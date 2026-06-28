@@ -296,6 +296,12 @@ type DataProcessingRecordListPayload = {
 type SourceCollectionStepState = "active" | "done" | "failed" | "idle" | "pending";
 type SourceCollectionStageModuleId = "collection" | "screening" | "candidate" | "graph" | "memory";
 
+type SourceCollectionActionReadiness = {
+  disabled: boolean;
+  loading: boolean;
+  reason: string;
+};
+
 type SourceCollectionCandidateWithSource = TeamWorkflowCandidate & {
   sourcePath?: string;
   sourceRef?: string;
@@ -6077,6 +6083,10 @@ export function TeamsRoute({
     if (!selectedTeam?.teamId || startSourceCollectionStageSessionTaskMutation.isPending) {
       return;
     }
+    const actionReadiness = sourceCollectionStageActionReadinessFor(stageId);
+    if (actionReadiness.disabled) {
+      return;
+    }
     openSourceCollectionStage(stageId);
     const chatState = sourceCollectionStageAgentChatState(stageId);
     const binding = chatState.binding;
@@ -6375,10 +6385,24 @@ export function TeamsRoute({
         ? selectedTeamStartSourceCollectionPending || !sourceCollectionCanStart
         : selectedTeamStartResearchStagePending || !researchStageCanLaunch
       : sourceCollectionSearchOpenAssignmentCount > 0
-        ? !canExecuteSourceCollectionSearch
-        : false;
+        ? sourceCollectionSearchActionReadiness.disabled
+        : sourceCollectionActionInitialDataPending || sourceCollectionActionDataError;
+    const knowledgeCollectionPrimaryReadiness = !selectedSourceCollectionRun
+      ? sourceCollectionActionReadiness(
+          knowledgeCollectionPrimaryDisabled,
+          selectedTeamStartSourceCollectionPending || selectedTeamStartResearchStagePending
+            ? sourceCollectionActionBusyReason
+            : sourceCollectionActionNoInputReason,
+        )
+      : sourceCollectionSearchOpenAssignmentCount > 0
+        ? sourceCollectionSearchActionReadiness
+        : sourceCollectionActionReadiness(
+            sourceCollectionActionInitialDataPending || sourceCollectionActionDataError,
+            sourceCollectionActionInitialDataPending ? sourceCollectionActionLoadingReason : sourceCollectionActionErrorReason,
+            sourceCollectionActionInitialDataPending,
+          );
     const runSourceCollectionSearchFromConsole = () => {
-      if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !canExecuteSourceCollectionSearch) {
+      if (sourceCollectionSearchActionReadiness.disabled || !selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId) {
         return;
       }
       const selectedAssignmentIsRunnable = selectedSourceCollectionAssignment
@@ -6394,6 +6418,9 @@ export function TeamsRoute({
       });
     };
     const runKnowledgeCollectionPrimaryAction = () => {
+      if (knowledgeCollectionPrimaryReadiness.disabled) {
+        return;
+      }
       if (!selectedTeam?.teamId) {
         return;
       }
@@ -6543,7 +6570,12 @@ export function TeamsRoute({
                 )}
                 {renderResearchStageAgentSummary(stageType)}
                 <div className={styles.researchStageActions}>
-                  <button type="button" onClick={() => runStagePrimaryAction(stageType)} disabled={disabled}>
+                  <button
+                    type="button"
+                    onClick={() => runStagePrimaryAction(stageType)}
+                    disabled={disabled}
+                    title={stageType === "knowledge_collection" ? sourceCollectionActionDisabledTitle(knowledgeCollectionPrimaryReadiness, primaryLabel) : primaryLabel}
+                  >
                     {stageType === "knowledge_collection" && selectedSourceCollectionRun && sourceCollectionSearchOpenAssignmentCount > 0 ? <Search size={13} /> : <Play size={13} />}
                     {primaryLabel}
                   </button>
@@ -6552,7 +6584,7 @@ export function TeamsRoute({
                       type="button"
                       onClick={runKnowledgeCollectionCompletionAction}
                       disabled={sourceCollectionCompletionActionDisabled}
-                      title={lang === "zh" ? "一键完成知识搜集" : "Complete knowledge collection"}
+                      title={sourceCollectionActionDisabledTitle(sourceCollectionCompletionActionReadiness, lang === "zh" ? "一键完成知识搜集" : "Complete knowledge collection")}
                     >
                       <CheckCircle2 size={13} />
                       {sourceCollectionCompletionActionLabel}
@@ -6756,6 +6788,7 @@ export function TeamsRoute({
                       type="button"
                       onClick={runKnowledgeCollectionCompletionAction}
                       disabled={sourceCollectionCompletionActionDisabled || selectedTeamKnowledgeCollectionIngestPending}
+                      title={sourceCollectionActionDisabledTitle(sourceCollectionCompletionActionReadiness, lang === "zh" ? "重试失败节点" : "Retry failed node")}
                     >
                       <RefreshCw size={13} />
                       {lang === "zh" ? "重试失败节点" : "Retry failed node"}
@@ -7379,6 +7412,7 @@ export function TeamsRoute({
             className={styles.sourceCollectionStagePrimaryAction}
             onClick={runSourceCollectionScreeningAction}
             disabled={sourceCollectionScreeningDisabled || selectedTeamSourceQualityPending}
+            title={sourceCollectionActionDisabledTitle(sourceCollectionScreeningActionReadiness, sourceCollectionScreeningButtonText)}
           >
             <CheckCircle2 size={13} />
             {sourceCollectionScreeningButtonText}
@@ -7388,6 +7422,7 @@ export function TeamsRoute({
             className={styles.sourceCollectionStageSecondaryAction}
             onClick={openSourceCollectionScreeningPanel}
             disabled={sourceCollectionScreeningDisabled}
+            title={sourceCollectionActionDisabledTitle(sourceCollectionScreeningActionReadiness, lang === "zh" ? "查看筛选结果" : "View results")}
           >
             <Eye size={13} />
             {lang === "zh" ? "查看筛选结果" : "View results"}
@@ -8561,7 +8596,7 @@ export function TeamsRoute({
               className={activeModule.actionTone === "primary" ? styles.sourceCollectionStagePrimaryAction : styles.sourceCollectionStageSecondaryAction}
               disabled={activeModule.actionDisabled}
               onClick={activeModule.onAction}
-              title={activeModule.actionLabel}
+              title={sourceCollectionActionDisabledTitle(sourceCollectionStageActionReadinessFor(activeModule.id), activeModule.actionLabel)}
             >
               {renderSourceCollectionStageActionIcon(activeModule.actionIcon)}
               {activeModule.actionLabel}
@@ -10393,9 +10428,75 @@ export function TeamsRoute({
     && !teamWorkflowSourceQualityStatus
     && (teamWorkflowSourceQualityStatusQuery.isPending || teamWorkflowSourceQualityStatusQuery.isFetching)
   );
+  const sourceCollectionGraphDataLoading = Boolean(
+    researchWorkflowTeamSelected
+    && selectedSourceCollectionRunEffectiveId
+    && teamWorkflowGraphEnabled
+    && teamWorkflowCandidateGraphQuery.isPending && !teamWorkflowCandidateGraphQuery.data
+  );
+  const sourceCollectionKnowledgeIngestionDataLoading = Boolean(
+    researchWorkflowTeamSelected
+    && selectedSourceCollectionRunEffectiveId
+    && teamWorkflowKnowledgeIngestionEnabled
+    && teamWorkflowKnowledgeIngestionStatusQuery.isPending && !teamWorkflowKnowledgeIngestionStatusQuery.data
+  );
+  const sourceCollectionActionInitialDataPending = Boolean(
+    researchWorkflowTeamSelected
+    && selectedSourceCollectionRunEffectiveId
+    && (
+      sourceCollectionRecordsDataLoading
+      || sourceCollectionAssignmentsDataLoading
+      || sourceCollectionPrimaryDataLoading
+      || sourceCollectionSourceQualityLoading
+      || sourceCollectionGraphDataLoading
+      || sourceCollectionKnowledgeIngestionDataLoading
+    ),
+  );
+  const sourceCollectionActionDataError = Boolean(
+    researchWorkflowTeamSelected
+    && selectedSourceCollectionRunEffectiveId
+    && (
+      (sourceCollectionRecordsQuery.error && !sourceCollectionRecordsQuery.data && !sourceCollectionSummaryHasRecordCount && !sourceCollectionRunSummaryHasRecordCount)
+      || (sourceCollectionAssignmentsQuery.error && !sourceCollectionAssignmentsQuery.data && !sourceCollectionRunSummaryHasAssignmentCounts)
+      || (sourceCollectionSummaryQuery.error && sourceCollectionWorkspaceSelected && !sourceCollectionSummaryQuery.data)
+    ),
+  );
+  const sourceCollectionSourceQualityDataError = Boolean(
+    researchWorkflowTeamSelected
+    && selectedSourceCollectionRunEffectiveId
+    && teamWorkflowSourceQualityStatusQuery.error
+    && !teamWorkflowSourceQualityStatusQuery.data
+  );
+  const sourceCollectionGraphDataError = Boolean(
+    researchWorkflowTeamSelected
+    && selectedSourceCollectionRunEffectiveId
+    && teamWorkflowCandidateGraphQuery.error
+    && !teamWorkflowCandidateGraphQuery.data
+  );
+  const sourceCollectionKnowledgeIngestionDataError = Boolean(
+    researchWorkflowTeamSelected
+    && selectedSourceCollectionRunEffectiveId
+    && teamWorkflowKnowledgeIngestionStatusQuery.error
+    && !teamWorkflowKnowledgeIngestionStatusQuery.data
+  );
   const sourceCollectionScreeningDataLoading = sourceCollectionPrimaryDataLoading || sourceCollectionSourceQualityLoading;
   const sourceCollectionLoadingText = lang === "zh" ? "加载中" : "loading";
   const sourceCollectionLoadingSummary = lang === "zh" ? "正在读取资料提炼结果" : "Loading extraction results";
+  const sourceCollectionActionLoadingReason = lang === "zh" ? "正在读取当前批次数据" : "Loading current batch data";
+  const sourceCollectionActionErrorReason = lang === "zh" ? "当前批次数据读取失败，请刷新后重试" : "Current batch data failed to load. Refresh and retry.";
+  const sourceCollectionActionNoRunReason = lang === "zh" ? "还没有可执行的搜集批次" : "No collection run is available yet.";
+  const sourceCollectionActionNoInputReason = lang === "zh" ? "当前阶段还没有可执行输入" : "This stage has no runnable input yet.";
+  const sourceCollectionActionBusyReason = lang === "zh" ? "已有任务正在执行" : "A task is already running.";
+  const sourceCollectionActionReady: SourceCollectionActionReadiness = { disabled: false, loading: false, reason: "" };
+  const sourceCollectionActionReadiness = (
+    disabled: boolean,
+    reason: string,
+    loading = false,
+  ): SourceCollectionActionReadiness => disabled
+    ? { disabled: true, loading, reason }
+    : sourceCollectionActionReady;
+  const sourceCollectionActionDisabledTitle = (readiness: SourceCollectionActionReadiness, fallback: string) =>
+    readiness.disabled && readiness.reason ? readiness.reason : fallback;
   const sourceCollectionCountWithUnit = (loading: boolean, value: number, zhUnit: string, enUnit = "") => {
     if (loading) {
       return sourceCollectionLoadingText;
@@ -10503,6 +10604,8 @@ export function TeamsRoute({
   const canExecuteSourceCollectionSearch = Boolean(
     selectedTeam?.teamId
     && selectedSourceCollectionRunEffectiveId
+    && !sourceCollectionAssignmentsDataLoading
+    && !sourceCollectionActionDataError
     && sourceCollectionSearchOpenAssignmentCount > 0
     && !selectedTeamExecuteSourceCollectionSearchPending
     && !sourceCollectionAcceptedBackgroundActive,
@@ -10631,30 +10734,133 @@ export function TeamsRoute({
     ?? "";
   const sourceCollectionPrecheckCandidateCount = Math.max(sourceCollectionApprovedCount, sourceCollectionRunApprovedCount);
   const sourceCollectionIngestCandidateCount = Math.max(sourceCollectionPrecheckCandidateCount, sourceCollectionDisplayedCandidateCount);
-  const sourceCollectionMemoryActionDisabled =
+  const sourceCollectionCanBuildGraph = sourceCollectionRunApprovedCount > 0 || sourceCollectionDisplayedCandidateCount > 0;
+  const sourceCollectionSearchActionReadiness = sourceCollectionActionReadiness(
+    !canExecuteSourceCollectionSearch,
+    !selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId
+      ? sourceCollectionActionNoRunReason
+      : sourceCollectionAssignmentsDataLoading
+        ? sourceCollectionActionLoadingReason
+        : sourceCollectionActionDataError
+          ? sourceCollectionActionErrorReason
+          : selectedTeamExecuteSourceCollectionSearchPending || sourceCollectionAcceptedBackgroundActive
+            ? sourceCollectionActionBusyReason
+            : sourceCollectionActionNoInputReason,
+    sourceCollectionAssignmentsDataLoading,
+  );
+  const sourceCollectionCandidateExtractionActionReadiness = sourceCollectionActionReadiness(
     !selectedTeam?.teamId
-    || sourceCollectionIngestCandidateCount <= 0
-    || selectedTeamKnowledgeCollectionIngestPending;
-  const sourceCollectionMemoryActionLabel = selectedTeamKnowledgeCollectionIngestPending
+      || !selectedSourceCollectionRunEffectiveId
+      || sourceCollectionRecordsDataLoading
+      || sourceCollectionActionDataError
+      || sourceCollectionRawRecordCount <= 0
+      || selectedTeamExtractSourceCollectionCandidatesPending,
+    !selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId
+      ? sourceCollectionActionNoRunReason
+      : sourceCollectionRecordsDataLoading
+        ? sourceCollectionActionLoadingReason
+        : sourceCollectionActionDataError
+          ? sourceCollectionActionErrorReason
+          : selectedTeamExtractSourceCollectionCandidatesPending
+            ? sourceCollectionActionBusyReason
+            : sourceCollectionActionNoInputReason,
+    sourceCollectionRecordsDataLoading,
+  );
+  const sourceCollectionScreeningActionReadiness = sourceCollectionActionReadiness(
+    !selectedTeam?.teamId
+      || sourceCollectionPrimaryDataLoading
+      || sourceCollectionSourceQualityLoading
+      || sourceCollectionActionDataError
+      || sourceCollectionSourceQualityDataError
+      || sourceCollectionDisplayedCandidateCount <= 0
+      || selectedTeamSourceQualityPending,
+    !selectedTeam?.teamId
+      ? sourceCollectionActionNoRunReason
+      : sourceCollectionPrimaryDataLoading || sourceCollectionSourceQualityLoading
+        ? sourceCollectionActionLoadingReason
+        : sourceCollectionActionDataError || sourceCollectionSourceQualityDataError
+          ? sourceCollectionActionErrorReason
+          : selectedTeamSourceQualityPending
+            ? sourceCollectionActionBusyReason
+            : sourceCollectionActionNoInputReason,
+    sourceCollectionPrimaryDataLoading || sourceCollectionSourceQualityLoading,
+  );
+  const sourceCollectionGraphActionReadiness = sourceCollectionActionReadiness(
+    !selectedTeam?.teamId
+      || sourceCollectionPrimaryDataLoading
+      || sourceCollectionGraphDataLoading
+      || sourceCollectionActionDataError
+      || sourceCollectionGraphDataError
+      || !sourceCollectionCanBuildGraph
+      || selectedTeamBuildCandidateGraphPending,
+    !selectedTeam?.teamId
+      ? sourceCollectionActionNoRunReason
+      : sourceCollectionPrimaryDataLoading || sourceCollectionGraphDataLoading
+        ? sourceCollectionActionLoadingReason
+        : sourceCollectionActionDataError || sourceCollectionGraphDataError
+          ? sourceCollectionActionErrorReason
+          : selectedTeamBuildCandidateGraphPending
+            ? sourceCollectionActionBusyReason
+            : sourceCollectionActionNoInputReason,
+    sourceCollectionPrimaryDataLoading || sourceCollectionGraphDataLoading,
+  );
+  const sourceCollectionMemoryActionReadiness = sourceCollectionActionReadiness(
+    !selectedTeam?.teamId
+      || sourceCollectionPrimaryDataLoading
+      || sourceCollectionSourceQualityLoading
+      || sourceCollectionKnowledgeIngestionDataLoading
+      || sourceCollectionActionDataError
+      || sourceCollectionSourceQualityDataError
+      || sourceCollectionKnowledgeIngestionDataError
+      || sourceCollectionIngestCandidateCount <= 0
+      || selectedTeamKnowledgeCollectionIngestPending,
+    !selectedTeam?.teamId
+      ? sourceCollectionActionNoRunReason
+      : sourceCollectionPrimaryDataLoading || sourceCollectionSourceQualityLoading || sourceCollectionKnowledgeIngestionDataLoading
+        ? sourceCollectionActionLoadingReason
+        : sourceCollectionActionDataError || sourceCollectionSourceQualityDataError || sourceCollectionKnowledgeIngestionDataError
+          ? sourceCollectionActionErrorReason
+          : selectedTeamKnowledgeCollectionIngestPending
+            ? sourceCollectionActionBusyReason
+            : sourceCollectionActionNoInputReason,
+    sourceCollectionPrimaryDataLoading || sourceCollectionSourceQualityLoading || sourceCollectionKnowledgeIngestionDataLoading,
+  );
+  const sourceCollectionCompletionActionReadiness = sourceCollectionActionReadiness(
+    !selectedTeam?.teamId
+      || !sourceCollectionActionRunId
+      || sourceCollectionActionInitialDataPending
+      || sourceCollectionActionDataError
+      || sourceCollectionSourceQualityDataError
+      || sourceCollectionGraphDataError
+      || sourceCollectionKnowledgeIngestionDataError
+      || (sourceCollectionIngestCandidateCount <= 0 && sourceCollectionRawRecordCount <= 0 && sourceCollectionSearchOpenAssignmentCount <= 0)
+      || selectedTeamKnowledgeCollectionIngestPending,
+    !selectedTeam?.teamId || !sourceCollectionActionRunId
+      ? sourceCollectionActionNoRunReason
+      : sourceCollectionActionInitialDataPending
+        ? sourceCollectionActionLoadingReason
+        : sourceCollectionActionDataError || sourceCollectionSourceQualityDataError || sourceCollectionGraphDataError || sourceCollectionKnowledgeIngestionDataError
+          ? sourceCollectionActionErrorReason
+          : selectedTeamKnowledgeCollectionIngestPending
+            ? sourceCollectionActionBusyReason
+            : sourceCollectionActionNoInputReason,
+    sourceCollectionActionInitialDataPending,
+  );
+  const sourceCollectionMemoryActionDisabled = sourceCollectionMemoryActionReadiness.disabled;
+  const sourceCollectionMemoryActionLabel = sourceCollectionMemoryActionDisabled && sourceCollectionMemoryActionReadiness.loading
+    ? (lang === "zh" ? "读取中" : "Loading")
+    : selectedTeamKnowledgeCollectionIngestPending
     ? (lang === "zh" ? "通知管理员中" : "Notifying admin")
     : sourceCollectionPrecheckCandidateCount > 0
       ? (lang === "zh" ? "通知知识库管理员" : "Notify knowledge base admin")
       : sourceCollectionDisplayedCandidateCount > 0
         ? (lang === "zh" ? "提炼并通知管理员" : "Prepare and notify admin")
         : (lang === "zh" ? "通知知识库管理员" : "Notify knowledge base admin");
-  const sourceCollectionCompletionActionDisabled =
-    !selectedTeam?.teamId
-    || !sourceCollectionActionRunId
-    || (sourceCollectionIngestCandidateCount <= 0 && sourceCollectionRawRecordCount <= 0 && sourceCollectionSearchOpenAssignmentCount <= 0)
-    || selectedTeamKnowledgeCollectionIngestPending;
+  const sourceCollectionCompletionActionDisabled = sourceCollectionCompletionActionReadiness.disabled;
   const sourceCollectionCompletionActionLabel = selectedTeamKnowledgeCollectionIngestPending
     ? (lang === "zh" ? "一键完成中" : "Completing")
     : (lang === "zh" ? "一键完成知识搜集" : "Complete knowledge collection");
-  const sourceCollectionCanBuildGraph = sourceCollectionRunApprovedCount > 0 || sourceCollectionDisplayedCandidateCount > 0;
-  const sourceCollectionGraphActionDisabled =
-    !selectedTeam?.teamId
-    || !sourceCollectionCanBuildGraph
-    || selectedTeamBuildCandidateGraphPending;
+  const sourceCollectionGraphActionDisabled = sourceCollectionGraphActionReadiness.disabled;
   const sourceCollectionGraphActionLabel = selectedTeamBuildCandidateGraphPending
     ? (lang === "zh" ? "Agent 生成中" : "Agent building")
     : sourceCollectionRunApprovedCount > 0
@@ -10662,7 +10868,7 @@ export function TeamsRoute({
       : sourceCollectionDisplayedCandidateCount > 0
         ? (lang === "zh" ? "审查并生成关系图" : "Review and build map")
         : (lang === "zh" ? "Agent 生成关系图" : "Agent build map");
-  const sourceCollectionScreeningDisabled = !selectedTeam?.teamId || sourceCollectionDisplayedCandidateCount <= 0;
+  const sourceCollectionScreeningDisabled = sourceCollectionScreeningActionReadiness.disabled;
   const sourceCollectionScreeningButtonText = selectedTeamSourceQualityPending
     ? (lang === "zh" ? "Agent 审查中" : "Agent reviewing")
     : sourceCollectionRunPendingScreeningCount > 0
@@ -10679,11 +10885,6 @@ export function TeamsRoute({
       : sourceCollectionDisplayedCandidateCount > 0
         ? (lang === "zh" ? "已审查" : "done")
         : (lang === "zh" ? "暂无候选" : "no candidates");
-  const sourceCollectionCandidateExtractionDisabled =
-    !selectedTeam?.teamId
-    || !selectedSourceCollectionRunEffectiveId
-    || sourceCollectionRawRecordCount <= 0
-    || selectedTeamExtractSourceCollectionCandidatesPending;
   const sourceCollectionCandidateExtractionButtonText = selectedTeamExtractSourceCollectionCandidatesPending
     ? (lang === "zh" ? "Agent 提炼中" : "Agent extracting")
     : sourceCollectionPendingCandidateImportCount > 0
@@ -10762,7 +10963,7 @@ export function TeamsRoute({
   };
   const runSourceCollectionScreeningAction = () => {
     openSourceCollectionStage("screening");
-    if (!selectedTeam?.teamId || sourceCollectionScreeningDisabled || selectedTeamSourceQualityPending) {
+    if (sourceCollectionScreeningActionReadiness.disabled || !selectedTeam?.teamId) {
       return;
     }
     const forceRescreen = sourceCollectionRunPendingScreeningCount <= 0 && sourceCollectionDisplayedCandidateCount > 0;
@@ -10786,9 +10987,9 @@ export function TeamsRoute({
   const runSourceCollectionCandidateExtractionAction = () => {
     openSourceCollectionStage("candidate");
     if (
-      !selectedTeam?.teamId
+      sourceCollectionCandidateExtractionActionReadiness.disabled
+      || !selectedTeam?.teamId
       || !selectedSourceCollectionRunEffectiveId
-      || sourceCollectionCandidateExtractionDisabled
     ) {
       return;
     }
@@ -10808,7 +11009,7 @@ export function TeamsRoute({
     });
   };
   const runSourceCollectionGraphAction = () => {
-    if (!selectedTeam?.teamId || sourceCollectionGraphActionDisabled) {
+    if (sourceCollectionGraphActionReadiness.disabled || !selectedTeam?.teamId) {
       return;
     }
     buildCandidateGraphMutation.mutate({
@@ -10823,7 +11024,7 @@ export function TeamsRoute({
     openSourceCollectionStage("graph");
   };
   const runKnowledgeCollectionCompletionAction = () => {
-    if (sourceCollectionCompletionActionDisabled) {
+    if (sourceCollectionCompletionActionReadiness.disabled || !selectedTeam?.teamId || !sourceCollectionActionRunId) {
       return;
     }
     selectResearchWorkspaceView("canvas");
@@ -10849,7 +11050,7 @@ export function TeamsRoute({
     });
   };
   const runSourceCollectionSearchFromHeader = () => {
-    if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !canExecuteSourceCollectionSearch) {
+    if (sourceCollectionSearchActionReadiness.disabled || !selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId) {
       return;
     }
     const selectedAssignmentIsRunnable = selectedSourceCollectionAssignment
@@ -10865,7 +11066,7 @@ export function TeamsRoute({
     });
   };
   const runSourceCollectionCollectionAction = () => {
-    if (!selectedTeam?.teamId) {
+    if (sourceCollectionCollectionActionReadiness.disabled || !selectedTeam?.teamId) {
       return;
     }
     openSourceCollectionStage("collection");
@@ -11021,17 +11222,56 @@ export function TeamsRoute({
       : sourceCollectionSearchOpenAssignmentCount > 0
         ? (lang === "zh" ? "搜索下一批" : "Search next")
       : (lang === "zh" ? "新一轮搜集" : "New round");
-  const sourceCollectionCollectionActionDisabled = !selectedSourceCollectionRun
-    ? selectedTeamStartResearchStagePending || selectedTeamStartSourceCollectionStageTaskPending || !researchStageCanLaunch
-    : sourceCollectionSearchOpenAssignmentCount > 0
-      ? !canExecuteSourceCollectionSearch || selectedTeamStartSourceCollectionStageTaskPending
-      : selectedTeamStartResearchStagePending || selectedTeamStartSourceCollectionStageTaskPending || !researchStageCanLaunch;
+  const sourceCollectionCollectionActionReadiness = !selectedSourceCollectionRun
+    ? sourceCollectionActionReadiness(
+        selectedTeamStartResearchStagePending || selectedTeamStartSourceCollectionStageTaskPending || !researchStageCanLaunch,
+        selectedTeamStartResearchStagePending || selectedTeamStartSourceCollectionStageTaskPending
+          ? sourceCollectionActionBusyReason
+          : sourceCollectionActionNoInputReason,
+        selectedTeamStartResearchStagePending || selectedTeamStartSourceCollectionStageTaskPending,
+      )
+    : sourceCollectionAssignmentsDataLoading || sourceCollectionActionDataError
+      ? sourceCollectionActionReadiness(
+          true,
+          sourceCollectionAssignmentsDataLoading ? sourceCollectionActionLoadingReason : sourceCollectionActionErrorReason,
+          sourceCollectionAssignmentsDataLoading,
+        )
+      : sourceCollectionSearchOpenAssignmentCount > 0
+        ? sourceCollectionSearchActionReadiness
+        : sourceCollectionActionReadiness(
+            selectedTeamStartResearchStagePending || selectedTeamStartSourceCollectionStageTaskPending || !researchStageCanLaunch,
+            selectedTeamStartResearchStagePending || selectedTeamStartSourceCollectionStageTaskPending
+              ? sourceCollectionActionBusyReason
+              : sourceCollectionActionNoInputReason,
+            selectedTeamStartResearchStagePending || selectedTeamStartSourceCollectionStageTaskPending,
+          );
   const sourceCollectionStageTaskActionLabel = (stageId: SourceCollectionStageModuleId, label: string) =>
     sourceCollectionStageSessionTaskPendingStageId === stageId
       ? (lang === "zh" ? "启动 Agent 中" : "Starting Agent")
       : label;
-  const sourceCollectionStageTaskActionDisabled = (disabled: boolean) =>
-    disabled || selectedTeamStartSourceCollectionStageTaskPending;
+  const sourceCollectionStageTaskActionReadiness = (readiness: SourceCollectionActionReadiness) =>
+    readiness.disabled
+      ? readiness
+      : sourceCollectionActionReadiness(
+          selectedTeamStartSourceCollectionStageTaskPending,
+          sourceCollectionActionBusyReason,
+          selectedTeamStartSourceCollectionStageTaskPending,
+        );
+  const sourceCollectionStageActionReadinessFor = (stageId: SourceCollectionStageModuleId): SourceCollectionActionReadiness => {
+    if (stageId === "collection") {
+      return sourceCollectionCollectionActionReadiness;
+    }
+    if (stageId === "candidate") {
+      return sourceCollectionStageTaskActionReadiness(sourceCollectionCandidateExtractionActionReadiness);
+    }
+    if (stageId === "screening") {
+      return sourceCollectionStageTaskActionReadiness(sourceCollectionScreeningActionReadiness);
+    }
+    if (stageId === "graph") {
+      return sourceCollectionStageTaskActionReadiness(sourceCollectionGraphActionReadiness);
+    }
+    return sourceCollectionStageTaskActionReadiness(sourceCollectionMemoryActionReadiness);
+  };
   const sourceCollectionStageModules: SourceCollectionStageModule[] = [
     {
       id: "collection",
@@ -11053,7 +11293,7 @@ export function TeamsRoute({
       status: sourceCollectionStageProjectionLabel(sourceCollectionCollectionProjection) || sourceCollectionStepStatusText(sourceCollectionSearchStepState),
       detailLabel: lang === "zh" ? "查看搜索结果" : "View search results",
       actionLabel: sourceCollectionStageTaskActionLabel("collection", sourceCollectionCollectionActionLabel),
-      actionDisabled: sourceCollectionCollectionActionDisabled,
+      actionDisabled: sourceCollectionCollectionActionReadiness.disabled,
       actionTone: "primary",
       actionIcon: selectedSourceCollectionRun && sourceCollectionSearchOpenAssignmentCount > 0 ? "search" : "play",
       projection: sourceCollectionCollectionProjection,
@@ -11080,7 +11320,7 @@ export function TeamsRoute({
       status: sourceCollectionStageProjectionLabel(sourceCollectionCandidateProjection) || sourceCollectionStepStatusText(sourceCollectionCandidateStepState),
       detailLabel: lang === "zh" ? "查看提炼结果" : "View extraction results",
       actionLabel: sourceCollectionStageTaskActionLabel("candidate", sourceCollectionCandidateExtractionButtonText),
-      actionDisabled: sourceCollectionStageTaskActionDisabled(sourceCollectionCandidateExtractionDisabled),
+      actionDisabled: sourceCollectionStageTaskActionReadiness(sourceCollectionCandidateExtractionActionReadiness).disabled,
       actionTone: "primary",
       actionIcon: selectedTeamExtractSourceCollectionCandidatesPending ? "refresh" : "archive",
       projection: sourceCollectionCandidateProjection,
@@ -11113,7 +11353,7 @@ export function TeamsRoute({
       status: sourceCollectionStageProjectionLabel(sourceCollectionScreeningProjection) || sourceCollectionStepStatusText(sourceCollectionScreeningStepState),
       detailLabel: lang === "zh" ? "查看审查结果" : "View review details",
       actionLabel: sourceCollectionStageTaskActionLabel("screening", sourceCollectionScreeningButtonText),
-      actionDisabled: sourceCollectionStageTaskActionDisabled(sourceCollectionScreeningDisabled || selectedTeamSourceQualityPending),
+      actionDisabled: sourceCollectionStageTaskActionReadiness(sourceCollectionScreeningActionReadiness).disabled,
       actionTone: "primary",
       actionIcon: "check",
       projection: sourceCollectionScreeningProjection,
@@ -11140,7 +11380,7 @@ export function TeamsRoute({
       status: sourceCollectionStageProjectionLabel(sourceCollectionGraphProjection) || sourceCollectionStepStatusText(sourceCollectionGraphStepState),
       detailLabel: lang === "zh" ? "查看候选图谱" : "View candidate map",
       actionLabel: sourceCollectionStageTaskActionLabel("graph", sourceCollectionGraphActionLabel),
-      actionDisabled: sourceCollectionStageTaskActionDisabled(sourceCollectionGraphActionDisabled),
+      actionDisabled: sourceCollectionStageTaskActionReadiness(sourceCollectionGraphActionReadiness).disabled,
       actionTone: "primary",
       actionIcon: "refresh",
       projection: sourceCollectionGraphProjection,
@@ -11177,7 +11417,7 @@ export function TeamsRoute({
       status: sourceCollectionStageProjectionLabel(sourceCollectionMemoryProjection) || sourceCollectionStepStatusText(sourceCollectionMemoryStepState),
       detailLabel: lang === "zh" ? "查看审核详情" : "View review details",
       actionLabel: sourceCollectionStageTaskActionLabel("memory", sourceCollectionMemoryActionLabel),
-      actionDisabled: sourceCollectionStageTaskActionDisabled(sourceCollectionMemoryActionDisabled),
+      actionDisabled: sourceCollectionStageTaskActionReadiness(sourceCollectionMemoryActionReadiness).disabled,
       actionTone: "primary",
       actionIcon: "check",
       projection: sourceCollectionMemoryProjection,
@@ -12382,16 +12622,9 @@ export function TeamsRoute({
                           </div>
                           <button
                             type="button"
-                            onClick={() => selectedTeam?.teamId && buildCandidateGraphMutation.mutate({
-                              teamId: selectedTeam.teamId,
-                              title: "Agent curated candidate graph",
-                              createdByAgent: sourceCollectionGraphAgentId,
-                              sourceQualityAgentId: sourceCollectionQualityAgentId,
-                              curationMode: "agent_approved_only",
-                              maxCandidates: Math.max(1, Math.min(80, sourceCollectionIngestCandidateCount)),
-                              forceReview: sourceCollectionRunApprovedCount <= 0 && sourceCollectionDisplayedCandidateCount > 0,
-                            })}
+                            onClick={runSourceCollectionGraphAction}
                             disabled={sourceCollectionGraphActionDisabled}
+                            title={sourceCollectionActionDisabledTitle(sourceCollectionGraphActionReadiness, sourceCollectionGraphActionLabel)}
                           >
                             <RefreshCw size={13} />
                             {sourceCollectionGraphActionLabel}
@@ -12647,7 +12880,12 @@ export function TeamsRoute({
                               <button type="button" onClick={openSourceCollectionCandidatePanel} disabled={!selectedTeam?.teamId}>
                                 {lang === "zh" ? "查看完整候选库" : "Full library"}
                               </button>
-                              <button type="button" onClick={openSourceCollectionScreeningPanel} disabled={sourceCollectionScreeningDisabled}>
+                              <button
+                                type="button"
+                                onClick={openSourceCollectionScreeningPanel}
+                                disabled={sourceCollectionScreeningDisabled}
+                                title={sourceCollectionActionDisabledTitle(sourceCollectionScreeningActionReadiness, lang === "zh" ? "进入资料审查" : "Open review")}
+                              >
                                 {lang === "zh" ? "进入资料审查" : "Open review"}
                               </button>
                             </div>
