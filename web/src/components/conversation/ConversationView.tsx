@@ -63,7 +63,7 @@ import { parseResponseSegments, ResponseSegment } from "./messageResponseSegment
 import styles from "./ConversationView.module.css";
 
 const RUNNING_OPERATION_STATUSES = new Set(["queued", "pending", "running", "thinking", "tooling", "answering"]);
-const DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT = 1;
+const DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT = 3;
 const INITIAL_VISIBLE_MESSAGE_COUNT = 14;
 const INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT = 36;
 const RESPONSE_PARSE_CACHE_LIMIT = 80;
@@ -220,6 +220,14 @@ function messageHasInternalStreamingStatusContent(message: ConversationMessage) 
     && isInternalStreamingStatusStage(message.streamStage)
     && isInternalStreamingStatusContent(message.content)
   );
+}
+
+function projectedConversationMessageIds(message: ConversationMessage) {
+  const rawIds = message.metadata?.projectedMessageIds;
+  if (!Array.isArray(rawIds)) {
+    return [];
+  }
+  return rawIds.map((id) => String(id).trim()).filter(Boolean);
 }
 
 function nextStreamingRevealLength(currentLength: number, targetLength: number) {
@@ -1242,19 +1250,24 @@ export function ConversationView({
     [displayMessages],
   );
   const defaultExpandedResponseIds = useMemo(() => {
-    const ids: string[] = [];
-    for (let index = timelineMessages.length - 1; index >= 0; index -= 1) {
-      const message = timelineMessages[index];
+    const ids = new Set<string>();
+    let expandedResponseCount = 0;
+    for (let index = activeTimelineMessages.length - 1; index >= 0; index -= 1) {
+      const message = activeTimelineMessages[index];
       if (!hasResponseBlock(message)) {
         continue;
       }
-      ids.push(message.id);
-      if (ids.length >= DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT) {
+      expandedResponseCount += 1;
+      ids.add(message.id);
+      for (const projectedId of projectedConversationMessageIds(message)) {
+        ids.add(projectedId);
+      }
+      if (expandedResponseCount >= DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT) {
         break;
       }
     }
-    return new Set(ids);
-  }, [timelineMessages]);
+    return ids;
+  }, [activeTimelineMessages]);
   const timelineSignalMessages = useMemo(
     () =>
       showMentalSnapshots

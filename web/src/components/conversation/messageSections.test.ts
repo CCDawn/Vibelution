@@ -12,6 +12,7 @@ import {
   isGroupRoomTranscriptMessage,
   isProviderFailureSummaryText,
   isRuntimeNoticeMessage,
+  isRuntimeStatusContent,
   isTurnErrorMessage,
   researchOrgMessageChips,
 } from "./messageSections";
@@ -58,6 +59,30 @@ describe("messageSections", () => {
 
     expect(isRuntimeNoticeMessage(noticeMessage)).toBe(true);
     expect(hasResponseBlock(noticeMessage)).toBe(false);
+  });
+
+  it("keeps transient reasoning placeholders out of assistant response blocks", () => {
+    const statusMessage = message({
+      role: "assistant",
+      content: "正在思考，已收到思考片段...\n模型已经开始返回 reasoning，正文可能稍后出现。",
+      streaming: true,
+      streamStage: "model_thinking",
+    });
+
+    expect(isRuntimeStatusContent(statusMessage)).toBe(true);
+    expect(hasResponseBlock(statusMessage)).toBe(false);
+  });
+
+  it("keeps normal assistant replies that mention thinking visible", () => {
+    const assistantMessage = message({
+      role: "assistant",
+      content: "我正在思考这个排版问题，结论是需要把状态移到过程区。",
+      streaming: true,
+      streamStage: "responding",
+    });
+
+    expect(isRuntimeStatusContent(assistantMessage)).toBe(false);
+    expect(hasResponseBlock(assistantMessage)).toBe(true);
   });
 
   it.each([
