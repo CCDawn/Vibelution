@@ -2582,6 +2582,57 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("responseSection");
   });
 
+  it("shows long tool loops as visible progress instead of an empty answer block", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-long-loop-progress",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-06-28T16:52:00Z",
+          streaming: true,
+          feedbackEvents: [
+            {
+              sequence: 1,
+              kind: "thought",
+              status: "running",
+              summary: "我正在换可访问来源继续查证。",
+              resultPreview: "我正在换可访问来源继续查证。",
+            },
+            {
+              sequence: 2,
+              kind: "tool",
+              status: "failed",
+              name: "web_fetch_tool",
+              summary: "[错误] HTTP 403: https://example.test/paper",
+              error: "[错误] HTTP 403: https://example.test/paper",
+            },
+            {
+              sequence: 3,
+              kind: "status",
+              status: "running",
+              name: "long_loop_progress",
+              summary: "尚未形成最终回答 · web_fetch_tool 第 3 次工具调用；失败 2 次，最近失败：HTTP 403",
+              resultPreview:
+                "尚未形成最终回答 · web_fetch_tool 第 3 次工具调用；失败 2 次，最近失败：HTTP 403\n当前仍在工具循环中，过程会继续更新；如果中断，可发送“继续”恢复这轮现场。",
+            },
+          ],
+        },
+      ],
+      { useDefaultProcessDisplayMode: true },
+    );
+
+    expect(html).toContain("生成中");
+    expect(html).toContain("状态 1");
+    expect(html).toContain("工具循环");
+    expect(html).toContain("尚未形成最终回答");
+    expect(html).toContain("HTTP 403");
+    expect(html).toContain("思考过程 1");
+    expect(html).not.toContain("Long Loop Progress");
+    expect(html).not.toContain("回答</span>");
+    expect(html).not.toContain("responseSection");
+  });
+
   it("keeps the collapsed answer-only process summary static before details are expanded", () => {
     const placeholder = "正在请求模型，等待首个响应片段...\n上下文已组装完成，正在进入 LLM 调用。";
     const html = renderConversation(

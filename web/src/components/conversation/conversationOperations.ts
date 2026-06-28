@@ -499,6 +499,9 @@ function statusOperationDisplay(
     if (key.includes("model_thinking") || key.includes("正在思考") || key.includes("reasoning")) {
       return zh ? "模型思考" : "Model thinking";
     }
+    if (key.includes("long_loop_progress") || key.includes("尚未形成最终回答") || key.includes("工具循环")) {
+      return zh ? "工具循环" : "Tool loop";
+    }
     if (key.includes("tool") || key.includes("工具")) {
       return zh ? "工具调用" : "Tool call";
     }
@@ -530,6 +533,9 @@ function statusOperationSummary(label: string, rawSummary: string, zh: boolean) 
   }
   if (label === "模型思考" || label === "Model thinking") {
     return zh ? "reasoning 已开始返回" : "Reasoning has started";
+  }
+  if (label === "工具循环" || label === "Tool loop") {
+    return compactPreview(normalized, 96);
   }
   if (label === "工具调用" || label === "Tool call") {
     return zh ? "等待工具结果" : "Waiting for tool result";

@@ -1707,6 +1707,9 @@ export function ConversationView({
   }
 
   function operationCollectionTone(operations: ConversationOperation[]) {
+    if (operations.some((operation) => isLongLoopProgressOperation(operation) && operationStatusTone(operation) === "running")) {
+      return "running";
+    }
     if (operations.some((operation) => operationStatusTone(operation) === "failed")) {
       return "failed";
     }
@@ -1801,6 +1804,9 @@ export function ConversationView({
         || fallback?.error?.trim()
         || fallback?.summary.trim()
         || "";
+    if (running && isLongLoopProgressOperation(running) && preview.trim()) {
+      return compactPreview(`${operationLabel(running)} · ${preview}`, 120);
+    }
     return compactPreview(preview || "", 120);
   }
 
@@ -1860,9 +1866,20 @@ export function ConversationView({
     ]);
   }
 
+  function isLongLoopProgressOperation(operation: ConversationOperation) {
+    if (operation.kind !== "status") {
+      return false;
+    }
+    return operationMatchesAny(operation, [
+      "long_loop_progress",
+      "工具循环",
+      "尚未形成最终回答",
+    ]);
+  }
+
   function shouldShowTimelineOperation(operation: ConversationOperation) {
     if (operation.kind === "status") {
-      return Boolean(operation.error?.trim());
+      return isLongLoopProgressOperation(operation) || Boolean(operation.error?.trim());
     }
     return !isInternalPipelineOperation(operation) || Boolean(operation.error?.trim());
   }
