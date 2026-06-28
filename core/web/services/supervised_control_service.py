@@ -2886,6 +2886,12 @@ def _dataset_payload(item: dict[str, Any]) -> dict[str, Any]:
         "sourcePath": str(item.get("source_path") or "").strip(),
         "sourceExists": bool(item.get("source_exists")),
         "tags": [str(tag) for tag in list(item.get("tags") or []) if str(tag).strip()],
+        "benchmarkFamily": str(item.get("benchmark_family") or "").strip(),
+        "taskType": str(item.get("task_type") or "").strip(),
+        "verifierKind": str(item.get("verifier_kind") or "").strip(),
+        "scoreSemantics": str(item.get("score_semantics") or "").strip(),
+        "runBudgetClass": str(item.get("run_budget_class") or "").strip(),
+        "defaultVisibility": str(item.get("default_visibility") or "").strip(),
         "reviewRequired": bool(item.get("review_required")),
         "sourceTrack": str(item.get("source_track") or "").strip(),
         "allowedDownstreamUses": [

@@ -517,6 +517,20 @@ function datasetUsabilityLabel(
   return String(dataset.adapterStatus || status || (lang === "zh" ? "不可用" : "unavailable"));
 }
 
+function datasetBenchmarkDetail(
+  item: NonNullable<EvolutionWorkbench["datasets"]>[number],
+  lang: string,
+) {
+  const base = `${item.bundleName || "--"} · ${lang === "zh" ? "数据集，运行前物化" : "dataset, materialized before run"}`;
+  const taskType = String(item.taskType || "").trim();
+  const budget = String(item.runBudgetClass || "").trim();
+  const benchmarkBits = [taskType, budget].filter(Boolean);
+  if (benchmarkBits.length === 0) {
+    return base;
+  }
+  return `${base} · ${benchmarkBits.join(" · ")}`;
+}
+
 function proposalEditDraftFromDetail(detail: EvolutionProposalDetail): ProposalEditDraft {
   return {
     improvementType: detail.proposal.improvementType || "",
@@ -1435,7 +1449,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       kind: "dataset",
       name: item.name,
       label: item.name,
-      detail: `${item.bundleName || "--"} · ${lang === "zh" ? "数据集，运行前物化" : "dataset, materialized before run"}`,
+      detail: datasetBenchmarkDetail(item, lang),
       caseCount: item.caseCount,
       dataset: item,
     }));

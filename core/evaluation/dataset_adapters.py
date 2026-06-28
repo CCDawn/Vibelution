@@ -145,6 +145,107 @@ class TerminalBenchJsonlAdapter(DatasetAdapter):
         return {"usability_status": "ready", "usability_reason": "数据集已有可运行 case。"}
 
 
+class RepoPatchJsonlAdapter(DatasetAdapter):
+    kind = "repo_patch_jsonl"
+
+    def materialize_case(self, spec: Any, row: Dict[str, Any], index: int) -> Dict[str, Any]:
+        return _build_repo_patch_case(spec, row, index)
+
+    def explain_usability(
+        self,
+        spec: Any,
+        *,
+        available: bool,
+        case_count: Optional[int],
+        validation_error: str,
+        project_root: Optional[Path] = None,
+        include_environment_preflight: bool = True,
+    ) -> Dict[str, Any]:
+        del project_root, include_environment_preflight
+        return _external_harness_usability(
+            spec,
+            available=available,
+            case_count=case_count,
+            validation_error=validation_error,
+            harness_label="repo patch",
+        )
+
+
+class RepoGenerationJsonlAdapter(DatasetAdapter):
+    kind = "repo_generation_jsonl"
+
+    def materialize_case(self, spec: Any, row: Dict[str, Any], index: int) -> Dict[str, Any]:
+        return _build_repo_generation_case(spec, row, index)
+
+    def explain_usability(
+        self,
+        spec: Any,
+        *,
+        available: bool,
+        case_count: Optional[int],
+        validation_error: str,
+        project_root: Optional[Path] = None,
+        include_environment_preflight: bool = True,
+    ) -> Dict[str, Any]:
+        del project_root, include_environment_preflight
+        return _external_harness_usability(
+            spec,
+            available=available,
+            case_count=case_count,
+            validation_error=validation_error,
+            harness_label="repo generation",
+        )
+
+
+class BlackboxRebuildJsonlAdapter(DatasetAdapter):
+    kind = "blackbox_rebuild_jsonl"
+
+    def materialize_case(self, spec: Any, row: Dict[str, Any], index: int) -> Dict[str, Any]:
+        return _build_blackbox_rebuild_case(spec, row, index)
+
+    def explain_usability(
+        self,
+        spec: Any,
+        *,
+        available: bool,
+        case_count: Optional[int],
+        validation_error: str,
+        project_root: Optional[Path] = None,
+        include_environment_preflight: bool = True,
+    ) -> Dict[str, Any]:
+        del project_root, include_environment_preflight
+        return _external_harness_usability(
+            spec,
+            available=available,
+            case_count=case_count,
+            validation_error=validation_error,
+            harness_label="blackbox rebuild",
+        )
+
+
+class BenchmarkRoadmapAdapter(DatasetAdapter):
+    kind = "benchmark_roadmap"
+
+    def materialize_case(self, spec: Any, row: Dict[str, Any], index: int) -> Dict[str, Any]:
+        raise ValueError(f"{spec.name} 是 roadmap-only 评测入口，不能物化为监督运行 bundle。")
+
+    def explain_usability(
+        self,
+        spec: Any,
+        *,
+        available: bool,
+        case_count: Optional[int],
+        validation_error: str,
+        project_root: Optional[Path] = None,
+        include_environment_preflight: bool = True,
+    ) -> Dict[str, Any]:
+        del available, case_count, validation_error, project_root, include_environment_preflight
+        return {
+            "usability_status": "roadmap_only",
+            "usability_reason": "该评测集只登记为长期路线图，当前不进入监督运行入口。",
+        }
+
+
 class SupervisedBundleAdapter(DatasetAdapter):
     kind = "supervised_bundle"
 
@@ -154,6 +255,10 @@ ADAPTERS: Dict[str, DatasetAdapter] = {
     "generated_case_jsonl": GeneratedCaseJsonlAdapter(),
     "swe_bench_jsonl": SweBenchJsonlAdapter(),
     "terminal_bench_jsonl": TerminalBenchJsonlAdapter(),
+    "repo_patch_jsonl": RepoPatchJsonlAdapter(),
+    "repo_generation_jsonl": RepoGenerationJsonlAdapter(),
+    "blackbox_rebuild_jsonl": BlackboxRebuildJsonlAdapter(),
+    "benchmark_roadmap": BenchmarkRoadmapAdapter(),
     "supervised_bundle": SupervisedBundleAdapter(),
 }
 
@@ -415,6 +520,235 @@ def _build_swe_case(spec: Any, row: Dict[str, Any], index: int) -> Dict[str, Any
         "training_tier": _normalize_training_tier(row.get("training_tier")),
         "dataset_ref": {"dataset": spec.name, "instance_id": instance_id, "repo": repo, "base_commit": base_commit},
         "requires_external_harness": "swe_bench",
+        **_benchmark_case_metadata(spec),
+    }
+
+
+def _benchmark_case_metadata(spec: Any) -> Dict[str, Any]:
+    metadata: Dict[str, Any] = {}
+    for key in (
+        "benchmark_family",
+        "task_type",
+        "verifier_kind",
+        "score_semantics",
+        "run_budget_class",
+    ):
+        value = str(getattr(spec, key, "") or "").strip()
+        if value:
+            metadata[key] = value
+    return metadata
+
+
+def _benchmark_score_label(spec: Any) -> str:
+    semantics = str(getattr(spec, "score_semantics", "") or "").strip()
+    if semantics == "dominance":
+        return "Dominance score"
+    if semantics == "agent_rubric_score":
+        return "Agent rubric score"
+    if semantics == "build_and_test_pass_rate":
+        return "Build/test pass rate"
+    if semantics == "behavior_match_rate":
+        return "Behavior match rate"
+    if semantics == "target_benchmark_delta":
+        return "Target benchmark delta"
+    if semantics == "pass_rate":
+        return "Pass rate"
+    return "Benchmark score"
+
+
+def _external_harness_usability(
+    spec: Any,
+    *,
+    available: bool,
+    case_count: Optional[int],
+    validation_error: str,
+    harness_label: str,
+) -> Dict[str, Any]:
+    if validation_error:
+        return _invalid_usability(validation_error)
+    if not available:
+        return {
+            "usability_status": "requires_external_harness",
+            "usability_reason": f"需要接入 {harness_label} harness，且当前源文件不存在。",
+        }
+    if case_count == 0:
+        return {"usability_status": "empty", "usability_reason": "数据集当前没有可物化 case。"}
+    return {
+        "usability_status": "requires_external_harness",
+        "usability_reason": f"需要接入 {harness_label} harness 后才能真实判分。",
+    }
+
+
+def _repo_patch_prompt(
+    *,
+    instance_id: str,
+    repo: str,
+    base_commit: str,
+    problem: str,
+    test_command: str,
+    benchmark_family: str,
+) -> str:
+    verifier_line = f"- Test command: {test_command}\n" if test_command else "- Test command: use verifier metadata.\n"
+    return (
+        "Run this repository patch benchmark case through the supervised evolution chain.\n"
+        f"Benchmark family: {benchmark_family or 'repo_patch'}\n"
+        f"Instance: {instance_id}\n"
+        f"Repo: {repo or '-'}\n"
+        f"Base commit: {base_commit or '-'}\n\n"
+        "Issue:\n"
+        f"{problem}\n\n"
+        "Verifier:\n"
+        f"{verifier_line}\n"
+        "Contract:\n"
+        "1. Work only in the candidate worktree supplied by the supervised run.\n"
+        "2. Inspect the repository before editing.\n"
+        "3. Produce a patch that addresses the issue without using hidden gold patches.\n"
+        "4. Run the verifier or explain why the external harness is unavailable.\n"
+        "5. Do not claim an official benchmark score unless an official runner produced it."
+    )
+
+
+def _build_repo_patch_case(spec: Any, row: Dict[str, Any], index: int) -> Dict[str, Any]:
+    instance_id = _case_id_from_row(row, index)
+    problem = str(row.get("problem_statement") or row.get("issue") or row.get("prompt") or "").strip()
+    if not problem:
+        raise ValueError("repo_patch row 缺少 problem_statement/issue/prompt")
+    repo = str(row.get("repo") or "").strip()
+    base_commit = str(row.get("base_commit") or "").strip()
+    test_command = str(row.get("test_command") or row.get("verifier_command") or "").strip()
+    prompt = _repo_patch_prompt(
+        instance_id=instance_id,
+        repo=repo,
+        base_commit=base_commit,
+        problem=problem,
+        test_command=test_command,
+        benchmark_family=str(getattr(spec, "benchmark_family", "") or ""),
+    )
+    verifier = row.get("verifier") if isinstance(row.get("verifier"), dict) else {}
+    if test_command:
+        verifier = {**verifier, "test_command": test_command}
+    return {
+        "case_id": instance_id,
+        "case_type": STATIC_CASE_TYPE,
+        "scenario": str(row.get("scenario") or spec.scenario),
+        "mode": str(row.get("mode") or spec.mode),
+        "timeout_seconds": int(row.get("timeout_seconds") or spec.timeout_seconds),
+        "expect_restart": bool(row.get("expect_restart", False)),
+        "baseline_prompt": prompt,
+        "candidate_prompt": prompt,
+        "training_tier": _normalize_training_tier(row.get("training_tier")),
+        "dataset_ref": {"dataset": spec.name, "instance_id": instance_id, "repo": repo, "base_commit": base_commit},
+        "requires_external_harness": "repo_patch",
+        "evaluation_mode": "external_harness_required",
+        "score_label": _benchmark_score_label(spec),
+        "official_score": None,
+        "official_score_available": False,
+        "verifier": verifier,
+        "source_track": spec.source_track,
+        "allowed_downstream_uses": list(spec.allowed_downstream_uses),
+        "intake_boundary": _intake_boundary(spec),
+        **_benchmark_case_metadata(spec),
+    }
+
+
+def _build_repo_generation_case(spec: Any, row: Dict[str, Any], index: int) -> Dict[str, Any]:
+    task_id = _case_id_from_row(row, index)
+    specification = str(row.get("specification") or row.get("prompt") or row.get("task") or "").strip()
+    if not specification:
+        raise ValueError("repo_generation row 缺少 specification/prompt/task")
+    package_name = str(row.get("package_name") or row.get("project_name") or "").strip()
+    install_command = str(row.get("install_command") or "").strip()
+    test_command = str(row.get("test_command") or "").strip()
+    prompt = (
+        "Run this NL2Repo-style repository generation case from an empty workspace.\n"
+        f"Task: {task_id}\n"
+        f"Package/project name: {package_name or '-'}\n\n"
+        "Specification:\n"
+        f"{specification}\n\n"
+        "Contract:\n"
+        "1. Start from the empty workspace supplied by the supervised harness.\n"
+        "2. Design the repository structure, dependency metadata, implementation, and tests.\n"
+        "3. Do not use hidden reference repositories or gold solutions.\n"
+        "4. Run install/build/test commands when the repo generation harness is available.\n"
+        "5. Report external-harness unavailability instead of claiming an official score."
+    )
+    verifier = row.get("verifier") if isinstance(row.get("verifier"), dict) else {}
+    if install_command:
+        verifier = {**verifier, "install_command": install_command}
+    if test_command:
+        verifier = {**verifier, "test_command": test_command}
+    return {
+        "case_id": task_id,
+        "case_type": STATIC_CASE_TYPE,
+        "scenario": str(row.get("scenario") or spec.scenario),
+        "mode": str(row.get("mode") or spec.mode),
+        "timeout_seconds": int(row.get("timeout_seconds") or spec.timeout_seconds),
+        "expect_restart": bool(row.get("expect_restart", False)),
+        "baseline_prompt": prompt,
+        "candidate_prompt": prompt,
+        "training_tier": _normalize_training_tier(row.get("training_tier")),
+        "dataset_ref": {"dataset": spec.name, "task_id": task_id, "package_name": package_name},
+        "requires_empty_workspace": True,
+        "requires_external_harness": "repo_generation",
+        "evaluation_mode": "external_harness_required",
+        "score_label": _benchmark_score_label(spec),
+        "official_score": None,
+        "official_score_available": False,
+        "verifier": verifier,
+        "source_track": spec.source_track,
+        "allowed_downstream_uses": list(spec.allowed_downstream_uses),
+        "intake_boundary": _intake_boundary(spec),
+        **_benchmark_case_metadata(spec),
+    }
+
+
+def _build_blackbox_rebuild_case(spec: Any, row: Dict[str, Any], index: int) -> Dict[str, Any]:
+    task_id = _case_id_from_row(row, index)
+    documentation = str(row.get("documentation") or row.get("prompt") or row.get("task") or "").strip()
+    if not documentation:
+        raise ValueError("blackbox_rebuild row 缺少 documentation/prompt/task")
+    binary_path = str(row.get("binary_path") or row.get("program_path") or "").strip()
+    build_command = str(row.get("build_command") or "").strip()
+    behavior_check_command = str(row.get("behavior_check_command") or row.get("test_command") or "").strip()
+    prompt = (
+        "Run this ProgramBench-style blackbox software rebuild case.\n"
+        f"Task: {task_id}\n"
+        f"Reference binary/program: {binary_path or '-'}\n\n"
+        "Documentation and observed behavior:\n"
+        f"{documentation}\n\n"
+        "Contract:\n"
+        "1. Reconstruct source code and build scripts from the binary/documentation behavior.\n"
+        "2. Do not use hidden original source code.\n"
+        "3. Build the new program and compare behavior when the blackbox harness is available.\n"
+        "4. Treat missing behavior harness evidence as external-harness unavailable.\n"
+        "5. Do not claim an official score without an official behavior verifier."
+    )
+    verifier = row.get("verifier") if isinstance(row.get("verifier"), dict) else {}
+    if build_command:
+        verifier = {**verifier, "build_command": build_command}
+    if behavior_check_command:
+        verifier = {**verifier, "behavior_check_command": behavior_check_command}
+    return {
+        "case_id": task_id,
+        "case_type": STATIC_CASE_TYPE,
+        "scenario": str(row.get("scenario") or spec.scenario),
+        "mode": str(row.get("mode") or spec.mode),
+        "timeout_seconds": int(row.get("timeout_seconds") or spec.timeout_seconds),
+        "expect_restart": bool(row.get("expect_restart", False)),
+        "baseline_prompt": prompt,
+        "candidate_prompt": prompt,
+        "training_tier": _normalize_training_tier(row.get("training_tier")),
+        "dataset_ref": {"dataset": spec.name, "task_id": task_id, "binary_path": binary_path},
+        "requires_external_harness": "blackbox_rebuild",
+        "evaluation_mode": "external_harness_required",
+        "score_label": _benchmark_score_label(spec),
+        "official_score": None,
+        "official_score_available": False,
+        "verifier": verifier,
+        "source_track": spec.source_track,
+        "allowed_downstream_uses": list(spec.allowed_downstream_uses),
+        "intake_boundary": _intake_boundary(spec),
+        **_benchmark_case_metadata(spec),
     }
 
 
@@ -562,6 +896,7 @@ def _build_terminal_bench_case(spec: Any, row: Dict[str, Any], index: int) -> Di
         "source_track": spec.source_track,
         "allowed_downstream_uses": list(spec.allowed_downstream_uses),
         "intake_boundary": _intake_boundary(spec),
+        **_benchmark_case_metadata(spec),
     }
     if "rubric" in row:
         case["rubric"] = row["rubric"]
@@ -575,21 +910,15 @@ def _build_terminal_bench_case(spec: Any, row: Dict[str, Any], index: int) -> Di
 
 
 def _base_dataset_metadata(spec: Any, source: Optional[Path]) -> Dict[str, Any]:
-    evaluation_mode = (
-        "agent_judged"
-        if _is_agent_judged_terminal_bench(spec)
-        else "custom_harness"
-        if spec.official_verifier_status == "harbor_pending"
-        else "official_or_not_required"
-    )
+    evaluation_mode = _dataset_evaluation_mode(spec)
     score_label = (
         "Agent-judged score (non-official Terminal-Bench score)"
         if evaluation_mode == "agent_judged"
         else "Vibelution custom score (non-official Terminal-Bench score)"
         if spec.official_verifier_status == "harbor_pending"
-        else "official_or_local_score"
+        else _benchmark_score_label(spec)
     )
-    return {
+    metadata = {
         "name": spec.name,
         "kind": spec.kind,
         "source_path": str(source) if source is not None else "",
@@ -598,7 +927,8 @@ def _base_dataset_metadata(spec: Any, source: Optional[Path]) -> Dict[str, Any]:
         "evaluation_mode": evaluation_mode,
         "score_label": score_label,
         "official_score": None,
-        "official_score_available": spec.official_verifier_status != "harbor_pending" and evaluation_mode != "agent_judged",
+        "official_score_available": evaluation_mode == "official_or_not_required"
+        and spec.official_verifier_status not in {"harbor_pending", "not_connected"},
         "runnable": spec.runnable,
         "review_required": spec.review_required,
         "source_track": spec.source_track,
@@ -607,6 +937,20 @@ def _base_dataset_metadata(spec: Any, source: Optional[Path]) -> Dict[str, Any]:
         "raw_chat_direct_training_allowed": spec.raw_chat_direct_training_allowed,
         "intake_boundary": _intake_boundary(spec),
     }
+    metadata.update(_benchmark_case_metadata(spec))
+    return metadata
+
+
+def _dataset_evaluation_mode(spec: Any) -> str:
+    if _is_agent_judged_terminal_bench(spec):
+        return "agent_judged"
+    if spec.official_verifier_status == "harbor_pending":
+        return "custom_harness"
+    if str(getattr(spec, "kind", "") or "") == "benchmark_roadmap":
+        return "roadmap_only"
+    if str(getattr(spec, "adapter_status", "") or "").startswith("requires_"):
+        return "external_harness_required"
+    return "official_or_not_required"
 
 
 def _invalid_usability(validation_error: str) -> Dict[str, Any]:

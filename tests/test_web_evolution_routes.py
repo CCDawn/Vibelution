@@ -894,6 +894,7 @@ def test_evolution_workbench_route_exposes_dataset_choices_and_saved_state(tmp_p
         "terminal_bench_smoke",
         "terminal_bench_core",
         "terminal_bench_agent_judged",
+        "terminal_bench_2_1_smoke",
     }
     dry_run = next(item for item in payload["datasets"] if item["name"] == "supervised_dry_run")
     assert dry_run["effective"] is True
@@ -905,7 +906,21 @@ def test_evolution_workbench_route_exposes_dataset_choices_and_saved_state(tmp_p
     assert terminal_smoke["effective"] is True
     assert terminal_smoke["selectable"] is True
     assert terminal_smoke["adapterStatus"] == "ready_local_smoke"
+    assert terminal_smoke["benchmarkFamily"] == "terminal_bench"
+    assert terminal_smoke["taskType"] == "terminal_task"
+    assert terminal_smoke["verifierKind"] == "local_terminal_harness"
+    assert terminal_smoke["scoreSemantics"] == "pass_rate"
+    assert terminal_smoke["runBudgetClass"] == "smoke"
     assert "terminal-bench" in terminal_smoke["tags"]
+    terminal_21 = next(item for item in payload["datasets"] if item["name"] == "terminal_bench_2_1_smoke")
+    assert terminal_21["effective"] is True
+    assert terminal_21["selectable"] is True
+    assert terminal_21["benchmarkFamily"] == "terminal_bench"
+    assert terminal_21["taskType"] == "terminal_task"
+    assert terminal_21["verifierKind"] == "local_terminal_harness"
+    assert terminal_21["runBudgetClass"] == "smoke"
+    assert terminal_21["officialScoreAvailable"] is False
+    assert "terminus-2" in terminal_21["tags"]
     terminal_core = next(item for item in payload["datasets"] if item["name"] == "terminal_bench_core")
     assert terminal_core["usabilityStatus"] == "custom_harness_ready"
     assert terminal_core["evaluationMode"] == "custom_harness"
@@ -1422,6 +1437,7 @@ def test_workbench_dataset_list_backfills_new_builtin_datasets(tmp_path, monkeyp
         "terminal_bench_smoke",
         "terminal_bench_core",
         "terminal_bench_agent_judged",
+        "terminal_bench_2_1_smoke",
     }
     assert not any(item["name"] == "generated_cases" for item in rows)
     assert not any(item["name"] == "chat_reviewed_multiturn" for item in rows)
@@ -1429,6 +1445,10 @@ def test_workbench_dataset_list_backfills_new_builtin_datasets(tmp_path, monkeyp
     terminal_row = next(item for item in rows if item["name"] == "terminal_bench_smoke")
     assert terminal_row["effective"] is True
     assert terminal_row["selectable"] is True
+    terminal_21_row = next(item for item in rows if item["name"] == "terminal_bench_2_1_smoke")
+    assert terminal_21_row["effective"] is True
+    assert terminal_21_row["selectable"] is True
+    assert terminal_21_row["taskType"] == "terminal_task"
     core_row = next(item for item in rows if item["name"] == "terminal_bench_core")
     agent_judged_row = next(item for item in rows if item["name"] == "terminal_bench_agent_judged")
     assert agent_judged_row["adapterStatus"] == "agent_harness_ready"

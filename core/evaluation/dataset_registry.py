@@ -244,6 +244,71 @@ TERMINAL_BENCH_AGENT_JUDGED_ROWS: List[Dict[str, Any]] = [
         },
     }
 ]
+TERMINAL_BENCH_2_1_SMOKE_ROWS: List[Dict[str, Any]] = [
+    {
+        "case_id": "tb21_smoke_repo_probe",
+        "task_slug": "local-repo-probe",
+        "instruction": (
+            "Run a Terminal-Bench 2.1 style local terminal task. Inspect the supervised "
+            "dataset registry, explain which benchmark metadata controls workbench "
+            "visibility, run the focused dataset registry tests, and close the evolution "
+            "transaction successfully only when validation passes."
+        ),
+        "training_tier": "coordination",
+        "difficulty": "smoke",
+        "category": "software-engineering",
+        "tags": ["terminal-bench", "terminus-2", "local-smoke"],
+        "max_steps": 100,
+        "allowed_tools": [
+            "open_evolution_transaction_tool",
+            "execute_shell_command_tool",
+            "python_lint_tool",
+            "close_evolution_transaction_tool",
+        ],
+        "verifier": {
+            "kind": "focused_pytest",
+            "command": "python -m pytest tests/test_dataset_registry.py -q",
+            "success_marker": "passed",
+        },
+        "expected": {
+            "kind": "terminal_harness",
+            "requires_transaction": True,
+            "requires_validation": True,
+            "requires_multi_step_trace": True,
+        },
+    },
+    {
+        "case_id": "tb21_smoke_environment_triage",
+        "task_slug": "local-environment-triage",
+        "instruction": (
+            "Use the terminal harness to inspect the local supervised evaluation environment, "
+            "identify whether official benchmark runners are available, avoid claiming an "
+            "official score, and close the transaction with evidence-backed status."
+        ),
+        "training_tier": "coordination",
+        "difficulty": "smoke",
+        "category": "system-administration",
+        "tags": ["terminal-bench", "terminus-2", "environment-preflight"],
+        "max_steps": 100,
+        "allowed_tools": [
+            "open_evolution_transaction_tool",
+            "execute_shell_command_tool",
+            "close_evolution_transaction_tool",
+        ],
+        "verifier": {
+            "kind": "agent_judgment",
+            "local_validation": "python -m pytest tests/test_dataset_registry.py -q",
+            "success_marker": "SUPERVISED_AGENT_JUDGMENT",
+        },
+        "expected": {
+            "kind": "terminal_harness",
+            "requires_transaction": True,
+            "requires_validation": True,
+            "requires_multi_step_trace": True,
+            "forbid_official_score_claim": True,
+        },
+    },
+]
 
 
 @dataclass
@@ -266,6 +331,12 @@ class DatasetSpec:
     holdout_allowed: bool = True
     raw_chat_direct_training_allowed: bool = True
     workbench_visible: bool = True
+    benchmark_family: str = ""
+    task_type: str = ""
+    verifier_kind: str = ""
+    score_semantics: str = ""
+    run_budget_class: str = ""
+    default_visibility: str = ""
 
     def __post_init__(self) -> None:
         if self.tags is None:
@@ -394,6 +465,12 @@ def _default_registry_payload() -> Dict[str, Any]:
                 "allowed_downstream_uses": ["supervised_evaluation", "regression_observation"],
                 "holdout_allowed": False,
                 "raw_chat_direct_training_allowed": False,
+                "benchmark_family": "terminal_bench",
+                "task_type": "terminal_task",
+                "verifier_kind": "local_terminal_harness",
+                "score_semantics": "pass_rate",
+                "run_budget_class": "smoke",
+                "default_visibility": "primary",
             },
             {
                 "name": "terminal_bench_core",
@@ -416,6 +493,12 @@ def _default_registry_payload() -> Dict[str, Any]:
                 "allowed_downstream_uses": ["supervised_evaluation", "regression_observation"],
                 "holdout_allowed": False,
                 "raw_chat_direct_training_allowed": False,
+                "benchmark_family": "terminal_bench",
+                "task_type": "terminal_task",
+                "verifier_kind": "custom_terminal_harness",
+                "score_semantics": "pass_rate",
+                "run_budget_class": "standard",
+                "default_visibility": "primary",
             },
             {
                 "name": "terminal_bench_agent_judged",
@@ -437,6 +520,39 @@ def _default_registry_payload() -> Dict[str, Any]:
                 "allowed_downstream_uses": ["supervised_evaluation", "regression_observation"],
                 "holdout_allowed": False,
                 "raw_chat_direct_training_allowed": False,
+                "benchmark_family": "terminal_bench",
+                "task_type": "terminal_task",
+                "verifier_kind": "agent_judgment",
+                "score_semantics": "agent_rubric_score",
+                "run_budget_class": "smoke",
+                "default_visibility": "primary",
+            },
+            {
+                "name": "terminal_bench_2_1_smoke",
+                "kind": "terminal_bench_jsonl",
+                "description": (
+                    "Terminal Bench 2.1 / Terminus-2 风格本地 smoke 入口，用于验证多步终端、"
+                    "事务关账、环境预检和非官方分数边界；不声明官方榜单成绩。"
+                ),
+                "source_path": "workspace/evaluation/datasets/terminal_bench_2_1_smoke.jsonl",
+                "bundle_name": "terminal_bench_2_1_smoke_v1",
+                "scenario": "transaction",
+                "mode": "multi_step_react",
+                "timeout_seconds": 900,
+                "runnable": True,
+                "adapter_status": "ready_local_smoke",
+                "official_verifier_status": "not_connected",
+                "tags": ["terminal-bench", "terminal-bench-2.1", "terminus-2", "react", "harness", "smoke"],
+                "source_track": "benchmark",
+                "allowed_downstream_uses": ["supervised_evaluation", "regression_observation"],
+                "holdout_allowed": False,
+                "raw_chat_direct_training_allowed": False,
+                "benchmark_family": "terminal_bench",
+                "task_type": "terminal_task",
+                "verifier_kind": "local_terminal_harness",
+                "score_semantics": "pass_rate",
+                "run_budget_class": "smoke",
+                "default_visibility": "primary",
             },
             {
                 "name": "generated_cases",
@@ -480,6 +596,12 @@ def _default_registry_payload() -> Dict[str, Any]:
                 "runnable": False,
                 "adapter_status": "requires_swe_harness",
                 "tags": ["swe", "external-repo"],
+                "benchmark_family": "swe_bench",
+                "task_type": "repo_patch_task",
+                "verifier_kind": "swe_harness",
+                "score_semantics": "pass_rate",
+                "run_budget_class": "standard",
+                "default_visibility": "advanced",
             },
             {
                 "name": "swe_bench_verified",
@@ -493,6 +615,175 @@ def _default_registry_payload() -> Dict[str, Any]:
                 "runnable": False,
                 "adapter_status": "requires_swe_harness",
                 "tags": ["swe", "verified", "external-repo"],
+                "benchmark_family": "swe_bench",
+                "task_type": "repo_patch_task",
+                "verifier_kind": "swe_harness",
+                "score_semantics": "pass_rate",
+                "run_budget_class": "standard",
+                "default_visibility": "advanced",
+            },
+            {
+                "name": "swe_bench_pro_sample",
+                "kind": "repo_patch_jsonl",
+                "description": (
+                    "SWE-bench Pro 小样本入口；需要真实 repo checkout/setup/verifier harness 后才能判分，"
+                    "当前仅作为监督进化 repo patch 任务契约和高级评测来源。"
+                ),
+                "source_path": "workspace/evaluation/datasets/swe_bench_pro_sample.jsonl",
+                "bundle_name": "swe_bench_pro_sample_v1",
+                "scenario": "repo_patch",
+                "mode": "multi_step_react",
+                "timeout_seconds": 3600,
+                "runnable": False,
+                "adapter_status": "requires_repo_patch_harness",
+                "official_verifier_status": "not_connected",
+                "tags": ["swe-bench-pro", "repo-patch", "external-repo", "advanced"],
+                "source_track": "benchmark",
+                "allowed_downstream_uses": ["supervised_evaluation", "regression_observation"],
+                "holdout_allowed": False,
+                "raw_chat_direct_training_allowed": False,
+                "workbench_visible": False,
+                "benchmark_family": "swe_bench_pro",
+                "task_type": "repo_patch_task",
+                "verifier_kind": "repo_patch_harness",
+                "score_semantics": "pass_rate",
+                "run_budget_class": "medium",
+                "default_visibility": "advanced",
+            },
+            {
+                "name": "deep_swe_sample",
+                "kind": "repo_patch_jsonl",
+                "description": (
+                    "DeepSWE 小样本入口；复用 repo patch 任务契约，强调长链路真实仓库修复，"
+                    "需要外部 harness 后才能进入默认可运行列表。"
+                ),
+                "source_path": "workspace/evaluation/datasets/deep_swe_sample.jsonl",
+                "bundle_name": "deep_swe_sample_v1",
+                "scenario": "repo_patch",
+                "mode": "multi_step_react",
+                "timeout_seconds": 5400,
+                "runnable": False,
+                "adapter_status": "requires_repo_patch_harness",
+                "official_verifier_status": "not_connected",
+                "tags": ["deep-swe", "repo-patch", "external-repo", "advanced"],
+                "source_track": "benchmark",
+                "allowed_downstream_uses": ["supervised_evaluation", "regression_observation"],
+                "holdout_allowed": False,
+                "raw_chat_direct_training_allowed": False,
+                "workbench_visible": False,
+                "benchmark_family": "deep_swe",
+                "task_type": "repo_patch_task",
+                "verifier_kind": "repo_patch_harness",
+                "score_semantics": "pass_rate",
+                "run_budget_class": "medium",
+                "default_visibility": "advanced",
+            },
+            {
+                "name": "nl2repo_sample",
+                "kind": "repo_generation_jsonl",
+                "description": (
+                    "NL2Repo 小样本入口；从空 workspace 生成完整可安装 repo，需 repo generation "
+                    "harness 后才能真实判分。"
+                ),
+                "source_path": "workspace/evaluation/datasets/nl2repo_sample.jsonl",
+                "bundle_name": "nl2repo_sample_v1",
+                "scenario": "repo_generation",
+                "mode": "multi_step_react",
+                "timeout_seconds": 7200,
+                "runnable": False,
+                "adapter_status": "requires_repo_generation_harness",
+                "official_verifier_status": "not_connected",
+                "tags": ["nl2repo", "repo-generation", "advanced"],
+                "source_track": "benchmark",
+                "allowed_downstream_uses": ["supervised_evaluation", "regression_observation"],
+                "holdout_allowed": False,
+                "raw_chat_direct_training_allowed": False,
+                "workbench_visible": False,
+                "benchmark_family": "nl2repo",
+                "task_type": "repo_generation_task",
+                "verifier_kind": "repo_generation_harness",
+                "score_semantics": "build_and_test_pass_rate",
+                "run_budget_class": "advanced",
+                "default_visibility": "advanced",
+            },
+            {
+                "name": "programbench_sample",
+                "kind": "blackbox_rebuild_jsonl",
+                "description": (
+                    "ProgramBench 小样本入口；根据二进制和文档重建源码/构建脚本，"
+                    "需要黑盒行为对比 harness 后才能真实判分。"
+                ),
+                "source_path": "workspace/evaluation/datasets/programbench_sample.jsonl",
+                "bundle_name": "programbench_sample_v1",
+                "scenario": "blackbox_rebuild",
+                "mode": "multi_step_react",
+                "timeout_seconds": 7200,
+                "runnable": False,
+                "adapter_status": "requires_blackbox_rebuild_harness",
+                "official_verifier_status": "not_connected",
+                "tags": ["programbench", "blackbox-rebuild", "research"],
+                "source_track": "benchmark",
+                "allowed_downstream_uses": ["supervised_evaluation", "regression_observation"],
+                "holdout_allowed": False,
+                "raw_chat_direct_training_allowed": False,
+                "workbench_visible": False,
+                "benchmark_family": "programbench",
+                "task_type": "blackbox_rebuild_task",
+                "verifier_kind": "blackbox_behavior_harness",
+                "score_semantics": "behavior_match_rate",
+                "run_budget_class": "research",
+                "default_visibility": "roadmap",
+            },
+            {
+                "name": "swe_marathon_roadmap",
+                "kind": "benchmark_roadmap",
+                "description": "SWE-Marathon 超长软件工程任务，只登记为长期 roadmap，不进入默认监督运行入口。",
+                "bundle_name": "swe_marathon_roadmap_v1",
+                "runnable": False,
+                "adapter_status": "roadmap_only",
+                "official_verifier_status": "not_connected",
+                "tags": ["swe-marathon", "marathon", "roadmap"],
+                "workbench_visible": False,
+                "benchmark_family": "swe_marathon",
+                "task_type": "marathon_task",
+                "verifier_kind": "marathon_harness",
+                "score_semantics": "pass_rate",
+                "run_budget_class": "marathon",
+                "default_visibility": "roadmap",
+            },
+            {
+                "name": "frontier_swe_roadmap",
+                "kind": "benchmark_roadmap",
+                "description": "FrontierSWE Dominance 需要独立分数语义，只登记为长期 roadmap。",
+                "bundle_name": "frontier_swe_roadmap_v1",
+                "runnable": False,
+                "adapter_status": "roadmap_only",
+                "official_verifier_status": "not_connected",
+                "tags": ["frontier-swe", "dominance", "roadmap"],
+                "workbench_visible": False,
+                "benchmark_family": "frontier_swe",
+                "task_type": "marathon_task",
+                "verifier_kind": "frontier_swe_harness",
+                "score_semantics": "dominance",
+                "run_budget_class": "marathon",
+                "default_visibility": "roadmap",
+            },
+            {
+                "name": "posttrainbench_roadmap",
+                "kind": "benchmark_roadmap",
+                "description": "PostTrainBench 属于训练/后训练自动化，应进入独立 Training Gym，当前只登记 roadmap。",
+                "bundle_name": "posttrainbench_roadmap_v1",
+                "runnable": False,
+                "adapter_status": "roadmap_only",
+                "official_verifier_status": "not_connected",
+                "tags": ["posttrainbench", "training-gym", "roadmap"],
+                "workbench_visible": False,
+                "benchmark_family": "posttrainbench",
+                "task_type": "training_research_task",
+                "verifier_kind": "training_research_harness",
+                "score_semantics": "target_benchmark_delta",
+                "run_budget_class": "training_research",
+                "default_visibility": "roadmap",
             },
             {
                 "name": "humaneval_jsonl",
@@ -546,6 +837,12 @@ def _merge_registry_payload(existing: Dict[str, Any]) -> Dict[str, Any]:
             "adapter_status",
             "official_verifier_status",
             "workbench_visible",
+            "benchmark_family",
+            "task_type",
+            "verifier_kind",
+            "score_semantics",
+            "run_budget_class",
+            "default_visibility",
         }
         for key, value in default_item.items():
             if key not in existing_item or key in protected_keys:
@@ -568,6 +865,7 @@ def _bootstrap_builtin_dataset_sources(project_root: Path, specs: List[DatasetSp
         "terminal_bench_smoke",
         "terminal_bench_core",
         "terminal_bench_agent_judged",
+        "terminal_bench_2_1_smoke",
     }
     for spec in specs:
         if spec.name not in bootstrap_names or not spec.source_path:
@@ -582,6 +880,8 @@ def _bootstrap_builtin_dataset_sources(project_root: Path, specs: List[DatasetSp
             _bootstrap_or_refresh_builtin_jsonl(source, TERMINAL_BENCH_CORE_ROWS)
         elif spec.name == "terminal_bench_agent_judged":
             _bootstrap_or_refresh_builtin_jsonl(source, TERMINAL_BENCH_AGENT_JUDGED_ROWS)
+        elif spec.name == "terminal_bench_2_1_smoke":
+            _bootstrap_or_refresh_builtin_jsonl(source, TERMINAL_BENCH_2_1_SMOKE_ROWS)
         elif source.exists():
             continue
         else:
@@ -660,6 +960,12 @@ def _dataset_specs_from_payload(payload: Dict[str, Any]) -> List[DatasetSpec]:
                 holdout_allowed=bool(item.get("holdout_allowed", True)),
                 raw_chat_direct_training_allowed=bool(item.get("raw_chat_direct_training_allowed", True)),
                 workbench_visible=bool(item.get("workbench_visible", True)),
+                benchmark_family=str(item.get("benchmark_family") or "").strip(),
+                task_type=str(item.get("task_type") or "").strip(),
+                verifier_kind=str(item.get("verifier_kind") or "").strip(),
+                score_semantics=str(item.get("score_semantics") or "").strip(),
+                run_budget_class=str(item.get("run_budget_class") or "").strip(),
+                default_visibility=str(item.get("default_visibility") or "").strip(),
             )
         )
     return [item for item in specs if item.name and item.kind and item.bundle_name]
@@ -690,6 +996,34 @@ def resolve_source_path(spec: DatasetSpec, project_root: Path) -> Optional[Path]
         else:
             path = project_root / path
     return path.resolve()
+
+
+def _dataset_evaluation_mode(spec: DatasetSpec) -> str:
+    if spec.adapter_status == "agent_harness_ready":
+        return "agent_judged"
+    if spec.official_verifier_status == "harbor_pending":
+        return "custom_harness"
+    if spec.kind == "benchmark_roadmap":
+        return "roadmap_only"
+    if spec.adapter_status.startswith("requires_"):
+        return "external_harness_required"
+    return "official_or_not_required"
+
+
+def _dataset_score_label(spec: DatasetSpec, evaluation_mode: str) -> str:
+    if evaluation_mode == "agent_judged":
+        return "Agent-judged score (non-official)"
+    if spec.official_verifier_status == "harbor_pending":
+        return "Vibelution custom score (non-official)"
+    labels = {
+        "agent_rubric_score": "Agent rubric score",
+        "behavior_match_rate": "Behavior match rate",
+        "build_and_test_pass_rate": "Build/test pass rate",
+        "dominance": "Dominance score",
+        "pass_rate": "Pass rate",
+        "target_benchmark_delta": "Target benchmark delta",
+    }
+    return labels.get(spec.score_semantics, "official_or_local_score")
 
 
 def list_dataset_status(
@@ -762,28 +1096,20 @@ def list_dataset_status(
             visibility_reason = "需要 Harbor/Docker 官方任务环境，已从主选择器隐藏。"
         elif preflight_blocks_launch:
             visibility_reason = "任务环境预检未通过，已从主选择器隐藏。"
+        elif spec.default_visibility == "roadmap":
+            visibility_reason = "长期研究评测，只登记路线图，不进入默认启动入口。"
         elif usability_status in {"invalid", "blocked"}:
             visibility_reason = "当前不可运行，已从主选择器隐藏。"
+        elif usability_status in {"requires_repo_harness", "requires_external_harness", "roadmap_only"}:
+            visibility_reason = "需要专用评测 harness 或高级模式，已从主选择器隐藏。"
         elif usability_status == "custom_harness_ready":
             visibility_reason = "可用于 Vibelution 自定义监督评测，但官方判分器未接通。"
         elif usability_status == "agent_harness_ready":
             visibility_reason = "可用于纯 agent 监督评分，不依赖官方判分器。"
         else:
             visibility_reason = "可直接用于监督进化运行。"
-        evaluation_mode = (
-            "agent_judged"
-            if spec.adapter_status == "agent_harness_ready"
-            else "custom_harness"
-            if spec.official_verifier_status == "harbor_pending"
-            else "official_or_not_required"
-        )
-        score_label = (
-            "Agent-judged score (non-official)"
-            if evaluation_mode == "agent_judged"
-            else "Vibelution custom score (non-official)"
-            if spec.official_verifier_status == "harbor_pending"
-            else "official_or_local_score"
-        )
+        evaluation_mode = _dataset_evaluation_mode(spec)
+        score_label = _dataset_score_label(spec, evaluation_mode)
         boundary = dataset_intake_boundary(
             name=spec.name,
             kind=spec.kind,
@@ -808,8 +1134,8 @@ def list_dataset_status(
                 "evaluation_mode": evaluation_mode,
                 "score_label": score_label,
                 "official_score_available": (
-                    spec.official_verifier_status != "harbor_pending"
-                    and evaluation_mode != "agent_judged"
+                    evaluation_mode == "official_or_not_required"
+                    and spec.official_verifier_status not in {"harbor_pending", "not_connected"}
                 ),
                 "visibility": visibility,
                 "visibility_reason": visibility_reason,
@@ -823,6 +1149,12 @@ def list_dataset_status(
                 "bundle_exists": bundle_path.exists(),
                 "description": spec.description,
                 "tags": spec.tags,
+                "benchmark_family": spec.benchmark_family,
+                "task_type": spec.task_type,
+                "verifier_kind": spec.verifier_kind,
+                "score_semantics": spec.score_semantics,
+                "run_budget_class": spec.run_budget_class,
+                "default_visibility": spec.default_visibility,
                 "review_required": spec.review_required,
                 "source_track": spec.source_track,
                 "allowed_downstream_uses": spec.allowed_downstream_uses,
