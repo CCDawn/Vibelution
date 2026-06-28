@@ -1,7 +1,19 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useNavigationType } from "react-router-dom";
-import { ArrowLeft, ChevronDown, LoaderCircle, Moon, Power, RefreshCw, Settings, Sun, Wrench } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronDown,
+  LoaderCircle,
+  Moon,
+  PanelTopClose,
+  PanelTopOpen,
+  Power,
+  RefreshCw,
+  Settings,
+  Sun,
+  Wrench,
+} from "lucide-react";
 
 import { fetchJson, setFetchJsonFailureReporter, type FetchJsonFailureReport } from "../api/client";
 import { cancelRuntimeLifecycleCommand, forceStopLauncherBundle, restartLauncherBundle, stopLauncherBundle } from "../api/launcher";
@@ -59,6 +71,7 @@ import {
   shouldBlockWorkbenchWindowClose,
 } from "./projectCloseGuard";
 import { getPageInstanceId } from "./pageInstance";
+import { useShellStore } from "../store/shellStore";
 import styles from "./AppShell.module.css";
 import packageJson from "../../package.json";
 
@@ -569,6 +582,9 @@ export function AppShell() {
   const [utilityOpen, setUtilityOpen] = useState(false);
   const [lifecycleMenuOpen, setLifecycleMenuOpen] = useState(false);
   const [statusGuideOpen, setStatusGuideOpen] = useState(false);
+  const topBarMode = useShellStore((state) => state.topBarMode);
+  const setTopBarMode = useShellStore((state) => state.setTopBarMode);
+  const topBarHidden = topBarMode === "hidden";
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [theme, setTheme] = useState(() => readStoredWorkbenchTheme());
   const [frontendVisible, setFrontendVisible] = useState(
@@ -677,6 +693,8 @@ export function AppShell() {
   const closeWorkbenchLabel = lang === "en" ? "Close workbench" : "关闭工作台";
   const forceCloseWorkbenchLabel = lang === "en" ? "Force close workbench" : "强制关闭工作台";
   const restartWorkbenchLabel = lang === "en" ? "Restart workbench" : "重启工作台";
+  const hideTopBarLabel = lang === "en" ? "Hide top bar" : "隐藏顶部栏";
+  const showTopBarLabel = lang === "en" ? "Show top bar" : "显示顶部栏";
   const cancelShutdownLabel = lang === "en" ? "Cancel close" : "取消关闭";
   const cancelRestartLabel = lang === "en" ? "Cancel restart" : "取消重启";
   const cancellingLifecycleLabel = lang === "en" ? "Cancelling..." : "正在取消...";
@@ -2003,6 +2021,7 @@ export function AppShell() {
       data-theme={theme}
       data-theme-background={themeBackgroundImageUrl ? "custom" : "default"}
       data-theme-background-readability={themeBackgroundImageUrl ? themeBackgroundReadability : undefined}
+      data-topbar-mode={topBarMode}
       data-shell="workbench"
       data-browser-role="workbench"
       style={shellStyle}
@@ -2053,6 +2072,18 @@ export function AppShell() {
             </div>
           </div>
         </div>
+      ) : null}
+      {topBarHidden ? (
+        <button
+          type="button"
+          className={styles.topBarRestoreButton}
+          aria-label={showTopBarLabel}
+          title={showTopBarLabel}
+          onClick={() => setTopBarMode("full")}
+        >
+          <PanelTopOpen size={15} />
+          <span>{showTopBarLabel}</span>
+        </button>
       ) : null}
       <header className={styles.topBar}>
         <div className={styles.brandBlock}>
@@ -2280,6 +2311,15 @@ export function AppShell() {
             disabled={restartRequested || shutdownRequested || (shutdownInFlight && !shutdownSettled)}
           >
             <RefreshCw size={16} />
+          </button>
+          <button
+            type="button"
+            className={styles.actionIconButton}
+            aria-label={hideTopBarLabel}
+            title={hideTopBarLabel}
+            onClick={() => setTopBarMode("hidden")}
+          >
+            <PanelTopClose size={16} />
           </button>
           <div
             ref={lifecycleMenuRef}

@@ -56,6 +56,23 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("width: 32px");
   });
 
+  it("can hide the web top bar while keeping a restore control", () => {
+    expect(shellSource).toContain("useShellStore");
+    expect(shellSource).toContain("topBarMode");
+    expect(shellSource).toContain('const topBarHidden = topBarMode === "hidden"');
+    expect(shellSource).toContain("setTopBarMode(\"hidden\")");
+    expect(shellSource).toContain("setTopBarMode(\"full\")");
+    expect(shellSource).toContain('data-topbar-mode={topBarMode}');
+    expect(shellSource).toContain("topBarRestoreButton");
+    expect(shellSource).toContain("hideTopBarLabel");
+    expect(shellSource).toContain("showTopBarLabel");
+    expect(shellStyles).toContain('.shell[data-topbar-mode="hidden"]');
+    expect(shellStyles).toContain("--shell-topbar-height: 0px");
+    expect(shellStyles).toContain('.shell[data-topbar-mode="hidden"] .topBar');
+    expect(shellStyles).toContain("display: none");
+    expect(styles.topBarRestoreButton).toBeTypeOf("string");
+  });
+
   it("exposes a shell-level semantic return action without visible helper copy", () => {
     expect(shellSource).toContain("resolveReturnTarget(routeLocationFromRouter(location), returnNavigationStack)");
     expect(shellSource).toContain("consumeReturnNavigationTarget(current, targetPath)");
