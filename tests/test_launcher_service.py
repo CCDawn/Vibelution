@@ -1088,6 +1088,51 @@ def test_launcher_stop_records_request_audit(monkeypatch):
     assert requested_event[1]["fields"]["requestAudit"] == request_audit
 
 
+def test_launcher_status_projects_last_close_request_audit():
+    workbench = launcher_service._workbench_payload(
+        runtime_state={
+            "daemonRunning": True,
+            "workbench": {
+                "desiredState": "closed",
+                "observedState": "closed",
+                "phase": "steady",
+                "lastReason": "launcher_stop_button",
+                "lastSource": "launcher_api",
+                "lastTransitionAt": "2026-06-28T09:33:19+00:00",
+                "lastRequestAudit": {
+                    "operation": "stop",
+                    "trigger": "launcher_route_stop_button",
+                    "endpoint": "/api/launcher/stop",
+                    "method": "POST",
+                    "clientHost": "127.0.0.1",
+                    "secret": "ignored",
+                },
+            },
+        },
+        observed_workbench={},
+    )
+
+    bundle = launcher_service._project_bundle_from_workbench(
+        workbench,
+        lifecycle_proof={"overallState": "closed"},
+        launcher_state={},
+    )
+
+    assert workbench["lastRequestAudit"] == {
+        "operation": "stop",
+        "trigger": "launcher_route_stop_button",
+        "endpoint": "/api/launcher/stop",
+        "method": "POST",
+        "clientHost": "127.0.0.1",
+    }
+    assert bundle["lastOperation"] == {
+        "reason": "launcher_stop_button",
+        "source": "launcher_api",
+        "transitionAt": "2026-06-28T09:33:19+00:00",
+        "requestAudit": workbench["lastRequestAudit"],
+    }
+
+
 def test_launcher_stop_records_prequeue_timing(monkeypatch):
     events = []
     monkeypatch.setattr(launcher_service, "_raise_if_active_work", lambda _operation: None)
