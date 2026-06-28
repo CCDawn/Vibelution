@@ -5732,6 +5732,12 @@ export type EvolutionDatasetOption = {
   sourcePath: string;
   sourceExists: boolean;
   tags: string[];
+  benchmarkFamily?: string;
+  taskType?: string;
+  verifierKind?: string;
+  scoreSemantics?: string;
+  runBudgetClass?: string;
+  defaultVisibility?: string;
   reviewRequired: boolean;
   sourceTrack: string;
   allowedDownstreamUses: string[];

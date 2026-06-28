@@ -87,6 +87,41 @@ def test_default_dataset_registry_lists_builtin_and_swe(monkeypatch: pytest.Monk
     assert by_name["terminal_bench_agent_judged"]["usability_status"] == "agent_harness_ready"
     assert by_name["terminal_bench_agent_judged"]["visibility"] == "primary"
     assert "纯 agent" in by_name["terminal_bench_agent_judged"]["usability_reason"]
+    assert by_name["terminal_bench_2_1_smoke"]["runnable"] is True
+    assert by_name["terminal_bench_2_1_smoke"]["kind"] == "terminal_bench_jsonl"
+    assert by_name["terminal_bench_2_1_smoke"]["benchmark_family"] == "terminal_bench"
+    assert by_name["terminal_bench_2_1_smoke"]["task_type"] == "terminal_task"
+    assert by_name["terminal_bench_2_1_smoke"]["verifier_kind"] == "local_terminal_harness"
+    assert by_name["terminal_bench_2_1_smoke"]["score_semantics"] == "pass_rate"
+    assert by_name["terminal_bench_2_1_smoke"]["run_budget_class"] == "smoke"
+    assert by_name["terminal_bench_2_1_smoke"]["official_score_available"] is False
+    assert by_name["terminal_bench_2_1_smoke"]["visibility"] == "primary"
+    assert by_name["terminal_bench_2_1_smoke"]["selectable"] is True
+    assert by_name["swe_bench_pro_sample"]["kind"] == "repo_patch_jsonl"
+    assert by_name["swe_bench_pro_sample"]["benchmark_family"] == "swe_bench_pro"
+    assert by_name["swe_bench_pro_sample"]["task_type"] == "repo_patch_task"
+    assert by_name["swe_bench_pro_sample"]["verifier_kind"] == "repo_patch_harness"
+    assert by_name["swe_bench_pro_sample"]["score_semantics"] == "pass_rate"
+    assert by_name["swe_bench_pro_sample"]["run_budget_class"] == "medium"
+    assert by_name["swe_bench_pro_sample"]["selectable"] is False
+    assert by_name["swe_bench_pro_sample"]["visibility"] == "hidden"
+    assert by_name["deep_swe_sample"]["kind"] == "repo_patch_jsonl"
+    assert by_name["deep_swe_sample"]["benchmark_family"] == "deep_swe"
+    assert by_name["deep_swe_sample"]["task_type"] == "repo_patch_task"
+    assert by_name["nl2repo_sample"]["kind"] == "repo_generation_jsonl"
+    assert by_name["nl2repo_sample"]["benchmark_family"] == "nl2repo"
+    assert by_name["nl2repo_sample"]["task_type"] == "repo_generation_task"
+    assert by_name["nl2repo_sample"]["run_budget_class"] == "advanced"
+    assert by_name["programbench_sample"]["kind"] == "blackbox_rebuild_jsonl"
+    assert by_name["programbench_sample"]["benchmark_family"] == "programbench"
+    assert by_name["programbench_sample"]["task_type"] == "blackbox_rebuild_task"
+    assert by_name["programbench_sample"]["run_budget_class"] == "research"
+    assert by_name["swe_marathon_roadmap"]["kind"] == "benchmark_roadmap"
+    assert by_name["swe_marathon_roadmap"]["task_type"] == "marathon_task"
+    assert by_name["frontier_swe_roadmap"]["kind"] == "benchmark_roadmap"
+    assert by_name["frontier_swe_roadmap"]["score_semantics"] == "dominance"
+    assert by_name["posttrainbench_roadmap"]["kind"] == "benchmark_roadmap"
+    assert by_name["posttrainbench_roadmap"]["task_type"] == "training_research_task"
     assert by_name["swe_bench_lite"]["runnable"] is False
     assert by_name["swe_bench_lite"]["adapter_status"] == "requires_swe_harness"
 
@@ -152,6 +187,14 @@ def test_ensure_dataset_registry_backfills_missing_builtin_datasets(tmp_path: Pa
     assert "terminal_bench_smoke" in names
     assert "terminal_bench_core" in names
     assert "terminal_bench_agent_judged" in names
+    assert "terminal_bench_2_1_smoke" in names
+    assert "swe_bench_pro_sample" in names
+    assert "deep_swe_sample" in names
+    assert "nl2repo_sample" in names
+    assert "programbench_sample" in names
+    assert "swe_marathon_roadmap" in names
+    assert "frontier_swe_roadmap" in names
+    assert "posttrainbench_roadmap" in names
     assert "custom_prompt_jsonl" in names
 
 
@@ -581,6 +624,124 @@ def test_materialize_swe_jsonl_marks_external_harness_requirement(tmp_path: Path
     assert bundle["cases"][0]["scenario"] == "swe_patch"
     assert bundle["cases"][0]["requires_external_harness"] == "swe_bench"
     assert "gold patch" not in bundle["cases"][0]["baseline_prompt"]
+
+
+def test_materialize_repo_patch_jsonl_preserves_benchmark_contract(tmp_path: Path):
+    ensure_dataset_registry(tmp_path)
+    dataset_path = tmp_path / "workspace" / "evaluation" / "datasets" / "swe_bench_pro_sample.jsonl"
+    dataset_path.parent.mkdir(parents=True, exist_ok=True)
+    dataset_path.write_text(
+        json.dumps(
+            {
+                "instance_id": "enterprise-app__issue-42",
+                "repo": "example/enterprise-app",
+                "base_commit": "def456",
+                "problem_statement": "Fix the invoice export crash.",
+                "test_command": "pytest tests/test_invoice_export.py -q",
+                "patch": "SECRET_PATCH_CONTENT",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = materialize_dataset_bundle("swe_bench_pro_sample", project_root=tmp_path)
+    bundle = json.loads(Path(result.bundle_path).read_text(encoding="utf-8"))
+    case = bundle["cases"][0]
+
+    assert result.runnable is False
+    assert result.adapter_status == "requires_repo_patch_harness"
+    assert bundle["dataset"]["benchmark_family"] == "swe_bench_pro"
+    assert bundle["dataset"]["task_type"] == "repo_patch_task"
+    assert case["scenario"] == "repo_patch"
+    assert case["mode"] == "multi_step_react"
+    assert case["benchmark_family"] == "swe_bench_pro"
+    assert case["task_type"] == "repo_patch_task"
+    assert case["verifier_kind"] == "repo_patch_harness"
+    assert case["score_semantics"] == "pass_rate"
+    assert case["requires_external_harness"] == "repo_patch"
+    assert case["official_score_available"] is False
+    assert case["dataset_ref"]["repo"] == "example/enterprise-app"
+    assert "Fix the invoice export crash" in case["baseline_prompt"]
+    assert "pytest tests/test_invoice_export.py -q" in case["baseline_prompt"]
+    assert "SECRET_PATCH_CONTENT" not in case["baseline_prompt"]
+
+
+def test_materialize_repo_generation_jsonl_preserves_empty_workspace_contract(tmp_path: Path):
+    ensure_dataset_registry(tmp_path)
+    dataset_path = tmp_path / "workspace" / "evaluation" / "datasets" / "nl2repo_sample.jsonl"
+    dataset_path.parent.mkdir(parents=True, exist_ok=True)
+    dataset_path.write_text(
+        json.dumps(
+            {
+                "task_id": "nl2repo-lib-1",
+                "specification": "Build an installable Python library for validating CSV schemas.",
+                "package_name": "csv_schema_guard",
+                "install_command": "pip install -e .",
+                "test_command": "pytest -q",
+                "reference_solution": "hidden reference repository",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = materialize_dataset_bundle("nl2repo_sample", project_root=tmp_path)
+    bundle = json.loads(Path(result.bundle_path).read_text(encoding="utf-8"))
+    case = bundle["cases"][0]
+
+    assert result.runnable is False
+    assert result.adapter_status == "requires_repo_generation_harness"
+    assert bundle["dataset"]["benchmark_family"] == "nl2repo"
+    assert bundle["dataset"]["task_type"] == "repo_generation_task"
+    assert case["scenario"] == "repo_generation"
+    assert case["task_type"] == "repo_generation_task"
+    assert case["requires_empty_workspace"] is True
+    assert case["requires_external_harness"] == "repo_generation"
+    assert case["verifier"]["install_command"] == "pip install -e ."
+    assert case["verifier"]["test_command"] == "pytest -q"
+    assert "empty workspace" in case["baseline_prompt"]
+    assert "csv_schema_guard" in case["baseline_prompt"]
+    assert "hidden reference repository" not in case["baseline_prompt"]
+
+
+def test_materialize_blackbox_rebuild_jsonl_preserves_rebuild_contract(tmp_path: Path):
+    ensure_dataset_registry(tmp_path)
+    dataset_path = tmp_path / "workspace" / "evaluation" / "datasets" / "programbench_sample.jsonl"
+    dataset_path.parent.mkdir(parents=True, exist_ok=True)
+    dataset_path.write_text(
+        json.dumps(
+            {
+                "task_id": "programbench-cli-1",
+                "binary_path": "/bench/bin/original",
+                "documentation": "The program reads stdin lines and emits sorted unique values.",
+                "build_command": "make",
+                "behavior_check_command": "./check_behavior.sh",
+                "source_code": "SECRET_ORIGINAL_SOURCE",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = materialize_dataset_bundle("programbench_sample", project_root=tmp_path)
+    bundle = json.loads(Path(result.bundle_path).read_text(encoding="utf-8"))
+    case = bundle["cases"][0]
+
+    assert result.runnable is False
+    assert result.adapter_status == "requires_blackbox_rebuild_harness"
+    assert bundle["dataset"]["benchmark_family"] == "programbench"
+    assert case["scenario"] == "blackbox_rebuild"
+    assert case["task_type"] == "blackbox_rebuild_task"
+    assert case["requires_external_harness"] == "blackbox_rebuild"
+    assert case["verifier"]["build_command"] == "make"
+    assert case["verifier"]["behavior_check_command"] == "./check_behavior.sh"
+    assert "/bench/bin/original" in case["baseline_prompt"]
+    assert "sorted unique values" in case["baseline_prompt"]
+    assert "SECRET_ORIGINAL_SOURCE" not in case["baseline_prompt"]
 
 
 def test_materialize_terminal_bench_smoke_preserves_harness_contract(tmp_path: Path):

@@ -79,6 +79,10 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("supervisedSourceOptions");
     expect(routeSource).toContain('value: `dataset:${item.name}`');
     expect(routeSource).toContain('value: `bundle:${item.name}`');
+    expect(routeSource).toContain("function datasetBenchmarkDetail");
+    expect(routeSource).toContain("item.taskType");
+    expect(routeSource).toContain("item.runBudgetClass");
+    expect(routeSource).toContain("datasetBenchmarkDetail(item, lang)");
     expect(routeSource).toContain("数据集会先物化，评测包可直接运行。");
     expect(routeSource).toContain("sourceInventoryBar");
     expect(routeSource).toContain("primaryDatasets.map((item)");
