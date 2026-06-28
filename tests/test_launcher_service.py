@@ -499,7 +499,7 @@ def test_standalone_launcher_app_exposes_maintenance_reset_routes(monkeypatch):
     preview = client.post("/api/launcher/maintenance/reset/preview", json={"profileId": "factory_runtime"})
     apply = client.post(
         "/api/launcher/maintenance/reset/apply",
-        json={"planId": "maintplan-1", "planHash": "hash-1", "confirm": True},
+        json={"planId": "maintplan-1", "planHash": "hash-1", "profileId": "factory_runtime", "confirm": True},
     )
 
     assert summary.status_code == 200
@@ -511,7 +511,7 @@ def test_standalone_launcher_app_exposes_maintenance_reset_routes(monkeypatch):
     assert calls == [
         ("summary", None),
         ("preview", {"profileId": "factory_runtime", "itemIds": []}),
-        ("apply", {"planId": "maintplan-1", "planHash": "hash-1", "confirm": True}),
+        ("apply", {"planId": "maintplan-1", "planHash": "hash-1", "profileId": "factory_runtime", "confirm": True}),
     ]
 
 
@@ -527,7 +527,7 @@ def test_standalone_launcher_app_rejects_invalid_maintenance_plan_id(monkeypatch
 
     response = client.post(
         "/api/launcher/maintenance/reset/apply",
-        json={"planId": "bad", "planHash": "hash-1", "confirm": True},
+        json={"planId": "bad", "planHash": "hash-1", "profileId": "factory_runtime", "confirm": True},
     )
 
     assert response.status_code == 400

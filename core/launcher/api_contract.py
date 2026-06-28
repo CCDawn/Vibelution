@@ -45,6 +45,7 @@ class LauncherMaintenancePreviewPayload(BaseModel):
 class LauncherMaintenanceApplyPayload(BaseModel):
     planId: str
     planHash: str
+    profileId: str
     confirm: bool = False
 
 

@@ -31,16 +31,7 @@ MAINTENANCE_PLAN_SCHEMA_VERSION = 1
 MAINTENANCE_PLAN_TTL_MINUTES = 30
 MAINTENANCE_PLAN_DIR = PROJECT_ROOT / ".runtime" / "launcher" / "maintenance-reset-plans"
 LauncherMaintenanceProfile = Literal["custom", "clean_start", "factory_runtime"]
-FACTORY_RUNTIME_ITEM_IDS = (
-    "chat_history",
-    "workspace_sessions",
-    "chat_rooms",
-    "memory",
-    "agents",
-    "agent_config_state",
-    "teams",
-    "project_agent_bus",
-    "generated_tools",
+SAFE_RUNTIME_CLEAN_ITEM_IDS = (
     "conversation_logs",
     "diagnostic_payloads",
     "runtime_logs",
@@ -53,23 +44,14 @@ FACTORY_RUNTIME_ITEM_IDS = (
     "root_temp_artifacts",
     "runtime_preview_artifacts",
 )
+FACTORY_RUNTIME_ITEM_IDS = (
+    "chat_history",
+    "workspace_sessions",
+    "memory",
+    *SAFE_RUNTIME_CLEAN_ITEM_IDS,
+)
 PROFILES: dict[str, tuple[str, ...]] = {
-    "clean_start": (
-        "chat_history",
-        "workspace_sessions",
-        "chat_rooms",
-        "conversation_logs",
-        "diagnostic_payloads",
-        "runtime_logs",
-        "stopped_runtime_scenes",
-        "runtime_manager_results",
-        "browser_profiles",
-        "workspace_browser_profiles",
-        "workspace_service_logs",
-        "temp_artifacts",
-        "root_temp_artifacts",
-        "runtime_preview_artifacts",
-    ),
+    "clean_start": SAFE_RUNTIME_CLEAN_ITEM_IDS,
     "factory_runtime": FACTORY_RUNTIME_ITEM_IDS,
 }
 RESET_CATEGORY_LABELS = {
@@ -350,13 +332,13 @@ def get_launcher_maintenance_summary() -> dict[str, Any]:
         {
             "id": "clean_start",
             "label": "干净启动",
-            "description": "清理会话、日志、运行残留和可重建产物，保留 Agent、Team、配置、项目记忆和进化证据。",
+            "description": "清理日志、运行残留和可重建临时产物，保留会话、Agent、Team、配置、项目记忆和进化证据。",
             "itemIds": list(PROFILES["clean_start"]),
         },
         {
             "id": "factory_runtime",
             "label": "恢复初始化",
-            "description": "保留代码、配置、项目记忆和进化证据，清空本地运行数据并回到可重新初始化的状态。",
+            "description": "清理会话工作区、Agent 记忆、日志和运行残留，保留 Agent、Team、聊天室、模式配置、工具配置、项目记忆和进化证据。",
             "itemIds": list(PROFILES["factory_runtime"]),
         },
     ]
@@ -364,6 +346,7 @@ def get_launcher_maintenance_summary() -> dict[str, Any]:
         "requiresLauncher": True,
         "requiresPlanId": True,
         "requiresPlanHash": True,
+        "requiresProfileId": True,
         "requiresConfirm": True,
         "blocksActiveWork": True,
         "retiredWebApi": True,
@@ -458,9 +441,17 @@ def apply_launcher_maintenance_plan(
         )
     plan_id = str(payload.get("planId") or "").strip()
     plan_hash = str(payload.get("planHash") or "").strip()
+    requested_profile_id = _parse_profile_id(payload.get("profileId"))
     plan = _load_maintenance_plan(plan_id, plan_dir=plan_dir)
     if str(plan.get("planHash") or "") != plan_hash or _maintenance_plan_hash(plan) != plan_hash:
         raise LauncherMaintenancePlanError("plan_hash_mismatch", "维护计划 hash 不匹配，请重新预览。")
+    plan_profile_id = _parse_profile_id(plan.get("profileId"))
+    if plan_profile_id != requested_profile_id:
+        raise LauncherMaintenancePlanError(
+            "profile_mismatch",
+            "维护档位与预览计划不一致，请重新生成预览。",
+            detail={"planProfileId": plan_profile_id, "requestedProfileId": requested_profile_id},
+        )
     if _maintenance_plan_expired(str(plan.get("expiresAt") or "")):
         raise LauncherMaintenancePlanError("plan_expired", "维护计划已过期，请重新预览。")
     if Path(str(plan.get("projectRoot") or "")).resolve() != PROJECT_ROOT.resolve():
