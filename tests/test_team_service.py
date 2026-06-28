@@ -932,6 +932,26 @@ def test_ensure_ai_search_system_team_materializes_source_scope_roles(tmp_path, 
     assert all(agent["primaryMode"] == "research" for agent in agents_by_role.values())
     assert all(agent["metadata"]["fixedRole"] is True for agent in agents_by_role.values())
     assert all(agent["metadata"]["protected"] is True for agent in agents_by_role.values())
+    assert all(
+        agent["metadata"]["conversationIndexKind"] == agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT
+        for agent in agents_by_role.values()
+    )
+    assert all(agent["metadata"]["teamId"] == team_service.AI_SEARCH_TEAM_ID for agent in agents_by_role.values())
+    stored_sessions = {item["conversation_id"]: item for item in session_service.load_chat_state(tmp_path)["conversations"]}
+    assert all(
+        stored_sessions[str(agent["directSessionId"])]["conversationIndexKind"]
+        == agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT
+        for agent in agents_by_role.values()
+    )
+    assert all(
+        agent_directory_service.agent_conversation_index_visibility(agent)
+        == agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
+        for agent in agents_by_role.values()
+    )
+    assert all(
+        session_service._agent_directory_stub_hidden_from_user_index(agent, {agent["agentId"]})
+        for agent in agents_by_role.values()
+    )
 
     second = team_service.ensure_ai_search_system_team()
     assert [member["agentId"] for member in second["members"]] == [member["agentId"] for member in team["members"]]

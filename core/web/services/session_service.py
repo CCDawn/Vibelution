@@ -1538,10 +1538,7 @@ def repair_conversation_index_records() -> dict[str, Any]:
         )
         if not repair_kind:
             continue
-        metadata = dict(agent.get("metadata") or {})
-        metadata["conversationIndexKind"] = repair_kind
-        metadata["conversationIndexVisibility"] = _conversation_index_visibility_for_kind(repair_kind)
-        agent["metadata"] = metadata
+        _apply_agent_conversation_index_repair_metadata(agent, repair_kind)
         agent["updatedAt"] = agent_directory_service.utc_now_iso()
         repaired_agents.append(
             {
@@ -1567,8 +1564,6 @@ def repair_conversation_index_records() -> dict[str, Any]:
             if not isinstance(conversation, dict):
                 continue
             raw_kind, normalized_raw_kind = _conversation_index_kind_from_raw(conversation)
-            if raw_kind and normalized_raw_kind != agent_directory_service.CONVERSATION_INDEX_KIND_INVALID:
-                continue
             if raw_kind and not normalized_raw_kind:
                 continue
             agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
@@ -1586,8 +1581,9 @@ def repair_conversation_index_records() -> dict[str, Any]:
                 agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN,
             }:
                 continue
-            conversation["conversation_index_kind"] = agent_kind
-            conversation["conversationIndexKind"] = agent_kind
+            if normalized_raw_kind == agent_kind and _conversation_repair_flags_match_kind(conversation, agent_kind):
+                continue
+            _apply_conversation_index_repair_fields(conversation, agent_kind)
             repaired_conversations.append(
                 {
                     "sessionId": str(conversation.get("conversation_id") or "").strip(),
@@ -1641,6 +1637,63 @@ def _legacy_agent_conversation_index_repair_kind(
     if looks_team_owned:
         return agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT
     return ""
+
+
+def _agent_created_by(agent: dict[str, Any], metadata: dict[str, Any]) -> str:
+    creation_spec = metadata.get("creationSpec") if isinstance(metadata.get("creationSpec"), dict) else {}
+    return str(agent.get("createdBy") or creation_spec.get("source") or "").strip()
+
+
+def _agent_needs_ai_search_team_marker(agent: dict[str, Any], metadata: dict[str, Any]) -> bool:
+    role_key = str(agent.get("roleKey") or metadata.get("aiSearchRole") or "").strip()
+    return (
+        _agent_created_by(agent, metadata) == "ai_search_team"
+        or bool(str(metadata.get("aiSearchRole") or "").strip())
+        or role_key.startswith("ai_search_")
+    )
+
+
+def _ai_search_team_id_for_repair() -> str:
+    try:
+        from . import team_service
+
+        return str(team_service.AI_SEARCH_TEAM_ID or "").strip() or "ai-search-team"
+    except Exception:
+        return "ai-search-team"
+
+
+def _apply_agent_conversation_index_repair_metadata(agent: dict[str, Any], kind: str) -> None:
+    metadata = dict(agent.get("metadata") or {})
+    metadata["conversationIndexKind"] = kind
+    metadata["conversationIndexVisibility"] = _conversation_index_visibility_for_kind(kind)
+    if kind in {
+        agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT,
+        agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN,
+    }:
+        metadata["showInSessionIndex"] = False
+    if kind == agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT:
+        metadata.setdefault("directSessionVisibility", "active_session")
+        if _agent_needs_ai_search_team_marker(agent, metadata):
+            metadata.setdefault("teamId", _ai_search_team_id_for_repair())
+    agent["metadata"] = metadata
+
+
+def _conversation_repair_flags_match_kind(conversation: dict[str, Any], kind: str) -> bool:
+    hidden_flag = bool(conversation.get("hidden_from_index") or conversation.get("hiddenFromIndex"))
+    if kind == agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN:
+        return hidden_flag
+    return not hidden_flag
+
+
+def _apply_conversation_index_repair_fields(conversation: dict[str, Any], kind: str) -> None:
+    conversation["conversation_index_kind"] = kind
+    conversation["conversationIndexKind"] = kind
+    if kind == agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN:
+        conversation["hidden_from_index"] = True
+        conversation["hiddenFromIndex"] = True
+    else:
+        conversation["hidden_from_index"] = False
+        conversation["hiddenFromIndex"] = False
 
 
 def _conversation_index_visibility_for_kind(kind: str) -> str:
@@ -2273,8 +2326,22 @@ def _resolve_active_agent_for_turn(
 
 
 def _session_agent_visible_in_indexes(summary: dict[str, Any]) -> bool:
-    if str(summary.get("conversationIndexKind") or "").strip() == agent_directory_service.CONVERSATION_INDEX_KIND_INVALID:
+    conversation_index_kind = str(summary.get("conversationIndexKind") or "").strip()
+    conversation_index_visibility = str(summary.get("conversationIndexVisibility") or "").strip()
+    if conversation_index_kind == agent_directory_service.CONVERSATION_INDEX_KIND_INVALID:
         return True
+    if conversation_index_visibility == agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE:
+        return False
+    if (
+        conversation_index_visibility == agent_directory_service.CONVERSATION_INDEX_VISIBILITY_HIDDEN
+        and conversation_index_kind in {"", agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN}
+    ):
+        return False
+    if conversation_index_kind in {
+        agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT,
+        agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN,
+    }:
+        return False
     if bool(summary.get("hiddenFromIndex") or summary.get("hidden_from_index")):
         return False
     if str(summary.get("sessionKind") or "").strip().lower() == "child":
@@ -3773,6 +3840,7 @@ def create_chat_session(
             llm_bindings=normalized_llm_bindings,
             session_workspace_path=str(conversation.get("workspace_path") or _session_workspace_relative_path(session_id)),
             created_by=created_by,
+            conversation_index_kind=conversation_index_kind,
         )
         agent_id = str(agent.get("agentId") or "").strip()
         if agent_id:
@@ -3902,6 +3970,7 @@ def ensure_agent_direct_session(
             agent,
             session_id=session_id,
             source="ensure_agent_direct_session",
+            conversation_index_kind=conversation_index_kind,
         )
         conversations.append(conversation)
         payload["version"] = int(payload.get("version") or CHAT_STATE_VERSION)
@@ -4205,6 +4274,7 @@ def _bind_conversation_to_agent_instance(
     *,
     session_id: str,
     source: str,
+    conversation_index_kind: str = "",
 ) -> None:
     agent_id = str(agent.get("agentId") or "").strip()
     if not agent_id:
@@ -4231,6 +4301,7 @@ def _bind_conversation_to_agent_instance(
                 existing_agent_id=agent_id,
                 session_workspace_path=str(conversation.get("workspace_path") or conversation.get("workspacePath") or _session_workspace_relative_path(session_id)),
                 created_by="session_agent_binding",
+                conversation_index_kind=conversation_index_kind,
             )
     except AgentNotFoundError:
         raise SessionValidationError(f"Session Agent not found: {agent_id}") from None
@@ -10571,7 +10642,7 @@ def _make_empty_conversation(
     normalized_index_kind = agent_directory_service.normalize_conversation_index_kind(conversation_index_kind)
     if not normalized_index_kind:
         normalized_index_kind = agent_directory_service.CONVERSATION_INDEX_KIND_INVALID
-    return {
+    conversation = {
         "conversation_id": str(session_id or "").strip(),
         "title": str(title or "").strip() or DEFAULT_CHAT_CONVERSATION_TITLE,
         "workspace_path": _session_workspace_relative_path(session_id),
@@ -10582,6 +10653,10 @@ def _make_empty_conversation(
         "conversation_index_kind": normalized_index_kind,
         "conversationIndexKind": normalized_index_kind,
     }
+    if normalized_index_kind == agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN:
+        conversation["hidden_from_index"] = True
+        conversation["hiddenFromIndex"] = True
+    return conversation
 
 
 def _normalize_session_agent_llm_bindings(value: Any) -> dict[str, dict[str, str]]:

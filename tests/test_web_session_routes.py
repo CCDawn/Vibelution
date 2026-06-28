@@ -753,6 +753,139 @@ def test_repair_conversation_index_records_migrates_legacy_direct_agent_sessions
     )
 
 
+def test_repair_conversation_index_records_rewrites_wrong_post_reset_agent_kinds(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": "session-ai-search",
+                "title": "AI 搜索范围负责人",
+                "agent_id": "agent-ai-search",
+                "agentId": "agent-ai-search",
+                "session_kind": "main",
+                "updated_at": "2026-06-28T16:24:00",
+                "conversation_index_kind": "user_chat",
+                "conversationIndexKind": "user_chat",
+                "messages": [],
+            },
+            {
+                "conversation_id": "session-self-evolution",
+                "title": "自进化执行器",
+                "agent_id": "agent-self-evolution",
+                "agentId": "agent-self-evolution",
+                "session_kind": "main",
+                "updated_at": "2026-06-28T16:24:00",
+                "conversation_index_kind": "user_chat",
+                "conversationIndexKind": "user_chat",
+                "messages": [],
+            },
+        ],
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {
+                    "agentId": "agent-ai-search",
+                    "agentCode": "A010",
+                    "displayName": "AI 搜索范围负责人",
+                    "status": "active",
+                    "directSessionId": "session-ai-search",
+                    "primaryMode": "research",
+                    "roleKey": "ai_search_scope_lead",
+                    "promptTemplateId": "prompt-chat-default",
+                    "createdBy": "ai_search_team",
+                    "metadata": {
+                        "aiSearchRole": "ai_search_scope_lead",
+                        "directSessionVisibility": "active_session",
+                    },
+                },
+                {
+                    "agentId": "agent-self-evolution",
+                    "agentCode": "A011",
+                    "displayName": "自进化执行器",
+                    "status": "active",
+                    "directSessionId": "session-self-evolution",
+                    "primaryMode": "self_evolution",
+                    "roleKey": "executor",
+                    "promptTemplateId": "prompt-self-evolution-executor",
+                    "createdBy": "self_evolution",
+                    "metadata": {
+                        "selfEvolutionRole": "executor",
+                        "directSessionVisibility": "active_session",
+                    },
+                },
+            ]
+        }
+    )
+    team_service._save_index(
+        {
+            "schemaVersion": team_service.SCHEMA_VERSION,
+            "updatedAt": "2026-06-28T16:24:00Z",
+            "teams": [
+                {
+                    "teamId": team_service.AI_SEARCH_TEAM_ID,
+                    "name": team_service.AI_SEARCH_TEAM_DISPLAY_NAME,
+                    "status": "active",
+                    "teamKind": "ai_search",
+                    "teamSource": "ai_search",
+                    "members": [{"agentId": "agent-ai-search", "role": "ai_search_scope_lead"}],
+                    "linkedChatRoomId": "",
+                }
+            ],
+        }
+    )
+
+    stored_before = {item["conversation_id"]: item for item in load_chat_state(tmp_path)["conversations"]}
+    assert stored_before["session-ai-search"]["conversationIndexKind"] == "user_chat"
+    assert stored_before["session-self-evolution"]["conversationIndexKind"] == "user_chat"
+
+    result = session_service.repair_conversation_index_records()
+
+    assert result["changed"] is True
+    assert result["conversationCount"] == 2
+    assert result["agentCount"] == 2
+    listed_after = {item["id"]: item for item in session_service.list_sessions()}
+    assert "session-ai-search" not in listed_after
+    assert "session-self-evolution" not in listed_after
+    ai_detail = session_service.get_session_detail("session-ai-search")
+    self_detail = session_service.get_session_detail("session-self-evolution")
+    assert ai_detail["conversationIndexKind"] == agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT
+    assert self_detail["conversationIndexKind"] == agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN
+    payload = load_chat_state(tmp_path)
+    stored_by_id = {item["conversation_id"]: item for item in payload["conversations"]}
+    assert stored_by_id["session-ai-search"]["conversationIndexKind"] == (
+        agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT
+    )
+    assert stored_by_id["session-self-evolution"]["conversationIndexKind"] == (
+        agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN
+    )
+    stored_agents = {item["agentId"]: item for item in agent_directory_service.load_state()["agents"]}
+    assert stored_agents["agent-ai-search"]["metadata"]["conversationIndexKind"] == (
+        agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT
+    )
+    assert stored_agents["agent-ai-search"]["metadata"]["teamId"] == team_service.AI_SEARCH_TEAM_ID
+    assert stored_agents["agent-self-evolution"]["metadata"]["conversationIndexKind"] == (
+        agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN
+    )
+
+
+def test_team_private_agent_summary_stays_out_of_user_session_index():
+    summary = {
+        "id": "session-team-private",
+        "agentId": "agent-team-private",
+        "agentMissing": False,
+        "hiddenFromIndex": False,
+        "sessionKind": "main",
+        "conversationIndexKind": agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT,
+        "conversationIndexVisibility": agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE,
+    }
+
+    assert session_service._session_agent_visible_in_indexes(summary) is False
+
+
 def test_ensure_agent_for_session_persists_personal_index_kind_for_session_repair(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, conversations=[])
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
