@@ -5,6 +5,7 @@ import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./SupervisedWorkspaceTabs.module.css";
 
 export type SupervisedWorkspaceView = "live" | "runs" | "library" | "review";
+export type SupervisedWorkspaceWorkflowStep = "baseline_eval" | "improve" | "rerun_score" | "approval";
 export type SupervisedWorkspaceTabSummary = Partial<Record<SupervisedWorkspaceView, {
   status: string;
   detail: string;
@@ -13,14 +14,15 @@ export type SupervisedWorkspaceTabSummary = Partial<Record<SupervisedWorkspaceVi
 
 type SupervisedWorkspaceTabsProps = {
   activeView: SupervisedWorkspaceView;
+  activeWorkflowStepId?: SupervisedWorkspaceWorkflowStep | string | null;
   summaries?: SupervisedWorkspaceTabSummary;
 };
 
-const VIEWS: Array<{ key: SupervisedWorkspaceView; href: string; end?: boolean }> = [
-  { key: "live", href: "/supervised-evolution", end: true },
-  { key: "runs", href: "/supervised-evolution/runs", end: true },
-  { key: "library", href: "/supervised-evolution/library", end: true },
-  { key: "review", href: "/supervised-evolution/review", end: true },
+const VIEWS: Array<{ key: SupervisedWorkspaceView; workflowStepId: SupervisedWorkspaceWorkflowStep; href: string; end?: boolean }> = [
+  { key: "live", workflowStepId: "baseline_eval", href: "/supervised-evolution", end: true },
+  { key: "runs", workflowStepId: "improve", href: "/supervised-evolution/runs", end: true },
+  { key: "library", workflowStepId: "rerun_score", href: "/supervised-evolution/library", end: true },
+  { key: "review", workflowStepId: "approval", href: "/supervised-evolution/review", end: true },
 ];
 
 function supervisedFlowLabel(view: SupervisedWorkspaceView, t: (key: TranslationKey) => string) {
@@ -49,8 +51,9 @@ function supervisedFlowHint(view: SupervisedWorkspaceView, t: (key: TranslationK
   return t("supervisedFlowReviewHint");
 }
 
-export function SupervisedWorkspaceTabs({ activeView, summaries = {} }: SupervisedWorkspaceTabsProps) {
+export function SupervisedWorkspaceTabs({ activeView, activeWorkflowStepId, summaries = {} }: SupervisedWorkspaceTabsProps) {
   const { t } = useAppI18n();
+  const normalizedActiveWorkflowStepId = String(activeWorkflowStepId || "").trim();
 
   return (
     <div className={styles.flowTabs} role="tablist" aria-label={t("navSupervisedEvolution")}>
@@ -63,11 +66,12 @@ export function SupervisedWorkspaceTabs({ activeView, summaries = {} }: Supervis
             key={view.key}
             to={view.href}
             end={view.end}
-            className={({ isActive }) =>
-              isActive || activeView === view.key
-                ? `${styles.flowTab} ${styles.flowTabActive}`
-                : styles.flowTab
-            }
+            className={({ isActive }) => {
+              const selected = normalizedActiveWorkflowStepId
+                ? view.workflowStepId === normalizedActiveWorkflowStepId
+                : isActive || activeView === view.key;
+              return selected ? `${styles.flowTab} ${styles.flowTabActive}` : styles.flowTab;
+            }}
           >
             <span className={styles.stepIndex}>{VIEWS.indexOf(view) + 1}</span>
             <span className={styles.stepBody}>

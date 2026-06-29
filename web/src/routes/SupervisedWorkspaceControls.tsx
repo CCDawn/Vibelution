@@ -10,12 +10,14 @@ import {
   SupervisedWorkspaceTabs,
   type SupervisedWorkspaceTabSummary,
   type SupervisedWorkspaceView,
+  type SupervisedWorkspaceWorkflowStep,
 } from "./SupervisedWorkspaceTabs";
 
 type IntakeMode = "manual_review" | "auto";
 
 type SupervisedWorkspaceControlsProps = {
   activeView: SupervisedWorkspaceView;
+  activeWorkflowStepId?: SupervisedWorkspaceWorkflowStep | string | null;
   overviewIntakeMode?: string | null;
   configIntakeMode?: string | null;
   tabSummaries?: SupervisedWorkspaceTabSummary;
@@ -33,6 +35,7 @@ export function getEffectiveIntakeMode(
 
 export function SupervisedWorkspaceControls({
   activeView,
+  activeWorkflowStepId,
   overviewIntakeMode,
   configIntakeMode,
   tabSummaries,
@@ -84,7 +87,11 @@ export function SupervisedWorkspaceControls({
 
   return (
     <>
-      <SupervisedWorkspaceTabs activeView={activeView} summaries={tabSummaries} />
+      <SupervisedWorkspaceTabs
+        activeView={activeView}
+        activeWorkflowStepId={activeWorkflowStepId}
+        summaries={tabSummaries}
+      />
 
       <div className={styles.intakeControl}>
         <span className={styles.controlLabel}>{t("intakeMode")}</span>

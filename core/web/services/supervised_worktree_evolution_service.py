@@ -78,6 +78,7 @@ SELF_EVOLUTION_RISKY_WRITE_INITIATOR = "self_evolution_risky_write"
 SELF_EVOLUTION_WORKTREE_ROUTE = "api:evolution.self.worktree-runs"
 REVIEW_GATE_APPROVED = "approved"
 REVIEW_GATE_PENDING = "pending"
+WORKFLOW_STEP_IDS = ("baseline_eval", "improve", "rerun_score", "approval")
 
 
 class SupervisedWorktreeRunBusyError(RuntimeError):
@@ -540,7 +541,13 @@ def _execute_flow(
             root,
             str(options["bundleName"]),
             "baseline",
-            {"runId": run_id, "options": options, "cancelChecker": cancel_checker},
+            {
+                "runId": run_id,
+                "options": options,
+                "cancelChecker": cancel_checker,
+                "workflowStepId": "baseline_eval",
+                "progressCallback": _workflow_progress_callback(snapshot, "baseline", "baseline_eval"),
+            },
         )
         _raise_if_run_cancelled(snapshot)
         snapshot["baseline"] = baseline
@@ -580,10 +587,19 @@ def _execute_flow(
         modification = modifier(
             candidate_path,
             str(reflection.get("selfModificationPrompt") or ""),
-            {"runId": run_id, "options": options, "cancelChecker": cancel_checker},
+            {
+                "runId": run_id,
+                "options": options,
+                "cancelChecker": cancel_checker,
+                "workflowStepId": "improve",
+                "progressCallback": _workflow_progress_callback(snapshot, "candidate", "improve"),
+            },
         )
         _raise_if_run_cancelled(snapshot)
         snapshot["candidateModification"] = modification
+        candidate_conversation_session_id = _candidate_conversation_session_id(snapshot)
+        if candidate_conversation_session_id:
+            snapshot["candidateConversationSessionId"] = candidate_conversation_session_id
         snapshot["candidateWorktree"]["changedFiles"] = _candidate_changed_files(
             candidate_path,
             baseline_untracked=candidate_worktree.get("untrackedFiles"),
@@ -597,7 +613,14 @@ def _execute_flow(
             candidate_path,
             str(options["bundleName"]),
             "candidate",
-            {"runId": run_id, "options": options, "cancelChecker": cancel_checker},
+            {
+                "runId": run_id,
+                "options": options,
+                "cancelChecker": cancel_checker,
+                "workflowStepId": "rerun_score",
+                "candidateConversationSessionId": _candidate_conversation_session_id(snapshot),
+                "progressCallback": _workflow_progress_callback(snapshot, "candidate", "rerun_score"),
+            },
         )
         _raise_if_run_cancelled(snapshot)
         snapshot["candidate"] = candidate
@@ -898,6 +921,12 @@ def _real_evaluation_runner(project_root: Path, bundle_name: str, role: str, con
     mental_model_mode = str(options.get("mentalModelMode") or "follow")
     mental_model_enabled = options.get("mentalModelEnabled")
     cancel_checker = context.get("cancelChecker") if callable(context.get("cancelChecker")) else None
+    progress_callback = context.get("progressCallback") if callable(context.get("progressCallback")) else None
+    conversation_session_id = (
+        str(context.get("candidateConversationSessionId") or "").strip()
+        if role == "candidate"
+        else ""
+    )
     results: list[dict[str, Any]] = []
     for case in cases:
         cancel_reason = _call_cancel_checker(cancel_checker)
@@ -938,6 +967,8 @@ def _real_evaluation_runner(project_root: Path, bundle_name: str, role: str, con
             mental_model_mode=mental_model_mode,
             mental_model_enabled=mental_model_enabled,
             workspace_override=project_root if role == "candidate" else None,
+            conversation_session_id=conversation_session_id or None,
+            progress_callback=progress_callback,
             cancel_checker=cancel_checker,
         )
         cancel_reason = _call_cancel_checker(cancel_checker)
@@ -1008,6 +1039,7 @@ def _real_candidate_modifier(worktree_path: Path, prompt: str, context: dict[str
     started = _now_iso()
     timeout_seconds = 900
     cancel_checker = context.get("cancelChecker") if callable(context.get("cancelChecker")) else None
+    progress_callback = context.get("progressCallback") if callable(context.get("progressCallback")) else None
     options = context.get("options") if isinstance(context.get("options"), dict) else {}
     agent_bindings = options.get("agentBindings") if isinstance(options.get("agentBindings"), dict) else {}
     agent_binding = dict(agent_bindings.get("candidate") or {})
@@ -1031,6 +1063,7 @@ def _real_candidate_modifier(worktree_path: Path, prompt: str, context: dict[str
         mental_model_mode=str(options.get("mentalModelMode") or "follow"),
         mental_model_enabled=options.get("mentalModelEnabled"),
         workspace_override=worktree_path,
+        progress_callback=progress_callback,
         cancel_checker=cancel_checker,
     )
     return {
@@ -1305,6 +1338,306 @@ def _finish_by_decision(snapshot: dict[str, Any], decision: dict[str, Any], opti
         },
         lifecycle=True,
     )
+
+
+def _workflow_progress_callback(snapshot: dict[str, Any], role: str, step_id: str) -> Callable[[dict[str, Any]], None]:
+    def _callback(event: dict[str, Any]) -> None:
+        if not isinstance(event, dict):
+            return
+        _record_workflow_progress(snapshot, role=role, step_id=step_id, event=event)
+
+    return _callback
+
+
+def _record_workflow_progress(
+    snapshot: dict[str, Any],
+    *,
+    role: str,
+    step_id: str,
+    event: dict[str, Any],
+) -> None:
+    normalized_step = step_id if step_id in WORKFLOW_STEP_IDS else "improve"
+    progress = snapshot.get("workflowProgress")
+    if not isinstance(progress, dict):
+        progress = {}
+        snapshot["workflowProgress"] = progress
+    existing = progress.get(normalized_step) if isinstance(progress.get(normalized_step), dict) else {}
+
+    def _text(*values: Any) -> str:
+        for value in values:
+            text = str(value or "").strip()
+            if text:
+                return text
+        return ""
+
+    conversation_session_id = _text(
+        event.get("conversation_session_id"),
+        event.get("conversationSessionId"),
+        existing.get("conversationSessionId"),
+        _candidate_conversation_session_id(snapshot) if normalized_step in {"improve", "rerun_score"} else "",
+    )
+    conversation_turn_id = _text(
+        event.get("conversation_turn_id"),
+        event.get("conversationTurnId"),
+        event.get("turn_id"),
+        event.get("turnId"),
+        existing.get("conversationTurnId"),
+    )
+    updated_at = _text(event.get("updated_at"), event.get("updatedAt"), _now_iso())
+    latest_output = _text(event.get("latest_output"), event.get("latestOutput"))
+    latest_label = _text(event.get("latest_output_label"), event.get("latestOutputLabel"))
+    phase = _text(event.get("phase"), existing.get("phase"))
+    live_preview = _bounded_text(latest_output or latest_label or phase or existing.get("livePreview"), limit=280)
+    conversation_messages = event.get("conversation_messages") or event.get("conversationMessages")
+    if not isinstance(conversation_messages, list):
+        conversation_messages = existing.get("conversationMessages") if isinstance(existing.get("conversationMessages"), list) else []
+    transcript = event.get("transcript")
+    if not isinstance(transcript, list):
+        transcript = existing.get("transcript") if isinstance(existing.get("transcript"), list) else []
+
+    progress[normalized_step] = {
+        "stepId": normalized_step,
+        "role": str(role or "").strip().lower(),
+        "status": "running",
+        "phase": phase,
+        "conversationPath": _text(event.get("conversation_path"), event.get("conversationPath"), f"session:{conversation_session_id}" if conversation_session_id else ""),
+        "conversationSessionId": conversation_session_id,
+        "conversationTurnId": conversation_turn_id,
+        "latestInput": _text(event.get("latest_input"), event.get("latestInput"), existing.get("latestInput")),
+        "latestOutput": latest_output,
+        "latestOutputKind": _text(event.get("latest_output_kind"), event.get("latestOutputKind"), existing.get("latestOutputKind")),
+        "latestOutputLabel": latest_label,
+        "livePreview": live_preview,
+        "updatedAt": updated_at,
+        "conversationMessages": conversation_messages[-20:],
+        "transcript": transcript[-20:],
+    }
+    if role == "candidate" and conversation_session_id:
+        snapshot["candidateConversationSessionId"] = conversation_session_id
+    if live_preview:
+        snapshot["latestMessage"] = live_preview
+    snapshot["updatedAt"] = updated_at
+    active_run_id = str(snapshot.get("runId") or "") if str(snapshot.get("status") or "").strip().lower() in _ACTIVE_STATUSES else ""
+    _persist_snapshot(snapshot, active_run_id=active_run_id)
+
+
+def _candidate_conversation_session_id(snapshot: dict[str, Any]) -> str:
+    direct = str(snapshot.get("candidateConversationSessionId") or "").strip()
+    if direct:
+        return direct
+    progress = snapshot.get("workflowProgress") if isinstance(snapshot.get("workflowProgress"), dict) else {}
+    for step_id in ("improve", "rerun_score"):
+        item = progress.get(step_id) if isinstance(progress.get(step_id), dict) else {}
+        session_id = str(item.get("conversationSessionId") or "").strip()
+        if session_id:
+            return session_id
+    modification = snapshot.get("candidateModification") if isinstance(snapshot.get("candidateModification"), dict) else {}
+    for key in ("conversationSessionId", "sessionId"):
+        session_id = str(modification.get(key) or "").strip()
+        if session_id:
+            return session_id
+    summary = modification.get("conversationSummary") if isinstance(modification.get("conversationSummary"), dict) else {}
+    backend = summary.get("conversation_backend") if isinstance(summary.get("conversation_backend"), dict) else {}
+    session_id = str(backend.get("session_id") or backend.get("sessionId") or "").strip()
+    if session_id:
+        return session_id
+    camel_backend = summary.get("conversationBackend") if isinstance(summary.get("conversationBackend"), dict) else {}
+    return str(camel_backend.get("sessionId") or camel_backend.get("session_id") or "").strip()
+
+
+def _build_workflow_steps(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    progress = snapshot.get("workflowProgress") if isinstance(snapshot.get("workflowProgress"), dict) else {}
+    action_states = snapshot.get("actionStates") if isinstance(snapshot.get("actionStates"), dict) else {}
+    baseline = snapshot.get("baseline") if isinstance(snapshot.get("baseline"), dict) else {}
+    candidate = snapshot.get("candidate") if isinstance(snapshot.get("candidate"), dict) else {}
+    modification = snapshot.get("candidateModification") if isinstance(snapshot.get("candidateModification"), dict) else {}
+    decision = snapshot.get("decision") if isinstance(snapshot.get("decision"), dict) else {}
+    merge_analysis = snapshot.get("mergeAnalysis") if isinstance(snapshot.get("mergeAnalysis"), dict) else {}
+    workflow_current = _current_workflow_step_id(snapshot)
+    candidate_session_id = _candidate_conversation_session_id(snapshot)
+
+    def _step_progress(step_id: str) -> dict[str, Any]:
+        return progress.get(step_id) if isinstance(progress.get(step_id), dict) else {}
+
+    def _conversation_fields(step_id: str, fallback_session_id: str = "") -> dict[str, Any]:
+        item = _step_progress(step_id)
+        session_id = str(item.get("conversationSessionId") or fallback_session_id or "").strip()
+        turn_id = str(item.get("conversationTurnId") or "").strip()
+        return {
+            "conversationSessionId": session_id,
+            "conversationTurnId": turn_id,
+            "chatRoute": _workflow_chat_route(session_id),
+            "conversationMessages": list(item.get("conversationMessages") or []),
+        }
+
+    baseline_fields = _conversation_fields("baseline_eval")
+    improve_fields = _conversation_fields("improve", candidate_session_id)
+    rerun_fields = _conversation_fields("rerun_score", candidate_session_id)
+    changed_files = list((snapshot.get("candidateWorktree") if isinstance(snapshot.get("candidateWorktree"), dict) else {}).get("changedFiles") or [])
+    approval_status = "pending" if str(snapshot.get("status") or "").strip().lower() == "done" else _workflow_status(snapshot, "approval")
+    if str(snapshot.get("status") or "").strip().lower() in {"failed", "cancelled"}:
+        approval_status = str(snapshot.get("status") or "").strip().lower()
+
+    return [
+        {
+            "id": "baseline_eval",
+            "label": "基线评测",
+            "ownerKind": "agent",
+            "role": "baseline",
+            "status": _workflow_status(snapshot, "baseline_eval"),
+            "current": workflow_current == "baseline_eval",
+            "summary": _bounded_text(baseline.get("summary") or "等待基线评测。"),
+            "livePreview": _workflow_live_preview(snapshot, "baseline_eval", baseline.get("summary")),
+            "metrics": _score_metrics(baseline),
+            **baseline_fields,
+        },
+        {
+            "id": "improve",
+            "label": "提出建议与改良",
+            "ownerKind": "agent",
+            "role": "candidate",
+            "status": _workflow_status(snapshot, "improve"),
+            "current": workflow_current == "improve",
+            "summary": _bounded_text(modification.get("summary") or (snapshot.get("reflection") or {}).get("summary") or "等待改良 Agent 给出建议并修改候选 worktree。"),
+            "livePreview": _workflow_live_preview(snapshot, "improve", modification.get("summary")),
+            "metrics": {"changedFileCount": len(changed_files), "highRiskFileCount": sum(1 for item in changed_files if isinstance(item, dict) and item.get("highRisk"))},
+            **improve_fields,
+        },
+        {
+            "id": "rerun_score",
+            "label": "复跑与评分",
+            "ownerKind": "agent",
+            "role": "candidate",
+            "status": _workflow_status(snapshot, "rerun_score"),
+            "current": workflow_current == "rerun_score",
+            "summary": _bounded_text(decision.get("reason") or candidate.get("summary") or "等待复跑候选并完成评分。"),
+            "livePreview": _workflow_live_preview(snapshot, "rerun_score", decision.get("reason") or candidate.get("summary")),
+            "metrics": {
+                **_score_metrics(candidate),
+                "baselineScore": decision.get("baselineScore"),
+                "candidateScore": decision.get("candidateScore"),
+                "scoreDelta": decision.get("scoreDelta"),
+            },
+            **rerun_fields,
+        },
+        {
+            "id": "approval",
+            "label": "用户审批",
+            "ownerKind": "human",
+            "role": None,
+            "status": approval_status,
+            "current": workflow_current == "approval",
+            "summary": _bounded_text(_approval_summary(snapshot, decision, merge_analysis, action_states)),
+            "livePreview": _bounded_text(str(snapshot.get("latestMessage") or decision.get("reason") or "")),
+            "metrics": {
+                "baselineScore": decision.get("baselineScore"),
+                "candidateScore": decision.get("candidateScore"),
+                "scoreDelta": decision.get("scoreDelta"),
+                "changedFileCount": len(changed_files),
+            },
+            "conversationSessionId": "",
+            "conversationTurnId": "",
+            "chatRoute": "",
+            "conversationMessages": [],
+        },
+    ]
+
+
+def _current_workflow_step_id(snapshot: dict[str, Any]) -> str:
+    status = str(snapshot.get("status") or "").strip().lower()
+    phase = str(snapshot.get("phase") or "").strip().lower()
+    if status in _TERMINAL_STATUSES or phase in {"complete", "failed", "baseline_unavailable", "shutdown"}:
+        return "approval"
+    if phase in {"candidate_evaluation", "decision"}:
+        return "rerun_score"
+    if phase in {"reflection", "candidate_worktree", "candidate_modify"}:
+        return "improve"
+    return "baseline_eval"
+
+
+def _workflow_status(snapshot: dict[str, Any], step_id: str) -> str:
+    status = str(snapshot.get("status") or "").strip().lower()
+    phase = str(snapshot.get("phase") or "").strip().lower()
+    if status == "failed":
+        if step_id == "baseline_eval" and phase == "baseline_unavailable":
+            return "failed"
+        return "failed" if _current_workflow_step_id(snapshot) == step_id else ("done" if _step_has_output(snapshot, step_id) else "pending")
+    if status == "cancelled":
+        return "cancelled" if _current_workflow_step_id(snapshot) == step_id else ("done" if _step_has_output(snapshot, step_id) else "pending")
+    if step_id == "baseline_eval":
+        if phase == "baseline" or (status in _ACTIVE_STATUSES and not snapshot.get("baseline")):
+            return "running"
+        return "done" if snapshot.get("baseline") else "pending"
+    if step_id == "improve":
+        if phase in {"reflection", "candidate_worktree", "candidate_modify"}:
+            return "running"
+        return "done" if snapshot.get("candidateModification") else "pending"
+    if step_id == "rerun_score":
+        if phase in {"candidate_evaluation", "decision"}:
+            return "running"
+        return "done" if snapshot.get("candidate") or snapshot.get("decision") else "pending"
+    if step_id == "approval":
+        return "pending" if status == "done" else ("running" if status in _ACTIVE_STATUSES else "pending")
+    return "pending"
+
+
+def _step_has_output(snapshot: dict[str, Any], step_id: str) -> bool:
+    if step_id == "baseline_eval":
+        return bool(snapshot.get("baseline"))
+    if step_id == "improve":
+        return bool(snapshot.get("candidateModification"))
+    if step_id == "rerun_score":
+        return bool(snapshot.get("candidate") or snapshot.get("decision"))
+    if step_id == "approval":
+        return bool(snapshot.get("decision") or snapshot.get("mergeAnalysis"))
+    return False
+
+
+def _workflow_live_preview(snapshot: dict[str, Any], step_id: str, fallback: Any = "") -> str:
+    progress = snapshot.get("workflowProgress") if isinstance(snapshot.get("workflowProgress"), dict) else {}
+    item = progress.get(step_id) if isinstance(progress.get(step_id), dict) else {}
+    return _bounded_text(item.get("livePreview") or item.get("latestOutput") or fallback or "")
+
+
+def _score_metrics(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "score": payload.get("score"),
+        "successes": payload.get("successes"),
+        "total": payload.get("total"),
+        "failures": payload.get("failures"),
+    }
+
+
+def _approval_summary(
+    snapshot: dict[str, Any],
+    decision: dict[str, Any],
+    merge_analysis: dict[str, Any],
+    action_states: dict[str, Any],
+) -> str:
+    if str(snapshot.get("status") or "").strip().lower() == "done":
+        action = str(decision.get("recommendedAction") or snapshot.get("outcome") or "").strip()
+        delta = decision.get("scoreDelta")
+        if action:
+            return f"等待用户审批：建议 {action}，scoreDelta={delta}。"
+        if bool((action_states.get("merge") if isinstance(action_states.get("merge"), dict) else {}).get("enabled")):
+            return "候选可进入人工入库或合并。"
+    if merge_analysis:
+        return str(merge_analysis.get("reason") or merge_analysis.get("status") or "").strip()
+    return str(snapshot.get("latestMessage") or "等待最终结果、改进提案和样本评审证据。")
+
+
+def _workflow_chat_route(session_id: str) -> str:
+    normalized = str(session_id or "").strip()
+    if not normalized:
+        return ""
+    return f"/chat?session={normalized}"
+
+
+def _bounded_text(value: Any, *, limit: int = 280) -> str:
+    text = str(value or "").strip().replace("\r", " ").replace("\n", " ")
+    if len(text) <= limit:
+        return text
+    return f"{text[: max(0, limit - 1)]}…"
 
 
 def _with_merge_analysis(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -2080,6 +2413,7 @@ def _decorate_snapshot(snapshot: dict[str, Any] | None) -> dict[str, Any] | None
             worktree.pop("path", None)
             worktree["pathValidationError"] = reason
     payload["actionStates"] = _action_states(payload)
+    payload["workflowSteps"] = _build_workflow_steps(payload)
     return payload
 
 

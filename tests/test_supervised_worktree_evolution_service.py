@@ -202,6 +202,89 @@ def test_supervised_worktree_flow_preserves_improved_candidate_and_records_merge
     assert snapshot["mergeAnalysis"]["changedFiles"][0]["path"] == "agent.py"
 
 
+def test_supervised_worktree_flow_projects_four_step_cards_with_shared_improver_session(tmp_path):
+    project_root = tmp_path / "project"
+    _init_repo(project_root)
+    (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
+    _write_bundle(project_root)
+    _run_git(project_root, "add", ".")
+    _run_git(project_root, "commit", "-m", "init")
+    evaluator_calls: list[dict[str, object]] = []
+
+    def worktree_factory(root: Path, run_id: str) -> dict:
+        candidate = _make_candidate_repo(tmp_path, root)
+        return {
+            "path": str(candidate),
+            "baseHead": "base",
+            "checkpointCommit": "base",
+            "checkpointRef": "",
+            "trackedDirty": False,
+            "untrackedFiles": [],
+        }
+
+    def evaluator(_: Path, bundle_name: str, role: str, context: dict) -> dict:
+        evaluator_calls.append({"role": role, "candidateSession": context.get("candidateConversationSessionId")})
+        if role == "candidate":
+            assert context.get("candidateConversationSessionId") == "session-improver"
+        successes = 1 if role == "baseline" else 2
+        return {
+            "role": role,
+            "status": "success",
+            "score": successes * 50.0,
+            "successes": successes,
+            "total": 2,
+            "failures": 2 - successes,
+            "bundleName": bundle_name,
+            "summary": f"{role} fake score",
+        }
+
+    def modifier(worktree_path: Path, _: str, __: dict) -> dict:
+        marker = worktree_path / "agent.py"
+        marker.write_text(marker.read_text(encoding="utf-8") + "\n# candidate edit\n", encoding="utf-8")
+        return {
+            "status": "success",
+            "summary": "candidate improved the worktree",
+            "conversationSummary": {
+                "conversation_backend": {
+                    "enabled": True,
+                    "session_id": "session-improver",
+                    "observed_active_turn_id": "turn-improve",
+                }
+            },
+        }
+
+    snapshot = service.run_supervised_worktree_flow(
+        {"sourceKind": "bundle", "bundleName": "closed_loop_v1", "mode": "auto"},
+        project_root=project_root,
+        dependencies=service.WorktreeRunDependencies(
+            evaluation_runner=evaluator,
+            candidate_modifier=modifier,
+            worktree_factory=worktree_factory,
+        ),
+    )
+
+    assert [item["id"] for item in snapshot["workflowSteps"]] == [
+        "baseline_eval",
+        "improve",
+        "rerun_score",
+        "approval",
+    ]
+    improve_step = snapshot["workflowSteps"][1]
+    rerun_score_step = snapshot["workflowSteps"][2]
+    approval_step = snapshot["workflowSteps"][3]
+    assert improve_step["label"] == "提出建议与改良"
+    assert rerun_score_step["label"] == "复跑与评分"
+    assert improve_step["conversationSessionId"] == "session-improver"
+    assert rerun_score_step["conversationSessionId"] == "session-improver"
+    assert improve_step["chatRoute"].endswith("session=session-improver")
+    assert rerun_score_step["chatRoute"].endswith("session=session-improver")
+    assert approval_step["label"] == "用户审批"
+    assert approval_step["ownerKind"] == "human"
+    assert approval_step["conversationSessionId"] == ""
+    assert approval_step["metrics"]["scoreDelta"] == 50.0
+    assert evaluator_calls[1]["candidateSession"] == "session-improver"
+
+
 def test_self_origin_worktree_flow_carries_goal_and_requires_review(tmp_path):
     project_root = tmp_path / "project"
     _init_repo(project_root)

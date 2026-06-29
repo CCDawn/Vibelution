@@ -214,6 +214,70 @@ def test_conversation_harness_passes_workspace_override_to_supervised_session(mo
     assert captured_submit["message_source"] == "supervised_evolution"
 
 
+def test_conversation_harness_can_reuse_existing_supervised_session(monkeypatch, tmp_path: Path):
+    created_sessions: list[dict] = []
+    captured_submit: dict[str, object] = {}
+    progress_events: list[dict] = []
+
+    monkeypatch.setattr(
+        adapter,
+        "create_supervised_agent_session",
+        lambda **kwargs: created_sessions.append(kwargs) or {"id": "new-session-should-not-be-used"},
+    )
+    monkeypatch.setattr(
+        adapter,
+        "submit_session_message",
+        lambda *args, **kwargs: captured_submit.update({"args": args, **kwargs}) or {"turnId": "turn-rerun"},
+    )
+    monkeypatch.setattr(
+        adapter,
+        "get_session_detail",
+        lambda session_id: {
+            "id": session_id,
+            "lastTurnStatus": "ready",
+            "updatedAt": "2026-06-16T01:33:59",
+            "messages": [
+                {"role": "user", "content": "rerun candidate"},
+                {"role": "assistant", "content": "rerun scored"},
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        adapter,
+        "get_session_turn_completion_snapshot",
+        lambda session_id, turn_id: {
+            "sessionId": session_id,
+            "turnId": turn_id,
+            "terminal": True,
+            "terminalStatus": "ready",
+            "assistantText": "rerun scored",
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(adapter.time, "sleep", lambda seconds: None)
+
+    result = adapter.run_supervised_conversation_harness(
+        repo_root=tmp_path,
+        mode="single_turn",
+        prompt="rerun candidate",
+        timeout_seconds=1,
+        expect_restart=False,
+        post_restart_observe_seconds=0,
+        keep_worktree=True,
+        scenario="candidate_rerun_score",
+        agent_binding={"agentId": "agent-candidate", "role": "candidate"},
+        conversation_session_id="session-improver",
+        progress_callback=progress_events.append,
+    )
+
+    assert result.status == "success"
+    assert created_sessions == []
+    assert captured_submit["args"][0] == "session-improver"
+    assert result.evolution_summary["conversation_backend"]["session_id"] == "session-improver"
+    assert progress_events[0]["phase"] == "conversation_session_reused"
+    assert progress_events[0]["conversation_session_id"] == "session-improver"
+
+
 def test_session_turn_completion_snapshot_recovers_finished_hidden_turn(tmp_path: Path, monkeypatch):
     assistant_text = (
         "完成候选探针。\n"

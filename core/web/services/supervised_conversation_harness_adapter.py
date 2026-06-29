@@ -64,6 +64,7 @@ def run_supervised_conversation_harness(
     mental_model_mode: str = "follow",
     mental_model_enabled: bool | None = None,
     workspace_override: str | Path | None = None,
+    conversation_session_id: str | None = None,
     progress_callback: Any = None,
     cancel_checker: Any = None,
 ) -> HarnessResult:
@@ -98,25 +99,29 @@ def run_supervised_conversation_harness(
 
     prompt_text = materialize_scenario_prompt(scenario, prompt, repo_root) or ""
     normalized_workspace_override = str(Path(workspace_override).resolve()) if workspace_override else ""
-    session = create_supervised_agent_session(
-        agent_id=agent_id,
-        title=f"监督进化 {role or 'role'} {scenario}",
-        metadata={
-            "runId": run_id,
-            "role": role,
-            "scenario": scenario,
-            "mentalModelMode": normalized_mental_mode,
-            "mentalModelEnabled": mental_model_enabled,
-            "workspaceOverride": normalized_workspace_override,
-        },
-    )
-    session_id = str(session.get("id") or "").strip()
+    requested_session_id = str(conversation_session_id or "").strip()
+    if requested_session_id:
+        session_id = requested_session_id
+    else:
+        session = create_supervised_agent_session(
+            agent_id=agent_id,
+            title=f"监督进化 {role or 'role'} {scenario}",
+            metadata={
+                "runId": run_id,
+                "role": role,
+                "scenario": scenario,
+                "mentalModelMode": normalized_mental_mode,
+                "mentalModelEnabled": mental_model_enabled,
+                "workspaceOverride": normalized_workspace_override,
+            },
+        )
+        session_id = str(session.get("id") or "").strip()
     turn_id = ""
     created_at = _now_timestamp()
     if callable(progress_callback):
         progress_callback(
             {
-                "phase": "conversation_session_created",
+                "phase": "conversation_session_reused" if requested_session_id else "conversation_session_created",
                 "conversation_path": f"session:{session_id}",
                 "conversation_session_id": session_id,
                 "conversation_turn_id": "",
