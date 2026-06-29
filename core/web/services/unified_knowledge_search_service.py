@@ -13,7 +13,7 @@ from . import rag_retrieval_service, team_knowledge_service
 
 
 SCHEMA_VERSION = 1
-SUPPORTED_QUERY_MODES = {"auto", "literal", "exact", "semantic", "hybrid", "metadata", "regex", "rg", "grep", "rag"}
+SUPPORTED_QUERY_MODES = {"auto", "literal", "exact", "semantic", "hybrid", "bm25", "metadata", "regex", "rg", "grep", "rag"}
 MAX_LIMIT = 25
 REGEX_SCAN_LIMIT = 100
 
@@ -84,6 +84,7 @@ def search_unified_memory(
         "exact": "exact",
         "semantic": "semantic",
         "hybrid": "hybrid",
+        "bm25": "bm25",
         "metadata": "exact",
     }[effective_mode]
     search_query = "" if effective_mode == "metadata" else normalized_query
@@ -478,6 +479,7 @@ def _backend_for_mode(mode: str) -> str:
         "exact": "local_exact",
         "semantic": "local_token_overlap",
         "hybrid": "local_hybrid",
+        "bm25": "local_bm25",
         "metadata": "local_metadata",
     }.get(mode, "local_hybrid")
 

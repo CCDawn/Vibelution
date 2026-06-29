@@ -604,6 +604,50 @@ def test_knowledge_rag_retrieve_route_returns_contexts_and_citations(tmp_path, m
     assert payload["retrievalPolicy"]["injectsPromptByDefault"] is False
 
 
+def test_knowledge_rag_retrieve_route_accepts_bm25_mode(tmp_path, monkeypatch):
+    client, team, lead, member, _outsider = _setup(tmp_path, monkeypatch)
+    base = client.post(
+        f"/api/teams/{team['teamId']}/knowledge-bases",
+        json={"name": "BM25 Route KB", "actorAgentId": lead["agentId"]},
+    ).json()
+    source = _source_artifact(client, base, team, lead, member, title="BM25 route source")
+    proposal = client.post(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/refinement-proposals",
+        json={
+            "sourceArtifactIds": [source["sourceArtifactId"]],
+            "proposedByAgentId": member["agentId"],
+            "title": "BM25 route context",
+            "summary": "BM25 should be available as a governed RAG mode.",
+            "content": "BM25 retrieval ranks formal memory using term frequency and source-governed knowledge.",
+            "tags": ["rag", "bm25"],
+        },
+    ).json()
+    applied = client.patch(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/refinement-proposals/{proposal['proposalId']}/review",
+        json={"status": "approved", "reviewedByAgentId": lead["agentId"]},
+    ).json()
+
+    response = client.get(
+        "/api/knowledge/rag/retrieve",
+        params={
+            "agentId": member["agentId"],
+            "query": "bm25 formal memory",
+            "knowledgeBaseId": base["knowledgeBaseId"],
+            "retrievalMode": "bm25",
+            "provider": "local",
+            "topK": 3,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["request"]["retrievalMode"] == "bm25"
+    assert payload["summary"]["contextCount"] == 1
+    assert payload["contexts"][0]["source"]["knowledgeItemId"] == applied["item"]["knowledgeItemId"]
+    assert payload["contexts"][0]["score"] > 0
+    assert payload["contexts"][0]["matchReason"] == "bm25"
+
+
 def test_knowledge_rag_retrieve_route_rejects_invalid_mode(tmp_path, monkeypatch):
     client, _team, _lead, member, _outsider = _setup(tmp_path, monkeypatch)
 
@@ -642,12 +686,14 @@ def test_knowledge_rag_health_route_reports_local_provider_ready(tmp_path, monke
     providers = {provider["provider"]: provider for provider in payload["providers"]}
     assert providers["local"]["status"] == "ready"
     assert providers["local"]["vectorEnabled"] is False
+    assert providers["local"]["bm25Enabled"] is True
     assert providers["vector"]["status"] == "unavailable"
     assert providers["vector"]["vectorEnabled"] is False
     assert providers["vector"]["indexedItemCount"] == 0
     assert providers["vector"]["staleItemCount"] == 0
     assert payload["retrievalPolicy"]["honorsKnowledgeAcl"] is True
     assert payload["retrievalPolicy"]["honorsMemoryPolicy"] is True
+    assert "bm25" in payload["retrievalPolicy"]["supportedRetrievalModes"]
     assert payload["retrievalPolicy"]["mutatesFormalKnowledge"] is False
     assert payload["retrievalPolicy"]["injectsPromptByDefault"] is False
 

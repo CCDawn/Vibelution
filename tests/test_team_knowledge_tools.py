@@ -372,6 +372,58 @@ def test_unified_memory_search_tool_returns_standard_results(tmp_path, monkeypat
     assert result["retrievalPolicy"]["mutatesFormalKnowledge"] is False
 
 
+def test_unified_memory_search_tool_supports_bm25_mode(tmp_path, monkeypatch):
+    env = _seed_team_knowledge(tmp_path, monkeypatch)
+    sparse_proposal = team_knowledge_service.create_refinement_proposal(
+        _kb_ref(env),
+        source_artifact_ids=_source_ids(env, title="Sparse BM25 tool source"),
+        proposed_by_agent_id=env["member"]["agentId"],
+        title="Sparse benchmark note",
+        content="Benchmark memory retrieval appears once before unrelated operational text.",
+        tags=["bm25-tool"],
+    )
+    dense_proposal = team_knowledge_service.create_refinement_proposal(
+        _kb_ref(env),
+        source_artifact_ids=_source_ids(env, title="Dense BM25 tool source"),
+        proposed_by_agent_id=env["member"]["agentId"],
+        title="Dense benchmark memory retrieval",
+        content="Benchmark memory retrieval repeats benchmark memory retrieval evidence for BM25 ranking.",
+        tags=["bm25-tool"],
+    )
+    sparse_item = team_knowledge_service.review_refinement_proposal(
+        _kb_ref(env),
+        sparse_proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=env["lead"]["agentId"],
+    )["item"]
+    dense_item = team_knowledge_service.review_refinement_proposal(
+        _kb_ref(env),
+        dense_proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=env["lead"]["agentId"],
+    )["item"]
+
+    with agent_directory_service.active_agent_runtime(env["member"]["agentId"], session_id="session-knowledge"):
+        result = json.loads(
+            team_knowledge_tools.unified_memory_search_tool(
+                query="benchmark memory retrieval",
+                query_mode="bm25",
+                knowledge_base_id=_kb_ref(env),
+                limit=2,
+            )
+        )
+
+    assert result["ok"] is True
+    assert result["request"]["effectiveQueryMode"] == "bm25"
+    assert result["request"]["backend"] == "local_bm25"
+    assert [item["knowledgeItemId"] for item in result["results"]] == [
+        dense_item["knowledgeItemId"],
+        sparse_item["knowledgeItemId"],
+    ]
+    assert result["results"][0]["score"] > result["results"][1]["score"] > 0
+    assert result["results"][0]["matchReason"] == "bm25"
+
+
 def test_unified_memory_search_tool_supports_regex_and_rag_modes(tmp_path, monkeypatch):
     env = _seed_team_knowledge(tmp_path, monkeypatch)
     proposal = team_knowledge_service.create_refinement_proposal(
