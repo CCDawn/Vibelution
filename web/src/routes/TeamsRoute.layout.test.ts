@@ -535,6 +535,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("coverageSummary");
     expect(routeSource).toContain("SourceCollectionStageClosureSummary");
     expect(routeSource).toContain("closureSummary");
+    expect(routeSource).toContain("SourceCollectionStageTaskToolProgress");
+    expect(routeSource).toContain("taskToolProgress");
+    expect(routeSource).toContain("SourceCollectionStageCompletionGate");
+    expect(routeSource).toContain("completionGatePassed");
+    expect(routeSource).toContain("sourceCollectionTaskToolProgressMetric");
+    expect(routeSource).toContain("检查项");
+    expect(routeSource).toContain("仍需完成检查项或生成本阶段产物");
     expect(routeSource).toContain("invalidRecordIds");
     expect(routeSource).toContain("本轮未生成候选资料");
     expect(routeSource).toContain("没有生成候选资料");

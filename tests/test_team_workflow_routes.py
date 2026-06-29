@@ -447,13 +447,15 @@ def test_team_workflow_route_writebacks_source_collection_stage_session_task(tmp
 
     assert task_response.status_code == 201, task_response.text
     assert response.status_code == 201, response.text
-    assert response.json()["task"]["status"] == "completed"
+    assert response.json()["task"]["status"] == "needs_review"
     assert response.json()["task"]["result"]["recordCount"] == 1
+    assert response.json()["task"]["result"]["closureSummary"]["artifactComplete"] is False
+    assert response.json()["task"]["result"]["closureSummary"]["completionGatePassed"] is False
     assert response.json()["boundaries"]["writesFormalKnowledge"] is False
     status_response = client.get(f"/api/teams/{team['teamId']}/workflow-orchestration/stage-rounds/status")
     assert status_response.status_code == 200, status_response.text
     stage_tasks = status_response.json()["latestRound"].get("sourceCollectionStageSessionTasks", [])
-    assert any(item["taskId"] == task_response.json()["taskId"] and item["status"] == "completed" for item in stage_tasks)
+    assert any(item["taskId"] == task_response.json()["taskId"] and item["status"] == "needs_review" for item in stage_tasks)
 
 
 def test_team_workflow_route_executes_source_collection_search(tmp_path, monkeypatch):
