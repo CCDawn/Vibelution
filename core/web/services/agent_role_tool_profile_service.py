@@ -37,6 +37,8 @@ RESEARCH_FORBIDDEN_TOOLS = KNOWLEDGE_STEWARD_TOOLS
 RESEARCH_STAGE_TOOLS = (
     "agent_message_tool",
     "research_knowledge_query_tool",
+    "task_create_tool",
+    "task_update_tool",
     "source_collection_context_tool",
     "source_collection_stage_writeback_tool",
 )
@@ -331,11 +333,15 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         "source_ingestor",
         allowed_tools=(
             "agent_message_tool",
+            "task_create_tool",
+            "task_update_tool",
             "source_collection_context_tool",
             "source_collection_stage_writeback_tool",
             *KNOWLEDGE_STEWARD_TOOLS,
         ),
         preferred_tools=(
+            "task_create_tool",
+            "task_update_tool",
             "source_collection_context_tool",
             "source_collection_stage_writeback_tool",
             "knowledge_governance_tasks_tool",
