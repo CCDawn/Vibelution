@@ -35,6 +35,7 @@ import {
   LogRoot,
   LogTreeResponse,
 } from "../api/types";
+import { VButton, VIconButton } from "../components/vui";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { LazyFilePreview } from "../components/preview/LazyFilePreview";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
@@ -1044,15 +1045,16 @@ export function LogsRoute() {
         const Icon = option.icon;
         const active = severityFilter === option.value;
         return (
-          <button
+          <VButton
             key={option.value}
             type="button"
+            variant="secondary"
             className={active ? `${styles.filterButton} ${styles.filterButtonActive}` : styles.filterButton}
-            onClick={() => setSeverityFilter(option.value)}
+            onPress={() => setSeverityFilter(option.value)}
+            icon={<Icon size={14} />}
           >
-            <Icon size={14} />
             <span>{option.label}</span>
-          </button>
+          </VButton>
         );
       })}
     </div>
@@ -1060,20 +1062,20 @@ export function LogsRoute() {
   const previewActions = (
     <div className={styles.previewActions}>
       {severityFilterControl}
-      <button type="button" className={styles.copyButton} onClick={handleCopy}>
-        {copyState === "copied" ? <Check size={15} /> : <Copy size={15} />}
+      <VButton type="button" variant="secondary" className={styles.copyButton} onPress={handleCopy} icon={copyState === "copied" ? <Check size={15} /> : <Copy size={15} />}>
         <span>{copyLabel}</span>
-      </button>
-      <button
+      </VButton>
+      <VButton
         type="button"
+        variant="danger"
         className={styles.clearButton}
-        onClick={handleClearCurrent}
-        disabled={!activeFilePath || clearLogMutation.isPending}
+        onPress={handleClearCurrent}
+        isDisabled={!activeFilePath || clearLogMutation.isPending}
         title={!activeFilePath ? t("clearCurrentDisabled") : undefined}
+        icon={<Eraser size={15} />}
       >
-        <Eraser size={15} />
         <span>{clearLogMutation.isPending ? t("clearingCurrentLog") : t("clearCurrentLog")}</span>
-      </button>
+      </VButton>
     </div>
   );
 
@@ -1116,34 +1118,37 @@ export function LogsRoute() {
                 <div className={styles.selectionToolbar}>
                   <span className={styles.selectionPill}>{selectedCountLabel}</span>
                   <div className={styles.selectionActions}>
-                    <button
+                    <VButton
                       type="button"
+                      variant="secondary"
                       className={styles.toolbarButton}
-                      onClick={handleSelectVisible}
-                      disabled={visibleFilePaths.length === 0}
+                      onPress={handleSelectVisible}
+                      isDisabled={visibleFilePaths.length === 0}
+                      icon={<CheckSquare size={15} />}
                     >
-                      <CheckSquare size={15} />
                       <span>{t("selectVisibleLogs")}</span>
-                    </button>
-                    <button
+                    </VButton>
+                    <VButton
                       type="button"
+                      variant="secondary"
                       className={styles.toolbarButton}
-                      onClick={handleClearSelection}
-                      disabled={selectedLogPaths.length === 0}
+                      onPress={handleClearSelection}
+                      isDisabled={selectedLogPaths.length === 0}
+                      icon={<X size={15} />}
                     >
-                      <X size={15} />
                       <span>{t("clearSelection")}</span>
-                    </button>
-                    <button
+                    </VButton>
+                    <VButton
                       type="button"
+                      variant="danger"
                       className={styles.deleteButton}
-                      onClick={handleDeleteSelected}
-                      disabled={selectedLogPaths.length === 0 || destructiveBusy}
+                      onPress={handleDeleteSelected}
+                      isDisabled={selectedLogPaths.length === 0 || destructiveBusy}
                       title={selectedLogPaths.length === 0 ? t("deleteSelectedDisabled") : undefined}
+                      icon={<Trash2 size={15} />}
                     >
-                      <Trash2 size={15} />
                       <span>{destructiveBusy ? t("deletingSelectedLogs") : t("deleteSelectedLogs")}</span>
-                    </button>
+                    </VButton>
                   </div>
                 </div>
                 {actionNotice ? (
@@ -1230,15 +1235,16 @@ export function LogsRoute() {
                   logPackages.map((item) => {
                     const isActive = activePackage?.id === item.id;
                     return (
-                      <button
+                      <VButton
                         key={item.id}
                         type="button"
+                        variant="ghost"
                         className={
                           isActive
                             ? `${styles.packageButton} ${styles.packageButtonActive}`
                             : styles.packageButton
                         }
-                        onClick={() => handleOpenPackage(item)}
+                        onPress={() => handleOpenPackage(item)}
                         aria-pressed={isActive}
                       >
                         <span className={styles.packageButtonHeader}>
@@ -1252,7 +1258,7 @@ export function LogsRoute() {
                         <span className={styles.packageButtonPath} title={item.path || rootPathLabel}>
                           {item.path || rootPathLabel}
                         </span>
-                      </button>
+                      </VButton>
                     );
                   })
                 )}
@@ -1348,31 +1354,31 @@ export function LogsRoute() {
                                 : styles.packageFileRow
                             }
                           >
-                            <button
+                            <VIconButton
                               type="button"
                               className={
                                 isSelected
                                   ? `${styles.packageSelectButton} ${styles.packageSelectButtonActive}`
                                   : styles.packageSelectButton
                               }
-                              onClick={() => handleToggleSelection(file.path)}
+                              onPress={() => handleToggleSelection(file.path)}
                               title={isSelected ? deselectPackageFileLabel : selectPackageFileLabel}
-                              aria-label={`${isSelected ? deselectPackageFileLabel : selectPackageFileLabel} ${file.name}`}
-                            >
-                              {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
-                            </button>
-                            <button
+                              label={`${isSelected ? deselectPackageFileLabel : selectPackageFileLabel} ${file.name}`}
+                              icon={isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
+                            />
+                            <VButton
                               type="button"
+                              variant="ghost"
                               className={
                                 isActive
                                   ? `${styles.packageFileButton} ${styles.packageFileButtonActive}`
                                   : styles.packageFileButton
                               }
-                              onClick={() => handleOpenFile(file.path)}
+                              onPress={() => handleOpenFile(file.path)}
                             >
                               <span className={styles.packageFileName}>{file.name}</span>
                               <span className={styles.packageFilePath}>{file.path}</span>
-                            </button>
+                            </VButton>
                           </div>
                         );
                       })}
@@ -1441,11 +1447,12 @@ export function LogsRoute() {
               const stateLabel = root.exists ? t("present") : t("missing");
               const timestampLabel = root.exists ? formatTimestamp(root.summary.lastModifiedAt, lang) : "";
               return (
-                <button
+                <VButton
                   key={root.id}
                   type="button"
+                  variant="ghost"
                   className={isActive ? `${styles.rootButton} ${styles.rootButtonActive}` : styles.rootButton}
-                  onClick={() => setActiveRootId(root.id)}
+                  onPress={() => setActiveRootId(root.id)}
                   aria-pressed={isActive}
                   title={root.summary.userGuide || root.path}
                 >
@@ -1467,7 +1474,7 @@ export function LogsRoute() {
                   <span className={styles.rootButtonLatest} title={latestLabel}>
                     {latestLabel}
                   </span>
-                </button>
+                </VButton>
               );
             })}
           </nav>
