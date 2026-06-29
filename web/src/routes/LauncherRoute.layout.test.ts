@@ -23,6 +23,12 @@ const sourceSlice = (source: string, startMarker: string, endMarker: string): st
 };
 
 describe("LauncherRoute layout contract", () => {
+  it("routes launcher controls through VUI primitives", () => {
+    expect(routeSource).toContain("from \"../components/vui\"");
+    expect(routeSource).toContain("<VButton");
+    expect(routeSource).not.toMatch(/<button\b/);
+  });
+
   it("uses shell language state without loading the full app dictionary", () => {
     expect(routeSource).toContain("useShellI18n");
     expect(routeSource).toContain("const { lang } = useShellI18n()");

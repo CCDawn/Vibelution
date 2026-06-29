@@ -1017,6 +1017,11 @@
   cursor: pointer;
 }
 
+.sceneCardButton[data-vui] [data-slot="vui-button-content"],
+.sceneCardButton[data-vui] [data-slot="vui-button-label"] {
+  display: contents;
+}
+
 .sceneCardHeader,
 .sceneCardMeta,
 .scenePillRow,
@@ -1313,6 +1318,13 @@
   background: var(--surface-panel-hover);
 }
 
+.packageWorkRunPathButton[data-vui] [data-slot="vui-button-label"] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .packageWorkRunMetricStrip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1430,6 +1442,14 @@
   background: var(--surface-panel-hover);
 }
 
+.packageClusterRefs button[data-vui] [data-slot="vui-button-label"],
+.packageClusterItem button[data-vui] [data-slot="vui-button-label"] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .startupTracePanel {
   display: grid;
   gap: 10px;
@@ -1498,6 +1518,11 @@
 .startupTraceStepMissing {
   border-color: color-mix(in srgb, var(--accent-warm) 30%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-warm) 8%, var(--surface-input));
+}
+
+.startupTraceStep[data-vui] [data-slot="vui-button-content"],
+.startupTraceStep[data-vui] [data-slot="vui-button-label"] {
+  display: contents;
 }
 
 .packageDiagnosisGrid,
@@ -1597,6 +1622,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.packageEvidencePaths button[data-vui] [data-slot="vui-button-content"],
+.packageEvidencePaths button[data-vui] [data-slot="vui-button-label"] {
+  display: contents;
 }
 
 .packageDiagnosisDetails {
@@ -1736,6 +1766,11 @@
   color: var(--fg-tertiary);
   font-family: var(--font-mono);
   font-size: 0.72rem;
+}
+
+.packageKeyEntryButton[data-vui] [data-slot="vui-button-content"],
+.packageKeyEntryButton[data-vui] [data-slot="vui-button-label"] {
+  display: contents;
 }
 
 .packageClusterList {
@@ -1931,6 +1966,11 @@
   text-align: left;
 }
 
+.timelineRawRefs .toolbarButton[data-vui] [data-slot="vui-button-content"],
+.timelineRawRefs .toolbarButton[data-vui] [data-slot="vui-button-label"] {
+  display: contents;
+}
+
 .sceneRawHeader {
   align-items: start;
   justify-content: space-between;
@@ -2016,6 +2056,11 @@
   border-color: color-mix(in srgb, var(--accent-warm) 24%, transparent);
   background: color-mix(in srgb, var(--accent-warm) 10%, transparent);
   color: var(--fg-primary);
+}
+
+.rawFileButton[data-vui] [data-slot="vui-button-content"],
+.rawFileButton[data-vui] [data-slot="vui-button-label"] {
+  display: contents;
 }
 
 .sceneRawPreview {

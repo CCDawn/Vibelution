@@ -15,6 +15,13 @@ import statusGuideSource from "./AppShellStatusGuidePanel.tsx?raw";
 const shellStyles = readFileSync(fileURLToPath(new URL("./AppShell.module.css", import.meta.url)), "utf8");
 
 describe("AppShell layout contract", () => {
+  it("routes shell controls through VUI primitives", () => {
+    expect(shellSource).toContain("from \"../components/vui\"");
+    expect(shellSource).toContain("<VButton");
+    expect(shellSource).toContain("<VIconButton");
+    expect(shellSource).not.toMatch(/<button\b/);
+  });
+
   it("renders one compact status summary chip while keeping the detailed guide panel", () => {
     expect(shellSource).toContain("statusSummaryChip");
     expect(shellSource).toContain('t("brandSubtle")');
@@ -79,7 +86,7 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("suppressNextReturnStackPushRef.current = true");
     expect(shellSource).toContain("RETURN_NAVIGATION_STACK_STORAGE_KEY");
     expect(shellSource).toContain("className={styles.returnButton}");
-    expect(shellSource).toContain("aria-label={returnNavigationLabel}");
+    expect(shellSource).toContain("label={returnNavigationLabel}");
     expect(shellSource).toContain("title={returnNavigationLabel}");
     expect(shellSource).toContain("<ArrowLeft size={16} />");
     expect(shellSource).not.toContain("returnNavigationHelper");

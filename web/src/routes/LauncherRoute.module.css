@@ -186,6 +186,14 @@
   box-sizing: border-box;
 }
 
+.primaryButton[data-vui],
+.iconButton[data-vui],
+.statusBarButton[data-vui],
+.compactButton[data-vui],
+.settingsSaveButton[data-vui] {
+  min-width: 0;
+}
+
 .primaryButton {
   border-color: color-mix(in srgb, var(--accent-primary) 36%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-primary) 10%, #ffffff);
@@ -689,6 +697,17 @@
 .segmentedControl button:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+.segmentedControl button[data-vui] {
+  min-width: 0;
+}
+
+.segmentedControl button[data-vui] [data-slot="vui-button-content"],
+.segmentedControl button[data-vui] [data-slot="vui-button-label"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .metric,

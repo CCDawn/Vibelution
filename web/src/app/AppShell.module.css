@@ -441,6 +441,13 @@
   white-space: nowrap;
 }
 
+.topBarRestoreButton[data-vui] [data-slot="vui-button-label"] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .brandBlock {
   position: relative;
   z-index: 1;
@@ -811,6 +818,16 @@
 .utilityChevron {
   color: var(--fg-tertiary);
   transition: transform 150ms ease;
+}
+
+.utilityTrigger[data-vui] [data-slot="vui-button-content"] {
+  gap: 7px;
+}
+
+.utilityTrigger[data-vui] [data-slot="vui-button-label"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
 }
 
 .utilityCluster:hover .utilityChevron,
@@ -1783,6 +1800,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.lifecycleMenuItem[data-vui] [data-slot="vui-button-content"],
+.lifecycleMenuItem[data-vui] [data-slot="vui-button-label"] {
+  display: contents;
 }
 
 .mainArea {

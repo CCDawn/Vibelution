@@ -26,6 +26,7 @@ import {
 } from "../api/types";
 import { LazyFilePreview } from "../components/preview/LazyFilePreview";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
+import { VButton, VIconButton } from "../components/vui";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { TranslationKey } from "../i18n/dictionary";
 import { classifyRuntimeSceneEvent, type LogSeverityFilter, matchesSeverityFilter } from "../logs/logSeverity";
@@ -329,10 +330,11 @@ function renderPackageDiagnosisPanel(
           <div className={styles.packageWorkRunHeader}>
             <span>{lang === "zh" ? "运行任务摘要" : "Work Run Summary"}</span>
             {workRunSummary.eventsPath ? (
-              <button
+              <VButton
                 type="button"
+                variant="ghost"
                 className={styles.packageWorkRunPathButton}
-                onClick={() => handleOpenRawLog(scene.runtimeSceneId, workRunSummary.eventsPath)}
+                onPress={() => handleOpenRawLog(scene.runtimeSceneId, workRunSummary.eventsPath)}
                 title={
                   lang === "zh"
                     ? `打开 Work Run 事件源：${workRunSummary.eventsPath}`
@@ -340,7 +342,7 @@ function renderPackageDiagnosisPanel(
                 }
               >
                 {workRunSummary.eventsPath}
-              </button>
+              </VButton>
             ) : null}
           </div>
           <div className={styles.packageWorkRunMetricStrip}>
@@ -378,10 +380,11 @@ function renderPackageDiagnosisPanel(
           <span>{lang === "zh" ? "优先排查路径" : "Priority evidence paths"}</span>
           <div>
             {evidencePaths.slice(0, 6).map((path, index) => (
-              <button
+              <VButton
                 key={`${path}-${index}`}
                 type="button"
-                onClick={() => handleOpenRawLog(scene.runtimeSceneId, path)}
+                variant="ghost"
+                onPress={() => handleOpenRawLog(scene.runtimeSceneId, path)}
                 title={
                   lang === "zh"
                     ? `包内相对路径：${path}`
@@ -390,7 +393,7 @@ function renderPackageDiagnosisPanel(
               >
                 <strong>{index + 1}</strong>
                 <code>{path}</code>
-              </button>
+              </VButton>
             ))}
           </div>
         </div>
@@ -403,13 +406,14 @@ function renderPackageDiagnosisPanel(
           {primaryCluster.rawRefs?.length ? (
             <div className={styles.packageClusterRefs}>
               {primaryCluster.rawRefs.slice(0, 2).map((ref, index) => (
-                <button
+                <VButton
                   key={`${primaryCluster.eventCode}-${ref.path}-${index}`}
                   type="button"
-                  onClick={() => handleOpenRawLog(scene.runtimeSceneId, ref.path)}
+                  variant="ghost"
+                  onPress={() => handleOpenRawLog(scene.runtimeSceneId, ref.path)}
                 >
                   {ref.path}
-                </button>
+                </VButton>
               ))}
             </div>
           ) : null}
@@ -423,16 +427,17 @@ function renderPackageDiagnosisPanel(
           </div>
           <div className={styles.startupTraceSteps}>
             {startupSteps.map((step) => (
-              <button
+              <VButton
                 key={step.id}
                 type="button"
+                variant="ghost"
                 className={
                   step.status === "recorded"
                     ? styles.startupTraceStep
                     : `${styles.startupTraceStep} ${styles.startupTraceStepMissing}`
                 }
-                onClick={() => step.evidencePath && handleOpenRawLog(scene.runtimeSceneId, step.evidencePath)}
-                disabled={!step.evidencePath}
+                onPress={() => step.evidencePath && handleOpenRawLog(scene.runtimeSceneId, step.evidencePath)}
+                isDisabled={!step.evidencePath}
                 title={step.message || step.eventCode || step.evidencePath}
               >
                 <span>{localizeRuntimeSceneText(step.label, lang)}</span>
@@ -445,7 +450,7 @@ function renderPackageDiagnosisPanel(
                       ? "缺失"
                       : "Missing"}
                 </strong>
-              </button>
+              </VButton>
             ))}
           </div>
         </div>
@@ -488,15 +493,16 @@ function renderPackageDiagnosisPanel(
               <span>{lang === "zh" ? "关键入口" : "Key entries"}</span>
               <div className={styles.packageKeyEntries}>
                 {keyEntries.slice(0, 6).map((entry) => (
-                  <button
+                  <VButton
                     key={entry.path}
                     type="button"
+                    variant="ghost"
                     className={styles.packageKeyEntryButton}
-                    onClick={() => handleOpenRawLog(scene.runtimeSceneId, entry.path)}
+                    onPress={() => handleOpenRawLog(scene.runtimeSceneId, entry.path)}
                   >
                     <strong>{localizeRuntimeSceneText(entry.label, lang)}</strong>
                     <span>{entry.path}</span>
-                  </button>
+                  </VButton>
                 ))}
               </div>
             </div>
@@ -510,9 +516,9 @@ function renderPackageDiagnosisPanel(
                     <strong>{runtimeSceneIssueClusterLabel(cluster, lang)}</strong>
                     <span>{runtimeSceneIssueClusterMeta(cluster, lang)}</span>
                     {cluster.rawRefs?.[0]?.path ? (
-                      <button type="button" onClick={() => handleOpenRawLog(scene.runtimeSceneId, cluster.rawRefs[0].path)}>
+                      <VButton type="button" variant="ghost" onPress={() => handleOpenRawLog(scene.runtimeSceneId, cluster.rawRefs[0].path)}>
                         {cluster.rawRefs[0].path}
-                      </button>
+                      </VButton>
                     ) : null}
                   </div>
                 ))}
@@ -1130,15 +1136,16 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
         const Icon = option.icon;
         const active = severityFilter === option.value;
         return (
-          <button
+          <VButton
             key={option.value}
             type="button"
+            variant="secondary"
             className={active ? `${styles.filterButton} ${styles.filterButtonActive}` : styles.filterButton}
-            onClick={() => setSeverityFilter(option.value)}
+            onPress={() => setSeverityFilter(option.value)}
+            icon={<Icon size={14} />}
           >
-            <Icon size={14} />
             <span>{option.label}</span>
-          </button>
+          </VButton>
         );
       })}
     </div>
@@ -1200,10 +1207,9 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
 
   const previewActions = (
     <div className={styles.previewActions}>
-      <button type="button" className={styles.copyButton} onClick={handleCopy} disabled={!sceneContentQuery.data?.content}>
-        {copyState === "copied" ? <Check size={15} /> : <Copy size={15} />}
+      <VButton type="button" variant="secondary" className={styles.copyButton} onPress={handleCopy} isDisabled={!sceneContentQuery.data?.content} icon={copyState === "copied" ? <Check size={15} /> : <Copy size={15} />}>
         <span>{copyLabel}</span>
-      </button>
+      </VButton>
     </div>
   );
 
@@ -1391,15 +1397,16 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
                       {event.rawRefs.length > 0 ? (
                         <div className={styles.timelineRawRefs}>
                           {event.rawRefs.map((ref) => (
-                            <button
+                            <VButton
                               key={`${event.eventCode}-${ref.path}`}
                               type="button"
+                              variant="secondary"
                               className={styles.toolbarButton}
-                              onClick={() => handleOpenRawLog(scene.runtimeSceneId, ref.path)}
+                              onPress={() => handleOpenRawLog(scene.runtimeSceneId, ref.path)}
                             >
                               <span>{t("runtimeSceneOpenRaw")}</span>
                               <span>{ref.path}</span>
-                            </button>
+                            </VButton>
                           ))}
                         </div>
                       ) : null}
@@ -1437,19 +1444,20 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
                   ) : (
                     <div className={styles.rawFileTabs}>
                       {section.files.map((item) => (
-                        <button
+                        <VButton
                           key={item.path}
                           type="button"
+                          variant="ghost"
                           className={
                             activeRawLogPath === item.path
                               ? `${styles.rawFileButton} ${styles.rawFileButtonActive}`
                               : styles.rawFileButton
                           }
-                          onClick={() => handleOpenRawLog(scene.runtimeSceneId, item.path)}
+                          onPress={() => handleOpenRawLog(scene.runtimeSceneId, item.path)}
                         >
                           <span>{item.label}</span>
                           <span>{formatBytes(item.size)}</span>
-                        </button>
+                        </VButton>
                       ))}
                     </div>
                   )}
@@ -1497,38 +1505,41 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
           <div className={styles.selectionToolbar}>
             <span className={styles.selectionPill}>{selectedCountLabel}</span>
             <div className={styles.selectionActions}>
-              <button
+              <VButton
                 type="button"
+                variant="secondary"
                 className={styles.toolbarButton}
-                onClick={handleSelectVisible}
-                disabled={visibleSceneIds.length === 0}
+                onPress={handleSelectVisible}
+                isDisabled={visibleSceneIds.length === 0}
+                icon={<CheckSquare size={15} />}
               >
-                <CheckSquare size={15} />
                 <span>{t("selectVisibleRuntimeScenes")}</span>
-              </button>
-              <button
+              </VButton>
+              <VButton
                 type="button"
+                variant="secondary"
                 className={styles.toolbarButton}
-                onClick={handleClearSelection}
-                disabled={selectedSceneIds.length === 0}
+                onPress={handleClearSelection}
+                isDisabled={selectedSceneIds.length === 0}
+                icon={<X size={15} />}
               >
-                <X size={15} />
                 <span>{t("clearSelection")}</span>
-              </button>
-              <button
+              </VButton>
+              <VButton
                 type="button"
+                variant="danger"
                 className={styles.deleteButton}
-                onClick={handleDeleteSelected}
-                disabled={selectedSceneIds.length === 0 || deleteRuntimeScenesMutation.isPending}
+                onPress={handleDeleteSelected}
+                isDisabled={selectedSceneIds.length === 0 || deleteRuntimeScenesMutation.isPending}
                 title={selectedSceneIds.length === 0 ? t("deleteSelectedRuntimeScenesDisabled") : undefined}
+                icon={<Trash2 size={15} />}
               >
-                <Trash2 size={15} />
                 <span>
                   {deleteRuntimeScenesMutation.isPending
                     ? t("deletingSelectedRuntimeScenes")
                     : t("deleteSelectedRuntimeScenes")}
                 </span>
-              </button>
+              </VButton>
             </div>
           </div>
           {actionNotice ? (
@@ -1575,22 +1586,23 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
                   className={isActive ? `${styles.sceneCard} ${styles.sceneCardActive}` : styles.sceneCard}
                 >
                   <div className={styles.sceneCardTop}>
-                    <button
+                    <VIconButton
                       type="button"
                       className={
                         isSelected
                           ? `${styles.packageSelectButton} ${styles.packageSelectButtonActive}`
                           : styles.packageSelectButton
                       }
-                      onClick={() => handleToggleSelection(scene.runtimeSceneId)}
+                      onPress={() => handleToggleSelection(scene.runtimeSceneId)}
                       title={isSelected ? t("clearSelection") : t("selectVisibleRuntimeScenes")}
-                    >
-                      {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
-                    </button>
-                    <button
+                      label={isSelected ? t("clearSelection") : t("selectVisibleRuntimeScenes")}
+                      icon={isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
+                    />
+                    <VButton
                       type="button"
+                      variant="ghost"
                       className={styles.sceneCardButton}
-                      onClick={() => setActiveSceneId(scene.runtimeSceneId)}
+                      onPress={() => setActiveSceneId(scene.runtimeSceneId)}
                     >
                       <div className={styles.sceneCardHeader}>
                         <strong title={scene.runtimeSceneId}>{displayName}</strong>
@@ -1628,7 +1640,7 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
                       <p className={styles.sceneCardSummary}>
                         {runtimeSceneListSummary(scene, lang)}
                       </p>
-                    </button>
+                    </VButton>
                   </div>
                   <div className={styles.scenePillRow}>
                     <span className={styles.metaPill}>{localizeRuntimeSceneText(scene.trigger || "start", lang)}</span>
