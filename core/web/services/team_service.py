@@ -228,22 +228,6 @@ KNOWLEDGE_EXPANSION_TEAM_ROLES: tuple[dict[str, Any], ...] = (
         "responsibilities": ["复核高置信资料", "执行正式知识库入库", "拒绝低置信或缺证据资料"],
     },
 )
-LEGACY_SOURCE_COLLECTION_ROLE_KEYS = {
-    "data_discovery",
-    "source_acquisition",
-    "source_intake",
-    "content_extraction",
-    "source_quality",
-    "candidate_graph",
-    "knowledge_steward",
-    "challenge_cup_data_discovery",
-    "challenge_cup_source_acquisition",
-    "challenge_cup_content_extraction",
-    "challenge_cup_source_quality",
-    "knowledge_expansion_content_extraction",
-    "knowledge_expansion_source_quality",
-    "knowledge_expansion_candidate_graph",
-}
 TEMPLATE_MEMBER_PREFIX_TO_TEMPLATE_ID = {
     "medical-demo": "medical-consultation-demo",
     "heletech-demo": "heletech-maternal-digital-health-demo",
@@ -655,7 +639,7 @@ def challenge_cup_research_team_agents_need_repair() -> bool:
                 continue
             role = str(member.get("role") or "").strip()
             agent_id = str(member.get("agentId") or "").strip()
-            if role in LEGACY_SOURCE_COLLECTION_ROLE_KEYS:
+            if role and role not in expected_roles:
                 return True
             if agent_id and agent_id not in active_agents:
                 return True
@@ -685,7 +669,7 @@ def challenge_cup_research_team_agents_need_repair() -> bool:
                 continue
             role = str(node.get("role") or "").strip()
             agent_id = str(node.get("agentId") or "").strip()
-            if role in LEGACY_SOURCE_COLLECTION_ROLE_KEYS:
+            if role and role not in expected_roles:
                 return True
             if agent_id and agent_id not in active_agents:
                 return True
@@ -836,7 +820,7 @@ def knowledge_expansion_team_agents_need_repair() -> bool:
                 continue
             role = str(member.get("role") or "").strip()
             agent_id = str(member.get("agentId") or "").strip()
-            if role in LEGACY_SOURCE_COLLECTION_ROLE_KEYS:
+            if role and role not in expected_roles:
                 return True
             if agent_id and agent_id not in active_agents:
                 return True
@@ -866,7 +850,7 @@ def knowledge_expansion_team_agents_need_repair() -> bool:
                 continue
             role = str(node.get("role") or "").strip()
             agent_id = str(node.get("agentId") or "").strip()
-            if role in LEGACY_SOURCE_COLLECTION_ROLE_KEYS:
+            if role and role not in expected_roles:
                 return True
             if agent_id and agent_id not in active_agents:
                 return True

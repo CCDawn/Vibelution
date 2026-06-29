@@ -30,8 +30,8 @@ def test_data_processing_route_runs_collection_slice(tmp_path, monkeypatch):
     assignment_response = client.post(
         f"/api/data-processing/runs/{run_id}/collection-assignments",
         json={
-            "agentRole": "data_discovery",
-            "agentId": "agent-data-discovery",
+            "agentRole": "source_finder",
+            "agentId": "agent-source-finder",
             "scope": {"query": "collect sources"},
         },
     )
@@ -56,7 +56,7 @@ def test_data_processing_route_runs_collection_slice(tmp_path, monkeypatch):
     assert run_response.status_code == 201, run_response.text
     assert assignment_response.status_code == 201, assignment_response.text
     assert output_response.status_code == 201, output_response.text
-    assert output_response.json()["createdRecords"][0]["collectionTrace"]["agentRole"] == "data_discovery"
+    assert output_response.json()["createdRecords"][0]["collectionTrace"]["agentRole"] == "source_finder"
     assert runs_response.status_code == 200, runs_response.text
     assert runs_response.json()["runs"][0]["runId"] == run_id
     assert status_response.status_code == 200, status_response.text

@@ -1463,6 +1463,8 @@ def _conversation_index_kind_from_raw(raw: dict[str, Any]) -> tuple[str, str]:
 def _conversation_index_classification(
     raw: dict[str, Any],
     agent: dict[str, Any] | None,
+    *,
+    hidden_team_member_agent_ids: set[str] | None = None,
 ) -> dict[str, Any]:
     raw_kind, normalized_raw_kind = _conversation_index_kind_from_raw(raw)
     errors: list[str] = []
@@ -1470,7 +1472,10 @@ def _conversation_index_classification(
         errors.append("invalid_conversation_index_kind")
 
     agent_classification = (
-        agent_directory_service.agent_conversation_index_classification(agent)
+        agent_directory_service.agent_conversation_index_classification(
+            agent,
+            hidden_team_member_agent_ids=hidden_team_member_agent_ids,
+        )
         if isinstance(agent, dict)
         else {"kind": agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN, "errors": []}
     )
@@ -1706,8 +1711,17 @@ def _conversation_index_visibility_for_kind(kind: str) -> str:
     return agent_directory_service.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
 
 
-def _conversation_hidden_from_index(raw: dict[str, Any], agent: dict[str, Any] | None) -> bool:
-    classification = _conversation_index_classification(raw, agent)
+def _conversation_hidden_from_index(
+    raw: dict[str, Any],
+    agent: dict[str, Any] | None,
+    *,
+    hidden_team_member_agent_ids: set[str] | None = None,
+) -> bool:
+    classification = _conversation_index_classification(
+        raw,
+        agent,
+        hidden_team_member_agent_ids=hidden_team_member_agent_ids,
+    )
     kind = str(classification.get("kind") or "").strip()
     if kind == agent_directory_service.CONVERSATION_INDEX_KIND_INVALID:
         return False
@@ -2262,6 +2276,16 @@ def _session_agent_status_payload(
                 en="Missing valid Agent: the Agent bound to this session was permanently deleted; history is preserved without recreating it.",
             ),
         }
+    if str(persisted_status_code or "").strip() == "missing_agent":
+        return {
+            "agentMissing": True,
+            "agentStatusCode": "missing_agent",
+            "agentStatusMessage": text_for(
+                get_web_language(),
+                zh="缺少有效 Agent：当前会话引用的 Agent 已不存在或不可用。",
+                en="Missing valid Agent: this session references an Agent that no longer exists or is unavailable.",
+            ),
+        }
     if not normalized_agent_id:
         return {
             "agentMissing": False,
@@ -2330,6 +2354,10 @@ def _resolve_active_agent_for_turn(
 def _session_agent_visible_in_indexes(summary: dict[str, Any]) -> bool:
     conversation_index_kind = str(summary.get("conversationIndexKind") or "").strip()
     conversation_index_visibility = str(summary.get("conversationIndexVisibility") or "").strip()
+    if str(summary.get("agentStatusCode") or "").strip() == "deleted_agent":
+        return True
+    if bool(summary.get("agentMissing")):
+        return False
     if conversation_index_kind == agent_directory_service.CONVERSATION_INDEX_KIND_INVALID:
         return True
     if conversation_index_visibility == agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE:
@@ -2349,10 +2377,6 @@ def _session_agent_visible_in_indexes(summary: dict[str, Any]) -> bool:
     if str(summary.get("sessionKind") or "").strip().lower() == "child":
         return False
     if str(summary.get("sessionKind") or "").strip().lower() == "supervised":
-        return False
-    if str(summary.get("agentStatusCode") or "").strip() == "deleted_agent":
-        return True
-    if bool(summary.get("agentMissing")):
         return False
     if not bool(str(summary.get("agentId") or "").strip()):
         return True
@@ -2897,7 +2921,9 @@ def list_sessions(*, include_hidden_internal: bool = False) -> list[dict]:
                 item,
                 hidden_team_member_agent_ids,
             )
-            if _session_agent_visible_in_indexes(summary) and not hidden_internal:
+            if include_hidden_internal:
+                sessions.append(summary)
+            elif _session_agent_visible_in_indexes(summary) and not hidden_internal:
                 sessions.append(summary)
             else:
                 hidden_summaries.append(summary)
@@ -6270,6 +6296,7 @@ def _load_conversations(
         conversations: list[dict[str, Any]] = []
         changed = False
         agent_by_id = agent_by_id if agent_by_id is not None else _agent_lookup_for_conversations()
+        hidden_team_member_agent_ids = _agent_directory_stub_hidden_team_member_ids()
         if repair:
             changed = _repair_child_root_agent_direct_session_bindings(payload, agent_by_id=agent_by_id) or changed
         for raw in list(payload.get("conversations") or []):
@@ -6279,6 +6306,7 @@ def _load_conversations(
             conversation = _normalize_conversation(
                 raw,
                 agent_by_id=agent_by_id,
+                hidden_team_member_agent_ids=hidden_team_member_agent_ids,
                 ensure_workspace=repair,
                 lightweight=lightweight,
             )
@@ -6306,6 +6334,7 @@ def _load_conversation_detail_target(
     if not isinstance(conversations, list):
         return None
     agent_by_id = agent_by_id if agent_by_id is not None else _agent_lookup_for_conversations()
+    hidden_team_member_agent_ids = _agent_directory_stub_hidden_team_member_ids()
     changed = False
     if repair:
         changed = _repair_child_root_agent_direct_session_bindings(payload, agent_by_id=agent_by_id) or changed
@@ -6322,6 +6351,7 @@ def _load_conversation_detail_target(
         conversation = _normalize_conversation(
             raw,
             agent_by_id=agent_by_id,
+            hidden_team_member_agent_ids=hidden_team_member_agent_ids,
             ensure_workspace=repair,
             lightweight=lightweight,
         )
@@ -7286,6 +7316,7 @@ def _normalize_conversation(
     raw: Any,
     *,
     agent_by_id: dict[str, dict[str, Any]] | None = None,
+    hidden_team_member_agent_ids: set[str] | None = None,
     ensure_workspace: bool = True,
     lightweight: bool = False,
 ) -> dict[str, Any] | None:
@@ -7350,6 +7381,9 @@ def _normalize_conversation(
         missing_agent_id = agent_id
         agent_missing = True
         agent_status_code = "missing_agent"
+    elif missing_agent_id and agent_lookup_checked and agent is None:
+        agent_missing = True
+        agent_status_code = agent_status_code or "missing_agent"
     if lightweight:
         ledger_messages = _ledger_visible_messages_for_session(conversation_id)
         messages = _normalize_latest_preview_messages(conversation_id, ledger_messages)
@@ -7392,9 +7426,16 @@ def _normalize_conversation(
     if not isinstance(active_task, dict):
         active_task = None
     agent_prompt_snapshot = _public_agent_prompt_snapshot(raw.get("agentPromptSnapshot"))
-    conversation_index_classification = _conversation_index_classification(raw, agent)
+    conversation_index_classification = _conversation_index_classification(
+        raw,
+        agent,
+        hidden_team_member_agent_ids=hidden_team_member_agent_ids,
+    )
     conversation_index_visibility = (
-        agent_directory_service.agent_conversation_index_visibility(agent)
+        agent_directory_service.agent_conversation_index_visibility(
+            agent,
+            hidden_team_member_agent_ids=hidden_team_member_agent_ids,
+        )
         if isinstance(agent, dict)
         else agent_directory_service.CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE
     )
@@ -7417,7 +7458,11 @@ def _normalize_conversation(
         "activeSkillContract": active_skill_contract,
         "lastCacheComposition": last_cache_composition,
         "sessionKind": session_kind,
-        "hiddenFromIndex": _conversation_hidden_from_index(raw, agent),
+        "hiddenFromIndex": _conversation_hidden_from_index(
+            raw,
+            agent,
+            hidden_team_member_agent_ids=hidden_team_member_agent_ids,
+        ),
         "conversationIndexVisibility": conversation_index_visibility,
         "conversationIndexKind": str(conversation_index_classification.get("kind") or "").strip(),
         "conversationIndexErrors": list(conversation_index_classification.get("errors") or []),
