@@ -55,6 +55,11 @@ const slottedListStyleTargets = [
 
 const routeShellTargets = [
   {
+    path: "routes/GitRoute.tsx",
+    expected: ["VRouteHeader", "VIconButton"],
+    forbidden: ["<header className={styles.header}"],
+  },
+  {
     path: "routes/KernelTaskCenterRoute.tsx",
     expected: ["VRouteHeader", "VSelect", "VIconButton"],
     forbidden: ["<header className={styles.header}", "<select value={status}"],
