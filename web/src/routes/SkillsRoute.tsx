@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import { SkillLibraryDetail, SkillLibraryItem, SkillLibraryPayload } from "../api/types";
+import { VButton } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
 import styles from "./SkillsRoute.module.css";
@@ -230,10 +231,15 @@ export function SkillsRoute() {
           <h1>{copy.title}</h1>
           <p>{copy.subtitle}</p>
         </div>
-        <button type="button" className={styles.refreshButton} onClick={() => libraryQuery.refetch()} disabled={libraryQuery.isFetching}>
-          <RefreshCw size={15} />
-          <span>{copy.refresh}</span>
-        </button>
+        <VButton
+          type="button"
+          className={styles.refreshButton}
+          icon={<RefreshCw size={15} />}
+          isDisabled={libraryQuery.isFetching}
+          onPress={() => libraryQuery.refetch()}
+        >
+          {copy.refresh}
+        </VButton>
       </header>
 
       <div className={styles.controlStrip}>
@@ -276,14 +282,14 @@ export function SkillsRoute() {
 
           <div className={styles.filterRow}>
             {SOURCE_FILTERS.map((filter) => (
-              <button
+              <VButton
                 key={filter}
                 type="button"
                 className={sourceFilter === filter ? styles.filterButtonActive : styles.filterButton}
-                onClick={() => setSourceFilter(filter)}
+                onPress={() => setSourceFilter(filter)}
               >
                 {sourceFilterLabel(filter, lang)}
-              </button>
+              </VButton>
             ))}
           </div>
 
@@ -293,33 +299,43 @@ export function SkillsRoute() {
               <strong>{copy.bulkSelected}</strong>
               <span>{selectedSkills.length} / {filteredSkills.length}</span>
             </div>
-            <button
+            <VButton
               type="button"
               className={styles.primaryButton}
-              disabled={!selectedSkills.length}
-              onClick={copySelectedSkillCommands}
+              icon={<Copy size={14} />}
+              isDisabled={!selectedSkills.length}
+              onPress={copySelectedSkillCommands}
             >
-              <Copy size={14} />
-              <span>{copy.bulkCopyCommands}</span>
-            </button>
-            <button
+              {copy.bulkCopyCommands}
+            </VButton>
+            <VButton
               type="button"
               className={styles.filterButton}
-              disabled={!filteredSkills.length}
-              onClick={allVisibleSkillsSelected ? clearSelectedSkills : selectVisibleSkills}
+              icon={allVisibleSkillsSelected ? <Square size={14} /> : <CheckSquare size={14} />}
+              isDisabled={!filteredSkills.length}
+              onPress={allVisibleSkillsSelected ? clearSelectedSkills : selectVisibleSkills}
             >
-              {allVisibleSkillsSelected ? <Square size={14} /> : <CheckSquare size={14} />}
-              <span>{allVisibleSkillsSelected ? copy.bulkClear : copy.bulkSelectVisible}</span>
-            </button>
+              {allVisibleSkillsSelected ? copy.bulkClear : copy.bulkSelectVisible}
+            </VButton>
             <span className={styles.bulkReadOnlyNote}>{copy.bulkReadOnlyReason}</span>
-            <button type="button" className={styles.filterButton} disabled title={copy.bulkReadOnlyReason}>
-              <Ban size={14} />
-              <span>{copy.bulkEdit}</span>
-            </button>
-            <button type="button" className={styles.filterButton} disabled title={copy.bulkReadOnlyReason}>
-              <Ban size={14} />
-              <span>{copy.bulkDelete}</span>
-            </button>
+            <VButton
+              type="button"
+              className={styles.filterButton}
+              icon={<Ban size={14} />}
+              isDisabled
+              title={copy.bulkReadOnlyReason}
+            >
+              {copy.bulkEdit}
+            </VButton>
+            <VButton
+              type="button"
+              className={styles.filterButton}
+              icon={<Ban size={14} />}
+              isDisabled
+              title={copy.bulkReadOnlyReason}
+            >
+              {copy.bulkDelete}
+            </VButton>
           </section>
 
           <div className={styles.skillList}>
@@ -343,10 +359,10 @@ export function SkillsRoute() {
                       />
                       {selected ? <CheckSquare size={15} /> : <Square size={15} />}
                     </label>
-                    <button
+                    <VButton
                       type="button"
                       className={activeCommand === skill.command ? styles.skillButtonActive : styles.skillButton}
-                      onClick={() => setActiveCommand(skill.command)}
+                      onPress={() => setActiveCommand(skill.command)}
                     >
                       <span className={styles.sourceDot} data-source={skill.source} />
                       <span className={styles.skillCopy}>
@@ -354,7 +370,7 @@ export function SkillsRoute() {
                         <span>{skill.description || skill.command}</span>
                       </span>
                       <span className={styles.sourcePill}>{sourceLabel(skill.source, lang)}</span>
-                    </button>
+                    </VButton>
                   </div>
                 );
               })
@@ -371,10 +387,14 @@ export function SkillsRoute() {
                   <h2>{activeSkill.name}</h2>
                   <p>{activeSkill.description || activeSkill.directoryName}</p>
                 </div>
-                <button type="button" className={styles.primaryButton} onClick={() => copyCommand(activeSkill.command)}>
-                  <Copy size={15} />
-                  <span>{copy.copyCommand}</span>
-                </button>
+                <VButton
+                  type="button"
+                  className={styles.primaryButton}
+                  icon={<Copy size={15} />}
+                  onPress={() => copyCommand(activeSkill.command)}
+                >
+                  {copy.copyCommand}
+                </VButton>
               </div>
 
               <div className={styles.commandPanel}>

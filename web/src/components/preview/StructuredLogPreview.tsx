@@ -1,6 +1,7 @@
 import { AlertTriangle, Bot, Brain, MessageSquareText, MonitorCog, Rows3, Wrench } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { VButton } from "../vui";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import {
   filterStructuredLogEntries,
@@ -81,17 +82,17 @@ export function StructuredLogPreview({ model, severityFilter }: StructuredLogPre
             const Icon = option.icon;
             const active = categoryFilter === option.value;
             return (
-              <button
+              <VButton
                 key={option.value}
                 type="button"
                 className={active ? `${styles.filterButton} ${styles.filterButtonActive}` : styles.filterButton}
-                onClick={() => setCategoryFilter(option.value)}
+                onPress={() => setCategoryFilter(option.value)}
                 title={lang === "zh" ? option.zh : option.en}
+                icon={<Icon size={14} />}
               >
-                <Icon size={14} />
                 <span>{lang === "zh" ? option.zh : option.en}</span>
                 <strong>{categoryCounts[option.value]}</strong>
-              </button>
+              </VButton>
             );
           })}
         </div>
