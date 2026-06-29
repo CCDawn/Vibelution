@@ -22,6 +22,7 @@ from typing import Any, Iterable
 
 from config.paths import resolve_workspace_home
 from config.public_config import build_effective_config, load_public_config
+from core.chat.conversation_ledger import load_conversation_events
 from core.infrastructure import developer_sandbox
 from core.llm import LLMClient, LLMInvocationContext, invoke_llm
 from core.research import smoke_runner
@@ -160,6 +161,8 @@ SOURCE_COLLECTION_LOCAL_SCAN_HARD_MAX_FILES = 100
 SOURCE_COLLECTION_LOCAL_SCAN_MAX_BYTES = 256_000
 SOURCE_COLLECTION_STAGE_SESSION_TASK_KIND = "source_collection_stage_session_task"
 SOURCE_COLLECTION_STAGE_REQUIRED_TOOLS = (
+    "task_create_tool",
+    "task_update_tool",
     "source_collection_context_tool",
     "source_collection_stage_writeback_tool",
 )
@@ -1138,6 +1141,9 @@ def start_source_collection_stage_session_task(
         agent_id=agent_id,
         agent_role=agent_role,
     )
+    task_checklist = _source_collection_stage_task_checklist(stage_id, agent_role)
+    writeback_contract["taskToolRequired"] = True
+    writeback_contract["taskChecklist"] = task_checklist
     previous_stage_task = _latest_source_collection_stage_task(
         [
             item
@@ -1164,6 +1170,7 @@ def start_source_collection_stage_session_task(
         source_candidates=source_candidates,
         storage_artifacts=storage_artifacts,
         writeback_contract=writeback_contract,
+        task_checklist=task_checklist,
         previous_task=previous_stage_task,
     )
     now = utc_now_iso()
@@ -1190,6 +1197,14 @@ def start_source_collection_stage_session_task(
         "matchingAssignmentCount": len(matching_assignments),
         "storageArtifacts": storage_artifacts,
         "writebackContract": writeback_contract,
+        "taskToolRequired": True,
+        "taskChecklist": task_checklist,
+        "taskToolProgress": _source_collection_stage_task_tool_progress(task_checklist),
+        "completionGate": _source_collection_stage_completion_gate(
+            task_checklist=task_checklist,
+            artifact_complete=False,
+            task_checklist_complete=False,
+        ),
         "writesFormalKnowledge": bool(writeback_contract.get("writesFormalKnowledge")),
         "writesRag": False,
         "writesOfficialGraph": bool(writeback_contract.get("writesOfficialGraph")),
@@ -1218,6 +1233,8 @@ def start_source_collection_stage_session_task(
             "sourceCollectionStageTaskId": task_id,
             "sourceCollectionStageTaskKey": task_idempotency_key,
             "writebackContract": writeback_contract,
+            "taskToolRequired": True,
+            "taskChecklist": task_checklist,
         },
         include_started_turn_id=True,
         lightweight_response=True,
@@ -1276,6 +1293,8 @@ def start_source_collection_stage_session_task(
         "turn": task_record["turn"],
         "chatRoute": _source_collection_stage_task_chat_route(session_id, return_to=return_to, return_label=return_label),
         "writebackContract": writeback_contract,
+        "taskChecklist": task_checklist,
+        "completionGate": task_record["completionGate"],
         "boundaries": _source_collection_stage_session_task_boundaries(stage_id=stage_id, agent_role=agent_role),
     }
 
@@ -1296,6 +1315,7 @@ def writeback_source_collection_stage_session_task(
     result_payload = request_payload.get("result") if isinstance(request_payload.get("result"), dict) else {}
     writeback = {
         "status": status,
+        "agentRequestedStatus": status,
         "summary": _trim_text(request_payload.get("summary"), max_length=4000),
         "result": _normalize_metadata(result_payload),
         "evidenceRefs": _normalize_ref_list(request_payload.get("evidenceRefs"), max_items=24),
@@ -1357,6 +1377,52 @@ def writeback_source_collection_stage_session_task(
         materialized_candidate_graph=materialized_candidate_graph,
         materialized_knowledge_ingestion=materialized_knowledge_ingestion,
     )
+    if status == "completed" and not bool(closure_summary.get("artifactComplete")):
+        status = "needs_review"
+        writeback["status"] = status
+        closure_summary = _source_collection_stage_writeback_closure_summary(
+            task,
+            writeback,
+            coverage_summary=coverage_summary,
+            materialized_sources=materialized_sources,
+            materialized_content_extraction=materialized_content_extraction,
+            materialized_source_quality=materialized_source_quality,
+            materialized_candidate_graph=materialized_candidate_graph,
+            materialized_knowledge_ingestion=materialized_knowledge_ingestion,
+        )
+    task_checklist = [
+        item for item in list(task.get("taskChecklist") or [])
+        if isinstance(item, dict)
+    ]
+    task_tool_progress = closure_summary.get("taskToolProgress") if isinstance(closure_summary.get("taskToolProgress"), dict) else {}
+    completion_gate = _source_collection_stage_completion_gate(
+        task_checklist=task_checklist,
+        artifact_complete=bool(closure_summary.get("artifactComplete")),
+        task_checklist_complete=bool(closure_summary.get("taskChecklistComplete")),
+    )
+    closure_summary["completionGate"] = completion_gate
+    closure_summary["completionGatePassed"] = bool(completion_gate.get("passed"))
+    if status == "completed" and not bool(closure_summary.get("completionGatePassed")):
+        status = "needs_review"
+        writeback["status"] = status
+        closure_summary = _source_collection_stage_writeback_closure_summary(
+            task,
+            writeback,
+            coverage_summary=coverage_summary,
+            materialized_sources=materialized_sources,
+            materialized_content_extraction=materialized_content_extraction,
+            materialized_source_quality=materialized_source_quality,
+            materialized_candidate_graph=materialized_candidate_graph,
+            materialized_knowledge_ingestion=materialized_knowledge_ingestion,
+        )
+        task_tool_progress = closure_summary.get("taskToolProgress") if isinstance(closure_summary.get("taskToolProgress"), dict) else {}
+        completion_gate = _source_collection_stage_completion_gate(
+            task_checklist=task_checklist,
+            artifact_complete=bool(closure_summary.get("artifactComplete")),
+            task_checklist_complete=bool(closure_summary.get("taskChecklistComplete")),
+        )
+        closure_summary["completionGate"] = completion_gate
+        closure_summary["completionGatePassed"] = bool(completion_gate.get("passed"))
     writeback["materializedSources"] = materialized_sources
     writeback["materializedContentExtraction"] = materialized_content_extraction
     writeback["materializedSourceQuality"] = materialized_source_quality
@@ -1388,6 +1454,11 @@ def writeback_source_collection_stage_session_task(
     task["evidenceRefs"] = writeback["evidenceRefs"]
     task["nextActions"] = writeback["nextActions"]
     task["writeback"] = writeback
+    task["taskToolRequired"] = bool(task.get("taskToolRequired", True))
+    if task_checklist:
+        task["taskChecklist"] = task_checklist
+    task["taskToolProgress"] = task_tool_progress or _source_collection_stage_task_tool_progress(task_checklist)
+    task["completionGate"] = completion_gate
     task["writesFormalKnowledge"] = bool(materialized_knowledge_ingestion.get("writesFormalKnowledge"))
     task["writesRag"] = False
     task["writesOfficialGraph"] = bool(materialized_knowledge_ingestion.get("writesOfficialGraph"))
@@ -3770,7 +3841,20 @@ def _materialize_source_collection_stage_writeback_sources(
         return record_materialized
 
     leads = _source_collection_stage_writeback_source_leads(result)
+    invalid_sources = _source_collection_stage_writeback_invalid_sources(result)
+    excluded_sources, invalid_skipped = _materialize_source_collection_stage_invalid_sources(
+        team_id,
+        run_id,
+        task,
+        invalid_sources,
+    )
     if not leads:
+        if excluded_sources or invalid_skipped:
+            return _source_collection_stage_writeback_materialization_summary(
+                status="completed" if excluded_sources else "no_structured_sources",
+                excluded_sources=excluded_sources,
+                skipped=invalid_skipped,
+            )
         return _source_collection_stage_writeback_materialization_summary(status="no_structured_sources")
 
     existing_records = records
@@ -3778,7 +3862,7 @@ def _materialize_source_collection_stage_writeback_sources(
 
     created_records: list[dict[str, Any]] = []
     imported_candidates: list[dict[str, Any]] = []
-    skipped: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = [*invalid_skipped]
     failed: list[dict[str, Any]] = []
     normalized_team_id = _trim_text(team_id, max_length=128)
     normalized_run_id = _trim_text(run_id, max_length=128)
@@ -3876,6 +3960,7 @@ def _materialize_source_collection_stage_writeback_sources(
         source_lead_count=len(leads),
         created_records=created_records,
         imported_candidates=imported_candidates,
+        excluded_sources=excluded_sources,
         skipped=skipped,
         failed=failed,
     )
@@ -3890,6 +3975,7 @@ def _materialize_source_collection_stage_writeback_sources(
             "sourceLeadCount": summary["sourceLeadCount"],
             "createdRecordCount": summary["createdRecordCount"],
             "importedCandidateCount": summary["importedCandidateCount"],
+            "excludedSourceCount": summary["excludedSourceCount"],
             "skippedDuplicateCount": summary["skippedDuplicateCount"],
             "failedCount": summary["failedCount"],
         },
@@ -4046,7 +4132,20 @@ def _source_collection_stage_writeback_closure_summary(
     action_label = "继续处理"
     retry_instruction = "重试时请先读取 source_collection_context_tool 的 compact 上下文，按分页读完后再回写真实 ID。"
     excluded_source_count = _source_collection_count(materialized_sources.get("excludedSourceCount"))
-    if stage_id == "extraction" or agent_role == "source_extractor":
+    if stage_id == "finding" or agent_role == "source_finder":
+        target_label = "原始资料"
+        action_label = "寻找"
+        created_count = _source_collection_count(materialized_sources.get("createdRecordCount"))
+        imported_count = _source_collection_count(materialized_sources.get("importedCandidateCount"))
+        duplicate_count = _source_collection_count(materialized_sources.get("skippedDuplicateCount"))
+        success_count = max(created_count, imported_count, duplicate_count)
+        artifact_status = "source_records_ready" if success_count else "no_effect"
+        retry_instruction = (
+            "重试时请先调用 task_create_tool 创建检查清单，再调用 "
+            "source_collection_context_tool(context_mode=compact, record_offset=0, record_limit=5)，"
+            "新资料必须用 candidateLeads[] 写回；无效来源写入 invalidSources[]。"
+        )
+    elif stage_id == "extraction" or agent_role == "source_extractor":
         target_label = "候选资料"
         action_label = "提炼"
         source_count = _source_collection_count(materialized_sources.get("importedCandidateCount"))
@@ -4074,16 +4173,38 @@ def _source_collection_stage_writeback_closure_summary(
         )
         artifact_status = "knowledge_ingestion_ready" if success_count else "no_effect"
 
-    if success_count > 0 and (not coverage or complete):
+    artifact_complete = bool(success_count > 0 and (not coverage or complete))
+    if not artifact_complete and excluded_source_count > 0 and (not coverage or complete):
+        artifact_complete = True
+    task_checklist = [
+        item for item in list(task.get("taskChecklist") or [])
+        if isinstance(item, dict)
+    ]
+    task_tool_progress = _source_collection_stage_task_tool_progress_from_trace(task, task_checklist)
+    task_checklist_complete = bool(task_tool_progress.get("complete"))
+    completion_gate = _source_collection_stage_completion_gate(
+        task_checklist=task_checklist,
+        artifact_complete=artifact_complete,
+        task_checklist_complete=task_checklist_complete,
+    )
+
+    if success_count > 0 and (not coverage or complete) and task_checklist_complete:
         user_status = "success"
         message = f"已生成 {success_count} 个{target_label}，本阶段闭环成功。"
+    elif success_count > 0 and (not coverage or complete):
+        user_status = "partial"
+        message = f"已生成 {success_count} 个{target_label}，等待 Agent 完成检查清单打勾。"
     elif success_count > 0:
         user_status = "partial"
         message = f"已{action_label} {processed}/{total}，已生成 {success_count} 个{target_label}；还有 {missing} 条待补，{invalid} 个 ID 未匹配。"
-    elif excluded_source_count > 0 and coverage and complete:
+    elif excluded_source_count > 0 and (not coverage or complete) and task_checklist_complete:
         user_status = "success"
         artifact_status = "source_manifest_filtered"
         message = f"已移出 {excluded_source_count} 条无有效内容来源，未生成候选资料；需要继续搜索或补充新来源。"
+    elif excluded_source_count > 0 and (not coverage or complete):
+        user_status = "partial"
+        artifact_status = "source_manifest_filtered"
+        message = f"已移出 {excluded_source_count} 条无有效内容来源，等待 Agent 完成检查清单打勾。"
     elif coverage and total > 0:
         user_status = "failed"
         message = f"Agent 已回写，但没有生成{target_label}；已{action_label} {processed}/{total}，{missing} 条待补，{invalid} 个 ID 未匹配。"
@@ -4103,6 +4224,11 @@ def _source_collection_stage_writeback_closure_summary(
         "userStatus": user_status,
         "targetLabel": target_label,
         "message": message,
+        "artifactComplete": artifact_complete,
+        "taskChecklistComplete": task_checklist_complete,
+        "completionGatePassed": bool(completion_gate.get("passed")),
+        "completionGate": completion_gate,
+        "taskToolProgress": task_tool_progress,
         "progressLabel": f"{action_label} {processed}/{total}" if coverage and total else "",
         "successCount": success_count,
         "excludedSourceCount": excluded_source_count,
@@ -5180,12 +5306,17 @@ def _source_collection_stage_writeback_source_leads(result: dict[str, Any]) -> l
     leads: list[dict[str, Any]] = []
     for key in (
         "candidateLeads",
+        "candidate_leads",
+        "sourceRecords",
+        "source_records",
         "sourceCandidates",
         "source_candidates",
         "sources",
         "records",
         "createdRecords",
         "created_records",
+        "newPapers",
+        "new_papers",
     ):
         value = result.get(key)
         if isinstance(value, list):
@@ -5194,7 +5325,18 @@ def _source_collection_stage_writeback_source_leads(result: dict[str, Any]) -> l
         container = result.get(container_key)
         if not isinstance(container, dict):
             continue
-        for key in ("candidateLeads", "sourceCandidates", "sources", "records"):
+        for key in (
+            "candidateLeads",
+            "candidate_leads",
+            "sourceRecords",
+            "source_records",
+            "sourceCandidates",
+            "source_candidates",
+            "sources",
+            "records",
+            "newPapers",
+            "new_papers",
+        ):
             value = container.get(key)
             if isinstance(value, list):
                 leads.extend(item for item in value if isinstance(item, dict))
@@ -5207,6 +5349,146 @@ def _source_collection_stage_writeback_source_leads(result: dict[str, Any]) -> l
         seen.add(fingerprint)
         deduped.append(lead)
     return deduped[:80]
+
+
+def _source_collection_stage_writeback_invalid_sources(result: dict[str, Any]) -> list[dict[str, Any]]:
+    invalid_sources: list[dict[str, Any]] = []
+    for key in (
+        "invalidSources",
+        "invalid_sources",
+        "excludedSources",
+        "excluded_sources",
+        "removedSources",
+        "removed_sources",
+        "noiseSources",
+        "noise_sources",
+    ):
+        value = result.get(key)
+        if isinstance(value, list):
+            invalid_sources.extend(item for item in value if isinstance(item, dict))
+    for container_key in ("searchFrame", "handoff", "result", "outputs", "summary"):
+        container = result.get(container_key)
+        if not isinstance(container, dict):
+            continue
+        for key in ("invalidSources", "invalid_sources", "excludedSources", "excluded_sources", "removedSources", "removed_sources"):
+            value = container.get(key)
+            if isinstance(value, list):
+                invalid_sources.extend(item for item in value if isinstance(item, dict))
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for source in invalid_sources:
+        fingerprint = _source_collection_stage_writeback_lead_fingerprint(source)
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        deduped.append(source)
+    return deduped[:80]
+
+
+def _source_collection_stage_invalid_source_record(source: dict[str, Any]) -> dict[str, Any]:
+    doi = _source_collection_extract_doi(
+        source.get("doi"),
+        source.get("DOI"),
+        source.get("locator"),
+        source.get("sourceRef"),
+        source.get("sourceUrl"),
+        source.get("url"),
+    )
+    source_ref = _trim_text(
+        source.get("sourceRef")
+        or source.get("source_ref")
+        or source.get("sourceUrl")
+        or source.get("url")
+        or source.get("locator"),
+        max_length=2000,
+    )
+    if doi and not source_ref:
+        source_ref = f"https://doi.org/{doi}"
+    raw_location = _trim_text(source.get("rawLocation") or source.get("raw_location") or source.get("url"), max_length=2000)
+    metadata = _normalize_metadata(source.get("metadata"))
+    if doi:
+        metadata["doi"] = doi
+    container = _trim_text(source.get("container") or source.get("venue") or source.get("journal"), max_length=240)
+    if container:
+        metadata["containerTitle"] = container
+    published = _trim_text(source.get("published") or source.get("year"), max_length=80)
+    if published:
+        metadata["published"] = published
+    return {
+        "recordId": _trim_text(source.get("recordId") or source.get("record_id"), max_length=160),
+        "title": _trim_text(source.get("title"), max_length=260),
+        "sourceType": _trim_text(source.get("sourceType") or source.get("type") or "invalid_source", max_length=80),
+        "sourceRef": source_ref,
+        "rawLocation": raw_location or source_ref,
+        "metadata": metadata,
+    }
+
+
+def _materialize_source_collection_stage_invalid_sources(
+    team_id: str,
+    run_id: str,
+    task: dict[str, Any],
+    invalid_sources: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if not invalid_sources:
+        return [], []
+    try:
+        run = data_processing_service.get_processing_run(run_id)
+    except data_processing_service.DataProcessingError:
+        run = {"runId": run_id, "scope": {}}
+    excluded_sources: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    task_id = _trim_text(task.get("taskId"), max_length=160)
+    agent_id = _trim_text(task.get("agentId"), max_length=160)
+    stage_id = _trim_text(task.get("stageId"), max_length=80)
+    for source in invalid_sources:
+        record = _source_collection_stage_invalid_source_record(source)
+        identity_key = _source_collection_record_identity_or_record_key(record)
+        if not identity_key:
+            skipped.append(
+                {
+                    "reason": "invalid_source_missing_identity",
+                    "title": _trim_text(source.get("title"), max_length=240),
+                }
+            )
+            continue
+        reason = (
+            _trim_text(source.get("reason"), max_length=160)
+            or _trim_text(source.get("excludeReason"), max_length=160)
+            or _trim_text(source.get("exclude_reason"), max_length=160)
+            or _trim_text(source.get("decisionReason"), max_length=160)
+            or "no_effective_content"
+        )
+        entry = _record_source_collection_exclusion(
+            team_id,
+            run,
+            record,
+            reason=reason,
+            evidence=(
+                _normalize_text_list(source.get("evidence"), max_items=8, max_length=500)
+                or [
+                    text for text in [
+                        _trim_text(source.get("notes"), max_length=500),
+                        _trim_text(source.get("summary"), max_length=500),
+                    ]
+                    if text
+                ]
+            ),
+            task_id=task_id,
+            agent_id=agent_id,
+            stage_id=stage_id,
+            source="stage_writeback_invalid_sources",
+        )
+        excluded_sources.append(
+            {
+                "recordId": _trim_text(record.get("recordId"), max_length=160),
+                "title": _trim_text(record.get("title"), max_length=240),
+                "reason": _normalize_source_collection_exclusion_reason(reason) or "no_effective_content",
+                "sourceIdentityKey": _trim_text(entry.get("sourceIdentityKey") or identity_key, max_length=240),
+                "exclusionId": _trim_text(entry.get("exclusionId"), max_length=160),
+            }
+        )
+    return excluded_sources, skipped
 
 
 def _source_collection_stage_writeback_lead_fingerprint(lead: dict[str, Any]) -> str:
@@ -16103,6 +16385,7 @@ def _reconcile_source_collection_stage_session_tasks(team_id: str) -> bool:
             reconciled = _reconcile_source_collection_stage_session_task_turn_status(task)
             reconciled = _reconcile_source_collection_stage_session_task_from_turn_result(reconciled)
             reconciled = _reconcile_source_collection_stage_session_task_sources(team_id, run_id, reconciled)
+            reconciled = _reconcile_source_collection_stage_session_task_completion_gate(team_id, run_id, reconciled)
             next_tasks.append(reconciled)
             store_changed = store_changed or reconciled is not task
         if store_changed:
@@ -16705,6 +16988,21 @@ def _source_collection_stage_task_card_summary(task: dict[str, Any]) -> dict[str
             if isinstance(writeback.get("closureSummary"), dict)
             else result.get("closureSummary") if isinstance(result.get("closureSummary"), dict) else {}
         ),
+        "taskToolRequired": bool(task.get("taskToolRequired")),
+        "taskChecklist": [
+            item for item in list(task.get("taskChecklist") or [])
+            if isinstance(item, dict)
+        ][:12],
+        "taskToolProgress": (
+            task.get("taskToolProgress")
+            if isinstance(task.get("taskToolProgress"), dict)
+            else {}
+        ),
+        "completionGate": (
+            task.get("completionGate")
+            if isinstance(task.get("completionGate"), dict)
+            else {}
+        ),
         "materializedSources": writeback.get("materializedSources") if isinstance(writeback.get("materializedSources"), dict) else {},
         "materializedContentExtraction": writeback.get("materializedContentExtraction") if isinstance(writeback.get("materializedContentExtraction"), dict) else {},
         "materializedKnowledgeIngestion": writeback.get("materializedKnowledgeIngestion") if isinstance(writeback.get("materializedKnowledgeIngestion"), dict) else {},
@@ -16885,6 +17183,141 @@ def _reconcile_source_collection_stage_session_task_sources(team_id: str, run_id
     next_task["writeback"] = next_writeback
     next_task["result"] = next_result
     next_task["updatedAt"] = utc_now_iso()
+    return next_task
+
+
+def _reconcile_source_collection_stage_session_task_completion_gate(team_id: str, run_id: str, task: dict[str, Any]) -> dict[str, Any]:
+    writeback = task.get("writeback") if isinstance(task.get("writeback"), dict) else {}
+    if not writeback:
+        return task
+    result = task.get("result") if isinstance(task.get("result"), dict) else {}
+    coverage_summary = (
+        writeback.get("coverageSummary")
+        if isinstance(writeback.get("coverageSummary"), dict)
+        else result.get("coverageSummary")
+        if isinstance(result.get("coverageSummary"), dict)
+        else {}
+    )
+    materialized_sources = (
+        writeback.get("materializedSources")
+        if isinstance(writeback.get("materializedSources"), dict)
+        else result.get("materializedSources")
+        if isinstance(result.get("materializedSources"), dict)
+        else {}
+    )
+    materialized_content_extraction = (
+        writeback.get("materializedContentExtraction")
+        if isinstance(writeback.get("materializedContentExtraction"), dict)
+        else result.get("materializedContentExtraction")
+        if isinstance(result.get("materializedContentExtraction"), dict)
+        else {}
+    )
+    materialized_source_quality = (
+        writeback.get("materializedSourceQuality")
+        if isinstance(writeback.get("materializedSourceQuality"), dict)
+        else result.get("materializedSourceQuality")
+        if isinstance(result.get("materializedSourceQuality"), dict)
+        else {}
+    )
+    materialized_candidate_graph = (
+        writeback.get("materializedCandidateGraph")
+        if isinstance(writeback.get("materializedCandidateGraph"), dict)
+        else result.get("materializedCandidateGraph")
+        if isinstance(result.get("materializedCandidateGraph"), dict)
+        else {}
+    )
+    materialized_knowledge_ingestion = (
+        writeback.get("materializedKnowledgeIngestion")
+        if isinstance(writeback.get("materializedKnowledgeIngestion"), dict)
+        else result.get("materializedKnowledgeIngestion")
+        if isinstance(result.get("materializedKnowledgeIngestion"), dict)
+        else {}
+    )
+    closure_summary = _source_collection_stage_writeback_closure_summary(
+        task,
+        writeback,
+        coverage_summary=coverage_summary,
+        materialized_sources=materialized_sources,
+        materialized_content_extraction=materialized_content_extraction,
+        materialized_source_quality=materialized_source_quality,
+        materialized_candidate_graph=materialized_candidate_graph,
+        materialized_knowledge_ingestion=materialized_knowledge_ingestion,
+    )
+    task_checklist = [
+        item for item in list(task.get("taskChecklist") or [])
+        if isinstance(item, dict)
+    ]
+    task_tool_progress = closure_summary.get("taskToolProgress") if isinstance(closure_summary.get("taskToolProgress"), dict) else {}
+    completion_gate = _source_collection_stage_completion_gate(
+        task_checklist=task_checklist,
+        artifact_complete=bool(closure_summary.get("artifactComplete")),
+        task_checklist_complete=bool(closure_summary.get("taskChecklistComplete")),
+    )
+    closure_summary["completionGate"] = completion_gate
+    closure_summary["completionGatePassed"] = bool(completion_gate.get("passed"))
+
+    requested_status = _trim_text(
+        writeback.get("agentRequestedStatus") or writeback.get("requestedStatus") or writeback.get("status") or task.get("status"),
+        max_length=80,
+    ).lower()
+    current_status = _trim_text(task.get("status"), max_length=80).lower()
+    next_status = current_status
+    if requested_status == "completed":
+        next_status = "completed" if completion_gate.get("passed") else "needs_review"
+    elif current_status == "completed" and not completion_gate.get("passed"):
+        next_status = "needs_review"
+
+    existing_closure = (
+        writeback.get("closureSummary")
+        if isinstance(writeback.get("closureSummary"), dict)
+        else result.get("closureSummary")
+        if isinstance(result.get("closureSummary"), dict)
+        else {}
+    )
+    if (
+        existing_closure == closure_summary
+        and task.get("taskToolProgress") == task_tool_progress
+        and task.get("completionGate") == completion_gate
+        and current_status == next_status
+    ):
+        return task
+
+    next_task = dict(task)
+    next_writeback = dict(writeback)
+    next_result = dict(result)
+    next_writeback.setdefault("agentRequestedStatus", requested_status or current_status)
+    next_writeback["status"] = next_status
+    next_writeback["closureSummary"] = closure_summary
+    next_result["closureSummary"] = closure_summary
+    next_task["status"] = next_status
+    next_task["writeback"] = next_writeback
+    next_task["result"] = next_result
+    next_task["taskToolProgress"] = task_tool_progress or _source_collection_stage_task_tool_progress(task_checklist)
+    next_task["completionGate"] = completion_gate
+    next_turn = next_task.get("turn") if isinstance(next_task.get("turn"), dict) else {}
+    if next_turn:
+        updated_turn = dict(next_turn)
+        updated_turn["status"] = next_status
+        next_task["turn"] = updated_turn
+    next_task["updatedAt"] = utc_now_iso()
+    if current_status != next_status:
+        _record_workflow_event(
+            "source_collection.stage_session_task_completion_gate_reconciled",
+            team_id,
+            fields={
+                "runId": run_id,
+                "taskId": _trim_text(task.get("taskId"), max_length=160),
+                "stageId": _trim_text(task.get("stageId"), max_length=80),
+                "previousStatus": current_status,
+                "status": next_status,
+                "completionGatePassed": bool(completion_gate.get("passed")),
+                "taskChecklistComplete": bool(completion_gate.get("taskChecklistComplete")),
+                "artifactComplete": bool(completion_gate.get("artifactComplete")),
+            },
+            level="info",
+            outcome=next_status,
+            lifecycle=True,
+        )
     return next_task
 
 
@@ -17473,6 +17906,282 @@ def _source_collection_stage_task_title(stage_id: str) -> str:
     }.get(stage_id, "知识搜集阶段任务")
 
 
+def _source_collection_stage_task_checklist(stage_id: str, agent_role: str = "") -> list[dict[str, Any]]:
+    normalized_stage_id = _normalize_source_collection_stage_id(stage_id, default="finding")
+    normalized_agent_role = _normalize_source_collection_agent_role(agent_role)
+    raw_items_by_stage: dict[str, tuple[tuple[str, str, str], ...]] = {
+        "finding": (
+            ("read_context", "读取本轮 compact 上下文", "source_collection_context_tool"),
+            ("page_existing_sources", "分页检查已有资料和候选", "source_collection_context_tool"),
+            ("search_and_dedupe_sources", "搜索并去重新资料", "batch_web_search_tool"),
+            ("write_candidate_leads", "用 candidateLeads[] 回写新资料", "source_collection_stage_writeback_tool"),
+            ("write_invalid_sources", "写入 invalidSources[] 或说明无无效来源", "source_collection_stage_writeback_tool"),
+            ("confirm_materialized_sources", "确认新增资料或候选已物化", "source_collection_stage_writeback_tool"),
+        ),
+        "extraction": (
+            ("read_candidates", "读取候选或原始资料上下文", "source_collection_context_tool"),
+            ("page_candidate_inputs", "分页覆盖本阶段输入", "source_collection_context_tool"),
+            ("extract_and_review_each_source", "逐候选提炼并审查保留/待补/无效", ""),
+            ("write_extractions_and_decisions", "回写 candidateExtractions[] / candidateDecisions[] 或 recordExtractions[]", "source_collection_stage_writeback_tool"),
+            ("confirm_coverage", "确认 coverageSummary 覆盖率和待补原因", "source_collection_stage_writeback_tool"),
+        ),
+        "relations": (
+            ("read_approved_candidates", "读取已通过或已保留候选", "source_collection_context_tool"),
+            ("build_candidate_relations", "生成候选级主题、来源和证据关系", ""),
+            ("write_candidate_graph", "回写 candidateGraph 候选关系图", "source_collection_stage_writeback_tool"),
+            ("confirm_graph_materialized", "确认关系节点和边已物化", "source_collection_stage_writeback_tool"),
+        ),
+        "ingestion": (
+            ("read_ingestion_inputs", "读取已通过候选和关系整理结果", "source_collection_context_tool"),
+            ("decide_ingestion_scope", "生成入库通过、退回或阻塞决策", ""),
+            ("write_ingestion_decision", "调用入库 writeback 写回审核结果", "source_collection_stage_writeback_tool"),
+            ("confirm_formal_knowledge_or_return", "确认正式知识项已生成或明确退回原因", "source_collection_stage_writeback_tool"),
+        ),
+    }
+    raw_items = raw_items_by_stage.get(normalized_stage_id, raw_items_by_stage["finding"])
+    return [
+        {
+            "id": item_id,
+            "order": index,
+            "description": description,
+            "requiredTool": required_tool,
+            "stageId": normalized_stage_id,
+            "agentRole": normalized_agent_role,
+        }
+        for index, (item_id, description, required_tool) in enumerate(raw_items, start=1)
+    ]
+
+
+def _source_collection_stage_task_tool_progress(
+    task_checklist: list[dict[str, Any]] | None,
+    *,
+    completed_ids: Iterable[str] | None = None,
+) -> dict[str, Any]:
+    checklist = [item for item in list(task_checklist or []) if isinstance(item, dict)]
+    expected_ids = [
+        _trim_text(item.get("id"), max_length=120)
+        for item in checklist
+        if _trim_text(item.get("id"), max_length=120)
+    ]
+    completed = {
+        _trim_text(item, max_length=120)
+        for item in list(completed_ids or [])
+        if _trim_text(item, max_length=120)
+    }
+    completed_ordered = [item_id for item_id in expected_ids if item_id in completed]
+    pending = [item_id for item_id in expected_ids if item_id not in completed]
+    return {
+        "required": bool(checklist),
+        "total": len(expected_ids),
+        "completed": len(completed_ordered),
+        "complete": bool(expected_ids) and len(completed_ordered) >= len(expected_ids),
+        "completedIds": completed_ordered,
+        "pendingIds": pending,
+    }
+
+
+def _source_collection_stage_task_tool_progress_from_trace(
+    task: dict[str, Any],
+    task_checklist: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    checklist = [item for item in list(task_checklist or []) if isinstance(item, dict)]
+    progress = _source_collection_stage_task_tool_progress(checklist)
+    if not checklist:
+        progress.update({"traceAvailable": False, "taskCreateObserved": False, "toolCallCount": 0})
+        return progress
+    turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
+    session_id = _trim_text(task.get("sessionId") or turn.get("sessionId"), max_length=160)
+    turn_id = _trim_text(turn.get("turnId"), max_length=200)
+    if not session_id:
+        progress.update({"traceAvailable": False, "taskCreateObserved": False, "toolCallCount": 0})
+        return progress
+    try:
+        events = load_conversation_events(_project_root(), session_id)
+    except Exception as exc:  # pragma: no cover - defensive for corrupt ledgers
+        progress.update(
+            {
+                "traceAvailable": False,
+                "traceError": _trim_text(str(exc), max_length=240),
+                "taskCreateObserved": False,
+                "toolCallCount": 0,
+            }
+        )
+        return progress
+    tool_calls: list[dict[str, Any]] = []
+    for event in events:
+        event_turn_id = _trim_text(getattr(event, "turn_id", ""), max_length=200)
+        if turn_id and event_turn_id and event_turn_id != turn_id:
+            continue
+        tool_calls.extend(_source_collection_stage_tool_calls_from_event(event))
+
+    task_create_observed = False
+    completed_ids: set[str] = set()
+    checklist_by_id = {
+        _trim_text(item.get("id"), max_length=120): item
+        for item in checklist
+        if _trim_text(item.get("id"), max_length=120)
+    }
+    checklist_by_order = {
+        _normalize_int(item.get("order"), default=index, minimum=1, maximum=1000): item
+        for index, item in enumerate(checklist, start=1)
+    }
+    for tool_call in tool_calls:
+        name = _source_collection_stage_tool_call_name(tool_call)
+        if name not in {"task_create_tool", "task_update_tool"}:
+            continue
+        if not _source_collection_stage_tool_call_succeeded(tool_call):
+            continue
+        args = _source_collection_stage_tool_call_args(tool_call)
+        if name == "task_create_tool":
+            task_create_observed = True
+            continue
+        if _normalize_optional_bool(args.get("is_completed") or args.get("isCompleted")) is not True:
+            continue
+        item_id = _source_collection_stage_task_tool_item_id(args, checklist_by_id, checklist_by_order)
+        if item_id:
+            completed_ids.add(item_id)
+
+    progress = _source_collection_stage_task_tool_progress(checklist, completed_ids=completed_ids)
+    progress.update(
+        {
+            "traceAvailable": True,
+            "taskCreateObserved": task_create_observed,
+            "toolCallCount": len(tool_calls),
+            "completedByTrace": progress.get("completed", 0),
+        }
+    )
+    progress["complete"] = bool(progress.get("complete")) and task_create_observed
+    if not task_create_observed:
+        progress["pendingReason"] = "task_create_tool_not_observed"
+    elif not progress["complete"]:
+        progress["pendingReason"] = "task_update_tool_items_pending"
+    return progress
+
+
+def _source_collection_stage_tool_calls_from_event(event: Any) -> list[dict[str, Any]]:
+    payload = getattr(event, "payload", {}) if event is not None else {}
+    if not isinstance(payload, dict):
+        return []
+    raw_calls: list[Any] = []
+    for key in ("toolCall", "tool_call"):
+        if isinstance(payload.get(key), dict):
+            raw_calls.append(payload[key])
+    for key in ("toolCalls", "tool_calls", "tools"):
+        if isinstance(payload.get(key), list):
+            raw_calls.extend(payload[key])
+    message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
+    if message:
+        for key in ("toolCall", "tool_call"):
+            if isinstance(message.get(key), dict):
+                raw_calls.append(message[key])
+        for key in ("toolCalls", "tool_calls", "tools"):
+            if isinstance(message.get(key), list):
+                raw_calls.extend(message[key])
+    if not raw_calls and _source_collection_stage_tool_call_name(payload):
+        raw_calls.append(payload)
+
+    event_type = _trim_text(getattr(event, "event_type", ""), max_length=80)
+    normalized_calls: list[dict[str, Any]] = []
+    for raw in raw_calls:
+        if not isinstance(raw, dict):
+            continue
+        item = dict(raw)
+        if event_type:
+            item.setdefault("__eventType", event_type)
+        normalized_calls.append(item)
+    return normalized_calls
+
+
+def _source_collection_stage_tool_call_name(tool_call: dict[str, Any]) -> str:
+    if not isinstance(tool_call, dict):
+        return ""
+    return _trim_text(tool_call.get("name") or tool_call.get("toolName") or tool_call.get("tool_name"), max_length=160)
+
+
+def _source_collection_stage_tool_call_args(tool_call: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(tool_call, dict):
+        return {}
+    raw_args = tool_call.get("args")
+    if raw_args is None:
+        raw_args = tool_call.get("arguments")
+    if isinstance(raw_args, dict):
+        return dict(raw_args)
+    if isinstance(raw_args, str):
+        text = raw_args.strip()
+        if not text:
+            return {}
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return {}
+        return dict(parsed) if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _source_collection_stage_tool_call_succeeded(tool_call: dict[str, Any]) -> bool:
+    if not isinstance(tool_call, dict):
+        return False
+    status = _trim_text(
+        tool_call.get("status")
+        or tool_call.get("semanticStatus")
+        or tool_call.get("semantic_status")
+        or tool_call.get("transportStatus")
+        or tool_call.get("transport_status"),
+        max_length=80,
+    ).lower()
+    if status in {"failed", "failure", "error", "timeout", "timed_out", "blocked", "cancelled", "canceled", "no_result", "interrupted"}:
+        return False
+    if status in {"done", "success", "succeeded", "completed", "finished", "ready", "degraded", "observed", "returned"}:
+        return True
+    event_type = _trim_text(tool_call.get("__eventType"), max_length=80)
+    has_result = any(str(tool_call.get(key) or "").strip() for key in ("result", "summary", "resultPreview", "result_preview"))
+    return event_type == "tool_result" and has_result
+
+
+def _source_collection_stage_task_tool_item_id(
+    args: dict[str, Any],
+    checklist_by_id: dict[str, dict[str, Any]],
+    checklist_by_order: dict[int, dict[str, Any]],
+) -> str:
+    raw_task_id = args.get("task_id")
+    if raw_task_id is None:
+        raw_task_id = args.get("taskId")
+    if raw_task_id is None:
+        raw_task_id = args.get("id")
+    task_id = _trim_text(raw_task_id, max_length=160)
+    if task_id in checklist_by_id:
+        return task_id
+    match = re.search(r"\d+", task_id)
+    if match:
+        item = checklist_by_order.get(_normalize_int(match.group(0), default=0, minimum=0, maximum=1000))
+        item_id = _trim_text(item.get("id") if isinstance(item, dict) else "", max_length=120)
+        if item_id:
+            return item_id
+    description = _trim_text(args.get("description"), max_length=500)
+    if description:
+        for item_id, item in checklist_by_id.items():
+            if description == _trim_text(item.get("description"), max_length=500):
+                return item_id
+    return ""
+
+
+def _source_collection_stage_completion_gate(
+    *,
+    task_checklist: list[dict[str, Any]] | None,
+    artifact_complete: bool,
+    task_checklist_complete: bool,
+) -> dict[str, Any]:
+    requires_task_checklist = bool(task_checklist)
+    passed = bool(artifact_complete) and (not requires_task_checklist or bool(task_checklist_complete))
+    return {
+        "requiresTaskChecklist": requires_task_checklist,
+        "requiresArtifact": True,
+        "taskChecklistComplete": bool(task_checklist_complete),
+        "artifactComplete": bool(artifact_complete),
+        "passed": passed,
+    }
+
+
 def _source_collection_stage_task_chat_route(session_id: str, *, return_to: str, return_label: str) -> str:
     params = urllib.parse.urlencode(
         {
@@ -17643,6 +18352,7 @@ def _source_collection_stage_session_task_message(
     source_candidates: list[dict[str, Any]],
     storage_artifacts: dict[str, str],
     writeback_contract: dict[str, Any],
+    task_checklist: list[dict[str, Any]],
     previous_task: dict[str, Any] | None = None,
 ) -> str:
     can_materialize_formal_knowledge = _source_collection_stage_can_materialize_formal_knowledge(stage_id, agent_role)
@@ -17690,6 +18400,18 @@ def _source_collection_stage_session_task_message(
     if can_materialize_formal_knowledge:
         context_tool_payload["candidate_limit"] = 80
     context_tool_json = json.dumps(context_tool_payload, ensure_ascii=False, sort_keys=True)
+    task_tool_payload = [
+        {"id": item.get("id"), "description": item.get("description")}
+        for item in task_checklist
+        if isinstance(item, dict) and _trim_text(item.get("id"), max_length=120)
+    ]
+    task_tool_json = json.dumps(task_tool_payload, ensure_ascii=False, sort_keys=True)
+    task_checklist_lines = [
+        f"- {item.get('order', index)}. [{_trim_text(item.get('id'), max_length=120)}] {_trim_text(item.get('description'), max_length=300)}"
+        + (f"；工具：`{_trim_text(item.get('requiredTool'), max_length=120)}`" if _trim_text(item.get("requiredTool"), max_length=120) else "")
+        for index, item in enumerate(task_checklist, start=1)
+        if isinstance(item, dict)
+    ]
     previous_attempt_lines = _source_collection_stage_previous_attempt_lines(previous_task)
     previous_attempt_block = [*previous_attempt_lines, ""] if previous_attempt_lines else []
     return "\n".join(
@@ -17699,9 +18421,19 @@ def _source_collection_stage_session_task_message(
             context,
             "",
             *previous_attempt_block,
+            "## Task 工具检查清单",
+            "- 第一步必须调用 `task_create_tool` 创建本阶段 checklist；`task_list` 必须使用下方 JSON 的 id 和 description，不要自行改顺序或合并项。",
+            f"- 固定 checklist JSON：`{task_tool_json}`。",
+            *task_checklist_lines,
+            "- 完成每个检查项后调用 `task_update_tool` 打勾，参数为 task_id=<对应编号或工具返回编号>, is_completed=true, result_summary=...。",
+            "- 最后一项必须在 `source_collection_stage_writeback_tool` 返回后再打勾，并确认 `closureSummary.completionGatePassed=true` 或写明未通过原因。",
+            "- 如果任一检查项无法完成，不要自然语言声称完成；调用 `source_collection_stage_writeback_tool` 写入 blocked/failed/needs_review 和失败原因。",
+            "",
             "## 执行要求",
             "- 先用一句简短状态回应已接收任务，再按需要调用工具；不要让用户看到像未启动一样的空白等待。",
             f"- 先调用 `source_collection_context_tool` 读取本轮受控资料上下文，参数如下：`{context_tool_json}`。",
+            "- 资料寻找阶段的新资料首选写入 `candidateLeads[]`；兼容字段只用于历史回写，不要把自然语言表格当作唯一结果。",
+            "- 资料寻找阶段的无效来源写入 `invalidSources[]`，每条包含 title/sourceRef 或 DOI/url、reason，系统会记录并从后续流程过滤。",
             "- 在本会话里完成当前阶段任务，并把可审查的结论、证据引用和下一步写清楚。",
             "- 如果返回的 `recordPage.hasMore=true`，必须继续按 `record_offset=recordPage.nextOffset` 分页读取，直到本阶段应处理原始资料都有真实 recordId 的结论。",
             "- 如果返回的 `candidatePage.hasMore=true`，必须继续按 `candidate_offset=candidatePage.nextOffset` 分页读取，直到本阶段应处理候选都有真实 candidateId 的结论。",

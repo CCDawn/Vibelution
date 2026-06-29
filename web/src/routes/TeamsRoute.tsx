@@ -367,6 +367,23 @@ type SourceCollectionCoverageSummary = {
   duplicate?: number;
 };
 
+type SourceCollectionStageTaskToolProgress = {
+  required?: boolean;
+  total?: number;
+  completed?: number;
+  complete?: boolean;
+  completedIds?: string[];
+  pendingIds?: string[];
+};
+
+type SourceCollectionStageCompletionGate = {
+  requiresTaskChecklist?: boolean;
+  requiresArtifact?: boolean;
+  taskChecklistComplete?: boolean;
+  artifactComplete?: boolean;
+  passed?: boolean;
+};
+
 type SourceCollectionStageClosureSummary = {
   userStatus?: "success" | "partial" | "failed" | string;
   artifactStatus?: string;
@@ -381,6 +398,11 @@ type SourceCollectionStageClosureSummary = {
   invalidIds?: string[];
   retryInstruction?: string;
   nextAction?: string;
+  artifactComplete?: boolean;
+  taskChecklistComplete?: boolean;
+  completionGatePassed?: boolean;
+  taskToolProgress?: SourceCollectionStageTaskToolProgress;
+  completionGate?: SourceCollectionStageCompletionGate;
 };
 
 type SourceCollectionStageCardProjection = {
@@ -416,6 +438,10 @@ type SourceCollectionStageCardProjection = {
     invalidCandidateIds?: string[];
     invalidRecordIds?: string[];
     closureSummary?: SourceCollectionStageClosureSummary;
+    taskToolRequired?: boolean;
+    taskChecklist?: Array<{ id?: string; description?: string; order?: number }>;
+    taskToolProgress?: SourceCollectionStageTaskToolProgress;
+    completionGate?: SourceCollectionStageCompletionGate;
     materializedSources?: Record<string, unknown>;
     materializedContentExtraction?: Record<string, unknown>;
   };
@@ -545,6 +571,21 @@ function sourceCollectionCoverageMetric(
   return `processed ${processed}/${total}${missing > 0 ? ` · missing ${missing}` : ""}${invalid > 0 ? ` · invalid IDs ${invalid}` : ""}`;
 }
 
+function sourceCollectionTaskToolProgressMetric(
+  progress: SourceCollectionStageTaskToolProgress | null | undefined,
+  lang: "zh" | "en",
+) {
+  if (!progress?.required) {
+    return "";
+  }
+  const total = typeof progress.total === "number" ? progress.total : 0;
+  const completed = typeof progress.completed === "number" ? progress.completed : 0;
+  if (!total) {
+    return "";
+  }
+  return lang === "zh" ? `检查项 ${completed}/${total}` : `checklist ${completed}/${total}`;
+}
+
 function sourceCollectionStageTaskStatusLabel(status: string | null | undefined, lang: "zh" | "en") {
   const normalized = String(status || "").trim().toLowerCase();
   if (lang !== "zh") {
@@ -582,13 +623,17 @@ function sourceCollectionStageProjectionTaskMetric(
   const nextActionCount = typeof latestTask.nextActionCount === "number" ? latestTask.nextActionCount : 0;
   const taskStatusLabel = sourceCollectionStageTaskStatusLabel(latestTask.status || projection?.agentTaskStatus, lang);
   const coverageMetric = sourceCollectionCoverageMetric(latestTask.coverageSummary, lang, projection?.stageId);
+  const taskProgressMetric = sourceCollectionTaskToolProgressMetric(
+    latestTask.closureSummary?.taskToolProgress || latestTask.taskToolProgress,
+    lang,
+  );
   if (coverageMetric) {
-    return `${taskStatusLabel} · ${coverageMetric}${historicalTaskCount > 0 ? (lang === "zh" ? ` · 历史 ${historicalTaskCount}` : ` · historical ${historicalTaskCount}`) : ""}`;
+    return `${taskStatusLabel}${taskProgressMetric ? ` · ${taskProgressMetric}` : ""} · ${coverageMetric}${historicalTaskCount > 0 ? (lang === "zh" ? ` · 历史 ${historicalTaskCount}` : ` · historical ${historicalTaskCount}`) : ""}`;
   }
   if (lang === "zh") {
-    return `${taskStatusLabel} · 证据引用 ${evidenceCount} · 后续建议 ${nextActionCount}${historicalTaskCount > 0 ? ` · 历史任务 ${historicalTaskCount}` : ""}`;
+    return `${taskStatusLabel}${taskProgressMetric ? ` · ${taskProgressMetric}` : ""} · 证据引用 ${evidenceCount} · 后续建议 ${nextActionCount}${historicalTaskCount > 0 ? ` · 历史任务 ${historicalTaskCount}` : ""}`;
   }
-  return `${taskStatusLabel} · evidence ${evidenceCount} · next ${nextActionCount}${historicalTaskCount > 0 ? ` · historical ${historicalTaskCount}` : ""}`;
+  return `${taskStatusLabel}${taskProgressMetric ? ` · ${taskProgressMetric}` : ""} · evidence ${evidenceCount} · next ${nextActionCount}${historicalTaskCount > 0 ? ` · historical ${historicalTaskCount}` : ""}`;
 }
 
 function sourceCollectionStageArtifactSummaryLabel(
@@ -11804,6 +11849,9 @@ export function TeamsRoute({
                       <details className={styles.sourceCollectionStageTechnicalDetails}>
                         <summary>{lang === "zh" ? "技术详情" : "Technical details"}</summary>
                         <small>{sourceCollectionStageProjectionTaskMetric(module.projection, lang, sourceCollectionStageProjectionSyncing(module.projection))}</small>
+                        {module.projection.latestTask?.closureSummary?.completionGatePassed === false ? (
+                          <small>{lang === "zh" ? "仍需完成检查项或生成本阶段产物" : "Checklist or stage artifact is still incomplete"}</small>
+                        ) : null}
                         {module.projection.latestTask?.summary ? <small>{module.projection.latestTask.summary}</small> : null}
                         {module.projection.blockingReasons?.length ? (
                           <small className={styles.sourceCollectionStageBlockers}>

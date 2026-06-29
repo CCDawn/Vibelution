@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from core.chat.conversation_ledger import append_conversation_event
 from core.agent_kernel import service as agent_kernel_service
 from core.runtime_manager.work_run_store import WorkRunStore
 from core.web.services import (
@@ -46,6 +47,11 @@ def test_source_collection_agent_role_registries_only_include_four_stage_roles()
     assert retired.isdisjoint(agent_role_tool_profile_service.RESEARCH_SOURCE_ROLE_KEYS)
     for role_key in retired:
         assert agent_role_tool_profile_service.get_role_tool_profile(role_key) is None
+    for role_key in expected:
+        profile = agent_role_tool_profile_service.get_role_tool_profile(role_key)
+        assert profile is not None
+        assert "task_create_tool" in profile["allowedTools"]
+        assert "task_update_tool" in profile["allowedTools"]
 
 
 def test_source_collection_formal_knowledge_boundary_requires_source_ingestor_stage():
@@ -177,6 +183,54 @@ def _capture_workflow_events(monkeypatch):
         fake_record_runtime_scene_event,
     )
     return events
+
+
+def _append_stage_task_tool_trace(project_root: Path, task: dict, *, complete: bool = True) -> None:
+    session_id = task["sessionId"]
+    turn_id = task["turn"]["turnId"]
+    checklist = list(task.get("taskChecklist") or [])
+    append_conversation_event(
+        project_root,
+        session_id,
+        turn_id,
+        "tool_result",
+        status="done",
+        payload={
+            "toolCall": {
+                "name": "task_create_tool",
+                "status": "done",
+                "args": {
+                    "goal": task.get("title") or "知识搜集阶段任务",
+                    "task_list": [
+                        {"description": item["description"]}
+                        for item in checklist
+                    ],
+                },
+                "result": "task list created",
+            }
+        },
+    )
+    update_items = checklist if complete else checklist[: max(0, len(checklist) - 1)]
+    for item in update_items:
+        append_conversation_event(
+            project_root,
+            session_id,
+            turn_id,
+            "tool_result",
+            status="done",
+            payload={
+                "toolCall": {
+                    "name": "task_update_tool",
+                    "status": "done",
+                    "args": {
+                        "task_id": item["order"],
+                        "is_completed": True,
+                        "result_summary": item["description"],
+                    },
+                    "result": "task updated",
+                }
+            },
+        )
 
 
 def _workflow_scene_events_by_code(events, event_code):
@@ -1546,9 +1600,23 @@ def test_start_source_collection_stage_session_task_submits_direct_session_task(
     assert task["task"]["status"] == "running"
     assert task["task"]["writebackContract"]["writesFormalKnowledge"] is False
     assert task["task"]["writebackContract"]["endpoint"].endswith(f"/stage-session-tasks/{task['taskId']}/writeback")
+    assert task["task"]["taskToolRequired"] is True
+    assert task["task"]["completionGate"]["requiresTaskChecklist"] is True
+    assert task["task"]["completionGate"]["requiresArtifact"] is True
+    assert [item["id"] for item in task["task"]["taskChecklist"]] == [
+        "read_context",
+        "page_existing_sources",
+        "search_and_dedupe_sources",
+        "write_candidate_leads",
+        "write_invalid_sources",
+        "confirm_materialized_sources",
+    ]
     assert submitted[0]["sessionId"] == direct_session["id"]
     assert "资料搜集阶段任务" in submitted[0]["content"]
     assert "会立即要求当前 Agent 在本会话执行" in submitted[0]["content"]
+    assert "第一步必须调用 `task_create_tool`" in submitted[0]["content"]
+    assert "完成每个检查项后调用 `task_update_tool`" in submitted[0]["content"]
+    assert "candidateLeads[]" in submitted[0]["content"]
     assert "先用一句简短状态回应已接收任务" in submitted[0]["content"]
     assert "source_collection_context_tool" in submitted[0]["content"]
     assert "source_collection_stage_writeback_tool" in submitted[0]["content"]
@@ -2107,16 +2175,19 @@ def test_source_collection_stage_session_task_writeback_records_structured_resul
         },
     )
 
-    assert result["task"]["status"] == "completed"
+    assert result["task"]["status"] == "needs_review"
     assert result["task"]["result"]["recordCount"] == 3
+    assert result["task"]["result"]["closureSummary"]["artifactComplete"] is False
+    assert result["task"]["result"]["closureSummary"]["completionGatePassed"] is False
+    assert "没有生成可用" in result["task"]["result"]["closureSummary"]["message"]
     assert result["task"]["writesFormalKnowledge"] is False
     assert result["task"]["writesRag"] is False
-    assert result["writeback"]["status"] == "completed"
+    assert result["writeback"]["status"] == "needs_review"
     assert result["boundaries"]["writesFormalKnowledge"] is False
     status_payload = team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
     latest_round = status_payload["latestRound"]
     stage_results = latest_round.get("sourceCollectionStageSessionTasks", [])
-    assert any(item["taskId"] == task["taskId"] and item["status"] == "completed" for item in stage_results)
+    assert any(item["taskId"] == task["taskId"] and item["status"] == "needs_review" for item in stage_results)
 
 
 def test_source_collection_stage_session_task_writeback_closes_running_turn_status(tmp_path, monkeypatch):
@@ -2291,6 +2362,153 @@ def test_source_collection_stage_session_task_writeback_materializes_search_lead
     assert writeback_events[-1]["child_log_payload"]["materializedKnowledgeIngestion"]["status"] == "skipped_stage"
 
 
+def test_source_collection_stage_session_task_writeback_materializes_source_records_alias(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
+    discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
+    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
+    )
+    stage_response = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {
+            "stageType": "knowledge_collection",
+            "topic": "预测编码",
+            "goal": "搜集可追踪资料",
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": discovery["agentId"]},
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = stage_response["run"]["runId"]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": "turn-stage-task-source-records",
+            "status": "running",
+        },
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "finding", "agentId": discovery["agentId"], "agentRole": "source_finder"},
+    )
+
+    response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "已发现 1 条核心论文，并排除 1 条无效来源。",
+            "result": {
+                "source_records": [
+                    {
+                        "title": "Predictive coding in the visual cortex",
+                        "authors": "Rao RPN, Ballard DH",
+                        "year": "1999",
+                        "doi": "10.1038/4580",
+                        "sourceType": "paper",
+                        "summary": "预测编码奠基论文。",
+                    }
+                ],
+                "invalid_sources": [
+                    {
+                        "title": "Unrelated machining paper",
+                        "sourceRef": "https://example.com/noise",
+                        "reason": "out_of_scope",
+                    }
+                ],
+            },
+        },
+    )
+
+    materialized = response["writeback"]["materializedSources"]
+    assert response["task"]["status"] == "needs_review"
+    assert response["task"]["result"]["closureSummary"]["artifactComplete"] is True
+    assert response["task"]["result"]["closureSummary"]["completionGatePassed"] is False
+    assert response["task"]["result"]["closureSummary"]["taskToolProgress"]["taskCreateObserved"] is False
+    assert materialized["sourceLeadCount"] == 1
+    assert materialized["createdRecordCount"] == 1
+    assert materialized["importedCandidateCount"] == 1
+    assert materialized["excludedSourceCount"] == 1
+    assert materialized["excludedSources"][0]["reason"] == "out_of_scope"
+    assert data_processing_service.list_records(run_id)["summary"]["recordCount"] == 1
+    candidates = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")
+    assert candidates["candidateCount"] == 1
+    _append_stage_task_tool_trace(tmp_path, response["task"])
+
+    status_payload = team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
+    latest_round = status_payload["latestRound"]
+    collection_card = next(card for card in latest_round["sourceCollectionStageCards"] if card["stageId"] == "finding")
+    assert collection_card["latestTask"]["status"] == "completed"
+    assert collection_card["latestTask"]["closureSummary"]["completionGatePassed"] is True
+    assert collection_card["latestTask"]["closureSummary"]["taskToolProgress"]["completed"] == len(response["task"]["taskChecklist"])
+
+
+def test_source_collection_stage_session_task_writeback_rejects_leads_without_identity(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
+    discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
+    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
+    )
+    stage_response = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {
+            "stageType": "knowledge_collection",
+            "topic": "预测编码",
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": discovery["agentId"]},
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": "turn-stage-task-invalid-lead",
+            "status": "running",
+        },
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        stage_response["run"]["runId"],
+        {"stageId": "finding", "agentId": discovery["agentId"], "agentRole": "source_finder"},
+    )
+
+    response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "只有一条缺少 locator 的线索。",
+            "result": {"source_records": [{"title": "A vague source without locator", "year": "2020"}]},
+        },
+    )
+
+    assert response["task"]["status"] == "needs_review"
+    materialized = response["writeback"]["materializedSources"]
+    assert materialized["sourceLeadCount"] == 1
+    assert materialized["createdRecordCount"] == 0
+    assert materialized["importedCandidateCount"] == 0
+    assert materialized["skippedCount"] == 1
+    assert response["task"]["result"]["closureSummary"]["artifactComplete"] is False
+    assert response["task"]["result"]["closureSummary"]["completionGatePassed"] is False
+
+
 def test_source_ingestor_writeback_auto_ingests_high_confidence_sources(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
@@ -2410,9 +2628,18 @@ def test_source_ingestor_writeback_auto_ingests_high_confidence_sources(tmp_path
     assert response["writeback"]["materializedKnowledgeIngestion"]["approvedCandidateCount"] == 1
     assert response["writeback"]["materializedKnowledgeIngestion"]["formalKnowledgeItemCount"] == 1
     assert knowledge_items["summary"]["itemCount"] == 1
+    assert response["task"]["status"] == "needs_review"
+    assert response["task"]["result"]["closureSummary"]["completionGatePassed"] is False
+    assert ingestion_card["status"] == "artifact_ready_agent_needs_review"
+    _append_stage_task_tool_trace(tmp_path, response["task"])
+
+    team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
+    projection = team_workflow_orchestration_service._source_collection_stage_cards_projection(team["teamId"], run_id)
+    ingestion_card = next(card for card in projection["cards"] if card["stageId"] == "ingestion")
     assert ingestion_card["status"] == "closed_loop"
     assert ingestion_card["counts"]["output"] == 1
     assert ingestion_card["latestTask"]["materializedKnowledgeIngestion"]["status"] == "completed"
+    assert ingestion_card["latestTask"]["closureSummary"]["completionGatePassed"] is True
     ingestion_events = _workflow_scene_events_by_code(scene_events, "source_collection.stage_session_task_knowledge_ingestion_materialized")
     assert ingestion_events[-1]["child_log_payload"]["kind"] == "source_collection_stage_knowledge_ingestion_materialization"
     assert ingestion_events[-1]["child_log_payload"]["status"] == "completed"
@@ -2710,11 +2937,12 @@ def test_research_stage_status_repairs_missing_round_and_projects_stage_cards(tm
     assert set(card_by_stage) == {"finding", "extraction", "relations", "ingestion"}
     candidate_card = card_by_stage["extraction"]
     assert candidate_card["status"] == "agent_done_artifact_pending"
-    assert candidate_card["agentTaskStatus"] == "completed"
+    assert candidate_card["agentTaskStatus"] == "needs_review"
     assert candidate_card["artifactStatus"] == "empty"
     assert candidate_card["counts"]["artifact"] == 0
     assert candidate_card["latestTask"]["taskId"] == task["taskId"]
-    assert candidate_card["latestTask"]["status"] == "completed"
+    assert candidate_card["latestTask"]["status"] == "needs_review"
+    assert candidate_card["latestTask"]["closureSummary"]["completionGatePassed"] is False
     assert candidate_card["latestTask"]["evidenceRefCount"] == 5
     assert candidate_card["latestTask"]["nextActionCount"] == 4
     assert candidate_card["blockingReasons"]
@@ -2952,11 +3180,12 @@ def test_research_stage_status_reconciles_completed_stage_task_turn_result(tmp_p
     latest_round = status_payload["latestRound"]
     stage_tasks = latest_round.get("sourceCollectionStageSessionTasks", [])
     reconciled = next(item for item in stage_tasks if item["taskId"] == task["taskId"])
-    assert reconciled["status"] == "completed"
+    assert reconciled["status"] == "needs_review"
     task_store = team_workflow_orchestration_service._load_source_collection_stage_session_task_store(team["teamId"], run_id)
     stored_task = next(item for item in task_store["tasks"] if item["taskId"] == task["taskId"])
-    assert stored_task["status"] == "completed"
+    assert stored_task["status"] == "needs_review"
     assert stored_task["writeback"]["resultAuthority"] == "agent_turn_result_reconciliation"
+    assert stored_task["result"]["closureSummary"]["completionGatePassed"] is False
 
 
 def test_research_stage_status_reconciles_blocked_stage_task_turn_result(tmp_path, monkeypatch):
@@ -3081,6 +3310,9 @@ def test_source_collection_stage_tools_read_context_and_writeback(tmp_path, monk
             max_records=5,
         )
     )
+    assert context_payload["status"] == "ok"
+    assert context_payload["records"][0]["doi"] == "10.0000/tool-context"
+    _append_stage_task_tool_trace(tmp_path, task["task"])
     writeback_payload = json.loads(
         source_collection_stage_writeback_tool(
             team_id=team["teamId"],
@@ -3104,9 +3336,6 @@ def test_source_collection_stage_tools_read_context_and_writeback(tmp_path, monk
             recorded_by_agent=agent["agentId"],
         )
     )
-
-    assert context_payload["status"] == "ok"
-    assert context_payload["records"][0]["doi"] == "10.0000/tool-context"
     assert writeback_payload["writeback"]["status"] == "completed"
     assert writeback_payload["task"]["result"]["coverageSummary"]["processed"] == 1
     tool_event_codes = [args[2] for args, _kwargs in tool_events]
@@ -3325,6 +3554,7 @@ def test_source_quality_stage_writeback_materializes_candidate_decisions(tmp_pat
         {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
     )
 
+    _append_stage_task_tool_trace(tmp_path, task["task"])
     response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
         team["teamId"],
         task["taskId"],
@@ -3471,6 +3701,7 @@ def test_content_extraction_writeback_requires_candidate_coverage_and_materializ
     assert extraction["taskId"] == task["taskId"]
     assert extraction["summary"] == "预测编码皮层层级可启发神经网络结构。"
 
+    _append_stage_task_tool_trace(tmp_path, task["task"])
     complete = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
         team["teamId"],
         task["taskId"],
@@ -3634,6 +3865,7 @@ def test_content_extraction_writeback_reports_no_effect_closure_for_invalid_raw_
         {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
     )
 
+    _append_stage_task_tool_trace(tmp_path, task["task"])
     response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
         team["teamId"],
         task["taskId"],
@@ -3710,6 +3942,7 @@ def test_content_extraction_writeback_excludes_no_content_records_and_keeps_valu
         {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
     )
 
+    _append_stage_task_tool_trace(tmp_path, task["task"])
     response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
         team["teamId"],
         task["taskId"],
@@ -4022,6 +4255,7 @@ def test_knowledge_steward_memory_writeback_auto_ingests_approved_candidates(tmp
         "nextActions": ["进入实验规划"],
     }
 
+    _append_stage_task_tool_trace(tmp_path, task["task"])
     response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
         team["teamId"],
         task["taskId"],
@@ -4244,6 +4478,7 @@ def test_candidate_graph_stage_writeback_materializes_candidate_graph(tmp_path, 
         {"stageId": "relations", "agentId": agent["agentId"], "agentRole": "source_relation_mapper"},
     )
 
+    _append_stage_task_tool_trace(tmp_path, task["task"])
     response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
         team["teamId"],
         task["taskId"],
