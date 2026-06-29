@@ -8,9 +8,17 @@ export type AgentSummaryMetric = {
   tone?: VuiTone;
 };
 
+export type AgentSummaryStatus = {
+  label: string;
+  title?: string;
+  ariaLabel?: string;
+  tone?: VuiTone;
+};
+
 export type AgentSummaryStripProps = {
   ariaLabel: string;
   metrics: AgentSummaryMetric[];
+  status?: AgentSummaryStatus;
 };
 
 function metricToneClass(tone: VuiTone | undefined): string {
@@ -32,6 +40,7 @@ function metricToneClass(tone: VuiTone | undefined): string {
 export function AgentSummaryStrip({
   ariaLabel,
   metrics,
+  status,
 }: AgentSummaryStripProps) {
   return (
     <section
@@ -39,6 +48,20 @@ export function AgentSummaryStrip({
       aria-label={ariaLabel}
       className="grid min-w-0 grid-flow-col auto-cols-[minmax(72px,1fr)] overflow-hidden rounded-[var(--radius-control)] border border-vui-border-hairline bg-vui-surface-panel/80"
     >
+      {status ? (
+        <div className="grid min-w-0 items-center border-r border-vui-border-hairline px-2 py-1">
+          <span
+            title={status.title}
+            aria-label={status.ariaLabel}
+            className={[
+              "inline-flex min-w-0 items-center justify-center truncate rounded-full border border-vui-border-hairline px-2 py-0.5 text-[0.68rem] font-semibold leading-none",
+              metricToneClass(status.tone),
+            ].join(" ")}
+          >
+            {status.label}
+          </span>
+        </div>
+      ) : null}
       {metrics.map((metric, index) => (
         <div
           key={metric.id}
