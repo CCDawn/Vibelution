@@ -48,6 +48,7 @@ import {
   shouldArmBrowserProjectCloseGuard,
   shouldBlockProjectWindowClose,
 } from "../app/projectCloseGuard";
+import { VButton } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import styles from "./LauncherRoute.module.css";
 
@@ -799,26 +800,28 @@ function LauncherStartupSettingsPanel({
         {frontendPortOverride ? <small>{copy.portOverride}: {frontendPortOverride}</small> : null}
       </label>
       <div className={styles.segmentedControl} role="group" aria-label={copy.windowMode}>
-        <button
+        <VButton
           type="button"
+          variant="secondary"
           data-active={draft.workbench.windowMode === "fullscreen"}
-          disabled={controlsDisabled}
-          onClick={() => saveWindowMode({ windowMode: "fullscreen" })}
+          isDisabled={controlsDisabled}
+          onPress={() => saveWindowMode({ windowMode: "fullscreen" })}
           title={copy.windowModeFullscreen}
+          icon={pendingWindowMode === "fullscreen" ? <LoaderCircle size={14} className={styles.spin} /> : <Maximize2 size={14} />}
         >
-          {pendingWindowMode === "fullscreen" ? <LoaderCircle size={14} className={styles.spin} /> : <Maximize2 size={14} />}
           <span>{copy.windowModeFullscreen}</span>
-        </button>
-        <button
+        </VButton>
+        <VButton
           type="button"
+          variant="secondary"
           data-active={draft.workbench.windowMode === "windowed"}
-          disabled={controlsDisabled}
-          onClick={() => saveWindowMode({ windowMode: "windowed" })}
+          isDisabled={controlsDisabled}
+          onPress={() => saveWindowMode({ windowMode: "windowed" })}
           title={copy.windowModeWindowed}
+          icon={pendingWindowMode === "windowed" ? <LoaderCircle size={14} className={styles.spin} /> : <Minimize2 size={14} />}
         >
-          {pendingWindowMode === "windowed" ? <LoaderCircle size={14} className={styles.spin} /> : <Minimize2 size={14} />}
           <span>{copy.windowModeWindowed}</span>
-        </button>
+        </VButton>
       </div>
       <label className={styles.settingField}>
         <span>{copy.windowSize}</span>
@@ -862,10 +865,9 @@ function LauncherStartupSettingsPanel({
         />
         <span>{copy.requireVenv}</span>
       </label>
-      <button type="button" className={styles.settingsSaveButton} disabled={controlsDisabled} onClick={saveDraft}>
-        {pending ? <LoaderCircle size={14} className={styles.spin} /> : <RefreshCw size={14} />}
+      <VButton type="button" variant="secondary" className={styles.settingsSaveButton} isDisabled={controlsDisabled} onPress={saveDraft} icon={pending ? <LoaderCircle size={14} className={styles.spin} /> : <RefreshCw size={14} />}>
         <span>{copy.saveStartupSettings}</span>
-      </button>
+      </VButton>
       {validationError ? <small className={styles.settingError} role="alert">{validationError}</small> : null}
     </div>
   );
@@ -948,26 +950,28 @@ function DeveloperModePanel({
           <p className={styles.panelEyebrow}>{copy.developerModeControlled}</p>
           <strong>{copy.developerModeTitle}</strong>
         </div>
-        <button
+        <VButton
           type="button"
+          variant={enabled ? "danger" : "primary"}
           className={enabled ? `${styles.iconButton} ${styles.dangerButton}` : styles.primaryButton}
-          disabled={controlsDisabled}
-          onClick={() => onToggle(!enabled, setting?.configHash ?? "")}
+          isDisabled={controlsDisabled}
+          onPress={() => onToggle(!enabled, setting?.configHash ?? "")}
           title={enabled ? copy.developerModeDisable : copy.developerModeEnable}
+          icon={pending ? <LoaderCircle size={15} className={styles.spin} /> : <ShieldCheck size={15} />}
         >
-          {pending ? <LoaderCircle size={15} className={styles.spin} /> : <ShieldCheck size={15} />}
           <span>{enabled ? copy.developerModeDisable : copy.developerModeEnable}</span>
-        </button>
-        <button
+        </VButton>
+        <VButton
           type="button"
+          variant="secondary"
           className={styles.iconButton}
-          disabled={!enabled || controlsDisabled || resetPending}
-          onClick={onReset}
+          isDisabled={!enabled || controlsDisabled || resetPending}
+          onPress={onReset}
           title={copy.developerModeResetSandbox}
+          icon={resetPending ? <LoaderCircle size={15} className={styles.spin} /> : <RefreshCw size={15} />}
         >
-          {resetPending ? <LoaderCircle size={15} className={styles.spin} /> : <RefreshCw size={15} />}
           <span>{copy.developerModeResetSandbox}</span>
-        </button>
+        </VButton>
       </div>
       <div className={styles.developerGrid}>
         <div className={styles.developerStatus} data-tone={enabled ? "warning" : "neutral"} aria-label={`${copy.developerModeCurrentState}: ${developerModeStateLabel}`}>
@@ -978,10 +982,9 @@ function DeveloperModePanel({
         <div className={styles.developerNoise}>
           <div className={styles.developerNoiseHeader}>
             <span>{copy.developerModeNoiseOverview}</span>
-            <button type="button" className={styles.compactButton} onClick={onRefreshNoise} disabled={noiseLoading}>
-              {noiseLoading ? <LoaderCircle size={13} className={styles.spin} /> : <RefreshCw size={13} />}
+            <VButton type="button" variant="secondary" className={styles.compactButton} onPress={onRefreshNoise} isDisabled={noiseLoading} icon={noiseLoading ? <LoaderCircle size={13} className={styles.spin} /> : <RefreshCw size={13} />}>
               <span>{copy.developerModeRefreshNoise}</span>
-            </button>
+            </VButton>
           </div>
           {noiseLoading && !noiseOverview ? <small>{copy.developerModeNoiseLoading}</small> : null}
           <div className={styles.noiseItemGrid}>
@@ -1008,14 +1011,12 @@ function DeveloperModePanel({
             <span>{copy.cleanupTargets}: <strong>{matchingOverview?.targetCount ?? plan?.targetCount ?? 0}</strong></span>
           </div>
           <div className={styles.cleanupActions}>
-            <button type="button" className={styles.iconButton} disabled={!canPreview} onClick={onPreview} title={!enabled ? copy.cleanupDisabledOff : copy.cleanupPreview}>
-              {previewPending ? <LoaderCircle size={14} className={styles.spin} /> : <Trash2 size={14} />}
+            <VButton type="button" variant="secondary" className={styles.iconButton} isDisabled={!canPreview} onPress={onPreview} title={!enabled ? copy.cleanupDisabledOff : copy.cleanupPreview} icon={previewPending ? <LoaderCircle size={14} className={styles.spin} /> : <Trash2 size={14} />}>
               <span>{copy.cleanupPreview}</span>
-            </button>
-            <button type="button" className={styles.primaryButton} disabled={!canApply} onClick={onApply} title={!enabled ? copy.cleanupDisabledOff : copy.cleanupApply}>
-              {applyPending ? <LoaderCircle size={14} className={styles.spin} /> : selectedAction === "db_compact" ? <Database size={14} /> : <HardDrive size={14} />}
+            </VButton>
+            <VButton type="button" variant="primary" className={styles.primaryButton} isDisabled={!canApply} onPress={onApply} title={!enabled ? copy.cleanupDisabledOff : copy.cleanupApply} icon={applyPending ? <LoaderCircle size={14} className={styles.spin} /> : selectedAction === "db_compact" ? <Database size={14} /> : <HardDrive size={14} />}>
               <span>{copy.cleanupApply}</span>
-            </button>
+            </VButton>
           </div>
           {plan ? (
             <div className={styles.cleanupPlan}>
@@ -1091,14 +1092,12 @@ function ProjectMaintenancePanel({
           <p className={styles.panelEyebrow}>Launcher 维护中心</p>
           <strong>{copy.maintenanceTitle}</strong>
         </div>
-        <button type="button" className={styles.iconButton} onClick={onPreview} disabled={!canPreview} title={copy.maintenancePreview}>
-          {previewPending ? <LoaderCircle size={15} className={styles.spin} /> : <Trash2 size={15} />}
+        <VButton type="button" variant="secondary" className={styles.iconButton} onPress={onPreview} isDisabled={!canPreview} title={copy.maintenancePreview} icon={previewPending ? <LoaderCircle size={15} className={styles.spin} /> : <Trash2 size={15} />}>
           <span>{copy.maintenancePreview}</span>
-        </button>
-        <button type="button" className={styles.primaryButton} onClick={onApply} disabled={!canApply} title={canApply ? copy.maintenanceApply : applyTitle}>
-          {applyPending ? <LoaderCircle size={15} className={styles.spin} /> : <ShieldCheck size={15} />}
+        </VButton>
+        <VButton type="button" variant="primary" className={styles.primaryButton} onPress={onApply} isDisabled={!canApply} title={canApply ? copy.maintenanceApply : applyTitle} icon={applyPending ? <LoaderCircle size={15} className={styles.spin} /> : <ShieldCheck size={15} />}>
           <span>{copy.maintenanceApply}</span>
-        </button>
+        </VButton>
       </div>
       <div className={styles.developerGrid}>
         <div className={styles.developerStatus} data-tone="warning">
@@ -1116,17 +1115,18 @@ function ProjectMaintenancePanel({
               ["clean_start", copy.maintenanceCleanStart],
               ["factory_runtime", copy.maintenanceFactoryRuntime],
             ].map(([profile, label]) => (
-              <button
+              <VButton
                 key={profile}
                 type="button"
+                variant="secondary"
                 data-active={maintenanceProfile === profile}
-                disabled={previewPending || applyPending}
-                onClick={() => {
+                isDisabled={previewPending || applyPending}
+                onPress={() => {
                   onProfileChange(profile as LauncherMaintenanceProfileId);
                 }}
               >
                 {label}
-              </button>
+              </VButton>
             ))}
           </div>
           <div className={styles.noiseItemGrid}>
@@ -2560,22 +2560,18 @@ export function LauncherRoute() {
             <small>{statusBarReasonText}</small>
           </div>
           <div className={styles.statusBarActions} aria-label={copy.lifecycleControls}>
-            <button type="button" className={styles.statusBarButton} onClick={() => void statusQuery.refetch()} disabled={statusQuery.isFetching} title={copy.refresh}>
-              {statusQuery.isFetching ? <LoaderCircle size={15} className={styles.spin} /> : <RefreshCw size={15} />}
+            <VButton type="button" variant="secondary" className={styles.statusBarButton} onPress={() => void statusQuery.refetch()} isDisabled={statusQuery.isFetching} title={copy.refresh} icon={statusQuery.isFetching ? <LoaderCircle size={15} className={styles.spin} /> : <RefreshCw size={15} />}>
               <span>{copy.refresh}</span>
-            </button>
-            <button type="button" className={`${styles.statusBarButton} ${styles.primaryButton}`} onClick={() => controlMutation.mutate("start")} disabled={startDisabled} title={startDisabled ? startDisabledReason : copy.start}>
-              <Play size={15} />
+            </VButton>
+            <VButton type="button" variant="primary" className={`${styles.statusBarButton} ${styles.primaryButton}`} onPress={() => controlMutation.mutate("start")} isDisabled={startDisabled} title={startDisabled ? startDisabledReason : copy.start} icon={<Play size={15} />}>
               <span>{copy.start}</span>
-            </button>
-            <button type="button" className={styles.statusBarButton} onClick={() => controlMutation.mutate("restart")} disabled={destructiveActionDisabled} title={destructiveActionDisabled ? destructiveActionDisabledReason : copy.restart}>
-              <RefreshCw size={15} />
+            </VButton>
+            <VButton type="button" variant="secondary" className={styles.statusBarButton} onPress={() => controlMutation.mutate("restart")} isDisabled={destructiveActionDisabled} title={destructiveActionDisabled ? destructiveActionDisabledReason : copy.restart} icon={<RefreshCw size={15} />}>
               <span>{copy.restart}</span>
-            </button>
-            <button type="button" className={styles.statusBarButton} onClick={() => controlMutation.mutate("stop")} disabled={stopDisabled} title={stopDisabled ? stopDisabledReason : copy.stop}>
-              <Square size={15} />
+            </VButton>
+            <VButton type="button" variant="secondary" className={styles.statusBarButton} onPress={() => controlMutation.mutate("stop")} isDisabled={stopDisabled} title={stopDisabled ? stopDisabledReason : copy.stop} icon={<Square size={15} />}>
               <span>{copy.stop}</span>
-            </button>
+            </VButton>
             {bundle?.url ? (
               <a className={styles.statusBarButton} href={bundle.url} target="_blank" rel="noreferrer" title={copy.open}>
                 <ExternalLink size={15} />
@@ -2609,10 +2605,9 @@ export function LauncherRoute() {
         <span>{copy.forceStop}</span>
         <small>{forceStopDisabled ? forceStopDisabledReason : copy.forceStopHint}</small>
         <div className={styles.dangerActions}>
-          <button type="button" className={`${styles.iconButton} ${styles.dangerButton}`} onClick={() => controlMutation.mutate("force-stop")} disabled={forceStopDisabled} title={forceStopDisabled ? forceStopDisabledReason : copy.forceStop}>
-            <Power size={15} />
+          <VButton type="button" variant="danger" className={`${styles.iconButton} ${styles.dangerButton}`} onPress={() => controlMutation.mutate("force-stop")} isDisabled={forceStopDisabled} title={forceStopDisabled ? forceStopDisabledReason : copy.forceStop} icon={<Power size={15} />}>
             <span>{copy.forceStop}</span>
-          </button>
+          </VButton>
         </div>
       </div>
 
@@ -2789,10 +2784,9 @@ export function LauncherRoute() {
                 <span>{copy.maintenanceScopeSummary}</span>
                 <strong>{copy.owned}: {guardian?.ownedCount ?? 0}</strong>
                 <strong>{copy.legacyAdapter}: {guardian?.adapterCount ?? 0}</strong>
-                <button type="button" className={styles.iconButton} onClick={() => supervisorMutation.mutate()} disabled={busy || !canRequestSupervisorReattach} title={copy.reattachSupervisor}>
-                  {supervisorMutation.isPending ? <LoaderCircle size={15} className={styles.spin} /> : <RefreshCw size={15} />}
+                <VButton type="button" variant="secondary" className={styles.iconButton} onPress={() => supervisorMutation.mutate()} isDisabled={busy || !canRequestSupervisorReattach} title={copy.reattachSupervisor} icon={supervisorMutation.isPending ? <LoaderCircle size={15} className={styles.spin} /> : <RefreshCw size={15} />}>
                   <span>{copy.reattachSupervisor}</span>
-                </button>
+                </VButton>
               </div>
               <div className={styles.guardianTable} role="table" aria-label={copy.guardian}>
                 <div className={styles.guardianHead} role="row">

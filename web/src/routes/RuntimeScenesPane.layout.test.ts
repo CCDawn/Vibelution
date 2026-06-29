@@ -3,6 +3,13 @@ import { describe, expect, it } from "vitest";
 import paneSource from "./RuntimeScenesPane.tsx?raw";
 
 describe("RuntimeScenesPane layout contract", () => {
+  it("routes runtime scene controls through VUI primitives", () => {
+    expect(paneSource).toContain("from \"../components/vui\"");
+    expect(paneSource).toContain("<VButton");
+    expect(paneSource).toContain("<VIconButton");
+    expect(paneSource).not.toMatch(/<button\b/);
+  });
+
   it("renders package diagnosis before evidence metrics and raw log sections", () => {
     const diagnosisIndex = paneSource.indexOf("{renderPackageDiagnosisPanel(scene, lang, handleOpenRawLog)}");
     const evidenceIndex = paneSource.indexOf('<div className={styles.sceneEvidenceStrip}>');
