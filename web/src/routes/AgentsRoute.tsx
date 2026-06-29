@@ -59,6 +59,7 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import {
+  AgentBulkActionBar,
   AgentPageHeader,
   AgentSummaryStrip,
   AgentWorkspacePanel,
@@ -5500,6 +5501,76 @@ export function AgentsRoute() {
     );
   };
 
+  const bulkActionSummary = (
+    <>
+      <CheckSquare size={15} />
+      <strong>{copy.bulkSelected}</strong>
+      <span>{selectedBulkAgents.length} / {visibleAgents.length}</span>
+    </>
+  );
+
+  const bulkSelectionActions = (
+    <>
+      <button
+        type="button"
+        className={styles.secondaryButton}
+        disabled={!visibleAgents.length || bulkAgentPending}
+        onClick={allVisibleAgentsSelected ? clearBulkAgents : selectVisibleBulkAgents}
+      >
+        {allVisibleAgentsSelected ? <Square size={14} /> : <CheckSquare size={14} />}
+        <span>{allVisibleAgentsSelected ? copy.bulkClear : copy.bulkSelectVisible}</span>
+      </button>
+      <button type="button" className={styles.secondaryButton} disabled={!selectedBulkAgents.length || bulkAgentPending} onClick={clearBulkAgents}>
+        <Square size={14} />
+        <span>{copy.bulkClear}</span>
+      </button>
+    </>
+  );
+
+  const bulkPromptPicker = (
+    <label className="inline-flex min-w-[180px] max-w-full items-center gap-1.5 text-[0.74rem] font-semibold text-vui-fg-secondary">
+      <span className="shrink-0 whitespace-nowrap">{copy.bulkPromptLabel}</span>
+      <select
+        className="min-h-[26px] min-w-0 flex-1 rounded-[var(--radius-control)] border border-vui-border-subtle bg-[var(--surface-input-strong)] px-2 text-vui-fg-primary"
+        value={bulkPromptTemplateId}
+        disabled={bulkAgentPending}
+        onChange={(event) => setBulkPromptTemplateId(event.target.value)}
+      >
+        <option value="">{copy.bulkPromptPlaceholder}</option>
+        {workspace?.promptTemplates.map((template) => (
+          <option key={template.promptTemplateId || template.templateId} value={template.promptTemplateId || template.templateId || ""}>
+            {promptTemplateOptionLabel(template, lang)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+
+  const bulkMutationActions = (
+    <>
+      <button
+        type="button"
+        className={styles.primaryButton}
+        disabled={!selectedBulkAgents.length || !bulkPromptTemplateId || bulkAgentPending}
+        onClick={bulkApplyPromptTemplate}
+      >
+        <CheckCircle2 size={14} />
+        <span>{bulkAgentPending ? copy.bulkWorking : copy.bulkApplyPrompt}</span>
+      </button>
+      <button type="button" className={styles.secondaryButton} disabled={!selectedBulkAgents.length || bulkAgentPending} onClick={bulkArchiveAgents}>
+        <Archive size={14} />
+        <span>{bulkAgentPending ? copy.bulkWorking : copy.bulkArchive}</span>
+      </button>
+    </>
+  );
+
+  const bulkDestructiveActions = (
+    <button type="button" className={styles.dangerButton} disabled={!selectedBulkAgents.length || bulkAgentPending} onClick={bulkPurgeAgents}>
+      <Trash2 size={14} />
+      <span>{bulkAgentPending ? copy.bulkWorking : copy.bulkPurge}</span>
+    </button>
+  );
+
   return (
     <section className={styles.route}>
       <div title={copy.subtitle}>
@@ -5816,58 +5887,14 @@ export function AgentsRoute() {
             </section>
           ) : null}
           {!createOpen ? (
-            <section className={styles.bulkActionBar} aria-label={copy.bulkSelected}>
-              <div className={styles.bulkSummary}>
-                <CheckSquare size={15} />
-                <strong>{copy.bulkSelected}</strong>
-                <span>{selectedBulkAgents.length} / {visibleAgents.length}</span>
-              </div>
-              <button
-                type="button"
-                className={styles.secondaryButton}
-                disabled={!visibleAgents.length || bulkAgentPending}
-                onClick={allVisibleAgentsSelected ? clearBulkAgents : selectVisibleBulkAgents}
-              >
-                {allVisibleAgentsSelected ? <Square size={14} /> : <CheckSquare size={14} />}
-                <span>{allVisibleAgentsSelected ? copy.bulkClear : copy.bulkSelectVisible}</span>
-              </button>
-              <button type="button" className={styles.secondaryButton} disabled={!selectedBulkAgents.length || bulkAgentPending} onClick={clearBulkAgents}>
-                <Square size={14} />
-                <span>{copy.bulkClear}</span>
-              </button>
-              <label className={styles.bulkPromptPicker}>
-                <span>{copy.bulkPromptLabel}</span>
-                <select
-                  value={bulkPromptTemplateId}
-                  disabled={bulkAgentPending}
-                  onChange={(event) => setBulkPromptTemplateId(event.target.value)}
-                >
-                  <option value="">{copy.bulkPromptPlaceholder}</option>
-                  {workspace?.promptTemplates.map((template) => (
-                    <option key={template.promptTemplateId || template.templateId} value={template.promptTemplateId || template.templateId || ""}>
-                      {promptTemplateOptionLabel(template, lang)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button
-                type="button"
-                className={styles.primaryButton}
-                disabled={!selectedBulkAgents.length || !bulkPromptTemplateId || bulkAgentPending}
-                onClick={bulkApplyPromptTemplate}
-              >
-                <CheckCircle2 size={14} />
-                <span>{bulkAgentPending ? copy.bulkWorking : copy.bulkApplyPrompt}</span>
-              </button>
-              <button type="button" className={styles.secondaryButton} disabled={!selectedBulkAgents.length || bulkAgentPending} onClick={bulkArchiveAgents}>
-                <Archive size={14} />
-                <span>{bulkAgentPending ? copy.bulkWorking : copy.bulkArchive}</span>
-              </button>
-              <button type="button" className={styles.dangerButton} disabled={!selectedBulkAgents.length || bulkAgentPending} onClick={bulkPurgeAgents}>
-                <Trash2 size={14} />
-                <span>{bulkAgentPending ? copy.bulkWorking : copy.bulkPurge}</span>
-              </button>
-            </section>
+            <AgentBulkActionBar
+              ariaLabel={copy.bulkSelected}
+              summary={bulkActionSummary}
+              selectionActions={bulkSelectionActions}
+              promptPicker={bulkPromptPicker}
+              mutationActions={bulkMutationActions}
+              destructiveActions={bulkDestructiveActions}
+            />
           ) : null}
           {workspaceQuery.isError ? (
             <section className={styles.emptyState}>
