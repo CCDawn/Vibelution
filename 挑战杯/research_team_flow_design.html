@@ -327,7 +327,7 @@
         <div class="feature-row">
               <strong>DataProcessingRun</strong>
               <b class="status-pill partial">4 个 assignment 完成</b>
-              <span>source_finder、source_quality 均已提交输出。</span>
+              <span>source_finder、source_extractor、source_relation_mapper、source_ingestor 均已提交输出。</span>
             </div>
 <div class="feature-row">
               <strong>DataRecord</strong>
@@ -2233,7 +2233,7 @@
 <div class="blueprint-row">
               <b>M6.30</b>
               <strong>步骤卡主操作入口</strong>
-              <span>知识搜集独立页移除顶部操作条和右侧下一步面板的重复按钮，把资料搜集、资料提炼、资料关系整理、资料关系整理、资料入库四个步骤卡改成主操作入口。</span>
+              <span>知识搜集独立页移除顶部操作条和右侧下一步面板的重复按钮，把资料寻找、资料提炼、资料关系整理、资料入库四个步骤卡改成主操作入口。</span>
               <span>点击资料提炼不再跳回通用候选页，而是在知识搜集工作台内打开页内筛选详情；每个步骤继续按进行中、已完成、失败、未进行、待处理显示客观状态，正式知识/RAG/official graph 写入边界不变。</span>
             </div>
 <div class="blueprint-row">
@@ -2251,14 +2251,14 @@
 <div class="blueprint-row">
               <b>M6.33</b>
               <strong>候选库可视化二级索引</strong>
-              <span>知识搜集阶段的资料搜集、资料提炼、资料关系整理、资料关系整理、资料入库四张步骤卡都可点击进入对应页内详情；资料关系整理主按钮改为查看可视化候选库，不再直接打开 candidate_store/index.json。</span>
+              <span>知识搜集阶段的资料寻找、资料提炼、资料关系整理、资料入库四张步骤卡都可点击进入对应页内详情；资料关系整理主按钮改为查看可视化候选库，不再直接打开 candidate_store/index.json。</span>
               <span>底层 candidate_store/index.json 仍保留在“更多证据文件”中作为维护入口；用户主路径只看到候选卡片、筛选状态、图谱预览和资料入库，不再被 JSON 文件打断。</span>
             </div>
 <div class="blueprint-row">
               <b>M6.35</b>
               <strong>知识搜集阶段子页控制台</strong>
-              <span>知识搜集阶段的四张步骤卡升级为页内子页索引，点击资料搜集、资料提炼、资料关系整理、资料关系整理或资料入库时，底部只显示该阶段内容。</span>
-              <span>右侧控制台按当前阶段切换主操作按钮和关键数量；资料搜集保留配置/批次/回写折叠区，其余阶段只显示对应查看、筛选、刷新或前审动作，避免所有阶段信息同屏堆叠。</span>
+              <span>知识搜集阶段的四张步骤卡升级为页内子页索引，点击资料寻找、资料提炼、资料关系整理或资料入库时，底部只显示该阶段内容。</span>
+              <span>右侧控制台按当前阶段切换主操作按钮和关键数量；资料寻找保留配置/批次/回写折叠区，其余阶段只显示对应查看、筛选、刷新或前审动作，避免所有阶段信息同屏堆叠。</span>
             </div>
 <div class="blueprint-row">
               <b>M6.36</b>
@@ -2293,7 +2293,7 @@
 <div class="blueprint-row">
               <b>M6.41</b>
               <strong>步骤 Agent 右侧配置槽</strong>
-              <span>知识搜集页移除顶部统一“本阶段 Agent”面板，也不再把 Agent 列表塞进四张步骤卡；资料搜集、资料提炼、资料关系整理、资料关系整理、资料入库的功能 Agent 跟随当前步骤显示在右侧详情底部。</span>
+              <span>知识搜集页移除顶部统一“本阶段 Agent”面板，也不再把 Agent 列表塞进四张步骤卡；资料寻找、资料提炼、资料关系整理、资料入库的功能 Agent 跟随当前步骤显示在右侧详情底部。</span>
               <span>用户操作某个步骤时，只在对应详情里看到该步骤 Agent 的职责、Agent 名称、模型、状态和配置入口；顶部步骤卡只保留状态、数量和主按钮，避免重复信息挤占流程阅读空间。</span>
             </div>
 <div class="blueprint-row">
@@ -2312,7 +2312,7 @@
               <b>M6.44</b>
               <strong>搜索运行态与后续任务拆分</strong>
               <span>source collection work-run 和 Teams 控制台拆分 searchOpenAssignmentCount、downstreamOpenAssignmentCount；只有资料寻找这类真实搜索任务运行时才显示“正在团队搜索”。</span>
-              <span>内容提炼、资料提炼、资料关系整理和资料入库的待处理不再把顶部状态误置为搜索中；控制台展示可搜索任务、后续任务和搜集结果，用户能判断当前是否真的有 Agent 在跑。</span>
+              <span>资料提炼、资料关系整理和资料入库的待处理不再把顶部状态误置为搜索中；控制台展示可搜索任务、后续任务和搜集结果，用户能判断当前是否真的有 Agent 在跑。</span>
             </div>
 <div class="blueprint-row">
               <b>M6.45</b>
@@ -2341,7 +2341,7 @@
 <div class="blueprint-row">
               <b>M6.49</b>
               <strong>四阶段完整结果与来源过滤</strong>
-              <span>资料搜集、资料提炼、资料关系整理、资料关系整理、资料入库四个子页统一接入来源类型过滤：全部、PDF、论文网页/DOI、数据集、本地文件、缺少来源。</span>
+              <span>资料寻找、资料提炼、资料关系整理、资料入库四个子页统一接入来源类型过滤：全部、PDF、论文网页/DOI、数据集、本地文件、缺少来源。</span>
               <span>资料提炼和资料关系整理不再只显示少量预览；资料关系整理按过滤条件裁剪节点/边并补节点列表；资料入库显示候选资料和前审问题，所有卡片保留 DOI、网页、本地文件或候选详情追溯入口。</span>
             </div>
 <div class="blueprint-row">
@@ -2365,8 +2365,8 @@
 <div class="blueprint-row">
               <b>M6.53</b>
               <strong>KV 缓存模型与执行 Agent 模型分层</strong>
-              <span>知识搜集过程流不再写“本轮使用某模型”来描述 prompt-cache policy，而是明确显示 KV 缓存模型；真实执行资料搜集的功能 Agent 和模型仍在右侧当前步骤 Agent 配置中展示。</span>
-              <span>当后端因请求模型不支持 prompt cache 而自动兜底到其他 KV 模型时，页面会标注“自动兜底”；用户不会再把 relay/openai/gpt 类缓存模型误认为资料寻找、资料寻找或内容提炼 Agent 的执行模型。</span>
+              <span>知识搜集过程流不再写“本轮使用某模型”来描述 prompt-cache policy，而是明确显示 KV 缓存模型；真实执行资料寻找的功能 Agent 和模型仍在右侧当前步骤 Agent 配置中展示。</span>
+              <span>当后端因请求模型不支持 prompt cache 而自动兜底到其他 KV 模型时，页面会标注“自动兜底”；用户不会再把 relay/openai/gpt 类缓存模型误认为资料寻找、资料提炼或资料关系整理 Agent 的执行模型。</span>
             </div>
 <div class="blueprint-row">
               <b>M6.54</b>
@@ -2389,8 +2389,8 @@
 <div class="blueprint-row">
               <b>M6.58</b>
               <strong>资料入库入口贯通候选资料</strong>
-              <span>资料入库步骤不再只看已通过资料数量；只要本轮已有候选资料，就允许进入知识库管理员阶段任务。</span>
-              <span>前端把候选资料数作为待入库包输入上限；后端会先补齐资料审查、候选关系和 steward_pack_draft 证据，再由知识库管理员 memory 阶段 approved writeback 触发治理门禁，避免用户被卡在必须手动跑完每个中间门禁，同时不绕过最终知识库管理员。</span>
+              <span>资料入库步骤不再只看已通过资料数量；只要本轮已有候选资料，就允许进入资料入库阶段任务。</span>
+              <span>前端把候选资料数作为待入库包输入上限；后端会先补齐资料提炼、候选关系和 steward_pack_draft 证据，再由 source_ingestor approved writeback 触发治理门禁，避免用户被卡在必须手动跑完每个中间门禁，同时不绕过最终入库审核。</span>
             </div>
 <div class="blueprint-row">
               <b>M6.59</b>
@@ -2419,8 +2419,8 @@
 <div class="blueprint-row">
               <b>M6.63</b>
               <strong>挑战杯 Agent 提示词按能力收敛</strong>
-              <span>Agent Directory 为 challenge_cup_coordinator、source_finder 和 source_quality 绑定专属 prompt template 与 persona/task profile。</span>
-              <span>提示词明确各角色现有工具边界：协调人只读协调，资料寻找只做搜索线索，资料获取负责来源元数据，资料提炼输出 source_manifest 候选，资料审查只做入库前审；均不声称拥有 Shell、Git、文件写入或正式知识入库权限。</span>
+              <span>Agent Directory 为 challenge_cup_coordinator、source_finder、source_extractor、source_relation_mapper 和 source_ingestor 绑定专属 prompt template 与 persona/task profile。</span>
+              <span>提示词明确各角色现有工具边界：协调人只读协调，资料寻找负责搜索获取和登记，资料提炼负责内容提炼和价值判断，资料关系整理负责候选关系预览，资料入库负责最终审核和治理门禁；均不声称拥有 Shell、Git 或越权写入权限。</span>
             </div>
 <div class="blueprint-row">
               <b>M6.64</b>

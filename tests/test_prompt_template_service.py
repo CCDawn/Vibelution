@@ -216,10 +216,16 @@ def test_source_extractor_prompt_requires_candidate_paging_and_structured_decisi
 def test_challenge_cup_source_collection_contract_names_source_ingestor_as_ingestion_owner():
     repo_root = Path(__file__).resolve().parents[1]
     agent_directory_source = (repo_root / "core" / "web" / "services" / "agent_directory_service.py").read_text(encoding="utf-8")
+    prompt_template_source = (repo_root / "core" / "web" / "services" / "prompt_template_service.py").read_text(encoding="utf-8")
+    team_service_source = (repo_root / "core" / "web" / "services" / "team_service.py").read_text(encoding="utf-8")
     flow_builder_source = (repo_root / "挑战杯" / "build_research_flow_site.mjs").read_text(encoding="utf-8")
 
     assert "资料入库/知识库管理员" not in agent_directory_source
     assert "source_ingestor 做最终入库审核" in agent_directory_source
+    assert "data_discovery、source_acquisition、content_extraction、source_quality" not in prompt_template_source
+    assert "source_finder、source_extractor、source_relation_mapper 和 source_ingestor" in prompt_template_source
+    assert "组织资料寻找、资料提炼、资料关系整理和资料入库。" in team_service_source
+    assert "组织资料发现、本地导入、资料提炼、质检、候选关系和知识库管理员入库。" not in team_service_source
     assert "source_ingestor" in flow_builder_source
     assert "知识库管理员只提交建议与待审对象" not in flow_builder_source
     assert "proposal_and_rating_suggestion_only" not in flow_builder_source
