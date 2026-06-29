@@ -1082,6 +1082,11 @@ def list_dataset_status(
             and bool(environment_preflight)
             and not bool(environment_preflight.get("available"))
         )
+        if preflight_blocks_launch:
+            usability_reason = _append_environment_preflight_missing_reason(
+                usability_reason,
+                environment_preflight,
+            )
         effective = usability_status in {"ready", "agent_harness_ready", "custom_harness_ready"} and not preflight_blocks_launch
         visibility = "primary" if effective and spec.workbench_visible else "hidden"
         if not spec.workbench_visible:
@@ -1169,6 +1174,48 @@ def list_dataset_status(
             }
         )
     return rows
+
+
+def _append_environment_preflight_missing_reason(reason: str, preflight: Dict[str, Any]) -> str:
+    missing = _environment_preflight_missing_labels(preflight)
+    if not missing:
+        return reason
+    cleaned = reason.rstrip()
+    suffix = f" 缺少/不可用：{'、'.join(missing)}。"
+    if cleaned.endswith("。"):
+        return f"{cleaned}{suffix}"
+    return f"{cleaned}。{suffix}"
+
+
+def _environment_preflight_missing_labels(preflight: Dict[str, Any]) -> List[str]:
+    labels: List[str] = []
+    for item in preflight.get("missing") or []:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("path") or "").strip()
+        if label:
+            labels.append(label)
+            continue
+        aliases = item.get("aliases")
+        if isinstance(aliases, list):
+            labels.extend(str(alias).strip() for alias in aliases if str(alias).strip())
+    verifier = preflight.get("official_verifier")
+    if isinstance(verifier, dict):
+        for item in verifier.get("missing") or []:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("name") or item.get("path") or item.get("evidence") or "").strip()
+            if label:
+                labels.append(label)
+    deduped: List[str] = []
+    seen: set[str] = set()
+    for label in labels:
+        key = label.lower()
+        if key in seen:
+            continue
+        deduped.append(label)
+        seen.add(key)
+    return deduped
 
 
 def _iter_jsonl(path: Path, *, limit: Optional[int] = None) -> Iterable[Dict[str, Any]]:

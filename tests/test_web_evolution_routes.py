@@ -940,6 +940,62 @@ def test_evolution_workbench_route_exposes_dataset_choices_and_saved_state(tmp_p
     assert "纯 agent" in agent_judged["usabilityReason"]
     assert payload["activeRun"] is None
 
+
+def test_evolution_workbench_route_exposes_full_dataset_catalog_and_preflight_filtered_counts(tmp_path, monkeypatch):
+    _reset_supervised_live_state()
+    monkeypatch.setattr(evolution_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(supervised_control_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "core.evaluation.dataset_adapters.preflight_environment_contract",
+        lambda *args, **kwargs: {
+            "status": "missing_verifier_dependency",
+            "available": False,
+            "checked": [],
+            "missing": [{"path": "uv"}],
+            "official_verifier": {"missing": [{"name": "docker daemon"}], "available": False},
+        },
+    )
+
+    response = client.get("/api/evolution/workbench")
+
+    assert response.status_code == 200
+    payload = response.json()
+    dataset_names = {item["name"] for item in payload["datasets"]}
+    catalog_names = {item["name"] for item in payload["datasetCatalog"]}
+    assert dataset_names == {
+        "supervised_dry_run",
+        "terminal_bench_smoke",
+        "terminal_bench_agent_judged",
+        "terminal_bench_2_1_smoke",
+    }
+    assert {
+        "terminal_bench_core",
+        "swe_bench_pro_sample",
+        "deep_swe_sample",
+        "nl2repo_sample",
+        "programbench_sample",
+        "swe_marathon_roadmap",
+        "frontier_swe_roadmap",
+        "posttrainbench_roadmap",
+    }.issubset(catalog_names)
+    assert payload["savedState"]["availableDatasets"] == len(payload["datasetCatalog"])
+    assert payload["savedState"]["runnableDatasets"] == len(payload["datasets"])
+    assert payload["savedState"]["blockedDatasets"] == len(payload["datasetCatalog"]) - len(payload["datasets"])
+
+    terminal_core = next(item for item in payload["datasetCatalog"] if item["name"] == "terminal_bench_core")
+    assert terminal_core["visibility"] == "hidden"
+    assert terminal_core["selectable"] is False
+    assert terminal_core["effective"] is False
+    assert "任务环境预检未通过" in terminal_core["visibilityReason"]
+    assert "uv" in terminal_core["usabilityReason"] or "docker" in terminal_core["usabilityReason"]
+
+    swe_pro = next(item for item in payload["datasetCatalog"] if item["name"] == "swe_bench_pro_sample")
+    assert swe_pro["visibility"] == "hidden"
+    assert swe_pro["selectable"] is False
+    assert swe_pro["usabilityStatus"] == "requires_external_harness"
+    assert swe_pro["sourceExists"] is False
+    assert "外部 harness" in swe_pro["usabilityReason"] or "repo patch harness" in swe_pro["usabilityReason"]
+
 def test_evolution_workbench_route_falls_back_from_stale_saved_bundle(tmp_path, monkeypatch):
     bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
     bundle_dir.mkdir(parents=True, exist_ok=True)

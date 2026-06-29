@@ -6108,6 +6108,7 @@ export type EvolutionWorkbench = {
     benchmark: string;
   }>;
   datasets: EvolutionDatasetOption[];
+  datasetCatalog: EvolutionDatasetOption[];
   activeRun: EvolutionActiveRun | null;
 };
 
