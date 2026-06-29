@@ -11,6 +11,30 @@ import shellSource from "../app/AppShell.tsx?raw";
 
 const stylesSource = readFileSync(new URL("./AgentsRoute.module.css", import.meta.url), "utf-8");
 
+function sourceBlocksForStyle(styleName: string): string[] {
+  const marker = `className={styles.${styleName}}`;
+  const blocks: string[] = [];
+  let offset = 0;
+
+  while (offset < routeSource.length) {
+    const markerIndex = routeSource.indexOf(marker, offset);
+    if (markerIndex < 0) {
+      break;
+    }
+
+    const blockStart = routeSource.lastIndexOf("<div", markerIndex);
+    const blockEnd = routeSource.indexOf("</div>", markerIndex);
+
+    expect(blockStart).toBeGreaterThanOrEqual(0);
+    expect(blockEnd).toBeGreaterThan(markerIndex);
+
+    blocks.push(routeSource.slice(blockStart, blockEnd));
+    offset = blockEnd + "</div>".length;
+  }
+
+  return blocks;
+}
+
 describe("AgentsRoute layout contract", () => {
   it("loads the read-only Agent config workspace endpoint", () => {
     expect(routeSource).toContain("fetchJson<AgentConfigWorkspaceWithTeamIndexes>(\"/api/agents/config-workspace?includeRuntime=false\")");
@@ -279,9 +303,9 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('agent.status !== "archived"');
     expect(routeSource).toContain("copy.bulkSkippedActive");
     expect(routeSource).toContain("selectedAgent.status !== \"archived\" ? (");
-    expect(routeSource).toContain("className={styles.secondaryButton}");
-    expect(routeSource).toContain("onClick={archiveSelectedAgent}");
-    expect(routeSource).toContain("onClick={purgeSelectedAgent}");
+    expect(routeSource).toContain("onPress={archiveSelectedAgent}");
+    expect(routeSource).toContain("onPress={purgeSelectedAgent}");
+    expect(routeSource).toContain('variant="danger"');
     expect(routeSource).toContain("已彻底删除归档 Agent");
     expect(routeSource).not.toContain("const canPurgeAgent = Boolean(selectedAgent?.agentId && !selectedAgentProtected)");
   });
@@ -577,7 +601,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("工具能力已迁移到 Agent 管理的工具页集中配置");
     expect(routeSource).toContain("配置工具能力");
     expect(routeSource).toContain("去工具页配置");
-    expect(routeSource).toContain("onClick={() => navigate(selectedAgentToolConfigRoute)}");
+    expect(routeSource).toContain("onPress={() => navigate(selectedAgentToolConfigRoute)}");
     expect(routeSource).toContain("copy.toolCategoryCount");
   });
 
@@ -589,7 +613,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('returnLabel: "agents"');
     expect(routeSource).toContain("returnTo: selectedAgentReturnRoute");
     expect(routeSource).toContain("styles.promptConfigRow");
-    expect(routeSource).toContain("onClick={() => navigate(selectedAgentPromptConfigRoute)}");
+    expect(routeSource).toContain("onPress={() => navigate(selectedAgentPromptConfigRoute)}");
     expect(routeSource).toContain("配置提示词");
   });
 
@@ -604,9 +628,9 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('view: "agents"');
     expect(routeSource).toContain("returnTo: selectedAgentReturnRoute");
     expect(routeSource).toContain("styles.configDeepLinkRow");
-    expect(routeSource).toContain("onClick={() => navigate(selectedAgentModelConfigRoute)}");
-    expect(routeSource).toContain("onClick={() => navigate(selectedAgentContextConfigRoute)}");
-    expect(routeSource).toContain("onClick={() => navigate(selectedAgentMemoryConfigRoute)}");
+    expect(routeSource).toContain("onPress={() => navigate(selectedAgentModelConfigRoute)}");
+    expect(routeSource).toContain("onPress={() => navigate(selectedAgentContextConfigRoute)}");
+    expect(routeSource).toContain("onPress={() => navigate(selectedAgentMemoryConfigRoute)}");
     expect(routeSource).toContain("去模型库配置");
     expect(routeSource).toContain("去上下文配置");
     expect(routeSource).toContain("去记忆页配置");
@@ -825,7 +849,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("styles.maintenanceIntro");
     expect(routeSource).toContain("selectedAgent.status === \"archived\"");
     expect(routeSource).toContain("styles.dangerZone");
-    expect(routeSource).toContain("styles.dangerButton");
+    expect(routeSource).toContain('variant="danger"');
     expect(styles.maintenanceIntro).toBeTruthy();
   });
 
@@ -870,7 +894,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("styles.resetOptionField");
     expect(routeSource).toContain("queryKeys.agentRuntimeEvidence(agent.agentId)");
     expect(routeSource).toContain("selectedAgent.status !== \"archived\"");
-    expect(routeSource).toContain("disabled={!canResetAgent || selectedAgentResetPending}");
+    expect(routeSource).toContain("isDisabled={!canResetAgent || selectedAgentResetPending}");
     expect(routeSource).toContain("selectedAgentResetPending ? copy.resettingAgent : copy.resetAgent");
     expect(routeSource).not.toContain("!canResetAgent || resetAgentMutation.isPending");
     expect(styles.resetZone).toBeTruthy();
@@ -998,7 +1022,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("`/api/agents/${encodeURIComponent(agent.agentId)}/purge`");
     expect(routeSource).toContain('method: "DELETE"');
     expect(routeSource).toContain("onPress={bulkPurgeAgents}");
-    expect(routeSource).toContain("onClick={bulkApplyAgentConfig}");
+    expect(routeSource).toContain("onPress={bulkApplyAgentConfig}");
     expect(routeSource).toContain("styles.bulkSelectionList");
     expect(routeSource).toContain("styles.bulkFieldHeader");
     expect(routeSource).toContain("styles.agentRowBulkSelected");
@@ -1037,5 +1061,44 @@ describe("AgentsRoute layout contract", () => {
     expect(bulkDestructiveSource).toContain("<VButton");
     expect(bulkDestructiveSource).toContain('variant="danger"');
     expect(bulkDestructiveSource).not.toContain("styles.dangerButton");
+  });
+
+  it("renders Agent editor action rows through VUI buttons instead of page-owned button CSS", () => {
+    const editorActionBlocks = sourceBlocksForStyle("editorActions");
+    const deepLinkActionBlocks = sourceBlocksForStyle("configDeepLinkRow");
+    const governanceActionBlocks = sourceBlocksForStyle("governanceActions");
+    const promptConfigActionBlocks = sourceBlocksForStyle("promptConfigRow");
+    const inboxMessageActionBlocks = sourceBlocksForStyle("inboxMessageTop");
+    const panelHeaderActionBlocks = sourceBlocksForStyle("panelHeaderActions")
+      .filter((block) => block.includes("copy.createAgent") || block.includes("copy.consumeAllMessages"));
+    const pendingInboxIssueStart = routeSource.indexOf('issue.code === "pending_inbox_messages" ? (');
+    const pendingInboxIssueBlock = routeSource.slice(
+      pendingInboxIssueStart,
+      routeSource.indexOf("</article>", pendingInboxIssueStart),
+    );
+    const actionBlocks = [
+      ...editorActionBlocks,
+      ...deepLinkActionBlocks,
+      ...governanceActionBlocks,
+      ...promptConfigActionBlocks,
+      ...inboxMessageActionBlocks,
+      ...panelHeaderActionBlocks,
+      pendingInboxIssueBlock,
+    ];
+
+    expect(pendingInboxIssueStart).toBeGreaterThanOrEqual(0);
+    expect(editorActionBlocks.length).toBeGreaterThanOrEqual(10);
+    expect(actionBlocks.length).toBeGreaterThanOrEqual(15);
+    expect(actionBlocks.join("\n")).toContain('variant="primary"');
+    expect(actionBlocks.join("\n")).toContain('variant="secondary"');
+    expect(actionBlocks.join("\n")).toContain('variant="danger"');
+
+    for (const block of actionBlocks) {
+      expect(block).toContain("<VButton");
+      expect(block).not.toContain("<button");
+      expect(block).not.toContain("styles.primaryButton");
+      expect(block).not.toContain("styles.secondaryButton");
+      expect(block).not.toContain("styles.dangerButton");
+    }
   });
 });
