@@ -46,10 +46,10 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps the workbench theme background visible behind the center conversation", () => {
-    expect(appShellCssSource).toContain('--theme-background-overlay-mid: rgba(255, 255, 255, 0.3);');
-    expect(appShellCssSource).toContain('--theme-background-overlay-mid: rgba(255, 255, 255, 0.16);');
-    expect(appShellCssSource).toContain('--theme-background-overlay-mid: rgba(7, 10, 16, 0.44);');
-    expect(appShellCssSource).toContain('--theme-background-overlay-mid: rgba(7, 10, 16, 0.26);');
+    expect(appShellCssSource).toContain("--theme-background-overlay-mid: color-mix(in srgb, var(--fg-primary) 30%, transparent);");
+    expect(appShellCssSource).toContain("--theme-background-overlay-mid: color-mix(in srgb, var(--fg-primary) 16%, transparent);");
+    expect(appShellCssSource).toContain("--theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 44%, transparent);");
+    expect(appShellCssSource).toContain("--theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 26%, transparent);");
     expect(routeCssSource).toMatch(
       /\.centerPane\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--surface-page\) 10%, transparent\);[\s\S]*?\}/,
     );
@@ -62,7 +62,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationCssSource).toMatch(
       /\.surfaceCompact \.timeline\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--surface-page\) 14%, transparent\);[\s\S]*?\}/,
     );
-    expect(appShellCssSource).not.toContain("--theme-background-overlay-mid: rgba(255, 255, 255, 0.62);");
+    expect(appShellCssSource).not.toContain("--theme-background-overlay-mid: rgba(");
     expect(routeCssSource).not.toContain("background: color-mix(in srgb, var(--surface-page) 92%, var(--bg-canvas));");
     expect(routeCssSource).not.toContain(".centerSurface {\n  display: grid;\n  height: 100%;\n  min-height: 0;\n  background: var(--surface-panel-strong);");
   });
@@ -84,13 +84,13 @@ describe("ChatCodingRoute layout contract", () => {
 
     expect(sendButton).toContain("background: color-mix(in srgb, var(--accent-cool) 14%, var(--surface-card));");
     expect(sendButton).toContain("box-shadow: none;");
-    expect(sendButton).not.toContain("background: #111318;");
+    expect(sendButton).not.toContain("background: #");
     expect(sendButtonHover).not.toContain("translateY(-1px)");
 
     expect(userCard).toContain("background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-panel));");
     expect(userCard).not.toContain("background: var(--surface-panel-strong);");
 
-    expect(currentSessionItem).toContain("box-shadow: inset 1px 0 0");
+    expect(currentSessionItem).toContain("box-shadow: var(--vui-shadow-inset-accent);");
     expect(currentSessionItem).not.toContain("linear-gradient");
     expect(currentSessionItem).not.toContain("0 2px");
   });
@@ -626,8 +626,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeCssSource).toContain("width: calc(var(--token-status-value) * 1%);");
     expect(routeCssSource).toContain("scrollbar-gutter: stable;");
     expect(routeCssSource).toContain(".cacheDetailBoundaryTrack span + span");
-    expect(routeCssSource).toContain(".cacheDonutSegmentToolDescriptions {\n  stroke: #8b5cf6;");
-    expect(routeCssSource).toContain(".cacheDonutSegmentToolSchema {\n  stroke: #0ea5e9;");
+    expect(routeCssSource).toContain(".cacheDonutSegmentToolDescriptions {\n  stroke: var(--accent-warm);");
+    expect(routeCssSource).toContain(".cacheDonutSegmentToolSchema {\n  stroke: var(--accent-warm);");
     expect(routeStyles.contextCompositionSegmentSystem).toBeTypeOf("string");
     expect(routeStyles.contextCompositionSegmentProjectRules).toBeTypeOf("string");
     expect(routeStyles.contextCompositionSegmentToolDescriptions).toBeTypeOf("string");
@@ -1445,7 +1445,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeCssSource).toContain(".cliAgentTerminalFrame");
     expect(routeCssSource).toContain(".cliAgentTerminalOutputShell");
     expect(routeCssSource).toContain(":global(.xterm)");
-    expect(routeCssSource).toContain("background: #06100d");
+    expect(routeCssSource).toContain(".cliAgentTerminalOutputShell");
+    expect(routeCssSource).toContain("background: var(--bg-canvas);");
     expect(routeCssSource).toContain(".cliAgentTerminalStatus");
     expect(routeCssSource).not.toContain(".cliAgentTerminalInputRow");
     expect(routeCssSource).toContain(".agentSessionTabCli");

@@ -205,7 +205,7 @@
   display: grid;
   place-items: center;
   padding: 18px;
-  background: rgba(7, 10, 14, 0.68);
+  background: color-mix(in srgb, var(--bg-canvas) 68%, transparent);
   backdrop-filter: blur(6px);
 }
 
@@ -217,7 +217,7 @@
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background:
-    linear-gradient(180deg, var(--surface-panel-strong), var(--surface-panel)),
+    var(--vui-gradient-route-soft),
     var(--surface-panel);
   box-shadow: var(--shadow-strong);
 }
@@ -397,8 +397,8 @@
   overflow: hidden;
   border-right: 1px solid var(--border-soft);
   background:
-    linear-gradient(color-mix(in srgb, var(--border-soft) 32%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--border-soft) 32%, transparent) 1px, transparent 1px),
+    var(--vui-gradient-route-soft),
+    var(--vui-gradient-route-soft),
     var(--surface-page);
   background-size: 28px 28px;
 }
@@ -624,7 +624,7 @@
   border-radius: 999px;
   color: var(--surface-page);
   background: var(--accent-cool-2);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-cool) 16%, transparent), var(--shadow-soft);
+  box-shadow: var(--vui-shadow-accent);
   cursor: grab;
   font: inherit;
   font-size: 0.5rem;
@@ -638,7 +638,7 @@
   cursor: grabbing;
   border-color: var(--accent-warm);
   background: var(--accent-warm-2);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-warm) 24%, transparent), var(--shadow-soft);
+  box-shadow: var(--vui-shadow-accent);
 }
 
 .node {
@@ -677,18 +677,18 @@
 
 .nodeActive {
   border-color: var(--accent-cool);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cool) 22%, transparent), var(--shadow-soft);
+  box-shadow: var(--vui-shadow-accent);
 }
 
 .nodeConnectSource {
   border-color: var(--accent-warm);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-warm) 22%, transparent), var(--shadow-soft);
+  box-shadow: var(--vui-shadow-accent);
 }
 
 .nodeReconnectTarget {
   border-color: var(--accent-warm);
   background: color-mix(in srgb, var(--surface-panel) 86%, var(--accent-warm) 14%);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-warm) 28%, transparent), var(--shadow-soft);
+  box-shadow: var(--vui-shadow-accent);
 }
 
 .nodeStatus_idle::before {
@@ -751,7 +751,7 @@
   height: 7px;
   border-radius: 999px;
   background: currentColor;
-  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 14%, transparent);
+  box-shadow: var(--vui-shadow-accent);
 }
 
 .statusPill {
@@ -821,7 +821,7 @@
 
 .nodeTitleInput:focus {
   border-color: var(--accent-cool);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cool) 20%, transparent);
+  box-shadow: var(--vui-shadow-accent);
 }
 
 .nodeMeta {

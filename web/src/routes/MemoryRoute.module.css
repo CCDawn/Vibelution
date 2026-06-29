@@ -412,7 +412,7 @@
 
 .matrixCardActive {
   border-color: color-mix(in srgb, var(--accent-warm) 34%, transparent);
-  box-shadow: inset 2px 0 0 var(--accent-warm);
+  box-shadow: var(--vui-shadow-inset-accent);
   background: var(--surface-panel-strong);
 }
 
@@ -1016,15 +1016,13 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid rgba(148, 163, 184, 0.28);
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 28%, transparent);
   border-radius: 8px;
   background:
-    radial-gradient(circle at 62% 36%, rgba(96, 165, 250, 0.18), transparent 28%),
-    radial-gradient(circle at 30% 72%, rgba(45, 212, 191, 0.12), transparent 34%),
-    linear-gradient(135deg, #06101d 0%, #0b1726 46%, #07111f 100%);
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
-    inset 0 28px 90px rgba(15, 23, 42, 0.34);
+    radial-gradient(circle at 62% 36%, color-mix(in srgb, var(--accent-warm) 18%, transparent), transparent 28%),
+    radial-gradient(circle at 30% 72%, color-mix(in srgb, var(--accent-warm) 12%, transparent), transparent 34%),
+    var(--vui-gradient-route-soft);
+  box-shadow: var(--vui-shadow-inset-accent);
 }
 
 .graphCanvasShell::before {
@@ -1033,12 +1031,12 @@
   inset: 0;
   pointer-events: none;
   background-image:
-    radial-gradient(circle at 12% 18%, rgba(255, 255, 255, 0.78) 0 1px, transparent 1.7px),
-    radial-gradient(circle at 78% 24%, rgba(191, 219, 254, 0.64) 0 1px, transparent 1.8px),
-    radial-gradient(circle at 42% 78%, rgba(255, 255, 255, 0.46) 0 1px, transparent 1.9px),
-    radial-gradient(circle at 18% 68%, rgba(148, 163, 184, 0.5) 0 1px, transparent 1.8px),
-    linear-gradient(rgba(148, 163, 184, 0.12) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(148, 163, 184, 0.1) 1px, transparent 1px);
+    radial-gradient(circle at 12% 18%, color-mix(in srgb, var(--fg-primary) 78%, transparent) 0 1px, transparent 1.7px),
+    radial-gradient(circle at 78% 24%, color-mix(in srgb, var(--accent-warm) 64%, transparent) 0 1px, transparent 1.8px),
+    radial-gradient(circle at 42% 78%, color-mix(in srgb, var(--fg-primary) 46%, transparent) 0 1px, transparent 1.9px),
+    radial-gradient(circle at 18% 68%, color-mix(in srgb, var(--accent-warm) 50%, transparent) 0 1px, transparent 1.8px),
+    var(--vui-gradient-route-soft),
+    var(--vui-gradient-route-soft);
   background-position:
     0 0,
     21px 17px,
@@ -1063,8 +1061,8 @@
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(120deg, transparent 0%, rgba(96, 165, 250, 0.08) 42%, transparent 62%),
-    radial-gradient(circle at 50% 48%, transparent 0%, rgba(2, 6, 23, 0.28) 78%);
+    var(--vui-gradient-route-soft),
+    radial-gradient(circle at 50% 48%, transparent 0%, color-mix(in srgb, var(--bg-canvas) 28%, transparent) 78%);
   mix-blend-mode: screen;
   opacity: 0.7;
 }
@@ -1079,7 +1077,7 @@
   border-radius: 8px;
   background:
     radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--accent-cool) 18%, transparent), transparent 42%),
-    linear-gradient(180deg, color-mix(in srgb, var(--surface-panel) 26%, transparent), transparent);
+    var(--vui-gradient-route-soft);
   color: var(--fg-secondary);
   text-align: center;
 }
@@ -1125,15 +1123,13 @@
   max-width: 150px;
   min-height: 28px;
   padding: 4px 7px 4px 5px;
-  border: 1px solid color-mix(in srgb, var(--node-color, var(--accent-cool)) 38%, rgba(226, 232, 240, 0.3));
+  border: 1px solid color-mix(in srgb, var(--node-color, var(--accent-cool)) 38%, color-mix(in srgb, var(--surface-card) 30%, transparent));
   border-radius: 8px;
   background:
-    linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(2, 6, 23, 0.82)),
-    color-mix(in srgb, #0f172a 82%, var(--node-color, var(--accent-cool)) 18%);
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.08) inset,
-    0 10px 24px rgba(2, 6, 23, 0.28);
-  color: rgba(226, 232, 240, 0.94);
+    var(--vui-gradient-route-soft),
+    color-mix(in srgb, var(--fg-tertiary) 82%, var(--node-color, var(--accent-cool)) 18%);
+  box-shadow: var(--vui-shadow-inset-accent);
+  color: color-mix(in srgb, var(--surface-card) 94%, transparent);
   text-align: left;
   line-height: 1;
   pointer-events: auto;
@@ -1150,13 +1146,11 @@
 .graphNodeBadge[data-selected="true"] {
   max-width: 240px;
   min-height: 40px;
-  border-color: color-mix(in srgb, var(--node-color, var(--accent-cool)) 70%, rgba(226, 232, 240, 0.62));
+  border-color: color-mix(in srgb, var(--node-color, var(--accent-cool)) 70%, color-mix(in srgb, var(--surface-card) 62%, transparent));
   background:
-    linear-gradient(180deg, color-mix(in srgb, #172033 82%, var(--node-color, var(--accent-cool)) 18%), #07111f),
-    color-mix(in srgb, #0f172a 74%, var(--node-color, var(--accent-cool)) 26%);
-  box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--node-color, var(--accent-cool)) 18%, transparent),
-    0 12px 28px rgba(2, 6, 23, 0.34);
+    var(--vui-gradient-route-soft),
+    color-mix(in srgb, var(--fg-tertiary) 74%, var(--node-color, var(--accent-cool)) 26%);
+  box-shadow: var(--vui-shadow-accent);
 }
 
 .graphNodeBadgeType {
@@ -1167,10 +1161,10 @@
   height: 24px;
   border-radius: 999px;
   background:
-    radial-gradient(circle at 35% 28%, rgba(248, 250, 252, 0.82), transparent 28%),
-    radial-gradient(circle at 68% 72%, rgba(2, 6, 23, 0.28), transparent 38%),
-    color-mix(in srgb, var(--node-color, var(--accent-cool)) 72%, #0f172a);
-  color: rgba(248, 250, 252, 0.94);
+    radial-gradient(circle at 35% 28%, color-mix(in srgb, var(--fg-primary) 82%, transparent), transparent 28%),
+    radial-gradient(circle at 68% 72%, color-mix(in srgb, var(--bg-canvas) 28%, transparent), transparent 38%),
+    color-mix(in srgb, var(--node-color, var(--accent-cool)) 72%, var(--fg-tertiary));
+  color: color-mix(in srgb, var(--fg-primary) 94%, transparent);
   font-size: 0.54rem;
   font-weight: 920;
 }
@@ -1183,7 +1177,7 @@
   grid-column: 1 / -1;
   min-width: 0;
   overflow: hidden;
-  color: color-mix(in srgb, var(--node-color, var(--accent-cool)) 38%, rgba(226, 232, 240, 0.86));
+  color: color-mix(in srgb, var(--node-color, var(--accent-cool)) 38%, color-mix(in srgb, var(--surface-card) 86%, transparent));
   font-size: 0.55rem;
   font-style: normal;
   font-weight: 760;
@@ -1201,13 +1195,13 @@
 }
 
 .graphNodeBadge strong {
-  color: rgba(241, 245, 249, 0.96);
+  color: color-mix(in srgb, var(--fg-primary) 96%, transparent);
   font-size: 0.68rem;
   font-weight: 850;
 }
 
 .graphNodeBadge small {
-  color: rgba(203, 213, 225, 0.68);
+  color: color-mix(in srgb, var(--surface-card) 68%, transparent);
   font-size: 0.58rem;
   line-height: 1.15;
 }
@@ -1323,7 +1317,7 @@
   height: 8px;
   border-radius: 999px;
   background: var(--node-color, var(--accent-cool));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-color, var(--accent-cool)) 16%, transparent);
+  box-shadow: var(--vui-shadow-accent);
 }
 
 .graphTypeList strong,
@@ -1581,67 +1575,67 @@
 }
 
 [data-node-type="project"] {
-  --node-color: #f2c94c;
+  --node-color: var(--state-warning);
 }
 
 [data-node-type="team"] {
-  --node-color: #35b779;
+  --node-color: var(--state-success);
 }
 
 [data-node-type="agent"] {
-  --node-color: #1594c7;
+  --node-color: var(--accent-warm);
 }
 
 [data-node-type="agent"][data-agent-category="session_agent"] {
-  --node-color: #4f7cff;
+  --node-color: var(--accent-warm);
 }
 
 [data-node-type="agent"][data-agent-category="team_member_agent"] {
-  --node-color: #18a878;
+  --node-color: var(--state-success);
 }
 
 [data-node-type="agent_private_memory"] {
-  --node-color: #2d9cdb;
+  --node-color: var(--accent-warm);
 }
 
 [data-node-type="knowledge_base"] {
-  --node-color: #9b51e0;
+  --node-color: var(--fg-tertiary);
 }
 
 [data-node-type="knowledge_item"] {
-  --node-color: #e58b32;
+  --node-color: var(--state-warning);
 }
 
 [data-node-type="source_artifact"] {
-  --node-color: #d94e4e;
+  --node-color: var(--state-error);
 }
 
 [data-node-type="refinement_proposal"] {
-  --node-color: #7f52d9;
+  --node-color: var(--accent-warm);
 }
 
 [data-node-type="knowledge_batch"] {
-  --node-color: #27ae60;
+  --node-color: var(--state-success);
 }
 
 [data-node-type="rating_suggestion"] {
-  --node-color: #c99a1c;
+  --node-color: var(--state-warning);
 }
 
 [data-node-type="runtime_scene"] {
-  --node-color: #626b73;
+  --node-color: var(--fg-secondary);
 }
 
 [data-node-type="evolution"] {
-  --node-color: #00a884;
+  --node-color: var(--state-success);
 }
 
 [data-node-type="supervision"] {
-  --node-color: #d85f97;
+  --node-color: var(--accent-warm);
 }
 
 [data-node-type="tag"] {
-  --node-color: #8795a1;
+  --node-color: var(--fg-tertiary);
 }
 
 .manageFormPanel {
@@ -2047,7 +2041,7 @@
 .sourceButtonActive,
 .itemButtonActive {
   border-color: color-mix(in srgb, var(--accent-warm) 32%, transparent);
-  box-shadow: inset 2px 0 0 var(--accent-warm);
+  box-shadow: var(--vui-shadow-inset-accent);
   background: var(--surface-panel-strong);
 }
 
@@ -3149,9 +3143,9 @@
   min-width: 0;
   padding: 5px 6px;
   overflow: hidden;
-  border: 1px solid rgba(34, 197, 94, 0.24);
+  border: 1px solid color-mix(in srgb, var(--state-success) 24%, transparent);
   border-radius: var(--radius-control);
-  background: rgba(34, 197, 94, 0.08);
+  background: color-mix(in srgb, var(--state-success) 8%, transparent);
   color: var(--fg-secondary);
   font-size: 0.68rem;
   font-weight: 700;
@@ -3160,8 +3154,8 @@
 }
 
 .ragHealthStrip span[data-stale="true"] {
-  border-color: rgba(245, 158, 11, 0.32);
-  background: rgba(245, 158, 11, 0.1);
+  border-color: color-mix(in srgb, var(--state-warning) 32%, transparent);
+  background: color-mix(in srgb, var(--state-warning) 10%, transparent);
 }
 
 .ragPolicyStrip span {

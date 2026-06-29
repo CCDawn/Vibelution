@@ -405,10 +405,9 @@
   border: 1px solid color-mix(in srgb, var(--accent-warm) 42%, transparent);
   border-radius: 8px;
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent-warm) 10%, transparent), transparent),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--accent-warm) 7%, transparent);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--accent-warm) 10%, transparent);
+  box-shadow: var(--vui-shadow-accent);
 }
 
 .turnAvatar {
@@ -1058,12 +1057,7 @@ button.timelineCellHeader:hover,
   bottom: 0.42em;
   width: 1px;
   border-radius: 999px;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--accent-cool-2) 20%, transparent),
-    color-mix(in srgb, var(--accent-cool-2) 58%, transparent) 42%,
-    color-mix(in srgb, var(--accent-warm) 30%, transparent)
-  );
+  background: var(--vui-gradient-route-soft);
 }
 
 .timelineAssistantTextCell {
@@ -2307,7 +2301,7 @@ button.timelineCellHeader:hover,
   display: grid;
   place-items: center;
   padding: 28px;
-  background: rgba(5, 8, 12, 0.78);
+  background: color-mix(in srgb, var(--bg-canvas) 78%, transparent);
   backdrop-filter: blur(10px);
 }
 
@@ -2321,7 +2315,7 @@ button.timelineCellHeader:hover,
   border: 1px solid color-mix(in srgb, var(--fg-tertiary) 20%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-panel-strong) 92%, transparent);
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.44);
+  box-shadow: var(--vui-shadow-soft);
 }
 
 .imagePreviewToolbar {
@@ -2708,7 +2702,7 @@ button.timelineCellHeader:hover,
 .composerFieldDragActive .input {
   border-color: color-mix(in srgb, var(--accent-cool) 54%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-cool) 9%, var(--surface-input-strong));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-cool) 28%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
 }
 
 .composerFieldDragActive .composerAttachmentTray {

@@ -42,6 +42,26 @@
   --vui-status-danger-bg: color-mix(in srgb, var(--state-error) 10%, transparent);
   --vui-status-danger-fg: var(--state-error);
   --vui-shadow-none: none;
+  --vui-shadow-soft: var(--shadow-soft);
+  --vui-shadow-strong: var(--shadow-strong);
+  --vui-shadow-focus: var(--focus-ring);
+  --vui-shadow-accent: 0 0 0 1px color-mix(in srgb, var(--accent-cool) 18%, transparent);
+  --vui-shadow-inset-accent: inset 2px 0 0 var(--accent-cool);
+  --vui-gradient-route-soft: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface-panel) 92%, transparent),
+    color-mix(in srgb, var(--surface-card) 88%, transparent)
+  );
+  --vui-gradient-route-accent: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent-cool) 8%, transparent),
+    transparent 68%
+  );
+  --vui-gradient-route-overlay: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface-page) 92%, transparent),
+    color-mix(in srgb, var(--surface-panel) 78%, transparent)
+  );
 
   --fg-primary: #f3f4f6;
   --fg-secondary: #b8c0cc;
@@ -128,6 +148,26 @@
   --vui-status-danger-bg: color-mix(in srgb, var(--state-error) 8%, transparent);
   --vui-status-danger-fg: var(--state-error);
   --vui-shadow-none: none;
+  --vui-shadow-soft: var(--shadow-soft);
+  --vui-shadow-strong: var(--shadow-strong);
+  --vui-shadow-focus: var(--focus-ring);
+  --vui-shadow-accent: 0 0 0 1px color-mix(in srgb, var(--accent-cool) 16%, transparent);
+  --vui-shadow-inset-accent: inset 2px 0 0 var(--accent-cool);
+  --vui-gradient-route-soft: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface-panel) 96%, transparent),
+    color-mix(in srgb, var(--surface-card-muted) 72%, var(--surface-card))
+  );
+  --vui-gradient-route-accent: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent-cool) 7%, transparent),
+    transparent 68%
+  );
+  --vui-gradient-route-overlay: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface-page) 96%, transparent),
+    color-mix(in srgb, var(--surface-panel) 88%, transparent)
+  );
 
   --fg-primary: #101828;
   --fg-secondary: #475467;

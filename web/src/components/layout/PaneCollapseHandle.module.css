@@ -17,7 +17,7 @@
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-panel-strong) 94%, transparent);
   color: var(--fg-secondary);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22);
+  box-shadow: var(--vui-shadow-soft);
   transform: translate(-50%, -50%);
   cursor: pointer;
   transition:
@@ -32,7 +32,7 @@
   border-color: color-mix(in srgb, var(--accent-warm) 42%, var(--border-strong));
   background: color-mix(in srgb, var(--accent-warm) 14%, var(--surface-panel-strong));
   color: var(--accent-warm-2);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-warm) 12%, transparent);
+  box-shadow: var(--vui-shadow-accent);
   outline: none;
 }
 

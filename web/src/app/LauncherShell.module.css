@@ -5,7 +5,7 @@
   min-height: 0;
   overflow: hidden;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 248, 251, 0.98)),
-    #f6f8fb;
+    var(--vui-gradient-route-soft),
+    var(--fg-primary);
   color: var(--fg-primary);
 }
