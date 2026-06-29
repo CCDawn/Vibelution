@@ -29,16 +29,28 @@ describe("VUI legacy bridge", () => {
       "--vui-legacy-control-bg",
       "--vui-legacy-control-bg-hover",
       "--vui-legacy-control-fg",
+      "--vui-legacy-field-bg",
+      "--vui-legacy-field-bg-hover",
+      "--vui-legacy-field-fg",
+      "--vui-legacy-field-placeholder",
       "--vui-legacy-focus-ring",
     ]) {
       expect(bridgeSource).toContain(token);
     }
 
     expect(bridgeSource).toContain("[data-vui-app]");
-    expect(bridgeSource).toContain(':where(button, [role="button"])');
+    expect(bridgeSource).toContain(':is(button, [role="button"], input, select, textarea)');
     expect(bridgeSource).toContain('[class*="Button"]');
+    expect(bridgeSource).toContain('input:not([type="checkbox"]):not([type="radio"]):not([type="range"])');
+    expect(bridgeSource).toContain("select");
+    expect(bridgeSource).toContain("textarea");
     expect(bridgeSource).toContain("box-shadow: none");
     expect(bridgeSource).not.toContain("border-width: 2px");
     expect(bridgeSource).not.toContain("width: 100%");
+  });
+
+  it("keeps the legacy bridge free of raw color fallbacks outside the token source", () => {
+    expect(bridgeSource).not.toMatch(/#[0-9a-fA-F]{3,8}/);
+    expect(bridgeSource).not.toMatch(/rgba?\(/);
   });
 });
