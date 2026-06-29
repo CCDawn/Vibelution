@@ -18,6 +18,40 @@
   box-shadow: var(--vui-focus-ring);
 }
 
+[data-vui-provider="heroui"] button[data-slot="button"][data-vui="button"],
+[data-vui-provider="heroui"] button[data-slot="button"][data-vui="icon-button"] {
+  min-height: var(--vui-control-height-sm);
+  border-width: 1px;
+  border-style: solid;
+  border-color: var(--vui-component-border);
+  border-radius: var(--radius-control);
+  background: var(--vui-control-muted);
+  color: var(--fg-secondary);
+  box-shadow: none;
+}
+
+[data-vui-provider="heroui"] button[data-slot="button"][data-vui="button"][class*="border-vui-accent-cool"],
+[data-vui-provider="heroui"] button[data-slot="button"][data-vui="icon-button"][class*="border-vui-accent-cool"] {
+  border-color: var(--accent-cool);
+  background: var(--surface-panel);
+  color: var(--fg-primary);
+}
+
+[data-vui-provider="heroui"] button[data-slot="button"][data-vui="button"][class*="vui-status-danger-bg"],
+[data-vui-provider="heroui"] button[data-slot="button"][data-vui="icon-button"][class*="vui-status-danger-bg"] {
+  border-color: color-mix(in srgb, var(--state-error) 36%, transparent);
+  background: var(--vui-status-danger-bg);
+  color: var(--vui-status-danger-fg);
+}
+
+[data-vui-provider="heroui"] button[data-slot="button"][data-vui="button"][class*="bg-transparent"],
+[data-vui-provider="heroui"] button[data-slot="button"][data-vui="icon-button"][class*="bg-transparent"],
+[data-vui-provider="heroui"] [class*="segmentedControl"] button[data-slot="button"][data-vui="button"],
+[data-vui-provider="heroui"] [class*="segmentedControl"] button[data-slot="button"][data-vui="icon-button"] {
+  border-color: transparent;
+  background: transparent;
+}
+
 [data-vui-provider="heroui"] .vui-tone-info {
   border-color: color-mix(in srgb, var(--accent-cool) 30%, transparent);
   background: var(--vui-status-info-bg);

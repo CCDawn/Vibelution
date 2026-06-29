@@ -1,25 +1,33 @@
 [data-vui-app] {
   --vui-legacy-control-height: 28px;
-  --vui-legacy-control-radius: var(--radius-control, 7px);
+  --vui-legacy-field-height: 30px;
+  --vui-legacy-field-textarea-min-height: 72px;
+  --vui-legacy-control-radius: var(--radius-control);
   --vui-legacy-control-border-width: 1px;
-  --vui-legacy-control-border: var(--vui-border-subtle, var(--border-soft, rgba(15, 23, 42, 0.1)));
-  --vui-legacy-control-border-hover: var(--border-strong, rgba(15, 23, 42, 0.16));
-  --vui-legacy-control-bg: var(--vui-control-muted, var(--surface-card-muted, rgba(255, 255, 255, 0.74)));
-  --vui-legacy-control-bg-hover: var(--vui-control-muted-hover, var(--surface-panel-hover, rgba(241, 245, 249, 0.88)));
-  --vui-legacy-control-fg: var(--fg-secondary, #475467);
-  --vui-legacy-control-fg-hover: var(--fg-primary, #101828);
+  --vui-legacy-control-border: var(--vui-border-subtle);
+  --vui-legacy-control-border-hover: var(--border-strong);
+  --vui-legacy-control-bg: var(--vui-control-muted);
+  --vui-legacy-control-bg-hover: var(--vui-control-muted-hover);
+  --vui-legacy-control-fg: var(--fg-secondary);
+  --vui-legacy-control-fg-hover: var(--fg-primary);
+  --vui-legacy-field-bg: var(--surface-input);
+  --vui-legacy-field-bg-hover: var(--surface-card);
+  --vui-legacy-field-fg: var(--fg-primary);
+  --vui-legacy-field-placeholder: var(--fg-tertiary);
   --vui-legacy-control-padding-x: 8px;
+  --vui-legacy-field-padding-x: 9px;
   --vui-legacy-control-font-size: 0.76rem;
   --vui-legacy-control-font-weight: 650;
-  --vui-legacy-focus-ring: var(--vui-focus-ring, var(--focus-ring));
+  --vui-legacy-field-font-size: 0.78rem;
+  --vui-legacy-focus-ring: var(--vui-focus-ring);
 }
 
-[data-vui-app] :where(button, [role="button"]) {
+[data-vui-app] :is(button, [role="button"], input, select, textarea) {
   border-width: var(--vui-legacy-control-border-width);
   box-shadow: none;
 }
 
-[data-vui-app] :where(button:not([data-vui]), [role="button"]:not([data-vui])) {
+[data-vui-app] :is(button:not([data-vui]), [role="button"]:not([data-vui])) {
   letter-spacing: 0;
   transition:
     background-color 0.16s ease,
@@ -28,7 +36,7 @@
     opacity 0.16s ease;
 }
 
-[data-vui-app] :where(
+[data-vui-app] :is(
   button:not([data-vui])[class*="Button"],
   button:not([data-vui])[class*="button"],
   [role="button"]:not([data-vui])[class*="Button"],
@@ -44,7 +52,7 @@
   font-weight: var(--vui-legacy-control-font-weight);
 }
 
-[data-vui-app] :where(
+[data-vui-app] :is(
   button:not([data-vui])[class*="Button"]:hover:not(:disabled),
   button:not([data-vui])[class*="button"]:hover:not(:disabled),
   [role="button"]:not([data-vui])[class*="Button"]:hover:not([aria-disabled="true"]),
@@ -55,7 +63,7 @@
   color: var(--vui-legacy-control-fg-hover);
 }
 
-[data-vui-app] :where(
+[data-vui-app] :is(
   button:not([data-vui]):focus-visible,
   [role="button"]:not([data-vui]):focus-visible
 ) {
@@ -63,9 +71,64 @@
   box-shadow: var(--vui-legacy-focus-ring);
 }
 
-[data-vui-app] :where(
+[data-vui-app] :is(
   button:not([data-vui]):disabled,
   [role="button"]:not([data-vui])[aria-disabled="true"]
 ) {
   opacity: 0.52;
+}
+
+[data-vui-app] :is(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea
+) {
+  min-width: 0;
+  border-style: solid;
+  border-color: var(--vui-legacy-control-border);
+  border-radius: var(--vui-legacy-control-radius);
+  background-color: var(--vui-legacy-field-bg);
+  color: var(--vui-legacy-field-fg);
+  font-size: var(--vui-legacy-field-font-size);
+  letter-spacing: 0;
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    color 0.16s ease,
+    opacity 0.16s ease;
+}
+
+[data-vui-app] :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select) {
+  min-height: var(--vui-legacy-field-height);
+  padding-inline: var(--vui-legacy-field-padding-x);
+}
+
+[data-vui-app] textarea {
+  min-height: var(--vui-legacy-field-textarea-min-height);
+  padding: 7px var(--vui-legacy-field-padding-x);
+  resize: vertical;
+  line-height: 1.42;
+}
+
+[data-vui-app] :is(input, textarea)::placeholder {
+  color: var(--vui-legacy-field-placeholder);
+}
+
+[data-vui-app] :is(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):hover:not(:disabled),
+  select:hover:not(:disabled),
+  textarea:hover:not(:disabled)
+) {
+  border-color: var(--vui-legacy-control-border-hover);
+  background-color: var(--vui-legacy-field-bg-hover);
+}
+
+[data-vui-app] :is(input:focus-visible, select:focus-visible, textarea:focus-visible) {
+  outline: none;
+  border-color: var(--accent-cool);
+  box-shadow: var(--vui-legacy-focus-ring);
+}
+
+[data-vui-app] :is(input:disabled, select:disabled, textarea:disabled) {
+  opacity: 0.58;
 }

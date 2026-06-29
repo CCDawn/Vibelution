@@ -62,6 +62,9 @@ describe("VUI dual-theme foundation", () => {
     expect(tailwindSource).toContain("--color-vui-border-subtle: var(--vui-border-subtle)");
     expect(herouiThemeSource).toContain("--vui-component-border");
     expect(herouiThemeSource).toContain("--vui-component-surface");
+    expect(herouiThemeSource).toContain('button[data-slot="button"][data-vui="button"]');
+    expect(herouiThemeSource).toContain("border-width: 1px");
+    expect(herouiThemeSource).toContain('[class*="segmentedControl"]');
   });
 
   it("renders page, surface, section, metric strip, and action group primitives", () => {
