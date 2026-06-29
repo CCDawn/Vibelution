@@ -2321,6 +2321,7 @@ def create_key_tools() -> List[BaseTool]:
         explain_current_worktree_tool,
         open_evolution_transaction_tool,
         close_evolution_transaction_tool,
+        get_evolution_fitness_tool,
         conversation_log_inspect_tool,
         history_search_tool,
         history_fetch_tool,
