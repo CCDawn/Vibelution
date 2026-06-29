@@ -86,6 +86,44 @@ describe("conversation process projection", () => {
     ]);
   });
 
+  it("keeps same-turn live overlay status text out of the committed assistant answer", () => {
+    const projected = projectConversationProcessMessages([
+      {
+        id: "message-live-overlay",
+        role: "assistant",
+        content: "正在唤起对话 agent...\n正在绑定 Agent 实例、私人工作区、记忆根和工具工作区。",
+        timestamp: "2026-06-26T10:30:00Z",
+        streaming: true,
+        streamStage: "agent_prepare",
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "status",
+            status: "running",
+            name: "agent_prepare",
+            summary: "正在绑定 Agent",
+          },
+        ],
+        metadata: {
+          kind: "session_live_overlay",
+          turnId: "turn-prepare",
+        },
+      },
+      {
+        id: "message-answer",
+        role: "assistant",
+        content: "你好，我可以开始处理。",
+        timestamp: "2026-06-26T10:30:01Z",
+        metadata: { turnId: "turn-prepare" },
+      },
+    ]);
+
+    expect(projected).toHaveLength(1);
+    expect(projected[0].content).toBe("你好，我可以开始处理。");
+    expect(projected[0].content).not.toContain("正在唤起对话 agent");
+    expect(projected[0].feedbackEvents?.map((event) => event.summary)).toEqual(["正在绑定 Agent"]);
+  });
+
   it("merges same-turn process-only events that arrive after the assistant answer", () => {
     const projected = projectConversationProcessMessages([
       {

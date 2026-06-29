@@ -181,4 +181,44 @@ describe("conversationTimeline", () => {
       text: "最终回答",
     });
   });
+
+  it("can exclude assistant text from backend timeline items so answers render only in the answer block", () => {
+    const message: ConversationMessage = {
+      id: "message-server-timeline-answer",
+      role: "assistant",
+      content: "最终回答",
+      timestamp: "2026-06-18T00:00:00Z",
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "thought",
+          status: "done",
+          summary: "已完成分析",
+        },
+      ],
+      timelineItems: [
+        {
+          id: "server-thought",
+          kind: "thought",
+          status: "completed",
+          text: "已完成分析",
+        },
+        {
+          id: "server-answer",
+          kind: "assistant_text",
+          status: "completed",
+          text: "最终回答",
+        },
+      ],
+    };
+
+    const items = buildConversationTimelineItems(
+      message,
+      buildConversationOperations(message, labels),
+      { lang: "zh", includeAssistantText: false },
+    );
+
+    expect(items.map((item) => item.kind)).toEqual(["thought"]);
+    expect(items.map((item) => ("text" in item ? item.text : ""))).not.toContain("最终回答");
+  });
 });

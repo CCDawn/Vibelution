@@ -142,6 +142,36 @@ describe("chat active turn layer", () => {
     });
   });
 
+  it("drops internal status text from assistant delta answer content", () => {
+    const active = mergeAssistantDeltaIntoActiveTurnLayer(
+      undefined,
+      assistantDelta({
+        stage: "agent_prepare",
+        content: "正在唤起对话 agent...\n正在绑定 Agent 实例、私人工作区、记忆根和工具工作区。",
+        contentDelta: undefined,
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "status",
+            status: "running",
+            name: "agent_prepare",
+            summary: "正在绑定 Agent",
+          },
+        ],
+      }),
+    );
+
+    expect(active?.answerContent).toBe("");
+    expect(active?.feedbackEvents?.[0]).toMatchObject({
+      kind: "status",
+      name: "agent_prepare",
+    });
+
+    const message = activeTurnLayerToConversationMessage(active);
+
+    expect(message?.content).toBe("");
+  });
+
   it("keeps process state and answer text in separate active-layer fields", () => {
     const preparing = mergeAssistantDeltaIntoActiveTurnLayer(
       undefined,
@@ -211,5 +241,32 @@ describe("chat active turn layer", () => {
     } as SessionDetail;
 
     expect(isActiveTurnSettledByDetail(active, detail)).toBe(true);
+  });
+
+  it("does not settle the active layer for a process-only same-turn assistant packet", () => {
+    const active = mergeAssistantDeltaIntoActiveTurnLayer(undefined, assistantDelta({ contentDelta: "临时回答" }));
+    const detail = {
+      id: "session-1",
+      messages: [
+        {
+          id: "assistant-process",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-06-26T08:31:00Z",
+          feedbackEvents: [
+            {
+              sequence: 1,
+              kind: "status",
+              status: "running",
+              name: "model_request",
+              summary: "正在请求模型",
+            },
+          ],
+          metadata: { turnId: "turn-1" },
+        } satisfies ConversationMessage,
+      ],
+    } as SessionDetail;
+
+    expect(isActiveTurnSettledByDetail(active, detail)).toBe(false);
   });
 });

@@ -4,6 +4,7 @@ import {
   isRuntimeNoticeMessage,
   isTurnErrorMessage,
 } from "./messageSections";
+import { answerProjectionContent } from "./conversationInternalStatus";
 
 function metadataText(metadata: Record<string, unknown> | undefined, key: string) {
   const value = metadata?.[key];
@@ -82,7 +83,7 @@ function isExcludedAssistantProjectionMessage(message: ConversationMessage) {
 }
 
 function isProjectableProcessOnlyMessage(message: ConversationMessage) {
-  if (isExcludedAssistantProjectionMessage(message) || String(message.content ?? "").trim()) {
+  if (isExcludedAssistantProjectionMessage(message) || String(answerProjectionContent(message) ?? "").trim()) {
     return false;
   }
   return Boolean(
@@ -108,7 +109,7 @@ function isSameTurnPacketMessage(message: ConversationMessage) {
   if (isExcludedAssistantProjectionMessage(message) || !normalizedTurnId(message)) {
     return false;
   }
-  return Boolean(String(message.content ?? "").trim() || isProjectableProcessOnlyMessage(message));
+  return Boolean(String(answerProjectionContent(message) ?? "").trim() || isProjectableProcessOnlyMessage(message));
 }
 
 function canMergeProcessProjection(previous: ConversationMessage | undefined, next: ConversationMessage) {
@@ -132,7 +133,7 @@ function canMergeProcessProjection(previous: ConversationMessage | undefined, ne
 function mergeProcessProjectionMessages(previous: ConversationMessage, next: ConversationMessage): ConversationMessage {
   return {
     ...previous,
-    content: mergeText(previous.content, next.content),
+    content: mergeText(answerProjectionContent(previous), answerProjectionContent(next)),
     streaming: Boolean(previous.streaming || next.streaming),
     streamStage: next.streamStage || previous.streamStage,
     thought: mergeText(previous.thought, next.thought) || undefined,
