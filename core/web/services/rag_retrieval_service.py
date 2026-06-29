@@ -13,7 +13,7 @@ from . import rag_vector_index_service, team_knowledge_service
 
 SCHEMA_VERSION = 1
 SUPPORTED_PROVIDERS = {"local"}
-SUPPORTED_RETRIEVAL_MODES = {"exact", "semantic", "hybrid"}
+SUPPORTED_RETRIEVAL_MODES = {"exact", "semantic", "hybrid", "bm25"}
 DEFAULT_TOP_K = 5
 MAX_TOP_K = 20
 DEFAULT_CONTEXT_CHARS = 1200
@@ -39,6 +39,7 @@ def get_rag_retrieval_health(*, agent_id: str = "", internal: bool = False) -> d
                 "provider": "local",
                 "status": "ready",
                 "vectorEnabled": False,
+                "bm25Enabled": True,
                 "indexedItemCount": 0,
                 "staleItemCount": 0,
             },
@@ -189,6 +190,7 @@ def _context_from_search_result(
             "importanceLevel": str(result.get("importanceLevel") or "").strip(),
             "confidence": result.get("confidence"),
             "stability": str(result.get("stability") or "").strip(),
+            "bm25Score": result.get("bm25Score"),
         },
     }
 
@@ -245,6 +247,7 @@ def _retrieval_policy(provider: str) -> dict[str, Any]:
         "honorsMemoryPolicy": True,
         "mutatesFormalKnowledge": False,
         "injectsPromptByDefault": False,
+        "supportedRetrievalModes": sorted(SUPPORTED_RETRIEVAL_MODES),
     }
 
 
