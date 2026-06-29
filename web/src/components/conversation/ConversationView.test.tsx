@@ -769,11 +769,26 @@ describe("ConversationView edit resend affordance", () => {
     expect(reactThoughtRule).toContain("border-left: 0");
     expect(reactThoughtRule).toContain("background: transparent");
     expect(operationDetailsRule).toContain("border: 0");
-    expect(operationItemRule).toContain("width: fit-content");
-    expect(operationItemRule).not.toContain("minmax(0, 1fr)");
+    expect(operationItemRule).toContain("width: min(100%, 860px)");
+    expect(operationItemRule).toContain("grid-template-columns: 22px minmax(0, 1fr) auto auto 16px");
     expect(timelineThoughtRule).toContain("border: 0");
     expect(timelineThoughtRule).toContain("background: transparent");
     expect(reactResultToggleRule).toContain("border: 0");
+  });
+
+  it("keeps streamed execution rows readable instead of squeezed into micro columns", () => {
+    const operationItemRule = cssRule(".operationItem");
+    const operationItemToolRule = cssRule(".operationItemTool");
+    const operationTextRule = cssRule(".operationText");
+    const statusBodyRule = cssRule(".responseSegment_status .messageBody");
+
+    expect(conversationViewStylesSource).not.toMatch(/font-size:\s*0\.(?:[0-6]\d?|7(?:0|1)?)rem/);
+    expect(operationItemRule).not.toContain("width: fit-content");
+    expect(operationItemRule).not.toContain("max-content");
+    expect(operationItemToolRule).not.toContain("max-content");
+    expect(operationTextRule).toContain("max-width: 100%");
+    expect(statusBodyRule).toContain("white-space: pre-wrap");
+    expect(statusBodyRule).toContain("overflow-wrap: anywhere");
   });
 
   it("can render a read-only transcript without the composer", () => {

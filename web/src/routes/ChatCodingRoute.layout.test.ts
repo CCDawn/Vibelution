@@ -212,7 +212,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("<div className={conversationFrameClassName}>");
     expect(routeStyles.conversationFrameFocus).toBeTypeOf("string");
     expect(routeCssSource).toMatch(
-      /\.conversationFrameFocus\s*\{[\s\S]*?justify-self:\s*center;[\s\S]*?width:\s*min\(calc\(100% - 96px\), 1120px\);[\s\S]*?max-width:\s*100%;[\s\S]*?\}/,
+      /\.conversationFrameFocus\s*\{[\s\S]*?justify-self:\s*center;[\s\S]*?width:\s*min\(calc\(100% - 48px\), 1480px\);[\s\S]*?max-width:\s*100%;[\s\S]*?\}/,
     );
     expect(routeCssSource).toMatch(
       /@media \(max-width: 980px\)\s*\{[\s\S]*?\.conversationFrameFocus\s*\{[\s\S]*?width:\s*100%;[\s\S]*?\}/,
@@ -290,11 +290,17 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeCssSource).toContain("width: 26px");
     expect(routeCssSource).toContain("height: 26px");
     expect(routeCssSource).toContain("font-size: 0.84rem");
-    expect(routeCssSource).toContain("font-size: 0.68rem");
+    expect(routeCssSource).toContain("font-size: 0.72rem");
     expect(routeCssSource).toContain("grid-template-columns: minmax(0, 1fr) fit-content(92px)");
     expect(routeCssSource).toContain("max-width: 100%");
     expect(conversationCssSource).toContain(".surfaceCompact .timeline {\n  padding: 9px 12px 11px;");
     expect(conversationCssSource).toContain(".surfaceCompact .composer {\n  gap: 7px;\n  padding: 6px 10px 8px;");
+  });
+
+  it("does not ship micro typography in the chat workbench surface", () => {
+    expect(routeCssSource).not.toMatch(/font-size:\s*0\.(?:[0-6]\d?|7(?:0|1)?)rem/);
+    expect(routeCssSource).toContain(".agentModelTag");
+    expect(routeCssSource).toContain("font-size: 0.72rem");
   });
 
   it("clamps responsive side panes so the center conversation remains visible near 1024px", () => {

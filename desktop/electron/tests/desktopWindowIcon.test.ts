@@ -22,6 +22,15 @@ vi.mock("electron", () => ({
 const { createLauncherWindow } = await import("../src/windows/launcherWindow.js");
 const { createWorkbenchWindow } = await import("../src/windows/workbenchWindow.js");
 
+const lightShellTitleBar = {
+  titleBarStyle: "hidden",
+  titleBarOverlay: {
+    color: "#f7fafc",
+    symbolColor: "#475467",
+    height: 34
+  }
+};
+
 const desktopPaths: DesktopPaths = {
   schemaVersion: 1,
   desktopBundleRoot: "C:/Program Files/Vibelution/resources/app.asar/dist",
@@ -42,7 +51,8 @@ describe("Electron desktop window icons", () => {
     expect(browserWindowOptions[0]).toMatchObject({
       title: "Vibelution Launcher",
       icon: "C:\\Users\\17533\\Desktop\\Vibelution\\assets\\icons\\vibelution.ico",
-      backgroundColor: "#f7fafc"
+      backgroundColor: "#f7fafc",
+      ...lightShellTitleBar
     });
     expect(loadedUrls).toEqual(["http://127.0.0.1:8765/launcher"]);
   });
@@ -53,7 +63,8 @@ describe("Electron desktop window icons", () => {
     expect(browserWindowOptions[0]).toMatchObject({
       title: "Vibelution Workbench",
       icon: "C:\\Users\\17533\\Desktop\\Vibelution\\assets\\icons\\vibelution.ico",
-      backgroundColor: "#f7fafc"
+      backgroundColor: "#f7fafc",
+      ...lightShellTitleBar
     });
     expect(loadedUrls).toEqual(["http://127.0.0.1:8000"]);
   });
