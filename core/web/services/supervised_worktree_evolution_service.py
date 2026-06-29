@@ -120,6 +120,7 @@ def start_supervised_worktree_run(payload: dict[str, Any]) -> dict[str, Any]:
         active = _ACTIVE_RUN_ID
         if active:
             snapshot = _work_run_store().load_snapshot(RUN_KIND, active)
+            snapshot = _reconcile_orphaned_supervised_worktree_snapshot(snapshot)
             if snapshot and str(snapshot.get("status") or "").strip().lower() in _ACTIVE_STATUSES:
                 raise SupervisedWorktreeRunBusyError(
                     text_for(
@@ -247,6 +248,7 @@ def get_supervised_worktree_run(run_id: str) -> dict[str, Any] | None:
     if not normalized:
         return None
     snapshot = _work_run_store().load_snapshot(RUN_KIND, normalized)
+    snapshot = _reconcile_orphaned_supervised_worktree_snapshot(snapshot)
     return _decorate_snapshot(snapshot) if snapshot else None
 
 
@@ -254,6 +256,7 @@ def get_active_supervised_worktree_run() -> dict[str, Any] | None:
     snapshot = _work_run_store().load_active_snapshot(RUN_KIND)
     if not snapshot:
         return None
+    snapshot = _reconcile_orphaned_supervised_worktree_snapshot(snapshot)
     if str(snapshot.get("status") or "").strip().lower() not in _ACTIVE_STATUSES:
         return None
     return _decorate_snapshot(snapshot)
@@ -271,6 +274,7 @@ def list_supervised_worktree_runs(limit: int = 20) -> list[dict[str, Any]]:
         except (OSError, json.JSONDecodeError):
             continue
         if isinstance(payload, dict):
+            payload = _reconcile_orphaned_supervised_worktree_snapshot(payload) or payload
             items.append(_decorate_snapshot(payload))
     items.sort(key=lambda item: str(item.get("updatedAt") or item.get("startedAt") or ""), reverse=True)
     return items[: max(1, min(int(limit or 20), 100))]
@@ -605,6 +609,13 @@ def _execute_flow(
             baseline_untracked=candidate_worktree.get("untrackedFiles"),
         )
         _persist_snapshot(snapshot, active_run_id=run_id if _ACTIVE_RUN_ID == run_id else "")
+        modifier_terminal_status = _candidate_modifier_terminal_status(modification)
+        if modifier_terminal_status:
+            _finish_candidate_modifier_terminal(snapshot, modification, terminal_status=modifier_terminal_status)
+            return _decorate_snapshot(snapshot)
+        if not snapshot["candidateWorktree"].get("changedFiles"):
+            _finish_candidate_modifier_no_changes(snapshot)
+            return _decorate_snapshot(snapshot)
 
         _raise_if_run_cancelled(snapshot)
         _transition(snapshot, "running", "candidate_evaluation", "正在用同一题集复测候选 agent。")
@@ -1232,6 +1243,185 @@ def _finish_baseline_unavailable(snapshot: dict[str, Any], baseline: dict[str, A
     )
 
 
+def _candidate_modifier_terminal_status(modification: dict[str, Any]) -> str:
+    raw_status = str((modification or {}).get("status") or "").strip().lower()
+    if raw_status in {"", "success", "succeeded", "done", "completed", "ready"}:
+        return ""
+    if raw_status in {"cancelled", "canceled", "stopped", "stopped_by_user", "superseded"}:
+        return "cancelled"
+    return "failed"
+
+
+def _reconcile_orphaned_supervised_worktree_snapshot(snapshot: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(snapshot, dict):
+        return snapshot
+    run_id = str(snapshot.get("runId") or "").strip()
+    status = str(snapshot.get("status") or "").strip().lower()
+    phase = str(snapshot.get("phase") or "").strip().lower()
+    if not run_id or status not in _ACTIVE_STATUSES or phase != "candidate_modify":
+        return snapshot
+    if _ACTIVE_RUN_ID == run_id or run_id in _RUN_CANCEL_EVENTS:
+        return snapshot
+    progress = snapshot.get("workflowProgress") if isinstance(snapshot.get("workflowProgress"), dict) else {}
+    improve = progress.get("improve") if isinstance(progress.get("improve"), dict) else {}
+    turn_id = str(
+        improve.get("conversationTurnId")
+        or improve.get("conversation_turn_id")
+        or improve.get("turnId")
+        or ""
+    ).strip()
+    if not turn_id:
+        return snapshot
+    child = _work_run_store().load_snapshot("chat_turn", turn_id)
+    if not isinstance(child, dict):
+        return snapshot
+    child_status = str(child.get("status") or child.get("runtimeStatus") or "").strip().lower()
+    child_runtime_status = str(child.get("runtimeStatus") or "").strip().lower()
+    if child_status in {"cancelled", "canceled", "stopped", "stopped_by_user", "force_stopped"} or child_runtime_status == "force_stopped":
+        terminal_status = "cancelled"
+    elif child_status in {"failed", "error", "timeout"}:
+        terminal_status = "failed"
+    else:
+        return snapshot
+    updated = _clone(snapshot)
+    modification = updated.get("candidateModification") if isinstance(updated.get("candidateModification"), dict) else {}
+    if terminal_status == "cancelled":
+        summary = f"候选改良子会话已终止：{child_status or child_runtime_status}"
+    else:
+        summary = f"候选改良子会话失败：{child_status}"
+    updated["candidateModification"] = {
+        **modification,
+        "status": terminal_status if terminal_status == "cancelled" else child_status or "failed",
+        "summary": summary,
+        "conversationSummary": {
+            **(modification.get("conversationSummary") if isinstance(modification.get("conversationSummary"), dict) else {}),
+            "conversation_backend": {
+                "enabled": True,
+                "session_id": str(improve.get("conversationSessionId") or "").strip(),
+                "observed_active_turn_id": turn_id,
+                "observed_terminal_status": child_status,
+            },
+        },
+        "reconciledFromChildTurn": turn_id,
+        "reconciledAt": _now_iso(),
+    }
+    _finish_candidate_modifier_terminal(
+        updated,
+        updated["candidateModification"],
+        terminal_status=terminal_status,
+    )
+    return _work_run_store().load_snapshot(RUN_KIND, run_id) or updated
+
+
+def _finish_candidate_modifier_terminal(
+    snapshot: dict[str, Any],
+    modification: dict[str, Any],
+    *,
+    terminal_status: str,
+) -> None:
+    run_id = str(snapshot.get("runId") or "")
+    raw_status = str((modification or {}).get("status") or terminal_status or "").strip().lower()
+    normalized = "cancelled" if terminal_status == "cancelled" else "failed"
+    reason = str((modification or {}).get("summary") or (modification or {}).get("reason") or raw_status or normalized).strip()
+    if normalized == "cancelled":
+        message = f"候选改良会话已停止，本轮监督 worktree 闭环已取消：{reason}"
+    else:
+        message = f"候选改良未正常完成，本轮监督 worktree 闭环已停止：{reason}"
+    finished = _now_iso()
+    snapshot["status"] = normalized
+    snapshot["phase"] = "candidate_modify"
+    snapshot["runtimeStatus"] = normalized
+    snapshot["outcome"] = f"candidate_modify_{raw_status or normalized}"
+    snapshot["latestMessage"] = message
+    snapshot["finishedAt"] = finished
+    snapshot["updatedAt"] = finished
+    if normalized == "failed":
+        snapshot["errorType"] = "CandidateModificationFailed"
+        snapshot["error"] = reason
+    progress = snapshot.get("workflowProgress") if isinstance(snapshot.get("workflowProgress"), dict) else {}
+    if progress is not snapshot.get("workflowProgress"):
+        snapshot["workflowProgress"] = progress
+    improve_progress = progress.get("improve") if isinstance(progress.get("improve"), dict) else {}
+    progress["improve"] = {
+        **improve_progress,
+        "stepId": "improve",
+        "role": "candidate",
+        "status": normalized,
+        "phase": "candidate_modify",
+        "conversationSessionId": _candidate_conversation_session_id(snapshot),
+        "conversationTurnId": str(improve_progress.get("conversationTurnId") or "").strip(),
+        "latestOutput": reason,
+        "latestOutputKind": "status",
+        "latestOutputLabel": raw_status or normalized,
+        "livePreview": _bounded_text(message),
+        "updatedAt": finished,
+    }
+    _append_stage(snapshot, "candidate_modify", normalized, message)
+    _persist_snapshot(snapshot, active_run_id="")
+    _record_worktree_scene_event(
+        "candidate_modify",
+        f"supervised_worktree_run.candidate_modify_{normalized}",
+        run_id=run_id,
+        level="warning" if normalized == "cancelled" else "error",
+        outcome=normalized,
+        fields={**_snapshot_event_fields(snapshot), "candidateModifierStatus": raw_status or normalized},
+        child_log_payload={"snapshot": _compact_snapshot_for_child_log(snapshot)},
+        lifecycle=True,
+    )
+
+
+def _finish_candidate_modifier_no_changes(snapshot: dict[str, Any]) -> None:
+    run_id = str(snapshot.get("runId") or "")
+    modification = snapshot.get("candidateModification") if isinstance(snapshot.get("candidateModification"), dict) else {}
+    reason = str(modification.get("summary") or "候选改良会话未产生任何 worktree 改动。").strip()
+    message = f"候选改良未产生可复跑的代码改动，本轮已停止：{reason}"
+    finished = _now_iso()
+    snapshot["candidateModification"] = {
+        **modification,
+        "status": "no_changes",
+        "summary": message,
+    }
+    snapshot["status"] = "failed"
+    snapshot["phase"] = "candidate_modify"
+    snapshot["runtimeStatus"] = "failed"
+    snapshot["outcome"] = "candidate_modify_no_changes"
+    snapshot["errorType"] = "CandidateModificationNoChanges"
+    snapshot["error"] = reason
+    snapshot["latestMessage"] = message
+    snapshot["finishedAt"] = finished
+    snapshot["updatedAt"] = finished
+    progress = snapshot.get("workflowProgress") if isinstance(snapshot.get("workflowProgress"), dict) else {}
+    if progress is not snapshot.get("workflowProgress"):
+        snapshot["workflowProgress"] = progress
+    improve_progress = progress.get("improve") if isinstance(progress.get("improve"), dict) else {}
+    progress["improve"] = {
+        **improve_progress,
+        "stepId": "improve",
+        "role": "candidate",
+        "status": "failed",
+        "phase": "candidate_modify",
+        "conversationSessionId": _candidate_conversation_session_id(snapshot),
+        "conversationTurnId": str(improve_progress.get("conversationTurnId") or "").strip(),
+        "latestOutput": reason,
+        "latestOutputKind": "status",
+        "latestOutputLabel": "no_changes",
+        "livePreview": _bounded_text(message),
+        "updatedAt": finished,
+    }
+    _append_stage(snapshot, "candidate_modify", "failed", message)
+    _persist_snapshot(snapshot, active_run_id="")
+    _record_worktree_scene_event(
+        "candidate_modify",
+        "supervised_worktree_run.candidate_modify_no_changes",
+        run_id=run_id,
+        level="warning",
+        outcome="failed",
+        fields={**_snapshot_event_fields(snapshot), "candidateModifierStatus": "no_changes"},
+        child_log_payload={"snapshot": _compact_snapshot_for_child_log(snapshot)},
+        lifecycle=True,
+    )
+
+
 def _baseline_failure_reason(baseline: dict[str, Any]) -> str:
     for case in list(baseline.get("cases") or []):
         if not isinstance(case, dict):
@@ -1546,12 +1736,12 @@ def _build_workflow_steps(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
 def _current_workflow_step_id(snapshot: dict[str, Any]) -> str:
     status = str(snapshot.get("status") or "").strip().lower()
     phase = str(snapshot.get("phase") or "").strip().lower()
-    if status in _TERMINAL_STATUSES or phase in {"complete", "failed", "baseline_unavailable", "shutdown"}:
-        return "approval"
     if phase in {"candidate_evaluation", "decision"}:
         return "rerun_score"
     if phase in {"reflection", "candidate_worktree", "candidate_modify"}:
         return "improve"
+    if status in _TERMINAL_STATUSES or phase in {"complete", "failed", "baseline_unavailable", "shutdown"}:
+        return "approval"
     return "baseline_eval"
 
 
