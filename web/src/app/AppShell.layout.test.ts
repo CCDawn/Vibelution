@@ -341,14 +341,14 @@ describe("AppShell layout contract", () => {
     expect(narrowShellStyles).toContain("text-overflow: ellipsis");
   });
 
-  it("themes the managed app window chrome to match the dark shell", () => {
+  it("themes the managed app window chrome to match the light-first shell", () => {
     const manifest = JSON.parse(manifestSource);
 
-    expect(indexHtml).toContain('name="theme-color" content="#12161a"');
-    expect(indexHtml).toContain('name="color-scheme" content="dark"');
+    expect(indexHtml).toContain('name="theme-color" content="#f7f8fa"');
+    expect(indexHtml).toContain('name="color-scheme" content="light dark"');
     expect(indexHtml).toContain('rel="manifest" href="/manifest.webmanifest"');
-    expect(manifest.theme_color).toBe("#12161a");
-    expect(manifest.background_color).toBe("#12161a");
+    expect(manifest.theme_color).toBe("#f7f8fa");
+    expect(manifest.background_color).toBe("#f7f8fa");
     expect(manifest.display).toBe("standalone");
   });
 });
