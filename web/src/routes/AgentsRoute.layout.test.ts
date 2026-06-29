@@ -998,7 +998,11 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("styles.agentRowBulkSelected");
     expect(routeSource).toContain("styles.agentRowShell");
     expect(stylesSource).toContain("grid-template-rows: auto auto minmax(0, 1fr)");
-    expect(stylesSource).toContain("grid-template-columns: auto auto auto minmax(140px, 1fr)");
+    expect(stylesSource).toContain(".bulkActionBar {\n  display: flex;");
+    expect(stylesSource).toContain("flex-wrap: wrap");
+    expect(stylesSource).toContain("flex: 1 1 220px");
+    expect(stylesSource).toContain(".bulkPromptPicker span");
+    expect(stylesSource).toContain("white-space: nowrap");
     expect(stylesSource).toContain("min-height: 26px");
     expect(stylesSource).toContain(".agentRowBulkSelected");
   });

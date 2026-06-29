@@ -522,8 +522,8 @@
 }
 
 .bulkActionBar {
-  display: grid;
-  grid-template-columns: auto auto auto minmax(140px, 1fr);
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 5px;
   min-width: 0;
@@ -551,9 +551,16 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-width: 0;
+  flex: 1 1 220px;
+  min-width: 180px;
+  max-width: 360px;
   color: var(--fg-secondary);
   font-size: 0.74rem;
+}
+
+.bulkPromptPicker span {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .bulkPromptPicker select {
