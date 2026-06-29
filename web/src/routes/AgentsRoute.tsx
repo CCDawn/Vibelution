@@ -58,6 +58,11 @@ import {
   ToolRegistryPayload,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
+import {
+  AgentPageHeader,
+  AgentSummaryStrip,
+  type AgentSummaryMetric,
+} from "../components/vui/product/agent-management";
 import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
@@ -2972,6 +2977,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         archivedAgents: "已归档",
         teams: "团队",
         healthIssues: "需处理问题",
+        workspaceSummary: "Agent 概览",
         healthIssueShort: "问题",
         statusReminders: "状态提醒",
         statusReminderShort: "提醒",
@@ -3368,6 +3374,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         archivedAgents: "Archived",
         teams: "Teams",
         healthIssues: "Issues to review",
+        workspaceSummary: "Agent summary",
         healthIssueShort: "Issues",
         statusReminders: "Status reminders",
         statusReminderShort: "Reminders",
@@ -3913,6 +3920,69 @@ export function AgentsRoute() {
   const healthStatus = workspace?.health.status ?? "ok";
   const healthStatusLabel = workspaceHealthStatusLabel(healthStatus, lang);
   const healthStatusDescription = workspaceHealthStatusDescription(healthStatus, summary, lang);
+  const workspaceAgents = workspace?.agents ?? [];
+  const workspaceTeams = workspace?.teams ?? [];
+  const workspaceChatRooms = workspace?.chatRooms ?? [];
+  const agentSummaryMetrics: AgentSummaryMetric[] = [
+    {
+      id: "all-agents",
+      label: copy.allAgents,
+      value: summary?.agentCount ?? workspaceAgents.length,
+      detail: copy.allAgents,
+    },
+    {
+      id: "active-agents",
+      label: copy.activeAgents,
+      value: summary?.activeAgentCount ?? workspaceAgents.filter((agent) => agent.status !== "archived").length,
+      detail: copy.activeAgents,
+      tone: "accent",
+    },
+    {
+      id: "archived-agents",
+      label: copy.archivedAgents,
+      value: summary?.archivedAgentCount ?? workspaceAgents.filter((agent) => agent.status === "archived").length,
+      detail: copy.archivedAgents,
+    },
+    {
+      id: "teams",
+      label: copy.teams,
+      value: summary?.teamCount ?? workspaceTeams.length,
+      detail: copy.teams,
+    },
+    {
+      id: "health-issues",
+      label: copy.healthIssues,
+      value: summary?.healthIssueCount ?? 0,
+      detail: `${copy.workspaceHealthStatus}: ${healthStatusLabel}. ${healthStatusDescription}`,
+      tone: healthStatus === "blocked" ? "danger" : healthStatus === "warning" ? "warning" : "success",
+    },
+    {
+      id: "chat-rooms",
+      label: copy.chatRooms,
+      value: summary?.chatRoomCount ?? workspaceChatRooms.length,
+      detail: copy.chatRooms,
+    },
+    {
+      id: "inbox",
+      label: copy.inbox,
+      value: summary?.inboxPendingCount ?? 0,
+      detail: copy.inbox,
+    },
+    {
+      id: "running-agents",
+      label: copy.runningAgents,
+      value: summary?.runningAgentCount ?? 0,
+      detail: copy.runningAgents,
+      tone: "accent",
+    },
+    {
+      id: "blocked-agents",
+      label: copy.blockedAgents,
+      value: summary?.blockedAgentCount ?? 0,
+      detail: copy.blockedAgents,
+      tone: (summary?.blockedAgentCount ?? 0) > 0 ? "danger" : undefined,
+    },
+  ];
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.agentSummary(true) });
     void chatWorkspaceCache.afterAgentWorkspaceChanged();
@@ -5431,65 +5501,34 @@ export function AgentsRoute() {
 
   return (
     <section className={styles.route}>
-      <header className={styles.header}>
-        <div title={copy.subtitle}>
-          <p className={styles.eyebrow}>{copy.eyebrow}</p>
-          <h1 className={styles.title}>{copy.title}</h1>
-        </div>
-        <span
-          className={`${styles.healthPill} ${styles[`health_${healthStatus}`]}`}
-          title={healthStatusDescription}
-          aria-label={`${copy.workspaceHealthStatus}: ${healthStatusLabel}. ${healthStatusDescription}`}
-        >
-          {healthStatusLabel}
-        </span>
-        <button type="button" className={styles.refreshButton} onClick={refresh}>
-          <RefreshCw size={16} />
-          {copy.refresh}
-        </button>
-      </header>
+      <div title={copy.subtitle}>
+        <AgentPageHeader
+          eyebrow={copy.eyebrow}
+          title={copy.title}
+        actions={[
+          {
+            id: "refresh",
+            label: copy.refresh,
+            icon: <RefreshCw size={14} />,
+            onPress: refresh,
+          },
+        ]}
+      />
+      </div>
 
       <div className={styles.controlStrip}>
         <AgentManagementNav active="agents" className={styles.managementNav} />
 
-        <div className={styles.summaryGrid}>
-          <section className={styles.summaryCard}>
-            <span>{copy.allAgents}</span>
-            <strong>{summary?.agentCount ?? 0}</strong>
-          </section>
-          <section className={styles.summaryCard}>
-            <span>{copy.activeAgents}</span>
-            <strong>{summary?.activeAgentCount ?? 0}</strong>
-          </section>
-          <section className={styles.summaryCard}>
-            <span>{copy.archivedAgents}</span>
-            <strong>{summary?.archivedAgentCount ?? 0}</strong>
-          </section>
-          <section className={styles.summaryCard}>
-            <span>{copy.teams}</span>
-            <strong>{summary?.teamCount ?? 0}</strong>
-          </section>
-          <section className={styles.summaryCard}>
-            <span>{copy.healthIssues}</span>
-            <strong>{summary?.healthIssueCount ?? 0}</strong>
-          </section>
-          <section className={styles.summaryCard}>
-            <span>{copy.chatRooms}</span>
-            <strong>{summary?.chatRoomCount ?? 0}</strong>
-          </section>
-          <section className={styles.summaryCard}>
-            <span>{copy.inbox}</span>
-            <strong>{summary?.inboxPendingCount ?? 0}</strong>
-          </section>
-          <section className={styles.summaryCard}>
-            <span>{copy.runningAgents}</span>
-            <strong>{summary?.runningAgentCount ?? 0}</strong>
-          </section>
-          <section className={styles.summaryCard}>
-            <span>{copy.blockedAgents}</span>
-            <strong>{summary?.blockedAgentCount ?? 0}</strong>
-          </section>
-        </div>
+        <AgentSummaryStrip
+          ariaLabel={copy.workspaceSummary}
+          status={{
+            label: healthStatusLabel,
+            title: healthStatusDescription,
+            ariaLabel: `${copy.workspaceHealthStatus}: ${healthStatusLabel}. ${healthStatusDescription}`,
+            tone: healthStatus === "blocked" ? "danger" : healthStatus === "warning" ? "warning" : "success",
+          }}
+          metrics={agentSummaryMetrics}
+        />
       </div>
 
       <div className={createOpen ? `${styles.workspace} ${styles.workspaceCreating}` : styles.workspace}>

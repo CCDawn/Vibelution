@@ -12,28 +12,6 @@
     linear-gradient(180deg, color-mix(in srgb, var(--surface-page) 96%, var(--bg-canvas)) 0%, var(--bg-canvas) 100%);
 }
 
-.header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: var(--route-topbar-gap);
-  min-width: 0;
-  min-height: 36px;
-  padding: 3px 12px;
-  border-bottom: 1px solid var(--border-hairline);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface-header) 96%, var(--accent-warm) 4%), var(--surface-header));
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--fg-primary) 5%, transparent);
-}
-
-.header > div {
-  display: grid;
-  grid-template-columns: auto auto;
-  align-items: baseline;
-  gap: 1px 7px;
-  min-width: 0;
-}
-
 .eyebrow,
 .panelEyebrow {
   margin: 0 0 1px;
@@ -50,29 +28,6 @@
   font-weight: 760;
   line-height: 1.1;
   white-space: nowrap;
-}
-
-.refreshButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  min-height: var(--agent-control-height);
-  padding: 3px 8px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-control);
-  background: var(--surface-card);
-  color: var(--fg-secondary);
-  transition:
-    border-color 160ms ease,
-    background 160ms ease,
-    color 160ms ease;
-}
-
-.refreshButton:hover {
-  border-color: var(--border-strong);
-  color: var(--fg-primary);
-  background: var(--surface-panel-hover);
 }
 
 .healthPill,
@@ -200,51 +155,6 @@
 
 .managementNav {
   margin: 0;
-}
-
-.summaryGrid {
-  display: grid;
-  grid-template-columns: repeat(9, minmax(64px, 1fr));
-  gap: 0;
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--border-soft) 78%, transparent);
-  border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--surface-panel) 90%, var(--surface-card));
-}
-
-.summaryCard {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: baseline;
-  gap: 5px;
-  min-width: 0;
-  min-height: 26px;
-  padding: 3px 8px;
-  border-right: 1px solid color-mix(in srgb, var(--border-soft) 58%, transparent);
-  background: transparent;
-}
-
-.summaryCard:last-child {
-  border-right: 0;
-}
-
-.summaryCard span {
-  color: var(--fg-tertiary);
-  font-size: 0.61rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.summaryCard strong {
-  min-width: 0;
-  overflow: hidden;
-  color: color-mix(in srgb, var(--fg-primary) 92%, var(--accent-cool));
-  font-size: 0.8rem;
-  line-height: 1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .workspace {
@@ -3207,10 +3117,6 @@
   .managementNav {
     justify-self: start;
   }
-
-  .summaryGrid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
 }
 
 @media (max-width: 1040px) {
@@ -3252,7 +3158,6 @@
     overflow: hidden;
   }
 
-  .header > div,
   .controlStrip,
   .workspace,
   .detailTabs,
@@ -3273,22 +3178,6 @@
   .factGrid,
   .policyGrid {
     grid-template-columns: 1fr;
-  }
-
-  .header {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .header > div {
-    grid-column: 1 / -1;
-  }
-
-  .refreshButton {
-    width: 100%;
-  }
-
-  .summaryGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .workspace {

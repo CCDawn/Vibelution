@@ -1,0 +1,16 @@
+:root {
+  --vui-control-height-sm: 26px;
+  --vui-control-height-md: 30px;
+  --vui-focus-ring: 0 0 0 2px color-mix(in srgb, var(--accent-cool) 22%, transparent);
+}
+
+[data-vui-provider="heroui"] {
+  color: var(--fg-primary);
+  font-family: var(--font-body);
+}
+
+[data-vui-provider="heroui"] [data-focus-visible="true"] {
+  outline: 1px solid color-mix(in srgb, var(--accent-cool) 58%, transparent);
+  outline-offset: 1px;
+  box-shadow: var(--vui-focus-ring);
+}

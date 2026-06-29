@@ -38,11 +38,21 @@ describe("AgentsRoute layout contract", () => {
     expect(shellSource).toContain('t("navAgents")');
     expect(routeSource).toContain('<AgentManagementNav active="agents" className={styles.managementNav} />');
     expect(routeSource.indexOf('<AgentManagementNav active="agents" className={styles.managementNav} />')).toBeGreaterThan(
-      routeSource.indexOf("</header>"),
+      routeSource.indexOf("<AgentPageHeader"),
     );
     expect(routeSource.indexOf('<AgentManagementNav active="agents" className={styles.managementNav} />')).toBeLessThan(
-      routeSource.indexOf("styles.summaryGrid"),
+      routeSource.indexOf("<AgentSummaryStrip"),
     );
+  });
+
+  it("uses VUI product components for the Agent management header and summary strip", () => {
+    expect(routeSource).toContain("AgentPageHeader");
+    expect(routeSource).toContain("AgentSummaryStrip");
+    expect(routeSource).toContain("agentSummaryMetrics");
+    expect(routeSource).not.toContain("styles.summaryCard");
+    expect(routeSource).not.toContain("styles.refreshButton");
+    expect(routeSource).not.toContain(['import { Button } from "', "@hero", "ui/react", '"'].join(""));
+    expect(routeSource).not.toContain("disabled: workspaceQuery.isFetching");
   });
 
   it("opens deep-linked Agent configuration and offers a governed return action", () => {
@@ -149,7 +159,11 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("workspaceHealthStatusLabel(healthStatus, lang)");
     expect(routeSource).toContain("workspaceHealthStatusDescription(healthStatus, summary, lang)");
     expect(routeSource).toContain("copy.workspaceHealthStatus");
-    expect(routeSource).toContain("aria-label={`${copy.workspaceHealthStatus}: ${healthStatusLabel}. ${healthStatusDescription}`}");
+    expect(routeSource).toContain("detail: `${copy.workspaceHealthStatus}: ${healthStatusLabel}. ${healthStatusDescription}`");
+    expect(routeSource).toContain("status={{");
+    expect(routeSource).toContain("label: healthStatusLabel");
+    expect(routeSource).toContain("title: healthStatusDescription");
+    expect(routeSource).toContain("ariaLabel: `${copy.workspaceHealthStatus}: ${healthStatusLabel}. ${healthStatusDescription}`");
     expect(routeSource).toContain("aria-label={copy.editAvatar}");
   });
 

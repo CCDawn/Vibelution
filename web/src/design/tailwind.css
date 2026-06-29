@@ -1,0 +1,21 @@
+@import "tailwindcss" source(none);
+
+@source "../app/**/*.{ts,tsx}";
+@source "../components/vui/**/*.{ts,tsx}";
+
+@theme {
+  --font-sans: var(--font-body);
+  --color-vui-bg-canvas: var(--bg-canvas);
+  --color-vui-surface-page: var(--surface-page);
+  --color-vui-surface-panel: var(--surface-panel);
+  --color-vui-surface-card: var(--surface-card);
+  --color-vui-fg-primary: var(--fg-primary);
+  --color-vui-fg-secondary: var(--fg-secondary);
+  --color-vui-fg-tertiary: var(--fg-tertiary);
+  --color-vui-border-hairline: var(--border-hairline);
+  --color-vui-border-soft: var(--border-soft);
+  --color-vui-accent-cool: var(--accent-cool);
+  --color-vui-accent-warm: var(--accent-warm);
+  --radius-vui-control: var(--radius-control);
+  --radius-vui-panel: var(--radius-panel);
+}
