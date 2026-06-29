@@ -56,6 +56,7 @@ describe("VUI foundation primitives", () => {
       <VButton
         icon={<Search size={14} />}
         trailingIcon={<span data-test-id="trailing">+</span>}
+        title="Search docs"
       >
         Search
       </VButton>,
@@ -65,6 +66,7 @@ describe("VUI foundation primitives", () => {
     expect(markup).toContain('data-slot="vui-button-icon"');
     expect(markup).toContain('data-slot="vui-button-label"');
     expect(markup).toContain('data-slot="vui-button-trailing-icon"');
+    expect(markup).toContain('title="Search docs"');
     expect(markup).toContain('class="inline-flex items-center gap-1.5"');
   });
 

@@ -186,4 +186,10 @@ describe("ConfigRoute layout contract", () => {
     expect(stylesSource).toContain(".configDenseSection .treeObjectCell .treeObjectBlock");
     expect(stylesSource).toContain(".configDenseSection .treeObjectCell .treeToggle");
   });
+
+  it("routes Config controls through VUI primitives", () => {
+    expect(routeSource).toContain('from "../components/vui"');
+    expect(routeSource).toContain("<VButton");
+    expect(routeSource).not.toMatch(/<button\b/);
+  });
 });

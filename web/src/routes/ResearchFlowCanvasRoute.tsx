@@ -31,6 +31,7 @@ import {
   ResearchOrgMessageResponse,
   ResearchOrgProposalResponse,
 } from "../api/types";
+import { VButton } from "../components/vui";
 import { agentDisplayInfo } from "./agentDisplay";
 import styles from "./ResearchFlowCanvasRoute.module.css";
 
@@ -2233,11 +2234,11 @@ export function ResearchFlowCanvasRoute() {
             <ArrowLeft size={16} />
             返回科研页
           </Link>
-          <button className={styles.secondaryButton} type="button" onClick={fitView} disabled={!draft}>
+          <VButton className={styles.secondaryButton} type="button" onClick={fitView} isDisabled={!draft}>
             <MousePointer2 size={16} />
             复位视图
-          </button>
-          <button
+          </VButton>
+          <VButton
             className={styles.secondaryButton}
             type="button"
             onClick={() => {
@@ -2245,12 +2246,12 @@ export function ResearchFlowCanvasRoute() {
               organizationQuery.refetch();
               setObservationMessage("已请求刷新科研组织图。");
             }}
-            disabled={canvasQuery.isFetching || organizationQuery.isFetching}
+            isDisabled={canvasQuery.isFetching || organizationQuery.isFetching}
           >
             <RefreshCw size={16} />
             刷新组织图
-          </button>
-          <button
+          </VButton>
+          <VButton
             className={`${styles.primaryButton} ${styles.lockButtonActive}`}
             type="button"
             onClick={toggleCanvasLock}
@@ -2259,7 +2260,7 @@ export function ResearchFlowCanvasRoute() {
           >
             <Lock size={16} />
             持续锁定
-          </button>
+          </VButton>
         </div>
       </header>
 
@@ -2284,25 +2285,25 @@ export function ResearchFlowCanvasRoute() {
       <div className={styles.body}>
         <main className={styles.canvasShell} aria-label="科研组织画布">
           <div className={styles.zoomControl} aria-label="画布缩放控制">
-            <button
+            <VButton
               className={styles.iconButton}
               type="button"
               onClick={() => zoomCanvasBy(-CANVAS_ZOOM_STEP)}
-              disabled={!draft || canvasZoom <= CANVAS_ZOOM_MIN}
+              isDisabled={!draft || canvasZoom <= CANVAS_ZOOM_MIN}
               title="缩小画布"
             >
               <ZoomOut size={16} />
-            </button>
+            </VButton>
             <span>{Math.round(canvasZoom * 100)}%</span>
-            <button
+            <VButton
               className={styles.iconButton}
               type="button"
               onClick={() => zoomCanvasBy(CANVAS_ZOOM_STEP)}
-              disabled={!draft || canvasZoom >= CANVAS_ZOOM_MAX}
+              isDisabled={!draft || canvasZoom >= CANVAS_ZOOM_MAX}
               title="放大画布"
             >
               <ZoomIn size={16} />
-            </button>
+            </VButton>
           </div>
           {reconnect && reconnectEdge ? (
             <div className={styles.reconnectHint}>
@@ -2371,7 +2372,7 @@ export function ResearchFlowCanvasRoute() {
                   }
                   const geometry = edgeGeometry(source, target, edgeLanes.get(edge.id));
                   return (
-                    <button
+                    <VButton
                       key={`${edge.id}-hotspot`}
                       type="button"
                       className={[
@@ -2388,7 +2389,7 @@ export function ResearchFlowCanvasRoute() {
                     >
                       <span>{edgeTypeLabel(edge.type)} · {edgeConditionLabel(edge.condition)}</span>
                       {edge.label || "路由"}
-                    </button>
+                    </VButton>
                   );
                 })}
                 {draft.edges.map((edge) => {
@@ -2401,7 +2402,7 @@ export function ResearchFlowCanvasRoute() {
                   const geometry = edgeGeometry(source, target, edgeLanes.get(edge.id));
                   return (
                     <div key={`${edge.id}-endpoints`} className={styles.edgeEndpoints}>
-                      <button
+                      <VButton
                         type="button"
                         className={[
                           styles.edgeEndpointHandle,
@@ -2412,8 +2413,8 @@ export function ResearchFlowCanvasRoute() {
                         onPointerDown={(event) => startEdgeReconnect(event, edge, "source")}
                       >
                         起
-                      </button>
-                      <button
+                      </VButton>
+                      <VButton
                         type="button"
                         className={[
                           styles.edgeEndpointHandle,
@@ -2424,7 +2425,7 @@ export function ResearchFlowCanvasRoute() {
                         onPointerDown={(event) => startEdgeReconnect(event, edge, "target")}
                       >
                         终
-                      </button>
+                      </VButton>
                     </div>
                   );
                 })}
@@ -2550,15 +2551,15 @@ export function ResearchFlowCanvasRoute() {
 
           <div className={styles.inspectorBody}>
             <nav className={styles.inspectorTabs} aria-label="画布侧栏">
-              <button
+              <VButton
                 type="button"
                 className={inspectorView === "properties" ? `${styles.inspectorTab} ${styles.inspectorTabActive}` : styles.inspectorTab}
                 onClick={() => setInspectorView("properties")}
                 aria-pressed={inspectorView === "properties"}
               >
                 详情
-              </button>
-              <button
+              </VButton>
+              <VButton
                 type="button"
                 className={inspectorView === "issues" ? `${styles.inspectorTab} ${styles.inspectorTabActive}` : styles.inspectorTab}
                 onClick={() => setInspectorView("issues")}
@@ -2568,8 +2569,8 @@ export function ResearchFlowCanvasRoute() {
                 <span className={styles.inspectorTabBadge}>
                   {validationErrors.length}/{validationWarnings.length}
                 </span>
-              </button>
-              <button
+              </VButton>
+              <VButton
                 type="button"
                 className={inspectorView === "organization" ? `${styles.inspectorTab} ${styles.inspectorTabActive}` : styles.inspectorTab}
                 onClick={() => setInspectorView("organization")}
@@ -2579,7 +2580,7 @@ export function ResearchFlowCanvasRoute() {
                 <span className={styles.inspectorTabBadge}>
                   {pendingOrganizationProposals.length}/{organization?.auditEvents.length ?? 0}
                 </span>
-              </button>
+              </VButton>
             </nav>
 
             <div className={styles.inspectorContent}>
@@ -2708,22 +2709,22 @@ export function ResearchFlowCanvasRoute() {
                       只投递邮箱，不立即唤醒
                     </label>
                     <div className={styles.organizationActionRow}>
-                      <button
+                      <VButton
                         className={styles.primaryButton}
                         type="submit"
-                        disabled={!canSendOrganizationMessage || sendOrgMessageMutation.isPending}
+                        isDisabled={!canSendOrganizationMessage || sendOrgMessageMutation.isPending}
                       >
                         <Send size={16} />
                         {sendOrgMessageMutation.isPending ? "发送中" : "发送消息"}
-                      </button>
-                      <button
+                      </VButton>
+                      <VButton
                         className={styles.secondaryButton}
                         type="button"
                         onClick={() => queryClient.invalidateQueries({ queryKey: queryKeys.researchOrganization() })}
                       >
                         <RefreshCw size={16} />
                         刷新
-                      </button>
+                      </VButton>
                     </div>
                     {orgMessageFeedback ? <p className={styles.fieldHint}>{orgMessageFeedback}</p> : null}
                   </form>
@@ -2740,14 +2741,14 @@ export function ResearchFlowCanvasRoute() {
                             <strong>{proposal.title}</strong>
                             <span>{proposal.riskLevel} / {proposal.status} / {proposal.actions.length} actions</span>
                           </div>
-                          <button
+                          <VButton
                             className={styles.primaryButton}
                             type="button"
-                            disabled={applyOrgProposalMutation.isPending}
+                            isDisabled={applyOrgProposalMutation.isPending}
                             onClick={() => applyOrgProposalMutation.mutate(proposal.proposalId)}
                           >
                             确认应用
-                          </button>
+                          </VButton>
                         </article>
                       ))
                     ) : (
@@ -2781,15 +2782,15 @@ export function ResearchFlowCanvasRoute() {
                             ))}
                           </div>
                           {retryable ? (
-                            <button
+                            <VButton
                               className={styles.secondaryButton}
                               type="button"
-                              disabled={retryOrgWakeMutation.isPending}
+                              isDisabled={retryOrgWakeMutation.isPending}
                               onClick={() => retryOrgWakeMutation.mutate(message.messageId)}
                             >
                               <RefreshCw size={16} />
                               重试唤醒
-                            </button>
+                            </VButton>
                           ) : null}
                         </article>
                       );
@@ -2877,9 +2878,9 @@ export function ResearchFlowCanvasRoute() {
                         <div className={styles.issueMeta}>
                           <code>{issue.edgeId || issue.nodeId || (issue.source && issue.target ? `${issue.source}->${issue.target}` : issue.code)}</code>
                           {(issue.edgeId || issue.nodeId || (issue.source && issue.target)) ? (
-                            <button className={styles.issueFocusButton} type="button" onClick={() => focusValidationIssue(issue)}>
+                            <VButton className={styles.issueFocusButton} type="button" onClick={() => focusValidationIssue(issue)}>
                               定位
-                            </button>
+                            </VButton>
                           ) : null}
                         </div>
                       </article>

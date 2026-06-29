@@ -41,6 +41,12 @@ function transaction(overrides: Partial<SelfEvolutionTransaction> & { txnId: str
 }
 
 describe("SelfEvolutionTrack static assets", () => {
+  it("routes self-evolution controls through VUI primitives", () => {
+    expect(selfEvolutionSource).toContain('from "../components/vui"');
+    expect(selfEvolutionSource).toContain("<VButton");
+    expect(selfEvolutionSource).not.toMatch(/<button\b/);
+  });
+
   it("does not use remote placeholder images that pollute runtime scene logs", () => {
     expect(selfEvolutionSource).not.toContain("http://");
     expect(selfEvolutionSource).not.toContain("https://");

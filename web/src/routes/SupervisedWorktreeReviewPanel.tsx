@@ -2,6 +2,7 @@ import { GitMerge, LoaderCircle, Save, SearchCheck, ShieldCheck, Trash2 } from "
 import { useEffect, useMemo, useState } from "react";
 
 import type { EvolutionActionState, SupervisedWorktreeRun } from "../api/types";
+import { VButton } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./SupervisedWorktreeReviewPanel.module.css";
 import { isSelfEvolutionWorktreeRun } from "./supervisedWorktreeReview";
@@ -149,7 +150,7 @@ export function SupervisedWorktreeReviewPanel({
                   && Boolean(runReviewGate?.required)
                   && String(runReviewGate?.status || "").trim().toLowerCase() !== "approved";
                 return (
-                  <button
+                  <VButton
                     key={run.runId}
                     type="button"
                     className={selected ? `${styles.worktreeRunItem} ${styles.worktreeRunItemActive}` : styles.worktreeRunItem}
@@ -165,7 +166,7 @@ export function SupervisedWorktreeReviewPanel({
                       {" · "}
                       {runReviewPending ? t("selfWorktreeReviewPending") : (run.phase || compactTimestamp(run.updatedAt))}
                     </span>
-                  </button>
+                  </VButton>
                 );
               })}
             </div>
@@ -179,7 +180,7 @@ export function SupervisedWorktreeReviewPanel({
                 const disabled = !item.state?.enabled || pending;
                 const reason = disabledReason(item.state);
                 return (
-                  <button
+                  <VButton
                     key={item.action}
                     type="button"
                     className={
@@ -187,13 +188,13 @@ export function SupervisedWorktreeReviewPanel({
                         ? `${styles.inlineAction} ${styles.dangerInlineAction}`
                         : styles.inlineAction
                     }
-                    disabled={disabled}
+                    isDisabled={disabled}
                     onClick={() => onRunAction(highlightedWorktreeRun, item.action)}
                     title={reason || t(item.labelKey)}
                   >
                     {pending ? <LoaderCircle size={15} className={styles.spin} /> : <Icon size={15} />}
                     {t(item.labelKey)}
-                  </button>
+                  </VButton>
                 );
               })}
             </div>
@@ -219,10 +220,10 @@ export function SupervisedWorktreeReviewPanel({
               </div>
             ) : null}
             <div className={styles.controlActions}>
-              <button
+              <VButton
                 type="button"
                 className={styles.inlineAction}
-                disabled={
+                isDisabled={
                   !highlightedApproveReviewAction?.enabled
                   || pending
                 }
@@ -231,7 +232,7 @@ export function SupervisedWorktreeReviewPanel({
               >
                 {pending ? <LoaderCircle size={15} className={styles.spin} /> : <ShieldCheck size={15} />}
                 {t("approveSelfWorktreeReview")}
-              </button>
+              </VButton>
               {!highlightedApproveReviewAction?.enabled && disabledReason(highlightedApproveReviewAction) ? (
                 <p className={styles.noticeText}>{disabledReason(highlightedApproveReviewAction)}</p>
               ) : null}

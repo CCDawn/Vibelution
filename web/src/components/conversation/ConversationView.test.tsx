@@ -134,6 +134,14 @@ function renderConversation(
   );
 }
 
+describe("ConversationView VUI control contract", () => {
+  it("routes conversation controls through VUI primitives", () => {
+    expect(conversationViewSource).toContain('from "../vui"');
+    expect(conversationViewSource).toContain("<VButton");
+    expect(conversationViewSource).not.toMatch(/<button\b/);
+  });
+});
+
 describe("ConversationView edit resend affordance", () => {
   it("does not force-collapse thinking sections when streaming settles", () => {
     expect(conversationViewSource).not.toContain("previousStreamingRef");
