@@ -31,11 +31,19 @@ describe("supervised workspace controls", () => {
     expect(tabsSource).toContain("stepCount");
     expect(tabsSource).toContain("supervisedFlowLabel");
     expect(tabsSource).toContain("supervisedFlowHint");
+    expect(tabsSource).toContain("activeWorkflowStepId");
+    expect(tabsSource).toContain('workflowStepId: "baseline_eval"');
+    expect(tabsSource).toContain('workflowStepId: "improve"');
+    expect(tabsSource).toContain('workflowStepId: "rerun_score"');
+    expect(tabsSource).toContain('workflowStepId: "approval"');
     expect(tabsSource).toContain("styles.stepHint");
-    expect(dictionarySource).toContain("启动与现场");
-    expect(dictionarySource).toContain("运行结果");
-    expect(dictionarySource).toContain("改进提案");
-    expect(dictionarySource).toContain("样本评审");
+    expect(dictionarySource).toContain('supervisedFlowLive: "基线评测"');
+    expect(dictionarySource).toContain('supervisedFlowRuns: "提出建议与改良"');
+    expect(dictionarySource).toContain('supervisedFlowLibrary: "复跑与评分"');
+    expect(dictionarySource).toContain('supervisedFlowReview: "用户审批"');
+    expect(dictionarySource).not.toContain('supervisedFlowRuns: "运行结果"');
+    expect(dictionarySource).not.toContain('supervisedFlowLibrary: "改进提案"');
+    expect(dictionarySource).not.toContain('supervisedFlowReview: "样本评审"');
     expect(tabsStylesSource).toContain(".flowTabs");
     expect(tabsStylesSource).toContain("grid-template-columns: repeat(4");
     expect(tabsStylesSource).toContain(".stepHint");
@@ -59,11 +67,14 @@ describe("supervised workspace controls", () => {
     expect(evolutionStylesSource).toContain("overflow-x: auto");
   });
 
-  it("feeds live run, history, library, and review counts into the supervised flow tabs", () => {
+  it("feeds workflow step summaries into the supervised flow tabs", () => {
     expect(evolutionRouteSource).toContain("supervisedTabSummaries");
-    expect(evolutionRouteSource).toContain("monitoredControlSummary?.stageLabel");
-    expect(evolutionRouteSource).toContain("pendingItems.length + libraryItems.length");
-    expect(evolutionRouteSource).toContain("highlightedReviewPending");
+    expect(evolutionRouteSource).toContain("supervisedWorkflowTabSummary");
+    expect(evolutionRouteSource).toContain("supervisedWorkflowCards[0]");
+    expect(evolutionRouteSource).toContain("supervisedWorkflowCards[1]");
+    expect(evolutionRouteSource).toContain("supervisedWorkflowCards[2]");
+    expect(evolutionRouteSource).toContain("supervisedWorkflowCards[3]");
+    expect(evolutionRouteSource).toContain("activeWorkflowStepId={supervisedRuntimeWorkflowStepId}");
     expect(evolutionRouteSource).toContain("tabSummaries={supervisedTabSummaries}");
   });
 });
