@@ -889,6 +889,11 @@
   color: var(--fg-secondary);
 }
 
+.answerOnlyProcessStatic {
+  grid-template-columns: 14px auto auto;
+  cursor: default;
+}
+
 .answerOnlyProcessIcon {
   display: inline-grid;
   place-items: center;
