@@ -22,6 +22,7 @@ import {
   UserRound,
   Users,
   Wrench,
+  X,
 } from "lucide-react";
 import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -3687,6 +3688,7 @@ export function AgentsRoute() {
   const [bulkAgentPending, setBulkAgentPending] = useState(false);
   const draftSyncSourceRef = useRef<AgentDraftSyncSource | null>(null);
   const appliedRouteTargetRef = useRef("");
+  const selectedAgentAvatarInputRef = useRef<HTMLInputElement | null>(null);
 
   const fullWorkspaceNeeded = Boolean(createOpen || activePane === "config" || activePane === "activity" || requestedAgentId);
   const workspaceQuery = useQuery({
@@ -6118,21 +6120,22 @@ export function AgentsRoute() {
                         </button>
                       </div>
                       <div className={styles.avatarEditorActions}>
-                        <label className={styles.secondaryButton}>
-                          <input
-                            type="file"
-                            accept="image/png,image/jpeg,image/webp"
-                            disabled={selectedAgentAvatarUploadPending}
-                            onChange={(event) => {
-                              uploadSelectedAgentAvatar(event.target.files?.[0]);
-                              event.currentTarget.value = "";
-                            }}
-                          />
-                          <span>{selectedAgentAvatarUploadPending ? copy.uploadingAvatar : copy.uploadAvatar}</span>
-                        </label>
-                        <button type="button" className={styles.secondaryButton} disabled={selectedAgentAvatarUpdatePending} onClick={resetSelectedAgentAvatar}>
+                        <input
+                          ref={selectedAgentAvatarInputRef}
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          disabled={selectedAgentAvatarUploadPending}
+                          onChange={(event) => {
+                            uploadSelectedAgentAvatar(event.target.files?.[0]);
+                            event.currentTarget.value = "";
+                          }}
+                        />
+                        <VButton type="button" variant="secondary" isDisabled={selectedAgentAvatarUploadPending} onPress={() => selectedAgentAvatarInputRef.current?.click()}>
+                          {selectedAgentAvatarUploadPending ? copy.uploadingAvatar : copy.uploadAvatar}
+                        </VButton>
+                        <VButton type="button" variant="secondary" isDisabled={selectedAgentAvatarUpdatePending} onPress={resetSelectedAgentAvatar}>
                           {selectedAgentAvatarUpdatePending ? copy.resettingAvatar : copy.resetDefaultAvatar}
-                        </button>
+                        </VButton>
                       </div>
                       <div className={styles.avatarLibraryHeader}>
                         <span>{copy.avatarLibrary}</span>
@@ -7166,9 +7169,16 @@ export function AgentsRoute() {
                     <span>{copy.readSharedGroups}</span>
                     <div className={styles.tagList}>
                       {memoryPolicyDraft.readSharedGroups.length ? memoryPolicyDraft.readSharedGroups.map((group) => (
-                        <button key={`read:${group}`} type="button" onClick={() => removeMemoryGroup("readSharedGroups", group)}>
-                          {group} x
-                        </button>
+                        <VButton
+                          key={`read:${group}`}
+                          type="button"
+                          variant="ghost"
+                          trailingIcon={<X size={12} />}
+                          title={lang === "zh" ? `移除 ${group}` : `Remove ${group}`}
+                          onPress={() => removeMemoryGroup("readSharedGroups", group)}
+                        >
+                          {group}
+                        </VButton>
                       )) : <small>{copy.noSharedGroups}</small>}
                     </div>
                     <div className={styles.inlineAdd}>
@@ -7178,18 +7188,25 @@ export function AgentsRoute() {
                         placeholder={copy.sharedGroupPlaceholder}
                         onChange={(event) => updateMemoryDraftField({ newReadGroup: event.target.value })}
                       />
-                      <button type="button" onClick={() => addMemoryGroup("readSharedGroups", memoryPolicyDraft.newReadGroup)}>
+                      <VButton type="button" variant="secondary" onPress={() => addMemoryGroup("readSharedGroups", memoryPolicyDraft.newReadGroup)}>
                         {copy.addSharedGroup}
-                      </button>
+                      </VButton>
                     </div>
                   </section>
                   <section>
                     <span>{copy.writeSharedGroups}</span>
                     <div className={styles.tagList}>
                       {memoryPolicyDraft.writeSharedGroups.length ? memoryPolicyDraft.writeSharedGroups.map((group) => (
-                        <button key={`write:${group}`} type="button" onClick={() => removeMemoryGroup("writeSharedGroups", group)}>
-                          {group} x
-                        </button>
+                        <VButton
+                          key={`write:${group}`}
+                          type="button"
+                          variant="ghost"
+                          trailingIcon={<X size={12} />}
+                          title={lang === "zh" ? `移除 ${group}` : `Remove ${group}`}
+                          onPress={() => removeMemoryGroup("writeSharedGroups", group)}
+                        >
+                          {group}
+                        </VButton>
                       )) : <small>{copy.noSharedGroups}</small>}
                     </div>
                     <div className={styles.inlineAdd}>
@@ -7199,18 +7216,25 @@ export function AgentsRoute() {
                         placeholder={copy.sharedGroupPlaceholder}
                         onChange={(event) => updateMemoryDraftField({ newWriteGroup: event.target.value })}
                       />
-                      <button type="button" onClick={() => addMemoryGroup("writeSharedGroups", memoryPolicyDraft.newWriteGroup)}>
+                      <VButton type="button" variant="secondary" onPress={() => addMemoryGroup("writeSharedGroups", memoryPolicyDraft.newWriteGroup)}>
                         {copy.addSharedGroup}
-                      </button>
+                      </VButton>
                     </div>
                   </section>
                   <section>
                     <span>{copy.readKnowledgeBaseIds}</span>
                     <div className={styles.tagList}>
                       {memoryPolicyDraft.readKnowledgeBaseIds.length ? memoryPolicyDraft.readKnowledgeBaseIds.map((knowledgeBaseId) => (
-                        <button key={`kb-read:${knowledgeBaseId}`} type="button" onClick={() => removeKnowledgeBaseId("readKnowledgeBaseIds", knowledgeBaseId)}>
-                          {knowledgeBaseId} x
-                        </button>
+                        <VButton
+                          key={`kb-read:${knowledgeBaseId}`}
+                          type="button"
+                          variant="ghost"
+                          trailingIcon={<X size={12} />}
+                          title={lang === "zh" ? `移除 ${knowledgeBaseId}` : `Remove ${knowledgeBaseId}`}
+                          onPress={() => removeKnowledgeBaseId("readKnowledgeBaseIds", knowledgeBaseId)}
+                        >
+                          {knowledgeBaseId}
+                        </VButton>
                       )) : <small>{copy.noKnowledgeBaseIds}</small>}
                     </div>
                     <div className={styles.inlineAdd}>
@@ -7219,18 +7243,25 @@ export function AgentsRoute() {
                         placeholder={copy.knowledgeBasePlaceholder}
                         onChange={(event) => updateMemoryDraftField({ newReadKnowledgeBaseId: event.target.value })}
                       />
-                      <button type="button" onClick={() => addKnowledgeBaseId("readKnowledgeBaseIds", memoryPolicyDraft.newReadKnowledgeBaseId)}>
+                      <VButton type="button" variant="secondary" onPress={() => addKnowledgeBaseId("readKnowledgeBaseIds", memoryPolicyDraft.newReadKnowledgeBaseId)}>
                         {copy.addSharedGroup}
-                      </button>
+                      </VButton>
                     </div>
                   </section>
                   <section>
                     <span>{copy.proposeKnowledgeBaseIds}</span>
                     <div className={styles.tagList}>
                       {memoryPolicyDraft.proposeKnowledgeBaseIds.length ? memoryPolicyDraft.proposeKnowledgeBaseIds.map((knowledgeBaseId) => (
-                        <button key={`kb-propose:${knowledgeBaseId}`} type="button" onClick={() => removeKnowledgeBaseId("proposeKnowledgeBaseIds", knowledgeBaseId)}>
-                          {knowledgeBaseId} x
-                        </button>
+                        <VButton
+                          key={`kb-propose:${knowledgeBaseId}`}
+                          type="button"
+                          variant="ghost"
+                          trailingIcon={<X size={12} />}
+                          title={lang === "zh" ? `移除 ${knowledgeBaseId}` : `Remove ${knowledgeBaseId}`}
+                          onPress={() => removeKnowledgeBaseId("proposeKnowledgeBaseIds", knowledgeBaseId)}
+                        >
+                          {knowledgeBaseId}
+                        </VButton>
                       )) : <small>{copy.noKnowledgeBaseIds}</small>}
                     </div>
                     <div className={styles.inlineAdd}>
@@ -7239,18 +7270,25 @@ export function AgentsRoute() {
                         placeholder={copy.knowledgeBasePlaceholder}
                         onChange={(event) => updateMemoryDraftField({ newProposeKnowledgeBaseId: event.target.value })}
                       />
-                      <button type="button" onClick={() => addKnowledgeBaseId("proposeKnowledgeBaseIds", memoryPolicyDraft.newProposeKnowledgeBaseId)}>
+                      <VButton type="button" variant="secondary" onPress={() => addKnowledgeBaseId("proposeKnowledgeBaseIds", memoryPolicyDraft.newProposeKnowledgeBaseId)}>
                         {copy.addSharedGroup}
-                      </button>
+                      </VButton>
                     </div>
                   </section>
                   <section>
                     <span>{copy.reviewKnowledgeBaseIds}</span>
                     <div className={styles.tagList}>
                       {memoryPolicyDraft.reviewKnowledgeBaseIds.length ? memoryPolicyDraft.reviewKnowledgeBaseIds.map((knowledgeBaseId) => (
-                        <button key={`kb-review:${knowledgeBaseId}`} type="button" onClick={() => removeKnowledgeBaseId("reviewKnowledgeBaseIds", knowledgeBaseId)}>
-                          {knowledgeBaseId} x
-                        </button>
+                        <VButton
+                          key={`kb-review:${knowledgeBaseId}`}
+                          type="button"
+                          variant="ghost"
+                          trailingIcon={<X size={12} />}
+                          title={lang === "zh" ? `移除 ${knowledgeBaseId}` : `Remove ${knowledgeBaseId}`}
+                          onPress={() => removeKnowledgeBaseId("reviewKnowledgeBaseIds", knowledgeBaseId)}
+                        >
+                          {knowledgeBaseId}
+                        </VButton>
                       )) : <small>{copy.noKnowledgeBaseIds}</small>}
                     </div>
                     <div className={styles.inlineAdd}>
@@ -7259,18 +7297,25 @@ export function AgentsRoute() {
                         placeholder={copy.knowledgeBasePlaceholder}
                         onChange={(event) => updateMemoryDraftField({ newReviewKnowledgeBaseId: event.target.value })}
                       />
-                      <button type="button" onClick={() => addKnowledgeBaseId("reviewKnowledgeBaseIds", memoryPolicyDraft.newReviewKnowledgeBaseId)}>
+                      <VButton type="button" variant="secondary" onPress={() => addKnowledgeBaseId("reviewKnowledgeBaseIds", memoryPolicyDraft.newReviewKnowledgeBaseId)}>
                         {copy.addSharedGroup}
-                      </button>
+                      </VButton>
                     </div>
                   </section>
                   <section>
                     <span>{copy.rateKnowledgeBaseIds}</span>
                     <div className={styles.tagList}>
                       {memoryPolicyDraft.rateKnowledgeBaseIds.length ? memoryPolicyDraft.rateKnowledgeBaseIds.map((knowledgeBaseId) => (
-                        <button key={`kb-rate:${knowledgeBaseId}`} type="button" onClick={() => removeKnowledgeBaseId("rateKnowledgeBaseIds", knowledgeBaseId)}>
-                          {knowledgeBaseId} x
-                        </button>
+                        <VButton
+                          key={`kb-rate:${knowledgeBaseId}`}
+                          type="button"
+                          variant="ghost"
+                          trailingIcon={<X size={12} />}
+                          title={lang === "zh" ? `移除 ${knowledgeBaseId}` : `Remove ${knowledgeBaseId}`}
+                          onPress={() => removeKnowledgeBaseId("rateKnowledgeBaseIds", knowledgeBaseId)}
+                        >
+                          {knowledgeBaseId}
+                        </VButton>
                       )) : <small>{copy.noKnowledgeBaseIds}</small>}
                     </div>
                     <div className={styles.inlineAdd}>
@@ -7279,9 +7324,9 @@ export function AgentsRoute() {
                         placeholder={copy.knowledgeBasePlaceholder}
                         onChange={(event) => updateMemoryDraftField({ newRateKnowledgeBaseId: event.target.value })}
                       />
-                      <button type="button" onClick={() => addKnowledgeBaseId("rateKnowledgeBaseIds", memoryPolicyDraft.newRateKnowledgeBaseId)}>
+                      <VButton type="button" variant="secondary" onPress={() => addKnowledgeBaseId("rateKnowledgeBaseIds", memoryPolicyDraft.newRateKnowledgeBaseId)}>
                         {copy.addSharedGroup}
-                      </button>
+                      </VButton>
                     </div>
                   </section>
                 </div>
@@ -7420,14 +7465,14 @@ export function AgentsRoute() {
                             <strong>{room.title || room.roomId}</strong>
                             <small>{room.mode || "-"} · {room.participantCount} members · {formatTimestamp(room.updatedAt, lang)}</small>
                           </span>
-                          <button
+                          <VButton
                             type="button"
-                            className={styles.referenceRouteButton}
-                            onClick={() => navigate(compactProjectionRoute(room, `/chat?room=${encodeURIComponent(room.roomId)}`))}
+                            variant="ghost"
+                            icon={<ExternalLink size={12} />}
+                            onPress={() => navigate(compactProjectionRoute(room, `/chat?room=${encodeURIComponent(room.roomId)}`))}
                           >
-                            <ExternalLink size={12} />
                             {lang === "zh" ? "打开群聊" : "Open room"}
-                          </button>
+                          </VButton>
                         </div>
                       );
                     })}
@@ -7465,14 +7510,14 @@ export function AgentsRoute() {
                         <div className={styles.referenceMetaRow}>
                           <small>{[reference.mode, reference.field].filter(Boolean).join(" / ") || reference.sourceId}</small>
                           {referenceRoute(reference) ? (
-                            <button
+                            <VButton
                               type="button"
-                              className={styles.referenceRouteButton}
-                              onClick={() => navigate(referenceRoute(reference))}
+                              variant="ghost"
+                              icon={<ExternalLink size={12} />}
+                              onPress={() => navigate(referenceRoute(reference))}
                             >
-                              <ExternalLink size={12} />
                               {lang === "zh" ? "打开" : "Open"}
-                            </button>
+                            </VButton>
                           ) : null}
                         </div>
                       </div>
@@ -7523,18 +7568,18 @@ export function AgentsRoute() {
                 </div>
                 <div className={styles.timelineActions}>
                   {selectedAgent.runtimeStatus?.sessionId || selectedAgent.directSessionId ? (
-                    <button
+                    <VButton
                       type="button"
-                      onClick={() => openAgentSession(selectedAgent.runtimeStatus?.sessionId || selectedAgent.directSessionId)}
+                      variant="ghost"
+                      icon={<ExternalLink size={13} />}
+                      onPress={() => openAgentSession(selectedAgent.runtimeStatus?.sessionId || selectedAgent.directSessionId)}
                     >
-                      <ExternalLink size={13} />
                       {copy.openSession}
-                    </button>
+                    </VButton>
                   ) : null}
-                  <button type="button" onClick={() => openAgentLogs(runtimeFocusEvidence.match)}>
-                    <Search size={13} />
+                  <VButton type="button" variant="ghost" icon={<Search size={13} />} onPress={() => openAgentLogs(runtimeFocusEvidence.match)}>
                     {runtimeFocusEvidence.match ? `${copy.openLogs} · ${runtimeFocusEvidence.match.runtimeSceneId}` : copy.openLogs}
-                  </button>
+                  </VButton>
                 </div>
               </section>
 
@@ -7572,22 +7617,19 @@ export function AgentsRoute() {
                         <small>{item.meta}</small>
                         <div className={styles.timelineActions}>
                           {item.sessionId ? (
-                            <button type="button" onClick={() => openAgentSession(item.sessionId)}>
-                              <ExternalLink size={13} />
+                            <VButton type="button" variant="ghost" icon={<ExternalLink size={13} />} onPress={() => openAgentSession(item.sessionId)}>
                               {copy.openSession}
-                            </button>
+                            </VButton>
                           ) : null}
                           {item.canOpenLogs ? (
-                            <button type="button" onClick={() => openAgentLogs(item.evidence)}>
-                              <Search size={13} />
+                            <VButton type="button" variant="ghost" icon={<Search size={13} />} onPress={() => openAgentLogs(item.evidence)}>
                               {item.evidence ? `${copy.openLogs} · ${item.evidence.runtimeSceneId}` : copy.openLogs}
-                            </button>
+                            </VButton>
                           ) : null}
                           {item.messageId ? (
-                            <button type="button" onClick={() => focusInboxMessage(item.messageId)}>
-                              <MessageSquare size={13} />
+                            <VButton type="button" variant="ghost" icon={<MessageSquare size={13} />} onPress={() => focusInboxMessage(item.messageId)}>
                               {copy.focusMessage}
-                            </button>
+                            </VButton>
                           ) : null}
                         </div>
                       </article>

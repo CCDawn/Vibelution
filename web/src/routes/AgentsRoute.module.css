@@ -898,6 +898,10 @@
   pointer-events: none;
 }
 
+.avatarEditorActions [data-vui="button"] {
+  white-space: nowrap;
+}
+
 .avatarOptionGrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
@@ -1792,8 +1796,7 @@
   min-width: 0;
 }
 
-.inlineAdd input,
-.inlineAdd button {
+.inlineAdd input {
   min-width: 0;
   min-height: 32px;
   border-radius: var(--radius-control);
@@ -1809,12 +1812,8 @@
   color: var(--fg-primary);
 }
 
-.inlineAdd button {
-  padding: 0 9px;
-  border: 1px solid var(--border-soft);
-  background: var(--surface-card);
-  color: var(--fg-secondary);
-  font-weight: 700;
+.inlineAdd [data-vui="button"] {
+  white-space: nowrap;
 }
 
 .runHistoryList {
@@ -2074,27 +2073,9 @@
   min-width: 0;
 }
 
-.timelineActions button {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 26px;
+.timelineActions [data-vui="button"] {
   max-width: 100%;
-  padding: 0 7px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-control);
-  background: var(--surface-card);
-  color: var(--fg-secondary);
-  font: inherit;
-  font-size: 0.7rem;
-  font-weight: 700;
   white-space: nowrap;
-}
-
-.timelineActions button:hover {
-  border-color: var(--border-strong);
-  color: var(--fg-primary);
-  background: var(--surface-panel-hover);
 }
 
 .inboxMessageList {
@@ -2989,27 +2970,6 @@
   border-color: color-mix(in srgb, var(--accent-warm) 32%, transparent);
   background: color-mix(in srgb, var(--accent-warm) 10%, transparent);
   color: var(--accent-warm-2);
-}
-
-.referenceRouteButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  min-height: 22px;
-  padding: 0 7px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-control);
-  background: var(--surface-card);
-  color: var(--fg-secondary);
-  font-size: 0.68rem;
-  font-weight: 720;
-}
-
-.referenceRouteButton:hover {
-  border-color: var(--border-strong);
-  color: var(--fg-primary);
-  background: var(--surface-panel-hover);
 }
 
 .issueItem_blocking {
