@@ -1,4 +1,4 @@
-export type VuiTone = "neutral" | "accent" | "success" | "warning" | "danger";
+export type VuiTone = "neutral" | "accent" | "info" | "success" | "warning" | "danger";
 export type VuiDensity = "compact" | "normal";
 export type VuiButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 

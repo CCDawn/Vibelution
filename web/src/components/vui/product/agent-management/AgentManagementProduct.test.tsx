@@ -101,8 +101,10 @@ describe("Agent Management VUI product components", () => {
     );
 
     expect(markup).toContain('data-vui-product="agent-workspace-panel"');
+    expect(markup).toContain('data-vui="surface"');
     expect(markup).toContain('aria-label="Agent filters"');
-    expect(markup).toContain("border-vui-border-hairline");
+    expect(markup).toContain("border-vui-border-subtle");
+    expect(markup).toContain("bg-vui-surface-glass");
     expect(markup).toContain("custom-layout-hook");
     expect(markup).toContain("<strong>Filters</strong>");
   });
