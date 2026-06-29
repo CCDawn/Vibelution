@@ -585,7 +585,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("reference.projectionEdit?.canonicalEditRoute || reference.sourceRef?.canonicalEditRoute");
     expect(routeSource).toContain("compactProjectionRoute(room");
     expect(routeSource).toContain('`/teams?team=${encodeURIComponent(reference.sourceId)}`');
-    expect(routeSource).toContain("styles.referenceRouteButton");
+    expect(routeSource).toContain("onPress={() => navigate(referenceRoute(reference))}");
     expect(routeSource).toContain("styles.referenceStatusStale");
   });
 
@@ -1099,6 +1099,40 @@ describe("AgentsRoute layout contract", () => {
       expect(block).not.toContain("styles.primaryButton");
       expect(block).not.toContain("styles.secondaryButton");
       expect(block).not.toContain("styles.dangerButton");
+    }
+  });
+
+  it("renders Agent micro action controls through VUI buttons instead of route-local button CSS", () => {
+    const avatarActionStart = routeSource.indexOf("className={styles.avatarEditorActions}");
+    const avatarActionSource = routeSource.slice(
+      avatarActionStart,
+      routeSource.indexOf("className={styles.avatarLibraryHeader}", avatarActionStart),
+    );
+    const memoryPolicyStart = routeSource.indexOf("className={styles.memoryPolicyGrid}");
+    const memoryPolicySource = routeSource.slice(
+      memoryPolicyStart,
+      routeSource.indexOf("<datalist", memoryPolicyStart),
+    );
+    const timelineActionBlocks = sourceBlocksForStyle("timelineActions");
+
+    expect(avatarActionStart).toBeGreaterThanOrEqual(0);
+    expect(memoryPolicyStart).toBeGreaterThanOrEqual(0);
+    expect(timelineActionBlocks.length).toBeGreaterThanOrEqual(2);
+
+    expect(avatarActionSource).toContain("<VButton");
+    expect(avatarActionSource).not.toContain("<button");
+    expect(avatarActionSource).not.toContain("styles.secondaryButton");
+
+    expect(memoryPolicySource).toContain("<VButton");
+    expect(memoryPolicySource).not.toContain("<button");
+
+    expect(routeSource).not.toContain("styles.referenceRouteButton");
+    expect(routeSource).toContain("onPress={() => navigate(compactProjectionRoute(room");
+    expect(routeSource).toContain("onPress={() => navigate(referenceRoute(reference))}");
+
+    for (const block of timelineActionBlocks) {
+      expect(block).toContain("<VButton");
+      expect(block).not.toContain("<button");
     }
   });
 });
