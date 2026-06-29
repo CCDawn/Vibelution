@@ -28,7 +28,8 @@ describe("themePreference", () => {
     expect(normalizeWorkbenchTheme("system")).toBeNull();
   });
 
-  it("defaults to dark when no stored theme exists", () => {
+  it("defaults to light when no stored theme exists", () => {
+    expect(DEFAULT_WORKBENCH_THEME).toBe("light");
     expect(readStoredWorkbenchTheme(memoryStorage())).toBe(DEFAULT_WORKBENCH_THEME);
   });
 

@@ -1,7 +1,7 @@
 export type WorkbenchTheme = "dark" | "light";
 
 export const WORKBENCH_THEME_STORAGE_KEY = "vibelution.workbench.theme";
-export const DEFAULT_WORKBENCH_THEME: WorkbenchTheme = "dark";
+export const DEFAULT_WORKBENCH_THEME: WorkbenchTheme = "light";
 
 type ThemeStorage = Pick<Storage, "getItem" | "setItem">;
 

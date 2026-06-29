@@ -70,6 +70,7 @@ import {
   shouldArmBrowserProjectCloseGuard,
   shouldBlockWorkbenchWindowClose,
 } from "./projectCloseGuard";
+import { VIconButton } from "../components/vui";
 import { getPageInstanceId } from "./pageInstance";
 import { useShellStore } from "../store/shellStore";
 import styles from "./AppShell.module.css";
@@ -2019,6 +2020,7 @@ export function AppShell() {
     <div
       className={styles.shell}
       data-theme={theme}
+      data-vui-app="workbench"
       data-theme-background={themeBackgroundImageUrl ? "custom" : "default"}
       data-theme-background-readability={themeBackgroundImageUrl ? themeBackgroundReadability : undefined}
       data-topbar-mode={topBarMode}
@@ -2293,34 +2295,31 @@ export function AppShell() {
               </Suspense>
             ) : null}
           </div>
-          <button
+          <VIconButton
             type="button"
             className={styles.actionIconButton}
-            aria-label={themeToggleLabel}
+            label={themeToggleLabel}
             title={themeToggleLabel}
-            onClick={toggleTheme}
-          >
-            {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
-          </button>
-          <button
+            icon={theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+            onPress={toggleTheme}
+          />
+          <VIconButton
             type="button"
             className={styles.actionIconButton}
-            aria-label={refreshFrontendLabel}
+            label={refreshFrontendLabel}
             title={refreshFrontendLabel}
-            onClick={refreshFrontend}
-            disabled={restartRequested || shutdownRequested || (shutdownInFlight && !shutdownSettled)}
-          >
-            <RefreshCw size={16} />
-          </button>
-          <button
+            icon={<RefreshCw size={16} />}
+            onPress={refreshFrontend}
+            isDisabled={restartRequested || shutdownRequested || (shutdownInFlight && !shutdownSettled)}
+          />
+          <VIconButton
             type="button"
             className={styles.actionIconButton}
-            aria-label={hideTopBarLabel}
+            label={hideTopBarLabel}
             title={hideTopBarLabel}
-            onClick={() => setTopBarMode("hidden")}
-          >
-            <PanelTopClose size={16} />
-          </button>
+            icon={<PanelTopClose size={16} />}
+            onPress={() => setTopBarMode("hidden")}
+          />
           <div
             ref={lifecycleMenuRef}
             className={
@@ -2329,18 +2328,17 @@ export function AppShell() {
                 : styles.lifecycleMenuCluster
             }
           >
-            <button
+            <VIconButton
               type="button"
               className={styles.actionIconButton}
-              aria-label={lifecycleMenuLabel}
+              label={lifecycleMenuLabel}
               title={lifecycleMenuLabel}
               aria-haspopup="menu"
               aria-expanded={lifecycleMenuOpen}
-              onClick={() => setLifecycleMenuOpen((current) => !current)}
-              disabled={restartRequested || (shutdownInFlight && !shutdownSettled)}
-            >
-              <Power size={16} />
-            </button>
+              icon={<Power size={16} />}
+              onPress={() => setLifecycleMenuOpen((current) => !current)}
+              isDisabled={restartRequested || (shutdownInFlight && !shutdownSettled)}
+            />
             <div
               className={styles.lifecycleMenuPanel}
               role="menu"

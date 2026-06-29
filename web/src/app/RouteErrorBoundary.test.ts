@@ -1,6 +1,10 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { buildRouteErrorBoundaryViewModel } from "./RouteErrorBoundary";
+
+const routeErrorBoundarySource = readFileSync(new URL("./RouteErrorBoundary.tsx", import.meta.url), "utf8");
+const routeErrorBoundaryStyles = readFileSync(new URL("./RouteErrorBoundary.module.css", import.meta.url), "utf8");
 
 describe("RouteErrorBoundary view model", () => {
   it("turns stale dynamic route chunks into a user-facing refresh state", () => {
@@ -25,5 +29,13 @@ describe("RouteErrorBoundary view model", () => {
     expect(viewModel.title).toBe("Launcher 页面加载失败");
     expect(viewModel.detail).not.toContain("Hey developer");
     expect(viewModel.technicalSummary).toContain("ordinary render failure");
+  });
+
+  it("renders route recovery actions through shared VUI primitives", () => {
+    expect(routeErrorBoundarySource).toContain("VButton");
+    expect(routeErrorBoundarySource).toContain('data-vui-app={surface}');
+    expect(routeErrorBoundarySource).not.toContain("<button");
+    expect(routeErrorBoundaryStyles).not.toContain(".primaryAction");
+    expect(routeErrorBoundaryStyles).not.toContain("#2563eb");
   });
 });

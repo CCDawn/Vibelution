@@ -4,79 +4,62 @@
   place-items: center;
   padding: 32px;
   background:
-    linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(241, 245, 249, 0.98)),
-    #f8fafc;
-  color: #111827;
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-page) 92%, transparent), color-mix(in srgb, var(--surface-panel-muted) 94%, transparent)),
+    var(--surface-page);
+  color: var(--fg-primary);
 }
 
 .panel {
   width: min(560px, 100%);
-  border: 1px solid rgba(148, 163, 184, 0.4);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.14);
-  padding: 24px;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: var(--radius-panel);
+  background: var(--vui-surface-glass);
+  box-shadow: var(--vui-shadow-none);
+  padding: 20px;
+  backdrop-filter: blur(14px);
 }
 
 .kicker {
   margin: 0 0 8px;
-  color: #2563eb;
-  font-size: 13px;
+  color: var(--accent-cool);
+  font-size: 0.78rem;
   font-weight: 700;
 }
 
 .title {
   margin: 0;
-  font-size: 24px;
+  font-size: 1.28rem;
   line-height: 1.25;
 }
 
 .detail {
   margin: 12px 0 0;
-  color: #475569;
-  font-size: 15px;
-  line-height: 1.6;
+  color: var(--fg-secondary);
+  font-size: 0.9rem;
+  line-height: 1.55;
 }
 
 .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 20px;
+  gap: 8px;
+  margin-top: 18px;
 }
 
-.primaryAction,
-.secondaryAction {
-  min-height: 36px;
-  border-radius: 6px;
-  padding: 0 14px;
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.primaryAction {
-  border: 1px solid #2563eb;
-  background: #2563eb;
-  color: #fff;
-}
-
-.secondaryAction {
-  border: 1px solid rgba(148, 163, 184, 0.72);
-  background: #fff;
-  color: #334155;
+.actionButton {
+  min-width: 96px;
 }
 
 .technical {
   margin-top: 18px;
-  border-top: 1px solid rgba(148, 163, 184, 0.32);
+  border-top: 1px solid var(--vui-border-subtle);
   padding-top: 14px;
 }
 
 .technical summary {
   cursor: pointer;
-  color: #64748b;
-  font-size: 13px;
+  color: var(--fg-tertiary);
+  font-size: 0.78rem;
   font-weight: 700;
 }
 
@@ -84,11 +67,12 @@
   overflow: auto;
   max-height: 160px;
   margin: 10px 0 0;
-  border-radius: 6px;
-  background: #0f172a;
-  color: #dbeafe;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--surface-code);
+  color: var(--fg-primary);
   padding: 12px;
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1.5;
   white-space: pre-wrap;
 }
