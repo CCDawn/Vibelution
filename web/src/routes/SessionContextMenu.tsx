@@ -2,6 +2,7 @@ import { BookPlus, Pencil, Settings2, Trash2 } from "lucide-react";
 import type { CSSProperties, PointerEvent } from "react";
 
 import type { SessionSummary } from "../api/types";
+import { VButton } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import styles from "./ChatCodingRoute.module.css";
 
@@ -74,12 +75,13 @@ export function SessionContextMenu({
       aria-label={lang === "zh" ? "会话操作" : "Session actions"}
       onPointerDown={stopPointerPropagation}
     >
-      <button
+      <VButton
         type="button"
         role="menuitem"
         className={styles.sessionContextMenuItem}
-        onClick={() => onAddToReview(session)}
-        disabled={addToReviewDisabled}
+        onPress={() => onAddToReview(session)}
+        isDisabled={addToReviewDisabled}
+        icon={<BookPlus size={14} />}
         title={
           addToReviewPending
             ? t("addingSessionToReview")
@@ -88,41 +90,41 @@ export function SessionContextMenu({
               : t("addSessionToReview")
         }
       >
-        <BookPlus size={14} />
-        <span>{addToReviewPending ? t("addingSessionToReview") : t("addSessionToReview")}</span>
-      </button>
-      <button
+        {addToReviewPending ? t("addingSessionToReview") : t("addSessionToReview")}
+      </VButton>
+      <VButton
         type="button"
         role="menuitem"
         className={styles.sessionContextMenuItem}
-        onClick={() => onRename(session)}
+        onPress={() => onRename(session)}
+        icon={<Pencil size={14} />}
       >
-        <Pencil size={14} />
-        <span>{t("renameSession")}</span>
-      </button>
+        {t("renameSession")}
+      </VButton>
       {session.agentId && onOpenAgentConfig ? (
-        <button
+        <VButton
           type="button"
           role="menuitem"
           className={styles.sessionContextMenuItem}
-          onClick={() => onOpenAgentConfig(session)}
+          onPress={() => onOpenAgentConfig(session)}
+          icon={<Settings2 size={14} />}
           title={lang === "zh" ? "打开当前 Agent 配置" : "Open current Agent configuration"}
         >
-          <Settings2 size={14} />
-          <span>{lang === "zh" ? "打开 Agent 配置" : "Open Agent config"}</span>
-        </button>
+          {lang === "zh" ? "打开 Agent 配置" : "Open Agent config"}
+        </VButton>
       ) : null}
-      <button
+      <VButton
         type="button"
         role="menuitem"
         className={`${styles.sessionContextMenuItem} ${styles.sessionContextMenuDanger}`}
-        onClick={() => onDelete(session)}
-        disabled={deleteDisabled}
+        variant="danger"
+        onPress={() => onDelete(session)}
+        isDisabled={deleteDisabled}
+        icon={<Trash2 size={14} />}
         title={deleteDisabled ? t("deleteSessionBusy") : t("deleteSession")}
       >
-        <Trash2 size={14} />
-        <span>{t("deleteSession")}</span>
-      </button>
+        {t("deleteSession")}
+      </VButton>
     </div>
   );
 }

@@ -243,6 +243,31 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.agentSessionTabActive).toBeTypeOf("string");
   });
 
+  it("routes chat session navigation controls through VUI primitives", () => {
+    const sessionControlSources = [
+      agentSessionTabStripSource,
+      sessionContextMenuSource,
+      directSessionIndexItemSource,
+      groupSessionIndexItemsSource,
+      conversationIndexSectionSource,
+    ];
+
+    for (const source of sessionControlSources) {
+      expect(source).toContain("from \"../components/vui\"");
+      expect(source).not.toMatch(/<button\b/);
+    }
+
+    expect(agentSessionTabStripSource).toContain("<VButton");
+    expect(agentSessionTabStripSource).toContain("<VIconButton");
+    expect(sessionContextMenuSource).toContain("<VButton");
+    expect(directSessionIndexItemSource).toContain("<VButton");
+    expect(directSessionIndexItemSource).toContain("<VIconButton");
+    expect(groupSessionIndexItemsSource).toContain("<VButton");
+    expect(conversationIndexSectionSource).toContain("<VButton");
+    expect(routeCssSource).toContain('.sessionContextMenuItem[data-vui] [data-slot="vui-button-content"]');
+    expect(routeCssSource).toContain("grid-column: 1 / -1;");
+  });
+
   it("shows a safe return link when Chat is opened from another workspace surface", () => {
     expect(routeSource).toContain("safeAgentCenterReturnToPath(new URLSearchParams(location.search).get(\"returnTo\"))");
     expect(routeSource).toContain("new URLSearchParams(location.search).get(\"returnLabel\")");
