@@ -372,7 +372,7 @@
 
 .templateButton,
 .templateButtonActive {
-  display: grid;
+  display: block;
   gap: 5px;
   width: 100%;
   padding: 8px 9px;
@@ -392,6 +392,18 @@
   border-color: color-mix(in srgb, var(--accent-warm) 30%, transparent);
   box-shadow: inset 3px 0 0 var(--accent-warm);
   background: var(--surface-active-neutral);
+}
+
+.templateButton [data-slot="vui-button-content"],
+.templateButtonActive [data-slot="vui-button-content"] {
+  width: 100%;
+}
+
+.templateButton [data-slot="vui-button-label"],
+.templateButtonActive [data-slot="vui-button-label"] {
+  display: grid;
+  gap: 5px;
+  width: 100%;
 }
 
 .templateMain {

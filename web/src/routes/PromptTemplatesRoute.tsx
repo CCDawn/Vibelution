@@ -6,6 +6,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import { AgentInstance, PromptTemplate, PromptTemplateWorkspace } from "../api/types";
+import { VButton } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
@@ -485,10 +486,15 @@ export function PromptTemplatesRoute() {
               <span>{copy.returnToAgents}</span>
             </Link>
           ) : null}
-          <button type="button" className={styles.refreshButton} onClick={() => templatesQuery.refetch()} disabled={templatesQuery.isFetching}>
-            <RefreshCw size={15} />
-            <span>{copy.refresh}</span>
-          </button>
+          <VButton
+            type="button"
+            className={styles.refreshButton}
+            icon={<RefreshCw size={15} />}
+            isDisabled={templatesQuery.isFetching}
+            onPress={() => templatesQuery.refetch()}
+          >
+            {copy.refresh}
+          </VButton>
         </div>
       </header>
 
@@ -532,14 +538,14 @@ export function PromptTemplatesRoute() {
 
           <div className={styles.filterRow}>
             {visibleFilters.map((filter) => (
-              <button
+              <VButton
                 key={filter}
                 type="button"
                 className={categoryFilter === filter ? styles.filterButtonActive : styles.filterButton}
-                onClick={() => selectCategory(filter)}
+                onPress={() => selectCategory(filter)}
               >
                 {filter === "all" ? copy.all : categoryLabel(filter, lang)}
-              </button>
+              </VButton>
             ))}
           </div>
 
@@ -549,15 +555,15 @@ export function PromptTemplatesRoute() {
               <strong>{copy.bulkSelected}</strong>
               <span>{selectedTemplates.length} / {filteredTemplates.length}</span>
             </div>
-            <button
+            <VButton
               type="button"
               className={styles.secondaryButton}
-              disabled={!filteredTemplates.length || bulkPromptPending}
-              onClick={allVisibleTemplatesSelected ? clearSelectedTemplates : selectVisibleTemplates}
+              icon={allVisibleTemplatesSelected ? <Square size={14} /> : <CheckSquare size={14} />}
+              isDisabled={!filteredTemplates.length || bulkPromptPending}
+              onPress={allVisibleTemplatesSelected ? clearSelectedTemplates : selectVisibleTemplates}
             >
-              {allVisibleTemplatesSelected ? <Square size={14} /> : <CheckSquare size={14} />}
-              <span>{allVisibleTemplatesSelected ? copy.bulkClear : copy.bulkSelectVisible}</span>
-            </button>
+              {allVisibleTemplatesSelected ? copy.bulkClear : copy.bulkSelectVisible}
+            </VButton>
             <label className={styles.bulkSelectField}>
               <Tags size={14} />
               <span>{copy.bulkCategory}</span>
@@ -569,28 +575,33 @@ export function PromptTemplatesRoute() {
                 ))}
               </select>
             </label>
-            <button
+            <VButton
               type="button"
               className={styles.primaryButton}
-              disabled={!selectedTemplates.length || bulkPromptPending}
-              onClick={() => bulkPatchTemplates({ category: bulkCategory }, copy.bulkCategoryResult)}
+              icon={<CheckCircle2 size={14} />}
+              isDisabled={!selectedTemplates.length || bulkPromptPending}
+              onPress={() => bulkPatchTemplates({ category: bulkCategory }, copy.bulkCategoryResult)}
             >
-              <CheckCircle2 size={14} />
-              <span>{bulkPromptPending ? copy.bulkWorking : copy.bulkApplyCategory}</span>
-            </button>
-            <button type="button" className={styles.secondaryButton} disabled={!selectedTemplates.length || bulkPromptPending} onClick={bulkResetTemplates}>
-              <RotateCcw size={14} />
-              <span>{bulkPromptPending ? copy.bulkWorking : copy.bulkReset}</span>
-            </button>
-            <button
+              {bulkPromptPending ? copy.bulkWorking : copy.bulkApplyCategory}
+            </VButton>
+            <VButton
               type="button"
               className={styles.secondaryButton}
-              disabled={!selectedTemplates.length || bulkPromptPending}
-              onClick={() => bulkPatchTemplates({ status: "inactive" }, copy.bulkDeactivateResult)}
+              icon={<RotateCcw size={14} />}
+              isDisabled={!selectedTemplates.length || bulkPromptPending}
+              onPress={bulkResetTemplates}
             >
-              <Archive size={14} />
-              <span>{bulkPromptPending ? copy.bulkWorking : copy.bulkDeactivate}</span>
-            </button>
+              {bulkPromptPending ? copy.bulkWorking : copy.bulkReset}
+            </VButton>
+            <VButton
+              type="button"
+              className={styles.secondaryButton}
+              icon={<Archive size={14} />}
+              isDisabled={!selectedTemplates.length || bulkPromptPending}
+              onPress={() => bulkPatchTemplates({ status: "inactive" }, copy.bulkDeactivateResult)}
+            >
+              {bulkPromptPending ? copy.bulkWorking : copy.bulkDeactivate}
+            </VButton>
           </section>
 
           <div className={styles.templateList}>
@@ -617,10 +628,10 @@ export function PromptTemplatesRoute() {
                       />
                       {selected ? <CheckSquare size={15} /> : <Square size={15} />}
                     </label>
-                    <button
+                    <VButton
                       type="button"
                       className={activeTemplateId === template.promptTemplateId ? styles.templateButtonActive : styles.templateButton}
-                      onClick={() => {
+                      onPress={() => {
                         setActiveTemplateId(template.promptTemplateId);
                         setNotice("");
                       }}
@@ -634,7 +645,7 @@ export function PromptTemplatesRoute() {
                         <span>{copy.usage}: {linkedCount}</span>
                         <span>{template.sourcePath || "-"}</span>
                       </span>
-                    </button>
+                    </VButton>
                   </div>
                 );
               })
@@ -714,14 +725,24 @@ export function PromptTemplatesRoute() {
                 {notice ? <p className={styles.notice}>{notice}</p> : null}
                 {saveMutation.error ? <p className={styles.errorText}>{errorMessage(saveMutation.error)}</p> : null}
                 {resetMutation.error ? <p className={styles.errorText}>{errorMessage(resetMutation.error)}</p> : null}
-                <button type="button" className={styles.secondaryButton} disabled={busy || !hasDefault} onClick={() => resetMutation.mutate(editor.templateId)}>
-                  <RotateCcw size={15} />
-                  <span>{copy.reset}</span>
-                </button>
-                <button type="button" className={styles.primaryButton} disabled={busy} onClick={() => saveMutation.mutate(editor)}>
-                  <Save size={15} />
-                  <span>{busy ? copy.saving : copy.save}</span>
-                </button>
+                <VButton
+                  type="button"
+                  className={styles.secondaryButton}
+                  icon={<RotateCcw size={15} />}
+                  isDisabled={busy || !hasDefault}
+                  onPress={() => resetMutation.mutate(editor.templateId)}
+                >
+                  {copy.reset}
+                </VButton>
+                <VButton
+                  type="button"
+                  className={styles.primaryButton}
+                  icon={<Save size={15} />}
+                  isDisabled={busy}
+                  onPress={() => saveMutation.mutate(editor)}
+                >
+                  {busy ? copy.saving : copy.save}
+                </VButton>
               </div>
             </>
           ) : (
