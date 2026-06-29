@@ -1,6 +1,7 @@
 import { ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { VButton } from "../components/vui";
 import styles from "./ChatCodingRoute.module.css";
 
 type ConversationIndexSectionProps = {
@@ -26,16 +27,16 @@ export function ConversationIndexSection({
 
   return (
     <section className={sectionClassName}>
-      <button
+      <VButton
         type="button"
         className={styles.conversationGroupHeader}
-        onClick={onToggle}
+        onPress={onToggle}
         aria-expanded={expanded}
       >
         <ChevronRight size={14} aria-hidden="true" />
         <span>{label}</span>
         <strong>{count}</strong>
-      </button>
+      </VButton>
       {expanded ? (
         <div className={styles.conversationGroupList}>
           {children}
