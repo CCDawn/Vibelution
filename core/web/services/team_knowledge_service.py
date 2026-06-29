@@ -66,7 +66,7 @@ INGESTION_ADAPTERS = {
         "evidenceKinds": ["manual_note"],
     },
 }
-REVIEW_ROLES = {"owner", "lead", "steward", "knowledge_steward", "coordinator"}
+REVIEW_ROLES = {"owner", "lead", "steward", "knowledge_steward", "source_ingestor", "coordinator"}
 IMPORTANCE_LEVELS = {"low", "medium", "high", "critical"}
 STABILITY_VALUES = {"temporary", "evolving", "stable", "deprecated"}
 SCOPES = {"agent", "team", "project", "global"}

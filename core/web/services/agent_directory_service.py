@@ -140,17 +140,10 @@ SYSTEM_NO_TOOL_ROLES = {
     "supervised_evolution": {"baseline", "candidate", "reviewer", "auditor", "judge"},
 }
 RESEARCH_SOURCE_ROLE_KEYS = {
-    "ai_search_scope_lead",
-    "global_primary_sources",
-    "cn_primary_sources",
-    "signal_quality_gate",
-    "challenge_cup_data_discovery",
-    "challenge_cup_source_acquisition",
-    "challenge_cup_content_extraction",
-    "challenge_cup_source_quality",
-    "knowledge_expansion_source_intake",
-    "knowledge_expansion_content_extraction",
-    "knowledge_expansion_source_quality",
+    "source_finder",
+    "source_extractor",
+    "source_relation_mapper",
+    "source_ingestor",
 }
 RESEARCH_SOURCE_ALLOWED_TOOLS = (
     "agent_message_tool",
@@ -170,102 +163,13 @@ RESEARCH_SOURCE_PREFERRED_TOOLS = (
     "search_summarize_sources_tool",
     "agent_message_tool",
 )
-RESEARCH_SOURCE_ROLE_TOOL_PROFILES = {
-    "challenge_cup_data_discovery": {
-        "allowedTools": (
-            "agent_message_tool",
-            "research_knowledge_query_tool",
-            "source_collection_context_tool",
-            "source_collection_stage_writeback_tool",
-            "batch_web_search_tool",
-            "paper_search_tool",
-            "project_search_tool",
-            "news_search_tool",
-            "search_summarize_sources_tool",
-        ),
-        "preferredTools": (
-            "source_collection_context_tool",
-            "source_collection_stage_writeback_tool",
-            "batch_web_search_tool",
-            "paper_search_tool",
-            "search_summarize_sources_tool",
-            "research_knowledge_query_tool",
-            "agent_message_tool",
-        ),
-    },
-    "challenge_cup_source_acquisition": {
-        "allowedTools": (
-            "agent_message_tool",
-            "research_knowledge_query_tool",
-            "source_collection_context_tool",
-            "source_collection_stage_writeback_tool",
-            "web_fetch_tool",
-            "batch_web_search_tool",
-            "paper_search_tool",
-            "project_search_tool",
-            "search_summarize_sources_tool",
-        ),
-        "preferredTools": (
-            "source_collection_context_tool",
-            "source_collection_stage_writeback_tool",
-            "web_fetch_tool",
-            "batch_web_search_tool",
-            "paper_search_tool",
-            "search_summarize_sources_tool",
-            "research_knowledge_query_tool",
-            "agent_message_tool",
-        ),
-    },
-    "challenge_cup_content_extraction": {
-        "allowedTools": (
-            "agent_message_tool",
-            "research_knowledge_query_tool",
-            "source_collection_context_tool",
-            "source_collection_stage_writeback_tool",
-            "web_fetch_tool",
-            "search_summarize_sources_tool",
-        ),
-        "preferredTools": (
-            "source_collection_context_tool",
-            "source_collection_stage_writeback_tool",
-            "web_fetch_tool",
-            "search_summarize_sources_tool",
-            "research_knowledge_query_tool",
-            "agent_message_tool",
-        ),
-    },
-    "challenge_cup_source_quality": {
-        "allowedTools": (
-            "agent_message_tool",
-            "research_knowledge_query_tool",
-            "source_collection_context_tool",
-            "source_collection_stage_writeback_tool",
-            "web_fetch_tool",
-            "batch_web_search_tool",
-            "paper_search_tool",
-            "project_search_tool",
-            "news_search_tool",
-            "search_summarize_sources_tool",
-        ),
-        "preferredTools": (
-            "source_collection_context_tool",
-            "source_collection_stage_writeback_tool",
-            "research_knowledge_query_tool",
-            "web_fetch_tool",
-            "search_summarize_sources_tool",
-            "batch_web_search_tool",
-            "paper_search_tool",
-            "agent_message_tool",
-        ),
-    },
-}
+RESEARCH_SOURCE_ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {}
 CHALLENGE_CUP_ROLE_PROMPT_TEMPLATE_IDS = {
     "challenge_cup_coordinator": "prompt-challenge-cup-coordinator",
-    "challenge_cup_data_discovery": "prompt-challenge-cup-data-discovery",
-    "challenge_cup_source_acquisition": "prompt-challenge-cup-source-acquisition",
-    "challenge_cup_content_extraction": "prompt-challenge-cup-content-extraction",
-    "challenge_cup_source_quality": "prompt-challenge-cup-source-quality",
-    "candidate_graph": "prompt-challenge-cup-candidate-graph",
+    "source_finder": "prompt-source-finder",
+    "source_extractor": "prompt-source-extractor",
+    "source_relation_mapper": "prompt-source-relation-mapper",
+    "source_ingestor": "prompt-source-ingestor",
     "challenge_cup_experiment_planner": "prompt-challenge-cup-experiment-planner",
     "challenge_cup_experiment_ledger": "prompt-challenge-cup-experiment-ledger",
     "challenge_cup_iteration_planner": "prompt-challenge-cup-iteration-planner",
@@ -278,28 +182,13 @@ AI_SEARCH_ROLE_PROMPT_TEMPLATE_IDS = {
     "signal_quality_gate": "prompt-ai-search-signal-quality-gate",
 }
 KNOWLEDGE_EXPANSION_ROLE_PROMPT_TEMPLATE_IDS = {
-    "knowledge_expansion_source_intake": "prompt-knowledge-expansion-source-intake",
-    "knowledge_expansion_content_extraction": "prompt-knowledge-expansion-content-extraction",
-    "knowledge_expansion_source_quality": "prompt-knowledge-expansion-source-quality",
-    "knowledge_expansion_candidate_graph": "prompt-knowledge-expansion-candidate-graph",
+    "source_finder": "prompt-source-finder",
+    "source_extractor": "prompt-source-extractor",
+    "source_relation_mapper": "prompt-source-relation-mapper",
+    "source_ingestor": "prompt-source-ingestor",
     "knowledge_steward": "prompt-knowledge-steward",
 }
 RESEARCH_ROLE_TOOL_PROFILES = {
-    "candidate_graph": {
-        "allowedTools": (
-            "agent_message_tool",
-            "research_knowledge_query_tool",
-            "source_collection_context_tool",
-            "source_collection_stage_writeback_tool",
-        ),
-        "preferredTools": (
-            "source_collection_context_tool",
-            "source_collection_stage_writeback_tool",
-            "research_knowledge_query_tool",
-            "agent_message_tool",
-        ),
-    },
-    "knowledge_expansion_candidate_graph": {},
     "challenge_cup_experiment_planner": {
         "allowedTools": (
             "agent_message_tool",
@@ -3394,8 +3283,22 @@ def default_system_no_tool_policy(policy_id: str) -> dict[str, Any]:
     return payload
 
 
+def default_retired_source_collection_role_tool_policy(policy_id: str) -> dict[str, Any]:
+    payload = default_tool_policy(policy_id)
+    payload["allowedTools"] = []
+    payload["preferredTools"] = []
+    payload["readScopes"] = ["private"]
+    payload["writeScopes"] = []
+    payload["networkAccess"] = "none"
+    payload["mutationAccess"] = "none"
+    payload["maxCallsPerTurn"] = 0
+    return payload
+
+
 def default_research_source_tool_policy(policy_id: str, *, role_key: str = "") -> dict[str, Any]:
     payload = default_tool_policy(policy_id)
+    if _normalize_role_key(role_key) in agent_role_tool_profile_service.RETIRED_SOURCE_COLLECTION_ROLE_KEYS:
+        return default_retired_source_collection_role_tool_policy(policy_id)
     resolved = agent_role_tool_profile_service.resolve_role_tool_policy(
         role_key=role_key,
         primary_mode="research",
@@ -3417,6 +3320,8 @@ def default_research_source_tool_policy(policy_id: str, *, role_key: str = "") -
 
 def default_research_role_tool_policy(policy_id: str, *, role_key: str = "") -> dict[str, Any]:
     payload = default_tool_policy(policy_id)
+    if _normalize_role_key(role_key) in agent_role_tool_profile_service.RETIRED_SOURCE_COLLECTION_ROLE_KEYS:
+        return default_retired_source_collection_role_tool_policy(policy_id)
     resolved = agent_role_tool_profile_service.resolve_role_tool_policy(
         role_key=role_key,
         primary_mode="research",
@@ -3490,6 +3395,8 @@ def _ensure_fixed_role_tool_policy(state: dict[str, Any], agent: dict[str, Any])
         desired_policy = default_research_source_tool_policy(policy_id, role_key=str(agent.get("roleKey") or ""))
     elif desired_kind == "research_role":
         desired_policy = default_research_role_tool_policy(policy_id, role_key=str(agent.get("roleKey") or ""))
+    elif desired_kind == "retired_source_collection_role":
+        desired_policy = default_retired_source_collection_role_tool_policy(policy_id)
     else:
         desired_policy = default_system_no_tool_policy(policy_id)
     current_policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
@@ -3525,6 +3432,8 @@ def _fixed_role_tool_policy_kind(agent: dict[str, Any]) -> str:
         system_role = _normalize_role_key(metadata.get("selfEvolutionRole") or metadata.get("supervisedRole") or role_key)
         if system_role in SYSTEM_NO_TOOL_ROLES.get(primary_mode, set()):
             return "no_tools"
+    if primary_mode == "research" and role_key in agent_role_tool_profile_service.RETIRED_SOURCE_COLLECTION_ROLE_KEYS:
+        return "retired_source_collection_role"
     if primary_mode == "research" and role_key in RESEARCH_SOURCE_ROLE_KEYS:
         return "research_source"
     if role_key in RESEARCH_ROLE_TOOL_PROFILES:
@@ -5094,7 +5003,7 @@ def _challenge_cup_agent_profile_defaults(role: str, functional_name: str) -> di
                 "personality": "清醒、克制，擅长把挑战杯科研流程压缩成下一步行动。",
                 "communicationStyle": "先给阶段判断，再列证据位置、角色分工和用户下一步。",
                 "background": f"{functional_name} 是挑战杯 ai 科研团队的协调 Agent，负责读状态和组织交接，不直接执行资料搜集。",
-                "collaborationPreference": "把执行任务交给资料发现、资料获取、资料提炼、资料审查和 知识库管理员，不越权声称已执行。",
+                "collaborationPreference": "把执行任务交给资料寻找、资料提炼、资料关系整理和资料入库 Agent，不越权声称已执行。",
                 "expertise": ["挑战杯科研流程", "阶段协调", "任务交接"],
             },
             "taskProfile": {
@@ -5105,88 +5014,88 @@ def _challenge_cup_agent_profile_defaults(role: str, functional_name: str) -> di
                 "successCriteria": "用户能清楚看到当前阶段、证据位置、哪个 Agent 该做什么、下一步点击或确认什么。",
                 "deliverables": "Stage Status、Agent Handoff、User Next Step、Boundaries。",
                 "constraints": "只基于可读上下文和已有状态协调；执行动作交给具备对应工具和权限的 Agent 或 UI/API。",
-                "handoffNotes": "需要真实资料处理时交给 challenge_cup_data_discovery/source_acquisition/content_extraction/source_quality。",
+                "handoffNotes": "需要真实资料处理时交给 source_finder/source_extractor/source_relation_mapper/source_ingestor。",
                 "taskTypes": ["challenge_cup", "coordination", "stage_status"],
             },
         },
-        "challenge_cup_data_discovery": {
+        "source_finder": {
             "personaProfile": {
-                "personality": "敏锐、证据优先，擅长把赛题和 query seeds 展开成可追踪资料线索。",
-                "communicationStyle": "先给检索框架，再列候选线索、价值、缺口和交接优先级。",
-                "background": f"{functional_name} 是挑战杯资料发现 Agent，负责发现公开资料线索，不负责打开全文或入库。",
-                "collaborationPreference": "把 DOI/URL/检索式交给资料获取 Agent，遇到弱来源或重复线索时标注风险。",
-                "expertise": ["挑战杯资料发现", "公开资料检索", "检索式设计"],
+                "personality": "敏锐、证据优先，擅长把赛题和 query seeds 展开成可追踪资料记录。",
+                "communicationStyle": "先给寻找范围，再列已找到资料、下载/登记状态、无效来源和下一批建议。",
+                "background": f"{functional_name} 是挑战杯资料寻找 Agent，负责搜索、获取、下载到本地和登记来源记录。",
+                "collaborationPreference": "把可读资料交给资料提炼 Agent；无法获得的来源要记录原因，避免后续重复搜集。",
+                "expertise": ["资料寻找", "公开资料检索", "来源获取", "本地登记"],
             },
             "taskProfile": {
-                "mission": "围绕挑战杯赛题和知识搜集目标发现高价值资料线索。",
-                "responsibilities": "生成检索方向；使用公开搜索发现论文、综述、数据集、政策/标准和赛题线索；记录 locator 缺口。",
-                "preferredTasks": "query seeds 扩展、候选来源发现、检索优先级排序。",
-                "avoidTasks": "不要抓取全文、不要提炼正文、不要写正式知识、不要把搜索摘要当成事实结论。",
-                "successCriteria": "每条线索都有标题、来源类型、关键词、URL/DOI 线索、价值说明和不确定性。",
-                "deliverables": "Search Frame、Candidate Leads、Acquisition Handoff、Blockers。",
-                "constraints": "阶段私聊任务先用 source_collection_context_tool 读取平台资料上下文，完成、阻塞或失败都用 source_collection_stage_writeback_tool 回写；该回写只更新阶段任务状态，不等于正式知识写入。",
-                "handoffNotes": "把可打开来源交给 challenge_cup_source_acquisition。",
-                "taskTypes": ["challenge_cup", "data_discovery", "source_leads"],
+                "mission": "围绕挑战杯赛题寻找、获取并登记高价值资料。",
+                "responsibilities": "读取本轮资料上下文；执行公开搜索和 DOI/URL 校验；登记 DataRecord、locator、来源类型、可读性和无效原因。",
+                "preferredTasks": "query seeds 扩展、候选来源寻找、公开来源获取、本地文件/URL/DOI 登记、无效来源归档。",
+                "avoidTasks": "不要提炼正文结论、不要审查入库价值、不要写正式知识库/RAG/official graph。",
+                "successCriteria": "每条资料都有标题、来源类型、URL/DOI/本地路径、访问状态、价值说明或无效原因。",
+                "deliverables": "Finding Summary、DataRecords、Invalid Source Notes、Extraction Handoff。",
+                "constraints": "阶段私聊任务先用 source_collection_context_tool 读取上下文；完成、阻塞或失败都用 source_collection_stage_writeback_tool 回写。",
+                "handoffNotes": "可读资料交给 source_extractor；无效资料写明来源和排除原因。",
+                "taskTypes": ["challenge_cup", "source_finding", "source_records"],
             },
         },
-        "challenge_cup_source_acquisition": {
+        "source_extractor": {
             "personaProfile": {
-                "personality": "耐心、严谨，重视 locator、访问状态和来源元数据一致性。",
-                "communicationStyle": "先汇总获取结果，再逐条列来源元数据、访问状态和失败原因。",
-                "background": f"{functional_name} 是挑战杯资料获取 Agent，负责把 DOI/URL/检索式转成可验证来源记录。",
-                "collaborationPreference": "向资料提炼 Agent 提交可读来源和注意事项；无法访问时退回明确原因。",
-                "expertise": ["来源获取", "DOI/URL 校验", "元数据登记"],
+                "personality": "细致、克制，能把资料内容和质量判断合并成可复核结果。",
+                "communicationStyle": "先说明覆盖率，再逐条列保留、退回、无效和需补信息的依据。",
+                "background": f"{functional_name} 是挑战杯资料提炼 Agent，负责内容提炼和资料审查两个动作的一体化闭环。",
+                "collaborationPreference": "把保留资料交给资料关系整理 Agent；把无效资料连同来源和原因从流程中移出。",
+                "expertise": ["内容提炼", "来源质量评估", "候选资料筛选"],
             },
             "taskProfile": {
-                "mission": "把资料发现线索转成可复核的挑战杯来源记录。",
-                "responsibilities": "搜索和打开公开网页；记录题名、作者/机构、年份、DOI/URL、来源类型、访问状态和证据片段。",
-                "preferredTasks": "DOI/URL 校验、网页访问、来源元数据整理、重复来源识别。",
-                "avoidTasks": "不要下载或改写本地文件、不要写正式知识、不要把无法访问来源标为已获取。",
-                "successCriteria": "每条来源都有可追踪 locator、访问状态、最小元数据和提炼注意事项。",
-                "deliverables": "Acquisition Summary、Source Records、Extraction Handoff、Gaps。",
-                "constraints": "阶段私聊任务先用 source_collection_context_tool 读取平台资料上下文，完成、阻塞或失败都用 source_collection_stage_writeback_tool 回写；该回写只更新阶段任务状态，不写文件或正式知识。",
-                "handoffNotes": "把已获取可读来源交给 challenge_cup_content_extraction。",
-                "taskTypes": ["challenge_cup", "source_acquisition", "source_metadata"],
+                "mission": "从已找到资料中提炼有效内容，并判断是否保留进入后续关系整理。",
+                "responsibilities": "分页读取候选资料；对每条资料提炼摘要、证据锚点、相关性、质量风险和保留/无效决定。",
+                "preferredTasks": "candidateExtractions、candidateDecisions、无效来源原因、待补资料建议。",
+                "avoidTasks": "不要发现新检索方向、不要生成关系图、不要写正式知识库/RAG/official graph。",
+                "successCriteria": "每条输入资料都有真实 candidateId 或 recordId 的提炼/审查结论；有价值但不完整的资料可保留并说明缺口；没有有效内容的一律移出流程。",
+                "deliverables": "Extraction Coverage、Kept Sources、Invalid Sources、Relation Mapping Handoff。",
+                "constraints": "默认使用 source_collection_context_tool 的 compact 分页；不要根据截断或隐藏候选猜结果；覆盖不足要回写待补读/待补审。",
+                "handoffNotes": "通过或保留资料交给 source_relation_mapper；无效资料记录来源用于后续去重排除。",
+                "taskTypes": ["challenge_cup", "source_extraction", "source_review"],
             },
         },
-        "challenge_cup_content_extraction": {
+        "source_relation_mapper": {
             "personaProfile": {
-                "personality": "细致、克制，擅长把资料内容提炼为可审查证据而不夸大结论。",
-                "communicationStyle": "先说明提炼范围，再列证据片段、来源锚点、可信度和退回原因。",
-                "background": f"{functional_name} 是挑战杯资料提炼 Agent，负责从已获取来源中提炼 source_manifest 候选摘要。",
-                "collaborationPreference": "把提炼结果交给资料审查 Agent；需要新来源时退回资料发现/获取链路。",
-                "expertise": ["证据摘录", "来源锚点", "source_manifest 提炼"],
+                "personality": "结构化、谨慎，擅长把资料、主题和证据关系整理成候选图。",
+                "communicationStyle": "先给关系覆盖，再列节点、关系、缺口和不能正式同步的边界。",
+                "background": f"{functional_name} 是挑战杯资料关系整理 Agent，负责候选关系预览，不写 official graph。",
+                "collaborationPreference": "把候选关系和缺口交给资料入库 Agent 做最终审核。",
+                "expertise": ["资料关系整理", "候选图谱", "证据链"],
             },
             "taskProfile": {
-                "mission": "从已获取来源中提炼与挑战杯赛题、机制、实验、数据和交付相关的证据。",
-                "responsibilities": "阅读公开网页或候选资料；提取证据片段、锚点、主题标签、可信度和不确定性。",
-                "preferredTasks": "证据摘录、主题标签、source_manifest 摘要、退回原因整理。",
-                "avoidTasks": "不要发现新检索方向、不要写最终结论、不要写正式知识或 official graph。",
-                "successCriteria": "每条提炼结果都有来源锚点、证据类型、适用主题、可信度和待审查边界。",
-                "deliverables": "Extraction Scope、Evidence Items、Candidate Manifest、Return Reasons。",
-                "constraints": "阶段私聊任务先用 source_collection_context_tool 读取平台资料上下文，完成、阻塞或失败都用 source_collection_stage_writeback_tool 回写；web_fetch_tool 只用于公开 URL 补查，不读取 file:// 或 localhost。",
-                "handoffNotes": "把候选摘要交给 challenge_cup_source_quality 审查。",
-                "taskTypes": ["challenge_cup", "content_extraction", "evidence_manifest"],
+                "mission": "把已保留资料整理成候选级主题、来源和证据关系。",
+                "responsibilities": "读取已保留资料；生成候选节点、关系、缺口和可入库预览。",
+                "preferredTasks": "candidate-only 关系整理、主题聚类、证据链预览、断链说明。",
+                "avoidTasks": "不要搜索新资料、不要审查保留价值、不要写正式知识库/RAG/official graph。",
+                "successCriteria": "关系整理可解释、可追溯，并明确哪些节点/边仍缺证据。",
+                "deliverables": "Relation Map、Missing Links、Ingestion Handoff。",
+                "constraints": "只使用候选资料和上下文工具；输出仍是候选边界。",
+                "handoffNotes": "关系预览交给 source_ingestor 做最终入库审核。",
+                "taskTypes": ["challenge_cup", "source_relations", "candidate_graph"],
             },
         },
-        "challenge_cup_source_quality": {
+        "source_ingestor": {
             "personaProfile": {
-                "personality": "审慎、挑剔，优先发现来源缺口、重复和证据风险。",
-                "communicationStyle": "先给审查分布，再逐条列通过/退回/拒绝/人工确认的依据。",
-                "background": f"{functional_name} 是挑战杯资料审查 Agent，负责 source_manifest 入库前审查。",
-                "collaborationPreference": "把通过项交给知识库管理员进入资料入库步骤，把缺口退回资料发现、获取或提炼 Agent。",
-                "expertise": ["来源质量评估", "证据审查", "入库前审"],
+                "personality": "审慎、负责，重视正式知识的可追溯和治理边界。",
+                "communicationStyle": "先给入库结论，再列通过项、退回项、正式知识写入结果和风险。",
+                "background": f"{functional_name} 是挑战杯资料入库 Agent，负责最终审核并把通过资料写入团队知识库。",
+                "collaborationPreference": "只处理已提炼、已保留并有关系上下文的资料；缺证据则退回对应阶段。",
+                "expertise": ["资料入库", "知识治理", "正式知识审查"],
             },
             "taskProfile": {
-                "mission": "审查挑战杯候选资料是否可进入入库前审。",
-                "responsibilities": "核对来源可追溯性、证据质量、赛题相关性、重复/冲突和可入库风险。",
-                "preferredTasks": "候选资料审查、退回补资料、人工确认项整理、Steward 交接。",
-                "avoidTasks": "不要直接写正式 Team Knowledge/RAG/official graph，不替 知识库管理员 做正式治理或 ACL 变更。",
-                "successCriteria": "每条候选都有清晰决定、证据、风险、补齐要求或 Steward 交接理由。",
-                "deliverables": "Review Summary、Candidate Decisions、Steward Handoff、Human Gate。",
-                "constraints": "阶段私聊任务先用 source_collection_context_tool 读取平台资料上下文，完成、阻塞或失败都用 source_collection_stage_writeback_tool 回写；仍可使用 research/web/search 工具补充公开来源审查，不读取 file:// 或 localhost。",
-                "handoffNotes": "通过项交给知识库管理员处理资料入库步骤，退回项交给对应执行 Agent。",
-                "taskTypes": ["challenge_cup", "source_quality", "pre_ingestion_review"],
+                "mission": "对资料寻找/提炼/关系整理结果做最终审核，并将通过资料纳入正式 Team Knowledge。",
+                "responsibilities": "读取 approved/kept 候选、关系预览和 writebackContract；执行受控入库或回写明确失败原因。",
+                "preferredTasks": "入库审核、正式知识写入、退回原因、治理门禁说明。",
+                "avoidTasks": "不要重新搜索资料、不要替资料提炼阶段补审全部候选、不要绕过 source_collection_stage_writeback_tool。",
+                "successCriteria": "用户能看到哪些资料已正式入库、哪些被退回、为什么失败以及下一轮该带给 Agent 的建议。",
+                "deliverables": "Ingestion Decision、Formal Knowledge Result、Returned Sources、Next Retry Advice。",
+                "constraints": "正式入库只能在本角色执行；完成必须以 writeback 和 materializedKnowledgeIngestion 结果为准。",
+                "handoffNotes": "入库失败时，把失败原因和建议带回下一轮资料寻找或提炼。",
+                "taskTypes": ["challenge_cup", "source_ingestion", "knowledge_governance"],
             },
         },
         "challenge_cup_experiment_planner": {

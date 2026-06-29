@@ -475,7 +475,7 @@ def test_agent_config_workspace_health_flags_prompt_tools_not_allowed():
     assert "open_evolution_transaction_tool" in tool_issues[0]["detail"]
 
 
-def test_agent_directory_repair_aligns_fixed_role_prompt_templates(tmp_path, monkeypatch):
+def test_agent_directory_repair_aligns_fixed_roles_and_disables_retired_source_roles(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
     registry_path = tmp_path / "workspace" / "agents" / "agents.json"
@@ -558,8 +558,33 @@ def test_agent_directory_repair_aligns_fixed_role_prompt_templates(tmp_path, mon
     agents = {item["agentId"]: item for item in repaired["agents"]}
 
     assert agents["agent-ai-search"]["promptTemplateId"] == "prompt-ai-search-scope-lead"
-    assert agents["agent-graph"]["promptTemplateId"] == "prompt-challenge-cup-candidate-graph"
+    assert agents["agent-graph"]["promptTemplateId"] == "prompt-chat-default"
     assert agents["agent-session"]["promptTemplateId"] == "prompt-chat-operation-default"
+    graph_policy = repaired["toolPolicies"][agents["agent-graph"]["toolPolicyId"]]
+    assert graph_policy["allowedTools"] == []
+    assert graph_policy["preferredTools"] == []
+    assert graph_policy["networkAccess"] == "none"
+    assert graph_policy["mutationAccess"] == "none"
+
+
+def test_agent_config_workspace_source_role_health_uses_four_stage_source_roles():
+    assert {
+        "source_finder",
+        "source_extractor",
+        "source_relation_mapper",
+        "source_ingestor",
+    } <= agent_config_workspace_service.RESEARCH_SOURCE_ROLE_KEYS
+    assert {
+        "candidate_graph",
+        "challenge_cup_data_discovery",
+        "challenge_cup_source_acquisition",
+        "challenge_cup_content_extraction",
+        "challenge_cup_source_quality",
+        "knowledge_expansion_source_intake",
+        "knowledge_expansion_content_extraction",
+        "knowledge_expansion_source_quality",
+        "knowledge_expansion_candidate_graph",
+    }.isdisjoint(agent_config_workspace_service.RESEARCH_SOURCE_ROLE_KEYS)
 
 
 def test_agent_config_workspace_persists_context_compression_policy(tmp_path, monkeypatch):
