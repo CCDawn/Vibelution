@@ -488,18 +488,18 @@
 }
 
 .activeSkillStatus_active {
-  border-color: color-mix(in srgb, #31b977 34%, var(--border-soft));
-  background: color-mix(in srgb, #31b977 8%, var(--surface-card));
+  border-color: color-mix(in srgb, var(--state-success) 34%, var(--border-soft));
+  background: color-mix(in srgb, var(--state-success) 8%, var(--surface-card));
 }
 
 .activeSkillStatus_stale {
-  border-color: color-mix(in srgb, #d19a3f 42%, var(--border-soft));
-  background: color-mix(in srgb, #d19a3f 10%, var(--surface-card));
+  border-color: color-mix(in srgb, var(--state-warning) 42%, var(--border-soft));
+  background: color-mix(in srgb, var(--state-warning) 10%, var(--surface-card));
 }
 
 .activeSkillStatus_missing {
-  border-color: color-mix(in srgb, #d6655a 46%, var(--border-soft));
-  background: color-mix(in srgb, #d6655a 10%, var(--surface-card));
+  border-color: color-mix(in srgb, var(--state-error) 46%, var(--border-soft));
+  background: color-mix(in srgb, var(--state-error) 10%, var(--surface-card));
 }
 
 .activeSkillIdentity {
@@ -615,7 +615,7 @@
   border: 1px solid color-mix(in srgb, var(--token-status-accent) 24%, var(--border-soft));
   border-radius: 8px;
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--token-status-accent) 10%, transparent), transparent 64%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-card) 84%, transparent);
   color: var(--fg-primary);
 }
@@ -632,7 +632,7 @@
 .tokenStatusMetricButton:focus-visible {
   border-color: color-mix(in srgb, var(--token-status-accent) 44%, var(--border-soft));
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--token-status-accent) 15%, transparent), transparent 64%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-card) 90%, transparent);
 }
 
@@ -650,7 +650,7 @@
 }
 
 .tokenStatusMetric_modelInput {
-  --token-status-accent: #5b7cfa;
+  --token-status-accent: var(--accent-warm);
 }
 
 .tokenStatusMetric_compression {
@@ -668,7 +668,7 @@
     var(--token-status-accent) calc(var(--token-status-value) * 1%),
     var(--token-status-track) 0
   );
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--token-status-accent) 24%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
 }
 
 .tokenStatusRing::before {
@@ -736,7 +736,7 @@
   width: calc(var(--token-status-value) * 1%);
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--token-status-accent) 70%, #fff), var(--token-status-accent));
+  background: var(--vui-gradient-route-soft);
 }
 
 .contextStatusCard .contextCompositionPanel {
@@ -852,14 +852,14 @@
 .featureTogglePrimary {
   border-color: color-mix(in srgb, var(--accent-warm) 28%, var(--border-soft));
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--accent-warm) 10%, transparent), transparent 62%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-card) 78%, transparent);
 }
 
 .featureTogglePrimary.featureToggleActive {
   border-color: color-mix(in srgb, var(--accent-warm) 48%, var(--border-soft));
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--accent-warm) 18%, transparent), transparent 64%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-card) 86%, transparent);
 }
 
@@ -1007,7 +1007,7 @@
   min-width: 32px;
   padding: 2px 5px;
   border-radius: 999px;
-  background: rgba(236, 230, 220, 0.06);
+  background: color-mix(in srgb, var(--surface-card) 6%, transparent);
   color: var(--fg-tertiary);
   font-size: 0.64rem;
   line-height: 1;
@@ -1124,7 +1124,7 @@
   color: var(--fg-primary);
   background:
     radial-gradient(circle at 34% 24%, color-mix(in srgb, var(--accent-warm) 38%, white), transparent 34%),
-    linear-gradient(145deg, color-mix(in srgb, var(--accent-warm) 34%, var(--surface-panel)), color-mix(in srgb, var(--surface-card) 90%, black));
+    var(--vui-gradient-route-soft);
   font-family: var(--font-display);
   font-size: 0.65rem;
   font-weight: 800;
@@ -1362,7 +1362,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-warm) 16%, var(--border-soft));
   border-radius: 8px;
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--accent-warm) 8%, transparent), transparent 62%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-card) 72%, transparent);
 }
 
@@ -1372,7 +1372,7 @@
   width: 30px;
   height: 30px;
   overflow: hidden;
-  border: 1px solid rgba(236, 230, 220, 0.08);
+  border: 1px solid color-mix(in srgb, var(--surface-card) 8%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-card) 78%, transparent);
 }
@@ -1427,7 +1427,7 @@
 .compactDetails {
   margin-top: 3px;
   padding-top: 4px;
-  border-top: 1px solid rgba(236, 230, 220, 0.06);
+  border-top: 1px solid color-mix(in srgb, var(--surface-card) 6%, transparent);
 }
 
 .compactDetails summary {
@@ -1608,7 +1608,7 @@
   height: 6px;
   overflow: hidden;
   border-radius: 999px;
-  background: rgba(236, 230, 220, 0.08);
+  background: color-mix(in srgb, var(--surface-card) 8%, transparent);
 }
 
 .progressFillWarm,
@@ -1618,11 +1618,11 @@
 }
 
 .progressFillWarm {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--accent-warm) 72%, transparent), color-mix(in srgb, var(--accent-warm) 96%, transparent));
+  background: var(--vui-gradient-route-soft);
 }
 
 .progressFillCool {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 70%, transparent), rgba(143, 208, 181, 0.94));
+  background: var(--vui-gradient-route-soft);
 }
 
 .petShowcase {
@@ -1639,7 +1639,7 @@
   border-radius: 8px;
   background:
     radial-gradient(circle at 15% 15%, color-mix(in srgb, var(--accent-warm) 20%, transparent), transparent 42%),
-    linear-gradient(135deg, color-mix(in srgb, var(--surface-panel-strong) 90%, transparent), var(--surface-panel));
+    var(--vui-gradient-route-soft);
 }
 
 .petShowcaseStage {
@@ -1649,7 +1649,7 @@
   width: 54px;
   height: 54px;
   overflow: hidden;
-  border: 1px solid rgba(236, 230, 220, 0.08);
+  border: 1px solid color-mix(in srgb, var(--surface-card) 8%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-card) 78%, transparent);
 }
@@ -1666,25 +1666,25 @@
 .petShowcaseAvatar {
   --pet-body: color-mix(in srgb, var(--accent-warm) 34%, var(--surface-panel-strong));
   --pet-body-deep: color-mix(in srgb, var(--accent-warm) 58%, var(--surface-card));
-  --pet-mark: rgba(255, 255, 255, 0.22);
+  --pet-mark: color-mix(in srgb, var(--fg-primary) 22%, transparent);
   --pet-feature: var(--surface-page);
   position: relative;
   display: grid;
   place-items: center;
   width: 40px;
   height: 40px;
-  border: 1px solid color-mix(in srgb, var(--pet-body-deep) 64%, rgba(255, 255, 255, 0.08));
+  border: 1px solid color-mix(in srgb, var(--pet-body-deep) 64%, color-mix(in srgb, var(--fg-primary) 8%, transparent));
   border-radius: 45% 45% 42% 42%;
   background:
     radial-gradient(circle at 36% 22%, var(--pet-mark), transparent 30%),
-    linear-gradient(155deg, color-mix(in srgb, var(--pet-body) 92%, white), var(--pet-body-deep));
-  box-shadow: 0 16px 24px rgba(0, 0, 0, 0.28);
+    var(--vui-gradient-route-soft);
+  box-shadow: var(--vui-shadow-soft);
   color: color-mix(in srgb, var(--accent-warm-2) 70%, white);
   font-family: var(--font-display);
   font-size: 0.56rem;
   font-weight: 800;
   letter-spacing: 0.03em;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.34);
+  text-shadow: 0 1px 4px color-mix(in srgb, var(--bg-canvas) 34%, transparent);
 }
 
 .petShowcaseSymbol {
@@ -1710,8 +1710,8 @@
   width: 13px;
   height: 16px;
   top: -6px;
-  border: 1px solid color-mix(in srgb, var(--pet-body-deep) 70%, rgba(255, 255, 255, 0.08));
-  background: linear-gradient(145deg, var(--pet-body), var(--pet-body-deep));
+  border: 1px solid color-mix(in srgb, var(--pet-body-deep) 70%, color-mix(in srgb, var(--fg-primary) 8%, transparent));
+  background: var(--vui-gradient-route-soft);
 }
 
 .petShowcaseEarLeft {
@@ -1774,15 +1774,15 @@
 }
 
 .petShowcaseAvatar_cat {
-  --pet-body: #d88955;
-  --pet-body-deep: #6c4932;
-  --pet-mark: rgba(255, 233, 205, 0.32);
+  --pet-body: var(--state-warning);
+  --pet-body-deep: var(--fg-tertiary);
+  --pet-mark: color-mix(in srgb, var(--accent-warm) 32%, transparent);
 }
 
 .petShowcaseAvatar_bunny {
-  --pet-body: #cdbfc9;
-  --pet-body-deep: #71656f;
-  --pet-mark: rgba(255, 255, 255, 0.34);
+  --pet-body: var(--surface-card);
+  --pet-body-deep: var(--fg-secondary);
+  --pet-mark: color-mix(in srgb, var(--fg-primary) 34%, transparent);
   border-radius: 47% 47% 40% 40%;
 }
 
@@ -1794,9 +1794,9 @@
 }
 
 .petShowcaseAvatar_penguin {
-  --pet-body: #34434b;
-  --pet-body-deep: #10171d;
-  --pet-mark: rgba(255, 244, 218, 0.9);
+  --pet-body: var(--fg-secondary);
+  --pet-body-deep: var(--bg-canvas);
+  --pet-mark: color-mix(in srgb, var(--accent-warm) 90%, transparent);
   color: var(--accent-warm-2);
 }
 
@@ -1808,9 +1808,9 @@
 }
 
 .petShowcaseAvatar_slime {
-  --pet-body: #7fd4b1;
-  --pet-body-deep: #286f5b;
-  --pet-mark: rgba(230, 255, 246, 0.42);
+  --pet-body: var(--accent-warm);
+  --pet-body-deep: var(--fg-tertiary);
+  --pet-mark: color-mix(in srgb, var(--accent-warm) 42%, transparent);
   border-radius: 52% 48% 42% 44%;
 }
 
@@ -1820,9 +1820,9 @@
 }
 
 .petShowcaseAvatar_moose {
-  --pet-body: #a87a49;
-  --pet-body-deep: #4e3725;
-  --pet-mark: rgba(255, 230, 190, 0.3);
+  --pet-body: var(--fg-tertiary);
+  --pet-body-deep: var(--fg-tertiary);
+  --pet-mark: color-mix(in srgb, var(--accent-warm) 30%, transparent);
 }
 
 .petShowcaseAvatar_moose .petShowcaseEarLeft,
@@ -1836,15 +1836,15 @@
 .petShowcaseAvatar_lobster,
 .petShowcaseAvatar_shrimp,
 .petShowcaseAvatar_crab {
-  --pet-body: #c96954;
-  --pet-body-deep: #703329;
-  --pet-mark: rgba(255, 221, 205, 0.34);
+  --pet-body: var(--state-error);
+  --pet-body-deep: var(--fg-tertiary);
+  --pet-mark: color-mix(in srgb, var(--accent-warm) 34%, transparent);
 }
 
 .petShowcaseAvatar_chick {
-  --pet-body: #d6b85d;
-  --pet-body-deep: #7b6230;
-  --pet-mark: rgba(255, 246, 192, 0.34);
+  --pet-body: var(--state-warning);
+  --pet-body-deep: var(--fg-tertiary);
+  --pet-mark: color-mix(in srgb, var(--accent-warm) 34%, transparent);
   color: color-mix(in srgb, var(--surface-page) 72%, black);
 }
 
@@ -2346,7 +2346,7 @@
   height: 100%;
   padding: 10px;
   overflow: hidden;
-  background: color-mix(in srgb, var(--surface-panel-strong) 92%, #07100e 8%);
+  background: color-mix(in srgb, var(--surface-panel-strong) 92%, var(--bg-canvas) 8%);
 }
 
 .cliAgentRunPanelHidden {
@@ -2358,11 +2358,11 @@
   grid-template-rows: auto minmax(0, 1fr) auto;
   min-height: 0;
   flex: 1 1 auto;
-  border: 1px solid color-mix(in srgb, var(--state-success) 20%, #000 80%);
+  border: 1px solid color-mix(in srgb, var(--state-success) 20%, var(--bg-canvas) 80%);
   border-radius: 8px;
   overflow: hidden;
-  background: #06100d;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--state-success) 6%, transparent);
+  background: var(--bg-canvas);
+  box-shadow: var(--vui-shadow-inset-accent);
 }
 
 .cliAgentTerminalCommand {
@@ -2372,9 +2372,9 @@
   align-items: center;
   min-height: 34px;
   padding: 0 10px;
-  border-bottom: 1px solid rgba(122, 202, 169, 0.14);
-  color: #a9f0ce;
-  background: #071713;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent-cool) 14%, transparent);
+  color: var(--accent-warm);
+  background: var(--bg-canvas);
   font-family: "Cascadia Mono", "Consolas", monospace;
   font-size: 0.76rem;
 }
@@ -2384,7 +2384,7 @@
   align-items: center;
   gap: 5px;
   min-width: 58px;
-  color: #a9f0ce;
+  color: var(--accent-warm);
   font-weight: 780;
   white-space: nowrap;
 }
@@ -2398,10 +2398,10 @@
   min-width: 0;
   height: 24px;
   padding: 0 8px;
-  border: 1px solid rgba(122, 202, 169, 0.32);
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 32%, transparent);
   border-radius: 6px;
-  color: #bdf6dc;
-  background: rgba(14, 58, 45, 0.7);
+  color: var(--accent-warm);
+  background: color-mix(in srgb, var(--fg-tertiary) 70%, transparent);
   font-family: inherit;
   font-size: 0.74rem;
   font-weight: 760;
@@ -2410,8 +2410,8 @@
 }
 
 .cliAgentTerminalAction:hover:not(:disabled) {
-  border-color: rgba(189, 246, 220, 0.58);
-  background: rgba(20, 88, 68, 0.82);
+  border-color: color-mix(in srgb, var(--accent-warm) 58%, transparent);
+  background: color-mix(in srgb, var(--fg-tertiary) 82%, transparent);
 }
 
 .cliAgentTerminalAction:disabled {
@@ -2422,7 +2422,7 @@
 .cliAgentTerminalCommand code {
   min-width: 0;
   overflow: hidden;
-  color: #d7f7e8;
+  color: var(--accent-warm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2431,7 +2431,7 @@
   position: relative;
   min-height: 0;
   overflow: hidden;
-  background: #06100d;
+  background: var(--bg-canvas);
 }
 
 .cliAgentTerminalOutput {
@@ -2439,8 +2439,8 @@
   min-height: 0;
   overflow: hidden;
   padding: 12px;
-  color: #d7f7e8;
-  background: #06100d;
+  color: var(--accent-warm);
+  background: var(--bg-canvas);
   font-family: "Cascadia Mono", "Consolas", monospace;
   font-size: 0.82rem;
 }
@@ -2452,11 +2452,11 @@
 
 .cliAgentTerminalOutput :global(.xterm-screen),
 .cliAgentTerminalOutput :global(.xterm-viewport) {
-  background: #06100d;
+  background: var(--bg-canvas);
 }
 
 .cliAgentTerminalOutput :global(.xterm-viewport) {
-  scrollbar-color: rgba(122, 202, 169, 0.34) transparent;
+  scrollbar-color: color-mix(in srgb, var(--accent-cool) 34%, transparent) transparent;
 }
 
 .cliAgentTerminalOverlay {
@@ -2464,20 +2464,20 @@
   left: 14px;
   bottom: 12px;
   max-width: min(420px, calc(100% - 28px));
-  border: 1px solid rgba(122, 202, 169, 0.2);
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 20%, transparent);
   border-radius: 6px;
   padding: 7px 9px;
-  color: #bdf6dc;
-  background: rgba(7, 23, 19, 0.9);
+  color: var(--accent-warm);
+  background: color-mix(in srgb, var(--bg-canvas) 90%, transparent);
   font-size: 0.78rem;
   font-weight: 650;
   pointer-events: none;
 }
 
 .cliAgentTerminalOverlay[data-tone="error"] {
-  border-color: color-mix(in srgb, var(--state-error) 34%, rgba(122, 202, 169, 0.2));
-  color: #ffd6d6;
-  background: rgba(38, 10, 12, 0.92);
+  border-color: color-mix(in srgb, var(--state-error) 34%, color-mix(in srgb, var(--accent-cool) 20%, transparent));
+  color: var(--accent-warm);
+  background: color-mix(in srgb, var(--fg-tertiary) 92%, transparent);
 }
 
 .inlineNotice {
@@ -2582,7 +2582,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-warm) 34%, var(--border-soft));
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-panel) 96%, var(--accent-warm) 5%);
-  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.18);
+  box-shadow: var(--vui-shadow-soft);
   pointer-events: auto;
 }
 
@@ -3097,15 +3097,15 @@
 }
 
 .cacheDonutSegmentCached {
-  stroke: #31b977;
+  stroke: var(--state-success);
 }
 
 .cacheDonutSegmentCacheWrite {
-  stroke: #4f8cff;
+  stroke: var(--accent-warm);
 }
 
 .cacheDonutSegmentUncached {
-  stroke: #8c96a6;
+  stroke: var(--fg-tertiary);
 }
 
 .cacheDonutSegmentMissing {
@@ -3113,55 +3113,55 @@
 }
 
 .cacheDonutSegmentOther {
-  stroke: #6366f1;
+  stroke: var(--accent-warm);
 }
 
 .cacheDonutSegmentSystem {
-  stroke: #14b8a6;
+  stroke: var(--accent-cool);
 }
 
 .cacheDonutSegmentUser {
-  stroke: #3b82f6;
+  stroke: var(--accent-warm);
 }
 
 .cacheDonutSegmentHistory {
-  stroke: #64748b;
+  stroke: var(--fg-tertiary);
 }
 
 .cacheDonutSegmentTask {
-  stroke: #f59e0b;
+  stroke: var(--state-warning);
 }
 
 .cacheDonutSegmentAgent {
-  stroke: #22c55e;
+  stroke: var(--state-success);
 }
 
 .cacheDonutSegmentProjectRules {
-  stroke: #d97706;
+  stroke: var(--state-error);
 }
 
 .cacheDonutSegmentToolDescriptions {
-  stroke: #8b5cf6;
+  stroke: var(--accent-warm);
 }
 
 .cacheDonutSegmentToolSchema {
-  stroke: #0ea5e9;
+  stroke: var(--accent-warm);
 }
 
 .cacheDonutSegmentProviderUnmapped {
-  stroke: #94a3b8;
+  stroke: var(--accent-warm);
 }
 
 .cacheDonutSegmentGuidance {
-  stroke: #ec4899;
+  stroke: var(--accent-warm);
 }
 
 .cacheDonutSegmentSkill {
-  stroke: #ef4444;
+  stroke: var(--state-error);
 }
 
 .cacheDonutSegmentAttachments {
-  stroke: #06b6d4;
+  stroke: var(--accent-warm);
 }
 
 .cacheDetailOverlay {
@@ -3172,7 +3172,7 @@
   place-items: start center;
   overflow: hidden;
   padding: 30px 22px 22px;
-  background: rgba(15, 23, 42, 0.38);
+  background: color-mix(in srgb, var(--fg-tertiary) 38%, transparent);
   backdrop-filter: blur(3px);
 }
 
@@ -3188,7 +3188,7 @@
   border: 1px solid var(--border-strong);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-panel) 98%, var(--surface-page));
-  box-shadow: 0 22px 52px rgba(15, 23, 42, 0.28);
+  box-shadow: var(--vui-shadow-soft);
 }
 
 .cacheDetailHeader {
@@ -3440,15 +3440,15 @@
 }
 
 .cacheDetailSwatch.cacheDonutSegmentCached {
-  background: #31b977;
+  background: var(--state-success);
 }
 
 .cacheDetailSwatch.cacheDonutSegmentCacheWrite {
-  background: #4f8cff;
+  background: var(--accent-warm);
 }
 
 .cacheDetailSwatch.cacheDonutSegmentUncached {
-  background: #8c96a6;
+  background: var(--fg-tertiary);
 }
 
 .cacheDetailSwatch.cacheDonutSegmentMissing {
@@ -3456,7 +3456,7 @@
 }
 
 .cacheDetailSwatch.cacheDonutSegmentOther {
-  background: #6f7dd9;
+  background: var(--accent-warm);
 }
 
 .cacheDetailSegmentText {
@@ -3518,22 +3518,22 @@
 }
 
 .cacheDetailSegmentMeta b[data-status="observed_hit"] {
-  color: #17764b;
-  border-color: color-mix(in srgb, #31b977 36%, var(--border-soft));
-  background: color-mix(in srgb, #31b977 12%, transparent);
+  color: var(--fg-tertiary);
+  border-color: color-mix(in srgb, var(--state-success) 36%, var(--border-soft));
+  background: color-mix(in srgb, var(--state-success) 12%, transparent);
 }
 
 .cacheDetailSegmentMeta b[data-status="observed_partial"] {
-  color: #8a5b11;
-  border-color: color-mix(in srgb, #d19a3f 38%, var(--border-soft));
-  background: color-mix(in srgb, #d19a3f 13%, transparent);
+  color: var(--fg-tertiary);
+  border-color: color-mix(in srgb, var(--state-warning) 38%, var(--border-soft));
+  background: color-mix(in srgb, var(--state-warning) 13%, transparent);
 }
 
 .cacheDetailSegmentMeta b[data-status="observed_miss"],
 .cacheDetailSegmentMeta b[data-status="computed_miss"] {
-  color: #6d7480;
-  border-color: color-mix(in srgb, #8c96a6 38%, var(--border-soft));
-  background: color-mix(in srgb, #8c96a6 12%, transparent);
+  color: var(--fg-tertiary);
+  border-color: color-mix(in srgb, var(--fg-tertiary) 38%, var(--border-soft));
+  background: color-mix(in srgb, var(--fg-tertiary) 12%, transparent);
 }
 
 .cacheDetailBoundary {
@@ -3573,15 +3573,15 @@
 }
 
 .cacheDetailBoundaryLabels span[data-kind="hit"] {
-  color: #17834f;
+  color: var(--fg-tertiary);
 }
 
 .cacheDetailBoundaryLabels span[data-kind="miss"] {
-  color: #687384;
+  color: var(--fg-tertiary);
 }
 
 .cacheDetailBoundaryLabels span[data-kind="unknown"] {
-  color: #9aa3b2;
+  color: var(--fg-tertiary);
 }
 
 .cacheDetailBoundaryTrack {
@@ -3605,21 +3605,15 @@
 }
 
 .cacheDetailBoundaryHit {
-  background: #31b977;
+  background: var(--state-success);
 }
 
 .cacheDetailBoundaryMiss {
-  background: #8c96a6;
+  background: var(--fg-tertiary);
 }
 
 .cacheDetailBoundaryUnknown {
-  background: repeating-linear-gradient(
-    45deg,
-    color-mix(in srgb, #9aa3b2 78%, transparent) 0,
-    color-mix(in srgb, #9aa3b2 78%, transparent) 4px,
-    color-mix(in srgb, #9aa3b2 34%, transparent) 4px,
-    color-mix(in srgb, #9aa3b2 34%, transparent) 8px
-  );
+  background: repeating-var(--vui-gradient-route-soft);
 }
 
 .cacheDetailSegmentRow em {
@@ -3693,73 +3687,67 @@
 }
 
 .contextCompositionSegmentSystem {
-  background: #14b8a6;
+  background: var(--accent-cool);
 }
 
 .contextCompositionSegmentUser {
-  background: #3b82f6;
+  background: var(--accent-warm);
 }
 
 .contextCompositionSegmentHistory {
-  background: #64748b;
+  background: var(--fg-tertiary);
 }
 
 .contextCompositionSegmentTask {
-  background: #f59e0b;
+  background: var(--state-warning);
 }
 
 .contextCompositionSegmentAgent {
-  background: #22c55e;
+  background: var(--state-success);
 }
 
 .contextCompositionSegmentProjectRules {
-  background: #d97706;
+  background: var(--state-error);
 }
 
 .contextCompositionSegmentToolDescriptions {
-  background: #8b5cf6;
+  background: var(--accent-warm);
 }
 
 .contextCompositionSegmentToolSchema {
-  background: #0ea5e9;
+  background: var(--accent-warm);
 }
 
 .contextCompositionSegmentProviderUnmapped {
-  background: #94a3b8;
+  background: var(--accent-warm);
 }
 
 .contextCompositionSegmentGuidance {
-  background: #ec4899;
+  background: var(--accent-warm);
 }
 
 .contextCompositionSegmentSkill {
-  background: #ef4444;
+  background: var(--state-error);
 }
 
 .contextCompositionSegmentAttachments {
-  background: #06b6d4;
+  background: var(--accent-warm);
 }
 
 .contextCompositionSegmentCached {
-  background: #31b977;
+  background: var(--state-success);
 }
 
 .contextCompositionSegmentCacheWrite {
-  background: #4f8cff;
+  background: var(--accent-warm);
 }
 
 .contextCompositionSegmentUncached {
-  background: #8c96a6;
+  background: var(--fg-tertiary);
 }
 
 .contextCompositionSegmentMissing {
-  background: repeating-linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--fg-tertiary) 42%, transparent) 0,
-    color-mix(in srgb, var(--fg-tertiary) 42%, transparent) 5px,
-    transparent 5px,
-    transparent 9px
-  );
+  background: repeating-var(--vui-gradient-route-soft);
 }
 
 .contextCompositionSegmentUnused {
@@ -3767,7 +3755,7 @@
 }
 
 .contextCompositionSegmentOther {
-  background: #6366f1;
+  background: var(--accent-warm);
 }
 
 .memberIndexSummary {
@@ -3889,7 +3877,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-cool) 26%, var(--border-soft));
   border-radius: 8px;
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent-cool) 8%, transparent), transparent 66%),
+    var(--vui-gradient-route-soft),
     var(--surface-panel);
 }
 
@@ -4374,7 +4362,7 @@ a.teamTreeChild:focus-visible {
 
 .sessionItem[aria-current="true"] {
   background: color-mix(in srgb, var(--surface-card) 68%, transparent);
-  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--accent-cool) 42%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
 }
 
 .directSessionItem {
@@ -4393,13 +4381,13 @@ a.teamTreeChild:focus-visible {
 .groupSessionItem[aria-current="true"] {
   border-color: transparent;
   background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-card));
-  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--accent-cool) 36%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
 }
 
 .sessionItem:hover,
 .sessionItem:focus-within {
   background: color-mix(in srgb, var(--surface-card) 58%, transparent);
-  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--accent-cool) 28%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
 }
 
 .sessionItemMain {
@@ -4470,7 +4458,7 @@ a.teamTreeChild:focus-visible {
   font-size: 0.66rem;
   font-weight: 760;
   letter-spacing: 0;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, white 8%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
 }
 
 .conversationAvatarDirect {
@@ -4662,7 +4650,7 @@ a.teamTreeChild:focus-visible {
   height: 6px;
   border-radius: 999px;
   background: var(--accent-cool);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-cool) 18%, transparent);
+  box-shadow: var(--vui-shadow-accent);
 }
 
 .sessionRunningBadge,
@@ -4862,7 +4850,7 @@ a.teamTreeChild:focus-visible {
   border: 1px solid color-mix(in srgb, var(--border-strong) 78%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-card) 92%, transparent);
-  box-shadow: 0 12px 28px color-mix(in srgb, black 14%, transparent);
+  box-shadow: var(--vui-shadow-soft);
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
 }
@@ -5042,9 +5030,9 @@ a.teamTreeChild:focus-visible {
 }
 
 .groupComposerBar .groupStopButton {
-  color: var(--danger, #ef6b73);
-  border-color: color-mix(in srgb, var(--danger, #ef6b73) 35%, var(--border-soft));
-  background: color-mix(in srgb, var(--danger, #ef6b73) 12%, var(--surface-card));
+  color: var(--danger, var(--state-error));
+  border-color: color-mix(in srgb, var(--danger, var(--state-error)) 35%, var(--border-soft));
+  background: color-mix(in srgb, var(--danger, var(--state-error)) 12%, var(--surface-card));
 }
 
 .groupManagementPanel {
@@ -5054,7 +5042,7 @@ a.teamTreeChild:focus-visible {
   border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
   border-radius: 8px;
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent-cool) 9%, transparent), transparent 70%),
+    var(--vui-gradient-route-soft),
     var(--surface-panel);
 }
 
@@ -5235,7 +5223,7 @@ a.teamTreeChild:focus-visible {
   font-size: 0.62rem;
   font-weight: 820;
   overflow: hidden;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, white 10%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
 }
 
 .groupMemberCopy {
@@ -5298,7 +5286,7 @@ a.teamTreeChild:focus-visible {
   gap: 12px;
   padding: 12px 16px;
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface-panel) 86%, transparent), transparent 34%),
+    var(--vui-gradient-route-soft),
     var(--surface-panel);
 }
 
@@ -5540,7 +5528,7 @@ a.teamTreeChild:focus-visible {
   font-family: var(--font-body);
   font-size: 0.68rem;
   font-weight: 820;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, white 10%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
 }
 
 .groupBubble {

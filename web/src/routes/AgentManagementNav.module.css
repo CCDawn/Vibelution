@@ -8,8 +8,8 @@
   border: 1px solid color-mix(in srgb, var(--border-soft) 88%, transparent);
   border-radius: 8px;
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface-panel) 96%, var(--fg-primary) 3%), var(--surface-panel));
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg-primary) 4%, transparent);
+    var(--vui-gradient-route-soft);
+  box-shadow: var(--vui-shadow-inset-accent);
 }
 
 .link {
@@ -38,7 +38,7 @@
 
 .linkActive {
   background: color-mix(in srgb, var(--accent-cool) 16%, var(--surface-panel-strong));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-cool) 20%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
   color: color-mix(in srgb, var(--accent-cool) 78%, var(--fg-primary));
 }
 

@@ -95,7 +95,7 @@
   bottom: 18px;
   width: 2px;
   border-radius: 999px;
-  background: rgba(148, 163, 184, 0.16);
+  background: color-mix(in srgb, var(--accent-warm) 16%, transparent);
 }
 
 .segmentedTabs {
@@ -206,12 +206,7 @@
   display: block;
   height: 8px;
   border-radius: 999px;
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--fg-muted) 11%, transparent),
-    color-mix(in srgb, var(--accent-cool) 18%, transparent),
-    color-mix(in srgb, var(--fg-muted) 11%, transparent)
-  );
+  background: var(--vui-gradient-route-soft);
   background-size: 220% 100%;
   animation: skeletonPulse 1.8s ease-in-out infinite;
 }
@@ -234,7 +229,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-cool) 16%, var(--border-soft));
   border-radius: 8px;
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent-cool) 8%, transparent), transparent 58%),
+    var(--vui-gradient-route-soft),
     var(--surface-panel);
   padding: 14px;
 }
@@ -254,7 +249,7 @@
 
 .petCompanionTone_error {
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--state-error) 8%, transparent), transparent 58%),
+    var(--vui-gradient-route-soft),
     var(--surface-panel);
 }
 
@@ -333,7 +328,7 @@
   min-height: 28px;
   padding: 0 10px;
   border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 18%, transparent);
   font-size: 0.78rem;
   white-space: nowrap;
 }
@@ -369,7 +364,7 @@
 .paginationButton {
   min-height: 38px;
   border-radius: 8px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 20%, transparent);
   background: var(--surface-panel-strong);
   color: var(--fg-primary);
   padding: 0 14px;
@@ -508,7 +503,7 @@
   justify-content: center;
   gap: 7px;
   animation: petFloat 4s ease-in-out infinite;
-  filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.24));
+  filter: drop-shadow(0 10px 20px color-mix(in srgb, var(--bg-canvas) 24%, transparent));
 }
 
 .petAvatarBody {
@@ -517,9 +512,9 @@
   border: 1px solid color-mix(in srgb, var(--accent-warm) 42%, transparent);
   border-radius: 48% 48% 42% 42%;
   background:
-    radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.28) 0 7px, transparent 8px),
-    radial-gradient(circle at 66% 28%, rgba(255, 255, 255, 0.28) 0 7px, transparent 8px),
-    linear-gradient(180deg, color-mix(in srgb, var(--accent-warm) 36%, var(--surface-panel-strong)), color-mix(in srgb, var(--accent-cool) 20%, var(--surface-card)));
+    radial-gradient(circle at 34% 28%, color-mix(in srgb, var(--fg-primary) 28%, transparent) 0 7px, transparent 8px),
+    radial-gradient(circle at 66% 28%, color-mix(in srgb, var(--fg-primary) 28%, transparent) 0 7px, transparent 8px),
+    var(--vui-gradient-route-soft);
 }
 
 .petAvatarClaw {
@@ -548,7 +543,7 @@
   min-height: 28px;
   padding: 0 10px;
   border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 18%, transparent);
   background: var(--surface-panel-strong);
   color: var(--fg-secondary);
   font-size: 0.78rem;
@@ -591,7 +586,7 @@
 .detailRow {
   align-items: center;
   padding-bottom: 8px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent-warm) 8%, transparent);
 }
 
 .detailRow span,
@@ -694,7 +689,7 @@
   align-items: center;
   gap: 8px;
   padding: 0 10px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 18%, transparent);
   border-radius: 8px;
   background: var(--surface-panel-strong);
   color: var(--fg-secondary);
@@ -722,7 +717,7 @@
   align-items: center;
   gap: 6px;
   padding: 0 9px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 18%, transparent);
   border-radius: 999px;
   background: color-mix(in srgb, var(--surface-panel-strong) 78%, transparent);
   color: var(--fg-secondary);
@@ -746,7 +741,7 @@
 .transactionDateGroup + .transactionDateGroup {
   margin-top: 4px;
   padding-top: 12px;
-  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  border-top: 1px solid color-mix(in srgb, var(--accent-warm) 12%, transparent);
 }
 
 .transactionDateHeader {
@@ -777,7 +772,7 @@
 .selectionToggle {
   min-height: 32px;
   border-radius: 8px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 20%, transparent);
   background: var(--surface-panel-strong);
   color: var(--fg-secondary);
   padding: 0 12px;
@@ -891,14 +886,14 @@
   width: 100%;
   height: 8px;
   border-radius: var(--radius-control);
-  background: rgba(64, 74, 86, 0.7);
+  background: color-mix(in srgb, var(--fg-secondary) 70%, transparent);
   overflow: hidden;
 }
 
 .vitalFill {
   height: 100%;
   border-radius: var(--radius-control);
-  background: linear-gradient(90deg, color-mix(in srgb, var(--accent-warm) 72%, transparent), color-mix(in srgb, var(--accent-cool) 78%, transparent));
+  background: var(--vui-gradient-route-soft);
 }
 
 .paginationBar {

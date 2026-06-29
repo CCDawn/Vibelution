@@ -4,7 +4,7 @@
   place-items: center;
   padding: 32px;
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface-page) 92%, transparent), color-mix(in srgb, var(--surface-panel-muted) 94%, transparent)),
+    var(--vui-gradient-route-soft),
     var(--surface-page);
   color: var(--fg-primary);
 }

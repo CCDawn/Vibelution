@@ -390,7 +390,7 @@
 
 .templateButtonActive {
   border-color: color-mix(in srgb, var(--accent-warm) 30%, transparent);
-  box-shadow: inset 3px 0 0 var(--accent-warm);
+  box-shadow: var(--vui-shadow-inset-accent);
   background: var(--surface-active-neutral);
 }
 

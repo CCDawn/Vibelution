@@ -100,7 +100,7 @@
 
 .rootButtonActive {
   border-color: color-mix(in srgb, var(--accent-warm) 24%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-warm) 18%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
   background: var(--surface-panel-strong);
 }
 
@@ -477,12 +477,7 @@
   min-height: 14px;
   border-radius: 5px;
   background:
-    linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--surface-card-subtle) 78%, transparent),
-      color-mix(in srgb, var(--surface-panel-hover) 72%, transparent),
-      color-mix(in srgb, var(--surface-card-subtle) 78%, transparent)
-    );
+    var(--vui-gradient-route-soft);
 }
 
 .stateSkeletonStack span:nth-child(2),
@@ -737,7 +732,7 @@
   width: 3px;
   transform: translateX(-50%);
   border-radius: 999px;
-  background: rgba(236, 230, 220, 0.08);
+  background: color-mix(in srgb, var(--surface-card) 8%, transparent);
   transition: background-color 150ms ease, box-shadow 150ms ease;
 }
 
@@ -745,7 +740,7 @@
 .resizeHandle:focus-visible::before,
 .resizeHandleActive::before {
   background: color-mix(in srgb, var(--accent-warm) 52%, transparent);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--accent-warm) 18%, transparent);
+  box-shadow: var(--vui-shadow-soft);
 }
 
 .rightRail {
@@ -825,7 +820,7 @@
 .packageButtonActive {
   border-color: color-mix(in srgb, var(--accent-warm) 24%, transparent);
   background: var(--surface-panel-strong);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-warm) 18%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
 }
 
 .packageButtonHeader,
@@ -995,7 +990,7 @@
 .sceneCardActive {
   border-color: color-mix(in srgb, var(--accent-warm) 24%, transparent);
   background: var(--surface-panel-strong);
-  box-shadow: inset 2px 0 0 var(--accent-warm);
+  box-shadow: var(--vui-shadow-inset-accent);
 }
 
 .sceneCardTop {
@@ -1063,9 +1058,9 @@
 }
 
 .sceneIssueBadgeError {
-  border-color: color-mix(in srgb, var(--danger, #ff6b6b) 42%, transparent);
-  background: color-mix(in srgb, var(--danger, #ff6b6b) 14%, transparent);
-  color: color-mix(in srgb, var(--danger, #ff6b6b) 78%, var(--fg-primary));
+  border-color: color-mix(in srgb, var(--danger, var(--state-error)) 42%, transparent);
+  background: color-mix(in srgb, var(--danger, var(--state-error)) 14%, transparent);
+  color: color-mix(in srgb, var(--danger, var(--state-error)) 78%, var(--fg-primary));
 }
 
 .sceneIssueBadgeWarning {
@@ -1208,7 +1203,7 @@
 }
 
 .sceneEvidenceStrip > span {
-  border-color: rgba(236, 230, 220, 0.08);
+  border-color: color-mix(in srgb, var(--surface-card) 8%, transparent);
   background: var(--surface-card-subtle);
 }
 
@@ -1334,7 +1329,7 @@
 .packageWorkRunMetricStrip span {
   min-width: 0;
   padding: 7px 8px;
-  border: 1px solid rgba(236, 230, 220, 0.08);
+  border: 1px solid color-mix(in srgb, var(--surface-card) 8%, transparent);
   border-radius: 8px;
   background: var(--surface-card-subtle);
   color: var(--fg-tertiary);
@@ -1486,9 +1481,9 @@
   gap: 3px;
   min-height: 46px;
   padding: 7px 8px;
-  border: 1px solid color-mix(in srgb, var(--success, #35c986) 30%, var(--border-soft));
+  border: 1px solid color-mix(in srgb, var(--success, var(--state-success)) 30%, var(--border-soft));
   border-radius: 8px;
-  background: color-mix(in srgb, var(--success, #35c986) 8%, var(--surface-input));
+  background: color-mix(in srgb, var(--success, var(--state-success)) 8%, var(--surface-input));
   color: var(--fg-secondary);
   text-align: left;
   cursor: pointer;

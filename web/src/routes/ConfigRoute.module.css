@@ -24,7 +24,7 @@
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-panel);
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-strong) 74%, transparent), var(--surface-panel)),
+    var(--vui-gradient-route-soft),
     var(--surface-panel);
   box-shadow: none;
 }
@@ -341,7 +341,7 @@
   display: grid;
   place-items: center;
   padding: 18px;
-  background: rgba(7, 10, 14, 0.68);
+  background: color-mix(in srgb, var(--bg-canvas) 68%, transparent);
   backdrop-filter: blur(6px);
 }
 
@@ -353,7 +353,7 @@
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background:
-    linear-gradient(180deg, var(--surface-panel-strong), var(--surface-panel)),
+    var(--vui-gradient-route-soft),
     var(--surface-panel);
   box-shadow: var(--shadow-strong);
 }
@@ -427,7 +427,7 @@
   padding: 7px var(--config-section-x);
   border-bottom: 1px solid var(--border-hairline);
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-strong) 84%, transparent), var(--surface-panel)),
+    var(--vui-gradient-route-soft),
     var(--surface-panel);
 }
 
@@ -1441,7 +1441,7 @@
 .actionButton:hover,
 .primaryButton:hover,
 .dangerButton:hover {
-  border-color: rgba(236, 230, 220, 0.14);
+  border-color: color-mix(in srgb, var(--surface-card) 14%, transparent);
 }
 
 .primaryButton:hover {
@@ -1724,7 +1724,7 @@
   width: 10px;
   height: calc(100% - 34px);
   cursor: col-resize;
-  background: linear-gradient(180deg, transparent, rgba(236, 230, 220, 0.08), transparent);
+  background: var(--vui-gradient-route-soft);
 }
 
 .sidebarResizeY {
@@ -1733,7 +1733,7 @@
   width: calc(100% - 36px);
   height: 10px;
   cursor: row-resize;
-  background: linear-gradient(90deg, transparent, rgba(236, 230, 220, 0.08), transparent);
+  background: var(--vui-gradient-route-soft);
 }
 
 .sidebarResizeCorner {
@@ -1743,7 +1743,7 @@
   height: 18px;
   cursor: nwse-resize;
   border-radius: 999px 0 8px 0;
-  background: rgba(236, 230, 220, 0.08);
+  background: color-mix(in srgb, var(--surface-card) 8%, transparent);
 }
 
 .cardBadges {
@@ -2166,7 +2166,7 @@
 .avatarImageDropButton:hover .avatarImagePreview,
 .avatarImageDropButton:hover .avatarImagePlaceholder {
   border-color: color-mix(in srgb, var(--accent-warm) 44%, var(--border-hairline));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-warm) 14%, transparent);
+  box-shadow: var(--vui-shadow-accent);
 }
 
 .avatarImageDropButton input {
@@ -2188,7 +2188,7 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--surface-panel-strong) 86%, transparent);
   color: var(--fg-primary);
-  box-shadow: 0 6px 14px color-mix(in srgb, var(--shadow-strong) 24%, transparent);
+  box-shadow: var(--vui-shadow-soft);
 }
 
 .themeBackgroundImagePreview,
@@ -2321,7 +2321,7 @@
 .themeBackgroundPresetButton[data-active="true"] {
   border-color: color-mix(in srgb, var(--accent-warm) 62%, var(--border-strong));
   background: color-mix(in srgb, var(--accent-warm) 12%, var(--surface-card));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-warm) 28%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
 }
 
 .themeBackgroundPresetButton img {
@@ -2414,10 +2414,10 @@
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 34%, transparent);
   background:
-    linear-gradient(45deg, color-mix(in srgb, var(--surface-card-muted) 92%, white) 25%, transparent 25%),
-    linear-gradient(-45deg, color-mix(in srgb, var(--surface-card-muted) 92%, white) 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, color-mix(in srgb, var(--surface-card-muted) 92%, white) 75%),
-    linear-gradient(-45deg, transparent 75%, color-mix(in srgb, var(--surface-card-muted) 92%, white) 75%),
+    var(--vui-gradient-route-soft),
+    var(--vui-gradient-route-soft),
+    var(--vui-gradient-route-soft),
+    var(--vui-gradient-route-soft),
     var(--surface-card);
   background-size: 18px 18px;
   background-position: 0 0, 0 9px, 9px -9px, -9px 0;
@@ -2448,10 +2448,8 @@
 .avatarCropMask {
   position: absolute;
   inset: 0;
-  border: 1px solid rgba(255, 255, 255, 0.54);
-  box-shadow:
-    inset 0 0 0 999px rgba(0, 0, 0, 0.08),
-    inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+  border: 1px solid color-mix(in srgb, var(--fg-primary) 54%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
   pointer-events: none;
 }
 
@@ -2562,7 +2560,7 @@
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-panel);
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-strong) 78%, transparent), var(--surface-panel)),
+    var(--vui-gradient-route-soft),
     var(--surface-panel);
 }
 
@@ -2620,12 +2618,7 @@
   display: block;
   border-radius: 6px;
   background:
-    linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--surface-card-subtle) 76%, transparent),
-      color-mix(in srgb, var(--surface-panel-hover) 72%, transparent),
-      color-mix(in srgb, var(--surface-card-subtle) 76%, transparent)
-    );
+    var(--vui-gradient-route-soft);
 }
 
 .loadingBoardHeader span {

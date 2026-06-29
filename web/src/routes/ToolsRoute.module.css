@@ -15,7 +15,7 @@
   min-height: 36px;
   padding: 3px 12px;
   border-bottom: 1px solid var(--border-strong);
-  background: var(--surface-header, rgba(22, 25, 28, 0.78));
+  background: var(--surface-header, color-mix(in srgb, var(--bg-canvas) 78%, transparent));
 }
 
 .header > div {
@@ -69,7 +69,7 @@
   min-height: 26px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
-  background: var(--surface-card, rgba(20, 23, 26, 0.72));
+  background: var(--surface-card, color-mix(in srgb, var(--bg-canvas) 72%, transparent));
   color: var(--fg-secondary);
 }
 
@@ -107,7 +107,7 @@
 .secondaryButton:hover {
   border-color: var(--border-strong);
   color: var(--fg-primary);
-  background: var(--surface-panel-hover, rgba(34, 39, 44, 0.9));
+  background: var(--surface-panel-hover, color-mix(in srgb, var(--fg-secondary) 90%, transparent));
 }
 
 .refreshButton:disabled,
@@ -152,7 +152,7 @@
   padding: 5px 8px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-panel);
-  background: var(--surface-panel, rgba(27, 31, 35, 0.78));
+  background: var(--surface-panel, color-mix(in srgb, var(--fg-secondary) 78%, transparent));
 }
 
 .scopeCopy {
@@ -198,7 +198,7 @@
   padding: 0 9px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-input-strong, rgba(14, 17, 20, 0.88));
+  background: var(--surface-input-strong, color-mix(in srgb, var(--bg-canvas) 88%, transparent));
   color: var(--fg-primary);
 }
 
@@ -218,7 +218,7 @@
   padding: 0 7px;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
-  background: var(--surface-input-strong, rgba(14, 17, 20, 0.72));
+  background: var(--surface-input-strong, color-mix(in srgb, var(--bg-canvas) 72%, transparent));
   color: var(--fg-secondary);
   font-size: 0.74rem;
   white-space: nowrap;
@@ -248,7 +248,7 @@
 .emptyDetail {
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-panel, rgba(27, 31, 35, 0.78));
+  background: var(--surface-panel, color-mix(in srgb, var(--fg-secondary) 78%, transparent));
 }
 
 .summaryCard {
@@ -321,14 +321,14 @@
   width: 3px;
   transform: translateX(-50%);
   border-radius: 999px;
-  background: rgba(236, 230, 220, 0.08);
+  background: color-mix(in srgb, var(--surface-card) 8%, transparent);
   transition: background-color 150ms ease, box-shadow 150ms ease;
 }
 
 .resizeHandle:hover::before,
 .resizeHandle:focus-visible::before {
   background: color-mix(in srgb, var(--accent-warm) 52%, transparent);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--accent-warm) 18%, transparent);
+  box-shadow: var(--vui-shadow-soft);
 }
 
 .listPanel,
@@ -415,7 +415,7 @@
   padding: 0 8px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-input-strong, rgba(14, 17, 20, 0.88));
+  background: var(--surface-input-strong, color-mix(in srgb, var(--bg-canvas) 88%, transparent));
   color: var(--fg-tertiary);
 }
 
@@ -586,20 +586,20 @@
   padding: 6px 7px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-panel-muted, rgba(21, 24, 27, 0.82));
+  background: var(--surface-panel-muted, color-mix(in srgb, var(--bg-canvas) 82%, transparent));
   color: var(--fg-primary);
   text-align: left;
 }
 
 .toolButton:hover {
   border-color: var(--border-strong);
-  background: var(--surface-panel-strong, rgba(34, 39, 44, 0.92));
+  background: var(--surface-panel-strong, color-mix(in srgb, var(--fg-secondary) 92%, transparent));
 }
 
 .toolButtonActive {
   border-color: color-mix(in srgb, var(--accent-warm) 30%, transparent);
-  box-shadow: inset 3px 0 0 var(--accent-warm);
-  background: var(--surface-active-neutral, rgba(35, 36, 33, 0.96));
+  box-shadow: var(--vui-shadow-inset-accent);
+  background: var(--surface-active-neutral, color-mix(in srgb, var(--fg-secondary) 96%, transparent));
 }
 
 .toolButton[data-vui] [data-slot="vui-button-content"],
@@ -741,7 +741,7 @@
   padding: 10px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-panel-muted, rgba(21, 24, 27, 0.82));
+  background: var(--surface-panel-muted, color-mix(in srgb, var(--bg-canvas) 82%, transparent));
 }
 
 .metaGridWide {
@@ -802,7 +802,7 @@
   padding: 12px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-panel-muted, rgba(21, 24, 27, 0.82));
+  background: var(--surface-panel-muted, color-mix(in srgb, var(--bg-canvas) 82%, transparent));
 }
 
 .toolDetailPanel {
@@ -912,7 +912,7 @@
   padding: 0 8px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-input-strong, rgba(14, 17, 20, 0.88));
+  background: var(--surface-input-strong, color-mix(in srgb, var(--bg-canvas) 88%, transparent));
   color: var(--fg-primary);
 }
 
@@ -1102,7 +1102,7 @@
   padding: 12px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-input-strong, rgba(14, 17, 20, 0.88));
+  background: var(--surface-input-strong, color-mix(in srgb, var(--bg-canvas) 88%, transparent));
   color: var(--fg-secondary);
   font-size: 0.78rem;
   line-height: 1.5;
@@ -1183,7 +1183,7 @@
   padding: 9px 10px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-input-strong, rgba(14, 17, 20, 0.72));
+  background: var(--surface-input-strong, color-mix(in srgb, var(--bg-canvas) 72%, transparent));
 }
 
 .image2ModelSummary strong,
@@ -1239,7 +1239,7 @@
   padding: 5px 7px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-input-strong, rgba(14, 17, 20, 0.68));
+  background: var(--surface-input-strong, color-mix(in srgb, var(--bg-canvas) 68%, transparent));
   color: var(--fg-tertiary);
   font-size: 0.7rem;
   line-height: 1.15;
@@ -1287,7 +1287,7 @@
   padding: 8px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-panel-muted, rgba(21, 24, 27, 0.82));
+  background: var(--surface-panel-muted, color-mix(in srgb, var(--bg-canvas) 82%, transparent));
 }
 
 .readinessCard span,
@@ -1311,7 +1311,7 @@
 .readiness_ready,
 .result_ok {
   border-color: color-mix(in srgb, var(--state-success) 24%, transparent);
-  background: color-mix(in srgb, var(--state-success) 8%, var(--surface-panel-muted, rgba(21, 24, 27, 0.82)));
+  background: color-mix(in srgb, var(--state-success) 8%, var(--surface-panel-muted, color-mix(in srgb, var(--bg-canvas) 82%, transparent)));
 }
 
 .readiness_ready strong,
@@ -1322,7 +1322,7 @@
 .readiness_blocked,
 .result_attention {
   border-color: color-mix(in srgb, var(--accent-warm) 28%, transparent);
-  background: color-mix(in srgb, var(--accent-warm) 8%, var(--surface-panel-muted, rgba(21, 24, 27, 0.82)));
+  background: color-mix(in srgb, var(--accent-warm) 8%, var(--surface-panel-muted, color-mix(in srgb, var(--bg-canvas) 82%, transparent)));
 }
 
 .readiness_blocked strong,
@@ -1345,7 +1345,7 @@
   padding: 0 9px;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
-  background: var(--surface-input-strong, rgba(14, 17, 20, 0.72));
+  background: var(--surface-input-strong, color-mix(in srgb, var(--bg-canvas) 72%, transparent));
   color: var(--fg-secondary);
   font-size: 0.76rem;
   overflow-wrap: anywhere;
@@ -1368,7 +1368,7 @@
   padding: 10px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-input-strong, rgba(14, 17, 20, 0.6));
+  background: var(--surface-input-strong, color-mix(in srgb, var(--bg-canvas) 60%, transparent));
 }
 
 .agentCompatibility p {
@@ -1433,7 +1433,7 @@
     padding: 10px;
     border: 1px solid var(--border-soft);
     border-radius: 8px;
-    background: var(--surface-panel-muted, rgba(21, 24, 27, 0.82));
+    background: var(--surface-panel-muted, color-mix(in srgb, var(--bg-canvas) 82%, transparent));
   }
 
   .permissionSummaryCards {

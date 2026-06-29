@@ -1,20 +1,20 @@
 .route {
-  --bg-canvas: #eef3f8;
-  --surface-page: #f6f8fb;
-  --surface-header: rgba(255, 255, 255, 0.94);
-  --surface-panel: rgba(255, 255, 255, 0.88);
-  --surface-card: rgba(248, 251, 255, 0.92);
-  --surface-panel-hover: #eef5ff;
-  --border-soft: #d9e2ec;
-  --border-strong: #b8c7d8;
-  --fg-primary: #172033;
-  --fg-secondary: #53627a;
-  --fg-tertiary: #7a879a;
-  --accent-primary: #4f7fd9;
-  --state-success: #3f9b74;
-  --state-warning: #bd8532;
-  --state-error: #d45d66;
-  --danger: #d45d66;
+  --bg-canvas: var(--fg-primary);
+  --surface-page: var(--fg-primary);
+  --surface-header: color-mix(in srgb, var(--fg-primary) 94%, transparent);
+  --surface-panel: color-mix(in srgb, var(--fg-primary) 88%, transparent);
+  --surface-card: color-mix(in srgb, var(--fg-primary) 92%, transparent);
+  --surface-panel-hover: var(--fg-primary);
+  --border-soft: var(--surface-card);
+  --border-strong: var(--surface-card);
+  --fg-primary: var(--fg-tertiary);
+  --fg-secondary: var(--fg-tertiary);
+  --fg-tertiary: var(--fg-tertiary);
+  --accent-primary: var(--accent-warm);
+  --state-success: var(--state-success);
+  --state-warning: var(--state-warning);
+  --state-error: var(--state-error);
+  --danger: var(--state-error);
   display: grid;
   grid-template-rows: auto;
   align-content: start;
@@ -29,7 +29,7 @@
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(246, 248, 251, 0.94) 28%, rgba(238, 243, 248, 0.98)),
+    var(--vui-gradient-route-soft),
     var(--surface-page);
 }
 
@@ -43,7 +43,7 @@
   padding: 8px 12px;
   border-bottom: 1px solid var(--border-strong);
   background: var(--surface-header);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.88) inset;
+  box-shadow: var(--vui-shadow-inset-accent);
 }
 
 .header > div:first-child {
@@ -114,7 +114,7 @@
   padding: 0 8px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--surface-card) 90%, #ffffff);
+  background: color-mix(in srgb, var(--surface-card) 90%, var(--fg-primary));
 }
 
 .statusBarReason span {
@@ -196,19 +196,19 @@
 
 .primaryButton {
   border-color: color-mix(in srgb, var(--accent-primary) 36%, var(--border-soft));
-  background: color-mix(in srgb, var(--accent-primary) 10%, #ffffff);
+  background: color-mix(in srgb, var(--accent-primary) 10%, var(--fg-primary));
   color: var(--fg-primary);
 }
 
 .iconButton,
 .statusBarButton {
-  background: color-mix(in srgb, var(--surface-card) 86%, #ffffff);
+  background: color-mix(in srgb, var(--surface-card) 86%, var(--fg-primary));
 }
 
 .dangerButton {
   border-color: color-mix(in srgb, var(--danger) 34%, var(--border-soft));
   color: color-mix(in srgb, var(--danger) 74%, var(--fg-primary));
-  background: color-mix(in srgb, var(--danger) 7%, #ffffff);
+  background: color-mix(in srgb, var(--danger) 7%, var(--fg-primary));
 }
 
 .primaryButton:hover,
@@ -222,7 +222,7 @@
 .dangerButton:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--danger) 52%, var(--border-strong));
   color: var(--fg-primary);
-  background: color-mix(in srgb, var(--danger) 12%, #ffffff);
+  background: color-mix(in srgb, var(--danger) 12%, var(--fg-primary));
 }
 
 .primaryButton:disabled,
@@ -459,7 +459,7 @@
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
   color: var(--fg-secondary);
-  background: color-mix(in srgb, var(--surface-card) 90%, #ffffff);
+  background: color-mix(in srgb, var(--surface-card) 90%, var(--fg-primary));
   font-size: 0.74rem;
 }
 
@@ -533,7 +533,7 @@
   padding: 6px;
   border: 1px solid color-mix(in srgb, var(--state-warning) 34%, var(--border-soft));
   border-radius: 6px;
-  background: color-mix(in srgb, var(--state-warning) 6%, #ffffff);
+  background: color-mix(in srgb, var(--state-warning) 6%, var(--fg-primary));
 }
 
 .cleanupPlan strong,
@@ -619,7 +619,7 @@
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
   color: var(--fg-primary);
-  background: #ffffff;
+  background: var(--fg-primary);
   font-size: 0.78rem;
 }
 
@@ -648,7 +648,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-primary) 34%, var(--border-soft));
   border-radius: var(--radius-control);
   color: var(--fg-primary);
-  background: color-mix(in srgb, var(--accent-primary) 9%, #ffffff);
+  background: color-mix(in srgb, var(--accent-primary) 9%, var(--fg-primary));
   font-size: 0.76rem;
 }
 
@@ -671,7 +671,7 @@
   padding: 2px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
-  background: #ffffff;
+  background: var(--fg-primary);
 }
 
 .segmentedControl button {
@@ -691,7 +691,7 @@
 
 .segmentedControl button[data-active="true"] {
   color: var(--fg-primary);
-  background: color-mix(in srgb, var(--accent-primary) 11%, #ffffff);
+  background: color-mix(in srgb, var(--accent-primary) 11%, var(--fg-primary));
 }
 
 .segmentedControl button:disabled {
@@ -724,7 +724,7 @@
   gap: 2px 7px;
   min-width: 0;
   padding: 7px 9px;
-  border-color: color-mix(in srgb, var(--border-soft) 90%, #ffffff);
+  border-color: color-mix(in srgb, var(--border-soft) 90%, var(--fg-primary));
 }
 
 .metric span,
@@ -955,14 +955,14 @@
 .statusHead,
 .guardianHead {
   border-bottom: 1px solid var(--border-soft);
-  background: color-mix(in srgb, var(--surface-card) 94%, #ffffff);
+  background: color-mix(in srgb, var(--surface-card) 94%, var(--fg-primary));
 }
 
 .statusRow,
 .guardianRow {
   color: var(--fg-secondary);
   font-size: 0.78rem;
-  background: color-mix(in srgb, #ffffff 74%, var(--surface-card));
+  background: color-mix(in srgb, var(--fg-primary) 74%, var(--surface-card));
 }
 
 .statusRow + .statusRow,

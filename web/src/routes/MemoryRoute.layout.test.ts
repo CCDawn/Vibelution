@@ -260,10 +260,10 @@ describe("MemoryRoute layout contract", () => {
     expect(memoryCssSource).toContain("grid-template-columns: minmax(210px, 250px) minmax(760px, 1fr) minmax(260px, 0.34fr)");
     expect(memoryCssSource).toContain("min-height: 360px");
     expect(memoryCssSource).toContain("min-height: 320px");
-    expect(memoryCssSource).toContain("#06101d");
+    expect(memoryCssSource).toContain("var(--vui-gradient-route-soft)");
     expect(memoryCssSource).toContain("91px 91px");
     expect(memoryCssSource).toContain(".graphNodeBadge");
-    expect(memoryCssSource).toContain("#0f172a 82%");
+    expect(memoryCssSource).toContain("color-mix(in srgb, var(--fg-tertiary) 82%, var(--node-color, var(--accent-cool)) 18%)");
     expect(memoryCssSource).not.toContain("backdrop-filter");
     expect(memoryCssSource).toContain('[data-detail="true"]');
     expect(memoryCssSource).toContain(".graphNodeBadgeType");

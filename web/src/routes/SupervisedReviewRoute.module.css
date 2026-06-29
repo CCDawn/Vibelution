@@ -154,7 +154,7 @@
 .resizeHandle:hover::before,
 .resizeHandle:focus-visible::before {
   background: color-mix(in srgb, var(--accent-warm) 52%, transparent);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--accent-warm) 18%, transparent);
+  box-shadow: var(--vui-shadow-soft);
 }
 
 .queuePanel,
@@ -223,27 +223,27 @@
 }
 
 .statusPending {
-  background: rgba(255, 214, 120, 0.12);
-  border-color: rgba(255, 214, 120, 0.2);
-  color: rgba(255, 226, 160, 0.96);
+  background: color-mix(in srgb, var(--fg-tertiary) 12%, transparent);
+  border-color: color-mix(in srgb, var(--fg-tertiary) 20%, transparent);
+  color: color-mix(in srgb, var(--accent-warm) 96%, transparent);
 }
 
 .statusPositive {
-  background: rgba(100, 214, 155, 0.12);
-  border-color: rgba(100, 214, 155, 0.2);
-  color: rgba(173, 244, 206, 0.98);
+  background: color-mix(in srgb, var(--state-success) 12%, transparent);
+  border-color: color-mix(in srgb, var(--state-success) 20%, transparent);
+  color: color-mix(in srgb, var(--accent-warm) 98%, transparent);
 }
 
 .statusNegative {
-  background: rgba(255, 140, 140, 0.12);
-  border-color: rgba(255, 140, 140, 0.2);
-  color: rgba(255, 190, 190, 0.98);
+  background: color-mix(in srgb, var(--fg-tertiary) 12%, transparent);
+  border-color: color-mix(in srgb, var(--fg-tertiary) 20%, transparent);
+  color: color-mix(in srgb, var(--accent-warm) 98%, transparent);
 }
 
 .statusDiscard {
-  background: rgba(185, 193, 207, 0.12);
-  border-color: rgba(185, 193, 207, 0.18);
-  color: rgba(226, 229, 234, 0.9);
+  background: color-mix(in srgb, var(--surface-card) 12%, transparent);
+  border-color: color-mix(in srgb, var(--surface-card) 18%, transparent);
+  color: color-mix(in srgb, var(--surface-card) 90%, transparent);
 }
 
 .queueControls {
@@ -296,9 +296,9 @@
 }
 
 .dangerAction {
-  color: rgba(255, 190, 190, 0.98);
-  border-color: rgba(255, 140, 140, 0.22);
-  background: rgba(255, 140, 140, 0.08);
+  color: color-mix(in srgb, var(--accent-warm) 98%, transparent);
+  border-color: color-mix(in srgb, var(--fg-tertiary) 22%, transparent);
+  background: color-mix(in srgb, var(--fg-tertiary) 8%, transparent);
 }
 
 .searchField {
@@ -608,12 +608,12 @@
 
 .feedbackText {
   margin: 0;
-  color: rgba(165, 237, 197, 0.92);
+  color: color-mix(in srgb, var(--accent-warm) 92%, transparent);
 }
 
 .errorText {
   margin: 0;
-  color: rgba(255, 168, 168, 0.96);
+  color: color-mix(in srgb, var(--accent-warm) 96%, transparent);
 }
 
 .hintText {
