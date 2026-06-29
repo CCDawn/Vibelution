@@ -48,7 +48,12 @@ import {
 import { applyWorkbenchDocumentLanguage } from "./documentLanguage";
 import { resolvePollingInterval, useStartupWarmup } from "./pollingPolicy";
 import { recoverFromBuiltAssetResourceError, recoverFromDynamicImportFetchError } from "./routeChunkRecovery";
-import { nextWorkbenchTheme, readStoredWorkbenchTheme, writeStoredWorkbenchTheme } from "./themePreference";
+import {
+  nextWorkbenchTheme,
+  readStoredWorkbenchTheme,
+  writeStoredWorkbenchTheme,
+  type WorkbenchTheme,
+} from "./themePreference";
 import { isWorkbenchDomainEnabled, isWorkbenchModeEnabled } from "./workbenchContract";
 import { requestWorkbenchExitGuard } from "./workbenchExitGuard";
 import {
@@ -178,6 +183,25 @@ type WorkbenchShellStyle = CSSProperties & {
 };
 
 type ThemeBackgroundReadability = "soft" | "standard" | "strong";
+
+export function syncWorkbenchThemeRoot(theme: WorkbenchTheme): () => void {
+  if (typeof document === "undefined") {
+    return () => undefined;
+  }
+  const root = document.documentElement;
+  const previousTheme = root.dataset.theme;
+  const previousColorScheme = root.style.colorScheme;
+  root.dataset.theme = theme;
+  root.style.colorScheme = theme;
+  return () => {
+    if (previousTheme === undefined) {
+      delete root.dataset.theme;
+    } else {
+      root.dataset.theme = previousTheme;
+    }
+    root.style.colorScheme = previousColorScheme;
+  };
+}
 
 function configThemeBackgroundImageUrl(summary: ConfigSummary | undefined): string {
   const value = (summary as ConfigSummaryWithThemeBackground | undefined)?.themeBackgroundImageUrl;
@@ -586,6 +610,7 @@ export function AppShell() {
   const topBarMode = useShellStore((state) => state.topBarMode);
   const setTopBarMode = useShellStore((state) => state.setTopBarMode);
   const topBarHidden = topBarMode === "hidden";
+  const desktopShell = useMemo(() => isElectronDesktopShell(), []);
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [theme, setTheme] = useState(() => readStoredWorkbenchTheme());
   const [frontendVisible, setFrontendVisible] = useState(
@@ -659,6 +684,8 @@ export function AppShell() {
     staleTime: 0,
     retry: false,
   });
+
+  useEffect(() => syncWorkbenchThemeRoot(theme), [theme]);
   useEffect(() => {
     if (configQuery.data && runtimeQuery.data && backendHealthQuery.data) {
       setShellStartupDataReady(true);
@@ -2020,6 +2047,7 @@ export function AppShell() {
     <div
       className={styles.shell}
       data-theme={theme}
+      data-desktop-shell={desktopShell ? "electron" : "browser"}
       data-vui-app="workbench"
       data-theme-background={themeBackgroundImageUrl ? "custom" : "default"}
       data-theme-background-readability={themeBackgroundImageUrl ? themeBackgroundReadability : undefined}
