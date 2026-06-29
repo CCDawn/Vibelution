@@ -328,9 +328,7 @@
 
 .skillButton,
 .skillButtonActive {
-  display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) auto;
-  align-items: center;
+  display: block;
   gap: 8px;
   width: 100%;
   padding: 8px;
@@ -350,6 +348,20 @@
   border-color: color-mix(in srgb, var(--accent-warm) 30%, transparent);
   box-shadow: inset 3px 0 0 var(--accent-warm);
   background: var(--surface-active-neutral, rgba(35, 36, 33, 0.96));
+}
+
+.skillButton [data-slot="vui-button-content"],
+.skillButtonActive [data-slot="vui-button-content"] {
+  width: 100%;
+}
+
+.skillButton [data-slot="vui-button-label"],
+.skillButtonActive [data-slot="vui-button-label"] {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
 }
 
 .sourceDot {

@@ -6,6 +6,7 @@ import type { Extension } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
 
 import { FileContent } from "../../api/types";
+import { VButton } from "../vui";
 import { workbenchCodeMirrorTheme } from "../../design/codeMirrorTheme";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { classifyLogText, matchesSeverityFilter, type LogSeverityFilter } from "../../logs/logSeverity";
@@ -200,20 +201,20 @@ export function FilePreview({
   const showStructuredPreview = Boolean(structuredModel && viewMode === "structured");
   const previewModeActions = structuredModel ? (
     <div className={styles.previewModeGroup} role="group" aria-label={t("logPreviewMode")}>
-      <button
+      <VButton
         type="button"
         className={viewMode === "structured" ? `${styles.previewModeButton} ${styles.previewModeButtonActive}` : styles.previewModeButton}
-        onClick={() => setViewMode("structured")}
+        onPress={() => setViewMode("structured")}
       >
         {t("logPreviewStructured")}
-      </button>
-      <button
+      </VButton>
+      <VButton
         type="button"
         className={viewMode === "raw" ? `${styles.previewModeButton} ${styles.previewModeButtonActive}` : styles.previewModeButton}
-        onClick={() => setViewMode("raw")}
+        onPress={() => setViewMode("raw")}
       >
         {t("logPreviewRaw")}
-      </button>
+      </VButton>
     </div>
   ) : null;
 

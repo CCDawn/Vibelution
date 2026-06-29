@@ -6,6 +6,7 @@ import { ExternalLink, FolderTree, GitBranch, ScrollText, Search } from "lucide-
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import type { FileTreeNode, GitStatusSummary } from "../api/types";
+import { VButton } from "../components/vui";
 import type { Language, ShellTranslationKey } from "../i18n/shellDictionary";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
 import { resolvePollingInterval } from "./pollingPolicy";
@@ -58,16 +59,16 @@ function renderUtilityFileTree(
     }
     const active = activeFilePath === node.path;
     return (
-      <button
+      <VButton
         key={node.path}
         type="button"
         className={active ? `${styles.utilityFileButton} ${styles.utilityFileButtonActive}` : styles.utilityFileButton}
-        onClick={() => onOpenFile(node.path)}
+        onPress={() => onOpenFile(node.path)}
         title={node.path}
       >
         <span>{node.name}</span>
         <small>{node.path}</small>
-      </button>
+      </VButton>
     );
   });
 }
@@ -189,18 +190,18 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
           <GitBranch size={16} />
           <span>{t("navGit")}</span>
         </NavLink>
-        <button
+        <VButton
           type="button"
           className={styles.utilityButton}
           role="menuitem"
-          onClick={() => {
+          icon={<FolderTree size={16} />}
+          onPress={() => {
             requestUtilityFileTree();
             window.requestAnimationFrame(() => document.getElementById("utility-file-navigator")?.scrollIntoView({ block: "nearest" }));
           }}
         >
-          <FolderTree size={16} />
           <span>{t("files")}</span>
-        </button>
+        </VButton>
       </div>
       <section className={styles.gitMiniPanel} aria-label={t("gitStatusGuide")} title={gitTitle}>
         <div className={styles.gitMiniHeader}>
