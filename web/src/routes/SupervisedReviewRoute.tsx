@@ -16,6 +16,7 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
+import { VButton } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { createEvolutionWorkspaceCache } from "./evolutionWorkspaceCache";
 import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
@@ -514,14 +515,14 @@ export function SupervisedReviewRoute() {
           <div className={styles.queueControls}>
             <div className={styles.filterSegmented}>
               {REVIEW_FILTERS.map((value) => (
-                <button
+                <VButton
                   key={value}
                   type="button"
                   className={filter === value ? `${styles.filterButton} ${styles.filterButtonActive}` : styles.filterButton}
                   onClick={() => setFilter(value)}
                 >
                   {filterLabel(value)}
-                </button>
+                </VButton>
               ))}
             </div>
             <label className={styles.searchField}>
@@ -546,32 +547,32 @@ export function SupervisedReviewRoute() {
               <span>{lang === "zh" ? `已选 / 当前待审 ${visiblePendingCount}` : `selected / ${visiblePendingCount} visible pending`}</span>
             </div>
             <div className={styles.bulkActions}>
-              <button
+              <VButton
                 type="button"
                 className={styles.compactAction}
-                disabled={visiblePendingCount === 0}
+                isDisabled={visiblePendingCount === 0}
                 onClick={selectVisiblePendingItems}
               >
                 <SquareCheckBig size={14} />
                 {lang === "zh" ? "选择当前待审" : "Select pending"}
-              </button>
-              <button
+              </VButton>
+              <VButton
                 type="button"
                 className={styles.compactAction}
-                disabled={selectedCount === 0}
+                isDisabled={selectedCount === 0}
                 onClick={() => setSelectedCandidateIds([])}
               >
                 {lang === "zh" ? "清空" : "Clear"}
-              </button>
-              <button
+              </VButton>
+              <VButton
                 type="button"
                 className={`${styles.compactAction} ${styles.dangerAction}`}
-                disabled={selectedCount === 0 || bulkDeleteMutation.isPending}
+                isDisabled={selectedCount === 0 || bulkDeleteMutation.isPending}
                 onClick={() => bulkDeleteMutation.mutate()}
               >
                 {bulkDeleteMutation.isPending ? <LoaderCircle size={14} className={styles.spin} /> : <Trash2 size={14} />}
                 {lang === "zh" ? "丢弃所选" : "Discard selected"}
-              </button>
+              </VButton>
             </div>
           </div>
 
@@ -608,14 +609,14 @@ export function SupervisedReviewRoute() {
                 >
                   <div className={styles.queueItemTop}>
                     <div className={styles.queueTitleRow}>
-                      <button
+                      <VButton
                         type="button"
                         className={
                           itemSelected
                             ? `${styles.selectionButton} ${styles.selectionButtonActive}`
                             : styles.selectionButton
                         }
-                        disabled={!selectable}
+                        isDisabled={!selectable}
                         title={selectable ? (lang === "zh" ? "加入批量丢弃" : "Select for bulk discard") : (lang === "zh" ? "已处理样本不可批量丢弃" : "Reviewed samples cannot be bulk discarded")}
                         aria-label={selectable ? (lang === "zh" ? "选择样本" : "Select sample") : (lang === "zh" ? "样本已处理" : "Sample already reviewed")}
                         onClick={(event) => {
@@ -626,7 +627,7 @@ export function SupervisedReviewRoute() {
                         }}
                       >
                         {itemSelected ? <SquareCheckBig size={16} /> : <Square size={16} />}
-                      </button>
+                      </VButton>
                       <strong>{item.topicSummary || item.candidateId}</strong>
                     </div>
                     <span className={`${styles.statusBadge} ${statusTone(item.status)}`}>{statusLabel(item.status)}</span>
@@ -763,16 +764,16 @@ export function SupervisedReviewRoute() {
 
                 <div className={styles.decisionSegmented}>
                   {(["positive", "negative", "discard"] as ReviewDecision[]).map((value) => (
-                    <button
+                    <VButton
                       key={value}
                       type="button"
                       className={draftDecision === value ? `${styles.decisionButton} ${styles.decisionButtonActive}` : styles.decisionButton}
-                      disabled={detailCandidate.status !== "pending"}
+                      isDisabled={detailCandidate.status !== "pending"}
                       onClick={() => setDraftDecision(value)}
                     >
                       {value === "positive" ? <CheckCircle2 size={15} /> : value === "negative" ? <TriangleAlert size={15} /> : <Trash2 size={15} />}
                       {decisionLabel(value)}
-                    </button>
+                    </VButton>
                   ))}
                 </div>
 
@@ -842,15 +843,15 @@ export function SupervisedReviewRoute() {
                 </label>
 
                 <div className={styles.actionRow}>
-                  <button
+                  <VButton
                     type="button"
                     className={styles.primaryAction}
-                    disabled={detailCandidate.status !== "pending" || decisionMutation.isPending}
+                    isDisabled={detailCandidate.status !== "pending" || decisionMutation.isPending}
                     onClick={submitCurrentDecision}
                   >
                     {decisionMutation.isPending ? <LoaderCircle size={15} className={styles.spin} /> : <LibraryBig size={15} />}
                     {lang === "zh" ? "保存裁决" : "Save decision"}
-                  </button>
+                  </VButton>
                   <NavLink to={consoleTarget} className={styles.secondaryAction}>
                     <ArrowUpRight size={15} />
                     {positiveDatasetVisible

@@ -9,6 +9,15 @@ const worktreePanelSource = readFileSync(new URL("./SupervisedWorktreeReviewPane
 const worktreePanelStyles = readFileSync(new URL("./SupervisedWorktreeReviewPanel.module.css", import.meta.url), "utf-8");
 
 describe("SupervisedReviewRoute layout contract", () => {
+  it("routes supervised review controls through VUI primitives", () => {
+    expect(routeSource).toContain('from "../components/vui"');
+    expect(routeSource).toContain("<VButton");
+    expect(routeSource).not.toMatch(/<button\b/);
+    expect(worktreePanelSource).toContain('from "../components/vui"');
+    expect(worktreePanelSource).toContain("<VButton");
+    expect(worktreePanelSource).not.toMatch(/<button\b/);
+  });
+
   it("keeps the review workspace in split-pane layout at common desktop widths", () => {
     expect(stylesSource).toContain("@media (min-width: 981px) and (max-width: 1600px)");
     expect(stylesSource).toContain("grid-template-columns: var(--review-queue-width, 380px) 12px minmax(0, 1fr)");

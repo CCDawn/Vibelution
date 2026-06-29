@@ -4,6 +4,7 @@ import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import { ConfigSummary, EvolutionOverview } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
+import { VButton } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./SupervisedWorkspaceControls.module.css";
 import {
@@ -100,7 +101,7 @@ export function SupervisedWorkspaceControls({
         <span className={styles.controlLabel}>{t("intakeMode")}</span>
         <div className={styles.intakeSegmented}>
           {(["manual_review", "auto"] as const).map((mode) => (
-            <button
+            <VButton
               key={mode}
               type="button"
               className={
@@ -109,11 +110,11 @@ export function SupervisedWorkspaceControls({
                   : styles.intakeButton
               }
               aria-pressed={currentIntakeMode === mode}
-              disabled={intakeModeMutation.isPending}
+              isDisabled={intakeModeMutation.isPending}
               onClick={() => intakeModeMutation.mutate(mode)}
             >
               {intakeModeLabel(mode)}
-            </button>
+            </VButton>
           ))}
         </div>
       </div>

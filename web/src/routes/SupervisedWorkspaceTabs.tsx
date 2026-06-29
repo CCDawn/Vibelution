@@ -1,5 +1,6 @@
 import { type TranslationKey } from "../i18n/dictionary";
 import { useAppI18n } from "../i18n/useAppI18n";
+import { VButton } from "../components/vui";
 import styles from "./SupervisedWorkspaceTabs.module.css";
 
 export type SupervisedWorkspaceView = "live" | "runs" | "library" | "review";
@@ -69,7 +70,7 @@ export function SupervisedWorkspaceTabs({
           ? step.key === normalizedActiveWorkflowStepId
           : step.view === activeView;
         return (
-          <button
+          <VButton
             key={step.key}
             type="button"
             role="tab"
@@ -91,7 +92,7 @@ export function SupervisedWorkspaceTabs({
             {summary?.count !== undefined ? (
               <span className={styles.stepCount}>{summary.count}</span>
             ) : null}
-          </button>
+          </VButton>
         );
       })}
     </div>

@@ -4,6 +4,12 @@ import routeSource from "./KernelTaskCenterRoute.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
 
 describe("KernelTaskCenterRoute layout contract", () => {
+  it("routes Kernel task center controls through VUI primitives", () => {
+    expect(routeSource).toContain('from "../components/vui"');
+    expect(routeSource).toContain("<VButton");
+    expect(routeSource).not.toMatch(/<button\b/);
+  });
+
   it("is wired as a read-only kernel route", () => {
     expect(routerSource).toContain('path: "kernel"');
     expect(routerSource).toContain("<KernelTaskCenterRoute />");
