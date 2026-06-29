@@ -1,0 +1,71 @@
+[data-vui-app] {
+  --vui-legacy-control-height: 28px;
+  --vui-legacy-control-radius: var(--radius-control, 7px);
+  --vui-legacy-control-border-width: 1px;
+  --vui-legacy-control-border: var(--vui-border-subtle, var(--border-soft, rgba(15, 23, 42, 0.1)));
+  --vui-legacy-control-border-hover: var(--border-strong, rgba(15, 23, 42, 0.16));
+  --vui-legacy-control-bg: var(--vui-control-muted, var(--surface-card-muted, rgba(255, 255, 255, 0.74)));
+  --vui-legacy-control-bg-hover: var(--vui-control-muted-hover, var(--surface-panel-hover, rgba(241, 245, 249, 0.88)));
+  --vui-legacy-control-fg: var(--fg-secondary, #475467);
+  --vui-legacy-control-fg-hover: var(--fg-primary, #101828);
+  --vui-legacy-control-padding-x: 8px;
+  --vui-legacy-control-font-size: 0.76rem;
+  --vui-legacy-control-font-weight: 650;
+  --vui-legacy-focus-ring: var(--vui-focus-ring, var(--focus-ring));
+}
+
+[data-vui-app] :where(button, [role="button"]) {
+  border-width: var(--vui-legacy-control-border-width);
+  box-shadow: none;
+}
+
+[data-vui-app] :where(button:not([data-vui]), [role="button"]:not([data-vui])) {
+  letter-spacing: 0;
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    color 0.16s ease,
+    opacity 0.16s ease;
+}
+
+[data-vui-app] :where(
+  button:not([data-vui])[class*="Button"],
+  button:not([data-vui])[class*="button"],
+  [role="button"]:not([data-vui])[class*="Button"],
+  [role="button"]:not([data-vui])[class*="button"]
+) {
+  min-height: var(--vui-legacy-control-height);
+  border-style: solid;
+  border-color: var(--vui-legacy-control-border);
+  border-radius: var(--vui-legacy-control-radius);
+  background-color: var(--vui-legacy-control-bg);
+  color: var(--vui-legacy-control-fg);
+  font-size: var(--vui-legacy-control-font-size);
+  font-weight: var(--vui-legacy-control-font-weight);
+}
+
+[data-vui-app] :where(
+  button:not([data-vui])[class*="Button"]:hover:not(:disabled),
+  button:not([data-vui])[class*="button"]:hover:not(:disabled),
+  [role="button"]:not([data-vui])[class*="Button"]:hover:not([aria-disabled="true"]),
+  [role="button"]:not([data-vui])[class*="button"]:hover:not([aria-disabled="true"])
+) {
+  border-color: var(--vui-legacy-control-border-hover);
+  background-color: var(--vui-legacy-control-bg-hover);
+  color: var(--vui-legacy-control-fg-hover);
+}
+
+[data-vui-app] :where(
+  button:not([data-vui]):focus-visible,
+  [role="button"]:not([data-vui]):focus-visible
+) {
+  outline: none;
+  box-shadow: var(--vui-legacy-focus-ring);
+}
+
+[data-vui-app] :where(
+  button:not([data-vui]):disabled,
+  [role="button"]:not([data-vui])[aria-disabled="true"]
+) {
+  opacity: 0.52;
+}

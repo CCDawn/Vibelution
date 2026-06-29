@@ -8,6 +8,7 @@ import "./design/tokens.css";
 import "./design/base.css";
 import "./design/tailwind.css";
 import "./design/heroui-theme.css";
+import "./design/vui-legacy-bridge.css";
 
 if (!redirectToCanonicalWorkbenchHost()) {
   ReactDOM.createRoot(document.getElementById("root")!).render(

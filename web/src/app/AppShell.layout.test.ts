@@ -231,6 +231,9 @@ describe("AppShell layout contract", () => {
   });
 
   it("turns the top refresh icon into a frontend refresh and routes lifecycle actions through Launcher", () => {
+    expect(shellSource).toContain("VIconButton");
+    expect(shellSource).toContain("label={refreshFrontendLabel}");
+    expect(shellSource).not.toContain("<button\n            type=\"button\"\n            className={styles.actionIconButton}");
     expect(shellSource).toContain("RefreshCw");
     expect(shellSource).toContain("refreshFrontendLabel");
     expect(shellSource).toContain("browser.user_action.frontend_refresh_requested");

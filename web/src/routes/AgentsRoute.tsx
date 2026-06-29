@@ -5530,10 +5530,10 @@ export function AgentsRoute() {
   );
 
   const bulkPromptPicker = (
-    <label className="inline-flex min-w-[180px] max-w-full items-center gap-1.5 text-[0.74rem] font-semibold text-vui-fg-secondary">
-      <span className="shrink-0 whitespace-nowrap">{copy.bulkPromptLabel}</span>
+    <label className={styles.bulkPromptPicker}>
+      <span>{copy.bulkPromptLabel}</span>
       <select
-        className="min-h-[26px] min-w-0 flex-1 rounded-[var(--radius-control)] border border-vui-border-subtle bg-[var(--surface-input-strong)] px-2 text-vui-fg-primary"
+        className={styles.bulkPromptSelect}
         value={bulkPromptTemplateId}
         disabled={bulkAgentPending}
         onChange={(event) => setBulkPromptTemplateId(event.target.value)}
