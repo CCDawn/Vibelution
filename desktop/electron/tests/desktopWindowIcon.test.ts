@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import type { DesktopPaths } from "../src/paths.js";
 
 const browserWindowOptions: Array<Record<string, unknown>> = [];
 const loadedUrls: string[] = [];
+const mainSource = readFileSync(fileURLToPath(new URL("../src/main.ts", import.meta.url)), "utf8");
 
 vi.mock("electron", () => ({
   BrowserWindow: vi.fn().mockImplementation((options: Record<string, unknown>) => {
@@ -38,7 +41,8 @@ describe("Electron desktop window icons", () => {
 
     expect(browserWindowOptions[0]).toMatchObject({
       title: "Vibelution Launcher",
-      icon: "C:\\Users\\17533\\Desktop\\Vibelution\\assets\\icons\\vibelution.ico"
+      icon: "C:\\Users\\17533\\Desktop\\Vibelution\\assets\\icons\\vibelution.ico",
+      backgroundColor: "#f7fafc"
     });
     expect(loadedUrls).toEqual(["http://127.0.0.1:8765/launcher"]);
   });
@@ -48,8 +52,13 @@ describe("Electron desktop window icons", () => {
 
     expect(browserWindowOptions[0]).toMatchObject({
       title: "Vibelution Workbench",
-      icon: "C:\\Users\\17533\\Desktop\\Vibelution\\assets\\icons\\vibelution.ico"
+      icon: "C:\\Users\\17533\\Desktop\\Vibelution\\assets\\icons\\vibelution.ico",
+      backgroundColor: "#f7fafc"
     });
     expect(loadedUrls).toEqual(["http://127.0.0.1:8000"]);
+  });
+
+  it("defaults the desktop shell chrome to the light workbench theme", () => {
+    expect(mainSource).toContain('nativeTheme.themeSource = "light"');
   });
 });

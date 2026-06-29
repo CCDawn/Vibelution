@@ -1,4 +1,4 @@
-import { app, ipcMain } from "electron";
+import { app, ipcMain, nativeTheme } from "electron";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { singleInstanceDecision } from "./appLock.js";
@@ -76,6 +76,7 @@ type PendingPublicDeepLink = {
 
 const pendingPublicDeepLinks: PendingPublicDeepLink[] = [];
 const lockDecision = singleInstanceDecision(app.requestSingleInstanceLock());
+nativeTheme.themeSource = "light";
 if (!desktopCliArgs.smoke && lockDecision.action === "focus_existing") {
   app.quit();
 }

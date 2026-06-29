@@ -63,6 +63,22 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("width: 32px");
   });
 
+  it("keeps the light shell top bar on light surfaces with a stable brand stack", () => {
+    const lightThemeBlock = shellStyles.slice(
+      shellStyles.indexOf('.shell[data-theme="light"] {'),
+      shellStyles.indexOf('.shell[data-theme="light"][data-theme-background="custom"]'),
+    );
+
+    expect(lightThemeBlock).toContain("--shell-page-end: var(--bg-canvas)");
+    expect(lightThemeBlock).toContain("--shell-surface: color-mix(in srgb, var(--surface-panel) 92%, transparent)");
+    expect(lightThemeBlock).not.toContain("--shell-surface: color-mix(in srgb, var(--fg-primary)");
+    expect(lightThemeBlock).not.toContain("--shell-panel: var(--fg-primary)");
+    expect(shellStyles).toContain('.shell[data-theme="light"] .topBar::before');
+    expect(shellStyles).toContain("background: color-mix(in srgb, var(--surface-panel) 86%, transparent)");
+    expect(shellStyles).toContain('grid-template-areas:\n    "brand version"\n    "subtle subtle";');
+    expect(shellStyles).toContain("max-width: min(230px, 34vw)");
+  });
+
   it("can hide the web top bar while keeping a restore control", () => {
     expect(shellSource).toContain("useShellStore");
     expect(shellSource).toContain("topBarMode");

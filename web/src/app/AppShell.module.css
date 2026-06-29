@@ -5,7 +5,7 @@
   min-height: 100dvh;
   overflow: hidden;
   isolation: isolate;
-  --shell-topbar-height: 58px;
+  --shell-topbar-height: 62px;
   --shell-page-end: var(--bg-canvas);
   --shell-surface: var(--surface-panel);
   --shell-surface-muted: color-mix(in srgb, var(--bg-canvas) 88%, transparent);
@@ -135,13 +135,13 @@
 }
 
 .shell[data-theme="light"] {
-  --shell-page-end: var(--fg-primary);
-  --shell-surface: color-mix(in srgb, var(--fg-primary) 92%, transparent);
-  --shell-surface-muted: color-mix(in srgb, var(--fg-primary) 88%, transparent);
-  --shell-surface-hover: var(--fg-primary);
-  --shell-panel: var(--fg-primary);
-  --shell-panel-soft: var(--fg-primary);
-  --shell-card: var(--fg-primary);
+  --shell-page-end: var(--bg-canvas);
+  --shell-surface: color-mix(in srgb, var(--surface-panel) 92%, transparent);
+  --shell-surface-muted: color-mix(in srgb, var(--surface-panel) 84%, transparent);
+  --shell-surface-hover: color-mix(in srgb, var(--surface-panel-hover) 94%, transparent);
+  --shell-panel: color-mix(in srgb, var(--surface-panel) 94%, transparent);
+  --shell-panel-soft: color-mix(in srgb, var(--surface-panel) 88%, transparent);
+  --shell-card: color-mix(in srgb, var(--surface-card) 84%, transparent);
   --shell-shadow: color-mix(in srgb, var(--fg-tertiary) 12%, transparent);
   --shell-star-color: color-mix(in srgb, var(--accent-warm) 20%, transparent);
   --shell-star-muted: color-mix(in srgb, var(--fg-tertiary) 14%, transparent);
@@ -156,15 +156,15 @@
 }
 
 .shell[data-theme="light"][data-theme-background="custom"] {
-  --theme-background-overlay-start: color-mix(in srgb, var(--fg-primary) 44%, transparent);
-  --theme-background-overlay-mid: color-mix(in srgb, var(--fg-primary) 30%, transparent);
-  --theme-background-overlay-end: color-mix(in srgb, var(--fg-primary) 58%, transparent);
+  --theme-background-overlay-start: color-mix(in srgb, var(--bg-canvas) 50%, transparent);
+  --theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 34%, transparent);
+  --theme-background-overlay-end: color-mix(in srgb, var(--bg-canvas) 62%, transparent);
   --theme-background-star-opacity: 0.18;
   --theme-background-blur: 1px;
-  --shell-surface-muted: color-mix(in srgb, var(--fg-primary) 86%, transparent);
-  --shell-panel: color-mix(in srgb, var(--fg-primary) 96%, transparent);
-  --shell-panel-soft: color-mix(in srgb, var(--fg-primary) 93%, transparent);
-  --shell-card: color-mix(in srgb, var(--fg-primary) 82%, transparent);
+  --shell-surface-muted: color-mix(in srgb, var(--surface-panel) 78%, transparent);
+  --shell-panel: color-mix(in srgb, var(--surface-panel) 88%, transparent);
+  --shell-panel-soft: color-mix(in srgb, var(--surface-panel) 82%, transparent);
+  --shell-card: color-mix(in srgb, var(--surface-card) 76%, transparent);
   background:
     var(--vui-gradient-route-soft),
     var(--workbench-theme-background-image),
@@ -176,27 +176,27 @@
 }
 
 .shell[data-theme="light"][data-theme-background="custom"][data-theme-background-readability="soft"] {
-  --theme-background-overlay-start: color-mix(in srgb, var(--fg-primary) 24%, transparent);
-  --theme-background-overlay-mid: color-mix(in srgb, var(--fg-primary) 16%, transparent);
-  --theme-background-overlay-end: color-mix(in srgb, var(--fg-primary) 42%, transparent);
+  --theme-background-overlay-start: color-mix(in srgb, var(--bg-canvas) 30%, transparent);
+  --theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 18%, transparent);
+  --theme-background-overlay-end: color-mix(in srgb, var(--bg-canvas) 46%, transparent);
   --theme-background-star-opacity: 0.22;
   --theme-background-blur: 0px;
-  --shell-surface-muted: color-mix(in srgb, var(--fg-primary) 72%, transparent);
-  --shell-panel: color-mix(in srgb, var(--fg-primary) 90%, transparent);
-  --shell-panel-soft: color-mix(in srgb, var(--fg-primary) 86%, transparent);
-  --shell-card: color-mix(in srgb, var(--fg-primary) 68%, transparent);
+  --shell-surface-muted: color-mix(in srgb, var(--surface-panel) 68%, transparent);
+  --shell-panel: color-mix(in srgb, var(--surface-panel) 80%, transparent);
+  --shell-panel-soft: color-mix(in srgb, var(--surface-panel) 72%, transparent);
+  --shell-card: color-mix(in srgb, var(--surface-card) 64%, transparent);
 }
 
 .shell[data-theme="light"][data-theme-background="custom"][data-theme-background-readability="strong"] {
-  --theme-background-overlay-start: color-mix(in srgb, var(--fg-primary) 68%, transparent);
-  --theme-background-overlay-mid: color-mix(in srgb, var(--fg-primary) 56%, transparent);
-  --theme-background-overlay-end: color-mix(in srgb, var(--fg-primary) 78%, transparent);
+  --theme-background-overlay-start: color-mix(in srgb, var(--bg-canvas) 72%, transparent);
+  --theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 60%, transparent);
+  --theme-background-overlay-end: color-mix(in srgb, var(--bg-canvas) 80%, transparent);
   --theme-background-star-opacity: 0.12;
   --theme-background-blur: 2px;
-  --shell-surface-muted: color-mix(in srgb, var(--fg-primary) 92%, transparent);
-  --shell-panel: color-mix(in srgb, var(--fg-primary) 98%, transparent);
-  --shell-panel-soft: color-mix(in srgb, var(--fg-primary) 96%, transparent);
-  --shell-card: color-mix(in srgb, var(--fg-primary) 90%, transparent);
+  --shell-surface-muted: color-mix(in srgb, var(--surface-panel) 90%, transparent);
+  --shell-panel: color-mix(in srgb, var(--surface-panel) 96%, transparent);
+  --shell-panel-soft: color-mix(in srgb, var(--surface-panel) 92%, transparent);
+  --shell-card: color-mix(in srgb, var(--surface-card) 88%, transparent);
 }
 
 .shell[data-theme="light"]::before {
@@ -361,9 +361,9 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   min-height: var(--shell-topbar-height);
-  padding: 8px 14px;
+  padding: 9px 16px;
   pointer-events: none;
 }
 
@@ -376,6 +376,11 @@
   border-bottom: 1px solid var(--border-hairline);
   backdrop-filter: blur(16px);
   pointer-events: none;
+}
+
+.shell[data-theme="light"] .topBar::before {
+  background: color-mix(in srgb, var(--surface-panel) 86%, transparent);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--border-hairline) 68%, transparent);
 }
 
 .shell[data-topbar-mode="hidden"] {
@@ -477,20 +482,28 @@
 }
 
 .brandCopy {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: max-content max-content;
+  grid-template-areas:
+    "brand version"
+    "subtle subtle";
+  align-items: center;
+  gap: 2px 7px;
   min-width: 0;
+  line-height: 1;
 }
 
 .brand {
+  grid-area: brand;
   font-family: var(--font-display);
-  font-size: 1.12rem;
+  font-size: 1.1rem;
+  line-height: 1;
   letter-spacing: 0;
   white-space: nowrap;
 }
 
 .versionPill {
+  grid-area: version;
   flex: 0 0 auto;
   padding: 2px 6px;
   border: 1px solid var(--border-soft);
@@ -504,8 +517,14 @@
 }
 
 .brandSubtle {
+  grid-area: subtle;
+  max-width: min(230px, 34vw);
+  min-width: 0;
+  overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: 0.74rem;
+  line-height: 1.08;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -514,13 +533,14 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
+  min-height: 32px;
   max-width: min(38vw, 300px);
-  padding: 6px 9px;
+  padding: 7px 10px;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
   background: var(--shell-surface);
   color: var(--fg-secondary);
-  font-size: 0.75rem;
+  font-size: 0.78rem;
   line-height: 1;
   white-space: nowrap;
 }
