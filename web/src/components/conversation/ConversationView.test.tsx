@@ -2643,6 +2643,36 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("responseSection");
   });
 
+  it("renders request-only process state as static status without empty expandable details", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-request-only-static",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-06-29T13:32:00Z",
+          streaming: true,
+          feedbackEvents: [
+            {
+              sequence: 1,
+              kind: "status",
+              status: "running",
+              name: "model_request",
+              summary: "正在请求模型，等待首个响应片段。",
+            },
+          ],
+        },
+      ],
+      { useDefaultProcessDisplayMode: true },
+    );
+
+    expect(html).toContain("生成中");
+    expect(html).toContain("正在请求");
+    expect(html).not.toContain("aria-expanded");
+    expect(html).not.toContain('title="展开执行明细"');
+    expect(html.match(/正在请求/g)?.length).toBe(1);
+  });
+
   it("shows long tool loops as visible progress instead of an empty answer block", () => {
     const html = renderConversation(
       [

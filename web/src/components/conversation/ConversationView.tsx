@@ -2750,6 +2750,29 @@ export function ConversationView({
     const expanded = getExpansionState(messageId, "process", defaultExpanded);
     const preview = inlinePreview || processSummaryPreview(operations);
     const title = processSummaryTitle(tone);
+    const hasExpandableDetails = operations.some(shouldShowTimelineOperation);
+    const summaryContent = (
+      <>
+        <span className={styles.answerOnlyProcessIcon} aria-hidden="true">
+          {processSummaryIcon(tone)}
+        </span>
+        <span className={styles.answerOnlyProcessTitle}>{title}</span>
+        <span className={styles.answerOnlyProcessMeta}>{processSummaryMeta(operations)}</span>
+      </>
+    );
+    if (!hasExpandableDetails) {
+      return (
+        <section className={[styles.answerOnlyProcessGroup, toneClass].filter(Boolean).join(" ")}>
+          <div
+            className={[styles.answerOnlyProcessToggle, styles.answerOnlyProcessStatic].filter(Boolean).join(" ")}
+            role={tone === "running" ? "status" : undefined}
+            aria-live={tone === "running" ? "polite" : undefined}
+          >
+            {summaryContent}
+          </div>
+        </section>
+      );
+    }
     return (
       <section className={[styles.answerOnlyProcessGroup, toneClass].filter(Boolean).join(" ")}>
         <button
@@ -2759,11 +2782,7 @@ export function ConversationView({
           onClick={() => toggleSection(messageId, "process", defaultExpanded)}
           title={expanded ? t("executionDetailsVisible") : t("executionDetailsHidden")}
         >
-          <span className={styles.answerOnlyProcessIcon} aria-hidden="true">
-            {processSummaryIcon(tone)}
-          </span>
-          <span className={styles.answerOnlyProcessTitle}>{title}</span>
-          <span className={styles.answerOnlyProcessMeta}>{processSummaryMeta(operations)}</span>
+          {summaryContent}
           {!expanded && preview ? <span className={styles.answerOnlyProcessPreview}>{preview}</span> : null}
           {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </button>
