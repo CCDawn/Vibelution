@@ -64,7 +64,7 @@ import {
   TeamKnowledgeBase,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
-import { VButton } from "../components/vui";
+import { VButton, VRouteHeader } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import styles from "./MemoryRoute.module.css";
@@ -6750,24 +6750,26 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
   return (
     <section className={styles.route}>
-      <header className={styles.header}>
-        <div>
-          <p className={styles.eyebrow}>{copy.eyebrow}</p>
-          <h1 className={styles.title} title={memoryViewSubtitle(copy, forcedView)}>
-            {memoryViewLabel(copy, forcedView)}
-          </h1>
-        </div>
-        <VButton type="button" className={styles.refreshButton} onClick={refresh}>
-          <RefreshCw size={16} />
-          {copy.refresh}
-        </VButton>
-        {returnToPath ? (
-          <Link to={returnToPath} className={styles.returnButton}>
-            <ArrowLeft size={16} />
-            {returnToLabel}
-          </Link>
-        ) : null}
-      </header>
+      <VRouteHeader
+        className={styles.header}
+        eyebrow={copy.eyebrow}
+        title={memoryViewLabel(copy, forcedView)}
+        meta={memoryViewSubtitle(copy, forcedView)}
+        actions={(
+          <div className={styles.headerActions}>
+            <VButton type="button" className={styles.refreshButton} onClick={refresh}>
+              <RefreshCw size={16} />
+              {copy.refresh}
+            </VButton>
+            {returnToPath ? (
+              <Link to={returnToPath} className={styles.returnButton}>
+                <ArrowLeft size={16} />
+                {returnToLabel}
+              </Link>
+            ) : null}
+          </div>
+        )}
+      />
 
       <div className={styles.controlStrip}>
         {renderSubnav()}

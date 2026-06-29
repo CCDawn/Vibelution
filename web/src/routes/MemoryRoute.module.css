@@ -7,27 +7,15 @@
 }
 
 .header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--route-topbar-gap);
+  margin: 8px 10px 0;
   min-width: 0;
   min-height: 32px;
-  padding: 2px 12px;
-  border-bottom: 1px solid var(--border-strong);
-  background: var(--surface-header);
+  border-color: var(--vui-border-subtle);
+  background:
+    var(--vui-gradient-route-soft),
+    color-mix(in srgb, var(--surface-panel) 86%, transparent);
 }
 
-.header > div:first-child {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: baseline;
-  gap: 1px 7px;
-  min-width: 0;
-}
-
-.eyebrow,
 .panelEyebrow {
   margin: 0 0 1px;
   color: var(--fg-tertiary);
@@ -36,27 +24,12 @@
   text-transform: uppercase;
 }
 
-.title {
-  margin: 0;
-  font-family: var(--font-body);
-  font-weight: 760;
-  font-size: 0.95rem;
-  line-height: 1.1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.subtitle {
-  display: none;
+.headerActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
   min-width: 0;
-  margin: 0;
-  color: var(--fg-secondary);
-  font-size: 0.7rem;
-  line-height: 1.18;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .refreshButton {
@@ -4396,11 +4369,8 @@
     overflow: auto;
   }
 
-  .header,
-  .header > div:first-child {
-    display: grid;
+  .header {
     grid-template-columns: 1fr;
-    align-items: start;
   }
 
   .controlStrip {
@@ -4411,10 +4381,6 @@
     width: 100%;
     overflow-x: auto;
     justify-content: flex-start;
-  }
-
-  .subtitle {
-    white-space: normal;
   }
 
   .summaryGrid,
