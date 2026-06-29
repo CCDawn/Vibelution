@@ -2291,7 +2291,7 @@ def _ensure_challenge_cup_research_team_role_agent(role: dict[str, Any], *, sess
     tool_policy = None
     if role_key == agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY:
         tool_policy = agent_directory_service._knowledge_steward_tool_policy()
-    elif role_key in agent_directory_service.RESEARCH_SOURCE_ROLE_TOOL_PROFILES:
+    elif role_key in agent_directory_service.RESEARCH_SOURCE_ROLE_KEYS:
         tool_policy = agent_directory_service.default_research_source_tool_policy(
             str(existing.get("toolPolicyId") or f"tool-{agent_id}"),
             role_key=role_key,
@@ -3252,7 +3252,7 @@ def _sync_research_team_member_agent_roles(members: list[dict[str, Any]]) -> boo
         current_policy = agent_directory_service.resolve_tool_policy_for_agent(agent_id)
         if role_key == agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY:
             expected_policy = agent_directory_service._knowledge_steward_tool_policy()
-        elif role_key in agent_directory_service.RESEARCH_SOURCE_ROLE_TOOL_PROFILES:
+        elif role_key in agent_directory_service.RESEARCH_SOURCE_ROLE_KEYS:
             expected_policy = agent_directory_service.default_research_source_tool_policy(
                 str(agent.get("toolPolicyId") or f"tool-{agent_id}"),
                 role_key=role_key,

@@ -14,6 +14,7 @@ from core.web.services import (
     agent_bulk_delete_service,
     agent_config_workspace_service,
     agent_directory_service,
+    agent_role_tool_profile_service,
     agent_tool_governance_service,
     agent_mode_binding_service,
     chat_room_service,
@@ -475,6 +476,56 @@ def test_agent_config_workspace_health_flags_prompt_tools_not_allowed():
     assert "open_evolution_transaction_tool" in tool_issues[0]["detail"]
 
 
+def test_agent_config_workspace_health_flags_role_governance_tool_drift():
+    agent = {
+        "agentId": "agent-source-finder",
+        "agentCode": "A102",
+        "displayName": "资料寻找",
+        "status": "active",
+        "primaryMode": "research",
+        "roleKey": "source_finder",
+        "promptTemplateId": "prompt-source-finder",
+        "directSessionId": "session-source-finder",
+        "workspacePath": "workspace/agents/agent-source-finder",
+        "toolPolicyId": "tool-source-finder",
+        "memoryPolicyId": "memory-source-finder",
+        "metadata": {"fixedRole": True},
+        "toolPolicy": {
+            "allowedTools": ["agent_message_tool", "web_search_tool"],
+            "preferredTools": ["agent_message_tool"],
+            "readScopes": ["private"],
+            "writeScopes": [],
+            "networkAccess": "controlled",
+            "mutationAccess": "none",
+            "maxCallsPerTurn": 8,
+        },
+        "llmBindings": {"dialogue": {"modelId": "model-primary"}},
+    }
+
+    health = agent_config_workspace_service._derive_health(
+        agents=[agent],
+        prompt_refs={
+            "prompt-source-finder": {
+                "promptTemplateId": "prompt-source-finder",
+                "contentLength": 120,
+                "contentPreview": "资料寻找 Agent。",
+                "content": "资料寻找 Agent。",
+                "sourcePath": "",
+                "sourceExists": False,
+            }
+        },
+        model_refs={"model-primary": {"modelId": "model-primary", "requiresApiKey": False}},
+        mode_bindings={"modes": {}},
+        chat_rooms=[],
+        teams=[],
+        active_agent_ids={"agent-source-finder"},
+    )
+
+    codes = {item["code"] for item in health["issues"]}
+    assert "role_tool_policy_drift" in codes
+    assert "role_forbidden_tool_allowed" in codes
+
+
 def test_agent_directory_repair_aligns_fixed_roles_and_disables_retired_source_roles(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
@@ -565,6 +616,16 @@ def test_agent_directory_repair_aligns_fixed_roles_and_disables_retired_source_r
     assert graph_policy["preferredTools"] == []
     assert graph_policy["networkAccess"] == "none"
     assert graph_policy["mutationAccess"] == "none"
+
+
+def test_default_research_source_tool_policy_uses_source_default_profile_for_blank_role():
+    policy = agent_directory_service.default_research_source_tool_policy("tool-source-default")
+
+    assert policy["roleToolProfileId"] == "research_source_default"
+    assert "project_search_tool" in policy["allowedTools"]
+    assert "news_search_tool" in policy["allowedTools"]
+    assert "search_memory_tool" in policy["allowedTools"]
+    assert "web_search_tool" not in policy["allowedTools"]
 
 
 def test_agent_config_workspace_source_role_health_uses_four_stage_source_roles():
@@ -1968,6 +2029,29 @@ def test_repair_agent_directory_fills_research_org_profiles(tmp_path, monkeypatc
     assert repaired["taskProfile"]["mission"] == "把研究目标转成组织任务"
     assert "Directly communicates with the user." in repaired["taskProfile"]["responsibilities"]
     assert not any(item["code"] == "agent_onboarding_incomplete" for item in workspace_agent["health"])
+
+
+def test_repair_agent_directory_uses_role_governance_prompt_for_research_org_metadata(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="CEO Agent",
+        primary_mode="research",
+        role_key="research_ceo",
+        llm_bindings={"dialogue": {"modelId": "model-research"}},
+        prompt_template_id="prompt-chat-default",
+        metadata={
+            "systemRole": "ceo",
+            "researchOrgRole": "ceo",
+            "fixedRole": True,
+            "functionalDisplayName": "CEO Agent",
+        },
+    )
+
+    agent_directory_service.repair_agent_directory()
+    repaired = agent_directory_service.get_agent(agent["agentId"])
+
+    assert repaired["promptTemplateId"] == "prompt-research-ceo"
 
 
 def test_repair_agent_directory_fills_research_agent_profiles(tmp_path, monkeypatch):

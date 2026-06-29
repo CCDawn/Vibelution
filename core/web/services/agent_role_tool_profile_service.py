@@ -557,6 +557,47 @@ RETIRED_SOURCE_COLLECTION_ROLE_KEYS = {
     "knowledge_expansion_candidate_graph",
 }
 
+AI_SEARCH_ROLE_PROMPT_TEMPLATE_IDS = {
+    "ai_search_scope_lead": "prompt-ai-search-scope-lead",
+    "global_primary_sources": "prompt-ai-search-global-primary-sources",
+    "cn_primary_sources": "prompt-ai-search-cn-primary-sources",
+    "signal_quality_gate": "prompt-ai-search-signal-quality-gate",
+}
+CHALLENGE_CUP_ROLE_PROMPT_TEMPLATE_IDS = {
+    "challenge_cup_coordinator": "prompt-challenge-cup-coordinator",
+    "source_finder": "prompt-source-finder",
+    "source_extractor": "prompt-source-extractor",
+    "source_relation_mapper": "prompt-source-relation-mapper",
+    "source_ingestor": "prompt-source-ingestor",
+    "challenge_cup_experiment_planner": "prompt-challenge-cup-experiment-planner",
+    "challenge_cup_experiment_ledger": "prompt-challenge-cup-experiment-ledger",
+    "challenge_cup_iteration_planner": "prompt-challenge-cup-iteration-planner",
+    "challenge_cup_versioning": "prompt-challenge-cup-versioning",
+}
+KNOWLEDGE_EXPANSION_ROLE_PROMPT_TEMPLATE_IDS = {
+    "source_finder": "prompt-source-finder",
+    "source_extractor": "prompt-source-extractor",
+    "source_relation_mapper": "prompt-source-relation-mapper",
+    "source_ingestor": "prompt-source-ingestor",
+    "knowledge_steward": "prompt-knowledge-steward",
+}
+RESEARCH_ORG_ROLE_PROMPT_TEMPLATE_IDS = {
+    "ceo": "prompt-research-ceo",
+    "organization_advisor": "prompt-research-organization-advisor",
+    "capability_steward": "prompt-research-capability-steward",
+}
+ROLE_PROMPT_TEMPLATE_IDS = {
+    **AI_SEARCH_ROLE_PROMPT_TEMPLATE_IDS,
+    **CHALLENGE_CUP_ROLE_PROMPT_TEMPLATE_IDS,
+    **KNOWLEDGE_EXPANSION_ROLE_PROMPT_TEMPLATE_IDS,
+    "knowledge_steward": "prompt-knowledge-steward",
+}
+DEFAULT_RESEARCH_TOOL_PROFILE_IDS = {
+    "research_source_default",
+    "research_role_default",
+}
+
+
 def normalize_role_key(value: Any) -> str:
     return re.sub(r"[^a-z0-9_]+", "_", str(value or "").strip().lower()).strip("_")
 
@@ -584,6 +625,58 @@ def role_tool_profile_for_role(role_key: str, *, primary_mode: str = "", metadat
     if normalized_mode == "research":
         return get_role_tool_profile("research_role_default")
     return None
+
+
+def role_has_explicit_tool_profile(
+    role_key: str,
+    *,
+    primary_mode: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> bool:
+    profile = role_tool_profile_for_role(role_key, primary_mode=primary_mode, metadata=metadata)
+    profile_id = str((profile or {}).get("profileId") or "").strip()
+    return bool(profile_id and profile_id not in DEFAULT_RESEARCH_TOOL_PROFILE_IDS)
+
+
+def role_prompt_template_id(role_key: str, *, metadata: dict[str, Any] | None = None) -> str:
+    normalized_role = normalize_role_key(role_key)
+    if normalized_role in RETIRED_SOURCE_COLLECTION_ROLE_KEYS:
+        return ""
+    raw_metadata = metadata if isinstance(metadata, dict) else {}
+    research_org_role = normalize_role_key(raw_metadata.get("researchOrgRole") or raw_metadata.get("systemRole") or "")
+    if research_org_role in RESEARCH_ORG_ROLE_PROMPT_TEMPLATE_IDS:
+        return RESEARCH_ORG_ROLE_PROMPT_TEMPLATE_IDS[research_org_role]
+    return ROLE_PROMPT_TEMPLATE_IDS.get(normalized_role, "")
+
+
+def role_governance_profile(
+    *,
+    role_key: str,
+    primary_mode: str = "",
+    metadata: dict[str, Any] | None = None,
+    policy_id: str = "",
+) -> dict[str, Any] | None:
+    normalized_role = normalize_role_key(role_key)
+    if normalized_role in RETIRED_SOURCE_COLLECTION_ROLE_KEYS:
+        return None
+    prompt_template_id = role_prompt_template_id(normalized_role, metadata=metadata)
+    tool_profile = role_tool_profile_for_role(normalized_role, primary_mode=primary_mode, metadata=metadata)
+    explicit_tool_profile = role_has_explicit_tool_profile(normalized_role, primary_mode=primary_mode, metadata=metadata)
+    if not prompt_template_id and not explicit_tool_profile:
+        return None
+    normalized_policy_id = str(policy_id or "").strip() or f"tool-{normalized_role or 'role'}"
+    tool_policy = build_policy_from_role_profile(tool_profile, normalized_policy_id) if tool_profile else None
+    return {
+        "roleKey": normalized_role,
+        "primaryMode": normalize_role_key(primary_mode),
+        "promptTemplateId": prompt_template_id,
+        "toolProfile": dict(tool_profile or {}),
+        "toolPolicy": tool_policy,
+        "toolProfileId": str((tool_profile or {}).get("profileId") or "").strip(),
+        "toolProfileFingerprint": str((tool_profile or {}).get("profileFingerprint") or "").strip(),
+        "forbiddenTools": list((tool_profile or {}).get("forbiddenTools") or []),
+        "enforceToolPolicy": bool(explicit_tool_profile),
+    }
 
 
 def build_policy_from_role_profile(profile: dict[str, Any], policy_id: str) -> dict[str, Any]:
