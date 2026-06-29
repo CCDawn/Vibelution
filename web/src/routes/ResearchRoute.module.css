@@ -315,7 +315,7 @@
 .intakeField_primary {
   border-color: color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 7%, transparent), transparent 56%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-card) 82%, transparent);
 }
 
@@ -357,7 +357,7 @@
 
 .intakeField:focus-within {
   border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cool) 13%, transparent);
+  box-shadow: var(--vui-shadow-accent);
 }
 
 .intakeField textarea:focus {
@@ -794,7 +794,7 @@
   color: var(--fg-primary);
   background:
     radial-gradient(circle at 35% 25%, color-mix(in srgb, var(--accent-warm) 78%, white), transparent 42%),
-    linear-gradient(145deg, color-mix(in srgb, var(--accent-warm) 70%, var(--accent-cool)), var(--accent-cool));
+    var(--vui-gradient-route-soft);
 }
 
 .agentTraceContent {
@@ -934,7 +934,7 @@
   padding: 0 10px;
   color: var(--fg-primary);
   background: color-mix(in srgb, var(--surface-card) 92%, transparent);
-  box-shadow: 0 8px 24px color-mix(in srgb, #000 18%, transparent);
+  box-shadow: var(--vui-shadow-soft);
   cursor: pointer;
   font: inherit;
   font-size: 0.73rem;
@@ -1130,7 +1130,7 @@
 .themeCompareRow_selected {
   border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 8%, transparent), transparent 46%),
+    var(--vui-gradient-route-soft),
     var(--surface-card);
 }
 
@@ -1315,7 +1315,7 @@
 .themeCard_selected {
   border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 8%, transparent), transparent 46%),
+    var(--vui-gradient-route-soft),
     var(--surface-card);
 }
 

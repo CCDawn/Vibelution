@@ -357,7 +357,7 @@
   border: 1px solid var(--border-hairline);
   border-radius: 8px;
   background: var(--surface-panel);
-  box-shadow: 0 8px 20px color-mix(in srgb, var(--shadow-soft) 45%, transparent);
+  box-shadow: var(--vui-shadow-soft);
   overflow: hidden;
   transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
 }
@@ -601,7 +601,7 @@
 }
 
 .supervisedMemberLink:focus-visible {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cool) 18%, transparent);
+  box-shadow: var(--vui-shadow-accent);
 }
 
 .supervisedMemberLink svg {
@@ -1033,7 +1033,7 @@
 .actionButton,
 .runItem,
 .inlineAction {
-  border: 1px solid rgba(236, 230, 220, 0.08);
+  border: 1px solid color-mix(in srgb, var(--surface-card) 8%, transparent);
   border-radius: 8px;
   transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
 }
@@ -1083,7 +1083,7 @@
 .trendBarFill {
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 80%, transparent), rgba(216, 167, 91, 0.95));
+  background: var(--vui-gradient-route-soft);
 }
 
 .deltaPositive {
@@ -1164,7 +1164,7 @@
   min-width: 0;
   min-height: 31px;
   padding: 0 9px;
-  border: 1px solid rgba(236, 230, 220, 0.08);
+  border: 1px solid color-mix(in srgb, var(--surface-card) 8%, transparent);
   border-radius: 7px;
   background: var(--surface-input);
   color: var(--fg-primary);
@@ -1913,7 +1913,7 @@
   justify-content: center;
   gap: 7px;
   min-height: 34px;
-  border: 1px solid rgba(236, 230, 220, 0.08);
+  border: 1px solid color-mix(in srgb, var(--surface-card) 8%, transparent);
   border-radius: 8px;
   background: var(--surface-card-muted);
   color: var(--fg-primary);
@@ -2043,14 +2043,14 @@
   height: 3px;
   transform: translateY(-50%);
   border-radius: 999px;
-  background: rgba(236, 230, 220, 0.08);
+  background: color-mix(in srgb, var(--surface-card) 8%, transparent);
   transition: background-color 150ms ease, box-shadow 150ms ease;
 }
 
 .liveIoResizeHandle:hover::before,
 .liveIoResizeHandle:focus-visible::before {
   background: color-mix(in srgb, var(--accent-warm) 52%, transparent);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--accent-warm) 18%, transparent);
+  box-shadow: var(--vui-shadow-soft);
 }
 
 .ioTranscript {
@@ -2208,7 +2208,7 @@
 .caseTraceTurn_error .caseTraceSummary {
   border-left-color: color-mix(in srgb, var(--state-error) 58%, transparent);
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--state-error) 10%, transparent), transparent 46%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-card-muted) 78%, transparent);
 }
 
@@ -2301,7 +2301,7 @@
   border: 1px solid var(--border-hairline);
   border-radius: 8px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 7%, transparent), transparent 42%),
+    var(--vui-gradient-route-soft),
     var(--surface-card-muted);
 }
 
@@ -2632,14 +2632,14 @@
   width: 3px;
   transform: translateX(-50%);
   border-radius: 999px;
-  background: rgba(236, 230, 220, 0.08);
+  background: color-mix(in srgb, var(--surface-card) 8%, transparent);
   transition: background-color 150ms ease, box-shadow 150ms ease;
 }
 
 .resizeHandle:hover::before,
 .resizeHandle:focus-visible::before {
   background: color-mix(in srgb, var(--accent-warm) 52%, transparent);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--accent-warm) 18%, transparent);
+  box-shadow: var(--vui-shadow-soft);
 }
 
 .paneCollapsed {
@@ -2691,7 +2691,7 @@
   min-height: 86px;
   padding: 10px 12px;
   border-radius: 8px;
-  border: 1px dashed rgba(236, 230, 220, 0.08);
+  border: 1px dashed color-mix(in srgb, var(--surface-card) 8%, transparent);
   background: var(--surface-card-subtle);
 }
 
@@ -2819,7 +2819,7 @@
   display: grid;
   gap: 6px;
   padding: 9px 10px;
-  border: 1px solid rgba(236, 230, 220, 0.08);
+  border: 1px solid color-mix(in srgb, var(--surface-card) 8%, transparent);
   border-radius: 8px;
   background: var(--surface-card-muted);
 }
@@ -3153,7 +3153,7 @@
 .listEmptyState {
   padding: 10px;
   border-radius: 8px;
-  border: 1px dashed rgba(236, 230, 220, 0.08);
+  border: 1px dashed color-mix(in srgb, var(--surface-card) 8%, transparent);
   color: var(--fg-secondary);
 }
 
@@ -3175,7 +3175,7 @@
 }
 
 .rawBlock {
-  border: 1px solid rgba(236, 230, 220, 0.08);
+  border: 1px solid color-mix(in srgb, var(--surface-card) 8%, transparent);
   border-radius: 8px;
   background: var(--surface-card-muted);
   padding: 10px 12px;

@@ -258,7 +258,7 @@
 
 .itemRowSelected {
   border-color: color-mix(in srgb, var(--accent-warm) 30%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-warm) 22%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
   background: var(--surface-active-neutral);
 }
 
@@ -535,12 +535,7 @@
   min-height: 10px;
   border-radius: 999px;
   background:
-    linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--surface-card-subtle) 78%, transparent),
-      color-mix(in srgb, var(--surface-panel-hover) 74%, transparent),
-      color-mix(in srgb, var(--surface-card-subtle) 78%, transparent)
-    );
+    var(--vui-gradient-route-soft);
 }
 
 .ledgerEmptyRows span:nth-child(2) {

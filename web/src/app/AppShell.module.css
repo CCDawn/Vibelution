@@ -6,49 +6,44 @@
   overflow: hidden;
   isolation: isolate;
   --shell-topbar-height: 58px;
-  --shell-page-end: #0b0d11;
+  --shell-page-end: var(--bg-canvas);
   --shell-surface: var(--surface-panel);
-  --shell-surface-muted: rgba(15, 18, 24, 0.88);
+  --shell-surface-muted: color-mix(in srgb, var(--bg-canvas) 88%, transparent);
   --shell-surface-hover: var(--surface-panel-hover);
-  --shell-panel: rgba(19, 23, 30, 0.98);
-  --shell-panel-soft: rgba(27, 32, 41, 0.98);
-  --shell-card: rgba(18, 22, 29, 0.82);
-  --shell-shadow: rgba(0, 0, 0, 0.28);
-  --shell-star-color: rgba(221, 234, 255, 0.74);
-  --shell-star-muted: rgba(130, 168, 220, 0.34);
-  --shell-star-faint: rgba(177, 205, 255, 0.2);
-  --shell-nebula-cool: rgba(58, 109, 174, 0.18);
-  --shell-nebula-warm: rgba(141, 103, 198, 0.11);
+  --shell-panel: color-mix(in srgb, var(--bg-canvas) 98%, transparent);
+  --shell-panel-soft: color-mix(in srgb, var(--fg-secondary) 98%, transparent);
+  --shell-card: color-mix(in srgb, var(--bg-canvas) 82%, transparent);
+  --shell-shadow: color-mix(in srgb, var(--bg-canvas) 28%, transparent);
+  --shell-star-color: color-mix(in srgb, var(--accent-warm) 74%, transparent);
+  --shell-star-muted: color-mix(in srgb, var(--accent-warm) 34%, transparent);
+  --shell-star-faint: color-mix(in srgb, var(--accent-warm) 20%, transparent);
+  --shell-nebula-cool: color-mix(in srgb, var(--accent-warm) 18%, transparent);
+  --shell-nebula-warm: color-mix(in srgb, var(--accent-warm) 11%, transparent);
   background:
-    radial-gradient(ellipse at 52% -18%, rgba(92, 132, 214, 0.14) 0 18%, transparent 52%),
+    radial-gradient(ellipse at 52% -18%, color-mix(in srgb, var(--accent-warm) 14%, transparent) 0 18%, transparent 52%),
     radial-gradient(circle at 16% 18%, var(--shell-nebula-cool) 0 11%, transparent 34%),
     radial-gradient(circle at 82% 8%, var(--shell-nebula-warm) 0 9%, transparent 31%),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.012) 1px, transparent 1px),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.012) 1px, transparent 1px),
-    linear-gradient(180deg, #090b11 0%, var(--bg-canvas) 46%, var(--shell-page-end) 100%);
+    var(--vui-gradient-route-soft),
+    var(--vui-gradient-route-soft),
+    var(--vui-gradient-route-soft);
   background-size: auto, auto, auto, 42px 42px, 42px 42px, auto;
   color: var(--fg-primary);
 }
 
 .shell[data-theme-background="custom"] {
-  --theme-background-overlay-start: rgba(7, 10, 16, 0.56);
-  --theme-background-overlay-mid: rgba(7, 10, 16, 0.44);
-  --theme-background-overlay-end: rgba(6, 8, 13, 0.68);
+  --theme-background-overlay-start: color-mix(in srgb, var(--bg-canvas) 56%, transparent);
+  --theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 44%, transparent);
+  --theme-background-overlay-end: color-mix(in srgb, var(--bg-canvas) 68%, transparent);
   --theme-background-star-opacity: 0.2;
   --theme-background-blur: 1px;
-  --shell-surface-muted: rgba(15, 18, 24, 0.82);
-  --shell-panel: rgba(19, 23, 30, 0.94);
-  --shell-panel-soft: rgba(27, 32, 41, 0.92);
-  --shell-card: rgba(18, 22, 29, 0.78);
+  --shell-surface-muted: color-mix(in srgb, var(--bg-canvas) 82%, transparent);
+  --shell-panel: color-mix(in srgb, var(--bg-canvas) 94%, transparent);
+  --shell-panel-soft: color-mix(in srgb, var(--fg-secondary) 92%, transparent);
+  --shell-card: color-mix(in srgb, var(--bg-canvas) 78%, transparent);
   background:
-    linear-gradient(
-      180deg,
-      var(--theme-background-overlay-start) 0%,
-      var(--theme-background-overlay-mid) 44%,
-      var(--theme-background-overlay-end) 100%
-    ),
+    var(--vui-gradient-route-soft),
     var(--workbench-theme-background-image),
-    linear-gradient(180deg, #090b11 0%, var(--bg-canvas) 46%, var(--shell-page-end) 100%);
+    var(--vui-gradient-route-soft);
   background-position: center, center, center;
   background-size: auto, cover, auto;
   background-repeat: no-repeat, no-repeat, no-repeat;
@@ -56,35 +51,35 @@
 }
 
 .shell[data-theme-background="custom"][data-theme-background-readability="soft"] {
-  --theme-background-overlay-start: rgba(7, 10, 16, 0.38);
-  --theme-background-overlay-mid: rgba(7, 10, 16, 0.26);
-  --theme-background-overlay-end: rgba(6, 8, 13, 0.5);
+  --theme-background-overlay-start: color-mix(in srgb, var(--bg-canvas) 38%, transparent);
+  --theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 26%, transparent);
+  --theme-background-overlay-end: color-mix(in srgb, var(--bg-canvas) 50%, transparent);
   --theme-background-star-opacity: 0.24;
   --theme-background-blur: 0px;
-  --shell-surface-muted: rgba(15, 18, 24, 0.72);
-  --shell-panel: rgba(19, 23, 30, 0.88);
-  --shell-panel-soft: rgba(27, 32, 41, 0.86);
-  --shell-card: rgba(18, 22, 29, 0.66);
+  --shell-surface-muted: color-mix(in srgb, var(--bg-canvas) 72%, transparent);
+  --shell-panel: color-mix(in srgb, var(--bg-canvas) 88%, transparent);
+  --shell-panel-soft: color-mix(in srgb, var(--fg-secondary) 86%, transparent);
+  --shell-card: color-mix(in srgb, var(--bg-canvas) 66%, transparent);
 }
 
 .shell[data-theme-background="custom"][data-theme-background-readability="standard"] {
-  --theme-background-overlay-start: rgba(7, 10, 16, 0.56);
-  --theme-background-overlay-mid: rgba(7, 10, 16, 0.44);
-  --theme-background-overlay-end: rgba(6, 8, 13, 0.68);
+  --theme-background-overlay-start: color-mix(in srgb, var(--bg-canvas) 56%, transparent);
+  --theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 44%, transparent);
+  --theme-background-overlay-end: color-mix(in srgb, var(--bg-canvas) 68%, transparent);
   --theme-background-star-opacity: 0.2;
   --theme-background-blur: 1px;
 }
 
 .shell[data-theme-background="custom"][data-theme-background-readability="strong"] {
-  --theme-background-overlay-start: rgba(7, 10, 16, 0.74);
-  --theme-background-overlay-mid: rgba(7, 10, 16, 0.62);
-  --theme-background-overlay-end: rgba(6, 8, 13, 0.82);
+  --theme-background-overlay-start: color-mix(in srgb, var(--bg-canvas) 74%, transparent);
+  --theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 62%, transparent);
+  --theme-background-overlay-end: color-mix(in srgb, var(--bg-canvas) 82%, transparent);
   --theme-background-star-opacity: 0.14;
   --theme-background-blur: 2px;
-  --shell-surface-muted: rgba(15, 18, 24, 0.9);
-  --shell-panel: rgba(19, 23, 30, 0.97);
-  --shell-panel-soft: rgba(27, 32, 41, 0.96);
-  --shell-card: rgba(18, 22, 29, 0.86);
+  --shell-surface-muted: color-mix(in srgb, var(--bg-canvas) 90%, transparent);
+  --shell-panel: color-mix(in srgb, var(--bg-canvas) 97%, transparent);
+  --shell-panel-soft: color-mix(in srgb, var(--fg-secondary) 96%, transparent);
+  --shell-card: color-mix(in srgb, var(--bg-canvas) 86%, transparent);
 }
 
 .shell::before,
@@ -101,12 +96,12 @@
   background-image:
     radial-gradient(circle at 8% 18%, var(--shell-star-color) 0 1px, transparent 1.6px),
     radial-gradient(circle at 22% 72%, var(--shell-star-muted) 0 1px, transparent 1.4px),
-    radial-gradient(circle at 38% 28%, rgba(255, 255, 255, 0.52) 0 1px, transparent 1.5px),
-    radial-gradient(circle at 67% 12%, rgba(204, 224, 255, 0.55) 0 1px, transparent 1.7px),
-    radial-gradient(circle at 82% 64%, rgba(255, 255, 255, 0.42) 0 1px, transparent 1.5px),
+    radial-gradient(circle at 38% 28%, color-mix(in srgb, var(--fg-primary) 52%, transparent) 0 1px, transparent 1.5px),
+    radial-gradient(circle at 67% 12%, color-mix(in srgb, var(--accent-warm) 55%, transparent) 0 1px, transparent 1.7px),
+    radial-gradient(circle at 82% 64%, color-mix(in srgb, var(--fg-primary) 42%, transparent) 0 1px, transparent 1.5px),
     radial-gradient(circle at 92% 34%, var(--shell-star-muted) 0 1px, transparent 1.4px),
     radial-gradient(circle, var(--shell-star-faint) 0 0.8px, transparent 1.2px),
-    radial-gradient(circle, rgba(255, 255, 255, 0.16) 0 0.7px, transparent 1px);
+    radial-gradient(circle, color-mix(in srgb, var(--fg-primary) 16%, transparent) 0 0.7px, transparent 1px);
   background-size:
     263px 211px,
     307px 239px,
@@ -125,60 +120,55 @@
     144px 24px,
     0 0,
     44px 58px;
-  filter: drop-shadow(0 0 5px rgba(143, 180, 255, 0.28));
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent-warm) 28%, transparent));
 }
 
 .shell::after {
   opacity: 0.78;
   background:
-    radial-gradient(ellipse at 50% 102%, rgba(74, 106, 176, 0.16), transparent 42%),
-    radial-gradient(circle at 20% 88%, rgba(91, 183, 174, 0.12), transparent 28%),
-    radial-gradient(circle at 78% 82%, rgba(91, 141, 239, 0.1), transparent 30%),
-    linear-gradient(115deg, transparent 0 34%, rgba(138, 174, 236, 0.04) 46%, transparent 64%),
-    linear-gradient(180deg, rgba(3, 5, 10, 0.08), rgba(3, 5, 10, 0.42));
+    radial-gradient(ellipse at 50% 102%, color-mix(in srgb, var(--accent-warm) 16%, transparent), transparent 42%),
+    radial-gradient(circle at 20% 88%, color-mix(in srgb, var(--accent-warm) 12%, transparent), transparent 28%),
+    radial-gradient(circle at 78% 82%, color-mix(in srgb, var(--accent-warm) 10%, transparent), transparent 30%),
+    var(--vui-gradient-route-soft),
+    var(--vui-gradient-route-soft);
   mix-blend-mode: screen;
 }
 
 .shell[data-theme="light"] {
-  --shell-page-end: #f7f7f8;
-  --shell-surface: rgba(255, 255, 255, 0.92);
-  --shell-surface-muted: rgba(255, 255, 255, 0.88);
-  --shell-surface-hover: #f1f1f3;
-  --shell-panel: #ffffff;
-  --shell-panel-soft: #f7f7f8;
-  --shell-card: #f7f7f8;
-  --shell-shadow: rgba(15, 23, 42, 0.12);
-  --shell-star-color: rgba(37, 99, 235, 0.2);
-  --shell-star-muted: rgba(15, 118, 110, 0.14);
-  --shell-star-faint: rgba(37, 99, 235, 0.08);
-  --shell-nebula-cool: rgba(37, 99, 235, 0.09);
-  --shell-nebula-warm: rgba(15, 118, 110, 0.08);
+  --shell-page-end: var(--fg-primary);
+  --shell-surface: color-mix(in srgb, var(--fg-primary) 92%, transparent);
+  --shell-surface-muted: color-mix(in srgb, var(--fg-primary) 88%, transparent);
+  --shell-surface-hover: var(--fg-primary);
+  --shell-panel: var(--fg-primary);
+  --shell-panel-soft: var(--fg-primary);
+  --shell-card: var(--fg-primary);
+  --shell-shadow: color-mix(in srgb, var(--fg-tertiary) 12%, transparent);
+  --shell-star-color: color-mix(in srgb, var(--accent-warm) 20%, transparent);
+  --shell-star-muted: color-mix(in srgb, var(--fg-tertiary) 14%, transparent);
+  --shell-star-faint: color-mix(in srgb, var(--accent-warm) 8%, transparent);
+  --shell-nebula-cool: color-mix(in srgb, var(--accent-warm) 9%, transparent);
+  --shell-nebula-warm: color-mix(in srgb, var(--fg-tertiary) 8%, transparent);
   background:
-    radial-gradient(ellipse at 52% -18%, rgba(37, 99, 235, 0.08) 0 18%, transparent 52%),
+    radial-gradient(ellipse at 52% -18%, color-mix(in srgb, var(--accent-warm) 8%, transparent) 0 18%, transparent 52%),
     radial-gradient(circle at 16% 18%, var(--shell-nebula-cool) 0 11%, transparent 34%),
     radial-gradient(circle at 82% 8%, var(--shell-nebula-warm) 0 9%, transparent 31%),
-    linear-gradient(180deg, #ffffff 0%, #f7f7f8 100%);
+    var(--vui-gradient-route-soft);
 }
 
 .shell[data-theme="light"][data-theme-background="custom"] {
-  --theme-background-overlay-start: rgba(255, 255, 255, 0.44);
-  --theme-background-overlay-mid: rgba(255, 255, 255, 0.3);
-  --theme-background-overlay-end: rgba(247, 247, 248, 0.58);
+  --theme-background-overlay-start: color-mix(in srgb, var(--fg-primary) 44%, transparent);
+  --theme-background-overlay-mid: color-mix(in srgb, var(--fg-primary) 30%, transparent);
+  --theme-background-overlay-end: color-mix(in srgb, var(--fg-primary) 58%, transparent);
   --theme-background-star-opacity: 0.18;
   --theme-background-blur: 1px;
-  --shell-surface-muted: rgba(255, 255, 255, 0.86);
-  --shell-panel: rgba(255, 255, 255, 0.96);
-  --shell-panel-soft: rgba(247, 247, 248, 0.93);
-  --shell-card: rgba(247, 247, 248, 0.82);
+  --shell-surface-muted: color-mix(in srgb, var(--fg-primary) 86%, transparent);
+  --shell-panel: color-mix(in srgb, var(--fg-primary) 96%, transparent);
+  --shell-panel-soft: color-mix(in srgb, var(--fg-primary) 93%, transparent);
+  --shell-card: color-mix(in srgb, var(--fg-primary) 82%, transparent);
   background:
-    linear-gradient(
-      180deg,
-      var(--theme-background-overlay-start) 0%,
-      var(--theme-background-overlay-mid) 48%,
-      var(--theme-background-overlay-end) 100%
-    ),
+    var(--vui-gradient-route-soft),
     var(--workbench-theme-background-image),
-    linear-gradient(180deg, #ffffff 0%, #f7f7f8 100%);
+    var(--vui-gradient-route-soft);
   background-position: center, center, center;
   background-size: auto, cover, auto;
   background-repeat: no-repeat, no-repeat, no-repeat;
@@ -186,27 +176,27 @@
 }
 
 .shell[data-theme="light"][data-theme-background="custom"][data-theme-background-readability="soft"] {
-  --theme-background-overlay-start: rgba(255, 255, 255, 0.24);
-  --theme-background-overlay-mid: rgba(255, 255, 255, 0.16);
-  --theme-background-overlay-end: rgba(247, 247, 248, 0.42);
+  --theme-background-overlay-start: color-mix(in srgb, var(--fg-primary) 24%, transparent);
+  --theme-background-overlay-mid: color-mix(in srgb, var(--fg-primary) 16%, transparent);
+  --theme-background-overlay-end: color-mix(in srgb, var(--fg-primary) 42%, transparent);
   --theme-background-star-opacity: 0.22;
   --theme-background-blur: 0px;
-  --shell-surface-muted: rgba(255, 255, 255, 0.72);
-  --shell-panel: rgba(255, 255, 255, 0.9);
-  --shell-panel-soft: rgba(247, 247, 248, 0.86);
-  --shell-card: rgba(247, 247, 248, 0.68);
+  --shell-surface-muted: color-mix(in srgb, var(--fg-primary) 72%, transparent);
+  --shell-panel: color-mix(in srgb, var(--fg-primary) 90%, transparent);
+  --shell-panel-soft: color-mix(in srgb, var(--fg-primary) 86%, transparent);
+  --shell-card: color-mix(in srgb, var(--fg-primary) 68%, transparent);
 }
 
 .shell[data-theme="light"][data-theme-background="custom"][data-theme-background-readability="strong"] {
-  --theme-background-overlay-start: rgba(255, 255, 255, 0.68);
-  --theme-background-overlay-mid: rgba(255, 255, 255, 0.56);
-  --theme-background-overlay-end: rgba(247, 247, 248, 0.78);
+  --theme-background-overlay-start: color-mix(in srgb, var(--fg-primary) 68%, transparent);
+  --theme-background-overlay-mid: color-mix(in srgb, var(--fg-primary) 56%, transparent);
+  --theme-background-overlay-end: color-mix(in srgb, var(--fg-primary) 78%, transparent);
   --theme-background-star-opacity: 0.12;
   --theme-background-blur: 2px;
-  --shell-surface-muted: rgba(255, 255, 255, 0.92);
-  --shell-panel: rgba(255, 255, 255, 0.98);
-  --shell-panel-soft: rgba(247, 247, 248, 0.96);
-  --shell-card: rgba(247, 247, 248, 0.9);
+  --shell-surface-muted: color-mix(in srgb, var(--fg-primary) 92%, transparent);
+  --shell-panel: color-mix(in srgb, var(--fg-primary) 98%, transparent);
+  --shell-panel-soft: color-mix(in srgb, var(--fg-primary) 96%, transparent);
+  --shell-card: color-mix(in srgb, var(--fg-primary) 90%, transparent);
 }
 
 .shell[data-theme="light"]::before {
@@ -245,9 +235,9 @@
   border: 1px solid var(--border-strong);
   border-radius: 8px;
   background:
-    linear-gradient(180deg, var(--shell-panel-soft), var(--shell-panel)),
+    var(--vui-gradient-route-soft),
     var(--shell-panel);
-  box-shadow: 0 18px 40px var(--shell-shadow);
+  box-shadow: var(--vui-shadow-soft);
 }
 
 .startupOverlay {
@@ -258,7 +248,7 @@
   place-items: center;
   padding: 24px;
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--bg-canvas) 90%, transparent), var(--shell-page-end)),
+    var(--vui-gradient-route-soft),
     var(--bg-canvas);
 }
 
@@ -271,9 +261,9 @@
   border: 1px solid var(--border-strong);
   border-radius: 8px;
   background:
-    linear-gradient(180deg, var(--shell-panel-soft), var(--shell-panel)),
+    var(--vui-gradient-route-soft),
     var(--shell-panel);
-  box-shadow: 0 18px 40px var(--shell-shadow);
+  box-shadow: var(--vui-shadow-soft);
 }
 
 .startupSpinner {
@@ -411,7 +401,7 @@
   border-radius: var(--radius-control);
   color: var(--fg-secondary);
   background: color-mix(in srgb, var(--shell-surface) 90%, transparent);
-  box-shadow: 0 10px 24px var(--shell-shadow);
+  box-shadow: var(--vui-shadow-soft);
   -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
   cursor: pointer;
@@ -553,13 +543,13 @@
   border: 1px solid color-mix(in srgb, var(--accent-warm) 36%, var(--border-soft));
   border-radius: 999px;
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent-warm) 10%, var(--shell-surface)), var(--shell-surface)),
+    var(--vui-gradient-route-soft),
     var(--shell-surface);
   color: var(--fg-secondary);
   font-size: 0.78rem;
   line-height: 1;
   white-space: nowrap;
-  box-shadow: 0 10px 22px color-mix(in srgb, var(--accent-warm) 10%, transparent);
+  box-shadow: var(--vui-shadow-soft);
   outline: none;
 }
 
@@ -591,9 +581,7 @@
 }
 
 .activeWorkChip:focus-visible {
-  box-shadow:
-    0 0 0 1px rgba(216, 167, 91, 0.55),
-    0 10px 22px color-mix(in srgb, var(--accent-warm) 10%, transparent);
+  box-shadow: var(--vui-shadow-accent);
 }
 
 .activeWorkDetailPanel {
@@ -608,9 +596,9 @@
   border: 1px solid var(--border-strong);
   border-radius: 10px;
   background:
-    linear-gradient(180deg, var(--shell-panel-soft), var(--shell-panel)),
+    var(--vui-gradient-route-soft),
     var(--shell-panel);
-  box-shadow: 0 18px 40px var(--shell-shadow);
+  box-shadow: var(--vui-shadow-soft);
   opacity: 0;
   transform: translateY(-4px);
   pointer-events: none;
@@ -849,9 +837,9 @@
   border: 1px solid var(--border-strong);
   border-radius: 12px;
   background:
-    linear-gradient(180deg, var(--shell-panel-soft), var(--shell-panel)),
+    var(--vui-gradient-route-soft),
     var(--shell-panel);
-  box-shadow: 0 18px 40px var(--shell-shadow);
+  box-shadow: var(--vui-shadow-soft);
   opacity: 0;
   transform: translateY(-4px);
   pointer-events: none;
@@ -1369,7 +1357,7 @@
 }
 
 .statusCluster:focus-visible .statusSummaryChip {
-  box-shadow: 0 0 0 1px rgba(216, 167, 91, 0.55);
+  box-shadow: var(--vui-shadow-accent);
 }
 
 .statusChipRow {
@@ -1451,7 +1439,7 @@
 
 .status_running {
   background: var(--state-success);
-  box-shadow: 0 0 16px color-mix(in srgb, var(--state-success) 40%, transparent);
+  box-shadow: var(--vui-shadow-soft);
 }
 
 .status_failed {
@@ -1460,7 +1448,7 @@
 
 .status_caution {
   background: var(--accent-warm-2);
-  box-shadow: 0 0 16px color-mix(in srgb, var(--accent-warm) 32%, transparent);
+  box-shadow: var(--vui-shadow-soft);
 }
 
 .statusGuidePanel {
@@ -1474,9 +1462,9 @@
   border: 1px solid var(--border-strong);
   border-radius: 10px;
   background:
-    linear-gradient(180deg, var(--shell-panel-soft), var(--shell-panel)),
+    var(--vui-gradient-route-soft),
     var(--shell-panel);
-  box-shadow: 0 18px 40px var(--shell-shadow);
+  box-shadow: var(--vui-shadow-soft);
   opacity: 0;
   transform: translateY(-4px);
   pointer-events: none;
@@ -1739,7 +1727,7 @@
   border: 1px solid var(--border-strong);
   border-radius: 10px;
   background: var(--shell-panel);
-  box-shadow: 0 16px 32px var(--shell-shadow);
+  box-shadow: var(--vui-shadow-soft);
   opacity: 0;
   transform: translateY(-4px);
   pointer-events: none;
