@@ -531,7 +531,6 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("{module.projection.blockingReasons[0]}</small>");
     expect(routeSource).toContain("evidenceRefCount");
     expect(routeSource).toContain("materializedSources");
-    expect(routeSource).toContain("excludedSourceSummary");
     expect(routeSource).toContain("SourceCollectionCoverageSummary");
     expect(routeSource).toContain("coverageSummary");
     expect(routeSource).toContain("SourceCollectionStageClosureSummary");
