@@ -22,7 +22,7 @@
 .kicker {
   margin: 0 0 8px;
   color: var(--accent-cool);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   font-weight: 700;
 }
 
@@ -35,7 +35,7 @@
 .detail {
   margin: 12px 0 0;
   color: var(--fg-secondary);
-  font-size: 0.9rem;
+  font-size: var(--vui-font-chat);
   line-height: 1.55;
 }
 
@@ -59,7 +59,7 @@
 .technical summary {
   cursor: pointer;
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   font-weight: 700;
 }
 
@@ -72,7 +72,7 @@
   background: var(--surface-code);
   color: var(--fg-primary);
   padding: 12px;
-  font-size: 0.75rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.5;
   white-space: pre-wrap;
 }

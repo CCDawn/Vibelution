@@ -1,6 +1,6 @@
 :root {
-  --vui-control-height-sm: 26px;
-  --vui-control-height-md: 30px;
+  --vui-control-height-sm: var(--vui-control-height-compact);
+  --vui-control-height-md: var(--vui-control-height-comfortable);
   --vui-focus-ring: 0 0 0 2px color-mix(in srgb, var(--accent-cool) 22%, transparent);
   --vui-component-border: var(--vui-border-subtle);
   --vui-component-surface: var(--vui-surface-glass);
@@ -21,6 +21,7 @@
 [data-vui-provider="heroui"] button[data-slot="button"][data-vui="button"],
 [data-vui-provider="heroui"] button[data-slot="button"][data-vui="icon-button"] {
   min-height: var(--vui-control-height-sm);
+  font-size: var(--vui-font-sm);
   border-width: 1px;
   border-style: solid;
   border-color: var(--vui-component-border);

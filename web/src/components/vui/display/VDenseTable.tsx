@@ -43,7 +43,7 @@ export function VDenseTable<TRow>({
               <th
                 key={column.id}
                 className={[
-                  "px-2 py-1 text-[0.62rem] font-semibold uppercase tracking-[0.04em]",
+                  "px-2 py-1 text-[var(--vui-font-xs)] font-semibold uppercase tracking-[0.04em]",
                   column.align === "right" ? "text-right" : "text-left",
                   column.className,
                 ]
@@ -67,7 +67,7 @@ export function VDenseTable<TRow>({
                   <td
                     key={column.id}
                     className={[
-                      "min-w-0 truncate px-2 py-1.5 text-[0.76rem]",
+                      "min-w-0 truncate px-2 py-1.5 text-[var(--vui-font-sm)]",
                       column.align === "right" ? "text-right" : "text-left",
                       column.className,
                     ]
@@ -82,7 +82,7 @@ export function VDenseTable<TRow>({
           ) : (
             <tr>
               <td
-                className="px-2 py-2 text-[0.76rem] text-vui-fg-tertiary"
+                className="px-2 py-2 text-[var(--vui-font-sm)] text-vui-fg-tertiary"
                 colSpan={columns.length}
               >
                 {emptyText}

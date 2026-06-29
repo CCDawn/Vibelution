@@ -21,7 +21,7 @@ export function VChip({
       className={[
         vuiChipBaseClass,
         vuiToneClass(tone),
-        "h-[22px] max-w-full px-1.5 text-[0.68rem] font-semibold",
+        "h-[24px] max-w-full px-1.5 text-[var(--vui-font-xs)] font-semibold",
         className,
       ]
         .filter(Boolean)
