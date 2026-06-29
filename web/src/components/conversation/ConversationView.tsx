@@ -52,6 +52,11 @@ import {
   type ConversationTimelineItem,
 } from "./conversationTimeline";
 import {
+  buildConversationTimelineRowIdentities,
+  conversationTimelineItemRowKey,
+  type ConversationTimelineRowIdentity,
+} from "./conversationTimelineRows";
+import {
   hasResponseBlock,
   hasThoughtBlock,
   hasMentalBlock,
@@ -65,7 +70,19 @@ import {
   researchOrgMessageChips,
 } from "./messageSections";
 import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
-import { parseStreamingMarkdownBlocks, type MarkdownBlock } from "./streamingMarkdown";
+import { projectStreamingMarkdownBlocks, type MarkdownBlock } from "./streamingMarkdown";
+import {
+  appendStableText,
+  EMPTY_STREAMING_REVEAL_STATE,
+  nextStreamingRevealLength,
+  streamingRevealText,
+  type StreamingRevealState,
+} from "./streamingRevealState";
+import {
+  captureTimelineScrollHeightAnchor,
+  restoreTimelineScrollHeightAnchor,
+  type TimelineScrollHeightAnchor,
+} from "./timelineScrollAnchor";
 import styles from "./ConversationView.module.css";
 
 const RUNNING_OPERATION_STATUSES = new Set(["queued", "pending", "running", "thinking", "tooling", "answering"]);
@@ -76,13 +93,6 @@ const RESPONSE_PARSE_CACHE_LIMIT = 80;
 const MARKDOWN_PARSE_CACHE_LIMIT = 160;
 const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
 const COMPUTER_USE_TOOL_NAME = "computer_use_task_tool";
-const STREAMING_RESPONSE_REVEAL_MIN_CHARS = 2;
-const STREAMING_RESPONSE_REVEAL_MAX_CHARS = 36;
-const STREAMING_RESPONSE_REVEAL_BACKLOG_RATIO = 0.18;
-const STREAMING_RESPONSE_CATCH_UP_BACKLOG_CHARS = 420;
-const STREAMING_RESPONSE_CATCH_UP_MAX_CHARS = 180;
-const STREAMING_RESPONSE_STABLE_TAIL_CHARS = 240;
-
 export type ConversationProcessDisplayMode = "answer" | "trace";
 
 type OperationDetailKind = "thought" | "status" | "tool";
@@ -166,43 +176,6 @@ function projectedConversationMessageIds(message: ConversationMessage) {
   return rawIds.map((id) => String(id).trim()).filter(Boolean);
 }
 
-function nextStreamingRevealLength(currentLength: number, targetLength: number) {
-  const backlog = Math.max(0, targetLength - currentLength);
-  if (backlog === 0) {
-    return currentLength;
-  }
-  const catchUpActive = backlog >= STREAMING_RESPONSE_CATCH_UP_BACKLOG_CHARS;
-  const maxStep = catchUpActive ? STREAMING_RESPONSE_CATCH_UP_MAX_CHARS : STREAMING_RESPONSE_REVEAL_MAX_CHARS;
-  const ratio = catchUpActive ? 0.42 : STREAMING_RESPONSE_REVEAL_BACKLOG_RATIO;
-  const step = Math.min(
-    maxStep,
-    Math.max(STREAMING_RESPONSE_REVEAL_MIN_CHARS, Math.ceil(backlog * ratio)),
-  );
-  return Math.min(targetLength, currentLength + step);
-}
-
-type StreamingRevealState = {
-  stableText: string;
-  revealTail: string;
-};
-
-function streamingRevealText(state: StreamingRevealState) {
-  return `${state.stableText}${state.revealTail}`;
-}
-
-function appendStableText(_previous: StreamingRevealState, nextVisibleText: string): StreamingRevealState {
-  const stableLength = Math.max(0, nextVisibleText.length - STREAMING_RESPONSE_STABLE_TAIL_CHARS);
-  return {
-    stableText: nextVisibleText.slice(0, stableLength),
-    revealTail: nextVisibleText.slice(stableLength),
-  };
-}
-
-const EMPTY_STREAMING_REVEAL_STATE: StreamingRevealState = {
-  stableText: "",
-  revealTail: "",
-};
-
 function StreamingResponseContent({
   content,
   renderBlock,
@@ -220,7 +193,8 @@ function StreamingResponseContent({
   const visibleContentRef = useRef(visibleContent);
   const frameIdRef = useRef<number | null>(null);
   const visibleText = streamingRevealText(visibleContent);
-  const blocks = useMemo(() => parseStreamingMarkdownBlocks(visibleText), [visibleText]);
+  const markdownProjection = useMemo(() => projectStreamingMarkdownBlocks(visibleText), [visibleText]);
+  const blocks = markdownProjection.blocks;
   const hasTable = blocks.some((block) => block.type === "table");
 
   useEffect(() => {
@@ -1002,6 +976,7 @@ export function ConversationView({
   void onInterruptGuidance;
   const { lang, t, statusLabel } = useAppI18n();
   const timelineRef = useRef<HTMLDivElement | null>(null);
+  const historyScrollAnchorRef = useRef<TimelineScrollHeightAnchor | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const initializedSessionRef = useRef("");
@@ -1195,6 +1170,10 @@ export function ConversationView({
     () => activeTimelineMessages.filter((message) => message.streaming),
     [activeTimelineMessages],
   );
+  const activeTimelineRowIdentities = useMemo(
+    () => buildConversationTimelineRowIdentities(activeTimelineMessages),
+    [activeTimelineMessages],
+  );
   const imageArtifactUrlsBeforeMessage = useMemo(() => {
     const urlsByMessageId = new Map<string, Set<string>>();
     const seenImageUrls = new Set<string>();
@@ -1300,6 +1279,18 @@ export function ConversationView({
   }
 
   useLayoutEffect(() => {
+    const anchor = historyScrollAnchorRef.current;
+    if (!anchor) {
+      return;
+    }
+    historyScrollAnchorRef.current = null;
+    if (restoreTimelineScrollHeightAnchor(timelineRef.current, anchor)) {
+      atBottomRef.current = false;
+      setIsAtBottom(false);
+    }
+  }, [activeTimelineMessages.length, allMessagesVisible]);
+
+  useLayoutEffect(() => {
     const timeline = timelineRef.current;
     if (!timeline) {
       return;
@@ -1378,6 +1369,7 @@ export function ConversationView({
 
   useEffect(() => {
     setAllMessagesVisible(false);
+    historyScrollAnchorRef.current = null;
     defaultExpansionRef.current = {};
     responseSegmentCacheRef.current.clear();
     markdownBlockCacheRef.current.clear();
@@ -1528,6 +1520,13 @@ export function ConversationView({
     timeline.scrollTo({ top: timeline.scrollHeight, behavior: "smooth" });
     atBottomRef.current = true;
     setIsAtBottom(true);
+  }
+
+  function showEarlierMessages() {
+    historyScrollAnchorRef.current = captureTimelineScrollHeightAnchor(timelineRef.current);
+    atBottomRef.current = false;
+    setIsAtBottom(false);
+    setAllMessagesVisible(true);
   }
 
   function formatDuration(seconds: number | null) {
@@ -1728,8 +1727,8 @@ export function ConversationView({
     const thoughtCount = operations.filter((operation) => operation.kind === "thought").length;
     const toolCount = operations.filter((operation) => operation.kind === "tool").length;
     const mentalCount = operations.filter((operation) => operation.kind === "mental").length;
-    const visibleStatusCount = operations.filter(
-      (operation) => operation.kind === "status" && shouldShowTimelineOperation(operation),
+    const visibleStatusCount = compactVisibleTimelineOperations(
+      operations.filter((operation) => operation.kind === "status" && shouldShowTimelineOperation(operation)),
     ).length;
     const parts = [
       thoughtCount > 0 ? `${t("thoughtProcess")} ${thoughtCount}` : "",
@@ -1843,6 +1842,37 @@ export function ConversationView({
       return isLongLoopProgressOperation(operation) || Boolean(operation.error?.trim());
     }
     return !isInternalPipelineOperation(operation) || Boolean(operation.error?.trim());
+  }
+
+  function visibleTimelineOperationDedupeKey(operation: ConversationOperation) {
+    if (operation.kind !== "status" || !isLongLoopProgressOperation(operation) || operation.error?.trim()) {
+      return "";
+    }
+    return [
+      operation.kind,
+      operation.rawLabel || operation.label,
+      operation.rawStatus || operation.status,
+    ].join(":");
+  }
+
+  function compactVisibleTimelineOperations(operations: ConversationOperation[]) {
+    const compacted: ConversationOperation[] = [];
+    const indexesByKey = new Map<string, number>();
+    for (const operation of operations) {
+      const key = visibleTimelineOperationDedupeKey(operation);
+      if (!key) {
+        compacted.push(operation);
+        continue;
+      }
+      const existingIndex = indexesByKey.get(key);
+      if (existingIndex === undefined) {
+        indexesByKey.set(key, compacted.length);
+        compacted.push(operation);
+        continue;
+      }
+      compacted[existingIndex] = operation;
+    }
+    return compacted;
   }
 
   function reActGroupDurationLabel(group: ConversationReActOperationGroup) {
@@ -2283,39 +2313,53 @@ export function ConversationView({
     return "";
   }
 
-  function renderConversationTimeline(message: ConversationMessage, items: ConversationTimelineItem[]) {
+  function renderConversationTimeline(
+    message: ConversationMessage,
+    items: ConversationTimelineItem[],
+    rowIdentity: ConversationTimelineRowIdentity,
+  ) {
     if (items.length === 0) {
       return null;
     }
     const activeItemId = activeTimelineItemId(message, items);
     return (
-      <div className={styles.conversationCellTimeline}>
-        {items.map((item) => renderConversationTimelineItem(message, item, item.id === activeItemId))}
+      <div className={styles.conversationCellTimeline} data-conversation-part-key={rowIdentity.processKey}>
+        {items.map((item) => renderConversationTimelineItem(message, item, rowIdentity, item.id === activeItemId))}
       </div>
     );
   }
 
-  function renderConversationTimelineItem(message: ConversationMessage, item: ConversationTimelineItem, isActiveTimelineItem: boolean) {
+  function renderConversationTimelineItem(
+    message: ConversationMessage,
+    item: ConversationTimelineItem,
+    rowIdentity: ConversationTimelineRowIdentity,
+    isActiveTimelineItem: boolean,
+  ) {
     if (item.kind === "thought") {
-      return renderThoughtTimelineItem(message, item, isActiveTimelineItem);
+      return renderThoughtTimelineItem(message, item, rowIdentity, isActiveTimelineItem);
     }
     if (item.kind === "assistant_text") {
-      return renderAssistantTextTimelineItem(message, item);
+      return renderAssistantTextTimelineItem(message, item, rowIdentity);
     }
     if (item.kind === "command_group") {
-      return renderCommandGroupTimelineItem(item, isActiveTimelineItem);
+      return renderCommandGroupTimelineItem(item, rowIdentity, isActiveTimelineItem);
     }
-    return renderOperationTimelineItem(item, isActiveTimelineItem);
+    return renderOperationTimelineItem(item, rowIdentity, isActiveTimelineItem);
   }
 
   function renderThoughtTimelineItem(
     message: ConversationMessage,
     item: Extract<ConversationTimelineItem, { kind: "thought" }>,
+    rowIdentity: ConversationTimelineRowIdentity,
     isActiveTimelineItem: boolean,
   ) {
     const expanded = getExpansionState(message.id, item.id, item.defaultExpanded);
     return (
-      <section key={item.id} className={styles.timelineThoughtCell}>
+      <section
+        key={conversationTimelineItemRowKey(rowIdentity, item)}
+        className={styles.timelineThoughtCell}
+        data-conversation-part-key={conversationTimelineItemRowKey(rowIdentity, item)}
+      >
         <button
           type="button"
           className={styles.timelineCellHeader}
@@ -2336,10 +2380,15 @@ export function ConversationView({
   function renderAssistantTextTimelineItem(
     message: ConversationMessage,
     item: Extract<ConversationTimelineItem, { kind: "assistant_text" }>,
+    rowIdentity: ConversationTimelineRowIdentity,
   ) {
     const segments = getCachedResponseSegments(item.text);
     return (
-      <section key={item.id} className={styles.timelineAssistantTextCell}>
+      <section
+        key={conversationTimelineItemRowKey(rowIdentity, item)}
+        className={styles.timelineAssistantTextCell}
+        data-conversation-part-key={conversationTimelineItemRowKey(rowIdentity, item)}
+      >
         {segments.map((segment) => renderResponseSegment(segment, imageArtifactUrlsBeforeMessage.get(message.id)))}
       </section>
     );
@@ -2360,6 +2409,7 @@ export function ConversationView({
 
   function renderCommandGroupTimelineItem(
     item: Extract<ConversationTimelineItem, { kind: "command_group" }>,
+    rowIdentity: ConversationTimelineRowIdentity,
     isActiveTimelineItem: boolean,
   ) {
     const expanded = getExpansionState(item.id, "details", false);
@@ -2375,7 +2425,11 @@ export function ConversationView({
       item.status === "failed" ? styles.timelineOperationCell_failed : "",
     ].filter(Boolean).join(" ");
     return (
-      <section key={item.id} className={className}>
+      <section
+        key={conversationTimelineItemRowKey(rowIdentity, item)}
+        className={className}
+        data-conversation-part-key={conversationTimelineItemRowKey(rowIdentity, item)}
+      >
         <button
           type="button"
           className={styles.timelineCellHeader}
@@ -2407,6 +2461,7 @@ export function ConversationView({
 
   function renderOperationTimelineItem(
     item: Extract<ConversationTimelineItem, { kind: "operation" }>,
+    rowIdentity: ConversationTimelineRowIdentity,
     isActiveTimelineItem: boolean,
   ) {
     const operation = item.operation;
@@ -2423,7 +2478,11 @@ export function ConversationView({
       item.status === "failed" ? styles.timelineOperationCell_failed : "",
     ].filter(Boolean).join(" ");
     return (
-      <section key={item.id} className={className}>
+      <section
+        key={conversationTimelineItemRowKey(rowIdentity, item)}
+        className={className}
+        data-conversation-part-key={conversationTimelineItemRowKey(rowIdentity, item)}
+      >
         <div className={styles.timelineCellHeader}>
           {operationStatusIcon(operation, isActiveTimelineItem)}
           <span>{item.title}</span>
@@ -2693,7 +2752,7 @@ export function ConversationView({
     if (operations.length === 0) {
       return null;
     }
-    const visibleOperations = operations.filter(shouldShowTimelineOperation);
+    const visibleOperations = compactVisibleTimelineOperations(operations.filter(shouldShowTimelineOperation));
     if (visibleOperations.length === 0) {
       return renderCompactRequestSummary(operations);
     }
@@ -3504,7 +3563,7 @@ export function ConversationView({
                 <button
                   type="button"
                   className={styles.timelineHistoryButton}
-                  onClick={() => setAllMessagesVisible(true)}
+                  onClick={showEarlierMessages}
                 >
                   <ArrowUp size={15} />
                   <span>
@@ -3516,10 +3575,15 @@ export function ConversationView({
               </div>
             ) : null}
             {activeTimelineMessages.map((message, index) => {
+            const rowIdentity = activeTimelineRowIdentities[index];
             if (isCliAgentLifecycleMessage(message)) {
               const detail = cliAgentLifecycleDetail(message);
               return (
-                <article key={message.id} className={styles.cliAgentLifecycleTurn}>
+                <article
+                  key={rowIdentity?.rowKey ?? message.id}
+                  className={styles.cliAgentLifecycleTurn}
+                  data-conversation-row-key={rowIdentity?.rowKey ?? message.id}
+                >
                   <span className={styles.cliAgentLifecycleIcon} aria-hidden="true">
                     <TerminalSquare size={14} />
                   </span>
@@ -3604,7 +3668,7 @@ export function ConversationView({
             );
             const renderProcessDetails = () => {
               if (hasConversationTimeline) {
-                return renderConversationTimeline(message, conversationTimelineItems);
+                return renderConversationTimeline(message, conversationTimelineItems, rowIdentity);
               }
               if (hasFeedbackTimeline) {
                 return renderFeedbackTimelineGroup(
@@ -3616,7 +3680,7 @@ export function ConversationView({
               return renderLegacyProcessDetails(true);
             };
             const responseSectionNode = showResponseBlock && !isStreamingStatusPlaceholder ? (
-              <section className={styles.responseSection}>
+              <section className={styles.responseSection} data-conversation-part-key={rowIdentity.answerKey}>
                 <button
                   type="button"
                   className={styles.responseToggle}
@@ -3648,7 +3712,7 @@ export function ConversationView({
                 isStreamingStatusPlaceholder ? compactStreamingStatusPlaceholder(message.content) : undefined,
               )
             ) : hasConversationTimeline ? (
-              renderConversationTimeline(message, conversationTimelineItems)
+              renderConversationTimeline(message, conversationTimelineItems, rowIdentity)
             ) : hasFeedbackTimeline ? (
               renderFeedbackTimelineGroup(
                 message.id,
@@ -3658,8 +3722,10 @@ export function ConversationView({
             ) : renderLegacyProcessDetails();
             return (
               <article
-                key={message.id}
+                key={rowIdentity.rowKey}
                 className={turnClassName}
+                data-conversation-row-key={rowIdentity.rowKey}
+                data-conversation-message-key={rowIdentity.messageKey}
               >
                 <div className={styles.turnAvatar} aria-hidden="true">
                   {compactTurnHeader
