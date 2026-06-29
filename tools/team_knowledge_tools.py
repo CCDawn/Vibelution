@@ -33,9 +33,11 @@ def unified_memory_search_tool(
     """
     Search governed Agent/Team memory and formal knowledge through one read-only Agent-facing tool.
 
-    The Agent chooses query_mode and query text; the platform routes the search
-    to the current local knowledge, metadata, regex, or RAG backend and returns
-    a stable result schema with citations/source ids.
+    The Agent chooses query_mode and query text; supported query_mode values
+    include auto, exact, semantic, hybrid, bm25, metadata, regex/rg/grep, and
+    rag. The platform routes the search to the current local knowledge,
+    metadata, regex, BM25, or RAG backend and returns a stable result schema
+    with citations/source ids.
     """
 
     runtime = _current_runtime()
