@@ -7,22 +7,13 @@
 }
 
 .header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--route-topbar-gap);
+  margin: 8px 10px 0;
   min-width: 0;
-  padding: var(--route-topbar-padding);
-  border-bottom: 1px solid var(--border-strong);
-  background: var(--surface-header);
-}
-
-.header > div:first-child {
-  display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
-  align-items: baseline;
-  gap: 2px 8px;
-  min-width: 0;
+  border-color: var(--vui-border-subtle);
+  background:
+    var(--vui-gradient-route-soft),
+    color-mix(in srgb, var(--surface-panel) 86%, transparent);
+  box-shadow: var(--vui-shadow-hairline);
 }
 
 .eyebrow,
@@ -60,10 +51,7 @@
 }
 
 .headerMeta {
-  display: flex;
-  flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 6px;
 }
 
 .metaPill {
