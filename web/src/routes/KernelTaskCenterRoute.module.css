@@ -7,14 +7,13 @@
 }
 
 .header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--route-topbar-gap);
+  margin: 8px 10px 0;
   min-width: 0;
-  padding: var(--route-topbar-padding);
-  border-bottom: 1px solid var(--border-strong);
-  background: var(--surface-header);
+  border-color: var(--vui-border-subtle);
+  background:
+    var(--vui-gradient-route-soft),
+    color-mix(in srgb, var(--surface-panel) 86%, transparent);
+  box-shadow: var(--vui-shadow-hairline);
 }
 
 .header h1 {
@@ -57,22 +56,16 @@
 }
 
 .statusFilter {
-  gap: 8px;
-  min-height: 34px;
-  padding: 0 8px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: var(--surface-panel);
+  gap: 7px;
+  min-width: 210px;
   color: var(--fg-secondary);
   font-size: 0.8rem;
 }
 
-.statusFilter select {
-  min-height: 26px;
-  border: 1px solid var(--border-soft);
-  border-radius: 6px;
-  background: var(--surface-card);
-  color: var(--fg-primary);
+.statusFilter > span {
+  font-size: 0.72rem;
+  font-weight: 780;
+  white-space: nowrap;
 }
 
 .iconButton {

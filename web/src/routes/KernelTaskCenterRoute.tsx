@@ -7,11 +7,12 @@ import { useSearchParams } from "react-router-dom";
 import { getKernelTaskTimeline, listKernelTasks, selectKernelTaskId } from "../api/kernel";
 import { queryKeys } from "../api/queryKeys";
 import type { KernelDelivery, KernelTask, KernelTimelineItem } from "../api/types";
-import { VButton } from "../components/vui";
+import { VButton, VIconButton, VRouteHeader, VSelect } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import styles from "./KernelTaskCenterRoute.module.css";
 
-const STATUS_OPTIONS = ["", "queued", "running", "succeeded", "blocked", "failed", "cancelled"];
+const ALL_STATUS_KEY = "all";
+const STATUS_OPTIONS = ["queued", "running", "succeeded", "blocked", "failed", "cancelled"];
 
 const COPY = {
   zh: {
@@ -159,42 +160,47 @@ export function KernelTaskCenterRoute() {
     enabled: Boolean(selectedTaskId),
   });
   const timeline = timelineQuery.data;
+  const statusOptions = useMemo(
+    () => [
+      { id: ALL_STATUS_KEY, label: copy.allStatus },
+      ...STATUS_OPTIONS.map((option) => ({ id: option, label: option })),
+    ],
+    [copy.allStatus],
+  );
 
   return (
     <div className={styles.route}>
-      <header className={styles.header}>
-        <div>
-          <p className={styles.eyebrow}>Kernel</p>
-          <h1>{copy.title}</h1>
-          <p>{copy.subtitle}</p>
-        </div>
-        <div className={styles.headerActions}>
-          <label className={styles.statusFilter}>
-            <span>{copy.status}</span>
-            <select value={status} onChange={(event) => setStatus(event.target.value)}>
-              {STATUS_OPTIONS.map((option) => (
-                <option key={option || "all"} value={option}>
-                  {option || copy.allStatus}
-                </option>
-              ))}
-            </select>
-          </label>
-          <VButton
-            type="button"
-            className={styles.iconButton}
-            onClick={() => {
-              taskQuery.refetch();
-              if (selectedTaskId) {
-                timelineQuery.refetch();
-              }
-            }}
-            title={copy.refresh}
-            aria-label={copy.refresh}
-          >
-            <RefreshCw size={16} />
-          </VButton>
-        </div>
-      </header>
+      <VRouteHeader
+        className={styles.header}
+        eyebrow="Kernel"
+        title={copy.title}
+        meta={copy.subtitle}
+        actions={(
+          <div className={styles.headerActions}>
+            <div className={styles.statusFilter}>
+              <span>{copy.status}</span>
+              <VSelect
+                aria-label={copy.status}
+                selectedKey={status || ALL_STATUS_KEY}
+                options={statusOptions}
+                placeholder={status || copy.allStatus}
+                onSelectionChange={(key) => setStatus(String(key) === ALL_STATUS_KEY ? "" : String(key))}
+              />
+            </div>
+            <VIconButton
+              label={copy.refresh}
+              className={styles.iconButton}
+              icon={<RefreshCw size={16} />}
+              onPress={() => {
+                taskQuery.refetch();
+                if (selectedTaskId) {
+                  timelineQuery.refetch();
+                }
+              }}
+            />
+          </div>
+        )}
+      />
 
       <main className={styles.workspace}>
         <section className={styles.taskPane} aria-label={copy.taskList}>
