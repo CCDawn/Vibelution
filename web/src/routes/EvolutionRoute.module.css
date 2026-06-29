@@ -719,7 +719,7 @@
   min-width: 0;
   padding: 7px 8px;
   border: 1px solid var(--border-hairline);
-  border-left: 3px solid var(--border-soft);
+  border-left: 2px solid var(--border-soft);
   border-radius: 7px;
   background: var(--surface-card-subtle);
 }

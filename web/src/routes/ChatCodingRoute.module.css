@@ -2087,17 +2087,17 @@
 }
 
 .agentSessionTabRoot {
-  border-left: 3px solid color-mix(in srgb, var(--accent-warm) 56%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--accent-warm) 56%, transparent);
   background: color-mix(in srgb, var(--accent-warm) 5%, transparent);
 }
 
 .agentSessionTabChild {
-  border-left: 3px solid color-mix(in srgb, var(--accent-cool) 62%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--accent-cool) 62%, transparent);
   background: color-mix(in srgb, var(--accent-cool) 7%, transparent);
 }
 
 .agentSessionTabCli {
-  border-left: 3px solid color-mix(in srgb, var(--state-success) 58%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--state-success) 58%, transparent);
   background: color-mix(in srgb, var(--state-success) 7%, transparent);
 }
 
