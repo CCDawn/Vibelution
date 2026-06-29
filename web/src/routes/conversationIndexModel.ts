@@ -301,7 +301,8 @@ export function sessionToConversationSummary(session: SessionSummary): Conversat
   const projectionEdit = session.projectionEdit ?? makeProjectionEditContract(sourceRef);
   const agentSourceRef = session.agentSourceRef
     ?? (session.agentId ? makeSourceAuthorityRef("agent", session.agentId) : null);
-  return {
+  const teamAwareSession = session as SessionSummary & { teamId?: string; teamName?: string };
+  const summary: TeamAwareConversationSummary = {
     conversationId: session.id,
     type: "direct_agent",
     title: sessionListTitle(session),
@@ -324,10 +325,13 @@ export function sessionToConversationSummary(session: SessionSummary): Conversat
     conversationIndexVisibility: session.conversationIndexVisibility,
     conversationIndexKind: session.conversationIndexKind,
     conversationIndexErrors: session.conversationIndexErrors ?? [],
+    teamId: teamAwareSession.teamId,
+    teamName: teamAwareSession.teamName,
     sourceRef,
     projectionEdit,
     agentSourceRef,
   };
+  return summary;
 }
 
 function normalizeConversationIndexKind(value: unknown) {
@@ -337,6 +341,39 @@ function normalizeConversationIndexKind(value: unknown) {
 
 function metadataString(agent: AgentInstance, key: string) {
   return String(agent.metadata?.[key] ?? "").trim();
+}
+
+function metadataTeamIdentity(agent: AgentInstance) {
+  const genericTeamId = metadataString(agent, "teamId");
+  const genericTeamName = metadataString(agent, "teamName");
+  if (genericTeamId) {
+    return { teamId: genericTeamId, teamName: genericTeamName };
+  }
+
+  const challengeTeamId = metadataString(agent, "challengeCupTeamId");
+  const challengeTeamName = metadataString(agent, "challengeCupTeamName");
+  const knowledgeTeamId = metadataString(agent, "knowledgeExpansionTeamId");
+  const knowledgeTeamName = metadataString(agent, "knowledgeExpansionTeamName");
+  const roleText = [
+    agent.roleKey,
+    metadataString(agent, "researchTeamRole"),
+    metadataString(agent, "researchTeamRoleKey"),
+    metadataString(agent, "challengeCupTeamRole"),
+    metadataString(agent, "challengeCupTeamRoleKey"),
+    metadataString(agent, "knowledgeExpansionTeamRole"),
+    metadataString(agent, "knowledgeExpansionTeamRoleKey"),
+  ].filter(Boolean).join(" ").toLowerCase();
+
+  if (knowledgeTeamId && (roleText.includes("knowledge") || !challengeTeamId)) {
+    return { teamId: knowledgeTeamId, teamName: knowledgeTeamName };
+  }
+  if (challengeTeamId) {
+    return { teamId: challengeTeamId, teamName: challengeTeamName };
+  }
+  if (knowledgeTeamId) {
+    return { teamId: knowledgeTeamId, teamName: knowledgeTeamName };
+  }
+  return { teamId: "", teamName: "" };
 }
 
 function agentConversationIndexClassification(agent: AgentInstance) {
@@ -406,7 +443,8 @@ export function agentToConversationSummary(agent: AgentInstance): ConversationSu
   const projectionEdit = makeProjectionEditContract(sourceRef);
   const agentSourceRef = agent.sourceRef ?? makeSourceAuthorityRef("agent", agent.agentId);
   const classification = agentConversationIndexClassification(agent);
-  return {
+  const teamIdentity = metadataTeamIdentity(agent);
+  const summary: TeamAwareConversationSummary = {
     conversationId: directSessionId || agent.agentId,
     type: "direct_agent",
     title: agent.displayName || agent.agentCode || agent.agentId,
@@ -429,10 +467,13 @@ export function agentToConversationSummary(agent: AgentInstance): ConversationSu
     conversationIndexVisibility: conversationIndexVisibilityForKind(classification.kind),
     conversationIndexKind: classification.kind,
     conversationIndexErrors: classification.errors,
+    teamId: teamIdentity.teamId || undefined,
+    teamName: teamIdentity.teamName || undefined,
     sourceRef,
     projectionEdit,
     agentSourceRef,
   };
+  return summary;
 }
 
 function makeSourceAuthorityRef(kind: string, id: string): SourceAuthorityRef {
