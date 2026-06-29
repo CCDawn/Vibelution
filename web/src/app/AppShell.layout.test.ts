@@ -366,5 +366,11 @@ describe("AppShell layout contract", () => {
     expect(manifest.theme_color).toBe("#f7f8fa");
     expect(manifest.background_color).toBe("#f7f8fa");
     expect(manifest.display).toBe("standalone");
+    expect(shellSource).toContain("syncWorkbenchThemeRoot(theme)");
+    expect(shellSource).toContain("isElectronDesktopShell()");
+    expect(shellSource).toContain('data-desktop-shell={desktopShell ? "electron" : "browser"}');
+    expect(shellStyles).toContain('.shell[data-desktop-shell="electron"] .topBar');
+    expect(shellStyles).toContain("--shell-window-control-inset");
+    expect(shellStyles).not.toMatch(/font-size:\s*0\.(?:[0-6]\d?|7(?:0|1)?)rem/);
   });
 });
