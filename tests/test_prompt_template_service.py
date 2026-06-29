@@ -80,6 +80,10 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     assert _contains_tool_name(source_finder["content"], "source_collection_stage_writeback_tool")
     assert "搜索、获取、下载到本地" in source_finder["content"]
     assert "无效来源" in source_finder["content"]
+    assert _contains_tool_name(source_finder["content"], "task_create_tool")
+    assert _contains_tool_name(source_finder["content"], "task_update_tool")
+    assert "candidateLeads[]" in source_finder["content"]
+    assert "invalidSources[]" in source_finder["content"]
     source_extractor = prompt_template_service.get_prompt_template("prompt-source-extractor")
     assert source_extractor is not None
     assert source_extractor["metadata"]["roleKey"] == "source_extractor"
