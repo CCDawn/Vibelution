@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>08 候选图谱预览 · 科研流程计划页</title>
+    <title>08 资料关系整理预览 · 科研流程计划页</title>
     <link rel="stylesheet" href="flow_pages.css" />
   </head>
   <body>
@@ -17,8 +17,8 @@
 <a class="" href="04-mechanism-mapping.html"><span class="mini">04</span><span>机制到计算抽象</span></a>
 <a class="" href="05-algorithm-hypothesis.html"><span class="mini">05</span><span>生成 algorithm_hypothesis</span></a>
 <a class="" href="06-research-review.html"><span class="mini">06</span><span>科研审稿</span></a>
-<a class="" href="07-steward-ingestion.html"><span class="mini">07</span><span>知识治理入库</span></a>
-<a class=" active" href="08-candidate-graph.html"><span class="mini">08</span><span>候选图谱预览</span></a>
+<a class="" href="07-source-ingestion.html"><span class="mini">07</span><span>资料入库</span></a>
+<a class=" active" href="08-candidate-graph.html"><span class="mini">08</span><span>资料关系整理预览</span></a>
 <a class="" href="09-official-graph.html"><span class="mini">09</span><span>正式知识图谱同步</span></a>
 <a class="" href="10-experiment-loop.html"><span class="mini">10</span><span>实验迭代闭环</span></a>
 <a class="" href="11-iteration-versioning.html"><span class="mini">11</span><span>持续迭代与版本化</span></a>
@@ -29,14 +29,14 @@
       <div>
         <section class="plan-hero">
           <div class="kicker">Research Flow Node 08</div>
-          <h1>候选图谱预览</h1>
+          <h1>资料关系整理预览</h1>
           <p class="subtitle">让团队先看到研究链路，但不污染正式知识图谱。</p>
           <div class="tag-row"><span class="tag done">Teams 可视化已接入</span><span class="tag">Candidate Graph Preview Agent</span><span class="tag">独立计划页</span></div>
           <div class="diagram">
             <div class="flow-cell"><strong>输入</strong><span>CandidateStore candidates / paperNoteIds / neuroMechanismIds / mechanismMappingIds</span></div>
             <div class="flow-cell"><strong>动作</strong><span>读取 candidate_only、ready_for_candidate_graph、excluded 状态。</span></div>
-            <div class="flow-cell"><strong>输出</strong><span>candidate_graph 候选快照 / Teams 候选图谱面板</span></div>
-            <div class="flow-cell"><strong>记忆/图谱</strong><span>只展示候选图谱；正式图谱同步必须等 ingested。</span></div>
+            <div class="flow-cell"><strong>输出</strong><span>candidate_graph 候选快照 / Teams 资料关系整理面板</span></div>
+            <div class="flow-cell"><strong>记忆/图谱</strong><span>只展示资料关系整理；正式图谱同步必须等 ingested。</span></div>
           </div>
         </section>
 
@@ -56,10 +56,10 @@
 <li>Teams 工作台科研流程面板可读取 latest candidate_graph，并用 SVG 小图展示节点、边、断链和未审节点。</li>
 <li>刷新图谱按钮复用 POST candidate-graph，只生成 candidate_only 快照，不写正式 Team Knowledge、RAG 或正式图谱。</li></ul></article>
             <article class="plan-card"><h2>输出物</h2><ul><li>candidate_graph 候选快照</li>
-<li>Teams 候选图谱面板</li>
+<li>Teams 资料关系整理面板</li>
 <li>missingLinks 断链报告</li>
 <li>unreviewedNodes 未审节点清单</li></ul></article>
-            <article class="plan-card"><h2>风险</h2><ul><li>候选图谱被误读为正式知识</li>
+            <article class="plan-card"><h2>风险</h2><ul><li>资料关系整理被误读为正式知识</li>
 <li>links 指向不存在对象</li></ul></article>
             <article class="plan-card "><h2>未决事项</h2><ul><li>是否仍需要导出独立 candidate_graph.json，或保持前端直接读取 CandidateStore graph payload。</li></ul></article>
           </div>
@@ -72,8 +72,8 @@
           </div>
           <div class="status-grid">
             <div class="status-item"><b>候选状态</b><span>Teams 可视化已接入</span></div>
-            <div class="status-item"><b>记忆平台</b><span>候选图谱只进入 CandidateStore 草稿区，不进入正式 RAG。</span></div>
-            <div class="status-item"><b>图谱同步</b><span>只展示候选图谱；正式图谱同步必须等 ingested。</span></div>
+            <div class="status-item"><b>记忆平台</b><span>资料关系整理只进入 CandidateStore 草稿区，不进入正式 RAG。</span></div>
+            <div class="status-item"><b>图谱同步</b><span>只展示资料关系整理；正式图谱同步必须等 ingested。</span></div>
           </div>
         </section>
 
@@ -86,10 +86,10 @@
       <div class="status-grid">
         <div class="status-item"><b>状态</b><span>candidate_graph_visible</span></div>
         <div class="status-item"><b>功能岗位</b><span>Candidate Graph Preview Agent</span></div>
-        <div class="status-item"><b>Agent 状态</b><span>后端/API 已可生成候选图谱快照；Teams 工作台绑定独立 candidate_graph Agent，并把 agentProcess 显示到当前步骤过程页。</span></div>
+        <div class="status-item"><b>Agent 状态</b><span>后端/API 已可生成资料关系整理快照；Teams 工作台绑定独立 candidate_graph Agent，并把 agentProcess 显示到当前步骤过程页。</span></div>
         <div class="status-item"><b>进入条件</b><span>CandidateStore 中存在 paper_note / neuro_mechanism / mechanism_mapping / algorithm_hypothesis 等候选。</span></div>
         <div class="status-item"><b>退出条件</b><span>candidate_graph 候选快照能列出 nodes、edges、missingLinks、unreviewedNodes 和 officialBoundary，并能在 Teams 科研流程面板可视化查看。</span></div>
-        <div class="status-item"><b>审核门禁</b><span>确认候选图谱只作预览，不作为正式知识证据使用。</span></div>
+        <div class="status-item"><b>审核门禁</b><span>确认资料关系整理只作预览，不作为正式知识证据使用。</span></div>
       </div>
       <div class="plan-grid">
         <article class="plan-card"><h2>本步操作</h2><p class="hint">由 candidate_graph Agent 从已通过筛选的 source_manifest 与后续候选链路重建候选关系；Teams 面板可请求最新 candidate_graph，渲染 evidence -&gt; candidate 的阅读向箭头，并在过程页展示输入、输出和下一步。</p></article>
@@ -99,11 +99,11 @@
 <li>断链报告</li>
 <li>未审节点清单</li>
 <li>候选/正式边界标识</li>
-<li>Teams SVG 候选图谱面板</li>
+<li>Teams SVG 资料关系整理面板</li>
 <li>candidate_graph Agent 过程追踪</li></ul></article>
         <article class="plan-card"><h2>工具/平台能力</h2><ul><li>/api/teams/{teamId}/workflow-orchestration/candidate-graph</li>
 <li>CandidateStore</li>
-<li>TeamsRoute 候选图谱渲染</li></ul></article>
+<li>TeamsRoute 资料关系整理渲染</li></ul></article>
         <article class="plan-card"><h2>功能缺口</h2><p class="hint">独立 candidate_graph.json 导出仍待接；首版前端直接读取 CandidateStore graph payload。</p></article>
         <article class="plan-card"><h2>失败回退</h2><p class="hint">候选链接指向不存在对象时输出 missingLinks，并把质量状态标记为 broken_links，不允许进入正式同步。</p></article>
       </div>
@@ -111,7 +111,7 @@
 
 
         <div class="pager">
-          <a href="07-steward-ingestion.html">上一节点：07 知识治理入库</a>
+          <a href="07-source-ingestion.html">上一节点：07 资料入库</a>
           <a href="09-official-graph.html">下一节点：09 正式知识图谱同步</a>
         </div>
       </div>

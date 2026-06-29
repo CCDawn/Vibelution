@@ -80,13 +80,13 @@ SOURCE_QUALITY_APPROVED_STATUSES = {"source_quality_approved", "source_manifest_
 SOURCE_QUALITY_NEEDS_REVISION_STATUSES = {"source_quality_needs_revision", "source_manifest_invalid"}
 SOURCE_QUALITY_REJECTED_STATUSES = {"source_quality_rejected", "rejected"}
 SOURCE_COLLECTION_DEFAULT_AGENT_ROLES = (
-    "data_discovery",
-    "source_acquisition",
-    "content_extraction",
-    "source_quality",
+    "source_finder",
+    "source_extractor",
+    "source_relation_mapper",
+    "source_ingestor",
 )
-SOURCE_COLLECTION_SEARCH_EXECUTION_AGENT_ROLES = {"source_intake", "data_discovery", "source_acquisition"}
-SOURCE_COLLECTION_COLLECTION_STAGE_AGENT_ROLES = {"source_intake", "data_discovery", "source_acquisition", "content_extraction"}
+SOURCE_COLLECTION_SEARCH_EXECUTION_AGENT_ROLES = {"source_finder"}
+SOURCE_COLLECTION_COLLECTION_STAGE_AGENT_ROLES = {"source_finder"}
 SOURCE_COLLECTION_DEFAULT_SEARCH_LANGUAGES = ("en", "zh")
 SOURCE_COLLECTION_DEFAULT_SOURCE_TYPES = ("paper", "review", "dataset", "preprint")
 SOURCE_COLLECTION_DEFAULT_MAX_RESULTS_PER_QUERY = 10
@@ -135,12 +135,13 @@ SOURCE_COLLECTION_KEEP_WITH_NOTES_DECISIONS = {
     "keep_with_notes",
 }
 SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES = {
-    "collection": ("source_intake", "data_discovery", "source_acquisition"),
-    "candidate": ("content_extraction",),
-    "screening": ("source_quality",),
-    "graph": ("candidate_graph",),
-    "memory": ("knowledge_steward",),
+    "finding": ("source_finder",),
+    "extraction": ("source_extractor",),
+    "relations": ("source_relation_mapper",),
+    "ingestion": ("source_ingestor",),
 }
+SOURCE_COLLECTION_AGENT_ROLES = set(SOURCE_COLLECTION_DEFAULT_AGENT_ROLES)
+SOURCE_COLLECTION_STAGE_IDS = set(SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES)
 SOURCE_COLLECTION_COLLECTION_MODES = {"web_search", "local_workspace", "mixed"}
 SOURCE_COLLECTION_LOCAL_SCAN_DEFAULT_ROOTS = ("workspace/knowledge",)
 SOURCE_COLLECTION_LOCAL_SCAN_EXTENSIONS = {".md", ".txt", ".json", ".jsonl", ".pdf"}
@@ -162,6 +163,17 @@ SOURCE_COLLECTION_STAGE_REQUIRED_TOOLS = (
     "source_collection_context_tool",
     "source_collection_stage_writeback_tool",
 )
+
+
+def _normalize_source_collection_stage_id(value: Any, *, default: str = "finding") -> str:
+    stage_id = _trim_text(value, max_length=80)
+    if not stage_id:
+        return default
+    return stage_id
+
+
+def _normalize_source_collection_agent_role(value: Any) -> str:
+    return _trim_text(value, max_length=80)
 SOURCE_COLLECTION_SEARCH_REQUIRED_TOOLS = (
     "web_search_tool",
     "batch_web_search_tool",
@@ -611,9 +623,9 @@ def extract_source_collection_candidates(team_id: str, payload: dict[str, Any] |
     extraction_assignment = next(
         (
             item for item in assignments
-            if _trim_text(item.get("agentRole"), max_length=80) == "content_extraction"
+            if _normalize_source_collection_agent_role(item.get("agentRole")) == "source_extractor"
         ),
-        {"assignmentId": "", "agentRole": "content_extraction", "agentId": extraction_agent_id},
+        {"assignmentId": "", "agentRole": "source_extractor", "agentId": extraction_agent_id},
     )
     for record in target_records:
         record_id = _trim_text(record.get("recordId"), max_length=128)
@@ -626,7 +638,7 @@ def extract_source_collection_candidates(team_id: str, payload: dict[str, Any] |
                 record_id,
                 {
                     "createdByAgent": extraction_agent_id,
-                    "tags": ["source_collection", "content_extraction"],
+                    "tags": ["source_collection", "source_extractor"],
                     "metadata": {
                         "sourceCollectionExtraction": True,
                         "extractionAgentId": extraction_agent_id,
@@ -702,7 +714,7 @@ def extract_source_collection_candidates(team_id: str, payload: dict[str, Any] |
     if records:
         open_extraction_assignments = [
             item for item in assignments
-            if _trim_text(item.get("agentRole"), max_length=80) == "content_extraction"
+            if _normalize_source_collection_agent_role(item.get("agentRole")) == "source_extractor"
             and str(item.get("status") or "").strip().lower() in {"open", "in_progress", "returned"}
         ]
         assignment_output_status = "completed" if not failed and remaining_pending_after_batch == 0 else "returned"
@@ -853,9 +865,9 @@ def seed_source_collection_agent_session_context(
     normalized_run_id = _normalize_required_id(run_id, "Data processing run id is required.")
     team = team_service.get_team(normalized_team_id)
     request_payload = dict(payload) if isinstance(payload, dict) else {}
-    stage_id = _trim_text(request_payload.get("stageId"), max_length=80) or "collection"
+    stage_id = _normalize_source_collection_stage_id(request_payload.get("stageId"), default="finding")
     agent_id = _trim_text(request_payload.get("agentId"), max_length=160)
-    agent_role = _trim_text(request_payload.get("agentRole"), max_length=80)
+    agent_role = _normalize_source_collection_agent_role(request_payload.get("agentRole"))
     if stage_id not in SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES:
         raise TeamWorkflowOrchestrationError(f"Unsupported source collection stage: {stage_id}")
     if not agent_id:
@@ -990,20 +1002,7 @@ def seed_source_collection_agent_session_context(
 
 
 def _source_collection_default_stage_agent(stage_id: str, *, agent_role: str = "") -> dict[str, Any] | None:
-    if stage_id != "memory":
-        return None
-    normalized_role = _trim_text(agent_role, max_length=80)
-    if normalized_role and normalized_role != agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY:
-        return None
-    agent_directory_service.repair_agent_directory()
-    agent = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID, include_archived=False)
-    if not isinstance(agent, dict):
-        return None
-    return _ensure_source_collection_stage_agent_direct_session(
-        agent,
-        stage_id=stage_id,
-        agent_role=agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY,
-    )
+    return None
 
 
 def _ensure_source_collection_stage_agent_direct_session(
@@ -1012,30 +1011,7 @@ def _ensure_source_collection_stage_agent_direct_session(
     stage_id: str,
     agent_role: str,
 ) -> dict[str, Any]:
-    agent_id = _trim_text(agent.get("agentId"), max_length=160)
-    if (
-        stage_id != "memory"
-        or (
-            agent_id != agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
-            and _trim_text(agent_role, max_length=80) != agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY
-        )
-    ):
-        return agent
-    session = session_service.ensure_agent_direct_session(
-        agent_id=agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID,
-        title=agent_directory_service.KNOWLEDGE_STEWARD_FUNCTIONAL_NAME,
-        created_by="source_collection_memory_stage",
-    )
-    session_id = _trim_text(session.get("id") or session.get("sessionId"), max_length=160)
-    if session_id and _trim_text(agent.get("directSessionId"), max_length=160) != session_id:
-        return agent_directory_service.update_agent_instance(
-            agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID,
-            direct_session_id=session_id,
-            display_name=agent_directory_service.KNOWLEDGE_STEWARD_FUNCTIONAL_NAME,
-            preserve_generated_display_name=True,
-        )
-    refreshed = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID, include_archived=False)
-    return refreshed if isinstance(refreshed, dict) else agent
+    return agent
 
 
 def start_source_collection_stage_session_task(
@@ -1047,9 +1023,9 @@ def start_source_collection_stage_session_task(
     normalized_run_id = _normalize_required_id(run_id, "Data processing run id is required.")
     team = team_service.get_team(normalized_team_id)
     request_payload = dict(payload) if isinstance(payload, dict) else {}
-    stage_id = _trim_text(request_payload.get("stageId"), max_length=80) or "collection"
+    stage_id = _normalize_source_collection_stage_id(request_payload.get("stageId"), default="finding")
     agent_id = _trim_text(request_payload.get("agentId"), max_length=160)
-    agent_role = _trim_text(request_payload.get("agentRole"), max_length=80)
+    agent_role = _normalize_source_collection_agent_role(request_payload.get("agentRole"))
     return_to = _trim_text(request_payload.get("returnTo"), max_length=1000)
     return_label = _trim_text(request_payload.get("returnLabel"), max_length=240)
     requested_by = _trim_text(request_payload.get("requestedByAgent"), max_length=160)
@@ -1060,7 +1036,6 @@ def start_source_collection_stage_session_task(
         default_agent = _source_collection_default_stage_agent(stage_id, agent_role=agent_role)
         if default_agent:
             agent_id = _trim_text(default_agent.get("agentId"), max_length=160)
-            agent_role = agent_role or "knowledge_steward"
     if not agent_id:
         raise TeamWorkflowOrchestrationError("Agent id is required for source collection stage session task.")
 
@@ -1080,7 +1055,7 @@ def start_source_collection_stage_session_task(
     run_status = run_bundle["runStatus"]
     active_work_run = run_bundle["activeWorkRun"]
     if not agent_role:
-        agent_role = _source_collection_agent_role_for_id(assignments, agent_id, stage_id)
+        agent_role = _normalize_source_collection_agent_role(_source_collection_agent_role_for_id(assignments, agent_id, stage_id))
     allowed_roles = SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES[stage_id]
     if agent_role and agent_role not in allowed_roles:
         raise TeamWorkflowOrchestrationError(f"Agent role {agent_role} is not assigned to source collection stage {stage_id}.")
@@ -1513,16 +1488,16 @@ def get_source_collection_stage_task_context(
         or _trim_text(task.get("runId"), max_length=128)
     )
     normalized_run_id = _normalize_required_id(normalized_run_id, "Data processing run id is required.")
-    normalized_stage_id = (
+    normalized_stage_id = _normalize_source_collection_stage_id(
         _trim_text(stage_id, max_length=80)
-        or _trim_text(task.get("stageId"), max_length=80)
-        or "collection"
+        or _trim_text(task.get("stageId"), max_length=80),
+        default="finding",
     )
     if normalized_stage_id not in SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES:
         raise TeamWorkflowOrchestrationError(f"Unsupported source collection stage: {normalized_stage_id}")
     run_bundle = _source_collection_run_context_bundle(normalized_team_id, normalized_run_id)
     task_agent_id = _trim_text(task.get("agentId"), max_length=160)
-    task_agent_role = _trim_text(task.get("agentRole"), max_length=80)
+    task_agent_role = _normalize_source_collection_agent_role(task.get("agentRole"))
     matching_assignments = _source_collection_matching_assignments(
         run_bundle["assignments"],
         agent_id=task_agent_id,
@@ -2255,7 +2230,7 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
         maximum=SOURCE_COLLECTION_SEARCH_EXECUTION_MAX_RESULTS_PER_QUERY,
     )
     target_assignment_ids = set(_normalize_text_list(request_payload.get("assignmentIds"), max_items=16, max_length=128))
-    target_agent_role = _trim_text(request_payload.get("agentRole"), max_length=80)
+    target_agent_role = _normalize_source_collection_agent_role(request_payload.get("agentRole"))
     force = bool(request_payload.get("force"))
     try:
         run = data_processing_service.get_processing_run(normalized_run_id)
@@ -2290,9 +2265,11 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
         if executed_query_count >= max_queries:
             break
         assignment_id = _trim_text(assignment.get("assignmentId"), max_length=128)
-        agent_role = _trim_text(assignment.get("agentRole"), max_length=80)
+        agent_role = _normalize_source_collection_agent_role(assignment.get("agentRole"))
         if agent_role not in SOURCE_COLLECTION_SEARCH_EXECUTION_AGENT_ROLES:
             continue
+        assignment = dict(assignment)
+        assignment["agentRole"] = agent_role
         if target_assignment_ids and assignment_id not in target_assignment_ids:
             continue
         if target_agent_role and agent_role != target_agent_role:
@@ -3118,8 +3095,8 @@ def _source_collection_stage_writeback_candidate_coverage(
     task: dict[str, Any],
     writeback: dict[str, Any],
 ) -> dict[str, Any]:
-    stage_id = _trim_text(task.get("stageId"), max_length=80)
-    agent_role = _trim_text(task.get("agentRole"), max_length=80)
+    stage_id = _normalize_source_collection_stage_id(task.get("stageId"), default="")
+    agent_role = _normalize_source_collection_agent_role(task.get("agentRole"))
     result = writeback.get("result") if isinstance(writeback.get("result"), dict) else {}
     source_candidates = _source_collection_candidates_for_run(team_id, run_id)
     source_candidate_ids = [
@@ -3138,7 +3115,7 @@ def _source_collection_stage_writeback_candidate_coverage(
         for item in records
         if _trim_text(item.get("recordId"), max_length=160)
     ]
-    if stage_id == "candidate" or agent_role == "content_extraction":
+    if stage_id == "extraction" or agent_role == "source_extractor":
         record_entries = _source_collection_stage_writeback_record_extractions(
             result,
             include_candidate_fallback=not bool(source_candidate_ids),
@@ -3195,11 +3172,14 @@ def _source_collection_stage_writeback_candidate_coverage(
                 "duplicateRecordIds": duplicate_ids[:80],
                 "recordIdAliasWarnings": alias_warnings[:80],
             }
-        coverage_kind = "candidate_extractions"
-        entries = _source_collection_stage_writeback_candidate_extractions(result)
-    elif stage_id == "screening" or agent_role == "source_quality":
-        coverage_kind = "candidate_decisions"
-        entries = _source_collection_stage_writeback_candidate_decisions(result)
+        candidate_extraction_entries = _source_collection_stage_writeback_candidate_extractions(result)
+        candidate_decision_entries = _source_collection_stage_writeback_candidate_decisions(result)
+        if candidate_decision_entries and not candidate_extraction_entries:
+            coverage_kind = "candidate_decisions"
+            entries = candidate_decision_entries
+        else:
+            coverage_kind = "candidate_extractions"
+            entries = candidate_extraction_entries
     else:
         return {"applicable": False, "coverageKind": ""}
 
@@ -3402,7 +3382,7 @@ def _materialize_source_collection_stage_writeback_content_extraction(
 ) -> dict[str, Any]:
     stage_id = _trim_text(task.get("stageId"), max_length=80)
     agent_role = _trim_text(task.get("agentRole"), max_length=80)
-    if stage_id != "candidate" and agent_role != "content_extraction":
+    if stage_id != "extraction" and agent_role != "source_extractor":
         return _source_collection_stage_writeback_content_extraction_summary(status="skipped_stage")
     status = _trim_text(writeback.get("status"), max_length=80).lower()
     if status not in SOURCE_COLLECTION_STAGE_WRITEBACK_MATERIALIZED_STATUSES:
@@ -3926,9 +3906,9 @@ def _materialize_source_collection_stage_writeback_quality(
     task: dict[str, Any],
     writeback: dict[str, Any],
 ) -> dict[str, Any]:
-    stage_id = _trim_text(task.get("stageId"), max_length=80)
-    agent_role = _trim_text(task.get("agentRole"), max_length=80)
-    if stage_id != "screening" and agent_role != "source_quality":
+    stage_id = _normalize_source_collection_stage_id(task.get("stageId"), default="")
+    agent_role = _normalize_source_collection_agent_role(task.get("agentRole"))
+    if stage_id != "extraction" and agent_role != "source_extractor":
         return _source_collection_stage_writeback_quality_summary(status="skipped_stage")
     status = _trim_text(writeback.get("status"), max_length=80).lower()
     if status not in SOURCE_COLLECTION_STAGE_WRITEBACK_MATERIALIZED_STATUSES:
@@ -3946,7 +3926,7 @@ def _materialize_source_collection_stage_writeback_quality(
     assessed_by_agent = (
         _trim_text(writeback.get("recordedByAgent"), max_length=160)
         or _trim_text(task.get("agentId"), max_length=160)
-        or "Source Quality Assessment Agent"
+        or "资料提炼 Agent"
     )
     assessed: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
@@ -4066,35 +4046,27 @@ def _source_collection_stage_writeback_closure_summary(
     action_label = "继续处理"
     retry_instruction = "重试时请先读取 source_collection_context_tool 的 compact 上下文，按分页读完后再回写真实 ID。"
     excluded_source_count = _source_collection_count(materialized_sources.get("excludedSourceCount"))
-    if stage_id == "candidate" or agent_role == "content_extraction":
+    if stage_id == "extraction" or agent_role == "source_extractor":
         target_label = "候选资料"
         action_label = "提炼"
         source_count = _source_collection_count(materialized_sources.get("importedCandidateCount"))
         extraction_count = _source_collection_count(materialized_content_extraction.get("extractedCandidateCount"))
-        success_count = max(source_count, extraction_count)
+        quality_count = _source_collection_count(materialized_source_quality.get("assessedCandidateCount"))
+        success_count = max(source_count, extraction_count, quality_count)
         artifact_status = "source_manifest_ready" if success_count else "no_effect"
         retry_instruction = (
             "重试时请调用 source_collection_context_tool(context_mode=compact, record_offset=0, record_limit=5)，"
             "按 recordPage.nextOffset 读完整个批次；没有候选时用 recordExtractions[] 绑定完整 recordId，"
             "不要使用短 ID、remaining_N_candidates 或隐藏候选推断。"
         )
-    elif stage_id == "screening" or agent_role == "source_quality":
-        target_label = "审查结论"
-        action_label = "审查"
-        success_count = _source_collection_count(materialized_source_quality.get("assessedCandidateCount"))
-        artifact_status = "source_quality_ready" if success_count else "no_effect"
-        retry_instruction = (
-            "重试时请按 candidatePage.nextOffset 读完所有候选资料，并用 candidateDecisions[] 绑定完整 candidateId；"
-            "无法判断的候选逐条写 needs_more_info 或 blockedReason。"
-        )
-    elif stage_id == "graph" or agent_role == "candidate_graph":
+    elif stage_id == "relations" or agent_role == "source_relation_mapper":
         target_label = "候选关系图"
         action_label = "建图"
         success_count = _source_collection_count(materialized_candidate_graph.get("createdCandidateGraphCount")) or (
             1 if materialized_candidate_graph.get("candidateGraphId") else 0
         )
         artifact_status = "candidate_graph_ready" if success_count else "no_effect"
-    elif stage_id == "memory" or agent_role == "knowledge_steward":
+    elif stage_id == "ingestion" or agent_role == "source_ingestor":
         target_label = "入库审核包"
         action_label = "入库审核"
         success_count = _source_collection_count(materialized_knowledge_ingestion.get("formalKnowledgeItemCount")) or (
@@ -4149,9 +4121,9 @@ def _materialize_source_collection_stage_writeback_candidate_graph(
     task: dict[str, Any],
     writeback: dict[str, Any],
 ) -> dict[str, Any]:
-    stage_id = _trim_text(task.get("stageId"), max_length=80)
-    agent_role = _trim_text(task.get("agentRole"), max_length=80)
-    if stage_id != "graph" and agent_role != "candidate_graph":
+    stage_id = _normalize_source_collection_stage_id(task.get("stageId"), default="")
+    agent_role = _normalize_source_collection_agent_role(task.get("agentRole"))
+    if stage_id != "relations" and agent_role != "source_relation_mapper":
         return _source_collection_stage_writeback_candidate_graph_summary(status="skipped_stage")
     status = _trim_text(writeback.get("status"), max_length=80).lower()
     if status not in SOURCE_COLLECTION_STAGE_WRITEBACK_MATERIALIZED_STATUSES:
@@ -4161,7 +4133,7 @@ def _materialize_source_collection_stage_writeback_candidate_graph(
     created_by_agent = (
         _trim_text(writeback.get("recordedByAgent"), max_length=160)
         or _trim_text(task.get("agentId"), max_length=160)
-        or "Candidate Graph Agent"
+        or "Source Relation Mapper Agent"
     )
     try:
         graph_response = build_candidate_graph(
@@ -4198,10 +4170,13 @@ def _materialize_source_collection_stage_writeback_candidate_graph(
     graph_summary = graph.get("summary") if isinstance(graph.get("summary"), dict) else {}
     candidate_graph_id = _trim_text(candidate_graph.get("candidateId"), max_length=160)
     if candidate_graph_id:
+        task_for_metadata = dict(task)
+        task_for_metadata["stageId"] = stage_id
+        task_for_metadata["agentRole"] = agent_role
         _attach_candidate_graph_stage_writeback_metadata(
             team_id,
             candidate_graph_id,
-            task=task,
+            task=task_for_metadata,
             writeback=writeback,
             graph_response=graph_response,
             agent_graph=agent_graph,
@@ -4250,8 +4225,8 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
     task: dict[str, Any],
     writeback: dict[str, Any],
 ) -> dict[str, Any]:
-    stage_id = _trim_text(task.get("stageId"), max_length=80)
-    agent_role = _trim_text(task.get("agentRole"), max_length=80)
+    stage_id = _normalize_source_collection_stage_id(task.get("stageId"), default="")
+    agent_role = _normalize_source_collection_agent_role(task.get("agentRole"))
     if not _source_collection_stage_can_materialize_formal_knowledge(stage_id, agent_role):
         return _source_collection_stage_writeback_knowledge_ingestion_summary(status="skipped_stage")
     status = _trim_text(writeback.get("status"), max_length=80).lower()
@@ -5135,12 +5110,14 @@ def _attach_candidate_graph_stage_writeback_metadata(
     normalized_candidate_graph_id = _trim_text(candidate_graph_id, max_length=160)
     if not normalized_candidate_graph_id:
         return
+    normalized_stage_id = _normalize_source_collection_stage_id(task.get("stageId"), default="relations")
+    normalized_agent_role = _normalize_source_collection_agent_role(task.get("agentRole")) or "source_relation_mapper"
     writeback_ref = {
         "taskId": _trim_text(task.get("taskId"), max_length=160),
         "runId": _trim_text(task.get("runId"), max_length=160),
-        "stageId": _trim_text(task.get("stageId"), max_length=80),
+        "stageId": normalized_stage_id,
         "agentId": _trim_text(task.get("agentId"), max_length=160),
-        "agentRole": _trim_text(task.get("agentRole"), max_length=80),
+        "agentRole": normalized_agent_role,
         "status": _trim_text(writeback.get("status"), max_length=80),
         "summary": _trim_text(writeback.get("summary"), max_length=1000),
         "recordedAt": _trim_text(writeback.get("recordedAt"), max_length=120),
@@ -5161,10 +5138,34 @@ def _attach_candidate_graph_stage_writeback_metadata(
                 if isinstance(item, dict) and _trim_text(item.get("taskId"), max_length=160) != writeback_ref["taskId"]
             ]
             refs.append(writeback_ref)
+            graph = metadata.get("graph") if isinstance(metadata.get("graph"), dict) else {}
+            if graph:
+                graph = dict(graph)
+                graph_summary = graph.get("summary") if isinstance(graph.get("summary"), dict) else {}
+                graph_summary = dict(graph_summary)
+                graph_summary["stageId"] = normalized_stage_id
+                graph_summary["stageAgentRole"] = normalized_agent_role
+                graph["summary"] = graph_summary
+                metadata["graph"] = graph
+            agent_process = metadata.get("agentProcess") if isinstance(metadata.get("agentProcess"), list) else []
+            if agent_process:
+                normalized_process: list[dict[str, Any]] = []
+                for process in agent_process:
+                    if not isinstance(process, dict):
+                        continue
+                    item = dict(process)
+                    if _normalize_source_collection_agent_role(item.get("agentRole")) == normalized_agent_role:
+                        item["agentRole"] = normalized_agent_role
+                    if _normalize_source_collection_stage_id(item.get("stage"), default="") == normalized_stage_id:
+                        item["stage"] = normalized_stage_id
+                    normalized_process.append(item)
+                metadata["agentProcess"] = normalized_process
             metadata["agentWriteback"] = writeback_ref
             metadata["stageTaskWritebacks"] = refs[-24:]
             metadata["sourceCollectionStageTaskId"] = writeback_ref["taskId"]
             metadata["sourceCollectionRunId"] = writeback_ref["runId"]
+            metadata["workflowStage"] = normalized_stage_id
+            metadata["stageAgentRole"] = normalized_agent_role
             metadata["reusedCandidateGraph"] = bool(graph_response.get("reusedCandidateGraph"))
             candidate["metadata"] = metadata
             candidate["updatedAt"] = utc_now_iso()
@@ -7632,7 +7633,7 @@ def assess_source_candidate_quality(team_id: str, candidate_id: str, payload: di
     normalized_candidate_id = _normalize_required_id(candidate_id, "Candidate id is required.")
     team_service.get_team(normalized_team_id)
     payload = payload if isinstance(payload, dict) else {}
-    assessed_by_agent = _trim_text(payload.get("assessedByAgent"), max_length=160) or "Source Quality Assessment Agent"
+    assessed_by_agent = _trim_text(payload.get("assessedByAgent"), max_length=160) or "资料提炼 Agent"
     requested_decision = _trim_text(payload.get("decision"), max_length=80)
     if requested_decision and requested_decision not in SOURCE_QUALITY_DECISIONS:
         raise TeamWorkflowOrchestrationError("Source quality decision must be approved, needs_revision, or rejected.")
@@ -7694,7 +7695,7 @@ def assess_source_candidate_quality(team_id: str, candidate_id: str, payload: di
             candidate["currentState"] = "rejected"
             candidate["qualityStatus"] = "source_quality_rejected"
             metadata["rejectionArchive"] = {
-                "reason": notes or "Source Quality Assessment Agent rejected this source candidate.",
+                "reason": notes or "资料提炼 Agent 判定该资料无有效内容或不适合进入本轮。",
                 "rejectedByAgent": assessed_by_agent,
                 "rejectedAt": now,
                 "assessmentId": assessment["assessmentId"],
@@ -7740,11 +7741,11 @@ def assess_source_quality_batch(team_id: str, payload: dict[str, Any] | None = N
     team_service.get_team(normalized_team_id)
     payload = payload if isinstance(payload, dict) else {}
     batch_run_id = _new_record_id("source-quality-batch")
-    assessed_by_agent = _trim_text(payload.get("assessedByAgent"), max_length=160) or "Source Quality Assessment Agent"
+    assessed_by_agent = _trim_text(payload.get("assessedByAgent"), max_length=160) or "资料提炼 Agent"
     max_candidates = _normalize_int(payload.get("maxCandidates"), default=100, minimum=1, maximum=200)
     force = bool(payload.get("force"))
     requested_candidate_ids = _normalize_text_list(payload.get("candidateIds"), max_items=200, max_length=128)
-    notes = _trim_text(payload.get("notes"), max_length=4000) or "Source Quality Assessment Agent completed one-click batch screening."
+    notes = _trim_text(payload.get("notes"), max_length=4000) or "资料提炼 Agent 已完成本轮批量提炼和审查。"
     evidence_refs = _normalize_ref_list(payload.get("evidenceRefs"), max_items=24)
     evidence_refs = [
         *evidence_refs,
@@ -7929,7 +7930,7 @@ def get_source_quality_status(team_id: str) -> dict[str, Any]:
         "candidates": sorted(candidate_summaries, key=lambda item: str(item.get("updatedAt") or ""), reverse=True)[:16],
         "actionItems": action_items,
         "screeningContract": {
-            "agentRole": "Source Quality Assessment Agent",
+            "agentRole": "资料提炼 Agent",
             "targetCandidateType": "source_manifest",
             "decisions": sorted(SOURCE_QUALITY_DECISIONS),
             "writesCandidateStore": True,
@@ -8533,7 +8534,7 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
     payload = payload if isinstance(payload, dict) else {}
     curation_mode = _trim_text(payload.get("curationMode"), max_length=80) or "all_active"
     created_by_agent = _trim_text(payload.get("createdByAgent"), max_length=160) or "Candidate Graph Preview Agent"
-    source_quality_agent_id = _trim_text(payload.get("sourceQualityAgentId"), max_length=160) or "Source Quality Assessment Agent"
+    source_quality_agent_id = _trim_text(payload.get("sourceQualityAgentId"), max_length=160) or "资料提炼 Agent"
     source_collection_run_id = _trim_text(payload.get("sourceCollectionRunId") or payload.get("runId"), max_length=160)
     force_rebuild = bool(payload.get("forceRebuild"))
     if bool(payload.get("forceReview")):
@@ -10314,33 +10315,27 @@ def _knowledge_collection_completion_step(
 
 _KNOWLEDGE_COLLECTION_COMPLETION_FLOW_STAGES: tuple[dict[str, Any], ...] = (
     {
-        "stageId": "collection",
-        "label": "搜索资料",
-        "agentRole": "source_collection",
+        "stageId": "finding",
+        "label": "资料寻找",
+        "agentRole": "source_finder",
         "stepIds": {"remaining_search"},
     },
     {
-        "stageId": "candidate",
+        "stageId": "extraction",
         "label": "资料提炼",
-        "agentRole": "content_extraction",
-        "stepIds": {"candidate_extraction"},
+        "agentRole": "source_extractor",
+        "stepIds": {"candidate_extraction", "source_review"},
     },
     {
-        "stageId": "screening",
-        "label": "资料审查",
-        "agentRole": "source_quality",
-        "stepIds": {"source_review"},
-    },
-    {
-        "stageId": "graph",
-        "label": "候选图谱",
-        "agentRole": "candidate_graph",
+        "stageId": "relations",
+        "label": "资料关系整理",
+        "agentRole": "source_relation_mapper",
         "stepIds": {"candidate_graph"},
     },
     {
-        "stageId": "memory",
-        "label": "知识库管理员入库审核",
-        "agentRole": "knowledge_steward",
+        "stageId": "ingestion",
+        "label": "资料入库",
+        "agentRole": "source_ingestor",
         "stepIds": {
             "steward_pack",
             "source_gate",
@@ -10815,7 +10810,7 @@ def _run_knowledge_collection_completion_background(team_id: str, run_id: str, p
             run_id,
             status="running",
             current_phase="running",
-            summary="知识搜集一键完成正在执行：搜索、提炼、审查、候选图谱和入库审核。",
+            summary="知识搜集一键完成正在执行：资料寻找、资料提炼、资料关系整理和资料入库。",
             active=True,
             completion_steps=running_steps,
             flow_visualization=_knowledge_collection_completion_flow_visualization("running", steps=running_steps),
@@ -11012,10 +11007,23 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     team_detail = team_service.get_team(normalized_team_id)
     payload = payload if isinstance(payload, dict) else {}
-    source_quality_agent_id = _trim_text(payload.get("sourceQualityAgentId"), max_length=160) or "Source Quality Assessment Agent"
-    candidate_graph_agent_id = _trim_text(payload.get("candidateGraphAgentId"), max_length=160) or "Candidate Graph Preview Agent"
+    source_agent_ids = _source_collection_team_agent_ids(team_detail, list(SOURCE_COLLECTION_DEFAULT_AGENT_ROLES), payload)
+    source_quality_agent_id = (
+        _trim_text(payload.get("sourceExtractorAgentId") or payload.get("sourceQualityAgentId"), max_length=160)
+        or source_agent_ids.get("source_extractor")
+        or "资料提炼 Agent"
+    )
+    candidate_graph_agent_id = (
+        _trim_text(payload.get("sourceRelationMapperAgentId") or payload.get("candidateGraphAgentId"), max_length=160)
+        or source_agent_ids.get("source_relation_mapper")
+        or "资料关系整理 Agent"
+    )
     # 默认必须是团队成员 agentId（而非显示名），否则建库/审核的成员校验会失败。
-    steward_agent_id = _trim_text(payload.get("stewardAgentId"), max_length=160) or agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    steward_agent_id = (
+        _trim_text(payload.get("sourceIngestorAgentId") or payload.get("stewardAgentId"), max_length=160)
+        or source_agent_ids.get("source_ingestor")
+        or agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    )
     # 职责分离：steward 提案，由独立的 coordinator/lead 成员审批，避免自提自批。
     reviewer_agent_id = _trim_text(payload.get("reviewerAgentId"), max_length=160) or _resolve_team_review_agent_id(
         team_detail, exclude_agent_id=steward_agent_id
@@ -11061,7 +11069,7 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
             "assessedByAgent": source_quality_agent_id,
             "maxCandidates": max_candidates,
             "force": force_review,
-            "notes": "资料审查 Agent 执行第一阶段一键入库前的批量质量审查。",
+            "notes": "资料提炼 Agent 执行第一阶段一键入库前的批量提炼和资料审查。",
         },
     )
     source_quality_summary = source_quality.get("sourceQualityStatus", {}).get("summary", {})
@@ -11069,11 +11077,11 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
     approved_count = int(source_quality_summary.get("approvedSourceCandidateCount") or 0)
     append_step(
         "source_review",
-        "资料审查",
+        "资料提炼",
         "completed" if approved_count else str(source_quality.get("status") or "blocked"),
         input_count=source_candidate_count,
         output_count=approved_count,
-        detail=f"{source_quality_agent_id} completed source quality screening.",
+        detail=f"{source_quality_agent_id} 已完成资料提炼和审查。",
         artifact_id=str(source_quality.get("batchRunId") or ""),
     )
     if approved_count <= 0:
@@ -11126,7 +11134,7 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
         "completed",
         input_count=int(graph_summary.get("inputCandidateCount") or approved_count),
         output_count=int(graph_summary.get("nodeCount") or 0),
-        detail=f"{candidate_graph_agent_id} generated a candidate-only graph snapshot.",
+        detail=f"{candidate_graph_agent_id} 已完成候选资料关系整理。",
         artifact_id=str(candidate_graph["candidateGraph"].get("candidateId") or ""),
     )
 
@@ -11142,11 +11150,11 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
     steward_candidate_id = str(precheck["candidate"].get("candidateId") or "")
     append_step(
         "steward_pack",
-        "资料提炼包",
+        "入库审核包",
         "completed",
         input_count=int(precheck["precheck"].get("selectedCandidateCount") or 0),
         output_count=1,
-        detail=f"{steward_agent_id} built a governed steward pack.",
+        detail=f"{steward_agent_id} 已生成受治理门禁保护的入库审核包。",
         artifact_id=steward_candidate_id,
     )
 
@@ -11294,13 +11302,13 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
         )
         append_step(
             "knowledge_steward_request",
-            "通知知识库管理员",
+            "通知资料入库 Agent",
             str(knowledge_steward_activation.get("status") or "message_written"),
             input_count=1,
             output_count=1 if knowledge_steward_activation.get("messageId") else 0,
-            detail="待入库知识包已发送给知识库管理员 Agent，等待它执行最终入库。"
+            detail="待入库知识包已发送给资料入库 Agent，等待它执行最终入库。"
             if knowledge_steward_activation.get("messageId")
-            else "待入库知识包已生成，但知识库管理员 Agent 尚未收到消息。",
+            else "待入库知识包已生成，但资料入库 Agent 尚未收到消息。",
             artifact_id=str(knowledge_steward_activation.get("messageId") or ""),
         )
 
@@ -11400,7 +11408,7 @@ def run_knowledge_collection_ingestion(team_id: str, payload: dict[str, Any] | N
             "reusedCandidateGraph": bool(candidate_graph.get("reusedCandidateGraph")),
             "reusedStewardPack": bool(precheck.get("reusedStewardPack")),
             "ingestionFingerprint": str(precheck.get("ingestionFingerprint") or candidate_graph.get("ingestionFingerprint") or ""),
-            "nextAction": "进入实验规划" if knowledge_review else ("等待知识库管理员最终入库" if knowledge_steward_activation else "检查入库审核门禁"),
+            "nextAction": "进入实验规划" if knowledge_review else ("等待资料入库 Agent 最终入库" if knowledge_steward_activation else "检查入库审核门禁"),
         },
         "workflow": (
             knowledge_review["workflow"]
@@ -12490,7 +12498,7 @@ def _coordination_target_agent_role(queue: str, node: str, state: str) -> str:
     if queue == "stewardship" or node == "steward_ingestion" or "steward" in state:
         return "知识库管理员"
     if node in {"knowledge_collection", "source_screening"} or state.startswith("source_"):
-        return "Source Intake Agent"
+        return "资料寻找 Agent"
     if node == "paper_note" or "paper_note" in state:
         return "Paper Note Extraction Agent"
     if node == "neuro_mechanism" or ("mechanism_" in state and "mapping" not in state):
@@ -12990,7 +12998,7 @@ def _source_quality_action_items(
             {
                 "code": "source_quality_no_sources",
                 "severity": "blocked",
-                "message": "还没有 source_manifest 可供资料质量评估。",
+                "message": "还没有 source_manifest 可供资料提炼和审查。",
                 "nextAction": "先启动资料搜索或手工回写 DataRecord 并导入 source_manifest。",
                 "candidateId": "",
             }
@@ -12999,7 +13007,7 @@ def _source_quality_action_items(
         {
             "code": "source_quality_pending_assessment",
             "severity": "needs_review",
-            "message": f"{item.get('title') or _source_manifest_label(item)} 等待 Source Quality Assessment Agent 筛选。",
+            "message": f"{item.get('title') or _source_manifest_label(item)} 等待资料提炼 Agent 审查。",
             "nextAction": "调用 source-quality/assess，给出 approved 或 needs_revision。",
             "candidateId": str(item.get("candidateId") or ""),
         }
@@ -13032,7 +13040,7 @@ def _source_quality_next_actions(decision: str) -> list[str]:
             "Collect replacement sources before continuing the knowledge collection round.",
         ]
     return [
-        "Return the source to Source Intake Agent or Source Acquisition Agent for repair.",
+        "将资料退回资料寻找 Agent 补充来源或剔除。",
         "Re-run source-quality/assess after source path, permission, citation, or relevance gaps are fixed.",
     ]
 
@@ -14464,7 +14472,7 @@ def _import_source_collection_local_workspace_sources(
                 _trim_text(record.get("recordId"), max_length=160),
                 {
                     "sourcePath": _trim_text((record.get("metadata") or {}).get("localWorkspaceImport", {}).get("relativePath") if isinstance(record.get("metadata"), dict) else "", max_length=2000),
-                    "createdByAgent": _trim_text(source_assignment.get("agentId"), max_length=160) or "knowledge_expansion_source_intake",
+                    "createdByAgent": _trim_text(source_assignment.get("agentId"), max_length=160) or "source_finder",
                     "tags": ["source_collection", "local_workspace", "knowledge_expansion"],
                     "metadata": {
                         "sourceCollectionRunId": run_id,
@@ -14538,8 +14546,8 @@ def _normalize_source_collection_roles(value: Any) -> list[str]:
     raw_roles = value if isinstance(value, list) else list(SOURCE_COLLECTION_DEFAULT_AGENT_ROLES)
     roles: list[str] = []
     for item in raw_roles[:8]:
-        role = _trim_text(item, max_length=80)
-        if role in data_processing_service.COLLECTION_AGENT_ROLES and role not in roles:
+        role = _normalize_source_collection_agent_role(item)
+        if role in SOURCE_COLLECTION_AGENT_ROLES and role not in roles:
             roles.append(role)
     return roles or list(SOURCE_COLLECTION_DEFAULT_AGENT_ROLES)
 
@@ -14556,7 +14564,7 @@ def _source_collection_team_agent_ids(team: dict[str, Any], roles: list[str], pa
     for node in nodes:
         if not isinstance(node, dict):
             continue
-        role = _trim_text(node.get("role"), max_length=80)
+        role = _normalize_source_collection_agent_role(node.get("role"))
         agent_id = _trim_text(node.get("agentId"), max_length=160)
         if role in roles and agent_id and role not in mapped:
             mapped[role] = agent_id
@@ -14862,12 +14870,10 @@ def _source_collection_dynamic_delta_contract() -> dict[str, Any]:
 def _source_collection_assignment_scope(role: str, base_scope: dict[str, Any], *, search_plan: dict[str, Any] | None = None) -> dict[str, Any]:
     role_purposes = {
         "data_intake_coordinator": "Coordinate source collection and handoff to source_manifest import.",
-        "data_discovery": "Find candidate source references under the run scope.",
-        "source_acquisition": "Acquire source handles, local paths, URLs, or API references.",
-        "content_extraction": "Extract readable content and metadata into DataRecords.",
-        "source_deduplication": "Detect duplicate or version-related source records.",
-        "source_quality": "Score reliability, completeness, and processing risk.",
-        "intake_review": "Review collected records before challenge-cup candidate import.",
+        "source_finder": "Find, fetch, download, and register traceable source records for the run.",
+        "source_extractor": "Extract useful source content and make source-quality decisions in one pass.",
+        "source_relation_mapper": "Build candidate-only topic, source, and evidence relationships.",
+        "source_ingestor": "Perform governed final ingestion into formal team knowledge.",
     }
     scope = {
         **base_scope,
@@ -14914,7 +14920,8 @@ def _build_source_collection_search_plan(
         minimum=1,
         maximum=100,
     )
-    role_cycle = roles or list(SOURCE_COLLECTION_DEFAULT_AGENT_ROLES)
+    search_roles = [role for role in roles if role in SOURCE_COLLECTION_SEARCH_EXECUTION_AGENT_ROLES]
+    role_cycle = search_roles or ["source_finder"]
     queries: list[dict[str, Any]] = []
     for seed in query_seeds:
         for source_type in source_types:
@@ -15035,27 +15042,27 @@ def _source_collection_assignment_stage_summary(assignments: list[dict[str, Any]
     open_assignments = _source_collection_open_assignments(assignments)
     search_assignments = [
         item for item in assignments
-        if _trim_text(item.get("agentRole"), max_length=80) in SOURCE_COLLECTION_SEARCH_EXECUTION_AGENT_ROLES
+        if _normalize_source_collection_agent_role(item.get("agentRole")) in SOURCE_COLLECTION_SEARCH_EXECUTION_AGENT_ROLES
     ]
     search_open_assignments = [
         item for item in open_assignments
-        if _trim_text(item.get("agentRole"), max_length=80) in SOURCE_COLLECTION_SEARCH_EXECUTION_AGENT_ROLES
+        if _normalize_source_collection_agent_role(item.get("agentRole")) in SOURCE_COLLECTION_SEARCH_EXECUTION_AGENT_ROLES
     ]
     collection_assignments = [
         item for item in assignments
-        if _trim_text(item.get("agentRole"), max_length=80) in SOURCE_COLLECTION_COLLECTION_STAGE_AGENT_ROLES
+        if _normalize_source_collection_agent_role(item.get("agentRole")) in SOURCE_COLLECTION_COLLECTION_STAGE_AGENT_ROLES
     ]
     collection_open_assignments = [
         item for item in open_assignments
-        if _trim_text(item.get("agentRole"), max_length=80) in SOURCE_COLLECTION_COLLECTION_STAGE_AGENT_ROLES
+        if _normalize_source_collection_agent_role(item.get("agentRole")) in SOURCE_COLLECTION_COLLECTION_STAGE_AGENT_ROLES
     ]
     downstream_assignments = [
         item for item in assignments
-        if _trim_text(item.get("agentRole"), max_length=80) not in SOURCE_COLLECTION_SEARCH_EXECUTION_AGENT_ROLES
+        if _normalize_source_collection_agent_role(item.get("agentRole")) not in SOURCE_COLLECTION_SEARCH_EXECUTION_AGENT_ROLES
     ]
     downstream_open_assignments = [
         item for item in open_assignments
-        if _trim_text(item.get("agentRole"), max_length=80) not in SOURCE_COLLECTION_SEARCH_EXECUTION_AGENT_ROLES
+        if _normalize_source_collection_agent_role(item.get("agentRole")) not in SOURCE_COLLECTION_SEARCH_EXECUTION_AGENT_ROLES
     ]
     return {
         "assignmentCount": len(assignments),
@@ -15914,7 +15921,10 @@ def _source_collection_matching_assignments(
 
 
 def _source_collection_stage_can_materialize_formal_knowledge(stage_id: str, agent_role: str) -> bool:
-    return _trim_text(stage_id, max_length=80) == "memory" and _trim_text(agent_role, max_length=80) == "knowledge_steward"
+    return (
+        _normalize_source_collection_stage_id(stage_id, default="") == "ingestion"
+        and _normalize_source_collection_agent_role(agent_role) == "source_ingestor"
+    )
 
 
 def _source_collection_stage_session_task_boundaries(*, stage_id: str = "", agent_role: str = "") -> dict[str, bool]:
@@ -15962,9 +15972,9 @@ def _source_collection_memory_steward_action_packet(
     ]
     recommended_status = "completed" if approved_candidate_ids else "blocked"
     summary = (
-        f"知识库管理员通过 {len(approved_candidate_ids)} 条 source_quality_approved 候选，按治理门禁写回。"
+        f"资料入库 Agent 通过 {len(approved_candidate_ids)} 条 source_quality_approved 候选，按治理门禁写回。"
         if approved_candidate_ids
-        else "本轮没有 source_quality_approved 候选可入库，写回 blocked 并等待资料质检完成。"
+        else "本轮没有 source_quality_approved 候选可入库，写回 blocked 并等待资料提炼完成。"
     )
     result_skeleton = {
         "approvedCandidateIds": approved_candidate_ids,
@@ -16406,8 +16416,8 @@ def _source_collection_stage_cards_projection(
     tasks = _source_collection_stage_session_tasks(normalized_team_id, normalized_run_id)
     tasks_by_stage: dict[str, list[dict[str, Any]]] = {}
     for task in tasks:
-        stage_id = _trim_text(task.get("stageId"), max_length=80)
-        if stage_id:
+        stage_id = _normalize_source_collection_stage_id(task.get("stageId"), default="")
+        if stage_id in SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES:
             tasks_by_stage.setdefault(stage_id, []).append(task)
     current_agent_ids_by_stage = (
         _source_collection_current_stage_agent_ids_by_stage(normalized_team_id, tasks_by_stage.keys())
@@ -16425,61 +16435,50 @@ def _source_collection_stage_cards_projection(
     }
     cards = [
         _source_collection_stage_card_projection(
-            "collection",
-            stage_task_groups.get("collection", ([], []))[0],
+            "finding",
+            stage_task_groups.get("finding", ([], []))[0],
             artifact_count=active_record_count,
             input_count=_source_collection_count(run_summary.get("assignmentCount")),
             output_count=active_record_count,
             pending_count=_source_collection_count(run_summary.get("openAssignmentCount")),
             artifact_status="ready" if active_record_count > 0 else "empty",
             artifact_summary=f"{active_record_count} active DataRecord records; {excluded_source_count} excluded; {_source_collection_count(run_summary.get('openAssignmentCount'))} assignments remain.",
-            historical_task_count=len(stage_task_groups.get("collection", ([], []))[1]),
+            historical_task_count=len(stage_task_groups.get("finding", ([], []))[1]),
             extra_counts={"excluded": excluded_source_count, "rawRecord": raw_record_count},
         ),
         _source_collection_stage_card_projection(
-            "candidate",
-            stage_task_groups.get("candidate", ([], []))[0],
-            artifact_count=len(source_candidates),
+            "extraction",
+            stage_task_groups.get("extraction", ([], []))[0],
+            artifact_count=max(len(source_candidates), len(assessed_sources)),
             input_count=active_record_count,
-            output_count=len(source_candidates),
-            pending_count=max(0, active_record_count - len(source_candidates)),
-            artifact_status="ready" if source_candidates else "empty",
-            artifact_summary=f"{len(source_candidates)} source_manifest candidates from this run; {excluded_source_count} excluded source(s).",
-            historical_task_count=len(stage_task_groups.get("candidate", ([], []))[1]),
+            output_count=len(approved_sources),
+            pending_count=max(0, len(source_candidates) - len(assessed_sources)) if source_candidates else max(0, active_record_count - len(source_candidates)),
+            artifact_status="ready" if source_candidates and len(assessed_sources) >= len(source_candidates) else ("partial" if source_candidates or assessed_sources else "empty"),
+            artifact_summary=f"{len(source_candidates)} source_manifest candidates; {len(assessed_sources)}/{len(source_candidates)} assessed; {len(approved_sources)} approved; {excluded_source_count} excluded.",
+            historical_task_count=len(stage_task_groups.get("extraction", ([], []))[1]),
             extra_counts={"excluded": excluded_source_count, "rawRecord": raw_record_count},
         ),
         _source_collection_stage_card_projection(
-            "screening",
-            stage_task_groups.get("screening", ([], []))[0],
-            artifact_count=len(assessed_sources),
-            input_count=len(source_candidates),
-            output_count=len(approved_sources),
-            pending_count=max(0, len(source_candidates) - len(assessed_sources)),
-            artifact_status="ready" if len(assessed_sources) >= len(source_candidates) and source_candidates else ("partial" if assessed_sources else "empty"),
-            artifact_summary=f"{len(assessed_sources)}/{len(source_candidates)} source candidates assessed; {len(approved_sources)} approved.",
-            historical_task_count=len(stage_task_groups.get("screening", ([], []))[1]),
-        ),
-        _source_collection_stage_card_projection(
-            "graph",
-            stage_task_groups.get("graph", ([], []))[0],
+            "relations",
+            stage_task_groups.get("relations", ([], []))[0],
             artifact_count=_source_collection_count(graph_summary.get("nodeCount")),
             input_count=len(source_candidates),
             output_count=_source_collection_count(graph_summary.get("edgeCount")),
             pending_count=0 if graph_summary else len(source_candidates),
             artifact_status="ready" if graph_summary else "empty",
             artifact_summary=f"{_source_collection_count(graph_summary.get('nodeCount'))} graph nodes; {_source_collection_count(graph_summary.get('edgeCount'))} graph edges.",
-            historical_task_count=len(stage_task_groups.get("graph", ([], []))[1]),
+            historical_task_count=len(stage_task_groups.get("relations", ([], []))[1]),
         ),
         _source_collection_stage_card_projection(
-            "memory",
-            stage_task_groups.get("memory", ([], []))[0],
+            "ingestion",
+            stage_task_groups.get("ingestion", ([], []))[0],
             artifact_count=max(steward_pack_count, formal_synced_count),
             input_count=len(approved_sources) or len(source_candidates),
             output_count=formal_synced_count,
             pending_count=pending_steward_pack_count,
             artifact_status="ready" if formal_synced_count else ("partial" if steward_pack_count else "empty"),
             artifact_summary=f"{steward_pack_count} 个入库审核包；{formal_synced_count} 个正式知识同步标记。",
-            historical_task_count=len(stage_task_groups.get("memory", ([], []))[1]),
+            historical_task_count=len(stage_task_groups.get("ingestion", ([], []))[1]),
         ),
     ]
     latest_tasks = {
@@ -16527,6 +16526,7 @@ def _source_collection_stage_card_projection(
     coverage_missing = _source_collection_count(coverage_summary.get("missing")) + _source_collection_count(coverage_summary.get("invalid"))
     coverage_incomplete = bool(coverage_summary.get("applicable")) and not bool(coverage_summary.get("complete"))
     effective_pending_count = max(pending_count, coverage_missing)
+    task_completed = agent_status == "completed"
     task_settled = agent_status in {"completed", "needs_review"}
     task_blocked = agent_status in {"blocked", "failed"}
     artifact_ready = artifact_status == "ready" and artifact_count > 0
@@ -16537,7 +16537,7 @@ def _source_collection_stage_card_projection(
         card_status = "artifact_ready_agent_blocked"
     elif task_blocked:
         card_status = "agent_blocked"
-    elif task_settled and artifact_complete:
+    elif task_completed and artifact_complete:
         card_status = "closed_loop"
     elif task_settled and artifact_ready:
         card_status = "artifact_ready_agent_needs_review"
@@ -16647,9 +16647,9 @@ def _source_collection_team_identity_snapshot(team_id: str) -> dict[str, Any]:
 
 def _source_collection_current_stage_agent_ids_by_stage(team_id: str, stage_ids: Iterable[str]) -> dict[str, set[str]]:
     normalized_stage_ids = [
-        _trim_text(stage_id, max_length=80)
+        _normalize_source_collection_stage_id(stage_id, default="")
         for stage_id in stage_ids
-        if _trim_text(stage_id, max_length=80) in SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES
+        if _normalize_source_collection_stage_id(stage_id, default="") in SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES
     ]
     result = {stage_id: set() for stage_id in normalized_stage_ids}
     if not result:
@@ -16659,14 +16659,12 @@ def _source_collection_current_stage_agent_ids_by_stage(team_id: str, stage_ids:
         for role in SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES.get(stage_id, ()):
             role_to_stage_ids.setdefault(role, []).append(stage_id)
     for member in _source_collection_team_member_snapshot(team_id):
-        member_role = _trim_text(member.get("role") or member.get("agentRole"), max_length=80)
+        member_role = _normalize_source_collection_agent_role(member.get("role") or member.get("agentRole"))
         member_agent_id = _trim_text(member.get("agentId"), max_length=160)
         if not member_agent_id:
             continue
         for stage_id in role_to_stage_ids.get(member_role, ()):
             result[stage_id].add(member_agent_id)
-    if "memory" in result:
-        result["memory"].add(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID)
     return result
 
 
@@ -16845,7 +16843,10 @@ def _reconcile_source_collection_stage_session_task_sources(team_id: str, run_id
     existing_quality_summary = writeback.get("materializedSourceQuality") if isinstance(writeback.get("materializedSourceQuality"), dict) else {}
     existing_quality_status = _trim_text(existing_quality_summary.get("status"), max_length=80).lower()
     should_reconcile_quality = (
-        (_trim_text(task.get("stageId"), max_length=80) == "screening" or _trim_text(task.get("agentRole"), max_length=80) == "source_quality")
+        (
+            _normalize_source_collection_stage_id(task.get("stageId"), default="") == "extraction"
+            or _normalize_source_collection_agent_role(task.get("agentRole")) == "source_extractor"
+        )
         and bool(_source_collection_stage_writeback_candidate_decisions(result))
     )
     if should_reconcile_quality and (not existing_quality_status or existing_quality_status == "failed"):
@@ -16862,7 +16863,10 @@ def _reconcile_source_collection_stage_session_task_sources(team_id: str, run_id
     existing_graph_summary = writeback.get("materializedCandidateGraph") if isinstance(writeback.get("materializedCandidateGraph"), dict) else {}
     existing_graph_status = _trim_text(existing_graph_summary.get("status"), max_length=80).lower()
     should_reconcile_graph = (
-        (_trim_text(task.get("stageId"), max_length=80) == "graph" or _trim_text(task.get("agentRole"), max_length=80) == "candidate_graph")
+        (
+            _normalize_source_collection_stage_id(task.get("stageId"), default="") == "relations"
+            or _normalize_source_collection_agent_role(task.get("agentRole")) == "source_relation_mapper"
+        )
         and isinstance(result.get("candidateGraph"), dict)
     )
     if should_reconcile_graph and (not existing_graph_status or existing_graph_status == "failed"):
@@ -17462,11 +17466,10 @@ def _source_collection_stage_task_idempotency_key(
 
 def _source_collection_stage_task_title(stage_id: str) -> str:
     return {
-        "collection": "资料搜索任务",
-        "candidate": "资料提炼任务",
-        "screening": "资料审查任务",
-        "graph": "候选图谱任务",
-        "memory": "知识库管理员入库审核任务",
+        "finding": "资料寻找任务",
+        "extraction": "资料提炼任务",
+        "relations": "资料关系整理任务",
+        "ingestion": "资料入库任务",
     }.get(stage_id, "知识搜集阶段任务")
 
 
@@ -17507,12 +17510,17 @@ def _source_collection_agent_context_message(
     assignment_summary = _source_collection_assignment_stage_summary(assignments)
     open_matching_assignments = _source_collection_open_assignments(matching_assignments)
     stage_label = {
-        "collection": "资料发现/获取/提炼",
-        "candidate": "资料提炼",
-        "screening": "资料质量评估",
-        "graph": "候选图谱构建",
-        "memory": "知识库管理员入库审核",
+        "finding": "资料寻找",
+        "extraction": "资料提炼",
+        "relations": "资料关系整理",
+        "ingestion": "资料入库",
     }.get(stage_id, stage_id)
+    role_label = {
+        "source_finder": "资料寻找 Agent",
+        "source_extractor": "资料提炼 Agent",
+        "source_relation_mapper": "资料关系整理 Agent",
+        "source_ingestor": "资料入库 Agent",
+    }.get(agent_role, agent_role or "未标注")
     active_summary = _trim_text(active_work_run.get("summary"), max_length=240) if active_work_run else ""
     run_title = _trim_text(run.get("title") or run_scope.get("topic") or run_metadata.get("title"), max_length=180)
     topic = _trim_text(run_scope.get("topic"), max_length=240)
@@ -17523,7 +17531,7 @@ def _source_collection_agent_context_message(
         f"- 团队：{_trim_text(team.get('name') or team.get('teamId'), max_length=160)}",
         f"- 当前 Agent：{agent_name}",
         f"- 当前阶段：{stage_label}",
-        f"- 角色：{agent_role or '未标注'}",
+        f"- 角色：{role_label}",
         f"- 运行：{_trim_text(run.get('runId'), max_length=160)}",
     ]
     if run_title:
@@ -17598,8 +17606,8 @@ def _source_collection_stage_previous_attempt_lines(previous_task: dict[str, Any
         ]
     progress = _trim_text(closure.get("progressLabel"), max_length=200)
     if not progress and isinstance(coverage, dict) and coverage:
-        stage_id = _trim_text(previous_task.get("stageId"), max_length=80)
-        action = "提炼" if stage_id == "candidate" else "处理"
+        stage_id = _normalize_source_collection_stage_id(previous_task.get("stageId"), default="")
+        action = "提炼" if stage_id == "extraction" else "处理"
         progress = f"{action} {_source_collection_count(coverage.get('processed'))}/{_source_collection_count(coverage.get('total'))}"
     message = _trim_text(closure.get("message"), max_length=700) or _trim_text(previous_task.get("summary"), max_length=700)
     retry_instruction = _trim_text(closure.get("retryInstruction") or closure.get("nextAction"), max_length=1000)
@@ -17639,14 +17647,14 @@ def _source_collection_stage_session_task_message(
 ) -> str:
     can_materialize_formal_knowledge = _source_collection_stage_can_materialize_formal_knowledge(stage_id, agent_role)
     boundary_text = (
-        "边界：这是知识库管理员入库审核任务，会立即要求当前 Agent 在本会话执行；"
+        "边界：这是资料入库任务，会立即要求当前 Agent 在本会话执行；"
         "对本轮已通过候选调用 source_collection_stage_writeback_tool 写回 approved 候选结果后，"
         "后端会复用 Team Knowledge source review、proposal review/apply gate 创建正式 KnowledgeItem；"
         "不要绕过该治理门禁直接写库、写 RAG 或改 ACL。"
         if can_materialize_formal_knowledge
         else (
             "边界：这是阶段任务启动消息，会立即要求当前 Agent 在本会话执行；"
-            "正式知识库、RAG 和官方图谱写入仍由知识库管理员治理入口控制。"
+            "正式知识库、RAG 和官方图谱写入仍由资料入库阶段控制。"
         )
     )
     context = _source_collection_agent_context_message(
@@ -17697,19 +17705,19 @@ def _source_collection_stage_session_task_message(
             "- 在本会话里完成当前阶段任务，并把可审查的结论、证据引用和下一步写清楚。",
             "- 如果返回的 `recordPage.hasMore=true`，必须继续按 `record_offset=recordPage.nextOffset` 分页读取，直到本阶段应处理原始资料都有真实 recordId 的结论。",
             "- 如果返回的 `candidatePage.hasMore=true`，必须继续按 `candidate_offset=candidatePage.nextOffset` 分页读取，直到本阶段应处理候选都有真实 candidateId 的结论。",
-            "- 资料提炼阶段如果 `candidatePage.total=0`，输入就是原始 DataRecord：请用 `recordExtractions[]` 回写，并绑定完整 `recordId`；已有候选后才用 `candidateExtractions[]` 绑定完整 `candidateId`。",
+            "- 资料提炼阶段如果 `candidatePage.total=0`，输入就是原始 DataRecord：请用 `recordExtractions[]` 回写，并绑定完整 `recordId`；已有候选后用 `candidateExtractions[]` 和 `candidateDecisions[]` 绑定完整 `candidateId`。",
             "- 资料提炼采用宽松保留：只要有可用内容或有价值线索，就写 `decision=keep` 或 `needs_more_info`，并填写 `valueSummary`、`defects`、`followUpSuggestion`；不要因为缺 DOI/缺全文直接丢弃。",
             "- 只有确认没有摘要、正文、可验证内容或明显跑题时，才写 `decision=exclude` 和 `excludeReason=no_effective_content/out_of_scope/unobtainable`；这些来源会被移出后续流程并记录，避免下次重复搜到。",
             "- 如果上下文返回 `excludedSourceSummary.excludedCount>0`，表示这些资料已从本轮活跃流程移出，不要再次处理或把它们算作待补资料。",
             "- 不要推断截断或隐藏资料；不要把 `remaining_11_candidates`、短 ID 或聚合占位符当作 recordId/candidateId。",
             "- 不要使用 `web_fetch_tool` 读取 `file://` 本地路径或 localhost 回写接口；本地资料上下文只通过 `source_collection_context_tool` 获取。",
             (
-                "- 本任务是知识库管理员入库审核：只处理 source_quality_approved 的本轮 approved 候选；优先使用 `source_collection_context_tool` 返回的 `stewardActionPacket.approvedCandidateIds` 和 `writebackResultSkeleton` 写回。"
+                "- 本任务是资料入库：只处理 source_quality_approved 的本轮 approved 候选；优先使用 `source_collection_context_tool` 返回的 `stewardActionPacket.approvedCandidateIds` 和 `writebackResultSkeleton` 写回。"
                 if can_materialize_formal_knowledge
                 else "- 不要直接写正式 Team Knowledge、RAG 或官方图谱；只能按候选层和结构化回写合同提交结果。"
             ),
             (
-                "- 不要推断截断或隐藏候选；pending/rejected/needs_revision 只作为 deferredCandidateCounts 汇报，不要在 memory 阶段继续审查或补全它们。"
+                "- 不要推断截断或隐藏候选；pending/rejected/needs_revision 只作为 deferredCandidateCounts 汇报，不要在资料入库阶段继续审查或补全它们。"
                 if can_materialize_formal_knowledge
                 else "- 当前非入库阶段只提交阶段结果，不处理知识入库。"
             ),
@@ -17798,20 +17806,18 @@ def _source_collection_stage_round_status_from_task_refs(stage_round: dict[str, 
 
 
 def _source_collection_agent_context_next_actions(stage_id: str, record_count: int, candidate_count: int, open_assignment_count: int) -> list[str]:
-    if stage_id == "collection":
+    if stage_id == "finding":
         if record_count <= 0:
             return ["继续等待或执行资料搜索，先形成 DataRecord。"]
         return ["检查 DataRecord 覆盖面，必要时补充查询词或来源类型。"]
-    if stage_id == "candidate":
+    if stage_id == "extraction":
         if candidate_count <= 0:
             return ["从 DataRecord 提炼 source_manifest 候选。"]
-        return ["审查候选来源、去重线索和后续质量评估输入。"]
-    if stage_id == "screening":
-        return ["对 source_manifest 候选做相关性、可靠性、可访问性和提炼就绪度评估。"]
-    if stage_id == "graph":
+        return ["完成候选内容提炼，并对相关性、可靠性、可访问性和入库价值给出审查结论。"]
+    if stage_id == "relations":
         return ["基于已通过质量评估的候选构建候选关系图。"]
-    if stage_id == "memory":
-        return ["由知识库管理员审核候选入库包；正式知识写入仍受审核门禁控制。"]
+    if stage_id == "ingestion":
+        return ["审核通过候选入库包；正式知识写入仍受审核门禁控制。"]
     if open_assignment_count:
         return ["继续处理未完成的本角色分派任务。"]
     return []
@@ -18177,12 +18183,10 @@ def _source_collection_queries_for_role(search_plan: dict[str, Any], role: str) 
 def _source_collection_expected_action(role: str) -> str:
     actions = {
         "data_intake_coordinator": "Coordinate planned query execution and ensure outputs follow the writeback contract.",
-        "data_discovery": "Use assigned query seeds to identify candidate academic, dataset, or source references.",
-        "source_acquisition": "Turn discovered references into retrievable URLs, files, API refs, or local handles.",
-        "content_extraction": "Extract title, summary, metadata, quality signals, and trace fields into DataRecords.",
-        "source_deduplication": "Compare collected records and flag duplicate or version-related sources.",
-        "source_quality": "Score source reliability, completeness, and downstream processing risk.",
-        "intake_review": "Review collected DataRecords before importing accepted records as source_manifest candidates.",
+        "source_finder": "Find, fetch, download, and register traceable DataRecord sources.",
+        "source_extractor": "Extract useful content and review source quality with per-source decisions.",
+        "source_relation_mapper": "Organize approved sources into candidate-only topic and evidence relationships.",
+        "source_ingestor": "Review approved candidates and write governed formal Team Knowledge.",
     }
     return actions.get(role, "Collect data records under the source-collection run contract.")
 

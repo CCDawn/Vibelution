@@ -34,15 +34,10 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
         "prompt-research-review",
         "prompt-research-themes",
         "prompt-research-card",
-        "prompt-challenge-cup-data-discovery",
-        "prompt-challenge-cup-source-acquisition",
-        "prompt-challenge-cup-content-extraction",
-        "prompt-challenge-cup-source-quality",
-        "prompt-challenge-cup-candidate-graph",
-        "prompt-knowledge-expansion-source-intake",
-        "prompt-knowledge-expansion-content-extraction",
-        "prompt-knowledge-expansion-source-quality",
-        "prompt-knowledge-expansion-candidate-graph",
+        "prompt-source-finder",
+        "prompt-source-extractor",
+        "prompt-source-relation-mapper",
+        "prompt-source-ingestor",
     } <= research_template_ids
     assert "prompt-challenge-cup-coordinator" in template_ids
     assert broad["category"] == "research"
@@ -76,48 +71,34 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     knowledge_steward_detail = prompt_template_service.get_prompt_template("prompt-knowledge-steward")
     assert knowledge_steward_detail is not None
     assert knowledge_steward_detail["metadata"]["roleKey"] == "knowledge_steward"
-    assert "只处理 source_quality_approved" in knowledge_steward_detail["content"]
+    assert "只处理已通过资料提炼复核" in knowledge_steward_detail["content"]
     assert "不要推断截断或隐藏候选" in knowledge_steward_detail["content"]
-    discovery_detail = prompt_template_service.get_prompt_template("prompt-challenge-cup-data-discovery")
-    assert discovery_detail is not None
-    assert discovery_detail["metadata"]["roleKey"] == "challenge_cup_data_discovery"
-    assert not _contains_tool_name(discovery_detail["content"], "web_search_tool")
-    assert _contains_tool_name(discovery_detail["content"], "batch_web_search_tool")
-    assert "不调用 web_fetch_tool" in discovery_detail["content"]
-    assert "[搜索质量不足]" in discovery_detail["content"]
-    assert "low_quality_search_results" in discovery_detail["content"]
-    acquisition_detail = prompt_template_service.get_prompt_template("prompt-challenge-cup-source-acquisition")
-    assert acquisition_detail is not None
-    assert "web_fetch_tool" in acquisition_detail["content"]
-    assert "[搜索质量不足]" in acquisition_detail["content"]
-    extraction_detail = prompt_template_service.get_prompt_template("prompt-challenge-cup-content-extraction")
-    assert extraction_detail is not None
-    assert "不直接写正式 Team Knowledge" in extraction_detail["content"]
-    assert "candidate_offset" in extraction_detail["content"]
-    assert "candidate_limit" in extraction_detail["content"]
-    assert "context_mode=compact" in extraction_detail["content"]
-    assert "candidateExtractions" in extraction_detail["content"]
-    assert "不要推断截断或隐藏候选" in extraction_detail["content"]
-    knowledge_source_intake = prompt_template_service.get_prompt_template("prompt-knowledge-expansion-source-intake")
-    assert knowledge_source_intake is not None
-    assert knowledge_source_intake["metadata"]["roleKey"] == "knowledge_expansion_source_intake"
-    assert "本地资料导入" in knowledge_source_intake["content"]
-    assert "source_collection_context_tool" in knowledge_source_intake["content"]
-    assert "source_collection_stage_writeback_tool" in knowledge_source_intake["content"]
-    assert "batch_web_search_tool" in knowledge_source_intake["content"]
-    assert not _contains_tool_name(knowledge_source_intake["content"], "web_search_tool")
-    assert not _contains_tool_name(knowledge_source_intake["content"], "knowledge_ingestion_tool")
-    knowledge_graph = prompt_template_service.get_prompt_template("prompt-knowledge-expansion-candidate-graph")
-    assert knowledge_graph is not None
-    assert knowledge_graph["metadata"]["roleKey"] == "knowledge_expansion_candidate_graph"
-    assert "候选关系" in knowledge_graph["content"]
-    assert "不写 official graph" in knowledge_graph["content"]
-    challenge_graph = prompt_template_service.get_prompt_template("prompt-challenge-cup-candidate-graph")
-    assert challenge_graph is not None
-    assert challenge_graph["metadata"]["roleKey"] == "candidate_graph"
-    assert _contains_tool_name(challenge_graph["content"], "source_collection_context_tool")
-    assert _contains_tool_name(challenge_graph["content"], "source_collection_stage_writeback_tool")
-    assert "不写 official graph" in challenge_graph["content"]
+    source_finder = prompt_template_service.get_prompt_template("prompt-source-finder")
+    assert source_finder is not None
+    assert source_finder["metadata"]["roleKey"] == "source_finder"
+    assert _contains_tool_name(source_finder["content"], "source_collection_context_tool")
+    assert _contains_tool_name(source_finder["content"], "source_collection_stage_writeback_tool")
+    assert "搜索、获取、下载到本地" in source_finder["content"]
+    assert "无效来源" in source_finder["content"]
+    source_extractor = prompt_template_service.get_prompt_template("prompt-source-extractor")
+    assert source_extractor is not None
+    assert source_extractor["metadata"]["roleKey"] == "source_extractor"
+    assert "candidate_offset" in source_extractor["content"]
+    assert "candidate_limit" in source_extractor["content"]
+    assert "context_mode=compact" in source_extractor["content"]
+    assert "candidateExtractions" in source_extractor["content"]
+    assert "candidateDecisions" in source_extractor["content"]
+    assert "不能根据截断上下文猜结果" in source_extractor["content"]
+    source_relation_mapper = prompt_template_service.get_prompt_template("prompt-source-relation-mapper")
+    assert source_relation_mapper is not None
+    assert source_relation_mapper["metadata"]["roleKey"] == "source_relation_mapper"
+    assert "候选级主题、来源和证据关系" in source_relation_mapper["content"]
+    assert "不写正式知识库" in source_relation_mapper["content"]
+    source_ingestor = prompt_template_service.get_prompt_template("prompt-source-ingestor")
+    assert source_ingestor is not None
+    assert source_ingestor["metadata"]["roleKey"] == "source_ingestor"
+    assert "正式 Team Knowledge" in source_ingestor["content"]
+    assert "materializedKnowledgeIngestion.status=completed" in source_ingestor["content"]
     coordinator_detail = prompt_template_service.get_prompt_template("prompt-challenge-cup-coordinator")
     assert coordinator_detail is not None
     assert coordinator_detail["category"] == "chat"
@@ -150,9 +131,10 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     assert (tmp_path / "workspace" / "prompts" / "research" / "ceo.md").exists()
     assert (tmp_path / "workspace" / "prompts" / "research" / "organization_advisor.md").exists()
     assert (tmp_path / "workspace" / "prompts" / "research" / "capability_steward.md").exists()
-    assert (tmp_path / "workspace" / "prompts" / "research" / "challenge_cup_data_discovery.md").exists()
-    assert (tmp_path / "workspace" / "prompts" / "research" / "challenge_cup_candidate_graph.md").exists()
-    assert (tmp_path / "workspace" / "prompts" / "research" / "knowledge_expansion_source_intake.md").exists()
+    assert (tmp_path / "workspace" / "prompts" / "research" / "source_finder.md").exists()
+    assert (tmp_path / "workspace" / "prompts" / "research" / "source_extractor.md").exists()
+    assert (tmp_path / "workspace" / "prompts" / "research" / "source_relation_mapper.md").exists()
+    assert (tmp_path / "workspace" / "prompts" / "research" / "source_ingestor.md").exists()
     supervised_baseline = prompt_template_service.get_prompt_template("prompt-supervised-baseline")
     assert supervised_baseline is not None
     assert supervised_baseline["metadata"]["builtinContentVersion"] == prompt_template_service.CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION
@@ -160,55 +142,91 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     assert not _contains_tool_name(supervised_baseline["content"], "open_evolution_transaction_tool")
 
 
+def test_source_collection_prompt_templates_only_expose_four_stage_roles(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    payload = prompt_template_service.list_prompt_templates()
+    role_keys = {
+        item.get("metadata", {}).get("roleKey")
+        for item in payload["templates"]
+        if isinstance(item.get("metadata"), dict)
+    }
+
+    assert {
+        "source_finder",
+        "source_extractor",
+        "source_relation_mapper",
+        "source_ingestor",
+    }.issubset(role_keys)
+    assert {
+        "challenge_cup_source_acquisition",
+        "challenge_cup_data_discovery",
+        "challenge_cup_content_extraction",
+        "challenge_cup_source_quality",
+        "knowledge_expansion_source_intake",
+        "knowledge_expansion_content_extraction",
+        "knowledge_expansion_source_quality",
+        "knowledge_expansion_candidate_graph",
+        "candidate_graph",
+    }.isdisjoint(role_keys)
+
+
 def test_prompt_template_repair_upgrades_builtin_challenge_stage_prompt_content(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     prompt_template_service.repair_prompt_templates()
 
     prompt_template_service.update_prompt_template(
-        "prompt-challenge-cup-data-discovery",
-        content="# 旧资料发现提示词\n\n没有阶段任务协议。",
+        "prompt-source-extractor",
+        content="# 旧资料提炼提示词\n\n没有阶段任务协议。",
         metadata={
             "builtin": True,
-            "roleKey": "challenge_cup_data_discovery",
+            "roleKey": "source_extractor",
             "builtinContentVersion": 1,
         },
     )
 
     prompt_template_service.repair_prompt_templates()
-    detail = prompt_template_service.get_prompt_template("prompt-challenge-cup-data-discovery")
+    detail = prompt_template_service.get_prompt_template("prompt-source-extractor")
 
     assert detail["metadata"]["builtinContentVersion"] == prompt_template_service.CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION
-    assert "source_collection_stage_session_task" in detail["content"]
+    assert "资料提炼阶段" in detail["content"]
     assert "source_collection_stage_writeback_tool" in detail["content"]
-    assert "[搜索质量不足]" in detail["content"]
-    source_content = (tmp_path / "workspace" / "prompts" / "research" / "challenge_cup_data_discovery.md").read_text(encoding="utf-8")
-    assert "source_collection_stage_session_task" in source_content
+    assert "candidateExtractions" in detail["content"]
+    source_content = (tmp_path / "workspace" / "prompts" / "research" / "source_extractor.md").read_text(encoding="utf-8")
+    assert "资料提炼阶段" in source_content
     assert "没有阶段任务协议" not in source_content
 
 
-def test_source_quality_prompt_requires_candidate_paging_and_structured_decisions(tmp_path, monkeypatch):
+def test_source_extractor_prompt_requires_candidate_paging_and_structured_decisions(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     prompt_template_service.repair_prompt_templates()
 
-    detail = prompt_template_service.get_prompt_template("prompt-challenge-cup-source-quality")
+    detail = prompt_template_service.get_prompt_template("prompt-source-extractor")
 
     assert "candidate_offset" in detail["content"]
     assert "candidate_limit" in detail["content"]
+    assert "candidateExtractions" in detail["content"]
     assert "candidateDecisions" in detail["content"]
     assert "candidateId" in detail["content"]
-    assert "未审候选" in detail["content"]
+    assert "待补读、待补审" in detail["content"]
     assert "资料入库/知识库管理员" not in detail["content"]
-    assert "知识库管理员进入资料入库步骤" in detail["content"]
+    assert "无有效内容" in detail["content"]
 
 
-def test_challenge_cup_source_quality_contract_names_steward_as_ingestion_owner():
+def test_challenge_cup_source_collection_contract_names_source_ingestor_as_ingestion_owner():
     repo_root = Path(__file__).resolve().parents[1]
     agent_directory_source = (repo_root / "core" / "web" / "services" / "agent_directory_service.py").read_text(encoding="utf-8")
+    prompt_template_source = (repo_root / "core" / "web" / "services" / "prompt_template_service.py").read_text(encoding="utf-8")
+    team_service_source = (repo_root / "core" / "web" / "services" / "team_service.py").read_text(encoding="utf-8")
     flow_builder_source = (repo_root / "挑战杯" / "build_research_flow_site.mjs").read_text(encoding="utf-8")
 
     assert "资料入库/知识库管理员" not in agent_directory_source
-    assert "知识库管理员处理资料入库步骤" in agent_directory_source
-    assert "只有知识库管理员的 memory 阶段 approved 回写可以触发后端治理门禁" in flow_builder_source
+    assert "source_ingestor 做最终入库审核" in agent_directory_source
+    assert "data_discovery、source_acquisition、content_extraction、source_quality" not in prompt_template_source
+    assert "source_finder、source_extractor、source_relation_mapper 和 source_ingestor" in prompt_template_source
+    assert "组织资料寻找、资料提炼、资料关系整理和资料入库。" in team_service_source
+    assert "组织资料发现、本地导入、资料提炼、质检、候选关系和知识库管理员入库。" not in team_service_source
+    assert "source_ingestor" in flow_builder_source
     assert "知识库管理员只提交建议与待审对象" not in flow_builder_source
     assert "proposal_and_rating_suggestion_only" not in flow_builder_source
 
