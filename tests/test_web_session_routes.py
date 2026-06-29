@@ -368,6 +368,123 @@ def test_conversation_index_exposes_direct_agent_classification_fields(tmp_path,
     assert direct["conversationIndexErrors"] == []
 
 
+def test_team_agent_session_summary_exposes_agent_owned_team_identity(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": "session-team-history",
+                "title": "历史资料整理",
+                "agent_id": "agent-team-history",
+                "agentId": "agent-team-history",
+                "conversation_index_kind": "team_agent",
+                "conversationIndexKind": "team_agent",
+                "updated_at": "2026-06-29T12:00:00Z",
+                "messages": [{"role": "user", "content": "继续", "timestamp": "2026-06-29T12:00:00Z"}],
+            }
+        ],
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {
+                    "agentId": "agent-team-history",
+                    "agentCode": "A016",
+                    "displayName": "历史资料整理",
+                    "kind": "persistent",
+                    "status": "active",
+                    "directSessionId": "session-team-history",
+                    "roleKey": "source_finder",
+                    "metadata": {
+                        "conversationIndexKind": "team_agent",
+                        "conversationIndexVisibility": "team_private",
+                        "challengeCupTeamId": "research-team",
+                        "challengeCupTeamRole": "source_finder",
+                    },
+                }
+            ]
+        }
+    )
+    team_service._save_index(
+        {
+            "schemaVersion": team_service.SCHEMA_VERSION,
+            "updatedAt": "2026-06-29T12:00:00Z",
+            "teams": [
+                {
+                    "teamId": "research-team",
+                    "name": "挑战杯ai科研团队",
+                    "status": "active",
+                    "teamKind": "research",
+                    "teamSource": "research_organization",
+                    "members": [],
+                    "linkedChatRoomId": "",
+                }
+            ],
+        }
+    )
+
+    listed = {item["id"]: item for item in session_service.list_sessions(include_hidden_internal=True)}
+
+    assert listed["session-team-history"]["conversationIndexKind"] == "team_agent"
+    assert listed["session-team-history"]["conversationIndexVisibility"] == "team_private"
+    assert listed["session-team-history"]["teamId"] == "research-team"
+
+
+def test_directory_only_team_agent_session_summary_keeps_team_identity(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, conversations=[])
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {
+                    "agentId": "agent-directory-team",
+                    "agentCode": "A028",
+                    "displayName": "候选图谱",
+                    "kind": "persistent",
+                    "status": "active",
+                    "directSessionId": "session-directory-team",
+                    "roleKey": "knowledge_expansion_candidate_graph",
+                    "metadata": {
+                        "conversationIndexKind": "team_agent",
+                        "conversationIndexVisibility": "team_private",
+                        "knowledgeExpansionTeamId": "knowledge-expansion-team",
+                        "knowledgeExpansionTeamRole": "candidate_graph",
+                        "knowledgeExpansionTeamRoleKey": "knowledge_expansion_candidate_graph",
+                    },
+                }
+            ]
+        }
+    )
+    team_service._save_index(
+        {
+            "schemaVersion": team_service.SCHEMA_VERSION,
+            "updatedAt": "2026-06-29T12:00:00Z",
+            "teams": [
+                {
+                    "teamId": "knowledge-expansion-team",
+                    "name": "知识库内容扩充团队",
+                    "status": "active",
+                    "teamKind": "research",
+                    "teamSource": "knowledge_expansion",
+                    "members": [],
+                    "linkedChatRoomId": "",
+                }
+            ],
+        }
+    )
+
+    listed = {item["id"]: item for item in session_service.list_sessions(include_hidden_internal=True)}
+
+    assert listed["session-directory-team"]["conversationIndexKind"] == "team_agent"
+    assert listed["session-directory-team"]["conversationIndexVisibility"] == "team_private"
+    assert listed["session-directory-team"]["teamId"] == "knowledge-expansion-team"
+
+
 def test_session_query_default_page_skips_per_item_filtering(tmp_path, monkeypatch):
     conversations = [
         {

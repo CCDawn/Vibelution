@@ -44,6 +44,8 @@ def list_conversations() -> list[dict[str, Any]]:
                 or "user_visible",
                 "conversationIndexKind": str(session.get("conversationIndexKind") or "").strip(),
                 "conversationIndexErrors": _conversation_index_errors(session),
+                "teamId": str(session.get("teamId") or "").strip(),
+                "teamName": str(session.get("teamName") or "").strip(),
             }
         )
     filtered_archived_team_room_count = 0

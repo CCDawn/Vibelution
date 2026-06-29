@@ -2162,6 +2162,7 @@ def _agent_lookup_for_conversations() -> dict[str, dict[str, Any]]:
 def _conversation_agent_from_state(agent: dict[str, Any]) -> dict[str, Any]:
     agent_id = str(agent.get("agentId") or "").strip()
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    team_identity = _agent_team_identity(agent, metadata)
     workspace_path = str(agent.get("workspacePath") or "").strip()
     avatar_path = _agent_avatar_path(agent, metadata)
     llm_bindings = agent_directory_service.normalize_agent_llm_bindings(agent.get("llmBindings"))
@@ -2178,6 +2179,8 @@ def _conversation_agent_from_state(agent: dict[str, Any]) -> dict[str, Any]:
         "llmBindings": llm_bindings,
         "directSessionId": str(agent.get("directSessionId") or "").strip(),
         "conversationIndexKind": str(agent.get("conversationIndexKind") or metadata.get("conversationIndexKind") or "").strip(),
+        "teamId": str(team_identity.get("teamId") or "").strip(),
+        "teamName": str(team_identity.get("teamName") or "").strip(),
         "workspacePath": workspace_path,
         "avatarImagePath": avatar_path,
         "avatarImageUrl": agent_directory_service.agent_avatar_image_url(avatar_path),
@@ -2187,6 +2190,39 @@ def _conversation_agent_from_state(agent: dict[str, Any]) -> dict[str, Any]:
         "createdAt": str(agent.get("createdAt") or "").strip(),
         "updatedAt": str(agent.get("updatedAt") or "").strip(),
     }
+
+
+def _agent_team_identity(agent: dict[str, Any], metadata: dict[str, Any]) -> dict[str, str]:
+    generic_team_id = str(metadata.get("teamId") or "").strip()
+    generic_team_name = str(metadata.get("teamName") or "").strip()
+    if generic_team_id:
+        return {"teamId": generic_team_id, "teamName": generic_team_name}
+
+    challenge_team_id = str(metadata.get("challengeCupTeamId") or "").strip()
+    challenge_team_name = str(metadata.get("challengeCupTeamName") or "").strip()
+    knowledge_team_id = str(metadata.get("knowledgeExpansionTeamId") or "").strip()
+    knowledge_team_name = str(metadata.get("knowledgeExpansionTeamName") or "").strip()
+    role_text = " ".join(
+        str(value or "").strip()
+        for value in (
+            agent.get("roleKey"),
+            metadata.get("researchTeamRole"),
+            metadata.get("researchTeamRoleKey"),
+            metadata.get("challengeCupTeamRole"),
+            metadata.get("challengeCupTeamRoleKey"),
+            metadata.get("knowledgeExpansionTeamRole"),
+            metadata.get("knowledgeExpansionTeamRoleKey"),
+        )
+        if str(value or "").strip()
+    ).lower()
+
+    if knowledge_team_id and ("knowledge" in role_text or not challenge_team_id):
+        return {"teamId": knowledge_team_id, "teamName": knowledge_team_name}
+    if challenge_team_id:
+        return {"teamId": challenge_team_id, "teamName": challenge_team_name}
+    if knowledge_team_id:
+        return {"teamId": knowledge_team_id, "teamName": knowledge_team_name}
+    return {"teamId": "", "teamName": ""}
 
 
 def _agent_avatar_path(agent: dict[str, Any], metadata: dict[str, Any] | None = None) -> str:
@@ -6981,6 +7017,10 @@ def _mark_conversation_agent_deleted(
 def _agent_directory_conversation_stub(agent: dict[str, Any], *, session_id: str) -> dict[str, Any]:
     display_name = str(agent.get("displayName") or agent.get("agentCode") or session_id).strip() or session_id
     hidden_team_member_agent_ids = _agent_directory_stub_hidden_team_member_ids()
+    team_identity = {
+        "teamId": str(agent.get("teamId") or "").strip(),
+        "teamName": str(agent.get("teamName") or "").strip(),
+    }
     classification = agent_directory_service.agent_conversation_index_classification(
         agent,
         hidden_team_member_agent_ids=hidden_team_member_agent_ids,
@@ -7001,6 +7041,8 @@ def _agent_directory_conversation_stub(agent: dict[str, Any], *, session_id: str
         ),
         "conversationIndexKind": str(classification.get("kind") or "").strip(),
         "conversationIndexErrors": list(classification.get("errors") or []),
+        "teamId": team_identity["teamId"],
+        "teamName": team_identity["teamName"],
         "_agent": dict(agent),
         "agentDirectoryOnly": True,
     }
@@ -7482,6 +7524,8 @@ def _normalize_conversation(
         "conversationIndexVisibility": conversation_index_visibility,
         "conversationIndexKind": str(conversation_index_classification.get("kind") or "").strip(),
         "conversationIndexErrors": list(conversation_index_classification.get("errors") or []),
+        "teamId": str(agent.get("teamId") or "").strip() if isinstance(agent, dict) else "",
+        "teamName": str(agent.get("teamName") or "").strip() if isinstance(agent, dict) else "",
         "parentSessionId": parent_session_id,
         "rootSessionId": root_session_id,
         "childSessionIds": child_session_ids,
@@ -8378,6 +8422,8 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
         "conversationIndexVisibility": str(conversation.get("conversationIndexVisibility") or "").strip(),
         "conversationIndexKind": str(conversation.get("conversationIndexKind") or "").strip(),
         "conversationIndexErrors": list(conversation.get("conversationIndexErrors") or []),
+        "teamId": str(conversation.get("teamId") or "").strip(),
+        "teamName": str(conversation.get("teamName") or "").strip(),
         "parentSessionId": str(conversation.get("parentSessionId") or "").strip(),
         "rootSessionId": str(conversation.get("rootSessionId") or conversation["id"]).strip() or conversation["id"],
         "childSessionIds": list(conversation.get("childSessionIds") or []),

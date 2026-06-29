@@ -137,6 +137,61 @@ describe("conversationIndexModel", () => {
     });
   });
 
+  it("keeps session-owned team identity when converting sessions for the conversation index", () => {
+    const teamSession = session({
+      id: "session-team-history",
+      title: "历史资料整理",
+      conversationIndexKind: "team_agent",
+      conversationIndexVisibility: "team_private",
+    }) as SessionSummary & { teamId: string; teamName: string };
+    teamSession.teamId = "research-team";
+    teamSession.teamName = "挑战杯ai科研团队";
+
+    const summary = sessionToConversationSummary(teamSession) as ConversationSummary & {
+      teamId?: string;
+      teamName?: string;
+    };
+
+    expect(summary.teamId).toBe("research-team");
+    expect(summary.teamName).toBe("挑战杯ai科研团队");
+  });
+
+  it("groups legacy team Agents by metadata team id even when they are no longer current team members", () => {
+    const model = buildConversationIndexModel({
+      agents: [
+        agent({
+          agentId: "agent-knowledge-steward",
+          displayName: "唐南栀",
+          roleKey: "knowledge_steward",
+          directSessionId: "agent-knowledge-steward-direct",
+          conversationIndexKind: "team_agent",
+          conversationIndexVisibility: "team_private",
+          metadata: {
+            conversationIndexKind: "team_agent",
+            challengeCupTeamId: "research-team",
+            challengeCupTeamRole: "knowledge_steward",
+            knowledgeExpansionTeamId: "knowledge-expansion-team",
+            knowledgeExpansionTeamRole: "knowledge_steward",
+          },
+        }),
+      ],
+      conversations: [],
+      lang: "zh",
+      linkedTeamRoomIds: new Set(),
+      rawSessions: [],
+      rightIndexSessions: [],
+      sessionFilter: "",
+      sessionsById: new Map(),
+      teams: [
+        team({ teamId: "research-team", name: "挑战杯ai科研团队", members: [], memberCount: 0 }),
+        team({ teamId: "knowledge-expansion-team", name: "知识库内容扩充团队", members: [], memberCount: 0 }),
+      ],
+    });
+
+    expect(model.groupedConversations.map((group) => group.groupKey)).toEqual(["team:knowledge-expansion-team"]);
+    expect(model.groupedConversations[0].items[0].title).toBe("唐南栀");
+  });
+
   it("preserves backend source authority refs when converting sessions", () => {
     const summary = sessionToConversationSummary(session({
       id: "session-source",
