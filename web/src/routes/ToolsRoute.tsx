@@ -20,7 +20,7 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { VButton, VIconButton } from "../components/vui";
+import { VButton, VIconButton, VRouteHeader } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
@@ -1585,19 +1585,31 @@ export function ToolsRoute() {
 
   return (
     <section className={styles.route}>
-      <header className={styles.header}>
-        <div title={t("toolsPageSubtitle")}>
-          <p className={styles.eyebrow}>{t("navTools")}</p>
-          <h1 className={styles.title}>{t("toolsPageTitle")}</h1>
-        </div>
-        {returnToPath ? (
-          <Link className={styles.returnButton} to={returnToPath} title={returnToLabel}>
-            <ArrowLeft size={15} />
-            <span>{returnToLabel}</span>
-          </Link>
-        ) : null}
-        <VIconButton type="button" variant="secondary" className={styles.refreshButton} label={t("gitRefresh")} icon={<RefreshCw size={16} />} onPress={refresh} />
-      </header>
+      <VRouteHeader
+        className={styles.header}
+        aria-label={t("toolsPageSubtitle")}
+        eyebrow={t("navTools")}
+        title={t("toolsPageTitle")}
+        meta={t("toolsPageSubtitle")}
+        actions={(
+          <div className={styles.headerActions}>
+            {returnToPath ? (
+              <Link className={styles.returnButton} to={returnToPath} title={returnToLabel}>
+                <ArrowLeft size={15} />
+                <span>{returnToLabel}</span>
+              </Link>
+            ) : null}
+            <VIconButton
+              type="button"
+              variant="secondary"
+              className={styles.refreshButton}
+              label={t("gitRefresh")}
+              icon={<RefreshCw size={16} />}
+              onPress={refresh}
+            />
+          </div>
+        )}
+      />
 
       <div className={styles.controlStrip}>
         <AgentManagementNav active="tools" className={styles.managementNav} />

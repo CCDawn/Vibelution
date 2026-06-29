@@ -84,6 +84,11 @@ const routeShellTargets = [
     expected: ["VRouteHeader", "VIconButton"],
     forbidden: ["<header className={styles.header}"],
   },
+  {
+    path: "routes/ToolsRoute.tsx",
+    expected: ["VRouteHeader", "VIconButton"],
+    forbidden: ["<header className={styles.header}"],
+  },
 ] as const;
 
 function readTargetSource(path: string): string {
