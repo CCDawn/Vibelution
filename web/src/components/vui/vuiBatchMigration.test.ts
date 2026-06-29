@@ -55,6 +55,11 @@ const slottedListStyleTargets = [
 
 const routeShellTargets = [
   {
+    path: "routes/LauncherRoute.tsx",
+    expected: ["VRouteHeader"],
+    forbidden: ["<header className={styles.header}"],
+  },
+  {
     path: "routes/GitRoute.tsx",
     expected: ["VRouteHeader", "VIconButton"],
     forbidden: ["<header className={styles.header}"],
@@ -88,6 +93,16 @@ const routeShellTargets = [
     path: "routes/ToolsRoute.tsx",
     expected: ["VRouteHeader", "VIconButton"],
     forbidden: ["<header className={styles.header}"],
+  },
+] as const;
+
+const routeStyleTargets = [
+  {
+    path: "routes/LauncherRoute.module.css",
+    forbidden: [
+      "--surface-page: var(--fg-primary)",
+      "--surface-header: color-mix(in srgb, var(--fg-primary)",
+    ],
   },
 ] as const;
 
@@ -134,6 +149,17 @@ describe("VUI batch migration", () => {
       for (const primitive of expected) {
         expect(source).toContain(primitive);
       }
+      for (const rawPattern of forbidden) {
+        expect(source).not.toContain(rawPattern);
+      }
+    },
+  );
+
+  it.each(routeStyleTargets)(
+    "$path keeps route surfaces on theme tokens",
+    ({ path, forbidden }) => {
+      const source = readTargetSource(path);
+
       for (const rawPattern of forbidden) {
         expect(source).not.toContain(rawPattern);
       }

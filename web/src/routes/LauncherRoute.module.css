@@ -1,19 +1,5 @@
 .route {
-  --bg-canvas: var(--fg-primary);
-  --surface-page: var(--fg-primary);
-  --surface-header: color-mix(in srgb, var(--fg-primary) 94%, transparent);
-  --surface-panel: color-mix(in srgb, var(--fg-primary) 88%, transparent);
-  --surface-card: color-mix(in srgb, var(--fg-primary) 92%, transparent);
-  --surface-panel-hover: var(--fg-primary);
-  --border-soft: var(--surface-card);
-  --border-strong: var(--surface-card);
-  --fg-primary: var(--fg-tertiary);
-  --fg-secondary: var(--fg-tertiary);
-  --fg-tertiary: var(--fg-tertiary);
   --accent-primary: var(--accent-warm);
-  --state-success: var(--state-success);
-  --state-warning: var(--state-warning);
-  --state-error: var(--state-error);
   --danger: var(--state-error);
   display: grid;
   grid-template-rows: auto;
@@ -34,54 +20,21 @@
 }
 
 .header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: var(--route-topbar-gap);
+  margin: 8px 10px 0;
   min-width: 0;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-strong);
-  background: var(--surface-header);
-  box-shadow: var(--vui-shadow-inset-accent);
+  border-color: var(--vui-border-subtle);
+  background:
+    var(--vui-gradient-route-soft),
+    color-mix(in srgb, var(--surface-panel) 86%, transparent);
+  box-shadow: var(--vui-shadow-hairline);
 }
 
-.header > div:first-child {
-  display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
-  align-items: baseline;
-  gap: 2px 8px;
-  min-width: 0;
-}
-
-.eyebrow,
 .panelEyebrow {
   margin: 0;
   color: var(--fg-tertiary);
   font-size: 0.68rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-}
-
-.title {
-  margin: 0;
-  color: var(--fg-primary);
-  font-family: var(--font-body);
-  font-size: var(--route-topbar-title-size);
-  font-weight: 760;
-  line-height: 1.1;
-  white-space: nowrap;
-}
-
-.subtitle {
-  min-width: 0;
-  margin: 0;
-  color: var(--fg-secondary);
-  font-size: var(--route-topbar-subtitle-size);
-  line-height: 1.25;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .actions {
@@ -99,9 +52,8 @@
   grid-template-columns: minmax(220px, 1fr) max-content;
   align-items: center;
   gap: 8px;
-  flex: 1 1 620px;
+  width: min(760px, 58vw);
   min-width: 0;
-  max-width: 760px;
 }
 
 .statusBarReason {
@@ -114,7 +66,7 @@
   padding: 0 8px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--surface-card) 90%, var(--fg-primary));
+  background: color-mix(in srgb, var(--surface-card) 90%, var(--surface-page));
 }
 
 .statusBarReason span {
@@ -196,19 +148,19 @@
 
 .primaryButton {
   border-color: color-mix(in srgb, var(--accent-primary) 36%, var(--border-soft));
-  background: color-mix(in srgb, var(--accent-primary) 10%, var(--fg-primary));
+  background: color-mix(in srgb, var(--accent-primary) 10%, var(--surface-card));
   color: var(--fg-primary);
 }
 
 .iconButton,
 .statusBarButton {
-  background: color-mix(in srgb, var(--surface-card) 86%, var(--fg-primary));
+  background: color-mix(in srgb, var(--surface-card) 86%, var(--surface-page));
 }
 
 .dangerButton {
   border-color: color-mix(in srgb, var(--danger) 34%, var(--border-soft));
   color: color-mix(in srgb, var(--danger) 74%, var(--fg-primary));
-  background: color-mix(in srgb, var(--danger) 7%, var(--fg-primary));
+  background: color-mix(in srgb, var(--danger) 7%, var(--surface-card));
 }
 
 .primaryButton:hover,
@@ -222,7 +174,7 @@
 .dangerButton:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--danger) 52%, var(--border-strong));
   color: var(--fg-primary);
-  background: color-mix(in srgb, var(--danger) 12%, var(--fg-primary));
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface-card));
 }
 
 .primaryButton:disabled,
@@ -459,7 +411,7 @@
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
   color: var(--fg-secondary);
-  background: color-mix(in srgb, var(--surface-card) 90%, var(--fg-primary));
+  background: color-mix(in srgb, var(--surface-card) 90%, var(--surface-page));
   font-size: 0.74rem;
 }
 
@@ -533,7 +485,7 @@
   padding: 6px;
   border: 1px solid color-mix(in srgb, var(--state-warning) 34%, var(--border-soft));
   border-radius: 6px;
-  background: color-mix(in srgb, var(--state-warning) 6%, var(--fg-primary));
+  background: color-mix(in srgb, var(--state-warning) 6%, var(--surface-card));
 }
 
 .cleanupPlan strong,
@@ -619,7 +571,7 @@
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
   color: var(--fg-primary);
-  background: var(--fg-primary);
+  background: var(--surface-card);
   font-size: 0.78rem;
 }
 
@@ -648,7 +600,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-primary) 34%, var(--border-soft));
   border-radius: var(--radius-control);
   color: var(--fg-primary);
-  background: color-mix(in srgb, var(--accent-primary) 9%, var(--fg-primary));
+  background: color-mix(in srgb, var(--accent-primary) 9%, var(--surface-card));
   font-size: 0.76rem;
 }
 
@@ -671,7 +623,7 @@
   padding: 2px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
-  background: var(--fg-primary);
+  background: var(--surface-card);
 }
 
 .segmentedControl button {
@@ -691,7 +643,7 @@
 
 .segmentedControl button[data-active="true"] {
   color: var(--fg-primary);
-  background: color-mix(in srgb, var(--accent-primary) 11%, var(--fg-primary));
+  background: color-mix(in srgb, var(--accent-primary) 11%, var(--surface-panel));
 }
 
 .segmentedControl button:disabled {
@@ -724,7 +676,7 @@
   gap: 2px 7px;
   min-width: 0;
   padding: 7px 9px;
-  border-color: color-mix(in srgb, var(--border-soft) 90%, var(--fg-primary));
+  border-color: color-mix(in srgb, var(--border-soft) 90%, var(--surface-page));
 }
 
 .metric span,
@@ -955,14 +907,14 @@
 .statusHead,
 .guardianHead {
   border-bottom: 1px solid var(--border-soft);
-  background: color-mix(in srgb, var(--surface-card) 94%, var(--fg-primary));
+  background: color-mix(in srgb, var(--surface-card) 94%, var(--surface-page));
 }
 
 .statusRow,
 .guardianRow {
   color: var(--fg-secondary);
   font-size: 0.78rem;
-  background: color-mix(in srgb, var(--fg-primary) 74%, var(--surface-card));
+  background: color-mix(in srgb, var(--surface-page) 74%, var(--surface-card));
 }
 
 .statusRow + .statusRow,
@@ -972,17 +924,17 @@
 
 .statusRow[data-tone="success"],
 .guardianRow[data-tone="success"] {
-  border-left: 3px solid var(--state-success);
+  border-left: 2px solid var(--state-success);
 }
 
 .statusRow[data-tone="warning"],
 .guardianRow[data-tone="warning"] {
-  border-left: 3px solid var(--state-warning);
+  border-left: 2px solid var(--state-warning);
 }
 
 .statusRow[data-tone="error"],
 .guardianRow[data-tone="error"] {
-  border-left: 3px solid var(--state-error);
+  border-left: 2px solid var(--state-error);
 }
 
 .statusRow span,
@@ -1227,11 +1179,6 @@
 }
 
 @media (max-width: 860px) {
-  .header {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
   .actions {
     justify-content: flex-start;
   }
@@ -1294,14 +1241,6 @@
 
   .dangerActions {
     justify-content: flex-start;
-  }
-
-  .header > div:first-child {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .subtitle {
-    white-space: normal;
   }
 
   .statusHead,
