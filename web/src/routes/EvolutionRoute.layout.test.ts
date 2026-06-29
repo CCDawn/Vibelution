@@ -317,6 +317,23 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(stylesSource).toContain(".supervisedWorkflowLivePreview");
   });
 
+  it("uses full supervised workflow session details for the conversation surface", () => {
+    expect(apiTypesSource).toContain("export type SessionDetail");
+    expect(routeSource).toContain("selectedWorkflowConversationSessionKey");
+    expect(routeSource).toContain('queryKeys.session(selectedWorkflowConversationSessionKey || "none")');
+    expect(routeSource).toContain("fetchJson<SessionDetail>(`/api/sessions/${selectedWorkflowConversationSessionKey}`)");
+    expect(routeSource).toContain("const selectedWorkflowSessionMessages = selectedWorkflowSessionDetailQuery.data?.messages ?? []");
+    expect(routeSource).toContain("selectedWorkflowSnapshotMessages");
+    expect(routeSource).toContain("selectedWorkflowSessionMessages.length");
+    expect(routeSource).toContain("selectedWorkflowSnapshotMessages.length");
+    expect(routeSource.indexOf("selectedWorkflowSessionMessages.length")).toBeLessThan(
+      routeSource.indexOf("selectedWorkflowSnapshotMessages.length"),
+    );
+    expect(routeSource).not.toContain(
+      "const selectedWorkflowConversationMessages: ConversationMessage[] =\n    supervisedSelectedWorkflowStep.conversationMessages?.length",
+    );
+  });
+
   it("shows immediate local feedback while a supervised start command is waiting for the run record", () => {
     expect(routeSource).toContain("LOCAL_SUPERVISED_RUN_PREFIX");
     expect(routeSource).toContain("buildSupervisedStartPlaceholder");
