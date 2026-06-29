@@ -53,6 +53,14 @@ const slottedListStyleTargets = [
   },
 ] as const;
 
+const routeShellTargets = [
+  {
+    path: "routes/KernelTaskCenterRoute.tsx",
+    expected: ["VRouteHeader", "VSelect", "VIconButton"],
+    forbidden: ["<header className={styles.header}", "<select value={status}"],
+  },
+] as const;
+
 function readTargetSource(path: string): string {
   return readFileSync(resolve(sourceRoot, path), "utf8");
 }
@@ -85,6 +93,20 @@ describe("VUI batch migration", () => {
       expect(outerBlock).toContain("display: block;");
       expect(source).toContain(contentSlot);
       expect(source).toContain(labelSlot);
+    },
+  );
+
+  it.each(routeShellTargets)(
+    "$path uses VUI route shell controls",
+    ({ path, expected, forbidden }) => {
+      const source = readTargetSource(path);
+
+      for (const primitive of expected) {
+        expect(source).toContain(primitive);
+      }
+      for (const rawPattern of forbidden) {
+        expect(source).not.toContain(rawPattern);
+      }
     },
   );
 });
