@@ -3,6 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from core.web.services import agent_role_tool_profile_service
+
 from tests.test_agent_config_workspace_service import (
     ProviderConfig,
     _fake_config_workspace,
@@ -105,81 +107,11 @@ def test_repair_agent_directory_creates_protected_knowledge_steward_agent(tmp_pa
 
 def test_repair_agent_directory_applies_challenge_cup_research_tool_profiles(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    cases = {
-        "challenge_cup_data_discovery": [
-            "agent_message_tool",
-            "research_knowledge_query_tool",
-            "source_collection_context_tool",
-            "source_collection_stage_writeback_tool",
-            "batch_web_search_tool",
-            "paper_search_tool",
-            "project_search_tool",
-            "news_search_tool",
-            "search_summarize_sources_tool",
-        ],
-        "challenge_cup_source_acquisition": [
-            "agent_message_tool",
-            "research_knowledge_query_tool",
-            "source_collection_context_tool",
-            "source_collection_stage_writeback_tool",
-            "web_fetch_tool",
-            "batch_web_search_tool",
-            "paper_search_tool",
-            "project_search_tool",
-            "search_summarize_sources_tool",
-        ],
-        "challenge_cup_content_extraction": [
-            "agent_message_tool",
-            "research_knowledge_query_tool",
-            "source_collection_context_tool",
-            "source_collection_stage_writeback_tool",
-            "web_fetch_tool",
-            "search_summarize_sources_tool",
-        ],
-        "challenge_cup_source_quality": [
-            "agent_message_tool",
-            "research_knowledge_query_tool",
-            "source_collection_context_tool",
-            "source_collection_stage_writeback_tool",
-            "web_fetch_tool",
-            "batch_web_search_tool",
-            "paper_search_tool",
-            "project_search_tool",
-            "news_search_tool",
-            "search_summarize_sources_tool",
-        ],
-        "challenge_cup_experiment_planner": [
-            "agent_message_tool",
-            "research_knowledge_query_tool",
-            "challenge_cup_experiment_context_tool",
-            "challenge_cup_experiment_writeback_tool",
-        ],
-        "challenge_cup_experiment_ledger": [
-            "agent_message_tool",
-            "research_knowledge_query_tool",
-            "challenge_cup_experiment_context_tool",
-            "challenge_cup_experiment_writeback_tool",
-        ],
-        "challenge_cup_iteration_planner": [
-            "agent_message_tool",
-            "research_knowledge_query_tool",
-            "challenge_cup_iteration_context_tool",
-            "challenge_cup_iteration_writeback_tool",
-            "challenge_cup_experiment_context_tool",
-        ],
-        "challenge_cup_versioning": [
-            "agent_message_tool",
-            "research_knowledge_query_tool",
-            "challenge_cup_versioning_context_tool",
-            "challenge_cup_versioning_writeback_tool",
-            "challenge_cup_iteration_context_tool",
-        ],
-    }
     expected_prompt_templates = {
-        "challenge_cup_data_discovery": "prompt-challenge-cup-data-discovery",
-        "challenge_cup_source_acquisition": "prompt-challenge-cup-source-acquisition",
-        "challenge_cup_content_extraction": "prompt-challenge-cup-content-extraction",
-        "challenge_cup_source_quality": "prompt-challenge-cup-source-quality",
+        "source_finder": "prompt-source-finder",
+        "source_extractor": "prompt-source-extractor",
+        "source_relation_mapper": "prompt-source-relation-mapper",
+        "source_ingestor": "prompt-source-ingestor",
         "challenge_cup_experiment_planner": "prompt-challenge-cup-experiment-planner",
         "challenge_cup_experiment_ledger": "prompt-challenge-cup-experiment-ledger",
         "challenge_cup_iteration_planner": "prompt-challenge-cup-iteration-planner",
@@ -204,7 +136,7 @@ def test_repair_agent_directory_applies_challenge_cup_research_tool_profiles(tmp
                 },
             },
         )["agentId"]
-        for role_key in cases
+        for role_key in expected_prompt_templates
     }
     coordinator_id = agent_directory_service.create_agent_instance(
         display_name="challenge_cup_coordinator",
@@ -220,17 +152,25 @@ def test_repair_agent_directory_applies_challenge_cup_research_tool_profiles(tmp
 
     agent_directory_service.repair_agent_directory()
 
-    for role_key, expected_tools in cases.items():
+    for role_key, expected_prompt_template in expected_prompt_templates.items():
+        expected_policy = agent_role_tool_profile_service.resolve_role_tool_policy(
+            role_key=role_key,
+            primary_mode="research",
+            policy_id=f"tool-{created_ids[role_key]}",
+        )
+        assert expected_policy is not None
         agent = agent_directory_service.get_agent(created_ids[role_key])
-        assert agent["promptTemplateId"] == expected_prompt_templates[role_key]
+        assert agent["promptTemplateId"] == expected_prompt_template
         assert "挑战杯" in agent["personaProfile"]["background"]
         assert "challenge_cup" in agent["taskProfile"]["taskTypes"]
-        assert agent["toolPolicy"]["allowedTools"] == expected_tools
+        assert agent["toolPolicy"]["allowedTools"] == expected_policy["allowedTools"]
+        assert agent["toolPolicy"]["roleToolProfileId"] == role_key
+        assert agent["toolPolicy"]["roleToolProfileFingerprint"] == expected_policy["roleToolProfileFingerprint"]
         if role_key in {
-            "challenge_cup_data_discovery",
-            "challenge_cup_source_acquisition",
-            "challenge_cup_content_extraction",
-            "challenge_cup_source_quality",
+            "source_finder",
+            "source_extractor",
+            "source_relation_mapper",
+            "source_ingestor",
         }:
             assert agent["toolPolicy"]["preferredTools"][:2] == [
                 "source_collection_context_tool",
@@ -251,17 +191,9 @@ def test_repair_agent_directory_applies_challenge_cup_research_tool_profiles(tmp
                 "challenge_cup_versioning_context_tool",
                 "challenge_cup_versioning_writeback_tool",
             ]
-        if role_key in {
-            "challenge_cup_experiment_planner",
-            "challenge_cup_experiment_ledger",
-            "challenge_cup_iteration_planner",
-            "challenge_cup_versioning",
-        }:
-            assert agent["toolPolicy"]["writeScopes"] == ["team_workflow_ledger"]
-        else:
-            assert agent["toolPolicy"]["writeScopes"] == []
-        assert agent["toolPolicy"]["networkAccess"] in {"controlled", "none"}
-        assert agent["toolPolicy"]["mutationAccess"] in {"none", "restricted"}
+        assert agent["toolPolicy"]["writeScopes"] == expected_policy["writeScopes"]
+        assert agent["toolPolicy"]["networkAccess"] == expected_policy["networkAccess"]
+        assert agent["toolPolicy"]["mutationAccess"] == expected_policy["mutationAccess"]
         assert "cli_tool" not in agent["toolPolicy"]["allowedTools"]
         assert "apply_patch_tool" not in agent["toolPolicy"]["allowedTools"]
     coordinator = agent_directory_service.get_agent(coordinator_id)

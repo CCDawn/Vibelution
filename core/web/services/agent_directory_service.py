@@ -139,134 +139,14 @@ SYSTEM_NO_TOOL_ROLES = {
     "self_evolution": {"executor", "reviewer", "summarizer"},
     "supervised_evolution": {"baseline", "candidate", "reviewer", "auditor", "judge"},
 }
-RESEARCH_SOURCE_ROLE_KEYS = {
-    "source_finder",
-    "source_extractor",
-    "source_relation_mapper",
-    "source_ingestor",
-}
-RESEARCH_SOURCE_ALLOWED_TOOLS = (
-    "agent_message_tool",
-    "research_knowledge_query_tool",
-    "web_fetch_tool",
-    "batch_web_search_tool",
-    "paper_search_tool",
-    "project_search_tool",
-    "news_search_tool",
-    "search_summarize_sources_tool",
-    "search_memory_tool",
-)
-RESEARCH_SOURCE_PREFERRED_TOOLS = (
-    "research_knowledge_query_tool",
-    "batch_web_search_tool",
-    "paper_search_tool",
-    "search_summarize_sources_tool",
-    "agent_message_tool",
-)
-RESEARCH_SOURCE_ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {}
-CHALLENGE_CUP_ROLE_PROMPT_TEMPLATE_IDS = {
-    "challenge_cup_coordinator": "prompt-challenge-cup-coordinator",
-    "source_finder": "prompt-source-finder",
-    "source_extractor": "prompt-source-extractor",
-    "source_relation_mapper": "prompt-source-relation-mapper",
-    "source_ingestor": "prompt-source-ingestor",
-    "challenge_cup_experiment_planner": "prompt-challenge-cup-experiment-planner",
-    "challenge_cup_experiment_ledger": "prompt-challenge-cup-experiment-ledger",
-    "challenge_cup_iteration_planner": "prompt-challenge-cup-iteration-planner",
-    "challenge_cup_versioning": "prompt-challenge-cup-versioning",
-}
-AI_SEARCH_ROLE_PROMPT_TEMPLATE_IDS = {
-    "ai_search_scope_lead": "prompt-ai-search-scope-lead",
-    "global_primary_sources": "prompt-ai-search-global-primary-sources",
-    "cn_primary_sources": "prompt-ai-search-cn-primary-sources",
-    "signal_quality_gate": "prompt-ai-search-signal-quality-gate",
-}
-KNOWLEDGE_EXPANSION_ROLE_PROMPT_TEMPLATE_IDS = {
-    "source_finder": "prompt-source-finder",
-    "source_extractor": "prompt-source-extractor",
-    "source_relation_mapper": "prompt-source-relation-mapper",
-    "source_ingestor": "prompt-source-ingestor",
-    "knowledge_steward": "prompt-knowledge-steward",
-}
-RESEARCH_ROLE_TOOL_PROFILES = {
-    "challenge_cup_experiment_planner": {
-        "allowedTools": (
-            "agent_message_tool",
-            "research_knowledge_query_tool",
-            "challenge_cup_experiment_context_tool",
-            "challenge_cup_experiment_writeback_tool",
-        ),
-        "preferredTools": (
-            "challenge_cup_experiment_context_tool",
-            "challenge_cup_experiment_writeback_tool",
-            "research_knowledge_query_tool",
-            "agent_message_tool",
-        ),
-    },
-    "challenge_cup_experiment_ledger": {
-        "allowedTools": (
-            "agent_message_tool",
-            "research_knowledge_query_tool",
-            "challenge_cup_experiment_context_tool",
-            "challenge_cup_experiment_writeback_tool",
-        ),
-        "preferredTools": (
-            "challenge_cup_experiment_context_tool",
-            "challenge_cup_experiment_writeback_tool",
-            "research_knowledge_query_tool",
-            "agent_message_tool",
-        ),
-    },
-    "challenge_cup_iteration_planner": {
-        "allowedTools": (
-            "agent_message_tool",
-            "research_knowledge_query_tool",
-            "challenge_cup_iteration_context_tool",
-            "challenge_cup_iteration_writeback_tool",
-            "challenge_cup_experiment_context_tool",
-        ),
-        "preferredTools": (
-            "challenge_cup_iteration_context_tool",
-            "challenge_cup_iteration_writeback_tool",
-            "challenge_cup_experiment_context_tool",
-            "research_knowledge_query_tool",
-            "agent_message_tool",
-        ),
-    },
-    "challenge_cup_versioning": {
-        "allowedTools": (
-            "agent_message_tool",
-            "research_knowledge_query_tool",
-            "challenge_cup_versioning_context_tool",
-            "challenge_cup_versioning_writeback_tool",
-            "challenge_cup_iteration_context_tool",
-        ),
-        "preferredTools": (
-            "challenge_cup_versioning_context_tool",
-            "challenge_cup_versioning_writeback_tool",
-            "challenge_cup_iteration_context_tool",
-            "research_knowledge_query_tool",
-            "agent_message_tool",
-        ),
-    },
-    "research_paper_reader": {
-        "allowedTools": (
-            "agent_message_tool",
-            "research_knowledge_query_tool",
-            "web_fetch_tool",
-            "batch_web_search_tool",
-            "paper_search_tool",
-            "search_summarize_sources_tool",
-        ),
-        "preferredTools": (
-            "research_knowledge_query_tool",
-            "paper_search_tool",
-            "web_fetch_tool",
-            "search_summarize_sources_tool",
-            "agent_message_tool",
-        ),
-    },
-}
+RESEARCH_SOURCE_ROLE_KEYS = set(agent_role_tool_profile_service.RESEARCH_SOURCE_ROLE_KEYS)
+_RESEARCH_SOURCE_DEFAULT_PROFILE = agent_role_tool_profile_service.get_role_tool_profile("research_source_default") or {}
+_RESEARCH_ROLE_DEFAULT_PROFILE = agent_role_tool_profile_service.get_role_tool_profile("research_role_default") or {}
+RESEARCH_SOURCE_ALLOWED_TOOLS = tuple(_RESEARCH_SOURCE_DEFAULT_PROFILE.get("allowedTools") or ())
+RESEARCH_SOURCE_PREFERRED_TOOLS = tuple(_RESEARCH_SOURCE_DEFAULT_PROFILE.get("preferredTools") or ())
+CHALLENGE_CUP_ROLE_PROMPT_TEMPLATE_IDS = agent_role_tool_profile_service.CHALLENGE_CUP_ROLE_PROMPT_TEMPLATE_IDS
+AI_SEARCH_ROLE_PROMPT_TEMPLATE_IDS = agent_role_tool_profile_service.AI_SEARCH_ROLE_PROMPT_TEMPLATE_IDS
+KNOWLEDGE_EXPANSION_ROLE_PROMPT_TEMPLATE_IDS = agent_role_tool_profile_service.KNOWLEDGE_EXPANSION_ROLE_PROMPT_TEMPLATE_IDS
 AGENT_LLM_BINDING_SLOTS = AGENT_LLM_SLOTS
 LEGACY_AGENT_MODEL_ID_ALIASES = {
     "gpt_5_5_gpt_5_5": "relay_openai_gpt_5_5",
@@ -3304,17 +3184,20 @@ def default_research_source_tool_policy(policy_id: str, *, role_key: str = "") -
         primary_mode="research",
         policy_id=policy_id,
     )
-    if resolved:
+    if resolved and str(resolved.get("roleToolProfileId") or "").strip() != "research_role_default":
         payload.update(resolved)
     else:
-        profile = RESEARCH_SOURCE_ROLE_TOOL_PROFILES.get(_normalize_role_key(role_key), {})
-        payload["allowedTools"] = list(profile.get("allowedTools") or RESEARCH_SOURCE_ALLOWED_TOOLS)
-        payload["preferredTools"] = list(profile.get("preferredTools") or RESEARCH_SOURCE_PREFERRED_TOOLS)
-        payload["readScopes"] = ["private", "shared"]
-        payload["writeScopes"] = []
-        payload["networkAccess"] = "controlled"
-        payload["mutationAccess"] = "none"
-        payload["maxCallsPerTurn"] = 8
+        profile = _RESEARCH_SOURCE_DEFAULT_PROFILE
+        if profile:
+            payload.update(agent_role_tool_profile_service.build_policy_from_role_profile(profile, policy_id))
+        else:
+            payload["allowedTools"] = list(RESEARCH_SOURCE_ALLOWED_TOOLS)
+            payload["preferredTools"] = list(RESEARCH_SOURCE_PREFERRED_TOOLS)
+            payload["readScopes"] = ["private", "shared"]
+            payload["writeScopes"] = []
+            payload["networkAccess"] = "controlled"
+            payload["mutationAccess"] = "none"
+            payload["maxCallsPerTurn"] = 8
     return payload
 
 
@@ -3330,7 +3213,7 @@ def default_research_role_tool_policy(policy_id: str, *, role_key: str = "") -> 
     if resolved:
         payload.update(resolved)
     else:
-        profile = RESEARCH_ROLE_TOOL_PROFILES.get(_normalize_role_key(role_key), {})
+        profile = _RESEARCH_ROLE_DEFAULT_PROFILE
         payload["allowedTools"] = list(profile.get("allowedTools") or ("agent_message_tool", "research_knowledge_query_tool"))
         payload["preferredTools"] = list(profile.get("preferredTools") or payload["allowedTools"])
         payload["readScopes"] = ["private", "shared"]
@@ -3389,12 +3272,24 @@ def _ensure_fixed_role_tool_policy(state: dict[str, Any], agent: dict[str, Any])
     agent_id = str(agent.get("agentId") or "").strip()
     if not agent_id:
         return None
-    policy_id = f"tool-{agent_id}"
+    role_key = _normalize_role_key(agent.get("roleKey") or _infer_agent_role_key(agent))
+    if agent_id == KNOWLEDGE_STEWARD_AGENT_ID or role_key == KNOWLEDGE_STEWARD_ROLE_KEY:
+        policy_id = KNOWLEDGE_STEWARD_TOOL_POLICY_ID
+    else:
+        policy_id = f"tool-{agent_id}"
     policies = _tool_policies(state)
     if desired_kind == "research_source":
         desired_policy = default_research_source_tool_policy(policy_id, role_key=str(agent.get("roleKey") or ""))
     elif desired_kind == "research_role":
         desired_policy = default_research_role_tool_policy(policy_id, role_key=str(agent.get("roleKey") or ""))
+    elif desired_kind == "role_profile":
+        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        desired_policy = agent_role_tool_profile_service.resolve_role_tool_policy(
+            role_key=str(agent.get("roleKey") or ""),
+            primary_mode=str(agent.get("primaryMode") or ""),
+            metadata=metadata,
+            policy_id=policy_id,
+        ) or default_research_role_tool_policy(policy_id, role_key=str(agent.get("roleKey") or ""))
     elif desired_kind == "retired_source_collection_role":
         desired_policy = default_retired_source_collection_role_tool_policy(policy_id)
     else:
@@ -3434,10 +3329,8 @@ def _fixed_role_tool_policy_kind(agent: dict[str, Any]) -> str:
             return "no_tools"
     if primary_mode == "research" and role_key in agent_role_tool_profile_service.RETIRED_SOURCE_COLLECTION_ROLE_KEYS:
         return "retired_source_collection_role"
-    if primary_mode == "research" and role_key in RESEARCH_SOURCE_ROLE_KEYS:
-        return "research_source"
-    if role_key in RESEARCH_ROLE_TOOL_PROFILES:
-        return "research_role"
+    if agent_role_tool_profile_service.role_has_explicit_tool_profile(role_key, primary_mode=primary_mode, metadata=metadata):
+        return "role_profile"
     return ""
 
 
@@ -4687,6 +4580,14 @@ def _ensure_knowledge_steward_agent(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def _knowledge_steward_tool_policy() -> dict[str, Any]:
+    profile_policy = agent_role_tool_profile_service.resolve_role_tool_policy(
+        role_key=KNOWLEDGE_STEWARD_ROLE_KEY,
+        primary_mode="general",
+        metadata={"systemRole": KNOWLEDGE_STEWARD_ROLE_KEY},
+        policy_id=KNOWLEDGE_STEWARD_TOOL_POLICY_ID,
+    )
+    if profile_policy:
+        return normalize_tool_policy(profile_policy, KNOWLEDGE_STEWARD_TOOL_POLICY_ID)
     return normalize_tool_policy(
         {
             **default_tool_policy(KNOWLEDGE_STEWARD_TOOL_POLICY_ID),
@@ -6340,14 +6241,8 @@ def _normalize_prompt_template_id(value: Any) -> str:
     return _safe_fragment(normalized)
 
 
-def _prompt_template_id_for_role(role_key: Any) -> str:
-    normalized_role = _normalize_role_key(role_key)
-    return (
-        AI_SEARCH_ROLE_PROMPT_TEMPLATE_IDS.get(normalized_role)
-        or CHALLENGE_CUP_ROLE_PROMPT_TEMPLATE_IDS.get(normalized_role)
-        or KNOWLEDGE_EXPANSION_ROLE_PROMPT_TEMPLATE_IDS.get(normalized_role)
-        or ""
-    )
+def _prompt_template_id_for_role(role_key: Any, *, metadata: dict[str, Any] | None = None) -> str:
+    return agent_role_tool_profile_service.role_prompt_template_id(_normalize_role_key(role_key), metadata=metadata)
 
 
 def _should_repair_agent_prompt_template_id(current: str, expected: str) -> bool:
@@ -6409,7 +6304,7 @@ def _infer_agent_prompt_template_id(agent: dict[str, Any]) -> str:
     explicit = str(metadata.get("promptTemplateId") or "").strip()
     if explicit:
         return _normalize_prompt_template_id(explicit)
-    role_prompt_template_id = _prompt_template_id_for_role(agent.get("roleKey"))
+    role_prompt_template_id = _prompt_template_id_for_role(agent.get("roleKey"), metadata=metadata)
     if role_prompt_template_id:
         return role_prompt_template_id
     research_key = str(metadata.get("researchAgentKey") or "").strip()
