@@ -986,6 +986,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('"/api/agents/bulk-purge"');
     expect(routeSource).toContain("bulkPurgeWorkspaceCache");
     expect(routeSource).toContain("AgentBulkActionBar");
+    expect(routeSource).toContain("VButton");
     expect(routeSource).toContain('summary={bulkActionSummary}');
     expect(routeSource).toContain('selectionActions={bulkSelectionActions}');
     expect(routeSource).toContain('promptPicker={bulkPromptPicker}');
@@ -996,7 +997,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("for (const agent of selectedBulkAgents) {\n      if (agentArchiveProtected(agent))");
     expect(routeSource).not.toContain("`/api/agents/${encodeURIComponent(agent.agentId)}/purge`");
     expect(routeSource).toContain('method: "DELETE"');
-    expect(routeSource).toContain("onClick={bulkPurgeAgents}");
+    expect(routeSource).toContain("onPress={bulkPurgeAgents}");
     expect(routeSource).toContain("onClick={bulkApplyAgentConfig}");
     expect(routeSource).toContain("styles.bulkSelectionList");
     expect(routeSource).toContain("styles.bulkFieldHeader");
@@ -1008,5 +1009,33 @@ describe("AgentsRoute layout contract", () => {
     expect(stylesSource).not.toContain(".bulkSummary");
     expect(stylesSource).not.toContain(".bulkPromptPicker");
     expect(stylesSource).toContain(".agentRowBulkSelected");
+  });
+
+  it("renders bulk action controls through VUI buttons instead of page-owned button CSS", () => {
+    const bulkSelectionSource = routeSource.slice(
+      routeSource.indexOf("const bulkSelectionActions"),
+      routeSource.indexOf("const bulkPromptPicker"),
+    );
+    const bulkMutationSource = routeSource.slice(
+      routeSource.indexOf("const bulkMutationActions"),
+      routeSource.indexOf("const bulkDestructiveActions"),
+    );
+    const bulkDestructiveStart = routeSource.indexOf("const bulkDestructiveActions");
+    const bulkDestructiveSource = routeSource.slice(
+      bulkDestructiveStart,
+      routeSource.indexOf("return (", bulkDestructiveStart),
+    );
+
+    expect(bulkSelectionSource).toContain("<VButton");
+    expect(bulkSelectionSource).toContain('variant="secondary"');
+    expect(bulkSelectionSource).not.toContain("styles.secondaryButton");
+    expect(bulkMutationSource).toContain("<VButton");
+    expect(bulkMutationSource).toContain('variant="primary"');
+    expect(bulkMutationSource).toContain('variant="secondary"');
+    expect(bulkMutationSource).not.toContain("styles.primaryButton");
+    expect(bulkMutationSource).not.toContain("styles.secondaryButton");
+    expect(bulkDestructiveSource).toContain("<VButton");
+    expect(bulkDestructiveSource).toContain('variant="danger"');
+    expect(bulkDestructiveSource).not.toContain("styles.dangerButton");
   });
 });

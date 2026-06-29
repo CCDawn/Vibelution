@@ -65,6 +65,7 @@ import {
   AgentWorkspacePanel,
   type AgentSummaryMetric,
 } from "../components/vui/product/agent-management";
+import { VButton } from "../components/vui";
 import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
@@ -5511,19 +5512,18 @@ export function AgentsRoute() {
 
   const bulkSelectionActions = (
     <>
-      <button
+      <VButton
         type="button"
-        className={styles.secondaryButton}
-        disabled={!visibleAgents.length || bulkAgentPending}
-        onClick={allVisibleAgentsSelected ? clearBulkAgents : selectVisibleBulkAgents}
+        variant="secondary"
+        icon={allVisibleAgentsSelected ? <Square size={14} /> : <CheckSquare size={14} />}
+        isDisabled={!visibleAgents.length || bulkAgentPending}
+        onPress={allVisibleAgentsSelected ? clearBulkAgents : selectVisibleBulkAgents}
       >
-        {allVisibleAgentsSelected ? <Square size={14} /> : <CheckSquare size={14} />}
-        <span>{allVisibleAgentsSelected ? copy.bulkClear : copy.bulkSelectVisible}</span>
-      </button>
-      <button type="button" className={styles.secondaryButton} disabled={!selectedBulkAgents.length || bulkAgentPending} onClick={clearBulkAgents}>
-        <Square size={14} />
-        <span>{copy.bulkClear}</span>
-      </button>
+        {allVisibleAgentsSelected ? copy.bulkClear : copy.bulkSelectVisible}
+      </VButton>
+      <VButton type="button" variant="secondary" icon={<Square size={14} />} isDisabled={!selectedBulkAgents.length || bulkAgentPending} onPress={clearBulkAgents}>
+        {copy.bulkClear}
+      </VButton>
     </>
   );
 
@@ -5548,27 +5548,25 @@ export function AgentsRoute() {
 
   const bulkMutationActions = (
     <>
-      <button
+      <VButton
         type="button"
-        className={styles.primaryButton}
-        disabled={!selectedBulkAgents.length || !bulkPromptTemplateId || bulkAgentPending}
-        onClick={bulkApplyPromptTemplate}
+        variant="primary"
+        icon={<CheckCircle2 size={14} />}
+        isDisabled={!selectedBulkAgents.length || !bulkPromptTemplateId || bulkAgentPending}
+        onPress={bulkApplyPromptTemplate}
       >
-        <CheckCircle2 size={14} />
-        <span>{bulkAgentPending ? copy.bulkWorking : copy.bulkApplyPrompt}</span>
-      </button>
-      <button type="button" className={styles.secondaryButton} disabled={!selectedBulkAgents.length || bulkAgentPending} onClick={bulkArchiveAgents}>
-        <Archive size={14} />
-        <span>{bulkAgentPending ? copy.bulkWorking : copy.bulkArchive}</span>
-      </button>
+        {bulkAgentPending ? copy.bulkWorking : copy.bulkApplyPrompt}
+      </VButton>
+      <VButton type="button" variant="secondary" icon={<Archive size={14} />} isDisabled={!selectedBulkAgents.length || bulkAgentPending} onPress={bulkArchiveAgents}>
+        {bulkAgentPending ? copy.bulkWorking : copy.bulkArchive}
+      </VButton>
     </>
   );
 
   const bulkDestructiveActions = (
-    <button type="button" className={styles.dangerButton} disabled={!selectedBulkAgents.length || bulkAgentPending} onClick={bulkPurgeAgents}>
-      <Trash2 size={14} />
-      <span>{bulkAgentPending ? copy.bulkWorking : copy.bulkPurge}</span>
-    </button>
+    <VButton type="button" variant="danger" icon={<Trash2 size={14} />} isDisabled={!selectedBulkAgents.length || bulkAgentPending} onPress={bulkPurgeAgents}>
+      {bulkAgentPending ? copy.bulkWorking : copy.bulkPurge}
+    </VButton>
   );
 
   return (
