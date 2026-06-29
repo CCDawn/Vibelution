@@ -473,7 +473,7 @@ def test_agent_directory_system_team_member_without_index_kind_is_invalid_and_li
     team_agent = agent_directory_service.create_agent_instance(
         display_name="挑战杯数据发现",
         primary_mode="research",
-        role_key="challenge_cup_data_discovery",
+        role_key="source_finder",
         prompt_template_id="prompt-chat-default",
         direct_session_id="session-team-member",
         created_by="user",
@@ -498,7 +498,8 @@ def test_agent_directory_system_team_member_without_index_kind_is_invalid_and_li
     )
 
     assert team_agent["conversationIndexKind"] == "invalid"
-    assert "team_agent_missing_conversation_index_kind" in team_agent["conversationIndexErrors"]
+    assert "missing_conversation_index_kind" in team_agent["conversationIndexErrors"]
+    assert "team_agent_missing_conversation_index_kind" not in team_agent["conversationIndexErrors"]
     listed = {item["id"]: item for item in session_service.list_sessions()}
     assert "session-team-member" in listed
     assert listed["session-team-member"]["conversationIndexKind"] == "invalid"
@@ -660,7 +661,7 @@ def test_repair_conversation_index_records_migrates_legacy_direct_agent_sessions
                     "status": "active",
                     "directSessionId": "session-team-private",
                     "primaryMode": "research",
-                    "roleKey": "challenge_cup_data_discovery",
+                    "roleKey": "source_finder",
                     "promptTemplateId": "prompt-chat-default",
                     "createdBy": "challenge_cup_team",
                     "metadata": {
@@ -668,7 +669,7 @@ def test_repair_conversation_index_records_migrates_legacy_direct_agent_sessions
                             agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
                         ),
                         "challengeCupTeamId": "research-team",
-                        "challengeCupTeamRole": "data_discovery",
+                        "challengeCupTeamRole": "source_finder",
                         "directSessionVisibility": "active_session",
                     },
                 },
@@ -710,7 +711,7 @@ def test_repair_conversation_index_records_migrates_legacy_direct_agent_sessions
                     "status": "active",
                     "teamKind": "research",
                     "teamSource": "research_organization",
-                    "members": [{"agentId": "agent-team-private", "role": "data_discovery"}],
+                    "members": [{"agentId": "agent-team-private", "role": "source_finder"}],
                     "linkedChatRoomId": "",
                 }
             ],
@@ -936,7 +937,7 @@ def test_legacy_team_private_agent_direct_session_without_index_kind_is_invalid_
                     "status": "active",
                     "directSessionId": "session-team-private",
                     "primaryMode": "research",
-                    "roleKey": "challenge_cup_data_discovery",
+                    "roleKey": "source_finder",
                     "promptTemplateId": "prompt-chat-default",
                     "createdBy": "challenge_cup_team",
                     "metadata": {
@@ -944,7 +945,7 @@ def test_legacy_team_private_agent_direct_session_without_index_kind_is_invalid_
                             agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
                         ),
                         "challengeCupTeamId": "research-team",
-                        "challengeCupTeamRole": "data_discovery",
+                        "challengeCupTeamRole": "source_finder",
                         "showInSessionIndex": True,
                         "directSessionVisibility": "active_session",
                     },

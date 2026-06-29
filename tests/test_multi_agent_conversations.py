@@ -1703,14 +1703,14 @@ def test_agent_message_tool_resolves_unique_role_key_target(tmp_path, monkeypatc
     agent_directory_service.update_agent_instance(
         beta["agentId"],
         primary_mode="research",
-        role_key="challenge_cup_source_acquisition",
+        role_key="source_finder",
     )
 
     with agent_directory_service.active_agent_runtime(alpha["agentId"], session_id=alpha["id"]):
         result, action = ToolExecutor().execute(
             "agent_message_tool",
             {
-                "target_agent": "challenge_cup_source_acquisition",
+                "target_agent": "source_finder",
                 "content": "请接收资料发现阶段的候选线索。",
                 "summary": "资料获取交接",
                 "wake_target": False,

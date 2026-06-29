@@ -617,13 +617,13 @@ def test_team_workflow_route_assesses_source_quality_batch(tmp_path, monkeypatch
             "summary": "Neural predictive coding evidence for network learning and attention mechanisms.",
             "tags": ["neuro", "algorithm"],
             "allowedForAnalysis": True,
-            "createdByAgent": "Data Discovery Agent",
+            "createdByAgent": "Source Finder Agent",
         },
     )["candidate"]
 
     response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/source-quality/assess-batch",
-        json={"assessedByAgent": "Source Quality Agent"},
+        json={"assessedByAgent": "Source Extractor Agent"},
     )
 
     assert response.status_code == 201, response.text
@@ -649,24 +649,24 @@ def test_team_workflow_route_force_rescreens_source_quality_batch(tmp_path, monk
             "summary": "Neural predictive coding evidence for network learning and attention mechanisms.",
             "tags": ["neuro", "algorithm"],
             "allowedForAnalysis": True,
-            "createdByAgent": "Data Discovery Agent",
+            "createdByAgent": "Source Finder Agent",
         },
     )["candidate"]
 
     first = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/source-quality/assess-batch",
-        json={"assessedByAgent": "Source Quality Agent"},
+        json={"assessedByAgent": "Source Extractor Agent"},
     )
     second = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/source-quality/assess-batch",
-        json={"assessedByAgent": "Source Quality Review Agent", "force": True},
+        json={"assessedByAgent": "Source Extractor Review Agent", "force": True},
     )
 
     assert first.status_code == 201, first.text
     assert second.status_code == 201, second.text
     payload = second.json()
     assert payload["status"] == "completed"
-    assert payload["assessedByAgent"] == "Source Quality Review Agent"
+    assert payload["assessedByAgent"] == "Source Extractor Review Agent"
     assert payload["summary"]["assessedCandidateCount"] == 1
     assert payload["summary"]["skippedCandidateCount"] == 0
     assert payload["assessments"][0]["candidateId"] == candidate["candidateId"]
@@ -1755,7 +1755,7 @@ def test_team_workflow_routes_build_candidate_graph(tmp_path, monkeypatch):
 
     response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/candidate-graph",
-        json={"title": "Candidate graph preview", "createdByAgent": "Candidate Graph Preview Agent"},
+        json={"title": "Candidate graph preview", "createdByAgent": "Source Relation Mapper Agent"},
     )
 
     assert response.status_code == 201, response.text
@@ -2033,15 +2033,15 @@ def test_team_workflow_routes_run_knowledge_collection_ingestion(tmp_path, monke
             "sourceKind": "paper",
             "summary": "Predictive coding evidence for neural-network algorithm design.",
             "allowedForAnalysis": True,
-            "createdByAgent": "Data Discovery Agent",
+            "createdByAgent": "Source Finder Agent",
         },
     )
 
     response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/knowledge-collection/ingest",
         json={
-            "sourceQualityAgentId": "资料审查 Agent",
-            "candidateGraphAgentId": "候选关系 Agent",
+            "sourceQualityAgentId": "资料提炼 Agent",
+            "candidateGraphAgentId": "资料关系整理 Agent",
             "stewardAgentId": steward["agentId"],
             "targetDomain": "神经学启发神经网络算法",
             "maxCandidates": 10,

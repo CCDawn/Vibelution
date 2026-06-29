@@ -29,22 +29,23 @@ def test_role_governance_profiles_bind_prompt_templates_to_tool_profiles():
         assert "web_search_tool" in governance["forbiddenTools"]
 
 
-def test_retired_source_collection_roles_have_no_role_governance_profile():
-    for role_key in agent_role_tool_profile_service.RETIRED_SOURCE_COLLECTION_ROLE_KEYS:
-        assert (
-            agent_role_tool_profile_service.role_governance_profile(
-                role_key=role_key,
-                primary_mode="research",
-                policy_id=f"tool-{role_key}",
-            )
-            is None
-        )
+def test_role_tool_profile_service_does_not_keep_retired_role_registry():
+    exported_names = {name.lower() for name in dir(agent_role_tool_profile_service)}
+    assert not any("retired" in name or "legacy" in name for name in exported_names)
+    assert agent_role_tool_profile_service.RESEARCH_SOURCE_ROLE_KEYS == {
+        "source_finder",
+        "source_extractor",
+        "source_relation_mapper",
+        "source_ingestor",
+    }
 
 
 def test_four_stage_source_roles_have_expected_tool_boundaries():
     cases = {
         "source_finder": {
             "required": {
+                "task_create_tool",
+                "task_update_tool",
                 "source_collection_context_tool",
                 "source_collection_stage_writeback_tool",
                 "batch_web_search_tool",
@@ -59,6 +60,8 @@ def test_four_stage_source_roles_have_expected_tool_boundaries():
         },
         "source_extractor": {
             "required": {
+                "task_create_tool",
+                "task_update_tool",
                 "source_collection_context_tool",
                 "source_collection_stage_writeback_tool",
                 "web_fetch_tool",
@@ -78,6 +81,8 @@ def test_four_stage_source_roles_have_expected_tool_boundaries():
         },
         "source_relation_mapper": {
             "required": {
+                "task_create_tool",
+                "task_update_tool",
                 "source_collection_context_tool",
                 "source_collection_stage_writeback_tool",
                 "research_knowledge_query_tool",
@@ -97,6 +102,8 @@ def test_four_stage_source_roles_have_expected_tool_boundaries():
         },
         "source_ingestor": {
             "required": {
+                "task_create_tool",
+                "task_update_tool",
                 "source_collection_context_tool",
                 "source_collection_stage_writeback_tool",
                 "knowledge_proposal_tool",
@@ -135,32 +142,15 @@ def test_four_stage_source_roles_have_expected_tool_boundaries():
         assert policy["roleToolProfileFingerprint"]
 
 
-def test_retired_source_collection_roles_have_no_fixed_tool_profile():
-    retired_roles = [
-        "data_discovery",
-        "source_acquisition",
-        "content_extraction",
-        "source_quality",
-        "candidate_graph",
-        "challenge_cup_data_discovery",
-        "challenge_cup_source_acquisition",
-        "challenge_cup_content_extraction",
-        "challenge_cup_source_quality",
-        "knowledge_expansion_source_intake",
-        "knowledge_expansion_content_extraction",
-        "knowledge_expansion_source_quality",
-        "knowledge_expansion_candidate_graph",
-    ]
-
-    for role_key in retired_roles:
-        assert (
-            agent_role_tool_profile_service.resolve_role_tool_policy(
-                role_key=role_key,
-                primary_mode="research",
-                policy_id=f"tool-{role_key}",
-            )
-            is None
+def test_unregistered_research_role_does_not_get_role_governance_profile():
+    assert (
+        agent_role_tool_profile_service.role_governance_profile(
+            role_key="unregistered_source_role",
+            primary_mode="research",
+            policy_id="tool-unregistered-source-role",
         )
+        is None
+    )
 
 
 def test_knowledge_steward_profile_owns_formal_knowledge_tools():
