@@ -1,6 +1,7 @@
 import { CircleDot, Clock3, MessageCircleHeart, UsersRound } from "lucide-react";
 
 import type { ConversationSummary, Team } from "../api/types";
+import { VButton } from "../components/vui";
 import type { ConversationIndexTeam } from "./conversationIndexModel";
 import { conversationIndexTeamMemberCount } from "./conversationIndexModel";
 import styles from "./ChatCodingRoute.module.css";
@@ -71,10 +72,10 @@ export function GroupConversationIndexItem({
       aria-current={active ? "true" : undefined}
       className={itemClassName}
     >
-      <button
+      <VButton
         type="button"
         className={styles.sessionItemMain}
-        onClick={() => onOpen(roomId)}
+        onPress={() => onOpen(roomId)}
       >
         <span className={`${styles.conversationAvatar} ${styles.conversationAvatarGroup}`} aria-hidden="true">
           <UsersRound size={18} />
@@ -98,7 +99,7 @@ export function GroupConversationIndexItem({
             <time>{formatTime(conversation.updatedAt)}</time>
           </span>
         </span>
-      </button>
+      </VButton>
     </div>
   );
 }
@@ -139,11 +140,11 @@ export function TeamConversationIndexItem({
       aria-current={active ? "true" : undefined}
       className={itemClassName}
     >
-      <button
+      <VButton
         type="button"
         className={styles.sessionItemMain}
-        disabled={!roomId}
-        onClick={() => onOpen(roomId)}
+        isDisabled={!roomId}
+        onPress={() => onOpen(roomId)}
       >
         <span className={`${styles.conversationAvatar} ${styles.conversationAvatarGroup}`} aria-hidden="true">
           <UsersRound size={18} />
@@ -173,7 +174,7 @@ export function TeamConversationIndexItem({
             ) : null}
           </span>
         </span>
-      </button>
+      </VButton>
     </div>
   );
 }

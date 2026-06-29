@@ -2,6 +2,7 @@ import { Bot, Check, Clock3, Cpu, LoaderCircle, MessageCircle, X } from "lucide-
 import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
 
 import type { AgentInstance, SessionSummary } from "../api/types";
+import { VButton, VIconButton } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import {
   sessionAgentDisplayInfo,
@@ -313,6 +314,10 @@ export function DirectSessionIndexItem({
       onCancelRename();
     }
   }
+  const dragSessionProps = {
+    draggable: true,
+    onDragStart,
+  };
 
   return (
     <div
@@ -371,12 +376,11 @@ export function DirectSessionIndexItem({
           </span>
         </div>
       ) : (
-        <button
+        <VButton
           type="button"
           className={styles.sessionItemMain}
-          draggable
-          onDragStart={onDragStart}
-          onClick={() => onOpen(session.id)}
+          {...dragSessionProps}
+          onPress={() => onOpen(session.id)}
           aria-current={active ? "true" : undefined}
         >
           {renderSessionAvatar(avatarClassName, sessionAvatarImageUrl, sessionAvatarFallback)}
@@ -418,30 +422,28 @@ export function DirectSessionIndexItem({
             </span>
             {missingAgentMessage ? <span className={styles.agentMissingLine}>{missingAgentMessage}</span> : null}
           </span>
-        </button>
+        </VButton>
       )}
       {editing ? (
         <div className={styles.sessionActionStack}>
-          <button
+          <VIconButton
             type="button"
             className={styles.sessionIconButton}
-            onClick={() => onSubmitRename(session)}
-            disabled={renamePending}
+            onPress={() => onSubmitRename(session)}
+            isDisabled={renamePending}
             title={saveLabel}
-            aria-label={`${saveLabel} ${sessionTitle}`}
-          >
-            <Check size={15} />
-          </button>
-          <button
+            label={`${saveLabel} ${sessionTitle}`}
+            icon={<Check size={15} />}
+          />
+          <VIconButton
             type="button"
             className={styles.sessionIconButton}
-            onClick={onCancelRename}
-            disabled={renamePending}
+            onPress={onCancelRename}
+            isDisabled={renamePending}
             title={t("cancelRenameSession")}
-            aria-label={t("cancelRenameSession")}
-          >
-            <X size={15} />
-          </button>
+            label={t("cancelRenameSession")}
+            icon={<X size={15} />}
+          />
         </div>
       ) : null}
       {itemMessage ? (

@@ -2251,6 +2251,25 @@
   white-space: nowrap;
 }
 
+.agentSessionTab[data-vui],
+.agentSessionTabMainAction[data-vui] {
+  justify-content: stretch;
+  font: inherit;
+}
+
+.agentSessionTab[data-vui] [data-slot="vui-button-content"],
+.agentSessionTab[data-vui] [data-slot="vui-button-label"],
+.agentSessionTabMainAction[data-vui] [data-slot="vui-button-content"],
+.agentSessionTabMainAction[data-vui] [data-slot="vui-button-label"] {
+  display: contents;
+}
+
+.agentSessionTabEditButton[data-vui],
+.agentSessionTabCloseButton[data-vui] {
+  min-width: 0;
+  padding: 0;
+}
+
 .fileTab {
   display: inline-flex;
   align-items: center;
@@ -4189,6 +4208,18 @@
   text-align: center;
 }
 
+.conversationGroupHeader[data-vui] {
+  justify-content: stretch;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 760;
+}
+
+.conversationGroupHeader[data-vui] [data-slot="vui-button-content"],
+.conversationGroupHeader[data-vui] [data-slot="vui-button-label"] {
+  display: contents;
+}
+
 .conversationGroupList {
   display: grid;
   gap: 1px;
@@ -4388,6 +4419,17 @@ a.teamTreeChild:focus-visible {
 
 .sessionItemMain:where(div) {
   cursor: default;
+}
+
+.sessionItemMain[data-vui] {
+  justify-content: stretch;
+  font: inherit;
+  font-weight: 760;
+}
+
+.sessionItemMain[data-vui] [data-slot="vui-button-content"],
+.sessionItemMain[data-vui] [data-slot="vui-button-label"] {
+  display: contents;
 }
 
 .sessionItemTop {
@@ -4805,6 +4847,12 @@ a.teamTreeChild:focus-visible {
   opacity: 0.45;
 }
 
+.sessionIconButton[data-vui],
+.sessionDeleteButton[data-vui] {
+  min-width: 0;
+  padding: 0;
+}
+
 .sessionContextMenu {
   position: fixed;
   z-index: 60;
@@ -4843,6 +4891,29 @@ a.teamTreeChild:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sessionContextMenuItem[data-vui] {
+  justify-content: stretch;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.sessionContextMenuItem[data-vui] [data-slot="vui-button-content"] {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.sessionContextMenuItem[data-vui] [data-slot="vui-button-icon"],
+.sessionContextMenuItem[data-vui] [data-slot="vui-button-label"] {
+  min-width: 0;
 }
 
 .sessionContextMenuItem:hover:not(:disabled),

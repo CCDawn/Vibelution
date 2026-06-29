@@ -2,6 +2,7 @@ import { Bot, Check, MessageCircleHeart, SquareTerminal, X } from "lucide-react"
 import type { DragEvent, MouseEvent as ReactMouseEvent } from "react";
 
 import type { AgentInstance, SessionReferenceAttachment, SessionSummary } from "../api/types";
+import { VButton, VIconButton } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import { sessionAgentDisplayInfo } from "./agentDisplay";
 import { isChildSession } from "./DirectSessionIndexItem";
@@ -137,44 +138,45 @@ export function AgentSessionTabStrip({
                 />
               </span>
               <span className={styles.agentSessionTabEditActions}>
-                <button
+                <VIconButton
                   type="button"
                   className={styles.agentSessionTabEditButton}
-                  onClick={() => onSubmitRename(session)}
-                  disabled={sessionRenamePending}
+                  onPress={() => onSubmitRename(session)}
+                  isDisabled={sessionRenamePending}
                   title={t(sessionIsChild ? "saveTaskName" : "saveAgentName")}
-                  aria-label={`${t(sessionIsChild ? "saveTaskName" : "saveAgentName")} ${sessionTitle}`}
-                >
-                  <Check size={13} />
-                </button>
-                <button
+                  label={`${t(sessionIsChild ? "saveTaskName" : "saveAgentName")} ${sessionTitle}`}
+                  icon={<Check size={13} />}
+                />
+                <VIconButton
                   type="button"
                   className={styles.agentSessionTabEditButton}
-                  onClick={onCancelRename}
-                  disabled={sessionRenamePending}
+                  onPress={onCancelRename}
+                  isDisabled={sessionRenamePending}
                   title={t("cancelRenameSession")}
-                  aria-label={t("cancelRenameSession")}
-                >
-                  <X size={13} />
-                </button>
+                  label={t("cancelRenameSession")}
+                  icon={<X size={13} />}
+                />
               </span>
             </div>
           );
         }
+        const dragReferenceProps = {
+          draggable: true,
+          onDragStart: (event: DragEvent<HTMLButtonElement>) =>
+            onDragReference(
+              event,
+              buildSessionReferencePayload(session, sessionDisplay.name, sessionSummary),
+            ),
+        };
         return (
-          <button
+          <VButton
             key={session.id}
             type="button"
             className={tabClassName}
             aria-current={tabActive ? "true" : undefined}
-            draggable
-            onDragStart={(event) =>
-              onDragReference(
-                event,
-                buildSessionReferencePayload(session, sessionDisplay.name, sessionSummary),
-              )}
+            {...dragReferenceProps}
             onContextMenu={(event) => onContextMenu(event, session)}
-            onClick={() => {
+            onPress={() => {
               if (activeSessionId === session.id) {
                 onSetActiveTab(session.id, "agent");
                 return;
@@ -196,7 +198,7 @@ export function AgentSessionTabStrip({
               {statusLabel(sessionStatus)}
               {sessionDisplay.modelLabel ? ` · ${sessionDisplay.modelLabel}` : ""}
             </span>
-          </button>
+          </VButton>
         );
       })}
       {cliAgentRuns.map((run) => {
@@ -214,10 +216,10 @@ export function AgentSessionTabStrip({
             aria-current={tabActive ? "true" : undefined}
             title={title}
           >
-            <button
+            <VButton
               type="button"
               className={styles.agentSessionTabMainAction}
-              onClick={() => onOpenCliAgentRun?.(run.id)}
+              onPress={() => onOpenCliAgentRun?.(run.id)}
               title={title}
             >
               <span className={styles.agentSessionTabIcon} aria-hidden="true">
@@ -227,8 +229,8 @@ export function AgentSessionTabStrip({
                 <span className={styles.agentSessionTabTitle}>{run.title}</span>
               </span>
               <span className={styles.agentSessionTabMeta}>{statusLabel(run.status)}</span>
-            </button>
-            <button
+            </VButton>
+            <VIconButton
               type="button"
               className={styles.agentSessionTabCloseButton}
               onClick={(event) => {
@@ -236,10 +238,9 @@ export function AgentSessionTabStrip({
                 onCloseCliAgentRun?.(run.id);
               }}
               title={lang === "zh" ? "关闭终端页" : "Close terminal tab"}
-              aria-label={`${lang === "zh" ? "关闭终端页" : "Close terminal tab"} ${run.title}`}
-            >
-              <X size={13} />
-            </button>
+              label={`${lang === "zh" ? "关闭终端页" : "Close terminal tab"} ${run.title}`}
+              icon={<X size={13} />}
+            />
           </div>
         );
       })}
