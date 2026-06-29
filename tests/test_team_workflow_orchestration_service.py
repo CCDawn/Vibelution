@@ -338,6 +338,34 @@ def _fake_low_quality_source_search_response(query, *, max_results, provider):
     }
 
 
+def _fake_mixed_excluded_source_search_response(query, *, max_results, provider):
+    query_text = str(query.get("query") or "neural source")
+    return {
+        "provider": provider,
+        "searchUrl": f"https://api.example.test/search?q={query_text.replace(' ', '+')}",
+        "results": [
+            {
+                "title": "Empty landing page for predictive coding",
+                "sourceRef": "https://doi.org/10.0000/empty-source",
+                "rawLocation": "https://api.example.test/works/10.0000/empty-source",
+                "summary": "Only a placeholder title was available; no abstract or usable source content.",
+                "sourceType": "paper",
+                "metadata": {"doi": "10.0000/empty-source", "containerTitle": "Placeholder Journal"},
+                "qualitySignals": {"providerScore": 91.0, "hasDoi": True},
+            },
+            {
+                "title": "Predictive coding useful web note",
+                "sourceRef": "https://example.test/predictive-coding-useful-note",
+                "rawLocation": "https://example.test/predictive-coding-useful-note",
+                "summary": "A useful explanation of predictive coding hierarchy without DOI metadata.",
+                "sourceType": "url",
+                "metadata": {"containerTitle": "Neural Research Notes", "published": "2025"},
+                "qualitySignals": {"providerScore": 74.0, "hasDoi": False},
+            },
+        ][:max_results],
+    }
+
+
 def _create_experiment_plan_with_active_baseline(team_id):
     team_workflow_orchestration_service.record_local_research_model_output(
         team_id,
@@ -2922,7 +2950,7 @@ def test_source_collection_stage_tools_read_context_and_writeback(tmp_path, monk
             "promptCachePolicy": {"requirement": "disabled"},
         },
     )
-    data_processing_service.add_record(
+    data_record = data_processing_service.add_record(
         run_response["run"]["runId"],
         {
             "sourceType": "paper",
@@ -2956,7 +2984,18 @@ def test_source_collection_stage_tools_read_context_and_writeback(tmp_path, monk
             task_id=task["taskId"],
             status="completed",
             summary="工具回写完成。",
-            result_json='{"extractedRecordCount": 1}',
+            result_json=json.dumps(
+                {
+                    "recordExtractions": [
+                        {
+                            "recordId": data_record["recordId"],
+                            "decision": "keep",
+                            "valueSummary": "Relevant source for the tool smoke test.",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
             evidence_refs_json=f'[{{"type":"run","id":"{run_response["run"]["runId"]}","label":"source run"}}]',
             next_actions_json='["进入资料审查"]',
             recorded_by_agent=agent["agentId"],
@@ -2966,7 +3005,7 @@ def test_source_collection_stage_tools_read_context_and_writeback(tmp_path, monk
     assert context_payload["status"] == "ok"
     assert context_payload["records"][0]["doi"] == "10.0000/tool-context"
     assert writeback_payload["writeback"]["status"] == "completed"
-    assert writeback_payload["task"]["result"]["extractedRecordCount"] == 1
+    assert writeback_payload["task"]["result"]["coverageSummary"]["processed"] == 1
     tool_event_codes = [args[2] for args, _kwargs in tool_events]
     assert "tool.source_collection_context.completed" in tool_event_codes
     assert "tool.source_collection_stage_writeback.completed" in tool_event_codes
@@ -3511,6 +3550,203 @@ def test_content_extraction_writeback_reports_no_effect_closure_for_invalid_raw_
     assert response["writeback"]["closureSummary"]["userStatus"] == "failed"
     assert "没有生成候选资料" in response["writeback"]["closureSummary"]["message"]
     assert "完整 recordId" in response["writeback"]["closureSummary"]["retryInstruction"]
+
+
+def test_content_extraction_writeback_excludes_no_content_records_and_keeps_valuable_sources(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "content_extraction", "agentName": "资料提炼"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经预测编码资料提炼",
+            "agentRoles": ["content_extraction"],
+            "agentIds": {"content_extraction": agent["agentId"]},
+            "querySeeds": ["predictive coding hierarchy"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    invalid_record = data_processing_service.add_record(
+        run_id,
+        {
+            "sourceType": "paper",
+            "sourceRef": "https://doi.org/10.0000/empty-source",
+            "title": "Empty landing page for predictive coding",
+            "summary": "",
+            "metadata": {"doi": "10.0000/empty-source", "containerTitle": "Placeholder Journal"},
+        },
+    )
+    useful_record = data_processing_service.add_record(
+        run_id,
+        {
+            "sourceType": "url",
+            "sourceRef": "https://example.test/predictive-coding-useful-note",
+            "title": "Predictive coding useful web note",
+            "summary": "A useful explanation of predictive coding hierarchy without DOI metadata.",
+            "metadata": {"containerTitle": "Neural Research Notes", "published": "2025"},
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-exclusion", "status": "running"},
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "candidate", "agentId": agent["agentId"], "agentRole": "content_extraction"},
+    )
+
+    response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "排除 1 条空资料，保留 1 条有价值资料。",
+            "result": {
+                "recordExtractions": [
+                    {
+                        "recordId": invalid_record["recordId"],
+                        "decision": "exclude",
+                        "excludeReason": "no_effective_content",
+                        "evidence": ["只有占位标题，没有摘要、正文或可验证内容。"],
+                    },
+                    {
+                        "recordId": useful_record["recordId"],
+                        "decision": "keep",
+                        "valueSummary": "虽然没有 DOI，但提供了预测编码层级的可用解释和关键词线索。",
+                        "defects": ["缺少 DOI"],
+                        "followUpSuggestion": "后续补充更权威论文来源。",
+                    },
+                ]
+            },
+            "recordedByAgent": agent["agentId"],
+        },
+    )
+
+    assert response["writeback"]["status"] == "completed"
+    assert response["writeback"]["materializedSources"]["importedCandidateCount"] == 1
+    assert response["writeback"]["materializedSources"]["excludedSourceCount"] == 1
+    candidates = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")["candidates"]
+    assert [candidate["metadata"]["sourceRecordId"] for candidate in candidates] == [useful_record["recordId"]]
+    assert candidates[0]["metadata"]["contentExtraction"]["status"] == "kept_with_notes"
+    assert candidates[0]["metadata"]["contentExtraction"]["valueSummary"].startswith("虽然没有 DOI")
+    ledger = team_workflow_orchestration_service.get_source_collection_exclusion_ledger(team["teamId"])
+    assert ledger["excludedCount"] == 1
+    assert ledger["entries"][0]["sourceIdentityKey"] == "doi:10.0000/empty-source"
+    assert ledger["entries"][0]["reason"] == "no_effective_content"
+
+    context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
+        team["teamId"],
+        run_id=run_id,
+        stage_id="candidate",
+        task_id=task["taskId"],
+        record_limit=5,
+        context_mode="compact",
+    )
+    assert invalid_record["recordId"] not in context["recordIds"]
+    assert useful_record["recordId"] in context["recordIds"]
+    assert context["excludedSourceSummary"]["excludedCount"] == 1
+
+
+def test_execute_source_collection_search_filters_previously_excluded_sources(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "content_extraction", "agentName": "资料提炼"}],
+    )
+    first_run = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经预测编码资料",
+            "agentRoles": ["content_extraction"],
+            "agentIds": {"content_extraction": agent["agentId"]},
+            "querySeeds": ["predictive coding hierarchy"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    first_run_id = first_run["run"]["runId"]
+    bad_record = data_processing_service.add_record(
+        first_run_id,
+        {
+            "sourceType": "paper",
+            "sourceRef": "https://doi.org/10.0000/empty-source",
+            "title": "Empty landing page for predictive coding",
+            "summary": "",
+            "metadata": {"doi": "10.0000/empty-source", "containerTitle": "Placeholder Journal"},
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-exclusion-seed", "status": "running"},
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        first_run_id,
+        {"stageId": "candidate", "agentId": agent["agentId"], "agentRole": "content_extraction"},
+    )
+    team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "排除无有效内容资料。",
+            "result": {
+                "recordExtractions": [
+                    {
+                        "recordId": bad_record["recordId"],
+                        "decision": "exclude",
+                        "excludeReason": "no_effective_content",
+                        "evidence": ["没有摘要、正文或可验证内容。"],
+                    }
+                ]
+            },
+            "recordedByAgent": agent["agentId"],
+        },
+    )
+
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_execute_source_collection_query",
+        _fake_mixed_excluded_source_search_response,
+    )
+    second_run = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经预测编码资料",
+            "agentRoles": ["data_discovery"],
+            "agentIds": {"data_discovery": "Data Discovery Agent"},
+            "querySeeds": ["predictive coding hierarchy"],
+            "promptCachePolicy": {"requirement": "disabled"},
+            "maxResultsPerQuery": 2,
+        },
+    )
+    execution = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        second_run["run"]["runId"],
+        {"maxQueries": 1, "maxResultsPerQuery": 2},
+    )
+    records = data_processing_service.list_records(second_run["run"]["runId"])["records"]
+    candidates = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")["candidates"]
+
+    assert execution["filteredExcludedCount"] == 1
+    assert execution["recordCount"] == 1
+    assert execution["importedCount"] == 1
+    assert [record["title"] for record in records] == ["Predictive coding useful web note"]
+    assert [candidate["title"] for candidate in candidates] == ["Predictive coding useful web note"]
+    assert "search.excluded_source_filtered" in {event["eventType"] for event in execution["executionEvents"]}
+    ledger = team_workflow_orchestration_service.get_source_collection_exclusion_ledger(team["teamId"])
+    assert ledger["entries"][0]["hitCount"] == 2
 
 
 def test_source_quality_writeback_downgrades_completed_when_candidate_coverage_is_partial(tmp_path, monkeypatch):

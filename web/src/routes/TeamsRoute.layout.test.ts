@@ -490,6 +490,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionStageCards");
     expect(routeSource).toContain("sourceCollectionStageCardSummary");
     expect(routeSource).toContain("sourceCollectionStageCardById");
+    expect(routeSource).toContain("excludedSourceCount");
+    expect(routeSource).toContain("filteredExcludedCount");
+    expect(routeSource).toContain("无效来源已过滤");
+    expect(routeSource).toContain("已移出");
     expect(routeSource).toContain("sourceCollectionDisplayedCandidateCount");
     expect(routeSource).toContain("sourceCollectionPrimaryDataLoading");
     expect(routeSource).toContain("sourceCollectionSourceQualityLoading");
@@ -527,6 +531,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("{module.projection.blockingReasons[0]}</small>");
     expect(routeSource).toContain("evidenceRefCount");
     expect(routeSource).toContain("materializedSources");
+    expect(routeSource).toContain("excludedSourceSummary");
     expect(routeSource).toContain("SourceCollectionCoverageSummary");
     expect(routeSource).toContain("coverageSummary");
     expect(routeSource).toContain("SourceCollectionStageClosureSummary");

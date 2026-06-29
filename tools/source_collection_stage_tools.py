@@ -24,7 +24,10 @@ def source_collection_context_tool(
     candidate_limit: int = 5,
     context_mode: str = "compact",
 ) -> str:
-    """Return paged source-collection task context without exposing local file access."""
+    """Return paged source-collection task context without exposing local file access.
+
+    Excluded sources are removed from records and summarized in excludedSourceSummary.
+    """
 
     try:
         from core.web.services import team_workflow_orchestration_service as workflow_service
@@ -58,6 +61,7 @@ def source_collection_context_tool(
                 "stageId": _text(payload.get("stageId")) if isinstance(payload, dict) else _text(stage_id),
                 "taskId": _text(payload.get("taskId")) if isinstance(payload, dict) else _text(task_id),
                 "recordCount": _safe_count((payload.get("counts") or {}).get("recordCount")) if isinstance(payload, dict) else 0,
+                "excludedSourceCount": _safe_count((payload.get("counts") or {}).get("excludedSourceCount")) if isinstance(payload, dict) else 0,
                 "returnedRecordCount": _safe_count((payload.get("counts") or {}).get("returnedRecordCount")) if isinstance(payload, dict) else 0,
                 "recordOffset": _safe_count(((payload.get("recordPage") or {}) if isinstance(payload, dict) else {}).get("offset")),
                 "recordLimit": _safe_count(((payload.get("recordPage") or {}) if isinstance(payload, dict) else {}).get("limit")),
