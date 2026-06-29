@@ -2,7 +2,6 @@
 
 @source "../app/**/*.{ts,tsx}";
 @source "../components/vui/**/*.{ts,tsx}";
-@source "../routes/**/*.{ts,tsx}";
 
 @theme {
   --font-sans: var(--font-body);
