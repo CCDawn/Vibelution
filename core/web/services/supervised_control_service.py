@@ -65,6 +65,7 @@ from .supervised_conversation_harness_adapter import (
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+SOURCE_PROJECT_ROOT = PROJECT_ROOT
 _RUN_STATE_LOCK = threading.Lock()
 _RUN_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="web-supervised-run")
 _RUN_SUBSCRIBERS_LOCK = threading.Lock()
@@ -110,6 +111,11 @@ class _SupervisedRunInterrupted(RuntimeError):
 
 def _runtime_manager_live_control_enabled() -> bool:
     return runtime_manager_live_control_enabled(PROJECT_ROOT)
+
+
+def _workbench_data_project_root() -> Path | None:
+    root = PROJECT_ROOT.resolve()
+    return None if root == SOURCE_PROJECT_ROOT.resolve() else root
 
 
 def _ensure_runtime_manager_daemon() -> None:
@@ -226,11 +232,12 @@ def get_supervised_workbench(
 ) -> dict[str, Any]:
     """Return workbench defaults, datasets, and current live run when present."""
 
-    datasets = [item for item in list_dataset_choices(PROJECT_ROOT) if item.get("visibility") == "primary"] if include_catalog else []
+    data_root = _workbench_data_project_root()
+    datasets = [item for item in list_dataset_choices(data_root) if item.get("visibility") == "primary"] if include_catalog else []
     return {
         "defaultBundleName": default_bundle_name(),
         "savedState": saved_state if saved_state is not None else get_workbench_state_payload(project_root=PROJECT_ROOT),
-        "bundles": list_available_workbench_bundles(PROJECT_ROOT) if include_catalog else [],
+        "bundles": list_available_workbench_bundles(data_root) if include_catalog else [],
         "datasets": [_dataset_payload(item) for item in datasets],
         "activeRun": active_run if active_run_loaded else get_active_supervised_run(),
     }
@@ -446,7 +453,7 @@ def start_supervised_run(payload: dict[str, Any]) -> dict[str, Any]:
             raise SupervisedRunValidationError(
                 text_for(lang, zh="请输入监督 bundle 名称。", en="Enter a supervised bundle name.")
             )
-        bundle_path = resolve_workbench_bundle_path(PROJECT_ROOT, bundle_name)
+        bundle_path = resolve_workbench_bundle_path(_workbench_data_project_root(), bundle_name)
         if not bundle_path.exists():
             raise SupervisedRunValidationError(
                 text_for(
@@ -597,7 +604,7 @@ def _local_retry_supervised_run(run_id: str) -> dict[str, Any]:
         raise SupervisedRunValidationError(
             text_for(lang, zh="这条监督记录缺少 bundle 名称，不能重跑失败项。", en="This supervised run has no bundle name to rerun.")
         )
-    bundle_path = resolve_workbench_bundle_path(PROJECT_ROOT, context["bundleName"])
+    bundle_path = resolve_workbench_bundle_path(_workbench_data_project_root(), context["bundleName"])
     environment_block_reason = bundle_environment_preflight_block_message(bundle_path, project_root=PROJECT_ROOT)
     if environment_block_reason:
         _record_supervised_environment_preflight_block(
@@ -3673,11 +3680,12 @@ def get_supervised_workbench(
     saved_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if _runtime_manager_live_control_enabled():
-        datasets = [item for item in list_dataset_choices(PROJECT_ROOT) if item.get("visibility") == "primary"] if include_catalog else []
+        data_root = _workbench_data_project_root()
+        datasets = [item for item in list_dataset_choices(data_root) if item.get("visibility") == "primary"] if include_catalog else []
         return {
             "defaultBundleName": default_bundle_name(),
             "savedState": saved_state if saved_state is not None else get_workbench_state_payload(project_root=PROJECT_ROOT),
-            "bundles": list_available_workbench_bundles(PROJECT_ROOT) if include_catalog else [],
+            "bundles": list_available_workbench_bundles(data_root) if include_catalog else [],
             "datasets": [_dataset_payload(item) for item in datasets],
             "activeRun": active_run if active_run_loaded else get_active_supervised_run(),
         }
