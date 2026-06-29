@@ -557,6 +557,33 @@
   accent-color: var(--accent-cool);
 }
 
+.bulkPromptPicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 180px;
+  max-width: 100%;
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+  font-weight: 650;
+}
+
+.bulkPromptPicker span {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.bulkPromptSelect {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-input-strong);
+  color: var(--fg-primary);
+}
+
 .detailSection h3 {
   font-size: 0.94rem;
 }

@@ -29,7 +29,13 @@ export function LauncherShell() {
   }, []);
 
   return (
-    <div className={styles.shell} data-theme={theme} data-shell="launcher" data-browser-role="launcher_control_surface">
+    <div
+      className={styles.shell}
+      data-theme={theme}
+      data-vui-app="launcher"
+      data-shell="launcher"
+      data-browser-role="launcher_control_surface"
+    >
       <Outlet />
     </div>
   );

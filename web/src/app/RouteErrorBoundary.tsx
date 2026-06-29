@@ -1,5 +1,6 @@
 import { useRouteError } from "react-router-dom";
 
+import { VButton } from "../components/vui";
 import { isDynamicImportFetchError } from "./routeChunkRecovery";
 import styles from "./RouteErrorBoundary.module.css";
 
@@ -69,18 +70,18 @@ export function RouteErrorBoundary({ surface = "workbench" }: { surface?: RouteE
   };
 
   return (
-    <div className={styles.surface} role="alert" aria-live="assertive">
+    <div className={styles.surface} data-vui-app={surface} role="alert" aria-live="assertive">
       <section className={styles.panel} aria-label={viewModel.title}>
         <p className={styles.kicker}>{viewModel.kicker}</p>
         <h1 className={styles.title}>{viewModel.title}</h1>
         <p className={styles.detail}>{viewModel.detail}</p>
         <div className={styles.actions}>
-          <button type="button" className={styles.primaryAction} onClick={reloadPage}>
+          <VButton type="button" variant="primary" className={styles.actionButton} onPress={reloadPage}>
             {viewModel.primaryActionLabel}
-          </button>
-          <button type="button" className={styles.secondaryAction} onClick={goHome}>
+          </VButton>
+          <VButton type="button" variant="secondary" className={styles.actionButton} onPress={goHome}>
             {viewModel.secondaryActionLabel}
-          </button>
+          </VButton>
         </div>
         <details className={styles.technical}>
           <summary>技术摘要</summary>
