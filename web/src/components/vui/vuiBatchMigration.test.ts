@@ -119,6 +119,14 @@ const routeStyleTargets = [
       "--surface-header: color-mix(in srgb, var(--fg-primary)",
     ],
   },
+  {
+    path: "routes/ChatCodingRoute.module.css",
+    forbidden: ["border-left: 3px"],
+  },
+  {
+    path: "routes/EvolutionRoute.module.css",
+    forbidden: ["border-left: 3px"],
+  },
 ] as const;
 
 function readTargetSource(path: string): string {
