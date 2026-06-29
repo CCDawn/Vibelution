@@ -18426,7 +18426,7 @@ def _source_collection_stage_session_task_message(
             f"- 固定 checklist JSON：`{task_tool_json}`。",
             *task_checklist_lines,
             "- 完成每个检查项后调用 `task_update_tool` 打勾，参数为 task_id=<对应编号或工具返回编号>, is_completed=true, result_summary=...。",
-            "- 最后一项必须在 `source_collection_stage_writeback_tool` 返回后再打勾，并确认 `closureSummary.completionGatePassed=true` 或写明未通过原因。",
+            "- 最后一项必须在 `source_collection_stage_writeback_tool` 返回后再调用 `task_update_tool` 打勾；系统会在下一次状态同步后把 `closureSummary.completionGatePassed` 刷新为 true，如果仍未通过，请写明未通过原因。",
             "- 如果任一检查项无法完成，不要自然语言声称完成；调用 `source_collection_stage_writeback_tool` 写入 blocked/failed/needs_review 和失败原因。",
             "",
             "## 执行要求",
