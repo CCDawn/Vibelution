@@ -283,7 +283,7 @@ describe("conversationIndexModel", () => {
       isVisibleConversationAgent(agent({
         conversationIndexKind: undefined,
         conversationIndexVisibility: undefined,
-        roleKey: "challenge_cup_data_discovery",
+        roleKey: "source_finder",
         metadata: {},
       })),
     ).toBe(true);

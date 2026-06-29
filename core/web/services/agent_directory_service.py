@@ -3163,22 +3163,8 @@ def default_system_no_tool_policy(policy_id: str) -> dict[str, Any]:
     return payload
 
 
-def default_retired_source_collection_role_tool_policy(policy_id: str) -> dict[str, Any]:
-    payload = default_tool_policy(policy_id)
-    payload["allowedTools"] = []
-    payload["preferredTools"] = []
-    payload["readScopes"] = ["private"]
-    payload["writeScopes"] = []
-    payload["networkAccess"] = "none"
-    payload["mutationAccess"] = "none"
-    payload["maxCallsPerTurn"] = 0
-    return payload
-
-
 def default_research_source_tool_policy(policy_id: str, *, role_key: str = "") -> dict[str, Any]:
     payload = default_tool_policy(policy_id)
-    if _normalize_role_key(role_key) in agent_role_tool_profile_service.RETIRED_SOURCE_COLLECTION_ROLE_KEYS:
-        return default_retired_source_collection_role_tool_policy(policy_id)
     resolved = agent_role_tool_profile_service.resolve_role_tool_policy(
         role_key=role_key,
         primary_mode="research",
@@ -3203,8 +3189,6 @@ def default_research_source_tool_policy(policy_id: str, *, role_key: str = "") -
 
 def default_research_role_tool_policy(policy_id: str, *, role_key: str = "") -> dict[str, Any]:
     payload = default_tool_policy(policy_id)
-    if _normalize_role_key(role_key) in agent_role_tool_profile_service.RETIRED_SOURCE_COLLECTION_ROLE_KEYS:
-        return default_retired_source_collection_role_tool_policy(policy_id)
     resolved = agent_role_tool_profile_service.resolve_role_tool_policy(
         role_key=role_key,
         primary_mode="research",
@@ -3290,8 +3274,6 @@ def _ensure_fixed_role_tool_policy(state: dict[str, Any], agent: dict[str, Any])
             metadata=metadata,
             policy_id=policy_id,
         ) or default_research_role_tool_policy(policy_id, role_key=str(agent.get("roleKey") or ""))
-    elif desired_kind == "retired_source_collection_role":
-        desired_policy = default_retired_source_collection_role_tool_policy(policy_id)
     else:
         desired_policy = default_system_no_tool_policy(policy_id)
     current_policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
@@ -3327,8 +3309,6 @@ def _fixed_role_tool_policy_kind(agent: dict[str, Any]) -> str:
         system_role = _normalize_role_key(metadata.get("selfEvolutionRole") or metadata.get("supervisedRole") or role_key)
         if system_role in SYSTEM_NO_TOOL_ROLES.get(primary_mode, set()):
             return "no_tools"
-    if primary_mode == "research" and role_key in agent_role_tool_profile_service.RETIRED_SOURCE_COLLECTION_ROLE_KEYS:
-        return "retired_source_collection_role"
     if agent_role_tool_profile_service.role_has_explicit_tool_profile(role_key, primary_mode=primary_mode, metadata=metadata):
         return "role_profile"
     return ""
@@ -6253,7 +6233,6 @@ def _should_repair_agent_prompt_template_id(current: str, expected: str) -> bool
     return (
         not normalized_current
         or normalized_current == "prompt-chat-default"
-        or normalized_current == "prompt-research-candidate_graph"
     )
 
 

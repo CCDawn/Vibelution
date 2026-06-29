@@ -49,11 +49,10 @@ The product exposes a generic processing surface where the user can:
 Data collection is an Agent workflow, not just a form submission. The generic substrate should define functional Agent roles that can be bound to any profile:
 
 - `Data Intake Coordinator Agent`: owns the collection batch, scope, acceptance criteria, dedupe policy, and escalation path.
-- `Data Discovery Agent`: finds candidate sources from search tools, existing memory, workspace files, configured directories, URLs, or API catalogs.
-- `Source Acquisition Agent`: fetches or registers the raw source reference without rewriting the content.
-- `Content Extraction Agent`: turns files, pages, PDFs, or raw payloads into text, metadata, anchors, checksums, and excerpts.
-- `Source Deduplication Agent`: detects duplicate URLs, files, checksums, titles, DOI-like IDs, or near-duplicate excerpts.
-- `Source Quality Agent`: scores source relevance, credibility, freshness, completeness, permission, and risk.
+- `Source Finder Agent`: finds and registers traceable candidate sources from search tools, existing memory, workspace files, configured directories, URLs, or API catalogs.
+- `Source Extractor Agent`: turns files, pages, PDFs, or raw payloads into text, metadata, anchors, checksums, excerpts, and source-quality decisions.
+- `Source Relation Mapper Agent`: groups retained sources into candidate-only topic, evidence, and relationship previews without writing the official graph.
+- `Source Ingestor Agent`: performs final governed review and writes approved records into formal knowledge stores.
 - `Intake Review Agent`: approves, returns, or rejects collected records before downstream transformation.
 
 These roles are profile-neutral. Challenge Cup can bind them to research-specific prompts and tools, but the core contract remains about data records and source quality.

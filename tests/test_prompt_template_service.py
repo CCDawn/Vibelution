@@ -158,17 +158,18 @@ def test_source_collection_prompt_templates_only_expose_four_stage_roles(tmp_pat
         "source_relation_mapper",
         "source_ingestor",
     }.issubset(role_keys)
-    assert {
-        "challenge_cup_source_acquisition",
-        "challenge_cup_data_discovery",
-        "challenge_cup_content_extraction",
-        "challenge_cup_source_quality",
-        "knowledge_expansion_source_intake",
-        "knowledge_expansion_content_extraction",
-        "knowledge_expansion_source_quality",
-        "knowledge_expansion_candidate_graph",
-        "candidate_graph",
-    }.isdisjoint(role_keys)
+    challenge_cup_role_keys = {
+        key
+        for key in role_keys
+        if isinstance(key, str) and key.startswith("challenge_cup_")
+    }
+    assert challenge_cup_role_keys <= {
+        "challenge_cup_coordinator",
+        "challenge_cup_experiment_planner",
+        "challenge_cup_experiment_ledger",
+        "challenge_cup_iteration_planner",
+        "challenge_cup_versioning",
+    }
 
 
 def test_prompt_template_repair_upgrades_builtin_challenge_stage_prompt_content(tmp_path, monkeypatch):
@@ -222,7 +223,6 @@ def test_challenge_cup_source_collection_contract_names_source_ingestor_as_inges
 
     assert "资料入库/知识库管理员" not in agent_directory_source
     assert "source_ingestor 做最终入库审核" in agent_directory_source
-    assert "data_discovery、source_acquisition、content_extraction、source_quality" not in prompt_template_source
     assert "source_finder、source_extractor、source_relation_mapper 和 source_ingestor" in prompt_template_source
     assert "组织资料寻找、资料提炼、资料关系整理和资料入库。" in team_service_source
     assert "组织资料发现、本地导入、资料提炼、质检、候选关系和知识库管理员入库。" not in team_service_source

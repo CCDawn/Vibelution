@@ -749,6 +749,23 @@ def _derive_health(
                 )
             )
         governance = _role_governance_profile_for_agent(agent)
+        normalized_primary_mode = str(agent.get("primaryMode") or "").strip()
+        normalized_role_key = str(agent.get("roleKey") or "").strip()
+        if (
+            normalized_primary_mode == "research"
+            and normalized_role_key
+            and _agent_has_system_fixed_role(agent)
+            and not governance
+        ):
+            issues.append(
+                _agent_issue(
+                    agent,
+                    "blocking",
+                    "unknown_role_governance",
+                    "固定角色缺少治理配置",
+                    f"roleKey={normalized_role_key} 没有角色提示词和工具画像；请改用当前角色或补齐治理画像。",
+                )
+            )
         if _should_enforce_role_governance(agent, governance, tool_policy):
             expected_prompt_template_id = str((governance or {}).get("promptTemplateId") or "").strip()
             if expected_prompt_template_id and prompt_template_id and prompt_template_id != expected_prompt_template_id:

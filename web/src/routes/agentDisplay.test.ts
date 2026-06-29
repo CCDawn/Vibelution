@@ -83,20 +83,20 @@ describe("agent display helpers", () => {
       functionLabel: "Agent 配置审查",
       tone: "chat",
     });
-    expect(agentDisplayInfo({ displayName: "数据发现", primaryMode: "research", roleKey: "challenge_cup_data_discovery" }, "zh")).toMatchObject({
-      functionLabel: "数据发现",
+    expect(agentDisplayInfo({ displayName: "资料寻找", primaryMode: "research", roleKey: "source_finder" }, "zh")).toMatchObject({
+      functionLabel: "资料寻找",
       tone: "research",
     });
-    expect(agentDisplayInfo({ displayName: "来源获取", primaryMode: "research", roleKey: "challenge_cup_source_acquisition" }, "zh")).toMatchObject({
-      functionLabel: "来源获取",
+    expect(agentDisplayInfo({ displayName: "资料提炼", primaryMode: "research", roleKey: "source_extractor" }, "zh")).toMatchObject({
+      functionLabel: "资料提炼",
       tone: "research",
     });
-    expect(agentDisplayInfo({ displayName: "内容抽取", primaryMode: "research", roleKey: "challenge_cup_content_extraction" }, "zh")).toMatchObject({
-      functionLabel: "内容抽取",
+    expect(agentDisplayInfo({ displayName: "资料关系整理", primaryMode: "research", roleKey: "source_relation_mapper" }, "zh")).toMatchObject({
+      functionLabel: "资料关系整理",
       tone: "research",
     });
-    expect(agentDisplayInfo({ displayName: "资料质量评估", primaryMode: "research", roleKey: "challenge_cup_source_quality" }, "zh")).toMatchObject({
-      functionLabel: "资料质检",
+    expect(agentDisplayInfo({ displayName: "资料入库", primaryMode: "research", roleKey: "source_ingestor" }, "zh")).toMatchObject({
+      functionLabel: "资料入库",
       tone: "research",
     });
     expect(agentDisplayInfo({ displayName: "叶念青", primaryMode: "chat", roleKey: "challenge_cup_coordinator" }, "zh")).toMatchObject({
