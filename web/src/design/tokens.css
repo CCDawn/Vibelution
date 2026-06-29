@@ -26,6 +26,22 @@
   --surface-scrollbar-track: rgba(12, 15, 20, 0.8);
   --shadow-soft: 0 12px 24px rgba(0, 0, 0, 0.2);
   --shadow-strong: 0 22px 52px rgba(0, 0, 0, 0.28);
+  --vui-surface-glass: color-mix(in srgb, var(--surface-panel) 82%, transparent);
+  --vui-surface-toolbar: color-mix(in srgb, var(--surface-card) 78%, transparent);
+  --vui-surface-row: color-mix(in srgb, var(--surface-card) 72%, transparent);
+  --vui-surface-row-hover: color-mix(in srgb, var(--surface-panel-hover) 88%, transparent);
+  --vui-control-muted: color-mix(in srgb, var(--surface-card) 82%, transparent);
+  --vui-control-muted-hover: color-mix(in srgb, var(--surface-panel-hover) 84%, transparent);
+  --vui-border-subtle: color-mix(in srgb, var(--border-hairline) 88%, transparent);
+  --vui-status-info-bg: color-mix(in srgb, var(--accent-cool) 11%, transparent);
+  --vui-status-info-fg: var(--accent-cool-2);
+  --vui-status-success-bg: color-mix(in srgb, var(--state-success) 10%, transparent);
+  --vui-status-success-fg: var(--state-success);
+  --vui-status-warning-bg: color-mix(in srgb, var(--state-warning) 11%, transparent);
+  --vui-status-warning-fg: var(--state-warning);
+  --vui-status-danger-bg: color-mix(in srgb, var(--state-error) 10%, transparent);
+  --vui-status-danger-fg: var(--state-error);
+  --vui-shadow-none: none;
 
   --fg-primary: #f3f4f6;
   --fg-secondary: #b8c0cc;
@@ -96,6 +112,22 @@
   --surface-scrollbar-track: #f1f1f3;
   --shadow-soft: 0 12px 28px rgba(15, 23, 42, 0.08);
   --shadow-strong: 0 20px 52px rgba(15, 23, 42, 0.12);
+  --vui-surface-glass: color-mix(in srgb, var(--surface-panel) 76%, transparent);
+  --vui-surface-toolbar: color-mix(in srgb, var(--surface-card) 88%, transparent);
+  --vui-surface-row: color-mix(in srgb, var(--surface-card) 86%, transparent);
+  --vui-surface-row-hover: color-mix(in srgb, var(--surface-panel-hover) 92%, transparent);
+  --vui-control-muted: color-mix(in srgb, var(--surface-card-muted) 86%, var(--surface-card));
+  --vui-control-muted-hover: color-mix(in srgb, var(--surface-panel-hover) 94%, var(--surface-card));
+  --vui-border-subtle: color-mix(in srgb, var(--border-hairline) 92%, transparent);
+  --vui-status-info-bg: color-mix(in srgb, var(--accent-cool) 9%, transparent);
+  --vui-status-info-fg: var(--accent-cool);
+  --vui-status-success-bg: color-mix(in srgb, var(--state-success) 8%, transparent);
+  --vui-status-success-fg: var(--state-success);
+  --vui-status-warning-bg: color-mix(in srgb, var(--state-warning) 9%, transparent);
+  --vui-status-warning-fg: var(--state-warning);
+  --vui-status-danger-bg: color-mix(in srgb, var(--state-error) 8%, transparent);
+  --vui-status-danger-fg: var(--state-error);
+  --vui-shadow-none: none;
 
   --fg-primary: #101828;
   --fg-secondary: #475467;
