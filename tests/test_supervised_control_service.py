@@ -811,6 +811,54 @@ def test_conversation_harness_returns_cancelled_after_stop_grace(monkeypatch, tm
     assert events[-1]["mental_model_enabled"] is True
 
 
+def test_conversation_harness_maps_stopped_user_turn_to_cancelled(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        conversation_adapter,
+        "create_supervised_agent_session",
+        lambda **kwargs: {"id": "session-hidden", "sessionKind": "supervised", "hiddenFromIndex": True},
+    )
+    monkeypatch.setattr(conversation_adapter, "submit_session_message", lambda *args, **kwargs: {"turnId": "turn-1"})
+    monkeypatch.setattr(
+        conversation_adapter,
+        "get_session_detail",
+        lambda session_id: {
+            "id": session_id,
+            "lastTurnStatus": "stopped_by_user",
+            "updatedAt": "2026-06-11T00:00:03Z",
+            "messages": [
+                {"role": "user", "content": "inspect current state", "timestamp": "2026-06-11T00:00:01Z"},
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        conversation_adapter,
+        "get_session_turn_completion_snapshot",
+        lambda session_id, turn_id: {
+            "terminal": True,
+            "terminalStatus": "stopped_by_user",
+            "assistantText": "",
+            "completionSource": "work_run",
+        },
+    )
+
+    result = service._run_supervised_conversation_harness(
+        repo_root=tmp_path,
+        mode="single_turn",
+        prompt="inspect current state",
+        timeout_seconds=1,
+        expect_restart=False,
+        post_restart_observe_seconds=0,
+        keep_worktree=False,
+        scenario="strategy",
+        agent_binding={"agentId": "agent-a", "role": "baseline"},
+    )
+
+    assert result.status == "cancelled"
+    assert result.primary_returncode is None
+    assert "终止" in result.reason or "停止" in result.reason
+    assert result.evolution_summary["conversation_backend"]["observed_terminal_status"] == "stopped_by_user"
+
+
 def test_start_supervised_run_blocks_incomplete_agent_model_binding(monkeypatch, tmp_path):
     monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
     bundle_path = tmp_path / "workspace" / "evaluation" / "bundles" / "manual_bundle.json"
