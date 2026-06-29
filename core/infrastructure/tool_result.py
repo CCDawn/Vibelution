@@ -495,6 +495,7 @@ def _compact_source_collection_context_result(result_str: str, max_chars: int, c
         "visibleRecordCount": len(compact_records),
         "omittedReturnedRecordCount": max(0, int(record_page.get("returned") or len(compact_records)) - len(compact_records)),
         "counts": payload.get("counts") if isinstance(payload.get("counts"), dict) else {},
+        "excludedSourceSummary": payload.get("excludedSourceSummary") if isinstance(payload.get("excludedSourceSummary"), dict) else {},
         "recordPage": record_page,
         "recordIds": [item.get("recordId") for item in compact_records if item.get("recordId")],
         "records": compact_records,

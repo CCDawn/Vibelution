@@ -586,6 +586,8 @@ def create_key_tools() -> List[BaseTool]:
         该工具不联网、不读取任意本地文件、不消耗 API 额度；只返回指定 team/run/task
         已落盘到平台工作流中的 DataRecord、source_manifest 候选、任务合同和边界摘要。
         适合资料提炼、资料审查、候选图谱和知识库管理员 在私聊阶段任务中使用。
+        已被确认无有效内容的来源会从 records 中移出，并通过 excludedSourceSummary 汇总；
+        不要把这些来源重新当作待补资料处理。
 
         Args:
             team_id: 团队 ID，阶段任务消息中的 teamId
@@ -601,7 +603,7 @@ def create_key_tools() -> List[BaseTool]:
             context_mode: compact 或 full；默认 compact，避免工具结果被通用截断
 
         Returns:
-            JSON 字符串，包含 counts、recordPage、candidatePage、真实 recordId/candidateId、records、candidates、writebackContract 和边界
+            JSON 字符串，包含 counts、recordPage、candidatePage、真实 recordId/candidateId、records、candidates、excludedSourceSummary、writebackContract 和边界
         """
         return _source_collection_context_impl(
             team_id=team_id,

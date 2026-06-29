@@ -97,6 +97,43 @@ SOURCE_COLLECTION_SEARCH_EXECUTION_MAX_QUERIES = 12
 SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_RESULTS_PER_QUERY = 2
 SOURCE_COLLECTION_SEARCH_EXECUTION_MAX_RESULTS_PER_QUERY = 5
 SOURCE_COLLECTION_SUMMARY_SLOW_EVENT_MS = 1000
+SOURCE_COLLECTION_EXCLUSION_REASONS = {
+    "no_effective_content",
+    "unreadable",
+    "unobtainable",
+    "out_of_scope",
+    "duplicate_invalid",
+    "empty_page",
+    "login_page",
+    "advertisement",
+}
+SOURCE_COLLECTION_EXCLUSION_DECISIONS = {
+    "exclude",
+    "excluded",
+    "discard",
+    "discarded",
+    "invalid",
+    "no_effective_content",
+    "unreadable",
+    "unobtainable",
+    "empty",
+    "empty_page",
+    "out_of_scope",
+    "irrelevant",
+    "reject",
+    "rejected",
+}
+SOURCE_COLLECTION_KEEP_WITH_NOTES_DECISIONS = {
+    "needs_more_info",
+    "need_more_info",
+    "needs_supplement",
+    "needs_revision",
+    "needs_review",
+    "missing_source",
+    "needs_fulltext",
+    "conditional_keep",
+    "keep_with_notes",
+}
 SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES = {
     "collection": ("source_intake", "data_discovery", "source_acquisition"),
     "candidate": ("content_extraction",),
@@ -429,6 +466,22 @@ def import_data_record_as_source_candidate(team_id: str, run_id: str, record_id:
     import_payload = payload if isinstance(payload, dict) else {}
     run, record = _load_data_processing_record(normalized_run_id, normalized_record_id)
     source_identity_key = _source_collection_record_identity_key(record)
+    excluded_entry = _source_collection_record_is_excluded(normalized_team_id, run, record)
+    if excluded_entry:
+        _record_workflow_event(
+            "candidate.import_excluded_source_blocked",
+            normalized_team_id,
+            fields={
+                "runId": normalized_run_id,
+                "recordId": normalized_record_id,
+                "sourceIdentityKey": source_identity_key,
+                "exclusionId": _trim_text(excluded_entry.get("exclusionId"), max_length=160),
+                "reason": _trim_text(excluded_entry.get("reason"), max_length=120),
+            },
+            level="warning",
+            outcome="blocked",
+        )
+        raise TeamWorkflowOrchestrationError("Data processing record is excluded from this source collection topic.")
     with _WORKFLOW_LOCK:
         workflow = _load_or_create_workflow(normalized_team_id)
         candidate_store = _load_candidate_store(normalized_team_id)
@@ -1342,7 +1395,11 @@ def writeback_source_collection_stage_session_task(
         task["result"]["coverageSummary"] = coverage_summary
         task["result"]["invalidCandidateIds"] = list(coverage_summary.get("invalidCandidateIds") or [])
         task["result"]["invalidRecordIds"] = list(coverage_summary.get("invalidRecordIds") or [])
-    if materialized_sources.get("createdRecordCount") or materialized_sources.get("importedCandidateCount"):
+    if (
+        materialized_sources.get("createdRecordCount")
+        or materialized_sources.get("importedCandidateCount")
+        or materialized_sources.get("excludedSourceCount")
+    ):
         task["result"]["materializedSources"] = materialized_sources
     if materialized_content_extraction.get("extractedCandidateCount"):
         task["result"]["materializedContentExtraction"] = materialized_content_extraction
@@ -1379,6 +1436,7 @@ def writeback_source_collection_stage_session_task(
             "sourceLeadCount": materialized_sources.get("sourceLeadCount", 0),
             "createdRecordCount": materialized_sources.get("createdRecordCount", 0),
             "importedCandidateCount": materialized_sources.get("importedCandidateCount", 0),
+            "excludedSourceCount": materialized_sources.get("excludedSourceCount", 0),
             "skippedDuplicateCount": materialized_sources.get("skippedDuplicateCount", 0),
             "contentExtractionCandidateCount": materialized_content_extraction.get("extractedCandidateCount", 0),
             "sourceQualityAssessedCandidateCount": materialized_source_quality.get("assessedCandidateCount", 0),
@@ -1526,6 +1584,8 @@ def get_source_collection_stage_task_context(
         "agentRole": task_agent_role,
         "counts": {
             "recordCount": len(run_bundle["records"]),
+            "rawRecordCount": len(run_bundle.get("allRecords") or []),
+            "excludedSourceCount": _source_collection_count((run_bundle.get("excludedSourceSummary") or {}).get("excludedCount")),
             "returnedRecordCount": len(selected_records),
             "candidateCount": len(run_bundle["sourceCandidates"]),
             "returnedCandidateCount": len(selected_candidates),
@@ -1537,6 +1597,7 @@ def get_source_collection_stage_task_context(
         "assignments": [_source_collection_context_assignment_summary(item) for item in matching_assignments[:12]],
         "records": [_source_collection_context_record_summary(item) for item in selected_records],
         "candidates": [_source_collection_context_candidate_summary(item) for item in selected_candidates],
+        "excludedSourceSummary": _normalize_metadata(run_bundle.get("excludedSourceSummary")),
         "recordPage": {
             "offset": record_page_offset,
             "limit": record_page_limit,
@@ -2221,7 +2282,9 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
     result_count = 0
     rejected_result_count = 0
     skipped_duplicate_count = 0
+    filtered_excluded_count = 0
     duplicate_source_keys: list[str] = []
+    excluded_source_keys: list[str] = []
 
     for assignment in assignments:
         if executed_query_count >= max_queries:
@@ -2288,6 +2351,7 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
             existing_query_ids.add(query_id)
             search_results = [item for item in list(search_response.get("results") or []) if isinstance(item, dict)]
             result_count += len(search_results)
+            query_filtered_excluded_count = 0
             execution_events.append(
                 _source_collection_execution_event(
                     "search.executed",
@@ -2344,6 +2408,33 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
                     search_url=_trim_text(search_response.get("searchUrl"), max_length=1000),
                 )
                 source_identity_key = _source_collection_record_identity_key(candidate_record)
+                excluded_entry = _source_collection_exclusion_match(normalized_team_id, run, source_identity_key)
+                if excluded_entry is not None:
+                    filtered_excluded_count += 1
+                    query_filtered_excluded_count += 1
+                    if source_identity_key:
+                        excluded_source_keys.append(source_identity_key)
+                    _record_source_collection_exclusion_hit(
+                        normalized_team_id,
+                        run,
+                        candidate_record,
+                        excluded_entry,
+                    )
+                    execution_events.append(
+                        _source_collection_execution_event(
+                            "search.excluded_source_filtered",
+                            assignment=assignment,
+                            query=query,
+                            status="completed",
+                            title=f"Filtered excluded source: {candidate_record.get('title') or candidate_record.get('sourceRef')}",
+                            summary=(
+                                "This result matched the source exclusion ledger for the current topic and was not written back into the active source collection flow."
+                            ),
+                            refs=[source_identity_key, _trim_text(excluded_entry.get("reason"), max_length=120)],
+                            raw_location=_trim_text(candidate_record.get("rawLocation") or candidate_record.get("sourceRef"), max_length=1000),
+                        )
+                    )
+                    continue
                 duplicate_record = existing_identity_records.get(source_identity_key) if source_identity_key else None
                 if duplicate_record is not None:
                     skipped_duplicate_count += 1
@@ -2459,27 +2550,34 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
                         )
             elif query_id in attempted_query_ids:
                 duplicate_only = query_skipped_duplicate_count > 0
+                excluded_only = query_filtered_excluded_count > 0
                 no_record_notes = (
                     f"Automated metadata search only found {query_skipped_duplicate_count} duplicate source(s) already present in this run; no repair is required."
                     if duplicate_only
-                    else "Automated metadata search returned no importable records for this query."
+                    else (
+                        f"Automated metadata search only found {query_filtered_excluded_count} source(s) already excluded for this topic; no active record was created."
+                        if excluded_only
+                        else "Automated metadata search returned no importable records for this query."
+                    )
                 )
                 try:
                     output_response = data_processing_service.record_collection_output(
                         normalized_run_id,
                         assignment_id,
                         {
-                            "status": "completed" if duplicate_only and not remaining_query_ids else "returned",
+                            "status": "completed" if (duplicate_only or excluded_only) and not remaining_query_ids else "returned",
                             "records": [],
                             "notes": no_record_notes,
-                            "blockingIssues": [] if duplicate_only else ["no_importable_search_result"],
+                            "blockingIssues": [] if (duplicate_only or excluded_only) else ["no_importable_search_result"],
                             "qualitySignals": {
                                 "searchProvider": provider,
                                 "metadataOnlyDownload": True,
                                 "queryId": query_id,
                                 "remainingQueryCount": len(remaining_query_ids),
                                 "skippedDuplicateCount": query_skipped_duplicate_count,
+                                "filteredExcludedCount": query_filtered_excluded_count,
                                 "duplicateOnly": duplicate_only,
+                                "excludedOnly": excluded_only,
                             },
                         },
                     )
@@ -2494,6 +2592,19 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
                             query=query,
                             status="completed",
                             title=f"Recorded duplicate-only query result: {query_text}",
+                            summary=no_record_notes,
+                            refs=[query_id],
+                            storage_refs=[storage_artifacts["recordsPath"]],
+                        )
+                    )
+                if excluded_only:
+                    execution_events.append(
+                        _source_collection_execution_event(
+                            "search.excluded_sources_only_output_recorded",
+                            assignment=assignment,
+                            query=query,
+                            status="completed",
+                            title=f"Recorded excluded-only query result: {query_text}",
                             summary=no_record_notes,
                             refs=[query_id],
                             storage_refs=[storage_artifacts["recordsPath"]],
@@ -2540,7 +2651,9 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
             "importedCount": len(imported),
             "rejectedResultCount": rejected_result_count,
             "skippedDuplicateCount": skipped_duplicate_count,
+            "filteredExcludedCount": filtered_excluded_count,
             "duplicateSourceKeys": duplicate_source_keys[:20],
+            "excludedSourceKeys": excluded_source_keys[:20],
             "remainingQueryCount": remaining_query_count,
             "hasMore": remaining_query_count > 0,
             "sourceCollectionRunDirectory": storage_artifacts["runDirectory"],
@@ -2559,11 +2672,12 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
                 "importedCount": len(imported),
                 "rejectedResultCount": rejected_result_count,
                 "skippedDuplicateCount": skipped_duplicate_count,
+                "filteredExcludedCount": filtered_excluded_count,
                 "remainingQueryCount": remaining_query_count,
             },
         },
     )
-    status_label = "executed" if created_records else ("duplicates_skipped" if skipped_duplicate_count else ("partial" if executed_query_count or failed_query_count else "no_open_assignment"))
+    status_label = "executed" if created_records else ("excluded_filtered" if filtered_excluded_count else ("duplicates_skipped" if skipped_duplicate_count else ("partial" if executed_query_count or failed_query_count else "no_open_assignment")))
     return {
         "schemaVersion": SCHEMA_VERSION,
         "teamId": normalized_team_id,
@@ -2580,7 +2694,9 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
         "importedCount": len(imported),
         "rejectedResultCount": rejected_result_count,
         "skippedDuplicateCount": skipped_duplicate_count,
+        "filteredExcludedCount": filtered_excluded_count,
         "duplicateSourceKeys": duplicate_source_keys[:20],
+        "excludedSourceKeys": excluded_source_keys[:20],
         "remainingQueryCount": remaining_query_count,
         "nextRunnableQueryIds": next_runnable_query_ids[:12],
         "hasMore": remaining_query_count > 0,
@@ -3012,6 +3128,11 @@ def _source_collection_stage_writeback_candidate_coverage(
         if _trim_text(item.get("candidateId"), max_length=160)
     ]
     records = _source_collection_stage_records_for_run(run_id)
+    try:
+        run = data_processing_service.get_processing_run(run_id)
+        records, _excluded_source_summary = _source_collection_filter_active_records(team_id, run, records)
+    except data_processing_service.DataProcessingError:
+        pass
     record_ids = [
         _trim_text(item.get("recordId"), max_length=160)
         for item in records
@@ -3159,6 +3280,120 @@ def _source_collection_stage_writeback_content_extraction_summary(
     }
 
 
+def _source_collection_stage_writeback_record_extraction_decision(extraction: dict[str, Any]) -> str:
+    raw = (
+        extraction.get("decision")
+        or extraction.get("status")
+        or extraction.get("result")
+        or extraction.get("bucket")
+        or extraction.get("outcome")
+    )
+    return re.sub(r"[^a-z0-9]+", "_", _trim_text(raw, max_length=120).lower()).strip("_")
+
+
+def _source_collection_stage_writeback_record_exclusion_reason(extraction: dict[str, Any]) -> str:
+    for key in (
+        "excludeReason",
+        "exclude_reason",
+        "exclusionReason",
+        "exclusion_reason",
+        "reasonCode",
+        "reason_code",
+        "invalidReason",
+        "invalid_reason",
+    ):
+        reason = _normalize_source_collection_exclusion_reason(extraction.get(key))
+        if reason:
+            return reason
+    decision = _source_collection_stage_writeback_record_extraction_decision(extraction)
+    if decision in SOURCE_COLLECTION_EXCLUSION_DECISIONS:
+        return _normalize_source_collection_exclusion_reason(decision) or "no_effective_content"
+    return ""
+
+
+def _source_collection_stage_writeback_record_extraction_evidence(extraction: dict[str, Any]) -> list[str]:
+    return _normalize_text_list(
+        extraction.get("evidence")
+        or extraction.get("evidenceRefs")
+        or extraction.get("evidence_refs")
+        or extraction.get("reasons")
+        or extraction.get("reason"),
+        max_items=8,
+        max_length=500,
+    )
+
+
+def _source_collection_record_extraction_effective_texts(extraction: dict[str, Any], record: dict[str, Any]) -> list[str]:
+    texts: list[str] = []
+    for key in (
+        "valueSummary",
+        "value_summary",
+        "summary",
+        "finding",
+        "notes",
+        "abstract",
+        "usableContent",
+        "usable_content",
+    ):
+        text = _trim_text(extraction.get(key), max_length=2000)
+        if text:
+            texts.append(text)
+    for key in ("keyFindings", "key_findings", "findings"):
+        for item in _normalize_text_list(extraction.get(key), max_items=12, max_length=300):
+            if item:
+                texts.append(item)
+    record_summary = _trim_text(record.get("summary"), max_length=2000)
+    if record_summary:
+        texts.append(record_summary)
+    metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+    for key in ("abstract", "description"):
+        text = _trim_text(metadata.get(key), max_length=2000)
+        if text:
+            texts.append(text)
+    return texts
+
+
+def _source_collection_record_extraction_has_effective_content(extraction: dict[str, Any], record: dict[str, Any]) -> bool:
+    negative_fragments = (
+        "no abstract",
+        "no summary",
+        "no usable",
+        "placeholder",
+        "landing page",
+        "没有摘要",
+        "没有正文",
+        "无有效内容",
+        "无法验证",
+        "仅有占位",
+    )
+    for text in _source_collection_record_extraction_effective_texts(extraction, record):
+        normalized = re.sub(r"\s+", " ", text.lower()).strip()
+        if len(normalized) < 24:
+            continue
+        if any(fragment in normalized for fragment in negative_fragments):
+            continue
+        return True
+    return False
+
+
+def _source_collection_record_extraction_kept_status(extraction: dict[str, Any]) -> str:
+    decision = _source_collection_stage_writeback_record_extraction_decision(extraction)
+    has_defects = bool(
+        _normalize_text_list(
+            extraction.get("defects")
+            or extraction.get("limitations")
+            or extraction.get("riskFlags")
+            or extraction.get("risk_flags"),
+            max_items=12,
+            max_length=180,
+        )
+        or _trim_text(extraction.get("followUpSuggestion") or extraction.get("follow_up_suggestion"), max_length=500)
+    )
+    if decision in SOURCE_COLLECTION_KEEP_WITH_NOTES_DECISIONS or has_defects:
+        return "kept_with_notes"
+    return "kept"
+
+
 def _materialize_source_collection_stage_writeback_content_extraction(
     team_id: str,
     run_id: str,
@@ -3288,10 +3523,32 @@ def _source_collection_record_extraction_metadata(
     stage_id: str,
     recorded_by_agent: str,
 ) -> dict[str, Any]:
+    value_summary = _trim_text(extraction.get("valueSummary") or extraction.get("value_summary"), max_length=2000)
+    defects = _normalize_text_list(
+        extraction.get("defects")
+        or extraction.get("limitations")
+        or extraction.get("riskFlags")
+        or extraction.get("risk_flags"),
+        max_items=12,
+        max_length=180,
+    )
+    follow_up = _trim_text(
+        extraction.get("followUpSuggestion")
+        or extraction.get("follow_up_suggestion")
+        or extraction.get("nextStep")
+        or extraction.get("next_step"),
+        max_length=600,
+    )
+    decision = _source_collection_stage_writeback_record_extraction_decision(extraction)
     return {
-        "status": _trim_text(extraction.get("status") or "extracted", max_length=80),
+        "status": _source_collection_record_extraction_kept_status(extraction),
+        "decision": decision,
+        "valueSummary": value_summary,
+        "defects": defects,
+        "followUpSuggestion": follow_up,
         "summary": _trim_text(
-            extraction.get("summary")
+            value_summary
+            or extraction.get("summary")
             or extraction.get("finding")
             or extraction.get("notes")
             or extraction.get("reason"),
@@ -3355,6 +3612,10 @@ def _materialize_source_collection_stage_writeback_record_extractions(
 ) -> dict[str, Any]:
     result = writeback.get("result") if isinstance(writeback.get("result"), dict) else {}
     source_candidates = _source_collection_candidates_for_run(team_id, run_id)
+    try:
+        run = data_processing_service.get_processing_run(run_id)
+    except data_processing_service.DataProcessingError:
+        run = {"runId": run_id, "scope": {}}
     extractions = _source_collection_stage_writeback_record_extractions(
         result,
         include_candidate_fallback=not bool(source_candidates),
@@ -3377,6 +3638,7 @@ def _materialize_source_collection_stage_writeback_record_extractions(
     agent_role = _trim_text(task.get("agentRole"), max_length=80)
     recorded_by_agent = _trim_text(writeback.get("recordedByAgent"), max_length=160) or agent_id or agent_role or "Content Extraction Agent"
     imported_candidates: list[dict[str, Any]] = []
+    excluded_sources: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -3390,9 +3652,45 @@ def _materialize_source_collection_stage_writeback_record_extractions(
             skipped.append({"recordId": record_id, "reason": "duplicate_record_extraction"})
             continue
         seen.add(record_id)
+        record = record_by_id.get(record_id) or {}
+        existing_exclusion = _source_collection_record_is_excluded(team_id, run, record)
+        if existing_exclusion:
+            skipped.append(
+                {
+                    "recordId": record_id,
+                    "reason": "source_excluded",
+                    "sourceIdentityKey": _trim_text(existing_exclusion.get("sourceIdentityKey"), max_length=240),
+                }
+            )
+            continue
         extraction_status = _trim_text(extraction.get("status"), max_length=80).lower()
-        if extraction_status in {"blocked", "needs_more_info", "need_more_info", "needs_fulltext", "missing_source", "needs_revision"}:
+        if extraction_status in {"blocked", "failed", "tool_failed", "temporarily_unavailable"}:
             skipped.append({"recordId": record_id, "reason": extraction_status or "record_extraction_blocked"})
+            continue
+        exclusion_reason = _source_collection_stage_writeback_record_exclusion_reason(extraction)
+        has_effective_content = _source_collection_record_extraction_has_effective_content(extraction, record)
+        if exclusion_reason or not has_effective_content:
+            normalized_reason = exclusion_reason or "no_effective_content"
+            exclusion_entry = _record_source_collection_exclusion(
+                team_id,
+                run,
+                record,
+                reason=normalized_reason,
+                evidence=_source_collection_stage_writeback_record_extraction_evidence(extraction),
+                task_id=task_id,
+                agent_id=agent_id,
+                stage_id=stage_id,
+            )
+            excluded_sources.append(
+                {
+                    "recordId": record_id,
+                    "title": _trim_text(record.get("title"), max_length=240),
+                    "reason": normalized_reason,
+                    "sourceIdentityKey": _trim_text(exclusion_entry.get("sourceIdentityKey"), max_length=240),
+                    "exclusionId": _trim_text(exclusion_entry.get("exclusionId"), max_length=160),
+                    "recordIdAliasWarning": warning,
+                }
+            )
             continue
         content_extraction = _source_collection_record_extraction_metadata(
             extraction,
@@ -3402,7 +3700,6 @@ def _materialize_source_collection_stage_writeback_record_extractions(
             stage_id=stage_id,
             recorded_by_agent=recorded_by_agent,
         )
-        record = record_by_id.get(record_id) or {}
         try:
             import_response = import_data_record_as_source_candidate(
                 team_id,
@@ -3444,10 +3741,11 @@ def _materialize_source_collection_stage_writeback_record_extractions(
         status=status,
         source_lead_count=len(extractions),
         imported_candidates=imported_candidates,
+        excluded_sources=excluded_sources,
         skipped=skipped,
         failed=failed,
     )
-    if imported_candidates or skipped or failed:
+    if imported_candidates or excluded_sources or skipped or failed:
         _record_workflow_event(
             "source_collection.stage_session_task_record_extractions_materialized",
             team_id,
@@ -3458,12 +3756,13 @@ def _materialize_source_collection_stage_writeback_record_extractions(
                 "agentId": agent_id,
                 "recordExtractionCount": len(extractions),
                 "importedCandidateCount": summary["importedCandidateCount"],
+                "excludedSourceCount": summary["excludedSourceCount"],
                 "skippedCount": summary["skippedCount"],
                 "failedCount": summary["failedCount"],
             },
             level="warning" if not imported_candidates else "info",
-            outcome="failed" if not imported_candidates else "completed",
-            lifecycle=not bool(imported_candidates),
+            outcome="failed" if not imported_candidates and not excluded_sources else "completed",
+            lifecycle=not bool(imported_candidates or excluded_sources),
         )
     return summary
 
@@ -3494,11 +3793,6 @@ def _materialize_source_collection_stage_writeback_sources(
     if not leads:
         return _source_collection_stage_writeback_materialization_summary(status="no_structured_sources")
 
-    if not records:
-        return _source_collection_stage_writeback_materialization_summary(
-            status="failed",
-            failed=[{"reason": "records_unavailable"}],
-        )
     existing_records = records
     existing_identity_records = _source_collection_existing_identity_records(existing_records)
 
@@ -3771,6 +4065,7 @@ def _source_collection_stage_writeback_closure_summary(
     target_label = "阶段产物"
     action_label = "继续处理"
     retry_instruction = "重试时请先读取 source_collection_context_tool 的 compact 上下文，按分页读完后再回写真实 ID。"
+    excluded_source_count = _source_collection_count(materialized_sources.get("excludedSourceCount"))
     if stage_id == "candidate" or agent_role == "content_extraction":
         target_label = "候选资料"
         action_label = "提炼"
@@ -3813,6 +4108,10 @@ def _source_collection_stage_writeback_closure_summary(
     elif success_count > 0:
         user_status = "partial"
         message = f"已{action_label} {processed}/{total}，已生成 {success_count} 个{target_label}；还有 {missing} 条待补，{invalid} 个 ID 未匹配。"
+    elif excluded_source_count > 0 and coverage and complete:
+        user_status = "success"
+        artifact_status = "source_manifest_filtered"
+        message = f"已移出 {excluded_source_count} 条无有效内容来源，未生成候选资料；需要继续搜索或补充新来源。"
     elif coverage and total > 0:
         user_status = "failed"
         message = f"Agent 已回写，但没有生成{target_label}；已{action_label} {processed}/{total}，{missing} 条待补，{invalid} 个 ID 未匹配。"
@@ -3834,6 +4133,7 @@ def _source_collection_stage_writeback_closure_summary(
         "message": message,
         "progressLabel": f"{action_label} {processed}/{total}" if coverage and total else "",
         "successCount": success_count,
+        "excludedSourceCount": excluded_source_count,
         "failedCount": missing + invalid,
         "blockedCount": blocked,
         "coverageSummary": _normalize_metadata(coverage),
@@ -5052,16 +5352,19 @@ def _source_collection_stage_writeback_materialization_summary(
     source_lead_count: int = 0,
     created_records: list[dict[str, Any]] | None = None,
     imported_candidates: list[dict[str, Any]] | None = None,
+    excluded_sources: list[dict[str, Any]] | None = None,
     skipped: list[dict[str, Any]] | None = None,
     failed: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     normalized_skipped = [item for item in list(skipped or []) if isinstance(item, dict)]
+    normalized_excluded = [item for item in list(excluded_sources or []) if isinstance(item, dict)]
     skipped_duplicate_count = sum(1 for item in normalized_skipped if "duplicate" in _trim_text(item.get("reason"), max_length=120))
     return {
         "status": status,
         "sourceLeadCount": source_lead_count,
         "createdRecordCount": len(list(created_records or [])),
         "importedCandidateCount": len(list(imported_candidates or [])),
+        "excludedSourceCount": len(normalized_excluded),
         "skippedCount": len(normalized_skipped),
         "skippedDuplicateCount": skipped_duplicate_count,
         "failedCount": len(list(failed or [])),
@@ -5075,6 +5378,7 @@ def _source_collection_stage_writeback_materialization_summary(
             if isinstance(item, dict)
         ],
         "importedCandidates": list(imported_candidates or [])[:24],
+        "excludedSources": normalized_excluded[:24],
         "skipped": normalized_skipped[:24],
         "failed": [item for item in list(failed or []) if isinstance(item, dict)][:24],
     }
@@ -7718,6 +8022,7 @@ def get_source_collection_summary(team_id: str, *, run_id: str = "") -> dict[str
             normalized_team_id,
             normalized_run_id,
             run_status=run_status,
+            run=selected_run,
         )
     else:
         projection = {
@@ -14852,6 +15157,314 @@ def _source_collection_identity_key(
     return f"title:{hashlib.sha256(fingerprint_source.encode('utf-8')).hexdigest()[:24]}"
 
 
+def _source_collection_exclusion_scope(run: dict[str, Any]) -> dict[str, str]:
+    scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
+    topic = _trim_text(
+        scope.get("topic")
+        or metadata.get("topic")
+        or run.get("title")
+        or scope.get("goal")
+        or metadata.get("title"),
+        max_length=500,
+    )
+    normalized = re.sub(r"\s+", " ", topic.lower()).strip()
+    scope_key = f"topic:{hashlib.sha256(normalized.encode('utf-8', errors='replace')).hexdigest()[:24]}" if normalized else "team"
+    return {
+        "scope": "team_topic" if normalized else "team",
+        "scopeKey": scope_key,
+        "topic": topic,
+    }
+
+
+def _source_collection_exclusion_store_default(team_id: str) -> dict[str, Any]:
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": team_id,
+        "entries": [],
+        "updatedAt": "",
+    }
+
+
+def _load_source_collection_exclusion_store(team_id: str) -> dict[str, Any]:
+    store = _read_json(_source_collection_exclusion_store_path(team_id))
+    if not store:
+        return _source_collection_exclusion_store_default(team_id)
+    entries = [item for item in list(store.get("entries") or []) if isinstance(item, dict)]
+    store["schemaVersion"] = _source_collection_count(store.get("schemaVersion")) or SCHEMA_VERSION
+    store["teamId"] = _trim_text(store.get("teamId"), max_length=160) or team_id
+    store["entries"] = entries
+    return store
+
+
+def _write_source_collection_exclusion_store(team_id: str, store: dict[str, Any]) -> None:
+    payload = dict(store)
+    payload["schemaVersion"] = _source_collection_count(payload.get("schemaVersion")) or SCHEMA_VERSION
+    payload["teamId"] = team_id
+    payload["entries"] = [item for item in list(payload.get("entries") or []) if isinstance(item, dict)]
+    payload["updatedAt"] = utc_now_iso()
+    _write_json(_source_collection_exclusion_store_path(team_id), payload)
+
+
+def get_source_collection_exclusion_ledger(team_id: str) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    team_service.assert_team_exists(normalized_team_id)
+    with _WORKFLOW_LOCK:
+        store = _load_source_collection_exclusion_store(normalized_team_id)
+    entries = [dict(item) for item in list(store.get("entries") or []) if isinstance(item, dict)]
+    entries.sort(key=lambda item: str(item.get("updatedAt") or item.get("lastSeenAt") or ""), reverse=True)
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "excludedCount": len(entries),
+        "entries": entries,
+        "storagePath": _relative_path(_source_collection_exclusion_store_path(normalized_team_id)),
+        "updatedAt": _trim_text(store.get("updatedAt"), max_length=120),
+    }
+
+
+def _source_collection_record_source_snapshot(record: dict[str, Any]) -> dict[str, Any]:
+    metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+    trace = record.get("collectionTrace") if isinstance(record.get("collectionTrace"), dict) else {}
+    return {
+        "recordId": _trim_text(record.get("recordId"), max_length=160),
+        "title": _trim_text(record.get("title"), max_length=260),
+        "sourceType": _trim_text(record.get("sourceType"), max_length=80),
+        "sourceRef": _trim_text(record.get("sourceRef"), max_length=500),
+        "rawLocation": _trim_text(record.get("rawLocation"), max_length=1000),
+        "doi": _source_collection_extract_doi(record.get("sourceRef"), record.get("rawLocation"), metadata.get("doi")),
+        "containerTitle": _trim_text(metadata.get("containerTitle") or metadata.get("container"), max_length=240),
+        "queryId": _trim_text(trace.get("queryId") or metadata.get("queryId"), max_length=160),
+        "query": _trim_text(trace.get("query") or metadata.get("query"), max_length=500),
+    }
+
+
+def _source_collection_record_identity_or_record_key(record: dict[str, Any]) -> str:
+    identity_key = _source_collection_record_identity_key(record)
+    if identity_key:
+        return identity_key
+    record_id = _trim_text(record.get("recordId"), max_length=160)
+    return f"record:{record_id}" if record_id else ""
+
+
+def _source_collection_exclusion_match(
+    team_id: str,
+    run: dict[str, Any],
+    source_identity_key: str,
+) -> dict[str, Any] | None:
+    normalized_key = _trim_text(source_identity_key, max_length=240)
+    if not normalized_key:
+        return None
+    scope = _source_collection_exclusion_scope(run)
+    with _WORKFLOW_LOCK:
+        store = _load_source_collection_exclusion_store(team_id)
+        for entry in list(store.get("entries") or []):
+            if not isinstance(entry, dict):
+                continue
+            if _trim_text(entry.get("sourceIdentityKey"), max_length=240) != normalized_key:
+                continue
+            if _trim_text(entry.get("scopeKey"), max_length=120) != scope["scopeKey"]:
+                continue
+            return dict(entry)
+    return None
+
+
+def _source_collection_record_is_excluded(team_id: str, run: dict[str, Any], record: dict[str, Any]) -> dict[str, Any] | None:
+    return _source_collection_exclusion_match(
+        team_id,
+        run,
+        _source_collection_record_identity_or_record_key(record),
+    )
+
+
+def _record_source_collection_exclusion(
+    team_id: str,
+    run: dict[str, Any],
+    record: dict[str, Any],
+    *,
+    reason: str,
+    evidence: list[str] | None = None,
+    task_id: str = "",
+    agent_id: str = "",
+    stage_id: str = "",
+    source: str = "stage_writeback",
+) -> dict[str, Any]:
+    source_identity_key = _source_collection_record_identity_or_record_key(record)
+    if not source_identity_key:
+        return {}
+    normalized_reason = _normalize_source_collection_exclusion_reason(reason) or "no_effective_content"
+    now = utc_now_iso()
+    scope = _source_collection_exclusion_scope(run)
+    record_id = _trim_text(record.get("recordId"), max_length=160)
+    run_id = _trim_text(run.get("runId"), max_length=160)
+    evidence_items = _normalize_text_list(evidence or [], max_items=8, max_length=500)
+    with _WORKFLOW_LOCK:
+        store = _load_source_collection_exclusion_store(team_id)
+        entries = [item for item in list(store.get("entries") or []) if isinstance(item, dict)]
+        matched: dict[str, Any] | None = None
+        for entry in entries:
+            if (
+                _trim_text(entry.get("sourceIdentityKey"), max_length=240) == source_identity_key
+                and _trim_text(entry.get("scopeKey"), max_length=120) == scope["scopeKey"]
+            ):
+                matched = entry
+                break
+        if matched is None:
+            matched = {
+                "exclusionId": _new_record_id("srcexcl"),
+                "sourceIdentityKey": source_identity_key,
+                "scope": scope["scope"],
+                "scopeKey": scope["scopeKey"],
+                "topic": scope["topic"],
+                "reason": normalized_reason,
+                "evidence": evidence_items,
+                "sourceSnapshot": _source_collection_record_source_snapshot(record),
+                "firstSeenAt": now,
+                "lastSeenAt": now,
+                "updatedAt": now,
+                "hitCount": 1,
+                "createdByTaskId": _trim_text(task_id, max_length=160),
+                "createdByAgent": _trim_text(agent_id, max_length=160),
+                "stageId": _trim_text(stage_id, max_length=80),
+                "source": _trim_text(source, max_length=80),
+                "runIds": [run_id] if run_id else [],
+                "recordIds": [record_id] if record_id else [],
+                "restoreAllowed": True,
+            }
+            entries.append(matched)
+        else:
+            matched["reason"] = normalized_reason or _trim_text(matched.get("reason"), max_length=120)
+            if evidence_items:
+                previous_evidence = _normalize_text_list(matched.get("evidence"), max_items=8, max_length=500)
+                matched["evidence"] = _normalize_text_list([*previous_evidence, *evidence_items], max_items=8, max_length=500)
+            matched["sourceSnapshot"] = _source_collection_record_source_snapshot(record)
+            matched["lastSeenAt"] = now
+            matched["updatedAt"] = now
+            matched["hitCount"] = max(1, _source_collection_count(matched.get("hitCount")))
+            run_ids = _normalize_text_list(matched.get("runIds"), max_items=40, max_length=160)
+            if run_id and run_id not in run_ids:
+                run_ids.append(run_id)
+            matched["runIds"] = run_ids[:40]
+            record_ids = _normalize_text_list(matched.get("recordIds"), max_items=80, max_length=160)
+            if record_id and record_id not in record_ids:
+                record_ids.append(record_id)
+            matched["recordIds"] = record_ids[:80]
+        store["entries"] = entries
+        _write_source_collection_exclusion_store(team_id, store)
+        stored = dict(matched)
+    _record_workflow_event(
+        "source_collection.source_excluded",
+        team_id,
+        fields={
+            "runId": run_id,
+            "recordId": record_id,
+            "taskId": _trim_text(task_id, max_length=160),
+            "stageId": _trim_text(stage_id, max_length=80),
+            "sourceIdentityKey": source_identity_key,
+            "reason": normalized_reason,
+            "scopeKey": scope["scopeKey"],
+        },
+        level="warning",
+        outcome="completed",
+    )
+    return stored
+
+
+def _record_source_collection_exclusion_hit(
+    team_id: str,
+    run: dict[str, Any],
+    record: dict[str, Any],
+    entry: dict[str, Any],
+) -> dict[str, Any]:
+    source_identity_key = _trim_text(entry.get("sourceIdentityKey"), max_length=240)
+    scope_key = _trim_text(entry.get("scopeKey"), max_length=120)
+    if not source_identity_key or not scope_key:
+        return {}
+    now = utc_now_iso()
+    run_id = _trim_text(run.get("runId"), max_length=160)
+    record_id = _trim_text(record.get("recordId"), max_length=160)
+    with _WORKFLOW_LOCK:
+        store = _load_source_collection_exclusion_store(team_id)
+        entries = [item for item in list(store.get("entries") or []) if isinstance(item, dict)]
+        stored: dict[str, Any] | None = None
+        for item in entries:
+            if (
+                _trim_text(item.get("sourceIdentityKey"), max_length=240) == source_identity_key
+                and _trim_text(item.get("scopeKey"), max_length=120) == scope_key
+            ):
+                stored = item
+                break
+        if stored is None:
+            return {}
+        stored["hitCount"] = max(1, _source_collection_count(stored.get("hitCount"))) + 1
+        stored["lastSeenAt"] = now
+        stored["updatedAt"] = now
+        stored["lastHitSourceSnapshot"] = _source_collection_record_source_snapshot(record)
+        run_ids = _normalize_text_list(stored.get("runIds"), max_items=40, max_length=160)
+        if run_id and run_id not in run_ids:
+            run_ids.append(run_id)
+        stored["runIds"] = run_ids[:40]
+        record_ids = _normalize_text_list(stored.get("recordIds"), max_items=80, max_length=160)
+        if record_id and record_id not in record_ids:
+            record_ids.append(record_id)
+        stored["recordIds"] = record_ids[:80]
+        store["entries"] = entries
+        _write_source_collection_exclusion_store(team_id, store)
+        return dict(stored)
+
+
+def _source_collection_filter_active_records(
+    team_id: str,
+    run: dict[str, Any],
+    records: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    active_records: list[dict[str, Any]] = []
+    excluded_refs: list[dict[str, Any]] = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        excluded = _source_collection_record_is_excluded(team_id, run, record)
+        if excluded:
+            excluded_refs.append(
+                {
+                    "recordId": _trim_text(record.get("recordId"), max_length=160),
+                    "sourceIdentityKey": _trim_text(excluded.get("sourceIdentityKey"), max_length=240),
+                    "reason": _trim_text(excluded.get("reason"), max_length=120),
+                    "title": _trim_text(record.get("title") or (excluded.get("sourceSnapshot") or {}).get("title"), max_length=240),
+                }
+            )
+            continue
+        active_records.append(record)
+    return active_records, {
+        "excludedCount": len(excluded_refs),
+        "activeRecordCount": len(active_records),
+        "rawRecordCount": len([item for item in records if isinstance(item, dict)]),
+        "excluded": excluded_refs[:40],
+    }
+
+
+def _normalize_source_collection_exclusion_reason(value: Any) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "_", _trim_text(value, max_length=120).lower()).strip("_")
+    aliases = {
+        "no_content": "no_effective_content",
+        "empty": "no_effective_content",
+        "invalid": "no_effective_content",
+        "exclude": "no_effective_content",
+        "excluded": "no_effective_content",
+        "discard": "no_effective_content",
+        "discarded": "no_effective_content",
+        "irrelevant": "out_of_scope",
+        "topic_mismatch": "out_of_scope",
+        "not_relevant": "out_of_scope",
+        "not_obtainable": "unobtainable",
+        "not_accessible": "unobtainable",
+        "cannot_access": "unobtainable",
+        "unavailable": "unobtainable",
+    }
+    normalized = aliases.get(normalized, normalized)
+    return normalized if normalized in SOURCE_COLLECTION_EXCLUSION_REASONS else ""
+
+
 def _source_collection_normalized_doi(value: Any) -> str:
     text = _trim_text(value, max_length=1000).strip()
     if not text:
@@ -15258,7 +15871,8 @@ def _source_collection_run_context_bundle(team_id: str, run_id: str) -> dict[str
     if run_team_id and run_team_id != team_id:
         raise TeamWorkflowOrchestrationError("Data processing run does not belong to this team.")
     assignments = [item for item in list(assignments_payload.get("assignments") or []) if isinstance(item, dict)]
-    records = [item for item in list(records_payload.get("records") or []) if isinstance(item, dict)]
+    all_records = [item for item in list(records_payload.get("records") or []) if isinstance(item, dict)]
+    records, excluded_source_summary = _source_collection_filter_active_records(team_id, run, all_records)
     source_candidates = _source_collection_candidates_for_run(team_id, run_id)
     active_snapshot = _source_collection_work_run_store().load_active_snapshot(SOURCE_COLLECTION_WORK_RUN_KIND)
     active_snapshot = _decorate_source_collection_work_run_snapshot(
@@ -15275,6 +15889,8 @@ def _source_collection_run_context_bundle(team_id: str, run_id: str) -> dict[str
         "run": run,
         "assignments": assignments,
         "records": records,
+        "allRecords": all_records,
+        "excludedSourceSummary": excluded_source_summary,
         "runStatus": run_status,
         "sourceCandidates": source_candidates,
         "activeWorkRun": active_work_run,
@@ -15720,6 +16336,7 @@ def _source_collection_stage_cards_projection(
     run_id: str,
     *,
     run_status: dict[str, Any] | None = None,
+    run: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     normalized_run_id = _trim_text(run_id, max_length=160)
@@ -15732,6 +16349,23 @@ def _source_collection_stage_cards_projection(
         except data_processing_service.DataProcessingError:
             resolved_run_status = {}
     run_summary = resolved_run_status.get("summary") if isinstance(resolved_run_status.get("summary"), dict) else {}
+    raw_record_count = _source_collection_count(run_summary.get("recordCount"))
+    active_record_count = raw_record_count
+    excluded_source_count = 0
+    try:
+        projection_run = run if isinstance(run, dict) and _trim_text(run.get("runId"), max_length=160) == normalized_run_id else data_processing_service.get_processing_run(normalized_run_id)
+        projection_records_payload = data_processing_service.list_records(normalized_run_id)
+        projection_records = [item for item in list(projection_records_payload.get("records") or []) if isinstance(item, dict)]
+        active_projection_records, excluded_source_summary = _source_collection_filter_active_records(
+            normalized_team_id,
+            projection_run,
+            projection_records,
+        )
+        raw_record_count = len(projection_records)
+        active_record_count = len(active_projection_records)
+        excluded_source_count = _source_collection_count(excluded_source_summary.get("excludedCount"))
+    except data_processing_service.DataProcessingError:
+        pass
     with _WORKFLOW_LOCK:
         candidate_store = _load_candidate_store(normalized_team_id)
     all_candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
@@ -15793,24 +16427,26 @@ def _source_collection_stage_cards_projection(
         _source_collection_stage_card_projection(
             "collection",
             stage_task_groups.get("collection", ([], []))[0],
-            artifact_count=_source_collection_count(run_summary.get("recordCount")),
+            artifact_count=active_record_count,
             input_count=_source_collection_count(run_summary.get("assignmentCount")),
-            output_count=_source_collection_count(run_summary.get("recordCount")),
+            output_count=active_record_count,
             pending_count=_source_collection_count(run_summary.get("openAssignmentCount")),
-            artifact_status="ready" if _source_collection_count(run_summary.get("recordCount")) > 0 else "empty",
-            artifact_summary=f"{_source_collection_count(run_summary.get('recordCount'))} DataRecord records; {_source_collection_count(run_summary.get('openAssignmentCount'))} assignments remain.",
+            artifact_status="ready" if active_record_count > 0 else "empty",
+            artifact_summary=f"{active_record_count} active DataRecord records; {excluded_source_count} excluded; {_source_collection_count(run_summary.get('openAssignmentCount'))} assignments remain.",
             historical_task_count=len(stage_task_groups.get("collection", ([], []))[1]),
+            extra_counts={"excluded": excluded_source_count, "rawRecord": raw_record_count},
         ),
         _source_collection_stage_card_projection(
             "candidate",
             stage_task_groups.get("candidate", ([], []))[0],
             artifact_count=len(source_candidates),
-            input_count=_source_collection_count(run_summary.get("recordCount")),
+            input_count=active_record_count,
             output_count=len(source_candidates),
-            pending_count=max(0, _source_collection_count(run_summary.get("recordCount")) - len(source_candidates)),
+            pending_count=max(0, active_record_count - len(source_candidates)),
             artifact_status="ready" if source_candidates else "empty",
-            artifact_summary=f"{len(source_candidates)} source_manifest candidates from this run.",
+            artifact_summary=f"{len(source_candidates)} source_manifest candidates from this run; {excluded_source_count} excluded source(s).",
             historical_task_count=len(stage_task_groups.get("candidate", ([], []))[1]),
+            extra_counts={"excluded": excluded_source_count, "rawRecord": raw_record_count},
         ),
         _source_collection_stage_card_projection(
             "screening",
@@ -15859,7 +16495,9 @@ def _source_collection_stage_cards_projection(
             "stageCount": len(cards),
             "closedLoopCount": sum(1 for card in cards if card.get("isClosedLoop")),
             "agentTaskCount": len(tasks),
-            "recordCount": _source_collection_count(run_summary.get("recordCount")),
+            "recordCount": active_record_count,
+            "rawRecordCount": raw_record_count,
+            "excludedSourceCount": excluded_source_count,
             "sourceCandidateCount": len(source_candidates),
             "assessedSourceCandidateCount": len(assessed_sources),
             "approvedSourceCandidateCount": len(approved_sources),
@@ -15881,6 +16519,7 @@ def _source_collection_stage_card_projection(
     artifact_status: str,
     artifact_summary: str,
     historical_task_count: int = 0,
+    extra_counts: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     latest_task = _latest_source_collection_stage_task(tasks)
     agent_status = _trim_text(latest_task.get("status"), max_length=80).lower() if latest_task else "not_started"
@@ -15913,6 +16552,11 @@ def _source_collection_stage_card_projection(
     next_actions = latest_task.get("nextActions") if latest_task and isinstance(latest_task.get("nextActions"), list) else []
     result = latest_task.get("result") if latest_task and isinstance(latest_task.get("result"), dict) else {}
     result_keys = sorted(str(key) for key in result.keys()) if result else []
+    normalized_extra_counts = {
+        _trim_text(key, max_length=80): _source_collection_count(value)
+        for key, value in dict(extra_counts or {}).items()
+        if _trim_text(key, max_length=80)
+    }
     return {
         "stageId": stage_id,
         "status": card_status,
@@ -15927,6 +16571,7 @@ def _source_collection_stage_card_projection(
             "pending": effective_pending_count,
             "task": len(tasks),
             "historicalTask": max(0, _source_collection_count(historical_task_count)),
+            **normalized_extra_counts,
         },
         "latestTask": _source_collection_stage_task_card_summary(latest_task) if latest_task else {},
         "resultKeys": result_keys,
@@ -16593,6 +17238,9 @@ def _compact_source_collection_stage_task_context(context: dict[str, Any]) -> di
     ]
     if record_continuation_hint:
         compact_usage["recordContinuationHint"] = record_continuation_hint
+    excluded_source_summary = _normalize_metadata(context.get("excludedSourceSummary"))
+    if _source_collection_count(excluded_source_summary.get("excludedCount")):
+        compact["excludedSourceSummary"] = excluded_source_summary
     if compact_record_ids or _source_collection_count(record_page.get("total")) or bool(record_page.get("hasMore")):
         compact["recordPage"] = _normalize_metadata(record_page)
         compact["recordIds"] = compact_record_ids
@@ -16626,8 +17274,8 @@ def _compact_source_collection_context_candidate(candidate: dict[str, Any]) -> d
     locator = doi or source_url or source_path
     compact: dict[str, Any] = {
         "candidateId": _trim_text(candidate.get("candidateId"), max_length=128),
-        "title": _trim_text(candidate.get("title"), max_length=140),
-        "summaryPreview": _trim_text(candidate.get("summary"), max_length=30),
+        "title": _trim_text(candidate.get("title"), max_length=120),
+        "summaryPreview": _trim_text(candidate.get("summary"), max_length=24),
         "sourceKind": _trim_text(candidate.get("sourceKind"), max_length=80),
         "locator": locator,
         "sourceRecordId": _trim_text(candidate.get("sourceRecordId"), max_length=128),
@@ -17050,6 +17698,9 @@ def _source_collection_stage_session_task_message(
             "- 如果返回的 `recordPage.hasMore=true`，必须继续按 `record_offset=recordPage.nextOffset` 分页读取，直到本阶段应处理原始资料都有真实 recordId 的结论。",
             "- 如果返回的 `candidatePage.hasMore=true`，必须继续按 `candidate_offset=candidatePage.nextOffset` 分页读取，直到本阶段应处理候选都有真实 candidateId 的结论。",
             "- 资料提炼阶段如果 `candidatePage.total=0`，输入就是原始 DataRecord：请用 `recordExtractions[]` 回写，并绑定完整 `recordId`；已有候选后才用 `candidateExtractions[]` 绑定完整 `candidateId`。",
+            "- 资料提炼采用宽松保留：只要有可用内容或有价值线索，就写 `decision=keep` 或 `needs_more_info`，并填写 `valueSummary`、`defects`、`followUpSuggestion`；不要因为缺 DOI/缺全文直接丢弃。",
+            "- 只有确认没有摘要、正文、可验证内容或明显跑题时，才写 `decision=exclude` 和 `excludeReason=no_effective_content/out_of_scope/unobtainable`；这些来源会被移出后续流程并记录，避免下次重复搜到。",
+            "- 如果上下文返回 `excludedSourceSummary.excludedCount>0`，表示这些资料已从本轮活跃流程移出，不要再次处理或把它们算作待补资料。",
             "- 不要推断截断或隐藏资料；不要把 `remaining_11_candidates`、短 ID 或聚合占位符当作 recordId/candidateId。",
             "- 不要使用 `web_fetch_tool` 读取 `file://` 本地路径或 localhost 回写接口；本地资料上下文只通过 `source_collection_context_tool` 获取。",
             (
@@ -19581,6 +20232,10 @@ def _workflow_path(team_id: str) -> Path:
 
 def _candidate_store_path(team_id: str) -> Path:
     return _team_workflow_root(team_id) / "candidate_store" / "index.json"
+
+
+def _source_collection_exclusion_store_path(team_id: str) -> Path:
+    return _team_workflow_root(team_id) / "source_collection_exclusions" / "index.json"
 
 
 def _transfer_records_path(team_id: str) -> Path:
