@@ -203,6 +203,75 @@ def test_local_rag_retrieval_returns_contexts_with_citations(rag_knowledge_env):
     assert citation["sourceArtifactIds"] == context["source"]["sourceArtifactIds"]
 
 
+def test_local_rag_bm25_retrieval_ranks_term_dense_formal_knowledge(rag_knowledge_env):
+    from core.web.services import rag_retrieval_service
+
+    sparse_source = _source_artifact(
+        rag_knowledge_env["readableBase"]["knowledgeBaseId"],
+        owner_type="team",
+        owner_id=rag_knowledge_env["team"]["teamId"],
+        actor_agent_id=rag_knowledge_env["member"]["agentId"],
+        reviewer_agent_id=rag_knowledge_env["lead"]["agentId"],
+        title="Sparse BM25 source",
+    )
+    sparse_proposal = team_knowledge_service.create_refinement_proposal(
+        rag_knowledge_env["readableBase"]["knowledgeBaseId"],
+        source_artifact_ids=[sparse_source["sourceArtifactId"]],
+        proposed_by_agent_id=rag_knowledge_env["member"]["agentId"],
+        title="Sparse calibration note",
+        content="Quasar calibration appears once and then the note discusses unrelated storage hygiene.",
+        tags=["rag", "bm25"],
+    )
+    dense_source = _source_artifact(
+        rag_knowledge_env["readableBase"]["knowledgeBaseId"],
+        owner_type="team",
+        owner_id=rag_knowledge_env["team"]["teamId"],
+        actor_agent_id=rag_knowledge_env["member"]["agentId"],
+        reviewer_agent_id=rag_knowledge_env["lead"]["agentId"],
+        title="Dense BM25 source",
+    )
+    dense_proposal = team_knowledge_service.create_refinement_proposal(
+        rag_knowledge_env["readableBase"]["knowledgeBaseId"],
+        source_artifact_ids=[dense_source["sourceArtifactId"]],
+        proposed_by_agent_id=rag_knowledge_env["member"]["agentId"],
+        title="Dense quasar calibration retrieval",
+        content=(
+            "Quasar calibration retrieval needs quasar calibration evidence. "
+            "The quasar calibration record repeats the same governed RAG terms."
+        ),
+        tags=["rag", "bm25"],
+    )
+    sparse_item = team_knowledge_service.review_refinement_proposal(
+        rag_knowledge_env["readableBase"]["knowledgeBaseId"],
+        sparse_proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=rag_knowledge_env["lead"]["agentId"],
+    )["item"]
+    dense_item = team_knowledge_service.review_refinement_proposal(
+        rag_knowledge_env["readableBase"]["knowledgeBaseId"],
+        dense_proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=rag_knowledge_env["lead"]["agentId"],
+    )["item"]
+
+    payload = rag_retrieval_service.retrieve_rag_contexts(
+        agent_id=rag_knowledge_env["member"]["agentId"],
+        query="quasar calibration",
+        knowledge_base_id=rag_knowledge_env["readableBase"]["knowledgeBaseId"],
+        retrieval_mode="bm25",
+        provider="local",
+        top_k=2,
+    )
+
+    assert payload["request"]["retrievalMode"] == "bm25"
+    assert [context["source"]["knowledgeItemId"] for context in payload["contexts"]] == [
+        dense_item["knowledgeItemId"],
+        sparse_item["knowledgeItemId"],
+    ]
+    assert payload["contexts"][0]["score"] > payload["contexts"][1]["score"] > 0
+    assert payload["contexts"][0]["matchReason"] == "bm25"
+
+
 def test_rag_retrieval_health_reports_local_provider_ready(rag_knowledge_env):
     from core.web.services import rag_retrieval_service
 
@@ -215,6 +284,7 @@ def test_rag_retrieval_health_reports_local_provider_ready(rag_knowledge_env):
     providers = {provider["provider"]: provider for provider in payload["providers"]}
     assert providers["local"]["status"] == "ready"
     assert providers["local"]["vectorEnabled"] is False
+    assert providers["local"]["bm25Enabled"] is True
     assert providers["vector"]["status"] == "unavailable"
     assert providers["vector"]["vectorEnabled"] is False
     assert providers["vector"]["indexedItemCount"] == 0
@@ -224,6 +294,7 @@ def test_rag_retrieval_health_reports_local_provider_ready(rag_knowledge_env):
     assert payload["retrievalPolicy"]["honorsMemoryPolicy"] is True
     assert payload["retrievalPolicy"]["mutatesFormalKnowledge"] is False
     assert payload["retrievalPolicy"]["injectsPromptByDefault"] is False
+    assert "bm25" in payload["retrievalPolicy"]["supportedRetrievalModes"]
     assert payload["updatedAt"]
 
 

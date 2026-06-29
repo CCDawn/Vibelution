@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import shutil
 import threading
 import uuid
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -76,6 +78,9 @@ KNOWLEDGE_OWNER_TYPES = {"team", "agent"}
 SOURCE_INBOX_STATUSES = {"pending", "accepted", "rejected", "duplicate", "needs_more_context"}
 SOURCE_REVIEW_DECISIONS = {"accepted", "rejected", "duplicate", "needs_more_context"}
 CENTRAL_SOURCE_STATUSES = {"active", "archived", "superseded"}
+KNOWLEDGE_SEARCH_MODES = {"exact", "semantic", "hybrid", "bm25"}
+BM25_K1 = 1.5
+BM25_B = 0.75
 _SAFE_ID_FRAGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
 _SEARCH_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_.-]+|[\u4e00-\u9fff]")
 _LOCK = threading.RLock()
@@ -1939,9 +1944,10 @@ def search_knowledge_items(
     normalized_importance = _enum_value(importance_level, IMPORTANCE_LEVELS, "importance level") if importance_level else ""
     normalized_stability = _enum_value(stability, STABILITY_VALUES, "stability") if stability else ""
     normalized_search_mode = str(search_mode or "exact").strip().lower()
-    if normalized_search_mode not in {"exact", "semantic", "hybrid"}:
+    if normalized_search_mode not in KNOWLEDGE_SEARCH_MODES:
         raise TeamKnowledgeError(f"Unsupported knowledge search mode: {search_mode}")
     bounded_limit = max(1, min(100, int(limit or 25)))
+    score_after_scan = normalized_search_mode == "bm25"
     results: list[dict[str, Any]] = []
     scanned_bases = 0
     owner_candidates = _iter_knowledge_owners(agent_id=agent_id, include_archived=True)
@@ -1991,7 +1997,7 @@ def search_knowledge_items(
                     continue
                 if not _item_matches_filters(
                     item,
-                    query=normalized_query,
+                    query="" if score_after_scan else normalized_query,
                     tags=normalized_tags,
                     source_type=normalized_source_type,
                     importance_level=normalized_importance,
@@ -2004,30 +2010,41 @@ def search_knowledge_items(
                 ):
                     continue
                 view = _search_item_view(item, base, owner, artifacts_by_id)
-                score = _semantic_match_score(view, normalized_query) if normalized_query else 1.0
-                if normalized_query and normalized_search_mode == "semantic" and score <= 0:
-                    continue
-                if normalized_query and normalized_search_mode == "hybrid" and score <= 0:
-                    haystack = " ".join(
-                        [
-                            str(view.get("title") or ""),
-                            str(view.get("summary") or ""),
-                            str(view.get("content") or ""),
-                        ]
-                    ).lower()
-                    if normalized_query not in haystack:
+                if score_after_scan:
+                    view["semanticScore"] = 1.0 if not normalized_query else 0.0
+                    view["searchMode"] = normalized_search_mode
+                    view["matchReason"] = "no_query" if not normalized_query else "metadata_filter"
+                else:
+                    score = _semantic_match_score(view, normalized_query) if normalized_query else 1.0
+                    if normalized_query and normalized_search_mode == "semantic" and score <= 0:
                         continue
-                view["semanticScore"] = score
-                view["searchMode"] = normalized_search_mode
-                view["matchReason"] = _search_match_reason(view, normalized_query, score)
+                    if normalized_query and normalized_search_mode == "hybrid" and score <= 0:
+                        haystack = " ".join(
+                            [
+                                str(view.get("title") or ""),
+                                str(view.get("summary") or ""),
+                                str(view.get("content") or ""),
+                            ]
+                        ).lower()
+                        if normalized_query not in haystack:
+                            continue
+                    view["semanticScore"] = score
+                    view["searchMode"] = normalized_search_mode
+                    view["matchReason"] = _search_match_reason(view, normalized_query, score)
                 results.append(view)
-                if len(results) >= bounded_limit:
+                if len(results) >= bounded_limit and not score_after_scan:
                     break
-            if len(results) >= bounded_limit:
+            if len(results) >= bounded_limit and not score_after_scan:
                 break
-        if len(results) >= bounded_limit:
+        if len(results) >= bounded_limit and not score_after_scan:
             break
-    results.sort(key=lambda item: (float(item.get("semanticScore") or 0.0), str(item.get("updatedAt") or item.get("createdAt") or "")), reverse=True)
+    if score_after_scan:
+        results = _rank_bm25_search_results(results, normalized_query)
+        if normalized_query:
+            results = [item for item in results if float(item.get("semanticScore") or 0.0) > 0]
+        results = results[:bounded_limit]
+    else:
+        results.sort(key=lambda item: (float(item.get("semanticScore") or 0.0), str(item.get("updatedAt") or item.get("createdAt") or "")), reverse=True)
     _record_event(
         "knowledge.search.executed",
         normalized_team_id,
@@ -2871,6 +2888,98 @@ def _tokenize_search_text(text: str) -> set[str]:
         for match in _SEARCH_TOKEN_PATTERN.finditer(str(text or "").lower())
         if match.group(0).strip()
     }
+
+
+def _tokenize_bm25_text(text: str) -> list[str]:
+    return [
+        match.group(0).lower()
+        for match in _SEARCH_TOKEN_PATTERN.finditer(str(text or "").lower())
+        if match.group(0).strip()
+    ]
+
+
+def _rank_bm25_search_results(results: list[dict[str, Any]], query: str) -> list[dict[str, Any]]:
+    normalized_query = str(query or "").strip().lower()
+    if not results:
+        return []
+    if not normalized_query:
+        ranked = []
+        for result in results:
+            item = dict(result)
+            item["semanticScore"] = 1.0
+            item["bm25Score"] = 1.0
+            item["matchReason"] = "no_query"
+            ranked.append(item)
+        ranked.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
+        return ranked
+
+    query_terms = list(dict.fromkeys(_tokenize_bm25_text(normalized_query)))
+    if not query_terms:
+        return []
+    document_terms = [_tokenize_bm25_text(_bm25_text_for_result(item)) for item in results]
+    document_term_sets = [set(terms) for terms in document_terms]
+    document_lengths = [len(terms) for terms in document_terms]
+    document_count = len(document_terms)
+    average_document_length = max(1.0, sum(document_lengths) / max(document_count, 1))
+    document_frequencies = {
+        term: sum(1 for terms in document_term_sets if term in terms)
+        for term in query_terms
+    }
+    ranked: list[dict[str, Any]] = []
+    for result, terms, document_length in zip(results, document_terms, document_lengths):
+        counts = Counter(terms)
+        score = 0.0
+        for term in query_terms:
+            term_frequency = counts.get(term, 0)
+            if term_frequency <= 0:
+                continue
+            document_frequency = document_frequencies.get(term, 0)
+            if document_frequency <= 0:
+                continue
+            idf = math.log(1.0 + ((document_count - document_frequency + 0.5) / (document_frequency + 0.5)))
+            denominator = term_frequency + BM25_K1 * (
+                1.0 - BM25_B + BM25_B * (document_length / average_document_length)
+            )
+            if denominator <= 0:
+                continue
+            score += idf * ((term_frequency * (BM25_K1 + 1.0)) / denominator)
+        item = dict(result)
+        rounded_score = round(score, 6)
+        item["semanticScore"] = rounded_score
+        item["bm25Score"] = rounded_score
+        item["searchMode"] = "bm25"
+        item["matchReason"] = "bm25" if rounded_score > 0 else "metadata_filter"
+        ranked.append(item)
+    ranked.sort(
+        key=lambda item: (
+            float(item.get("semanticScore") or 0.0),
+            str(item.get("updatedAt") or item.get("createdAt") or ""),
+        ),
+        reverse=True,
+    )
+    return ranked
+
+
+def _bm25_text_for_result(result: dict[str, Any]) -> str:
+    tags = " ".join(str(tag or "").strip() for tag in list(result.get("tags") or []) if str(tag or "").strip())
+    source_parts: list[str] = []
+    for source in list(result.get("sourceSummaries") or []):
+        if not isinstance(source, dict):
+            continue
+        source_parts.extend(
+            [
+                str(source.get("title") or "").strip(),
+                str(source.get("summary") or "").strip(),
+            ]
+        )
+    parts = [
+        " ".join([str(result.get("title") or "").strip()] * 3),
+        " ".join([str(result.get("summary") or "").strip()] * 2),
+        str(result.get("content") or "").strip(),
+        tags,
+        " ".join(part for part in source_parts if part),
+    ]
+    return " ".join(part for part in parts if part)
 
 
 def _semantic_match_score(payload: Any, query: str) -> float:
