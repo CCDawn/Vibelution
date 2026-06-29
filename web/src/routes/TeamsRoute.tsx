@@ -52,6 +52,7 @@ import {
 } from "../api/types";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
+import { VIconButton, VRouteHeader, VSelect, VStatusStrip } from "../components/vui";
 import { agentCenterMemoryRoute, teamMemoryRoute } from "./agentCenterRoutes";
 import { agentDisplayInfo } from "./agentDisplay";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
@@ -11756,6 +11757,16 @@ export function TeamsRoute({
       `${lang === "zh" ? "成员源" : "Member source"} Agent Center`,
     ].filter(Boolean).join("\n")
     : (lang === "zh" ? "仅显示 AI 搜索、知识库扩充和挑战杯科研团队。" : "Only AI search, knowledge expansion, and research teams are shown.");
+  const visibleTeamOptions = visibleTeams.length
+    ? visibleTeams.map((team) => ({
+      id: team.teamId,
+      label: team.name,
+      description: team.purpose || team.teamId,
+    }))
+    : [{
+      id: "",
+      label: lang === "zh" ? "正在读取团队" : "Loading teams",
+    }];
 
   if (sourceCollectionStandalone) {
     return (
@@ -11895,47 +11906,52 @@ export function TeamsRoute({
 
   return (
     <section className={styles.route}>
-      <header className={styles.teamContextBar} title={selectedTeamContextTitle}>
-        <div className={styles.teamTitleBlock}>
-          <span>{lang === "zh" ? "团队工作台 / 组织画布" : "Team Workspace / Canvas"}</span>
-          <h1>{lang === "zh" ? "团队组织画布" : "Team Organization Canvas"}</h1>
-        </div>
-        <label className={styles.teamSelectField}>
-          <span>{lang === "zh" ? "团队" : "Team"}</span>
-          <select
-            value={selectedTeam?.teamId ?? effectiveTeamId}
-            onChange={(event) => {
-              const nextTeam = visibleTeams.find((team) => team.teamId === event.target.value);
-              if (nextTeam) {
-                selectTeamRecord(nextTeam);
-              }
-            }}
-            disabled={!visibleTeams.length}
-            aria-label={lang === "zh" ? "选择团队" : "Select team"}
-          >
-            {visibleTeams.length ? (
-              visibleTeams.map((team) => (
-                <option key={team.teamId} value={team.teamId}>
-                  {team.name}
-                </option>
-              ))
-            ) : (
-              <option value="">{lang === "zh" ? "正在读取团队" : "Loading teams"}</option>
-            )}
-          </select>
-        </label>
-        <div className={styles.teamContextChips} aria-label={lang === "zh" ? "团队概况" : "Team summary"}>
-          <span>{lang === "zh" ? "团队" : "Teams"} <strong>{visibleTeamSummary.activeTeamCount}</strong></span>
-          <span>{lang === "zh" ? "成员" : "Members"} <strong>{visibleTeamSummary.memberCount}</strong></span>
-          <span>{lang === "zh" ? "失效" : "Stale"} <strong>{visibleTeamSummary.staleMemberCount}</strong></span>
-          <span>{lang === "zh" ? "来源" : "Source"} <strong>Agent Center</strong></span>
-        </div>
-        <div className={styles.teamContextActions}>
-          <button type="button" className={styles.iconButton} onClick={() => teamsQuery.refetch()} title={lang === "zh" ? "刷新团队" : "Refresh teams"}>
-            <RefreshCw size={15} />
-          </button>
-        </div>
-      </header>
+      <VRouteHeader
+        className={styles.teamContextBar}
+        aria-label={selectedTeamContextTitle}
+        eyebrow={lang === "zh" ? "团队工作台 / 组织画布" : "Team Workspace / Canvas"}
+        title={lang === "zh" ? "团队组织画布" : "Team Organization Canvas"}
+        meta={selectedTeam?.name ?? (lang === "zh" ? "暂无团队" : "No team")}
+        actions={(
+          <div className={styles.teamContextActions}>
+            <div className={styles.teamSelectField}>
+              <span>{lang === "zh" ? "团队" : "Team"}</span>
+              <VSelect
+                aria-label={lang === "zh" ? "选择团队" : "Select team"}
+                selectedKey={selectedTeam?.teamId ?? effectiveTeamId}
+                options={visibleTeamOptions}
+                placeholder={selectedTeam?.name ?? (lang === "zh" ? "选择团队" : "Select team")}
+                isDisabled={!visibleTeams.length}
+                onSelectionChange={(key) => {
+                  const nextTeam = visibleTeams.find((team) => team.teamId === String(key));
+                  if (nextTeam) {
+                    selectTeamRecord(nextTeam);
+                  }
+                }}
+              />
+            </div>
+            <VIconButton
+              label={lang === "zh" ? "刷新团队" : "Refresh teams"}
+              icon={<RefreshCw size={15} />}
+              onPress={() => void teamsQuery.refetch()}
+            />
+          </div>
+        )}
+      />
+      <VStatusStrip
+        className={styles.teamContextChips}
+        aria-label={lang === "zh" ? "团队概况" : "Team summary"}
+        items={[
+          { label: lang === "zh" ? "团队" : "Teams", value: visibleTeamSummary.activeTeamCount, tone: "info" },
+          { label: lang === "zh" ? "成员" : "Members", value: visibleTeamSummary.memberCount, tone: "success" },
+          {
+            label: lang === "zh" ? "失效" : "Stale",
+            value: visibleTeamSummary.staleMemberCount,
+            tone: visibleTeamSummary.staleMemberCount > 0 ? "warning" : "neutral",
+          },
+          { label: lang === "zh" ? "来源" : "Source", value: "Agent Center" },
+        ]}
+      />
       <div className={workspaceClassName}>
         <main className={canvasPanelClassName} id="research-organization-canvas">
           <div className={styles.canvasToolbar}>

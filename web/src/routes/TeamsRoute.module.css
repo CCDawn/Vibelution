@@ -69,18 +69,13 @@
 }
 
 .teamContextBar {
-  display: grid;
-  grid-template-columns: minmax(172px, max-content) minmax(220px, 320px) minmax(280px, 1fr) auto;
-  align-items: center;
-  gap: 8px;
   margin: 8px 10px 0;
-  padding: 7px 8px;
-  border: 1px solid var(--border-soft);
+  border-color: var(--vui-border-subtle);
   border-radius: 8px;
   background:
     var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-panel-strong) 82%, transparent);
-  box-shadow: var(--vui-shadow-inset-accent);
+  box-shadow: var(--vui-shadow-hairline);
 }
 
 .teamTitleBlock {
@@ -113,8 +108,7 @@
 
 .teamSelectField {
   display: grid;
-  grid-column: 2;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(168px, 248px);
   align-items: center;
   gap: 7px;
   min-width: 0;
@@ -127,32 +121,9 @@
   white-space: nowrap;
 }
 
-.teamSelectField select:disabled {
-  cursor: not-allowed;
-  opacity: 0.58;
-}
-
 .teamContextChips {
-  display: flex;
-  grid-column: 3;
+  margin: 6px 10px 0;
   min-width: 0;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-
-.teamContextChips span {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 26px;
-  padding: 0 9px;
-  border: 1px solid color-mix(in srgb, var(--border-soft) 82%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--surface-panel) 76%, transparent);
-  color: var(--fg-secondary);
-  font-size: 0.72rem;
-  white-space: nowrap;
 }
 
 .teamContextChips strong {
@@ -162,10 +133,10 @@
 
 .teamContextActions {
   display: flex;
-  grid-column: 4;
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
+  min-width: 0;
 }
 
 .workspace {
