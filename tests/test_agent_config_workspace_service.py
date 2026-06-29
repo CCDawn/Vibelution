@@ -2097,6 +2097,7 @@ def test_repair_agent_directory_fills_research_agent_profiles(tmp_path, monkeypa
     assert "paper_reader" in repaired["taskProfile"]["taskTypes"]
     assert repaired["toolPolicy"]["allowedTools"] == [
         "agent_message_tool",
+        "unified_memory_search_tool",
         "research_knowledge_query_tool",
         "web_fetch_tool",
         "batch_web_search_tool",

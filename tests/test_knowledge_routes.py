@@ -376,6 +376,7 @@ def test_knowledge_routes_reject_empty_actor_for_governed_content(tmp_path, monk
     assert client.get("/api/knowledge/steward/recommendations").status_code == 422
     assert client.get("/api/knowledge/steward/workbench").status_code == 422
     assert client.get("/api/knowledge/operations/health").status_code == 422
+    assert client.get("/api/knowledge/agent-readiness").status_code == 422
     assert client.get("/api/knowledge/governance/plan").status_code == 422
     assert client.get("/api/knowledge/rag/health").status_code == 422
     assert client.get(f"/api/agents/{member['agentId']}/knowledge-bases").status_code == 422
@@ -957,3 +958,32 @@ def test_knowledge_operations_health_and_governance_plan_routes_are_read_only(tm
     assert payload["operatingBoundary"]["canDirectlyApplyKnowledge"] is False
     assert all(action["mutatesFormalKnowledge"] is False for action in payload["actions"])
     assert items_response.json()["summary"]["itemCount"] == 0
+
+
+def test_knowledge_agent_readiness_route_reports_agent_memory_access(tmp_path, monkeypatch):
+    client, _team, _lead, member, _outsider = _setup(tmp_path, monkeypatch)
+    research_agent = agent_directory_service.create_agent_instance(
+        display_name="Route Research Agent",
+        primary_mode="research",
+        role_key="research_paper_reader",
+    )
+    research_team = team_service.create_team(
+        name="Route Research Team",
+        members=[{"agentId": research_agent["agentId"], "role": "member"}],
+    )
+    client.post(
+        f"/api/teams/{research_team['teamId']}/knowledge-bases",
+        json={"name": "Route Research KB", "actorAgentId": research_agent["agentId"]},
+    )
+
+    response = client.get("/api/knowledge/agent-readiness", params={"agentId": member["agentId"]})
+
+    assert response.status_code == 200
+    payload = response.json()
+    row = next(item for item in payload["agents"] if item["agentId"] == research_agent["agentId"])
+    assert payload["schemaVersion"] == 1
+    assert payload["agentId"] == member["agentId"]
+    assert payload["operatingBoundary"]["readOnly"] is True
+    assert payload["summary"]["unifiedMemorySearchToolAgentCount"] >= 1
+    assert row["memorySearch"]["hasUnifiedMemorySearchTool"] is True
+    assert row["formalKnowledge"]["visibleKnowledgeBaseCount"] == 1
