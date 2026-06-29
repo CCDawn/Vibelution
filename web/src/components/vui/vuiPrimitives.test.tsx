@@ -1,9 +1,11 @@
 import React from "react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { Search } from "lucide-react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
+import { VButton, VChip, VIconButton, VPanel, VToolbar } from "./index";
 import { VibelutionHeroProvider } from "./renderers/heroui/HeroProvider";
 
 describe("VUI foundation primitives", () => {
@@ -27,5 +29,37 @@ describe("VUI foundation primitives", () => {
 
     expect(markup).toContain('data-vui-provider="heroui"');
     expect(markup).toContain('data-test-id="inside-vui"');
+  });
+
+  it("renders compact VUI controls with stable data attributes", () => {
+    const markup = renderToStaticMarkup(
+      <VibelutionHeroProvider>
+        <VToolbar ariaLabel="Agent actions">
+          <VButton variant="secondary" icon={<Search size={14} />}>
+            Search
+          </VButton>
+          <VIconButton label="Refresh" icon={<Search size={14} />} />
+          <VChip tone="accent">mimo-v2.5</VChip>
+        </VToolbar>
+      </VibelutionHeroProvider>,
+    );
+
+    expect(markup).toContain('data-vui="button"');
+    expect(markup).toContain('data-vui="icon-button"');
+    expect(markup).toContain('data-vui="chip"');
+    expect(markup).toContain('aria-label="Refresh"');
+    expect(markup).toContain("mimo-v2.5");
+  });
+
+  it("renders panels as background-integrated native surfaces", () => {
+    const markup = renderToStaticMarkup(
+      <VPanel ariaLabel="Agent summary">
+        <strong>11</strong>
+      </VPanel>,
+    );
+
+    expect(markup).toContain('data-vui="panel"');
+    expect(markup).toContain('aria-label="Agent summary"');
+    expect(markup).toContain("<strong>11</strong>");
   });
 });
