@@ -10,6 +10,8 @@ import { fileURLToPath } from "node:url";
 const sourceRoot = fileURLToPath(new URL("../../", import.meta.url));
 const boundaryTestRelativePath = "components/vui/vuiImportBoundary.test.ts";
 const heroUiImportToken = "@heroui/react";
+const vuiRendererRelativeRoot = "components/vui/renderers/";
+const vuiProductRelativeRoot = "components/vui/product/";
 const routeSourceExtensions = new Set([".ts", ".tsx"]);
 const routeVisualUtilityPattern =
   /className\s*=\s*(?:["'`][^"'`]*(?:bg-|text-|border-|rounded-|shadow-|px-|py-|gap-|grid|flex)[^"'`]*["'`]|{`[^`]*(?:bg-|text-|border-|rounded-|shadow-|px-|py-|gap-|grid|flex)[^`]*`})/;
@@ -41,6 +43,16 @@ describe("VUI architecture boundary", () => {
       .map(relativeFromSourceRoot)
       .filter((file) => file !== boundaryTestRelativePath)
       .filter((file) => !file.startsWith("components/vui/"));
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("keeps VUI product components from importing HeroUI directly", () => {
+    const offenders = walkFiles(join(sourceRoot, "components", "vui", "product"))
+      .filter((file) => readText(file).includes(heroUiImportToken))
+      .map(relativeFromSourceRoot)
+      .filter((file) => !file.startsWith(vuiRendererRelativeRoot))
+      .filter((file) => file.startsWith(vuiProductRelativeRoot));
 
     expect(offenders).toEqual([]);
   });

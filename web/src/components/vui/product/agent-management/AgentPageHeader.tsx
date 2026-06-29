@@ -7,7 +7,6 @@ export type AgentPageHeaderAction = {
   label: string;
   icon?: ReactNode;
   onPress?: () => void;
-  href?: string;
   disabled?: boolean;
 };
 
@@ -16,20 +15,6 @@ export type AgentPageHeaderProps = {
   title: string;
   actions?: AgentPageHeaderAction[];
 };
-
-function resolveActionPress(action: AgentPageHeaderAction): (() => void) | undefined {
-  if (action.onPress) {
-    return action.onPress;
-  }
-  if (!action.href) {
-    return undefined;
-  }
-  return () => {
-    if (typeof window !== "undefined") {
-      window.location.assign(action.href as string);
-    }
-  };
-}
 
 export function AgentPageHeader({
   eyebrow,
@@ -56,11 +41,11 @@ export function AgentPageHeader({
               <VIconButton
                 label={action.label}
                 icon={action.icon}
-                onPress={resolveActionPress(action)}
+                onPress={action.onPress}
                 isDisabled={action.disabled}
               />
             ) : (
-              <VButton onPress={resolveActionPress(action)} isDisabled={action.disabled}>
+              <VButton onPress={action.onPress} isDisabled={action.disabled}>
                 {action.label}
               </VButton>
             )}
