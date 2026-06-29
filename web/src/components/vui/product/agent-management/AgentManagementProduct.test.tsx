@@ -1,0 +1,59 @@
+import React from "react";
+import { RefreshCw } from "lucide-react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it } from "vitest";
+
+import { VibelutionHeroProvider } from "../../renderers/heroui/HeroProvider";
+import {
+  AgentPageHeader,
+  AgentSummaryStrip,
+  type AgentSummaryMetric,
+} from "./index";
+
+describe("Agent Management VUI product components", () => {
+  it("renders a compact page header without inline explanatory prose", () => {
+    const markup = renderToStaticMarkup(
+      <VibelutionHeroProvider>
+        <AgentPageHeader
+          eyebrow="Agent Center"
+          title="Agent Management"
+          actions={[
+            {
+              id: "refresh",
+              label: "Refresh",
+              icon: <RefreshCw size={14} />,
+              onPress: () => undefined,
+            },
+          ]}
+        />
+      </VibelutionHeroProvider>,
+    );
+
+    expect(markup).toContain("Agent Management");
+    expect(markup).toContain('role="toolbar"');
+    expect(markup).toContain('aria-label="Refresh"');
+    expect(markup).not.toContain("<p>");
+  });
+
+  it("renders summary metrics as one dense strip", () => {
+    const metrics: AgentSummaryMetric[] = [
+      { id: "agents", label: "Agents", value: "11", detail: "Total agents" },
+      {
+        id: "issues",
+        label: "Issues",
+        value: "0",
+        tone: "success",
+        detail: "No blocking issues",
+      },
+    ];
+
+    const markup = renderToStaticMarkup(
+      <AgentSummaryStrip ariaLabel="Agent summary" metrics={metrics} />,
+    );
+
+    expect(markup).toContain('data-vui-product="agent-summary-strip"');
+    expect(markup).toContain("Agents");
+    expect(markup).toContain("11");
+    expect(markup).toContain('title="Total agents"');
+  });
+});
