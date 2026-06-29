@@ -78,6 +78,19 @@
   padding: 3px 8px;
 }
 
+.refreshButton[data-vui],
+.filterButton[data-vui],
+.filterButtonActive[data-vui],
+.primaryButton[data-vui],
+.secondaryButton[data-vui],
+.dangerButton[data-vui] {
+  min-width: 0;
+}
+
+.refreshButton[data-vui] {
+  padding: 0;
+}
+
 .returnButton {
   flex: 0 0 auto;
   padding: 3px 9px;
@@ -434,6 +447,13 @@
   color: var(--accent-warm-2);
 }
 
+.filterButton[data-vui] [data-slot="vui-button-label"],
+.filterButtonActive[data-vui] [data-slot="vui-button-label"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .bulkActionBar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -580,6 +600,13 @@
   border-color: color-mix(in srgb, var(--accent-warm) 30%, transparent);
   box-shadow: inset 3px 0 0 var(--accent-warm);
   background: var(--surface-active-neutral, rgba(35, 36, 33, 0.96));
+}
+
+.toolButton[data-vui] [data-slot="vui-button-content"],
+.toolButton[data-vui] [data-slot="vui-button-label"],
+.toolButtonActive[data-vui] [data-slot="vui-button-content"],
+.toolButtonActive[data-vui] [data-slot="vui-button-label"] {
+  display: contents;
 }
 
 .toolCopy {
@@ -1050,6 +1077,12 @@
   border-color: color-mix(in srgb, var(--state-error) 34%, transparent);
   background: color-mix(in srgb, var(--state-error) 10%, var(--surface-card));
   color: var(--state-error);
+}
+
+.segmentButton[data-vui],
+.segmentActive[data-vui],
+.segmentActiveDanger[data-vui] {
+  min-width: 0;
 }
 
 .policyHint {

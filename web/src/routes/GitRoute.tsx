@@ -16,6 +16,7 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
+import { VButton, VIconButton } from "../components/vui";
 import { GitDiffView } from "./GitDiffView";
 import {
   getGitAiDraftBlockReason,
@@ -416,11 +417,12 @@ export function GitRoute() {
   function renderCommitItem(commit: GitCommitSummary, sourceLabel = gitCommitSourceLabel) {
     const active = activeObject?.kind === "commit" && activeObject.ref === commit.sha;
     return (
-      <button
+      <VButton
         key={commit.sha}
         type="button"
+        variant="ghost"
         className={active ? `${styles.commitItem} ${styles.objectItemActive}` : styles.commitItem}
-        onClick={() =>
+        onPress={() =>
           selectGitObject({
             kind: "commit",
             ref: commit.sha,
@@ -438,7 +440,7 @@ export function GitRoute() {
         </div>
         <strong>{commit.subject}</strong>
         <p>{t("gitCommitBy")}: {commit.author}</p>
-      </button>
+      </VButton>
     );
   }
 
@@ -450,17 +452,16 @@ export function GitRoute() {
           <h1 className={styles.title}>{t("gitPageTitle")}</h1>
           <p className={styles.subtitle}>{t("gitPageSubtitle")}</p>
         </div>
-        <button type="button" className={styles.refreshButton} onClick={refresh}>
-          <RefreshCw size={16} />
+        <VButton type="button" variant="secondary" className={styles.refreshButton} icon={<RefreshCw size={16} />} onPress={refresh}>
           {t("gitRefresh")}
-        </button>
+        </VButton>
       </header>
 
       <div className={styles.summaryGrid}>
-        <button type="button" className={styles.summaryCard} onClick={selectCurrentBranch} disabled={!status?.branch}>
+        <VButton type="button" variant="ghost" className={styles.summaryCard} onPress={selectCurrentBranch} isDisabled={!status?.branch}>
           <span>{t("gitBranch")}</span>
           <strong>{status?.branch || status?.headRevShort || "-"}</strong>
-        </button>
+        </VButton>
         <section className={styles.summaryCard}>
           <span>{t("gitChangedFiles")}</span>
           <strong>{status?.counts.total ?? 0}</strong>
@@ -477,19 +478,20 @@ export function GitRoute() {
           <span>{t("gitLocalCommits")}</span>
           <strong>{localCommitCount}</strong>
         </section>
-        <button
+        <VButton
           type="button"
+          variant="ghost"
           className={styles.summaryCard}
-          onClick={() => {
+          onPress={() => {
             if (worktreeDetailTarget) {
               selectWorktree(worktreeDetailTarget);
             }
           }}
-          disabled={!worktreeDetailTarget}
+          isDisabled={!worktreeDetailTarget}
         >
           <span>{t("gitWorktreeBranches")}</span>
           <strong>{worktreeBranchCount} / {worktreeTotalCount}</strong>
-        </button>
+        </VButton>
       </div>
 
       {!statusQuery.isPending && status && !status.available ? (
@@ -500,13 +502,13 @@ export function GitRoute() {
         {noChangedFiles ? (
           <>
             <main className={styles.gitOverviewPanel}>
-              <button type="button" className={styles.cleanStateStrip} onClick={selectCurrentBranch}>
+              <VButton type="button" variant="ghost" className={styles.cleanStateStrip} onPress={selectCurrentBranch}>
                 <div>
                   <p className={styles.panelEyebrow}>{lang === "zh" ? "状态" : "Status"}</p>
                   <h2>{lang === "zh" ? "工作区干净" : "Clean worktree"}</h2>
                 </div>
                 <span>{status?.summary || (lang === "zh" ? "没有文件变更。" : "No changed files.")}</span>
-              </button>
+              </VButton>
               <div className={styles.gitSituationGrid}>
                 <section className={styles.gitSituationCard}>
                   <div className={styles.panelHeader}>
@@ -533,22 +535,23 @@ export function GitRoute() {
                   </div>
                   <div className={styles.worktreeList}>
                     {pendingWorktreePreview.map((item) => (
-                      <button
+                      <VButton
                         key={`${item.path}-${item.branch}`}
                         type="button"
+                        variant="ghost"
                         className={
                           activeObject?.kind === "worktree" && activeObject.path === item.path
                             ? `${styles.worktreeItem} ${styles.objectItemActive}`
                             : styles.worktreeItem
                         }
-                        onClick={() => selectWorktree(item)}
+                        onPress={() => selectWorktree(item)}
                       >
                         <div>
                           <strong>{worktreeDisplayName(item)}</strong>
                           <span>{displayGitPath(item.path)}</span>
                         </div>
                         <code>+{item.aheadMain} / -{item.behindMain}</code>
-                      </button>
+                      </VButton>
                     ))}
                     {!pendingWorktreePreview.length ? (
                       <p className={styles.emptyState}>{lang === "zh" ? "没有待合入 worktree 分支。" : "No worktree branches with pending commits."}</p>
@@ -608,23 +611,24 @@ export function GitRoute() {
               </div>
               <div className={styles.filterRow}>
                 {GIT_FILTERS.map((filter) => (
-                  <button
+                  <VButton
                     key={filter}
                     type="button"
+                    variant="secondary"
                     className={filter === activeFilter ? styles.filterButtonActive : styles.filterButton}
-                    onClick={() => setActiveFilter(filter)}
+                    onPress={() => setActiveFilter(filter)}
                   >
                     {t(GIT_FILTER_LABEL_KEYS[filter])}
-                  </button>
+                  </VButton>
                 ))}
               </div>
               <div className={styles.selectionRow}>
-                <button type="button" className={styles.selectionButton} onClick={selectVisible} disabled={!filteredFiles.length}>
+                <VButton type="button" variant="secondary" className={styles.selectionButton} onPress={selectVisible} isDisabled={!filteredFiles.length}>
                   {t("gitSelectVisible")}
-                </button>
-                <button type="button" className={styles.selectionButton} onClick={clearSelection} disabled={!selectedCount}>
+                </VButton>
+                <VButton type="button" variant="secondary" className={styles.selectionButton} onPress={clearSelection} isDisabled={!selectedCount}>
                   {t("gitClearSelection")}
-                </button>
+                </VButton>
               </div>
               <div className={styles.fileList}>
                 {filteredFiles.map((file) => {
@@ -641,24 +645,23 @@ export function GitRoute() {
                       key={`${file.status}-${file.path}`}
                       className={fileCardClassName}
                     >
-                      <button
+                      <VIconButton
                         type="button"
                         className={styles.fileCheckButton}
-                        aria-label={isSelected ? t("gitUnselectFile") : t("gitSelectFileForCommit")}
+                        label={isSelected ? t("gitUnselectFile") : t("gitSelectFileForCommit")}
                         aria-pressed={isSelected}
-                        onClick={() => toggleSelectedPath(file.path)}
-                      >
-                        {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
-                      </button>
+                        icon={isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
+                        onPress={() => toggleSelectedPath(file.path)}
+                      />
                       <span className={styles.fileStatus}>{file.status}</span>
-                      <button type="button" className={styles.fileCopyButton} onClick={() => selectFilePath(file.path)}>
+                      <VButton type="button" variant="ghost" className={styles.fileCopyButton} onPress={() => selectFilePath(file.path)}>
                         <strong>{gitFileName(file.path)}</strong>
                         <span className={styles.filePathText}>{displayGitPath(file.path)}</span>
                         <span className={styles.fileBadgeRow}>
                           {isActive ? <span className={styles.fileBadgeActive}>{t("gitPreviewing")}</span> : null}
                           {isSelected ? <span className={styles.fileBadgeSelected}>{t("gitSelectedForCommit")}</span> : null}
                         </span>
-                      </button>
+                      </VButton>
                     </article>
                   );
                 })}
@@ -774,15 +777,16 @@ export function GitRoute() {
             </label>
             <div className={styles.modelDefaultRow}>
               <span>{configuredModelId ? `${t("gitAiCurrentDefault")} ${configuredModelId}` : t("gitAiNoDefaultModel")}</span>
-              <button
+              <VButton
                 type="button"
+                variant="secondary"
                 className={styles.secondaryButton}
-                disabled={defaultModelSaveDisabled}
-                onClick={saveDefaultAiModel}
+                isDisabled={defaultModelSaveDisabled}
+                onPress={saveDefaultAiModel}
+                icon={<Save size={14} />}
               >
-                <Save size={14} />
                 {saveDefaultModelMutation.isPending ? t("gitAiSavingDefaultModel") : t("gitAiSaveDefaultModel")}
-              </button>
+              </VButton>
             </div>
             <label className={`${styles.messageField} ${styles.promptTemplateField}`}>
               <span>{t("gitAiPromptTemplate")}</span>
@@ -794,16 +798,17 @@ export function GitRoute() {
               />
             </label>
             <div className={`${styles.modelDefaultRow} ${styles.modelActionRow}`} title={t("gitAiPromptHint")}>
-              <button
+              <VButton
                 type="button"
+                variant="secondary"
                 className={styles.secondaryButton}
-                disabled={promptSaveDisabled}
-                onClick={saveAiPrompt}
+                isDisabled={promptSaveDisabled}
+                onPress={saveAiPrompt}
                 title={t("gitAiPromptHint")}
+                icon={<Save size={14} />}
               >
-                <Save size={14} />
                 {savePromptMutation.isPending ? t("gitAiPromptSaving") : t("gitAiPromptSave")}
-              </button>
+              </VButton>
             </div>
             <label className={styles.messageField}>
               <span>{t("gitCommitMessage")}</span>
@@ -815,26 +820,28 @@ export function GitRoute() {
               />
             </label>
             <div className={styles.commitActions} title={t("gitCommitHint")}>
-              <button
+              <VButton
                 type="button"
+                variant="secondary"
                 className={styles.secondaryButton}
-                onClick={generateMessage}
-                disabled={aiDisabled}
+                onPress={generateMessage}
+                isDisabled={aiDisabled}
                 title={aiDraftBlockReasonText || undefined}
+                icon={<Bot size={15} />}
               >
-                <Bot size={15} />
                 {generateMessageMutation.isPending ? t("gitAiGenerating") : t("gitAiGenerateMessage")}
-              </button>
-              <button
+              </VButton>
+              <VButton
                 type="button"
+                variant="primary"
                 className={styles.primaryButton}
-                onClick={commitSelected}
-                disabled={commitDisabled}
+                onPress={commitSelected}
+                isDisabled={commitDisabled}
                 title={commitBlockReasonText || undefined}
+                icon={<GitCommitHorizontal size={15} />}
               >
-                <GitCommitHorizontal size={15} />
                 {commitMutation.isPending ? t("gitCommitting") : t("gitCommitSelected")}
-              </button>
+              </VButton>
             </div>
             {commitNotice.text ? (
               <p className={commitNotice.tone === "error" ? styles.commitNoticeError : styles.commitNotice}>
