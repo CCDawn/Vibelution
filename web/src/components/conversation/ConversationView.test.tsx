@@ -259,6 +259,17 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).not.toContain("JSON.stringify(toolCall.arguments ?? {})");
   });
 
+  it("keeps active-turn projection and history expansion anchors outside the render hot path", () => {
+    expect(conversationViewSource).toContain("projectConversationTimelineMessages");
+    expect(conversationViewSource).toContain("const activeTimelineProjection = useMemo");
+    expect(conversationViewSource).toContain("activeTimelineProjection.messages");
+    expect(conversationViewSource).toContain("activeTimelineProjection.streamingMessages");
+    expect(conversationViewSource).toContain("activeTimelineProjection.rowIdentities");
+    expect(conversationViewSource).toContain("captureTimelineRowKeyAnchor");
+    expect(conversationViewSource).toContain("restoreTimelineRowKeyAnchor");
+    expect(conversationViewSource).not.toContain("buildConversationTimelineRowIdentities(activeTimelineMessages)");
+  });
+
   it("defaults to answer-only process display while keeping details expandable", () => {
     const html = renderConversation(
       [
@@ -705,18 +716,17 @@ describe("ConversationView edit resend affordance", () => {
   });
 
   it("keeps active streaming scroll signals on a small streaming-only tail", () => {
-    expect(conversationViewSource).toContain("const streamingTimelineMessages = useMemo(");
-    expect(conversationViewSource).toContain("activeTimelineMessages.filter((message) => message.streaming)");
-    expect(conversationViewSource).toContain("isSessionLiveOverlayMessage(message)");
-    expect(conversationViewSource).toContain("mergeLiveOverlayIntoActiveTurnMessage(message, mergedActiveTurnMessage)");
+    expect(conversationViewSource).toContain("projectConversationTimelineMessages({ timelineMessages, activeTurnMessage })");
+    expect(conversationViewSource).toContain("const streamingTimelineMessages = activeTimelineProjection.streamingMessages");
     expect(conversationViewSource).toContain("buildStreamingTimelineScrollSignal(streamingTimelineMessages)");
+    expect(conversationViewSource).not.toContain("activeTimelineMessages.filter((message) => message.streaming)");
     expect(conversationViewSource).not.toContain("activeTimelineSignalMessages");
   });
 
   it("captures a scroll anchor before revealing earlier messages", () => {
     expect(conversationViewSource).toContain("function showEarlierMessages()");
-    expect(conversationViewSource).toContain("captureTimelineScrollHeightAnchor(timelineRef.current)");
-    expect(conversationViewSource).toContain("restoreTimelineScrollHeightAnchor(timelineRef.current, anchor)");
+    expect(conversationViewSource).toContain("captureTimelineRowKeyAnchor(timelineRef.current)");
+    expect(conversationViewSource).toContain("restoreTimelineRowKeyAnchor(timelineRef.current, anchor)");
     expect(conversationViewSource).toContain("onClick={showEarlierMessages}");
     expect(conversationViewSource).not.toContain("onClick={() => setAllMessagesVisible(true)}");
   });

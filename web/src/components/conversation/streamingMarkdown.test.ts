@@ -70,4 +70,26 @@ describe("parseStreamingMarkdownBlocks", () => {
     expect(projection.stableText).not.toContain("```ts");
     expect(projection.blocks).toEqual(parseStreamingMarkdownBlocks(content));
   });
+
+  it("keeps a recent table in the live tail so streamed rows do not reshape stable blocks", () => {
+    const intro = "稳定上下文 ".repeat(150);
+    const rows = Array.from({ length: 24 }, (_, index) => `| 指标 ${index} | ${index * 3} |`);
+    const content = [
+      intro,
+      "",
+      "| 指标 | 数值 |",
+      "| --- | --- |",
+      ...rows,
+      "",
+      "表格之后的流式总结 ".repeat(220),
+    ].join("\n");
+
+    expect(content.length).toBeGreaterThan(STREAMING_MARKDOWN_LIVE_TAIL_CHARS);
+    const projection = projectStreamingMarkdownBlocks(content);
+
+    expect(projection.stableText).not.toContain("| 指标 | 数值 |");
+    expect(projection.liveText).toContain("| 指标 | 数值 |");
+    expect(projection.liveBlocks[0]).toMatchObject({ type: "table" });
+    expect(projection.blocks).toEqual(parseStreamingMarkdownBlocks(content));
+  });
 });

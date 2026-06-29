@@ -203,6 +203,10 @@ function splitStableMarkdownText(content: string): { stableText: string; liveTex
   if (hasOpenCodeFence(stableCandidate)) {
     splitIndex = lastCodeFenceLineStart(stableCandidate);
   }
+  const tableHoldbackStart = recentMarkdownTableHoldbackStart(content, splitIndex);
+  if (tableHoldbackStart !== null) {
+    splitIndex = tableHoldbackStart;
+  }
   if (splitIndex <= 0) {
     return { stableText: "", liveText: content };
   }
@@ -238,6 +242,39 @@ function hasOpenCodeFence(content: string) {
 function lastCodeFenceLineStart(content: string) {
   const starts = codeFenceLineStarts(content);
   return starts[starts.length - 1] ?? 0;
+}
+
+function recentMarkdownTableHoldbackStart(content: string, splitIndex: number) {
+  const lines = content.split("\n");
+  const lineStarts: number[] = [];
+  let position = 0;
+  for (let index = 0; index < lines.length; index += 1) {
+    lineStarts[index] = position;
+    position += lines[index].length + (index < lines.length - 1 ? 1 : 0);
+  }
+
+  let holdbackStart: number | null = null;
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!isMarkdownTableHeader(lines, index)) {
+      continue;
+    }
+    const tableStart = lineStarts[index];
+    let afterTableIndex = index + 2;
+    while (afterTableIndex < lines.length && isStreamingTableRow(lines[afterTableIndex])) {
+      afterTableIndex += 1;
+    }
+    const lastTableLineIndex = afterTableIndex - 1;
+    const tableEnd = lineStarts[lastTableLineIndex] + lines[lastTableLineIndex].length;
+    if (
+      tableStart < splitIndex
+      && tableEnd <= splitIndex
+      && splitIndex - tableStart <= STREAMING_MARKDOWN_LIVE_TAIL_CHARS * 3
+    ) {
+      holdbackStart = tableStart;
+    }
+    index = afterTableIndex - 1;
+  }
+  return holdbackStart;
 }
 
 function isMarkdownTableHeader(lines: string[], index: number) {

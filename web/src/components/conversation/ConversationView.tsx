@@ -33,13 +33,10 @@ import { fetchJson } from "../../api/client";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
 import { COMPOSER_SESSION_REFERENCE_MIME } from "./conversationConstants";
-import { mergeConversationFeedbackEvents } from "./conversationFeedbackEvents";
 import {
-  answerProjectionContent,
   isInternalStreamingStatusContent,
   messageHasInternalStreamingStatusContent,
 } from "./conversationInternalStatus";
-import { projectConversationProcessMessages } from "./conversationProcessProjection";
 import {
   buildConversationOperationGroups,
   buildConversationReActOperationGroups,
@@ -52,10 +49,10 @@ import {
   type ConversationTimelineItem,
 } from "./conversationTimeline";
 import {
-  buildConversationTimelineRowIdentities,
   conversationTimelineItemRowKey,
   type ConversationTimelineRowIdentity,
 } from "./conversationTimelineRows";
+import { projectConversationTimelineMessages } from "./useConversationTimelineProjection";
 import {
   hasResponseBlock,
   hasThoughtBlock,
@@ -79,9 +76,9 @@ import {
   type StreamingRevealState,
 } from "./streamingRevealState";
 import {
-  captureTimelineScrollHeightAnchor,
-  restoreTimelineScrollHeightAnchor,
-  type TimelineScrollHeightAnchor,
+  captureTimelineRowKeyAnchor,
+  restoreTimelineRowKeyAnchor,
+  type TimelineScrollRowKeyAnchor,
 } from "./timelineScrollAnchor";
 import styles from "./ConversationView.module.css";
 
@@ -649,15 +646,6 @@ function conversationMessageTurnId(message: ConversationMessage) {
   return metadataText(message.metadata, "turnId").replace(/^live:/, "");
 }
 
-function isSessionLiveOverlayMessage(message: ConversationMessage) {
-  return message.role === "assistant" && metadataText(message.metadata, "kind") === "session_live_overlay";
-}
-
-function isSameConversationTurn(left: ConversationMessage, right: ConversationMessage) {
-  const leftTurnId = conversationMessageTurnId(left);
-  return Boolean(leftTurnId) && leftTurnId === conversationMessageTurnId(right);
-}
-
 function isAssistantProcessThreadCandidate(message: ConversationMessage) {
   if (
     message.role !== "assistant"
@@ -693,95 +681,6 @@ function conversationVisualThreadKey(message: ConversationMessage | undefined) {
 function shouldCompactConversationTurnHeader(previous: ConversationMessage | undefined, message: ConversationMessage) {
   const threadKey = conversationVisualThreadKey(message);
   return Boolean(threadKey && threadKey === conversationVisualThreadKey(previous));
-}
-
-function mergeUniqueJsonItems<T>(...itemGroups: Array<T[] | undefined>) {
-  const merged: T[] = [];
-  const seen = new Set<string>();
-  for (const group of itemGroups) {
-    for (const item of group ?? []) {
-      const key = JSON.stringify(item);
-      if (seen.has(key)) {
-        continue;
-      }
-      seen.add(key);
-      merged.push(item);
-    }
-  }
-  return merged.length > 0 ? merged : undefined;
-}
-
-function normalizeMergedText(value: string) {
-  return value.replace(/\s+/g, " ").trim();
-}
-
-function mergeConversationText(...values: Array<string | undefined>) {
-  const merged: string[] = [];
-  const mergedSignals: string[] = [];
-  for (const value of values) {
-    const text = String(value ?? "").trim();
-    if (!text) {
-      continue;
-    }
-    const signal = normalizeMergedText(text);
-    if (mergedSignals.some((existing) => existing === signal || existing.includes(signal))) {
-      continue;
-    }
-    const containedIndex = mergedSignals.findIndex((existing) => signal.includes(existing));
-    if (containedIndex >= 0) {
-      merged[containedIndex] = text;
-      mergedSignals[containedIndex] = signal;
-      continue;
-    }
-    merged.push(text);
-    mergedSignals.push(signal);
-  }
-  return merged.join("\n\n");
-}
-
-function mergeLiveOverlayIntoActiveTurnMessage(
-  liveOverlayMessage: ConversationMessage,
-  activeTurnMessage: ConversationMessage,
-): ConversationMessage {
-  const feedbackEvents = mergeConversationFeedbackEvents(
-    liveOverlayMessage.feedbackEvents,
-    activeTurnMessage.feedbackEvents,
-  );
-  return {
-    ...liveOverlayMessage,
-    ...activeTurnMessage,
-    content: mergeConversationText(answerProjectionContent(liveOverlayMessage), activeTurnMessage.content),
-    thought: mergeConversationText(liveOverlayMessage.thought, activeTurnMessage.thought) || undefined,
-    streamStage: activeTurnMessage.streamStage || liveOverlayMessage.streamStage,
-    streaming: activeTurnMessage.streaming ?? liveOverlayMessage.streaming,
-    mentalSnapshot: activeTurnMessage.mentalSnapshot ?? liveOverlayMessage.mentalSnapshot,
-    feedbackEvents: feedbackEvents.length > 0 ? feedbackEvents : undefined,
-    timelineItems: mergeUniqueJsonItems(liveOverlayMessage.timelineItems, activeTurnMessage.timelineItems),
-    toolCalls: mergeUniqueJsonItems(liveOverlayMessage.toolCalls, activeTurnMessage.toolCalls),
-    attachments: mergeUniqueJsonItems(liveOverlayMessage.attachments, activeTurnMessage.attachments),
-    references: mergeUniqueJsonItems(liveOverlayMessage.references, activeTurnMessage.references),
-    metadata: {
-      ...(liveOverlayMessage.metadata ?? {}),
-      ...(activeTurnMessage.metadata ?? {}),
-    },
-  };
-}
-
-function hasCommittedAssistantAnswerForActiveTurn(
-  messages: ConversationMessage[],
-  activeTurnMessage: ConversationMessage,
-) {
-  return messages.some((message) => {
-    if (
-      message.role !== "assistant"
-      || isSessionLiveOverlayMessage(message)
-      || metadataText(message.metadata, "kind") === "session_active_turn_layer"
-      || !isSameConversationTurn(message, activeTurnMessage)
-    ) {
-      return false;
-    }
-    return Boolean(String(answerProjectionContent(message) ?? "").trim());
-  });
 }
 
 type PreviewImageState = {
@@ -976,7 +875,7 @@ export function ConversationView({
   void onInterruptGuidance;
   const { lang, t, statusLabel } = useAppI18n();
   const timelineRef = useRef<HTMLDivElement | null>(null);
-  const historyScrollAnchorRef = useRef<TimelineScrollHeightAnchor | null>(null);
+  const historyScrollAnchorRef = useRef<TimelineScrollRowKeyAnchor | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const initializedSessionRef = useRef("");
@@ -1149,31 +1048,13 @@ export function ConversationView({
     () => displayMessages.slice(displayMessages.length - visibleMessageCount),
     [displayMessages, visibleMessageCount],
   );
-  const activeTimelineMessages = useMemo(() => {
-    if (!activeTurnMessage) {
-      return projectConversationProcessMessages(timelineMessages);
-    }
-    if (hasCommittedAssistantAnswerForActiveTurn(timelineMessages, activeTurnMessage)) {
-      return projectConversationProcessMessages(timelineMessages);
-    }
-    let mergedActiveTurnMessage = activeTurnMessage;
-    const dedupedTimelineMessages = timelineMessages.filter((message) => {
-      if (isSessionLiveOverlayMessage(message) && isSameConversationTurn(message, activeTurnMessage)) {
-        mergedActiveTurnMessage = mergeLiveOverlayIntoActiveTurnMessage(message, mergedActiveTurnMessage);
-        return false;
-      }
-      return true;
-    });
-    return projectConversationProcessMessages([...dedupedTimelineMessages, mergedActiveTurnMessage]);
-  }, [activeTurnMessage, timelineMessages]);
-  const streamingTimelineMessages = useMemo(
-    () => activeTimelineMessages.filter((message) => message.streaming),
-    [activeTimelineMessages],
+  const activeTimelineProjection = useMemo(
+    () => projectConversationTimelineMessages({ timelineMessages, activeTurnMessage }),
+    [activeTurnMessage, timelineMessages],
   );
-  const activeTimelineRowIdentities = useMemo(
-    () => buildConversationTimelineRowIdentities(activeTimelineMessages),
-    [activeTimelineMessages],
-  );
+  const activeTimelineMessages = activeTimelineProjection.messages;
+  const streamingTimelineMessages = activeTimelineProjection.streamingMessages;
+  const activeTimelineRowIdentities = activeTimelineProjection.rowIdentities;
   const imageArtifactUrlsBeforeMessage = useMemo(() => {
     const urlsByMessageId = new Map<string, Set<string>>();
     const seenImageUrls = new Set<string>();
@@ -1284,7 +1165,7 @@ export function ConversationView({
       return;
     }
     historyScrollAnchorRef.current = null;
-    if (restoreTimelineScrollHeightAnchor(timelineRef.current, anchor)) {
+    if (restoreTimelineRowKeyAnchor(timelineRef.current, anchor)) {
       atBottomRef.current = false;
       setIsAtBottom(false);
     }
@@ -1523,7 +1404,7 @@ export function ConversationView({
   }
 
   function showEarlierMessages() {
-    historyScrollAnchorRef.current = captureTimelineScrollHeightAnchor(timelineRef.current);
+    historyScrollAnchorRef.current = captureTimelineRowKeyAnchor(timelineRef.current);
     atBottomRef.current = false;
     setIsAtBottom(false);
     setAllMessagesVisible(true);
