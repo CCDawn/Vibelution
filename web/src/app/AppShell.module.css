@@ -13,6 +13,7 @@
   --shell-panel: color-mix(in srgb, var(--bg-canvas) 98%, transparent);
   --shell-panel-soft: color-mix(in srgb, var(--fg-secondary) 98%, transparent);
   --shell-card: color-mix(in srgb, var(--bg-canvas) 82%, transparent);
+  --shell-window-control-inset: 0px;
   --shell-shadow: color-mix(in srgb, var(--bg-canvas) 28%, transparent);
   --shell-star-color: color-mix(in srgb, var(--accent-warm) 74%, transparent);
   --shell-star-muted: color-mix(in srgb, var(--accent-warm) 34%, transparent);
@@ -363,8 +364,13 @@
   align-items: center;
   gap: 12px;
   min-height: var(--shell-topbar-height);
-  padding: 9px 16px;
+  padding: 9px calc(16px + var(--shell-window-control-inset)) 9px 16px;
   pointer-events: none;
+  -webkit-app-region: drag;
+}
+
+.topBar > * {
+  -webkit-app-region: no-drag;
 }
 
 .topBar::before {
@@ -381,6 +387,10 @@
 .shell[data-theme="light"] .topBar::before {
   background: color-mix(in srgb, var(--surface-panel) 86%, transparent);
   box-shadow: var(--vui-shadow-hairline);
+}
+
+.shell[data-desktop-shell="electron"] .topBar {
+  --shell-window-control-inset: 136px;
 }
 
 .shell[data-topbar-mode="hidden"] {
@@ -510,7 +520,7 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--shell-surface-muted) 78%, transparent);
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: 0.72rem;
   font-weight: 600;
   line-height: 1.2;
   white-space: nowrap;
@@ -576,7 +586,7 @@
 .activeWorkKicker {
   flex: 0 0 auto;
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: 0.72rem;
 }
 
 .activeWorkChip strong {
@@ -593,7 +603,7 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--shell-card) 74%, transparent);
   color: var(--fg-primary);
-  font-size: 0.7rem;
+  font-size: 0.72rem;
 }
 
 .activeWorkMore {
@@ -716,7 +726,7 @@
   overflow: hidden;
   color: var(--fg-tertiary);
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: 0.72rem;
   text-overflow: ellipsis;
 }
 
@@ -1080,7 +1090,7 @@
 
 .utilityFileButton small {
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: 0.72rem;
 }
 
 .utilityFileState {
@@ -1180,7 +1190,7 @@
   border-radius: 8px;
   background: color-mix(in srgb, var(--shell-card) 86%, transparent);
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: 0.72rem;
 }
 
 .gitSignalGrid strong {
@@ -1267,7 +1277,7 @@
 
 .gitSectionHeader span {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: 0.72rem;
   white-space: nowrap;
 }
 
@@ -1310,7 +1320,7 @@
 
 .gitCommitItem code {
   color: var(--accent-warm-2);
-  font-size: 0.7rem;
+  font-size: 0.72rem;
 }
 
 .gitCommitItem span,
@@ -1328,14 +1338,14 @@
 
 .gitWorktreeItem span {
   color: var(--accent-warm-2);
-  font-size: 0.7rem;
+  font-size: 0.72rem;
   white-space: nowrap;
 }
 
 .gitWorktreeItem small {
   grid-column: 1 / -1;
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: 0.72rem;
 }
 
 .gitQuietState {
@@ -1443,7 +1453,7 @@
   border-radius: 999px;
   color: var(--fg-tertiary);
   background: color-mix(in srgb, var(--shell-card) 74%, transparent);
-  font-size: 0.68rem;
+  font-size: 0.72rem;
 }
 
 .statusDot {
