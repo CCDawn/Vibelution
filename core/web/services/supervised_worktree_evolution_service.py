@@ -679,7 +679,10 @@ def _normalize_start_payload(
             text_for(lang, zh="请输入监督 bundle 名称。", en="Enter a supervised bundle name.")
         )
 
-    bundle = load_supervised_bundle(bundle_name, project_root=storage_project_root)
+    try:
+        bundle = load_supervised_bundle(bundle_name, project_root=storage_project_root)
+    except (FileNotFoundError, ValueError) as exc:
+        raise SupervisedWorktreeRunValidationError(str(exc)) from exc
     case_count = len(list(bundle.get("cases") or []))
     estimate = _estimate_llm_cost(case_count)
     if execution_mode == "real" and not bool(payload.get("confirmRealLlmCost")):
