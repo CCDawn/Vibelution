@@ -379,7 +379,9 @@
 }
 
 .shell[data-theme="light"] .topBar::before {
-  background: color-mix(in srgb, var(--surface-panel) 86%, transparent);
+  background:
+    var(--vui-gradient-route-soft),
+    color-mix(in srgb, var(--surface-panel) 68%, transparent);
   box-shadow: var(--vui-shadow-hairline);
 }
 
