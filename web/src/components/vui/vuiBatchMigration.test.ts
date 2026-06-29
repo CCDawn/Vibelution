@@ -127,6 +127,19 @@ const routeStyleTargets = [
     path: "routes/EvolutionRoute.module.css",
     forbidden: ["border-left: 3px"],
   },
+  {
+    path: "routes/AgentsRoute.module.css",
+    forbidden: ["background: color-mix(in srgb, var(--accent-cool) 90%, var(--fg-primary))"],
+  },
+  {
+    path: "routes/TeamsRoute.module.css",
+    forbidden: [
+      "background: color-mix(in srgb, var(--fg-primary) 78%, transparent)",
+      "border-left-width: 4px",
+      "color-mix(in srgb, var(--surface-panel-strong) 96%, var(--fg-primary) 4%)",
+      "color-mix(in srgb, var(--surface-card) 96%, var(--fg-primary) 4%)",
+    ],
+  },
 ] as const;
 
 function readTargetSource(path: string): string {

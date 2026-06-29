@@ -514,7 +514,7 @@
 .returnBannerButton:hover,
 .returnBannerButton:focus-visible {
   border-color: color-mix(in srgb, var(--accent-cool) 86%, var(--border-soft));
-  background: color-mix(in srgb, var(--accent-cool) 90%, var(--fg-primary));
+  background: color-mix(in srgb, var(--accent-cool) 86%, var(--surface-panel));
   outline: none;
   box-shadow: var(--focus-ring);
 }
