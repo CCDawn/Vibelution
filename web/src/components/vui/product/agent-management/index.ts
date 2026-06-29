@@ -1,4 +1,8 @@
 export {
+  AgentBulkActionBar,
+  type AgentBulkActionBarProps,
+} from "./AgentBulkActionBar";
+export {
   AgentPageHeader,
   type AgentPageHeaderAction,
   type AgentPageHeaderProps,
