@@ -2579,7 +2579,7 @@
   min-width: 0;
 }
 
-.promptConfigRow button {
+.promptConfigRow [data-vui="button"] {
   white-space: nowrap;
 }
 
@@ -2590,7 +2590,7 @@
   min-width: 0;
 }
 
-.configDeepLinkRow button {
+.configDeepLinkRow [data-vui="button"] {
   white-space: nowrap;
 }
 
