@@ -5,6 +5,8 @@ type VibelutionHeroProviderProps = {
 };
 
 export function VibelutionHeroProvider({ children }: VibelutionHeroProviderProps) {
+  // HeroUI 3.2.1 does not expose a root provider. Keep this renderer boundary
+  // explicit so app code does not learn package-level assumptions.
   return (
     <div
       className="vui-heroui-provider"
