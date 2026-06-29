@@ -64,6 +64,7 @@ import {
   TeamKnowledgeBase,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
+import { VButton } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import styles from "./MemoryRoute.module.css";
@@ -3992,21 +3993,21 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                     onChange={() => toggleMemorySelection(section.id, item.id)}
                   />
                 </label>
-                <button
+                <VButton
                   type="button"
                   className={`${styles.itemContentButton} ${styles.itemContentButtonDense}`}
                   onClick={() => selectMemoryPair(section.id, item.id)}
                   aria-pressed={active}
                 >
                   {denseItemBody}
-                </button>
+                </VButton>
               </article>
             );
           }
 
           if (compact) {
             return (
-              <button
+              <VButton
                 key={itemKey}
                 type="button"
                 className={
@@ -4018,12 +4019,12 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 aria-pressed={active}
               >
                 {compactItemBody}
-              </button>
+              </VButton>
             );
           }
 
           return (
-            <button
+            <VButton
               key={itemKey}
               type="button"
               className={active ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
@@ -4031,7 +4032,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               aria-pressed={active}
             >
               {itemBody}
-            </button>
+            </VButton>
           );
         })}
       </div>
@@ -4068,22 +4069,22 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             <h2>{copy.projectMemoryQueue}</h2>
           </div>
           <div className={styles.projectMemoryQueueControls} aria-label={copy.status}>
-            <button
+            <VButton
               type="button"
               className={isPendingOnly ? styles.filterButtonActive : styles.filterButton}
               aria-pressed={isPendingOnly}
               onClick={() => setMemoryProposalStatusFilter("pending")}
             >
               {copy.projectMemoryQueuePendingOnly}
-            </button>
-            <button
+            </VButton>
+            <VButton
               type="button"
               className={!isPendingOnly ? styles.filterButtonActive : styles.filterButton}
               aria-pressed={!isPendingOnly}
               onClick={() => setMemoryProposalStatusFilter("")}
             >
               {copy.projectMemoryQueueAll}
-            </button>
+            </VButton>
           </div>
         </div>
         <div className={styles.projectMemoryQueueStats} title={copy.projectMemoryQueueHint}>
@@ -4158,46 +4159,46 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 <div className={styles.projectMemoryProposalActions}>
                   {isPendingProposal ? (
                     <>
-                      <button
+                      <VButton
                         type="button"
                         className={styles.detailActionButton}
                         title={copy.projectMemoryQueueApply}
-                        disabled={isResolving}
+                        isDisabled={isResolving}
                         onClick={() => handleProjectMemoryProposalResolve(proposal, "applied")}
                       >
                         <CheckCircle2 size={14} />
                         <span>{copy.projectMemoryQueueApply}</span>
-                      </button>
-                      <button
+                      </VButton>
+                      <VButton
                         type="button"
                         className={styles.detailActionButton}
                         title={copy.projectMemoryQueueReject}
-                        disabled={isResolving}
+                        isDisabled={isResolving}
                         onClick={() => handleProjectMemoryProposalResolve(proposal, "rejected")}
                       >
                         <XCircle size={14} />
                         <span>{copy.projectMemoryQueueReject}</span>
-                      </button>
-                      <button
+                      </VButton>
+                      <VButton
                         type="button"
                         className={styles.detailActionButton}
                         title={copy.projectMemoryQueueConflict}
-                        disabled={isResolving}
+                        isDisabled={isResolving}
                         onClick={() => handleProjectMemoryProposalResolve(proposal, "conflict")}
                       >
                         <TriangleAlert size={14} />
                         <span>{copy.projectMemoryQueueConflict}</span>
-                      </button>
-                      <button
+                      </VButton>
+                      <VButton
                         type="button"
                         className={styles.detailActionButton}
                         title={copy.projectMemoryQueueSupersede}
-                        disabled={isResolving}
+                        isDisabled={isResolving}
                         onClick={() => handleProjectMemoryProposalResolve(proposal, "superseded")}
                       >
                         <Square size={14} />
                         <span>{copy.projectMemoryQueueSupersede}</span>
-                      </button>
+                      </VButton>
                     </>
                   ) : (
                     <span className={styles.projectMemoryProposalResolved}>
@@ -4305,7 +4306,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       </div>
       <div className={styles.matrixGrid}>
         {matrixCards.map((card) => (
-          <button
+          <VButton
             key={card.id}
             type="button"
             className={
@@ -4330,7 +4331,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 <dd>{card.promptCount}</dd>
               </div>
             </dl>
-          </button>
+          </VButton>
         ))}
       </div>
     </section>
@@ -4353,10 +4354,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             <p className={styles.panelEyebrow}>{copy.management}</p>
             <h2>{editDraft.mode === "create" ? copy.addMemory : copy.editMemory}</h2>
           </div>
-          <button type="button" className={styles.iconButton} onClick={cancelDraft} disabled={mutationBusy}>
+          <VButton type="button" className={styles.iconButton} onClick={cancelDraft} isDisabled={mutationBusy}>
             <XCircle size={16} />
             <span>{copy.cancelEdit}</span>
-          </button>
+          </VButton>
         </div>
         <label className={styles.fieldStack}>
           <span>{copy.titleField}</span>
@@ -4383,14 +4384,14 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           />
         </label>
         <div className={styles.managementActions}>
-          <button type="button" className={styles.primaryActionButton} onClick={saveDraft} disabled={mutationBusy}>
+          <VButton type="button" className={styles.primaryActionButton} onClick={saveDraft} isDisabled={mutationBusy}>
             <CheckCircle2 size={15} />
             <span>{copy.saveMemory}</span>
-          </button>
-          <button type="button" className={styles.detailActionButton} onClick={cancelDraft} disabled={mutationBusy}>
+          </VButton>
+          <VButton type="button" className={styles.detailActionButton} onClick={cancelDraft} isDisabled={mutationBusy}>
             <XCircle size={15} />
             <span>{copy.cancelEdit}</span>
-          </button>
+          </VButton>
         </div>
         <section className={styles.editPreviewPanel} aria-label={copy.editPreview}>
           <div className={styles.panelHeader}>
@@ -4455,30 +4456,30 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           <p>{resolvedActiveItem.summary || resolvedActiveItem.content || copy.noContent}</p>
         </div>
         <div className={styles.managementActions}>
-          <button
+          <VButton
             type="button"
             className={styles.detailActionButton}
             onClick={startEdit}
-            disabled={!resolvedActiveItem.managedState?.editable || mutationBusy}
+            isDisabled={!resolvedActiveItem.managedState?.editable || mutationBusy}
           >
             <Pencil size={15} />
             <span>{copy.editMemory}</span>
-          </button>
+          </VButton>
           {resolvedActiveItem.managedState?.restorable ? (
-            <button type="button" className={styles.detailActionButton} onClick={restoreActiveItem} disabled={mutationBusy}>
+            <VButton type="button" className={styles.detailActionButton} onClick={restoreActiveItem} isDisabled={mutationBusy}>
               <Undo2 size={15} />
               <span>{copy.restoreMemory}</span>
-            </button>
+            </VButton>
           ) : null}
-          <button
+          <VButton
             type="button"
             className={styles.detailActionButton}
             onClick={disableOrDeleteActiveItem}
-            disabled={!resolvedActiveItem.managedState?.deletable || mutationBusy}
+            isDisabled={!resolvedActiveItem.managedState?.deletable || mutationBusy}
           >
             <Trash2 size={15} />
             <span>{resolvedActiveItem.managedState?.userManaged ? copy.deleteMemory : copy.disableMemory}</span>
-          </button>
+          </VButton>
         </div>
         {mutationFeedback.tone !== "idle" ? (
           <p className={styles.copyNotice} data-tone={mutationFeedback.tone}>
@@ -4520,28 +4521,28 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           ) : null}
 
           <div className={styles.detailActions}>
-            <button type="button" className={styles.detailActionButton} onClick={handleCopySourceSummary}>
+            <VButton type="button" className={styles.detailActionButton} onClick={handleCopySourceSummary}>
               <CopyIcon size={14} />
               <span>{copy.copySourceSummary}</span>
-            </button>
-            <button type="button" className={styles.detailActionButton} onClick={handleCopySourcePath}>
+            </VButton>
+            <VButton type="button" className={styles.detailActionButton} onClick={handleCopySourcePath}>
               <FileText size={14} />
               <span>{copy.copySourcePath}</span>
-            </button>
-            <button
+            </VButton>
+            <VButton
               type="button"
               className={styles.detailActionButton}
               onClick={handleCopyRawContent}
-              disabled={!canCopyRawContent}
+              isDisabled={!canCopyRawContent}
               title={!canCopyRawContent ? copy.noContent : undefined}
             >
               <FileText size={14} />
               <span>{copy.copyRawContentAction}</span>
-            </button>
-            <button type="button" className={styles.detailActionButton} onClick={handleCopyCurrentLink}>
+            </VButton>
+            <VButton type="button" className={styles.detailActionButton} onClick={handleCopyCurrentLink}>
               <Link2 size={14} />
               <span>{copy.copyCurrentLink}</span>
-            </button>
+            </VButton>
           </div>
 
           {copyFeedback.tone !== "idle" ? (
@@ -4752,7 +4753,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
         <div className={styles.filterGroup} aria-label={copy.filters}>
           {filterOptions.map((option) => (
-            <button
+            <VButton
               key={option.id}
               type="button"
               className={option.id === activeFilter ? `${styles.filterButton} ${styles.filterButtonActive}` : styles.filterButton}
@@ -4761,11 +4762,11 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             >
               <span>{option.label}</span>
               <strong>{option.count}</strong>
-            </button>
+            </VButton>
           ))}
         </div>
 
-        <button
+        <VButton
           type="button"
           className={!activeSectionId ? `${styles.sourceButton} ${styles.sourceButtonActive}` : styles.sourceButton}
           onClick={() => {
@@ -4783,14 +4784,14 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               {selectedSectionPromptCount ? ` / ${selectedSectionPromptCount}` : ""}
             </span>
           </span>
-        </button>
+        </VButton>
 
         <nav className={styles.sourceList} aria-label={copy.sections}>
           {sections.map((section) => {
             const active = section.id === activeSectionId;
             const metrics = sourceSectionMetrics.get(section.id);
             return (
-              <button
+              <VButton
                 key={section.id}
                 type="button"
                 className={active ? `${styles.sourceButton} ${styles.sourceButtonActive}` : styles.sourceButton}
@@ -4811,7 +4812,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                   {metrics?.itemCount ?? 0}
                   {metrics?.promptCount ? ` / ${metrics.promptCount}` : ""}
                 </span>
-              </button>
+              </VButton>
             );
           })}
         </nav>
@@ -4862,7 +4863,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             </div>
             <div className={styles.filterGroup}>
               {manageFilterOptions.map((option) => (
-                <button
+                <VButton
                   key={option.id}
                   type="button"
                   className={option.id === activeManageFilter ? `${styles.filterButton} ${styles.filterButtonActive}` : styles.filterButton}
@@ -4874,12 +4875,12 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 >
                   <span>{option.label}</span>
                   <strong>{option.count}</strong>
-                </button>
+                </VButton>
               ))}
             </div>
           </section>
           <section className={styles.manageSourceFilters} aria-label={copy.sourceFilters}>
-            <button
+            <VButton
               type="button"
               className={!activeSectionId ? `${styles.sourceChip} ${styles.sourceChipActive}` : styles.sourceChip}
               onClick={() => {
@@ -4890,13 +4891,13 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             >
               <span>{copy.allSections}</span>
               <strong>{manageablePairs.length}</strong>
-            </button>
+            </VButton>
             {sections
               .filter((section) => (manageableSectionMetrics.get(section.id) ?? 0) > 0)
               .map((section) => {
                 const active = section.id === activeSectionId;
                 return (
-                  <button
+                  <VButton
                     key={section.id}
                     type="button"
                     className={active ? `${styles.sourceChip} ${styles.sourceChipActive}` : styles.sourceChip}
@@ -4909,40 +4910,40 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                   >
                     <span>{section.title}</span>
                     <strong>{manageableSectionMetrics.get(section.id) ?? 0}</strong>
-                  </button>
+                  </VButton>
                 );
               })}
           </section>
           <section className={styles.bulkActionBar}>
-            <button type="button" className={styles.detailActionButton} onClick={toggleVisibleMemorySelection} disabled={mutationBusy}>
+            <VButton type="button" className={styles.detailActionButton} onClick={toggleVisibleMemorySelection} isDisabled={mutationBusy}>
               {allVisibleSelected ? <SquareCheckBig size={14} /> : <Square size={14} />}
               <span>{allVisibleSelected ? copy.clearSelection : copy.selectAllVisible}</span>
-            </button>
+            </VButton>
             <span className={styles.countPill}>
               {copy.selectedCount}: {selectedMemoryPairs.length}
             </span>
-            <button
+            <VButton
               type="button"
               className={styles.detailActionButton}
               onClick={() => {
                 void runBulkMemoryAction("disable");
               }}
-              disabled={mutationBusy || selectedDisablePairs.length === 0}
+              isDisabled={mutationBusy || selectedDisablePairs.length === 0}
             >
               <Trash2 size={14} />
               <span>{bulkActionPending === "disable" ? copy.loading : copy.bulkDisable}</span>
-            </button>
-            <button
+            </VButton>
+            <VButton
               type="button"
               className={styles.detailActionButton}
               onClick={() => {
                 void runBulkMemoryAction("restore");
               }}
-              disabled={mutationBusy || selectedRestorePairs.length === 0}
+              isDisabled={mutationBusy || selectedRestorePairs.length === 0}
             >
               <Undo2 size={14} />
               <span>{bulkActionPending === "restore" ? copy.loading : copy.bulkRestore}</span>
-            </button>
+            </VButton>
           </section>
           {renderMemoryList(flatVisibleItems, copy.noMatches, false, true)}
         </main>
@@ -4953,10 +4954,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               <p className={styles.panelEyebrow}>{copy.management}</p>
               <h2>{editDraft ? (editDraft.mode === "create" ? copy.addMemory : copy.editMemory) : copy.manageConfigPanel}</h2>
             </div>
-            <button type="button" className={styles.primaryActionButton} onClick={startCreate} disabled={mutationBusy}>
+            <VButton type="button" className={styles.primaryActionButton} onClick={startCreate} isDisabled={mutationBusy}>
               <Pencil size={15} />
               <span>{copy.addMemory}</span>
-            </button>
+            </VButton>
           </div>
           {renderManagementEditor()}
           {renderSelectedMemoryConfig()}
@@ -5035,7 +5036,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               {visibleAgents.map((agent) => {
                 const active = agent.agentId === selectedAgentMemoryAgentId;
                 return (
-                  <button
+                  <VButton
                     key={agent.agentId}
                     type="button"
                     className={active ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
@@ -5055,7 +5056,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                         {copy.agentMemoryFormalBases}: {agent.knowledgeSummary.knowledgeBaseCount}
                       </span>
                     </span>
-                  </button>
+                  </VButton>
                 );
               })}
             </div>
@@ -5089,7 +5090,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               {selectedAgentMemoryItems.map((item) => {
                 const active = item.id === selectedAgentMemoryItem?.id;
                 return (
-                  <button
+                  <VButton
                     key={item.id}
                     type="button"
                     className={active ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
@@ -5106,7 +5107,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                       <span className={styles.statusPill}>{item.contentType}</span>
                       {item.contentTruncated ? <span className={styles.statusPill}>{copy.truncated}</span> : null}
                     </span>
-                  </button>
+                  </VButton>
                 );
               })}
             </div>
@@ -5382,10 +5383,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 <small>
                   {copy.recommendedAction}: {recommendation.recommendedAction} · {recommendation.knowledgeBaseName}
                 </small>
-                <button type="button" className={styles.detailActionButton} onClick={() => setTraceTargetId(recommendation.targetId)}>
+                <VButton type="button" className={styles.detailActionButton} onClick={() => setTraceTargetId(recommendation.targetId)}>
                   <Eye size={14} />
                   <span>{copy.traceability}</span>
-                </button>
+                </VButton>
               </section>
             ))}
           </div>
@@ -5414,11 +5415,11 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           </div>
           <div className={styles.stewardActionGrid} aria-label={copy.stewardNextActions}>
             {(knowledgeStewardWorkbench?.nextActions ?? []).slice(0, 4).map((action) => (
-              <button key={action.actionId} type="button" className={styles.stewardActionRow} onClick={() => setTraceTargetId(action.targetId)}>
+              <VButton key={action.actionId} type="button" className={styles.stewardActionRow} onClick={() => setTraceTargetId(action.targetId)}>
                 <span className={styles.statusPill}>{action.priority}</span>
                 <strong>{action.title}</strong>
                 <small>{action.nextStep}</small>
-              </button>
+              </VButton>
             ))}
           </div>
           <div className={styles.stewardChecklist} aria-label={copy.acceptanceChecklist}>
@@ -5477,7 +5478,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             {knowledgeBases.map((base) => {
               const requestId = knowledgeBaseRequestId(base);
               return (
-                <button
+                <VButton
                   key={requestId}
                   type="button"
                   className={requestId === activeKnowledgeBaseForItems ? `${styles.sourceButton} ${styles.sourceButtonActive}` : styles.sourceButton}
@@ -5491,7 +5492,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                     <span>{base.teamName || base.teamId}</span>
                   </span>
                   <span className={styles.sourceStats}>{base.stats.itemCount}/{base.stats.pendingProposalCount}</span>
-                </button>
+                </VButton>
               );
             })}
           </nav>
@@ -5531,7 +5532,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 count: (permissionAudit?.summary.knowledgeBaseCount ?? 0) + ingestionAdapters.length,
               },
             ] satisfies Array<{ key: KnowledgeWorkspaceMode; label: string; hint: string; count: number }>).map((mode) => (
-              <button
+              <VButton
                 key={mode.key}
                 type="button"
                 role="tab"
@@ -5542,7 +5543,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               >
                 <span>{mode.label}</span>
                 <strong>{mode.count}</strong>
-              </button>
+              </VButton>
             ))}
           </div>
           {activeKnowledgeWorkspaceMode === "sources" ? (
@@ -5574,10 +5575,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                   ))}
                 </select>
               </label>
-              <button type="button" className={styles.detailActionButton} onClick={applyActiveKnowledgeOwner}>
+              <VButton type="button" className={styles.detailActionButton} onClick={applyActiveKnowledgeOwner}>
                 <Database size={14} />
                 <span>{copy.useActiveKnowledgeOwner}</span>
-              </button>
+              </VButton>
             </div>
             <div className={styles.sourceGovernanceGrid}>
               <div className={styles.sourceGovernanceColumn}>
@@ -5586,10 +5587,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                     <p className={styles.panelEyebrow}>{copy.collectOwnerSource}</p>
                     <h3>{copy.ownerSourceInbox}</h3>
                   </div>
-                  <button type="button" className={styles.primaryActionButton} onClick={() => setShowOwnerSourceForm((value) => !value)}>
+                  <VButton type="button" className={styles.primaryActionButton} onClick={() => setShowOwnerSourceForm((value) => !value)}>
                     <Pencil size={15} />
                     <span>{showOwnerSourceForm ? copy.cancelEdit : copy.submitSource}</span>
-                  </button>
+                  </VButton>
                 </div>
                 {showOwnerSourceForm ? (
                 <>
@@ -5640,18 +5641,18 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                   </label>
                 </div>
                 <div className={styles.formActionRow}>
-                  <button type="button" className={styles.primaryActionButton} onClick={submitOwnerSource} disabled={knowledgeBusy || !activeSourceOwnerId}>
+                  <VButton type="button" className={styles.primaryActionButton} onClick={submitOwnerSource} isDisabled={knowledgeBusy || !activeSourceOwnerId}>
                     <Link2 size={15} />
                     <span>{copy.collectOwnerSource}</span>
-                  </button>
+                  </VButton>
                 </div>
                 </>
                 ) : (
-                <button type="button" className={styles.collapsedFormButton} onClick={() => setShowOwnerSourceForm(true)}>
+                <VButton type="button" className={styles.collapsedFormButton} onClick={() => setShowOwnerSourceForm(true)}>
                   <Pencil size={15} />
                   <span>{copy.submitSource}</span>
                   <small>{ownerSourceDraft.sourceType}</small>
-                </button>
+                </VButton>
                 )}
               </div>
               <div className={styles.sourceGovernanceColumn}>
@@ -5689,42 +5690,42 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                         <span>{copy.dedupeStatus}: {source.dedupeStatus || "-"}</span>
                       </div>
                       <div className={styles.sourceRecordActions}>
-                        <button
+                        <VButton
                           type="button"
                           className={styles.detailActionButton}
-                          disabled={knowledgeBusy || !(source.status === "pending" || source.status === "needs_more_context")}
+                          isDisabled={knowledgeBusy || !(source.status === "pending" || source.status === "needs_more_context")}
                           onClick={() => reviewOwnerSource(source, "accepted")}
                         >
                           <CheckCircle2 size={14} />
                           <span>{copy.acceptSource}</span>
-                        </button>
-                        <button
+                        </VButton>
+                        <VButton
                           type="button"
                           className={styles.detailActionButton}
-                          disabled={knowledgeBusy || !(source.status === "pending" || source.status === "needs_more_context")}
+                          isDisabled={knowledgeBusy || !(source.status === "pending" || source.status === "needs_more_context")}
                           onClick={() => reviewOwnerSource(source, "needs_more_context")}
                         >
                           <Eye size={14} />
                           <span>{copy.needsMoreContext}</span>
-                        </button>
-                        <button
+                        </VButton>
+                        <VButton
                           type="button"
                           className={styles.detailActionButton}
-                          disabled={knowledgeBusy || !(source.status === "pending" || source.status === "needs_more_context") || !duplicateCentralSourceId.trim()}
+                          isDisabled={knowledgeBusy || !(source.status === "pending" || source.status === "needs_more_context") || !duplicateCentralSourceId.trim()}
                           onClick={() => reviewOwnerSource(source, "duplicate")}
                         >
                           <CopyIcon size={14} />
                           <span>{copy.markDuplicate}</span>
-                        </button>
-                        <button
+                        </VButton>
+                        <VButton
                           type="button"
                           className={styles.detailActionButton}
-                          disabled={knowledgeBusy || !(source.status === "pending" || source.status === "needs_more_context")}
+                          isDisabled={knowledgeBusy || !(source.status === "pending" || source.status === "needs_more_context")}
                           onClick={() => reviewOwnerSource(source, "rejected")}
                         >
                           <XCircle size={14} />
                           <span>{copy.rejectProposal}</span>
-                        </button>
+                        </VButton>
                       </div>
                     </article>
                   ))}
@@ -5753,15 +5754,15 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                     <span>{copy.reviewedAt}: {formatTimestamp(source.acceptedAt, lang)}</span>
                   </div>
                   <div className={styles.sourceRecordActions}>
-                    <button
+                    <VButton
                       type="button"
                       className={styles.detailActionButton}
-                      disabled={!activeKnowledgeBase?.permissions.canPropose || knowledgeBusy || !activeKnowledgeBaseForItems}
+                      isDisabled={!activeKnowledgeBase?.permissions.canPropose || knowledgeBusy || !activeKnowledgeBaseForItems}
                       onClick={() => attachCentralSource(source.centralSourceId)}
                     >
                       <Link2 size={14} />
                       <span>{copy.attachCentralSource}</span>
-                    </button>
+                    </VButton>
                   </div>
                 </article>
               ))}
@@ -5985,10 +5986,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                   <strong>{task.title}</strong>
                   <span>{task.summary || task.targetId}</span>
                   <small>{task.taskType} · {task.targetStatus} · {task.knowledgeBaseName}</small>
-                  <button type="button" className={styles.detailActionButton} onClick={() => setTraceTargetId(task.targetId)}>
+                  <VButton type="button" className={styles.detailActionButton} onClick={() => setTraceTargetId(task.targetId)}>
                     <Eye size={14} />
                     <span>{copy.traceability}</span>
-                  </button>
+                  </VButton>
                 </section>
               ))}
               {!governanceTasksQuery.isPending && !governanceTasks.length ? (
@@ -6032,15 +6033,15 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 <p className={styles.panelEyebrow}>{copy.refinementProposal}</p>
                 <h2>{copy.pendingProposals}</h2>
               </div>
-              <button
+              <VButton
                 type="button"
                 className={styles.primaryActionButton}
                 onClick={submitRefinementProposal}
-                disabled={!activeKnowledgeBase?.permissions.canPropose || knowledgeBusy}
+                isDisabled={!activeKnowledgeBase?.permissions.canPropose || knowledgeBusy}
               >
                 <Pencil size={15} />
                 <span>{copy.submitProposal}</span>
-              </button>
+              </VButton>
             </div>
             <div className={styles.knowledgeFormGrid}>
               <label>
@@ -6073,24 +6074,24 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                   <section key={proposal.proposalId} className={styles.knowledgeRow}>
                     <strong>{proposal.title}</strong>
                     <span>{proposal.summary || proposal.content}</span>
-                    <button
+                    <VButton
                       type="button"
                       className={styles.detailActionButton}
-                      disabled={!activeKnowledgeBase?.permissions.canReview || knowledgeBusy}
+                      isDisabled={!activeKnowledgeBase?.permissions.canReview || knowledgeBusy}
                       onClick={() => reviewProposal(proposal.proposalId, "approved")}
                     >
                       <CheckCircle2 size={14} />
                       <span>{copy.approveProposal}</span>
-                    </button>
-                    <button
+                    </VButton>
+                    <VButton
                       type="button"
                       className={styles.detailActionButton}
-                      disabled={!activeKnowledgeBase?.permissions.canReview || knowledgeBusy}
+                      isDisabled={!activeKnowledgeBase?.permissions.canReview || knowledgeBusy}
                       onClick={() => reviewProposal(proposal.proposalId, "rejected")}
                     >
                       <XCircle size={14} />
                       <span>{copy.rejectProposal}</span>
-                    </button>
+                    </VButton>
                   </section>
               ))}
               {activeKnowledgeBase && activeKnowledgeBase.pendingProposals.length === 0 ? (
@@ -6132,32 +6133,32 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             </div>
             <div className={styles.bulkActionBar}>
               <span className={styles.countPill}>{copy.selectedSuggestions}: {selectedVisibleRatingSuggestionIds.length}</span>
-              <button type="button" className={styles.detailActionButton} onClick={toggleVisibleRatingSuggestions} disabled={!pendingVisibleRatingSuggestions.length || knowledgeBusy}>
+              <VButton type="button" className={styles.detailActionButton} onClick={toggleVisibleRatingSuggestions} isDisabled={!pendingVisibleRatingSuggestions.length || knowledgeBusy}>
                 <SquareCheckBig size={14} />
                 <span>{copy.selectAllVisibleSuggestions}</span>
-              </button>
-              <button type="button" className={styles.detailActionButton} onClick={() => setSelectedRatingSuggestionIds([])} disabled={!selectedVisibleRatingSuggestionIds.length || knowledgeBusy}>
+              </VButton>
+              <VButton type="button" className={styles.detailActionButton} onClick={() => setSelectedRatingSuggestionIds([])} isDisabled={!selectedVisibleRatingSuggestionIds.length || knowledgeBusy}>
                 <Square size={14} />
                 <span>{copy.clearSuggestionSelection}</span>
-              </button>
-              <button
+              </VButton>
+              <VButton
                 type="button"
                 className={styles.detailActionButton}
-                disabled={!activeKnowledgeBase?.permissions.canRate || !selectedVisibleRatingSuggestionIds.length || knowledgeBusy}
+                isDisabled={!activeKnowledgeBase?.permissions.canRate || !selectedVisibleRatingSuggestionIds.length || knowledgeBusy}
                 onClick={() => reviewSelectedRatingSuggestions("applied")}
               >
                 <CheckCircle2 size={14} />
                 <span>{copy.bulkApplySuggestions}</span>
-              </button>
-              <button
+              </VButton>
+              <VButton
                 type="button"
                 className={styles.detailActionButton}
-                disabled={!activeKnowledgeBase?.permissions.canRate || !selectedVisibleRatingSuggestionIds.length || knowledgeBusy}
+                isDisabled={!activeKnowledgeBase?.permissions.canRate || !selectedVisibleRatingSuggestionIds.length || knowledgeBusy}
                 onClick={() => reviewSelectedRatingSuggestions("rejected")}
               >
                 <XCircle size={14} />
                 <span>{copy.bulkRejectSuggestions}</span>
-              </button>
+              </VButton>
             </div>
             <div className={styles.knowledgeProposalList}>
               {ratingSuggestions.map((suggestion) => (
@@ -6175,24 +6176,24 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                   <strong>{suggestion.importanceLevel} · {suggestion.reviewPriority}</strong>
                   <span>{suggestion.markingReason || suggestion.suggestionId}</span>
                   <small>{suggestion.status} · {suggestion.targetType} · {suggestion.knowledgeItemId || suggestion.proposalId} · {copy.confidence}: {suggestion.confidence}</small>
-                  <button
+                  <VButton
                     type="button"
                     className={styles.detailActionButton}
-                    disabled={!activeKnowledgeBase?.permissions.canRate || suggestion.status !== "pending" || knowledgeBusy}
+                    isDisabled={!activeKnowledgeBase?.permissions.canRate || suggestion.status !== "pending" || knowledgeBusy}
                     onClick={() => reviewRatingSuggestion(suggestion.suggestionId, "applied")}
                   >
                     <CheckCircle2 size={14} />
                     <span>{copy.applySuggestion}</span>
-                  </button>
-                  <button
+                  </VButton>
+                  <VButton
                     type="button"
                     className={styles.detailActionButton}
-                    disabled={!activeKnowledgeBase?.permissions.canRate || suggestion.status !== "pending" || knowledgeBusy}
+                    isDisabled={!activeKnowledgeBase?.permissions.canRate || suggestion.status !== "pending" || knowledgeBusy}
                     onClick={() => reviewRatingSuggestion(suggestion.suggestionId, "rejected")}
                   >
                     <XCircle size={14} />
                     <span>{copy.rejectSuggestion}</span>
-                  </button>
+                  </VButton>
                 </section>
               ))}
               {!ratingSuggestionsQuery.isPending && !ratingSuggestions.length ? (
@@ -6294,15 +6295,15 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                   <select value={ratingDraft.stability} onChange={(event) => setRatingDraft({ ...ratingDraft, stability: event.target.value })}>
                     {["temporary", "evolving", "stable", "deprecated"].map((value) => <option key={value} value={value}>{value}</option>)}
                   </select>
-                  <button
+                  <VButton
                     type="button"
                     className={styles.detailActionButton}
                     onClick={() => updateKnowledgeRating(item)}
-                    disabled={!activeKnowledgeBase?.permissions.canRate || knowledgeBusy}
+                    isDisabled={!activeKnowledgeBase?.permissions.canRate || knowledgeBusy}
                   >
                     <CheckCircle2 size={14} />
                     <span>{copy.submitRatingSuggestion}</span>
-                  </button>
+                  </VButton>
                 </div>
               </section>
             ))}
@@ -6390,15 +6391,15 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               <div>
                 <h2 title={copy.cleanupCentralSourceBoundary}>{copy.cleanupPreview}</h2>
               </div>
-              <button
+              <VButton
                 type="button"
                 className={styles.inlineActionButton}
                 onClick={previewCleanup}
-                disabled={!selectedCleanupTargets.length || cleanupPreviewMutation.isPending}
+                isDisabled={!selectedCleanupTargets.length || cleanupPreviewMutation.isPending}
               >
                 <Eye size={15} />
                 {copy.cleanupPreview}
-              </button>
+              </VButton>
             </div>
             {report ? (
               <>
@@ -6457,15 +6458,15 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 onChange={(event) => setCleanupConfirmationText(event.target.value)}
               />
             </label>
-            <button
+            <VButton
               type="button"
               className={styles.cleanupExecuteButton}
               onClick={executeCleanup}
-              disabled={!canExecute || cleanupExecuteMutation.isPending}
+              isDisabled={!canExecute || cleanupExecuteMutation.isPending}
             >
               <Trash2 size={15} />
               {copy.cleanupExecute}
-            </button>
+            </VButton>
             {cleanupFeedback.tone !== "idle" ? (
               <p className={styles.cleanupFeedback} data-tone={cleanupFeedback.tone}>{cleanupFeedback.text}</p>
             ) : null}
@@ -6539,7 +6540,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             </div>
             <div className={styles.graphTypeList}>
               {graphTypeEntries.map(([type, count]) => (
-                <button
+                <VButton
                   key={type}
                   type="button"
                   data-active={activeGraphNodeType === type ? "true" : "false"}
@@ -6548,11 +6549,11 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 >
                   <strong>{type}</strong>
                   <small>{count}</small>
-                </button>
+                </VButton>
               ))}
             </div>
             {activeGraphNodeType || graphSearchText ? (
-              <button
+              <VButton
                 type="button"
                 className={styles.graphClearFocusButton}
                 onClick={() => {
@@ -6562,7 +6563,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               >
                 <XCircle size={14} />
                 {copy.graphClearFocus}
-              </button>
+              </VButton>
             ) : null}
           </section>
         </aside>
@@ -6588,7 +6589,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           </Suspense>
           <div className={styles.graphNodeList}>
             {filteredGraphNodes.slice(0, 80).map((node) => (
-              <button
+              <VButton
                 key={node.id}
                 type="button"
                 className={selectedGraphNode?.id === node.id ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
@@ -6599,7 +6600,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 <span className={styles.graphNodeTypeMark}>{GRAPH_NODE_TYPE_LABELS[node.type] ?? node.type.slice(0, 10)}</span>
                 <strong>{node.label}</strong>
                 <small>{node.status || "-"}</small>
-              </button>
+              </VButton>
             ))}
           </div>
         </main>
@@ -6634,7 +6635,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 ) : (
                   <div className={styles.graphRelationGroup}>
                     {selectedGraphChildren.map((child) => (
-                      <button
+                      <VButton
                         key={child.id}
                         type="button"
                         data-node-type={child.type}
@@ -6643,7 +6644,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                       >
                         <small>{GRAPH_NODE_TYPE_LABELS[child.type] ?? child.type}</small>
                         <strong>{child.label}</strong>
-                      </button>
+                      </VButton>
                     ))}
                   </div>
                 )}
@@ -6689,7 +6690,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                     <div className={styles.graphRelationGroup}>
                       <span>{copy.graphIncoming}</span>
                       {selectedGraphRelations.incoming.map((relation) => (
-                        <button
+                        <VButton
                           key={relation.edge.id}
                           type="button"
                           data-node-type={relation.neighbor.type}
@@ -6698,13 +6699,13 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                         >
                           <small>{relation.edge.label || relation.edge.type}</small>
                           <strong>{relation.neighbor.label}</strong>
-                        </button>
+                        </VButton>
                       ))}
                     </div>
                     <div className={styles.graphRelationGroup}>
                       <span>{copy.graphOutgoing}</span>
                       {selectedGraphRelations.outgoing.map((relation) => (
-                        <button
+                        <VButton
                           key={relation.edge.id}
                           type="button"
                           data-node-type={relation.neighbor.type}
@@ -6713,7 +6714,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                         >
                           <small>{relation.edge.label || relation.edge.type}</small>
                           <strong>{relation.neighbor.label}</strong>
-                        </button>
+                        </VButton>
                       ))}
                     </div>
                   </>
@@ -6756,10 +6757,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             {memoryViewLabel(copy, forcedView)}
           </h1>
         </div>
-        <button type="button" className={styles.refreshButton} onClick={refresh}>
+        <VButton type="button" className={styles.refreshButton} onClick={refresh}>
           <RefreshCw size={16} />
           {copy.refresh}
-        </button>
+        </VButton>
         {returnToPath ? (
           <Link to={returnToPath} className={styles.returnButton}>
             <ArrowLeft size={16} />

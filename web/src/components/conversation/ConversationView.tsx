@@ -83,6 +83,7 @@ import {
   restoreTimelineScrollHeightAnchor,
   type TimelineScrollHeightAnchor,
 } from "./timelineScrollAnchor";
+import { VButton } from "../vui";
 import styles from "./ConversationView.module.css";
 
 const RUNNING_OPERATION_STATUSES = new Set(["queued", "pending", "running", "thinking", "tooling", "answering"]);
@@ -2174,7 +2175,7 @@ export function ConversationView({
         </div>
         {result.summary ? <p className={styles.computerUseSummary}>{result.summary}</p> : null}
         {result.screenshotUrl ? (
-          <button
+          <VButton
             type="button"
             className={`${styles.imageArtifactFrame} ${styles.imagePreviewButton}`}
             onClick={() =>
@@ -2189,7 +2190,7 @@ export function ConversationView({
             title={previewLabel}
           >
             <img className={styles.computerUseScreenshot} src={result.screenshotUrl} alt={imageAlt} loading="lazy" />
-          </button>
+          </VButton>
         ) : null}
         {result.steps.length > 0 ? (
           <ol className={styles.computerUseSteps}>
@@ -2205,13 +2206,13 @@ export function ConversationView({
         {result.needsConfirmation || result.status === "running" ? (
           <div className={styles.computerUseActions}>
             {result.needsConfirmation ? (
-              <button type="button" onClick={confirmSession} disabled={Boolean(pendingAction)}>
+              <VButton type="button" onClick={confirmSession} isDisabled={Boolean(pendingAction)}>
                 {pendingAction === "confirm" ? (lang === "zh" ? "确认中" : "Confirming") : confirmLabel}
-              </button>
+              </VButton>
             ) : null}
-            <button type="button" onClick={cancelSession} disabled={Boolean(pendingAction)}>
+            <VButton type="button" onClick={cancelSession} isDisabled={Boolean(pendingAction)}>
               {pendingAction === "cancel" ? (lang === "zh" ? "停止中" : "Stopping") : cancelLabel}
-            </button>
+            </VButton>
           </div>
         ) : null}
       </section>
@@ -2267,7 +2268,7 @@ export function ConversationView({
                 </span>
                 {duration ? <span className={styles.operationDuration}>{duration}</span> : null}
                 {canExpandDetails ? (
-                  <button
+                  <VButton
                     type="button"
                     className={styles.operationDetailToggle}
                     aria-expanded={detailsExpanded}
@@ -2276,7 +2277,7 @@ export function ConversationView({
                     title={detailToggleTitle}
                   >
                     {detailsExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                  </button>
+                  </VButton>
                 ) : (
                   <span className={styles.operationChevron} aria-hidden="true">
                     {hasOperationDetails(operation) ? <ChevronRight size={16} /> : null}
@@ -2360,7 +2361,7 @@ export function ConversationView({
         className={styles.timelineThoughtCell}
         data-conversation-part-key={conversationTimelineItemRowKey(rowIdentity, item)}
       >
-        <button
+        <VButton
           type="button"
           className={styles.timelineCellHeader}
           aria-expanded={expanded}
@@ -2371,7 +2372,7 @@ export function ConversationView({
           <span>{lang === "zh" ? "思考" : "Thinking"}</span>
           {!expanded && item.preview ? <span className={styles.timelineCellPreview}>{item.preview}</span> : null}
           {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-        </button>
+        </VButton>
         {expanded ? <pre className={styles.timelineThoughtText}>{item.text}</pre> : null}
       </section>
     );
@@ -2430,7 +2431,7 @@ export function ConversationView({
         className={className}
         data-conversation-part-key={conversationTimelineItemRowKey(rowIdentity, item)}
       >
-        <button
+        <VButton
           type="button"
           className={styles.timelineCellHeader}
           aria-expanded={expanded}
@@ -2443,7 +2444,7 @@ export function ConversationView({
           {visibleStatus ? <span className={styles.timelineCellMeta}>{visibleStatus}</span> : null}
           {duration ? <span className={styles.timelineCellMeta}>{duration}</span> : null}
           {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-        </button>
+        </VButton>
         {expanded ? (
           <div className={styles.timelineCommandList}>
             {item.operations.map((operation) => (
@@ -2490,7 +2491,7 @@ export function ConversationView({
           {visibleStatus ? <span className={styles.timelineCellMeta}>{visibleStatus}</span> : null}
           {duration ? <span className={styles.timelineCellMeta}>{duration}</span> : null}
           {canExpandDetails ? (
-            <button
+            <VButton
               type="button"
               className={styles.timelineCellDetailButton}
               aria-expanded={detailsExpanded}
@@ -2499,7 +2500,7 @@ export function ConversationView({
               title={detailsExpanded ? t("toolCallDetailsVisible") : t("toolCallDetailsHidden")}
             >
               {detailsExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-            </button>
+            </VButton>
           ) : null}
         </div>
         {canExpandDetails ? (
@@ -2545,7 +2546,7 @@ export function ConversationView({
                     {duration ? <span>{duration}</span> : null}
                   </span>
                   {canExpandDetails ? (
-                    <button
+                    <VButton
                       type="button"
                       className={styles.reActToolDetailToggle}
                       aria-expanded={detailsExpanded}
@@ -2554,7 +2555,7 @@ export function ConversationView({
                       title={detailsExpanded ? t("toolCallDetailsVisible") : t("toolCallDetailsHidden")}
                     >
                       {detailsExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-                    </button>
+                    </VButton>
                   ) : null}
                 </div>
                 {canExpandDetails ? (
@@ -2605,7 +2606,7 @@ export function ConversationView({
       : results.length > 1 ? `${results.length} results` : "Result";
     return (
       <section className={styles.reActOperationSection}>
-        <button
+        <VButton
           type="button"
           className={styles.reActResultToggle}
           aria-expanded={expanded}
@@ -2617,7 +2618,7 @@ export function ConversationView({
         >
           <span className={styles.reActOperationSectionLabel}>{label}</span>
           {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-        </button>
+        </VButton>
         {expanded ? (
           <div id={bodyId} className={styles.reActResultList}>
             {results.map((item) => (
@@ -2650,7 +2651,7 @@ export function ConversationView({
     ].filter(Boolean);
     return (
       <section className={`${styles.reActOperationGroup} ${styles[`reActOperationGroup_${tone}`]}`}>
-        <button
+        <VButton
           type="button"
           className={styles.reActOperationSummary}
           aria-expanded={expanded}
@@ -2665,7 +2666,7 @@ export function ConversationView({
             </span>
           ) : null}
           {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-        </button>
+        </VButton>
         {expanded ? (
           <div className={styles.reActOperationBody}>
             {renderReActThoughtSection(group)}
@@ -2725,7 +2726,7 @@ export function ConversationView({
           : t("toolProcessHidden");
     return (
       <section className={styles.operationGroup}>
-        <button
+        <VButton
           type="button"
           className={styles.operationSummary}
           aria-expanded={expanded}
@@ -2738,7 +2739,7 @@ export function ConversationView({
             <span className={styles.operationSummaryPreview}>{operations[0].summary}</span>
           ) : null}
           {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-        </button>
+        </VButton>
         {expanded ? renderOperationTimeline(operations) : null}
       </section>
     );
@@ -2769,7 +2770,7 @@ export function ConversationView({
       : operationStateLabel(operationCollectionTone(visibleOperations));
     return (
       <section className={`${styles.operationGroup} ${styles.executionTraceGroup}`}>
-        <button
+        <VButton
           type="button"
           className={styles.operationSummary}
           aria-expanded={expanded}
@@ -2780,7 +2781,7 @@ export function ConversationView({
           <span>{title}</span>
           <span className={styles.operationSummaryCount}>{stateLabel}</span>
           {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-        </button>
+        </VButton>
         {expanded ? (
           <div className={styles.reActOperationList}>
             {reActGroups.map((group) => (
@@ -2834,7 +2835,7 @@ export function ConversationView({
     }
     return (
       <section className={[styles.answerOnlyProcessGroup, toneClass].filter(Boolean).join(" ")}>
-        <button
+        <VButton
           type="button"
           className={styles.answerOnlyProcessToggle}
           aria-expanded={expanded}
@@ -2844,7 +2845,7 @@ export function ConversationView({
           {summaryContent}
           {!expanded && preview ? <span className={styles.answerOnlyProcessPreview}>{preview}</span> : null}
           {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-        </button>
+        </VButton>
         {expanded ? <div className={styles.answerOnlyProcessDetails}>{renderDetails()}</div> : null}
       </section>
     );
@@ -2900,7 +2901,7 @@ export function ConversationView({
       : section === "thought" ? t("thoughtProcessHidden") : t("mentalProcessHidden");
     return (
       <section className={`${styles.auxiliaryBlock} ${styles[`auxiliaryBlock_${section}`]}`}>
-        <button
+        <VButton
           type="button"
           className={styles.operationSummary}
           aria-expanded={expanded}
@@ -2914,7 +2915,7 @@ export function ConversationView({
           ) : null}
           {isRunning ? <LoaderCircle className={styles.statusSpinner} size={14} /> : null}
           {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-        </button>
+        </VButton>
         {expanded ? children : null}
       </section>
     );
@@ -3100,7 +3101,7 @@ export function ConversationView({
       const previewLabel = lang === "zh" ? "预览图片" : "Preview image";
       return (
         <figure key={`image-${index}-${safeUrl}`} className={styles.markdownImageFigure}>
-          <button
+          <VButton
             type="button"
             className={styles.imagePreviewButton}
             onClick={() =>
@@ -3115,7 +3116,7 @@ export function ConversationView({
             title={previewLabel}
           >
             <img className={styles.markdownImage} src={previewUrl} alt={imageAlt} loading="lazy" />
-          </button>
+          </VButton>
           <figcaption className={styles.markdownImageCaption}>
             {block.alt ? <span>{block.alt}</span> : null}
             <a
@@ -3265,7 +3266,7 @@ export function ConversationView({
     const metaItems = [artifact.size, artifact.quality, artifact.model].filter(Boolean);
     return (
       <figure className={styles.imageArtifact}>
-        <button
+        <VButton
           type="button"
           className={`${styles.imageArtifactFrame} ${styles.imagePreviewButton}`}
           onClick={() =>
@@ -3280,7 +3281,7 @@ export function ConversationView({
           title={previewLabel}
         >
           <img className={styles.imagePreview} src={artifact.imageUrl} alt={imageAlt} loading="lazy" />
-        </button>
+        </VButton>
         <figcaption className={styles.imageArtifactFooter}>
           <span className={styles.imageArtifactMeta}>
             {artifact.prompt ? <span className={styles.imageArtifactPrompt}>{artifact.prompt}</span> : null}
@@ -3560,7 +3561,7 @@ export function ConversationView({
           <>
             {hiddenMessageCount > 0 ? (
               <div className={styles.timelineHistoryGate}>
-                <button
+                <VButton
                   type="button"
                   className={styles.timelineHistoryButton}
                   onClick={showEarlierMessages}
@@ -3571,7 +3572,7 @@ export function ConversationView({
                       ? `显示更早 ${hiddenMessageCount} 条消息`
                       : `Show ${hiddenMessageCount} earlier messages`}
                   </span>
-                </button>
+                </VButton>
               </div>
             ) : null}
             {activeTimelineMessages.map((message, index) => {
@@ -3681,7 +3682,7 @@ export function ConversationView({
             };
             const responseSectionNode = showResponseBlock && !isStreamingStatusPlaceholder ? (
               <section className={styles.responseSection} data-conversation-part-key={rowIdentity.answerKey}>
-                <button
+                <VButton
                   type="button"
                   className={styles.responseToggle}
                   aria-expanded={responseExpanded}
@@ -3691,7 +3692,7 @@ export function ConversationView({
                   {responseExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                   <span>{t("responseLabel")}</span>
                   {showResponseSpinner ? <LoaderCircle className={styles.statusSpinner} size={14} /> : null}
-                </button>
+                </VButton>
                 {responseExpanded ? (
                   <div className={styles.responseBody}>
                     {isResponseStreaming
@@ -3755,7 +3756,7 @@ export function ConversationView({
                       <span className={styles.turnMetaActions}>
                         {message.timestamp ? <span>{formatTimestamp(message.timestamp)}</span> : null}
                         {userAuthoredMessage && message.id === latestUserMessageId && onEditUserMessage ? (
-                          <button
+                          <VButton
                             type="button"
                             className={
                               isEditingMessage
@@ -3763,13 +3764,13 @@ export function ConversationView({
                                 : styles.turnIconButton
                             }
                             onClick={() => onEditUserMessage(message)}
-                            disabled={editDisabled}
+                            isDisabled={editDisabled}
                             aria-pressed={isEditingMessage}
                             title={editDisabled ? composerPlaceholder : editUserMessageLabel ?? t("editMessage")}
                             aria-label={editUserMessageLabel ?? t("editMessage")}
                           >
                             <Pencil size={14} />
-                          </button>
+                          </VButton>
                         ) : null}
                       </span>
                     </div>
@@ -3789,7 +3790,7 @@ export function ConversationView({
                           ))}
                         </div>
                       ) : null}
-                      <button
+                      <VButton
                         type="button"
                         className={styles.agentInboxToggle}
                         aria-expanded={agentInboxExpanded}
@@ -3799,7 +3800,7 @@ export function ConversationView({
                         {agentInboxExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                         <span>{lang === "zh" ? "私信内容" : "Private message"}</span>
                         {agentInboxPreview ? <span className={styles.agentInboxPreview}>{agentInboxPreview}</span> : null}
-                      </button>
+                      </VButton>
                       {agentInboxExpanded ? (
                         <div className={styles.agentInboxMessageBody}>
                           {renderResponseText(message.content)}
@@ -3854,7 +3855,7 @@ export function ConversationView({
       </div>
 
       {!isAtBottom ? (
-        <button
+        <VButton
           type="button"
           className={styles.backToBottomButton}
           onClick={scrollToBottom}
@@ -3863,7 +3864,7 @@ export function ConversationView({
         >
           <ArrowDown size={16} />
           <span>{t("backToBottom")}</span>
-        </button>
+        </VButton>
       ) : null}
 
       {turnError?.message && !hasVisibleTurnErrorMessage ? (
@@ -3900,9 +3901,9 @@ export function ConversationView({
               </span>
               <span>{composerModeNotice}</span>
               {onCancelComposerMode ? (
-                <button type="button" onClick={onCancelComposerMode}>
+                <VButton type="button" onClick={onCancelComposerMode}>
                   {cancelComposerModeLabel ?? t("cancelEditMessage")}
-                </button>
+                </VButton>
               ) : null}
             </div>
           ) : null}
@@ -3913,14 +3914,14 @@ export function ConversationView({
                   <img src={attachment.previewUrl} alt={attachment.filename} />
                   <span title={attachment.filename}>{attachment.filename}</span>
                   {onRemoveComposerAttachment ? (
-                    <button
+                    <VButton
                       type="button"
                       onClick={() => onRemoveComposerAttachment(attachment.id)}
                       title={lang === "zh" ? "移除图片" : "Remove image"}
                       aria-label={lang === "zh" ? "移除图片" : "Remove image"}
                     >
                       <X size={13} />
-                    </button>
+                    </VButton>
                   ) : null}
                 </div>
               ))}
@@ -3942,14 +3943,14 @@ export function ConversationView({
                       {agentLabel ? <small title={agentLabel}>{agentLabel}</small> : null}
                     </span>
                     {onRemoveComposerReference ? (
-                      <button
+                      <VButton
                         type="button"
                         onClick={() => onRemoveComposerReference(referenceId)}
                         title={lang === "zh" ? "移除会话引用" : "Remove session reference"}
                         aria-label={lang === "zh" ? "移除会话引用" : "Remove session reference"}
                       >
                         <X size={13} />
-                      </button>
+                      </VButton>
                     ) : null}
                   </div>
                 );
@@ -4011,20 +4012,20 @@ export function ConversationView({
             event.currentTarget.value = "";
           }}
         />
-        <button
+        <VButton
           className={styles.attachButton}
-          disabled={attachmentInputDisabled || !onAddComposerAttachments}
+          isDisabled={attachmentInputDisabled || !onAddComposerAttachments}
           type="button"
           onClick={() => attachmentInputRef.current?.click()}
           title={lang === "zh" ? "添加图片" : "Attach image"}
           aria-label={lang === "zh" ? "添加图片" : "Attach image"}
         >
           <ImagePlus size={16} />
-        </button>
+        </VButton>
         {!runningGuidanceActionsEnabled || showSafeGuidanceAction ? (
-          <button
+          <VButton
             className={`${styles.sendButton} ${styles.composerRoundButton} ${styles.composerRoundButtonPrimary}`}
-            disabled={runningGuidanceActionsEnabled ? guidanceActionDisabled || !onSafeGuidance : resolvedActionDisabled}
+            isDisabled={runningGuidanceActionsEnabled ? guidanceActionDisabled || !onSafeGuidance : resolvedActionDisabled}
             type="button"
             onClick={runningGuidanceActionsEnabled ? onSafeGuidance : handlePrimaryAction}
             title={
@@ -4051,12 +4052,12 @@ export function ConversationView({
             ) : (
               <ArrowUp size={18} aria-hidden="true" />
             )}
-          </button>
+          </VButton>
         ) : null}
         {runningGuidanceActionsEnabled ? (
-          <button
+          <VButton
             className={`${styles.sendButton} ${styles.composerRoundButton} ${styles.stopButton}`}
-            disabled={resolvedActionDisabled}
+            isDisabled={resolvedActionDisabled}
             type="button"
             onClick={handlePrimaryAction}
             title={composerPending ? resolvedPendingLabel : resolvedActionLabel}
@@ -4067,7 +4068,7 @@ export function ConversationView({
             ) : (
               <Square size={14} aria-hidden="true" />
             )}
-          </button>
+          </VButton>
         ) : null}
       </div>
       ) : null}
@@ -4092,7 +4093,7 @@ export function ConversationView({
                 >
                   <Download size={15} />
                 </a>
-                <button
+                <VButton
                   type="button"
                   className={styles.imagePreviewCloseButton}
                   onClick={() => setPreviewImage(null)}
@@ -4100,7 +4101,7 @@ export function ConversationView({
                   aria-label={lang === "zh" ? "关闭预览" : "Close preview"}
                 >
                   <X size={16} />
-                </button>
+                </VButton>
               </div>
             </div>
             <img className={styles.imagePreviewLarge} src={previewImage.src} alt={previewImage.alt} />

@@ -5065,7 +5065,7 @@ export function AgentsRoute() {
     setBulkSelectionAnchorAgentId(agentId);
   };
 
-  const handleAgentRowSelect = (agent: AgentConfigWorkspaceAgent, event: MouseEvent<HTMLButtonElement>) => {
+  const handleAgentRowSelect = (agent: AgentConfigWorkspaceAgent, event: MouseEvent<Element>) => {
     if (event.ctrlKey || event.metaKey || event.shiftKey) {
       event.preventDefault();
       toggleBulkAgent(agent.agentId, event.shiftKey ? true : !selectedBulkAgentIds.has(agent.agentId), event.shiftKey);
@@ -5466,7 +5466,7 @@ export function AgentsRoute() {
           />
           {bulkSelected ? <CheckSquare size={15} /> : <Square size={15} />}
         </label>
-        <button
+        <VButton
           type="button"
           className={rowClassName}
           onClick={(event) => handleAgentRowSelect(agent, event)}
@@ -5499,7 +5499,7 @@ export function AgentsRoute() {
               {issueLabel(agent.health, lang)}
             </span>
           </span>
-        </button>
+        </VButton>
       </div>
     );
   };
@@ -5619,7 +5619,7 @@ export function AgentsRoute() {
                     const description = groupDescription(group, copy);
                     const displayLabel = groupDisplayLabel(group, copy);
                     return (
-                      <button
+                      <VButton
                         key={group.id}
                         type="button"
                         className={active ? `${styles.groupButton} ${styles.groupButtonActive}` : styles.groupButton}
@@ -5638,7 +5638,7 @@ export function AgentsRoute() {
                         {group.healthCount ? (
                           <em>{group.id === "setup:inbox" ? copy.statusReminderShort : copy.healthIssueShort} {group.healthCount}</em>
                         ) : null}
-                      </button>
+                      </VButton>
                     );
                   })}
                 </div>
@@ -5660,7 +5660,7 @@ export function AgentsRoute() {
                           const description = groupDescription(group, copy);
                           const displayLabel = groupDisplayLabel(group, copy);
                           return (
-                            <button
+                            <VButton
                               key={group.id}
                               type="button"
                               className={active ? `${styles.groupButton} ${styles.groupButtonActive}` : styles.groupButton}
@@ -5679,7 +5679,7 @@ export function AgentsRoute() {
                               {group.healthCount ? (
                                 <em>{group.id === "setup:inbox" ? copy.statusReminderShort : copy.healthIssueShort} {group.healthCount}</em>
                               ) : null}
-                            </button>
+                            </VButton>
                           );
                         })}
                       </div>
@@ -5949,7 +5949,7 @@ export function AgentsRoute() {
               <div className={styles.returnBannerCopy}>
                 <strong>{copy.returnBannerTitle}</strong>
               </div>
-              <button
+              <VButton
                 type="button"
                 className={styles.returnBannerButton}
                 onClick={() => navigate(returnToPath)}
@@ -5957,7 +5957,7 @@ export function AgentsRoute() {
               >
                 <ArrowLeft size={16} />
                 <span>{returnToLabel}</span>
-              </button>
+              </VButton>
             </section>
           ) : null}
           {selectedBulkAgents.length > 1 ? (
@@ -6094,7 +6094,7 @@ export function AgentsRoute() {
             <>
               <section className={styles.detailHeader} title={copy.routeHint}>
                 <div className={styles.avatarEditorAnchor}>
-                  <button
+                  <VButton
                     type="button"
                     className={styles.detailAvatarButton}
                     onClick={() => setAvatarEditorOpen((current) => !current)}
@@ -6107,7 +6107,7 @@ export function AgentsRoute() {
                       selectedAgent.avatarImageUrl,
                       avatarInitials(selectedAgent.agentCode, agentLabel(selectedAgent)),
                     )}
-                  </button>
+                  </VButton>
                   {avatarEditorOpen ? (
                     <section className={styles.avatarEditorPanel} title={copy.avatarEditorHint}>
                       <div className={styles.avatarEditorHeader}>
@@ -6115,9 +6115,9 @@ export function AgentsRoute() {
                           <p className={styles.panelEyebrow}>{copy.avatarEditorTitle}</p>
                           <strong>{copy.editAvatar}</strong>
                         </div>
-                        <button type="button" className={styles.iconButton} onClick={() => setAvatarEditorOpen(false)} aria-label={lang === "zh" ? "关闭" : "Close"}>
+                        <VButton type="button" className={styles.iconButton} onClick={() => setAvatarEditorOpen(false)} aria-label={lang === "zh" ? "关闭" : "Close"}>
                           ×
-                        </button>
+                        </VButton>
                       </div>
                       <div className={styles.avatarEditorActions}>
                         <input
@@ -6148,16 +6148,16 @@ export function AgentsRoute() {
                           {avatarOptionsQuery.data.options.map((option) => {
                             const selected = option.path === selectedAgent.avatarImagePath;
                             return (
-                              <button
+                              <VButton
                                 key={option.path}
                                 type="button"
                                 className={selected ? `${styles.avatarOption} ${styles.avatarOptionSelected}` : styles.avatarOption}
                                 onClick={() => selectAgentAvatar(option.path)}
-                                disabled={selectedAgentAvatarUpdatePending}
+                                isDisabled={selectedAgentAvatarUpdatePending}
                                 title={option.filename}
                               >
                                 <img src={option.url} alt="" />
-                              </button>
+                              </VButton>
                             );
                           })}
                         </div>
@@ -6185,7 +6185,7 @@ export function AgentsRoute() {
 
               <nav className={styles.detailTabs} aria-label={copy.title}>
                 {panes.map((pane) => (
-                  <button
+                  <VButton
                     key={pane.id}
                     type="button"
                     className={activePane === pane.id ? styles.detailTabActive : styles.detailTab}
@@ -6193,7 +6193,7 @@ export function AgentsRoute() {
                   >
                     <span>{pane.label}</span>
                     <strong>{pane.count}</strong>
-                  </button>
+                  </VButton>
                 ))}
               </nav>
 
@@ -6208,7 +6208,7 @@ export function AgentsRoute() {
                 </div>
                 <div className={styles.managementChecklist}>
                   {managementBrief.items.map((item) => (
-                    <button
+                    <VButton
                       key={item.id}
                       type="button"
                       className={item.complete ? styles.managementChecklistDone : styles.managementChecklistMissing}
@@ -6216,14 +6216,14 @@ export function AgentsRoute() {
                     >
                       {item.complete ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
                       <span>{item.label}</span>
-                    </button>
+                    </VButton>
                   ))}
                 </div>
                 <div className={styles.nextActionList}>
                   <span>{copy.nextActionsTitle}</span>
                   {managementBrief.actions.length ? (
                     managementBrief.actions.map((action) => (
-                      <button
+                      <VButton
                         key={action.id}
                         type="button"
                         title={action.detail}
@@ -6236,7 +6236,7 @@ export function AgentsRoute() {
                         }}
                       >
                         <strong>{action.label}</strong>
-                      </button>
+                      </VButton>
                     ))
                   ) : (
                     <p>{copy.nextAllReady}</p>

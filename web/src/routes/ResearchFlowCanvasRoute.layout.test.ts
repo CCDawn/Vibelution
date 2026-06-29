@@ -5,6 +5,12 @@ import routeSource from "./ResearchFlowCanvasRoute.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
 
 describe("ResearchFlowCanvasRoute layout contract", () => {
+  it("routes Research flow canvas controls through VUI primitives", () => {
+    expect(routeSource).toContain('from "../components/vui"');
+    expect(routeSource).toContain("<VButton");
+    expect(routeSource).not.toMatch(/<button\b/);
+  });
+
   it("exposes a locked project organization canvas backed by the research organization graph", () => {
     expect(routerSource).toContain("ResearchFlowCanvasRoute");
     expect(routerSource).toContain("research/flow-canvas");

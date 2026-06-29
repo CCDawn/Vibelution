@@ -4,6 +4,7 @@ import { RotateCcw, SquareTerminal } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { fetchJson } from "../../api/client";
+import { VButton } from "../../components/vui";
 import type { CliAgentRunView, CliAgentTerminalSession } from "../ChatCodingRoute";
 import styles from "../ChatCodingRoute.module.css";
 import "@xterm/xterm/css/xterm.css";
@@ -542,18 +543,18 @@ export function CliAgentRunTerminalPanel({
           </span>
           <code>{visibleCommand}</code>
           {terminalCanResume || terminalCanStart ? (
-            <button
+            <VButton
               type="button"
               className={styles.cliAgentTerminalAction}
               onClick={() => requestTerminalSession(terminalCanResume ? "resume" : "start")}
-              disabled={connecting}
+              isDisabled={connecting}
               title={terminalCanResume
                 ? (lang === "zh" ? "恢复这个 CLI 会话" : "Resume this CLI session")
                 : (lang === "zh" ? "新开一个 CLI 会话" : "Start a new CLI session")}
             >
               <RotateCcw size={13} aria-hidden="true" />
               <span>{terminalCanResume ? (lang === "zh" ? "恢复" : "Resume") : (lang === "zh" ? "新开" : "Start")}</span>
-            </button>
+            </VButton>
           ) : null}
         </div>
         <div className={styles.cliAgentTerminalOutputShell}>

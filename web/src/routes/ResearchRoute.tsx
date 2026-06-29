@@ -38,6 +38,7 @@ import {
   ResearchSource,
   ResearchThemeCard,
 } from "../api/types";
+import { VButton } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./ResearchRoute.module.css";
 
@@ -662,34 +663,34 @@ export function ResearchRoute() {
           {showFallbackWorkflowModeControl ? (
             <div className={styles.workflowModeControl} aria-label={copy.workflowMode}>
               <span>{copy.workflowMode}</span>
-              <button
+              <VButton
                 type="button"
                 className={workflowMode === "manual" ? styles.workflowModeButton_active : styles.workflowModeButton}
                 onClick={() => setWorkflowMode("manual")}
                 aria-pressed={workflowMode === "manual"}
               >
                 {copy.manualMode}
-              </button>
-              <button
+              </VButton>
+              <VButton
                 type="button"
                 className={workflowMode === "auto" ? styles.workflowModeButton_active : styles.workflowModeButton}
                 onClick={() => setWorkflowMode("auto")}
                 aria-pressed={workflowMode === "auto"}
               >
                 {copy.autoMode}
-              </button>
+              </VButton>
             </div>
           ) : null}
           {autoDraftMutation.isPending ? (
-            <button className={styles.secondaryButton} disabled={autoDraftPauseRequested} onClick={pauseAutoDraft}>
+            <VButton className={styles.secondaryButton} isDisabled={autoDraftPauseRequested} onClick={pauseAutoDraft}>
               <Pause size={16} />
               {autoDraftPauseRequested ? copy.pausing : copy.pause}
-            </button>
+            </VButton>
           ) : (
-            <button className={styles.primaryButton} disabled={workflowControlsDisabled} onClick={runWorkflow}>
+            <VButton className={styles.primaryButton} isDisabled={workflowControlsDisabled} onClick={runWorkflow}>
               <Sparkles size={16} />
               {copy.continueWorkflow}
-            </button>
+            </VButton>
           )}
         </div>
       </header>
@@ -751,10 +752,10 @@ export function ResearchRoute() {
                 />
               </label>
             </div>
-            <button className={styles.primaryButton} disabled={busy} onClick={() => createMutation.mutate()}>
+            <VButton className={styles.primaryButton} isDisabled={busy} onClick={() => createMutation.mutate()}>
               <Layers3 size={16} />
               {copy.create}
-            </button>
+            </VButton>
             {actionError ? <p className={styles.errorText}>{errorMessage(actionError)}</p> : null}
           </section>
 
@@ -773,23 +774,23 @@ export function ResearchRoute() {
                   key={session.sessionId}
                   className={`${styles.sessionRow} ${session.sessionId === activeSessionId ? styles.sessionRow_active : ""}`}
                 >
-                  <button className={styles.sessionButton} onClick={() => setActiveSessionId(session.sessionId)}>
+                  <VButton className={styles.sessionButton} onClick={() => setActiveSessionId(session.sessionId)}>
                     <strong>{clip(session.openGoal, 72)}</strong>
                     <span>{formatDate(session.updatedAt)}</span>
                     <code>
                       {session.summary.candidateThemeCount} {copy.themeCount} / {session.status}
                     </code>
-                  </button>
-                  <button
+                  </VButton>
+                  <VButton
                     type="button"
                     className={styles.sessionDeleteButton}
-                    disabled={deleteSessionMutation.isPending}
+                    isDisabled={deleteSessionMutation.isPending}
                     title={copy.deleteSession}
                     aria-label={`${copy.deleteSession}: ${clip(session.openGoal, 36)}`}
                     onClick={() => deleteSession(session.sessionId)}
                   >
                     <Trash2 size={14} />
-                  </button>
+                  </VButton>
                 </div>
               ))}
             </div>
@@ -839,7 +840,7 @@ export function ResearchRoute() {
                     key={item.node.id}
                     className={`${styles.stageCard} ${isActiveStage ? styles.stageCard_active : styles.stageCard_compact}`}
                   >
-                    <button
+                    <VButton
                       type="button"
                       className={styles.stageSelectButton}
                       aria-pressed={isActiveStage}
@@ -859,16 +860,16 @@ export function ResearchRoute() {
                         </div>
                         <span>{flowStatusLabel(status, copy)}</span>
                       </div>
-                    </button>
+                    </VButton>
                     {isActiveStage ? <div className={styles.stageBody}>
-                      <button
+                      <VButton
                         className={styles.secondaryButton}
-                        disabled={busy || !canRun}
+                        isDisabled={busy || !canRun}
                         onClick={() => runFlowNode(item.node)}
                       >
                         <ActionIcon size={14} />
                         <span>{actionLabel}</span>
-                      </button>
+                      </VButton>
                     </div> : null}
                   </article>
                 );
@@ -1172,7 +1173,7 @@ function StageSources({
         </article>
       ))}
       {sources.length > 12 ? (
-        <button
+        <VButton
           type="button"
           className={`${styles.secondaryButton} ${styles.sourceToggleButton}`}
           onClick={() => setShowAllSources((current) => !current)}
@@ -1184,7 +1185,7 @@ function StageSources({
             : lang === "zh"
               ? `显示全部 ${sources.length} 条来源（还有 ${hiddenSourceCount} 条）`
               : `Show all ${sources.length} sources (${hiddenSourceCount} more)`}
-        </button>
+        </VButton>
       ) : null}
     </div>
   );
@@ -1274,7 +1275,7 @@ function AgentTracePanel({
             <span>{isRunning ? "等待第一条过程记录" : "还没有执行过程记录"}</span>
           </div>
           <div className={styles.agentTraceControls}>
-            <button
+            <VButton
               type="button"
               className={styles.traceGhostButton}
               onClick={() => setIsCollapsed((current) => !current)}
@@ -1282,7 +1283,7 @@ function AgentTracePanel({
             >
               {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
               <span>{isCollapsed ? copy.expandTrace : copy.collapseTrace}</span>
-            </button>
+            </VButton>
             {isRunning ? <LoaderCircle className={styles.statusSpinner} size={15} /> : null}
           </div>
         </div>
@@ -1313,7 +1314,7 @@ function AgentTracePanel({
           </span>
         </div>
         <div className={styles.agentTraceControls}>
-          <button
+          <VButton
             type="button"
             className={styles.traceGhostButton}
             onClick={() => setIsCollapsed((current) => !current)}
@@ -1321,17 +1322,17 @@ function AgentTracePanel({
           >
             {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
             <span>{isCollapsed ? copy.expandTrace : copy.collapseTrace}</span>
-          </button>
-          <button
+          </VButton>
+          <VButton
             type="button"
             className={styles.traceGhostButton}
-            disabled={!detailEntries.length}
+            isDisabled={!detailEntries.length}
             onClick={() => setDetailsExpanded((current) => !current)}
             aria-expanded={detailsExpanded}
           >
             {detailsExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
             <span>{detailsExpanded ? "收起细节" : `展开细节 ${detailEntries.length}`}</span>
-          </button>
+          </VButton>
           {isRunning ? (
             <span className={styles.agentTraceLivePill}>
               <LoaderCircle className={styles.statusSpinner} size={13} />
@@ -1363,7 +1364,7 @@ function AgentTracePanel({
 
         {detailEntries.length ? (
           <section className={styles.agentTraceDetailGroup}>
-            <button
+            <VButton
               type="button"
               className={styles.agentTraceDetailSummary}
               aria-expanded={detailsExpanded}
@@ -1373,7 +1374,7 @@ function AgentTracePanel({
               <span>工具调用与上下文过程</span>
               <em>{detailEntries.length}</em>
               {detailsExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-            </button>
+            </VButton>
             {detailsExpanded ? (
               <div className={styles.agentTraceDetailList}>
                 {detailEntries.map((item, index) => (
@@ -1400,10 +1401,10 @@ function AgentTracePanel({
       </div> : null}
 
       {!isCollapsed && !isAtBottom ? (
-        <button type="button" className={styles.traceBackToBottomButton} onClick={scrollToLatest}>
+        <VButton type="button" className={styles.traceBackToBottomButton} onClick={scrollToLatest}>
           <ArrowDown size={14} />
           <span>回到最新</span>
-        </button>
+        </VButton>
       ) : null}
     </section>
   );
@@ -1522,10 +1523,10 @@ function StageEvidence({
               <li key={item}>{item}</li>
             ))}
           </ul>
-          <button className={styles.secondaryButton} disabled={busy} onClick={onSupplementEvidence}>
+          <VButton className={styles.secondaryButton} isDisabled={busy} onClick={onSupplementEvidence}>
             <SearchCheck size={14} />
             {copy.confirmEvidenceSearch}
-          </button>
+          </VButton>
         </section>
       ) : null}
       {!visibleEvidence.length ? <p className={styles.emptyText}>还没有证据记录。</p> : null}
@@ -1627,22 +1628,22 @@ function ThemeCompareRow({
         <span>{clip(theme.agentReview || theme.uncertainty, 92)}</span>
       </div>
       <div className={styles.themeCompareActions}>
-        <button
+        <VButton
           className={cardPrimary ? styles.secondaryButton : styles.primaryButton}
-          disabled={disabled || isSelected}
+          isDisabled={disabled || isSelected}
           onClick={() => onSelectTheme(theme)}
         >
           <GitBranch size={14} />
           <span>{isSelected ? copy.selected : copy.select}</span>
-        </button>
-        <button
+        </VButton>
+        <VButton
           className={cardPrimary ? styles.primaryButton : styles.secondaryButton}
-          disabled={disabled}
+          isDisabled={disabled}
           onClick={() => onGenerateCard(theme)}
         >
           <FlaskConical size={14} />
           <span>{cardPrimary ? copy.formalCard : copy.themeCard}</span>
-        </button>
+        </VButton>
       </div>
     </article>
   );

@@ -32,6 +32,7 @@ import {
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { LazyConversationView } from "../components/conversation/LazyConversationView";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
+import { VButton } from "../components/vui";
 import { TranslationKey } from "../i18n/dictionary";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
 import { useAppI18n } from "../i18n/useAppI18n";
@@ -914,20 +915,20 @@ export function SelfEvolutionTrack({
     <div className={styles.pageStack}>
       <div className={styles.pageTabsRow}>
         <div className={styles.segmentedTabs}>
-          <button
+          <VButton
             type="button"
             className={activePage === "workspace" ? `${styles.tabButton} ${styles.tabButtonActive}` : styles.tabButton}
             onClick={() => setActivePage("workspace")}
           >
             {t("selfWorkspacePage")}
-          </button>
-          <button
+          </VButton>
+          <VButton
             type="button"
             className={activePage === "status" ? `${styles.tabButton} ${styles.tabButtonActive}` : styles.tabButton}
             onClick={() => setActivePage("status")}
           >
             {t("selfStatusPage")}
-          </button>
+          </VButton>
         </div>
       </div>
 
@@ -990,15 +991,15 @@ export function SelfEvolutionTrack({
                 {worktreeIsolationStartError ? (
                   <div className={styles.worktreeEscalation}>
                     <p className={styles.noticeText}>{t("selfWorktreeEscalationHint")}</p>
-                    <button
+                    <VButton
                       type="button"
                       className={styles.secondaryAction}
-                      disabled={runLocked || worktreeRunLocked || startWorktreePending}
+                      isDisabled={runLocked || worktreeRunLocked || startWorktreePending}
                       onClick={onStartWorktreeRun}
                     >
                       {startWorktreePending ? <LoaderCircle size={15} className={styles.spinning} /> : <ArrowUpRight size={15} />}
                       {t("startSelfWorktreeRun")}
-                    </button>
+                    </VButton>
                   </div>
                 ) : null}
               </div>
@@ -1110,78 +1111,78 @@ export function SelfEvolutionTrack({
                   <div className={styles.conversationActions}>
                     {runIsActive && latestRun ? (
                       <>
-                        <button
+                        <VButton
                           type="button"
                           className={styles.secondaryAction}
-                          disabled={pausePending || !pauseSelfAction?.enabled}
+                          isDisabled={pausePending || !pauseSelfAction?.enabled}
                           title={disabledReason(pauseSelfAction) || undefined}
                           onClick={onPauseRun}
                         >
                           {pausePending ? <LoaderCircle size={15} className={styles.spinning} /> : <Pause size={15} />}
                           {pauseRequested ? t("selfPauseRequested") : t("pauseSelfRun")}
-                        </button>
-                        <button
+                        </VButton>
+                        <VButton
                           type="button"
                           className={styles.secondaryAction}
-                          disabled={terminatePending || !terminateSelfAction?.enabled}
+                          isDisabled={terminatePending || !terminateSelfAction?.enabled}
                           title={disabledReason(terminateSelfAction) || undefined}
                           onClick={onTerminateRun}
                         >
                           {terminatePending ? <LoaderCircle size={15} className={styles.spinning} /> : <Square size={15} />}
                           {terminateRequested ? t("selfStopRequested") : t("stopSelfRun")}
-                        </button>
+                        </VButton>
                       </>
                     ) : null}
 
                     {runIsPaused && latestRun ? (
                       <>
-                        <button
+                        <VButton
                           type="button"
                           className={styles.secondaryAction}
-                          disabled={resumePending || !resumeSelfAction?.enabled}
+                          isDisabled={resumePending || !resumeSelfAction?.enabled}
                           title={disabledReason(resumeSelfAction) || undefined}
                           onClick={onResumeRun}
                         >
                           {resumePending ? <LoaderCircle size={15} className={styles.spinning} /> : <Play size={15} />}
                           {t("resumeSelfRun")}
-                        </button>
-                        <button
+                        </VButton>
+                        <VButton
                           type="button"
                           className={styles.secondaryAction}
-                          disabled={terminatePending || !terminateSelfAction?.enabled}
+                          isDisabled={terminatePending || !terminateSelfAction?.enabled}
                           title={disabledReason(terminateSelfAction) || undefined}
                           onClick={onTerminateRun}
                         >
                           {terminatePending ? <LoaderCircle size={15} className={styles.spinning} /> : <Square size={15} />}
                           {t("stopSelfRun")}
-                        </button>
+                        </VButton>
                       </>
                     ) : null}
 
                     {!runIsActive && !runIsPaused && latestRun && rollbackReady ? (
-                      <button
+                      <VButton
                         type="button"
                         className={styles.secondaryAction}
-                        disabled={rollbackPending || !rollbackSelfAction?.enabled}
+                        isDisabled={rollbackPending || !rollbackSelfAction?.enabled}
                         title={disabledReason(rollbackSelfAction) || undefined}
                         onClick={onRollbackRun}
                       >
                         {rollbackPending ? <LoaderCircle size={15} className={styles.spinning} /> : <RotateCcw size={15} />}
                         {t("rollbackSelfRun")}
-                      </button>
+                      </VButton>
                     ) : null}
 
                     {!runIsActive && !runIsPaused && latestRun && rollbackBlocked ? (
-                      <button
+                      <VButton
                         type="button"
                         className={styles.secondaryAction}
-                        disabled={handoffPending || !handoffSelfAction?.enabled}
+                        isDisabled={handoffPending || !handoffSelfAction?.enabled}
                         title={disabledReason(handoffSelfAction) || undefined}
                         onClick={onHandoffRun}
                       >
                         {handoffPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ArrowUpRight size={15} />}
                         {t("handoffSelfRollback")}
-                      </button>
+                      </VButton>
                     ) : null}
                   </div>
                 )}
@@ -1279,34 +1280,34 @@ export function SelfEvolutionTrack({
                           ? `${worktreePageStart}-${worktreePageEnd} / ${worktreeFiles.length}`
                           : `0 / ${worktreeFiles.length}`}
                       </span>
-                      <button
+                      <VButton
                         type="button"
                         className={styles.paginationButton}
-                        disabled={clampedWorktreePage <= 1}
+                        isDisabled={clampedWorktreePage <= 1}
                         onClick={() => setWorktreePage((current) => Math.max(1, current - 1))}
                         title={t("pagePrevious")}
                       >
                         <ChevronLeft size={15} />
-                      </button>
+                      </VButton>
                       {pageNumbers.map((page) => (
-                        <button
+                        <VButton
                           key={page}
                           type="button"
                           className={page === clampedWorktreePage ? `${styles.paginationButton} ${styles.paginationButtonActive}` : styles.paginationButton}
                           onClick={() => setWorktreePage(page)}
                         >
                           {page}
-                        </button>
+                        </VButton>
                       ))}
-                      <button
+                      <VButton
                         type="button"
                         className={styles.paginationButton}
-                        disabled={clampedWorktreePage >= totalWorktreePages}
+                        isDisabled={clampedWorktreePage >= totalWorktreePages}
                         onClick={() => setWorktreePage((current) => Math.min(totalWorktreePages, current + 1))}
                         title={t("pageNext")}
                       >
                         <ChevronRight size={15} />
-                      </button>
+                      </VButton>
                     </div>
                   </div>
 
@@ -1391,21 +1392,21 @@ export function SelfEvolutionTrack({
                   </div>
                   <div className={styles.headerActionCluster}>
                     <span className={styles.counter}>{transactionItems.length}</span>
-                    <button
+                    <VButton
                       type="button"
                       className={styles.selectionToggle}
-                      disabled={visibleTransactionIds.length === 0}
+                      isDisabled={visibleTransactionIds.length === 0}
                       onClick={toggleAllVisibleHistoryGroups}
                     >
                       <CheckSquare size={14} />
                       {allVisibleHistorySelected ? t("clearSelection") : t("selectForBatchDelete")}
-                    </button>
+                    </VButton>
                   </div>
                 </div>
 
                 <div className={styles.transactionFilterBar} aria-label={t("selfTransactionFilterLabel")}>
                   {transactionFilterOptions.map((option) => (
-                    <button
+                    <VButton
                       key={option.id}
                       type="button"
                       className={
@@ -1417,13 +1418,13 @@ export function SelfEvolutionTrack({
                     >
                       <span>{option.label}</span>
                       <strong>{option.count}</strong>
-                    </button>
+                    </VButton>
                   ))}
                 </div>
 
                 <div className={styles.transactionDateFilterBar} aria-label={t("selfTransactionDateFilterLabel")}>
                   <span>{t("selfTransactionDateFilterLabel")}</span>
-                  <button
+                  <VButton
                     type="button"
                     className={
                       transactionDateFilter === "all"
@@ -1434,9 +1435,9 @@ export function SelfEvolutionTrack({
                   >
                     <span>{t("selfTransactionDateAll")}</span>
                     <strong>{filteredTransactions.length}</strong>
-                  </button>
+                  </VButton>
                   {transactionDateOptions.map((option) => (
-                    <button
+                    <VButton
                       key={option.key}
                       type="button"
                       className={
@@ -1448,7 +1449,7 @@ export function SelfEvolutionTrack({
                     >
                       <span>{option.label}</span>
                       <strong>{option.count}</strong>
-                    </button>
+                    </VButton>
                   ))}
                 </div>
 
@@ -1464,34 +1465,34 @@ export function SelfEvolutionTrack({
                       {hiddenTransactionCount > 0 ? ` · ${hiddenTransactionCount} ${t("selfTransactionHiddenSuffix")}` : ""}
                     </span>
                     {dateFilteredTransactions.length > SELF_TRANSACTION_COLLAPSED_LIMIT ? (
-                      <button
+                      <VButton
                         type="button"
                         className={styles.secondaryAction}
                         onClick={() => setTransactionHistoryExpanded((current) => !current)}
                       >
                         {transactionHistoryExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                         {transactionHistoryExpanded ? t("selfTransactionCollapseRecent") : t("selfTransactionShowAll")}
-                      </button>
+                      </VButton>
                     ) : null}
-                    <button
+                    <VButton
                       type="button"
                       className={styles.secondaryAction}
-                      disabled={selectedHistoryTxnIds.length === 0 || deleteHistoryPending}
+                      isDisabled={selectedHistoryTxnIds.length === 0 || deleteHistoryPending}
                       onClick={() => setSelectedHistoryTxnIds([])}
                     >
                       <X size={14} />
                       {t("clearSelection")}
-                    </button>
-                    <button
+                    </VButton>
+                    <VButton
                       type="button"
                       className={styles.secondaryAction}
-                      disabled={selectedHistoryTxnIds.length === 0 || deleteHistoryPending}
+                      isDisabled={selectedHistoryTxnIds.length === 0 || deleteHistoryPending}
                       title={selectedHistoryTxnIds.length === 0 ? t("deleteSelectedDisabledHistory") : undefined}
                       onClick={() => onDeleteHistoryGroups(selectedHistoryTxnIds)}
                     >
                       {deleteHistoryPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ScrollText size={15} />}
                       {deleteHistoryPending ? t("deletingSelectedHistory") : t("deleteSelected")}
-                    </button>
+                    </VButton>
                   </div>
                 </div>
                 <p className={styles.noticeText}>{t("batchDeleteHint")}</p>
@@ -1558,7 +1559,7 @@ export function SelfEvolutionTrack({
                                     <span className={styles.secondaryPill}>{outcomeLabel}</span>
                                     <span className={styles.secondaryPill}>{statusLabel(item.status)}</span>
                                     <span className={styles.secondaryPill}>{t("selfLinkedAuditCount")} {auditCountByTxnId.get(item.txnId) || 0}</span>
-                                    <button
+                                    <VButton
                                       type="button"
                                       className={styles.transactionDetailsToggle}
                                       aria-expanded={detailsExpanded}
@@ -1566,7 +1567,7 @@ export function SelfEvolutionTrack({
                                     >
                                       {detailsExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                                       {detailsExpanded ? t("hideDetails") : t("showDetails")}
-                                    </button>
+                                    </VButton>
                                   </div>
                                 </div>
                                 <div className={styles.transactionMetaGrid}>

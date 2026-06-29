@@ -88,6 +88,7 @@ import { COMPOSER_SESSION_REFERENCE_MIME } from "../components/conversation/conv
 import { LazyConversationView } from "../components/conversation/LazyConversationView";
 import { isAgentInboxMessage, isTurnErrorMessage } from "../components/conversation/messageSections";
 import { LazyFilePreview } from "../components/preview/LazyFilePreview";
+import { VButton } from "../components/vui";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../app/browserTelemetry";
 import { getPageInstanceId } from "../app/pageInstance";
 import { resolvePollingInterval, usePageVisibility, useStartupWarmup } from "../app/pollingPolicy";
@@ -5916,7 +5917,7 @@ export function ChatCodingRoute() {
         ? (lang === "zh" ? "全体成员" : "All agents")
         : [segment.target.displayName, segment.target.agentCode].filter(Boolean).join(" · ");
       return (
-        <button
+        <VButton
           key={`mention-${index}-${segment.text}`}
           type="button"
           className={styles.agentMention}
@@ -5925,7 +5926,7 @@ export function ChatCodingRoute() {
           title={lang === "zh" ? "打开对应 Agent 索引" : "Open the matching agent index"}
         >
           {segment.text}
-        </button>
+        </VButton>
       );
     });
   }
@@ -5945,7 +5946,7 @@ export function ChatCodingRoute() {
           {renderMentionedText(content, lang === "zh" ? "暂无内容" : "No content yet")}
         </p>
         {collapsible ? (
-          <button
+          <VButton
             type="button"
             className={styles.groupBubbleToggle}
             onClick={() =>
@@ -5956,7 +5957,7 @@ export function ChatCodingRoute() {
               )}
           >
             {expanded ? (lang === "zh" ? "收起" : "Collapse") : collapseLabel}
-          </button>
+          </VButton>
         ) : null}
       </>
     );
@@ -6364,16 +6365,16 @@ export function ChatCodingRoute() {
             onToggleConversationGroup={toggleConversationGroup}
           />
           {sessionIndexHasMore ? (
-            <button
+            <VButton
               type="button"
               className={styles.sessionLoadMoreButton}
               onClick={() => rawSessionsQuery.loadMore()}
-              disabled={rawSessionsQuery.isLoadingMore}
+              isDisabled={rawSessionsQuery.isLoadingMore}
               aria-label={sessionIndexLoadMoreLabel}
             >
               <span>{sessionIndexLoadMoreLabel}</span>
               <strong>{sessionIndexProgressLabel}</strong>
-            </button>
+            </VButton>
           ) : sessionIndexProgressVisible ? (
             <div className={styles.sessionLoadMoreStatus} role="status">
               <span>{sessionIndexFullyLoadedLabel}</span>
@@ -6451,19 +6452,19 @@ export function ChatCodingRoute() {
                 </div>
                 <div className={styles.groupManagementActions}>
                   {activeGroupTeamOwned && activeGroupTeam ? (
-                    <button
+                    <VButton
                       type="button"
                       className={styles.groupSecondaryButton}
                       onClick={() => navigate(`/teams?team=${encodeURIComponent(activeGroupTeam.teamId)}`)}
                     >
                       <ArrowUpRight size={14} />
                       <span>{lang === "zh" ? "打开团队" : "Open team"}</span>
-                    </button>
+                    </VButton>
                   ) : null}
-                  <button
+                  <VButton
                     type="button"
                     className={groupManageChanged ? styles.groupApplyButton : styles.groupSecondaryButton}
-                    disabled={groupManageDisabled || !groupManageChanged}
+                    isDisabled={groupManageDisabled || !groupManageChanged}
                     onClick={handleApplyGroupRoomManagement}
                   >
                     <Check size={14} />
@@ -6472,11 +6473,11 @@ export function ChatCodingRoute() {
                         ? (lang === "zh" ? "应用中" : "Applying")
                         : (lang === "zh" ? "应用变更" : "Apply")}
                     </span>
-                  </button>
-                  <button
+                  </VButton>
+                  <VButton
                     type="button"
                     className={styles.groupDeleteButton}
-                    disabled={groupDeleteDisabled}
+                    isDisabled={groupDeleteDisabled}
                     onClick={handleDeleteActiveGroupRoom}
                   >
                     <Trash2 size={14} />
@@ -6485,11 +6486,11 @@ export function ChatCodingRoute() {
                         ? (lang === "zh" ? "删除中" : "Deleting")
                         : (lang === "zh" ? "删除" : "Delete")}
                     </span>
-                  </button>
-                  <button
+                  </VButton>
+                  <VButton
                     type="button"
                     className={styles.groupSecondaryButton}
-                    disabled={groupResetDisabled}
+                    isDisabled={groupResetDisabled}
                     onClick={handleResetActiveGroupRoom}
                   >
                     <RotateCcw size={14} />
@@ -6498,7 +6499,7 @@ export function ChatCodingRoute() {
                         ? (lang === "zh" ? "重置中" : "Resetting")
                         : (lang === "zh" ? "重置消息" : "Reset messages")}
                     </span>
-                  </button>
+                  </VButton>
                 </div>
               </div>
               {groupRoomActionError ? (
@@ -6637,14 +6638,14 @@ export function ChatCodingRoute() {
           {agentDirectSessionMismatch && agentPrimaryDirectSessionId ? (
             <div className={styles.sessionBindingNotice} role="status">
               <span>{sessionBindingMismatchLine}</span>
-              <button
+              <VButton
                 type="button"
                 onClick={() => handleOpenDirectSession(agentPrimaryDirectSessionId)}
                 title={`${t("openCurrentDirectSession")} · ${agentPrimaryDirectSessionId}`}
               >
                 <ArrowUpRight size={13} />
                 <span>{t("openCurrentDirectSession")}</span>
-              </button>
+              </VButton>
             </div>
           ) : null}
           {sessionCompactRows.length > 0 ? (
@@ -6687,7 +6688,7 @@ export function ChatCodingRoute() {
             <span className={styles.featurePresetScope} title={t("chatFeaturePanelHint")}>{lang === "zh" ? "下轮生效" : "Next turn"}</span>
           </div>
           <div className={styles.featureChipRow}>
-            <button
+            <VButton
               type="button"
               className={
                 mentalModelEnabledForNextTurn
@@ -6695,18 +6696,18 @@ export function ChatCodingRoute() {
                   : `${styles.featureChip} ${styles.featureChipPrimary}`
               }
               aria-pressed={mentalModelEnabledForNextTurn}
-              disabled={!activeSessionId}
+              isDisabled={!activeSessionId}
               onClick={() => handleMentalModelEnabledChange(!mentalModelEnabledForNextTurn)}
               title={t("chatFeatureMentalModelHint")}
             >
               <strong>{lang === "zh" ? "心智" : t("chatFeatureMentalModel")}</strong>
               <em>{mentalModelEnabledForNextTurn ? (lang === "zh" ? "开" : "On") : (lang === "zh" ? "关" : "Off")}</em>
-            </button>
+            </VButton>
             {CHAT_FEATURE_PRESETS.map((item) => {
               const enabled = featurePresetState[item.key];
               const featureLabel = t(item.labelKey);
               return (
-                <button
+                <VButton
                   key={item.key}
                   type="button"
                   className={enabled ? `${styles.featureChip} ${styles.featureChipActive}` : styles.featureChip}
@@ -6716,7 +6717,7 @@ export function ChatCodingRoute() {
                 >
                   <strong>{chatFeaturePresetShortLabel(item.key, lang, featureLabel)}</strong>
                   <em>{enabled ? (lang === "zh" ? "开" : "On") : (lang === "zh" ? "关" : "Off")}</em>
-                </button>
+                </VButton>
               );
             })}
           </div>
@@ -6750,7 +6751,7 @@ export function ChatCodingRoute() {
 
               if (metric.key === "cache") {
                 return (
-                  <button
+                  <VButton
                     key={metric.key}
                     type="button"
                     className={`${metricClassName} ${styles.tokenStatusMetricButton}`}
@@ -6763,7 +6764,7 @@ export function ChatCodingRoute() {
                     title={metric.title}
                   >
                     {metricContent}
-                  </button>
+                  </VButton>
                 );
               }
 
@@ -6856,36 +6857,36 @@ export function ChatCodingRoute() {
               ))}
             </div>
             <div className={styles.petShowcaseActions} aria-label={petInteractionLabels.group}>
-              <button
+              <VButton
                 type="button"
                 className={styles.petShowcaseAction}
                 onClick={() => handlePetInteraction("feed")}
-                disabled={petActionMutation.isPending}
+                isDisabled={petActionMutation.isPending}
                 title={petInteractionLabels.feedTitle}
               >
                 <Apple size={14} />
                 <span>{petInteractionLabels.feed}</span>
-              </button>
-              <button
+              </VButton>
+              <VButton
                 type="button"
                 className={styles.petShowcaseAction}
                 onClick={() => handlePetInteraction("talk")}
-                disabled={petActionMutation.isPending}
+                isDisabled={petActionMutation.isPending}
                 title={petInteractionLabels.talkTitle}
               >
                 <MessageCircleHeart size={14} />
                 <span>{petInteractionLabels.talk}</span>
-              </button>
-              <button
+              </VButton>
+              <VButton
                 type="button"
                 className={styles.petShowcaseAction}
                 onClick={() => handlePetInteraction("care")}
-                disabled={petActionMutation.isPending}
+                isDisabled={petActionMutation.isPending}
                 title={petInteractionLabels.careTitle}
               >
                 <HeartHandshake size={14} />
                 <span>{petInteractionLabels.care}</span>
-              </button>
+              </VButton>
               <span className={styles.petShowcaseActionHint}>
                 <Sparkles size={13} />
                 <span>{petInteractionLabels.pending}</span>
@@ -6921,13 +6922,13 @@ export function ChatCodingRoute() {
             </Link>
           ) : null}
           {groupPanelActive ? (
-            <button
+            <VButton
               type="button"
               className={`${styles.tab} ${styles.tabActive}`}
               onClick={() => undefined}
             >
               {projectBusActive ? (lang === "zh" ? "通知流" : "Notice stream") : (lang === "zh" ? "群聊" : "Group")}
-            </button>
+            </VButton>
           ) : agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0 ? (
             <AgentSessionTabStrip
               activeSessionId={activeSessionId}
@@ -6965,7 +6966,7 @@ export function ChatCodingRoute() {
               onSubmitRename={submitRenameSession}
             />
           ) : (
-            <button
+            <VButton
               type="button"
               className={workspace.activeTab === "agent" ? `${styles.tab} ${styles.tabActive}` : styles.tab}
               onClick={() => {
@@ -6973,7 +6974,7 @@ export function ChatCodingRoute() {
               }}
             >
               {t("agentSession")}
-            </button>
+            </VButton>
           )}
           {!groupPanelActive && workspace.openTabs.map((tabPath) => (
             <div
@@ -6984,7 +6985,7 @@ export function ChatCodingRoute() {
                   : styles.fileTab
               }
             >
-              <button
+              <VButton
                 type="button"
                 className={styles.fileTabButton}
                 onClick={() => {
@@ -6992,8 +6993,8 @@ export function ChatCodingRoute() {
                 }}
               >
                 {tabPath.split("/").at(-1)}
-              </button>
-              <button
+              </VButton>
+              <VButton
                 type="button"
                 className={styles.fileTabClose}
                 onClick={() => activeSessionId && closePreviewTab(activeSessionId, tabPath)}
@@ -7001,7 +7002,7 @@ export function ChatCodingRoute() {
                 aria-label={`${t("closePreviewTab")} ${tabPath.split("/").at(-1)}`}
               >
                 <X size={14} />
-              </button>
+              </VButton>
             </div>
           ))}
         </div>
@@ -7058,14 +7059,14 @@ export function ChatCodingRoute() {
                     {lang === "zh" ? "全局广播与投递观察" : "broadcasts and delivery observation"}
                   </span>
                 </div>
-                <button
+                <VButton
                   type="button"
                   className={styles.groupRefreshButton}
                   onClick={() => void projectAgentBusQuery.refetch()}
-                  disabled={projectAgentBusQuery.isFetching}
+                  isDisabled={projectAgentBusQuery.isFetching}
                 >
                   {lang === "zh" ? "刷新" : "Refresh"}
-                </button>
+                </VButton>
               </header>
               {projectAgentBusQuery.isError ? (
                 <div className={styles.inlineNotice}>
@@ -7100,13 +7101,13 @@ export function ChatCodingRoute() {
                           <div className={styles.projectBusEventActions}>
                             <time>{formatTime(event.createdAt)}</time>
                             {event.createdBy === "user" && !revoked ? (
-                              <button
+                              <VButton
                                 type="button"
                                 onClick={() => handleRevokeProjectBusMessage(event.eventId)}
-                                disabled={revokeProjectBusMessageMutation.isPending}
+                                isDisabled={revokeProjectBusMessageMutation.isPending}
                               >
                                 {lang === "zh" ? "撤回" : "Recall"}
-                              </button>
+                              </VButton>
                             ) : null}
                           </div>
                         </header>
@@ -7255,10 +7256,10 @@ export function ChatCodingRoute() {
                   />
                   <span>{lang === "zh" ? "打断目标助手" : "Interrupt targets"}</span>
                 </label>
-                <button
+                <VButton
                   type="button"
                   onClick={handleSendProjectBusMessage}
-                  disabled={
+                  isDisabled={
                     !projectBusDraft.trim()
                     || sendProjectBusMessageMutation.isPending
                   }
@@ -7269,7 +7270,7 @@ export function ChatCodingRoute() {
                       ? (lang === "zh" ? "发送中" : "Sending")
                       : (lang === "zh" ? "发送广播" : "Send")}
                   </span>
-                </button>
+                </VButton>
               </div>
             </div>
           ) : legacyGroupRoomActive ? (
@@ -7288,14 +7289,14 @@ export function ChatCodingRoute() {
                     {statusLabel(activeGroupRoom?.status ?? "ready")}
                   </span>
                 </div>
-                <button
+                <VButton
                   type="button"
                   className={styles.groupRefreshButton}
                   onClick={() => activeGroupRoomId && void activeGroupRoomQuery.refetch()}
-                  disabled={activeGroupRoomQuery.isFetching}
+                  isDisabled={activeGroupRoomQuery.isFetching}
                 >
                   {lang === "zh" ? "刷新" : "Refresh"}
-                </button>
+                </VButton>
               </header>
               {activeGroupRoomQuery.isError ? (
                 <div className={styles.inlineNotice}>
@@ -7419,10 +7420,10 @@ export function ChatCodingRoute() {
                     }
                   }}
                 />
-                <button
+                <VButton
                   type="button"
                   onClick={handleStartGroupRound}
-                  disabled={
+                  isDisabled={
                     !groupTopicDraft.trim()
                     || startGroupRoundMutation.isPending
                     || groupRoundActive
@@ -7435,13 +7436,13 @@ export function ChatCodingRoute() {
                       ? (groupRoundStopping ? (lang === "zh" ? "停止中" : "Stopping") : (lang === "zh" ? "讨论中" : "Running"))
                       : (lang === "zh" ? "启动一轮" : "Run round")}
                   </span>
-                </button>
+                </VButton>
                 {groupRoundActive ? (
-                  <button
+                  <VButton
                     type="button"
                     className={styles.groupStopButton}
                     onClick={handleStopGroupRound}
-                    disabled={groupStopDisabled}
+                    isDisabled={groupStopDisabled}
                     title={lang === "zh" ? "停止当前群聊轮次" : "Stop current group round"}
                   >
                     <Square size={15} />
@@ -7450,7 +7451,7 @@ export function ChatCodingRoute() {
                         ? (lang === "zh" ? "停止中" : "Stopping")
                         : (lang === "zh" ? "停止" : "Stop")}
                     </span>
-                  </button>
+                  </VButton>
                 ) : null}
               </div>
             </div>
@@ -7527,23 +7528,23 @@ export function ChatCodingRoute() {
                         </div>
                       </div>
                       <div className={styles.toolApprovalActions}>
-                        <button
+                        <VButton
                           type="button"
                           onClick={() => resolveToolApprovalMutation.mutate({ request: pendingToolApproval, decision: "reject" })}
-                          disabled={pendingToolApprovalPending}
+                          isDisabled={pendingToolApprovalPending}
                         >
                           <X size={15} />
                           <span>{lang === "zh" ? "拒绝" : "Reject"}</span>
-                        </button>
-                        <button
+                        </VButton>
+                        <VButton
                           type="button"
                           className={styles.toolApprovalAllow}
                           onClick={() => resolveToolApprovalMutation.mutate({ request: pendingToolApproval, decision: "approve" })}
-                          disabled={pendingToolApprovalPending}
+                          isDisabled={pendingToolApprovalPending}
                         >
                           <ShieldCheck size={15} />
                           <span>{pendingToolApprovalPending ? (lang === "zh" ? "处理中" : "Resolving") : (lang === "zh" ? "允许" : "Allow")}</span>
-                        </button>
+                        </VButton>
                       </div>
                     </section>
                   </div>
@@ -7658,7 +7659,7 @@ export function ChatCodingRoute() {
             role="tablist"
             aria-label={lang === "zh" ? "右侧索引" : "Right index"}
           >
-            <button
+            <VButton
               type="button"
               role="tab"
               aria-selected={rightIndexPanel === "conversations"}
@@ -7667,8 +7668,8 @@ export function ChatCodingRoute() {
             >
               <MessageCircleHeart size={14} />
               <span>{lang === "zh" ? "会话" : "Chats"}</span>
-            </button>
-            <button
+            </VButton>
+            <VButton
               type="button"
               role="tab"
               aria-selected={rightIndexPanel === "members"}
@@ -7677,7 +7678,7 @@ export function ChatCodingRoute() {
             >
               <UsersRound size={14} />
               <span>{lang === "zh" ? "成员" : "Members"}</span>
-            </button>
+            </VButton>
           </div>
         ) : null}
 
@@ -7745,7 +7746,7 @@ export function ChatCodingRoute() {
                   return (
                     <article key={participant.participantId || participant.sessionId} className={styles.agentIndexCard}>
                       <div className={styles.agentIndexHeader}>
-                        <button
+                        <VButton
                           type="button"
                           className={styles.agentIndexExpandButton}
                           aria-expanded={expanded}
@@ -7760,8 +7761,8 @@ export function ChatCodingRoute() {
                             )}
                         >
                           <ChevronRight size={14} aria-hidden="true" />
-                        </button>
-                        <button
+                        </VButton>
+                        <VButton
                           type="button"
                           className={styles.agentIndexOpenButton}
                           onClick={() => handleOpenDirectSession(participant.sessionId)}
@@ -7786,7 +7787,7 @@ export function ChatCodingRoute() {
                               </span>
                             ) : null}
                           </span>
-                        </button>
+                        </VButton>
                         <span className={styles.agentIndexStatus}>
                           {statusLabel(participant.status || participantSession?.status || "ready")}
                         </span>
@@ -7854,25 +7855,25 @@ export function ChatCodingRoute() {
           ) : (
             <>
             <div className={styles.sessionActionRow}>
-              <button
+              <VButton
                 type="button"
                 className={styles.newSessionButton}
                 onClick={handleCreateSession}
-                disabled={createSessionMutation.isPending}
+                isDisabled={createSessionMutation.isPending}
               >
                 <Plus size={15} />
                 <span>{createSessionMutation.isPending ? t("creatingSession") : t("newSession")}</span>
-              </button>
-              <button
+              </VButton>
+              <VButton
                 type="button"
                 className={styles.newGroupButton}
                 onClick={handleToggleGroupComposer}
                 aria-expanded={groupComposerOpen}
-                disabled={createGroupRoomMutation.isPending}
+                isDisabled={createGroupRoomMutation.isPending}
               >
                 <UsersRound size={15} />
                 <span>{groupComposerOpen ? (lang === "zh" ? "收起" : "Close") : (lang === "zh" ? "新建群聊" : "New group")}</span>
-              </button>
+              </VButton>
             </div>
             {conversationIndexPanel}
             <section className={styles.systemEntryGroup} aria-label={lang === "zh" ? "系统入口" : "System entries"}>
@@ -7880,7 +7881,7 @@ export function ChatCodingRoute() {
                 <span>{lang === "zh" ? "系统入口" : "System"}</span>
                 <strong>1</strong>
               </div>
-              <button
+              <VButton
                 type="button"
                 aria-current={projectBusActive ? "true" : undefined}
                 className={
@@ -7902,7 +7903,7 @@ export function ChatCodingRoute() {
                     {lang === "zh" ? "全局广播 · 私信投递记录" : "Global broadcast · private delivery log"}
                   </span>
                 </span>
-              </button>
+              </VButton>
             </section>
             {groupComposerOpen ? (
               <section className={styles.groupComposerPanel} aria-label={lang === "zh" ? "新建群聊" : "New group chat"}>
@@ -7985,15 +7986,15 @@ export function ChatCodingRoute() {
                     <p className={styles.groupComposerEmpty}>{lang === "zh" ? "暂无可加入群聊的持久助手。" : "No persistent agents are available."}</p>
                   )}
                 </div>
-                <button
+                <VButton
                   type="button"
                   className={styles.createGroupButton}
                   onClick={handleCreateGroupRoom}
-                  disabled={createGroupRoomMutation.isPending || groupSelectedAgentIds.length < 2 || !groupTitleDraft.trim()}
+                  isDisabled={createGroupRoomMutation.isPending || groupSelectedAgentIds.length < 2 || !groupTitleDraft.trim()}
                 >
                   <UsersRound size={15} />
                   <span>{createGroupRoomMutation.isPending ? (lang === "zh" ? "创建中" : "Creating") : (lang === "zh" ? "创建群聊" : "Create group")}</span>
-                </button>
+                </VButton>
               </section>
             ) : null}
             </>
@@ -8015,14 +8016,14 @@ export function ChatCodingRoute() {
                 <p>{t("previousCacheHit")}</p>
                 <h3>{cacheDetailDialogTitle}</h3>
               </div>
-              <button
+              <VButton
                 type="button"
                 className={styles.cacheDetailCloseButton}
                 onClick={closeCacheDetail}
                 aria-label={lang === "zh" ? "关闭缓存详情" : "Close cache details"}
               >
                 <X size={16} />
-              </button>
+              </VButton>
             </header>
 
             <div className={styles.cacheDetailSummaryGrid}>

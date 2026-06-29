@@ -71,6 +71,7 @@ import {
   type PublicConfigShape,
 } from "./configRouteLogic";
 import { LazyJsonCodeMirror } from "../components/editor/LazyJsonCodeMirror";
+import { VButton } from "../components/vui";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import styles from "./ConfigRoute.module.css";
 
@@ -1124,10 +1125,10 @@ function LogHelperCenter({
               {healthStatusLabel(diagnostics.status, copy)}
             </span>
           ) : null}
-          <button type="button" className={styles.actionButton} onClick={onRefresh} disabled={loading}>
+          <VButton type="button" className={styles.actionButton} onClick={onRefresh} isDisabled={loading}>
             <RefreshCw size={14} />
             {copy.healthRefresh}
-          </button>
+          </VButton>
         </div>
       </div>
       {loading && !diagnostics ? <p className={styles.helperText}>{copy.healthLoading}</p> : null}
@@ -1781,15 +1782,15 @@ function ConfigSectionEditor({
                 />
               </label>
               {getString(fieldValue) ? (
-                <button
+                <VButton
                   type="button"
                   className={`${styles.actionButton} ${styles.compactButton}`}
-                  disabled={disabled || imageUploading}
+                  isDisabled={disabled || imageUploading}
                   onClick={() => updateSectionDraft(absolutePath, "")}
                 >
                   <X size={14} />
                   {copy.clearThemeBackgroundImage}
-                </button>
+                </VButton>
               ) : null}
             </div>
           </div>
@@ -1802,12 +1803,12 @@ function ConfigSectionEditor({
                 const optionPreviewUrl = themeBackgroundImagePreviewUrl(option.value);
                 const active = currentPath === option.value;
                 return (
-                  <button
+                  <VButton
                     key={option.value}
                     type="button"
                     className={styles.themeBackgroundPresetButton}
                     data-active={active ? "true" : undefined}
-                    disabled={disabled || imageUploading}
+                    isDisabled={disabled || imageUploading}
                     aria-pressed={active}
                     title={option.label}
                     onClick={() => updateSectionDraft(absolutePath, option.value)}
@@ -1815,7 +1816,7 @@ function ConfigSectionEditor({
                     {optionPreviewUrl ? <img src={optionPreviewUrl} alt="" /> : <ImageIcon size={14} />}
                     <span>{option.label}</span>
                     {active ? <em>{lang === "zh" ? "当前" : "Current"}</em> : null}
-                  </button>
+                  </VButton>
                 );
               })}
             </div>
@@ -2019,26 +2020,26 @@ function ConfigSectionEditor({
                 />
               </label>
               <div className={styles.avatarImageActions}>
-                <button
+                <VButton
                   type="button"
                   className={`${styles.primaryButton} ${styles.compactButton}`}
-                  disabled={disabled || imageUploading}
+                  isDisabled={disabled || imageUploading}
                   onClick={() => {
                     void confirmAvatarCrop();
                   }}
                 >
                   <Save size={14} />
                   {imageUploading ? copy.avatarImageUploading : copy.avatarCropConfirm}
-                </button>
-                <button
+                </VButton>
+                <VButton
                   type="button"
                   className={`${styles.actionButton} ${styles.compactButton}`}
-                  disabled={disabled || imageUploading}
+                  isDisabled={disabled || imageUploading}
                   onClick={cancelAvatarCrop}
                 >
                   <X size={14} />
                   {copy.avatarCropCancel}
-                </button>
+                </VButton>
               </div>
             </div>
           ) : null}
@@ -2067,15 +2068,15 @@ function ConfigSectionEditor({
               />
             </label>
             {getString(fieldValue) ? (
-              <button
+              <VButton
                 type="button"
                 className={`${styles.actionButton} ${styles.compactButton}`}
-                disabled={disabled || imageUploading}
+                isDisabled={disabled || imageUploading}
                 onClick={() => updateSectionDraft(absolutePath, "")}
               >
                 <X size={14} />
                 {copy.clearAvatarImage}
-              </button>
+              </VButton>
             ) : null}
           </div>
           {avatarCropError ? <p className={styles.inlineError}>{avatarCropError}</p> : null}
@@ -2199,7 +2200,7 @@ function ConfigSectionEditor({
     const expanded = Boolean(expandedPaths[absolutePath]);
     return (
       <div className={styles.treeObjectBlock}>
-        <button
+        <VButton
           type="button"
           className={styles.treeToggle}
           aria-expanded={expanded}
@@ -2213,7 +2214,7 @@ function ConfigSectionEditor({
             </div>
           </div>
           <span className={styles.inlineBadge}>{count}</span>
-        </button>
+        </VButton>
         {expanded ? <div className={styles.treeBody}>{children}</div> : null}
       </div>
     );
@@ -2342,7 +2343,7 @@ function ConfigSectionEditor({
             <span className={styles.inlineBadge}>{section.fieldCount}</span>
           </div>
           <div className={styles.sectionToolbarGroup}>
-            <button
+            <VButton
               type="button"
               className={`${styles.actionButton} ${styles.compactButton} ${styles.toolbarButton}`}
               aria-expanded={sectionExpanded}
@@ -2350,22 +2351,22 @@ function ConfigSectionEditor({
             >
               <ChevronRight size={14} className={sectionExpanded ? styles.treeToggleIconExpanded : styles.treeToggleIcon} />
               {sectionExpanded ? copy.collapseSection : copy.expandSection}
-            </button>
+            </VButton>
           {editing ? (
             <>
-              <button
+              <VButton
                 type="button"
                 className={`${styles.primaryButton} ${styles.compactButton} ${styles.toolbarButton}`}
-                disabled={disabled}
+                isDisabled={disabled}
                 onClick={handleSave}
               >
                 <Save size={14} />
                 {copy.saveSection}
-              </button>
-              <button
+              </VButton>
+              <VButton
                 type="button"
                 className={`${styles.actionButton} ${styles.compactButton} ${styles.toolbarButton}`}
-                disabled={disabled}
+                isDisabled={disabled}
                 onClick={() => {
                   onUiStateChange(section.id, {
                     ...uiState,
@@ -2377,13 +2378,13 @@ function ConfigSectionEditor({
               >
                 <RotateCcw size={14} />
                 {copy.cancelSection}
-              </button>
+              </VButton>
             </>
           ) : (
-            <button
+            <VButton
               type="button"
               className={`${styles.actionButton} ${styles.compactButton} ${styles.toolbarButton}`}
-              disabled={disabled}
+              isDisabled={disabled}
               onClick={() => {
                 onUiStateChange(section.id, {
                   ...uiState,
@@ -2395,7 +2396,7 @@ function ConfigSectionEditor({
             >
               <Pencil size={14} />
               {copy.editSection}
-            </button>
+            </VButton>
           )}
           </div>
         </div>
@@ -3422,23 +3423,23 @@ export function ConfigRoute() {
               <p className={styles.helperText}>{sidebarApplyHint}</p>
             </div>
             <div className={styles.leaveGuardActions}>
-              <button
+              <VButton
                 type="button"
                 className={styles.primaryButton}
-                disabled={!canSaveConfig || Boolean(busyAction)}
+                isDisabled={!canSaveConfig || Boolean(busyAction)}
                 onClick={() => {
                   void handleSaveAndLeave();
                 }}
               >
                 <Save size={14} />
                 {leaveGuardSaveLabel}
-              </button>
-              <button type="button" className={styles.dangerButton} disabled={Boolean(busyAction)} onClick={handleDiscardAndLeave}>
+              </VButton>
+              <VButton type="button" className={styles.dangerButton} isDisabled={Boolean(busyAction)} onClick={handleDiscardAndLeave}>
                 {copy.leaveGuardDiscard}
-              </button>
-              <button type="button" className={styles.actionButton} disabled={Boolean(busyAction)} onClick={handleCancelLeave}>
+              </VButton>
+              <VButton type="button" className={styles.actionButton} isDisabled={Boolean(busyAction)} onClick={handleCancelLeave}>
                 {copy.leaveGuardCancel}
-              </button>
+              </VButton>
             </div>
           </section>
         </div>
@@ -3479,17 +3480,17 @@ export function ConfigRoute() {
               <strong>{visibleSidebarGroups.length}</strong>
             </span>
           </div>
-          <button
+          <VButton
             type="button"
             className={`${styles.primaryButton} ${styles.buttonBlock}`}
-            disabled={!canSaveConfig}
+            isDisabled={!canSaveConfig}
             onClick={() => {
               void handleApply();
             }}
           >
             <Save size={14} />
             {saveButtonLabel}
-          </button>
+          </VButton>
           <span className={styles.helperText}>{sidebarApplyHint}</span>
         </div>
 
@@ -3501,7 +3502,7 @@ export function ConfigRoute() {
             </div>
             <div className={styles.sidebarPanelActions}>
               <span className={styles.inlineBadge}>{visibleSidebarGroups.length}</span>
-              <button
+              <VButton
                 type="button"
                 className={`${styles.actionButton} ${styles.compactButton} ${styles.sidebarPanelToggle}`}
                 aria-expanded={!sidebarIndexCollapsed}
@@ -3509,13 +3510,13 @@ export function ConfigRoute() {
               >
                 <ChevronRight size={14} className={sidebarIndexCollapsed ? styles.treeToggleIcon : styles.treeToggleIconExpanded} />
                 {sectionIndexToggleLabel}
-              </button>
+              </VButton>
             </div>
           </div>
           {sidebarIndexCollapsed ? null : (
             <nav className={styles.sectionNav} aria-label="config sections">
                 {visibleSidebarGroups.map((section) => (
-                  <button
+                  <VButton
                     key={section.id}
                     type="button"
                     className={
@@ -3528,7 +3529,7 @@ export function ConfigRoute() {
                   >
                     <span>{section.title}</span>
                     <span className={styles.inlineBadge}>{section.memberSectionIds.length}</span>
-                  </button>
+                  </VButton>
                 ))}
               </nav>
             )}
@@ -3616,30 +3617,30 @@ export function ConfigRoute() {
             </article>
           </div>
           <div className={styles.actionsRow}>
-            <button type="button" className={styles.actionButton} disabled={Boolean(busyAction)} onClick={reloadWorkspace}>
+            <VButton type="button" className={styles.actionButton} isDisabled={Boolean(busyAction)} onClick={reloadWorkspace}>
               <RefreshCw size={14} />
               {copy.refresh}
-            </button>
-            <button
+            </VButton>
+            <VButton
               type="button"
               className={styles.actionButton}
-              disabled={Boolean(busyAction)}
+              isDisabled={Boolean(busyAction)}
               title={copy.openEnvironmentHint}
               onClick={handleOpenEnvironment}
             >
               <ExternalLink size={14} />
               {busyAction === copy.openEnvironmentPending ? copy.openEnvironmentPending : copy.openEnvironment}
-            </button>
-            <button
+            </VButton>
+            <VButton
               type="button"
               className={styles.actionButton}
-              disabled={!canRestoreEditorText}
+              isDisabled={!canRestoreEditorText}
               title={copy.editorRestoreHint}
               onClick={restoreEditorText}
             >
               <RotateCcw size={14} />
               {copy.resetDraft}
-            </button>
+            </VButton>
           </div>
           <details className={styles.rawConfigPanel}>
             <summary>{copy.rawToml}</summary>
@@ -3664,7 +3665,7 @@ export function ConfigRoute() {
               <p className={styles.matrixTitle}>{copy.intakeMode}</p>
               <div className={styles.segmented}>
                 {(["manual_review", "auto"] as const).map((mode) => (
-                  <button
+                  <VButton
                     key={mode}
                     type="button"
                     className={
@@ -3672,7 +3673,7 @@ export function ConfigRoute() {
                         ? `${styles.segmentButton} ${styles.segmentButtonActive}`
                         : styles.segmentButton
                     }
-                    disabled={structuredActionsDisabled}
+                    isDisabled={structuredActionsDisabled}
                     onClick={() =>
                       updateSimpleDraft((next) => {
                         const evolution = asRecord(next.evolution);
@@ -3682,7 +3683,7 @@ export function ConfigRoute() {
                     }
                   >
                     {intakeLabel(mode)}
-                  </button>
+                  </VButton>
                 ))}
               </div>
             </article>
@@ -3723,26 +3724,26 @@ export function ConfigRoute() {
                 ))}
               </select>
             </label>
-            <button
+            <VButton
               type="button"
               className={styles.primaryButton}
-              disabled={structuredActionsDisabled || busyAction === copy.testPending || !selectedModelTestId}
+              isDisabled={structuredActionsDisabled || busyAction === copy.testPending || !selectedModelTestId}
               title={selectedModelTestId ? copy.testSelectedLibraryModel : copy.modelTestRequired}
               onClick={handleTestSelectedLibraryModel}
             >
               <Play size={14} />
               {busyAction === copy.testPending ? copy.testPending : copy.testSelectedLibraryModel}
-            </button>
-            <button
+            </VButton>
+            <VButton
               type="button"
               className={styles.actionButton}
-              disabled={structuredActionsDisabled || busyAction === copy.imageCapabilityCheckPending || !selectedModelTestId}
+              isDisabled={structuredActionsDisabled || busyAction === copy.imageCapabilityCheckPending || !selectedModelTestId}
               title={selectedModelTestId ? copy.checkSavedImageCapabilities : copy.modelTestRequired}
               onClick={() => void handleCheckModelImageCapabilities([selectedModelTestId])}
             >
               <ImageIcon size={14} />
               {busyAction === copy.imageCapabilityCheckPending ? copy.imageCapabilityCheckPending : copy.checkSavedImageCapabilities}
-            </button>
+            </VButton>
           </div>
           <div ref={modelEditorRef} className={styles.formSurface} onChange={() => (modelEditorError ? setModelEditorError("") : undefined)}>
             <div className={styles.formHeader}>
@@ -3750,16 +3751,16 @@ export function ConfigRoute() {
                 <Pencil size={16} />
                 <span>{modelEditor.mode === "edit" ? copy.modelEditorEdit : copy.modelEditorCreate}</span>
               </div>
-              <button
+              <VButton
                 type="button"
                 className={`${styles.actionButton} ${styles.compactButton}`}
                 aria-expanded={modelEditorExpanded}
-                disabled={structuredActionsDisabled}
+                isDisabled={structuredActionsDisabled}
                 onClick={() => setModelEditorExpanded((current) => !current)}
               >
                 <ChevronRight size={14} className={modelEditorExpanded ? styles.treeToggleIconExpanded : styles.treeToggleIcon} />
                 {modelEditorExpanded ? copy.collapseSection : copy.expandSection}
-              </button>
+              </VButton>
             </div>
             {modelEditorExpanded ? (
               <>
@@ -3769,7 +3770,7 @@ export function ConfigRoute() {
                       <span>{copy.modelScenario}</span>
                       <div className={styles.modelScenarioButtons}>
                         {modelScenarioOptions.map((scenario) => (
-                          <button
+                          <VButton
                             key={scenario.id}
                             type="button"
                             className={styles.actionButton}
@@ -3777,7 +3778,7 @@ export function ConfigRoute() {
                           >
                             {scenario.id === "image" ? <ImageIcon size={14} /> : <Blocks size={14} />}
                             {scenario.label}
-                          </button>
+                          </VButton>
                         ))}
                       </div>
                     </div>
@@ -3871,16 +3872,16 @@ export function ConfigRoute() {
                 <p className={styles.fieldHint}>{copy.keyStorageHint}</p>
 
                 <div className={styles.actionsRow}>
-                  <button
+                  <VButton
                     type="button"
                     className={styles.actionButton}
-                    disabled={structuredActionsDisabled || busyAction === copy.discoveryPending || !modelDiscoveryAvailable}
+                    isDisabled={structuredActionsDisabled || busyAction === copy.discoveryPending || !modelDiscoveryAvailable}
                     title={modelDiscoveryAvailable ? copy.discoverModels : copy.discoveryUnavailable}
                     onClick={handleDiscoverModels}
                   >
                     <RefreshCw size={14} />
                     {busyAction === copy.discoveryPending ? copy.discoveryPending : copy.discoverModels}
-                  </button>
+                  </VButton>
                   {!modelDiscoveryAvailable && modelEditor.provider.base_url.trim() ? (
                     <span className={styles.helperText}>{copy.discoveryUnavailable}</span>
                   ) : null}
@@ -4219,20 +4220,20 @@ export function ConfigRoute() {
                 <p className={styles.fieldHint}>{copy.deleteModelHint}</p>
 
                 <div className={styles.actionsRow}>
-                  <button
+                  <VButton
                     type="button"
                     className={styles.primaryButton}
-                    disabled={!canSubmitModelEditor}
+                    isDisabled={!canSubmitModelEditor}
                     title={modelEditorRequiredFieldsReady ? undefined : copy.modelRequiredFieldsMissing}
                     onClick={handleSaveModel}
                   >
                     <Save size={14} />
                     {copy.saveModel}
-                  </button>
-                  <button
+                  </VButton>
+                  <VButton
                     type="button"
                     className={styles.actionButton}
-                    disabled={structuredActionsDisabled}
+                    isDisabled={structuredActionsDisabled}
                       onClick={() => {
                         setModelEditorError("");
                         setModelEditor(emptyModelEditorState());
@@ -4241,17 +4242,17 @@ export function ConfigRoute() {
                   >
                     <RotateCcw size={14} />
                     {copy.cancelEditing}
-                  </button>
+                  </VButton>
                   {modelEditor.mode === "edit" ? (
-                    <button
+                    <VButton
                       type="button"
                       className={styles.dangerButton}
-                      disabled={structuredActionsDisabled}
+                      isDisabled={structuredActionsDisabled}
                       onClick={() => handleDeleteModel(modelEditor.model_id)}
                     >
                       <Trash2 size={14} />
                       {copy.deleteModel}
-                    </button>
+                    </VButton>
                   ) : null}
                 </div>
                 {modelEditorError ? (
@@ -4326,10 +4327,10 @@ export function ConfigRoute() {
                       </td>
                       <td>
                         <div className={styles.profileTableActions}>
-                          <button
+                          <VButton
                             type="button"
                             className={`${styles.actionButton} ${styles.compactButton}`}
-                            disabled={structuredActionsDisabled || !row.editable || !option}
+                            isDisabled={structuredActionsDisabled || !row.editable || !option}
                             onClick={() => {
                               if (!option) {
                                 return;
@@ -4342,16 +4343,16 @@ export function ConfigRoute() {
                           >
                             <Pencil size={14} />
                             {copy.modelEditorEdit}
-                          </button>
-                          <button
+                          </VButton>
+                          <VButton
                             type="button"
                             className={`${styles.dangerButton} ${styles.compactButton}`}
-                            disabled={structuredActionsDisabled || !row.deletable}
+                            isDisabled={structuredActionsDisabled || !row.deletable}
                             onClick={() => handleDeleteModel(row.modelId)}
                           >
                             <Trash2 size={14} />
                             {copy.deleteModel}
-                          </button>
+                          </VButton>
                         </div>
                       </td>
                     </tr>
@@ -4391,20 +4392,20 @@ export function ConfigRoute() {
           </div>
           <p className={styles.sectionText}>{copy.draftBody}</p>
           <div className={styles.actionsRow}>
-            <button type="button" className={styles.actionButton} disabled={!canCheckCurrentChanges} onClick={handleValidateEditorDraft}>
+            <VButton type="button" className={styles.actionButton} isDisabled={!canCheckCurrentChanges} onClick={handleValidateEditorDraft}>
               <RefreshCw size={14} />
               {copy.validateDraft}
-            </button>
-            <button
+            </VButton>
+            <VButton
               type="button"
               className={styles.actionButton}
-              disabled={!canRestoreEditorText}
+              isDisabled={!canRestoreEditorText}
               title={copy.editorRestoreHint}
               onClick={restoreEditorText}
             >
               <RotateCcw size={14} />
               {copy.resetDraft}
-            </button>
+            </VButton>
             <span className={styles.helperText}>{hasEditorChanges ? copy.editorDirtyHint : copy.editorCleanHint}</span>
           </div>
           <div className={styles.editorWrap}>
