@@ -804,6 +804,7 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "plan_update_tool",
             "open_evolution_transaction_tool",
             "close_evolution_transaction_tool",
+            "get_evolution_fitness_tool",
             "update_diagnosis_rules_tool",
             "update_self_model_tool",
             "record_evolution_tool",
