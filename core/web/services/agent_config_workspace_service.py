@@ -17,6 +17,7 @@ from . import chat_room_service, config_service
 from .agent_directory_service import agent_persona_profile_has_content
 from .agent_directory_service import agent_task_profile_has_content
 from .agent_directory_service import AGENT_LLM_BINDING_SLOTS
+from .agent_directory_service import RESEARCH_SOURCE_ROLE_KEYS as SOURCE_COLLECTION_RESEARCH_SOURCE_ROLE_KEYS
 from .agent_directory_service import SESSION_AGENT_VISIBILITY_PENDING
 from .agent_directory_service import _session_workspace_has_activity
 from .agent_directory_service import agent_dialogue_model_id
@@ -91,12 +92,13 @@ MUTATING_AGENT_TOOLS = {
     "run_test_for_tool",
     "python_lint_tool",
 }
-RESEARCH_SOURCE_ROLE_KEYS = {
+AI_SEARCH_SOURCE_ROLE_KEYS = {
     "ai_search_scope_lead",
     "global_primary_sources",
     "cn_primary_sources",
     "signal_quality_gate",
 }
+RESEARCH_SOURCE_ROLE_KEYS = set(SOURCE_COLLECTION_RESEARCH_SOURCE_ROLE_KEYS) | AI_SEARCH_SOURCE_ROLE_KEYS
 TOOL_NAME_PATTERN = re.compile(r"\b[a-z][a-z0-9_]*_tool\b")
 TOOL_NEGATION_PREFIXES = (
     "不调用",

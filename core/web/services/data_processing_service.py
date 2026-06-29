@@ -22,6 +22,10 @@ ASSIGNMENT_STATUSES = {"open", "in_progress", "completed", "returned", "cancelle
 OUTPUT_STATUSES = {"completed", "returned", "partial", "failed"}
 COLLECTION_AGENT_ROLES = {
     "data_intake_coordinator",
+    "source_finder",
+    "source_extractor",
+    "source_relation_mapper",
+    "source_ingestor",
     "source_intake",
     "data_discovery",
     "source_acquisition",
@@ -373,6 +377,10 @@ def _generic_document_processing_profile() -> dict[str, Any]:
         ],
         "collectionRoles": [
             {"agentRole": "data_intake_coordinator", "purpose": "Owns run scope, assigns collection work, and monitors status."},
+            {"agentRole": "source_finder", "purpose": "Finds, fetches, downloads, and registers traceable source records."},
+            {"agentRole": "source_extractor", "purpose": "Extracts useful content and reviews source quality in one pass."},
+            {"agentRole": "source_relation_mapper", "purpose": "Builds candidate-only topic, source, and evidence relationships."},
+            {"agentRole": "source_ingestor", "purpose": "Performs final governed ingestion into formal team knowledge."},
             {"agentRole": "source_intake", "purpose": "Finds network sources and imports local workspace sources under the run scope."},
             {"agentRole": "data_discovery", "purpose": "Finds candidate source references under the run scope."},
             {"agentRole": "source_acquisition", "purpose": "Acquires files, URLs, API references, or local source handles."},

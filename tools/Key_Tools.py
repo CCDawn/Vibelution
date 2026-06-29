@@ -585,14 +585,14 @@ def create_key_tools() -> List[BaseTool]:
 
         该工具不联网、不读取任意本地文件、不消耗 API 额度；只返回指定 team/run/task
         已落盘到平台工作流中的 DataRecord、source_manifest 候选、任务合同和边界摘要。
-        适合资料提炼、资料审查、候选图谱和知识库管理员 在私聊阶段任务中使用。
+        适合资料寻找、资料提炼、资料关系整理和资料入库 Agent 在私聊阶段任务中使用。
         已被确认无有效内容的来源会从 records 中移出，并通过 excludedSourceSummary 汇总；
         不要把这些来源重新当作待补资料处理。
 
         Args:
             team_id: 团队 ID，阶段任务消息中的 teamId
             run_id: 资料搜集运行 ID，阶段任务消息中的 runId
-            stage_id: 阶段 ID，可选 collection/candidate/screening/graph/memory
+            stage_id: 阶段 ID，可选 finding/extraction/relations/ingestion
             task_id: 阶段任务 ID；传入后会自动补齐 run/stage
             max_records: 最多返回多少条资料记录，默认 5，上限由后端限制
             include_candidates: 是否返回本轮已导入的 source_manifest 候选

@@ -9,6 +9,7 @@ from core.agent_kernel import service as agent_kernel_service
 from core.runtime_manager.work_run_store import WorkRunStore
 from core.web.services import (
     agent_directory_service,
+    agent_role_tool_profile_service,
     chat_room_service,
     data_processing_service,
     project_agent_bus_service,
@@ -27,28 +28,47 @@ def test_source_collection_stage_round_sync_has_single_implementation():
 
     assert source.count("def _sync_source_collection_stage_round_after_search(") == 1
 
+def test_source_collection_agent_role_registries_only_include_four_stage_roles():
+    expected = {"source_finder", "source_extractor", "source_relation_mapper", "source_ingestor"}
+    retired = {
+        "challenge_cup_data_discovery",
+        "challenge_cup_content_extraction",
+        "challenge_cup_source_quality",
+        "knowledge_expansion_content_extraction",
+        "knowledge_expansion_source_quality",
+        "knowledge_expansion_candidate_graph",
+        "candidate_graph",
+    }
 
-def test_source_collection_formal_knowledge_boundary_requires_steward_memory_stage():
+    assert agent_directory_service.RESEARCH_SOURCE_ROLE_KEYS == expected
+    assert agent_role_tool_profile_service.RESEARCH_SOURCE_ROLE_KEYS == expected
+    assert retired.isdisjoint(agent_directory_service.RESEARCH_SOURCE_ROLE_KEYS)
+    assert retired.isdisjoint(agent_role_tool_profile_service.RESEARCH_SOURCE_ROLE_KEYS)
+    for role_key in retired:
+        assert agent_role_tool_profile_service.get_role_tool_profile(role_key) is None
+
+
+def test_source_collection_formal_knowledge_boundary_requires_source_ingestor_stage():
     assert team_workflow_orchestration_service._source_collection_stage_can_materialize_formal_knowledge(
-        "memory",
-        "knowledge_steward",
+        "ingestion",
+        "source_ingestor",
     ) is True
     assert team_workflow_orchestration_service._source_collection_stage_can_materialize_formal_knowledge(
-        "memory",
-        "content_extraction",
+        "ingestion",
+        "source_extractor",
     ) is False
     assert team_workflow_orchestration_service._source_collection_stage_can_materialize_formal_knowledge(
-        "candidate",
-        "knowledge_steward",
+        "extraction",
+        "source_ingestor",
     ) is False
 
     contract = team_workflow_orchestration_service._source_collection_stage_task_writeback_contract(
         "team-boundary",
         "run-boundary",
         "task-boundary",
-        stage_id="memory",
+        stage_id="ingestion",
         agent_id="content-agent",
-        agent_role="content_extraction",
+        agent_role="source_extractor",
     )
     assert contract["writesFormalKnowledge"] is False
     assert contract["writesOfficialGraph"] is False
@@ -63,7 +83,7 @@ def test_source_collection_summary_reuses_processing_status_for_projection(tmp_p
         team["teamId"],
         {
             "topic": "predictive coding",
-            "agentRoles": ["data_discovery"],
+            "agentRoles": ["source_finder"],
             "querySeeds": ["predictive coding"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -999,8 +1019,8 @@ def test_extract_source_collection_candidates_imports_records_and_closes_extract
     data_processing_service.create_collection_assignment(
         run["runId"],
         {
-            "agentRole": "content_extraction",
-            "agentId": "content-extraction-agent",
+            "agentRole": "source_extractor",
+            "agentId": "source-extractor-agent",
             "scope": {"topic": "predictive coding"},
             "expectedRecordTypes": ["source_manifest"],
         },
@@ -1028,7 +1048,7 @@ def test_extract_source_collection_candidates_imports_records_and_closes_extract
         team["teamId"],
         {
             "runId": run["runId"],
-            "extractionAgentId": "content-extraction-agent",
+            "extractionAgentId": "source-extractor-agent",
             "maxRecords": 10,
         },
     )
@@ -1036,7 +1056,7 @@ def test_extract_source_collection_candidates_imports_records_and_closes_extract
         team["teamId"],
         {
             "runId": run["runId"],
-            "extractionAgentId": "content-extraction-agent",
+            "extractionAgentId": "source-extractor-agent",
             "maxRecords": 10,
             "force": True,
         },
@@ -1078,7 +1098,7 @@ def test_extract_source_collection_candidates_keeps_assignment_open_when_batch_i
     )
     data_processing_service.create_collection_assignment(
         run["runId"],
-        {"agentRole": "content_extraction", "agentId": "content-extraction-agent"},
+        {"agentRole": "source_extractor", "agentId": "source-extractor-agent"},
     )
     for index in range(2):
         data_processing_service.add_record(
@@ -1094,7 +1114,7 @@ def test_extract_source_collection_candidates_keeps_assignment_open_when_batch_i
         team["teamId"],
         {
             "runId": run["runId"],
-            "extractionAgentId": "content-extraction-agent",
+            "extractionAgentId": "source-extractor-agent",
             "maxRecords": 1,
         },
     )
@@ -1117,7 +1137,7 @@ def test_start_source_collection_run_creates_generic_run_and_assignments(tmp_pat
             "goal": "Collect sources about neural gating.",
             "topic": "neural gating",
             "requestedByAgent": "Research Coordination Agent",
-            "agentRoles": ["data_discovery", "source_acquisition", "content_extraction"],
+            "agentRoles": ["source_finder", "source_extractor", "source_relation_mapper", "source_ingestor"],
             "inputRefs": ["seed-query:neural gating"],
         },
     )
@@ -1141,27 +1161,113 @@ def test_start_source_collection_run_creates_generic_run_and_assignments(tmp_pat
     assert response["run"]["scope"]["promptCachePolicyRef"]["gateStatus"] == "satisfied"
     assert response["run"]["metadata"]["promptCacheMode"] == "explicit_cache_control"
     assert response["searchPlan"]["resultWritebackContract"]["formalKnowledgeWrites"] is False
-    assert response["assignmentCount"] == 3
-    assert {item["agentRole"] for item in response["assignments"]} == {"data_discovery", "source_acquisition", "content_extraction"}
+    expected_roles = {"source_finder", "source_extractor", "source_relation_mapper", "source_ingestor"}
+    assert response["assignmentCount"] == 4
+    assert {item["agentRole"] for item in response["assignments"]} == expected_roles
     assert all(item["inputRefs"] == ["seed-query:neural gating"] for item in response["assignments"])
     assert all(item["scope"]["dataSearchPlanRef"]["planId"] == response["searchPlan"]["planId"] for item in response["assignments"])
-    assert all(item["scope"]["assignedQueries"] for item in response["assignments"])
+    assignment_by_role = {item["agentRole"]: item for item in response["assignments"]}
+    assert assignment_by_role["source_finder"]["scope"]["assignedQueries"]
+    assert assignment_by_role["source_extractor"]["scope"]["assignedQueries"] == []
+    assert assignment_by_role["source_relation_mapper"]["scope"]["assignedQueries"] == []
+    assert assignment_by_role["source_ingestor"]["scope"]["assignedQueries"] == []
     assert all(item["scope"]["promptCachePolicyRef"]["gateStatus"] == "satisfied" for item in response["assignments"])
     assert all(item["scope"]["promptCachePartition"].startswith("research-team-") for item in response["assignments"])
     assert all(item["execution"]["promptCacheRequired"] is True for item in response["searchPlan"]["queries"])
+    assert {item["assignedAgentRole"] for item in response["searchPlan"]["queries"]} == {"source_finder"}
     assert all(item["execution"]["promptCachePartition"].startswith("research-team-") for item in response["searchPlan"]["queries"])
     assert all(item["scope"]["resultWritebackContract"]["ragWrites"] is False for item in response["assignments"])
-    assert assignments["summary"]["assignmentCount"] == 3
+    assert assignments["summary"]["assignmentCount"] == 4
     assert run_status["boundaries"]["writesFormalKnowledge"] is False
     assert response["workflow"]["activeWorkflowItems"][0]["candidateId"] == response["run"]["runId"]
     assert response["workflow"]["activeWorkflowItems"][0]["status"] == "source_collection_started"
+
+def test_knowledge_expansion_team_agents_purge_legacy_source_role_agents(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    legacy_agent = agent_directory_service.create_agent_instance(
+        display_name="旧资料质检",
+        created_by=team_service.KNOWLEDGE_EXPANSION_TEAM_AGENT_CREATED_BY,
+        role_key="knowledge_expansion_source_quality",
+        metadata={
+            "knowledgeExpansionTeamId": team_service.KNOWLEDGE_EXPANSION_TEAM_ID,
+            "knowledgeExpansionTeamManagedVersion": 1,
+            "knowledgeExpansionTeamRole": "source_quality",
+            "knowledgeExpansionTeamRoleKey": "knowledge_expansion_source_quality",
+        },
+    )
+
+    result = team_service.ensure_knowledge_expansion_team_agents(purge_stale=True)
+    team = result["team"]
+
+    assert legacy_agent["agentId"] in result["purgedAgentIds"]
+    assert agent_directory_service.get_agent(legacy_agent["agentId"], include_archived=True) is None
+    assert [member["role"] for member in team["members"]] == [
+        "source_finder",
+        "source_extractor",
+        "source_relation_mapper",
+        "source_ingestor",
+    ]
+
+
+def test_challenge_cup_team_agents_purge_legacy_source_role_agents(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    legacy_agent = agent_directory_service.create_agent_instance(
+        display_name="旧资料发现",
+        created_by=team_service.CHALLENGE_CUP_RESEARCH_TEAM_AGENT_CREATED_BY,
+        role_key="challenge_cup_data_discovery",
+        metadata={
+            "challengeCupTeamId": team_service.CHALLENGE_CUP_RESEARCH_TEAM_ID,
+            "challengeCupTeamManagedVersion": 1,
+            "challengeCupTeamRole": "data_discovery",
+            "challengeCupTeamRoleKey": "challenge_cup_data_discovery",
+        },
+    )
+
+    result = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+    roles = {member["role"] for member in result["team"]["members"]}
+
+    assert legacy_agent["agentId"] in result["purgedAgentIds"]
+    assert agent_directory_service.get_agent(legacy_agent["agentId"], include_archived=True) is None
+    assert {"source_finder", "source_extractor", "source_relation_mapper", "source_ingestor"} <= roles
+    assert "data_discovery" not in roles
+
+
+def test_legacy_source_collection_stage_tasks_are_rejected(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="旧资料质检")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="旧资料质检")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "source_quality", "agentName": "旧资料质检"}],
+    )
+    stage_response = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {
+            "stageType": "knowledge_collection",
+            "topic": "预测编码资料审查",
+            "agentRoles": ["source_quality"],
+            "agentIds": {"source_quality": agent["agentId"]},
+            "querySeeds": ["predictive coding source review"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = stage_response["run"]["runId"]
+
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError, match="Unsupported source collection stage"):
+        team_workflow_orchestration_service.start_source_collection_stage_session_task(
+            team["teamId"],
+            run_id,
+            {"stageId": "screening", "agentId": agent["agentId"], "agentRole": "source_quality"},
+        )
 
 
 def test_start_source_collection_run_imports_local_workspace_sources_for_knowledge_expansion(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     result = team_service.ensure_knowledge_expansion_team_agents(purge_stale=True)
     team = result["team"]
-    source_member = next(member for member in team["members"] if member["role"] == "source_intake")
+    source_member = next(member for member in team["members"] if member["role"] == "source_finder")
     source_file = tmp_path / "workspace" / "knowledge" / "notes" / "predictive-coding.md"
     source_file.parent.mkdir(parents=True, exist_ok=True)
     source_file.write_text(
@@ -1177,8 +1283,8 @@ def test_start_source_collection_run_imports_local_workspace_sources_for_knowled
             "collectionMode": "local_workspace",
             "topic": "predictive coding",
             "goal": "扩充团队知识库",
-            "agentRoles": ["source_intake", "content_extraction", "source_quality"],
-            "agentIds": {"source_intake": source_member["agentId"]},
+            "agentRoles": ["source_finder", "source_extractor", "source_ingestor"],
+            "agentIds": {"source_finder": source_member["agentId"]},
             "localScanScope": {"roots": ["workspace/knowledge"], "maxFiles": 10},
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -1233,22 +1339,23 @@ def test_start_source_collection_run_ignores_invalid_collection_roles(tmp_path, 
         {"agentRoles": ["data_discovery", "research_specific_role"]},
     )
 
-    assert response["assignmentCount"] == 1
-    assert response["assignments"][0]["agentRole"] == "data_discovery"
+    expected_roles = {"source_finder", "source_extractor", "source_relation_mapper", "source_ingestor"}
+    assert response["assignmentCount"] == 4
+    assert {item["agentRole"] for item in response["assignments"]} == expected_roles
 
 
 def test_start_source_collection_run_maps_roles_to_team_canvas_agents(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     coordinator = session_service.create_chat_session(title="Coordinator")
-    discovery = session_service.create_chat_session(title="Discovery")
-    acquisition = session_service.create_chat_session(title="Acquisition")
-    extraction = session_service.create_chat_session(title="Extraction")
+    legacy_discovery = session_service.create_chat_session(title="Legacy Discovery")
+    finder = session_service.create_chat_session(title="Source Finder")
+    extractor = session_service.create_chat_session(title="Source Extractor")
     organization = {
         "agents": [
             {"nodeId": "coordinator", "agentId": coordinator["agentId"], "displayName": "Coordinator", "role": "ceo", "status": "active"},
-            {"nodeId": "discovery", "agentId": discovery["agentId"], "displayName": "Discovery", "role": "data_discovery", "status": "active"},
-            {"nodeId": "acquisition", "agentId": acquisition["agentId"], "displayName": "Acquisition", "role": "source_acquisition", "status": "active"},
-            {"nodeId": "extraction", "agentId": extraction["agentId"], "displayName": "Extraction", "role": "content_extraction", "status": "active"},
+            {"nodeId": "legacy-discovery", "agentId": legacy_discovery["agentId"], "displayName": "Legacy Discovery", "role": "data_discovery", "status": "active"},
+            {"nodeId": "finder", "agentId": finder["agentId"], "displayName": "Source Finder", "role": "source_finder", "status": "active"},
+            {"nodeId": "extractor", "agentId": extractor["agentId"], "displayName": "Source Extractor", "role": "source_extractor", "status": "active"},
         ],
         "edges": [],
     }
@@ -1258,17 +1365,16 @@ def test_start_source_collection_run_maps_roles_to_team_canvas_agents(tmp_path, 
         team["teamId"],
         {
             "topic": "predictive coding",
-            "agentRoles": ["data_discovery", "source_acquisition", "content_extraction"],
+            "agentRoles": ["source_finder", "source_extractor"],
         },
     )
 
     role_to_agent_id = {item["agentRole"]: item["agentId"] for item in response["assignments"]}
     assert response["run"]["metadata"]["ownerAgentId"] == coordinator["agentId"]
-    assert response["searchPlan"]["roleAssignmentInputs"][0]["agentId"] == discovery["agentId"]
+    assert response["searchPlan"]["roleAssignmentInputs"][0]["agentId"] == finder["agentId"]
     assert role_to_agent_id == {
-        "data_discovery": discovery["agentId"],
-        "source_acquisition": acquisition["agentId"],
-        "content_extraction": extraction["agentId"],
+        "source_finder": finder["agentId"],
+        "source_extractor": extractor["agentId"],
     }
 
 
@@ -1284,8 +1390,8 @@ def test_start_source_collection_run_accepts_traceable_query_seed_contract(tmp_p
             "searchLanguages": ["en"],
             "sourceTypes": ["paper"],
             "maxResultsPerQuery": 7,
-            "agentRoles": ["data_discovery", "source_quality"],
-            "agentIds": {"source_quality": "Source Quality Agent"},
+            "agentRoles": ["source_finder", "source_extractor"],
+            "agentIds": {"source_extractor": "Source Extractor Agent"},
         },
     )
 
@@ -1297,11 +1403,11 @@ def test_start_source_collection_run_accepts_traceable_query_seed_contract(tmp_p
     assert search_plan["sourceTypes"] == ["paper"]
     assert search_plan["maxResultsPerQuery"] == 7
     assert search_plan["queryCount"] == 2
-    assert {item["assignedAgentRole"] for item in queries} == {"data_discovery", "source_quality"}
+    assert {item["assignedAgentRole"] for item in queries} == {"source_finder"}
     assert all(item["status"] == "planned" for item in queries)
     assert all(item["execution"]["externalSearchTriggered"] is False for item in queries)
-    assert response["assignments"][1]["agentId"] == "Source Quality Agent"
-    assert response["assignments"][1]["scope"]["assignedQueries"][0]["assignedAgentRole"] == "source_quality"
+    assert response["assignments"][1]["agentId"] == "Source Extractor Agent"
+    assert response["assignments"][1]["scope"]["assignedQueries"] == []
     assert response["assignments"][1]["acceptance"]["resultWritebackContract"]["candidateImport"]["targetCandidateType"] == "source_manifest"
     assert response["assignments"][1]["acceptance"]["resultWritebackContract"]["officialGraphWrites"] is False
 
@@ -1309,11 +1415,11 @@ def test_start_source_collection_run_accepts_traceable_query_seed_contract(tmp_p
 def test_seed_source_collection_agent_session_context_writes_and_dedupes_direct_session(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    discovery = agent_directory_service.create_agent_instance(display_name="资料发现")
-    direct_session = session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料发现")
+    discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
+    direct_session = session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": discovery["agentId"], "role": "data_discovery", "agentName": "资料发现"}],
+        members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
 
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -1321,8 +1427,8 @@ def test_seed_source_collection_agent_session_context_writes_and_dedupes_direct_
         {
             "topic": "脑启发路由",
             "goal": "搜集神经机制启发算法资料",
-            "agentRoles": ["data_discovery"],
-            "agentIds": {"data_discovery": discovery["agentId"]},
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": discovery["agentId"]},
             "querySeeds": ["brain-inspired routing"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -1331,12 +1437,12 @@ def test_seed_source_collection_agent_session_context_writes_and_dedupes_direct_
     first = team_workflow_orchestration_service.seed_source_collection_agent_session_context(
         team["teamId"],
         run_response["run"]["runId"],
-        {"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery"},
+        {"stageId": "finding", "agentId": discovery["agentId"], "agentRole": "source_finder"},
     )
     second = team_workflow_orchestration_service.seed_source_collection_agent_session_context(
         team["teamId"],
         run_response["run"]["runId"],
-        {"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery"},
+        {"stageId": "finding", "agentId": discovery["agentId"], "agentRole": "source_finder"},
     )
 
     assert first["created"] is True
@@ -1359,19 +1465,19 @@ def test_start_source_collection_stage_session_task_submits_direct_session_task(
     _use_fake_local_research_config(monkeypatch)
     submitted: list[dict] = []
 
-    discovery = agent_directory_service.create_agent_instance(display_name="资料发现")
-    direct_session = session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料发现")
+    finder = agent_directory_service.create_agent_instance(display_name="资料寻找")
+    direct_session = session_service.ensure_agent_direct_session(agent_id=finder["agentId"], title="资料寻找")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": discovery["agentId"], "role": "data_discovery", "agentName": "资料发现"}],
+        members=[{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
             "topic": "脑启发路由",
             "goal": "搜集神经机制启发算法资料",
-            "agentRoles": ["data_discovery"],
-            "agentIds": {"data_discovery": discovery["agentId"]},
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": finder["agentId"]},
             "querySeeds": ["brain-inspired routing"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -1393,10 +1499,10 @@ def test_start_source_collection_stage_session_task_submits_direct_session_task(
         team["teamId"],
         run_response["run"]["runId"],
         {
-            "stageId": "collection",
-            "agentId": discovery["agentId"],
-            "agentRole": "data_discovery",
-            "returnTo": "/teams?team=research-team&researchView=knowledge_collection&collectionStage=collection",
+            "stageId": "finding",
+            "agentId": finder["agentId"],
+            "agentRole": "source_finder",
+            "returnTo": "/teams?team=research-team&researchView=knowledge_collection&collectionStage=finding",
             "returnLabel": "返回搜索资料",
         },
     )
@@ -1404,10 +1510,10 @@ def test_start_source_collection_stage_session_task_submits_direct_session_task(
         team["teamId"],
         run_response["run"]["runId"],
         {
-            "stageId": "collection",
-            "agentId": discovery["agentId"],
-            "agentRole": "data_discovery",
-            "returnTo": "/teams?team=research-team&researchView=knowledge_collection&collectionStage=collection",
+            "stageId": "finding",
+            "agentId": finder["agentId"],
+            "agentRole": "source_finder",
+            "returnTo": "/teams?team=research-team&researchView=knowledge_collection&collectionStage=finding",
             "returnLabel": "返回搜索资料",
         },
     )
@@ -1415,9 +1521,9 @@ def test_start_source_collection_stage_session_task_submits_direct_session_task(
         team["teamId"],
         run_response["run"]["runId"],
         {
-            "stageId": "collection",
-            "agentId": discovery["agentId"],
-            "agentRole": "data_discovery",
+            "stageId": "finding",
+            "agentId": finder["agentId"],
+            "agentRole": "source_finder",
             "idempotencyKey": "stage-task-click-explicit",
         },
     )
@@ -1425,9 +1531,9 @@ def test_start_source_collection_stage_session_task_submits_direct_session_task(
         team["teamId"],
         run_response["run"]["runId"],
         {
-            "stageId": "collection",
-            "agentId": discovery["agentId"],
-            "agentRole": "data_discovery",
+            "stageId": "finding",
+            "agentId": finder["agentId"],
+            "agentRole": "source_finder",
             "idempotencyKey": "stage-task-click-explicit",
         },
     )
@@ -1468,25 +1574,20 @@ def test_start_source_collection_stage_session_task_submits_direct_session_task(
     assert len(submitted) == 3
 
 
-def test_start_source_collection_memory_stage_routes_to_knowledge_base_admin(tmp_path, monkeypatch):
+def test_start_source_collection_ingestion_stage_routes_to_bound_source_ingestor(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     submitted: list[dict] = []
 
     discovery = agent_directory_service.create_agent_instance(display_name="资料发现")
     session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料发现")
-    agent_directory_service.repair_agent_directory()
-    admin = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID)
-    assert admin is not None
-    admin_session = session_service.ensure_agent_direct_session(
-        agent_id=admin["agentId"],
-        title=agent_directory_service.KNOWLEDGE_STEWARD_FUNCTIONAL_NAME,
-    )
-    admin = agent_directory_service.update_agent_instance(admin["agentId"], direct_session_id=admin_session["id"])
+    ingestor = agent_directory_service.create_agent_instance(display_name="资料入库")
+    ingestor_session = session_service.ensure_agent_direct_session(agent_id=ingestor["agentId"], title="资料入库")
     team = team_service.create_team(
         name="挑战杯科研团队",
         members=[
-            {"agentId": discovery["agentId"], "role": "data_discovery", "agentName": "资料发现"},
+            {"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料发现"},
+            {"agentId": ingestor["agentId"], "role": "source_ingestor", "agentName": "资料入库"},
         ],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
@@ -1494,8 +1595,8 @@ def test_start_source_collection_memory_stage_routes_to_knowledge_base_admin(tmp
         {
             "topic": "脑启发路由",
             "goal": "搜集神经机制启发算法资料",
-            "agentRoles": ["data_discovery"],
-            "agentIds": {"data_discovery": discovery["agentId"]},
+            "agentRoles": ["source_finder", "source_ingestor"],
+            "agentIds": {"source_finder": discovery["agentId"], "source_ingestor": ingestor["agentId"]},
             "querySeeds": ["brain-inspired routing"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -1516,29 +1617,30 @@ def test_start_source_collection_memory_stage_routes_to_knowledge_base_admin(tmp
         team["teamId"],
         run_response["run"]["runId"],
         {
-            "stageId": "memory",
-            "returnTo": "/teams?team=research-team&researchView=knowledge_collection&collectionStage=memory",
-            "returnLabel": "返回知识库管理员入库审核",
+            "stageId": "ingestion",
+            "agentId": ingestor["agentId"],
+            "agentRole": "source_ingestor",
+            "returnTo": "/teams?team=research-team&researchView=knowledge_collection&collectionStage=ingestion",
+            "returnLabel": "返回资料入库",
         },
     )
 
-    assert task["agentId"] == agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
-    assert task["agentRole"] == "knowledge_steward"
-    assert task["sessionId"] == admin_session["id"]
-    assert task["task"]["title"] == "知识库管理员入库审核任务"
+    assert task["agentId"] == ingestor["agentId"]
+    assert task["agentRole"] == "source_ingestor"
+    assert task["sessionId"] == ingestor_session["id"]
+    assert task["task"]["title"] == "资料入库任务"
     assert task["task"]["writesFormalKnowledge"] is True
     assert task["writebackContract"]["writesFormalKnowledge"] is True
     assert task["writebackContract"]["resultAuthority"] == "source_collection_stage_writeback_tool+knowledge_ingestion_gate"
-    assert submitted[0]["sessionId"] == admin_session["id"]
-    assert "知识库管理员入库审核" in submitted[0]["content"]
-    assert "资料入库 Agent" not in submitted[0]["content"]
+    assert submitted[0]["sessionId"] == ingestor_session["id"]
+    assert "资料入库任务" in submitted[0]["content"]
+    assert "资料入库 Agent" in submitted[0]["content"]
     assert "共享记忆前审" not in submitted[0]["content"]
     assert "approved 候选" in submitted[0]["content"]
-    assert "只处理 source_quality_approved" in submitted[0]["content"]
     assert "不要推断截断或隐藏候选" in submitted[0]["content"]
     metadata = submitted[0]["kwargs"]["message_metadata"]
-    assert metadata["agentId"] == agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
-    assert metadata["agentRole"] == "knowledge_steward"
+    assert metadata["agentId"] == ingestor["agentId"]
+    assert metadata["agentRole"] == "source_ingestor"
 
 
 def test_source_collection_stage_task_context_returns_bounded_records_for_extraction(tmp_path, monkeypatch):
@@ -1550,8 +1652,8 @@ def test_source_collection_stage_task_context_returns_bounded_records_for_extrac
         {
             "topic": "脑启发路由",
             "goal": "搜集神经机制启发算法资料",
-            "agentRoles": ["content_extraction"],
-            "agentIds": {"content_extraction": "extraction-agent"},
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": "extraction-agent"},
             "querySeeds": ["brain-inspired routing"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -1591,9 +1693,9 @@ def test_source_collection_stage_task_context_returns_bounded_records_for_extrac
     task = {
         "taskId": "stagetask-context",
         "runId": run_id,
-        "stageId": "candidate",
+        "stageId": "extraction",
         "agentId": "extraction-agent",
-        "agentRole": "content_extraction",
+        "agentRole": "source_extractor",
         "sessionId": "session-extraction",
         "status": "running",
         "title": "资料提炼任务",
@@ -1608,7 +1710,7 @@ def test_source_collection_stage_task_context_returns_bounded_records_for_extrac
     )
 
     assert context["status"] == "ok"
-    assert context["stageId"] == "candidate"
+    assert context["stageId"] == "extraction"
     assert context["counts"]["recordCount"] == 2
     assert context["counts"]["returnedRecordCount"] == 1
     assert context["records"][0]["doi"] == "10.0000/predictive-coding"
@@ -1628,8 +1730,8 @@ def test_source_collection_stage_task_context_pages_raw_records_when_candidates_
         {
             "topic": "预测编码资料提炼",
             "goal": "把原始 DataRecord 提炼成候选资料",
-            "agentRoles": ["content_extraction"],
-            "agentIds": {"content_extraction": "extraction-agent"},
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": "extraction-agent"},
             "querySeeds": ["predictive coding neural algorithm"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -1651,9 +1753,9 @@ def test_source_collection_stage_task_context_pages_raw_records_when_candidates_
     task = {
         "taskId": "stagetask-record-page",
         "runId": run_id,
-        "stageId": "candidate",
+        "stageId": "extraction",
         "agentId": "extraction-agent",
-        "agentRole": "content_extraction",
+        "agentRole": "source_extractor",
         "sessionId": "session-extraction",
         "status": "running",
         "title": "资料提炼任务",
@@ -1696,8 +1798,8 @@ def test_source_collection_stage_task_context_uses_lightweight_team_existence(tm
         {
             "topic": "脑启发路由",
             "goal": "搜集神经机制启发算法资料",
-            "agentRoles": ["content_extraction"],
-            "agentIds": {"content_extraction": "extraction-agent"},
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": "extraction-agent"},
             "querySeeds": ["brain-inspired routing"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -1715,9 +1817,9 @@ def test_source_collection_stage_task_context_uses_lightweight_team_existence(tm
     task = {
         "taskId": "stagetask-context-lightweight",
         "runId": run_id,
-        "stageId": "candidate",
+        "stageId": "extraction",
         "agentId": "extraction-agent",
-        "agentRole": "content_extraction",
+        "agentRole": "source_extractor",
         "sessionId": "session-extraction",
         "status": "running",
         "title": "资料提炼任务",
@@ -1747,7 +1849,7 @@ def test_source_collection_stage_task_context_uses_lightweight_team_existence(tm
     assert existence_reads == [team["teamId"]]
 
 
-def test_source_collection_stage_task_context_uses_memory_steward_boundaries(tmp_path, monkeypatch):
+def test_source_collection_stage_task_context_uses_source_ingestor_boundaries(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
@@ -1755,24 +1857,24 @@ def test_source_collection_stage_task_context_uses_memory_steward_boundaries(tmp
         team["teamId"],
         {
             "topic": "神经预测编码",
-            "agentRoles": ["knowledge_steward"],
-            "agentIds": {"knowledge_steward": "agent-knowledge-steward"},
+            "agentRoles": ["source_ingestor"],
+            "agentIds": {"source_ingestor": "agent-source-ingestor"},
             "querySeeds": ["predictive coding neural algorithm"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
     )
     run_id = run_response["run"]["runId"]
     task = {
-        "taskId": "stagetask-memory-context",
+        "taskId": "stagetask-ingestion-context",
         "runId": run_id,
-        "stageId": "memory",
-        "agentId": "agent-knowledge-steward",
-        "agentRole": "knowledge_steward",
-        "sessionId": "session-steward",
+        "stageId": "ingestion",
+        "agentId": "agent-source-ingestor",
+        "agentRole": "source_ingestor",
+        "sessionId": "session-ingestor",
         "status": "running",
-        "title": "知识库管理员入库审核",
+        "title": "资料入库任务",
         "writebackContract": {
-            "taskId": "stagetask-memory-context",
+            "taskId": "stagetask-ingestion-context",
             "writesFormalKnowledge": True,
             "writesOfficialGraph": True,
         },
@@ -1781,11 +1883,11 @@ def test_source_collection_stage_task_context_uses_memory_steward_boundaries(tmp
 
     context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
         team["teamId"],
-        task_id="stagetask-memory-context",
+        task_id="stagetask-ingestion-context",
     )
 
-    assert context["stageId"] == "memory"
-    assert context["agentRole"] == "knowledge_steward"
+    assert context["stageId"] == "ingestion"
+    assert context["agentRole"] == "source_ingestor"
     assert context["boundaries"]["writesFormalKnowledge"] is True
     assert context["boundaries"]["writesOfficialGraph"] is True
     assert context["writebackContract"]["writesFormalKnowledge"] is True
@@ -1799,8 +1901,8 @@ def test_memory_steward_context_returns_approved_candidate_action_packet_without
         team["teamId"],
         {
             "topic": "神经预测编码",
-            "agentRoles": ["knowledge_steward"],
-            "agentIds": {"knowledge_steward": "agent-knowledge-steward"},
+            "agentRoles": ["source_ingestor"],
+            "agentIds": {"source_ingestor": "agent-source-ingestor"},
             "querySeeds": ["predictive coding neural algorithm"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -1848,12 +1950,12 @@ def test_memory_steward_context_returns_approved_candidate_action_packet_without
     task = {
         "taskId": "stagetask-memory-context-approved-action",
         "runId": run_id,
-        "stageId": "memory",
-        "agentId": "agent-knowledge-steward",
-        "agentRole": "knowledge_steward",
-        "sessionId": "session-steward",
+        "stageId": "ingestion",
+        "agentId": "agent-source-ingestor",
+        "agentRole": "source_ingestor",
+        "sessionId": "session-ingestor",
         "status": "running",
-        "title": "知识库管理员入库审核",
+        "title": "资料入库任务",
         "writebackContract": {
             "taskId": "stagetask-memory-context-approved-action",
             "writesFormalKnowledge": True,
@@ -1884,18 +1986,18 @@ def test_source_collection_stage_task_records_high_roi_runtime_events(tmp_path, 
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     events = _capture_workflow_events(monkeypatch)
-    discovery = agent_directory_service.create_agent_instance(display_name="资料发现")
-    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料发现")
+    discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
+    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": discovery["agentId"], "role": "data_discovery", "agentName": "资料发现"}],
+        members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
             "topic": "脑启发路由",
-            "agentRoles": ["data_discovery"],
-            "agentIds": {"data_discovery": discovery["agentId"]},
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": discovery["agentId"]},
             "querySeeds": ["brain-inspired routing"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -1923,9 +2025,9 @@ def test_source_collection_stage_task_records_high_roi_runtime_events(tmp_path, 
         team["teamId"],
         run_response["run"]["runId"],
         {
-            "stageId": "collection",
+            "stageId": "finding",
             "agentId": discovery["agentId"],
-            "agentRole": "data_discovery",
+            "agentRole": "source_finder",
             "idempotencyKey": "stage-click",
         },
     )
@@ -1933,9 +2035,9 @@ def test_source_collection_stage_task_records_high_roi_runtime_events(tmp_path, 
         team["teamId"],
         run_response["run"]["runId"],
         {
-            "stageId": "collection",
+            "stageId": "finding",
             "agentId": discovery["agentId"],
-            "agentRole": "data_discovery",
+            "agentRole": "source_finder",
             "idempotencyKey": "stage-click",
         },
     )
@@ -1958,11 +2060,11 @@ def test_source_collection_stage_session_task_writeback_records_structured_resul
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
-    discovery = agent_directory_service.create_agent_instance(display_name="资料发现")
-    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料发现")
+    discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
+    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": discovery["agentId"], "role": "data_discovery", "agentName": "资料发现"}],
+        members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     stage_response = team_workflow_orchestration_service.start_research_stage_round(
         team["teamId"],
@@ -1970,8 +2072,8 @@ def test_source_collection_stage_session_task_writeback_records_structured_resul
             "stageType": "knowledge_collection",
             "topic": "脑启发路由",
             "goal": "搜集神经机制启发算法资料",
-            "agentRoles": ["data_discovery"],
-            "agentIds": {"data_discovery": discovery["agentId"]},
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": discovery["agentId"]},
             "querySeeds": ["brain-inspired routing"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -1990,7 +2092,7 @@ def test_source_collection_stage_session_task_writeback_records_structured_resul
     task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         run_id,
-        {"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery"},
+        {"stageId": "finding", "agentId": discovery["agentId"], "agentRole": "source_finder"},
     )
 
     result = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
@@ -2021,11 +2123,11 @@ def test_source_collection_stage_session_task_writeback_closes_running_turn_stat
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
-    discovery = agent_directory_service.create_agent_instance(display_name="资料发现")
-    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料发现")
+    discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
+    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": discovery["agentId"], "role": "data_discovery", "agentName": "资料发现"}],
+        members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     stage_response = team_workflow_orchestration_service.start_research_stage_round(
         team["teamId"],
@@ -2033,8 +2135,8 @@ def test_source_collection_stage_session_task_writeback_closes_running_turn_stat
             "stageType": "knowledge_collection",
             "topic": "脑启发路由",
             "goal": "搜集神经机制启发算法资料",
-            "agentRoles": ["data_discovery"],
-            "agentIds": {"data_discovery": discovery["agentId"]},
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": discovery["agentId"]},
             "querySeeds": ["brain-inspired routing"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -2053,7 +2155,7 @@ def test_source_collection_stage_session_task_writeback_closes_running_turn_stat
     task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         run_id,
-        {"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery"},
+        {"stageId": "finding", "agentId": discovery["agentId"], "agentRole": "source_finder"},
     )
 
     result = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
@@ -2064,7 +2166,7 @@ def test_source_collection_stage_session_task_writeback_closes_running_turn_stat
             "summary": "搜索工具质量不足，但已回写可审查文献线索。",
             "result": {"candidate_leads": [{"title": "Predictive coding", "locator": "DOI:10.1038/4580"}]},
             "evidenceRefs": [{"type": "paper", "label": "lead-rao1999"}],
-            "nextActions": ["资料获取 Agent 打开 DOI 验证"],
+            "nextActions": ["资料寻找 Agent 打开 DOI 验证"],
         },
     )
 
@@ -2078,7 +2180,7 @@ def test_source_collection_stage_session_task_writeback_closes_running_turn_stat
 
     status_payload = team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
     latest_round = status_payload["latestRound"]
-    collection_card = next(card for card in latest_round["sourceCollectionStageCards"] if card["stageId"] == "collection")
+    collection_card = next(card for card in latest_round["sourceCollectionStageCards"] if card["stageId"] == "finding")
     assert collection_card["agentTaskStatus"] == "needs_review"
     assert collection_card["latestTask"]["status"] == "needs_review"
     assert collection_card["status"] != "agent_running"
@@ -2092,11 +2194,11 @@ def test_source_collection_stage_session_task_writeback_materializes_search_lead
     _use_fake_local_research_config(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
     scene_events = _capture_workflow_events(monkeypatch)
-    discovery = agent_directory_service.create_agent_instance(display_name="资料发现")
-    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料发现")
+    discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
+    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": discovery["agentId"], "role": "data_discovery", "agentName": "资料发现"}],
+        members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     stage_response = team_workflow_orchestration_service.start_research_stage_round(
         team["teamId"],
@@ -2104,8 +2206,8 @@ def test_source_collection_stage_session_task_writeback_materializes_search_lead
             "stageType": "knowledge_collection",
             "topic": "预测编码",
             "goal": "搜集可追踪资料",
-            "agentRoles": ["data_discovery"],
-            "agentIds": {"data_discovery": discovery["agentId"]},
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": discovery["agentId"]},
             "querySeeds": ["predictive coding"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -2124,7 +2226,7 @@ def test_source_collection_stage_session_task_writeback_materializes_search_lead
     task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         run_id,
-        {"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery"},
+        {"stageId": "finding", "agentId": discovery["agentId"], "agentRole": "source_finder"},
     )
     payload = {
         "status": "needs_review",
@@ -2189,20 +2291,20 @@ def test_source_collection_stage_session_task_writeback_materializes_search_lead
     assert writeback_events[-1]["child_log_payload"]["materializedKnowledgeIngestion"]["status"] == "skipped_stage"
 
 
-def test_knowledge_steward_writeback_auto_ingests_high_confidence_sources(tmp_path, monkeypatch):
+def test_source_ingestor_writeback_auto_ingests_high_confidence_sources(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     scene_events = _capture_workflow_events(monkeypatch)
     result = team_service.ensure_knowledge_expansion_team_agents(purge_stale=True)
     team = result["team"]
-    steward = next(member for member in team["members"] if member["role"] == "knowledge_steward")
-    steward_agent_id = steward["agentId"]
-    steward_session = session_service.ensure_agent_direct_session(agent_id=steward_agent_id, title="知识库管理员")
-    agent_directory_service.update_agent_instance(steward_agent_id, direct_session_id=steward_session["id"])
+    ingestor = next(member for member in team["members"] if member["role"] == "source_ingestor")
+    ingestor_agent_id = ingestor["agentId"]
+    ingestor_session = session_service.ensure_agent_direct_session(agent_id=ingestor_agent_id, title="资料入库")
+    agent_directory_service.update_agent_instance(ingestor_agent_id, direct_session_id=ingestor_session["id"])
     knowledge_base = team_knowledge_service.create_knowledge_base(
         team["teamId"],
         name="Knowledge Expansion Library",
-        actor_agent_id=steward_agent_id,
+        actor_agent_id=ingestor_agent_id,
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
@@ -2210,7 +2312,7 @@ def test_knowledge_steward_writeback_auto_ingests_high_confidence_sources(tmp_pa
             "workflowPurpose": "knowledge_expansion",
             "collectionMode": "web_search",
             "topic": "predictive coding",
-            "agentRoles": ["source_intake", "content_extraction", "source_quality"],
+            "agentRoles": ["source_finder", "source_extractor", "source_ingestor"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
     )
@@ -2227,14 +2329,14 @@ def test_knowledge_steward_writeback_auto_ingests_high_confidence_sources(tmp_pa
                 "sourceCollectionRunId": run_id,
                 "doi": "10.0000/predictive-coding",
             },
-            "createdByAgent": "knowledge-expansion-source-intake",
+            "createdByAgent": "knowledge-expansion-source-finder",
         },
     )["candidate"]
     team_workflow_orchestration_service.assess_source_candidate_quality(
         team["teamId"],
         source["candidateId"],
         {
-            "assessedByAgent": "knowledge-expansion-source-quality",
+            "assessedByAgent": "knowledge-expansion-source-extractor",
             "decision": "approved",
             "notes": "Source is traceable and relevant.",
         },
@@ -2266,14 +2368,14 @@ def test_knowledge_steward_writeback_auto_ingests_high_confidence_sources(tmp_pa
         lambda session_id, content, **kwargs: {
             "accepted": True,
             "sessionId": session_id,
-            "turnId": "turn-knowledge-expansion-steward",
+            "turnId": "turn-knowledge-expansion-ingestor",
             "status": "running",
         },
     )
     task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         run_id,
-        {"stageId": "memory", "agentId": steward_agent_id, "agentRole": "knowledge_steward"},
+        {"stageId": "ingestion", "agentId": ingestor_agent_id, "agentRole": "source_ingestor"},
     )
 
     response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
@@ -2281,7 +2383,7 @@ def test_knowledge_steward_writeback_auto_ingests_high_confidence_sources(tmp_pa
         task["taskId"],
         {
             "status": "completed",
-            "summary": "知识库管理员已审核并入库高置信资料。",
+            "summary": "资料入库 Agent 已审核并入库高置信资料。",
             "result": {
                 "knowledgeBaseId": knowledge_base["knowledgeBaseId"],
                 "stewardPackDraft": pack_output,
@@ -2291,26 +2393,26 @@ def test_knowledge_steward_writeback_auto_ingests_high_confidence_sources(tmp_pa
                     "reason": "Source quality approved and steward confidence is high.",
                 },
             },
-            "recordedByAgent": steward_agent_id,
+            "recordedByAgent": ingestor_agent_id,
             "evidenceRefs": [{"kind": "candidate", "ref": source["candidateId"]}],
             "nextActions": ["继续下一轮知识扩充"],
         },
     )
     knowledge_items = team_knowledge_service.list_knowledge_items(
         knowledge_base["knowledgeBaseId"],
-        agent_id=steward_agent_id,
+        agent_id=ingestor_agent_id,
     )
     projection = team_workflow_orchestration_service._source_collection_stage_cards_projection(team["teamId"], run_id)
-    memory_card = next(card for card in projection["cards"] if card["stageId"] == "memory")
+    ingestion_card = next(card for card in projection["cards"] if card["stageId"] == "ingestion")
 
     assert response["task"]["writesFormalKnowledge"] is True
     assert response["writeback"]["materializedKnowledgeIngestion"]["status"] == "completed"
     assert response["writeback"]["materializedKnowledgeIngestion"]["approvedCandidateCount"] == 1
     assert response["writeback"]["materializedKnowledgeIngestion"]["formalKnowledgeItemCount"] == 1
     assert knowledge_items["summary"]["itemCount"] == 1
-    assert memory_card["status"] == "closed_loop"
-    assert memory_card["counts"]["output"] == 1
-    assert memory_card["latestTask"]["materializedKnowledgeIngestion"]["status"] == "completed"
+    assert ingestion_card["status"] == "closed_loop"
+    assert ingestion_card["counts"]["output"] == 1
+    assert ingestion_card["latestTask"]["materializedKnowledgeIngestion"]["status"] == "completed"
     ingestion_events = _workflow_scene_events_by_code(scene_events, "source_collection.stage_session_task_knowledge_ingestion_materialized")
     assert ingestion_events[-1]["child_log_payload"]["kind"] == "source_collection_stage_knowledge_ingestion_materialization"
     assert ingestion_events[-1]["child_log_payload"]["status"] == "completed"
@@ -2319,19 +2421,19 @@ def test_knowledge_steward_writeback_auto_ingests_high_confidence_sources(tmp_pa
     assert ingestion_events[-1]["child_log_payload"]["formalKnowledgeItemIds"] == response["writeback"]["materializedKnowledgeIngestion"]["formalKnowledgeItemIds"]
 
 
-def test_knowledge_steward_writeback_auto_ingests_approved_candidate_summary(tmp_path, monkeypatch):
+def test_source_ingestor_writeback_auto_ingests_approved_candidate_summary(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     result = team_service.ensure_knowledge_expansion_team_agents(purge_stale=True)
     team = result["team"]
-    steward = next(member for member in team["members"] if member["role"] == "knowledge_steward")
-    steward_agent_id = steward["agentId"]
-    steward_session = session_service.ensure_agent_direct_session(agent_id=steward_agent_id, title="知识库管理员")
-    agent_directory_service.update_agent_instance(steward_agent_id, direct_session_id=steward_session["id"])
+    ingestor = next(member for member in team["members"] if member["role"] == "source_ingestor")
+    ingestor_agent_id = ingestor["agentId"]
+    ingestor_session = session_service.ensure_agent_direct_session(agent_id=ingestor_agent_id, title="资料入库")
+    agent_directory_service.update_agent_instance(ingestor_agent_id, direct_session_id=ingestor_session["id"])
     knowledge_base = team_knowledge_service.create_knowledge_base(
         team["teamId"],
         name="Knowledge Expansion Library",
-        actor_agent_id=steward_agent_id,
+        actor_agent_id=ingestor_agent_id,
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
@@ -2339,7 +2441,7 @@ def test_knowledge_steward_writeback_auto_ingests_approved_candidate_summary(tmp
             "workflowPurpose": "knowledge_expansion",
             "collectionMode": "web_search",
             "topic": "predictive coding",
-            "agentRoles": ["source_intake", "content_extraction", "source_quality"],
+            "agentRoles": ["source_finder", "source_extractor", "source_ingestor"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
     )
@@ -2356,14 +2458,14 @@ def test_knowledge_steward_writeback_auto_ingests_approved_candidate_summary(tmp
                 "sourceCollectionRunId": run_id,
                 "doi": "10.0000/predictive-coding-summary",
             },
-            "createdByAgent": "knowledge-expansion-source-intake",
+            "createdByAgent": "knowledge-expansion-source-finder",
         },
     )["candidate"]
     team_workflow_orchestration_service.assess_source_candidate_quality(
         team["teamId"],
         source["candidateId"],
         {
-            "assessedByAgent": "knowledge-expansion-source-quality",
+            "assessedByAgent": "knowledge-expansion-source-extractor",
             "decision": "approved",
             "notes": "Source is traceable and relevant.",
         },
@@ -2374,14 +2476,14 @@ def test_knowledge_steward_writeback_auto_ingests_approved_candidate_summary(tmp
         lambda session_id, content, **kwargs: {
             "accepted": True,
             "sessionId": session_id,
-            "turnId": "turn-knowledge-expansion-steward-summary",
+            "turnId": "turn-knowledge-expansion-ingestor-summary",
             "status": "running",
         },
     )
     task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         run_id,
-        {"stageId": "memory", "agentId": steward_agent_id, "agentRole": "knowledge_steward"},
+        {"stageId": "ingestion", "agentId": ingestor_agent_id, "agentRole": "source_ingestor"},
     )
 
     response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
@@ -2389,7 +2491,7 @@ def test_knowledge_steward_writeback_auto_ingests_approved_candidate_summary(tmp
         task["taskId"],
         {
             "status": "completed",
-            "summary": "知识库管理员通过 1 条候选，进入正式入库。",
+            "summary": "资料入库 Agent 通过 1 条候选，进入正式入库。",
             "result": {
                 "knowledgeBaseId": knowledge_base["knowledgeBaseId"],
                 "candidate_summary": {
@@ -2407,14 +2509,14 @@ def test_knowledge_steward_writeback_auto_ingests_approved_candidate_summary(tmp
                 },
                 "steward_assessment": {"decision": "approved", "targetDomain": "team_knowledge_expansion"},
             },
-            "recordedByAgent": steward_agent_id,
+            "recordedByAgent": ingestor_agent_id,
             "evidenceRefs": [{"kind": "candidate", "ref": source["candidateId"]}],
             "nextActions": ["继续下一轮知识扩充"],
         },
     )
     knowledge_items = team_knowledge_service.list_knowledge_items(
         knowledge_base["knowledgeBaseId"],
-        agent_id=steward_agent_id,
+        agent_id=ingestor_agent_id,
     )
 
     assert response["writeback"]["materializedKnowledgeIngestion"]["status"] == "completed"
@@ -2428,11 +2530,11 @@ def test_research_stage_status_materializes_legacy_stage_task_writeback_sources(
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
-    discovery = agent_directory_service.create_agent_instance(display_name="资料发现")
-    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料发现")
+    discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
+    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": discovery["agentId"], "role": "data_discovery", "agentName": "资料发现"}],
+        members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     stage_response = team_workflow_orchestration_service.start_research_stage_round(
         team["teamId"],
@@ -2440,8 +2542,8 @@ def test_research_stage_status_materializes_legacy_stage_task_writeback_sources(
             "stageType": "knowledge_collection",
             "topic": "预测编码",
             "goal": "补齐历史任务资料池",
-            "agentRoles": ["data_discovery"],
-            "agentIds": {"data_discovery": discovery["agentId"]},
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": discovery["agentId"]},
             "querySeeds": ["predictive coding"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -2460,7 +2562,7 @@ def test_research_stage_status_materializes_legacy_stage_task_writeback_sources(
     task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         run_id,
-        {"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery"},
+        {"stageId": "finding", "agentId": discovery["agentId"], "agentRole": "source_finder"},
     )
     legacy_result = {
         "candidateLeads": [
@@ -2538,7 +2640,7 @@ def test_research_stage_status_repairs_missing_round_and_projects_stage_cards(tm
     session_service.ensure_agent_direct_session(agent_id=extraction["agentId"], title="资料提炼")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": extraction["agentId"], "role": "content_extraction", "agentName": "资料提炼"}],
+        members=[{"agentId": extraction["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     stage_response = team_workflow_orchestration_service.start_research_stage_round(
         team["teamId"],
@@ -2546,8 +2648,8 @@ def test_research_stage_status_repairs_missing_round_and_projects_stage_cards(tm
             "stageType": "knowledge_collection",
             "topic": "脑启发路由",
             "goal": "提炼本轮候选资料",
-            "agentRoles": ["content_extraction"],
-            "agentIds": {"content_extraction": extraction["agentId"]},
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": extraction["agentId"]},
             "querySeeds": ["brain inspired routing"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -2566,7 +2668,7 @@ def test_research_stage_status_repairs_missing_round_and_projects_stage_cards(tm
     task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         run_id,
-        {"stageId": "candidate", "agentId": extraction["agentId"], "agentRole": "content_extraction"},
+        {"stageId": "extraction", "agentId": extraction["agentId"], "agentRole": "source_extractor"},
     )
     store = team_workflow_orchestration_service._load_source_collection_stage_session_task_store(team["teamId"], run_id)
     stored_task = next(item for item in store["tasks"] if item["taskId"] == task["taskId"])
@@ -2603,9 +2705,10 @@ def test_research_stage_status_repairs_missing_round_and_projects_stage_cards(tm
     assert latest_round["sourceRunIds"] == [run_id]
     assert any(item["taskId"] == task["taskId"] for item in latest_round["sourceCollectionStageSessionTasks"])
     cards = latest_round["sourceCollectionStageCards"]
-    assert len(cards) == 5
+    assert len(cards) == 4
     card_by_stage = {card["stageId"]: card for card in cards}
-    candidate_card = card_by_stage["candidate"]
+    assert set(card_by_stage) == {"finding", "extraction", "relations", "ingestion"}
+    candidate_card = card_by_stage["extraction"]
     assert candidate_card["status"] == "agent_done_artifact_pending"
     assert candidate_card["agentTaskStatus"] == "completed"
     assert candidate_card["artifactStatus"] == "empty"
@@ -2694,12 +2797,12 @@ def test_source_collection_stage_card_projection_is_scoped_to_current_run_artifa
     assert projection["summary"]["graphNodeCount"] == 0
     assert projection["summary"]["stewardPackCount"] == 0
     assert projection["summary"]["formalKnowledgeSyncCount"] == 0
-    assert card_by_stage["candidate"]["status"] == "artifact_ready_no_latest_agent_task"
-    assert card_by_stage["candidate"]["counts"]["artifact"] == 1
-    assert card_by_stage["graph"]["status"] == "pending"
-    assert card_by_stage["graph"]["counts"]["artifact"] == 0
-    assert card_by_stage["memory"]["status"] == "pending"
-    assert card_by_stage["memory"]["counts"]["artifact"] == 0
+    assert card_by_stage["extraction"]["status"] == "pending"
+    assert card_by_stage["extraction"]["counts"]["artifact"] == 1
+    assert card_by_stage["relations"]["status"] == "pending"
+    assert card_by_stage["relations"]["counts"]["artifact"] == 0
+    assert card_by_stage["ingestion"]["status"] == "pending"
+    assert card_by_stage["ingestion"]["counts"]["artifact"] == 0
 
 
 def test_source_collection_stage_card_projection_ignores_stale_agent_tasks_for_current_team(tmp_path, monkeypatch):
@@ -2707,7 +2810,7 @@ def test_source_collection_stage_card_projection_ignores_stale_agent_tasks_for_c
     current_agent = agent_directory_service.create_agent_instance(display_name="当前资料提炼")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": current_agent["agentId"], "role": "content_extraction", "agentName": "当前资料提炼"}],
+        members=[{"agentId": current_agent["agentId"], "role": "source_extractor", "agentName": "当前资料提炼"}],
     )
     run = data_processing_service.create_processing_run(
         title="Knowledge collection current round",
@@ -2748,25 +2851,25 @@ def test_source_collection_stage_card_projection_ignores_stale_agent_tasks_for_c
 
     projection = team_workflow_orchestration_service._source_collection_stage_cards_projection(team["teamId"], run["runId"])
 
-    candidate_card = next(item for item in projection["cards"] if item["stageId"] == "candidate")
+    candidate_card = next(item for item in projection["cards"] if item["stageId"] == "extraction")
     assert source["candidateId"]
-    assert candidate_card["status"] == "artifact_ready_no_latest_agent_task"
+    assert candidate_card["status"] == "pending"
     assert candidate_card["agentTaskStatus"] == "not_started"
     assert candidate_card["latestTask"] == {}
     assert candidate_card["counts"]["task"] == 0
-    assert candidate_card["counts"]["historicalTask"] == 1
+    assert candidate_card["counts"]["historicalTask"] == 0
 
 
 def test_source_collection_stage_card_projection_does_not_close_partial_needs_review_artifacts():
     card = team_workflow_orchestration_service._source_collection_stage_card_projection(
-        "screening",
+        "extraction",
         [
             {
                 "taskId": "stagetask-needs-review",
-                "stageId": "screening",
-                "agentId": "source-quality-agent",
-                "agentRole": "source_quality",
-                "sessionId": "session-source-quality",
+                "stageId": "extraction",
+                "agentId": "source-extractor-agent",
+                "agentRole": "source_extractor",
+                "sessionId": "session-source-extractor",
                 "status": "needs_review",
                 "summary": "Agent 已回写部分审查结果，但还有候选资料待审。",
                 "updatedAt": "2026-06-25T00:00:00+00:00",
@@ -2791,11 +2894,11 @@ def test_research_stage_status_reconciles_completed_stage_task_turn_result(tmp_p
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
-    discovery = agent_directory_service.create_agent_instance(display_name="资料发现")
-    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料发现")
+    discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
+    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": discovery["agentId"], "role": "data_discovery", "agentName": "资料发现"}],
+        members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
     )
     stage_response = team_workflow_orchestration_service.start_research_stage_round(
         team["teamId"],
@@ -2803,8 +2906,8 @@ def test_research_stage_status_reconciles_completed_stage_task_turn_result(tmp_p
             "stageType": "knowledge_collection",
             "topic": "脑启发路由",
             "goal": "搜集神经机制启发算法资料",
-            "agentRoles": ["data_discovery"],
-            "agentIds": {"data_discovery": discovery["agentId"]},
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": discovery["agentId"]},
             "querySeeds": ["brain-inspired routing"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -2823,7 +2926,7 @@ def test_research_stage_status_reconciles_completed_stage_task_turn_result(tmp_p
     task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         run_id,
-        {"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery"},
+        {"stageId": "finding", "agentId": discovery["agentId"], "agentRole": "source_finder"},
     )
     events_path = tmp_path / "workspace" / "agents" / discovery["agentId"] / "events" / "agent_turn_results.jsonl"
     events_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2864,7 +2967,7 @@ def test_research_stage_status_reconciles_blocked_stage_task_turn_result(tmp_pat
     session_service.ensure_agent_direct_session(agent_id=extraction["agentId"], title="资料提炼")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": extraction["agentId"], "role": "content_extraction", "agentName": "资料提炼"}],
+        members=[{"agentId": extraction["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     stage_response = team_workflow_orchestration_service.start_research_stage_round(
         team["teamId"],
@@ -2872,8 +2975,8 @@ def test_research_stage_status_reconciles_blocked_stage_task_turn_result(tmp_pat
             "stageType": "knowledge_collection",
             "topic": "脑启发路由",
             "goal": "搜集神经机制启发算法资料",
-            "agentRoles": ["content_extraction"],
-            "agentIds": {"content_extraction": extraction["agentId"]},
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": extraction["agentId"]},
             "querySeeds": ["brain-inspired routing"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -2892,7 +2995,7 @@ def test_research_stage_status_reconciles_blocked_stage_task_turn_result(tmp_pat
     task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         run_id,
-        {"stageId": "candidate", "agentId": extraction["agentId"], "agentRole": "content_extraction"},
+        {"stageId": "extraction", "agentId": extraction["agentId"], "agentRole": "source_extractor"},
     )
     events_path = tmp_path / "workspace" / "agents" / extraction["agentId"] / "events" / "agent_turn_results.jsonl"
     events_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2938,14 +3041,14 @@ def test_source_collection_stage_tools_read_context_and_writeback(tmp_path, monk
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": agent["agentId"], "role": "content_extraction", "agentName": "资料提炼"}],
+        members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
             "topic": "脑启发路由",
-            "agentRoles": ["content_extraction"],
-            "agentIds": {"content_extraction": agent["agentId"]},
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": agent["agentId"]},
             "querySeeds": ["brain-inspired routing"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -2968,7 +3071,7 @@ def test_source_collection_stage_tools_read_context_and_writeback(tmp_path, monk
     task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         run_response["run"]["runId"],
-        {"stageId": "candidate", "agentId": agent["agentId"], "agentRole": "content_extraction"},
+        {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
     )
 
     context_payload = json.loads(
@@ -3017,18 +3120,18 @@ def test_source_collection_stage_tools_read_context_and_writeback(tmp_path, monk
 def test_source_collection_context_reports_actual_candidate_page(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    agent = agent_directory_service.create_agent_instance(display_name="资料审查")
-    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料审查")
+    agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": agent["agentId"], "role": "source_quality", "agentName": "资料审查"}],
+        members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
             "topic": "预测编码皮层层级",
-            "agentRoles": ["source_quality"],
-            "agentIds": {"source_quality": agent["agentId"]},
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": agent["agentId"]},
             "querySeeds": ["predictive coding cortical hierarchy"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -3055,7 +3158,7 @@ def test_source_collection_context_reports_actual_candidate_page(tmp_path, monke
     task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         run_id,
-        {"stageId": "screening", "agentId": agent["agentId"], "agentRole": "source_quality"},
+        {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
     )
 
     context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
@@ -3086,14 +3189,14 @@ def test_source_collection_context_compact_candidate_paging_stays_model_visible(
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": agent["agentId"], "role": "content_extraction", "agentName": "资料提炼"}],
+        members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
             "topic": "预测编码皮层层级",
-            "agentRoles": ["content_extraction"],
-            "agentIds": {"content_extraction": agent["agentId"]},
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": agent["agentId"]},
             "querySeeds": ["predictive coding cortical hierarchy"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -3122,7 +3225,7 @@ def test_source_collection_context_compact_candidate_paging_stays_model_visible(
     task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         run_id,
-        {"stageId": "candidate", "agentId": agent["agentId"], "agentRole": "content_extraction"},
+        {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
     )
 
     pages = [
@@ -3157,18 +3260,18 @@ def test_source_collection_context_compact_candidate_paging_stays_model_visible(
 def test_source_quality_stage_writeback_materializes_candidate_decisions(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    agent = agent_directory_service.create_agent_instance(display_name="资料审查")
-    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料审查")
+    agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": agent["agentId"], "role": "source_quality", "agentName": "资料审查"}],
+        members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
             "topic": "神经算法资料质检",
-            "agentRoles": ["source_quality"],
-            "agentIds": {"source_quality": agent["agentId"]},
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": agent["agentId"]},
             "querySeeds": ["predictive coding neural algorithm"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -3219,7 +3322,7 @@ def test_source_quality_stage_writeback_materializes_candidate_decisions(tmp_pat
     task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         run_id,
-        {"stageId": "screening", "agentId": agent["agentId"], "agentRole": "source_quality"},
+        {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
     )
 
     response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
@@ -3272,8 +3375,12 @@ def test_source_quality_stage_writeback_materializes_candidate_decisions(tmp_pat
     assert status["summary"]["approvedSourceCandidateCount"] == 1
     assert status["summary"]["rejectedSourceCandidateCount"] == 1
     assert status["summary"]["needsRevisionSourceCandidateCount"] == 1
-    screening_projection = team_workflow_orchestration_service._source_collection_stage_cards_projection(team["teamId"], run_id)["cards"][2]
-    assert screening_projection["status"] == "closed_loop"
+    screening_projection = next(
+        card
+        for card in team_workflow_orchestration_service._source_collection_stage_cards_projection(team["teamId"], run_id)["cards"]
+        if card["stageId"] == "extraction"
+    )
+    assert screening_projection["status"] == "artifact_ready_agent_needs_review"
     assert screening_projection["counts"]["artifact"] == 3
     assert screening_projection["counts"]["pending"] == 0
 
@@ -3285,14 +3392,14 @@ def test_content_extraction_writeback_requires_candidate_coverage_and_materializ
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": agent["agentId"], "role": "content_extraction", "agentName": "资料提炼"}],
+        members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
             "topic": "神经预测编码资料提炼",
-            "agentRoles": ["content_extraction"],
-            "agentIds": {"content_extraction": agent["agentId"]},
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": agent["agentId"]},
             "querySeeds": ["predictive coding neural algorithm"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -3321,7 +3428,7 @@ def test_content_extraction_writeback_requires_candidate_coverage_and_materializ
     task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         run_id,
-        {"stageId": "candidate", "agentId": agent["agentId"], "agentRole": "content_extraction"},
+        {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
     )
 
     partial = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
@@ -3392,14 +3499,14 @@ def test_content_extraction_writeback_materializes_record_extractions_and_report
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": agent["agentId"], "role": "content_extraction", "agentName": "资料提炼"}],
+        members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
             "topic": "神经预测编码资料提炼",
-            "agentRoles": ["content_extraction"],
-            "agentIds": {"content_extraction": agent["agentId"]},
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": agent["agentId"]},
             "querySeeds": ["predictive coding neural algorithm"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -3428,7 +3535,7 @@ def test_content_extraction_writeback_materializes_record_extractions_and_report
     task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         run_id,
-        {"stageId": "candidate", "agentId": agent["agentId"], "agentRole": "content_extraction"},
+        {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
     )
 
     partial = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
@@ -3474,7 +3581,7 @@ def test_content_extraction_writeback_materializes_record_extractions_and_report
     retry_task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         run_id,
-        {"stageId": "candidate", "agentId": agent["agentId"], "agentRole": "content_extraction"},
+        {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
     )
 
     assert retry_task["created"] is True
@@ -3492,14 +3599,14 @@ def test_content_extraction_writeback_reports_no_effect_closure_for_invalid_raw_
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": agent["agentId"], "role": "content_extraction", "agentName": "资料提炼"}],
+        members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
             "topic": "神经预测编码资料提炼",
-            "agentRoles": ["content_extraction"],
-            "agentIds": {"content_extraction": agent["agentId"]},
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": agent["agentId"]},
             "querySeeds": ["predictive coding neural algorithm"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -3524,7 +3631,7 @@ def test_content_extraction_writeback_reports_no_effect_closure_for_invalid_raw_
     task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         run_id,
-        {"stageId": "candidate", "agentId": agent["agentId"], "agentRole": "content_extraction"},
+        {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
     )
 
     response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
@@ -3559,14 +3666,14 @@ def test_content_extraction_writeback_excludes_no_content_records_and_keeps_valu
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": agent["agentId"], "role": "content_extraction", "agentName": "资料提炼"}],
+        members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
             "topic": "神经预测编码资料提炼",
-            "agentRoles": ["content_extraction"],
-            "agentIds": {"content_extraction": agent["agentId"]},
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": agent["agentId"]},
             "querySeeds": ["predictive coding hierarchy"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -3600,7 +3707,7 @@ def test_content_extraction_writeback_excludes_no_content_records_and_keeps_valu
     task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         run_id,
-        {"stageId": "candidate", "agentId": agent["agentId"], "agentRole": "content_extraction"},
+        {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
     )
 
     response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
@@ -3645,7 +3752,7 @@ def test_content_extraction_writeback_excludes_no_content_records_and_keeps_valu
     context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
         team["teamId"],
         run_id=run_id,
-        stage_id="candidate",
+        stage_id="extraction",
         task_id=task["taskId"],
         record_limit=5,
         context_mode="compact",
@@ -3662,14 +3769,14 @@ def test_execute_source_collection_search_filters_previously_excluded_sources(tm
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": agent["agentId"], "role": "content_extraction", "agentName": "资料提炼"}],
+        members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     first_run = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
             "topic": "神经预测编码资料",
-            "agentRoles": ["content_extraction"],
-            "agentIds": {"content_extraction": agent["agentId"]},
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": agent["agentId"]},
             "querySeeds": ["predictive coding hierarchy"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -3693,7 +3800,7 @@ def test_execute_source_collection_search_filters_previously_excluded_sources(tm
     task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         first_run_id,
-        {"stageId": "candidate", "agentId": agent["agentId"], "agentRole": "content_extraction"},
+        {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
     )
     team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
         team["teamId"],
@@ -3724,8 +3831,8 @@ def test_execute_source_collection_search_filters_previously_excluded_sources(tm
         team["teamId"],
         {
             "topic": "神经预测编码资料",
-            "agentRoles": ["data_discovery"],
-            "agentIds": {"data_discovery": "Data Discovery Agent"},
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": "Data Discovery Agent"},
             "querySeeds": ["predictive coding hierarchy"],
             "promptCachePolicy": {"requirement": "disabled"},
             "maxResultsPerQuery": 2,
@@ -3752,18 +3859,18 @@ def test_execute_source_collection_search_filters_previously_excluded_sources(tm
 def test_source_quality_writeback_downgrades_completed_when_candidate_coverage_is_partial(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    agent = agent_directory_service.create_agent_instance(display_name="资料审查")
-    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料审查")
+    agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": agent["agentId"], "role": "source_quality", "agentName": "资料审查"}],
+        members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
             "topic": "神经算法资料审查",
-            "agentRoles": ["source_quality"],
-            "agentIds": {"source_quality": agent["agentId"]},
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": agent["agentId"]},
             "querySeeds": ["predictive coding neural algorithm"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -3792,7 +3899,7 @@ def test_source_quality_writeback_downgrades_completed_when_candidate_coverage_i
     task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         run_id,
-        {"stageId": "screening", "agentId": agent["agentId"], "agentRole": "source_quality"},
+        {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
     )
 
     response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
@@ -3824,19 +3931,20 @@ def test_source_quality_writeback_downgrades_completed_when_candidate_coverage_i
 def test_knowledge_steward_memory_writeback_auto_ingests_approved_candidates(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    agent_directory_service.repair_agent_directory()
-    steward = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID)
-    assert steward is not None
-    steward_session = session_service.ensure_agent_direct_session(
-        agent_id=steward["agentId"],
-        title=agent_directory_service.KNOWLEDGE_STEWARD_FUNCTIONAL_NAME,
+    ingestor = agent_directory_service.create_agent_instance(display_name="资料入库")
+    ingestor_session = session_service.ensure_agent_direct_session(
+        agent_id=ingestor["agentId"],
+        title="资料入库",
     )
-    agent_directory_service.update_agent_instance(steward["agentId"], direct_session_id=steward_session["id"])
+    agent_directory_service.update_agent_instance(ingestor["agentId"], direct_session_id=ingestor_session["id"])
     coordinator = agent_directory_service.create_agent_instance(display_name="科研协调")
     session_service.ensure_agent_direct_session(agent_id=coordinator["agentId"], title="科研协调")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": coordinator["agentId"], "role": "research_coordination", "agentName": "科研协调"}],
+        members=[
+            {"agentId": coordinator["agentId"], "role": "research_coordination", "agentName": "科研协调"},
+            {"agentId": ingestor["agentId"], "role": "source_ingestor", "agentName": "资料入库"},
+        ],
     )
     knowledge_base = team_knowledge_service.create_knowledge_base(
         team["teamId"],
@@ -3847,8 +3955,8 @@ def test_knowledge_steward_memory_writeback_auto_ingests_approved_candidates(tmp
         team["teamId"],
         {
             "topic": "神经预测编码",
-            "agentRoles": ["knowledge_steward"],
-            "agentIds": {"knowledge_steward": steward["agentId"]},
+            "agentRoles": ["source_ingestor"],
+            "agentIds": {"source_ingestor": ingestor["agentId"]},
             "querySeeds": ["predictive coding neural algorithm"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -3885,7 +3993,7 @@ def test_knowledge_steward_memory_writeback_auto_ingests_approved_candidates(tmp
     task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         run_id,
-        {"stageId": "memory", "agentId": steward["agentId"], "agentRole": "knowledge_steward"},
+        {"stageId": "ingestion", "agentId": ingestor["agentId"], "agentRole": "source_ingestor"},
     )
     writeback_payload = {
         "status": "completed",
@@ -3909,7 +4017,7 @@ def test_knowledge_steward_memory_writeback_auto_ingests_approved_candidates(tmp
             },
             "steward_assessment": {"decision": "approved", "targetDomain": "神经机制启发神经网络算法"},
         },
-        "recordedByAgent": steward["agentId"],
+        "recordedByAgent": ingestor["agentId"],
         "evidenceRefs": [{"type": "candidate", "id": source["candidateId"]}],
         "nextActions": ["进入实验规划"],
     }
@@ -3924,9 +4032,13 @@ def test_knowledge_steward_memory_writeback_auto_ingests_approved_candidates(tmp
     knowledge_base_id = materialized["knowledgeBaseId"]
     knowledge_items = team_knowledge_service.list_knowledge_items(
         knowledge_base_id,
-        agent_id=steward["agentId"],
+        agent_id=ingestor["agentId"],
     )
-    memory_projection = team_workflow_orchestration_service._source_collection_stage_cards_projection(team["teamId"], run_id)["cards"][4]
+    memory_projection = next(
+        card
+        for card in team_workflow_orchestration_service._source_collection_stage_cards_projection(team["teamId"], run_id)["cards"]
+        if card["stageId"] == "ingestion"
+    )
 
     assert materialized["status"] == "completed"
     assert materialized["approvedCandidateCount"] == 1
@@ -3946,7 +4058,7 @@ def test_knowledge_steward_memory_writeback_auto_ingests_approved_candidates(tmp
     )
     second_items = team_knowledge_service.list_knowledge_items(
         knowledge_base_id,
-        agent_id=steward["agentId"],
+        agent_id=ingestor["agentId"],
     )
     second_materialized = second_response["writeback"]["materializedKnowledgeIngestion"]
     assert second_materialized["status"] == "completed"
@@ -3957,19 +4069,20 @@ def test_knowledge_steward_memory_writeback_auto_ingests_approved_candidates(tmp
 def test_knowledge_steward_memory_writeback_auto_ingests_real_steward_pack_shape(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    agent_directory_service.repair_agent_directory()
-    steward = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID)
-    assert steward is not None
-    steward_session = session_service.ensure_agent_direct_session(
-        agent_id=steward["agentId"],
-        title=agent_directory_service.KNOWLEDGE_STEWARD_FUNCTIONAL_NAME,
+    ingestor = agent_directory_service.create_agent_instance(display_name="资料入库")
+    ingestor_session = session_service.ensure_agent_direct_session(
+        agent_id=ingestor["agentId"],
+        title="资料入库",
     )
-    agent_directory_service.update_agent_instance(steward["agentId"], direct_session_id=steward_session["id"])
+    agent_directory_service.update_agent_instance(ingestor["agentId"], direct_session_id=ingestor_session["id"])
     coordinator = agent_directory_service.create_agent_instance(display_name="科研协调")
     session_service.ensure_agent_direct_session(agent_id=coordinator["agentId"], title="科研协调")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": coordinator["agentId"], "role": "research_coordination", "agentName": "科研协调"}],
+        members=[
+            {"agentId": coordinator["agentId"], "role": "research_coordination", "agentName": "科研协调"},
+            {"agentId": ingestor["agentId"], "role": "source_ingestor", "agentName": "资料入库"},
+        ],
     )
     knowledge_base = team_knowledge_service.create_knowledge_base(
         team["teamId"],
@@ -3980,8 +4093,8 @@ def test_knowledge_steward_memory_writeback_auto_ingests_real_steward_pack_shape
         team["teamId"],
         {
             "topic": "神经预测编码",
-            "agentRoles": ["knowledge_steward"],
-            "agentIds": {"knowledge_steward": steward["agentId"]},
+            "agentRoles": ["source_ingestor"],
+            "agentIds": {"source_ingestor": ingestor["agentId"]},
             "querySeeds": ["predictive coding neural algorithm"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -4018,7 +4131,7 @@ def test_knowledge_steward_memory_writeback_auto_ingests_real_steward_pack_shape
     task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         run_id,
-        {"stageId": "memory", "agentId": steward["agentId"], "agentRole": "knowledge_steward"},
+        {"stageId": "ingestion", "agentId": ingestor["agentId"], "agentRole": "source_ingestor"},
     )
 
     response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
@@ -4057,7 +4170,7 @@ def test_knowledge_steward_memory_writeback_auto_ingests_real_steward_pack_shape
                     "approvedCandidates": [{"candidateId": source["candidateId"], "title": source["title"]}],
                 },
             },
-            "recordedByAgent": steward["agentId"],
+            "recordedByAgent": ingestor["agentId"],
             "evidenceRefs": [{"type": "candidate", "id": source["candidateId"]}],
             "nextActions": ["进入实验规划"],
         },
@@ -4072,25 +4185,25 @@ def test_knowledge_steward_memory_writeback_auto_ingests_real_steward_pack_shape
 
     knowledge_items = team_knowledge_service.list_knowledge_items(
         materialized["knowledgeBaseId"],
-        agent_id=steward["agentId"],
+        agent_id=ingestor["agentId"],
     )
     assert knowledge_items["summary"]["itemCount"] == 1
 
 def test_candidate_graph_stage_writeback_materializes_candidate_graph(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
-    agent = agent_directory_service.create_agent_instance(display_name="候选图谱")
-    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="候选图谱")
+    agent = agent_directory_service.create_agent_instance(display_name="资料关系整理")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料关系整理")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": agent["agentId"], "role": "candidate_graph", "agentName": "候选图谱"}],
+        members=[{"agentId": agent["agentId"], "role": "source_relation_mapper", "agentName": "资料关系整理"}],
     )
     run_response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
         {
             "topic": "神经预测编码候选图谱",
-            "agentRoles": ["candidate_graph"],
-            "agentIds": {"candidate_graph": agent["agentId"]},
+            "agentRoles": ["source_relation_mapper"],
+            "agentIds": {"source_relation_mapper": agent["agentId"]},
             "querySeeds": ["predictive coding neural graph"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -4128,7 +4241,7 @@ def test_candidate_graph_stage_writeback_materializes_candidate_graph(tmp_path, 
     task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         run_id,
-        {"stageId": "graph", "agentId": agent["agentId"], "agentRole": "candidate_graph"},
+        {"stageId": "relations", "agentId": agent["agentId"], "agentRole": "source_relation_mapper"},
     )
 
     response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
@@ -4161,21 +4274,25 @@ def test_candidate_graph_stage_writeback_materializes_candidate_graph(tmp_path, 
     materialized = response["writeback"]["materializedCandidateGraph"]
     graph_list = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="candidate_graph")
     graph_candidate = graph_list["candidates"][0]
-    graph_projection = team_workflow_orchestration_service._source_collection_stage_cards_projection(team["teamId"], run_id)["cards"][3]
+    graph_projection = next(
+        card
+        for card in team_workflow_orchestration_service._source_collection_stage_cards_projection(team["teamId"], run_id)["cards"]
+        if card["stageId"] == "relations"
+    )
     assert materialized["createdCandidateGraphCount"] == 1
     assert materialized["candidateGraphId"] == graph_candidate["candidateId"]
     assert materialized["nodeCount"] == 2
     assert materialized["edgeCount"] >= 0
     assert graph_candidate["candidateType"] == "candidate_graph"
-    assert graph_candidate["metadata"]["stageAgentRole"] == "candidate_graph"
+    assert graph_candidate["metadata"]["stageAgentRole"] == "source_relation_mapper"
     assert graph_candidate["metadata"]["agentWriteback"]["taskId"] == task["taskId"]
     assert graph_candidate["metadata"]["agentWriteback"]["result"]["candidateGraph"]["theme"] == "神经预测编码"
-    assert graph_projection["stageId"] == "graph"
+    assert graph_projection["stageId"] == "relations"
     assert graph_projection["status"] == "closed_loop"
     assert graph_projection["counts"]["artifact"] == 2
 
 
-def test_research_stage_status_reconciles_legacy_source_quality_writeback(tmp_path, monkeypatch):
+def test_legacy_source_quality_stage_task_is_rejected(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
@@ -4197,65 +4314,16 @@ def test_research_stage_status_reconciles_legacy_source_quality_writeback(tmp_pa
         },
     )
     run_id = stage_response["run"]["runId"]
-    source = team_workflow_orchestration_service.register_candidate_source(
-        team["teamId"],
-        {
-            "title": "Predictive coding source for legacy writeback",
-            "sourceUrl": "https://doi.org/10.0000/legacy-source-quality",
-            "sourceKind": "paper",
-            "summary": "Neural predictive coding evidence.",
-            "allowedForAnalysis": True,
-            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/legacy-source-quality"},
-            "createdByAgent": "content-extraction-agent",
-        },
-    )["candidate"]
-    monkeypatch.setattr(
-        session_service,
-        "submit_session_message",
-        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-legacy-quality", "status": "running"},
-    )
-    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
-        team["teamId"],
-        run_id,
-        {"stageId": "screening", "agentId": agent["agentId"], "agentRole": "source_quality"},
-    )
-    result = {
-        "candidateDecisions": [
-            {
-                "candidateId": source["candidateId"],
-                "decision": "pass",
-                "reason": "旧任务已经完成审查，但当时没有物化候选质检状态。",
-            }
-        ]
-    }
-    store = team_workflow_orchestration_service._load_source_collection_stage_session_task_store(team["teamId"], run_id)
-    stored_task = next(item for item in store["tasks"] if item["taskId"] == task["taskId"])
-    stored_task["status"] = "needs_review"
-    stored_task["summary"] = "旧资料审查任务已写回候选决策。"
-    stored_task["result"] = result
-    stored_task["writeback"] = {
-        "status": "needs_review",
-        "summary": stored_task["summary"],
-        "result": result,
-        "resultAuthority": "source_collection_stage_writeback_tool",
-        "recordedByAgent": agent["agentId"],
-        "recordedAt": "2026-06-25T00:00:00+00:00",
-    }
-    team_workflow_orchestration_service._write_source_collection_stage_session_task_store(team["teamId"], run_id, store)
 
-    status_payload = team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
-
-    source_quality = team_workflow_orchestration_service.get_source_quality_status(team["teamId"])
-    refreshed_store = team_workflow_orchestration_service._load_source_collection_stage_session_task_store(team["teamId"], run_id)
-    refreshed_task = next(item for item in refreshed_store["tasks"] if item["taskId"] == task["taskId"])
-    assert source_quality["summary"]["assessedSourceCandidateCount"] == 1
-    assert source_quality["summary"]["approvedSourceCandidateCount"] == 1
-    assert refreshed_task["writeback"]["materializedSourceQuality"]["assessedCandidateCount"] == 1
-    screening_card = next(item for item in status_payload["latestRound"]["sourceCollectionStageCards"] if item["stageId"] == "screening")
-    assert screening_card["status"] == "closed_loop"
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError, match="Unsupported source collection stage"):
+        team_workflow_orchestration_service.start_source_collection_stage_session_task(
+            team["teamId"],
+            run_id,
+            {"stageId": "screening", "agentId": agent["agentId"], "agentRole": "source_quality"},
+        )
 
 
-def test_research_stage_status_reconciles_legacy_candidate_graph_writeback(tmp_path, monkeypatch):
+def test_legacy_candidate_graph_stage_task_is_rejected(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
@@ -4277,83 +4345,13 @@ def test_research_stage_status_reconciles_legacy_candidate_graph_writeback(tmp_p
         },
     )
     run_id = stage_response["run"]["runId"]
-    source_one = team_workflow_orchestration_service.register_candidate_source(
-        team["teamId"],
-        {
-            "title": "Predictive coding source for legacy graph",
-            "sourceUrl": "https://doi.org/10.0000/legacy-graph-one",
-            "sourceKind": "paper",
-            "summary": "Predictive coding source for graph building.",
-            "allowedForAnalysis": True,
-            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/legacy-graph-one"},
-            "createdByAgent": "content-extraction-agent",
-        },
-    )["candidate"]
-    source_two = team_workflow_orchestration_service.register_candidate_source(
-        team["teamId"],
-        {
-            "title": "Precision attention source for legacy graph",
-            "sourceUrl": "https://doi.org/10.0000/legacy-graph-two",
-            "sourceKind": "paper",
-            "summary": "Precision attention source for graph building.",
-            "allowedForAnalysis": True,
-            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/legacy-graph-two"},
-            "createdByAgent": "content-extraction-agent",
-        },
-    )["candidate"]
-    monkeypatch.setattr(
-        session_service,
-        "submit_session_message",
-        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-legacy-graph", "status": "running"},
-    )
-    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
-        team["teamId"],
-        run_id,
-        {"stageId": "graph", "agentId": agent["agentId"], "agentRole": "candidate_graph"},
-    )
-    result = {
-        "candidateGraph": {
-            "theme": "旧任务图谱",
-            "nodes": [
-                {"candidateId": source_one["candidateId"], "label": "predictive coding"},
-                {"candidateId": source_two["candidateId"], "label": "attention precision"},
-            ],
-            "edges": [
-                {
-                    "sourceCandidateId": source_one["candidateId"],
-                    "targetCandidateId": source_two["candidateId"],
-                    "relation": "supports",
-                }
-            ],
-        }
-    }
-    store = team_workflow_orchestration_service._load_source_collection_stage_session_task_store(team["teamId"], run_id)
-    stored_task = next(item for item in store["tasks"] if item["taskId"] == task["taskId"])
-    stored_task["status"] = "completed"
-    stored_task["summary"] = "旧候选图谱任务已写回图谱结构。"
-    stored_task["result"] = result
-    stored_task["writeback"] = {
-        "status": "completed",
-        "summary": stored_task["summary"],
-        "result": result,
-        "resultAuthority": "source_collection_stage_writeback_tool",
-        "recordedByAgent": agent["agentId"],
-        "recordedAt": "2026-06-25T00:00:00+00:00",
-    }
-    team_workflow_orchestration_service._write_source_collection_stage_session_task_store(team["teamId"], run_id, store)
 
-    status_payload = team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
-
-    graph_list = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="candidate_graph")
-    refreshed_store = team_workflow_orchestration_service._load_source_collection_stage_session_task_store(team["teamId"], run_id)
-    refreshed_task = next(item for item in refreshed_store["tasks"] if item["taskId"] == task["taskId"])
-    graph_card = next(item for item in status_payload["latestRound"]["sourceCollectionStageCards"] if item["stageId"] == "graph")
-    assert len(graph_list["candidates"]) == 1
-    assert refreshed_task["writeback"]["materializedCandidateGraph"]["candidateGraphId"] == graph_list["candidates"][0]["candidateId"]
-    assert refreshed_task["writeback"]["materializedCandidateGraph"]["createdCandidateGraphCount"] == 1
-    assert graph_list["candidates"][0]["metadata"]["agentWriteback"]["result"]["candidateGraph"]["theme"] == "旧任务图谱"
-    assert graph_card["status"] == "closed_loop"
-    assert graph_card["counts"]["artifact"] == 2
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError, match="Unsupported source collection stage"):
+        team_workflow_orchestration_service.start_source_collection_stage_session_task(
+            team["teamId"],
+            run_id,
+            {"stageId": "graph", "agentId": agent["agentId"], "agentRole": "candidate_graph"},
+        )
 
 
 def test_source_collection_stage_tools_record_failure_runtime_events(tmp_path, monkeypatch):
@@ -4399,8 +4397,8 @@ def test_execute_source_collection_search_writes_records_and_imports_candidates(
             "searchLanguages": ["en"],
             "sourceTypes": ["paper"],
             "maxResultsPerQuery": 2,
-            "agentRoles": ["data_discovery"],
-            "agentIds": {"data_discovery": "Data Discovery Agent"},
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": "Data Discovery Agent"},
         },
     )
 
@@ -4488,8 +4486,8 @@ def test_execute_source_collection_search_rejects_low_relevance_results_before_s
             "searchLanguages": ["en"],
             "sourceTypes": ["paper"],
             "maxResultsPerQuery": 1,
-            "agentRoles": ["data_discovery"],
-            "agentIds": {"data_discovery": "Data Discovery Agent"},
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": "Data Discovery Agent"},
         },
     )
 
@@ -4540,7 +4538,7 @@ def test_execute_source_collection_search_publishes_runtime_work_run(tmp_path, m
             "querySeeds": ["neural predictive coding"],
             "searchLanguages": ["en"],
             "sourceTypes": ["paper"],
-            "agentRoles": ["data_discovery"],
+            "agentRoles": ["source_finder"],
         },
     )
 
@@ -4593,7 +4591,7 @@ def test_execute_source_collection_search_does_not_mark_downstream_assignments_a
             "querySeeds": ["neural predictive coding"],
             "searchLanguages": ["en"],
             "sourceTypes": ["paper"],
-            "agentRoles": ["data_discovery", "content_extraction", "source_quality"],
+            "agentRoles": ["source_finder", "source_extractor", "source_relation_mapper", "source_ingestor"],
         },
     )
 
@@ -4605,17 +4603,17 @@ def test_execute_source_collection_search_does_not_mark_downstream_assignments_a
     summary = team_workflow_orchestration_service.load_source_collection_work_run_summary()
 
     assert execution["executedQueryCount"] == 1
-    assert execution["sourceCollectionSummary"]["openAssignmentCount"] == 2
+    assert execution["sourceCollectionSummary"]["openAssignmentCount"] == 3
     assert execution["sourceCollectionSummary"]["searchOpenAssignmentCount"] == 0
-    assert execution["sourceCollectionSummary"]["downstreamOpenAssignmentCount"] == 2
+    assert execution["sourceCollectionSummary"]["downstreamOpenAssignmentCount"] == 3
     assert execution["runStatus"]["summary"]["searchOpenAssignmentCount"] == 0
-    assert execution["runStatus"]["summary"]["downstreamOpenAssignmentCount"] == 2
+    assert execution["runStatus"]["summary"]["downstreamOpenAssignmentCount"] == 3
     assert summary["active"] is None
     assert summary["latest"]["status"] == "completed"
     assert summary["latest"]["currentPhase"] == "completed"
-    assert summary["latest"]["openAssignmentCount"] == 2
+    assert summary["latest"]["openAssignmentCount"] == 3
     assert summary["latest"]["searchOpenAssignmentCount"] == 0
-    assert summary["latest"]["downstreamOpenAssignmentCount"] == 2
+    assert summary["latest"]["downstreamOpenAssignmentCount"] == 3
 
 
 def test_execute_source_collection_search_skips_existing_query_without_force(tmp_path, monkeypatch):
@@ -4635,7 +4633,7 @@ def test_execute_source_collection_search_skips_existing_query_without_force(tmp
             "querySeeds": ["predictive coding cortical hierarchy"],
             "searchLanguages": ["en"],
             "sourceTypes": ["paper"],
-            "agentRoles": ["data_discovery"],
+            "agentRoles": ["source_finder"],
         },
     )
     first = team_workflow_orchestration_service.execute_source_collection_search(team["teamId"], run_response["run"]["runId"], {"maxQueries": 1})
@@ -4681,7 +4679,7 @@ def test_execute_source_collection_search_records_output_per_query(tmp_path, mon
             "querySeeds": ["first query", "second query"],
             "searchLanguages": ["en"],
             "sourceTypes": ["paper"],
-            "agentRoles": ["data_discovery"],
+            "agentRoles": ["source_finder"],
         },
     )
 
@@ -4715,7 +4713,7 @@ def test_execute_source_collection_search_skips_duplicate_sources_on_force_rerun
             "querySeeds": ["predictive coding cortical hierarchy"],
             "searchLanguages": ["en"],
             "sourceTypes": ["paper"],
-            "agentRoles": ["data_discovery"],
+            "agentRoles": ["source_finder"],
         },
     )
 
@@ -4813,7 +4811,7 @@ def test_execute_source_collection_search_dedupes_metadata_doi_and_sorted_url_qu
             "querySeeds": ["first", "second"],
             "searchLanguages": ["en"],
             "sourceTypes": ["paper"],
-            "agentRoles": ["data_discovery"],
+            "agentRoles": ["source_finder"],
         },
     )
 
@@ -4848,7 +4846,7 @@ def test_start_research_stage_round_creates_knowledge_collection_round(tmp_path,
             "topic": "predictive coding",
             "goal": "Collect traceable neuroscience sources.",
             "querySeeds": ["cortical predictive coding"],
-            "agentRoles": ["data_discovery", "source_quality"],
+            "agentRoles": ["source_finder", "source_extractor"],
         },
     )
 
@@ -4926,7 +4924,7 @@ def test_source_collection_search_syncs_stage_round_terminal_state(tmp_path, mon
             "querySeeds": ["first stage query", "second stage query"],
             "searchLanguages": ["en"],
             "sourceTypes": ["paper"],
-            "agentRoles": ["data_discovery"],
+            "agentRoles": ["source_finder"],
         },
     )
     run_id = response["run"]["runId"]
@@ -4985,7 +4983,7 @@ def test_research_stage_status_recovers_stale_running_source_collection_round(tm
             "querySeeds": ["first query", "second query"],
             "searchLanguages": ["en"],
             "sourceTypes": ["paper"],
-            "agentRoles": ["data_discovery"],
+            "agentRoles": ["source_finder"],
         },
     )
     run_id = response["run"]["runId"]
@@ -5058,8 +5056,8 @@ def test_start_research_stage_round_does_not_auto_start_team_coordination_round(
         {
             "stageType": "knowledge_collection",
             "topic": "predictive coding",
-            "agentRoles": ["data_discovery"],
-            "agentIds": {"data_discovery": agent["agentId"]},
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": agent["agentId"]},
         },
     )
     room = chat_room_service.get_chat_room_detail(team["linkedChatRoomId"])
@@ -6261,7 +6259,7 @@ def test_source_collection_summary_uses_lightweight_team_existence(tmp_path, mon
         team["teamId"],
         {
             "topic": "predictive coding",
-            "agentRoles": ["data_discovery"],
+            "agentRoles": ["source_finder"],
             "querySeeds": ["predictive coding"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -6294,7 +6292,7 @@ def test_source_collection_summary_uses_lightweight_team_existence(tmp_path, mon
     assert payload["runId"] == run_id
     assert payload["summary"]["recordCount"] == 1
     assert payload["summary"]["sourceCandidateCount"] == 1
-    assert len(payload["stageCards"]) == 5
+    assert [card["stageId"] for card in payload["stageCards"]] == ["finding", "extraction", "relations", "ingestion"]
     assert payload["stageCardSummary"]["sourceCandidateCount"] == 1
 
 
@@ -6328,7 +6326,7 @@ def test_research_stage_round_status_skips_repair_hydration_when_round_exists(tm
         {
             "stageType": "knowledge_collection",
             "topic": "predictive coding",
-            "agentRoles": ["data_discovery"],
+            "agentRoles": ["source_finder"],
             "querySeeds": ["predictive coding"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -6340,10 +6338,10 @@ def test_research_stage_round_status_skips_repair_hydration_when_round_exists(tm
         {
             "taskId": "stagetask-existing-round",
             "runId": run_id,
-            "stageId": "collection",
-            "agentId": "discovery-agent",
-            "agentRole": "data_discovery",
-            "sessionId": "session-discovery",
+            "stageId": "finding",
+            "agentId": "source-finder-agent",
+            "agentRole": "source_finder",
+            "sessionId": "session-source-finder",
             "status": "completed",
             "summary": "已完成资料搜索。",
             "writebackContract": {"taskId": "stagetask-existing-round"},
@@ -6359,7 +6357,7 @@ def test_research_stage_round_status_skips_repair_hydration_when_round_exists(tm
 
     assert payload["latestRound"]["sourceRunIds"] == [run_id]
     collection_card = next(
-        item for item in payload["latestRound"]["sourceCollectionStageCards"] if item["stageId"] == "collection"
+        item for item in payload["latestRound"]["sourceCollectionStageCards"] if item["stageId"] == "finding"
     )
     assert collection_card["latestTask"]["taskId"] == "stagetask-existing-round"
 
@@ -6368,7 +6366,13 @@ def test_source_collection_stage_card_projection_resolves_current_stage_agents_o
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
     run_id = "run-stage-card-projection-fast-path"
-    for stage_id in ("collection", "candidate", "screening", "graph", "memory"):
+    stage_roles = {
+        "finding": "source_finder",
+        "extraction": "source_extractor",
+        "relations": "source_relation_mapper",
+        "ingestion": "source_ingestor",
+    }
+    for stage_id, agent_role in stage_roles.items():
         team_workflow_orchestration_service._upsert_source_collection_stage_session_task(
             team["teamId"],
             run_id,
@@ -6376,7 +6380,7 @@ def test_source_collection_stage_card_projection_resolves_current_stage_agents_o
                 "taskId": f"task-{stage_id}",
                 "stageId": stage_id,
                 "agentId": f"agent-{stage_id}",
-                "agentRole": "knowledge_steward" if stage_id == "memory" else "data_discovery",
+                "agentRole": agent_role,
                 "sessionId": f"session-{stage_id}",
                 "status": "completed",
                 "summary": f"{stage_id} done",
@@ -6391,11 +6395,10 @@ def test_source_collection_stage_card_projection_resolves_current_stage_agents_o
         return {
             "teamId": team_id,
             "members": [
-                {"agentId": "agent-collection", "role": "data_discovery"},
-                {"agentId": "agent-candidate", "role": "content_extraction"},
-                {"agentId": "agent-screening", "role": "source_quality"},
-                {"agentId": "agent-graph", "role": "candidate_graph"},
-                {"agentId": "agent-memory", "role": "knowledge_steward"},
+                {"agentId": "agent-finding", "role": "source_finder"},
+                {"agentId": "agent-extraction", "role": "source_extractor"},
+                {"agentId": "agent-relations", "role": "source_relation_mapper"},
+                {"agentId": "agent-ingestion", "role": "source_ingestor"},
             ],
         }
 
@@ -6407,7 +6410,8 @@ def test_source_collection_stage_card_projection_resolves_current_stage_agents_o
         run_status={"summary": {"recordCount": 1, "assignmentCount": 1, "openAssignmentCount": 0}},
     )
 
-    assert len(projection["cards"]) == 5
+    assert len(projection["cards"]) == 4
+    assert [card["stageId"] for card in projection["cards"]] == ["finding", "extraction", "relations", "ingestion"]
     assert team_reads == []
 
 
@@ -6419,7 +6423,7 @@ def test_source_collection_summary_records_slow_runtime_event(tmp_path, monkeypa
         team["teamId"],
         {
             "topic": "predictive coding",
-            "agentRoles": ["data_discovery"],
+            "agentRoles": ["source_finder"],
             "querySeeds": ["predictive coding"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -6464,16 +6468,16 @@ def test_source_collection_summary_records_slow_runtime_event(tmp_path, monkeypa
     assert slow_events[0]["fields"]["runId"] == run_id
     assert slow_events[0]["fields"]["durationMs"] == 1600
     assert slow_events[0]["fields"]["recordCount"] == 1
-    assert slow_events[0]["fields"]["stageCardCount"] == 5
+    assert slow_events[0]["fields"]["stageCardCount"] == 4
 
 
 def test_source_collection_stage_card_projection_keeps_ready_artifact_when_latest_task_blocked():
     card = team_workflow_orchestration_service._source_collection_stage_card_projection(
-        "collection",
+        "finding",
         [
             {
                 "taskId": "task-supplemental-search-blocked",
-                "stageId": "collection",
+                "stageId": "finding",
                 "status": "blocked",
                 "summary": "Supplemental public search was blocked by low quality results.",
                 "updatedAt": "2026-06-27T09:10:00Z",
@@ -6514,7 +6518,7 @@ def test_load_source_collection_work_run_summary_cleanses_invalid_storage_path(t
         team["teamId"],
         {
             "topic": "predictive coding",
-            "agentRoles": ["data_discovery"],
+            "agentRoles": ["source_finder"],
             "querySeeds": ["predictive coding"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -6591,7 +6595,7 @@ def test_source_collection_summary_cleanses_active_work_run_invalid_storage_path
         team["teamId"],
         {
             "topic": "predictive coding",
-            "agentRoles": ["data_discovery"],
+            "agentRoles": ["source_finder"],
             "querySeeds": ["predictive coding"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -6632,7 +6636,7 @@ def test_source_collection_run_context_bundle_cleanses_invalid_active_storage_pa
         team["teamId"],
         {
             "topic": "predictive coding",
-            "agentRoles": ["data_discovery"],
+            "agentRoles": ["source_finder"],
             "querySeeds": ["predictive coding"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -8031,13 +8035,13 @@ def test_knowledge_collection_completion_background_normalizes_one_click_default
     active_flow = accepted["activeWorkRun"]["flowVisualization"]
     latest_run = status["latestWorkRun"]
     latest_flow = latest_run["flowVisualization"]
-    assert [node["stageId"] for node in active_flow["nodes"]] == ["collection", "candidate", "screening", "graph", "memory"]
-    assert active_flow["nodes"][0]["agentRole"] == "source_collection"
+    assert [node["stageId"] for node in active_flow["nodes"]] == ["finding", "extraction", "relations", "ingestion"]
+    assert active_flow["nodes"][0]["agentRole"] == "source_finder"
     assert latest_run["completionSteps"][0]["stageId"] == "remaining_search"
     assert latest_flow["status"] == "completed"
     assert latest_flow["nodes"][-1]["status"] == "completed"
     assert latest_flow["nodes"][-1]["outputCount"] == 1
-    assert latest_flow["nodes"][-1]["agentRole"] == "knowledge_steward"
+    assert latest_flow["nodes"][-1]["agentRole"] == "source_ingestor"
 
 
 def test_knowledge_collection_completion_background_failure_logs_child_payload(tmp_path, monkeypatch):
@@ -8076,7 +8080,7 @@ def test_knowledge_collection_completion_background_failure_logs_child_payload(t
 
     accepted = team_workflow_orchestration_service.start_knowledge_collection_completion_background(
         team["teamId"],
-        {"runId": "source-run-failed", "stewardAgentId": "knowledge-steward"},
+        {"runId": "source-run-failed", "stewardAgentId": "source-ingestor"},
     )
 
     assert accepted["accepted"] is True
@@ -8093,9 +8097,9 @@ def test_knowledge_collection_completion_background_failure_logs_child_payload(t
     failed_flow = status["latestWorkRun"]["flowVisualization"]
     failed_nodes = {node["stageId"]: node for node in failed_flow["nodes"]}
     assert failed_flow["status"] == "failed"
-    assert failed_nodes["collection"]["status"] == "completed"
-    assert failed_nodes["candidate"]["status"] == "failed"
-    assert failed_nodes["candidate"]["errorType"] == "TeamWorkflowOrchestrationError"
+    assert failed_nodes["finding"]["status"] == "completed"
+    assert failed_nodes["extraction"]["status"] == "failed"
+    assert failed_nodes["extraction"]["errorType"] == "TeamWorkflowOrchestrationError"
     assert "Source extraction failed" in failed_flow["error"]
 
 
@@ -8134,9 +8138,9 @@ def test_knowledge_ingestion_status_backfills_failed_completion_flow(tmp_path, m
     assert status["activeWorkRun"] is None
     assert latest_run["runId"] == run_id
     assert flow["status"] == "failed"
-    assert flow["currentStageId"] == "memory"
-    assert nodes["memory"]["status"] == "failed"
-    assert nodes["memory"]["errorType"] == "TeamWorkflowOrchestrationError"
+    assert flow["currentStageId"] == "ingestion"
+    assert nodes["ingestion"]["status"] == "failed"
+    assert nodes["ingestion"]["errorType"] == "TeamWorkflowOrchestrationError"
     assert "Knowledge review grant failed" in flow["error"]
 
 

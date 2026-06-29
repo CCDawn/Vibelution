@@ -121,16 +121,14 @@ TEAM_ID_TO_KIND = {
 }
 RESEARCH_TEAM_MEMBER_ROLE_KEYS = {
     "research_coordination": "challenge_cup_coordinator",
-    "data_discovery": "challenge_cup_data_discovery",
-    "source_acquisition": "challenge_cup_source_acquisition",
-    "content_extraction": "challenge_cup_content_extraction",
-    "source_quality": "challenge_cup_source_quality",
-    "candidate_graph": "candidate_graph",
+    "source_finder": "source_finder",
+    "source_extractor": "source_extractor",
+    "source_relation_mapper": "source_relation_mapper",
+    "source_ingestor": "source_ingestor",
     "experiment_planner": "challenge_cup_experiment_planner",
     "experiment_ledger": "challenge_cup_experiment_ledger",
     "iteration_planner": "challenge_cup_iteration_planner",
     "iteration_versioning": "challenge_cup_versioning",
-    "knowledge_steward": "knowledge_steward",
 }
 CHALLENGE_CUP_RESEARCH_TEAM_ID = "research-team"
 CHALLENGE_CUP_RESEARCH_TEAM_AGENT_CREATED_BY = "challenge_cup_team"
@@ -143,39 +141,32 @@ CHALLENGE_CUP_RESEARCH_TEAM_ROLES: tuple[dict[str, Any], ...] = (
         "responsibilities": ["判断当前阶段", "组织返工转移", "把任务交接给功能 Agent"],
     },
     {
-        "role": "data_discovery",
-        "roleKey": "challenge_cup_data_discovery",
-        "label": "资料发现",
-        "purpose": "搜索问题与来源范围",
-        "responsibilities": ["生成检索问题", "发现公开资料线索", "标注来源缺口"],
+        "role": "source_finder",
+        "roleKey": "source_finder",
+        "label": "资料寻找",
+        "purpose": "搜索、获取并登记可追溯资料",
+        "responsibilities": ["生成检索问题", "搜索和下载有效资料", "登记无效来源用于后续去重排除"],
     },
     {
-        "role": "source_acquisition",
-        "roleKey": "challenge_cup_source_acquisition",
-        "label": "来源获取",
-        "purpose": "网页、论文和数据集元信息",
-        "responsibilities": ["打开可验证来源", "记录 DOI/URL/来源元数据", "把可读来源交给提炼"],
+        "role": "source_extractor",
+        "roleKey": "source_extractor",
+        "label": "资料提炼",
+        "purpose": "提炼价值、复核质量并决定保留/排除",
+        "responsibilities": ["逐条提炼候选资料", "保留有价值但不完整的资料并说明限制", "排除无有效内容来源"],
     },
     {
-        "role": "content_extraction",
-        "roleKey": "challenge_cup_content_extraction",
-        "label": "内容提炼",
-        "purpose": "摘要、页码与证据片段",
-        "responsibilities": ["提炼证据片段", "生成候选摘要", "标注页码和引用锚点"],
+        "role": "source_relation_mapper",
+        "roleKey": "source_relation_mapper",
+        "label": "资料关系整理",
+        "purpose": "整理候选资料之间的主题和证据关系",
+        "responsibilities": ["生成候选关系", "标注断链缺口", "预览入库前关系边界"],
     },
     {
-        "role": "source_quality",
-        "roleKey": "challenge_cup_source_quality",
-        "label": "资料质量评估",
-        "purpose": "筛选、复审与退回",
-        "responsibilities": ["审查候选资料", "判断通过或退回", "整理补资料要求"],
-    },
-    {
-        "role": "candidate_graph",
-        "roleKey": "candidate_graph",
-        "label": "资料关系生成",
-        "purpose": "入库关系与断链预览",
-        "responsibilities": ["生成候选关系", "标注断链缺口", "预览图谱边界"],
+        "role": "source_ingestor",
+        "roleKey": "source_ingestor",
+        "label": "资料入库",
+        "purpose": "最终审核并写入正式 Team Knowledge",
+        "responsibilities": ["复核可入库资料", "执行正式知识库入库", "拒绝低置信或缺证据资料"],
     },
     {
         "role": "experiment_planner",
@@ -205,52 +196,54 @@ CHALLENGE_CUP_RESEARCH_TEAM_ROLES: tuple[dict[str, Any], ...] = (
         "purpose": "候选版本与拒绝归档",
         "responsibilities": ["维护 versionHistory", "记录 supersedes/derived_from", "归档 rejectionArchive"],
     },
-    {
-        "role": "knowledge_steward",
-        "roleKey": "knowledge_steward",
-        "label": "知识库管理员",
-        "purpose": "知识库管理员入库审核",
-        "responsibilities": ["审查入库门槛", "接收入库审核请求", "防止未审资料进入正式知识"],
-    },
 )
 KNOWLEDGE_EXPANSION_TEAM_AGENT_CREATED_BY = "knowledge_expansion_team"
 KNOWLEDGE_EXPANSION_TEAM_ROLES: tuple[dict[str, Any], ...] = (
     {
-        "role": "source_intake",
-        "roleKey": "knowledge_expansion_source_intake",
-        "label": "资料发现与导入",
-        "purpose": "本地资料导入与网络资料发现",
-        "responsibilities": ["扫描本地知识资料", "搜索公开资料线索", "把来源写回受控资料批次"],
+        "role": "source_finder",
+        "roleKey": "source_finder",
+        "label": "资料寻找",
+        "purpose": "本地资料导入、网络资料发现和可追溯登记",
+        "responsibilities": ["扫描本地知识资料", "搜索公开资料线索", "把有效来源写回受控资料批次"],
     },
     {
-        "role": "content_extraction",
-        "roleKey": "knowledge_expansion_content_extraction",
+        "role": "source_extractor",
+        "roleKey": "source_extractor",
         "label": "资料提炼",
-        "purpose": "摘要、证据片段与候选资料提炼",
-        "responsibilities": ["提炼可入库摘要", "标注证据引用", "把结构化结果写回团队批次"],
+        "purpose": "提炼价值、复核质量并决定保留/排除",
+        "responsibilities": ["提炼可入库摘要", "标注证据引用", "排除无有效内容来源并记录来源"],
     },
     {
-        "role": "source_quality",
-        "roleKey": "knowledge_expansion_source_quality",
-        "label": "资料质检",
-        "purpose": "可信度、完整性与入库风险审查",
-        "responsibilities": ["判断资料是否通过", "标注风险和缺口", "退回低质量来源"],
-    },
-    {
-        "role": "candidate_graph",
-        "roleKey": "knowledge_expansion_candidate_graph",
-        "label": "候选关系生成",
+        "role": "source_relation_mapper",
+        "roleKey": "source_relation_mapper",
+        "label": "资料关系整理",
         "purpose": "候选知识关系预览",
         "responsibilities": ["生成候选关系", "检查断链", "保持正式图谱写入边界"],
     },
     {
-        "role": "knowledge_steward",
-        "roleKey": "knowledge_steward",
-        "label": "知识库管理员",
-        "purpose": "入库审核与正式 Team Knowledge 写入",
+        "role": "source_ingestor",
+        "roleKey": "source_ingestor",
+        "label": "资料入库",
+        "purpose": "最终审核并写入正式 Team Knowledge",
         "responsibilities": ["复核高置信资料", "执行正式知识库入库", "拒绝低置信或缺证据资料"],
     },
 )
+LEGACY_SOURCE_COLLECTION_ROLE_KEYS = {
+    "data_discovery",
+    "source_acquisition",
+    "source_intake",
+    "content_extraction",
+    "source_quality",
+    "candidate_graph",
+    "knowledge_steward",
+    "challenge_cup_data_discovery",
+    "challenge_cup_source_acquisition",
+    "challenge_cup_content_extraction",
+    "challenge_cup_source_quality",
+    "knowledge_expansion_content_extraction",
+    "knowledge_expansion_source_quality",
+    "knowledge_expansion_candidate_graph",
+}
 TEMPLATE_MEMBER_PREFIX_TO_TEMPLATE_ID = {
     "medical-demo": "medical-consultation-demo",
     "heletech-demo": "heletech-maternal-digital-health-demo",
@@ -662,6 +655,8 @@ def challenge_cup_research_team_agents_need_repair() -> bool:
                 continue
             role = str(member.get("role") or "").strip()
             agent_id = str(member.get("agentId") or "").strip()
+            if role in LEGACY_SOURCE_COLLECTION_ROLE_KEYS:
+                return True
             if agent_id and agent_id not in active_agents:
                 return True
             if role in expected_roles:
@@ -690,6 +685,8 @@ def challenge_cup_research_team_agents_need_repair() -> bool:
                 continue
             role = str(node.get("role") or "").strip()
             agent_id = str(node.get("agentId") or "").strip()
+            if role in LEGACY_SOURCE_COLLECTION_ROLE_KEYS:
+                return True
             if agent_id and agent_id not in active_agents:
                 return True
             if role in expected_roles:
@@ -839,6 +836,8 @@ def knowledge_expansion_team_agents_need_repair() -> bool:
                 continue
             role = str(member.get("role") or "").strip()
             agent_id = str(member.get("agentId") or "").strip()
+            if role in LEGACY_SOURCE_COLLECTION_ROLE_KEYS:
+                return True
             if agent_id and agent_id not in active_agents:
                 return True
             if role in expected_roles:
@@ -867,6 +866,8 @@ def knowledge_expansion_team_agents_need_repair() -> bool:
                 continue
             role = str(node.get("role") or "").strip()
             agent_id = str(node.get("agentId") or "").strip()
+            if role in LEGACY_SOURCE_COLLECTION_ROLE_KEYS:
+                return True
             if agent_id and agent_id not in active_agents:
                 return True
             if role in expected_roles:
@@ -894,8 +895,18 @@ def _knowledge_expansion_team_agent_direct_session_available(agent: dict[str, An
 def ensure_knowledge_expansion_team_agents(*, purge_stale: bool = True) -> dict[str, Any]:
     """Ensure the dedicated knowledge-expansion Team and role Agents exist."""
 
+    project_root = Path(PROJECT_ROOT).resolve()
     ensured_agents = _ensure_knowledge_expansion_team_role_agents()
     members = _knowledge_expansion_team_members_from_agents(ensured_agents)
+    expected_agent_ids = {
+        str(agent.get("agentId") or "").strip()
+        for agent in ensured_agents
+        if isinstance(agent, dict) and str(agent.get("agentId") or "").strip()
+    }
+    old_agent_ids = _knowledge_expansion_team_bound_agent_ids()
+    extra_agent_ids = _knowledge_expansion_team_duplicate_agent_ids(expected_agent_ids)
+    purge_candidates = sorted((old_agent_ids | extra_agent_ids) - expected_agent_ids)
+    purge_results = _purge_knowledge_expansion_team_agents(purge_candidates, project_root=project_root) if purge_stale else []
     now = utc_now_iso()
     agent_refs = _merged_agent_reference_maps(_load_lightweight_agent_references(), ensured_agents)
     with _TEAM_LOCK:
@@ -959,8 +970,8 @@ def ensure_knowledge_expansion_team_agents(*, purge_stale: bool = True) -> dict[
         "memberCount": len(members),
         "agentCount": len(ensured_agents),
         "directSessionCount": sum(1 for agent in ensured_agents if str(agent.get("directSessionId") or "").strip()),
-        "purgedAgentIds": [],
-        "purgeResults": [],
+        "purgedAgentIds": [str(item.get("agentId") or "") for item in purge_results if item.get("deleted")],
+        "purgeResults": purge_results,
         "roles": [
             {
                 "role": str(role.get("role") or ""),
@@ -979,6 +990,7 @@ def ensure_knowledge_expansion_team_agents(*, purge_stale: bool = True) -> dict[
             "memberCount": result["memberCount"],
             "agentCount": result["agentCount"],
             "directSessionCount": result["directSessionCount"],
+            "purgedAgentCount": len(result["purgedAgentIds"]),
         },
     )
     return result
@@ -2598,6 +2610,45 @@ def _challenge_cup_research_team_duplicate_agent_ids(expected_agent_ids: set[str
         if str(metadata.get("challengeCupTeamId") or "").strip() == CHALLENGE_CUP_RESEARCH_TEAM_ID:
             duplicates.add(agent_id)
     return duplicates
+
+
+def _knowledge_expansion_team_bound_agent_ids() -> set[str]:
+    agent_ids: set[str] = set()
+    with _TEAM_LOCK:
+        state = _load_index()
+        team = _find_team(state, KNOWLEDGE_EXPANSION_TEAM_ID)
+        if team:
+            for member in list(team.get("members") or []):
+                if isinstance(member, dict):
+                    agent_id = str(member.get("agentId") or "").strip()
+                    if agent_id:
+                        agent_ids.add(agent_id)
+        canvas_path = _team_canvas_path(KNOWLEDGE_EXPANSION_TEAM_ID)
+        canvas = _read_json(canvas_path) if canvas_path.exists() else {}
+        for node in list(canvas.get("nodes") or []):
+            if isinstance(node, dict):
+                agent_id = str(node.get("agentId") or "").strip()
+                if agent_id:
+                    agent_ids.add(agent_id)
+    return agent_ids
+
+
+def _knowledge_expansion_team_duplicate_agent_ids(expected_agent_ids: set[str]) -> set[str]:
+    duplicates: set[str] = set()
+    for agent in agent_directory_service.list_agents(include_archived=True, detail="summary"):
+        agent_id = str(agent.get("agentId") or "").strip()
+        if not agent_id or agent_id in expected_agent_ids:
+            continue
+        if agent_id == agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID:
+            continue
+        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        if str(metadata.get("knowledgeExpansionTeamId") or "").strip() == KNOWLEDGE_EXPANSION_TEAM_ID:
+            duplicates.add(agent_id)
+    return duplicates
+
+
+def _purge_knowledge_expansion_team_agents(agent_ids: list[str], *, project_root: Path) -> list[dict[str, Any]]:
+    return _purge_challenge_cup_research_team_agents(agent_ids, project_root=project_root)
 
 
 def _purge_challenge_cup_research_team_agents(agent_ids: list[str], *, project_root: Path) -> list[dict[str, Any]]:
@@ -5309,19 +5360,17 @@ def _default_edges_for_team(team: dict[str, Any], nodes: list[dict[str, Any]]) -
         return _edges_from_role_links(
             nodes_by_role,
             [
-                ("research_coordination", "data_discovery", "分配资料发现任务", "reports_to"),
-                ("data_discovery", "source_acquisition", "交接来源线索", "reports_to"),
-                ("source_acquisition", "content_extraction", "交接可读来源", "reports_to"),
-                ("content_extraction", "source_quality", "提交资料审查", "reports_to"),
-                ("source_quality", "candidate_graph", "交接通过资料", "reports_to"),
-                ("candidate_graph", "knowledge_steward", "提交入库审核", "reports_to"),
+                ("research_coordination", "source_finder", "分配资料寻找任务", "reports_to"),
+                ("source_finder", "source_extractor", "交接可读资料", "reports_to"),
+                ("source_extractor", "source_relation_mapper", "交接保留资料", "reports_to"),
+                ("source_relation_mapper", "source_ingestor", "提交入库审核", "reports_to"),
                 ("research_coordination", "experiment_planner", "分配实验规划", "reports_to"),
                 ("experiment_planner", "experiment_ledger", "登记实验计划与结果", "reports_to"),
                 ("experiment_ledger", "iteration_planner", "交接实验证据", "reports_to"),
                 ("iteration_planner", "iteration_versioning", "交接版本决策", "reports_to"),
-                ("source_quality", "content_extraction", "退回补读与补提炼", "communication"),
-                ("candidate_graph", "source_quality", "反馈关系缺口", "communication"),
-                ("knowledge_steward", "candidate_graph", "反馈入库前关系补全", "communication"),
+                ("source_extractor", "source_finder", "退回补读与补资料", "communication"),
+                ("source_relation_mapper", "source_extractor", "反馈关系缺口", "communication"),
+                ("source_ingestor", "source_relation_mapper", "反馈入库前关系补全", "communication"),
             ],
         )
     return []

@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>07 知识治理入库 · 科研流程计划页</title>
+    <title>07 资料入库 · 科研流程计划页</title>
     <link rel="stylesheet" href="flow_pages.css" />
   </head>
   <body>
@@ -17,8 +17,8 @@
 <a class="" href="04-mechanism-mapping.html"><span class="mini">04</span><span>机制到计算抽象</span></a>
 <a class="" href="05-algorithm-hypothesis.html"><span class="mini">05</span><span>生成 algorithm_hypothesis</span></a>
 <a class="" href="06-research-review.html"><span class="mini">06</span><span>科研审稿</span></a>
-<a class=" active" href="07-steward-ingestion.html"><span class="mini">07</span><span>知识治理入库</span></a>
-<a class="" href="08-candidate-graph.html"><span class="mini">08</span><span>候选图谱预览</span></a>
+<a class=" active" href="07-source-ingestion.html"><span class="mini">07</span><span>资料入库</span></a>
+<a class="" href="08-candidate-graph.html"><span class="mini">08</span><span>资料关系整理预览</span></a>
 <a class="" href="09-official-graph.html"><span class="mini">09</span><span>正式知识图谱同步</span></a>
 <a class="" href="10-experiment-loop.html"><span class="mini">10</span><span>实验迭代闭环</span></a>
 <a class="" href="11-iteration-versioning.html"><span class="mini">11</span><span>持续迭代与版本化</span></a>
@@ -29,9 +29,9 @@
       <div>
         <section class="plan-hero">
           <div class="kicker">Research Flow Node 07</div>
-          <h1>知识治理入库</h1>
-          <p class="subtitle">知识库管理员在 memory 阶段审核本轮候选；approved 回写会由后端经 Team Knowledge 治理门禁创建正式 KnowledgeItem。</p>
-          <div class="tag-row"><span class="tag active">待知识治理审查</span><span class="tag">知识库管理员 · agent-knowledge-steward</span><span class="tag">独立计划页</span></div>
+          <h1>资料入库</h1>
+          <p class="subtitle">source_ingestor 在 ingestion 阶段审核本轮候选；approved 回写会由后端经 Team Knowledge 治理门禁创建正式 KnowledgeItem。</p>
+          <div class="tag-row"><span class="tag active">待资料入库审核</span><span class="tag">资料入库 Agent · source_ingestor</span><span class="tag">独立计划页</span></div>
           <div class="diagram">
             <div class="flow-cell"><strong>输入</strong><span>review_record 候选 / algorithm_hypothesis 候选</span></div>
             <div class="flow-cell"><strong>动作</strong><span>校验回写中的 approved candidateIds、targetDomain、sourceTrace、riskSummary、proposalPayload、ratingSuggestion。</span></div>
@@ -46,16 +46,16 @@
             <p class="hint">本页只展示 07 节点。通过左侧导航可进入其它节点页。</p>
           </div>
           <div class="plan-grid">
-            <article class="plan-card"><h2>目标</h2><p class="hint">把已通过资料质量筛选的本轮候选交给知识库管理员审核，并通过阶段回写触发 SourceArtifact、pending RefinementProposal、review/apply 和正式 KnowledgeItem 闭环。</p></article>
+            <article class="plan-card"><h2>目标</h2><p class="hint">把已通过资料提炼并具备关系上下文的本轮候选交给 source_ingestor 审核，并通过阶段回写触发 SourceArtifact、pending RefinementProposal、review/apply 和正式 KnowledgeItem 闭环。</p></article>
             <article class="plan-card"><h2>输入</h2><ul><li>review_record 候选</li>
 <li>algorithm_hypothesis 候选</li>
 <li>candidate_graph 快照</li>
 <li>目标知识域</li></ul></article>
             <article class="plan-card"><h2>处理动作</h2><ul><li>校验回写中的 approved candidateIds、targetDomain、sourceTrace、riskSummary、proposalPayload、ratingSuggestion。</li>
-<li>只采纳本轮 source_manifest 且 source_quality approved 的候选，拒绝跨轮或未质检通过资料进入正式链路。</li>
+<li>只采纳本轮 source_manifest 且已被资料提炼阶段保留的候选，拒绝跨轮或无有效内容资料进入正式链路。</li>
 <li>禁止绕过 source_collection_stage_writeback_tool、Team Knowledge source review、proposal review/apply gate 直接写库。</li>
-<li>知识搜集入库入口进入知识库管理员 direct session task，而不是只发送 inbox 请求后等待人工二次启动。</li>
-<li>知识库管理员在 memory 阶段回写 approved 后，后端构建或复用 steward_pack_draft，并提交 Team Knowledge 待审队列。</li>
+<li>知识搜集入库入口进入 source_ingestor direct session task，而不是只发送 inbox 请求后等待人工二次启动。</li>
+<li>source_ingestor 在 ingestion 阶段回写 approved 后，后端构建或复用 steward_pack_draft，并提交 Team Knowledge 待审队列。</li>
 <li>后端复用 source review、RefinementProposal review/apply 和 ingestion approval gate；批准后进入 official_synced，拒绝后回到 steward_needs_revision。</li>
 <li>重复 approved 回写会复用已有 official sync，不重复创建 KnowledgeItem。</li>
 <li>审批通过且创建正式 KnowledgeItem 后，将 proposal 级 pending ratingSuggestion 迁移为 KnowledgeItem 级 pending ratingSuggestion。</li>
@@ -87,8 +87,8 @@
             <p class="hint">区分候选工作区、知识治理 Agent、正式 Team Knowledge 和正式知识图谱。</p>
           </div>
           <div class="status-grid">
-            <div class="status-item"><b>候选状态</b><span>待知识治理审查</span></div>
-            <div class="status-item"><b>记忆平台</b><span>知识库管理员 memory 阶段 approved 回写会经治理门禁创建正式 KnowledgeItem；非知识库管理员阶段仍只写候选/任务结果，不写正式 Team Knowledge、RAG 或 official graph。</span></div>
+            <div class="status-item"><b>候选状态</b><span>待资料入库审核</span></div>
+            <div class="status-item"><b>记忆平台</b><span>source_ingestor ingestion 阶段 approved 回写会经治理门禁创建正式 KnowledgeItem；资料寻找、资料提炼和资料关系整理阶段仍只写候选/任务结果，不写正式 Team Knowledge、RAG 或 official graph。</span></div>
             <div class="status-item"><b>图谱同步</b><span>审批通过后正式 KnowledgeItem metadata 记录 officialResearchGraph；状态总览明确 candidate_graph_preview_only 与 official_research_trace_synced 的边界。</span></div>
           </div>
         </section>
@@ -101,15 +101,15 @@
       </div>
       <div class="status-grid">
         <div class="status-item"><b>状态</b><span>steward_pending_knowledge_review</span></div>
-        <div class="status-item"><b>功能岗位</b><span>知识库管理员 / agent-knowledge-steward</span></div>
+        <div class="status-item"><b>功能岗位</b><span>资料入库 Agent / source_ingestor</span></div>
         <div class="status-item"><b>Agent 状态</b><span>后端草稿包门禁、Team Knowledge 待审入库桥、审批门禁和入库状态总览已接入</span></div>
-        <div class="status-item"><b>进入条件</b><span>review_record 或候选图谱已给出可追溯 candidateIds，且具备目标知识域。</span></div>
+        <div class="status-item"><b>进入条件</b><span>review_record 或资料关系整理已给出可追溯 candidateIds，且具备目标知识域。</span></div>
         <div class="status-item"><b>退出条件</b><span>approved 回写经门禁后进入 official_synced、记录 officialSyncRecord 和 officialResearchGraph，并创建 KnowledgeItem 级 pending ratingSuggestion；重复回写复用已有 official sync；status=ready 表示入库链路已跑通。</span></div>
-        <div class="status-item"><b>审核门禁</b><span>必须经知识库管理员 / Ingestion Approval Gate 确认，不能由科研执行 Agent 或本地模型直接入库。</span></div>
+        <div class="status-item"><b>审核门禁</b><span>必须经 source_ingestor / Ingestion Approval Gate 确认，不能由资料寻找、资料提炼、资料关系整理或本地模型直接入库。</span></div>
       </div>
       <div class="plan-grid">
-        <article class="plan-card"><h2>本步操作</h2><p class="hint">生成带 sourceTrace、riskSummary、proposalPayload、ratingSuggestion、approvalRequired=true 的 CandidateStore 草稿包；知识库管理员 memory 阶段回写 approved 候选后，后端提交到指定 knowledgeBaseId 的待审入库队列并执行治理门禁；status API 汇总 pendingProposalCount、formalKnowledgeItemCount、actionItems 和 officialBoundary。</p></article>
-        <article class="plan-card"><h2>本地研究模型用法</h2><p class="hint">本地 9B 模型只能生成 steward_pack_draft 草稿；正式入库只能由知识库管理员 memory 阶段 approved writeback 触发后端治理门禁，禁止绕过 gate 请求正式写入。</p></article>
+        <article class="plan-card"><h2>本步操作</h2><p class="hint">生成带 sourceTrace、riskSummary、proposalPayload、ratingSuggestion、approvalRequired=true 的 CandidateStore 草稿包；source_ingestor ingestion 阶段回写 approved 候选后，后端提交到指定 knowledgeBaseId 的待审入库队列并执行治理门禁；status API 汇总 pendingProposalCount、formalKnowledgeItemCount、actionItems 和 officialBoundary。</p></article>
+        <article class="plan-card"><h2>本地研究模型用法</h2><p class="hint">本地 9B 模型只能生成 steward_pack_draft 草稿；正式入库只能由 source_ingestor ingestion 阶段 approved writeback 触发后端治理门禁，禁止绕过 gate 请求正式写入。</p></article>
         <article class="plan-card"><h2>所需功能</h2><ul><li>sourceTrace 校验</li>
 <li>proposalPayload</li>
 <li>ratingSuggestion</li>
@@ -136,7 +136,7 @@
 
         <div class="pager">
           <a href="06-research-review.html">上一节点：06 科研审稿</a>
-          <a href="08-candidate-graph.html">下一节点：08 候选图谱预览</a>
+          <a href="08-candidate-graph.html">下一节点：08 资料关系整理预览</a>
         </div>
       </div>
     </main>

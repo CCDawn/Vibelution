@@ -218,7 +218,7 @@ def test_team_workflow_route_starts_source_collection_run(tmp_path, monkeypatch)
             "title": "Neurology source batch",
             "topic": "neural gating",
             "requestedByAgent": "Research Coordination Agent",
-            "agentRoles": ["data_discovery", "source_acquisition"],
+            "agentRoles": ["source_finder"],
             "inputRefs": ["seed-query:neural gating"],
             "querySeeds": ["thalamic gating"],
             "searchLanguages": ["en"],
@@ -231,7 +231,7 @@ def test_team_workflow_route_starts_source_collection_run(tmp_path, monkeypatch)
     status_response = client.get(f"/api/data-processing/runs/{run_id}/status")
 
     assert response.status_code == 201, response.text
-    assert response.json()["assignmentCount"] == 2
+    assert response.json()["assignmentCount"] == 1
     assert response.json()["searchPlan"]["querySeeds"] == ["thalamic gating", "neural gating"]
     assert response.json()["searchPlan"]["queryCount"] == 2
     assert response.json()["searchPlan"]["boundaries"]["externalSearchTriggered"] is False
@@ -240,11 +240,11 @@ def test_team_workflow_route_starts_source_collection_run(tmp_path, monkeypatch)
     assert response.json()["promptCachePolicy"]["promptCacheMode"] == "explicit_cache_control"
     assert response.json()["run"]["metadata"]["promptCacheGateStatus"] == "satisfied"
     assert response.json()["searchPlan"]["resultWritebackContract"]["ragWrites"] is False
-    assert {item["agentRole"] for item in response.json()["assignments"]} == {"data_discovery", "source_acquisition"}
+    assert {item["agentRole"] for item in response.json()["assignments"]} == {"source_finder"}
     assert all(item["scope"]["assignedQueries"] for item in response.json()["assignments"])
     assert all(item["scope"]["promptCachePartition"].startswith("research-team-") for item in response.json()["assignments"])
     assert response.json()["workflow"]["activeWorkflowItems"][0]["candidateId"] == run_id
-    assert assignments_response.json()["summary"]["assignmentCount"] == 2
+    assert assignments_response.json()["summary"]["assignmentCount"] == 1
     assert status_response.json()["boundaries"]["writesFormalKnowledge"] is False
 
 
@@ -262,7 +262,7 @@ def test_team_workflow_route_starts_knowledge_expansion_local_source_collection(
             "workflowPurpose": "knowledge_expansion",
             "collectionMode": "local_workspace",
             "topic": "predictive coding",
-            "agentRoles": ["source_intake", "content_extraction", "source_quality"],
+            "agentRoles": ["source_finder", "source_extractor"],
             "localScanScope": {"roots": ["workspace/knowledge"], "maxFiles": 10},
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -279,18 +279,18 @@ def test_team_workflow_route_starts_knowledge_expansion_local_source_collection(
 def test_team_workflow_route_seeds_source_collection_agent_session_context(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
-    discovery = agent_directory_service.create_agent_instance(display_name="资料发现")
-    direct_session = session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料发现")
+    finder = agent_directory_service.create_agent_instance(display_name="资料寻找")
+    direct_session = session_service.ensure_agent_direct_session(agent_id=finder["agentId"], title="资料寻找")
     team = client.post(
         "/api/teams",
-        json={"name": "挑战杯科研团队", "members": [{"agentId": discovery["agentId"], "role": "data_discovery", "agentName": "资料发现"}]},
+        json={"name": "挑战杯科研团队", "members": [{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}]},
     ).json()
     start_response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs",
         json={
             "topic": "脑启发路由",
-            "agentRoles": ["data_discovery"],
-            "agentIds": {"data_discovery": discovery["agentId"]},
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": finder["agentId"]},
             "querySeeds": ["brain-inspired routing"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -298,11 +298,11 @@ def test_team_workflow_route_seeds_source_collection_agent_session_context(tmp_p
 
     response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs/{start_response.json()['run']['runId']}/agent-session-context",
-        json={"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery"},
+        json={"stageId": "finding", "agentId": finder["agentId"], "agentRole": "source_finder"},
     )
     duplicate = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs/{start_response.json()['run']['runId']}/agent-session-context",
-        json={"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery"},
+        json={"stageId": "finding", "agentId": finder["agentId"], "agentRole": "source_finder"},
     )
 
     assert start_response.status_code == 201, start_response.text
@@ -319,18 +319,18 @@ def test_team_workflow_route_seeds_source_collection_agent_session_context(tmp_p
 def test_team_workflow_route_starts_source_collection_stage_session_task(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
-    discovery = agent_directory_service.create_agent_instance(display_name="资料发现")
-    direct_session = session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料发现")
+    finder = agent_directory_service.create_agent_instance(display_name="资料寻找")
+    direct_session = session_service.ensure_agent_direct_session(agent_id=finder["agentId"], title="资料寻找")
     team = client.post(
         "/api/teams",
-        json={"name": "挑战杯科研团队", "members": [{"agentId": discovery["agentId"], "role": "data_discovery", "agentName": "资料发现"}]},
+        json={"name": "挑战杯科研团队", "members": [{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}]},
     ).json()
     start_response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs",
         json={
             "topic": "脑启发路由",
-            "agentRoles": ["data_discovery"],
-            "agentIds": {"data_discovery": discovery["agentId"]},
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": finder["agentId"]},
             "querySeeds": ["brain-inspired routing"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -345,15 +345,15 @@ def test_team_workflow_route_starts_source_collection_stage_session_task(tmp_pat
 
     response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs/{start_response.json()['run']['runId']}/stage-session-tasks",
-        json={"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery", "returnLabel": "返回搜索资料", "idempotencyKey": "stage-task-click-1"},
+        json={"stageId": "finding", "agentId": finder["agentId"], "agentRole": "source_finder", "returnLabel": "返回搜索资料", "idempotencyKey": "stage-task-click-1"},
     )
     second_response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs/{start_response.json()['run']['runId']}/stage-session-tasks",
-        json={"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery", "returnLabel": "返回搜索资料", "idempotencyKey": "stage-task-click-2"},
+        json={"stageId": "finding", "agentId": finder["agentId"], "agentRole": "source_finder", "returnLabel": "返回搜索资料", "idempotencyKey": "stage-task-click-2"},
     )
     duplicate_response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs/{start_response.json()['run']['runId']}/stage-session-tasks",
-        json={"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery", "returnLabel": "返回搜索资料", "idempotencyKey": "stage-task-click-2"},
+        json={"stageId": "finding", "agentId": finder["agentId"], "agentRole": "source_finder", "returnLabel": "返回搜索资料", "idempotencyKey": "stage-task-click-2"},
     )
 
     assert start_response.status_code == 201, start_response.text
@@ -413,19 +413,19 @@ def test_team_workflow_route_writebacks_source_collection_stage_session_task(tmp
     _use_tmp_project_root(tmp_path, monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
     client = _client()
-    discovery = agent_directory_service.create_agent_instance(display_name="资料发现")
-    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料发现")
+    finder = agent_directory_service.create_agent_instance(display_name="资料寻找")
+    session_service.ensure_agent_direct_session(agent_id=finder["agentId"], title="资料寻找")
     team = client.post(
         "/api/teams",
-        json={"name": "挑战杯科研团队", "members": [{"agentId": discovery["agentId"], "role": "data_discovery", "agentName": "资料发现"}]},
+        json={"name": "挑战杯科研团队", "members": [{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}]},
     ).json()
     stage_response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/stage-rounds/start",
         json={
             "stageType": "knowledge_collection",
             "topic": "脑启发路由",
-            "agentRoles": ["data_discovery"],
-            "agentIds": {"data_discovery": discovery["agentId"]},
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": finder["agentId"]},
             "querySeeds": ["brain-inspired routing"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -437,7 +437,7 @@ def test_team_workflow_route_writebacks_source_collection_stage_session_task(tmp
     )
     task_response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/source-collection-runs/{stage_response.json()['run']['runId']}/stage-session-tasks",
-        json={"stageId": "collection", "agentId": discovery["agentId"], "agentRole": "data_discovery"},
+        json={"stageId": "finding", "agentId": finder["agentId"], "agentRole": "source_finder"},
     )
 
     response = client.post(
@@ -486,7 +486,7 @@ def test_team_workflow_route_executes_source_collection_search(tmp_path, monkeyp
             "querySeeds": ["predictive coding cortical hierarchy"],
             "searchLanguages": ["en"],
             "sourceTypes": ["paper"],
-            "agentRoles": ["data_discovery"],
+            "agentRoles": ["source_finder"],
         },
     )
 
@@ -563,7 +563,7 @@ def test_team_workflow_route_accepts_source_collection_search_background(tmp_pat
             "querySeeds": ["predictive coding cortical hierarchy"],
             "searchLanguages": ["en"],
             "sourceTypes": ["paper"],
-            "agentRoles": ["data_discovery"],
+            "agentRoles": ["source_finder"],
         },
     )
     run_id = start_response.json()["run"]["runId"]
@@ -703,7 +703,7 @@ def test_team_workflow_route_starts_research_stage_round(tmp_path, monkeypatch):
             "stageType": "knowledge_collection",
             "topic": "predictive coding",
             "querySeeds": ["cortical predictive coding"],
-            "agentRoles": ["data_discovery", "source_quality"],
+            "agentRoles": ["source_finder", "source_extractor"],
         },
     )
     status_response = client.get(f"/api/teams/{team['teamId']}/workflow-orchestration/stage-rounds/status")
@@ -2134,7 +2134,7 @@ def test_team_workflow_routes_extract_source_collection_candidates(monkeypatch):
         "/api/teams/research-team/workflow-orchestration/knowledge-collection/extract",
         json={
             "runId": "dprun-source-1",
-            "extractionAgentId": "content-extraction-agent",
+            "extractionAgentId": "source-extractor-agent",
             "maxRecords": 40,
             "force": True,
             "notes": "rerun extraction",
@@ -2145,7 +2145,7 @@ def test_team_workflow_routes_extract_source_collection_candidates(monkeypatch):
     assert response.json()["status"] == "completed"
     assert captured["team_id"] == "research-team"
     assert captured["payload"]["runId"] == "dprun-source-1"
-    assert captured["payload"]["extractionAgentId"] == "content-extraction-agent"
+    assert captured["payload"]["extractionAgentId"] == "source-extractor-agent"
     assert captured["payload"]["maxRecords"] == 40
     assert captured["payload"]["force"] is True
 

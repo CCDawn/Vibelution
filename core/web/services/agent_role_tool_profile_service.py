@@ -277,19 +277,80 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         ),
         forbidden_tools=(*RESEARCH_FORBIDDEN_TOOLS, *SEARCH_DISABLED_TOOLS),
     ),
-    "challenge_cup_data_discovery": _profile(
-        "challenge_cup_data_discovery",
-        allowed_tools=(*RESEARCH_STAGE_TOOLS, *SEARCH_TOOLS),
+    "source_finder": _profile(
+        "source_finder",
+        allowed_tools=(*RESEARCH_STAGE_TOOLS, *SEARCH_TOOLS, *FETCH_TOOLS),
         preferred_tools=(
             "source_collection_context_tool",
             "source_collection_stage_writeback_tool",
             "batch_web_search_tool",
             "paper_search_tool",
+            "project_search_tool",
+            "search_summarize_sources_tool",
+            "web_fetch_tool",
+            "agent_message_tool",
+        ),
+        forbidden_tools=(*RESEARCH_FORBIDDEN_TOOLS, *SEARCH_DISABLED_TOOLS),
+        description="Find, fetch, download, and register traceable source records for a source collection run.",
+    ),
+    "source_extractor": _profile(
+        "source_extractor",
+        allowed_tools=(*RESEARCH_STAGE_TOOLS, *FETCH_TOOLS, "search_summarize_sources_tool"),
+        preferred_tools=(
+            "source_collection_context_tool",
+            "source_collection_stage_writeback_tool",
+            "web_fetch_tool",
             "search_summarize_sources_tool",
             "research_knowledge_query_tool",
             "agent_message_tool",
         ),
-        forbidden_tools=(*RESEARCH_FORBIDDEN_TOOLS, "web_fetch_tool", *SEARCH_DISABLED_TOOLS),
+        forbidden_tools=(
+            *RESEARCH_FORBIDDEN_TOOLS,
+            "batch_web_search_tool",
+            "paper_search_tool",
+            "project_search_tool",
+            "news_search_tool",
+            *SEARCH_DISABLED_TOOLS,
+        ),
+        description="Extract useful source content and make source-quality decisions in one pass.",
+    ),
+    "source_relation_mapper": _profile(
+        "source_relation_mapper",
+        allowed_tools=RESEARCH_STAGE_TOOLS,
+        preferred_tools=(
+            "source_collection_context_tool",
+            "source_collection_stage_writeback_tool",
+            "research_knowledge_query_tool",
+            "agent_message_tool",
+        ),
+        forbidden_tools=(*RESEARCH_FORBIDDEN_TOOLS, *SEARCH_TOOLS, *FETCH_TOOLS, *SEARCH_DISABLED_TOOLS),
+        network_access="none",
+        description="Build candidate-only topic, source, and evidence relationships without writing the official graph.",
+    ),
+    "source_ingestor": _profile(
+        "source_ingestor",
+        allowed_tools=(
+            "agent_message_tool",
+            "source_collection_context_tool",
+            "source_collection_stage_writeback_tool",
+            *KNOWLEDGE_STEWARD_TOOLS,
+        ),
+        preferred_tools=(
+            "source_collection_context_tool",
+            "source_collection_stage_writeback_tool",
+            "knowledge_governance_tasks_tool",
+            "knowledge_operations_health_tool",
+            "knowledge_governance_plan_tool",
+            "knowledge_proposal_tool",
+            "knowledge_ingestion_tool",
+        ),
+        forbidden_tools=(*SEARCH_TOOLS, *FETCH_TOOLS, *SEARCH_DISABLED_TOOLS),
+        write_scopes=("private",),
+        network_access="none",
+        mutation_access="restricted",
+        max_calls_per_turn=12,
+        role_family="knowledge",
+        description="Perform governed final source review and formal Team Knowledge ingestion.",
     ),
     "challenge_cup_coordinator": _profile(
         "challenge_cup_coordinator",
@@ -313,141 +374,6 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         network_access="none",
         mutation_access="none",
         description="Coordinate Challenge Cup stages with read-only context tools and Agent messaging.",
-    ),
-    "challenge_cup_source_acquisition": _profile(
-        "challenge_cup_source_acquisition",
-        allowed_tools=(
-            *RESEARCH_STAGE_TOOLS,
-            *FETCH_TOOLS,
-            "batch_web_search_tool",
-            "paper_search_tool",
-            "project_search_tool",
-            "search_summarize_sources_tool",
-        ),
-        preferred_tools=(
-            "source_collection_context_tool",
-            "source_collection_stage_writeback_tool",
-            "web_fetch_tool",
-            "batch_web_search_tool",
-            "paper_search_tool",
-            "search_summarize_sources_tool",
-            "research_knowledge_query_tool",
-            "agent_message_tool",
-        ),
-        forbidden_tools=(*RESEARCH_FORBIDDEN_TOOLS, *SEARCH_DISABLED_TOOLS),
-    ),
-    "challenge_cup_content_extraction": _profile(
-        "challenge_cup_content_extraction",
-        allowed_tools=(*RESEARCH_STAGE_TOOLS, *FETCH_TOOLS, "search_summarize_sources_tool"),
-        preferred_tools=(
-            "source_collection_context_tool",
-            "source_collection_stage_writeback_tool",
-            "web_fetch_tool",
-            "search_summarize_sources_tool",
-            "research_knowledge_query_tool",
-            "agent_message_tool",
-        ),
-        forbidden_tools=(
-            *RESEARCH_FORBIDDEN_TOOLS,
-            "batch_web_search_tool",
-            "paper_search_tool",
-            "project_search_tool",
-            "news_search_tool",
-            *SEARCH_DISABLED_TOOLS,
-        ),
-    ),
-    "challenge_cup_source_quality": _profile(
-        "challenge_cup_source_quality",
-        allowed_tools=(*RESEARCH_STAGE_TOOLS, *FETCH_TOOLS, *SEARCH_TOOLS),
-        preferred_tools=(
-            "source_collection_context_tool",
-            "source_collection_stage_writeback_tool",
-            "research_knowledge_query_tool",
-            "web_fetch_tool",
-            "search_summarize_sources_tool",
-            "batch_web_search_tool",
-            "paper_search_tool",
-            "agent_message_tool",
-        ),
-        forbidden_tools=(*RESEARCH_FORBIDDEN_TOOLS, *SEARCH_DISABLED_TOOLS),
-    ),
-    "knowledge_expansion_source_intake": _profile(
-        "knowledge_expansion_source_intake",
-        allowed_tools=(*RESEARCH_STAGE_TOOLS, *FETCH_TOOLS, *SEARCH_TOOLS),
-        preferred_tools=(
-            "source_collection_context_tool",
-            "source_collection_stage_writeback_tool",
-            "batch_web_search_tool",
-            "paper_search_tool",
-            "project_search_tool",
-            "news_search_tool",
-            "search_summarize_sources_tool",
-            "research_knowledge_query_tool",
-            "agent_message_tool",
-        ),
-        forbidden_tools=(*RESEARCH_FORBIDDEN_TOOLS, *SEARCH_DISABLED_TOOLS),
-        description="Find and import local or network sources for knowledge expansion without formal knowledge writes.",
-    ),
-    "knowledge_expansion_content_extraction": _profile(
-        "knowledge_expansion_content_extraction",
-        allowed_tools=(*RESEARCH_STAGE_TOOLS, *FETCH_TOOLS, "search_summarize_sources_tool"),
-        preferred_tools=(
-            "source_collection_context_tool",
-            "source_collection_stage_writeback_tool",
-            "web_fetch_tool",
-            "search_summarize_sources_tool",
-            "research_knowledge_query_tool",
-            "agent_message_tool",
-        ),
-        forbidden_tools=(
-            *RESEARCH_FORBIDDEN_TOOLS,
-            "batch_web_search_tool",
-            "paper_search_tool",
-            "project_search_tool",
-            "news_search_tool",
-            *SEARCH_DISABLED_TOOLS,
-        ),
-        description="Extract summaries and evidence from controlled source collection context.",
-    ),
-    "knowledge_expansion_source_quality": _profile(
-        "knowledge_expansion_source_quality",
-        allowed_tools=(*RESEARCH_STAGE_TOOLS, *FETCH_TOOLS, *SEARCH_TOOLS),
-        preferred_tools=(
-            "source_collection_context_tool",
-            "source_collection_stage_writeback_tool",
-            "research_knowledge_query_tool",
-            "web_fetch_tool",
-            "search_summarize_sources_tool",
-            "batch_web_search_tool",
-            "paper_search_tool",
-            "agent_message_tool",
-        ),
-        forbidden_tools=(*RESEARCH_FORBIDDEN_TOOLS, *SEARCH_DISABLED_TOOLS),
-        description="Review source quality and decide whether source candidates can continue toward knowledge governance.",
-    ),
-    "knowledge_expansion_candidate_graph": _profile(
-        "knowledge_expansion_candidate_graph",
-        allowed_tools=RESEARCH_STAGE_TOOLS,
-        preferred_tools=(
-            "source_collection_context_tool",
-            "source_collection_stage_writeback_tool",
-            "research_knowledge_query_tool",
-            "agent_message_tool",
-        ),
-        forbidden_tools=(*RESEARCH_FORBIDDEN_TOOLS, *SEARCH_DISABLED_TOOLS),
-        network_access="none",
-        description="Build candidate-only relationship previews without writing the official graph.",
-    ),
-    "candidate_graph": _profile(
-        "candidate_graph",
-        allowed_tools=RESEARCH_STAGE_TOOLS,
-        preferred_tools=(
-            "source_collection_context_tool",
-            "source_collection_stage_writeback_tool",
-            "research_knowledge_query_tool",
-            "agent_message_tool",
-        ),
-        forbidden_tools=(*RESEARCH_FORBIDDEN_TOOLS, *SEARCH_DISABLED_TOOLS),
     ),
     "challenge_cup_experiment_planner": _profile(
         "challenge_cup_experiment_planner",
@@ -609,10 +535,18 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
 }
 
 RESEARCH_SOURCE_ROLE_KEYS = {
-    "ai_search_scope_lead",
-    "global_primary_sources",
-    "cn_primary_sources",
-    "signal_quality_gate",
+    "source_finder",
+    "source_extractor",
+    "source_relation_mapper",
+    "source_ingestor",
+}
+RETIRED_SOURCE_COLLECTION_ROLE_KEYS = {
+    "data_discovery",
+    "source_acquisition",
+    "source_intake",
+    "content_extraction",
+    "source_quality",
+    "candidate_graph",
     "challenge_cup_data_discovery",
     "challenge_cup_source_acquisition",
     "challenge_cup_content_extraction",
@@ -620,8 +554,8 @@ RESEARCH_SOURCE_ROLE_KEYS = {
     "knowledge_expansion_source_intake",
     "knowledge_expansion_content_extraction",
     "knowledge_expansion_source_quality",
+    "knowledge_expansion_candidate_graph",
 }
-
 
 def normalize_role_key(value: Any) -> str:
     return re.sub(r"[^a-z0-9_]+", "_", str(value or "").strip().lower()).strip("_")
@@ -637,6 +571,8 @@ def role_tool_profile_for_role(role_key: str, *, primary_mode: str = "", metadat
     normalized_mode = normalize_role_key(primary_mode)
     raw_metadata = metadata if isinstance(metadata, dict) else {}
     research_org_role = normalize_role_key(raw_metadata.get("researchOrgRole") or raw_metadata.get("systemRole") or "")
+    if normalized_role in RETIRED_SOURCE_COLLECTION_ROLE_KEYS:
+        return None
     if normalized_role == "knowledge_steward" or research_org_role == "knowledge_steward":
         return get_role_tool_profile("knowledge_steward")
     if research_org_role in {"ceo", "organization_advisor", "capability_steward"}:
