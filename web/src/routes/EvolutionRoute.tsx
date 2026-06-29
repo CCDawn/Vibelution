@@ -56,6 +56,7 @@ import {
   EvolutionClosedLoopRecord,
   EvolutionWorkflowStep,
   ConversationMessage,
+  SessionDetail,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
@@ -1325,6 +1326,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     || monitoredRun?.currentCaseIo?.conversationPath?.replace(/^session:/, "")
     || monitoredRun?.runId
     || "supervised-case";
+  const monitoredCaseRealConversationSessionId =
+    monitoredRun?.currentCaseIo?.conversationSessionId
+    || monitoredRun?.currentCaseIo?.conversationPath?.replace(/^session:/, "")
+    || "";
   const monitoredCaseTraceItems = useMemo(
     () =>
       buildSupervisedCaseTraceItems(monitoredCaseTranscript, {
@@ -1473,17 +1478,45 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       value: supervisedWorkflowRun?.workflowSteps?.find((step) => step.id === "approval")?.summary || "--",
     },
   ];
-  const selectedWorkflowConversationMessages: ConversationMessage[] =
+  const selectedWorkflowConversationSessionId =
+    supervisedSelectedWorkflowStep.conversationSessionId
+    || (supervisedSelectedWorkflowStep.id === supervisedRuntimeWorkflowStepId ? monitoredCaseConversationSessionId : "")
+    || supervisedSelectedWorkflowStep.id;
+  const selectedWorkflowConversationSessionKey =
+    supervisedSelectedWorkflowStep.id === "approval"
+      ? ""
+      : String(
+          supervisedSelectedWorkflowStep.conversationSessionId
+          || (supervisedSelectedWorkflowStep.id === supervisedRuntimeWorkflowStepId ? monitoredCaseRealConversationSessionId : "")
+          || "",
+        ).trim();
+  const selectedWorkflowSessionPollingActive =
+    supervisedPrimaryRunning
+    || ["queued", "running", "paused", "stopping"].includes(String(supervisedSelectedWorkflowStep.status || "").trim().toLowerCase());
+  const selectedWorkflowSessionDetailQuery = useQuery({
+    queryKey: queryKeys.session(selectedWorkflowConversationSessionKey || "none"),
+    enabled: supervisedTrackQueriesEnabled && Boolean(selectedWorkflowConversationSessionKey),
+    queryFn: () => fetchJson<SessionDetail>(`/api/sessions/${selectedWorkflowConversationSessionKey}`),
+    refetchInterval: resolvePollingInterval(pageVisible, selectedWorkflowSessionPollingActive ? 2_000 : 8_000),
+  });
+  const selectedWorkflowSessionMessages = selectedWorkflowSessionDetailQuery.data?.messages ?? [];
+  const selectedWorkflowSnapshotMessages: ConversationMessage[] =
     supervisedSelectedWorkflowStep.conversationMessages?.length
       ? supervisedSelectedWorkflowStep.conversationMessages
       : supervisedSelectedWorkflowStep.id === supervisedRuntimeWorkflowStepId
         ? monitoredCaseConversationMessages
         : [];
-  const selectedWorkflowHasConversationMessages = selectedWorkflowConversationMessages.length > 0;
-  const selectedWorkflowConversationSessionId =
-    supervisedSelectedWorkflowStep.conversationSessionId
-    || (supervisedSelectedWorkflowStep.id === supervisedRuntimeWorkflowStepId ? monitoredCaseConversationSessionId : "")
-    || supervisedSelectedWorkflowStep.id;
+  const selectedWorkflowConversationMessages: ConversationMessage[] =
+    selectedWorkflowSessionMessages.length
+      ? selectedWorkflowSessionMessages
+      : selectedWorkflowConversationSessionKey
+        ? []
+        : selectedWorkflowSnapshotMessages.length
+          ? selectedWorkflowSnapshotMessages
+          : [];
+  const selectedWorkflowHasConversationMessages =
+    selectedWorkflowConversationMessages.length > 0
+    || Boolean(selectedWorkflowConversationSessionKey);
   const selectedWorkflowAssistantName =
     supervisedSelectedWorkflowStep.member?.name
     || monitoredRun?.currentAgentBinding?.displayName
