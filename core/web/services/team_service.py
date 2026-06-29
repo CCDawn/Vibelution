@@ -925,7 +925,7 @@ def ensure_knowledge_expansion_team_agents(*, purge_stale: bool = True) -> dict[
                 "teamId": KNOWLEDGE_EXPANSION_TEAM_ID,
                 "name": KNOWLEDGE_EXPANSION_TEAM_DISPLAY_NAME,
                 "description": "用于把本地和网络资料提炼为团队正式知识的系统团队。",
-                "purpose": "组织资料发现、本地导入、资料提炼、质检、候选关系和知识库管理员入库。",
+                "purpose": "组织资料寻找、资料提炼、资料关系整理和资料入库。",
                 "status": DEFAULT_TEAM_STATUS,
                 "members": members,
                 "linkedChatRoomId": "",
@@ -943,7 +943,7 @@ def ensure_knowledge_expansion_team_agents(*, purge_stale: bool = True) -> dict[
             if str(team.get("description") or "").strip() != "用于把本地和网络资料提炼为团队正式知识的系统团队。":
                 team["description"] = "用于把本地和网络资料提炼为团队正式知识的系统团队。"
                 changed = True
-            expected_purpose = "组织资料发现、本地导入、资料提炼、质检、候选关系和知识库管理员入库。"
+            expected_purpose = "组织资料寻找、资料提炼、资料关系整理和资料入库。"
             if str(team.get("purpose") or "").strip() != expected_purpose:
                 team["purpose"] = expected_purpose
                 changed = True
