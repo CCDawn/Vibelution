@@ -1006,9 +1006,23 @@ def test_evolution_workbench_catalog_uses_same_formal_workspace_as_worktree_star
         ),
         encoding="utf-8",
     )
+    formal_state_path = formal_workspace / "supervised_evolution" / "workbench_state.json"
+    formal_state_path.parent.mkdir(parents=True, exist_ok=True)
+    formal_state_path.write_text(
+        json.dumps(
+            {
+                "source": "bundle",
+                "bundle_name": "repo_only_bundle",
+                "keep_worktree": False,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
     monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: formal_workspace)
     monkeypatch.setattr(workspace_manager, "get_workspace", lambda: SimpleNamespace(root=formal_workspace))
     monkeypatch.setattr(evolution_service, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(evolution_service, "SOURCE_PROJECT_ROOT", project_root)
     monkeypatch.setattr(supervised_control_service, "PROJECT_ROOT", project_root)
     monkeypatch.setattr(supervised_control_service, "SOURCE_PROJECT_ROOT", project_root)
 
@@ -1018,6 +1032,7 @@ def test_evolution_workbench_catalog_uses_same_formal_workspace_as_worktree_star
     bundle_names = {item["name"] for item in response.json()["bundles"]}
     assert "formal_launchable_bundle" in bundle_names
     assert "repo_only_bundle" not in bundle_names
+    assert response.json()["savedState"]["bundleName"] == "formal_launchable_bundle"
 
 
 def test_supervised_worktree_run_route_returns_validation_error_for_missing_bundle(tmp_path, monkeypatch):

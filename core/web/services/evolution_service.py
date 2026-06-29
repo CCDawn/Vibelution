@@ -847,8 +847,9 @@ def _build_workbench_state() -> dict[str, Any]:
 def get_workbench_state_payload(*, project_root: Path | None = None) -> dict[str, Any]:
     root = (project_root or PROJECT_ROOT).resolve()
     state = load_workbench_state(root)
-    datasets = list_dataset_status(_storage_root_arg(project_root), include_environment_preflight=False)
-    bundles = list_available_workbench_bundles(root)
+    storage_root = _storage_root_arg(project_root)
+    datasets = list_dataset_status(storage_root, include_environment_preflight=False)
+    bundles = list_available_workbench_bundles(storage_root)
     source = str(state.get("source") or "").strip().lower()
     if source not in {"bundle", "dataset"}:
         source = "unknown"
