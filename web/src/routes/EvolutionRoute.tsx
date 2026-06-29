@@ -63,6 +63,7 @@ import { LazyConversationView } from "../components/conversation/LazyConversatio
 import { useAppI18n } from "../i18n/useAppI18n";
 import { useShellStore } from "../store/shellStore";
 import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
+import { type SupervisedWorkspaceWorkflowStep } from "./SupervisedWorkspaceTabs";
 import { isSelfEvolutionWorktreeRun } from "./supervisedWorktreeReview";
 import {
   isCompletedEvolutionRunCommandFailure,
@@ -1528,11 +1529,17 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     };
   };
   const supervisedTabSummaries = {
-    live: supervisedWorkflowTabSummary(supervisedWorkflowCards[0]),
-    runs: supervisedWorkflowTabSummary(supervisedWorkflowCards[1]),
-    library: supervisedWorkflowTabSummary(supervisedWorkflowCards[2]),
-    review: supervisedWorkflowTabSummary(supervisedWorkflowCards[3]),
+    baseline_eval: supervisedWorkflowTabSummary(supervisedWorkflowCards[0]),
+    improve: supervisedWorkflowTabSummary(supervisedWorkflowCards[1]),
+    rerun_score: supervisedWorkflowTabSummary(supervisedWorkflowCards[2]),
+    approval: supervisedWorkflowTabSummary(supervisedWorkflowCards[3]),
   };
+  const handleSupervisedWorkflowStepSelect = useCallback((stepId: SupervisedWorkspaceWorkflowStep) => {
+    setSelectedSupervisedWorkflowStepId(stepId);
+    if (evolutionView !== "live") {
+      goToSupervisedView("live");
+    }
+  }, [evolutionView]);
   const pauseSupervisedAction = monitoredRun?.actionStates?.pause;
   const resumeSupervisedAction = monitoredRun?.actionStates?.resume;
   const retrySupervisedAction = monitoredRun?.actionStates?.retry;
@@ -2941,7 +2948,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           {activeTrack === "supervised" ? (
             <SupervisedWorkspaceControls
               activeView={evolutionView}
-              activeWorkflowStepId={supervisedRuntimeWorkflowStepId}
+              activeWorkflowStepId={supervisedSelectedWorkflowStepId}
+              onWorkflowStepSelect={handleSupervisedWorkflowStepSelect}
               overviewIntakeMode={overview?.intakeMode}
               configIntakeMode={configQuery.data?.intakeMode}
               tabSummaries={supervisedTabSummaries}
