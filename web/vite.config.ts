@@ -1,3 +1,4 @@
+import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { readFileSync } from "node:fs";
@@ -85,7 +86,7 @@ export default defineConfig({
   define: {
     __VIBELUTION_BUILD_ID__: JSON.stringify(buildStamp),
   },
-  plugins: [react()],
+  plugins: [tailwindcss(), react()],
   test: {
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx", "*.test.ts"],
