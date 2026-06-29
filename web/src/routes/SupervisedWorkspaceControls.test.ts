@@ -25,17 +25,22 @@ describe("supervised workspace controls", () => {
 
   it("renders supervised navigation as a status-bearing flow instead of plain segmented buttons", () => {
     expect(tabsSource).toContain("SupervisedWorkspaceTabSummary");
-    expect(tabsSource).toContain("summaries[view.key]");
+    expect(tabsSource).toContain("WORKFLOW_STEPS");
+    expect(tabsSource).toContain("summaries[step.key]");
     expect(tabsSource).toContain("stepIndex");
     expect(tabsSource).toContain("stepMeta");
     expect(tabsSource).toContain("stepCount");
     expect(tabsSource).toContain("supervisedFlowLabel");
     expect(tabsSource).toContain("supervisedFlowHint");
     expect(tabsSource).toContain("activeWorkflowStepId");
-    expect(tabsSource).toContain('workflowStepId: "baseline_eval"');
-    expect(tabsSource).toContain('workflowStepId: "improve"');
-    expect(tabsSource).toContain('workflowStepId: "rerun_score"');
-    expect(tabsSource).toContain('workflowStepId: "approval"');
+    expect(tabsSource).toContain('key: "baseline_eval"');
+    expect(tabsSource).toContain('key: "improve"');
+    expect(tabsSource).toContain('key: "rerun_score"');
+    expect(tabsSource).toContain('key: "approval"');
+    expect(tabsSource).toContain("onWorkflowStepSelect?.(step.key)");
+    expect(tabsSource).toContain("role=\"tab\"");
+    expect(tabsSource).not.toContain("NavLink");
+    expect(tabsSource).not.toContain("href: \"/supervised-evolution/runs\"");
     expect(tabsSource).toContain("styles.stepHint");
     expect(dictionarySource).toContain('supervisedFlowLive: "基线评测"');
     expect(dictionarySource).toContain('supervisedFlowRuns: "提出建议与改良"');
@@ -74,7 +79,9 @@ describe("supervised workspace controls", () => {
     expect(evolutionRouteSource).toContain("supervisedWorkflowCards[1]");
     expect(evolutionRouteSource).toContain("supervisedWorkflowCards[2]");
     expect(evolutionRouteSource).toContain("supervisedWorkflowCards[3]");
-    expect(evolutionRouteSource).toContain("activeWorkflowStepId={supervisedRuntimeWorkflowStepId}");
+    expect(evolutionRouteSource).toContain("handleSupervisedWorkflowStepSelect");
+    expect(evolutionRouteSource).toContain("activeWorkflowStepId={supervisedSelectedWorkflowStepId}");
+    expect(evolutionRouteSource).toContain("onWorkflowStepSelect={handleSupervisedWorkflowStepSelect}");
     expect(evolutionRouteSource).toContain("tabSummaries={supervisedTabSummaries}");
   });
 });

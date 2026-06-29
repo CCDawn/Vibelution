@@ -18,6 +18,7 @@ type IntakeMode = "manual_review" | "auto";
 type SupervisedWorkspaceControlsProps = {
   activeView: SupervisedWorkspaceView;
   activeWorkflowStepId?: SupervisedWorkspaceWorkflowStep | string | null;
+  onWorkflowStepSelect?: (stepId: SupervisedWorkspaceWorkflowStep) => void;
   overviewIntakeMode?: string | null;
   configIntakeMode?: string | null;
   tabSummaries?: SupervisedWorkspaceTabSummary;
@@ -36,6 +37,7 @@ export function getEffectiveIntakeMode(
 export function SupervisedWorkspaceControls({
   activeView,
   activeWorkflowStepId,
+  onWorkflowStepSelect,
   overviewIntakeMode,
   configIntakeMode,
   tabSummaries,
@@ -90,6 +92,7 @@ export function SupervisedWorkspaceControls({
       <SupervisedWorkspaceTabs
         activeView={activeView}
         activeWorkflowStepId={activeWorkflowStepId}
+        onWorkflowStepSelect={onWorkflowStepSelect}
         summaries={tabSummaries}
       />
 
