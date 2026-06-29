@@ -5505,22 +5505,30 @@ export function AgentsRoute() {
         <AgentPageHeader
           eyebrow={copy.eyebrow}
           title={copy.title}
-          actions={[
-            {
-              id: "refresh",
-              label: copy.refresh,
-              icon: <RefreshCw size={14} />,
-              onPress: refresh,
-              disabled: workspaceQuery.isFetching,
-            },
-          ]}
-        />
+        actions={[
+          {
+            id: "refresh",
+            label: copy.refresh,
+            icon: <RefreshCw size={14} />,
+            onPress: refresh,
+          },
+        ]}
+      />
       </div>
 
       <div className={styles.controlStrip}>
         <AgentManagementNav active="agents" className={styles.managementNav} />
 
-        <AgentSummaryStrip ariaLabel={copy.workspaceSummary} metrics={agentSummaryMetrics} />
+        <AgentSummaryStrip
+          ariaLabel={copy.workspaceSummary}
+          status={{
+            label: healthStatusLabel,
+            title: healthStatusDescription,
+            ariaLabel: `${copy.workspaceHealthStatus}: ${healthStatusLabel}. ${healthStatusDescription}`,
+            tone: healthStatus === "blocked" ? "danger" : healthStatus === "warning" ? "warning" : "success",
+          }}
+          metrics={agentSummaryMetrics}
+        />
       </div>
 
       <div className={createOpen ? `${styles.workspace} ${styles.workspaceCreating}` : styles.workspace}>

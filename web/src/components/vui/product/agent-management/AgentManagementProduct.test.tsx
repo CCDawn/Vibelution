@@ -70,4 +70,22 @@ describe("Agent Management VUI product components", () => {
     expect(markup).toContain("11");
     expect(markup).toContain('title="Total agents"');
   });
+
+  it("renders compact status metadata accessibly when provided", () => {
+    const markup = renderToStaticMarkup(
+      <AgentSummaryStrip
+        ariaLabel="Agent summary"
+        status={{
+          label: "Warning",
+          title: "Needs review",
+          ariaLabel: "Workspace health status: Warning. Needs review",
+        }}
+        metrics={[{ id: "agents", label: "Agents", value: "11" }]}
+      />,
+    );
+
+    expect(markup).toContain("Warning");
+    expect(markup).toContain('title="Needs review"');
+    expect(markup).toContain('aria-label="Workspace health status: Warning. Needs review"');
+  });
 });

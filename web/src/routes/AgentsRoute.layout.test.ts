@@ -52,6 +52,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("styles.summaryCard");
     expect(routeSource).not.toContain("styles.refreshButton");
     expect(routeSource).not.toContain(['import { Button } from "', "@hero", "ui/react", '"'].join(""));
+    expect(routeSource).not.toContain("disabled: workspaceQuery.isFetching");
   });
 
   it("opens deep-linked Agent configuration and offers a governed return action", () => {
@@ -159,6 +160,10 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("workspaceHealthStatusDescription(healthStatus, summary, lang)");
     expect(routeSource).toContain("copy.workspaceHealthStatus");
     expect(routeSource).toContain("detail: `${copy.workspaceHealthStatus}: ${healthStatusLabel}. ${healthStatusDescription}`");
+    expect(routeSource).toContain("status={{");
+    expect(routeSource).toContain("label: healthStatusLabel");
+    expect(routeSource).toContain("title: healthStatusDescription");
+    expect(routeSource).toContain("ariaLabel: `${copy.workspaceHealthStatus}: ${healthStatusLabel}. ${healthStatusDescription}`");
     expect(routeSource).toContain("aria-label={copy.editAvatar}");
   });
 
