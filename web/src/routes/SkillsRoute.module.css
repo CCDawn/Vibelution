@@ -15,7 +15,7 @@
   min-height: 36px;
   padding: 3px 12px;
   border-bottom: 1px solid var(--border-strong);
-  background: var(--surface-header, rgba(22, 25, 28, 0.78));
+  background: var(--surface-header, color-mix(in srgb, var(--bg-canvas) 78%, transparent));
 }
 
 .header > div {
@@ -66,7 +66,7 @@
   min-height: 26px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
-  background: var(--surface-card, rgba(20, 23, 26, 0.72));
+  background: var(--surface-card, color-mix(in srgb, var(--bg-canvas) 72%, transparent));
   color: var(--fg-secondary);
 }
 
@@ -80,7 +80,7 @@
 .primaryButton:hover {
   border-color: var(--border-strong);
   color: var(--fg-primary);
-  background: var(--surface-panel-hover, rgba(34, 39, 44, 0.9));
+  background: var(--surface-panel-hover, color-mix(in srgb, var(--fg-secondary) 90%, transparent));
 }
 
 .refreshButton:disabled {
@@ -120,7 +120,7 @@
 .emptyDetail {
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-panel, rgba(27, 31, 35, 0.78));
+  background: var(--surface-panel, color-mix(in srgb, var(--fg-secondary) 78%, transparent));
 }
 
 .summaryCard {
@@ -217,7 +217,7 @@
   padding: 0 8px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-input-strong, rgba(14, 17, 20, 0.88));
+  background: var(--surface-input-strong, color-mix(in srgb, var(--bg-canvas) 88%, transparent));
   color: var(--fg-tertiary);
 }
 
@@ -334,20 +334,20 @@
   padding: 8px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-panel-muted, rgba(21, 24, 27, 0.82));
+  background: var(--surface-panel-muted, color-mix(in srgb, var(--bg-canvas) 82%, transparent));
   color: var(--fg-primary);
   text-align: left;
 }
 
 .skillButton:hover {
   border-color: var(--border-strong);
-  background: var(--surface-panel-strong, rgba(34, 39, 44, 0.92));
+  background: var(--surface-panel-strong, color-mix(in srgb, var(--fg-secondary) 92%, transparent));
 }
 
 .skillButtonActive {
   border-color: color-mix(in srgb, var(--accent-warm) 30%, transparent);
-  box-shadow: inset 3px 0 0 var(--accent-warm);
-  background: var(--surface-active-neutral, rgba(35, 36, 33, 0.96));
+  box-shadow: var(--vui-shadow-inset-accent);
+  background: var(--surface-active-neutral, color-mix(in srgb, var(--fg-secondary) 96%, transparent));
 }
 
 .skillButton [data-slot="vui-button-content"],
@@ -454,7 +454,7 @@
   padding: 10px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-card, rgba(20, 23, 26, 0.72));
+  background: var(--surface-card, color-mix(in srgb, var(--bg-canvas) 72%, transparent));
 }
 
 .metaGrid strong {
@@ -476,7 +476,7 @@
   padding: 10px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-input-strong, rgba(14, 17, 20, 0.88));
+  background: var(--surface-input-strong, color-mix(in srgb, var(--bg-canvas) 88%, transparent));
   color: var(--fg-primary);
   font-size: 0.78rem;
   line-height: 1.48;

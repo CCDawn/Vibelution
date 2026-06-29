@@ -14,7 +14,7 @@
   min-width: 0;
   padding: var(--route-topbar-padding);
   border-bottom: 1px solid var(--border-strong);
-  background: var(--surface-header, rgba(22, 25, 28, 0.78));
+  background: var(--surface-header, color-mix(in srgb, var(--bg-canvas) 78%, transparent));
 }
 
 .header > div {
@@ -68,7 +68,7 @@
   min-height: 32px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
-  background: var(--surface-card, rgba(20, 23, 26, 0.72));
+  background: var(--surface-card, color-mix(in srgb, var(--bg-canvas) 72%, transparent));
   color: var(--fg-secondary);
 }
 
@@ -92,7 +92,7 @@
 .secondaryButton:hover {
   border-color: var(--border-strong);
   color: var(--fg-primary);
-  background: var(--surface-panel-hover, rgba(34, 39, 44, 0.9));
+  background: var(--surface-panel-hover, color-mix(in srgb, var(--fg-secondary) 90%, transparent));
 }
 
 .refreshButton:disabled,
@@ -116,7 +116,7 @@
 .emptyPreview {
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-panel, rgba(27, 31, 35, 0.78));
+  background: var(--surface-panel, color-mix(in srgb, var(--fg-secondary) 78%, transparent));
 }
 
 .summaryCard {
@@ -138,7 +138,7 @@ button.summaryCard {
 .summaryCard[data-vui]:hover:not(:disabled),
 button.summaryCard:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--accent-cool) 28%, transparent);
-  background: color-mix(in srgb, var(--accent-cool) 7%, var(--surface-panel, rgba(27, 31, 35, 0.78)));
+  background: color-mix(in srgb, var(--accent-cool) 7%, var(--surface-panel, color-mix(in srgb, var(--fg-secondary) 78%, transparent)));
 }
 
 .summaryCard[data-vui]:disabled,
@@ -211,14 +211,14 @@ button.summaryCard:disabled {
   width: 3px;
   transform: translateX(-50%);
   border-radius: 999px;
-  background: rgba(236, 230, 220, 0.08);
+  background: color-mix(in srgb, var(--surface-card) 8%, transparent);
   transition: background-color 150ms ease, box-shadow 150ms ease;
 }
 
 .resizeHandle:hover::before,
 .resizeHandle:focus-visible::before {
   background: color-mix(in srgb, var(--accent-warm) 52%, transparent);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--accent-warm) 18%, transparent);
+  box-shadow: var(--vui-shadow-soft);
 }
 
 .changePanel,
@@ -246,7 +246,7 @@ button.summaryCard:disabled {
 .gitSituationCard {
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-panel, rgba(27, 31, 35, 0.78));
+  background: var(--surface-panel, color-mix(in srgb, var(--fg-secondary) 78%, transparent));
 }
 
 .cleanStateStrip {
@@ -264,7 +264,7 @@ button.summaryCard:disabled {
 
 .cleanStateStrip:hover {
   border-color: color-mix(in srgb, var(--accent-cool) 30%, transparent);
-  background: color-mix(in srgb, var(--accent-cool) 7%, var(--surface-panel, rgba(27, 31, 35, 0.78)));
+  background: color-mix(in srgb, var(--accent-cool) 7%, var(--surface-panel, color-mix(in srgb, var(--fg-secondary) 78%, transparent)));
 }
 
 .cleanStateStrip[data-vui] [data-slot="vui-button-content"],
@@ -331,7 +331,7 @@ button.summaryCard:disabled {
   padding: 8px 9px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-panel-muted, rgba(21, 24, 27, 0.82));
+  background: var(--surface-panel-muted, color-mix(in srgb, var(--bg-canvas) 82%, transparent));
   color: inherit;
   cursor: pointer;
   text-align: left;
@@ -340,7 +340,7 @@ button.summaryCard:disabled {
 .worktreeItem:hover,
 .commitItem:hover {
   border-color: color-mix(in srgb, var(--accent-cool) 32%, transparent);
-  background: var(--surface-panel-strong, rgba(34, 39, 44, 0.92));
+  background: var(--surface-panel-strong, color-mix(in srgb, var(--fg-secondary) 92%, transparent));
 }
 
 .worktreeItem div {
@@ -458,29 +458,29 @@ button.summaryCard:disabled {
   padding: 8px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-panel-muted, rgba(21, 24, 27, 0.82));
+  background: var(--surface-panel-muted, color-mix(in srgb, var(--bg-canvas) 82%, transparent));
   color: var(--fg-primary);
   text-align: left;
 }
 
 .fileButton:hover {
   border-color: var(--border-strong);
-  background: var(--surface-panel-strong, rgba(34, 39, 44, 0.92));
+  background: var(--surface-panel-strong, color-mix(in srgb, var(--fg-secondary) 92%, transparent));
 }
 
 .fileButtonActive {
   border-color: color-mix(in srgb, var(--accent-warm) 30%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-warm) 20%, transparent);
-  background: var(--surface-active-neutral, rgba(35, 36, 33, 0.96));
+  box-shadow: var(--vui-shadow-inset-accent);
+  background: var(--surface-active-neutral, color-mix(in srgb, var(--fg-secondary) 96%, transparent));
 }
 
 .fileButtonSelected {
   border-color: color-mix(in srgb, var(--state-success) 34%, transparent);
-  background: color-mix(in srgb, var(--state-success) 8%, var(--surface-panel-muted, rgba(21, 24, 27, 0.82)));
+  background: color-mix(in srgb, var(--state-success) 8%, var(--surface-panel-muted, color-mix(in srgb, var(--bg-canvas) 82%, transparent)));
 }
 
 .fileButtonActive.fileButtonSelected {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--state-success) 24%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
 }
 
 .fileStatus {
@@ -625,7 +625,7 @@ button.summaryCard:disabled {
   padding: 9px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-panel-muted, rgba(21, 24, 27, 0.82));
+  background: var(--surface-panel-muted, color-mix(in srgb, var(--bg-canvas) 82%, transparent));
   color: inherit;
   cursor: pointer;
   text-align: left;
@@ -633,8 +633,8 @@ button.summaryCard:disabled {
 
 .objectItemActive {
   border-color: color-mix(in srgb, var(--accent-cool) 40%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-cool) 18%, transparent);
-  background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-panel-muted, rgba(21, 24, 27, 0.82)));
+  box-shadow: var(--vui-shadow-inset-accent);
+  background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-panel-muted, color-mix(in srgb, var(--bg-canvas) 82%, transparent)));
 }
 
 .manualCommitPanel {
@@ -655,7 +655,7 @@ button.summaryCard:disabled {
   padding: 9px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-panel-muted, rgba(21, 24, 27, 0.82));
+  background: var(--surface-panel-muted, color-mix(in srgb, var(--bg-canvas) 82%, transparent));
 }
 
 .scopeHeader {
@@ -735,13 +735,13 @@ button.summaryCard:disabled {
   display: grid;
   gap: 4px;
   padding: 9px;
-  border: 1px solid color-mix(in srgb, var(--state-warning, #d6a84f) 34%, transparent);
+  border: 1px solid color-mix(in srgb, var(--state-warning, var(--state-warning)) 34%, transparent);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--state-warning, #d6a84f) 10%, transparent);
+  background: color-mix(in srgb, var(--state-warning, var(--state-warning)) 10%, transparent);
 }
 
 .scopeWarning strong {
-  color: var(--state-warning, #d6a84f);
+  color: var(--state-warning, var(--state-warning));
   font-size: 0.78rem;
 }
 
@@ -766,7 +766,7 @@ button.summaryCard:disabled {
   width: 100%;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: var(--surface-input-strong, rgba(14, 17, 20, 0.88));
+  background: var(--surface-input-strong, color-mix(in srgb, var(--bg-canvas) 88%, transparent));
   color: var(--fg-primary);
   padding: 8px 9px;
   line-height: 1.42;

@@ -78,9 +78,9 @@
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 8%, transparent), transparent 54%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-panel-strong) 82%, transparent);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 6%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
 }
 
 .teamTitleBlock {
@@ -245,7 +245,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-cool) 28%, var(--border-soft));
   border-radius: 8px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 8%, transparent), transparent 58%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-panel-strong) 76%, transparent);
 }
 
@@ -529,7 +529,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-success) 26%, var(--border-soft));
   border-radius: 8px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-success) 7%, transparent), transparent 62%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-card) 58%, transparent);
 }
 
@@ -705,14 +705,14 @@
 .aiSearchRunCardFailed {
   border-color: color-mix(in srgb, var(--accent-danger) 30%, var(--border-soft));
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-danger) 7%, transparent), transparent 68%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-panel-strong) 62%, transparent);
 }
 
 .aiSearchRunCardDegraded {
   border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 9%, transparent), transparent 70%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-panel-strong) 62%, transparent);
 }
 
@@ -731,7 +731,7 @@
 .aiSearchRunCardReview {
   border-color: color-mix(in srgb, var(--accent-warm) 34%, var(--border-soft));
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-warm) 7%, transparent), transparent 68%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-panel-strong) 62%, transparent);
 }
 
@@ -862,9 +862,9 @@
   border: 1px solid var(--border-soft);
   border-radius: 10px;
   background:
-    linear-gradient(120deg, color-mix(in srgb, var(--accent-success) 12%, transparent), transparent 44%),
-    linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-strong) 90%, transparent), var(--surface-panel));
-  box-shadow: 0 12px 34px color-mix(in srgb, black 10%, transparent);
+    var(--vui-gradient-route-soft),
+    var(--vui-gradient-route-soft);
+  box-shadow: var(--vui-shadow-soft);
 }
 
 .researchInspector .researchStageLauncher {
@@ -950,7 +950,7 @@
 
 .researchStageCardActive {
   border-color: color-mix(in srgb, var(--accent-success) 50%, var(--border-soft));
-  box-shadow: inset 3px 0 0 var(--accent-success);
+  box-shadow: var(--vui-shadow-inset-accent);
 }
 
 .researchStageCardHead {
@@ -1110,7 +1110,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, var(--border-soft));
   border-radius: 8px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 8%, transparent), transparent 58%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-panel-strong) 78%, transparent);
 }
 
@@ -1292,7 +1292,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-cool) 28%, var(--border-soft));
   border-radius: 8px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 10%, transparent), transparent 56%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-card) 82%, transparent);
 }
 
@@ -1347,7 +1347,7 @@
   --source-workbench-panel: var(--bg-canvas);
   --source-workbench-card: var(--bg-canvas);
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent-success) 5%, transparent), transparent 16%),
+    var(--vui-gradient-route-soft),
     var(--source-workbench-bg);
 }
 
@@ -1442,7 +1442,7 @@
   border: 1px solid var(--source-step-border, color-mix(in srgb, var(--accent-success) 24%, var(--border-soft)));
   border-radius: 8px;
   background:
-    linear-gradient(90deg, var(--source-step-bg-soft, color-mix(in srgb, var(--accent-success) 8%, transparent)), transparent 54%),
+    var(--vui-gradient-route-soft),
     var(--source-workbench-panel);
 }
 
@@ -1504,7 +1504,7 @@
   border: 1px solid var(--workflow-message-border, var(--border-soft));
   border-radius: 8px;
   background:
-    linear-gradient(90deg, var(--workflow-message-bg, transparent), transparent 72%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-card) 76%, transparent);
   color: var(--fg-secondary);
   font-size: 0.72rem;
@@ -1542,7 +1542,7 @@
   border: 1px solid var(--source-step-border, var(--border-soft));
   border-radius: 7px;
   background:
-    linear-gradient(90deg, var(--source-step-bg-soft, transparent), transparent 76%),
+    var(--vui-gradient-route-soft),
     var(--source-workbench-card);
   color: var(--source-step-fg, var(--fg-muted));
   cursor: pointer;
@@ -1554,17 +1554,13 @@
 .sourceCollectionStageCard:hover,
 .sourceCollectionStageCard:focus-visible {
   border-color: color-mix(in srgb, var(--accent-cool) 56%, var(--source-step-border, var(--border-soft)));
-  box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--accent-cool) 12%, transparent),
-    0 8px 20px color-mix(in srgb, black 8%, transparent);
+  box-shadow: var(--vui-shadow-accent);
   outline: none;
 }
 
 .sourceCollectionStageCardSelected {
   border-color: color-mix(in srgb, var(--accent-cool) 72%, var(--border-strong));
-  box-shadow:
-    inset 0 -2px 0 color-mix(in srgb, var(--accent-cool) 64%, transparent),
-    0 0 0 2px color-mix(in srgb, var(--accent-cool) 14%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
 }
 
 .sourceCollectionStageCardHead {
@@ -1655,9 +1651,9 @@
 .sourceCollectionStageTaskSummary {
   margin: 10px 0;
   padding: 10px 12px;
-  border: 1px solid rgba(126, 143, 167, 0.22);
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, transparent);
   border-radius: 8px;
-  background: rgba(248, 250, 252, 0.78);
+  background: color-mix(in srgb, var(--fg-primary) 78%, transparent);
 }
 
 .sourceCollectionStageTaskSummary > div {
@@ -1673,7 +1669,7 @@
 }
 
 .sourceCollectionStageBlockers {
-  color: #a34a2a;
+  color: var(--fg-tertiary);
 }
 
 .sourceCollectionStageTechnicalDetails {
@@ -1779,7 +1775,7 @@
 .sourceCollectionStagePrimaryAction {
   --source-step-action-border: color-mix(in srgb, var(--accent-success) 46%, var(--border-strong));
   --source-step-action-bg:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-success) 16%, transparent), transparent 82%),
+    var(--vui-gradient-route-soft),
     var(--source-workbench-card);
 }
 
@@ -2001,7 +1997,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, var(--border-soft));
   border-radius: 7px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-success) 5%, transparent), transparent 76%),
+    var(--vui-gradient-route-soft),
     var(--source-workbench-card);
 }
 
@@ -2072,7 +2068,7 @@
   border: 1px solid var(--stage-agent-card-border, var(--border-soft));
   border-radius: 7px;
   background:
-    linear-gradient(90deg, var(--stage-agent-card-bg, color-mix(in srgb, var(--accent-success) 5%, transparent)), transparent 78%),
+    var(--vui-gradient-route-soft),
     var(--source-workbench-card);
 }
 
@@ -2140,11 +2136,9 @@
   border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
   border-radius: 10px;
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent-cool) 6%, transparent), transparent 28%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--source-workbench-panel) 78%, transparent);
-  box-shadow:
-    inset 0 12px 18px -18px color-mix(in srgb, var(--fg-primary) 42%, transparent),
-    inset 0 -18px 24px -24px color-mix(in srgb, var(--fg-primary) 48%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
   overscroll-behavior: contain;
   scrollbar-color: color-mix(in srgb, var(--accent-cool) 54%, var(--border-strong)) transparent;
   scrollbar-gutter: stable;
@@ -2153,10 +2147,7 @@
 
 .sourceCollectionScreeningListShell:focus-visible {
   border-color: color-mix(in srgb, var(--accent-cool) 54%, var(--border-strong));
-  box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--accent-cool) 18%, transparent),
-    inset 0 12px 18px -18px color-mix(in srgb, var(--fg-primary) 42%, transparent),
-    inset 0 -18px 24px -24px color-mix(in srgb, var(--fg-primary) 48%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
   outline: none;
 }
 
@@ -2189,7 +2180,7 @@
   margin-top: -8px;
   padding: 28px 0 4px;
   pointer-events: none;
-  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--source-workbench-panel) 92%, transparent) 62%);
+  background: var(--vui-gradient-route-soft);
 }
 
 .sourceCollectionScreeningScrollHint span {
@@ -2209,7 +2200,7 @@
   --source-step-bg: color-mix(in srgb, var(--accent-cool) 12%, var(--surface-panel-strong));
   --source-step-bg-soft: color-mix(in srgb, var(--accent-cool) 10%, transparent);
   --source-step-fg: color-mix(in srgb, var(--accent-cool) 78%, var(--fg-primary));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-cool) 34%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
 }
 
 .sourceCollectionStepDone {
@@ -2266,7 +2257,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
   border-radius: 8px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 8%, transparent), transparent 72%),
+    var(--vui-gradient-route-soft),
     var(--source-workbench-panel);
 }
 
@@ -2323,7 +2314,7 @@
 .sourceCollectionStageHandoffNext {
   border-color: color-mix(in srgb, var(--accent-success) 42%, var(--border-soft)) !important;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-success) 11%, transparent), transparent 86%),
+    var(--vui-gradient-route-soft),
     var(--source-workbench-card) !important;
 }
 
@@ -2355,7 +2346,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
   border-radius: 7px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 10%, transparent), transparent 86%),
+    var(--vui-gradient-route-soft),
     var(--source-workbench-card);
   color: var(--fg-primary);
   cursor: pointer;
@@ -2402,7 +2393,7 @@
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-strong) 6%, transparent), transparent 24%),
+    var(--vui-gradient-route-soft),
     var(--source-workbench-panel);
 }
 
@@ -2463,7 +2454,7 @@
   border: 1px solid var(--workflow-trace-border, var(--border-soft));
   border-radius: 7px;
   background:
-    linear-gradient(90deg, var(--workflow-trace-bg, transparent), transparent 72%),
+    var(--vui-gradient-route-soft),
     var(--source-workbench-card);
 }
 
@@ -2781,7 +2772,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-success) 22%, var(--border-soft));
   border-radius: 7px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-success) 7%, transparent), transparent 82%),
+    var(--vui-gradient-route-soft),
     var(--source-workbench-card);
   color: var(--fg-muted);
   font-size: 0.62rem;
@@ -2800,7 +2791,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-warm) 30%, var(--border-soft));
   border-radius: 7px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-warm) 8%, transparent), transparent 82%),
+    var(--vui-gradient-route-soft),
     var(--source-workbench-card);
   color: var(--fg-secondary);
   font-size: 0.66rem;
@@ -2850,7 +2841,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, var(--border-soft));
   border-radius: 10px;
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent-cool) 5%, transparent), transparent 30%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--source-workbench-panel) 78%, transparent);
   overscroll-behavior: contain;
   scrollbar-color: color-mix(in srgb, var(--accent-cool) 54%, var(--border-strong)) transparent;
@@ -2860,7 +2851,7 @@
 
 .sourceCollectionCandidateListShell:focus-visible {
   border-color: color-mix(in srgb, var(--accent-cool) 54%, var(--border-strong));
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cool) 18%, transparent);
+  box-shadow: var(--vui-shadow-accent);
   outline: none;
 }
 
@@ -2936,7 +2927,7 @@
   border: 1px solid color-mix(in srgb, var(--border-soft) 92%, transparent);
   border-radius: 7px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 4%, transparent), transparent 62%),
+    var(--vui-gradient-route-soft),
     var(--source-workbench-card);
   cursor: pointer;
 }
@@ -2946,9 +2937,9 @@
 .sourceCollectionResultItemSelected {
   border-color: color-mix(in srgb, var(--accent-cool) 54%, var(--border-strong));
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 10%, transparent), transparent 68%),
+    var(--vui-gradient-route-soft),
     var(--source-workbench-card);
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent-cool) 62%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
   outline: none;
 }
 
@@ -3042,7 +3033,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-cool) 28%, var(--border-soft));
   border-radius: 7px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 7%, transparent), transparent 82%),
+    var(--vui-gradient-route-soft),
     var(--source-workbench-card);
   color: var(--accent-cool-2);
   font-family: inherit;
@@ -3065,7 +3056,7 @@
 .sourceCollectionResultSourceMissing code {
   border-color: color-mix(in srgb, var(--accent-warm) 32%, var(--border-soft));
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-warm) 8%, transparent), transparent 82%),
+    var(--vui-gradient-route-soft),
     var(--source-workbench-card);
   color: var(--fg-secondary);
 }
@@ -3078,7 +3069,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-cool) 30%, var(--border-soft));
   border-radius: 8px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 8%, transparent), transparent 70%),
+    var(--vui-gradient-route-soft),
     var(--source-workbench-card);
 }
 
@@ -3283,7 +3274,7 @@
 
 .researchStagePage {
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent-cool) 7%, transparent), transparent 18%),
+    var(--vui-gradient-route-soft),
     var(--bg-canvas);
 }
 
@@ -3317,7 +3308,7 @@
   grid-template-columns: minmax(320px, 1fr) minmax(420px, 0.9fr);
   border-color: color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 8%, transparent), transparent 55%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-panel-strong) 78%, transparent);
 }
 
@@ -3635,7 +3626,7 @@
 
 .experimentBaselineForm input:focus {
   border-color: color-mix(in srgb, var(--accent-cool) 46%, var(--border-soft));
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cool) 12%, transparent);
+  box-shadow: var(--vui-shadow-accent);
 }
 
 .experimentBaselineForm button {
@@ -3810,7 +3801,7 @@
 .experimentSmokeForm input:focus,
 .experimentSmokeForm select:focus {
   border-color: color-mix(in srgb, var(--accent-success) 44%, var(--border-soft));
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-success) 10%, transparent);
+  box-shadow: var(--vui-shadow-accent);
 }
 
 .experimentSmokeForm button {
@@ -3900,7 +3891,7 @@
 
 .experimentKnowledgeForm input:focus {
   border-color: color-mix(in srgb, var(--accent-cool) 44%, var(--border-soft));
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cool) 10%, transparent);
+  box-shadow: var(--vui-shadow-accent);
 }
 
 .experimentKnowledgeForm button {
@@ -4096,7 +4087,7 @@
 .researchLoopDecisionForm input:focus,
 .researchLoopDecisionForm select:focus {
   border-color: color-mix(in srgb, var(--accent-cool) 46%, var(--border-soft));
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cool) 10%, transparent);
+  box-shadow: var(--vui-shadow-accent);
 }
 
 .researchLoopTemplateSummary,
@@ -4343,15 +4334,13 @@
   border: 1px solid var(--source-step-border, var(--border-soft));
   border-radius: 8px;
   background:
-    linear-gradient(90deg, var(--source-step-bg-soft, transparent), transparent 72%),
+    var(--vui-gradient-route-soft),
     var(--surface-card);
   color: var(--source-step-fg, var(--fg-muted));
 }
 
 .knowledgeCompletionFlowNodeCurrent {
-  box-shadow:
-    inset 0 -2px 0 color-mix(in srgb, var(--source-step-fg, var(--accent-cool)) 52%, transparent),
-    0 0 0 2px color-mix(in srgb, var(--source-step-fg, var(--accent-cool)) 10%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
 }
 
 .knowledgeCompletionFlowNodeHeader {
@@ -4532,8 +4521,8 @@
   flex: 1;
   overflow: auto;
   background-image:
-    linear-gradient(color-mix(in srgb, var(--border-soft) 55%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--border-soft) 55%, transparent) 1px, transparent 1px);
+    var(--vui-gradient-route-soft),
+    var(--vui-gradient-route-soft);
   background-size: 32px 32px;
 }
 
@@ -4543,8 +4532,8 @@
   min-height: 0;
   padding: 10px;
   background:
-    linear-gradient(color-mix(in srgb, var(--border-soft) 34%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--border-soft) 34%, transparent) 1px, transparent 1px);
+    var(--vui-gradient-route-soft),
+    var(--vui-gradient-route-soft);
   background-size: 32px 32px;
 }
 
@@ -4620,7 +4609,7 @@
   pointer-events: none;
   z-index: 0;
   overflow: visible;
-  color: var(--accent-cool, #5bb7ae);
+  color: var(--accent-cool, var(--accent-warm));
 }
 
 .edges > path {
@@ -4635,7 +4624,7 @@
 }
 
 .edges > .edgeOrganization {
-  color: var(--accent-cool, #5bb7ae);
+  color: var(--accent-cool, var(--accent-warm));
   stroke-width: 2.15;
   opacity: 0.9;
 }
@@ -4673,7 +4662,7 @@
   text-align: left;
   touch-action: none;
   user-select: none;
-  box-shadow: 0 8px 22px color-mix(in srgb, black 16%, transparent);
+  box-shadow: var(--vui-shadow-soft);
 }
 
 .canvasViewport .node {
@@ -4748,21 +4737,21 @@
 }
 
 .nodeRoleBadgeSteward {
-  --node-role-bg: color-mix(in srgb, #d8912d 16%, var(--surface-panel));
-  --node-role-border: color-mix(in srgb, #d8912d 52%, var(--border-soft));
-  --node-role-fg: color-mix(in srgb, #d8912d 82%, var(--fg-primary));
+  --node-role-bg: color-mix(in srgb, var(--state-warning) 16%, var(--surface-panel));
+  --node-role-border: color-mix(in srgb, var(--state-warning) 52%, var(--border-soft));
+  --node-role-fg: color-mix(in srgb, var(--state-warning) 82%, var(--fg-primary));
 }
 
 .nodeRoleBadgeResearch {
-  --node-role-bg: color-mix(in srgb, #7d6be8 15%, var(--surface-panel));
-  --node-role-border: color-mix(in srgb, #7d6be8 44%, var(--border-soft));
-  --node-role-fg: color-mix(in srgb, #9a8cff 76%, var(--fg-primary));
+  --node-role-bg: color-mix(in srgb, var(--accent-warm) 15%, var(--surface-panel));
+  --node-role-border: color-mix(in srgb, var(--accent-warm) 44%, var(--border-soft));
+  --node-role-fg: color-mix(in srgb, var(--fg-tertiary) 76%, var(--fg-primary));
 }
 
 .nodeRoleBadgeSelf {
-  --node-role-bg: color-mix(in srgb, #d85c77 13%, var(--surface-panel));
-  --node-role-border: color-mix(in srgb, #d85c77 44%, var(--border-soft));
-  --node-role-fg: color-mix(in srgb, #e06f86 78%, var(--fg-primary));
+  --node-role-bg: color-mix(in srgb, var(--state-error) 13%, var(--surface-panel));
+  --node-role-border: color-mix(in srgb, var(--state-error) 44%, var(--border-soft));
+  --node-role-fg: color-mix(in srgb, var(--state-error) 78%, var(--fg-primary));
 }
 
 .nodeRoleBadgeOpen {
@@ -4796,9 +4785,7 @@
 }
 
 .nodeActive {
-  box-shadow:
-    inset 0 0 0 1px var(--accent-cool),
-    0 8px 22px color-mix(in srgb, black 18%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
 }
 
 .nodeReadOnly {
@@ -5254,7 +5241,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, var(--border-soft));
   border-radius: 8px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 6%, transparent), transparent 52%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-panel-strong) 70%, transparent);
 }
 
@@ -5316,7 +5303,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
   border-radius: 8px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 7%, transparent), transparent 44%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-panel-strong) 68%, transparent);
 }
 
@@ -5328,7 +5315,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-success) 26%, var(--border-soft));
   border-radius: 8px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-success) 7%, transparent), transparent 48%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-panel-strong) 70%, transparent);
 }
 
@@ -5347,9 +5334,7 @@
 
 .sourceCollectionFocusedPanel {
   border-color: color-mix(in srgb, var(--accent-cool) 64%, var(--border-strong));
-  box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--accent-cool) 18%, transparent),
-    0 12px 28px color-mix(in srgb, var(--accent-cool) 10%, transparent);
+  box-shadow: var(--vui-shadow-accent);
   animation: sourceCollectionPanelPulse 1.6s ease-out;
 }
 
@@ -5515,7 +5500,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-primary) 30%, var(--border-soft));
   border-radius: 7px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-primary) 9%, transparent), transparent 62%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-panel-strong) 78%, transparent);
 }
 
@@ -5563,7 +5548,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
   border-radius: 7px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 8%, transparent), transparent 70%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-card) 78%, transparent);
 }
 
@@ -5837,7 +5822,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-success) 24%, var(--border-soft));
   border-radius: 8px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-success) 7%, transparent), transparent 42%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-panel-strong) 68%, transparent);
 }
 
@@ -5949,7 +5934,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
   border-radius: 8px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 6%, transparent), transparent 46%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-panel-strong) 68%, transparent);
 }
 
@@ -5961,7 +5946,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-success) 26%, var(--border-soft));
   border-radius: 8px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-success) 7%, transparent), transparent 48%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-panel-strong) 70%, transparent);
 }
 
@@ -6101,9 +6086,9 @@
   border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
   border-radius: 10px;
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--accent-cool) 9%, transparent), transparent 42%),
-    color-mix(in srgb, var(--surface-panel-strong) 96%, #fff 4%);
-  box-shadow: 0 14px 34px color-mix(in srgb, #000 9%, transparent);
+    var(--vui-gradient-route-soft),
+    color-mix(in srgb, var(--surface-panel-strong) 96%, var(--fg-primary) 4%);
+  box-shadow: var(--vui-shadow-soft);
 }
 
 .workflowGraphHeader {
@@ -6173,14 +6158,14 @@
   border: 1px solid color-mix(in srgb, var(--accent-cool) 28%, var(--border-soft));
   border-radius: 10px;
   background:
-    linear-gradient(color-mix(in srgb, var(--border-soft) 34%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--border-soft) 34%, transparent) 1px, transparent 1px),
+    var(--vui-gradient-route-soft),
+    var(--vui-gradient-route-soft),
     radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--accent-cool) 10%, transparent), transparent 34%),
-    color-mix(in srgb, var(--surface-card) 96%, #fff 4%);
+    color-mix(in srgb, var(--surface-card) 96%, var(--fg-primary) 4%);
   background-size: 28px 28px;
   overflow: auto;
   overscroll-behavior: contain;
-  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 72%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
 }
 
 .researchInspector .workflowGraphFrame {
@@ -6227,8 +6212,8 @@
   border: 1px solid var(--workflow-graph-node-border, var(--border-soft));
   border-left-width: 4px;
   border-radius: 9px;
-  background: var(--workflow-graph-node-bg, color-mix(in srgb, var(--surface-panel-strong) 96%, #fff 4%));
-  box-shadow: 0 10px 22px color-mix(in srgb, #000 13%, transparent);
+  background: var(--workflow-graph-node-bg, color-mix(in srgb, var(--surface-panel-strong) 96%, var(--fg-primary) 4%));
+  box-shadow: var(--vui-shadow-soft);
   color: var(--fg-primary);
 }
 
@@ -6260,9 +6245,9 @@
 }
 
 .workflowGraphNodeWarning {
-  --workflow-graph-node-bg: color-mix(in srgb, #d8912d 12%, var(--surface-panel-strong));
-  --workflow-graph-node-border: color-mix(in srgb, #d8912d 42%, var(--border-soft));
-  --workflow-graph-node-fg: color-mix(in srgb, #d8912d 76%, var(--fg-muted));
+  --workflow-graph-node-bg: color-mix(in srgb, var(--state-warning) 12%, var(--surface-panel-strong));
+  --workflow-graph-node-border: color-mix(in srgb, var(--state-warning) 42%, var(--border-soft));
+  --workflow-graph-node-fg: color-mix(in srgb, var(--state-warning) 76%, var(--fg-muted));
 }
 
 .workflowGraphNodeDanger {
@@ -6272,7 +6257,7 @@
 }
 
 .workflowGraphNodeNeutral {
-  --workflow-graph-node-bg: color-mix(in srgb, var(--surface-panel-strong) 96%, #fff 4%);
+  --workflow-graph-node-bg: color-mix(in srgb, var(--surface-panel-strong) 96%, var(--fg-primary) 4%);
   --workflow-graph-node-border: var(--border-soft);
   --workflow-graph-node-fg: var(--fg-muted);
 }
@@ -6299,7 +6284,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
   border-radius: 8px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 7%, transparent), transparent 66%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-panel-strong) 70%, transparent);
 }
 
@@ -6363,7 +6348,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, var(--border-soft));
   border-radius: 10px;
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent-cool) 5%, transparent), transparent 30%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-panel-strong) 58%, transparent);
   overscroll-behavior: contain;
   scrollbar-color: color-mix(in srgb, var(--accent-cool) 54%, var(--border-strong)) transparent;
@@ -6373,7 +6358,7 @@
 
 .workflowCandidateListScroll:focus-visible {
   border-color: color-mix(in srgb, var(--accent-cool) 54%, var(--border-strong));
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cool) 18%, transparent);
+  box-shadow: var(--vui-shadow-accent);
   outline: none;
 }
 
@@ -6402,7 +6387,7 @@
   margin-top: -8px;
   padding: 28px 0 4px;
   pointer-events: none;
-  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--surface-panel-strong) 88%, transparent) 62%);
+  background: var(--vui-gradient-route-soft);
 }
 
 .workflowCandidateListScrollHint span {
@@ -6443,9 +6428,9 @@
 .workflowCandidateItemSelected {
   border-color: color-mix(in srgb, var(--accent-cool) 48%, var(--border-strong));
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 7%, transparent), transparent 72%),
+    var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-panel-strong) 82%, transparent);
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent-cool) 56%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
   outline: none;
 }
 
@@ -6584,9 +6569,9 @@
 }
 
 .workflowTagWarning {
-  --workflow-tag-bg: color-mix(in srgb, #d8912d 14%, var(--surface-panel));
-  --workflow-tag-border: color-mix(in srgb, #d8912d 44%, var(--border-soft));
-  --workflow-tag-fg: color-mix(in srgb, #d8912d 82%, var(--fg-primary));
+  --workflow-tag-bg: color-mix(in srgb, var(--state-warning) 14%, var(--surface-panel));
+  --workflow-tag-border: color-mix(in srgb, var(--state-warning) 44%, var(--border-soft));
+  --workflow-tag-fg: color-mix(in srgb, var(--state-warning) 82%, var(--fg-primary));
 }
 
 .workflowTagDanger {

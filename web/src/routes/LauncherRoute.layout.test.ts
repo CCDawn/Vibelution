@@ -233,15 +233,16 @@ describe("LauncherRoute layout contract", () => {
   });
 
   it("uses a light dense Launcher surface with muted action buttons", () => {
-    expect(routeStylesSource).toContain("--surface-page: #f6f8fb");
-    expect(routeStylesSource).toContain("--surface-header: rgba(255, 255, 255, 0.94)");
-    expect(routeStylesSource).toContain("background: color-mix(in srgb, var(--accent-primary) 10%, #ffffff)");
-    expect(routeStylesSource).toContain("background: color-mix(in srgb, var(--danger) 7%, #ffffff)");
+    expect(routeStylesSource).toContain("--surface-page: var(--fg-primary)");
+    expect(routeStylesSource).toContain("--surface-header: color-mix(in srgb, var(--fg-primary) 94%, transparent)");
+    expect(routeStylesSource).toContain("background: color-mix(in srgb, var(--accent-primary) 10%, var(--fg-primary))");
+    expect(routeStylesSource).toContain("background: color-mix(in srgb, var(--danger) 7%, var(--fg-primary))");
     expect(routeStylesSource).toContain("min-height: 28px");
     expect(routeStylesSource).toContain("padding: 0 8px");
     expect(routeStylesSource).toContain("width: fit-content");
     expect(routeStylesSource).toContain("white-space: nowrap");
-    expect(launcherShellStylesSource).toContain("#f6f8fb");
+    expect(launcherShellStylesSource).toContain("var(--vui-gradient-route-soft)");
+    expect(launcherShellStylesSource).toContain("var(--fg-primary)");
   });
 
   it("keeps the complete launcher surface reachable when the window is short", () => {
