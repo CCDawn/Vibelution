@@ -87,19 +87,30 @@
   --font-display: "Segoe UI Variable Display", "Segoe UI", sans-serif;
   --font-body: "Segoe UI Variable Text", "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Code", monospace;
+  --vui-font-xs: 0.82rem;
+  --vui-font-sm: 0.88rem;
+  --vui-font-md: 0.94rem;
+  --vui-font-chat: 1.02rem;
+  --vui-font-title: 1.12rem;
+  --vui-line-tight: 1.25;
+  --vui-line-readable: 1.58;
 
   --radius-control: 7px;
   --radius-panel: 8px;
   --radius-card: 7px;
   --radius-pill: 999px;
   --focus-ring: 0 0 0 2px color-mix(in srgb, var(--accent-warm) 64%, transparent);
-  --control-height: 32px;
+  --vui-control-height-compact: 30px;
+  --vui-control-height-comfortable: 34px;
+  --vui-control-height-sm: var(--vui-control-height-compact);
+  --vui-control-height-md: var(--vui-control-height-comfortable);
+  --control-height: var(--vui-control-height-comfortable);
   --control-padding-x: 10px;
 
   --route-topbar-padding: 8px 12px;
   --route-topbar-gap: 10px;
-  --route-topbar-title-size: 1.12rem;
-  --route-topbar-subtitle-size: 0.78rem;
+  --route-topbar-title-size: var(--vui-font-title);
+  --route-topbar-subtitle-size: var(--vui-font-sm);
   --route-summary-gap: 6px;
   --route-summary-padding: 6px 8px;
   --route-workspace-padding: 10px 12px 12px;

@@ -17,6 +17,7 @@ import {
 
 const designRoot = resolve(import.meta.dirname, "../../design");
 const tokensSource = readFileSync(resolve(designRoot, "tokens.css"), "utf8");
+const baseSource = readFileSync(resolve(designRoot, "base.css"), "utf8");
 const tailwindSource = readFileSync(resolve(designRoot, "tailwind.css"), "utf8");
 const herouiThemeSource = readFileSync(resolve(designRoot, "heroui-theme.css"), "utf8");
 const agentWorkspacePanelSource = readFileSync(
@@ -65,6 +66,36 @@ describe("VUI dual-theme foundation", () => {
     expect(herouiThemeSource).toContain('button[data-slot="button"][data-vui="button"]');
     expect(herouiThemeSource).toContain("border-width: 1px");
     expect(herouiThemeSource).toContain('[class*="segmentedControl"]');
+  });
+
+  it("defines the readable display scale as shared tokens instead of page-local micro text", () => {
+    for (const token of [
+      "--vui-font-xs",
+      "--vui-font-sm",
+      "--vui-font-md",
+      "--vui-font-chat",
+      "--vui-line-readable",
+      "--vui-control-height-compact",
+      "--vui-control-height-comfortable",
+    ]) {
+      expect(tokensSource).toContain(token);
+    }
+
+    expect(baseSource).toContain("font-size: 15px");
+
+    const vuiSources = [
+      agentWorkspacePanelSource,
+      agentSummaryStripSource,
+      readFileSync(resolve(import.meta.dirname, "display/VMetricStrip.tsx"), "utf8"),
+      readFileSync(resolve(import.meta.dirname, "display/VDenseTable.tsx"), "utf8"),
+      readFileSync(resolve(import.meta.dirname, "layout/VSection.tsx"), "utf8"),
+      readFileSync(resolve(import.meta.dirname, "primitives/VChip.tsx"), "utf8"),
+      readFileSync(resolve(import.meta.dirname, "primitives/VTooltip.tsx"), "utf8"),
+    ].join("\n");
+
+    expect(vuiSources).not.toMatch(/text-\[0\.(?:6\d|7[0-7])rem\]/);
+    expect(vuiSources).not.toContain("text-xs");
+    expect(vuiSources).toContain("text-[var(--vui-font-xs)]");
   });
 
   it("renders page, surface, section, metric strip, and action group primitives", () => {

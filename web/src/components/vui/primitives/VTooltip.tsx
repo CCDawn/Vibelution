@@ -21,7 +21,7 @@ export function VTooltip({
 }: VTooltipProps) {
   const contentProps: TooltipContentProps = {
     className: [
-      "max-w-72 border border-vui-border-soft bg-vui-surface-card px-2 py-1 text-xs text-vui-fg-secondary",
+      "max-w-72 border border-vui-border-soft bg-vui-surface-card px-2 py-1 text-[var(--vui-font-xs)] text-vui-fg-secondary",
       className,
     ]
       .filter(Boolean)

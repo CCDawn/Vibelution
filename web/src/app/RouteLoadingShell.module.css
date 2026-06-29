@@ -18,7 +18,7 @@
 
 .title {
   display: block;
-  font-size: 0.92rem;
+  font-size: var(--vui-font-chat);
   font-weight: 720;
   line-height: 1.35;
 }
@@ -27,6 +27,6 @@
   display: block;
   margin-top: 6px;
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.35;
 }
