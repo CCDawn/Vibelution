@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { ChatNextStateSignalSummary, ConversationMessage, SessionTurnError } from "../../api/types";
 import conversationViewSource from "./ConversationView.tsx?raw";
+import streamingRevealStateSource from "./streamingRevealState.ts?raw";
 import {
   buildStreamingTimelineScrollSignal,
   buildTimelineScrollSignal,
@@ -148,13 +149,14 @@ describe("ConversationView edit resend affordance", () => {
   it("renders streaming assistant markdown progressively instead of waiting for the final answer", () => {
     expect(conversationViewSource).toContain("function renderStreamingResponseText(content: string)");
     expect(conversationViewSource).toContain("<StreamingResponseContent content={content} renderBlock={renderMarkdownBlock} />");
-    expect(conversationViewSource).toContain("parseStreamingMarkdownBlocks");
-    expect(conversationViewSource).toContain("STREAMING_RESPONSE_REVEAL_MAX_CHARS");
-    expect(conversationViewSource).toContain("STREAMING_RESPONSE_CATCH_UP_BACKLOG_CHARS");
+    expect(conversationViewSource).toContain("projectStreamingMarkdownBlocks");
+    expect(conversationViewSource).toContain("nextStreamingRevealLength");
     expect(conversationViewSource).toContain("type StreamingRevealState");
-    expect(conversationViewSource).toContain("stableText");
-    expect(conversationViewSource).toContain("revealTail");
     expect(conversationViewSource).toContain("appendStableText");
+    expect(streamingRevealStateSource).toContain("STREAMING_RESPONSE_REVEAL_MAX_CHARS");
+    expect(streamingRevealStateSource).toContain("STREAMING_RESPONSE_CATCH_UP_BACKLOG_CHARS");
+    expect(streamingRevealStateSource).toContain("stableText");
+    expect(streamingRevealStateSource).toContain("revealTail");
     expect(conversationViewSource).toContain("requestAnimationFrame");
     expect(conversationViewSource).toContain("setVisibleContent");
     expect(conversationViewSource).toContain("const isResponseStreaming = Boolean(message.streaming) && showResponseBlock");
@@ -512,6 +514,31 @@ describe("ConversationView edit resend affordance", () => {
     expect(html.match(/assistantTurn/g)?.length ?? 0).toBe(1);
   });
 
+  it("renders stable row and part identities for the active assistant turn", () => {
+    const html = renderConversation(
+      [],
+      {
+        useDefaultProcessDisplayMode: true,
+        activeTurnMessage: {
+          id: "session-1-message-active-turn-1",
+          role: "assistant",
+          content: "当前回答正在流式显示。",
+          timestamp: "2026-06-26T10:30:01Z",
+          streaming: true,
+          streamStage: "responding",
+          metadata: {
+            kind: "session_active_turn_layer",
+            turnId: "turn-identity",
+          },
+        },
+      },
+    );
+
+    expect(html).toContain('data-conversation-row-key="assistant-turn:turn-identity"');
+    expect(html).toContain('data-conversation-message-key="assistant-turn:turn-identity:message"');
+    expect(html).toContain('data-conversation-part-key="assistant-turn:turn-identity:answer"');
+  });
+
   it("coalesces same-tool feedback updates when merging live overlay with the active turn", () => {
     const html = renderConversation(
       [
@@ -684,6 +711,14 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("mergeLiveOverlayIntoActiveTurnMessage(message, mergedActiveTurnMessage)");
     expect(conversationViewSource).toContain("buildStreamingTimelineScrollSignal(streamingTimelineMessages)");
     expect(conversationViewSource).not.toContain("activeTimelineSignalMessages");
+  });
+
+  it("captures a scroll anchor before revealing earlier messages", () => {
+    expect(conversationViewSource).toContain("function showEarlierMessages()");
+    expect(conversationViewSource).toContain("captureTimelineScrollHeightAnchor(timelineRef.current)");
+    expect(conversationViewSource).toContain("restoreTimelineScrollHeightAnchor(timelineRef.current, anchor)");
+    expect(conversationViewSource).toContain("onClick={showEarlierMessages}");
+    expect(conversationViewSource).not.toContain("onClick={() => setAllMessagesVisible(true)}");
   });
 
   it("can render the opt-in compact workbench density", () => {
@@ -2722,6 +2757,43 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("Long Loop Progress");
     expect(html).not.toContain("回答</span>");
     expect(html).not.toContain("responseSection");
+  });
+
+  it("keeps only the latest repeated visible status process update", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-long-loop-progress-updates",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-06-28T16:52:00Z",
+          streaming: true,
+          feedbackEvents: [
+            {
+              sequence: 1,
+              kind: "status",
+              status: "running",
+              name: "long_loop_progress",
+              summary: "尚未形成最终回答 · 第 1 次工具调用",
+              resultPreview: "尚未形成最终回答 · 第 1 次工具调用",
+            },
+            {
+              sequence: 2,
+              kind: "status",
+              status: "running",
+              name: "long_loop_progress",
+              summary: "尚未形成最终回答 · 第 2 次工具调用",
+              resultPreview: "尚未形成最终回答 · 第 2 次工具调用",
+            },
+          ],
+        },
+      ],
+      { useDefaultProcessDisplayMode: true },
+    );
+
+    expect(html).toContain("状态 1");
+    expect(html).toContain("第 2 次工具调用");
+    expect(html).not.toContain("第 1 次工具调用");
   });
 
   it("keeps the collapsed answer-only process summary static before details are expanded", () => {

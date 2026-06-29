@@ -9,8 +9,35 @@ export type MarkdownBlock =
   | { type: "code"; content: string; language: string; open: boolean }
   | { type: "divider" };
 
+export const STREAMING_MARKDOWN_LIVE_TAIL_CHARS = 960;
+
+export type StreamingMarkdownProjection = {
+  stableText: string;
+  liveText: string;
+  stableBlocks: MarkdownBlock[];
+  liveBlocks: MarkdownBlock[];
+  blocks: MarkdownBlock[];
+};
+
+const STABLE_MARKDOWN_BLOCK_CACHE_LIMIT = 120;
+const stableMarkdownBlockCache = new Map<string, MarkdownBlock[]>();
+
+export function projectStreamingMarkdownBlocks(content: string): StreamingMarkdownProjection {
+  const normalizedContent = normalizeStreamingMarkdownContent(content);
+  const { stableText, liveText } = splitStableMarkdownText(normalizedContent);
+  const stableBlocks = stableText ? cachedStableMarkdownBlocks(stableText) : [];
+  const liveBlocks = liveText ? parseStreamingMarkdownBlocks(liveText) : [];
+  return {
+    stableText,
+    liveText,
+    stableBlocks,
+    liveBlocks,
+    blocks: [...stableBlocks, ...liveBlocks],
+  };
+}
+
 export function parseStreamingMarkdownBlocks(content: string): MarkdownBlock[] {
-  const lines = String(content ?? "").replace(/\r\n/g, "\n").split("\n");
+  const lines = normalizeStreamingMarkdownContent(content).split("\n");
   const blocks: MarkdownBlock[] = [];
   let paragraphLines: string[] = [];
 
@@ -141,6 +168,76 @@ export function parseStreamingMarkdownBlocks(content: string): MarkdownBlock[] {
 
   flushParagraph();
   return blocks;
+}
+
+function normalizeStreamingMarkdownContent(content: string) {
+  return String(content ?? "").replace(/\r\n/g, "\n");
+}
+
+function cachedStableMarkdownBlocks(stableText: string) {
+  const cached = stableMarkdownBlockCache.get(stableText);
+  if (cached) {
+    return cached;
+  }
+  const blocks = parseStreamingMarkdownBlocks(stableText);
+  stableMarkdownBlockCache.set(stableText, blocks);
+  if (stableMarkdownBlockCache.size > STABLE_MARKDOWN_BLOCK_CACHE_LIMIT) {
+    const oldestKey = stableMarkdownBlockCache.keys().next().value;
+    if (oldestKey) {
+      stableMarkdownBlockCache.delete(oldestKey);
+    }
+  }
+  return blocks;
+}
+
+function splitStableMarkdownText(content: string): { stableText: string; liveText: string } {
+  if (content.length <= STREAMING_MARKDOWN_LIVE_TAIL_CHARS) {
+    return { stableText: "", liveText: content };
+  }
+  let splitIndex = stableMarkdownSplitIndex(content);
+  if (splitIndex <= 0) {
+    return { stableText: "", liveText: content };
+  }
+
+  const stableCandidate = content.slice(0, splitIndex);
+  if (hasOpenCodeFence(stableCandidate)) {
+    splitIndex = lastCodeFenceLineStart(stableCandidate);
+  }
+  if (splitIndex <= 0) {
+    return { stableText: "", liveText: content };
+  }
+
+  return {
+    stableText: content.slice(0, splitIndex).trimEnd(),
+    liveText: content.slice(splitIndex).replace(/^\n+/, ""),
+  };
+}
+
+function stableMarkdownSplitIndex(content: string) {
+  const targetIndex = Math.max(0, content.length - STREAMING_MARKDOWN_LIVE_TAIL_CHARS);
+  const searchText = content.slice(0, targetIndex);
+  const boundaries = [...searchText.matchAll(/\n\s*\n/g)];
+  const boundary = boundaries[boundaries.length - 1];
+  if (!boundary || boundary.index === undefined) {
+    return 0;
+  }
+  return boundary.index + boundary[0].length;
+}
+
+function codeFenceLineStarts(content: string) {
+  return [...content.matchAll(/(^|\n)```[A-Za-z0-9_+.-]*\s*($|\n)/g)].map((match) => {
+    const index = match.index ?? 0;
+    return match[1] === "\n" ? index + 1 : index;
+  });
+}
+
+function hasOpenCodeFence(content: string) {
+  return codeFenceLineStarts(content).length % 2 === 1;
+}
+
+function lastCodeFenceLineStart(content: string) {
+  const starts = codeFenceLineStarts(content);
+  return starts[starts.length - 1] ?? 0;
 }
 
 function isMarkdownTableHeader(lines: string[], index: number) {
