@@ -17,8 +17,8 @@
 <a class="" href="04-mechanism-mapping.html"><span class="mini">04</span><span>机制到计算抽象</span></a>
 <a class="" href="05-algorithm-hypothesis.html"><span class="mini">05</span><span>生成 algorithm_hypothesis</span></a>
 <a class="" href="06-research-review.html"><span class="mini">06</span><span>科研审稿</span></a>
-<a class="" href="07-steward-ingestion.html"><span class="mini">07</span><span>知识治理入库</span></a>
-<a class="" href="08-candidate-graph.html"><span class="mini">08</span><span>候选图谱预览</span></a>
+<a class="" href="07-source-ingestion.html"><span class="mini">07</span><span>资料入库</span></a>
+<a class="" href="08-candidate-graph.html"><span class="mini">08</span><span>资料关系整理预览</span></a>
 <a class="" href="09-official-graph.html"><span class="mini">09</span><span>正式知识图谱同步</span></a>
 <a class="" href="10-experiment-loop.html"><span class="mini">10</span><span>实验迭代闭环</span></a>
 <a class="" href="11-iteration-versioning.html"><span class="mini">11</span><span>持续迭代与版本化</span></a>
@@ -31,12 +31,12 @@
           <div class="kicker">Research Flow Node 01</div>
           <h1>资料进入工作区</h1>
           <p class="subtitle">建立稳定证据源，并把本地 PDF 转成可引用的页码锚点。</p>
-          <div class="tag-row"><span class="tag active">第一阶段四步闭环入库搭建中</span><span class="tag">Source Intake Agent</span><span class="tag">独立计划页</span></div>
+          <div class="tag-row"><span class="tag active">第一阶段四步闭环入库搭建中</span><span class="tag">资料寻找 Agent</span><span class="tag">独立计划页</span></div>
           <div class="diagram">
             <div class="flow-cell"><strong>输入</strong><span>用户提供的论文/PDF / 赛题 PDF</span></div>
             <div class="flow-cell"><strong>动作</strong><span>登记文件路径、资料类型、页码范围和来源可信度。</span></div>
             <div class="flow-cell"><strong>输出</strong><span>资料清单 / sourceFiles 引用</span></div>
-            <div class="flow-cell"><strong>记忆/图谱</strong><span>可作为候选图谱的 Paper source 节点，不进入正式知识图谱。</span></div>
+            <div class="flow-cell"><strong>记忆/图谱</strong><span>可作为资料关系整理的 Paper source 节点，不进入正式知识图谱。</span></div>
           </div>
         </section>
 
@@ -77,7 +77,7 @@
           <div class="status-grid">
             <div class="status-item"><b>候选状态</b><span>第一阶段四步闭环入库搭建中</span></div>
             <div class="status-item"><b>记忆平台</b><span>不进入正式记忆库；只作为后续 paper_note 的 sourceFiles。</span></div>
-            <div class="status-item"><b>图谱同步</b><span>可作为候选图谱的 Paper source 节点，不进入正式知识图谱。</span></div>
+            <div class="status-item"><b>图谱同步</b><span>可作为资料关系整理的 Paper source 节点，不进入正式知识图谱。</span></div>
           </div>
         </section>
 
@@ -89,87 +89,31 @@
       </div>
       <div class="status-grid">
         <div class="status-item"><b>状态</b><span>source_registered</span></div>
-        <div class="status-item"><b>功能岗位</b><span>Source Intake Agent</span></div>
-        <div class="status-item"><b>Agent 状态</b><span>可复用通用 data-processing assignment / source-extraction / source-quality 后端已接入；Teams 搜索资料执行台、资料提炼页、资料审查台、科研总览控制台、KV 缓存门禁、启动复用反馈、metadata-only 搜索执行闭环、高价值信息层、中文控制台、默认层去说明化、步骤卡主操作入口、阶段 Agent direct session task、结构化 writeback 回团队阶段、右侧当前步骤 Agent 配置、资料审查页内反馈、资料审查 Agent 批量执行、候选库可视化二级索引、知识搜集阶段四步控制台、资料审查 Agent 复审入口、一键排队首批后台搜索、搜索资料当前动作和已收集资料分层、搜集结果状态徽标完整显示、搜集结果 DOI/网页/本地文件来源可溯源、资料提炼结果滚动与待审查交接、四步完整列表、来源类型过滤、阶段结果工作台、Agent 私聊深链、阶段输入输出交接、结果分页、实体可读工作台、阶段卡降噪、知识库管理员生成关系并通知知识库管理员、资料入库可从候选资料触发审查并发送入库请求、KV 缓存模型与执行 Agent 模型分层、阶段协调显式启动已接入</span></div>
+        <div class="status-item"><b>功能岗位</b><span>资料寻找 Agent</span></div>
+        <div class="status-item"><b>Agent 状态</b><span>四阶段知识搜集主线已收敛：资料寻找、资料提炼、资料关系整理、资料入库各绑定一个功能 Agent；阶段卡主按钮创建 Agent 私聊任务，结构化 writeback 回团队阶段，结果在同一轮候选资料仓库中去重叠加。</span></div>
         <div class="status-item"><b>进入条件</b><span>用户提供 PDF、论文、赛题或补充资料；文件可在挑战杯工作区定位。</span></div>
         <div class="status-item"><b>退出条件</b><span>每个知识搜集轮次有 stageRoundId、roundNumber、teamMemoryRecord、coordinationContract.startResult(manual_only 或显式启动结果)、显式协调后的可选 coordinationRoomId/coordinationRoundId、sourceRunIds、dataSearchPlanRef、planned queries、assignedQueries、resultWritebackContract 和 sourceCollectionStageSessionTasks；每个阶段会话任务有 taskId、stageId、agentId、agentRole、sessionId、writebackContract、status、turn、result、evidenceRefs、nextActions 和作用域化 idempotencyKey，并持久化在 source_collection_runs/&lt;runId&gt;/stage_session_tasks.json；默认每次点击新建任务，只在显式相同 idempotencyKey 的同一次请求重试中复用；每个资料项先有 DataRecord/sourceRef/rawLocation/title/qualitySignals/collectionTrace，再有 source_manifest 的 id、path、type、allowedForAnalysis、sha256、pageScope、sourceExtraction.pageAnchors 和 sourceQualityAssessment。</span></div>
         <div class="status-item"><b>审核门禁</b><span>确认资料允许分析、来源可信度和是否纳入本轮。</span></div>
       </div>
       <div class="plan-grid">
-        <article class="plan-card"><h2>本步操作</h2><p class="hint">用户在 ai科学研究团队科研控制台点击知识搜集主按钮，stage-rounds/start 创建或续用 ResearchStageRound，并复用 source-collection run 建立 DataProcessingRun；新建知识搜集轮次可继续排队第一批后台 source collection 搜索并在响应中返回 sourceCollectionSearchExecution.activeWorkRun。总览页只提示当前阶段、下一步和阶段详情入口，不默认展示模型证据、路径、query、KV 分区或校验详情。知识搜集卡会显示未开始、待继续搜索、搜索中、待审查、可入库、可进入实验或等待回写，并显示当前批次、待处理、候选和查询数；进入知识搜集页后，搜索资料、资料提炼、资料审查、候选图谱、知识库管理员入库审核五张步骤卡的主按钮会调用 source-collection-runs/{runId}/stage-session-tasks，创建对应功能 Agent 的 direct session task，并带 returnTo/returnLabel 跳转到 Chat 会话页执行；每次用户点击都会投递新的私聊任务消息，同一轮新增结果继续进入候选资料仓库并由 DOI/URL/标题指纹去重；Agent 接收任务后先调用 source_collection_context_tool 读取指定 team/run/task 的 bounded DataRecord、source_manifest、assignment 和 writebackContract，不通过 web_fetch_tool 访问 file:// 本地路径或 localhost API；Agent 完成或阻塞后必须调用 source_collection_stage_writeback_tool 提交结构化 status/summary/result/evidenceRefs/nextActions，团队阶段只以 writeback 结果更新 sourceCollectionStageSessionTasks。旧本地执行按钮、手工 CollectionOutput 回写和 Agent 私聊入口保留为详情/调试/兜底路径，不再作为五张阶段卡主路径。如果已有 active knowledge_collection，接口返回 continuedSourceRunRef、run 和 assignments，知识搜集阶段页直接显示 runId、记录数、待回写任务数和搜索执行状态。资料搜索 run 列表由 /api/data-processing/runs 使用 teamId + startedFrom 服务端过滤，不再先取全局最近批次再本地筛选，避免其它任务把当前科研批次挤出 UI。阶段启动只记录显式协商契约，不会自动打开团队群聊；需要协商时再由用户显式启动 coordination/retry。系统基于 topic/goal/scope/querySeeds 生成 searchPlan、queries、roleAssignmentInputs 和 resultWritebackContract，让 data_discovery/source_acquisition/content_extraction/source_quality 等功能 Agent 领取带 assignedQueries 的 CollectionAssignment。知识搜集页首屏作为流程控制台：左上角显示正在团队搜索、待继续搜索、待审查、可入库或失败；后台搜索 accepted 后 activeWorkRun 会合成到控制台和对话流，AppShell 顶部运行态在知识搜集与团队群聊并发时优先显示知识搜集，搜索资料卡保持进行中直到 runStatus 进入 reviewing 或终态。搜索资料、资料提炼、资料审查、候选图谱、知识库管理员入库审核五张步骤卡只展示状态、关键数量和主按钮；点击卡片本体切换页内子页，底部只显示当前阶段内容，右侧保留当前阶段主操作、关键数量和当前步骤细节，并在详情底部展示该步骤功能 Agent 的职责、Agent 名称、模型、状态和配置入口。当前阶段子页只保留结果工作台，按 8 条分页展示该阶段产物；阶段标题区同步显示本阶段输入、输出和下一步，Agent 的任务过程进入对应会话页审查。四个子页统一提供来源类型过滤：全部、PDF、论文网页/DOI、数据集、本地文件、缺少来源；过滤只改变当前页结果列表，不改变候选状态。搜索资料子页左侧主内容拆成当前搜索动作和已收集资料：当前动作只保留正在执行或最近完成的一条，已收集资料集中展示进入候选仓库的资料清单，让用户一眼区分流程和结果；每条结果必须显示可溯源入口：DOI 以 DOI 标签和 doi.org 链接展示，网页以可点击来源展示，本地资料显示文件路径，缺少 DOI/链接/路径时标为缺少来源；候选资料状态以横向徽标显示，避免“需补资料”“已通过”等中文状态在窄列中只露出单字。搜索资料步骤聚焦 data_discovery、source_acquisition、content_extraction，不把协调人显示成执行 Agent；Agent 配置入口复用 Agent 管理页，不复制第二套 Agent 配置表。资料审查任务由资料质量评估 Agent 在会话里处理待审 source_manifest 或复审结论；知识库管理员入库审核任务只能由知识库管理员在会话里形成 approved/blocked 结构化结论；approved 回写会触发后端标准化 steward_pack_draft，并经 SourceArtifact、pending RefinementProposal、review/apply gate 创建正式 KnowledgeItem/officialResearchGraph，不再保留独立入库 Agent 或要求用户逐条选择资料。人工通过审查、退回补资料和生成分块保留为覆盖修正入口；五个步骤按进行中、已完成、失败、未进行、待处理显示为不同颜色。processing/reviewing/open/planned、Agent 角色、DataRecord/source_manifest/Query seeds 等内部字段通过中文展示映射转成业务表述；assignment、query、KV 分区、存储路径、更多证据文件和手工回写收进可展开详情，默认层不再放解释性小字。用户可在详情兜底路径通过 source-collection-runs/{runId}/search/execute 继续执行无 key 多源 metadata 查询，优先使用公开论文/项目/网页索引并对低相关结果执行质量门禁，生成 search.executed、storage.data_record_written、storage.source_manifest_imported 等对话式事件，把结果写成 DataRecord 并幂等导入 source_manifest 候选；执行台仍支持手工回写一条 CollectionOutput。所有采集 assignment 关闭且已有资料记录后，通用 DataProcessingRun 收口到 reviewing，表示后台搜索已停止、下一步进入资料审查。资料审查批量执行/复审复用 source-quality/assess 写入 sourceQualityAssessment/sourceQualityAssessments，并标记通过审查、退回补资料或拒绝。对本地 PDF 运行 source-extraction，计算 sha256、生成 pageAnchors/excerpt，不改写原文，不自动混入联网全文。</p></article>
+        <article class="plan-card"><h2>本步操作</h2><p class="hint">用户在 ai科学研究团队科研控制台点击知识搜集主按钮后，stage-rounds/start 创建或续用 ResearchStageRound，并复用 source-collection run 建立 DataProcessingRun。知识搜集页只保留资料寻找、资料提炼、资料关系整理、资料入库四张步骤卡：source_finder 负责搜索、获取、下载和本地登记；source_extractor 负责内容提炼、价值判断和资料审查；source_relation_mapper 负责整理候选主题、来源和证据关系；source_ingestor 负责最终入库审核，并通过治理门禁写入正式 Team Knowledge。四张卡的主按钮都会创建对应 Agent 的 direct session task，跳转到 Chat 执行；Agent 必须先用 source_collection_context_tool 读取受控上下文，再用 source_collection_stage_writeback_tool 回写 status、summary、result、evidenceRefs 和 nextActions。旧本地执行按钮、手工 CollectionOutput 和历史会话入口只保留在详情/调试兜底区，不再作为主路径。</p></article>
         <article class="plan-card"><h2>本地研究模型用法</h2><p class="hint">本地 9B 模型适合做标题/摘要/片段初筛，输出 relevanceScore、topicTags、excludeReason；调用证据进入 official_model_evidence 状态面板，不直接决定正式纳入。</p></article>
         <article class="plan-card"><h2>所需功能</h2><ul><li>ResearchStageRound 建立</li>
 <li>科研控制台一键进入知识搜集</li>
-<li>总览页只显示三阶段主操作</li>
-<li>知识搜集状态驱动按钮</li>
-<li>知识搜集中文展示映射</li>
-<li>默认层去说明化</li>
-<li>右侧主操作唯一化</li>
-<li>资料审查入口常驻</li>
-<li>步骤卡主操作入口</li>
+<li>资料寻找/资料提炼/资料关系整理/资料入库四步控制台</li>
 <li>阶段 Agent 会话任务启动</li>
 <li>受控上下文工具</li>
-<li>结构化 writeback 工具</li>
 <li>结构化 writeback 回团队阶段</li>
 <li>Chat 返回链接</li>
 <li>右侧当前步骤 Agent 配置</li>
-<li>步骤卡二级索引</li>
-<li>四步阶段控制台</li>
 <li>阶段结果工作台</li>
-<li>Agent 私聊深链</li>
-<li>实体可读工作台</li>
-<li>阶段卡降噪</li>
-<li>阶段输入输出交接</li>
-<li>KV 缓存模型分层展示</li>
-<li>执行 Agent 模型右侧展示</li>
-<li>四步结果分页</li>
-<li>结果区独立滚动</li>
-<li>搜索资料当前动作</li>
-<li>已收集资料结果区</li>
-<li>搜集结果来源溯源</li>
-<li>搜集结果状态徽标</li>
-<li>资料提炼待审查交接</li>
-<li>资料审查 Agent 复审</li>
-<li>候选库可视化面板</li>
-<li>知识库管理员通知入库</li>
-<li>资料入库候选触发</li>
-<li>资料审查页内详情</li>
-<li>资料审查展开高亮反馈</li>
-<li>资料审查 Agent 批量执行</li>
-<li>source-quality/assess-batch</li>
-<li>source-quality force 重审</li>
-<li>新一轮搜集入口</li>
-<li>active 知识搜集轮次复用反馈</li>
-<li>一键排队首批搜索</li>
-<li>全局运行态知识搜集优先</li>
-<li>步骤功能 Agent 聚焦</li>
-<li>四步完整列表</li>
 <li>来源类型过滤</li>
-<li>阶段协调显式启动</li>
 <li>DataProcessingRun 建立</li>
-<li>DataProcessingRun reviewing 收口</li>
 <li>DataSearchPlan/querySeeds 搜索计划</li>
-<li>KV/prompt cache 启动门禁</li>
-<li>稳定前缀/动态增量契约</li>
 <li>CollectionAssignment 搜索资料任务</li>
-<li>assignedQueries 角色分配</li>
-<li>promptCachePartition 角色分区</li>
-<li>Teams 启动搜集批次</li>
-<li>Teams 查看 run/assignment/query/KV 状态</li>
-<li>Teams 高价值摘要层</li>
-<li>Teams 搜索下一批</li>
-<li>无 key 多源搜索执行器</li>
-<li>搜索结果质量门禁</li>
-<li>DataRecord 通用记录</li>
 <li>DataRecord 自动导入 source_manifest</li>
-<li>metadata-only 下载边界</li>
-<li>手工 CollectionOutput 回写</li>
-<li>本地资料登记</li>
-<li>source_manifest 写入</li>
-<li>文件路径/页码/来源可信度记录</li>
-<li>本地 PDF sha256/pageAnchors/excerpt 抽取</li>
 <li>sourceQualityAssessment 审查</li>
-<li>可选 research_knowledge_query_tool 查重</li></ul></article>
+<li>资料入库 Agent 治理门禁</li></ul></article>
         <article class="plan-card"><h2>工具/平台能力</h2><ul><li>/api/teams/{teamId}/workflow-orchestration/stage-rounds/status</li>
 <li>/api/teams/{teamId}/workflow-orchestration/stage-rounds/start</li>
 <li>/api/teams/{teamId}/workflow-orchestration/stage-rounds/{stageRoundId}/coordination/retry</li>
