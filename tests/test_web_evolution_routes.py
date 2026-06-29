@@ -2,6 +2,7 @@ import json
 import sqlite3
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,6 +18,8 @@ from core.gym.promotion import (
     apply_gym_promotion_proposal,
     rollback_gym_promotion_proposal,
 )
+from core.infrastructure import developer_sandbox
+from core.infrastructure import workspace_manager
 from core.runtime_manager import constants as runtime_manager_constants
 from core.runtime_manager import evolution_store
 from core.web.app import create_app
@@ -973,6 +976,72 @@ def test_evolution_workbench_route_falls_back_from_stale_saved_bundle(tmp_path, 
     assert payload["savedState"]["datasetName"] in {"", "supervised_dry_run"}
     assert any(item["name"] == "real_bundle_v1" for item in payload["bundles"])
     assert not any(item["name"] == "demo_bundle" for item in payload["bundles"])
+
+def test_evolution_workbench_catalog_uses_same_formal_workspace_as_worktree_start(tmp_path, monkeypatch):
+    project_root = tmp_path / "project"
+    repo_bundle_dir = project_root / "workspace" / "evaluation" / "bundles"
+    formal_workspace = tmp_path / "formal_workspace"
+    formal_bundle_dir = formal_workspace / "evaluation" / "bundles"
+    repo_bundle_dir.mkdir(parents=True, exist_ok=True)
+    formal_bundle_dir.mkdir(parents=True, exist_ok=True)
+    (repo_bundle_dir / "repo_only_bundle.json").write_text(
+        json.dumps(
+            {
+                "bundle_name": "repo_only_bundle",
+                "benchmark": "stale",
+                "cases": [{"case_id": "repo", "prompt": "repo only"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (formal_bundle_dir / "formal_launchable_bundle.json").write_text(
+        json.dumps(
+            {
+                "bundle_name": "formal_launchable_bundle",
+                "benchmark": "formal",
+                "cases": [{"case_id": "formal", "prompt": "formal launch"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: formal_workspace)
+    monkeypatch.setattr(workspace_manager, "get_workspace", lambda: SimpleNamespace(root=formal_workspace))
+    monkeypatch.setattr(evolution_service, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(supervised_control_service, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(supervised_control_service, "SOURCE_PROJECT_ROOT", project_root)
+
+    response = client.get("/api/evolution/workbench")
+
+    assert response.status_code == 200
+    bundle_names = {item["name"] for item in response.json()["bundles"]}
+    assert "formal_launchable_bundle" in bundle_names
+    assert "repo_only_bundle" not in bundle_names
+
+
+def test_supervised_worktree_run_route_returns_validation_error_for_missing_bundle(tmp_path, monkeypatch):
+    formal_workspace = tmp_path / "formal_workspace"
+    monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: formal_workspace)
+    monkeypatch.setattr(supervised_worktree_evolution_service, "PROJECT_ROOT", Path(__file__).resolve().parents[1])
+    monkeypatch.setattr(
+        supervised_worktree_evolution_service,
+        "_raise_if_lease_conflict",
+        lambda *, lang: None,
+    )
+
+    response = client.post(
+        "/api/evolution/worktree-runs",
+        json={
+            "sourceKind": "bundle",
+            "bundleName": "missing_bundle_v1",
+            "executionMode": "simulation",
+            "mode": "manual",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "missing_bundle_v1" in response.json()["detail"]
 
 @pytest.mark.slow
 def test_supervised_worktree_run_routes_start_and_list_simulation(tmp_path, monkeypatch):
