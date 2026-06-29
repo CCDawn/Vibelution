@@ -1,4 +1,4 @@
-from core.web.services import agent_role_tool_profile_service
+from core.web.services import agent_role_tool_profile_service, prompt_template_service
 
 
 def test_role_governance_profiles_bind_prompt_templates_to_tool_profiles():
@@ -171,6 +171,67 @@ def test_knowledge_steward_profile_owns_formal_knowledge_tools():
     assert policy["roleToolProfileId"] == "knowledge_steward"
 
 
+def test_research_profiles_prefer_unified_memory_search_before_legacy_query_tools():
+    profile_ids = {
+        "ai_search_scope_lead",
+        "global_primary_sources",
+        "cn_primary_sources",
+        "signal_quality_gate",
+        "research_source_default",
+        "research_role_default",
+        "source_finder",
+        "source_extractor",
+        "source_relation_mapper",
+        "source_ingestor",
+        "challenge_cup_coordinator",
+        "challenge_cup_experiment_planner",
+        "challenge_cup_experiment_ledger",
+        "challenge_cup_iteration_planner",
+        "challenge_cup_versioning",
+        "research_paper_reader",
+        "research_org_capability_steward",
+    }
+
+    for profile_id in sorted(profile_ids):
+        policy = agent_role_tool_profile_service.resolve_role_tool_policy(
+            role_key=profile_id,
+            primary_mode="research",
+            policy_id=f"tool-{profile_id}",
+        )
+
+        assert policy is not None, profile_id
+        assert "unified_memory_search_tool" in policy["allowedTools"], profile_id
+        preferred = list(policy["preferredTools"])
+        assert "unified_memory_search_tool" in preferred, profile_id
+        if "research_knowledge_query_tool" in preferred:
+            assert preferred.index("unified_memory_search_tool") < preferred.index("research_knowledge_query_tool"), profile_id
+        if "search_memory_tool" in preferred:
+            assert preferred.index("unified_memory_search_tool") < preferred.index("search_memory_tool"), profile_id
+
+
+def test_research_prompt_templates_make_unified_memory_search_the_primary_memory_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
+    monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
+    template_ids = {
+        "prompt-ai-search-scope-lead",
+        "prompt-ai-search-global-primary-sources",
+        "prompt-ai-search-cn-primary-sources",
+        "prompt-ai-search-signal-quality-gate",
+        "prompt-challenge-cup-coordinator",
+        "prompt-challenge-cup-experiment-planner",
+    }
+
+    for template_id in sorted(template_ids):
+        detail = prompt_template_service.get_prompt_template(template_id)
+        assert detail is not None, template_id
+        content = str(detail.get("content") or "")
+        assert "unified_memory_search_tool" in content, template_id
+        legacy_index = content.find("research_knowledge_query_tool")
+        unified_index = content.find("unified_memory_search_tool")
+        if legacy_index >= 0:
+            assert unified_index < legacy_index, template_id
+
+
 def test_ai_search_roles_have_explicit_search_profiles_without_legacy_web_search():
     cases = {
         "ai_search_scope_lead": {
@@ -238,13 +299,14 @@ def test_challenge_cup_coordinator_is_bounded_to_coordination_and_context_reads(
     assert policy["roleToolProfileId"] == "challenge_cup_coordinator"
     assert set(policy["allowedTools"]) == {
         "agent_message_tool",
+        "unified_memory_search_tool",
         "research_knowledge_query_tool",
         "source_collection_context_tool",
         "challenge_cup_experiment_context_tool",
         "challenge_cup_iteration_context_tool",
         "challenge_cup_versioning_context_tool",
     }
-    assert policy["preferredTools"][:2] == ["agent_message_tool", "research_knowledge_query_tool"]
+    assert policy["preferredTools"][:3] == ["agent_message_tool", "unified_memory_search_tool", "research_knowledge_query_tool"]
     assert "batch_web_search_tool" not in policy["allowedTools"]
     assert "web_fetch_tool" not in policy["allowedTools"]
     assert "batch_web_search_tool" in agent_role_tool_profile_service.forbidden_tools_for_role(
