@@ -70,7 +70,7 @@ import {
   shouldArmBrowserProjectCloseGuard,
   shouldBlockWorkbenchWindowClose,
 } from "./projectCloseGuard";
-import { VIconButton } from "../components/vui";
+import { VButton, VIconButton } from "../components/vui";
 import { getPageInstanceId } from "./pageInstance";
 import { useShellStore } from "../store/shellStore";
 import styles from "./AppShell.module.css";
@@ -2058,47 +2058,49 @@ export function AppShell() {
               <strong>{shutdownTitle}</strong>
               <p>{shutdownDetail}</p>
               {!shutdownSettled ? (
-                <button
+                <VButton
                   type="button"
+                  variant="secondary"
                   className={styles.shutdownCancelButton}
-                  onClick={cancelLifecycleWait}
-                  disabled={lifecycleCancelPending}
+                  onPress={cancelLifecycleWait}
+                  isDisabled={lifecycleCancelPending}
                 >
                   {lifecycleCancelPending
                     ? cancellingLifecycleLabel
                     : lifecycleAction === "restart"
                       ? cancelRestartLabel
                       : cancelShutdownLabel}
-                </button>
+                </VButton>
               ) : null}
             </div>
           </div>
         </div>
       ) : null}
       {topBarHidden ? (
-        <button
+        <VButton
           type="button"
+          variant="secondary"
           className={styles.topBarRestoreButton}
           aria-label={showTopBarLabel}
           title={showTopBarLabel}
-          onClick={() => setTopBarMode("full")}
+          onPress={() => setTopBarMode("full")}
+          icon={<PanelTopOpen size={15} />}
         >
-          <PanelTopOpen size={15} />
           <span>{showTopBarLabel}</span>
-        </button>
+        </VButton>
       ) : null}
       <header className={styles.topBar}>
         <div className={styles.brandBlock}>
           {returnNavigationTarget ? (
-            <button
+            <VIconButton
               type="button"
+              variant="secondary"
               className={styles.returnButton}
-              onClick={handleReturnNavigation}
-              aria-label={returnNavigationLabel}
+              onPress={handleReturnNavigation}
+              label={returnNavigationLabel}
               title={returnNavigationLabel}
-            >
-              <ArrowLeft size={16} />
-            </button>
+              icon={<ArrowLeft size={16} />}
+            />
           ) : null}
           <div className={styles.brandCopy}>
             <span className={styles.brand}>Vibelution</span>
@@ -2228,21 +2230,22 @@ export function AppShell() {
               }
             }}
           >
-            <button
+            <VButton
               type="button"
+              variant="secondary"
               className={styles.utilityTrigger}
               aria-haspopup="menu"
               aria-expanded={utilityOpen}
               aria-label={t("topUtilityMenu")}
               title={t("topUtilityMenu")}
-              onClick={() => setUtilityOpen(true)}
+              onPress={() => setUtilityOpen(true)}
               onFocus={() => setUtilityOpen(true)}
+              icon={<Wrench size={15} />}
+              trailingIcon={<ChevronDown size={13} className={styles.utilityChevron} />}
             >
-              <Wrench size={15} />
               <span className={styles.utilityTriggerLabel}>{t("topUtilityMenuShort")}</span>
               <span className={`${styles.statusDot} ${styles.status_idle}`} />
-              <ChevronDown size={13} className={styles.utilityChevron} />
-            </button>
+            </VButton>
             {utilityOpen ? (
               <Suspense fallback={null}>
                 <LazyAppShellUtilityMenu
@@ -2345,11 +2348,12 @@ export function AppShell() {
               aria-label={lifecycleMenuLabel}
               hidden={!lifecycleMenuOpen}
             >
-              <button
+              <VButton
                 type="button"
+                variant="ghost"
                 className={styles.lifecycleMenuItem}
                 role="menuitem"
-                onClick={() => {
+                onPress={() => {
                   setLifecycleMenuOpen(false);
                   const proceed = () => {
                     void beginShutdown();
@@ -2358,31 +2362,33 @@ export function AppShell() {
                     proceed();
                   }
                 }}
-                disabled={restartRequested || (shutdownInFlight && !shutdownSettled)}
+                isDisabled={restartRequested || (shutdownInFlight && !shutdownSettled)}
+                icon={<Power size={15} />}
               >
-                <Power size={15} />
                 <span>{closeWorkbenchLabel}</span>
-              </button>
+              </VButton>
               {forceCloseVisible ? (
-                <button
+                <VButton
                   type="button"
+                  variant="danger"
                   className={`${styles.lifecycleMenuItem} ${styles.lifecycleMenuDangerItem}`}
                   role="menuitem"
-                  onClick={() => {
+                  onPress={() => {
                     setLifecycleMenuOpen(false);
                     void beginForceShutdown();
                   }}
-                  disabled={restartRequested}
+                  isDisabled={restartRequested}
+                  icon={<Power size={15} />}
                 >
-                  <Power size={15} />
                   <span>{forceCloseWorkbenchLabel}</span>
-                </button>
+                </VButton>
               ) : null}
-              <button
+              <VButton
                 type="button"
+                variant="ghost"
                 className={styles.lifecycleMenuItem}
                 role="menuitem"
-                onClick={() => {
+                onPress={() => {
                   setLifecycleMenuOpen(false);
                   const proceed = () => {
                     if (activeWorkIndicator) {
@@ -2418,11 +2424,11 @@ export function AppShell() {
                     proceed();
                   }
                 }}
-                disabled={restartRequested || shutdownRequested || (shutdownInFlight && !shutdownSettled)}
+                isDisabled={restartRequested || shutdownRequested || (shutdownInFlight && !shutdownSettled)}
+                icon={<RefreshCw size={15} />}
               >
-                <RefreshCw size={15} />
                 <span>{restartWorkbenchLabel}</span>
-              </button>
+              </VButton>
             </div>
           </div>
           <NavLink
