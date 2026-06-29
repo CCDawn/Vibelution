@@ -69,6 +69,21 @@ const routeShellTargets = [
     expected: ["VRouteHeader", "VStatusStrip"],
     forbidden: ["<header className={styles.header}", "<span className={styles.metaPill}>{t(\"readonlyPreview\")}</span>"],
   },
+  {
+    path: "routes/PromptTemplatesRoute.tsx",
+    expected: ["VRouteHeader", "VIconButton"],
+    forbidden: ["<header className={styles.header}"],
+  },
+  {
+    path: "routes/ResetRoute.tsx",
+    expected: ["VRouteHeader"],
+    forbidden: ["<header className={styles.header}"],
+  },
+  {
+    path: "routes/SkillsRoute.tsx",
+    expected: ["VRouteHeader", "VIconButton"],
+    forbidden: ["<header className={styles.header}"],
+  },
 ] as const;
 
 function readTargetSource(path: string): string {
