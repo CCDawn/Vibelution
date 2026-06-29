@@ -45,6 +45,7 @@
   --vui-shadow-soft: var(--shadow-soft);
   --vui-shadow-strong: var(--shadow-strong);
   --vui-shadow-focus: var(--focus-ring);
+  --vui-shadow-hairline: 0 1px 0 color-mix(in srgb, var(--border-hairline) 68%, transparent);
   --vui-shadow-accent: 0 0 0 1px color-mix(in srgb, var(--accent-cool) 18%, transparent);
   --vui-shadow-inset-accent: inset 2px 0 0 var(--accent-cool);
   --vui-gradient-route-soft: linear-gradient(
@@ -151,6 +152,7 @@
   --vui-shadow-soft: var(--shadow-soft);
   --vui-shadow-strong: var(--shadow-strong);
   --vui-shadow-focus: var(--focus-ring);
+  --vui-shadow-hairline: 0 1px 0 color-mix(in srgb, var(--border-hairline) 68%, transparent);
   --vui-shadow-accent: 0 0 0 1px color-mix(in srgb, var(--accent-cool) 16%, transparent);
   --vui-shadow-inset-accent: inset 2px 0 0 var(--accent-cool);
   --vui-gradient-route-soft: linear-gradient(
