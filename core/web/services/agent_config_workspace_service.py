@@ -13,7 +13,7 @@ from typing import Any, Callable, Iterable
 from core.llm.reasoning_effort import GPT_REASONING_EFFORT_VALUES, model_supports_gpt_reasoning_effort
 from core.orchestration.context_engine import list_agent_runs_for_agents
 
-from . import chat_room_service, config_service
+from . import agent_role_tool_profile_service, chat_room_service, config_service
 from .agent_directory_service import agent_persona_profile_has_content
 from .agent_directory_service import agent_task_profile_has_content
 from .agent_directory_service import AGENT_LLM_BINDING_SLOTS
@@ -519,6 +519,58 @@ def _is_research_source_role(agent: dict[str, Any]) -> bool:
     return str(agent.get("primaryMode") or "").strip() == "research" and role_key in RESEARCH_SOURCE_ROLE_KEYS
 
 
+def _role_governance_profile_for_agent(agent: dict[str, Any]) -> dict[str, Any] | None:
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    governance = agent_role_tool_profile_service.role_governance_profile(
+        role_key=str(agent.get("roleKey") or ""),
+        primary_mode=str(agent.get("primaryMode") or ""),
+        metadata=metadata,
+        policy_id=str(agent.get("toolPolicyId") or ""),
+    )
+    return governance if isinstance(governance, dict) and governance else None
+
+
+def _should_enforce_role_governance(
+    agent: dict[str, Any],
+    governance: dict[str, Any] | None,
+    tool_policy: dict[str, Any],
+) -> bool:
+    if not governance:
+        return False
+    if bool(governance.get("enforceToolPolicy")):
+        return True
+    if _agent_has_system_fixed_role(agent):
+        return True
+    return bool(str(tool_policy.get("roleToolProfileId") or "").strip())
+
+
+def _role_tool_policy_drift_detail(current_policy: dict[str, Any], expected_policy: Any) -> str:
+    if not isinstance(expected_policy, dict) or not expected_policy:
+        return ""
+    parts: list[str] = []
+    for key in ("allowedTools", "preferredTools", "readScopes", "writeScopes"):
+        current = [str(item or "").strip() for item in list(current_policy.get(key) or []) if str(item or "").strip()]
+        expected = [str(item or "").strip() for item in list(expected_policy.get(key) or []) if str(item or "").strip()]
+        if current == expected:
+            continue
+        missing = [item for item in expected if item not in current]
+        extra = [item for item in current if item not in expected]
+        detail = key
+        if missing:
+            detail += " 缺少 " + "、".join(missing[:6])
+        if extra:
+            detail += " 多出 " + "、".join(extra[:6])
+        parts.append(detail)
+    for key in ("networkAccess", "mutationAccess", "maxCallsPerTurn", "roleToolProfileId", "roleToolProfileFingerprint"):
+        current_value = current_policy.get(key)
+        expected_value = expected_policy.get(key)
+        if current_value != expected_value:
+            parts.append(f"{key} 应为 {expected_value or '-'}，当前为 {current_value or '-'}")
+    if not parts:
+        return ""
+    return "ToolPolicy 与角色治理矩阵不一致：" + "；".join(parts[:6]) + "。"
+
+
 def _derive_health(
     *,
     agents: list[dict[str, Any]],
@@ -696,6 +748,41 @@ def _derive_health(
                     "这个角色只应使用检索、知识查询和 Agent 消息工具；当前包含高风险工具：" + "、".join(risky_tools[:8]) + "。",
                 )
             )
+        governance = _role_governance_profile_for_agent(agent)
+        if _should_enforce_role_governance(agent, governance, tool_policy):
+            expected_prompt_template_id = str((governance or {}).get("promptTemplateId") or "").strip()
+            if expected_prompt_template_id and prompt_template_id and prompt_template_id != expected_prompt_template_id:
+                issues.append(
+                    _agent_issue(
+                        agent,
+                        "warning",
+                        "role_prompt_template_mismatch",
+                        "角色提示词与治理配置不一致",
+                        f"roleKey={agent.get('roleKey') or '-'} 应使用 {expected_prompt_template_id}，当前为 {prompt_template_id}。",
+                    )
+                )
+            forbidden_allowed = sorted(set(allowed_tools).intersection(set((governance or {}).get("forbiddenTools") or [])))
+            if forbidden_allowed:
+                issues.append(
+                    _agent_issue(
+                        agent,
+                        "warning",
+                        "role_forbidden_tool_allowed",
+                        "角色放行了治理禁用工具",
+                        "ToolPolicy.allowedTools 包含当前角色明确禁用的工具：" + "、".join(forbidden_allowed[:8]) + "。",
+                    )
+                )
+            drift_detail = _role_tool_policy_drift_detail(tool_policy, (governance or {}).get("toolPolicy"))
+            if drift_detail:
+                issues.append(
+                    _agent_issue(
+                        agent,
+                        "warning",
+                        "role_tool_policy_drift",
+                        "角色工具策略偏离治理配置",
+                        drift_detail,
+                    )
+                )
         if not str(agent.get("memoryPolicyId") or "").strip():
             issues.append(_agent_issue(agent, "warning", "missing_memory_policy", "缺少记忆策略", "memoryPolicyId 为空。"))
         metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}

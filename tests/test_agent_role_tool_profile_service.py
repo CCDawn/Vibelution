@@ -1,6 +1,46 @@
 from core.web.services import agent_role_tool_profile_service
 
 
+def test_role_governance_profiles_bind_prompt_templates_to_tool_profiles():
+    cases = {
+        "source_finder": "prompt-source-finder",
+        "source_extractor": "prompt-source-extractor",
+        "source_relation_mapper": "prompt-source-relation-mapper",
+        "source_ingestor": "prompt-source-ingestor",
+        "challenge_cup_coordinator": "prompt-challenge-cup-coordinator",
+        "challenge_cup_experiment_planner": "prompt-challenge-cup-experiment-planner",
+        "challenge_cup_experiment_ledger": "prompt-challenge-cup-experiment-ledger",
+        "challenge_cup_iteration_planner": "prompt-challenge-cup-iteration-planner",
+        "challenge_cup_versioning": "prompt-challenge-cup-versioning",
+    }
+
+    for role_key, prompt_template_id in cases.items():
+        governance = agent_role_tool_profile_service.role_governance_profile(
+            role_key=role_key,
+            primary_mode="research",
+            policy_id=f"tool-{role_key}",
+        )
+
+        assert governance is not None
+        assert governance["roleKey"] == role_key
+        assert governance["promptTemplateId"] == prompt_template_id
+        assert governance["toolPolicy"]["roleToolProfileId"] == role_key
+        assert governance["toolPolicy"]["roleToolProfileFingerprint"]
+        assert "web_search_tool" in governance["forbiddenTools"]
+
+
+def test_retired_source_collection_roles_have_no_role_governance_profile():
+    for role_key in agent_role_tool_profile_service.RETIRED_SOURCE_COLLECTION_ROLE_KEYS:
+        assert (
+            agent_role_tool_profile_service.role_governance_profile(
+                role_key=role_key,
+                primary_mode="research",
+                policy_id=f"tool-{role_key}",
+            )
+            is None
+        )
+
+
 def test_four_stage_source_roles_have_expected_tool_boundaries():
     cases = {
         "source_finder": {

@@ -3,6 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from core.web.services import agent_role_tool_profile_service
+
 from tests.test_agent_config_workspace_service import (
     ProviderConfig,
     _fake_config_workspace,
@@ -282,11 +284,10 @@ def test_repair_tightens_ai_search_source_role_tool_policy(tmp_path, monkeypatch
 @pytest.mark.parametrize(
     "role_key,primary_mode",
     [
-        ("challenge_cup_data_discovery", "research"),
-        ("challenge_cup_source_acquisition", "research"),
-        ("challenge_cup_content_extraction", "research"),
-        ("challenge_cup_source_quality", "research"),
-        ("candidate_graph", "research"),
+        ("source_finder", "research"),
+        ("source_extractor", "research"),
+        ("source_relation_mapper", "research"),
+        ("source_ingestor", "research"),
         ("knowledge_steward", "general"),
     ],
 )
@@ -320,12 +321,15 @@ def test_challenge_stage_task_roles_include_context_and_writeback_tools(tmp_path
         "source_collection_context_tool",
         "source_collection_stage_writeback_tool",
     ]
-    if role_key == "knowledge_steward":
-        assert policy["writeScopes"] == ["private"]
-        assert policy["mutationAccess"] == "restricted"
-    else:
-        assert policy["writeScopes"] == []
-        assert policy["mutationAccess"] == "none"
+    expected_policy = agent_role_tool_profile_service.resolve_role_tool_policy(
+        role_key=role_key,
+        primary_mode=primary_mode,
+        metadata={"systemRole": role_key} if role_key == "knowledge_steward" else None,
+        policy_id=policy["policyId"],
+    )
+    assert expected_policy is not None
+    assert policy["writeScopes"] == expected_policy["writeScopes"]
+    assert policy["mutationAccess"] == expected_policy["mutationAccess"]
 
 
 def test_agent_create_api_rejects_incomplete_onboarding_payload(tmp_path, monkeypatch):
