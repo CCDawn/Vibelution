@@ -227,6 +227,14 @@ describe("ConversationView edit resend affordance", () => {
     expect(cssRule(".answerOnlyProcessToggle")).toContain("color: var(--fg-secondary)");
   });
 
+  it("uses shared readable scale tokens for dense conversation text", () => {
+    expect(conversationViewStylesSource).toContain("var(--vui-font-xs)");
+    expect(conversationViewStylesSource).toContain("var(--vui-font-sm)");
+    expect(conversationViewStylesSource).toContain("var(--vui-font-md)");
+    expect(conversationViewStylesSource).toContain("var(--vui-font-chat)");
+    expect(conversationViewStylesSource).not.toMatch(/font-size:\s*0\.(?:6\d|7[0-7])rem/);
+  });
+
   it("folds streaming request placeholders into the process strip", () => {
     expect(conversationViewSource).toContain("function isStreamingStatusPlaceholderContent(content: string)");
     expect(conversationViewSource).toContain("const isStreamingStatusPlaceholder = Boolean(message.streaming)");

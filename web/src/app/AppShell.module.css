@@ -287,7 +287,7 @@
 
 .startupKicker {
   color: var(--accent-warm-2);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
 }
 
 .startupCopy strong {
@@ -328,7 +328,7 @@
   background: var(--shell-card);
   color: var(--fg-primary);
   font: inherit;
-  font-size: 0.88rem;
+  font-size: var(--vui-font-chat);
   cursor: pointer;
 }
 
@@ -421,7 +421,7 @@
   backdrop-filter: blur(14px);
   cursor: pointer;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--vui-font-md);
   -webkit-app-region: no-drag;
   app-region: no-drag;
   transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
@@ -520,7 +520,7 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--shell-surface-muted) 78%, transparent);
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   font-weight: 600;
   line-height: 1.2;
   white-space: nowrap;
@@ -532,7 +532,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.08;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -550,7 +550,7 @@
   border-radius: 999px;
   background: var(--shell-surface);
   color: var(--fg-secondary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   line-height: 1;
   white-space: nowrap;
 }
@@ -576,7 +576,7 @@
     var(--vui-gradient-route-soft),
     var(--shell-surface);
   color: var(--fg-secondary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   line-height: 1;
   white-space: nowrap;
   box-shadow: var(--vui-shadow-soft);
@@ -586,13 +586,13 @@
 .activeWorkKicker {
   flex: 0 0 auto;
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
 .activeWorkChip strong {
   flex: 0 0 auto;
   color: var(--fg-primary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-md);
 }
 
 .activeWorkStatus,
@@ -603,7 +603,7 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--shell-card) 74%, transparent);
   color: var(--fg-primary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
 .activeWorkMore {
@@ -653,12 +653,12 @@
 
 .activeWorkDetailHeader strong {
   color: var(--fg-primary);
-  font-size: 0.86rem;
+  font-size: var(--vui-font-md);
 }
 
 .activeWorkDetailHeader span {
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
 .activeWorkDetailList {
@@ -703,20 +703,20 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-md);
   text-overflow: ellipsis;
 }
 
 .activeWorkDetailTitle span {
   flex: 0 0 auto;
   color: var(--accent-warm-2);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
 .activeWorkDetailCopy p {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   line-height: 1.42;
   overflow-wrap: anywhere;
 }
@@ -726,7 +726,7 @@
   overflow: hidden;
   color: var(--fg-tertiary);
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
 }
 
@@ -814,7 +814,7 @@
   color: var(--fg-secondary);
   background: var(--shell-surface);
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--vui-font-md);
   cursor: pointer;
   -webkit-app-region: no-drag;
   app-region: no-drag;
@@ -893,12 +893,12 @@
 
 .utilityPanelHeader strong {
   color: var(--fg-primary);
-  font-size: 0.92rem;
+  font-size: var(--vui-font-chat);
 }
 
 .utilityPanelHeader span {
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-md);
   line-height: 1.45;
 }
 
@@ -938,7 +938,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.82rem;
+  font-size: var(--vui-font-md);
   font-weight: 650;
 }
 
@@ -977,12 +977,12 @@
 
 .utilityFileHeader strong {
   color: var(--fg-primary);
-  font-size: 0.86rem;
+  font-size: var(--vui-font-md);
 }
 
 .utilityFileHeader span {
   color: var(--fg-tertiary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.35;
 }
 
@@ -1006,7 +1006,7 @@
   background: transparent;
   color: var(--fg-primary);
   font: inherit;
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
 }
 
 .utilityFileTree {
@@ -1028,7 +1028,7 @@
   min-height: 26px;
   color: var(--fg-secondary);
   cursor: pointer;
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   font-weight: 700;
   list-style-position: inside;
 }
@@ -1072,7 +1072,7 @@
 }
 
 .utilityFileButton span {
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   font-weight: 650;
 }
 
@@ -1090,7 +1090,7 @@
 
 .utilityFileButton small {
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
 .utilityFileState {
@@ -1099,7 +1099,7 @@
   border: 1px dashed var(--border-soft);
   border-radius: 8px;
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
 }
 
 .gitMiniPanel {
@@ -1128,7 +1128,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.86rem;
+  font-size: var(--vui-font-md);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1137,7 +1137,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-secondary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1154,7 +1154,7 @@
   border-radius: 999px;
   color: var(--fg-secondary);
   background: var(--shell-surface);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-md);
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }
@@ -1171,7 +1171,7 @@
 
 .gitCount {
   color: var(--accent-warm-2);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-md);
 }
 
 .gitSignalGrid {
@@ -1190,7 +1190,7 @@
   border-radius: 8px;
   background: color-mix(in srgb, var(--shell-card) 86%, transparent);
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
 .gitSignalGrid strong {
@@ -1210,14 +1210,14 @@
 
 .gitMetaGrid span {
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
 }
 
 .gitMetaGrid strong {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-md);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1237,12 +1237,12 @@
   border-radius: 8px;
   background: var(--shell-card);
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
 .gitCountGrid strong {
   color: var(--accent-warm-2);
-  font-size: 0.95rem;
+  font-size: var(--vui-font-title);
 }
 
 .gitFileList {
@@ -1270,14 +1270,14 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .gitSectionHeader span {
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
@@ -1296,7 +1296,7 @@
   align-items: center;
   min-width: 0;
   color: var(--fg-secondary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
 }
 
 .gitCommitItem,
@@ -1311,7 +1311,7 @@
   border-radius: 7px;
   background: color-mix(in srgb, var(--shell-card) 70%, transparent);
   color: var(--fg-secondary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
 }
 
 .gitWorktreeItem {
@@ -1320,7 +1320,7 @@
 
 .gitCommitItem code {
   color: var(--accent-warm-2);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
 .gitCommitItem span,
@@ -1338,14 +1338,14 @@
 
 .gitWorktreeItem span {
   color: var(--accent-warm-2);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
 .gitWorktreeItem small {
   grid-column: 1 / -1;
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
 .gitQuietState {
@@ -1354,13 +1354,13 @@
   border: 1px dashed var(--border-soft);
   border-radius: 8px;
   color: var(--fg-tertiary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.35;
 }
 
 .gitFileItem code {
   color: var(--accent-warm-2);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
 .gitFileItem span {
@@ -1373,7 +1373,7 @@
 .gitFileList p {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   line-height: 1.4;
 }
 
@@ -1408,7 +1408,7 @@
   border: 1px solid var(--border-soft);
   color: var(--fg-secondary);
   background: var(--shell-surface);
-  font-size: 0.85rem;
+  font-size: var(--vui-font-md);
   white-space: nowrap;
 }
 
@@ -1423,14 +1423,14 @@
   border-radius: 999px;
   background: var(--shell-surface);
   color: var(--fg-secondary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-md);
   white-space: nowrap;
 }
 
 .statusBadgeLabel {
   flex: 0 0 auto;
   color: var(--fg-tertiary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
 }
 
 .statusBadgeValue {
@@ -1438,7 +1438,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--fg-primary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-md);
   font-weight: 600;
 }
 
@@ -1453,7 +1453,7 @@
   border-radius: 999px;
   color: var(--fg-tertiary);
   background: color-mix(in srgb, var(--shell-card) 74%, transparent);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
 .statusDot {
@@ -1517,7 +1517,7 @@
 }
 
 .statusGuideHeader strong {
-  font-size: 0.92rem;
+  font-size: var(--vui-font-chat);
 }
 
 .statusGuideGrid {
@@ -1545,12 +1545,12 @@
 
 .statusGuideCardHeader span {
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
 }
 
 .statusGuideCardHeader strong {
   color: var(--fg-primary);
-  font-size: 0.84rem;
+  font-size: var(--vui-font-md);
   overflow: hidden;
   text-align: right;
   text-overflow: ellipsis;
@@ -1586,7 +1586,7 @@
 
 .statusGuideStateLabel {
   color: var(--fg-primary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -1611,7 +1611,7 @@
 
 .lifecycleProofHeader span {
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
 }
 
 .lifecycleProofHeader strong {
@@ -1620,7 +1620,7 @@
   gap: 7px;
   min-width: 0;
   color: var(--fg-primary);
-  font-size: 0.84rem;
+  font-size: var(--vui-font-md);
 }
 
 .lifecycleProofMeta {
@@ -1641,14 +1641,14 @@
   border-radius: 7px;
   background: color-mix(in srgb, var(--shell-card) 76%, transparent);
   color: var(--fg-tertiary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
 }
 
 .lifecycleProofMeta strong {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1679,7 +1679,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1687,7 +1687,7 @@
 
 .lifecycleProofItem strong {
   color: var(--accent-warm-2);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
@@ -1786,7 +1786,7 @@
   background: transparent;
   color: var(--fg-secondary);
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--vui-font-md);
   text-align: left;
   cursor: pointer;
 }
@@ -1898,7 +1898,7 @@
   .navLink {
     min-height: 28px;
     padding-inline: 8px;
-    font-size: 0.82rem;
+    font-size: var(--vui-font-md);
   }
 
   .actionIconButton {
@@ -1959,7 +1959,7 @@
     flex: 0 0 auto;
     min-height: 30px;
     padding-inline: 9px;
-    font-size: 0.82rem;
+    font-size: var(--vui-font-md);
   }
 
   .topActions {
@@ -2097,7 +2097,7 @@
     min-height: 28px;
     overflow: hidden;
     padding-inline: 4px;
-    font-size: 0.74rem;
+    font-size: var(--vui-font-xs);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
