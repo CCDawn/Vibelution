@@ -8,6 +8,13 @@ import routerSource from "../app/router.tsx?raw";
 const stylesSource = readFileSync(new URL("./ToolsRoute.module.css", import.meta.url), "utf-8");
 
 describe("ToolsRoute layout contract", () => {
+  it("routes Tools page controls through VUI primitives", () => {
+    expect(routeSource).toContain("from \"../components/vui\"");
+    expect(routeSource).toContain("<VButton");
+    expect(routeSource).toContain("<VIconButton");
+    expect(routeSource).not.toMatch(/<button\b/);
+  });
+
   it("lives inside Agent management navigation", () => {
     expect(routerSource).toContain('path: "agents/tools"');
     expect(routerSource).toContain("<ToolsRoute />");

@@ -77,6 +77,15 @@
   padding: 6px 10px;
 }
 
+.refreshButton[data-vui],
+.filterButton[data-vui],
+.filterButtonActive[data-vui],
+.selectionButton[data-vui],
+.secondaryButton[data-vui],
+.primaryButton[data-vui] {
+  min-width: 0;
+}
+
 .refreshButton:hover,
 .filterButton:hover,
 .selectionButton:hover,
@@ -121,18 +130,26 @@
   text-align: left;
 }
 
+.summaryCard[data-vui],
 button.summaryCard {
   cursor: pointer;
 }
 
+.summaryCard[data-vui]:hover:not(:disabled),
 button.summaryCard:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--accent-cool) 28%, transparent);
   background: color-mix(in srgb, var(--accent-cool) 7%, var(--surface-panel, rgba(27, 31, 35, 0.78)));
 }
 
+.summaryCard[data-vui]:disabled,
 button.summaryCard:disabled {
   opacity: 0.76;
   cursor: default;
+}
+
+.summaryCard[data-vui] [data-slot="vui-button-content"],
+.summaryCard[data-vui] [data-slot="vui-button-label"] {
+  display: contents;
 }
 
 .summaryCard span {
@@ -248,6 +265,15 @@ button.summaryCard:disabled {
 .cleanStateStrip:hover {
   border-color: color-mix(in srgb, var(--accent-cool) 30%, transparent);
   background: color-mix(in srgb, var(--accent-cool) 7%, var(--surface-panel, rgba(27, 31, 35, 0.78)));
+}
+
+.cleanStateStrip[data-vui] [data-slot="vui-button-content"],
+.cleanStateStrip[data-vui] [data-slot="vui-button-label"],
+.worktreeItem[data-vui] [data-slot="vui-button-content"],
+.worktreeItem[data-vui] [data-slot="vui-button-label"],
+.commitItem[data-vui] [data-slot="vui-button-content"],
+.commitItem[data-vui] [data-slot="vui-button-label"] {
+  display: contents;
 }
 
 .cleanStateStrip h2,
@@ -475,6 +501,7 @@ button.summaryCard:disabled {
 .fileCheckButton {
   display: inline-grid;
   width: 20px;
+  min-width: 20px;
   height: 20px;
   place-items: center;
   padding: 0;
@@ -486,6 +513,15 @@ button.summaryCard:disabled {
   min-width: 0;
   gap: 3px;
   padding: 0;
+}
+
+.fileCheckButton[data-vui] {
+  min-height: 20px;
+}
+
+.fileCopyButton[data-vui] [data-slot="vui-button-content"],
+.fileCopyButton[data-vui] [data-slot="vui-button-label"] {
+  display: contents;
 }
 
 .fileCopy {

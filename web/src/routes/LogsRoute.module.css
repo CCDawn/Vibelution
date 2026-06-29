@@ -93,6 +93,11 @@
   text-align: left;
 }
 
+.rootButton[data-vui] [data-slot="vui-button-content"],
+.rootButton[data-vui] [data-slot="vui-button-label"] {
+  display: contents;
+}
+
 .rootButtonActive {
   border-color: color-mix(in srgb, var(--accent-warm) 24%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-warm) 18%, transparent);
@@ -278,6 +283,14 @@
   color: var(--fg-secondary);
   cursor: pointer;
   font-size: 0.72rem;
+}
+
+.filterButton[data-vui],
+.toolbarButton[data-vui],
+.deleteButton[data-vui],
+.copyButton[data-vui],
+.clearButton[data-vui] {
+  min-width: 0;
 }
 
 .filterButton:hover {
@@ -797,6 +810,13 @@
   cursor: pointer;
 }
 
+.packageButton[data-vui] [data-slot="vui-button-content"],
+.packageButton[data-vui] [data-slot="vui-button-label"],
+.packageFileButton[data-vui] [data-slot="vui-button-content"],
+.packageFileButton[data-vui] [data-slot="vui-button-label"] {
+  display: contents;
+}
+
 .packageButton:hover {
   border-color: var(--border-strong);
   background: var(--surface-panel-hover);
@@ -900,6 +920,10 @@
   background: var(--surface-card);
   color: var(--fg-tertiary);
   cursor: pointer;
+}
+
+.packageSelectButton[data-vui] {
+  min-height: 100%;
 }
 
 .packageSelectButtonActive {
