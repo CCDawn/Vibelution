@@ -1717,12 +1717,23 @@ describe("ChatCodingRoute layout contract", () => {
     expect(renameMutationSource).not.toContain("void chatWorkspaceCache.refreshSessionRuntime(variables.sessionId)");
   });
 
-  it("classifies direct conversations from Agent Center role metadata", () => {
+  it("classifies direct conversations from explicit conversation index metadata", () => {
     expect(conversationIndexModelSource).toContain("agentPrimaryMode: session.agentPrimaryMode");
     expect(conversationIndexModelSource).toContain("agentRoleKey: session.agentRoleKey");
     expect(conversationIndexModelSource).toContain("agentPromptTemplateId: session.agentPromptTemplateId");
-    expect(conversationIndexModelSource).toContain("primaryMode === \"research\"");
-    expect(conversationIndexModelSource).toContain("roleKey.startsWith(\"research_\")");
-    expect(conversationIndexModelSource).toContain("promptTemplateId.startsWith(\"prompt-research-\")");
+    expect(conversationIndexModelSource).toContain("conversationIndexKind: session.conversationIndexKind");
+    expect(conversationIndexModelSource).toContain("conversationIndexKind: classification.kind");
+    expect(conversationIndexModelSource).toContain("const kind = normalizeConversationIndexKind(conversation.conversationIndexKind)");
+    expect(conversationIndexModelSource).toContain("kind === CONVERSATION_INDEX_KIND_PERSONAL_AGENT");
+    expect(conversationIndexModelSource).toContain("kind === CONVERSATION_INDEX_KIND_TEAM_AGENT");
+    expect(conversationIndexModelSource).not.toContain("primaryMode === \"research\"");
+    expect(conversationIndexModelSource).not.toContain("roleKey.startsWith(\"research_\")");
+    expect(conversationIndexModelSource).not.toContain("promptTemplateId.startsWith(\"prompt-research-\")");
+  });
+
+  it("routes ChatCoding route controls through VUI primitives", () => {
+    expect(routeSource).toContain('from "../components/vui"');
+    expect(routeSource).toContain("<VButton");
+    expect(routeSource).not.toMatch(/<button\b/);
   });
 });

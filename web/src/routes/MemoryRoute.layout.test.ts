@@ -768,4 +768,10 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain('new URLSearchParams({ include: "officialResearchGraph" })');
     expect(routeSource).toContain('params.set("teamId", requestedTeamId)');
   });
+
+  it("routes Memory controls through VUI primitives", () => {
+    expect(routeSource).toContain('from "../components/vui"');
+    expect(routeSource).toContain("<VButton");
+    expect(routeSource).not.toMatch(/<button\b/);
+  });
 });

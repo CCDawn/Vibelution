@@ -64,6 +64,7 @@ export function VButton({
     >
       <span
         data-slot="vui-button-content"
+        title={title}
         className="inline-flex items-center gap-1.5"
       >
         {icon ? <span data-slot="vui-button-icon">{icon}</span> : null}

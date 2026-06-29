@@ -36,6 +36,12 @@ function sourceBlocksForStyle(styleName: string): string[] {
 }
 
 describe("AgentsRoute layout contract", () => {
+  it("routes Agent management controls through VUI primitives", () => {
+    expect(routeSource).toContain('from "../components/vui"');
+    expect(routeSource).toContain("<VButton");
+    expect(routeSource).not.toMatch(/<button\b/);
+  });
+
   it("loads the read-only Agent config workspace endpoint", () => {
     expect(routeSource).toContain("fetchJson<AgentConfigWorkspaceWithTeamIndexes>(\"/api/agents/config-workspace?includeRuntime=false\")");
     expect(routeSource).toContain("fetchJson<AgentConfigWorkspaceAgent[]>(\"/api/agents?includeArchived=true&detail=summary\")");
@@ -1031,7 +1037,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("styles.bulkActionBar");
     expect(stylesSource).not.toContain(".bulkActionBar {");
     expect(stylesSource).not.toContain(".bulkSummary");
-    expect(stylesSource).not.toContain(".bulkPromptPicker");
+    expect(stylesSource).toContain(".bulkPromptPicker");
+    expect(stylesSource).toContain(".bulkPromptSelect");
     expect(stylesSource).toContain(".agentRowBulkSelected");
   });
 

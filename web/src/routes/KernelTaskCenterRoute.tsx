@@ -7,6 +7,7 @@ import { useSearchParams } from "react-router-dom";
 import { getKernelTaskTimeline, listKernelTasks, selectKernelTaskId } from "../api/kernel";
 import { queryKeys } from "../api/queryKeys";
 import type { KernelDelivery, KernelTask, KernelTimelineItem } from "../api/types";
+import { VButton } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import styles from "./KernelTaskCenterRoute.module.css";
 
@@ -178,7 +179,7 @@ export function KernelTaskCenterRoute() {
               ))}
             </select>
           </label>
-          <button
+          <VButton
             type="button"
             className={styles.iconButton}
             onClick={() => {
@@ -191,7 +192,7 @@ export function KernelTaskCenterRoute() {
             aria-label={copy.refresh}
           >
             <RefreshCw size={16} />
-          </button>
+          </VButton>
         </div>
       </header>
 
@@ -314,7 +315,7 @@ function TaskRow({
   copy: (typeof COPY)["zh"] | (typeof COPY)["en"];
 }) {
   return (
-    <button
+    <VButton
       type="button"
       className={selected ? `${styles.taskRow} ${styles.taskRowSelected}` : styles.taskRow}
       onClick={onSelect}
@@ -328,7 +329,7 @@ function TaskRow({
         <span>{copy.updated}: {formatTime(task.updatedAt)}</span>
       </span>
       <code>{task.taskId}</code>
-    </button>
+    </VButton>
   );
 }
 

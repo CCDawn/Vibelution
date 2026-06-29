@@ -4,6 +4,12 @@ import styles from "./ResearchRoute.module.css";
 import routeSource from "./ResearchRoute.tsx?raw";
 
 describe("ResearchRoute layout contract", () => {
+  it("routes Research controls through VUI primitives", () => {
+    expect(routeSource).toContain('from "../components/vui"');
+    expect(routeSource).toContain("<VButton");
+    expect(routeSource).not.toMatch(/<button\b/);
+  });
+
   it("renders the API-backed theme discovery MVP", () => {
     expect(routeSource).toContain("ResearchRoute");
     expect(routeSource).toContain("/api/research/theme-discovery/sessions");

@@ -512,4 +512,10 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).not.toContain("title={monitoredTaskLabel}");
     expect(routeSource).not.toContain("title={entry.content}");
   });
+
+  it("routes Evolution controls through VUI primitives", () => {
+    expect(routeSource).toContain('from "../components/vui"');
+    expect(routeSource).toContain("<VButton");
+    expect(routeSource).not.toMatch(/<button\b/);
+  });
 });
