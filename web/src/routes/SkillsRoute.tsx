@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import { SkillLibraryDetail, SkillLibraryItem, SkillLibraryPayload } from "../api/types";
-import { VButton } from "../components/vui";
+import { VButton, VIconButton, VRouteHeader } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
 import styles from "./SkillsRoute.module.css";
@@ -225,22 +225,22 @@ export function SkillsRoute() {
 
   return (
     <section className={styles.route}>
-      <header className={styles.header}>
-        <div>
-          <p className={styles.eyebrow}>{copy.eyebrow}</p>
-          <h1>{copy.title}</h1>
-          <p>{copy.subtitle}</p>
-        </div>
-        <VButton
-          type="button"
-          className={styles.refreshButton}
-          icon={<RefreshCw size={15} />}
-          isDisabled={libraryQuery.isFetching}
-          onPress={() => libraryQuery.refetch()}
-        >
-          {copy.refresh}
-        </VButton>
-      </header>
+      <VRouteHeader
+        className={styles.header}
+        eyebrow={copy.eyebrow}
+        title={copy.title}
+        meta={copy.subtitle}
+        actions={(
+          <VIconButton
+            type="button"
+            className={styles.refreshButton}
+            label={copy.refresh}
+            icon={<RefreshCw size={15} />}
+            isDisabled={libraryQuery.isFetching}
+            onPress={() => libraryQuery.refetch()}
+          />
+        )}
+      />
 
       <div className={styles.controlStrip}>
         <AgentManagementNav active="skills" className={styles.managementNav} />

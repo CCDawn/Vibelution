@@ -6,7 +6,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import { AgentInstance, PromptTemplate, PromptTemplateWorkspace } from "../api/types";
-import { VButton } from "../components/vui";
+import { VButton, VIconButton, VRouteHeader } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
@@ -473,30 +473,30 @@ export function PromptTemplatesRoute() {
 
   return (
     <section className={styles.route}>
-      <header className={styles.header}>
-        <div>
-          <p className={styles.eyebrow}>{copy.eyebrow}</p>
-          <h1>{copy.title}</h1>
-          <p>{copy.subtitle}</p>
-        </div>
-        <div className={styles.headerActions}>
-          {returnToPath ? (
-            <Link className={styles.returnButton} to={returnToPath} title={copy.returnToAgents}>
-              <ArrowLeft size={15} />
-              <span>{copy.returnToAgents}</span>
-            </Link>
-          ) : null}
-          <VButton
-            type="button"
-            className={styles.refreshButton}
-            icon={<RefreshCw size={15} />}
-            isDisabled={templatesQuery.isFetching}
-            onPress={() => templatesQuery.refetch()}
-          >
-            {copy.refresh}
-          </VButton>
-        </div>
-      </header>
+      <VRouteHeader
+        className={styles.header}
+        eyebrow={copy.eyebrow}
+        title={copy.title}
+        meta={copy.subtitle}
+        actions={(
+          <div className={styles.headerActions}>
+            {returnToPath ? (
+              <Link className={styles.returnButton} to={returnToPath} title={copy.returnToAgents}>
+                <ArrowLeft size={15} />
+                <span>{copy.returnToAgents}</span>
+              </Link>
+            ) : null}
+            <VIconButton
+              type="button"
+              className={styles.refreshButton}
+              label={copy.refresh}
+              icon={<RefreshCw size={15} />}
+              isDisabled={templatesQuery.isFetching}
+              onPress={() => templatesQuery.refetch()}
+            />
+          </div>
+        )}
+      />
 
       <div className={styles.controlStrip}>
         <AgentManagementNav active="prompts" className={styles.managementNav} />

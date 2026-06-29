@@ -7,23 +7,14 @@
 }
 
 .header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--route-topbar-gap);
+  margin: 8px 10px 0;
   min-width: 0;
   min-height: 36px;
-  padding: 3px 12px;
-  border-bottom: 1px solid var(--border-strong);
-  background: var(--surface-header, color-mix(in srgb, var(--bg-canvas) 78%, transparent));
-}
-
-.header > div {
-  display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
-  align-items: baseline;
-  gap: 1px 7px;
-  min-width: 0;
+  border-color: var(--vui-border-subtle);
+  background:
+    var(--vui-gradient-route-soft),
+    color-mix(in srgb, var(--surface-panel) 86%, transparent);
+  box-shadow: var(--vui-shadow-hairline);
 }
 
 .eyebrow,
@@ -72,7 +63,15 @@
 
 .refreshButton,
 .primaryButton {
+  padding: 0;
+}
+
+.primaryButton {
   padding: 3px 8px;
+}
+
+.refreshButton {
+  width: var(--vui-control-height-sm);
 }
 
 .refreshButton:hover,

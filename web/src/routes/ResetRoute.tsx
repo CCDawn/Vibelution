@@ -1,5 +1,6 @@
 import { ExternalLink, ShieldCheck } from "lucide-react";
 
+import { VRouteHeader } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import styles from "./ResetRoute.module.css";
 
@@ -30,19 +31,20 @@ export function ResetRoute() {
 
   return (
     <div className={styles.route} data-reset-retired="launcher-owned">
-      <header className={styles.header}>
-        <div>
-          <p className={styles.eyebrow}>Reset</p>
-          <h1 className={styles.title}>{copy.title}</h1>
-          <p className={styles.subtitle}>{copy.subtitle}</p>
-        </div>
-        <div className={styles.headerActions}>
-          <a className={styles.secondaryButton} href="/launcher" target="_blank" rel="noreferrer">
-            <ExternalLink size={15} />
-            {copy.openLauncher}
-          </a>
-        </div>
-      </header>
+      <VRouteHeader
+        className={styles.header}
+        eyebrow="Reset"
+        title={copy.title}
+        meta={copy.subtitle}
+        actions={(
+          <div className={styles.headerActions}>
+            <a className={styles.secondaryButton} href="/launcher" target="_blank" rel="noreferrer">
+              <ExternalLink size={15} />
+              {copy.openLauncher}
+            </a>
+          </div>
+        )}
+      />
 
       <main className={styles.workspace}>
         <section className={styles.card}>
