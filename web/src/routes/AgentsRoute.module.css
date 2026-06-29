@@ -521,59 +521,6 @@
   box-shadow: var(--focus-ring);
 }
 
-.bulkActionBar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  padding: 5px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-panel) 86%, var(--surface-card));
-}
-
-.bulkSummary {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 26px;
-  min-width: 0;
-  color: var(--fg-secondary);
-  font-size: 0.76rem;
-}
-
-.bulkSummary strong {
-  color: var(--fg-primary);
-}
-
-.bulkPromptPicker {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex: 1 1 220px;
-  min-width: 180px;
-  max-width: 360px;
-  color: var(--fg-secondary);
-  font-size: 0.74rem;
-}
-
-.bulkPromptPicker span {
-  flex: 0 0 auto;
-  white-space: nowrap;
-}
-
-.bulkPromptPicker select {
-  min-width: 0;
-  min-height: 26px;
-  flex: 1 1 112px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: var(--surface-input-strong);
-  color: var(--fg-primary);
-  font: inherit;
-}
-
 .bulkSelectionList {
   display: flex;
   flex-wrap: wrap;

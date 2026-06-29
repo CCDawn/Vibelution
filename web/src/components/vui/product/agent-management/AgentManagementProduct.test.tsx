@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import { VibelutionHeroProvider } from "../../renderers/heroui/HeroProvider";
 import {
+  AgentBulkActionBar,
   AgentPageHeader,
   AgentSummaryStrip,
   AgentWorkspacePanel,
@@ -107,5 +108,57 @@ describe("Agent Management VUI product components", () => {
     expect(markup).toContain("bg-vui-surface-glass");
     expect(markup).toContain("custom-layout-hook");
     expect(markup).toContain("<strong>Filters</strong>");
+  });
+
+  it("renders bulk actions as a dense product toolbar without inline prose", () => {
+    const markup = renderToStaticMarkup(
+      <AgentBulkActionBar
+        ariaLabel="Selected agents"
+        summary={
+          <>
+            <strong>Selected</strong>
+            <span>2 / 11</span>
+          </>
+        }
+        selectionActions={<button type="button">Select visible</button>}
+        promptPicker={
+          <label>
+            <span>Prompt</span>
+            <select defaultValue="">
+              <option value="">Mixed</option>
+            </select>
+          </label>
+        }
+        mutationActions={<button type="button">Apply</button>}
+        destructiveActions={<button type="button">Purge</button>}
+      />,
+    );
+
+    expect(markup).toContain('data-vui-product="agent-bulk-action-bar"');
+    expect(markup).toContain('data-vui="agent-bulk-action-bar"');
+    expect(markup).toContain('role="toolbar"');
+    expect(markup).toContain("bg-vui-surface-toolbar");
+    expect(markup).toContain("border-vui-border-subtle");
+    expect(markup).toContain("Selected");
+    expect(markup).toContain("2 / 11");
+    expect(markup).not.toContain("<p>");
+  });
+
+  it("keeps the bulk toolbar single-line inside narrow workspace columns", () => {
+    const markup = renderToStaticMarkup(
+      <AgentBulkActionBar
+        ariaLabel="Selected agents"
+        summary={<span>0 / 32</span>}
+        selectionActions={<button type="button">Select visible</button>}
+        promptPicker={<select aria-label="Prompt" />}
+        mutationActions={<button type="button">Apply prompt</button>}
+        destructiveActions={<button type="button">Purge selected</button>}
+      />,
+    );
+
+    expect(markup).toContain("!flex-nowrap");
+    expect(markup).toContain("overflow-x-auto");
+    expect(markup).toContain("[&amp;_button]:whitespace-nowrap");
+    expect(markup).not.toContain("grid-cols-[auto_auto_minmax");
   });
 });
