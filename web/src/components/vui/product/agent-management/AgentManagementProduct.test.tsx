@@ -69,6 +69,8 @@ describe("Agent Management VUI product components", () => {
     expect(markup).toContain("Agents");
     expect(markup).toContain("11");
     expect(markup).toContain('title="Total agents"');
+    expect(markup).toContain("overflow-x-auto");
+    expect(markup).not.toContain("overflow-hidden");
   });
 
   it("renders compact status metadata accessibly when provided", () => {
