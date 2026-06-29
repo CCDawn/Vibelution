@@ -235,7 +235,7 @@ source_registered
 | 机制到算法映射不稳 | mapping_needs_revision | 04 机制映射 mechanism_mapping_candidate | Mechanism Mapping Agent | analogy_risk_note、required_changes |
 | 算法假设不可测 | hypothesis_needs_revision | 05 算法假设 hypothesis_candidate | Algorithm Hypothesis Agent | experiment_plan_fix |
 | 审稿要求返工 | review_ready + needs_revision | 最近责任节点 | 原产出 Agent | review_record、requiredChanges |
-| 图谱断链 | candidate_graph_visible + broken_links | 对应缺失节点状态 | Candidate Graph Preview Agent 协调原产出 Agent | broken_link_report |
+| 图谱断链 | candidate_graph_visible + broken_links | 对应缺失节点状态 | 资料关系整理 Agent 协调原产出 Agent | broken_link_report |
 | 入库治理退回 | steward_needs_revision | 06 审稿或 07 知识治理 | Evidence Review Agent / 知识库管理员 | steward_feedback |
 | 审批门禁拒绝 | approved_to_ingest + rejected_by_gate | rejection_archive 或 06 审稿 | Ingestion Approval Gate 指定 | ingestion_rejection_reason |
 | 权限或能力缺口 | 任意状态 | risk_escalation | Research Coordination Agent | risk_record、proposal |
@@ -246,7 +246,7 @@ source_registered
 - 目标节点补齐 acceptance 中列出的缺口。
 - 原始 blocker 或 risk_record 更新为 resolved、rejected 或 superseded。
 - Research Coordination Agent 生成 status_digest，并把新的 state/index 写回候选工作区；其他功能 Agent 不直接写最终状态。
-- 如果转移影响知识候选或图谱，Candidate Graph Preview Agent 重新生成候选图谱和断链报告。
+- 如果转移影响知识候选或图谱，资料关系整理 Agent 重新生成候选图谱和断链报告。
 
 ## 5.1 TeamWorkflowOrchestration
 
@@ -885,7 +885,7 @@ Vibelution 已经具备团队沟通基础能力，不需要为挑战杯从零实
 - Mechanism Mapping Agent
 - Algorithm Hypothesis Agent
 - Evidence Review Agent
-- Candidate Graph Preview Agent
+- 资料关系整理 Agent
 
 知识治理层：
 

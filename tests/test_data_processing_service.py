@@ -23,8 +23,10 @@ def test_data_processing_profile_lists_generic_contract():
     assert profile["publishBoundary"]["writesKnowledgeGraph"] is False
     assert {role["agentRole"] for role in profile["collectionRoles"]} >= {
         "data_intake_coordinator",
-        "data_discovery",
-        "content_extraction",
+        "source_finder",
+        "source_extractor",
+        "source_relation_mapper",
+        "source_ingestor",
         "intake_review",
     }
 
@@ -120,8 +122,8 @@ def test_collection_assignment_records_agent_output_without_publishing(tmp_path,
     assignment = data_processing_service.create_collection_assignment(
         run["runId"],
         {
-            "agentRole": "data_discovery",
-            "agentId": "agent-data-discovery",
+            "agentRole": "source_finder",
+            "agentId": "agent-source-finder",
             "scope": {"query": "find useful sources"},
             "expectedRecordTypes": ["source_manifest"],
         },
@@ -166,15 +168,15 @@ def test_processing_run_stays_active_until_all_collection_assignments_close(tmp_
     first = data_processing_service.create_collection_assignment(
         run["runId"],
         {
-            "agentRole": "data_discovery",
-            "agentId": "agent-data-discovery",
+            "agentRole": "source_finder",
+            "agentId": "agent-source-finder",
         },
     )
     second = data_processing_service.create_collection_assignment(
         run["runId"],
         {
-            "agentRole": "source_quality",
-            "agentId": "agent-source-quality",
+            "agentRole": "source_ingestor",
+            "agentId": "agent-source-ingestor",
         },
     )
 

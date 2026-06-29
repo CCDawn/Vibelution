@@ -26,12 +26,6 @@ COLLECTION_AGENT_ROLES = {
     "source_extractor",
     "source_relation_mapper",
     "source_ingestor",
-    "source_intake",
-    "data_discovery",
-    "source_acquisition",
-    "content_extraction",
-    "source_deduplication",
-    "source_quality",
     "intake_review",
 }
 SOURCE_TYPES = {"url", "file", "paper", "dataset", "note", "api", "manual", "unknown"}
@@ -381,12 +375,6 @@ def _generic_document_processing_profile() -> dict[str, Any]:
             {"agentRole": "source_extractor", "purpose": "Extracts useful content and reviews source quality in one pass."},
             {"agentRole": "source_relation_mapper", "purpose": "Builds candidate-only topic, source, and evidence relationships."},
             {"agentRole": "source_ingestor", "purpose": "Performs final governed ingestion into formal team knowledge."},
-            {"agentRole": "source_intake", "purpose": "Finds network sources and imports local workspace sources under the run scope."},
-            {"agentRole": "data_discovery", "purpose": "Finds candidate source references under the run scope."},
-            {"agentRole": "source_acquisition", "purpose": "Acquires files, URLs, API references, or local source handles."},
-            {"agentRole": "content_extraction", "purpose": "Extracts readable content and metadata into structured records."},
-            {"agentRole": "source_deduplication", "purpose": "Detects duplicates and source-version relationships."},
-            {"agentRole": "source_quality", "purpose": "Scores source reliability, completeness, and processing risk."},
             {"agentRole": "intake_review", "purpose": "Reviews records before downstream domain pipelines publish them."},
         ],
         "publishBoundary": {

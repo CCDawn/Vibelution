@@ -546,23 +546,6 @@ RESEARCH_SOURCE_ROLE_KEYS = {
     "source_relation_mapper",
     "source_ingestor",
 }
-RETIRED_SOURCE_COLLECTION_ROLE_KEYS = {
-    "data_discovery",
-    "source_acquisition",
-    "source_intake",
-    "content_extraction",
-    "source_quality",
-    "candidate_graph",
-    "challenge_cup_data_discovery",
-    "challenge_cup_source_acquisition",
-    "challenge_cup_content_extraction",
-    "challenge_cup_source_quality",
-    "knowledge_expansion_source_intake",
-    "knowledge_expansion_content_extraction",
-    "knowledge_expansion_source_quality",
-    "knowledge_expansion_candidate_graph",
-}
-
 AI_SEARCH_ROLE_PROMPT_TEMPLATE_IDS = {
     "ai_search_scope_lead": "prompt-ai-search-scope-lead",
     "global_primary_sources": "prompt-ai-search-global-primary-sources",
@@ -618,8 +601,6 @@ def role_tool_profile_for_role(role_key: str, *, primary_mode: str = "", metadat
     normalized_mode = normalize_role_key(primary_mode)
     raw_metadata = metadata if isinstance(metadata, dict) else {}
     research_org_role = normalize_role_key(raw_metadata.get("researchOrgRole") or raw_metadata.get("systemRole") or "")
-    if normalized_role in RETIRED_SOURCE_COLLECTION_ROLE_KEYS:
-        return None
     if normalized_role == "knowledge_steward" or research_org_role == "knowledge_steward":
         return get_role_tool_profile("knowledge_steward")
     if research_org_role in {"ceo", "organization_advisor", "capability_steward"}:
@@ -646,8 +627,6 @@ def role_has_explicit_tool_profile(
 
 def role_prompt_template_id(role_key: str, *, metadata: dict[str, Any] | None = None) -> str:
     normalized_role = normalize_role_key(role_key)
-    if normalized_role in RETIRED_SOURCE_COLLECTION_ROLE_KEYS:
-        return ""
     raw_metadata = metadata if isinstance(metadata, dict) else {}
     research_org_role = normalize_role_key(raw_metadata.get("researchOrgRole") or raw_metadata.get("systemRole") or "")
     if research_org_role in RESEARCH_ORG_ROLE_PROMPT_TEMPLATE_IDS:
@@ -663,8 +642,6 @@ def role_governance_profile(
     policy_id: str = "",
 ) -> dict[str, Any] | None:
     normalized_role = normalize_role_key(role_key)
-    if normalized_role in RETIRED_SOURCE_COLLECTION_ROLE_KEYS:
-        return None
     prompt_template_id = role_prompt_template_id(normalized_role, metadata=metadata)
     tool_profile = role_tool_profile_for_role(normalized_role, primary_mode=primary_mode, metadata=metadata)
     explicit_tool_profile = role_has_explicit_tool_profile(normalized_role, primary_mode=primary_mode, metadata=metadata)
