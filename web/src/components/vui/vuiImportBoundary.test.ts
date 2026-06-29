@@ -6,6 +6,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join, relative } from "node:path";
 // @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
 import { fileURLToPath } from "node:url";
+import * as heroUiReact from "@heroui/react";
 
 const sourceRoot = fileURLToPath(new URL("../../", import.meta.url));
 const boundaryTestRelativePath = "components/vui/vuiImportBoundary.test.ts";
@@ -37,6 +38,14 @@ function relativeFromSourceRoot(file: string): string {
 }
 
 describe("VUI architecture boundary", () => {
+  it("documents the current HeroUI package root provider surface", () => {
+    const providerSource = readText(join(sourceRoot, "components", "vui", "renderers", "heroui", "HeroProvider.tsx"));
+
+    expect("HeroUIProvider" in heroUiReact).toBe(false);
+    expect(providerSource).toContain('data-vui-provider="heroui"');
+    expect(providerSource).toContain("HeroUI 3.2.1 does not expose a root provider");
+  });
+
   it("keeps HeroUI imports inside the VUI renderer layer", () => {
     const offenders = walkFiles(sourceRoot)
       .filter((file) => readText(file).includes(heroUiImportToken))

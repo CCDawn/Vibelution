@@ -46,7 +46,7 @@ export function AgentSummaryStrip({
     <section
       data-vui-product="agent-summary-strip"
       aria-label={ariaLabel}
-      className="grid min-w-0 grid-flow-col auto-cols-[minmax(88px,max-content)] overflow-x-auto rounded-[var(--radius-control)] border border-vui-border-hairline bg-vui-surface-panel/80"
+      className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(88px,1fr))] rounded-[var(--radius-control)] border border-vui-border-hairline bg-vui-surface-panel/80"
     >
       {status ? (
         <div className="grid min-w-[88px] items-center border-r border-vui-border-hairline px-2 py-1">
