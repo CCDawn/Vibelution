@@ -5794,6 +5794,22 @@ export type EvolutionActiveRunCaseIo = {
   conversationMessages?: ConversationMessage[];
 };
 
+export type EvolutionWorkflowStep = {
+  id: "baseline_eval" | "improve" | "rerun_score" | "approval" | string;
+  label: string;
+  ownerKind: "agent" | "human" | string;
+  role: string | null;
+  status: string;
+  current: boolean;
+  summary: string;
+  livePreview: string;
+  metrics: Record<string, unknown>;
+  conversationSessionId: string;
+  conversationTurnId?: string;
+  chatRoute: string;
+  conversationMessages?: ConversationMessage[];
+};
+
 export type EvolutionActiveRunAgentBinding = {
   agentId?: string;
   agentCode?: string;
@@ -5918,6 +5934,7 @@ export type EvolutionActiveRun = {
   currentAgentBinding: EvolutionActiveRunAgentBinding;
   currentCaseIo: EvolutionActiveRunCaseIo | null;
   roleConversationSessions?: Record<string, EvolutionRoleConversationSession>;
+  workflowSteps?: EvolutionWorkflowStep[];
   closedLoopRecord?: EvolutionClosedLoopRecord | null;
   currentTask: string;
   decision: string;
@@ -6022,6 +6039,7 @@ export type SupervisedWorktreeRun = {
   updatedAt: string;
   finishedAt: string;
   latestMessage: string;
+  workflowSteps?: EvolutionWorkflowStep[];
   costEstimate: {
     caseCount: number;
     evaluationCalls: number;

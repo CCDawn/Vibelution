@@ -329,6 +329,208 @@
   background: color-mix(in srgb, var(--accent-cool) 9%, var(--surface-panel));
 }
 
+.supervisedWorkflowPanel {
+  display: grid;
+  gap: 8px;
+  align-self: start;
+  min-height: 0;
+  padding: 8px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
+  overflow: hidden;
+}
+
+.supervisedWorkflowCardGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+  max-height: min(210px, 34vh);
+  overflow: auto;
+}
+
+.supervisedWorkflowCard {
+  display: grid;
+  min-width: 0;
+  min-height: 118px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--surface-panel);
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--shadow-soft) 45%, transparent);
+  overflow: hidden;
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+}
+
+.supervisedWorkflowCardActive {
+  border-color: color-mix(in srgb, var(--accent-cool) 54%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 9%, var(--surface-panel));
+}
+
+.supervisedWorkflowCardCurrent:not(.supervisedWorkflowCardActive) {
+  border-color: color-mix(in srgb, var(--accent-warm) 40%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-warm) 7%, var(--surface-panel));
+}
+
+.supervisedWorkflowCardButton {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.supervisedWorkflowCardButton:hover,
+.supervisedWorkflowCardButton:focus-visible {
+  background: color-mix(in srgb, var(--accent-cool) 6%, transparent);
+  outline: none;
+}
+
+.supervisedWorkflowCardTopline,
+.supervisedWorkflowCardFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+
+.supervisedWorkflowCardTopline span,
+.supervisedWorkflowCardButton strong,
+.supervisedWorkflowCardFooter span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.supervisedWorkflowCardTopline span {
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.supervisedWorkflowCardTopline em {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-warm) 14%, transparent);
+  color: var(--accent-warm-2);
+  font-size: 0.62rem;
+  font-style: normal;
+  font-weight: 750;
+}
+
+.supervisedWorkflowCardButton strong {
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.supervisedWorkflowLivePreview {
+  display: -webkit-box;
+  min-height: 34px;
+  color: var(--fg-tertiary);
+  font-size: 0.7rem;
+  line-height: 1.45;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.supervisedWorkflowCardFooter {
+  padding: 0 8px 8px;
+  color: var(--fg-secondary);
+  font-size: 0.68rem;
+  font-weight: 650;
+}
+
+.supervisedWorkflowSessionLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  color: var(--accent-cool-2);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.supervisedWorkflowSessionLink:hover,
+.supervisedWorkflowSessionLink:focus-visible {
+  color: var(--accent-cool);
+  text-decoration: underline;
+  outline: none;
+}
+
+.supervisedWorkflowFollowButton {
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 999px;
+  background: var(--surface-card-muted);
+  color: var(--fg-secondary);
+  font: inherit;
+  font-size: 0.74rem;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.supervisedWorkflowFollowButton:hover,
+.supervisedWorkflowFollowButton:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-card-muted));
+  color: var(--accent-cool-2);
+  outline: none;
+}
+
+.approvalEvidencePanel {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-height: 100%;
+  padding: 10px;
+}
+
+.approvalEvidenceItem {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
+}
+
+.approvalEvidenceItem span {
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.approvalEvidenceItem strong {
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.approvalEvidenceActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .supervisedStepMemberCardCurrent {
   border-color: color-mix(in srgb, var(--accent-warm) 34%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-warm) 6%, var(--surface-panel));
@@ -3056,8 +3258,17 @@
     max-height: none;
   }
 
+  .supervisedWorkflowPanel {
+    max-height: none;
+  }
+
   .supervisedMembersList {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+  }
+
+  .supervisedWorkflowCardGrid {
+    max-height: none;
     overflow: visible;
   }
 
@@ -3122,6 +3333,10 @@
   .compactRunRow,
   .sourceNextAction,
   .closedLoopStatus {
+    grid-template-columns: 1fr;
+  }
+
+  .supervisedWorkflowCardGrid {
     grid-template-columns: 1fr;
   }
 

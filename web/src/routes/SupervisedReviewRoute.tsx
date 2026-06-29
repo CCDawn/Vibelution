@@ -202,7 +202,7 @@ export function SupervisedReviewRoute() {
     : null;
   const detailCandidate = selectedCandidateDetail ?? selectedCandidate;
   const reviewTabSummaries = {
-    review: {
+    approval: {
       status: lang === "zh"
         ? `${reviewData?.pendingCount ?? 0} 待审`
         : `${reviewData?.pendingCount ?? 0} pending`,
@@ -439,7 +439,7 @@ export function SupervisedReviewRoute() {
         </div>
 
         <div className={styles.toolbarControls}>
-          <SupervisedWorkspaceControls activeView="review" tabSummaries={reviewTabSummaries} />
+          <SupervisedWorkspaceControls activeView="review" activeWorkflowStepId="approval" tabSummaries={reviewTabSummaries} />
         </div>
       </section>
 
