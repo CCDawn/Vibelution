@@ -22,6 +22,7 @@ export type VButtonProps = Omit<
   trailingIcon?: ReactNode;
   children?: ReactNode;
   "data-vui"?: string;
+  role?: string;
   title?: string;
 };
 
