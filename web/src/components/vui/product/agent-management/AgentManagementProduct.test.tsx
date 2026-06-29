@@ -1,4 +1,8 @@
 import React from "react";
+// @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
+import { readFileSync } from "node:fs";
+// @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
+import { resolve } from "node:path";
 import { RefreshCw } from "lucide-react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -11,6 +15,16 @@ import {
 } from "./index";
 
 describe("Agent Management VUI product components", () => {
+  it("keeps header actions caller-owned without built-in href navigation", () => {
+    const source = readFileSync(
+      resolve(import.meta.dirname, "AgentPageHeader.tsx"),
+      "utf8",
+    );
+
+    expect(source).not.toContain("window.location.assign");
+    expect(source).not.toContain("href?: string");
+  });
+
   it("renders a compact page header without inline explanatory prose", () => {
     const markup = renderToStaticMarkup(
       <VibelutionHeroProvider>
