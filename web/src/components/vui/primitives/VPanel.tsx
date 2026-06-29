@@ -1,5 +1,7 @@
 import { type ComponentPropsWithoutRef, type ReactNode } from "react";
 
+import { VSurface } from "./VSurface";
+
 export type VPanelProps = ComponentPropsWithoutRef<"section"> & {
   ariaLabel?: string;
   children: ReactNode;
@@ -7,19 +9,19 @@ export type VPanelProps = ComponentPropsWithoutRef<"section"> & {
 
 export function VPanel({ ariaLabel, className, children, ...props }: VPanelProps) {
   return (
-    <section
+    <VSurface
       {...props}
+      as="section"
       data-vui="panel"
-      aria-label={ariaLabel}
+      ariaLabel={ariaLabel}
       className={[
-        "min-w-0 rounded-[var(--radius-panel)] border border-vui-border-hairline bg-vui-surface-panel/82",
-        "shadow-none backdrop-blur-[1px]",
+        "backdrop-blur-[1px]",
         className,
       ]
         .filter(Boolean)
         .join(" ")}
     >
       {children}
-    </section>
+    </VSurface>
   );
 }
