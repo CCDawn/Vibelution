@@ -16,7 +16,7 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { VButton, VIconButton } from "../components/vui";
+import { VButton, VIconButton, VRouteHeader } from "../components/vui";
 import { GitDiffView } from "./GitDiffView";
 import {
   getGitAiDraftBlockReason,
@@ -446,16 +446,21 @@ export function GitRoute() {
 
   return (
     <section className={styles.route}>
-      <header className={styles.header}>
-        <div>
-          <p className={styles.eyebrow}>{t("navGit")}</p>
-          <h1 className={styles.title}>{t("gitPageTitle")}</h1>
-          <p className={styles.subtitle}>{t("gitPageSubtitle")}</p>
-        </div>
-        <VButton type="button" variant="secondary" className={styles.refreshButton} icon={<RefreshCw size={16} />} onPress={refresh}>
-          {t("gitRefresh")}
-        </VButton>
-      </header>
+      <VRouteHeader
+        className={styles.header}
+        eyebrow={t("navGit")}
+        title={t("gitPageTitle")}
+        meta={t("gitPageSubtitle")}
+        actions={(
+          <VIconButton
+            type="button"
+            className={styles.refreshButton}
+            label={t("gitRefresh")}
+            icon={<RefreshCw size={16} />}
+            onPress={refresh}
+          />
+        )}
+      />
 
       <div className={styles.summaryGrid}>
         <VButton type="button" variant="ghost" className={styles.summaryCard} onPress={selectCurrentBranch} isDisabled={!status?.branch}>
