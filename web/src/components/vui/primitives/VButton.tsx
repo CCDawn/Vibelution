@@ -61,9 +61,16 @@ export function VButton({
         .filter(Boolean)
         .join(" ")}
     >
-      {icon}
-      {children}
-      {trailingIcon}
+      <span
+        data-slot="vui-button-content"
+        className="inline-flex items-center gap-1.5"
+      >
+        {icon ? <span data-slot="vui-button-icon">{icon}</span> : null}
+        {children ? <span data-slot="vui-button-label">{children}</span> : null}
+        {trailingIcon ? (
+          <span data-slot="vui-button-trailing-icon">{trailingIcon}</span>
+        ) : null}
+      </span>
     </Button>
   );
 }
