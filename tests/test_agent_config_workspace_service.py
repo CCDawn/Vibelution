@@ -526,7 +526,7 @@ def test_agent_config_workspace_health_flags_role_governance_tool_drift():
     assert "role_forbidden_tool_allowed" in codes
 
 
-def test_agent_directory_repair_aligns_fixed_roles_and_disables_retired_source_roles(tmp_path, monkeypatch):
+def test_agent_directory_repair_aligns_fixed_roles_and_operation_chat_prompt(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
     registry_path = tmp_path / "workspace" / "agents" / "agents.json"
@@ -553,22 +553,6 @@ def test_agent_directory_repair_aligns_fixed_roles_and_disables_retired_source_r
                         "metadata": {},
                     },
                     {
-                        "agentId": "agent-graph",
-                        "agentCode": "A202",
-                        "displayName": "候选图谱",
-                        "kind": "persistent",
-                        "primaryMode": "research",
-                        "roleKey": "candidate_graph",
-                        "promptTemplateId": "prompt-research-candidate_graph",
-                        "directSessionId": "session-graph",
-                        "workspacePath": "workspace/agents/agent-graph",
-                        "toolPolicyId": "tool-agent-graph",
-                        "memoryPolicyId": "memory-agent-graph",
-                        "createdBy": "challenge_cup_team",
-                        "status": "active",
-                        "metadata": {},
-                    },
-                    {
                         "agentId": "agent-session",
                         "agentCode": "A203",
                         "displayName": "操作会话",
@@ -590,10 +574,6 @@ def test_agent_directory_repair_aligns_fixed_roles_and_disables_retired_source_r
                         "tool-agent-ai-search",
                         role_key="ai_search_scope_lead",
                     ),
-                    "tool-agent-graph": agent_directory_service.default_research_role_tool_policy(
-                        "tool-agent-graph",
-                        role_key="candidate_graph",
-                    ),
                     "tool-agent-session": agent_directory_service.default_session_agent_tool_policy("tool-agent-session"),
                 },
                 "memoryPolicies": {},
@@ -609,13 +589,50 @@ def test_agent_directory_repair_aligns_fixed_roles_and_disables_retired_source_r
     agents = {item["agentId"]: item for item in repaired["agents"]}
 
     assert agents["agent-ai-search"]["promptTemplateId"] == "prompt-ai-search-scope-lead"
-    assert agents["agent-graph"]["promptTemplateId"] == "prompt-chat-default"
     assert agents["agent-session"]["promptTemplateId"] == "prompt-chat-operation-default"
-    graph_policy = repaired["toolPolicies"][agents["agent-graph"]["toolPolicyId"]]
-    assert graph_policy["allowedTools"] == []
-    assert graph_policy["preferredTools"] == []
-    assert graph_policy["networkAccess"] == "none"
-    assert graph_policy["mutationAccess"] == "none"
+
+
+def test_agent_config_workspace_flags_fixed_role_without_governance_profile():
+    agent = {
+        "agentId": "agent-unregistered-role",
+        "displayName": "未注册固定角色",
+        "primaryMode": "research",
+        "roleKey": "unregistered_source_role",
+        "promptTemplateId": "prompt-chat-default",
+        "directSessionId": "session-unregistered-role",
+        "workspacePath": "workspace/agents/agent-unregistered-role",
+        "toolPolicyId": "tool-agent-unregistered-role",
+        "memoryPolicyId": "memory-agent-unregistered-role",
+        "status": "active",
+        "metadata": {"fixedRole": True, "configSurface": "team"},
+        "llmBindings": {"dialogue": {"modelId": "model-primary"}},
+        "toolPolicy": agent_directory_service.default_research_role_tool_policy(
+            "tool-agent-unregistered-role",
+            role_key="unregistered_source_role",
+        ),
+    }
+
+    health = agent_config_workspace_service._derive_health(
+        agents=[agent],
+        prompt_refs={
+            "prompt-chat-default": {
+                "promptTemplateId": "prompt-chat-default",
+                "contentLength": 120,
+                "contentPreview": "默认聊天。",
+                "content": "默认聊天。",
+                "sourcePath": "",
+                "sourceExists": False,
+            }
+        },
+        model_refs={"model-primary": {"modelId": "model-primary", "requiresApiKey": False}},
+        mode_bindings={"modes": {}},
+        chat_rooms=[],
+        teams=[],
+        active_agent_ids={"agent-unregistered-role"},
+    )
+
+    issue_by_code = {item["code"]: item for item in health["issues"]}
+    assert issue_by_code["unknown_role_governance"]["severity"] == "blocking"
 
 
 def test_default_research_source_tool_policy_uses_source_default_profile_for_blank_role():
@@ -629,23 +646,16 @@ def test_default_research_source_tool_policy_uses_source_default_profile_for_bla
 
 
 def test_agent_config_workspace_source_role_health_uses_four_stage_source_roles():
-    assert {
+    assert agent_config_workspace_service.RESEARCH_SOURCE_ROLE_KEYS == {
         "source_finder",
         "source_extractor",
         "source_relation_mapper",
         "source_ingestor",
-    } <= agent_config_workspace_service.RESEARCH_SOURCE_ROLE_KEYS
-    assert {
-        "candidate_graph",
-        "challenge_cup_data_discovery",
-        "challenge_cup_source_acquisition",
-        "challenge_cup_content_extraction",
-        "challenge_cup_source_quality",
-        "knowledge_expansion_source_intake",
-        "knowledge_expansion_content_extraction",
-        "knowledge_expansion_source_quality",
-        "knowledge_expansion_candidate_graph",
-    }.isdisjoint(agent_config_workspace_service.RESEARCH_SOURCE_ROLE_KEYS)
+        "ai_search_scope_lead",
+        "global_primary_sources",
+        "cn_primary_sources",
+        "signal_quality_gate",
+    }
 
 
 def test_agent_config_workspace_persists_context_compression_policy(tmp_path, monkeypatch):

@@ -373,7 +373,7 @@ def test_context_assembler_agent_inbox_profile_summarizes_old_source_collection_
                 "kind": "source_collection_stage_session_task",
                 "sourceCollectionStageTaskId": "stagetask-old-1",
                 "stageId": "collection",
-                "agentRole": "data_discovery",
+                "agentRole": "source_finder",
             },
         },
     )

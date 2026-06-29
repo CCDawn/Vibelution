@@ -8533,7 +8533,7 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
     team_service.get_team(normalized_team_id)
     payload = payload if isinstance(payload, dict) else {}
     curation_mode = _trim_text(payload.get("curationMode"), max_length=80) or "all_active"
-    created_by_agent = _trim_text(payload.get("createdByAgent"), max_length=160) or "Candidate Graph Preview Agent"
+    created_by_agent = _trim_text(payload.get("createdByAgent"), max_length=160) or "资料关系整理 Agent"
     source_quality_agent_id = _trim_text(payload.get("sourceQualityAgentId"), max_length=160) or "资料提炼 Agent"
     source_collection_run_id = _trim_text(payload.get("sourceCollectionRunId") or payload.get("runId"), max_length=160)
     force_rebuild = bool(payload.get("forceRebuild"))
@@ -8544,7 +8544,7 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
                 "assessedByAgent": source_quality_agent_id,
                 "maxCandidates": _normalize_int(payload.get("maxCandidates"), default=80, minimum=1, maximum=200),
                 "force": True,
-                "notes": "Candidate Graph Agent requested source review before graph generation.",
+                "notes": "Source Relation Mapper requested source review before graph generation.",
             },
         )
     now = utc_now_iso()
@@ -8587,7 +8587,7 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
                 graph["summary"]["inputCandidateCount"] = len(active_candidates)
                 graph["summary"]["filteredCandidateCount"] = len(filtered_candidates)
                 graph["summary"]["createdByAgent"] = created_by_agent
-                graph["summary"]["stageAgentRole"] = "candidate_graph"
+                graph["summary"]["stageAgentRole"] = "source_relation_mapper"
                 if source_collection_run_id:
                     graph["summary"]["sourceCollectionRunId"] = source_collection_run_id
                 _record_workflow_event(
@@ -8621,7 +8621,7 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
         graph["summary"]["inputCandidateCount"] = len(active_candidates)
         graph["summary"]["filteredCandidateCount"] = len(filtered_candidates)
         graph["summary"]["createdByAgent"] = created_by_agent
-        graph["summary"]["stageAgentRole"] = "candidate_graph"
+        graph["summary"]["stageAgentRole"] = "source_relation_mapper"
         if source_collection_run_id:
             graph["summary"]["sourceCollectionRunId"] = source_collection_run_id
         graph["summary"]["ingestionFingerprint"] = graph_fingerprint
@@ -8629,7 +8629,7 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
             {
                 "eventType": "candidate_graph.input_selected",
                 "stage": "candidate_graph",
-                "agentRole": "candidate_graph",
+                "agentRole": "source_relation_mapper",
                 "agentId": created_by_agent,
                 "status": "completed",
                 "inputSummary": f"{len(active_candidates)} active candidates, {len(candidates)} selected",
@@ -8640,7 +8640,7 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
             {
                 "eventType": "candidate_graph.snapshot_built",
                 "stage": "candidate_graph",
-                "agentRole": "candidate_graph",
+                "agentRole": "source_relation_mapper",
                 "agentId": created_by_agent,
                 "status": "completed" if not graph["missingLinks"] else "needs_attention",
                 "inputSummary": f"{len(candidates)} selected candidates",
@@ -8671,7 +8671,7 @@ def build_candidate_graph(team_id: str, payload: dict[str, Any] | None = None) -
                 "graph": graph,
                 "agentProcess": agent_process,
                 "workflowStage": "candidate_graph",
-                "stageAgentRole": "candidate_graph",
+                "stageAgentRole": "source_relation_mapper",
                 "missingLinkCount": len(graph["missingLinks"]),
                 "unreviewedNodeCount": len(graph["unreviewedNodes"]),
                 "officialBoundary": graph["officialBoundary"],

@@ -84,10 +84,6 @@ const ROLE_LABELS: Record<string, { zh: string; en: string; tone: AgentDisplayTo
   "ai-search-scope-lead": { zh: "搜索范围", en: "Search scope", tone: "research" },
   "chat-session-entry": { zh: "会话入口", en: "Chat entry", tone: "chat" },
   "challenge-cup-coordinator": { zh: "科研统筹", en: "Research coordinator", tone: "research" },
-  "challenge-cup-content-extraction": { zh: "内容抽取", en: "Content extraction", tone: "research" },
-  "challenge-cup-data-discovery": { zh: "数据发现", en: "Data discovery", tone: "research" },
-  "challenge-cup-source-acquisition": { zh: "来源获取", en: "Source acquisition", tone: "research" },
-  "challenge-cup-source-quality": { zh: "资料质检", en: "Source quality", tone: "research" },
   "cn-primary-sources": { zh: "中国源检索", en: "CN source search", tone: "research" },
   "global-primary-sources": { zh: "全球源检索", en: "Global source search", tone: "research" },
   "knowledge-steward": { zh: "知识管理员", en: "Knowledge steward", tone: "memory" },
@@ -96,6 +92,10 @@ const ROLE_LABELS: Record<string, { zh: string; en: string; tone: AgentDisplayTo
   "research-organization-advisor": { zh: "科研组织顾问", en: "Research advisor", tone: "research" },
   "research-paper-reader": { zh: "论文阅读", en: "Paper reader", tone: "research" },
   "signal-quality-gate": { zh: "信号质检", en: "Signal quality", tone: "research" },
+  "source-extractor": { zh: "资料提炼", en: "Source extraction", tone: "research" },
+  "source-finder": { zh: "资料寻找", en: "Source finding", tone: "research" },
+  "source-ingestor": { zh: "资料入库", en: "Source ingestion", tone: "research" },
+  "source-relation-mapper": { zh: "资料关系整理", en: "Source relation mapping", tone: "research" },
 };
 
 function mappedRole(value: string, lang: "zh" | "en"): { label: string; tone: AgentDisplayTone } | null {

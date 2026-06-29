@@ -31,7 +31,7 @@
           <div class="kicker">Research Flow Node 08</div>
           <h1>资料关系整理预览</h1>
           <p class="subtitle">让团队先看到研究链路，但不污染正式知识图谱。</p>
-          <div class="tag-row"><span class="tag done">Teams 可视化已接入</span><span class="tag">Candidate Graph Preview Agent</span><span class="tag">独立计划页</span></div>
+          <div class="tag-row"><span class="tag done">Teams 可视化已接入</span><span class="tag">资料关系整理 Agent</span><span class="tag">独立计划页</span></div>
           <div class="diagram">
             <div class="flow-cell"><strong>输入</strong><span>CandidateStore candidates / paperNoteIds / neuroMechanismIds / mechanismMappingIds</span></div>
             <div class="flow-cell"><strong>动作</strong><span>读取 candidate_only、ready_for_candidate_graph、excluded 状态。</span></div>
@@ -85,14 +85,14 @@
       </div>
       <div class="status-grid">
         <div class="status-item"><b>状态</b><span>candidate_graph_visible</span></div>
-        <div class="status-item"><b>功能岗位</b><span>Candidate Graph Preview Agent</span></div>
-        <div class="status-item"><b>Agent 状态</b><span>后端/API 已可生成资料关系整理快照；Teams 工作台绑定独立 candidate_graph Agent，并把 agentProcess 显示到当前步骤过程页。</span></div>
+        <div class="status-item"><b>功能岗位</b><span>资料关系整理 Agent</span></div>
+        <div class="status-item"><b>Agent 状态</b><span>后端/API 已可生成资料关系整理快照；Teams 工作台绑定资料关系整理 Agent，并把 agentProcess 显示到当前步骤过程页。</span></div>
         <div class="status-item"><b>进入条件</b><span>CandidateStore 中存在 paper_note / neuro_mechanism / mechanism_mapping / algorithm_hypothesis 等候选。</span></div>
         <div class="status-item"><b>退出条件</b><span>candidate_graph 候选快照能列出 nodes、edges、missingLinks、unreviewedNodes 和 officialBoundary，并能在 Teams 科研流程面板可视化查看。</span></div>
         <div class="status-item"><b>审核门禁</b><span>确认资料关系整理只作预览，不作为正式知识证据使用。</span></div>
       </div>
       <div class="plan-grid">
-        <article class="plan-card"><h2>本步操作</h2><p class="hint">由 candidate_graph Agent 从已通过筛选的 source_manifest 与后续候选链路重建候选关系；Teams 面板可请求最新 candidate_graph，渲染 evidence -&gt; candidate 的阅读向箭头，并在过程页展示输入、输出和下一步。</p></article>
+        <article class="plan-card"><h2>本步操作</h2><p class="hint">由资料关系整理 Agent 从已通过筛选的 source_manifest 与后续候选链路重建候选关系；Teams 面板可请求最新 candidate_graph，渲染 evidence -&gt; candidate 的阅读向箭头，并在过程页展示输入、输出和下一步。</p></article>
 
         <article class="plan-card"><h2>所需功能</h2><ul><li>candidate_graph 候选快照生成</li>
 <li>候选节点/边预览 payload</li>
@@ -100,7 +100,7 @@
 <li>未审节点清单</li>
 <li>候选/正式边界标识</li>
 <li>Teams SVG 资料关系整理面板</li>
-<li>candidate_graph Agent 过程追踪</li></ul></article>
+<li>资料关系整理 Agent 过程追踪</li></ul></article>
         <article class="plan-card"><h2>工具/平台能力</h2><ul><li>/api/teams/{teamId}/workflow-orchestration/candidate-graph</li>
 <li>CandidateStore</li>
 <li>TeamsRoute 资料关系整理渲染</li></ul></article>

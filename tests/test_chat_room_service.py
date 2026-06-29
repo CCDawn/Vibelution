@@ -362,7 +362,7 @@ def test_create_chat_room_resolves_explicit_hidden_team_agent_session(tmp_path, 
         display_name="资料发现",
         direct_session_id="session-hidden-team-agent",
         primary_mode="research",
-        role_key="challenge_cup_data_discovery",
+        role_key="source_finder",
         created_by="challenge_cup_team",
     )
     save_chat_state(
@@ -1048,7 +1048,9 @@ def test_chat_room_disables_missing_agent_participants(tmp_path, monkeypatch):
     detail = chat_room_service.get_chat_room_detail(room["roomId"])
 
     assert {item["id"] for item in sessions} == {"session-alpha", "session-beta"}
-    updated_sessions = {item["id"]: item for item in session_service.list_sessions()}
+    visible_sessions = {item["id"] for item in session_service.list_sessions()}
+    assert "session-alpha" not in visible_sessions
+    updated_sessions = {item["id"]: item for item in session_service.list_sessions(include_hidden_internal=True)}
     assert updated_sessions["session-alpha"]["agentMissing"] is True
     assert updated_sessions["session-alpha"]["agentStatusCode"] == "missing_agent"
     assert updated_sessions["session-alpha"]["conversationIndexKind"] == "invalid"
