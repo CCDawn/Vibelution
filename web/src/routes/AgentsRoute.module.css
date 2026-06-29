@@ -168,19 +168,8 @@
 .filterPanel,
 .agentPanel,
 .detailPanel {
-  display: grid;
-  align-content: start;
-  gap: var(--agent-density-gap);
   min-width: 0;
   min-height: 0;
-  padding: var(--agent-panel-pad);
-  border: 1px solid color-mix(in srgb, var(--border-soft) 86%, transparent);
-  border-radius: 8px;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface-panel) 97%, var(--fg-primary) 2%), var(--surface-panel));
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--fg-primary) 4%, transparent),
-    0 14px 34px color-mix(in srgb, var(--bg-canvas) 36%, transparent);
 }
 
 .filterPanel {
@@ -533,8 +522,8 @@
 }
 
 .bulkActionBar {
-  display: grid;
-  grid-template-columns: auto auto auto minmax(140px, 1fr);
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 5px;
   min-width: 0;
@@ -562,9 +551,16 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-width: 0;
+  flex: 1 1 220px;
+  min-width: 180px;
+  max-width: 360px;
   color: var(--fg-secondary);
   font-size: 0.74rem;
+}
+
+.bulkPromptPicker span {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .bulkPromptPicker select {

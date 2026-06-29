@@ -55,6 +55,15 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("disabled: workspaceQuery.isFetching");
   });
 
+  it("uses the VUI product panel surface for the Agent workspace columns", () => {
+    expect(routeSource).toContain("AgentWorkspacePanel");
+    expect(routeSource).toContain('as="aside" ariaLabel={copy.agentFilters}');
+    expect(routeSource).toContain('as="main"');
+    expect(routeSource).toContain("ariaLabel={activeGroupLabel}");
+    expect(routeSource).toContain("ariaLabel={selectedAgent ? agentLabel(selectedAgent) : copy.title}");
+    expect(stylesSource).not.toContain("0 14px 34px");
+  });
+
   it("opens deep-linked Agent configuration and offers a governed return action", () => {
     expect(routeSource).toContain("useSearchParams");
     expect(routeSource).toContain("normalizeAgentConfigPane(searchParams.get(\"pane\"))");
@@ -989,7 +998,11 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("styles.agentRowBulkSelected");
     expect(routeSource).toContain("styles.agentRowShell");
     expect(stylesSource).toContain("grid-template-rows: auto auto minmax(0, 1fr)");
-    expect(stylesSource).toContain("grid-template-columns: auto auto auto minmax(140px, 1fr)");
+    expect(stylesSource).toContain(".bulkActionBar {\n  display: flex;");
+    expect(stylesSource).toContain("flex-wrap: wrap");
+    expect(stylesSource).toContain("flex: 1 1 220px");
+    expect(stylesSource).toContain(".bulkPromptPicker span");
+    expect(stylesSource).toContain("white-space: nowrap");
     expect(stylesSource).toContain("min-height: 26px");
     expect(stylesSource).toContain(".agentRowBulkSelected");
   });
