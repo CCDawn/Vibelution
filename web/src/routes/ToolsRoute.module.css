@@ -7,22 +7,21 @@
 }
 
 .header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--route-topbar-gap);
+  margin: 8px 10px 0;
   min-width: 0;
   min-height: 36px;
-  padding: 3px 12px;
-  border-bottom: 1px solid var(--border-strong);
-  background: var(--surface-header, color-mix(in srgb, var(--bg-canvas) 78%, transparent));
+  border-color: var(--vui-border-subtle);
+  background:
+    var(--vui-gradient-route-soft),
+    color-mix(in srgb, var(--surface-panel) 86%, transparent);
+  box-shadow: var(--vui-shadow-hairline);
 }
 
-.header > div {
-  display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
-  align-items: baseline;
-  gap: 1px 7px;
+.headerActions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -75,7 +74,8 @@
 
 .refreshButton {
   flex: 0 0 auto;
-  padding: 3px 8px;
+  width: var(--vui-control-height-sm);
+  padding: 0;
 }
 
 .refreshButton[data-vui],
@@ -85,10 +85,6 @@
 .secondaryButton[data-vui],
 .dangerButton[data-vui] {
   min-width: 0;
-}
-
-.refreshButton[data-vui] {
-  padding: 0;
 }
 
 .returnButton {
@@ -1472,10 +1468,6 @@
 @media (max-width: 860px) {
   .route {
     overflow: auto;
-  }
-
-  .header > div {
-    grid-template-columns: 1fr;
   }
 
   .title,
