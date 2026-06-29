@@ -380,7 +380,7 @@
 
 .shell[data-theme="light"] .topBar::before {
   background: color-mix(in srgb, var(--surface-panel) 86%, transparent);
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--border-hairline) 68%, transparent);
+  box-shadow: var(--vui-shadow-hairline);
 }
 
 .shell[data-topbar-mode="hidden"] {
