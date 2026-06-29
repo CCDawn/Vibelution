@@ -1,4 +1,9 @@
 import { mergeConversationFeedbackEvents } from "../components/conversation/conversationFeedbackEvents";
+import {
+  answerProjectionContent,
+  isInternalStreamingStatusContent,
+  isInternalStreamingStatusStage,
+} from "../components/conversation/conversationInternalStatus";
 import type { ConversationMessage, SessionDetail, SessionStreamEvent } from "../api/types";
 
 export type AssistantDeltaEvent = Extract<SessionStreamEvent, { type: "assistant_delta" }>;
@@ -36,6 +41,11 @@ function messageTurnId(message: ConversationMessage) {
   return rawTurnId.startsWith("live:") ? rawTurnId.slice("live:".length) : rawTurnId;
 }
 
+function assistantDeltaAnswerContent(payload: AssistantDeltaEvent, base: ActiveTurnLayerState | undefined) {
+  const rawDelta = payload.contentDelta ?? (payload.replaceContent || !base ? payload.content ?? "" : "");
+  return isInternalStreamingStatusStage(payload.stage) && isInternalStreamingStatusContent(rawDelta) ? "" : rawDelta;
+}
+
 export function mergeAssistantDeltaIntoActiveTurnLayer(
   previous: ActiveTurnLayerState | undefined,
   payload: AssistantDeltaEvent,
@@ -51,7 +61,7 @@ export function mergeAssistantDeltaIntoActiveTurnLayer(
   const now = payload.updatedAt || new Date().toISOString();
   const sameTurn = previous && previous.turnId === turnId;
   const base = sameTurn ? previous : undefined;
-  const contentDelta = payload.contentDelta ?? (payload.replaceContent || !base ? payload.content ?? "" : "");
+  const contentDelta = assistantDeltaAnswerContent(payload, base);
   const thoughtDelta = payload.thoughtDelta ?? (payload.replaceThought || !base ? payload.thought ?? "" : "");
   const content = payload.replaceContent ? contentDelta : `${base?.answerContent ?? ""}${contentDelta}`;
   const thought = payload.replaceThought ? thoughtDelta : `${base?.thoughtContent ?? ""}${thoughtDelta}`;
@@ -121,5 +131,6 @@ export function isActiveTurnSettledByDetail(
     && String(message.metadata?.kind ?? "") !== "session_live_overlay"
     && String(message.metadata?.kind ?? "") !== "session_active_turn_layer"
     && messageTurnId(message) === activeTurnId
+    && Boolean(String(answerProjectionContent(message) ?? "").trim())
   ));
 }

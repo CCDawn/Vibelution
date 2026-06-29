@@ -362,6 +362,32 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("已确定检查范围");
   });
 
+  it("keeps the answer block visible in trace display when process timeline items exist", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-trace-answer",
+          role: "assistant",
+          content: "这是最终回答。",
+          timestamp: "2026-06-26T08:00:00Z",
+          feedbackEvents: [
+            {
+              sequence: 1,
+              kind: "thought",
+              status: "done",
+              summary: "已完成分析",
+            },
+          ],
+        },
+      ],
+      { processDisplayMode: "trace" },
+    );
+
+    expect(html).toContain("已完成分析");
+    expect(html).toContain("这是最终回答。");
+    expect(html.indexOf("conversationCellTimeline")).toBeLessThan(html.indexOf("responseSection"));
+  });
+
   it("renders the active assistant turn after committed history without requiring it in messages", () => {
     const html = renderConversation(
       [
@@ -392,6 +418,41 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("上一轮正式回答。");
     expect(html).toContain("当前回答正在流式显示。");
     expect(html.indexOf("上一轮正式回答。")).toBeLessThan(html.indexOf("当前回答正在流式显示。"));
+  });
+
+  it("drops the active assistant turn once the same turn has a committed answer", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-committed-turn-1",
+          role: "assistant",
+          content: "最终回答已经落库。",
+          timestamp: "2026-06-26T08:01:02Z",
+          metadata: {
+            turnId: "turn-1",
+          },
+        },
+      ],
+      {
+        useDefaultProcessDisplayMode: true,
+        activeTurnMessage: {
+          id: "session-1-message-active-turn-1",
+          role: "assistant",
+          content: "临时活动层旧尾巴。",
+          timestamp: "2026-06-26T08:01:01Z",
+          streaming: true,
+          streamStage: "responding",
+          metadata: {
+            kind: "session_active_turn_layer",
+            turnId: "turn-1",
+          },
+        },
+      },
+    );
+
+    expect(html).toContain("最终回答已经落库。");
+    expect(html).not.toContain("临时活动层旧尾巴。");
+    expect(html.match(/<article class="_assistantTurn_/g)?.length ?? 0).toBe(1);
   });
 
   it("merges a same-turn live overlay into the active assistant turn instead of rendering duplicates", () => {

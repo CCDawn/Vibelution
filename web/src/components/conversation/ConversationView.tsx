@@ -34,6 +34,11 @@ import { useAppI18n } from "../../i18n/useAppI18n";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
 import { COMPOSER_SESSION_REFERENCE_MIME } from "./conversationConstants";
 import { mergeConversationFeedbackEvents } from "./conversationFeedbackEvents";
+import {
+  answerProjectionContent,
+  isInternalStreamingStatusContent,
+  messageHasInternalStreamingStatusContent,
+} from "./conversationInternalStatus";
 import { projectConversationProcessMessages } from "./conversationProcessProjection";
 import {
   buildConversationOperationGroups,
@@ -152,67 +157,6 @@ type ComputerUseResult = {
   needsConfirmation: boolean;
   error: string;
 };
-
-const STREAMING_STATUS_CONTENT_MARKERS = [
-  "正在准备对话上下文",
-  "正在读取当前会话",
-  "正在唤起对话 agent",
-  "正在绑定 agent 实例",
-  "私有工作区",
-  "工具工作区",
-  "正在请求模型",
-  "等待首个响应片段",
-  "上下文已组装完成",
-  "正在进入 llm 调用",
-  "preparing the conversation context",
-  "reading the current session",
-  "preparing the conversation agent",
-  "binding the agent instance",
-  "private workspace",
-  "tool workspace",
-  "requesting the model",
-  "waiting for the first response chunk",
-  "context is assembled",
-  "llm call is starting",
-];
-
-const INTERNAL_STREAMING_STATUS_STAGES = new Set([
-  "context_prepare",
-  "queued",
-  "agent_prepare",
-  "history_restore",
-  "model_request",
-  "model_thinking",
-  "followup_prepare",
-]);
-
-function normalizeStreamingStatusText(content: string) {
-  return String(content ?? "").replace(/\s+/g, " ").trim().toLowerCase();
-}
-
-function isInternalStreamingStatusContent(content: string) {
-  const normalized = normalizeStreamingStatusText(content);
-  if (!normalized || normalized.length > 360) {
-    return false;
-  }
-  return STREAMING_STATUS_CONTENT_MARKERS.some((marker) => normalized.includes(marker));
-}
-
-function isInternalStreamingStatusStage(stage: unknown) {
-  return INTERNAL_STREAMING_STATUS_STAGES.has(String(stage ?? "").trim().toLowerCase());
-}
-
-function messageHasInternalStreamingStatusContent(message: ConversationMessage) {
-  if (!message.content) {
-    return false;
-  }
-  const metadataKind = String(message.metadata?.kind ?? "").trim();
-  return (
-    (metadataKind === "session_live_overlay" || metadataKind === "session_active_turn_layer" || Boolean(message.streaming))
-    && isInternalStreamingStatusStage(message.streamStage)
-    && isInternalStreamingStatusContent(message.content)
-  );
-}
 
 function projectedConversationMessageIds(message: ConversationMessage) {
   const rawIds = message.metadata?.projectedMessageIds;
@@ -829,13 +773,10 @@ function mergeLiveOverlayIntoActiveTurnMessage(
     liveOverlayMessage.feedbackEvents,
     activeTurnMessage.feedbackEvents,
   );
-  const liveOverlayAnswerContent = messageHasInternalStreamingStatusContent(liveOverlayMessage)
-    ? ""
-    : liveOverlayMessage.content;
   return {
     ...liveOverlayMessage,
     ...activeTurnMessage,
-    content: mergeConversationText(liveOverlayAnswerContent, activeTurnMessage.content),
+    content: mergeConversationText(answerProjectionContent(liveOverlayMessage), activeTurnMessage.content),
     thought: mergeConversationText(liveOverlayMessage.thought, activeTurnMessage.thought) || undefined,
     streamStage: activeTurnMessage.streamStage || liveOverlayMessage.streamStage,
     streaming: activeTurnMessage.streaming ?? liveOverlayMessage.streaming,
@@ -850,6 +791,23 @@ function mergeLiveOverlayIntoActiveTurnMessage(
       ...(activeTurnMessage.metadata ?? {}),
     },
   };
+}
+
+function hasCommittedAssistantAnswerForActiveTurn(
+  messages: ConversationMessage[],
+  activeTurnMessage: ConversationMessage,
+) {
+  return messages.some((message) => {
+    if (
+      message.role !== "assistant"
+      || isSessionLiveOverlayMessage(message)
+      || metadataText(message.metadata, "kind") === "session_active_turn_layer"
+      || !isSameConversationTurn(message, activeTurnMessage)
+    ) {
+      return false;
+    }
+    return Boolean(String(answerProjectionContent(message) ?? "").trim());
+  });
 }
 
 type PreviewImageState = {
@@ -1218,6 +1176,9 @@ export function ConversationView({
   );
   const activeTimelineMessages = useMemo(() => {
     if (!activeTurnMessage) {
+      return projectConversationProcessMessages(timelineMessages);
+    }
+    if (hasCommittedAssistantAnswerForActiveTurn(timelineMessages, activeTurnMessage)) {
       return projectConversationProcessMessages(timelineMessages);
     }
     let mergedActiveTurnMessage = activeTurnMessage;
@@ -3563,7 +3524,7 @@ export function ConversationView({
             const compactTurnHeader = shouldCompactConversationTurnHeader(activeTimelineMessages[index - 1], message);
             const conversationTimelineItems = buildConversationTimelineItems(message, operationGroups.timeline, {
               lang,
-              includeAssistantText: showResponseBlock && !answerOnlyProcessMode,
+              includeAssistantText: false,
             });
             const hasConversationTimeline =
               message.role === "assistant"
@@ -3635,7 +3596,7 @@ export function ConversationView({
               }
               return renderLegacyProcessDetails(true);
             };
-            const responseSectionNode = showResponseBlock && !isStreamingStatusPlaceholder && (!hasConversationTimeline || answerOnlyProcessMode) ? (
+            const responseSectionNode = showResponseBlock && !isStreamingStatusPlaceholder ? (
               <section className={styles.responseSection}>
                 <button
                   type="button"
