@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, CheckCircle2, CheckSquare, CircleSlash, FlaskConical, Power, RefreshCw, Search, Square, Trash2, Wrench } from "lucide-react";
-import { type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -20,6 +20,7 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
+import { VButton, VIconButton } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
@@ -67,6 +68,12 @@ type ToolPermissionGroup = {
   blockedCount: number;
   inheritedCount: number;
   highRiskCount: number;
+};
+type ToolRowClickEvent = {
+  ctrlKey: boolean;
+  metaKey: boolean;
+  shiftKey: boolean;
+  preventDefault: () => void;
 };
 type ScopedToolTestResult = {
   key: string;
@@ -1463,7 +1470,7 @@ export function ToolsRoute() {
     setBulkSelectionAnchorToolId(toolId);
   }
 
-  function handleToolRowClick(tool: ToolRegistryItem, event: MouseEvent<HTMLButtonElement>) {
+  function handleToolRowClick(tool: ToolRegistryItem, event: ToolRowClickEvent) {
     if (event.ctrlKey || event.metaKey || event.shiftKey) {
       event.preventDefault();
       toggleBulkTool(tool.id, event.shiftKey ? true : !selectedToolIds.has(tool.id), event.shiftKey);
@@ -1589,10 +1596,7 @@ export function ToolsRoute() {
             <span>{returnToLabel}</span>
           </Link>
         ) : null}
-        <button type="button" className={styles.refreshButton} onClick={refresh}>
-          <RefreshCw size={16} />
-          {t("gitRefresh")}
-        </button>
+        <VIconButton type="button" variant="secondary" className={styles.refreshButton} label={t("gitRefresh")} icon={<RefreshCw size={16} />} onPress={refresh} />
       </header>
 
       <div className={styles.controlStrip}>
@@ -1689,15 +1693,16 @@ export function ToolsRoute() {
           </label>
           <div className={styles.filterRow}>
             {FILTERS.map((filter) => (
-              <button
+              <VButton
                 key={filter}
                 type="button"
+                variant="secondary"
                 className={filter === activeFilter ? styles.filterButtonActive : styles.filterButton}
-                onClick={() => setActiveFilter(filter)}
+                onPress={() => setActiveFilter(filter)}
               >
                 <span>{filterLabel(filter, lang)}</span>
                 <strong>{filterCounts[filter]}</strong>
-              </button>
+              </VButton>
             ))}
           </div>
           <section className={styles.bulkActionBar} aria-label={bulkCopy.selected}>
@@ -1706,27 +1711,25 @@ export function ToolsRoute() {
               <strong>{bulkCopy.selected}</strong>
               <span>{selectedTools.length} / {visibleTools.length}</span>
             </div>
-            <button
+            <VButton
               type="button"
+              variant="secondary"
               className={styles.secondaryButton}
-              disabled={!visibleTools.length || bulkToolPending}
-              onClick={allVisibleToolsSelected ? clearBulkTools : selectVisibleBulkTools}
+              isDisabled={!visibleTools.length || bulkToolPending}
+              onPress={allVisibleToolsSelected ? clearBulkTools : selectVisibleBulkTools}
+              icon={allVisibleToolsSelected ? <Square size={14} /> : <CheckSquare size={14} />}
             >
-              {allVisibleToolsSelected ? <Square size={14} /> : <CheckSquare size={14} />}
               <span>{allVisibleToolsSelected ? bulkCopy.clear : bulkCopy.selectVisible}</span>
-            </button>
-            <button type="button" className={styles.primaryButton} disabled={!selectedTools.length || bulkToolPending} onClick={() => bulkSetToolsEnabled(true)}>
-              <Power size={14} />
+            </VButton>
+            <VButton type="button" variant="primary" className={styles.primaryButton} isDisabled={!selectedTools.length || bulkToolPending} onPress={() => bulkSetToolsEnabled(true)} icon={<Power size={14} />}>
               <span>{bulkToolPending ? bulkCopy.working : bulkCopy.enable}</span>
-            </button>
-            <button type="button" className={styles.secondaryButton} disabled={!selectedTools.length || bulkToolPending} onClick={() => bulkSetToolsEnabled(false)}>
-              <CircleSlash size={14} />
+            </VButton>
+            <VButton type="button" variant="secondary" className={styles.secondaryButton} isDisabled={!selectedTools.length || bulkToolPending} onPress={() => bulkSetToolsEnabled(false)} icon={<CircleSlash size={14} />}>
               <span>{bulkToolPending ? bulkCopy.working : bulkCopy.disable}</span>
-            </button>
-            <button type="button" className={styles.secondaryButton} disabled={!selectedTools.length || bulkToolPending} onClick={bulkDeleteTools}>
-              <Trash2 size={14} />
+            </VButton>
+            <VButton type="button" variant="secondary" className={styles.secondaryButton} isDisabled={!selectedTools.length || bulkToolPending} onPress={bulkDeleteTools} icon={<Trash2 size={14} />}>
               <span>{bulkToolPending ? bulkCopy.working : bulkCopy.delete}</span>
-            </button>
+            </VButton>
           </section>
           <div className={styles.toolList}>
             {visibleToolBundleGroups.map((group) => (
@@ -1760,8 +1763,9 @@ export function ToolsRoute() {
                           />
                           {bulkSelected ? <CheckSquare size={15} /> : <Square size={15} />}
                         </label>
-                        <button
+                        <VButton
                           type="button"
+                          variant="ghost"
                           className={isActive ? styles.toolButtonActive : styles.toolButton}
                           onClick={(event) => handleToolRowClick(tool, event)}
                         >
@@ -1778,7 +1782,7 @@ export function ToolsRoute() {
                           </span>
                           <span className={styles.sourcePill}>{displaySource(tool.source, lang)}</span>
                         </span>
-                        </button>
+                        </VButton>
                       </div>
                     );
                   })}
@@ -1868,22 +1872,24 @@ export function ToolsRoute() {
                     {selectedBundle ? toolBundleMeta(selectedBundle, lang) : "-"}
                   </span>
                   <div className={styles.toolBundleApplyActions}>
-                    <button
+                    <VButton
                       type="button"
+                      variant="secondary"
                       className={styles.secondaryButton}
-                      disabled={!selectedBundle}
-                      onClick={() => selectedBundle && applyToolBundle(selectedBundle, "merge")}
+                      isDisabled={!selectedBundle}
+                      onPress={() => selectedBundle && applyToolBundle(selectedBundle, "merge")}
                     >
                       {lang === "zh" ? "追加" : "Add"}
-                    </button>
-                    <button
+                    </VButton>
+                    <VButton
                       type="button"
+                      variant="secondary"
                       className={styles.secondaryButton}
-                      disabled={!selectedBundle}
-                      onClick={() => selectedBundle && applyToolBundle(selectedBundle, "replace")}
+                      isDisabled={!selectedBundle}
+                      onPress={() => selectedBundle && applyToolBundle(selectedBundle, "replace")}
                     >
                       {lang === "zh" ? "替换" : "Replace"}
-                    </button>
+                    </VButton>
                   </div>
                 </div>
               ) : null}
@@ -1924,27 +1930,30 @@ export function ToolsRoute() {
                                 </span>
                               </span>
                               <div className={styles.segmentedControl} aria-label={tool.name}>
-                                <button
+                                <VButton
                                   type="button"
+                                  variant="ghost"
                                   className={mode === "inherited" || mode === "excluded" ? styles.segmentActive : styles.segmentButton}
-                                  onClick={() => updateToolPolicyMode(tool.name, "inherited")}
+                                  onPress={() => updateToolPolicyMode(tool.name, "inherited")}
                                 >
                                   {policyDraftModeLabel(mode === "excluded" ? "excluded" : "inherited", lang)}
-                                </button>
-                                <button
+                                </VButton>
+                                <VButton
                                   type="button"
+                                  variant="ghost"
                                   className={mode === "allowed" ? styles.segmentActive : styles.segmentButton}
-                                  onClick={() => updateToolPolicyMode(tool.name, "allowed")}
+                                  onPress={() => updateToolPolicyMode(tool.name, "allowed")}
                                 >
                                   {policyDraftModeLabel("allowed", lang)}
-                                </button>
-                                <button
+                                </VButton>
+                                <VButton
                                   type="button"
+                                  variant="ghost"
                                   className={mode === "blocked" ? styles.segmentActiveDanger : styles.segmentButton}
-                                  onClick={() => updateToolPolicyMode(tool.name, "blocked")}
+                                  onPress={() => updateToolPolicyMode(tool.name, "blocked")}
                                 >
                                   {policyDraftModeLabel("blocked", lang)}
-                                </button>
+                                </VButton>
                               </div>
                             </div>
                           );
@@ -1957,22 +1966,24 @@ export function ToolsRoute() {
                 <p className={styles.emptyState}>{lang === "zh" ? "当前没有可分配工具。" : "No assignable tools."}</p>
               )}
               <div className={styles.detailActions}>
-                <button
+                <VButton
                   type="button"
+                  variant="secondary"
                   className={styles.secondaryButton}
-                  disabled={!toolPolicyDirty || activePolicyAgentPending}
-                  onClick={() => setToolPolicyDraft(toolPolicyDraftFromAgent(activePolicyAgent))}
+                  isDisabled={!toolPolicyDirty || activePolicyAgentPending}
+                  onPress={() => setToolPolicyDraft(toolPolicyDraftFromAgent(activePolicyAgent))}
                 >
                   {lang === "zh" ? "重置草稿" : "Reset draft"}
-                </button>
-                <button
+                </VButton>
+                <VButton
                   type="button"
+                  variant="primary"
                   className={styles.primaryButton}
-                  disabled={!activePolicyAgent || !toolPolicyDirty || activePolicyAgentPending}
-                  onClick={saveToolPolicy}
+                  isDisabled={!activePolicyAgent || !toolPolicyDirty || activePolicyAgentPending}
+                  onPress={saveToolPolicy}
                 >
                   {activePolicyAgentPending ? (lang === "zh" ? "保存中..." : "Saving...") : (lang === "zh" ? "保存工具配置" : "Save tool config")}
-                </button>
+                </VButton>
               </div>
             </section>
           </section>
@@ -2190,26 +2201,28 @@ export function ToolsRoute() {
                 <pre>{jsonPreview(activeTool.testPolicy.argsPreview)}</pre>
               </section>
               <div className={styles.detailActions}>
-                <button
+                <VButton
                   type="button"
+                  variant="secondary"
                   className={styles.secondaryButton}
-                  disabled={!activeCanToggle || activeToolEnablePending}
-                  onClick={() => {
+                  isDisabled={!activeCanToggle || activeToolEnablePending}
+                  onPress={() => {
                     if (!activeTool) {
                       return;
                     }
                     enableMutation.mutate({ toolId: activeTool.id, enabled: !activeTool.enabled });
                   }}
                   title={activeCanToggle ? undefined : activeTool.blockReason || t("toolsEnableBlocked")}
+                  icon={activeTool.enabled ? <CircleSlash size={15} /> : <Power size={15} />}
                 >
-                  {activeTool.enabled ? <CircleSlash size={15} /> : <Power size={15} />}
                   {activeTool.enabled ? t("toolsDisable") : t("toolsEnable")}
-                </button>
-                <button
+                </VButton>
+                <VButton
                   type="button"
+                  variant="danger"
                   className={styles.dangerButton}
-                  disabled={!activeCanDelete}
-                  onClick={() => {
+                  isDisabled={!activeCanDelete}
+                  onPress={() => {
                     if (activeTool) {
                       const confirmed = window.confirm(
                         lang === "zh"
@@ -2223,15 +2236,16 @@ export function ToolsRoute() {
                     }
                   }}
                   title={activeTool.deleteAllowed ? undefined : activeTool.blockReason || t("toolsBuiltInProtected")}
+                  icon={<Trash2 size={15} />}
                 >
-                  <Trash2 size={15} />
                   {activeToolDeletePending ? t("deletingSelectedLogs") : t("deleteSelected")}
-                </button>
-                <button
+                </VButton>
+                <VButton
                   type="button"
+                  variant="secondary"
                   className={styles.secondaryButton}
-                  disabled={!activeTool || !activePolicyAgent || activeToolTestPending}
-                  onClick={() => {
+                  isDisabled={!activeTool || !activePolicyAgent || activeToolTestPending}
+                  onPress={() => {
                     if (activeTool && activePolicyAgent) {
                       testMutation.mutate({
                         toolId: activeTool.id,
@@ -2240,10 +2254,10 @@ export function ToolsRoute() {
                       });
                     }
                   }}
+                  icon={<FlaskConical size={15} />}
                 >
-                  <FlaskConical size={15} />
                   {activeToolTestPending ? t("toolsTesting") : t("toolsTest")}
-                </button>
+                </VButton>
               </div>
               {notice.text ? (
                 <p

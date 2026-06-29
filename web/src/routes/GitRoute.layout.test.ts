@@ -12,6 +12,13 @@ import shellDictionarySource from "../i18n/shellDictionary.ts?raw";
 const stylesSource = readFileSync(new URL("./GitRoute.module.css", import.meta.url), "utf-8");
 
 describe("GitRoute layout contract", () => {
+  it("routes Git page controls through VUI primitives", () => {
+    expect(routeSource).toContain("from \"../components/vui\"");
+    expect(routeSource).toContain("<VButton");
+    expect(routeSource).toContain("<VIconButton");
+    expect(routeSource).not.toMatch(/<button\b/);
+  });
+
   it("uses shell language state without loading the full app dictionary", () => {
     expect(routeSource).toContain("useGitRouteI18n");
     expect(routeSource).toContain("const { lang, t } = useGitRouteI18n()");
