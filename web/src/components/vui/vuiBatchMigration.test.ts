@@ -60,6 +60,21 @@ const routeShellTargets = [
     forbidden: ["<header className={styles.header}"],
   },
   {
+    path: "routes/MemoryRoute.tsx",
+    expected: ["VRouteHeader"],
+    forbidden: ["<header className={styles.header}"],
+  },
+  {
+    path: "routes/ResearchFlowCanvasRoute.tsx",
+    expected: ["VRouteHeader"],
+    forbidden: ["<header className={styles.header}"],
+  },
+  {
+    path: "routes/ResearchRoute.tsx",
+    expected: ["VRouteHeader"],
+    forbidden: ["<header className={styles.header}"],
+  },
+  {
     path: "routes/GitRoute.tsx",
     expected: ["VRouteHeader", "VIconButton"],
     forbidden: ["<header className={styles.header}"],
