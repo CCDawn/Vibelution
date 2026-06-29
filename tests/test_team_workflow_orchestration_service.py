@@ -31,27 +31,9 @@ def test_source_collection_stage_round_sync_has_single_implementation():
 
 def test_source_collection_agent_role_registries_only_include_four_stage_roles():
     expected = {"source_finder", "source_extractor", "source_relation_mapper", "source_ingestor"}
-    retired = {
-        "challenge_cup_data_discovery",
-        "challenge_cup_content_extraction",
-        "challenge_cup_source_quality",
-        "knowledge_expansion_content_extraction",
-        "knowledge_expansion_source_quality",
-        "knowledge_expansion_candidate_graph",
-        "candidate_graph",
-    }
 
     assert agent_directory_service.RESEARCH_SOURCE_ROLE_KEYS == expected
     assert agent_role_tool_profile_service.RESEARCH_SOURCE_ROLE_KEYS == expected
-    assert retired.isdisjoint(agent_directory_service.RESEARCH_SOURCE_ROLE_KEYS)
-    assert retired.isdisjoint(agent_role_tool_profile_service.RESEARCH_SOURCE_ROLE_KEYS)
-    for role_key in retired:
-        assert agent_role_tool_profile_service.get_role_tool_profile(role_key) is None
-    for role_key in expected:
-        profile = agent_role_tool_profile_service.get_role_tool_profile(role_key)
-        assert profile is not None
-        assert "task_create_tool" in profile["allowedTools"]
-        assert "task_update_tool" in profile["allowedTools"]
 
 
 def test_source_collection_formal_knowledge_boundary_requires_source_ingestor_stage():
@@ -1236,17 +1218,17 @@ def test_start_source_collection_run_creates_generic_run_and_assignments(tmp_pat
     assert response["workflow"]["activeWorkflowItems"][0]["candidateId"] == response["run"]["runId"]
     assert response["workflow"]["activeWorkflowItems"][0]["status"] == "source_collection_started"
 
-def test_knowledge_expansion_team_agents_purge_legacy_source_role_agents(tmp_path, monkeypatch):
+def test_knowledge_expansion_team_agents_purge_unregistered_source_role_agents(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     legacy_agent = agent_directory_service.create_agent_instance(
-        display_name="旧资料质检",
+        display_name="未注册资料角色",
         created_by=team_service.KNOWLEDGE_EXPANSION_TEAM_AGENT_CREATED_BY,
-        role_key="knowledge_expansion_source_quality",
+        role_key="unsupported_source_role",
         metadata={
             "knowledgeExpansionTeamId": team_service.KNOWLEDGE_EXPANSION_TEAM_ID,
             "knowledgeExpansionTeamManagedVersion": 1,
-            "knowledgeExpansionTeamRole": "source_quality",
-            "knowledgeExpansionTeamRoleKey": "knowledge_expansion_source_quality",
+            "knowledgeExpansionTeamRole": "unsupported_source_role",
+            "knowledgeExpansionTeamRoleKey": "unsupported_source_role",
         },
     )
 
@@ -1263,17 +1245,17 @@ def test_knowledge_expansion_team_agents_purge_legacy_source_role_agents(tmp_pat
     ]
 
 
-def test_challenge_cup_team_agents_purge_legacy_source_role_agents(tmp_path, monkeypatch):
+def test_challenge_cup_team_agents_purge_unregistered_source_role_agents(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     legacy_agent = agent_directory_service.create_agent_instance(
         display_name="旧资料发现",
         created_by=team_service.CHALLENGE_CUP_RESEARCH_TEAM_AGENT_CREATED_BY,
-        role_key="challenge_cup_data_discovery",
+        role_key="unsupported_source_role",
         metadata={
             "challengeCupTeamId": team_service.CHALLENGE_CUP_RESEARCH_TEAM_ID,
             "challengeCupTeamManagedVersion": 1,
-            "challengeCupTeamRole": "data_discovery",
-            "challengeCupTeamRoleKey": "challenge_cup_data_discovery",
+            "challengeCupTeamRole": "unsupported_source_role",
+            "challengeCupTeamRoleKey": "unsupported_source_role",
         },
     )
 
@@ -1283,10 +1265,10 @@ def test_challenge_cup_team_agents_purge_legacy_source_role_agents(tmp_path, mon
     assert legacy_agent["agentId"] in result["purgedAgentIds"]
     assert agent_directory_service.get_agent(legacy_agent["agentId"], include_archived=True) is None
     assert {"source_finder", "source_extractor", "source_relation_mapper", "source_ingestor"} <= roles
-    assert "data_discovery" not in roles
+    assert "unsupported_source_role" not in roles
 
 
-def test_legacy_source_collection_stage_tasks_are_rejected(tmp_path, monkeypatch):
+def test_unregistered_source_collection_stage_tasks_are_rejected(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
@@ -1294,15 +1276,15 @@ def test_legacy_source_collection_stage_tasks_are_rejected(tmp_path, monkeypatch
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="旧资料质检")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": agent["agentId"], "role": "source_quality", "agentName": "旧资料质检"}],
+        members=[{"agentId": agent["agentId"], "role": "unsupported_source_role", "agentName": "未注册资料角色"}],
     )
     stage_response = team_workflow_orchestration_service.start_research_stage_round(
         team["teamId"],
         {
             "stageType": "knowledge_collection",
             "topic": "预测编码资料审查",
-            "agentRoles": ["source_quality"],
-            "agentIds": {"source_quality": agent["agentId"]},
+            "agentRoles": ["unsupported_source_role"],
+            "agentIds": {"unsupported_source_role": agent["agentId"]},
             "querySeeds": ["predictive coding source review"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -1313,7 +1295,7 @@ def test_legacy_source_collection_stage_tasks_are_rejected(tmp_path, monkeypatch
         team_workflow_orchestration_service.start_source_collection_stage_session_task(
             team["teamId"],
             run_id,
-            {"stageId": "screening", "agentId": agent["agentId"], "agentRole": "source_quality"},
+            {"stageId": "screening", "agentId": agent["agentId"], "agentRole": "unsupported_source_role"},
         )
 
 
@@ -1390,7 +1372,7 @@ def test_start_source_collection_run_ignores_invalid_collection_roles(tmp_path, 
 
     response = team_workflow_orchestration_service.start_source_collection_run(
         team["teamId"],
-        {"agentRoles": ["data_discovery", "research_specific_role"]},
+        {"agentRoles": ["unsupported_source_role", "research_specific_role"]},
     )
 
     expected_roles = {"source_finder", "source_extractor", "source_relation_mapper", "source_ingestor"}
@@ -1401,13 +1383,13 @@ def test_start_source_collection_run_ignores_invalid_collection_roles(tmp_path, 
 def test_start_source_collection_run_maps_roles_to_team_canvas_agents(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     coordinator = session_service.create_chat_session(title="Coordinator")
-    legacy_discovery = session_service.create_chat_session(title="Legacy Discovery")
+    other_research_agent = session_service.create_chat_session(title="Other Research Agent")
     finder = session_service.create_chat_session(title="Source Finder")
     extractor = session_service.create_chat_session(title="Source Extractor")
     organization = {
         "agents": [
             {"nodeId": "coordinator", "agentId": coordinator["agentId"], "displayName": "Coordinator", "role": "ceo", "status": "active"},
-            {"nodeId": "legacy-discovery", "agentId": legacy_discovery["agentId"], "displayName": "Legacy Discovery", "role": "data_discovery", "status": "active"},
+            {"nodeId": "other-research-agent", "agentId": other_research_agent["agentId"], "displayName": "Other Research Agent", "role": "other_research_role", "status": "active"},
             {"nodeId": "finder", "agentId": finder["agentId"], "displayName": "Source Finder", "role": "source_finder", "status": "active"},
             {"nodeId": "extractor", "agentId": extractor["agentId"], "displayName": "Source Extractor", "role": "source_extractor", "status": "active"},
         ],
@@ -3068,7 +3050,7 @@ def test_source_collection_stage_card_projection_ignores_stale_agent_tasks_for_c
             "runId": run["runId"],
             "stageId": "candidate",
             "agentId": "agent-old-content-extraction",
-            "agentRole": "content_extraction",
+            "agentRole": "source_extractor",
             "sessionId": "session-old-content-extraction",
             "status": "running",
             "summary": "旧会话的资料提炼任务仍显示运行中。",
@@ -4065,7 +4047,7 @@ def test_execute_source_collection_search_filters_previously_excluded_sources(tm
         {
             "topic": "神经预测编码资料",
             "agentRoles": ["source_finder"],
-            "agentIds": {"source_finder": "Data Discovery Agent"},
+            "agentIds": {"source_finder": "Source Finder Agent"},
             "querySeeds": ["predictive coding hierarchy"],
             "promptCachePolicy": {"requirement": "disabled"},
             "maxResultsPerQuery": 2,
@@ -4527,7 +4509,7 @@ def test_candidate_graph_stage_writeback_materializes_candidate_graph(tmp_path, 
     assert graph_projection["counts"]["artifact"] == 2
 
 
-def test_legacy_source_quality_stage_task_is_rejected(tmp_path, monkeypatch):
+def test_unregistered_quality_stage_task_is_rejected(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
@@ -4535,15 +4517,15 @@ def test_legacy_source_quality_stage_task_is_rejected(tmp_path, monkeypatch):
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料审查")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": agent["agentId"], "role": "source_quality", "agentName": "资料审查"}],
+        members=[{"agentId": agent["agentId"], "role": "unsupported_source_role", "agentName": "资料审查"}],
     )
     stage_response = team_workflow_orchestration_service.start_research_stage_round(
         team["teamId"],
         {
             "stageType": "knowledge_collection",
             "topic": "预测编码资料审查",
-            "agentRoles": ["source_quality"],
-            "agentIds": {"source_quality": agent["agentId"]},
+            "agentRoles": ["unsupported_source_role"],
+            "agentIds": {"unsupported_source_role": agent["agentId"]},
             "querySeeds": ["predictive coding source review"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -4554,11 +4536,11 @@ def test_legacy_source_quality_stage_task_is_rejected(tmp_path, monkeypatch):
         team_workflow_orchestration_service.start_source_collection_stage_session_task(
             team["teamId"],
             run_id,
-            {"stageId": "screening", "agentId": agent["agentId"], "agentRole": "source_quality"},
+            {"stageId": "screening", "agentId": agent["agentId"], "agentRole": "unsupported_source_role"},
         )
 
 
-def test_legacy_candidate_graph_stage_task_is_rejected(tmp_path, monkeypatch):
+def test_unregistered_candidate_graph_stage_task_is_rejected(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     _stub_source_collection_search_background(monkeypatch)
@@ -4566,15 +4548,15 @@ def test_legacy_candidate_graph_stage_task_is_rejected(tmp_path, monkeypatch):
     session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="候选图谱")
     team = team_service.create_team(
         name="挑战杯科研团队",
-        members=[{"agentId": agent["agentId"], "role": "candidate_graph", "agentName": "候选图谱"}],
+        members=[{"agentId": agent["agentId"], "role": "unsupported_relation_role", "agentName": "候选图谱"}],
     )
     stage_response = team_workflow_orchestration_service.start_research_stage_round(
         team["teamId"],
         {
             "stageType": "knowledge_collection",
             "topic": "预测编码候选图谱",
-            "agentRoles": ["candidate_graph"],
-            "agentIds": {"candidate_graph": agent["agentId"]},
+            "agentRoles": ["unsupported_relation_role"],
+            "agentIds": {"unsupported_relation_role": agent["agentId"]},
             "querySeeds": ["predictive coding candidate graph"],
             "promptCachePolicy": {"requirement": "disabled"},
         },
@@ -4585,7 +4567,7 @@ def test_legacy_candidate_graph_stage_task_is_rejected(tmp_path, monkeypatch):
         team_workflow_orchestration_service.start_source_collection_stage_session_task(
             team["teamId"],
             run_id,
-            {"stageId": "graph", "agentId": agent["agentId"], "agentRole": "candidate_graph"},
+            {"stageId": "graph", "agentId": agent["agentId"], "agentRole": "unsupported_relation_role"},
         )
 
 
@@ -4633,7 +4615,7 @@ def test_execute_source_collection_search_writes_records_and_imports_candidates(
             "sourceTypes": ["paper"],
             "maxResultsPerQuery": 2,
             "agentRoles": ["source_finder"],
-            "agentIds": {"source_finder": "Data Discovery Agent"},
+            "agentIds": {"source_finder": "Source Finder Agent"},
         },
     )
 
@@ -4722,7 +4704,7 @@ def test_execute_source_collection_search_rejects_low_relevance_results_before_s
             "sourceTypes": ["paper"],
             "maxResultsPerQuery": 1,
             "agentRoles": ["source_finder"],
-            "agentIds": {"source_finder": "Data Discovery Agent"},
+            "agentIds": {"source_finder": "Source Finder Agent"},
         },
     )
 
@@ -6143,7 +6125,7 @@ def test_assess_source_quality_batch_processes_pending_sources_by_agent(tmp_path
             "summary": "Neural predictive coding evidence for network learning and attention mechanisms.",
             "tags": ["neuro", "algorithm"],
             "allowedForAnalysis": True,
-            "createdByAgent": "Data Discovery Agent",
+            "createdByAgent": "Source Finder Agent",
         },
     )["candidate"]
     revision_source = team_workflow_orchestration_service.register_candidate_source(
@@ -6152,20 +6134,20 @@ def test_assess_source_quality_batch_processes_pending_sources_by_agent(tmp_path
             "title": "Unlocated source",
             "sourceKind": "paper",
             "summary": "Potentially relevant but missing a source location.",
-            "createdByAgent": "Data Discovery Agent",
+            "createdByAgent": "Source Finder Agent",
         },
     )["candidate"]
 
     response = team_workflow_orchestration_service.assess_source_quality_batch(
         team["teamId"],
-        {"assessedByAgent": "Source Quality Agent"},
+        {"assessedByAgent": "Source Extractor Agent"},
     )
     status_payload = team_workflow_orchestration_service.get_source_quality_status(team["teamId"])
     decisions = {item["candidateId"]: item["decision"] for item in response["assessments"]}
 
     assert response["status"] == "completed"
     assert response["executionMode"] == "source_quality_agent_batch"
-    assert response["assessedByAgent"] == "Source Quality Agent"
+    assert response["assessedByAgent"] == "Source Extractor Agent"
     assert response["summary"]["assessedCandidateCount"] == 2
     assert response["summary"]["approvedCandidateCount"] == 1
     assert response["summary"]["needsRevisionCandidateCount"] == 1
@@ -6192,7 +6174,7 @@ def test_assess_source_quality_batch_reports_no_pending_candidates(tmp_path, mon
             "summary": "Neural network predictive coding.",
             "tags": ["neuro", "network"],
             "allowedForAnalysis": True,
-            "createdByAgent": "Data Discovery Agent",
+            "createdByAgent": "Source Finder Agent",
         },
     )["candidate"]
 
@@ -6223,7 +6205,7 @@ def test_assess_source_quality_batch_force_rescreens_assessed_sources(tmp_path, 
             "summary": "Neural network predictive coding.",
             "tags": ["neuro", "network"],
             "allowedForAnalysis": True,
-            "createdByAgent": "Data Discovery Agent",
+            "createdByAgent": "Source Finder Agent",
         },
     )["candidate"]
 
@@ -7279,7 +7261,7 @@ def test_candidate_graph_builds_candidate_only_chain(tmp_path, monkeypatch):
         },
     )
 
-    response = team_workflow_orchestration_service.build_candidate_graph(team["teamId"], {"createdByAgent": "Candidate Graph Preview Agent"})
+    response = team_workflow_orchestration_service.build_candidate_graph(team["teamId"], {"createdByAgent": "资料关系整理 Agent"})
 
     assert response["candidateGraph"]["candidateType"] == "candidate_graph"
     assert response["candidateGraph"]["currentState"] == "candidate_graph_visible"
@@ -7344,7 +7326,7 @@ def test_candidate_graph_agent_curation_uses_approved_sources_only(tmp_path, mon
             "summary": "Neural predictive coding supports learning and attention mechanisms.",
             "tags": ["neuro", "algorithm"],
             "allowedForAnalysis": True,
-            "createdByAgent": "Data Discovery Agent",
+            "createdByAgent": "Source Finder Agent",
         },
     )["candidate"]
     revision_source = team_workflow_orchestration_service.register_candidate_source(
@@ -7353,7 +7335,7 @@ def test_candidate_graph_agent_curation_uses_approved_sources_only(tmp_path, mon
             "title": "Untraceable neuroscience note",
             "sourceKind": "paper",
             "summary": "Potentially relevant but missing a source location.",
-            "createdByAgent": "Data Discovery Agent",
+            "createdByAgent": "Source Finder Agent",
         },
     )["candidate"]
     team_workflow_orchestration_service.assess_source_quality_batch(team["teamId"], {})
@@ -7361,22 +7343,22 @@ def test_candidate_graph_agent_curation_uses_approved_sources_only(tmp_path, mon
     response = team_workflow_orchestration_service.build_candidate_graph(
         team["teamId"],
         {
-            "createdByAgent": "Candidate Graph Agent",
+            "createdByAgent": "Source Relation Mapper Agent",
             "curationMode": "agent_approved_only",
         },
     )
 
     graph_node_ids = {node["candidateId"] for node in response["graph"]["nodes"]}
     assert response["graph"]["summary"]["curationMode"] == "agent_approved_only"
-    assert response["graph"]["summary"]["createdByAgent"] == "Candidate Graph Agent"
-    assert response["graph"]["summary"]["stageAgentRole"] == "candidate_graph"
+    assert response["graph"]["summary"]["createdByAgent"] == "Source Relation Mapper Agent"
+    assert response["graph"]["summary"]["stageAgentRole"] == "source_relation_mapper"
     assert response["reusedCandidateGraph"] is False
     assert response["ingestionFingerprint"]
     assert response["graph"]["summary"]["nodeCount"] == 1
     assert response["graph"]["summary"]["filteredCandidateCount"] == 1
-    assert response["candidateGraph"]["createdByAgent"] == "Candidate Graph Agent"
-    assert response["candidateGraph"]["metadata"]["stageAgentRole"] == "candidate_graph"
-    assert response["candidateGraph"]["metadata"]["agentProcess"][0]["agentRole"] == "candidate_graph"
+    assert response["candidateGraph"]["createdByAgent"] == "Source Relation Mapper Agent"
+    assert response["candidateGraph"]["metadata"]["stageAgentRole"] == "source_relation_mapper"
+    assert response["candidateGraph"]["metadata"]["agentProcess"][0]["agentRole"] == "source_relation_mapper"
     assert response["candidateGraph"]["metadata"]["agentProcess"][1]["nextAction"] == "knowledge_ingestion_precheck"
     assert approved_source["candidateId"] in graph_node_ids
     assert revision_source["candidateId"] not in graph_node_ids
@@ -7384,7 +7366,7 @@ def test_candidate_graph_agent_curation_uses_approved_sources_only(tmp_path, mon
     reused = team_workflow_orchestration_service.build_candidate_graph(
         team["teamId"],
         {
-            "createdByAgent": "Candidate Graph Agent",
+            "createdByAgent": "Source Relation Mapper Agent",
             "curationMode": "agent_approved_only",
         },
     )
@@ -7409,16 +7391,16 @@ def test_knowledge_ingestion_precheck_creates_candidate_only_steward_pack(tmp_pa
             "summary": "Neural predictive coding supports learning and attention mechanisms.",
             "tags": ["neuro", "algorithm"],
             "allowedForAnalysis": True,
-            "createdByAgent": "Data Discovery Agent",
+            "createdByAgent": "Source Finder Agent",
         },
     )["candidate"]
     team_workflow_orchestration_service.assess_source_quality_batch(
         team["teamId"],
-        {"assessedByAgent": "Source Quality Agent"},
+        {"assessedByAgent": "Source Extractor Agent"},
     )
     graph_response = team_workflow_orchestration_service.build_candidate_graph(
         team["teamId"],
-        {"createdByAgent": "Candidate Graph Agent", "curationMode": "agent_approved_only"},
+        {"createdByAgent": "Source Relation Mapper Agent", "curationMode": "agent_approved_only"},
     )
 
     response = team_workflow_orchestration_service.run_knowledge_ingestion_precheck(
@@ -7839,7 +7821,7 @@ def test_knowledge_collection_ingestion_notifies_steward_agent_for_final_ingesti
             "summary": "Neural predictive coding evidence for neural-network hierarchy and learning.",
             "tags": ["neuroscience", "algorithm"],
             "allowedForAnalysis": True,
-            "createdByAgent": "Data Discovery Agent",
+            "createdByAgent": "Source Finder Agent",
         },
     )
     team_workflow_orchestration_service.register_candidate_source(
@@ -7959,7 +7941,7 @@ def test_knowledge_collection_ingestion_auto_closes_to_formal_item_via_coordinat
             "summary": "Neural predictive coding evidence for neural-network hierarchy and learning.",
             "tags": ["neuroscience", "algorithm"],
             "allowedForAnalysis": True,
-            "createdByAgent": "Data Discovery Agent",
+            "createdByAgent": "Source Finder Agent",
         },
         {
             "title": "Synaptic plasticity learning rule review",
@@ -8041,7 +8023,7 @@ def test_knowledge_collection_ingestion_uses_scoped_existing_team_base_when_ids_
             "summary": "Neural predictive coding evidence for neural-network hierarchy and learning.",
             "tags": ["neuroscience", "algorithm"],
             "allowedForAnalysis": True,
-            "createdByAgent": "Data Discovery Agent",
+            "createdByAgent": "Source Finder Agent",
         },
         {
             "title": "Synaptic plasticity learning rule review",
@@ -8094,7 +8076,7 @@ def test_knowledge_collection_ingestion_auto_approve_needs_distinct_reviewer(tmp
             "summary": "Neural predictive coding evidence for neural-network hierarchy and learning.",
             "tags": ["neuroscience", "algorithm"],
             "allowedForAnalysis": True,
-            "createdByAgent": "Data Discovery Agent",
+            "createdByAgent": "Source Finder Agent",
         },
     )
 
@@ -8152,7 +8134,7 @@ def test_knowledge_collection_ingestion_background_completes_and_reports_status(
             "summary": "Neural predictive coding evidence for neural-network hierarchy and learning.",
             "tags": ["neuroscience", "algorithm"],
             "allowedForAnalysis": True,
-            "createdByAgent": "Data Discovery Agent",
+            "createdByAgent": "Source Finder Agent",
         },
         {
             "title": "Synaptic plasticity learning rule review",

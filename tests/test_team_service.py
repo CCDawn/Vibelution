@@ -197,28 +197,30 @@ def test_ensure_research_team_from_organization_uses_stable_team_id(tmp_path, mo
 
 def test_research_team_sync_applies_challenge_cup_agent_tool_profiles(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    discovery = agent_directory_service.create_agent_instance(display_name="Discovery", direct_session_id="session-discovery")
-    acquisition = agent_directory_service.create_agent_instance(display_name="Acquisition", direct_session_id="session-acquisition")
-    extraction = agent_directory_service.create_agent_instance(display_name="Extraction", direct_session_id="session-extraction")
+    finder = agent_directory_service.create_agent_instance(display_name="Finder", direct_session_id="session-finder")
+    extractor = agent_directory_service.create_agent_instance(display_name="Extractor", direct_session_id="session-extractor")
+    mapper = agent_directory_service.create_agent_instance(display_name="Mapper", direct_session_id="session-mapper")
     organization = {
         "updatedAt": "2026-05-29T00:00:00Z",
         "agents": [
-            {"nodeId": "discovery", "agentId": discovery["agentId"], "displayName": "Discovery", "role": "data_discovery", "status": "active"},
-            {"nodeId": "acquisition", "agentId": acquisition["agentId"], "displayName": "Acquisition", "role": "source_acquisition", "status": "active"},
-            {"nodeId": "extraction", "agentId": extraction["agentId"], "displayName": "Extraction", "role": "content_extraction", "status": "active"},
+            {"nodeId": "finder", "agentId": finder["agentId"], "displayName": "Finder", "role": "source_finder", "status": "active"},
+            {"nodeId": "extractor", "agentId": extractor["agentId"], "displayName": "Extractor", "role": "source_extractor", "status": "active"},
+            {"nodeId": "mapper", "agentId": mapper["agentId"], "displayName": "Mapper", "role": "source_relation_mapper", "status": "active"},
         ],
         "edges": [],
     }
 
     team = team_service.ensure_research_team_from_organization(organization)
 
-    assert [member["role"] for member in team["members"]] == ["data_discovery", "source_acquisition", "content_extraction"]
+    assert [member["role"] for member in team["members"]] == ["source_finder", "source_extractor", "source_relation_mapper"]
     cases = {
-        discovery["agentId"]: (
-            "challenge_cup_data_discovery",
+        finder["agentId"]: (
+            "source_finder",
             [
                 "agent_message_tool",
                 "research_knowledge_query_tool",
+                "task_create_tool",
+                "task_update_tool",
                 "source_collection_context_tool",
                 "source_collection_stage_writeback_tool",
                 "batch_web_search_tool",
@@ -226,31 +228,31 @@ def test_research_team_sync_applies_challenge_cup_agent_tool_profiles(tmp_path, 
                 "project_search_tool",
                 "news_search_tool",
                 "search_summarize_sources_tool",
-            ],
-        ),
-        acquisition["agentId"]: (
-            "challenge_cup_source_acquisition",
-            [
-                "agent_message_tool",
-                "research_knowledge_query_tool",
-                "source_collection_context_tool",
-                "source_collection_stage_writeback_tool",
                 "web_fetch_tool",
-                "batch_web_search_tool",
-                "paper_search_tool",
-                "project_search_tool",
-                "search_summarize_sources_tool",
             ],
         ),
-        extraction["agentId"]: (
-            "challenge_cup_content_extraction",
+        extractor["agentId"]: (
+            "source_extractor",
             [
                 "agent_message_tool",
                 "research_knowledge_query_tool",
+                "task_create_tool",
+                "task_update_tool",
                 "source_collection_context_tool",
                 "source_collection_stage_writeback_tool",
                 "web_fetch_tool",
                 "search_summarize_sources_tool",
+            ],
+        ),
+        mapper["agentId"]: (
+            "source_relation_mapper",
+            [
+                "agent_message_tool",
+                "research_knowledge_query_tool",
+                "task_create_tool",
+                "task_update_tool",
+                "source_collection_context_tool",
+                "source_collection_stage_writeback_tool",
             ],
         ),
     }
@@ -266,16 +268,16 @@ def test_research_team_sync_applies_challenge_cup_agent_tool_profiles(tmp_path, 
 
 def test_research_team_repair_applies_challenge_cup_agent_tool_profiles(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    discovery = agent_directory_service.create_agent_instance(display_name="Discovery", direct_session_id="session-discovery")
+    finder = agent_directory_service.create_agent_instance(display_name="Finder", direct_session_id="session-finder")
     team_service.create_team(
         name="挑战杯ai科研团队",
         purpose="科研协作",
         members=[
             {
-                "agentId": discovery["agentId"],
-                "memberId": "discovery",
-                "role": "data_discovery",
-                "purpose": "Discovery",
+                "agentId": finder["agentId"],
+                "memberId": "finder",
+                "role": "source_finder",
+                "purpose": "Finder",
             }
         ],
         team_kind="research",
@@ -284,12 +286,14 @@ def test_research_team_repair_applies_challenge_cup_agent_tool_profiles(tmp_path
 
     team_service.list_teams()
 
-    agent = agent_directory_service.get_agent(discovery["agentId"])
+    agent = agent_directory_service.get_agent(finder["agentId"])
     assert agent["primaryMode"] == "research"
-    assert agent["roleKey"] == "challenge_cup_data_discovery"
+    assert agent["roleKey"] == "source_finder"
     assert agent["toolPolicy"]["allowedTools"] == [
         "agent_message_tool",
         "research_knowledge_query_tool",
+        "task_create_tool",
+        "task_update_tool",
         "source_collection_context_tool",
         "source_collection_stage_writeback_tool",
         "batch_web_search_tool",
@@ -297,28 +301,27 @@ def test_research_team_repair_applies_challenge_cup_agent_tool_profiles(tmp_path
         "project_search_tool",
         "news_search_tool",
         "search_summarize_sources_tool",
+        "web_fetch_tool",
     ]
     assert agent["toolPolicy"]["mutationAccess"] == "none"
     assert agent["toolPolicy"]["writeScopes"] == []
 
 
-def test_challenge_cup_research_team_uses_knowledge_base_admin_for_ingestion_review(tmp_path, monkeypatch):
+def test_challenge_cup_research_team_uses_source_ingestor_for_governed_ingestion(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
 
     result = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
     team = result["team"]
-    admin_member = next(member for member in team["members"] if member["role"] == "knowledge_steward")
-    admin_agent = agent_directory_service.get_agent(admin_member["agentId"])
+    ingestor_member = next(member for member in team["members"] if member["role"] == "source_ingestor")
+    ingestor_agent = agent_directory_service.get_agent(ingestor_member["agentId"])
+    policy = agent_directory_service.resolve_tool_policy_for_agent(ingestor_member["agentId"])
 
-    assert admin_member["agentId"] != agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
-    assert admin_member["purpose"] == "知识库管理员入库审核"
-    assert all("资料入库" not in str(value) for value in [admin_member["agentName"], admin_member["purpose"]])
-    assert admin_agent["displayName"]
-    assert "资料入库" not in admin_agent["displayName"]
-    assert admin_agent["roleKey"] == agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY
-    assert admin_agent["metadata"]["functionalDisplayName"] == "知识库管理员"
-    assert admin_agent["metadata"]["challengeCupTeamRole"] == "knowledge_steward"
-    assert admin_agent["metadata"]["managedDomain"] == "challenge_cup_neuro_algorithm"
+    assert ingestor_agent["roleKey"] == "source_ingestor"
+    assert ingestor_agent["metadata"]["challengeCupTeamRole"] == "source_ingestor"
+    assert "knowledge_ingestion_tool" in policy["allowedTools"]
+    assert "knowledge_proposal_tool" in policy["allowedTools"]
+    assert "batch_web_search_tool" not in policy["allowedTools"]
+    assert "cli_tool" not in policy["allowedTools"]
 
 
 def test_knowledge_expansion_team_agents_seed_complete_team(tmp_path, monkeypatch):
@@ -332,65 +335,53 @@ def test_knowledge_expansion_team_agents_seed_complete_team(tmp_path, monkeypatc
     assert team["teamSource"] == "knowledge_expansion"
     assert team["linkedChatRoom"]["purpose"] == "knowledge_expansion"
     assert [member["role"] for member in team["members"]] == [
-        "source_intake",
-        "content_extraction",
-        "source_quality",
-        "candidate_graph",
-        "knowledge_steward",
+        "source_finder",
+        "source_extractor",
+        "source_relation_mapper",
+        "source_ingestor",
     ]
-    source_member = next(member for member in team["members"] if member["role"] == "source_intake")
-    steward_member = next(member for member in team["members"] if member["role"] == "knowledge_steward")
+    source_member = next(member for member in team["members"] if member["role"] == "source_finder")
+    ingestor_member = next(member for member in team["members"] if member["role"] == "source_ingestor")
     source_agent = agent_directory_service.get_agent(source_member["agentId"])
-    steward_agent = agent_directory_service.get_agent(steward_member["agentId"])
+    ingestor_agent = agent_directory_service.get_agent(ingestor_member["agentId"])
 
-    assert source_agent["roleKey"] == "knowledge_expansion_source_intake"
+    assert source_agent["roleKey"] == "source_finder"
     assert source_agent["metadata"]["knowledgeExpansionTeamId"] == "knowledge-expansion-team"
-    assert source_agent["metadata"]["knowledgeExpansionTeamRole"] == "source_intake"
+    assert source_agent["metadata"]["knowledgeExpansionTeamRole"] == "source_finder"
     assert source_agent["metadata"]["conversationIndexVisibility"] == (
         agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
     )
     assert source_agent["metadata"]["showInSessionIndex"] is False
     assert source_agent["directSessionId"]
     assert session_service.get_session_detail(source_agent["directSessionId"])
-    assert steward_agent["roleKey"] == "knowledge_steward"
-    assert steward_agent["agentId"] == agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
-    assert steward_agent["metadata"]["knowledgeExpansionTeamRole"] == "knowledge_steward"
+    assert ingestor_agent["roleKey"] == "source_ingestor"
+    assert ingestor_agent["metadata"]["knowledgeExpansionTeamRole"] == "source_ingestor"
 
     source_policy = agent_directory_service.resolve_tool_policy_for_agent(source_agent["agentId"])
-    steward_policy = agent_directory_service.resolve_tool_policy_for_agent(steward_agent["agentId"])
+    ingestor_policy = agent_directory_service.resolve_tool_policy_for_agent(ingestor_agent["agentId"])
     assert "paper_search_tool" in source_policy["allowedTools"]
     assert "knowledge_ingestion_tool" not in source_policy["allowedTools"]
-    assert "knowledge_ingestion_tool" in steward_policy["allowedTools"]
-    assert "knowledge_proposal_tool" in steward_policy["allowedTools"]
+    assert "knowledge_ingestion_tool" in ingestor_policy["allowedTools"]
+    assert "knowledge_proposal_tool" in ingestor_policy["allowedTools"]
 
     canvas = team_service.get_team_canvas("knowledge-expansion-team")
     assert {node["agentId"] for node in canvas["nodes"]} == {member["agentId"] for member in team["members"]}
     assert team_service.knowledge_expansion_team_agents_need_repair() is False
 
 
-def test_knowledge_steward_roles_are_per_team_agents_with_matching_capabilities(tmp_path, monkeypatch):
+def test_system_teams_do_not_embed_global_knowledge_steward_as_member(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
 
     research = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)["team"]
     expansion = team_service.ensure_knowledge_expansion_team_agents(purge_stale=True)["team"]
+    global_steward = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID)
 
-    research_steward = next(member for member in research["members"] if member["role"] == "knowledge_steward")
-    expansion_steward = next(member for member in expansion["members"] if member["role"] == "knowledge_steward")
-    research_agent = agent_directory_service.get_agent(research_steward["agentId"])
-    expansion_agent = agent_directory_service.get_agent(expansion_steward["agentId"])
-
-    assert research_steward["agentId"] != expansion_steward["agentId"]
-    assert research_agent["roleKey"] == agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY
-    assert expansion_agent["roleKey"] == agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY
-    assert research_agent["metadata"]["challengeCupTeamRole"] == "knowledge_steward"
-    assert expansion_agent["metadata"]["knowledgeExpansionTeamRole"] == "knowledge_steward"
-
-    research_policy = agent_directory_service.resolve_tool_policy_for_agent(research_steward["agentId"])
-    expansion_policy = agent_directory_service.resolve_tool_policy_for_agent(expansion_steward["agentId"])
-    assert research_policy["allowedTools"] == expansion_policy["allowedTools"]
-    assert research_policy["preferredTools"] == expansion_policy["preferredTools"]
-    assert research_policy["mutationAccess"] == expansion_policy["mutationAccess"] == "restricted"
-    assert "knowledge_ingestion_tool" in research_policy["allowedTools"]
+    assert global_steward
+    assert global_steward["roleKey"] == agent_directory_service.KNOWLEDGE_STEWARD_ROLE_KEY
+    assert "knowledge_steward" not in {member["role"] for member in research["members"]}
+    assert "knowledge_steward" not in {member["role"] for member in expansion["members"]}
+    assert all(member["agentId"] != global_steward["agentId"] for member in research["members"])
+    assert all(member["agentId"] != global_steward["agentId"] for member in expansion["members"])
 
     research_canvas = team_service.get_team_canvas("research-team")
     expansion_canvas = team_service.get_team_canvas("knowledge-expansion-team")
@@ -400,27 +391,17 @@ def test_knowledge_steward_roles_are_per_team_agents_with_matching_capabilities(
     assert all(issue["code"] != "agent_team_conflict" for issue in expansion_canvas["validation"]["issues"])
 
 
-def test_challenge_cup_research_team_ignores_legacy_global_steward_metadata(tmp_path, monkeypatch):
+def test_challenge_cup_research_team_keeps_global_knowledge_steward_separate(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent_directory_service.repair_agent_directory()
     global_steward = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID)
-    agent_directory_service.update_agent_instance(
-        global_steward["agentId"],
-        metadata={
-            "challengeCupTeamId": "research-team",
-            "challengeCupTeamManagedVersion": 1,
-            "challengeCupTeamRole": "knowledge_steward",
-            "challengeCupTeamRoleKey": "knowledge_steward",
-        },
-        status="active",
-    )
 
     result = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
     team = result["team"]
-    steward_member = next(member for member in team["members"] if member["role"] == "knowledge_steward")
 
-    assert steward_member["agentId"] != agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
-    assert all(item["agentId"] != agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID for item in result["purgeResults"])
+    assert all(member["role"] != "knowledge_steward" for member in team["members"])
+    assert all(member["agentId"] != global_steward["agentId"] for member in team["members"])
+    assert all(item["agentId"] != global_steward["agentId"] for item in result["purgeResults"])
     assert agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID, include_archived=False)
 
 
@@ -437,10 +418,10 @@ def test_challenge_cup_research_team_default_canvas_has_stage_relationships(tmp_
     }
 
     assert canvas["validation"]["valid"] is True
-    assert ("research_coordination", "data_discovery", "reports_to") in edge_pairs
-    assert ("source_quality", "content_extraction", "communication") in edge_pairs
-    assert ("candidate_graph", "knowledge_steward", "reports_to") in edge_pairs
-    assert len([edge for edge in canvas["edges"] if edge["type"] != "communication"]) >= 10
+    assert ("research_coordination", "source_finder", "reports_to") in edge_pairs
+    assert ("source_relation_mapper", "source_extractor", "communication") in edge_pairs
+    assert ("source_relation_mapper", "source_ingestor", "reports_to") in edge_pairs
+    assert len([edge for edge in canvas["edges"] if edge["type"] != "communication"]) >= 8
     assert len([edge for edge in canvas["edges"] if edge["type"] == "communication"]) >= 3
 
 
@@ -464,7 +445,7 @@ def test_challenge_cup_research_team_agent_repair_purges_stale_and_rebuilds_comp
     stale_agent = agent_directory_service.create_agent_instance(
         display_name="旧资料发现",
         direct_session_id="session-old-discovery",
-        metadata={"challengeCupTeamId": "research-team", "challengeCupTeamRole": "data_discovery"},
+        metadata={"challengeCupTeamId": "research-team", "challengeCupTeamRole": "unsupported_source_role"},
     )
     missing_agent_id = "agent-missing-challenge-cup"
     orphan_workspace = developer_sandbox.seeded_sandbox_workspace_path(tmp_path, "agents", missing_agent_id)
@@ -490,13 +471,13 @@ def test_challenge_cup_research_team_agent_repair_purges_stale_and_rebuilds_comp
                                 "memberId": "old-discovery",
                                 "agentId": stale_agent["agentId"],
                                 "agentName": "旧资料发现",
-                                "role": "data_discovery",
+                                "role": "unsupported_source_role",
                             },
                             {
                                 "memberId": "missing",
                                 "agentId": missing_agent_id,
                                 "agentName": "缺失 Agent",
-                                "role": "source_acquisition",
+                                "role": "unsupported_source_role",
                             },
                         ],
                         "linkedChatRoomId": "",
@@ -527,8 +508,8 @@ def test_challenge_cup_research_team_agent_repair_purges_stale_and_rebuilds_comp
                 "path": "workspace/teams/research-team/canvas.json",
                 "viewport": {"x": 0, "y": 0, "zoom": 1},
                 "nodes": [
-                    {"id": stale_agent["agentId"], "agentId": stale_agent["agentId"], "label": "旧资料发现", "role": "data_discovery"},
-                    {"id": missing_agent_id, "agentId": missing_agent_id, "label": "缺失 Agent", "role": "source_acquisition"},
+                    {"id": stale_agent["agentId"], "agentId": stale_agent["agentId"], "label": "旧资料发现", "role": "unsupported_source_role"},
+                    {"id": missing_agent_id, "agentId": missing_agent_id, "label": "缺失 Agent", "role": "unsupported_source_role"},
                 ],
                 "edges": [],
             },
@@ -550,16 +531,14 @@ def test_challenge_cup_research_team_agent_repair_purges_stale_and_rebuilds_comp
     assert agent_directory_service.get_agent(stale_agent["agentId"], include_archived=True) is None
     assert [member["role"] for member in team["members"]] == [
         "research_coordination",
-        "data_discovery",
-        "source_acquisition",
-        "content_extraction",
-        "source_quality",
-        "candidate_graph",
+        "source_finder",
+        "source_extractor",
+        "source_relation_mapper",
+        "source_ingestor",
         "experiment_planner",
         "experiment_ledger",
         "iteration_planner",
         "iteration_versioning",
-        "knowledge_steward",
     ]
     active_agents_by_id = {
         agent["agentId"]: agent
@@ -576,16 +555,14 @@ def test_challenge_cup_research_team_agent_repair_purges_stale_and_rebuilds_comp
             agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
         )
         if member["role"] in {
-            "data_discovery",
-            "source_acquisition",
-            "content_extraction",
-            "source_quality",
-            "candidate_graph",
+            "source_finder",
+            "source_extractor",
+            "source_relation_mapper",
+            "source_ingestor",
             "experiment_planner",
             "experiment_ledger",
             "iteration_planner",
             "iteration_versioning",
-            "knowledge_steward",
         }:
             policy = agent_directory_service.resolve_tool_policy_for_agent(agent["agentId"])
             if member["role"] in {"experiment_planner", "experiment_ledger"}:
@@ -606,10 +583,18 @@ def test_challenge_cup_research_team_agent_repair_purges_stale_and_rebuilds_comp
             else:
                 assert "source_collection_context_tool" in policy["allowedTools"]
                 assert "source_collection_stage_writeback_tool" in policy["allowedTools"]
-                assert policy["preferredTools"][:2] == [
-                    "source_collection_context_tool",
-                    "source_collection_stage_writeback_tool",
-                ]
+                if member["role"] == "source_ingestor":
+                    assert policy["preferredTools"][:4] == [
+                        "task_create_tool",
+                        "task_update_tool",
+                        "source_collection_context_tool",
+                        "source_collection_stage_writeback_tool",
+                    ]
+                else:
+                    assert policy["preferredTools"][:2] == [
+                        "source_collection_context_tool",
+                        "source_collection_stage_writeback_tool",
+                    ]
     canvas = team_service.get_team_canvas("research-team")
     assert {node["agentId"] for node in canvas["nodes"]} == {member["agentId"] for member in team["members"]}
     assert stale_agent["agentId"] not in {node["agentId"] for node in canvas["nodes"]}
@@ -626,8 +611,8 @@ def test_challenge_cup_research_team_agent_repair_detects_missing_roles_and_dire
     _use_tmp_project_root(tmp_path, monkeypatch)
     result = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
     team = result["team"]
-    discovery = next(member for member in team["members"] if member["role"] == "data_discovery")
-    agent = agent_directory_service.get_agent(discovery["agentId"])
+    finder = next(member for member in team["members"] if member["role"] == "source_finder")
+    agent = agent_directory_service.get_agent(finder["agentId"])
     state = agent_directory_service.load_state()
     for item in state["agents"]:
         if item["agentId"] == agent["agentId"]:
@@ -640,8 +625,8 @@ def test_challenge_cup_research_team_agent_repair_detects_missing_roles_and_dire
     repaired = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
 
     assert team_service.challenge_cup_research_team_agents_need_repair() is False
-    repaired_discovery = next(member for member in repaired["team"]["members"] if member["role"] == "data_discovery")
-    repaired_agent = agent_directory_service.get_agent(repaired_discovery["agentId"])
+    repaired_finder = next(member for member in repaired["team"]["members"] if member["role"] == "source_finder")
+    repaired_agent = agent_directory_service.get_agent(repaired_finder["agentId"])
     assert session_service.get_session_detail(repaired_agent["directSessionId"])
 
     teams_root = developer_sandbox.seeded_sandbox_workspace_path(tmp_path, "teams")
@@ -649,7 +634,7 @@ def test_challenge_cup_research_team_agent_repair_detects_missing_roles_and_dire
     teams_payload = json.loads(teams_index.read_text(encoding="utf-8"))
     teams_payload["teams"][0]["members"] = [
         member for member in teams_payload["teams"][0]["members"]
-        if member.get("role") != "candidate_graph"
+        if member.get("role") != "source_ingestor"
     ]
     teams_index.write_text(json.dumps(teams_payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -659,8 +644,8 @@ def test_challenge_cup_research_team_agent_repair_detects_missing_roles_and_dire
 def test_challenge_cup_research_team_agents_stay_out_of_ordinary_session_index(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     result = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
-    data_discovery = next(member for member in result["team"]["members"] if member["role"] == "data_discovery")
-    agent = agent_directory_service.get_agent(data_discovery["agentId"])
+    finder = next(member for member in result["team"]["members"] if member["role"] == "source_finder")
+    agent = agent_directory_service.get_agent(finder["agentId"])
 
     assert agent_directory_service.agent_conversation_index_visibility(
         agent,
