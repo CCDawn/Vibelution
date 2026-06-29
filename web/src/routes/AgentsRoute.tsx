@@ -5705,14 +5705,14 @@ export function AgentsRoute() {
               <h2>{activeGroupLabel}</h2>
             </div>
             <div className={styles.panelHeaderActions}>
-              <button
+              <VButton
                 type="button"
-                className={styles.secondaryButton}
-                onClick={() => setCreateOpen((value) => !value)}
+                variant="secondary"
+                icon={<Plus size={15} />}
+                onPress={() => setCreateOpen((value) => !value)}
               >
-                <Plus size={15} />
                 {copy.createAgent}
-              </button>
+              </VButton>
               <span className={styles.countPill}>{visibleAgents.length}</span>
             </div>
           </div>
@@ -5861,26 +5861,26 @@ export function AgentsRoute() {
                 <p className={notice.tone === "error" ? styles.errorText : styles.successText}>{notice.text}</p>
               ) : null}
               <div className={styles.editorActions}>
-                <button
+                <VButton
                   type="button"
-                  className={styles.secondaryButton}
-                  disabled={createAgentMutation.isPending}
-                  onClick={() => {
+                  variant="secondary"
+                  isDisabled={createAgentMutation.isPending}
+                  onPress={() => {
                     setCreateOpen(false);
                     setCreateDraft(createDraftFromWorkspace(workspace, toolBundles));
                   }}
                 >
                   {copy.cancelCreate}
-                </button>
-                <button
+                </VButton>
+                <VButton
                   type="button"
-                  className={styles.primaryButton}
-                  disabled={!canCreateAgent || createAgentMutation.isPending}
-                  onClick={createAgent}
+                  variant="primary"
+                  icon={<Plus size={15} />}
+                  isDisabled={!canCreateAgent || createAgentMutation.isPending}
+                  onPress={createAgent}
                 >
-                  <Plus size={15} />
                   {createAgentMutation.isPending ? copy.creatingAgent : copy.createAgent}
-                </button>
+                </VButton>
               </div>
             </section>
           ) : null}
@@ -6067,25 +6067,25 @@ export function AgentsRoute() {
                 <p className={notice.tone === "error" ? styles.errorText : styles.successText}>{notice.text}</p>
               ) : null}
               <div className={styles.editorActions}>
-                <button
+                <VButton
                   type="button"
-                  className={styles.secondaryButton}
-                  disabled={bulkAgentPending}
-                  onClick={() => {
+                  variant="secondary"
+                  isDisabled={bulkAgentPending}
+                  onPress={() => {
                     setBulkConfigDraft(bulkConfigDraftFromAgents(selectedBulkAgents));
                     setBulkConfigApply(DEFAULT_BULK_CONFIG_APPLY);
                   }}
                 >
                   {copy.bulkConfigReset}
-                </button>
-                <button
+                </VButton>
+                <VButton
                   type="button"
-                  className={styles.primaryButton}
-                  disabled={!bulkConfigCanSave}
-                  onClick={bulkApplyAgentConfig}
+                  variant="primary"
+                  isDisabled={!bulkConfigCanSave}
+                  onPress={bulkApplyAgentConfig}
                 >
                   {bulkAgentPending ? copy.bulkWorking : copy.bulkApplyConfig}
-                </button>
+                </VButton>
               </div>
             </section>
           ) : selectedAgent ? (
@@ -6465,14 +6465,14 @@ export function AgentsRoute() {
                       })}
                     </div>
                     <div className={styles.configDeepLinkRow}>
-                      <button
+                      <VButton
                         type="button"
-                        className={styles.secondaryButton}
-                        onClick={() => navigate(selectedAgentModelConfigRoute)}
+                        variant="secondary"
+                        icon={<ExternalLink size={15} />}
+                        onPress={() => navigate(selectedAgentModelConfigRoute)}
                       >
-                        <ExternalLink size={15} />
                         {lang === "zh" ? "去模型库配置" : "Open model library"}
-                      </button>
+                      </VButton>
                     </div>
                   </section>
                   <section className={`${styles.fieldWide} ${styles.promptConfigField}`}>
@@ -6486,14 +6486,14 @@ export function AgentsRoute() {
                           </option>
                         ))}
                       </select>
-                      <button
+                      <VButton
                         type="button"
-                        className={styles.secondaryButton}
-                        onClick={() => navigate(selectedAgentPromptConfigRoute)}
+                        variant="secondary"
+                        icon={<SquarePen size={15} />}
+                        onPress={() => navigate(selectedAgentPromptConfigRoute)}
                       >
-                        <SquarePen size={15} />
                         {lang === "zh" ? "配置提示词" : "Configure prompt"}
-                      </button>
+                      </VButton>
                     </div>
                   </section>
                   <label className={styles.field} title={[toolPolicySourceLine, toolPolicySource?.description || copy.toolPolicyPickerHint].filter(Boolean).join("\n")}>
@@ -6678,14 +6678,14 @@ export function AgentsRoute() {
                       </label>
                     </div>
                     <div className={styles.configDeepLinkRow}>
-                      <button
+                      <VButton
                         type="button"
-                        className={styles.secondaryButton}
-                        onClick={() => navigate(selectedAgentContextConfigRoute)}
+                        variant="secondary"
+                        icon={<ExternalLink size={15} />}
+                        onPress={() => navigate(selectedAgentContextConfigRoute)}
                       >
-                        <ExternalLink size={15} />
                         {lang === "zh" ? "去上下文配置" : "Open context config"}
-                      </button>
+                      </VButton>
                     </div>
                   </section>
                 </div>
@@ -6693,12 +6693,12 @@ export function AgentsRoute() {
                   <p className={notice.tone === "error" ? styles.errorText : styles.successText}>{notice.text}</p>
                 ) : null}
                 <div className={styles.editorActions}>
-                  <button type="button" className={styles.secondaryButton} disabled={!configDirty || selectedAgentConfigPending} onClick={() => setConfigDraft(draftFromAgent(selectedAgent))}>
+                  <VButton type="button" variant="secondary" isDisabled={!configDirty || selectedAgentConfigPending} onPress={() => setConfigDraft(draftFromAgent(selectedAgent))}>
                     {copy.resetConfig}
-                  </button>
-                  <button type="button" className={styles.primaryButton} disabled={!canSaveConfig || selectedAgentConfigPending} onClick={saveAgentConfig}>
+                  </VButton>
+                  <VButton type="button" variant="primary" isDisabled={!canSaveConfig || selectedAgentConfigPending} onPress={saveAgentConfig}>
                     {selectedAgentConfigPending ? copy.savingConfig : copy.saveConfig}
-                  </button>
+                  </VButton>
                 </div>
               </section>
 
@@ -6762,22 +6762,22 @@ export function AgentsRoute() {
                   </label>
                 </div>
                 <div className={styles.editorActions}>
-                  <button
+                  <VButton
                     type="button"
-                    className={styles.secondaryButton}
-                    disabled={!personaDirty || selectedAgentPersonaPending}
-                    onClick={() => setPersonaDraft(personaDraftFromAgent(selectedAgent))}
+                    variant="secondary"
+                    isDisabled={!personaDirty || selectedAgentPersonaPending}
+                    onPress={() => setPersonaDraft(personaDraftFromAgent(selectedAgent))}
                   >
                     {copy.resetConfig}
-                  </button>
-                  <button
+                  </VButton>
+                  <VButton
                     type="button"
-                    className={styles.primaryButton}
-                    disabled={!canSavePersona || selectedAgentPersonaPending}
-                    onClick={savePersonaProfile}
+                    variant="primary"
+                    isDisabled={!canSavePersona || selectedAgentPersonaPending}
+                    onPress={savePersonaProfile}
                   >
                     {selectedAgentPersonaPending ? copy.savingPersona : copy.savePersona}
-                  </button>
+                  </VButton>
                 </div>
               </section>
               ) : null}
@@ -6810,22 +6810,22 @@ export function AgentsRoute() {
                         </div>
                         {request.status === "pending_review" ? (
                           <div className={styles.governanceActions}>
-                            <button
+                            <VButton
                               type="button"
-                              className={styles.secondaryButton}
-                              disabled={requestPending}
-                              onClick={() => resolveToolGovernanceRequest(request, "reject")}
+                              variant="secondary"
+                              isDisabled={requestPending}
+                              onPress={() => resolveToolGovernanceRequest(request, "reject")}
                             >
                               {copy.toolGovernanceReject}
-                            </button>
-                            <button
+                            </VButton>
+                            <VButton
                               type="button"
-                              className={styles.primaryButton}
-                              disabled={requestPending}
-                              onClick={() => resolveToolGovernanceRequest(request, "approve")}
+                              variant="primary"
+                              isDisabled={requestPending}
+                              onPress={() => resolveToolGovernanceRequest(request, "approve")}
                             >
                               {copy.toolGovernanceApprove}
-                            </button>
+                            </VButton>
                           </div>
                         ) : null}
                       </article>
@@ -6836,14 +6836,14 @@ export function AgentsRoute() {
                   )}
                 </div>
                 <div className={styles.editorActions}>
-                  <button
+                  <VButton
                     type="button"
-                    className={styles.primaryButton}
-                    onClick={() => navigate(selectedAgentToolConfigRoute)}
+                    variant="primary"
+                    icon={<Wrench size={15} />}
+                    onPress={() => navigate(selectedAgentToolConfigRoute)}
                   >
-                    <Wrench size={15} />
                     {lang === "zh" ? "去工具页配置" : "Configure in tools"}
-                  </button>
+                  </VButton>
                 </div>
               </section>
 
@@ -6901,22 +6901,22 @@ export function AgentsRoute() {
                   </label>
                 </div>
                 <div className={styles.editorActions}>
-                  <button
+                  <VButton
                     type="button"
-                    className={styles.secondaryButton}
-                    disabled={!taskDirty || selectedAgentTaskPending}
-                    onClick={() => setTaskDraft(taskDraftFromAgent(selectedAgent))}
+                    variant="secondary"
+                    isDisabled={!taskDirty || selectedAgentTaskPending}
+                    onPress={() => setTaskDraft(taskDraftFromAgent(selectedAgent))}
                   >
                     {copy.resetConfig}
-                  </button>
-                  <button
+                  </VButton>
+                  <VButton
                     type="button"
-                    className={styles.primaryButton}
-                    disabled={!canSaveTask || selectedAgentTaskPending}
-                    onClick={saveTaskProfile}
+                    variant="primary"
+                    isDisabled={!canSaveTask || selectedAgentTaskPending}
+                    onPress={saveTaskProfile}
                   >
                     {selectedAgentTaskPending ? copy.savingTask : copy.saveTask}
-                  </button>
+                  </VButton>
                 </div>
               </section>
               ) : null}
@@ -6936,14 +6936,14 @@ export function AgentsRoute() {
                         <strong>{issueDisplayTitle(issue, lang)}</strong>
                         <p>{issue.detail}</p>
                         {issue.code === "pending_inbox_messages" ? (
-                          <button
+                          <VButton
                             type="button"
-                            className={styles.secondaryButton}
-                            onClick={() => setActivePane("activity")}
+                            variant="secondary"
+                            icon={<MessageSquare size={15} />}
+                            onPress={() => setActivePane("activity")}
                           >
-                            <MessageSquare size={15} />
                             {copy.handleInboxNow}
-                          </button>
+                          </VButton>
                         ) : null}
                       </article>
                     ))}
@@ -6994,25 +6994,25 @@ export function AgentsRoute() {
                 ) : (
                   <div className={styles.editorActions}>
                     {selectedAgent.status !== "archived" ? (
-                      <button
+                      <VButton
                         type="button"
-                        className={styles.secondaryButton}
-                        disabled={!canArchiveAgent || selectedAgentArchivePending}
-                        onClick={archiveSelectedAgent}
+                        variant="secondary"
+                        icon={<Archive size={15} />}
+                        isDisabled={!canArchiveAgent || selectedAgentArchivePending}
+                        onPress={archiveSelectedAgent}
                       >
-                        <Archive size={15} />
                         {selectedAgentArchivePending ? copy.archivingAgent : copy.archiveAgent}
-                      </button>
+                      </VButton>
                     ) : null}
-                    <button
+                    <VButton
                       type="button"
-                      className={styles.dangerButton}
-                      disabled={!canPurgeAgent || selectedAgentPurgePending}
-                      onClick={purgeSelectedAgent}
+                      variant="danger"
+                      icon={<Trash2 size={15} />}
+                      isDisabled={!canPurgeAgent || selectedAgentPurgePending}
+                      onPress={purgeSelectedAgent}
                     >
-                      <Trash2 size={15} />
                       {selectedAgentPurgePending ? copy.purgingAgent : copy.purgeAgent}
-                    </button>
+                    </VButton>
                   </div>
                 )}
               </section>
@@ -7098,15 +7098,15 @@ export function AgentsRoute() {
                     </label>
                   </div>
                   <div className={styles.editorActions}>
-                    <button
+                    <VButton
                       type="button"
-                      className={styles.secondaryButton}
-                      disabled={!canResetAgent || selectedAgentResetPending}
-                      onClick={resetSelectedAgent}
+                      variant="secondary"
+                      icon={<RefreshCw size={15} />}
+                      isDisabled={!canResetAgent || selectedAgentResetPending}
+                      onPress={resetSelectedAgent}
                     >
-                      <RefreshCw size={15} />
                       {selectedAgentResetPending ? copy.resettingAgent : copy.resetAgent}
-                    </button>
+                    </VButton>
                   </div>
                 </section>
               ) : null}
@@ -7137,14 +7137,14 @@ export function AgentsRoute() {
                   <span>{copy.toolCategoryCount}: <strong>{toolBundles.length}</strong></span>
                 </div>
                 <div className={styles.editorActions}>
-                  <button
+                  <VButton
                     type="button"
-                    className={styles.primaryButton}
-                    onClick={() => navigate(selectedAgentToolConfigRoute)}
+                    variant="primary"
+                    icon={<Wrench size={15} />}
+                    onPress={() => navigate(selectedAgentToolConfigRoute)}
                   >
-                    <Wrench size={15} />
                     {lang === "zh" ? "配置工具能力" : "Configure tools"}
-                  </button>
+                  </VButton>
                 </div>
               </section>
 
@@ -7289,30 +7289,30 @@ export function AgentsRoute() {
                   {memoryGroupOptions.map((group) => <option key={group} value={group} />)}
                 </datalist>
                 <div className={styles.editorActions}>
-                  <button
+                  <VButton
                     type="button"
-                    className={styles.secondaryButton}
-                    onClick={() => navigate(selectedAgentMemoryConfigRoute)}
+                    variant="secondary"
+                    icon={<ExternalLink size={15} />}
+                    onPress={() => navigate(selectedAgentMemoryConfigRoute)}
                   >
-                    <ExternalLink size={15} />
                     {lang === "zh" ? "去记忆页配置" : "Open memory page"}
-                  </button>
-                  <button
+                  </VButton>
+                  <VButton
                     type="button"
-                    className={styles.secondaryButton}
-                    disabled={!memoryPolicyDirty || selectedAgentMemoryPolicyPending}
-                    onClick={() => setMemoryPolicyDraft(memoryPolicyDraftFromAgent(selectedAgent))}
+                    variant="secondary"
+                    isDisabled={!memoryPolicyDirty || selectedAgentMemoryPolicyPending}
+                    onPress={() => setMemoryPolicyDraft(memoryPolicyDraftFromAgent(selectedAgent))}
                   >
                     {copy.resetConfig}
-                  </button>
-                  <button
+                  </VButton>
+                  <VButton
                     type="button"
-                    className={styles.primaryButton}
-                    disabled={!canSaveMemoryPolicy || selectedAgentMemoryPolicyPending}
-                    onClick={saveMemoryPolicy}
+                    variant="primary"
+                    isDisabled={!canSaveMemoryPolicy || selectedAgentMemoryPolicyPending}
+                    onPress={saveMemoryPolicy}
                   >
                     {selectedAgentMemoryPolicyPending ? copy.savingMemoryPolicy : copy.saveMemoryPolicy}
-                  </button>
+                  </VButton>
                 </div>
               </section>
                 </>
@@ -7378,22 +7378,22 @@ export function AgentsRoute() {
                   </label>
                 </div>
                 <div className={styles.editorActions}>
-                  <button
+                  <VButton
                     type="button"
-                    className={styles.secondaryButton}
-                    disabled={!membershipDirty || selectedAgentMembershipPending}
-                    onClick={() => setMembershipDraft(membershipDraftFromWorkspace(workspace, selectedAgent))}
+                    variant="secondary"
+                    isDisabled={!membershipDirty || selectedAgentMembershipPending}
+                    onPress={() => setMembershipDraft(membershipDraftFromWorkspace(workspace, selectedAgent))}
                   >
                     {copy.resetConfig}
-                  </button>
-                  <button
+                  </VButton>
+                  <VButton
                     type="button"
-                    className={styles.primaryButton}
-                    disabled={!canSaveMembership || selectedAgentMembershipPending}
-                    onClick={saveModeMembership}
+                    variant="primary"
+                    isDisabled={!canSaveMembership || selectedAgentMembershipPending}
+                    onPress={saveModeMembership}
                   >
                     {selectedAgentMembershipPending ? copy.savingMembership : copy.saveMembership}
-                  </button>
+                  </VButton>
                 </div>
               </section>
               ) : null}
@@ -7637,14 +7637,14 @@ export function AgentsRoute() {
                     <h3>{copy.inboxTitle}: {selectedAgentInboxPendingCount}</h3>
                   </div>
                   <div className={styles.panelHeaderActions}>
-                    <button
+                    <VButton
                       type="button"
-                      className={styles.secondaryButton}
-                      disabled={selectedAgentInboxPendingCount <= 0 || selectedAgentConsumeAllPending}
-                      onClick={consumeAllInboxMessages}
+                      variant="secondary"
+                      isDisabled={selectedAgentInboxPendingCount <= 0 || selectedAgentConsumeAllPending}
+                      onPress={consumeAllInboxMessages}
                     >
                       {selectedAgentConsumeAllPending ? copy.consumingMessage : copy.consumeAllMessages}
-                    </button>
+                    </VButton>
                     <MessageSquare size={16} />
                   </div>
                 </div>
@@ -7668,14 +7668,14 @@ export function AgentsRoute() {
                               <strong>{message.sourceAgentName || message.sourceAgentCode || message.sourceAgentId || "-"}</strong>
                               <small>{formatTimestamp(message.createdAt, lang)} · {message.kind || "agent_message"}</small>
                             </span>
-                            <button
+                            <VButton
                               type="button"
-                              className={styles.secondaryButton}
-                              disabled={messagePending}
-                              onClick={() => consumeInboxMessage(message)}
+                              variant="secondary"
+                              isDisabled={messagePending}
+                              onPress={() => consumeInboxMessage(message)}
                             >
                               {messagePending ? copy.consumingMessage : copy.consumeMessage}
-                            </button>
+                            </VButton>
                           </div>
                           <p>{message.summary || message.content || message.threadId || messageId}</p>
                           <small>
@@ -7811,25 +7811,25 @@ export function AgentsRoute() {
                   <p className={notice.tone === "error" ? styles.errorText : styles.successText}>{notice.text}</p>
                 ) : null}
                 <div className={styles.editorActions}>
-                  <button
+                  <VButton
                     type="button"
-                    className={styles.secondaryButton}
-                    disabled={!runtimePolicyDirty || selectedAgentRuntimePolicyPending}
-                    onClick={() => {
+                    variant="secondary"
+                    isDisabled={!runtimePolicyDirty || selectedAgentRuntimePolicyPending}
+                    onPress={() => {
                       setDelegationPolicyDraft(delegationPolicyDraftFromAgent(selectedAgent));
                       setSupervisionPolicyDraft(supervisionPolicyDraftFromAgent(selectedAgent));
                     }}
                   >
                     {copy.resetConfig}
-                  </button>
-                  <button
+                  </VButton>
+                  <VButton
                     type="button"
-                    className={styles.primaryButton}
-                    disabled={!canSaveRuntimePolicy || selectedAgentRuntimePolicyPending}
-                    onClick={saveRuntimePolicy}
+                    variant="primary"
+                    isDisabled={!canSaveRuntimePolicy || selectedAgentRuntimePolicyPending}
+                    onPress={saveRuntimePolicy}
                   >
                     {selectedAgentRuntimePolicyPending ? copy.savingRuntimePolicy : copy.saveRuntimePolicy}
-                  </button>
+                  </VButton>
                 </div>
               </section>
                 </>
