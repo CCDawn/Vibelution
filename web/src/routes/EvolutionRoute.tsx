@@ -103,6 +103,7 @@ type LibraryStatusFilter =
   | "rolled_back"
   | "missing";
 type LibraryDeleteFilter = "all" | "deletable" | "blocked";
+type DatasetCatalogFilter = "all" | "runnable" | "blocked" | "roadmap";
 type EvolutionRouteTrack = "supervised" | "self";
 type SupervisedRouteView = "live" | "runs" | "library";
 type EvolutionRouteProps = {
@@ -543,6 +544,28 @@ function datasetUsabilityLabel(
   return String(dataset.adapterStatus || status || (lang === "zh" ? "不可用" : "unavailable"));
 }
 
+function datasetCatalogStatusLabel(
+  item: NonNullable<EvolutionWorkbench["datasets"]>[number],
+  lang: string,
+) {
+  if (item.selectable !== false && item.effective && item.visibility === "primary") {
+    return lang === "zh" ? "可运行" : "Runnable";
+  }
+  if (String(item.defaultVisibility || "").trim() === "roadmap" || item.usabilityStatus === "roadmap_only") {
+    return lang === "zh" ? "路线图" : "Roadmap";
+  }
+  if (item.usabilityStatus === "missing_source") {
+    return lang === "zh" ? "缺源文件" : "Missing source";
+  }
+  if (item.usabilityStatus === "requires_external_harness") {
+    return lang === "zh" ? "需外部 harness" : "Needs harness";
+  }
+  if (item.usabilityStatus === "custom_harness_ready" && item.visibility !== "primary") {
+    return lang === "zh" ? "环境未就绪" : "Environment blocked";
+  }
+  return lang === "zh" ? "未进入下拉" : "Hidden";
+}
+
 function datasetBenchmarkDetail(
   item: NonNullable<EvolutionWorkbench["datasets"]>[number],
   lang: string,
@@ -687,6 +710,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [formInitialized, setFormInitialized] = useState(false);
   const [sourceKind, setSourceKind] = useState<"dataset" | "bundle">("dataset");
   const [datasetName, setDatasetName] = useState("");
+  const [selectedDatasetCatalogFilter, setSelectedDatasetCatalogFilter] = useState<DatasetCatalogFilter>("all");
   const [datasetLimitInput, setDatasetLimitInput] = useState("");
   const [bundleNameInput, setBundleNameInput] = useState("");
   const [keepWorktree, setKeepWorktree] = useState(false);
@@ -1568,11 +1592,26 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       : null;
   const selfRunLocked = Boolean(lockedSelfRun);
   const selectedDataset = workbenchControl?.datasets.find((item) => item.name === datasetName) ?? null;
+  const datasetCatalog = workbenchControl?.datasetCatalog ?? workbenchControl?.datasets ?? [];
   const primaryDatasets = useMemo(
     () => (workbenchControl?.datasets ?? []).filter((item) => item.selectable !== false && item.effective),
     [workbenchControl?.datasets],
   );
-  const hiddenDatasetCount = Math.max(0, (workbenchControl?.datasets ?? []).length - primaryDatasets.length);
+  const datasetCatalogGroups = useMemo(() => {
+    const runnable = datasetCatalog.filter((item) => item.selectable !== false && item.effective && item.visibility === "primary");
+    const roadmap = datasetCatalog.filter(
+      (item) => String(item.defaultVisibility || "").trim() === "roadmap" || item.usabilityStatus === "roadmap_only",
+    );
+    const blocked = datasetCatalog.filter((item) => !runnable.includes(item) && !roadmap.includes(item));
+    return {
+      all: datasetCatalog,
+      runnable,
+      blocked,
+      roadmap,
+    };
+  }, [datasetCatalog]);
+  const visibleDatasetCatalog = datasetCatalogGroups[selectedDatasetCatalogFilter] ?? datasetCatalogGroups.all;
+  const hiddenDatasetCount = Math.max(0, datasetCatalog.length - primaryDatasets.length);
   const availableBundles = workbenchControl?.bundles ?? [];
   const selectedBundleExists = availableBundles.some((item) => item.name === bundleNameInput);
   const workbenchCatalogLoading = supervisedTrackQueriesEnabled && !workbenchControl && workbenchCatalogQuery.isFetching;
@@ -3041,6 +3080,67 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   <span>{lang === "zh" ? "隐藏" : "Hidden"} <strong>{hiddenDatasetCount}</strong></span>
                 ) : null}
               </div>
+              {datasetCatalog.length > 0 ? (
+                <div className={styles.datasetCatalogPanel}>
+                  <div className={styles.datasetCatalogHeader}>
+                    <div>
+                      <strong>{t("datasetCatalog")}</strong>
+                      <span>
+                        {datasetCatalog.length} · {lang === "zh" ? "可运行" : "runnable"} {datasetCatalogGroups.runnable.length}
+                      </span>
+                    </div>
+                    <div className={styles.datasetCatalogFilterRow} role="tablist" aria-label={t("datasetCatalog")}>
+                      {([
+                        ["all", t("datasetCatalogAll"), datasetCatalogGroups.all.length],
+                        ["runnable", t("datasetCatalogRunnable"), datasetCatalogGroups.runnable.length],
+                        ["blocked", t("datasetCatalogBlocked"), datasetCatalogGroups.blocked.length],
+                        ["roadmap", t("datasetCatalogRoadmap"), datasetCatalogGroups.roadmap.length],
+                      ] as Array<[DatasetCatalogFilter, string, number]>).map(([filter, label, count]) => (
+                        <button
+                          key={filter}
+                          type="button"
+                          className={
+                            selectedDatasetCatalogFilter === filter
+                              ? `${styles.datasetCatalogFilterButton} ${styles.datasetCatalogFilterButtonActive}`
+                              : styles.datasetCatalogFilterButton
+                          }
+                          onClick={() => setSelectedDatasetCatalogFilter(filter)}
+                          aria-pressed={selectedDatasetCatalogFilter === filter}
+                        >
+                          {label} {count}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className={styles.datasetCatalogList}>
+                    {visibleDatasetCatalog.length > 0 ? (
+                      visibleDatasetCatalog.map((item) => {
+                        const statusText = datasetCatalogStatusLabel(item, lang);
+                        const reason = item.visibility === "primary"
+                          ? item.usabilityReason
+                          : (item.visibilityReason || item.usabilityReason);
+                        return (
+                          <article key={item.name} className={styles.datasetCatalogItem}>
+                            <div className={styles.datasetCatalogItemMain}>
+                              <strong title={item.name}>{item.name}</strong>
+                              <span>{item.benchmarkFamily || item.taskType || item.bundleName || "--"}</span>
+                            </div>
+                            <span className={styles.datasetCatalogStatus}>{statusText}</span>
+                            {reason ? (
+                              <p>
+                                <span>{item.visibility === "primary" ? statusText : t("datasetCatalogHiddenReason")}</span>
+                                {reason}
+                              </p>
+                            ) : null}
+                          </article>
+                        );
+                      })
+                    ) : (
+                      <p className={styles.datasetCatalogEmpty}>{lang === "zh" ? "当前筛选无条目。" : "No entries for this filter."}</p>
+                    )}
+                  </div>
+                </div>
+              ) : null}
               {workbenchCatalogUnavailable ? (
                 <p className={styles.errorTextCompact}>
                   {lang === "zh" ? "评测来源暂时不可用，正在等待目录刷新。" : "Evaluation sources are temporarily unavailable while the catalog refreshes."}

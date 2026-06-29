@@ -233,12 +233,23 @@ def get_supervised_workbench(
     """Return workbench defaults, datasets, and current live run when present."""
 
     data_root = _workbench_data_project_root()
-    datasets = [item for item in list_dataset_choices(data_root) if item.get("visibility") == "primary"] if include_catalog else []
+    dataset_catalog = list_dataset_choices(data_root) if include_catalog else []
+    datasets = [item for item in dataset_catalog if item.get("visibility") == "primary"]
+    dataset_payloads = [_dataset_payload(item) for item in datasets]
+    catalog_payloads = [_dataset_payload(item) for item in dataset_catalog]
+    state_payload = saved_state if saved_state is not None else get_workbench_state_payload(project_root=PROJECT_ROOT)
+    if include_catalog:
+        state_payload = _workbench_saved_state_with_catalog_counts(
+            state_payload,
+            catalog_payloads,
+            dataset_payloads,
+        )
     return {
         "defaultBundleName": default_bundle_name(),
-        "savedState": saved_state if saved_state is not None else get_workbench_state_payload(project_root=PROJECT_ROOT),
+        "savedState": state_payload,
         "bundles": list_available_workbench_bundles(data_root) if include_catalog else [],
-        "datasets": [_dataset_payload(item) for item in datasets],
+        "datasets": dataset_payloads,
+        "datasetCatalog": catalog_payloads,
         "activeRun": active_run if active_run_loaded else get_active_supervised_run(),
     }
 
@@ -2915,6 +2926,18 @@ def _dataset_payload(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _workbench_saved_state_with_catalog_counts(
+    saved_state: dict[str, Any],
+    dataset_catalog: list[dict[str, Any]],
+    runnable_datasets: list[dict[str, Any]],
+) -> dict[str, Any]:
+    state = dict(saved_state or {})
+    state["availableDatasets"] = len(dataset_catalog)
+    state["runnableDatasets"] = len(runnable_datasets)
+    state["blockedDatasets"] = max(0, len(dataset_catalog) - len(runnable_datasets))
+    return state
+
+
 def _lifecycle_payload(lifecycle) -> dict[str, Any]:
     return {
         "status": lifecycle.status,
@@ -3681,12 +3704,23 @@ def get_supervised_workbench(
 ) -> dict[str, Any]:
     if _runtime_manager_live_control_enabled():
         data_root = _workbench_data_project_root()
-        datasets = [item for item in list_dataset_choices(data_root) if item.get("visibility") == "primary"] if include_catalog else []
+        dataset_catalog = list_dataset_choices(data_root) if include_catalog else []
+        datasets = [item for item in dataset_catalog if item.get("visibility") == "primary"]
+        dataset_payloads = [_dataset_payload(item) for item in datasets]
+        catalog_payloads = [_dataset_payload(item) for item in dataset_catalog]
+        state_payload = saved_state if saved_state is not None else get_workbench_state_payload(project_root=PROJECT_ROOT)
+        if include_catalog:
+            state_payload = _workbench_saved_state_with_catalog_counts(
+                state_payload,
+                catalog_payloads,
+                dataset_payloads,
+            )
         return {
             "defaultBundleName": default_bundle_name(),
-            "savedState": saved_state if saved_state is not None else get_workbench_state_payload(project_root=PROJECT_ROOT),
+            "savedState": state_payload,
             "bundles": list_available_workbench_bundles(data_root) if include_catalog else [],
-            "datasets": [_dataset_payload(item) for item in datasets],
+            "datasets": dataset_payloads,
+            "datasetCatalog": catalog_payloads,
             "activeRun": active_run if active_run_loaded else get_active_supervised_run(),
         }
     return _LOCAL_GET_SUPERVISED_WORKBENCH(

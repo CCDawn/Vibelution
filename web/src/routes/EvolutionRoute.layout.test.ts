@@ -88,6 +88,20 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("primaryDatasets.map((item)");
   });
 
+  it("keeps the runnable source picker separate from the full supervised benchmark catalog", () => {
+    expect(apiTypesSource).toContain("datasetCatalog: EvolutionDatasetOption[]");
+    expect(routeSource).toContain("const datasetCatalog = workbenchControl?.datasetCatalog");
+    expect(routeSource).toContain("datasetCatalogGroups");
+    expect(routeSource).toContain("selectedDatasetCatalogFilter");
+    expect(routeSource).toContain("datasetCatalogPanel");
+    expect(routeSource).toContain("item.visibilityReason");
+    expect(routeSource).toContain("item.usabilityReason");
+    expect(routeSource).toContain("datasetCatalogStatusLabel");
+    expect(dictionarySource).toContain('datasetCatalog: "评测集目录"');
+    expect(dictionarySource).toContain('datasetCatalogHiddenReason: "隐藏原因"');
+    expect(stylesSource).toContain(".datasetCatalogPanel");
+  });
+
   it("separates inconclusive terminal status and harness-only datasets from success wording", () => {
     expect(routeSource).toContain('normalizedDecision === "INCONCLUSIVE"');
     expect(routeSource).toContain("statusIcon(monitoredRun.status, monitoredRun.decision)");
