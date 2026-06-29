@@ -142,9 +142,16 @@ class TestTruncateResult:
             "contextMode": "full",
             "counts": {
                 "recordCount": 15,
+                "excludedSourceCount": 2,
                 "returnedRecordCount": 10,
                 "candidateCount": 15,
                 "returnedCandidateCount": 5,
+            },
+            "excludedSourceSummary": {
+                "excludedCount": 2,
+                "activeRecordCount": 15,
+                "rawRecordCount": 17,
+                "excluded": [{"recordId": "record-excluded-1", "reason": "no_effective_content"}],
             },
             "candidatePage": {
                 "offset": 0,
@@ -192,6 +199,7 @@ class TestTruncateResult:
         assert compact["doNotUsePreviewAsEvidence"] is True
         assert compact["visibleCandidateCount"] == 5
         assert compact["omittedReturnedCandidateCount"] == 0
+        assert compact["excludedSourceSummary"]["excludedCount"] == 2
         assert "summaryPreview" in compact["candidates"][0]
         assert "summary" not in compact["candidates"][0]
 

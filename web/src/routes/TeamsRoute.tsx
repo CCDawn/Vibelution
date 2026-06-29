@@ -375,6 +375,7 @@ type SourceCollectionStageClosureSummary = {
   message?: string;
   progressLabel?: string;
   successCount?: number;
+  excludedSourceCount?: number;
   failedCount?: number;
   blockedCount?: number;
   invalidIds?: string[];
@@ -396,6 +397,8 @@ type SourceCollectionStageCardProjection = {
     pending?: number;
     task?: number;
     historicalTask?: number;
+    excluded?: number;
+    rawRecord?: number;
   };
   latestTask?: {
     taskId?: string;
@@ -594,15 +597,20 @@ function sourceCollectionStageArtifactSummaryLabel(
   const artifact = typeof counts.artifact === "number" ? counts.artifact : 0;
   const output = typeof counts.output === "number" ? counts.output : 0;
   const pending = typeof counts.pending === "number" ? counts.pending : 0;
+  const excluded = typeof counts.excluded === "number" ? counts.excluded : 0;
+  const excludedText = excluded > 0 ? `；已移出 ${excluded} 条无效来源` : "";
   if (projection.stageId === "collection") {
-    return `${artifact} 条原始资料；${pending} 个搜索任务待执行`;
+    return `${artifact} 条可处理原始资料${excludedText}；${pending} 个搜索任务待执行`;
   }
   if (projection.stageId === "candidate") {
     const coverage = sourceCollectionCoverageMetric(projection.latestTask?.coverageSummary, lang, projection.stageId);
     if (coverage) {
-      return coverage;
+      return `${coverage}${excludedText}`;
     }
-    return `${artifact} 条候选资料来自本轮`;
+    if (artifact <= 0 && excluded > 0) {
+      return `暂无候选资料；已移出 ${excluded} 条无有效内容来源`;
+    }
+    return `${artifact} 条候选资料来自本轮${excludedText}`;
   }
   if (projection.stageId === "screening") {
     const coverage = sourceCollectionCoverageMetric(projection.latestTask?.coverageSummary, lang, projection.stageId);
@@ -743,6 +751,14 @@ function sourceCollectionStageUserStatusLabel(
     return sourceCollectionStageRecoveryStatusLabel(projection.stageId, lang);
   }
   if (projection.status === "agent_done_artifact_pending") {
+    if (
+      projection.stageId === "candidate"
+      && typeof projection.counts?.excluded === "number"
+      && projection.counts.excluded > 0
+      && Number(projection.counts?.artifact ?? 0) <= 0
+    ) {
+      return lang === "zh" ? "已移出无效来源" : "Invalid sources removed";
+    }
     return lang === "zh" ? "已收到 Agent 结果，等待生成可用资料" : "Agent result received; waiting for usable output";
   }
   if (projection.status === "artifact_ready_agent_blocked") {
@@ -780,7 +796,12 @@ function sourceCollectionStageUserSummary(
   }
   const objectLabel = sourceCollectionStageReadableObjectLabel(projection.stageId, lang);
   const closure = projection.latestTask?.closureSummary;
+  const excluded = typeof projection.counts?.excluded === "number" ? projection.counts.excluded : 0;
+  const artifact = typeof projection.counts?.artifact === "number" ? projection.counts.artifact : 0;
   if (closure?.userStatus === "failed" && projection.stageId === "candidate" && lang === "zh") {
+    if (excluded > 0 && artifact <= 0) {
+      return `本轮没有生成候选资料；已移出 ${excluded} 条无有效内容来源，避免后续重复处理。建议：继续搜索新资料。`;
+    }
     const message = closure.message || "Agent 已回写，但没有生成候选资料。";
     const retryInstruction = closure.retryInstruction || closure.nextAction || "请使用完整 recordId 重试。";
     return `${message}建议：${retryInstruction}`;
@@ -815,6 +836,9 @@ function sourceCollectionStageUserSummary(
   }
   if (projection.status === "agent_done_artifact_pending") {
     if (lang === "zh") {
+      if (projection.stageId === "candidate" && excluded > 0) {
+        return `Agent 已回写，本轮已移出 ${excluded} 条无有效内容来源；还没有生成可用候选资料。建议：继续搜索或补充新来源。`;
+      }
       return `已收到 Agent 结果，但还没有生成可用${objectLabel}。建议：${sourceCollectionStageRecoveryActionLabel(projection.stageId, lang)}。`;
     }
     return `Agent returned a result, but usable ${objectLabel} has not been generated yet.`;
@@ -937,7 +961,9 @@ type TeamWorkflowSourceCollectionSearchExecutionPayload = {
   outputCount: number;
   importedCount: number;
   skippedDuplicateCount?: number;
+  filteredExcludedCount?: number;
   duplicateSourceKeys?: string[];
+  excludedSourceKeys?: string[];
   remainingQueryCount?: number;
   nextRunnableQueryIds?: string[];
   hasMore?: boolean;
@@ -1182,6 +1208,8 @@ type ResearchStageRound = {
     closedLoopCount?: number;
     agentTaskCount?: number;
     recordCount?: number;
+    rawRecordCount?: number;
+    excludedSourceCount?: number;
     sourceCandidateCount?: number;
     assessedSourceCandidateCount?: number;
     approvedSourceCandidateCount?: number;
@@ -1251,6 +1279,8 @@ type SourceCollectionSummaryPayload = {
   runStatus?: DataProcessingStatus;
   summary?: {
     recordCount?: number;
+    rawRecordCount?: number;
+    excludedSourceCount?: number;
     assignmentCount?: number;
     openAssignmentCount?: number;
     outputCount?: number;
@@ -8778,7 +8808,7 @@ export function TeamsRoute({
                   <span>{lang === "zh" ? "页面可继续操作，结果会自动刷新。" : "You can keep working; results will refresh automatically."}</span>
                 ) : (
                   <span>
-                    {selectedTeamExecuteSourceCollectionSearchResult.executedQueryCount} {lang === "zh" ? "条搜索" : "queries"} / {selectedTeamExecuteSourceCollectionSearchResult.recordCount} {lang === "zh" ? "条资料记录" : "DataRecord"} / {selectedTeamExecuteSourceCollectionSearchResult.importedCount} {lang === "zh" ? "个候选" : "candidate"}{selectedTeamExecuteSourceCollectionSearchResult.skippedDuplicateCount ? ` / ${selectedTeamExecuteSourceCollectionSearchResult.skippedDuplicateCount} ${lang === "zh" ? "条重复跳过" : "duplicates skipped"}` : ""}{selectedTeamExecuteSourceCollectionSearchResult.hasMore ? ` / ${selectedTeamExecuteSourceCollectionSearchResult.remainingQueryCount ?? 0} ${lang === "zh" ? "条待继续" : "remaining"}` : ""}
+                    {selectedTeamExecuteSourceCollectionSearchResult.executedQueryCount} {lang === "zh" ? "条搜索" : "queries"} / {selectedTeamExecuteSourceCollectionSearchResult.recordCount} {lang === "zh" ? "条资料记录" : "DataRecord"} / {selectedTeamExecuteSourceCollectionSearchResult.importedCount} {lang === "zh" ? "个候选" : "candidate"}{selectedTeamExecuteSourceCollectionSearchResult.skippedDuplicateCount ? ` / ${selectedTeamExecuteSourceCollectionSearchResult.skippedDuplicateCount} ${lang === "zh" ? "条重复跳过" : "duplicates skipped"}` : ""}{selectedTeamExecuteSourceCollectionSearchResult.filteredExcludedCount ? ` / ${selectedTeamExecuteSourceCollectionSearchResult.filteredExcludedCount} ${lang === "zh" ? "条无效来源已过滤" : "excluded sources filtered"}` : ""}{selectedTeamExecuteSourceCollectionSearchResult.hasMore ? ` / ${selectedTeamExecuteSourceCollectionSearchResult.remainingQueryCount ?? 0} ${lang === "zh" ? "条待继续" : "remaining"}` : ""}
                   </span>
                 )}
               </div>
