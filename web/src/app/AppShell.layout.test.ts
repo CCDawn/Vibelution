@@ -74,7 +74,8 @@ describe("AppShell layout contract", () => {
     expect(lightThemeBlock).not.toContain("--shell-surface: color-mix(in srgb, var(--fg-primary)");
     expect(lightThemeBlock).not.toContain("--shell-panel: var(--fg-primary)");
     expect(shellStyles).toContain('.shell[data-theme="light"] .topBar::before');
-    expect(shellStyles).toContain("background: color-mix(in srgb, var(--surface-panel) 86%, transparent)");
+    expect(shellStyles).toContain("color-mix(in srgb, var(--surface-panel) 68%, transparent)");
+    expect(shellStyles).not.toContain("background: color-mix(in srgb, var(--surface-panel) 86%, transparent)");
     expect(shellStyles).toContain('grid-template-areas:\n    "brand version"\n    "subtle subtle";');
     expect(shellStyles).toContain("max-width: min(230px, 34vw)");
   });
