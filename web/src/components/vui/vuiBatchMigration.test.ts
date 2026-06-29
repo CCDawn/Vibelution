@@ -64,6 +64,11 @@ const routeShellTargets = [
     expected: ["VRouteHeader", "VSelect", "VIconButton"],
     forbidden: ["<header className={styles.header}", "<select value={status}"],
   },
+  {
+    path: "routes/LogsRoute.tsx",
+    expected: ["VRouteHeader", "VStatusStrip"],
+    forbidden: ["<header className={styles.header}", "<span className={styles.metaPill}>{t(\"readonlyPreview\")}</span>"],
+  },
 ] as const;
 
 function readTargetSource(path: string): string {
