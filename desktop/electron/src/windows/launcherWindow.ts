@@ -8,6 +8,7 @@ export function createLauncherWindow(url: string, paths: DesktopPaths): BrowserW
     height: 760,
     title: "Vibelution Launcher",
     icon: resolveWorkspaceIconPath(paths),
+    backgroundColor: "#f7fafc",
     webPreferences: {
       preload: resolvePreloadPath(paths),
       contextIsolation: true,

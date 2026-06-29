@@ -46,8 +46,8 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps the workbench theme background visible behind the center conversation", () => {
-    expect(appShellCssSource).toContain("--theme-background-overlay-mid: color-mix(in srgb, var(--fg-primary) 30%, transparent);");
-    expect(appShellCssSource).toContain("--theme-background-overlay-mid: color-mix(in srgb, var(--fg-primary) 16%, transparent);");
+    expect(appShellCssSource).toContain("--theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 34%, transparent);");
+    expect(appShellCssSource).toContain("--theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 18%, transparent);");
     expect(appShellCssSource).toContain("--theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 44%, transparent);");
     expect(appShellCssSource).toContain("--theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 26%, transparent);");
     expect(routeCssSource).toMatch(
@@ -286,12 +286,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeCssSource).toContain("minmax(0, min(var(--chat-left-pane-width, 0px), 24vw))");
     expect(routeCssSource).toContain("minmax(360px, 1fr)");
     expect(routeCssSource).toContain("minmax(0, min(var(--chat-right-pane-width, 0px), 22vw))");
-    expect(routeCssSource).toContain("min-height: 42px");
-    expect(routeCssSource).toContain("width: 32px");
-    expect(routeCssSource).toContain("height: 32px");
-    expect(routeCssSource).toContain("font-size: 0.7rem");
-    expect(routeCssSource).toContain("font-size: 0.66rem");
-    expect(routeCssSource).toContain("grid-template-columns: minmax(0, 1fr) fit-content(86px)");
+    expect(routeCssSource).toContain("min-height: 44px");
+    expect(routeCssSource).toContain("width: 26px");
+    expect(routeCssSource).toContain("height: 26px");
+    expect(routeCssSource).toContain("font-size: 0.84rem");
+    expect(routeCssSource).toContain("font-size: 0.68rem");
+    expect(routeCssSource).toContain("grid-template-columns: minmax(0, 1fr) fit-content(92px)");
     expect(routeCssSource).toContain("max-width: 100%");
     expect(conversationCssSource).toContain(".surfaceCompact .timeline {\n  padding: 9px 12px 11px;");
     expect(conversationCssSource).toContain(".surfaceCompact .composer {\n  gap: 7px;\n  padding: 6px 10px 8px;");
@@ -1179,10 +1179,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(directSessionIndexItemSource).toContain("styles.sessionStatusCluster");
     expect(directSessionIndexItemSource).toContain("styles.sessionRunningBadge");
     expect(directSessionIndexItemSource).toContain("styles.sessionUnreadBadge");
-    expect(routeCssSource).toContain("grid-template-columns: minmax(0, 1fr) fit-content(86px)");
-    expect(routeCssSource).toContain("max-width: 86px");
+    expect(routeCssSource).toContain("grid-template-columns: minmax(0, 1fr) fit-content(92px)");
+    expect(routeCssSource).toContain("max-width: 92px");
     expect(routeCssSource).toContain("grid-template-columns: minmax(0, 1fr) max-content");
-    expect(routeCssSource).toContain("max-width: min(148px, 64%)");
+    expect(routeCssSource).toContain("max-width: min(164px, 68%)");
     expect(routeCssSource).toContain(".conversationMetaTime time");
     expect(routeCssSource).toContain("overflow: visible");
     expect(routeCssSource).toContain("text-overflow: clip");
