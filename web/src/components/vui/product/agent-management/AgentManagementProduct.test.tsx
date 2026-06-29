@@ -11,6 +11,7 @@ import { VibelutionHeroProvider } from "../../renderers/heroui/HeroProvider";
 import {
   AgentPageHeader,
   AgentSummaryStrip,
+  AgentWorkspacePanel,
   type AgentSummaryMetric,
 } from "./index";
 
@@ -90,5 +91,19 @@ describe("Agent Management VUI product components", () => {
     expect(markup).toContain("Warning");
     expect(markup).toContain('title="Needs review"');
     expect(markup).toContain('aria-label="Workspace health status: Warning. Needs review"');
+  });
+
+  it("renders workspace panels through the shared product surface", () => {
+    const markup = renderToStaticMarkup(
+      <AgentWorkspacePanel as="aside" ariaLabel="Agent filters" className="custom-layout-hook">
+        <strong>Filters</strong>
+      </AgentWorkspacePanel>,
+    );
+
+    expect(markup).toContain('data-vui-product="agent-workspace-panel"');
+    expect(markup).toContain('aria-label="Agent filters"');
+    expect(markup).toContain("border-vui-border-hairline");
+    expect(markup).toContain("custom-layout-hook");
+    expect(markup).toContain("<strong>Filters</strong>");
   });
 });

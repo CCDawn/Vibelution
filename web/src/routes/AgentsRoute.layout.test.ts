@@ -55,6 +55,15 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("disabled: workspaceQuery.isFetching");
   });
 
+  it("uses the VUI product panel surface for the Agent workspace columns", () => {
+    expect(routeSource).toContain("AgentWorkspacePanel");
+    expect(routeSource).toContain('as="aside" ariaLabel={copy.agentFilters}');
+    expect(routeSource).toContain('as="main"');
+    expect(routeSource).toContain("ariaLabel={activeGroupLabel}");
+    expect(routeSource).toContain("ariaLabel={selectedAgent ? agentLabel(selectedAgent) : copy.title}");
+    expect(stylesSource).not.toContain("0 14px 34px");
+  });
+
   it("opens deep-linked Agent configuration and offers a governed return action", () => {
     expect(routeSource).toContain("useSearchParams");
     expect(routeSource).toContain("normalizeAgentConfigPane(searchParams.get(\"pane\"))");

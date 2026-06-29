@@ -61,6 +61,7 @@ import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy"
 import {
   AgentPageHeader,
   AgentSummaryStrip,
+  AgentWorkspacePanel,
   type AgentSummaryMetric,
 } from "../components/vui/product/agent-management";
 import { safeReturnToPath } from "../app/navigationReturn";
@@ -5532,7 +5533,7 @@ export function AgentsRoute() {
       </div>
 
       <div className={createOpen ? `${styles.workspace} ${styles.workspaceCreating}` : styles.workspace}>
-        <aside className={styles.filterPanel}>
+        <AgentWorkspacePanel as="aside" ariaLabel={copy.agentFilters} className={styles.filterPanel}>
           <label className={styles.searchBox}>
             <Search size={15} />
             <input value={searchText} placeholder={copy.search} onChange={(event) => setSearchText(event.target.value)} />
@@ -5622,9 +5623,13 @@ export function AgentsRoute() {
             <code>{workspace?.storage.agentRegistryPath ?? "workspace/agents/agents.json"}</code>
             <code>{workspace?.storage.modeBindingPath ?? "workspace/agent_config/mode_bindings.json"}</code>
           </section>
-        </aside>
+        </AgentWorkspacePanel>
 
-        <main className={createOpen ? `${styles.agentPanel} ${styles.agentPanelCreating}` : styles.agentPanel}>
+        <AgentWorkspacePanel
+          as="main"
+          ariaLabel={activeGroupLabel}
+          className={createOpen ? `${styles.agentPanel} ${styles.agentPanelCreating}` : styles.agentPanel}
+        >
           <div className={styles.panelHeader}>
             <div>
               <p className={styles.panelEyebrow}>{copy.agentFilters}</p>
@@ -5905,9 +5910,13 @@ export function AgentsRoute() {
               ))}
             </div>
           )}
-        </main>
+        </AgentWorkspacePanel>
 
-        <aside className={styles.detailPanel}>
+        <AgentWorkspacePanel
+          as="aside"
+          ariaLabel={selectedAgent ? agentLabel(selectedAgent) : copy.title}
+          className={styles.detailPanel}
+        >
           {returnToPath ? (
             <section className={styles.returnBanner} aria-label={copy.returnBannerTitle} title={copy.returnBannerHint}>
               <div className={styles.returnBannerCopy}>
@@ -7807,7 +7816,7 @@ export function AgentsRoute() {
               <strong>{copy.selectAgent}</strong>
             </section>
           )}
-        </aside>
+        </AgentWorkspacePanel>
       </div>
     </section>
   );

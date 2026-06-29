@@ -8,3 +8,7 @@ export {
   type AgentSummaryMetric,
   type AgentSummaryStripProps,
 } from "./AgentSummaryStrip";
+export {
+  AgentWorkspacePanel,
+  type AgentWorkspacePanelProps,
+} from "./AgentWorkspacePanel";
