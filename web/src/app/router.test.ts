@@ -48,15 +48,17 @@ function expectRouteErrorSurface(route: RouteObject, surface: "launcher" | "work
   expect((route.errorElement as ReactElement<{ surface?: string }>).props.surface).toBe(surface);
 }
 
-function expectLazyFallback(route: RouteObject, expectedLabel: string) {
+function expectLazyFallback(route: RouteObject, expectedLabel: string, expectedSurface: "launcher" | "workbench") {
   expect(isValidElement(route.element)).toBe(true);
   const fallback = (route.element as ReactElement<{ fallback?: ReactNode }>).props.fallback;
   expect(isValidElement(fallback)).toBe(true);
   const markup = renderToStaticMarkup(fallback as ReactElement);
   expect(markup).toContain('role="status"');
   expect(markup).toContain('aria-busy="true"');
+  expect(markup).toContain(`data-vui-app="${expectedSurface}"`);
   expect(markup).toContain(expectedLabel);
   expect(markup).not.toContain("Hey developer");
+  expect(markup).not.toContain("style=");
 }
 
 describe("router route contracts", () => {
@@ -72,7 +74,7 @@ describe("router route contracts", () => {
     const launcherIndex = launcher.children?.find((item) => item.index);
     expect(launcherIndex).toBeTruthy();
     expectRouteErrorSurface(launcherIndex as RouteObject, "launcher");
-    expectLazyFallback(launcherIndex as RouteObject, "正在打开启动器");
+    expectLazyFallback(launcherIndex as RouteObject, "正在打开启动器", "launcher");
 
     const workbench = findTopRoute("/");
     expectRouteErrorSurface(workbench, "workbench");
@@ -88,14 +90,14 @@ describe("router route contracts", () => {
     ].forEach((path) => {
       const route = findWorkbenchRoute(path);
       expectRouteErrorSurface(route, "workbench");
-      expectLazyFallback(route, "正在打开工作台");
+      expectLazyFallback(route, "正在打开工作台", "workbench");
     });
   });
 
   it("guards the chat route while timing the chat chunk loader itself", async () => {
     const chatRoute = findWorkbenchRoute("chat");
     expectRouteErrorSurface(chatRoute, "workbench");
-    expectLazyFallback(chatRoute, "正在打开工作台");
+    expectLazyFallback(chatRoute, "正在打开工作台", "workbench");
 
     const ChatRoute: ComponentType = () => null;
     const loaded = await loadChatCodingRouteChunk(

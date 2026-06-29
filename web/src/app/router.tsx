@@ -13,6 +13,7 @@ import { WorkbenchDomainRoute } from "../routes/WorkbenchDomainRoute";
 import { WorkbenchModeRoute } from "../routes/WorkbenchModeRoute";
 import { postBrowserTelemetry } from "./browserTelemetry";
 import { recoverFromDynamicImportFetchError } from "./routeChunkRecovery";
+import loadingStyles from "./RouteLoadingShell.module.css";
 
 const AgentsRoute = lazyRoute(() => import("../routes/AgentsRoute").then((module) => ({ default: module.AgentsRoute })));
 type ChatCodingRouteModule = typeof import("../routes/ChatCodingRoute");
@@ -90,26 +91,12 @@ function RouteLoadingShell({ surface }: { surface: RouteErrorSurface }) {
       role="status"
       aria-live="polite"
       aria-busy="true"
-      style={{
-        display: "grid",
-        minHeight: "min(520px, calc(100dvh - 96px))",
-        placeItems: "center",
-        padding: 24,
-      }}
+      data-vui-app={surface}
+      className={loadingStyles.surface}
     >
-      <div
-        style={{
-          width: "min(360px, 100%)",
-          border: "1px solid rgba(148, 163, 184, 0.24)",
-          borderRadius: 8,
-          background: "rgba(12, 16, 24, 0.72)",
-          boxShadow: "0 20px 80px rgba(0, 0, 0, 0.24)",
-          color: "var(--fg-primary)",
-          padding: "18px 20px",
-        }}
-      >
-        <strong style={{ display: "block", fontSize: 15, fontWeight: 700 }}>{label}</strong>
-        <span style={{ display: "block", marginTop: 6, color: "var(--fg-muted)", fontSize: 13 }}>加载界面模块</span>
+      <div className={loadingStyles.panel}>
+        <strong className={loadingStyles.title}>{label}</strong>
+        <span className={loadingStyles.meta}>加载界面模块</span>
       </div>
     </div>
   );
