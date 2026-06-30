@@ -302,6 +302,10 @@ const styleKeys = [
   "teamSelectField",
   "teamTaskForm",
   "teamTitleBlock",
+  "teamUnavailableActions",
+  "teamUnavailableCard",
+  "teamUnavailableMeta",
+  "teamUnavailableSurface",
   "toolbarActions",
   "toolbarLink",
   "workflowCandidateActions",
@@ -496,6 +500,14 @@ const styles = createVuiStyleMap(styleKeys, {
     teamMemoryIndex: "grid-cols-[repeat(auto-fit,minmax(300px,1fr))]",
     teamMemoryMemberActions: "[&_a_span]:hidden",
     teamMemoryMemberHeading: "hidden",
+    teamUnavailableActions:
+      "!flex min-w-0 justify-end gap-1.5 [&_button]:min-w-[78px]",
+    teamUnavailableCard:
+      "grid w-full max-w-[720px] content-start gap-3 p-4 text-left",
+    teamUnavailableMeta:
+      "grid grid-cols-[repeat(3,minmax(0,1fr))] gap-1.5 text-[var(--vui-font-xs)] max-[760px]:grid-cols-[1fr]",
+    teamUnavailableSurface:
+      "grid min-h-0 flex-1 grid-cols-[minmax(0,720px)] justify-center place-items-center overflow-auto px-3 py-6",
     toolbarActions:
       "!flex min-w-[220px] max-w-[min(100%,560px)] flex-wrap items-center justify-end gap-1.5 overflow-visible [&_a]:min-w-[72px] [&_a]:whitespace-nowrap [&_button]:min-w-[72px] [&_button]:whitespace-nowrap",
     workflowGraphFrame: "h-full overflow-hidden",

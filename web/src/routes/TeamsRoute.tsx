@@ -11738,8 +11738,24 @@ export function TeamsRoute({
   };
   const activeWorkflowItemCount = teamWorkflow?.activeWorkflowItems.length ?? 0;
   const researchCanvasVisible = researchCanvasReadOnly;
+  const teamListUnavailable = teamsQuery.isError && !teamsQuery.data;
+  const teamListLoading = teamsQuery.isPending && !teamsQuery.data;
+  const showTeamUnavailableSurface = !hasTeams;
+  const teamUnavailableTitle = teamListUnavailable
+    ? (lang === "zh" ? "团队数据不可用" : "Team data unavailable")
+    : teamListLoading
+      ? (lang === "zh" ? "正在读取团队" : "Loading teams")
+      : (lang === "zh" ? "团队尚未初始化" : "Teams are not initialized");
+  const teamUnavailableMessage = teamListUnavailable
+    ? (lang === "zh"
+      ? "当前前端没有拿到团队列表。请刷新团队数据，或通过 Launcher 恢复后端 API。"
+      : "The frontend cannot read the team list. Refresh teams or restore the backend API from Launcher.")
+    : teamListLoading
+      ? (lang === "zh" ? "正在连接团队索引，页面会在数据返回后切换到工作区。" : "Connecting to the team index. The workspace opens once data is available.")
+      : (lang === "zh" ? "暂时没有可展示团队。请确认 AI 搜索范围团队、知识库扩充团队和挑战杯ai科研团队已初始化。" : "No visible teams are available. Confirm the AI search, knowledge expansion, and research teams are initialized.");
+  const teamUnavailableDetail = teamsQuery.error instanceof Error ? teamsQuery.error.message : "";
   const workspaceClassName = [
-    hasTeams ? styles.workspace : `${styles.workspace} ${styles.workspaceEmpty}`,
+    styles.workspace,
     researchWorkflowTeamSelected ? styles.workspaceResearch : "",
     researchCanvasVisible ? styles.workspaceResearchCanvas : "",
   ].filter(Boolean).join(" ");
@@ -11947,6 +11963,28 @@ export function TeamsRoute({
           { label: lang === "zh" ? "来源" : "Source", value: "Agent Center" },
         ]}
       />
+      {showTeamUnavailableSurface ? (
+        <main className={styles.teamUnavailableSurface} aria-label={teamUnavailableTitle}>
+          <section className={styles.teamUnavailableCard} title={teamUnavailableDetail || teamUnavailableMessage}>
+            <div className={styles.sectionTitle}>
+              <strong>{teamUnavailableTitle}</strong>
+              <span>{teamListUnavailable ? (lang === "zh" ? "接口不可用" : "API unavailable") : teamListLoading ? (lang === "zh" ? "读取中" : "loading") : (lang === "zh" ? "空团队" : "empty")}</span>
+            </div>
+            <p>{teamUnavailableMessage}</p>
+            <div className={styles.teamUnavailableMeta} aria-label={lang === "zh" ? "团队入口状态" : "Team entry status"}>
+              <span>{lang === "zh" ? "团队" : "Teams"} <strong>{visibleTeamSummary.activeTeamCount}</strong></span>
+              <span>{lang === "zh" ? "成员" : "Members"} <strong>{visibleTeamSummary.memberCount}</strong></span>
+              <span>{lang === "zh" ? "来源" : "Source"} <strong>Agent Center</strong></span>
+            </div>
+            <div className={styles.teamUnavailableActions}>
+              <VNativeButton type="button" onClick={() => void teamsQuery.refetch()} disabled={teamsQuery.isFetching}>
+                <RefreshCw size={14} />
+                {teamsQuery.isFetching ? (lang === "zh" ? "刷新中" : "Refreshing") : (lang === "zh" ? "刷新" : "Refresh")}
+              </VNativeButton>
+            </div>
+          </section>
+        </main>
+      ) : (
       <div className={workspaceClassName}>
         <main className={canvasPanelClassName} id="research-organization-canvas">
           <div className={styles.canvasToolbar}>
@@ -12125,17 +12163,21 @@ export function TeamsRoute({
           ) : (
             <div className={styles.emptyCanvasPanel} ref={canvasFrameRef}>
               <div className={styles.emptyCanvasContent}>
-                <span className={styles.emptyCanvasKicker}>{lang === "zh" ? "团队入口" : "Team entry"}</span>
-                <strong>{lang === "zh" ? "选择团队后进入对应工作区" : "Select a team to open its workspace"}</strong>
+                <span className={styles.emptyCanvasKicker}>{lang === "zh" ? "组织画布" : "Organization canvas"}</span>
+                <strong>
+                  {teamDetailQuery.isPending
+                    ? (lang === "zh" ? "正在读取画布" : "Loading canvas")
+                    : (lang === "zh" ? "暂无画布数据" : "No canvas data")}
+                </strong>
                 <p>
                   {lang === "zh"
-                    ? "顶部只保留 AI 搜索范围团队和 挑战杯ai科研团队 两个入口；选择后这里会显示对应团队内容。"
-                    : "The top selector only exposes the AI search scope team and the Challenge Cup AI research team; selecting one opens its workspace."}
+                    ? "刷新团队数据后会自动恢复。"
+                    : "Refresh team data to restore the canvas."}
                 </p>
                 <div className={styles.emptyCanvasSteps}>
-                  <span>{lang === "zh" ? "1 选择团队" : "1 Select team"}</span>
-                  <span>{lang === "zh" ? "2 打开页面" : "2 Open page"}</span>
-                  <span>{lang === "zh" ? "3 审核流程" : "3 Review workflow"}</span>
+                  <span>{lang === "zh" ? "团队" : "Team"}</span>
+                  <span>{selectedTeam?.name ?? (lang === "zh" ? "未选择" : "Not selected")}</span>
+                  <span>{teamDetailQuery.isError ? (lang === "zh" ? "读取失败" : "Failed") : (lang === "zh" ? "等待数据" : "Waiting")}</span>
                 </div>
               </div>
             </div>
@@ -13507,6 +13549,7 @@ export function TeamsRoute({
             </div>
         </aside>
       </div>
+      )}
     </section>
   );
 }
