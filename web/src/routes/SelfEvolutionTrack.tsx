@@ -32,7 +32,7 @@ import {
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { LazyConversationView } from "../components/conversation/LazyConversationView";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { VButton } from "../components/vui";
+import { VButton, VNativeInput } from "../components/vui";
 import { TranslationKey } from "../i18n/dictionary";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
 import { useAppI18n } from "../i18n/useAppI18n";
@@ -1545,7 +1545,7 @@ export function SelfEvolutionTrack({
                               >
                                 <div className={styles.itemTop}>
                                   <label className={styles.checkboxRow}>
-                                    <input
+                                    <VNativeInput
                                       type="checkbox"
                                       checked={selectedHistorySet.has(item.txnId)}
                                       onChange={() => toggleHistorySelection(item.txnId)}

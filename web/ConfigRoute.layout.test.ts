@@ -126,9 +126,9 @@ describe("ConfigRoute content experience contract", () => {
     expect(advancedPanelSource).toContain("MODEL_CONTRACT_OPTIONS.map");
     expect(advancedPanelSource).toContain("MODEL_TOOL_CALLING_MODE_OPTIONS.map");
     expect(advancedPanelSource).toContain("PROVIDER_COMPAT_MODE_OPTIONS.map");
-    expect(advancedPanelSource).toContain("<select\n                        value={modelEditor.details.transport}");
-    expect(advancedPanelSource).toContain("<select\n                        value={modelEditor.details.contract}");
-    expect(advancedPanelSource).toContain("<select\n                        value={modelEditor.details.tool_calling_mode}");
+    expect(advancedPanelSource).toContain("<VNativeSelect\n                        value={modelEditor.details.transport}");
+    expect(advancedPanelSource).toContain("<VNativeSelect\n                        value={modelEditor.details.contract}");
+    expect(advancedPanelSource).toContain("<VNativeSelect\n                        value={modelEditor.details.tool_calling_mode}");
   });
 
   it("treats model deletion as model-key cleanup in user-facing copy", () => {

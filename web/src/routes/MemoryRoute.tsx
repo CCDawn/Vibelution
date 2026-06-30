@@ -64,7 +64,7 @@ import {
   TeamKnowledgeBase,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
-import { VButton, VRouteHeader } from "../components/vui";
+import { VButton, VNativeInput, VNativeSelect, VNativeTextarea, VRouteHeader } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import styles from "./MemoryRoute.styles";
@@ -3986,7 +3986,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 }
               >
                 <label className={`${styles.itemSelectionRow} ${styles.itemSelectionRowDense}`}>
-                  <input
+                  <VNativeInput
                     type="checkbox"
                     checked={selectedMemoryKeySet.has(itemKey)}
                     aria-label={`${copy.selectMemory}: ${item.title}`}
@@ -4139,7 +4139,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 </div>
                 <div className={styles.projectMemoryProposalNote}>
                   {isPendingProposal ? (
-                    <input
+                    <VNativeInput
                       value={noteValue}
                       placeholder={copy.projectMemoryQueueResolutionNote}
                       onChange={(event) =>
@@ -4361,7 +4361,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         </div>
         <label className={styles.fieldStack}>
           <span>{copy.titleField}</span>
-          <input
+          <VNativeInput
             value={editDraft.title}
             placeholder={copy.titlePlaceholder}
             onChange={(event) => setEditDraft((current) => (current ? { ...current, title: event.target.value } : current))}
@@ -4369,7 +4369,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         </label>
         <label className={styles.fieldStack}>
           <span>{copy.summaryField}</span>
-          <input
+          <VNativeInput
             value={editDraft.summary}
             placeholder={copy.summaryPlaceholder}
             onChange={(event) => setEditDraft((current) => (current ? { ...current, summary: event.target.value } : current))}
@@ -4377,7 +4377,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         </label>
         <label className={styles.fieldStack}>
           <span>{copy.contentField}</span>
-          <textarea
+          <VNativeTextarea
             value={editDraft.content}
             placeholder={copy.contentPlaceholder}
             onChange={(event) => setEditDraft((current) => (current ? { ...current, content: event.target.value } : current))}
@@ -4748,7 +4748,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
         <label className={styles.searchBox}>
           <Search size={15} />
-          <input value={searchText} placeholder={copy.searchPlaceholder} onChange={(event) => setSearchText(event.target.value)} />
+          <VNativeInput value={searchText} placeholder={copy.searchPlaceholder} onChange={(event) => setSearchText(event.target.value)} />
         </label>
 
         <div className={styles.filterGroup} aria-label={copy.filters}>
@@ -4854,7 +4854,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           </div>
           <label className={styles.searchBox}>
             <Search size={15} />
-            <input value={searchText} placeholder={copy.searchPlaceholder} onChange={(event) => setSearchText(event.target.value)} />
+            <VNativeInput value={searchText} placeholder={copy.searchPlaceholder} onChange={(event) => setSearchText(event.target.value)} />
           </label>
           <section className={styles.manageFilterPanel} aria-label={copy.manageFilters}>
             <div className={styles.manageFilterHeader}>
@@ -5023,7 +5023,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             </div>
             <label className={styles.searchBox}>
               <Search size={15} />
-              <input value={searchText} placeholder={copy.searchPlaceholder} onChange={(event) => setSearchText(event.target.value)} />
+              <VNativeInput value={searchText} placeholder={copy.searchPlaceholder} onChange={(event) => setSearchText(event.target.value)} />
             </label>
             <div className={styles.itemList}>
               {agentMemoryInventoryQuery.isPending ? <div className={styles.emptyState}>{copy.loading}</div> : null}
@@ -5558,22 +5558,22 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             <div className={styles.sourceGovernanceControls}>
               <label>
                 <span>{copy.ownerScope}</span>
-                <select value={sourceOwnerType} onChange={(event) => setSourceOwnerType(event.target.value as SourceOwnerType)}>
+                <VNativeSelect value={sourceOwnerType} onChange={(event) => setSourceOwnerType(event.target.value as SourceOwnerType)}>
                   <option value="team">{copy.ownerTeam}</option>
                   <option value="agent">{copy.ownerAgent}</option>
-                </select>
+                </VNativeSelect>
               </label>
               <label>
                 <span>{copy.ownerId}</span>
-                <input value={sourceOwnerId} onChange={(event) => setSourceOwnerId(event.target.value)} />
+                <VNativeInput value={sourceOwnerId} onChange={(event) => setSourceOwnerId(event.target.value)} />
               </label>
               <label>
                 <span>{copy.status}</span>
-                <select value={sourceInboxStatus} onChange={(event) => setSourceInboxStatus(event.target.value as SourceInboxStatusFilter)}>
+                <VNativeSelect value={sourceInboxStatus} onChange={(event) => setSourceInboxStatus(event.target.value as SourceInboxStatusFilter)}>
                   {(["pending", "accepted", "rejected", "duplicate", "needs_more_context", "all"] as SourceInboxStatusFilter[]).map((status) => (
                     <option key={status} value={status}>{sourceInboxStatusLabel(copy, status)}</option>
                   ))}
-                </select>
+                </VNativeSelect>
               </label>
               <VButton type="button" className={styles.detailActionButton} onClick={applyActiveKnowledgeOwner}>
                 <Database size={14} />
@@ -5597,47 +5597,47 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 <div className={styles.knowledgeFormGrid}>
                   <label>
                     <span>{copy.sourceType}</span>
-                    <select value={ownerSourceDraft.sourceType} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, sourceType: event.target.value })}>
+                    <VNativeSelect value={ownerSourceDraft.sourceType} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, sourceType: event.target.value })}>
                       {["manual_user_entry", "team_chat_refinement", "external_search_refinement", "pdf_refinement", "agent_authored", "runtime_evidence_refinement"].map((type) => (
                         <option key={type} value={type}>{type}</option>
                       ))}
-                    </select>
+                    </VNativeSelect>
                   </label>
                   <label>
                     <span>{copy.titleField}</span>
-                    <input value={ownerSourceDraft.title} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, title: event.target.value })} />
+                    <VNativeInput value={ownerSourceDraft.title} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, title: event.target.value })} />
                   </label>
                   <label>
                     <span>{copy.originalFilename}</span>
-                    <input value={ownerSourceDraft.originalFilename} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, originalFilename: event.target.value })} />
+                    <VNativeInput value={ownerSourceDraft.originalFilename} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, originalFilename: event.target.value })} />
                   </label>
                   <label>
                     <span>{copy.sourceCreatedAt}</span>
-                    <input value={ownerSourceDraft.sourceCreatedAt} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, sourceCreatedAt: event.target.value })} />
+                    <VNativeInput value={ownerSourceDraft.sourceCreatedAt} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, sourceCreatedAt: event.target.value })} />
                   </label>
                   <label>
                     <span>{copy.capturedBy}</span>
-                    <input value={ownerSourceDraft.capturedBy} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, capturedBy: event.target.value })} />
+                    <VNativeInput value={ownerSourceDraft.capturedBy} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, capturedBy: event.target.value })} />
                   </label>
                   <label>
                     <span>{copy.sourceHash}</span>
-                    <input value={ownerSourceDraft.sourceHash} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, sourceHash: event.target.value })} />
+                    <VNativeInput value={ownerSourceDraft.sourceHash} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, sourceHash: event.target.value })} />
                   </label>
                   <label className={styles.wideField}>
                     <span>{copy.sourceRef}</span>
-                    <textarea rows={2} value={ownerSourceDraft.sourceRef} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, sourceRef: event.target.value })} />
+                    <VNativeTextarea rows={2} value={ownerSourceDraft.sourceRef} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, sourceRef: event.target.value })} />
                   </label>
                   <label className={styles.wideField}>
                     <span>{copy.evidenceRange}</span>
-                    <textarea rows={2} value={ownerSourceDraft.evidenceRange} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, evidenceRange: event.target.value })} />
+                    <VNativeTextarea rows={2} value={ownerSourceDraft.evidenceRange} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, evidenceRange: event.target.value })} />
                   </label>
                   <label className={styles.wideField}>
                     <span>{copy.summaryField}</span>
-                    <textarea rows={2} value={ownerSourceDraft.summary} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, summary: event.target.value })} />
+                    <VNativeTextarea rows={2} value={ownerSourceDraft.summary} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, summary: event.target.value })} />
                   </label>
                   <label className={styles.wideField}>
                     <span>{copy.originalContent}</span>
-                    <textarea rows={4} value={ownerSourceDraft.originalContent} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, originalContent: event.target.value })} />
+                    <VNativeTextarea rows={4} value={ownerSourceDraft.originalContent} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, originalContent: event.target.value })} />
                   </label>
                 </div>
                 <div className={styles.formActionRow}>
@@ -5666,11 +5666,11 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 <div className={styles.sourceGovernanceControls}>
                   <label>
                     <span>{copy.sourceReviewNote}</span>
-                    <input value={sourceReviewNote} onChange={(event) => setSourceReviewNote(event.target.value)} />
+                    <VNativeInput value={sourceReviewNote} onChange={(event) => setSourceReviewNote(event.target.value)} />
                   </label>
                   <label>
                     <span>{copy.centralSourceId}</span>
-                    <input value={duplicateCentralSourceId} onChange={(event) => setDuplicateCentralSourceId(event.target.value)} />
+                    <VNativeInput value={duplicateCentralSourceId} onChange={(event) => setDuplicateCentralSourceId(event.target.value)} />
                   </label>
                 </div>
                 <div className={styles.sourceRecordList}>
@@ -5788,15 +5788,15 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             <div className={styles.knowledgeFormGrid}>
               <label>
                 <span>{copy.searchQuery}</span>
-                <input value={knowledgeSearchDraft.query} onChange={(event) => setKnowledgeSearchDraft({ ...knowledgeSearchDraft, query: event.target.value })} />
+                <VNativeInput value={knowledgeSearchDraft.query} onChange={(event) => setKnowledgeSearchDraft({ ...knowledgeSearchDraft, query: event.target.value })} />
               </label>
               <label>
                 <span>{copy.tags}</span>
-                <input value={knowledgeSearchDraft.tags} onChange={(event) => setKnowledgeSearchDraft({ ...knowledgeSearchDraft, tags: event.target.value })} />
+                <VNativeInput value={knowledgeSearchDraft.tags} onChange={(event) => setKnowledgeSearchDraft({ ...knowledgeSearchDraft, tags: event.target.value })} />
               </label>
               <label>
                 <span>{copy.searchMode}</span>
-                <select
+                <VNativeSelect
                   value={knowledgeSearchDraft.searchMode}
                   onChange={(event) =>
                     setKnowledgeSearchDraft({
@@ -5808,11 +5808,11 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                   <option value="exact">{copy.exactSearch}</option>
                   <option value="semantic">{copy.semanticSearch}</option>
                   <option value="hybrid">{copy.hybridSearch}</option>
-                </select>
+                </VNativeSelect>
               </label>
               <label>
                 <span>{copy.ragTopK}</span>
-                <input
+                <VNativeInput
                   type="number"
                   min={1}
                   max={20}
@@ -5827,7 +5827,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               </label>
               <label>
                 <span>{copy.ragContextBudget}</span>
-                <input
+                <VNativeInput
                   type="number"
                   min={120}
                   max={4000}
@@ -6046,27 +6046,27 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             <div className={styles.knowledgeFormGrid}>
               <label>
                 <span>{copy.proposalTitle}</span>
-                <input value={proposalDraft.title} onChange={(event) => setProposalDraft({ ...proposalDraft, title: event.target.value })} />
+                <VNativeInput value={proposalDraft.title} onChange={(event) => setProposalDraft({ ...proposalDraft, title: event.target.value })} />
               </label>
               <label>
                 <span>{copy.capturedBy}</span>
-                <input value={proposalDraft.proposedByAgentId} onChange={(event) => setProposalDraft({ ...proposalDraft, proposedByAgentId: event.target.value })} />
+                <VNativeInput value={proposalDraft.proposedByAgentId} onChange={(event) => setProposalDraft({ ...proposalDraft, proposedByAgentId: event.target.value })} />
               </label>
               <label>
                 <span>{copy.sourceArtifacts}</span>
-                <input value={proposalDraft.sourceArtifactIds} onChange={(event) => setProposalDraft({ ...proposalDraft, sourceArtifactIds: event.target.value })} />
+                <VNativeInput value={proposalDraft.sourceArtifactIds} onChange={(event) => setProposalDraft({ ...proposalDraft, sourceArtifactIds: event.target.value })} />
               </label>
               <label>
                 <span>{copy.tags}</span>
-                <input value={proposalDraft.tags} onChange={(event) => setProposalDraft({ ...proposalDraft, tags: event.target.value })} />
+                <VNativeInput value={proposalDraft.tags} onChange={(event) => setProposalDraft({ ...proposalDraft, tags: event.target.value })} />
               </label>
               <label className={styles.wideField}>
                 <span>{copy.summaryField}</span>
-                <textarea rows={2} value={proposalDraft.summary} onChange={(event) => setProposalDraft({ ...proposalDraft, summary: event.target.value })} />
+                <VNativeTextarea rows={2} value={proposalDraft.summary} onChange={(event) => setProposalDraft({ ...proposalDraft, summary: event.target.value })} />
               </label>
               <label className={styles.wideField}>
                 <span>{copy.proposalContent}</span>
-                <textarea rows={4} value={proposalDraft.content} onChange={(event) => setProposalDraft({ ...proposalDraft, content: event.target.value })} />
+                <VNativeTextarea rows={4} value={proposalDraft.content} onChange={(event) => setProposalDraft({ ...proposalDraft, content: event.target.value })} />
               </label>
             </div>
             <div className={styles.knowledgeProposalList}>
@@ -6114,21 +6114,21 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             <div className={styles.queueToolbar}>
               <label>
                 <span>{copy.status}</span>
-                <select value={ratingSuggestionStatus} onChange={(event) => setRatingSuggestionStatus(event.target.value as RatingSuggestionStatusFilter)}>
+                <VNativeSelect value={ratingSuggestionStatus} onChange={(event) => setRatingSuggestionStatus(event.target.value as RatingSuggestionStatusFilter)}>
                   <option value="pending">{copy.pendingProposals}</option>
                   <option value="applied">{copy.applySuggestion}</option>
                   <option value="rejected">{copy.rejectSuggestion}</option>
                   <option value="all">{copy.allStatuses}</option>
-                </select>
+                </VNativeSelect>
               </label>
               <label>
                 <span>{copy.priority}</span>
-                <select value={ratingSuggestionPriority} onChange={(event) => setRatingSuggestionPriority(event.target.value as RatingSuggestionPriorityFilter)}>
+                <VNativeSelect value={ratingSuggestionPriority} onChange={(event) => setRatingSuggestionPriority(event.target.value as RatingSuggestionPriorityFilter)}>
                   <option value="all">{copy.allPriorities}</option>
                   <option value="urgent">urgent</option>
                   <option value="elevated">elevated</option>
                   <option value="normal">normal</option>
-                </select>
+                </VNativeSelect>
               </label>
             </div>
             <div className={styles.bulkActionBar}>
@@ -6164,7 +6164,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               {ratingSuggestions.map((suggestion) => (
                 <section key={suggestion.suggestionId} className={styles.knowledgeRow}>
                   <label className={styles.inlineCheck}>
-                    <input
+                    <VNativeInput
                       type="checkbox"
                       aria-label={copy.selectSuggestion}
                       checked={selectedRatingSuggestionIds.includes(suggestion.suggestionId)}
@@ -6255,7 +6255,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             </div>
             <label>
               <span>{copy.traceability}</span>
-              <input value={traceTargetId} onChange={(event) => setTraceTargetId(event.target.value)} placeholder="source / proposal / item / rating id" />
+              <VNativeInput value={traceTargetId} onChange={(event) => setTraceTargetId(event.target.value)} placeholder="source / proposal / item / rating id" />
             </label>
             {knowledgeTraceQuery.data ? (
               <div className={styles.metaGrid}>
@@ -6285,16 +6285,16 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 </div>
                 <label>
                   <span>{copy.markingReason}</span>
-                  <input value={ratingDraft.markingReason} onChange={(event) => setRatingDraft({ ...ratingDraft, markingReason: event.target.value })} />
+                  <VNativeInput value={ratingDraft.markingReason} onChange={(event) => setRatingDraft({ ...ratingDraft, markingReason: event.target.value })} />
                 </label>
                 <div className={styles.ratingControls}>
-                  <select value={ratingDraft.importanceLevel} onChange={(event) => setRatingDraft({ ...ratingDraft, importanceLevel: event.target.value })}>
+                  <VNativeSelect value={ratingDraft.importanceLevel} onChange={(event) => setRatingDraft({ ...ratingDraft, importanceLevel: event.target.value })}>
                     {["low", "medium", "high", "critical"].map((value) => <option key={value} value={value}>{value}</option>)}
-                  </select>
-                  <input value={ratingDraft.confidence} onChange={(event) => setRatingDraft({ ...ratingDraft, confidence: event.target.value })} aria-label={copy.confidence} />
-                  <select value={ratingDraft.stability} onChange={(event) => setRatingDraft({ ...ratingDraft, stability: event.target.value })}>
+                  </VNativeSelect>
+                  <VNativeInput value={ratingDraft.confidence} onChange={(event) => setRatingDraft({ ...ratingDraft, confidence: event.target.value })} aria-label={copy.confidence} />
+                  <VNativeSelect value={ratingDraft.stability} onChange={(event) => setRatingDraft({ ...ratingDraft, stability: event.target.value })}>
                     {["temporary", "evolving", "stable", "deprecated"].map((value) => <option key={value} value={value}>{value}</option>)}
-                  </select>
+                  </VNativeSelect>
                   <VButton
                     type="button"
                     className={styles.detailActionButton}
@@ -6370,7 +6370,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 const selected = selectedCleanupTargetKeys.includes(option.key);
                 return (
                   <label key={option.key} className={styles.cleanupTargetRow} data-selected={selected} data-risk={option.risk}>
-                    <input
+                    <VNativeInput
                       type="checkbox"
                       checked={selected}
                       onChange={() => toggleCleanupTarget(option.key)}
@@ -6452,7 +6452,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             </div>
             <label className={styles.cleanupConfirmField}>
               <span>{copy.cleanupConfirmPhrase}</span>
-              <input
+              <VNativeInput
                 value={cleanupConfirmationText}
                 placeholder={copy.cleanupConfirmPlaceholder}
                 onChange={(event) => setCleanupConfirmationText(event.target.value)}
@@ -6525,7 +6525,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           </div>
           <label className={styles.searchBox}>
             <Search size={15} />
-            <input
+            <VNativeInput
               value={graphSearchText}
               onChange={(event) => setGraphSearchText(event.target.value)}
               placeholder={copy.graphSearchPlaceholder}

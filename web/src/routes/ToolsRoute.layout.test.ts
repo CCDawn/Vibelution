@@ -12,7 +12,12 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("from \"../components/vui\"");
     expect(routeSource).toContain("<VButton");
     expect(routeSource).toContain("<VIconButton");
+    expect(routeSource).toContain("<VNativeInput");
+    expect(routeSource).toContain("<VNativeSelect");
     expect(routeSource).not.toMatch(/<button\b/);
+    expect(routeSource).not.toMatch(/<input\b/);
+    expect(routeSource).not.toMatch(/<select\b/);
+    expect(routeSource).not.toMatch(/<textarea\b/);
   });
 
   it("lives inside Agent management navigation", () => {

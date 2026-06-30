@@ -20,7 +20,7 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { VButton, VIconButton, VRouteHeader } from "../components/vui";
+import { VButton, VIconButton, VNativeInput, VNativeSelect, VRouteHeader } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
@@ -1642,7 +1642,7 @@ export function ToolsRoute() {
         </div>
         <label className={styles.scopeSelect}>
           <span>{lang === "zh" ? "配置" : "Agent"}</span>
-          <select
+          <VNativeSelect
             value={activePolicyAgent?.agentId ?? ""}
             disabled={!activeAgents.length}
             aria-label={lang === "zh" ? "配置 Agent" : "Configure Agent"}
@@ -1656,11 +1656,11 @@ export function ToolsRoute() {
                 {agent.agentCode ? `${agent.agentCode} · ` : ""}{agent.displayName || agent.agentId}
               </option>
             ))}
-          </select>
+          </VNativeSelect>
         </label>
         <label className={styles.scopeSelect}>
           <span>{t("toolsAgentScope")}</span>
-          <select
+          <VNativeSelect
             value={activeAgentScopeId}
             aria-label={t("toolsAgentScope")}
             onChange={(event) => setActiveAgentScopeId(event.target.value)}
@@ -1670,7 +1670,7 @@ export function ToolsRoute() {
                 {scopeLabel(scope, lang, t)}
               </option>
             ))}
-          </select>
+          </VNativeSelect>
         </label>
         <div className={styles.scopeStats}>
           <span>
@@ -1697,7 +1697,7 @@ export function ToolsRoute() {
           </div>
           <label className={styles.searchBox}>
             <Search size={15} />
-            <input
+            <VNativeInput
               value={searchText}
               placeholder={t("toolsSearchPlaceholder")}
               onChange={(event) => setSearchText(event.target.value)}
@@ -1763,7 +1763,7 @@ export function ToolsRoute() {
                     return (
                       <div key={`${group.bundleId}-${tool.source}-${tool.id}`} className={styles.selectableToolRow}>
                         <label className={styles.rowSelect} title={`${bulkCopy.selected}: ${tool.name}`}>
-                          <input
+                          <VNativeInput
                             type="checkbox"
                             checked={bulkSelected}
                             aria-label={`${bulkCopy.selected}: ${tool.name}`}
@@ -1850,11 +1850,11 @@ export function ToolsRoute() {
               <div className={styles.workspaceScopePanel}>
                 <span>{lang === "zh" ? "工作空间写入" : "Workspace write"}</span>
                 <label>
-                  <input type="checkbox" checked disabled />
+                  <VNativeInput type="checkbox" checked disabled />
                   {lang === "zh" ? "私人工作区" : "Private workspace"}
                 </label>
                 <label>
-                  <input
+                  <VNativeInput
                     type="checkbox"
                     checked={toolPolicyDraft.writeScopes.includes("shared")}
                     onChange={(event) => toggleToolPolicyScope("writeScopes", "shared", event.target.checked)}
@@ -1869,7 +1869,7 @@ export function ToolsRoute() {
                 >
                   <label className={styles.toolBundleSelect}>
                     <span>{lang === "zh" ? "工具包" : "Package"}</span>
-                    <select
+                    <VNativeSelect
                       value={selectedBundle?.bundleId ?? ""}
                       onChange={(event) => setSelectedBundleId(event.target.value)}
                     >
@@ -1878,7 +1878,7 @@ export function ToolsRoute() {
                           {bundle.label}
                         </option>
                       ))}
-                    </select>
+                    </VNativeSelect>
                   </label>
                   <span className={styles.toolBundleSummary} title={selectedBundle?.description || ""}>
                     {selectedBundle ? toolBundleMeta(selectedBundle, lang) : "-"}
@@ -1907,7 +1907,7 @@ export function ToolsRoute() {
               ) : null}
               <label className={styles.searchBox}>
                 <Search size={15} />
-                <input
+                <VNativeInput
                   value={toolPolicySearchText}
                   placeholder={lang === "zh" ? "搜索可分配工具" : "Search assignable tools"}
                   onChange={(event) => setToolPolicySearchText(event.target.value)}
@@ -2081,7 +2081,7 @@ export function ToolsRoute() {
                   <div className={styles.image2ModelControls}>
                     <label className={styles.image2ModelSelect}>
                       <span>{lang === "zh" ? "使用模型" : "Model"}</span>
-                      <select
+                      <VNativeSelect
                         value={image2ModelConfig?.defaultModelRef ?? ""}
                         disabled={image2ModelsQuery.isPending || image2ModelMutation.isPending}
                         onChange={(event) => image2ModelMutation.mutate(event.target.value)}
@@ -2094,7 +2094,7 @@ export function ToolsRoute() {
                             {model.label || model.modelRef}
                           </option>
                         ))}
-                      </select>
+                      </VNativeSelect>
                     </label>
                     <div className={styles.image2ModelSummary}>
                       <strong>{image2ModelLabel(image2ModelConfig, lang)}</strong>
