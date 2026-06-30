@@ -3705,6 +3705,167 @@ def test_content_extraction_writeback_requires_candidate_coverage_and_materializ
     assert complete["writeback"]["coverageSummary"]["missing"] == 0
 
 
+def test_source_collection_context_reconciles_checklist_updates_after_writeback(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经预测编码资料提炼",
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": agent["agentId"]},
+            "querySeeds": ["predictive coding neural algorithm"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    candidate = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding closure candidate",
+            "sourceUrl": "https://doi.org/10.0000/closure-candidate",
+            "sourceKind": "paper",
+            "summary": "Predictive coding evidence for closure.",
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/closure-candidate"},
+            "createdByAgent": agent["agentId"],
+        },
+    )["candidate"]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-context-reconcile", "status": "running"},
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
+    )
+
+    first = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "已提炼候选，但 task 工具稍后才补齐打勾。",
+            "result": {
+                "candidateExtractions": [
+                    {
+                        "candidateId": candidate["candidateId"],
+                        "status": "extracted",
+                        "summary": "预测编码候选已提炼。",
+                    }
+                ],
+                "candidateDecisions": [{"candidateId": candidate["candidateId"], "decision": "keep"}],
+            },
+            "recordedByAgent": agent["agentId"],
+        },
+    )
+    assert first["task"]["status"] == "needs_review"
+    assert first["task"]["completionGate"]["artifactComplete"] is True
+    assert first["task"]["completionGate"]["taskChecklistComplete"] is False
+
+    _append_stage_task_tool_trace(tmp_path, task["task"])
+    context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
+        team["teamId"],
+        run_id=run_id,
+        stage_id="extraction",
+        task_id=task["taskId"],
+        context_mode="compact",
+    )
+
+    assert context["task"]["status"] == "completed"
+    assert context["task"]["taskToolProgress"]["completed"] == len(task["task"]["taskChecklist"])
+    assert context["task"]["completionGate"]["passed"] is True
+    stored_task, _stored_run_id = team_workflow_orchestration_service._find_source_collection_stage_session_task_by_id(
+        team["teamId"],
+        task["taskId"],
+    )
+    assert stored_task["status"] == "completed"
+    assert stored_task["completionGate"]["passed"] is True
+
+
+def test_source_collection_writeback_recovers_fenced_structured_result_text(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经预测编码资料提炼",
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": agent["agentId"]},
+            "querySeeds": ["predictive coding neural algorithm"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    candidate = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding fenced result candidate",
+            "sourceUrl": "https://doi.org/10.0000/fenced-result-candidate",
+            "sourceKind": "paper",
+            "summary": "Predictive coding evidence for fenced result recovery.",
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/fenced-result-candidate"},
+            "createdByAgent": agent["agentId"],
+        },
+    )["candidate"]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-fenced-result", "status": "running"},
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
+    )
+    _append_stage_task_tool_trace(tmp_path, task["task"])
+    structured_result = {
+        "candidateExtractions": [
+            {
+                "candidateId": candidate["candidateId"],
+                "status": "extracted",
+                "summary": "预测编码候选已从围栏 JSON 恢复。",
+            }
+        ],
+        "candidateDecisions": [{"candidateId": candidate["candidateId"], "decision": "keep"}],
+    }
+
+    response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "围栏 JSON 结构化回写。",
+            "result": {
+                "text": "Agent output:\n```json\n"
+                + json.dumps(structured_result, ensure_ascii=False)
+                + "\n```\nEnd.",
+            },
+            "recordedByAgent": agent["agentId"],
+        },
+    )
+
+    assert response["writeback"]["status"] == "completed"
+    assert response["writeback"]["coverageSummary"]["processed"] == 1
+    assert response["writeback"]["coverageSummary"]["missing"] == 0
+    assert response["task"]["result"]["_structuredResultRecoveredFrom"] == "text"
+
+
 def test_content_extraction_writeback_materializes_record_extractions_and_reports_partial_closure(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)

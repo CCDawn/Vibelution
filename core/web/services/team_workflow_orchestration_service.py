@@ -1312,7 +1312,7 @@ def writeback_source_collection_stage_session_task(
     if task is None or not run_id:
         raise TeamWorkflowOrchestrationError(f"Stage session task not found: {normalized_task_id}")
     status = _normalize_source_collection_stage_session_task_status(request_payload.get("status") or request_payload.get("resultStatus"))
-    result_payload = request_payload.get("result") if isinstance(request_payload.get("result"), dict) else {}
+    result_payload = _normalize_source_collection_stage_writeback_result_payload(request_payload.get("result"))
     writeback = {
         "status": status,
         "agentRequestedStatus": status,
@@ -1551,7 +1551,7 @@ def get_source_collection_stage_task_context(
         found_task, found_run_id = _find_source_collection_stage_session_task_by_id(normalized_team_id, normalized_task_id)
         if found_task is None or not found_run_id:
             raise TeamWorkflowOrchestrationError(f"Stage session task not found: {normalized_task_id}")
-        task = dict(found_task)
+        task = _reconcile_source_collection_stage_session_task(normalized_team_id, found_run_id, dict(found_task))
         task_run_id = found_run_id
     normalized_run_id = (
         _trim_text(run_id, max_length=128)
@@ -16314,6 +16314,72 @@ def _normalize_source_collection_stage_session_task_status(value: Any) -> str:
     return normalized if normalized in SOURCE_COLLECTION_STAGE_SESSION_TASK_STATUSES else "needs_review"
 
 
+def _normalize_source_collection_stage_writeback_result_payload(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    if any(
+        key in value
+        for key in (
+            "candidateExtractions",
+            "candidate_extractions",
+            "candidateDecisions",
+            "candidate_decisions",
+            "recordExtractions",
+            "record_extractions",
+            "candidateLeads",
+            "candidate_leads",
+            "sourceRecords",
+            "source_records",
+            "invalidSources",
+            "invalid_sources",
+            "candidateGraph",
+            "candidate_graph",
+            "stewardPackDraft",
+            "approvedCandidateIds",
+        )
+    ):
+        return value
+    for key in ("text", "value", "result_json", "resultJson"):
+        raw = value.get(key)
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        parsed = _parse_source_collection_stage_writeback_result_text(raw)
+        if parsed:
+            parsed.setdefault("_structuredResultRecoveredFrom", key)
+            return parsed
+    return value
+
+
+def _parse_source_collection_stage_writeback_result_text(text: str) -> dict[str, Any]:
+    stripped = str(text or "").strip()
+    if not stripped:
+        return {}
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, dict):
+        return parsed
+    if isinstance(parsed, str) and parsed.strip() != stripped:
+        nested = _parse_source_collection_stage_writeback_result_text(parsed)
+        if nested:
+            return nested
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", stripped, flags=re.IGNORECASE | re.DOTALL)
+    if fenced:
+        nested = _parse_source_collection_stage_writeback_result_text(fenced.group(1))
+        if nested:
+            return nested
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"\{", stripped):
+        try:
+            candidate, end_index = decoder.raw_decode(stripped[match.start():])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(candidate, dict):
+            return candidate
+    return {}
+
+
 def _load_source_collection_stage_session_task_store(team_id: str, run_id: str) -> dict[str, Any]:
     path = _source_collection_stage_session_task_store_path(team_id, run_id)
     if path.exists():
@@ -16396,6 +16462,19 @@ def _reconcile_source_collection_stage_session_tasks(team_id: str) -> bool:
                     _sync_stage_round_with_source_collection_stage_task(team_id, run_id, task)
             changed = True
     return changed
+
+
+def _reconcile_source_collection_stage_session_task(team_id: str, run_id: str, task: dict[str, Any]) -> dict[str, Any]:
+    reconciled = _reconcile_source_collection_stage_session_task_turn_status(task)
+    reconciled = _reconcile_source_collection_stage_session_task_from_turn_result(reconciled)
+    reconciled = _reconcile_source_collection_stage_session_task_sources(team_id, run_id, reconciled)
+    reconciled = _reconcile_source_collection_stage_session_task_completion_gate(team_id, run_id, reconciled)
+    if reconciled == task:
+        return task
+    _upsert_source_collection_stage_session_task(team_id, run_id, reconciled)
+    if _trim_text(reconciled.get("status"), max_length=80) not in {"running", "queued"}:
+        _sync_stage_round_with_source_collection_stage_task(team_id, run_id, reconciled)
+    return reconciled
 
 
 def _repair_missing_source_collection_stage_round(team_id: str, run_id: str, tasks: list[dict[str, Any]]) -> bool:
@@ -17504,6 +17583,13 @@ def _source_collection_context_run_summary(
 def _source_collection_context_task_summary(task: dict[str, Any]) -> dict[str, Any]:
     if not task:
         return {}
+    result = task.get("result") if isinstance(task.get("result"), dict) else {}
+    writeback = task.get("writeback") if isinstance(task.get("writeback"), dict) else {}
+    closure_summary = (
+        writeback.get("closureSummary")
+        if isinstance(writeback.get("closureSummary"), dict)
+        else result.get("closureSummary") if isinstance(result.get("closureSummary"), dict) else {}
+    )
     return {
         "taskId": _trim_text(task.get("taskId"), max_length=160),
         "stageId": _trim_text(task.get("stageId"), max_length=80),
@@ -17515,6 +17601,9 @@ def _source_collection_context_task_summary(task: dict[str, Any]) -> dict[str, A
         "summary": _trim_text(task.get("summary"), max_length=500),
         "createdAt": _trim_text(task.get("createdAt"), max_length=120),
         "updatedAt": _trim_text(task.get("updatedAt"), max_length=120),
+        "taskToolProgress": task.get("taskToolProgress") if isinstance(task.get("taskToolProgress"), dict) else {},
+        "completionGate": task.get("completionGate") if isinstance(task.get("completionGate"), dict) else {},
+        "closureSummary": closure_summary,
     }
 
 
@@ -17748,7 +17837,7 @@ def _compact_source_collection_context_run(run: dict[str, Any]) -> dict[str, Any
 
 
 def _compact_source_collection_context_task(task: dict[str, Any]) -> dict[str, Any]:
-    return {
+    compact = {
         "taskId": _trim_text(task.get("taskId"), max_length=160),
         "stageId": _trim_text(task.get("stageId"), max_length=80),
         "agentId": _trim_text(task.get("agentId"), max_length=160),
@@ -17756,6 +17845,23 @@ def _compact_source_collection_context_task(task: dict[str, Any]) -> dict[str, A
         "status": _trim_text(task.get("status"), max_length=80),
         "summary": _trim_text(task.get("summary"), max_length=240),
     }
+    task_status = _trim_text(task.get("status"), max_length=80).lower()
+    should_show_gate = task_status not in {"", "running", "queued"}
+    if should_show_gate and isinstance(task.get("taskToolProgress"), dict):
+        progress = task["taskToolProgress"]
+        compact["taskToolProgress"] = {
+            key: progress.get(key)
+            for key in ("complete", "completed", "total", "pendingIds", "pendingReason")
+            if key in progress
+        }
+    if should_show_gate and isinstance(task.get("completionGate"), dict):
+        gate = task["completionGate"]
+        compact["completionGate"] = {
+            key: gate.get(key)
+            for key in ("passed", "artifactComplete", "taskChecklistComplete")
+            if key in gate
+        }
+    return compact
 
 
 def _compact_source_collection_context_assignment(assignment: dict[str, Any]) -> dict[str, Any]:
