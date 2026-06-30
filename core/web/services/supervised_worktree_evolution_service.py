@@ -334,6 +334,59 @@ def _force_cancel_supervised_worktree_run_for_shutdown(
     return updated
 
 
+def _terminate_supervised_worktree_run_for_operator(
+    snapshot: dict[str, Any],
+    *,
+    reviewer_note: str = "",
+) -> dict[str, Any]:
+    run_id = str(snapshot.get("runId") or "").strip()
+    if not run_id:
+        raise SupervisedWorktreeRunNotFoundError("Supervised worktree run not found.")
+    status = str(snapshot.get("status") or "").strip().lower()
+    if status not in _ACTIVE_STATUSES:
+        raise SupervisedWorktreeRunActionError("This supervised worktree run is not active and cannot be terminated.")
+
+    _request_run_cancel(run_id)
+    updated = _clone(snapshot)
+    now = _now_iso()
+    message = "用户已终止监督工作树进化运行。"
+    note = str(reviewer_note or "").strip()
+    updated["status"] = "cancelled"
+    updated["phase"] = "operator_terminated"
+    updated["runtimeStatus"] = "cancelled"
+    updated["outcome"] = "operator_cancelled"
+    updated["latestMessage"] = message
+    updated["finishedAt"] = now
+    updated["updatedAt"] = now
+    updated["cancelRequested"] = True
+    updated["cancelRequestedAt"] = now
+    updated["stopReason"] = note or message
+    updated["runtimeManagerControl"] = {
+        "reason": "operator_terminate",
+        "message": note,
+    }
+    _append_stage(updated, "operator_terminated", "cancelled", message)
+    with _RUN_STATE_LOCK:
+        global _ACTIVE_RUN_ID
+        if _ACTIVE_RUN_ID == run_id:
+            _ACTIVE_RUN_ID = None
+    _persist_snapshot(updated, active_run_id="")
+    _record_worktree_scene_event(
+        "operator_terminated",
+        "supervised_worktree_run.operator_cancelled",
+        run_id=run_id,
+        message="Supervised worktree evolution run cancelled by operator.",
+        outcome="cancelled",
+        fields={
+            **_snapshot_event_fields(updated),
+            "reason": "operator_terminate",
+        },
+        child_log_payload={"snapshot": _compact_snapshot_for_child_log(updated)},
+        lifecycle=True,
+    )
+    return updated
+
+
 def _register_run_cancel_event(run_id: str) -> threading.Event:
     normalized = str(run_id or "").strip()
     with _RUN_STATE_LOCK:
@@ -501,6 +554,9 @@ def _execute_supervised_worktree_action(
     if normalized_action in {"rollback_merge", "rollback"}:
         updated = _rollback_merge(snapshot)
         _append_event(updated, "rollback", "已按回滚清单恢复合并前状态。")
+        return _decorate_snapshot(updated)
+    if normalized_action in {"terminate", "cancel", "stop"}:
+        updated = _terminate_supervised_worktree_run_for_operator(snapshot, reviewer_note=reviewer_note)
         return _decorate_snapshot(updated)
     raise SupervisedWorktreeRunValidationError(f"Unsupported supervised worktree action: {action}")
 
@@ -2615,9 +2671,14 @@ def _action_states(snapshot: dict[str, Any]) -> dict[str, Any]:
     merge = snapshot.get("merge") if isinstance(snapshot.get("merge"), dict) else {}
     rollback = snapshot.get("rollback") if isinstance(snapshot.get("rollback"), dict) else {}
     done = status in _TERMINAL_STATUSES
+    active = status in _ACTIVE_STATUSES
     review_pending = _review_gate_requires_approval(snapshot)
     review_gate = snapshot.get("reviewGate") if isinstance(snapshot.get("reviewGate"), dict) else {}
     return {
+        "terminate": {
+            "enabled": active,
+            "reason": "" if active else "这一轮没有正在运行的监督工作树进化任务。",
+        },
         "preserve": {"enabled": done and has_worktree and outcome not in {"preserved", "merged"}},
         "discard": {"enabled": done and has_worktree and outcome not in {"discarded", "discard_skipped", "merged"}},
         "analyzeMerge": {"enabled": done and has_worktree},

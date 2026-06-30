@@ -1272,6 +1272,55 @@ def test_supervised_worktree_run_route_get_run_cleanses_invalid_candidate_path(t
     assert "path" not in payload["candidateWorktree"]
 
 
+def test_supervised_worktree_run_action_route_terminates_active_run(tmp_path, monkeypatch):
+    monkeypatch.setattr(supervised_worktree_evolution_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        supervised_worktree_evolution_service.work_run_store,
+        "WORK_RUNS_DIR",
+        tmp_path / "work_runs",
+    )
+    monkeypatch.setattr(
+        supervised_worktree_evolution_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: {"accepted": True},
+    )
+    run_id = "swte-web-terminate"
+    supervised_worktree_evolution_service._persist_snapshot(
+        {
+            "runId": run_id,
+            "runKind": supervised_worktree_evolution_service.RUN_KIND,
+            "leases": supervised_worktree_evolution_service.RUN_LEASES,
+            "status": "running",
+            "phase": "candidate_modify",
+            "runtimeStatus": "running",
+            "outcome": "",
+            "startedAt": "2026-05-22T10:00:00+00:00",
+            "updatedAt": "2026-05-22T10:01:00+00:00",
+            "finishedAt": "",
+            "latestMessage": "候选 agent 正在改良。",
+            "decision": {},
+            "mergeAnalysis": {},
+        },
+        active_run_id=run_id,
+    )
+
+    response = client.post(
+        f"/api/evolution/worktree-runs/{run_id}/actions",
+        json={"action": "terminate", "reviewerNote": "用户终止。"},
+    )
+    active_response = client.get("/api/evolution/worktree-runs/active")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "cancelled"
+    assert payload["outcome"] == "operator_cancelled"
+    assert payload["runtimeManagerControl"]["reason"] == "operator_terminate"
+    assert payload["actionStates"]["terminate"]["enabled"] is False
+    assert active_response.status_code == 200
+    assert active_response.json() is None
+
+
 def test_supervised_worktree_run_route_requires_real_llm_cost_confirmation(tmp_path, monkeypatch):
     bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
     bundle_dir.mkdir(parents=True, exist_ok=True)
