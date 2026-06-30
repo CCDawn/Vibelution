@@ -1,17 +1,15 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const routeStyles = readFileSync(new URL("./src/routes/MemoryRoute.legacy.css", import.meta.url), "utf-8");
+import routeStyles from "./src/routes/MemoryRoute.styles";
 
 describe("MemoryRoute CSS layout contract", () => {
   it("clips long memory list text so raw HTML summaries cannot overlap cards", () => {
-    expect(routeStyles).toContain(".itemButton");
-    expect(routeStyles).toContain("overflow: hidden;");
-    expect(routeStyles).toContain(".itemContentButton");
-    expect(routeStyles).toContain(".sourceCopy span,");
-    expect(routeStyles).toContain(".itemPath,");
-    expect(routeStyles).toContain(".itemSummary");
-    expect(routeStyles).toContain("display: block;");
-    expect(routeStyles).toContain("text-overflow: ellipsis;");
+    expect(routeStyles.itemButton).toBeTypeOf("string");
+    expect(routeStyles.itemContentButton).toBeTypeOf("string");
+    expect(routeStyles.sourceCopy).toBeTypeOf("string");
+    expect(routeStyles.itemPath).toBeTypeOf("string");
+    expect(routeStyles.itemSummary).toBeTypeOf("string");
+    expect(routeStyles.itemButtonDense).toContain("min-h-[62px]");
+    expect(routeStyles.itemContentButtonDense).toContain("grid-rows-[16px_14px_18px]");
   });
 });

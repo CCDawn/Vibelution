@@ -5,6 +5,8 @@ import { readFileSync } from "node:fs";
 
 const routeSource = readFileSync(new URL("./SupervisedReviewRoute.tsx", import.meta.url), "utf-8");
 const worktreePanelSource = readFileSync(new URL("./SupervisedWorktreeReviewPanel.tsx", import.meta.url), "utf-8");
+const routeStylesSource = readFileSync(new URL("./SupervisedReviewRoute.styles.ts", import.meta.url), "utf-8");
+const worktreePanelStylesSource = readFileSync(new URL("./SupervisedWorktreeReviewPanel.styles.ts", import.meta.url), "utf-8");
 
 describe("SupervisedReviewRoute layout contract", () => {
   it("routes supervised review controls through VUI primitives", () => {
@@ -23,16 +25,18 @@ describe("SupervisedReviewRoute layout contract", () => {
   });
 
   it("keeps the review workspace in split-pane layout at common desktop widths", () => {
-    expect(routeSource).toContain("grid-cols-[var(--review-queue-width,380px)_12px_minmax(0,1fr)]");
-    expect(routeSource).toContain("max-[980px]:grid-cols-1");
-    expect(routeSource).toContain("max-[980px]:overflow-visible");
-    expect(routeSource).not.toContain("max-[1280px]:grid-cols-1");
+    expect(routeSource).toContain("className={styles.workspace}");
+    expect(routeStylesSource).toContain("grid-cols-[var(--review-queue-width,380px)_12px_minmax(0,1fr)]");
+    expect(routeStylesSource).toContain("max-[980px]:grid-cols-1");
+    expect(routeStylesSource).toContain("max-[980px]:overflow-visible");
+    expect(routeStylesSource).not.toContain("max-[1280px]:grid-cols-1");
   });
 
   it("keeps review empty states compact enough for the first viewport", () => {
-    expect(routeSource).toContain("min-h-[82px]");
-    expect(routeSource).toContain("px-[11px] py-[9px]");
-    expect(routeSource).not.toContain("min-h-[118px]");
+    expect(routeSource).toContain("className={styles.emptyState}");
+    expect(routeStylesSource).toContain("min-h-[82px]");
+    expect(routeStylesSource).toContain("px-[11px] py-[9px]");
+    expect(routeStylesSource).not.toContain("min-h-[118px]");
   });
 
   it("hosts candidate worktree review inside the sample review workspace", () => {
@@ -75,6 +79,7 @@ describe("SupervisedReviewRoute layout contract", () => {
     expect(worktreePanelSource).toContain("worktreeReviewGateClass");
     expect(worktreePanelSource).toContain("controlActionsClass");
     expect(worktreePanelSource).toContain("gateActionGridClass");
-    expect(worktreePanelSource).toContain("grid-cols-2");
+    expect(worktreePanelStylesSource).toContain("gateActionGridClass");
+    expect(worktreePanelStylesSource).toContain("grid-cols-2");
   });
 });

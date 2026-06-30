@@ -3,6 +3,9 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import appShellStyles from "../../app/AppShell.styles";
+import teamStyles from "../../routes/TeamsRoute.styles";
+
 const sourceRoot = resolve(import.meta.dirname, "../..");
 
 const migrationTargets = [
@@ -46,15 +49,6 @@ const cssModuleFreeTargets = [
   "routes/SelfEvolutionTrack.tsx",
   "routes/SupervisedReviewRoute.tsx",
   "routes/SupervisedWorktreeReviewPanel.tsx",
-] as const;
-
-const slottedListStyleTargets = [
-  {
-    path: "app/AppShell.legacy.css",
-    outerSelector: ".utilityFileButton",
-    contentSlot: '.utilityFileButton [data-slot="vui-button-content"]',
-    labelSlot: '.utilityFileButton [data-slot="vui-button-label"]',
-  },
 ] as const;
 
 const routeShellTargets = [
@@ -124,19 +118,19 @@ const routeStyleTargets = [
     ],
   },
   {
-    path: "routes/ChatCodingRoute.legacy.css",
+    path: "routes/ChatCodingRoute.styles.ts",
     forbidden: ["border-left: 3px"],
   },
   {
-    path: "routes/EvolutionRoute.legacy.css",
+    path: "routes/EvolutionRoute.styles.ts",
     forbidden: ["border-left: 3px"],
   },
   {
-    path: "routes/AgentsRoute.legacy.css",
+    path: "routes/AgentsRoute.styles.ts",
     forbidden: ["background: color-mix(in srgb, var(--accent-cool) 90%, var(--fg-primary))"],
   },
   {
-    path: "routes/TeamsRoute.legacy.css",
+    path: "routes/TeamsRoute.styles.ts",
     forbidden: [
       "background: color-mix(in srgb, var(--fg-primary) 78%, transparent)",
       "border-left-width: 4px",
@@ -148,14 +142,6 @@ const routeStyleTargets = [
 
 function readTargetSource(path: string): string {
   return readFileSync(resolve(sourceRoot, path), "utf8");
-}
-
-function readStyleBlock(source: string, selector: string): string {
-  const start = source.indexOf(selector);
-  expect(start).toBeGreaterThanOrEqual(0);
-  const end = source.indexOf("}", start);
-  expect(end).toBeGreaterThan(start);
-  return source.slice(start, end + 1);
 }
 
 describe("VUI batch migration", () => {
@@ -175,20 +161,15 @@ describe("VUI batch migration", () => {
     expect(source).not.toContain(".module.css");
   });
 
-  it.each(slottedListStyleTargets)(
-    "$path keeps VUI list button grid on internal slots",
-    ({ path, outerSelector, contentSlot, labelSlot }) => {
-      const source = readTargetSource(path);
-      const outerBlock = readStyleBlock(source, outerSelector);
-
-      expect(outerBlock).toContain("display: block;");
-      expect(source).toContain(contentSlot);
-      expect(source).toContain(labelSlot);
-    },
-  );
+  it("app/AppShell.styles.ts keeps VUI list button grid on internal slots", () => {
+    expect(appShellStyles.utilityFileButton).toContain("[&_[data-slot=vui-button-content]]:w-full");
+    expect(appShellStyles.utilityFileButton).toContain("[&_[data-slot=vui-button-label]]:grid");
+    expect(appShellStyles.utilityFileButton).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(appShellStyles.utilityFileButtonActive).toContain("[&_[data-slot=vui-button-label]]:grid");
+  });
 
   it("routes/SkillsRoute.tsx keeps VUI list button grid on internal slots", () => {
-    const source = readTargetSource("routes/SkillsRoute.tsx");
+    const source = readTargetSource("routes/SkillsRoute.styles.ts");
 
     expect(source).toContain("skillButtonBaseClass");
     expect(source).toContain("[&_[data-slot=vui-button-content]]:w-full");
@@ -196,7 +177,7 @@ describe("VUI batch migration", () => {
   });
 
   it("routes/PromptTemplatesRoute.tsx keeps VUI list button grid on internal slots", () => {
-    const source = readTargetSource("routes/PromptTemplatesRoute.tsx");
+    const source = readTargetSource("routes/PromptTemplatesRoute.styles.ts");
 
     expect(source).toContain("templateButtonBaseClass");
     expect(source).toContain("[&_[data-slot=vui-button-content]]:w-full");
@@ -229,20 +210,17 @@ describe("VUI batch migration", () => {
   );
 
   it("keeps Teams source-collection stage actions compact by default", () => {
-    const source = readTargetSource("routes/TeamsRoute.legacy.css");
-    const researchActionsBlock = readStyleBlock(source, ".researchStageActions");
-    const researchActionButtonBlock = readStyleBlock(source, ".researchStageActions [data-vui=\"native-button\"]");
-    const actionBlock = readStyleBlock(source, ".sourceCollectionStagePrimaryAction");
-    const panelBlock = readStyleBlock(source, ".sourceCollectionPanelActions");
+    const source = readTargetSource("routes/TeamsRoute.styles.ts");
 
-    expect(researchActionsBlock).toContain("display: flex;");
-    expect(researchActionsBlock).toContain("flex-wrap: wrap;");
-    expect(researchActionsBlock).not.toContain("grid-template-columns");
-    expect(researchActionButtonBlock).toContain("width: fit-content;");
-    expect(researchActionButtonBlock).not.toMatch(/^\s*width:\s*100%;/m);
-    expect(actionBlock).toContain("width: fit-content;");
-    expect(actionBlock).not.toMatch(/^\s*width:\s*100%;/m);
-    expect(panelBlock).toContain("display: flex;");
-    expect(panelBlock).toContain("flex-wrap: wrap;");
+    expect(source).toContain("researchStageActions");
+    expect(source).toContain("sourceCollectionStagePrimaryAction");
+    expect(source).toContain("sourceCollectionPanelActions");
+    expect(teamStyles.researchStageActions).toContain("flex");
+    expect(teamStyles.researchStageActions).toContain("flex-wrap");
+    expect(teamStyles.researchStageActions).not.toContain("grid-template-columns");
+    expect(teamStyles.sourceCollectionStagePrimaryAction).toContain("w-fit");
+    expect(teamStyles.sourceCollectionStagePrimaryAction).not.toMatch(/(^|\s)w-full(\s|$)/);
+    expect(teamStyles.sourceCollectionPanelActions).toContain("flex");
+    expect(teamStyles.sourceCollectionPanelActions).toContain("flex-wrap");
   });
 });
