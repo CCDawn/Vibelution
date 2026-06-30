@@ -3070,6 +3070,71 @@ def test_source_collection_stage_card_projection_ignores_stale_agent_tasks_for_c
     assert candidate_card["counts"]["historicalTask"] == 0
 
 
+def test_source_collection_stage_card_projection_closes_finding_with_downstream_assignments_open(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    finder = agent_directory_service.create_agent_instance(display_name="资料寻找")
+    extractor = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[
+            {"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"},
+            {"agentId": extractor["agentId"], "role": "source_extractor", "agentName": "资料提炼"},
+        ],
+    )
+    run = data_processing_service.create_processing_run(
+        title="Knowledge collection current round",
+        scope={"teamId": team["teamId"], "workflowStage": "knowledge_collection"},
+        metadata={"startedFrom": "team_workflow_source_collection"},
+    )
+    finder_assignment = data_processing_service.create_collection_assignment(
+        run["runId"],
+        {"agentRole": "source_finder", "agentId": finder["agentId"]},
+    )
+    data_processing_service.create_collection_assignment(
+        run["runId"],
+        {"agentRole": "source_extractor", "agentId": extractor["agentId"]},
+    )
+    data_processing_service.record_collection_output(
+        run["runId"],
+        finder_assignment["assignmentId"],
+        {
+            "status": "completed",
+            "records": [
+                {
+                    "sourceType": "paper",
+                    "sourceRef": "https://doi.org/10.0000/finder-done",
+                    "title": "Finder completed source",
+                }
+            ],
+        },
+    )
+    team_workflow_orchestration_service._upsert_source_collection_stage_session_task(
+        team["teamId"],
+        run["runId"],
+        {
+            "taskId": "stagetask-finder-completed",
+            "runId": run["runId"],
+            "stageId": "finding",
+            "agentId": finder["agentId"],
+            "agentRole": "source_finder",
+            "sessionId": "session-finder-completed",
+            "status": "completed",
+            "summary": "资料寻找已完成并产出资料。",
+            "createdAt": "2026-06-30T00:00:00+00:00",
+            "updatedAt": "2026-06-30T00:00:00+00:00",
+        },
+    )
+
+    projection = team_workflow_orchestration_service._source_collection_stage_cards_projection(team["teamId"], run["runId"])
+
+    finding_card = next(item for item in projection["cards"] if item["stageId"] == "finding")
+    assert finding_card["status"] == "closed_loop"
+    assert finding_card["counts"]["pending"] == 0
+    assert finding_card["counts"]["searchOpenAssignment"] == 0
+    assert finding_card["counts"]["downstreamOpenAssignment"] == 1
+    assert "0 search assignments remain" in finding_card["artifactSummary"]
+
+
 def test_source_collection_stage_card_projection_does_not_close_partial_needs_review_artifacts():
     card = team_workflow_orchestration_service._source_collection_stage_card_projection(
         "extraction",
@@ -3684,7 +3749,7 @@ def test_source_quality_stage_writeback_materializes_candidate_decisions(tmp_pat
                 "candidateDecisions": [
                     {
                         "candidateId": approved["candidateId"],
-                        "decision": "pass",
+                        "decision": "keep",
                         "reason": "神经预测编码主题相关，元数据可追踪。",
                         "evidenceRefs": [{"type": "doi", "id": "10.0000/source-quality-approved"}],
                     },
@@ -3731,6 +3796,90 @@ def test_source_quality_stage_writeback_materializes_candidate_decisions(tmp_pat
     assert screening_projection["status"] == "artifact_ready_agent_needs_review"
     assert screening_projection["counts"]["artifact"] == 3
     assert screening_projection["counts"]["pending"] == 0
+
+
+def test_source_quality_reconcile_retries_legacy_no_assessable_keep_decisions(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
+    )
+    run_id = "run-legacy-keep-quality-reconcile"
+    candidate = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding keep decision source",
+            "sourceUrl": "https://doi.org/10.0000/legacy-keep",
+            "sourceKind": "paper",
+            "summary": "Neural predictive coding evidence suitable for keeping.",
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/legacy-keep"},
+            "createdByAgent": agent["agentId"],
+        },
+    )["candidate"]
+    team_workflow_orchestration_service._upsert_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {
+            "taskId": "stagetask-legacy-keep-quality",
+            "runId": run_id,
+            "stageId": "extraction",
+            "agentId": agent["agentId"],
+            "agentRole": "source_extractor",
+            "sessionId": "session-legacy-keep-quality",
+            "status": "completed",
+            "summary": "旧版本把 keep 判定跳过为 unsupported_decision。",
+            "writeback": {
+                "status": "completed",
+                "summary": "旧版本回写。",
+                "result": {
+                    "candidateDecisions": [
+                        {
+                            "candidateId": candidate["candidateId"],
+                            "decision": "keep",
+                            "reason": "有价值资料，保留进入关系整理。",
+                        }
+                    ]
+                },
+                "materializedSourceQuality": {
+                    "status": "no_assessable_decisions",
+                    "skippedCandidateCount": 1,
+                    "skippedCandidates": [{"candidateId": candidate["candidateId"], "reason": "unsupported_decision"}],
+                },
+            },
+            "result": {
+                "candidateDecisions": [
+                    {
+                        "candidateId": candidate["candidateId"],
+                        "decision": "keep",
+                        "reason": "有价值资料，保留进入关系整理。",
+                    }
+                ],
+                "materializedSourceQuality": {
+                    "status": "no_assessable_decisions",
+                    "skippedCandidateCount": 1,
+                    "skippedCandidates": [{"candidateId": candidate["candidateId"], "reason": "unsupported_decision"}],
+                },
+            },
+            "createdAt": "2026-06-30T00:00:00+00:00",
+            "updatedAt": "2026-06-30T00:00:00+00:00",
+        },
+    )
+
+    changed = team_workflow_orchestration_service._reconcile_source_collection_stage_session_tasks(team["teamId"])
+
+    store = team_workflow_orchestration_service._load_source_collection_stage_session_task_store(team["teamId"], run_id)
+    stored_task = next(item for item in store["tasks"] if item["taskId"] == "stagetask-legacy-keep-quality")
+    candidates = {
+        item["candidateId"]: item
+        for item in team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")["candidates"]
+    }
+    assert changed is True
+    assert stored_task["writeback"]["materializedSourceQuality"]["status"] == "completed"
+    assert stored_task["writeback"]["materializedSourceQuality"]["approvedCandidateCount"] == 1
+    assert candidates[candidate["candidateId"]]["qualityStatus"] == "source_quality_approved"
 
 
 def test_content_extraction_writeback_requires_candidate_coverage_and_materializes_extractions(tmp_path, monkeypatch):
