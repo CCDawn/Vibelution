@@ -406,7 +406,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("正在整理回答。");
     expect(html).toContain("正在读取 ConversationView 渲染链路");
     expect(html.indexOf("answerOnlyProcessGroup")).toBeLessThan(html.indexOf("responseSection"));
-    expect(html).not.toContain("已确定检查范围");
+    expect(html).toContain("已确定检查范围");
   });
 
   it("keeps the answer block visible in trace display when process timeline items exist", () => {
