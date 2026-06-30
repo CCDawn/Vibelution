@@ -1846,7 +1846,7 @@ export function ResearchFlowCanvasRoute() {
     Boolean(orgMessageContent.trim()) &&
     (orgDeliveryMode !== "private" || Boolean(defaultOrganizationTargetId)) &&
     (orgDeliveryMode !== "zone" || Boolean(orgZoneId));
-  const saveStatusClass =
+  const saveStatusStyle =
     saveStatus === "error"
       ? styles.saveStatusError
       : saveStatus === "warning"
@@ -2545,7 +2545,7 @@ export function ResearchFlowCanvasRoute() {
                 {(draft?.nodes.find((node) => node.id === selectedEdge.target)?.label ?? selectedEdge.target)}
               </span>
             ) : null}
-            <span className={saveStatusClass}>
+            <span className={saveStatusStyle}>
               {saveMessage || `组织图已同步 ${draft?.updatedAt ?? ""}`}
             </span>
           </div>

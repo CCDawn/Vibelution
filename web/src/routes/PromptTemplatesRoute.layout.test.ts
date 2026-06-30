@@ -2,17 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import routerSource from "../app/router.tsx?raw";
 import routeSource from "./PromptTemplatesRoute.tsx?raw";
+import stylesSource from "./PromptTemplatesRoute.styles.ts?raw";
 
 describe("PromptTemplatesRoute layout contract", () => {
   it("lives inside Agent management navigation with the shared nav row", () => {
     expect(routerSource).toContain('path: "agents/prompts"');
     expect(routerSource).toContain("<PromptTemplatesRoute />");
-    expect(routeSource).toContain('<AgentManagementNav active="prompts" className={managementNavClass} />');
-    expect(routeSource.indexOf('<AgentManagementNav active="prompts" className={managementNavClass} />')).toBeGreaterThan(
+    expect(routeSource).toContain('<AgentManagementNav active="prompts" className={styles.managementNavClass} />');
+    expect(stylesSource).toContain("const managementNavClass");
+    expect(routeSource.indexOf('<AgentManagementNav active="prompts" className={styles.managementNavClass} />')).toBeGreaterThan(
       routeSource.indexOf("</VRouteHeader>"),
     );
-    expect(routeSource.indexOf('<AgentManagementNav active="prompts" className={managementNavClass} />')).toBeLessThan(
-      routeSource.indexOf("className={summaryGridClass}"),
+    expect(routeSource.indexOf('<AgentManagementNav active="prompts" className={styles.managementNavClass} />')).toBeLessThan(
+      routeSource.indexOf("className={styles.summaryGridClass}"),
     );
   });
 
@@ -100,17 +102,17 @@ describe("PromptTemplatesRoute layout contract", () => {
 
   it("keeps bulk prompt controls in their own compact row above the list", () => {
     expect(routeSource).toContain("listPanelClass");
-    expect(routeSource).toContain("grid-rows-[auto_auto_auto_auto_minmax(0,1fr)]");
+    expect(stylesSource).toContain("grid-rows-[auto_auto_auto_auto_minmax(0,1fr)]");
     expect(routeSource).toContain("bulkActionBarClass");
-    expect(routeSource).toContain("grid-cols-[auto_auto_minmax(118px,1fr)]");
-    expect(routeSource).toContain("min-h-[26px]");
+    expect(stylesSource).toContain("grid-cols-[auto_auto_minmax(118px,1fr)]");
+    expect(stylesSource).toContain("min-h-[26px]");
   });
 
   it("keeps the narrow prompt workspace scrollable without oversized editor panels", () => {
     expect(routeSource).toContain("workspaceClass");
-    expect(routeSource).toContain("max-[980px]:grid-cols-1");
-    expect(routeSource).toContain("max-[980px]:content-start");
-    expect(routeSource).toContain("max-[980px]:overflow-auto");
-    expect(routeSource).toContain("max-[980px]:grid-rows-[auto_auto_minmax(180px,0.8fr)_auto_auto]");
+    expect(stylesSource).toContain("max-[980px]:grid-cols-1");
+    expect(stylesSource).toContain("max-[980px]:content-start");
+    expect(stylesSource).toContain("max-[980px]:overflow-auto");
+    expect(stylesSource).toContain("max-[980px]:grid-rows-[auto_auto_minmax(180px,0.8fr)_auto_auto]");
   });
 });

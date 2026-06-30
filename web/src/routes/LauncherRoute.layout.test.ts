@@ -8,6 +8,7 @@ import routerSource from "../app/router.tsx?raw";
 import shellSource from "../app/AppShell.tsx?raw";
 import utilityMenuSource from "../app/AppShellUtilityMenu.tsx?raw";
 import launcherShellSource from "../app/LauncherShell.tsx?raw";
+import launcherShellStylesSource from "../app/LauncherShell.styles.ts?raw";
 
 const routeStylesSource = stylesSource;
 
@@ -54,7 +55,8 @@ describe("LauncherRoute layout contract", () => {
     expect(launcherShellSource).not.toContain("<nav");
     expect(launcherShellSource).not.toContain("NavLink");
     expect(launcherShellSource).toContain('data-vui-app="launcher"');
-    expect(launcherShellSource).toContain("text-vui-fg-primary");
+    expect(launcherShellSource).toContain("className={styles.root}");
+    expect(launcherShellStylesSource).toContain("text-vui-fg-primary");
   });
 
   it("uses the typed launcher lifecycle API client", () => {
@@ -244,8 +246,8 @@ describe("LauncherRoute layout contract", () => {
     expect(routeStylesSource).toContain("px-2");
     expect(routeStylesSource).toContain("w-fit");
     expect(routeStylesSource).toContain("whitespace-nowrap");
-    expect(launcherShellSource).toContain("var(--vui-gradient-route-soft)");
-    expect(launcherShellSource).toContain("var(--fg-primary)");
+    expect(launcherShellStylesSource).toContain("var(--vui-gradient-route-soft)");
+    expect(launcherShellStylesSource).toContain("var(--fg-primary)");
   });
 
   it("keeps the complete launcher surface reachable when the window is short", () => {

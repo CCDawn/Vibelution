@@ -12,7 +12,7 @@ import useShellI18nSource from "../i18n/useShellI18n.ts?raw";
 import utilityMenuSource from "./AppShellUtilityMenu.tsx?raw";
 import statusGuideSource from "./AppShellStatusGuidePanel.tsx?raw";
 
-const shellStyles = readFileSync(fileURLToPath(new URL("./AppShell.legacy.css", import.meta.url)), "utf8");
+const shellStyles = readFileSync(fileURLToPath(new URL("../design/workbench-shell.css", import.meta.url)), "utf8");
 
 describe("AppShell layout contract", () => {
   it("routes shell controls through VUI primitives", () => {
@@ -55,6 +55,11 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain(".statusGuideListItem[data-current=\"true\"]");
     expect(shellStyles).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
     expect(shellStyles).toContain("flex-wrap: nowrap");
+    expect(styles.topActions).toContain("flex-nowrap");
+    expect(styles.utilityTrigger).toContain("h-8");
+    expect(styles.utilityTrigger).toContain("[&_[data-slot=vui-button-content]]:whitespace-nowrap");
+    expect(styles.statusSummaryChip).toContain("whitespace-nowrap");
+    expect(shellStyles).toContain("@media (max-width: 1420px)");
     expect(shellStyles).toContain("@media (max-width: 1180px)");
     expect(shellStyles).toContain(".topClock span:last-child");
     expect(shellStyles).toContain("@media (max-width: 980px)");

@@ -1,30 +1,30 @@
 [data-vui-app] {
-  --vui-legacy-control-height: 28px;
-  --vui-legacy-field-height: 30px;
-  --vui-legacy-field-textarea-min-height: 72px;
-  --vui-legacy-control-radius: var(--radius-control);
-  --vui-legacy-control-border-width: 1px;
-  --vui-legacy-control-border: var(--vui-border-subtle);
-  --vui-legacy-control-border-hover: var(--border-strong);
-  --vui-legacy-control-bg: var(--vui-control-muted);
-  --vui-legacy-control-bg-hover: var(--vui-control-muted-hover);
-  --vui-legacy-control-fg: var(--fg-secondary);
-  --vui-legacy-control-fg-hover: var(--fg-primary);
-  --vui-legacy-field-bg: var(--surface-input);
-  --vui-legacy-field-bg-hover: var(--surface-card);
-  --vui-legacy-field-fg: var(--fg-primary);
-  --vui-legacy-field-placeholder: var(--fg-tertiary);
-  --vui-legacy-control-padding-x: 8px;
-  --vui-legacy-field-padding-x: 9px;
-  --vui-legacy-control-gap: 6px;
-  --vui-legacy-control-font-size: var(--font-size-caption);
-  --vui-legacy-control-font-weight: 650;
-  --vui-legacy-field-font-size: var(--font-size-small);
-  --vui-legacy-focus-ring: var(--vui-focus-ring);
+  --vui-native-control-height: 28px;
+  --vui-native-field-height: 30px;
+  --vui-native-field-textarea-min-height: 72px;
+  --vui-native-control-radius: var(--radius-control);
+  --vui-native-control-border-width: 1px;
+  --vui-native-control-border: var(--vui-border-subtle);
+  --vui-native-control-border-hover: var(--border-strong);
+  --vui-native-control-bg: var(--vui-control-muted);
+  --vui-native-control-bg-hover: var(--vui-control-muted-hover);
+  --vui-native-control-fg: var(--fg-secondary);
+  --vui-native-control-fg-hover: var(--fg-primary);
+  --vui-native-field-bg: var(--surface-input);
+  --vui-native-field-bg-hover: var(--surface-card);
+  --vui-native-field-fg: var(--fg-primary);
+  --vui-native-field-placeholder: var(--fg-tertiary);
+  --vui-native-control-padding-x: 8px;
+  --vui-native-field-padding-x: 9px;
+  --vui-native-control-gap: 6px;
+  --vui-native-control-font-size: var(--font-size-caption);
+  --vui-native-control-font-weight: 650;
+  --vui-native-field-font-size: var(--font-size-small);
+  --vui-native-focus-ring: var(--vui-focus-ring);
 }
 
 [data-vui-app] :is(button, [role="button"], input, select, textarea) {
-  border-width: var(--vui-legacy-control-border-width);
+  border-width: var(--vui-native-control-border-width);
   box-shadow: none;
 }
 
@@ -56,18 +56,18 @@
   [role="button"]:not([data-vui])[class*="tab"]
 ) {
   display: inline-flex;
-  min-height: var(--vui-legacy-control-height);
+  min-height: var(--vui-native-control-height);
   align-items: center;
   justify-content: center;
-  gap: var(--vui-legacy-control-gap);
-  padding-inline: var(--vui-legacy-control-padding-x);
+  gap: var(--vui-native-control-gap);
+  padding-inline: var(--vui-native-control-padding-x);
   border-style: solid;
-  border-color: var(--vui-legacy-control-border);
-  border-radius: var(--vui-legacy-control-radius);
-  background-color: var(--vui-legacy-control-bg);
-  color: var(--vui-legacy-control-fg);
-  font-size: var(--vui-legacy-control-font-size);
-  font-weight: var(--vui-legacy-control-font-weight);
+  border-color: var(--vui-native-control-border);
+  border-radius: var(--vui-native-control-radius);
+  background-color: var(--vui-native-control-bg);
+  color: var(--vui-native-control-fg);
+  font-size: var(--vui-native-control-font-size);
+  font-weight: var(--vui-native-control-font-weight);
 }
 
 [data-vui-app] :is(
@@ -88,9 +88,9 @@
   [role="button"]:not([data-vui])[class*="Tab"]:hover:not([aria-disabled="true"]),
   [role="button"]:not([data-vui])[class*="tab"]:hover:not([aria-disabled="true"])
 ) {
-  border-color: var(--vui-legacy-control-border-hover);
-  background-color: var(--vui-legacy-control-bg-hover);
-  color: var(--vui-legacy-control-fg-hover);
+  border-color: var(--vui-native-control-border-hover);
+  background-color: var(--vui-native-control-bg-hover);
+  color: var(--vui-native-control-fg-hover);
 }
 
 [data-vui-app] :is(
@@ -99,7 +99,7 @@
   [role="button"]:not([data-vui])[class*="Icon"],
   [role="button"]:not([data-vui])[class*="icon"]
 ) {
-  min-width: var(--vui-legacy-control-height);
+  min-width: var(--vui-native-control-height);
   padding-inline: 0;
 }
 
@@ -108,7 +108,7 @@
   [role="button"]:not([data-vui]):focus-visible
 ) {
   outline: none;
-  box-shadow: var(--vui-legacy-focus-ring);
+  box-shadow: var(--vui-native-focus-ring);
 }
 
 [data-vui-app] :is(
@@ -125,11 +125,11 @@
 ) {
   min-width: 0;
   border-style: solid;
-  border-color: var(--vui-legacy-control-border);
-  border-radius: var(--vui-legacy-control-radius);
-  background-color: var(--vui-legacy-field-bg);
-  color: var(--vui-legacy-field-fg);
-  font-size: var(--vui-legacy-field-font-size);
+  border-color: var(--vui-native-control-border);
+  border-radius: var(--vui-native-control-radius);
+  background-color: var(--vui-native-field-bg);
+  color: var(--vui-native-field-fg);
+  font-size: var(--vui-native-field-font-size);
   letter-spacing: 0;
   transition:
     background-color 0.16s ease,
@@ -139,19 +139,19 @@
 }
 
 [data-vui-app] :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select) {
-  min-height: var(--vui-legacy-field-height);
-  padding-inline: var(--vui-legacy-field-padding-x);
+  min-height: var(--vui-native-field-height);
+  padding-inline: var(--vui-native-field-padding-x);
 }
 
 [data-vui-app] textarea {
-  min-height: var(--vui-legacy-field-textarea-min-height);
-  padding: 7px var(--vui-legacy-field-padding-x);
+  min-height: var(--vui-native-field-textarea-min-height);
+  padding: 7px var(--vui-native-field-padding-x);
   resize: vertical;
   line-height: 1.42;
 }
 
 [data-vui-app] :is(input, textarea)::placeholder {
-  color: var(--vui-legacy-field-placeholder);
+  color: var(--vui-native-field-placeholder);
 }
 
 [data-vui-app] :is(
@@ -159,14 +159,14 @@
   select:hover:not(:disabled),
   textarea:hover:not(:disabled)
 ) {
-  border-color: var(--vui-legacy-control-border-hover);
-  background-color: var(--vui-legacy-field-bg-hover);
+  border-color: var(--vui-native-control-border-hover);
+  background-color: var(--vui-native-field-bg-hover);
 }
 
 [data-vui-app] :is(input:focus-visible, select:focus-visible, textarea:focus-visible) {
   outline: none;
   border-color: var(--accent-cool);
-  box-shadow: var(--vui-legacy-focus-ring);
+  box-shadow: var(--vui-native-focus-ring);
 }
 
 [data-vui-app] :is(input:disabled, select:disabled, textarea:disabled) {
