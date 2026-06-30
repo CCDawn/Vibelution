@@ -129,7 +129,7 @@
   right: 0;
   z-index: 20;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr) max-content;
   align-items: center;
   gap: 12px;
   min-height: var(--shell-topbar-height);
@@ -185,10 +185,13 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 :where(.vui-app-appshell).brandCopy {
   display: grid;
+  flex: 0 0 auto;
   grid-template-columns: max-content max-content;
   grid-template-areas:
     "brand version"
@@ -240,6 +243,7 @@
   justify-self: center;
   flex-wrap: nowrap;
   gap: 3px;
+  max-width: 100%;
   padding: 3px;
   overflow-x: auto;
   overscroll-behavior-x: contain;
@@ -271,6 +275,7 @@
   justify-content: flex-end;
   flex-wrap: nowrap;
   gap: 6px;
+  max-width: 100%;
 }
 
 :where(.vui-app-appshell).topBarRestoreButton {
@@ -363,6 +368,7 @@
 }
 
 @media (max-width: 1420px) {
+  :where(.vui-app-appshell).topClock span:last-child,
   :where(.vui-app-appshell).utilityTriggerLabel,
   :where(.vui-app-appshell).statusBadgeLabel {
     display: none;

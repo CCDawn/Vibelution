@@ -461,8 +461,10 @@ const styleKeys = [
 const styles = createVuiStyleMap(styleKeys, {
   baseClassName: "vui-routes-chatcodingroute",
   extensions: {
-    centerPane: "bg-[color-mix(in_srgb,var(--surface-page)_10%,transparent)]",
-    centerSurface: "bg-[color-mix(in_srgb,var(--surface-panel-strong)_6%,transparent)]",
+    centerPane:
+      "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[color-mix(in_srgb,var(--surface-page)_10%,transparent)]",
+    centerSurface:
+      "grid h-full min-h-0 overflow-hidden bg-[color-mix(in_srgb,var(--surface-panel-strong)_6%,transparent)]",
     cacheDetailBody: "max-h-[min(620px,calc(100dvh_-_238px))] overflow-auto [scrollbar-gutter:stable]",
     cacheDetailBoundaryTrack: "[&_span+span]:border-l [&_span+span]:border-[var(--vui-border-subtle)]",
     cacheDetailDialog: "w-[min(1120px,calc(100vw_-_44px))] max-h-[min(860px,calc(100dvh_-_52px))]",
@@ -475,6 +477,8 @@ const styles = createVuiStyleMap(styleKeys, {
     conversationMetaRow: "grid grid-cols-[minmax(0,1fr)_max-content] [&_time]:flex-none [&_time]:overflow-visible [&_time]:text-clip",
     conversationMetaTime: "max-w-[min(164px,68%)] [&_time]:flex-none [&_time]:overflow-visible [&_time]:text-clip",
     conversationTitleRow: "grid grid-cols-[minmax(0,1fr)_fit-content(92px)] max-w-full",
+    emptySurface:
+      "grid h-full min-h-[min(420px,calc(100dvh_-_190px))] place-items-center px-4 py-8 text-center text-[var(--fg-secondary)]",
     featureChip:
       "relative !grid !w-full grid-cols-[auto_minmax(0,1fr)] justify-start gap-1.5 px-1.5 [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-content]]:max-w-full [&_[data-slot=vui-button-content]]:!w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1 before:content-[''] before:h-1.5 before:w-1.5 before:shrink-0 before:rounded-full before:bg-[var(--fg-tertiary)] [&_em]:shrink-0 [&_em]:not-italic [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:whitespace-nowrap",
     featureChipActive:
@@ -484,11 +488,12 @@ const styles = createVuiStyleMap(styleKeys, {
     featureChipRow: "!grid grid-cols-2 gap-1.5 overflow-visible rounded-none border-0 bg-transparent p-0",
     inlineMetaPill: "[&_strong]:truncate [&_strong]:whitespace-nowrap",
     layout:
-      "grid-cols-[var(--chat-left-pane-width,220px)_8px_minmax(0,1fr)_8px_var(--chat-right-pane-width,284px)] max-[980px]:grid-cols-[minmax(192px,var(--chat-left-pane-width,220px))_8px_minmax(0,1fr)_8px_minmax(244px,var(--chat-right-pane-width,284px))]",
+      "h-[calc(100dvh_-_var(--shell-topbar-height))] max-h-[calc(100dvh_-_var(--shell-topbar-height))] overflow-hidden grid-cols-[var(--chat-left-pane-width,220px)_8px_minmax(0,1fr)_8px_var(--chat-right-pane-width,284px)] max-[980px]:grid-cols-[minmax(192px,var(--chat-left-pane-width,220px))_8px_minmax(0,1fr)_8px_minmax(244px,var(--chat-right-pane-width,284px))]",
     layoutCenterFirst:
       "grid-cols-[minmax(0,min(var(--chat-left-pane-width,0px),24vw))_8px_minmax(360px,1fr)_8px_minmax(0,min(var(--chat-right-pane-width,0px),22vw))] max-[640px]:grid-cols-[minmax(0,min(var(--chat-left-pane-width,0px),22vw))_8px_minmax(280px,1fr)_8px_minmax(0,min(var(--chat-right-pane-width,0px),20vw))]",
-    leftRail: "flex flex-col gap-[5px] p-1.5",
-    rightPane: "grid grid-rows-[auto_auto_1fr] p-1.5",
+    leftRail: "!flex h-full min-h-0 !flex-col gap-[5px] overflow-auto p-1.5 [scrollbar-gutter:stable]",
+    panelBody: "min-h-0 overflow-auto [scrollbar-gutter:stable]",
+    rightPane: "grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden p-1.5",
     sessionContextMenuItem:
       "[&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents [&_[data-slot=vui-button-label]]:col-span-full",
     sessionItemActive: "shadow-[var(--vui-shadow-inset-accent)]",
