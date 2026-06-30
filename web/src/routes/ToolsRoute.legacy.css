@@ -188,15 +188,9 @@
   font-size: var(--vui-font-xs);
 }
 
-:where(.vui-routes-toolsroute).scopeSelect select {
+:where(.vui-routes-toolsroute).scopeSelect [data-vui="native-select"] {
   min-width: 0;
   width: 100%;
-  min-height: 28px;
-  padding: 0 9px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: var(--surface-input-strong, color-mix(in srgb, var(--bg-canvas) 88%, transparent));
-  color: var(--fg-primary);
 }
 
 :where(.vui-routes-toolsroute).scopeStats {
@@ -416,13 +410,16 @@
   color: var(--fg-tertiary);
 }
 
-:where(.vui-routes-toolsroute).searchBox input {
+[data-vui-app] :where(.vui-routes-toolsroute).searchBox.searchBox.searchBox [data-vui="native-input"] {
   min-width: 0;
   width: 100%;
+  min-height: 0;
+  padding: 0;
   border: 0;
   outline: 0;
   background: transparent;
   color: var(--fg-primary);
+  box-shadow: none;
 }
 
 :where(.vui-routes-toolsroute).filterRow {
@@ -565,7 +562,7 @@
   color: var(--accent-warm-2);
 }
 
-:where(.vui-routes-toolsroute).rowSelect input {
+:where(.vui-routes-toolsroute).rowSelect [data-vui="native-input"] {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -902,15 +899,9 @@
   font-size: var(--vui-font-xs);
 }
 
-:where(.vui-routes-toolsroute).toolBundleSelect select {
+:where(.vui-routes-toolsroute).toolBundleSelect [data-vui="native-select"] {
   min-width: 0;
   width: 100%;
-  min-height: 28px;
-  padding: 0 8px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: var(--surface-input-strong, color-mix(in srgb, var(--bg-canvas) 88%, transparent));
-  color: var(--fg-primary);
 }
 
 :where(.vui-routes-toolsroute).toolBundleSummary {
@@ -1167,7 +1158,7 @@
   font-weight: 650;
 }
 
-:where(.vui-routes-toolsroute).image2ModelSelect select {
+:where(.vui-routes-toolsroute).image2ModelSelect [data-vui="native-select"] {
   min-width: 0;
   width: 100%;
 }
@@ -1210,7 +1201,7 @@
   font-weight: 650;
 }
 
-:where(.vui-routes-toolsroute).agentPolicySelect select {
+:where(.vui-routes-toolsroute).agentPolicySelect [data-vui="native-select"] {
   min-width: 0;
   width: 100%;
 }
@@ -1501,7 +1492,7 @@
     width: 100%;
   }
 
-  :where(.vui-routes-toolsroute).scopeSelect select {
+  :where(.vui-routes-toolsroute).scopeSelect [data-vui="native-select"] {
     width: 100%;
   }
 

@@ -3134,10 +3134,11 @@
 }
 
 :where(.vui-components-conversation-conversationview).timelineCellHeader {
-  display: inline-flex;
-  align-items: center;
+  display: inline-grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto auto;
+  align-items: start;
   gap: 7px;
-  width: fit-content;
+  width: min(100%, 72ch);
   max-width: 100%;
   min-height: 24px;
   padding: 0;
@@ -3150,6 +3151,18 @@
   line-height: 1.5;
 }
 
+:where(.vui-components-conversation-conversationview).timelineCellHeader [data-slot="vui-button-content"] {
+  display: contents;
+}
+
+:where(.vui-components-conversation-conversationview).timelineCellHeader [data-slot="vui-button-label"] {
+  display: contents;
+}
+
+:where(.vui-components-conversation-conversationview).timelineCellHeader svg {
+  margin-top: 2px;
+}
+
 button:where(.vui-components-conversation-conversationview).timelineCellHeader {
   cursor: pointer;
 }
@@ -3160,13 +3173,19 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
 }
 
 :where(.vui-components-conversation-conversationview).timelineCellPreview {
+  display: -webkit-box;
   min-width: 0;
-  max-width: min(58vw, 640px);
+  max-width: 100%;
   overflow: hidden;
   color: var(--fg-secondary);
   font-weight: 460;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 :where(.vui-components-conversation-conversationview).timelineCellMeta {
@@ -3537,8 +3556,8 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   grid-template-columns: 22px minmax(0, 1fr) auto auto 16px;
   justify-content: stretch;
   gap: 7px;
-  align-items: center;
-  width: min(100%, 860px);
+  align-items: start;
+  width: min(100%, 72ch);
   min-height: 30px;
   min-width: 0;
   max-width: 100%;
@@ -3570,10 +3589,6 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   padding-right: 5px;
   background: color-mix(in srgb, var(--accent-cool) 7%, transparent);
   color: var(--fg-primary);
-}
-
-:where(.vui-components-conversation-conversationview).operationItemActive .operationStatus {
-  color: color-mix(in srgb, var(--accent-cool-2) 86%, var(--fg-secondary));
 }
 
 :where(.vui-components-conversation-conversationview).operationIcon {
@@ -3623,10 +3638,16 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
 :where(.vui-components-conversation-conversationview).operationStatus {
   display: inline-flex;
   align-items: center;
+  justify-self: start;
   gap: 5px;
+  margin-top: 2px;
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
   white-space: nowrap;
+}
+
+:where(.vui-components-conversation-conversationview).operationItemActive .operationStatus {
+  color: color-mix(in srgb, var(--accent-cool-2) 86%, var(--fg-secondary));
 }
 
 :where(.vui-components-conversation-conversationview).statusSpinner {
@@ -3658,6 +3679,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
 
 :where(.vui-components-conversation-conversationview).operationDuration {
   min-width: 42px;
+  margin-top: 2px;
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
   text-align: right;
@@ -5557,15 +5579,18 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   color: var(--fg-secondary);
 }
 
-:where(.vui-routes-agentsroute).searchBox input {
+[data-vui-app] :where(.vui-routes-agentsroute).searchBox.searchBox.searchBox [data-vui="native-input"] {
   min-width: 0;
   width: 100%;
+  min-height: 0;
+  padding: 0;
   border: 0;
   outline: 0;
   background: transparent;
   color: var(--fg-primary);
   font: inherit;
   font-size: var(--vui-font-xs);
+  box-shadow: none;
 }
 
 :where(.vui-routes-agentsroute).groupList {
@@ -5899,7 +5924,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   font-weight: 800;
 }
 
-:where(.vui-routes-agentsroute).bulkFieldHeader input {
+:where(.vui-routes-agentsroute).bulkFieldHeader [data-vui="native-input"] {
   width: 14px;
   height: 14px;
   margin: 0;
@@ -6064,7 +6089,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   color: var(--accent-warm-2);
 }
 
-:where(.vui-routes-agentsroute).rowSelect input {
+:where(.vui-routes-agentsroute).rowSelect [data-vui="native-input"] {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -6262,7 +6287,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   min-width: 0;
 }
 
-:where(.vui-routes-agentsroute).avatarEditorActions input[type="file"] {
+:where(.vui-routes-agentsroute).avatarEditorActions [data-vui="native-input"][type="file"] {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -6498,8 +6523,8 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-panel));
 }
 
-:where(.vui-routes-agentsroute).createToolBundleOption input,
-:where(.vui-routes-agentsroute).createToolBundleSelected input {
+:where(.vui-routes-agentsroute).createToolBundleOption [data-vui="native-input"],
+:where(.vui-routes-agentsroute).createToolBundleSelected [data-vui="native-input"] {
   margin-top: 2px;
 }
 
@@ -7168,20 +7193,14 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   min-width: 0;
 }
 
-:where(.vui-routes-agentsroute).inlineAdd input {
+:where(.vui-routes-agentsroute).inlineAdd [data-vui="native-input"] {
   min-width: 0;
   min-height: 32px;
-  border-radius: var(--radius-control);
-  font: inherit;
   font-size: var(--vui-font-xs);
 }
 
-:where(.vui-routes-agentsroute).inlineAdd input {
+:where(.vui-routes-agentsroute).inlineAdd [data-vui="native-input"] {
   width: 100%;
-  padding: 0 8px;
-  border: 1px solid var(--border-soft);
-  background: var(--surface-card);
-  color: var(--fg-primary);
 }
 
 :where(.vui-routes-agentsroute).inlineAdd [data-vui="button"] {
@@ -7619,7 +7638,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   align-items: end;
 }
 
-:where(.vui-routes-agentsroute).compressionToggleField input {
+:where(.vui-routes-agentsroute).compressionToggleField [data-vui="native-input"] {
   justify-self: start;
   width: 18px;
   min-height: 18px;
@@ -7641,7 +7660,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   font-weight: 700;
 }
 
-:where(.vui-routes-agentsroute).compressionInlineCheck input {
+:where(.vui-routes-agentsroute).compressionInlineCheck [data-vui="native-input"] {
   flex: 0 0 auto;
   width: 16px;
   height: 16px;
@@ -7757,11 +7776,11 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   min-width: 0;
 }
 
-:where(.vui-routes-agentsroute).checkField input {
+:where(.vui-routes-agentsroute).checkField [data-vui="native-input"] {
   flex: 0 0 auto;
 }
 
-:where(.vui-routes-agentsroute).roomCheckField input {
+:where(.vui-routes-agentsroute).roomCheckField [data-vui="native-input"] {
   margin: 0;
 }
 
@@ -7874,26 +7893,16 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   color: var(--state-error);
 }
 
-:where(.vui-routes-agentsroute).field input,
-:where(.vui-routes-agentsroute).field select,
-:where(.vui-routes-agentsroute).llmSlotField select,
-:where(.vui-routes-agentsroute).fieldWide textarea {
+:where(.vui-routes-agentsroute).field [data-vui="native-input"],
+:where(.vui-routes-agentsroute).field [data-vui="native-select"],
+:where(.vui-routes-agentsroute).llmSlotField [data-vui="native-select"],
+:where(.vui-routes-agentsroute).fieldWide [data-vui="native-textarea"] {
   width: 100%;
   min-width: 0;
-  min-height: 30px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-control);
-  background: var(--surface-panel);
-  color: var(--fg-primary);
-  font: inherit;
   font-size: var(--vui-font-xs);
 }
 
-:where(.vui-routes-agentsroute).field input {
-  padding: 0 9px;
-}
-
-:where(.vui-routes-agentsroute).field .bulkFieldHeader input {
+:where(.vui-routes-agentsroute).field .bulkFieldHeader [data-vui="native-input"] {
   flex: 0 0 auto;
   width: 14px;
   height: 14px;
@@ -7901,18 +7910,9 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   padding: 0;
 }
 
-:where(.vui-routes-agentsroute).field select {
-  padding: 0 8px;
-}
-
-:where(.vui-routes-agentsroute).llmSlotField select {
-  padding: 0 8px;
-}
-
-:where(.vui-routes-agentsroute).fieldWide textarea {
+:where(.vui-routes-agentsroute).fieldWide [data-vui="native-textarea"] {
   min-height: 62px;
   resize: vertical;
-  padding: 7px 9px;
   line-height: 1.35;
 }
 
@@ -7928,7 +7928,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   min-width: 0;
 }
 
-:where(.vui-routes-agentsroute).promptConfigRow select {
+:where(.vui-routes-agentsroute).promptConfigRow [data-vui="native-select"] {
   min-width: 0;
 }
 
@@ -7945,15 +7945,6 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
 
 :where(.vui-routes-agentsroute).configDeepLinkRow [data-vui="button"] {
   white-space: nowrap;
-}
-
-:where(.vui-routes-agentsroute).field input:focus,
-:where(.vui-routes-agentsroute).field select:focus,
-:where(.vui-routes-agentsroute).promptConfigRow select:focus,
-:where(.vui-routes-agentsroute).llmSlotField select:focus,
-:where(.vui-routes-agentsroute).fieldWide textarea:focus {
-  outline: 2px solid color-mix(in srgb, var(--accent-cool) 24%, transparent);
-  border-color: color-mix(in srgb, var(--accent-cool) 48%, transparent);
 }
 
 :where(.vui-routes-agentsroute).editorActions {
@@ -8089,7 +8080,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   color: var(--fg-secondary);
 }
 
-:where(.vui-routes-agentsroute).resetOptionField input {
+:where(.vui-routes-agentsroute).resetOptionField [data-vui="native-input"] {
   margin-top: 3px;
 }
 
@@ -9413,7 +9404,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
 :where(.vui-routes-chatcodingroute).featureChip {
   display: inline-flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 4px;
   min-width: 0;
   max-width: 100%;
@@ -9424,10 +9415,21 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   background: color-mix(in srgb, var(--surface-card) 72%, transparent);
   color: var(--fg-secondary);
   cursor: pointer;
+  overflow: hidden;
   transition:
     background 140ms ease,
     border-color 140ms ease,
     color 140ms ease;
+}
+
+:where(.vui-routes-chatcodingroute).featureChip::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--fg-tertiary);
+  opacity: 0.58;
 }
 
 :where(.vui-routes-chatcodingroute).runModeBlock .featureChip {
@@ -9440,11 +9442,39 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   background: color-mix(in srgb, var(--accent-warm) 9%, var(--surface-card));
 }
 
-:where(.vui-routes-chatcodingroute).featureChip strong {
+:where(.vui-routes-chatcodingroute).featureChip [data-slot="vui-button-content"] {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
   min-width: 0;
-  overflow-wrap: anywhere;
+  max-width: 100%;
+  width: 100%;
+}
+
+:where(.vui-routes-chatcodingroute).featureChip [data-slot="vui-button-label"] {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+:where(.vui-routes-chatcodingroute).featureChip strong {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--vui-font-xs);
   font-weight: 650;
+  line-height: 1;
 }
 
 :where(.vui-routes-chatcodingroute).featureChip em {
@@ -9459,15 +9489,6 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   font-weight: 760;
   line-height: 1;
   text-align: center;
-}
-
-:where(.vui-routes-chatcodingroute).featureChip span {
-  flex: 0 0 auto;
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--fg-tertiary);
-  opacity: 0.58;
 }
 
 :where(.vui-routes-chatcodingroute).featureChip:hover {
@@ -9486,7 +9507,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   color: var(--fg-primary);
 }
 
-:where(.vui-routes-chatcodingroute).featureChipActive span {
+:where(.vui-routes-chatcodingroute).featureChipActive::before {
   background: var(--accent-cool);
   opacity: 1;
 }
@@ -9501,7 +9522,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   border-color: color-mix(in srgb, var(--accent-warm) 36%, var(--border-soft));
 }
 
-:where(.vui-routes-chatcodingroute).featureChipPrimary.featureChipActive span {
+:where(.vui-routes-chatcodingroute).featureChipPrimary.featureChipActive::before {
   background: var(--accent-warm-2);
 }
 
@@ -38058,15 +38079,9 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   font-size: var(--vui-font-xs);
 }
 
-:where(.vui-routes-toolsroute).scopeSelect select {
+:where(.vui-routes-toolsroute).scopeSelect [data-vui="native-select"] {
   min-width: 0;
   width: 100%;
-  min-height: 28px;
-  padding: 0 9px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: var(--surface-input-strong, color-mix(in srgb, var(--bg-canvas) 88%, transparent));
-  color: var(--fg-primary);
 }
 
 :where(.vui-routes-toolsroute).scopeStats {
@@ -38286,13 +38301,16 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   color: var(--fg-tertiary);
 }
 
-:where(.vui-routes-toolsroute).searchBox input {
+[data-vui-app] :where(.vui-routes-toolsroute).searchBox.searchBox.searchBox [data-vui="native-input"] {
   min-width: 0;
   width: 100%;
+  min-height: 0;
+  padding: 0;
   border: 0;
   outline: 0;
   background: transparent;
   color: var(--fg-primary);
+  box-shadow: none;
 }
 
 :where(.vui-routes-toolsroute).filterRow {
@@ -38435,7 +38453,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   color: var(--accent-warm-2);
 }
 
-:where(.vui-routes-toolsroute).rowSelect input {
+:where(.vui-routes-toolsroute).rowSelect [data-vui="native-input"] {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -38772,15 +38790,9 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   font-size: var(--vui-font-xs);
 }
 
-:where(.vui-routes-toolsroute).toolBundleSelect select {
+:where(.vui-routes-toolsroute).toolBundleSelect [data-vui="native-select"] {
   min-width: 0;
   width: 100%;
-  min-height: 28px;
-  padding: 0 8px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: var(--surface-input-strong, color-mix(in srgb, var(--bg-canvas) 88%, transparent));
-  color: var(--fg-primary);
 }
 
 :where(.vui-routes-toolsroute).toolBundleSummary {
@@ -39037,7 +39049,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   font-weight: 650;
 }
 
-:where(.vui-routes-toolsroute).image2ModelSelect select {
+:where(.vui-routes-toolsroute).image2ModelSelect [data-vui="native-select"] {
   min-width: 0;
   width: 100%;
 }
@@ -39080,7 +39092,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   font-weight: 650;
 }
 
-:where(.vui-routes-toolsroute).agentPolicySelect select {
+:where(.vui-routes-toolsroute).agentPolicySelect [data-vui="native-select"] {
   min-width: 0;
   width: 100%;
 }
@@ -39371,7 +39383,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
     width: 100%;
   }
 
-  :where(.vui-routes-toolsroute).scopeSelect select {
+  :where(.vui-routes-toolsroute).scopeSelect [data-vui="native-select"] {
     width: 100%;
   }
 
