@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import appShellSource from "../app/AppShell.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
 import routeSource from "./SkillsRoute.tsx?raw";
+import stylesSource from "./SkillsRoute.styles.ts?raw";
 
 describe("SkillsRoute layout contract", () => {
   it("is mounted as an Agent management section", () => {
@@ -10,12 +11,13 @@ describe("SkillsRoute layout contract", () => {
     expect(routerSource).toContain("<SkillsRoute />");
     expect(routerSource).not.toContain('path: "skills"');
     expect(routerSource).not.toContain('to="/agents/skills" replace');
-    expect(routeSource).toContain('<AgentManagementNav active="skills" className={managementNavClass} />');
-    expect(routeSource.indexOf('<AgentManagementNav active="skills" className={managementNavClass} />')).toBeGreaterThan(
+    expect(routeSource).toContain('<AgentManagementNav active="skills" className={styles.managementNavClass} />');
+    expect(stylesSource).toContain("const managementNavClass");
+    expect(routeSource.indexOf('<AgentManagementNav active="skills" className={styles.managementNavClass} />')).toBeGreaterThan(
       routeSource.indexOf("</VRouteHeader>"),
     );
-    expect(routeSource.indexOf('<AgentManagementNav active="skills" className={managementNavClass} />')).toBeLessThan(
-      routeSource.indexOf("className={summaryGridClass}"),
+    expect(routeSource.indexOf('<AgentManagementNav active="skills" className={styles.managementNavClass} />')).toBeLessThan(
+      routeSource.indexOf("className={styles.summaryGridClass}"),
     );
     expect(appShellSource).not.toContain('to="/skills"');
   });
@@ -61,13 +63,13 @@ describe("SkillsRoute layout contract", () => {
 
   it("keeps the narrow skill workspace in normal document flow with compact empty details", () => {
     expect(routeSource).toContain("workspaceClass");
-    expect(routeSource).toContain("max-[920px]:grid-cols-1");
-    expect(routeSource).toContain("max-[920px]:content-start");
-    expect(routeSource).toContain("max-[920px]:overflow-auto");
+    expect(stylesSource).toContain("max-[920px]:grid-cols-1");
+    expect(stylesSource).toContain("max-[920px]:content-start");
+    expect(stylesSource).toContain("max-[920px]:overflow-auto");
     expect(routeSource).toContain("listPanelClass");
     expect(routeSource).toContain("detailPanelClass");
     expect(routeSource).toContain("emptyDetailClass");
-    expect(routeSource).toContain("min-h-24");
-    expect(routeSource).toContain("p-3");
+    expect(stylesSource).toContain("min-h-24");
+    expect(stylesSource).toContain("p-3");
   });
 });

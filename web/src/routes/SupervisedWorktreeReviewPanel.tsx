@@ -5,6 +5,7 @@ import type { EvolutionActionState, SupervisedWorktreeRun } from "../api/types";
 import { VButton } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { isSelfEvolutionWorktreeRun } from "./supervisedWorktreeReview";
+import styles from "./SupervisedWorktreeReviewPanel.styles";
 
 const WORKTREE_ACTION_ITEMS = [
   {
@@ -43,41 +44,6 @@ type SupervisedWorktreeReviewPanelProps = {
   onRunAction: (run: SupervisedWorktreeRun, action: string) => void;
 };
 
-const worktreeReviewSurfaceClass = "grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-2 overflow-hidden rounded-lg border border-vui-border-soft bg-[var(--surface-panel-strong)] px-3 pb-3 pt-2.5 text-[0.9rem]";
-const surfaceHeaderCompactClass = "flex min-w-0 items-center justify-between gap-2.5";
-const headerCopyClass = "min-w-0";
-const eyebrowClass = "m-0 mb-0.5 text-[var(--vui-font-xs)] uppercase tracking-[0.08em] text-[var(--accent-warm-2)]";
-const sectionTitleClass = "m-0 text-base font-bold leading-[1.22] text-vui-fg-primary";
-const secondaryPillClass = "inline-flex min-h-6 items-center justify-center rounded-[var(--radius-control)] border border-vui-border-soft bg-[var(--surface-card-muted)] px-2 text-xs font-semibold text-vui-fg-secondary";
-const statusPillClass = "inline-flex min-h-6 items-center justify-center rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_13%,transparent)] px-2 text-xs font-semibold text-[var(--accent-warm-2)]";
-const noticeTextClass = "m-0 break-words text-[var(--vui-font-xs)] leading-[1.45] text-vui-fg-secondary";
-const gateNoticeTextClass = "m-0 overflow-hidden break-words text-[var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]";
-const errorTextClass = "m-0 break-words text-[var(--vui-font-xs)] leading-[1.45] text-[var(--state-error)]";
-const controlFooterClass = "grid min-h-0 gap-[7px] overflow-auto pr-0.5";
-const closedLoopStatusClass = "grid min-h-[30px] min-w-0 grid-cols-[auto_minmax(56px,auto)_minmax(0,1fr)] items-center gap-[7px] rounded-[7px] border border-[var(--border-hairline)] bg-[var(--surface-card-subtle)] px-2 py-1 text-[var(--vui-font-xs)] max-[640px]:grid-cols-1";
-const closedLoopStrongClass = "min-w-0 truncate";
-const closedLoopMessageClass = "min-w-0 truncate text-[var(--vui-font-xs)] text-vui-fg-secondary";
-const worktreeRunPickerClass = "grid min-w-0 gap-[5px]";
-const worktreeRunPickerHeaderClass = "flex min-h-5 items-center justify-between gap-2 text-[var(--vui-font-xs)] text-vui-fg-tertiary";
-const worktreeRunListClass = "grid max-h-[clamp(92px,16vh,148px)] gap-1 overflow-auto";
-const worktreeRunItemClass = "grid min-h-8 min-w-0 grid-cols-[minmax(0,1.25fr)_minmax(78px,0.55fr)_minmax(0,1fr)] items-center gap-2 rounded-[7px] border border-[var(--border-hairline)] bg-[var(--surface-card-muted)] px-2 py-1 text-left text-[var(--vui-font-xs)] text-vui-fg-primary max-[640px]:grid-cols-1";
-const worktreeRunItemActiveClass = "border-[color-mix(in_srgb,var(--accent-cool)_34%,var(--border-hairline))] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--surface-card-muted))]";
-const worktreeRunItemTopClass = "contents";
-const worktreeRunIdClass = "min-w-0 truncate font-[var(--font-mono)] text-[var(--vui-font-xs)] font-semibold text-vui-fg-primary";
-const worktreeRunStatusClass = "inline-flex min-h-5 max-w-full items-center justify-self-start truncate rounded-full border border-vui-border-soft bg-[var(--surface-card-subtle)] px-[7px] text-[var(--vui-font-xs)] leading-[1.25] text-vui-fg-secondary";
-const worktreeRunMetaClass = "inline-flex min-w-0 items-center justify-self-end truncate text-right text-[var(--vui-font-xs)] leading-[1.25] text-vui-fg-tertiary max-[640px]:justify-self-start max-[640px]:text-left";
-const worktreeReviewGateClass = "grid min-w-0 gap-1.5 rounded-[7px] border border-[color-mix(in_srgb,var(--accent-cool)_26%,var(--border-hairline))] bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-card-subtle))] px-2.5 py-2";
-const worktreeActionGateClass = "py-[7px]";
-const gateActionGridClass = "grid grid-cols-2 gap-[7px]";
-const controlActionsClass = "flex flex-wrap gap-2";
-const inlineActionClass = "inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-vui-border-soft bg-[var(--surface-card-muted)] px-3.5 text-[var(--vui-font-xs)] font-semibold text-vui-fg-primary disabled:cursor-not-allowed disabled:opacity-55";
-const gateInlineActionClass = "min-h-[34px] min-w-0 px-[9px]";
-const dangerInlineActionClass = "border-[color-mix(in_srgb,var(--state-error)_38%,var(--border-soft))] text-[var(--state-error)] hover:bg-[color-mix(in_srgb,var(--state-error)_10%,var(--surface-card-muted))]";
-const worktreeReviewHeaderClass = "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2";
-const truncateTextClass = "min-w-0 max-w-full truncate";
-const metaRowClass = "grid min-w-0 grid-cols-[minmax(90px,auto)_minmax(0,1fr)] gap-2 text-[var(--vui-font-xs)] text-vui-fg-secondary";
-const metaValueClass = "min-w-0 truncate";
-const spinClass = "animate-spin";
 
 function worktreeReviewGate(run: SupervisedWorktreeRun | null | undefined) {
   if (!run) {
@@ -150,34 +116,34 @@ export function SupervisedWorktreeReviewPanel({
   }, [activeRun?.runId, selectedWorktreeRunId, runs]);
 
   return (
-    <section className={worktreeReviewSurfaceClass}>
-      <div className={surfaceHeaderCompactClass}>
-        <div className={headerCopyClass}>
-          <p className={eyebrowClass}>{t("closedLoopActive")}</p>
-          <h2 className={sectionTitleClass}>{t("worktreeReviewPanelTitle")}</h2>
+    <section className={styles.worktreeReviewSurfaceClass}>
+      <div className={styles.surfaceHeaderCompactClass}>
+        <div className={styles.headerCopyClass}>
+          <p className={styles.eyebrowClass}>{t("closedLoopActive")}</p>
+          <h2 className={styles.sectionTitleClass}>{t("worktreeReviewPanelTitle")}</h2>
         </div>
-        <span className={secondaryPillClass}>
+        <span className={styles.secondaryPillClass}>
           {runs.length} {lang === "zh" ? "个候选" : "candidates"}
         </span>
       </div>
-      <p className={noticeTextClass}>{t("worktreeReviewPanelHint")}</p>
-      <div className={controlFooterClass}>
+      <p className={styles.noticeTextClass}>{t("worktreeReviewPanelHint")}</p>
+      <div className={styles.controlFooterClass}>
         {highlightedWorktreeRun ? (
-          <div className={closedLoopStatusClass}>
-            <span className={secondaryPillClass}>
+          <div className={styles.closedLoopStatusClass}>
+            <span className={styles.secondaryPillClass}>
               {highlightedIsSelfOrigin ? t("selfWorktreeReviewSource") : t("closedLoopActive")}
             </span>
-            <strong className={closedLoopStrongClass}>{highlightedWorktreeRun.status || "--"}</strong>
-            <span className={closedLoopMessageClass}>{highlightedWorktreeRun.latestMessage || highlightedWorktreeRun.phase || "--"}</span>
+            <strong className={styles.closedLoopStrongClass}>{highlightedWorktreeRun.status || "--"}</strong>
+            <span className={styles.closedLoopMessageClass}>{highlightedWorktreeRun.latestMessage || highlightedWorktreeRun.phase || "--"}</span>
           </div>
         ) : null}
         {runs.length > 0 ? (
-          <div className={worktreeRunPickerClass}>
-            <div className={worktreeRunPickerHeaderClass}>
+          <div className={styles.worktreeRunPickerClass}>
+            <div className={styles.worktreeRunPickerHeaderClass}>
               <span>{t("worktreeRunHistory")}</span>
               <span>{runs.length}</span>
             </div>
-            <div className={worktreeRunListClass}>
+            <div className={styles.worktreeRunListClass}>
               {runs.slice(0, 4).map((run) => {
                 const selected = highlightedWorktreeRun?.runId === run.runId;
                 const runReviewGate = worktreeReviewGate(run);
@@ -188,15 +154,15 @@ export function SupervisedWorktreeReviewPanel({
                   <VButton
                     key={run.runId}
                     type="button"
-                    className={selected ? `${worktreeRunItemClass} ${worktreeRunItemActiveClass}` : worktreeRunItemClass}
+                    className={selected ? `${styles.worktreeRunItemClass} ${styles.worktreeRunItemActiveClass}` : styles.worktreeRunItemClass}
                     aria-pressed={selected}
                     onClick={() => setSelectedWorktreeRunId(run.runId)}
                   >
-                    <span className={worktreeRunItemTopClass}>
-                      <strong className={worktreeRunIdClass}>{run.runId || "--"}</strong>
-                      <span className={worktreeRunStatusClass}>{statusLabel(run.status)}</span>
+                    <span className={styles.worktreeRunItemTopClass}>
+                      <strong className={styles.worktreeRunIdClass}>{run.runId || "--"}</strong>
+                      <span className={styles.worktreeRunStatusClass}>{statusLabel(run.status)}</span>
                     </span>
-                    <span className={worktreeRunMetaClass}>
+                    <span className={styles.worktreeRunMetaClass}>
                       {isSelfEvolutionWorktreeRun(run) ? t("selfWorktreeReviewSource") : t("closedLoopActive")}
                       {" · "}
                       {runReviewPending ? t("selfWorktreeReviewPending") : (run.phase || compactTimestamp(run.updatedAt))}
@@ -208,8 +174,8 @@ export function SupervisedWorktreeReviewPanel({
           </div>
         ) : null}
         {highlightedWorktreeRun ? (
-          <div className={`${worktreeReviewGateClass} ${worktreeActionGateClass}`}>
-            <div className={gateActionGridClass}>
+          <div className={`${styles.worktreeReviewGateClass} ${styles.worktreeActionGateClass}`}>
+            <div className={styles.gateActionGridClass}>
               {highlightedWorktreeActions.map((item) => {
                 const Icon = item.icon;
                 const disabled = !item.state?.enabled || pending;
@@ -220,14 +186,14 @@ export function SupervisedWorktreeReviewPanel({
                     type="button"
                     className={
                       item.action === "discard" || item.action === "merge"
-                        ? `${inlineActionClass} ${gateInlineActionClass} ${dangerInlineActionClass}`
-                        : `${inlineActionClass} ${gateInlineActionClass}`
+                        ? `${styles.inlineActionClass} ${styles.gateInlineActionClass} ${styles.dangerInlineActionClass}`
+                        : `${styles.inlineActionClass} ${styles.gateInlineActionClass}`
                     }
                     isDisabled={disabled}
                     onClick={() => onRunAction(highlightedWorktreeRun, item.action)}
                     title={reason || t(item.labelKey)}
                   >
-                    {pending ? <LoaderCircle size={15} className={spinClass} /> : <Icon size={15} />}
+                    {pending ? <LoaderCircle size={15} className={styles.spinClass} /> : <Icon size={15} />}
                     {t(item.labelKey)}
                   </VButton>
                 );
@@ -236,28 +202,28 @@ export function SupervisedWorktreeReviewPanel({
           </div>
         ) : null}
         {highlightedIsSelfOrigin && highlightedWorktreeRun ? (
-          <div className={worktreeReviewGateClass}>
-            <div className={worktreeReviewHeaderClass}>
-              <span className={highlightedReviewPending ? statusPillClass : secondaryPillClass}>
+          <div className={styles.worktreeReviewGateClass}>
+            <div className={styles.worktreeReviewHeaderClass}>
+              <span className={highlightedReviewPending ? styles.statusPillClass : styles.secondaryPillClass}>
                 {highlightedReviewPending ? t("selfWorktreeReviewPending") : t("selfWorktreeReviewApprovedStatus")}
               </span>
-              <strong className={truncateTextClass} title={highlightedSelfOrigin?.goal || highlightedWorktreeRun.runId}>
+              <strong className={styles.truncateTextClass} title={highlightedSelfOrigin?.goal || highlightedWorktreeRun.runId}>
                 {highlightedSelfOrigin?.goal || highlightedWorktreeRun.runId}
               </strong>
             </div>
-            <p className={gateNoticeTextClass}>
+            <p className={styles.gateNoticeTextClass}>
               {highlightedReviewGate?.reason || highlightedSelfOrigin?.riskReason || t("selfWorktreeReviewHint")}
             </p>
             {highlightedMergeBlockers.length > 0 ? (
-              <div className={metaRowClass}>
-                <span className={metaValueClass}>{t("selfWorktreeMergeBlockers")}</span>
-                <span className={metaValueClass}>{highlightedMergeBlockers.join(", ")}</span>
+              <div className={styles.metaRowClass}>
+                <span className={styles.metaValueClass}>{t("selfWorktreeMergeBlockers")}</span>
+                <span className={styles.metaValueClass}>{highlightedMergeBlockers.join(", ")}</span>
               </div>
             ) : null}
-            <div className={controlActionsClass}>
+            <div className={styles.controlActionsClass}>
               <VButton
                 type="button"
-                className={inlineActionClass}
+                className={styles.inlineActionClass}
                 isDisabled={
                   !highlightedApproveReviewAction?.enabled
                   || pending
@@ -265,20 +231,20 @@ export function SupervisedWorktreeReviewPanel({
                 onClick={() => onApproveReview(highlightedWorktreeRun)}
                 title={disabledReason(highlightedApproveReviewAction) || t("approveSelfWorktreeReview")}
               >
-                {pending ? <LoaderCircle size={15} className={spinClass} /> : <ShieldCheck size={15} />}
+                {pending ? <LoaderCircle size={15} className={styles.spinClass} /> : <ShieldCheck size={15} />}
                 {t("approveSelfWorktreeReview")}
               </VButton>
               {!highlightedApproveReviewAction?.enabled && disabledReason(highlightedApproveReviewAction) ? (
-                <p className={gateNoticeTextClass}>{disabledReason(highlightedApproveReviewAction)}</p>
+                <p className={styles.gateNoticeTextClass}>{disabledReason(highlightedApproveReviewAction)}</p>
               ) : null}
               {highlightedReviewPending ? (
-                <p className={gateNoticeTextClass}>{t("selfWorktreeMergeRequiresReview")}</p>
+                <p className={styles.gateNoticeTextClass}>{t("selfWorktreeMergeRequiresReview")}</p>
               ) : null}
             </div>
           </div>
         ) : null}
-        {feedback ? <p className={noticeTextClass}>{feedback}</p> : null}
-        {error ? <p className={errorTextClass}>{error}</p> : null}
+        {feedback ? <p className={styles.noticeTextClass}>{feedback}</p> : null}
+        {error ? <p className={styles.errorTextClass}>{error}</p> : null}
       </div>
     </section>
   );

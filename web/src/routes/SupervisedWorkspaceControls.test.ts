@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
+import evolutionStyles from "./EvolutionRoute.styles";
 import { getEffectiveIntakeMode } from "./SupervisedWorkspaceControls";
 
 const controlsSource = readFileSync(new URL("./SupervisedWorkspaceControls.tsx", import.meta.url), "utf-8");
+const controlsStylesSource = readFileSync(new URL("./SupervisedWorkspaceControls.styles.ts", import.meta.url), "utf-8");
 const tabsSource = readFileSync(new URL("./SupervisedWorkspaceTabs.tsx", import.meta.url), "utf-8");
-const evolutionStylesSource = readFileSync(new URL("./EvolutionRoute.legacy.css", import.meta.url), "utf-8");
+const tabsStylesSource = readFileSync(new URL("./SupervisedWorkspaceTabs.styles.ts", import.meta.url), "utf-8");
 const evolutionRouteSource = readFileSync(new URL("./EvolutionRoute.tsx", import.meta.url), "utf-8");
 const dictionarySource = readFileSync(new URL("../i18n/dictionary.ts", import.meta.url), "utf-8");
 
@@ -49,21 +51,21 @@ describe("supervised workspace controls", () => {
     expect(dictionarySource).not.toContain('supervisedFlowLibrary: "改进提案"');
     expect(dictionarySource).not.toContain('supervisedFlowReview: "样本评审"');
     expect(tabsSource).toContain("flowTabsClass");
-    expect(tabsSource).toContain("grid-cols-[repeat(4,minmax(92px,1fr))]");
+    expect(tabsStylesSource).toContain("grid-cols-[repeat(4,minmax(92px,1fr))]");
     expect(tabsSource).toContain("stepHintClass");
     expect(tabsSource).not.toContain("segmentButton");
   });
 
   it("keeps the supervised flow rail on one dense row before mobile overflow", () => {
-    expect(tabsSource).toContain("grid-cols-[repeat(4,minmax(92px,1fr))]");
-    expect(tabsSource).toContain("min-h-[38px]");
-    expect(tabsSource).toContain("hidden overflow-hidden");
-    expect(tabsSource).toContain("max-[1120px]:grid-cols-[repeat(4,minmax(88px,1fr))]");
+    expect(tabsStylesSource).toContain("grid-cols-[repeat(4,minmax(92px,1fr))]");
+    expect(tabsStylesSource).toContain("min-h-[38px]");
+    expect(tabsStylesSource).toContain("hidden overflow-hidden");
+    expect(tabsStylesSource).toContain("max-[1120px]:grid-cols-[repeat(4,minmax(88px,1fr))]");
     expect(tabsSource).not.toContain("repeat(2");
-    expect(controlsSource).toContain("min-h-[34px]");
-    expect(controlsSource).toContain("min-h-[26px]");
-    expect(evolutionStylesSource).toContain("flex-wrap: nowrap");
-    expect(evolutionStylesSource).toContain("overflow-x: auto");
+    expect(controlsStylesSource).toContain("min-h-[34px]");
+    expect(controlsStylesSource).toContain("min-h-[26px]");
+    expect(evolutionStyles.supervisedFlowShell).toContain("min-w-0");
+    expect(evolutionStyles.supervisedFlowTabs).toContain("min-w-0");
   });
 
   it("feeds workflow step summaries into the supervised flow tabs", () => {
