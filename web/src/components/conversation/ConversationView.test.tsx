@@ -304,6 +304,13 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).not.toContain("buildConversationTimelineRowIdentities(activeTimelineMessages)");
   });
 
+  it("isolates conversation turn rendering behind a memoized row boundary", () => {
+    expect(conversationViewSource).toContain("const ConversationTurnRow = React.memo");
+    expect(conversationViewSource).toContain("function conversationTurnRowPropsAreEqual");
+    expect(conversationViewSource).toContain("<ConversationTurnRow");
+    expect(conversationViewSource).not.toContain("activeTimelineMessages.map((message, index) => {");
+  });
+
   it("defaults to answer-only process display while keeping details expandable", () => {
     const html = renderConversation(
       [
