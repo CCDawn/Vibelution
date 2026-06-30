@@ -8,11 +8,72 @@ import { SkillLibraryDetail, SkillLibraryItem, SkillLibraryPayload } from "../ap
 import { VButton, VIconButton, VRouteHeader } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
-import styles from "./SkillsRoute.module.css";
 
 type SkillSourceFilter = "all" | "codex" | "agents" | "other";
 
 const SOURCE_FILTERS: SkillSourceFilter[] = ["all", "codex", "agents", "other"];
+
+const routeClass = "grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] bg-[color-mix(in_srgb,var(--surface-page)_94%,var(--bg-canvas))]";
+const headerClass = "mx-2.5 mt-2 min-h-9 min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-gradient-route-soft),color-mix(in_srgb,var(--surface-panel)_86%,transparent)] shadow-[var(--vui-shadow-hairline)]";
+const refreshButtonClass = "h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-h-[26px] rounded-[var(--radius-control)] border border-vui-border-soft bg-[var(--surface-card)] p-0 text-vui-fg-secondary hover:border-[var(--border-strong)] hover:bg-[var(--surface-panel-hover)] hover:text-vui-fg-primary disabled:opacity-55";
+const controlStripClass = "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-1.5 px-3 pt-1 max-[920px]:grid-cols-1";
+const managementNavClass = "m-0";
+const summaryGridClass = "grid min-w-0 grid-cols-4 overflow-hidden rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--border-soft)_78%,transparent)] bg-[color-mix(in_srgb,var(--surface-panel)_90%,var(--surface-card))] max-[920px]:grid-cols-1";
+const summaryCardClass = "grid min-h-[26px] min-w-0 grid-cols-[auto_minmax(0,1fr)] items-baseline gap-[5px] border-0 border-r border-[color-mix(in_srgb,var(--border-soft)_58%,transparent)] bg-transparent px-2 py-[3px] last:border-r-0";
+const summaryLabelClass = "text-[0.61rem] text-vui-fg-tertiary";
+const summaryValueClass = "min-w-0 truncate text-[0.8rem] text-vui-fg-primary";
+const workspaceClass = "grid min-h-0 grid-cols-[minmax(260px,340px)_minmax(440px,1fr)] gap-1.5 px-2.5 pb-2 pt-1.5 max-[920px]:grid-cols-1 max-[920px]:content-start max-[920px]:overflow-auto";
+const panelClass = "grid min-h-0 min-w-0 content-start gap-[9px] rounded-lg border border-vui-border-soft bg-[var(--surface-panel)] p-2.5";
+const listPanelClass = `${panelClass} grid-rows-[auto_auto_auto_minmax(0,1fr)]`;
+const detailPanelClass = `${panelClass} overflow-auto`;
+const panelHeaderClass = "flex min-w-0 items-start justify-between gap-3";
+const panelEyebrowClass = "m-0 mb-px text-[0.61rem] uppercase tracking-[0.07em] text-vui-fg-tertiary";
+const panelTitleClass = "m-0 font-[var(--font-display)] text-base leading-[1.2] text-vui-fg-primary";
+const detailDescriptionClass = "m-0 mt-[3px] text-[0.78rem] leading-[1.32] text-vui-fg-secondary";
+const searchBoxClass = "flex min-h-8 items-center gap-2 rounded-lg border border-vui-border-soft bg-[var(--surface-input-strong)] px-2 text-vui-fg-tertiary";
+const searchInputClass = "min-w-0 w-full border-0 bg-transparent text-vui-fg-primary outline-0";
+const filterRowClass = "flex flex-wrap gap-[5px]";
+const filterButtonClass = "min-h-[26px] rounded-[var(--radius-control)] border border-vui-border-soft bg-[var(--surface-card)] px-2 py-[3px] text-[0.78rem] text-vui-fg-secondary hover:border-[var(--border-strong)] hover:bg-[var(--surface-panel-hover)] hover:text-vui-fg-primary";
+const filterButtonActiveClass = "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_14%,transparent)] text-[var(--accent-warm-2)]";
+const primaryButtonClass = "min-h-[26px] rounded-[var(--radius-control)] border border-vui-border-soft bg-[var(--surface-card)] px-2 py-[3px] text-vui-fg-secondary hover:border-[var(--border-strong)] hover:bg-[var(--surface-panel-hover)] hover:text-vui-fg-primary";
+const bulkActionBarClass = "flex min-w-0 flex-wrap items-center gap-[7px] rounded-lg border border-vui-border-soft bg-[color-mix(in_srgb,var(--surface-panel)_86%,var(--surface-card))] p-[7px]";
+const bulkSummaryClass = "inline-flex min-h-7 items-center gap-1.5 text-[0.75rem] text-vui-fg-secondary";
+const bulkSummaryTitleClass = "text-vui-fg-primary";
+const bulkReadOnlyNoteClass = "inline-flex min-h-7 max-w-[min(420px,100%)] items-center text-[0.75rem] leading-[1.35] text-vui-fg-tertiary";
+const skillListClass = "grid min-h-0 content-start gap-1.5 overflow-auto pr-1";
+const selectableRowClass = "grid min-w-0 grid-cols-[28px_minmax(0,1fr)] items-center gap-[5px]";
+const rowSelectClass = "grid h-9 w-7 cursor-pointer place-items-center rounded-lg border border-vui-border-soft bg-[var(--surface-card)] text-vui-fg-secondary hover:border-[var(--border-strong)] hover:text-[var(--accent-warm-2)]";
+const hiddenCheckboxClass = "pointer-events-none absolute h-px w-px opacity-0";
+const skillButtonBaseClass = [
+  "block w-full rounded-lg border border-vui-border-soft bg-[var(--surface-panel-muted)] p-2 text-left text-vui-fg-primary hover:border-[var(--border-strong)] hover:bg-[var(--surface-panel-strong)]",
+  "[&_[data-slot=vui-button-content]]:w-full",
+  "[&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[10px_minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-2",
+].join(" ");
+const skillButtonActiveClass = "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[var(--surface-active-neutral)] shadow-[var(--vui-shadow-inset-accent)]";
+const sourceDotClass = "h-2 w-2 rounded-full bg-[var(--accent-cool)] data-[source=agents]:bg-[var(--accent-warm)] data-[source=other]:bg-vui-fg-tertiary";
+const skillCopyClass = "grid min-w-0 gap-0.5";
+const skillNameClass = "min-w-0 truncate text-vui-fg-primary";
+const skillDescriptionClass = "m-0 min-w-0 truncate text-[0.76rem] leading-[1.3] text-vui-fg-secondary";
+const sourcePillClass = "inline-flex min-h-[21px] items-center justify-center whitespace-nowrap rounded-full border border-vui-border-soft px-1.5 text-[0.72rem] text-vui-fg-secondary";
+const emptyStateClass = "m-0 text-[0.76rem] leading-[1.3] text-vui-fg-secondary";
+const detailHeaderClass = "flex min-w-0 items-start justify-between gap-3";
+const commandPanelClass = "grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border border-vui-border-soft bg-[var(--surface-panel)] p-2.5";
+const commandBodyClass = "grid min-w-0 gap-1";
+const commandLabelClass = "text-[0.61rem] text-vui-fg-tertiary";
+const commandCodeClass = "min-w-0 truncate text-[0.98rem] text-[var(--accent-warm-2)]";
+const commandFeedbackClass = "text-[0.78rem] text-[var(--state-success)]";
+const metaGridClass = "grid grid-cols-[110px_minmax(0,1fr)] gap-x-2.5 gap-y-1.5 rounded-lg border border-vui-border-soft bg-[var(--surface-card)] p-2.5";
+const metaLabelClass = "text-[0.61rem] text-vui-fg-tertiary";
+const metaValueClass = "min-w-0 truncate text-[0.8rem] text-vui-fg-primary";
+const surfacePanelClass = "grid gap-2 rounded-lg border border-vui-border-soft bg-[var(--surface-panel)] p-2.5";
+const contentHeaderClass = "flex min-w-0 items-start justify-between gap-3";
+const contentPreClass = "m-0 max-h-[48vh] overflow-auto rounded-lg border border-vui-border-soft bg-[var(--surface-input-strong)] p-2.5 text-[0.78rem] leading-[1.48] text-vui-fg-primary whitespace-pre-wrap break-words";
+const truncatedNoticeClass = "m-0 text-[0.76rem] leading-[1.3] text-vui-fg-secondary";
+const rootRowClass = "grid min-w-0 grid-cols-[90px_minmax(0,1fr)] items-center gap-2.5";
+const rootSourceClass = "text-[0.76rem] text-vui-fg-tertiary";
+const rootPathClass = "min-w-0 truncate";
+const emptyDetailClass = "grid min-h-[190px] place-items-center rounded-lg border border-vui-border-soft bg-[var(--surface-panel)] p-[18px] text-center max-[920px]:min-h-24 max-[920px]:p-3";
+const emptyDetailTextClass = "m-0 text-[0.76rem] leading-[1.3] text-vui-fg-secondary";
 
 function normalizeCommand(command: string) {
   return String(command || "").replace(/^\/+/, "").trim();
@@ -224,16 +285,16 @@ export function SkillsRoute() {
   }
 
   return (
-    <section className={styles.route}>
+    <section className={routeClass}>
       <VRouteHeader
-        className={styles.header}
+        className={headerClass}
         eyebrow={copy.eyebrow}
         title={copy.title}
         meta={copy.subtitle}
         actions={(
           <VIconButton
             type="button"
-            className={styles.refreshButton}
+            className={refreshButtonClass}
             label={copy.refresh}
             icon={<RefreshCw size={15} />}
             isDisabled={libraryQuery.isFetching}
@@ -242,50 +303,50 @@ export function SkillsRoute() {
         )}
       />
 
-      <div className={styles.controlStrip}>
-        <AgentManagementNav active="skills" className={styles.managementNav} />
+      <div className={controlStripClass}>
+        <AgentManagementNav active="skills" className={managementNavClass} />
 
-        <div className={styles.summaryGrid}>
-          <section className={styles.summaryCard}>
-            <span>Total</span>
-            <strong>{counts.total}</strong>
+        <div className={summaryGridClass}>
+          <section className={summaryCardClass}>
+            <span className={summaryLabelClass}>Total</span>
+            <strong className={summaryValueClass}>{counts.total}</strong>
           </section>
-          <section className={styles.summaryCard}>
-            <span>Codex</span>
-            <strong>{counts.codex}</strong>
+          <section className={summaryCardClass}>
+            <span className={summaryLabelClass}>Codex</span>
+            <strong className={summaryValueClass}>{counts.codex}</strong>
           </section>
-          <section className={styles.summaryCard}>
-            <span>Agents</span>
-            <strong>{counts.agents}</strong>
+          <section className={summaryCardClass}>
+            <span className={summaryLabelClass}>Agents</span>
+            <strong className={summaryValueClass}>{counts.agents}</strong>
           </section>
-          <section className={styles.summaryCard}>
-            <span>{copy.readOnly}</span>
-            <strong>{libraryQuery.data?.mode ?? "read_only"}</strong>
+          <section className={summaryCardClass}>
+            <span className={summaryLabelClass}>{copy.readOnly}</span>
+            <strong className={summaryValueClass}>{libraryQuery.data?.mode ?? "read_only"}</strong>
           </section>
         </div>
       </div>
 
-      <main className={styles.workspace}>
-        <aside className={styles.listPanel}>
-          <div className={styles.panelHeader}>
+      <main className={workspaceClass}>
+        <aside className={listPanelClass}>
+          <div className={panelHeaderClass}>
             <div>
-              <p className={styles.panelEyebrow}>{copy.listTitle}</p>
-              <h2>{filteredSkills.length} / {skills.length}</h2>
+              <p className={panelEyebrowClass}>{copy.listTitle}</p>
+              <h2 className={panelTitleClass}>{filteredSkills.length} / {skills.length}</h2>
             </div>
             <Sparkles size={17} />
           </div>
 
-          <label className={styles.searchBox}>
+          <label className={searchBoxClass}>
             <Search size={14} />
-            <input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder={copy.search} />
+            <input className={searchInputClass} value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder={copy.search} />
           </label>
 
-          <div className={styles.filterRow}>
+          <div className={filterRowClass}>
             {SOURCE_FILTERS.map((filter) => (
               <VButton
                 key={filter}
                 type="button"
-                className={sourceFilter === filter ? styles.filterButtonActive : styles.filterButton}
+                className={sourceFilter === filter ? `${filterButtonClass} ${filterButtonActiveClass}` : filterButtonClass}
                 onPress={() => setSourceFilter(filter)}
               >
                 {sourceFilterLabel(filter, lang)}
@@ -293,15 +354,15 @@ export function SkillsRoute() {
             ))}
           </div>
 
-          <section className={styles.bulkActionBar} aria-label={copy.bulkSelected}>
-            <div className={styles.bulkSummary}>
+          <section className={bulkActionBarClass} aria-label={copy.bulkSelected}>
+            <div className={bulkSummaryClass}>
               <CheckSquare size={15} />
-              <strong>{copy.bulkSelected}</strong>
+              <strong className={bulkSummaryTitleClass}>{copy.bulkSelected}</strong>
               <span>{selectedSkills.length} / {filteredSkills.length}</span>
             </div>
             <VButton
               type="button"
-              className={styles.primaryButton}
+              className={primaryButtonClass}
               icon={<Copy size={14} />}
               isDisabled={!selectedSkills.length}
               onPress={copySelectedSkillCommands}
@@ -310,17 +371,17 @@ export function SkillsRoute() {
             </VButton>
             <VButton
               type="button"
-              className={styles.filterButton}
+              className={filterButtonClass}
               icon={allVisibleSkillsSelected ? <Square size={14} /> : <CheckSquare size={14} />}
               isDisabled={!filteredSkills.length}
               onPress={allVisibleSkillsSelected ? clearSelectedSkills : selectVisibleSkills}
             >
               {allVisibleSkillsSelected ? copy.bulkClear : copy.bulkSelectVisible}
             </VButton>
-            <span className={styles.bulkReadOnlyNote}>{copy.bulkReadOnlyReason}</span>
+            <span className={bulkReadOnlyNoteClass}>{copy.bulkReadOnlyReason}</span>
             <VButton
               type="button"
-              className={styles.filterButton}
+              className={filterButtonClass}
               icon={<Ban size={14} />}
               isDisabled
               title={copy.bulkReadOnlyReason}
@@ -329,7 +390,7 @@ export function SkillsRoute() {
             </VButton>
             <VButton
               type="button"
-              className={styles.filterButton}
+              className={filterButtonClass}
               icon={<Ban size={14} />}
               isDisabled
               title={copy.bulkReadOnlyReason}
@@ -338,20 +399,21 @@ export function SkillsRoute() {
             </VButton>
           </section>
 
-          <div className={styles.skillList}>
+          <div className={skillListClass}>
             {libraryQuery.isError ? (
-              <p className={styles.emptyState}>{copy.loadFailed}</p>
+              <p className={emptyStateClass}>{copy.loadFailed}</p>
             ) : libraryQuery.isPending ? (
-              <p className={styles.emptyState}>{copy.loading}</p>
+              <p className={emptyStateClass}>{copy.loading}</p>
             ) : filteredSkills.length === 0 ? (
-              <p className={styles.emptyState}>{copy.emptyList}</p>
+              <p className={emptyStateClass}>{copy.emptyList}</p>
             ) : (
               filteredSkills.map((skill) => {
                 const selected = selectedSkillCommands.has(skill.command);
                 return (
-                  <div key={`${skill.path}-${skill.hash}`} className={styles.selectableRow}>
-                    <label className={styles.rowSelect} title={`${copy.bulkSelected}: ${skill.name}`}>
+                  <div key={`${skill.path}-${skill.hash}`} className={selectableRowClass}>
+                    <label className={rowSelectClass} title={`${copy.bulkSelected}: ${skill.name}`}>
                       <input
+                        className={hiddenCheckboxClass}
                         type="checkbox"
                         checked={selected}
                         aria-label={`${copy.bulkSelected}: ${skill.name}`}
@@ -361,15 +423,15 @@ export function SkillsRoute() {
                     </label>
                     <VButton
                       type="button"
-                      className={activeCommand === skill.command ? styles.skillButtonActive : styles.skillButton}
+                      className={activeCommand === skill.command ? `${skillButtonBaseClass} ${skillButtonActiveClass}` : skillButtonBaseClass}
                       onPress={() => setActiveCommand(skill.command)}
                     >
-                      <span className={styles.sourceDot} data-source={skill.source} />
-                      <span className={styles.skillCopy}>
-                        <strong>{skill.name}</strong>
-                        <span>{skill.description || skill.command}</span>
+                      <span className={sourceDotClass} data-source={skill.source} />
+                      <span className={skillCopyClass}>
+                        <strong className={skillNameClass}>{skill.name}</strong>
+                        <span className={skillDescriptionClass}>{skill.description || skill.command}</span>
                       </span>
-                      <span className={styles.sourcePill}>{sourceLabel(skill.source, lang)}</span>
+                      <span className={sourcePillClass}>{sourceLabel(skill.source, lang)}</span>
                     </VButton>
                   </div>
                 );
@@ -378,18 +440,18 @@ export function SkillsRoute() {
           </div>
         </aside>
 
-        <section className={styles.detailPanel}>
+        <section className={detailPanelClass}>
           {activeSkill ? (
             <>
-              <div className={styles.detailHeader}>
+              <div className={detailHeaderClass}>
                 <div>
-                  <p className={styles.panelEyebrow}>{copy.detailTitle}</p>
-                  <h2>{activeSkill.name}</h2>
-                  <p>{activeSkill.description || activeSkill.directoryName}</p>
+                  <p className={panelEyebrowClass}>{copy.detailTitle}</p>
+                  <h2 className={panelTitleClass}>{activeSkill.name}</h2>
+                  <p className={detailDescriptionClass}>{activeSkill.description || activeSkill.directoryName}</p>
                 </div>
                 <VButton
                   type="button"
-                  className={styles.primaryButton}
+                  className={primaryButtonClass}
                   icon={<Copy size={15} />}
                   onPress={() => copyCommand(activeSkill.command)}
                 >
@@ -397,54 +459,54 @@ export function SkillsRoute() {
                 </VButton>
               </div>
 
-              <div className={styles.commandPanel}>
+              <div className={commandPanelClass}>
                 <BookOpen size={17} />
-                <div>
-                  <span>{copy.command}</span>
-                  <code>{activeSkill.command} </code>
+                <div className={commandBodyClass}>
+                  <span className={commandLabelClass}>{copy.command}</span>
+                  <code className={commandCodeClass}>{activeSkill.command} </code>
                 </div>
-                {copyState ? <strong>{copyState}</strong> : null}
+                {copyState ? <strong className={commandFeedbackClass}>{copyState}</strong> : null}
               </div>
 
-              <div className={styles.metaGrid}>
-                <span>{copy.aliases}</span>
-                <strong>{activeSkill.aliases.join(", ") || "-"}</strong>
-                <span>{copy.path}</span>
-                <strong title={activeSkill.path}>{activeSkill.path}</strong>
-                <span>{copy.hash}</span>
-                <strong>{activeSkill.hash}</strong>
-                <span>{copy.size}</span>
-                <strong>{formatBytes(activeSkill.contentLength, lang)}</strong>
+              <div className={metaGridClass}>
+                <span className={metaLabelClass}>{copy.aliases}</span>
+                <strong className={metaValueClass}>{activeSkill.aliases.join(", ") || "-"}</strong>
+                <span className={metaLabelClass}>{copy.path}</span>
+                <strong className={metaValueClass} title={activeSkill.path}>{activeSkill.path}</strong>
+                <span className={metaLabelClass}>{copy.hash}</span>
+                <strong className={metaValueClass}>{activeSkill.hash}</strong>
+                <span className={metaLabelClass}>{copy.size}</span>
+                <strong className={metaValueClass}>{formatBytes(activeSkill.contentLength, lang)}</strong>
               </div>
 
-              <section className={styles.contentPanel}>
-                <div className={styles.contentHeader}>
+              <section className={surfacePanelClass}>
+                <div className={contentHeaderClass}>
                   <div>
-                    <p className={styles.panelEyebrow}>{detailQuery.data ? copy.fullContent : copy.preview}</p>
-                    <h3>SKILL.md</h3>
+                    <p className={panelEyebrowClass}>{detailQuery.data ? copy.fullContent : copy.preview}</p>
+                    <h3 className={panelTitleClass}>SKILL.md</h3>
                   </div>
                   <FileText size={17} />
                 </div>
-                <pre>{detailQuery.data?.content ?? activeSkill.preview}</pre>
+                <pre className={contentPreClass}>{detailQuery.data?.content ?? activeSkill.preview}</pre>
                 {detailQuery.data?.contentTruncated || activeSkill.previewTruncated ? (
-                  <p className={styles.truncatedNotice}>{copy.truncated}</p>
+                  <p className={truncatedNoticeClass}>{copy.truncated}</p>
                 ) : null}
               </section>
 
-              <section className={styles.rootsPanel}>
-                <p className={styles.panelEyebrow}>{copy.rootPaths}</p>
+              <section className={surfacePanelClass}>
+                <p className={panelEyebrowClass}>{copy.rootPaths}</p>
                 {(libraryQuery.data?.roots ?? []).map((root) => (
-                  <div key={root.path} className={styles.rootRow}>
-                    <span>{sourceLabel(root.source, lang)}</span>
-                    <code>{root.path}</code>
+                  <div key={root.path} className={rootRowClass}>
+                    <span className={rootSourceClass}>{sourceLabel(root.source, lang)}</span>
+                    <code className={rootPathClass}>{root.path}</code>
                   </div>
                 ))}
               </section>
             </>
           ) : (
-            <div className={styles.emptyDetail}>
+            <div className={emptyDetailClass}>
               <Sparkles size={20} />
-              <p>{copy.emptyDetail}</p>
+              <p className={emptyDetailTextClass}>{copy.emptyDetail}</p>
             </div>
           )}
         </section>

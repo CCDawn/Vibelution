@@ -2,7 +2,6 @@ import { ExternalLink, ShieldCheck } from "lucide-react";
 
 import { VRouteHeader } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
-import styles from "./ResetRoute.module.css";
 
 const COPY = {
   zh: {
@@ -25,20 +24,30 @@ const COPY = {
   },
 } as const;
 
+const routeClass = "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-[var(--surface-page)]";
+const headerClass = "mx-2.5 mt-2 min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-gradient-route-soft),color-mix(in_srgb,var(--surface-panel)_86%,transparent)] shadow-[var(--vui-shadow-hairline)]";
+const headerActionsClass = "flex items-center justify-end gap-2";
+const secondaryButtonClass = "inline-flex min-h-8 items-center justify-center gap-[7px] rounded-lg border border-vui-border-soft bg-[var(--surface-card)] px-2.5 py-1.5 text-[0.8rem] text-vui-fg-secondary hover:border-[var(--border-strong)] hover:bg-[var(--surface-panel-hover)] hover:text-vui-fg-primary";
+const workspaceClass = "grid min-h-0 grid-cols-[minmax(0,1fr)_minmax(320px,390px)] items-start gap-2 px-2.5 pb-2.5 pt-2 max-[1120px]:grid-cols-1";
+const cardClass = "min-h-0 rounded-lg border border-vui-border-soft bg-[var(--surface-panel)] p-2";
+const cardTitleRowClass = "mb-1.5 flex items-center gap-1.5 text-vui-fg-primary";
+const cardTitleClass = "m-0 text-[0.94rem] font-bold";
+const subtitleClass = "m-0 min-w-0 truncate text-[var(--route-topbar-subtitle-size)] leading-[1.25] text-vui-fg-secondary";
+
 export function ResetRoute() {
   const { lang } = useShellI18n();
   const copy = COPY[lang];
 
   return (
-    <div className={styles.route} data-reset-retired="launcher-owned">
+    <div className={routeClass} data-reset-retired="launcher-owned">
       <VRouteHeader
-        className={styles.header}
+        className={headerClass}
         eyebrow="Reset"
         title={copy.title}
         meta={copy.subtitle}
         actions={(
-          <div className={styles.headerActions}>
-            <a className={styles.secondaryButton} href="/launcher" target="_blank" rel="noreferrer">
+          <div className={headerActionsClass}>
+            <a className={secondaryButtonClass} href="/launcher" target="_blank" rel="noreferrer">
               <ExternalLink size={15} />
               {copy.openLauncher}
             </a>
@@ -46,20 +55,20 @@ export function ResetRoute() {
         )}
       />
 
-      <main className={styles.workspace}>
-        <section className={styles.card}>
-          <div className={styles.cardTitleRow}>
+      <main className={workspaceClass}>
+        <section className={cardClass}>
+          <div className={cardTitleRowClass}>
             <ShieldCheck size={16} />
-            <h2>{copy.owner}</h2>
+            <h2 className={cardTitleClass}>{copy.owner}</h2>
           </div>
-          <p className={styles.subtitle}>{copy.ownerDetail}</p>
+          <p className={subtitleClass}>{copy.ownerDetail}</p>
         </section>
-        <section className={styles.card}>
-          <div className={styles.cardTitleRow}>
+        <section className={cardClass}>
+          <div className={cardTitleRowClass}>
             <ShieldCheck size={16} />
-            <h2>{copy.retired}</h2>
+            <h2 className={cardTitleClass}>{copy.retired}</h2>
           </div>
-          <p className={styles.subtitle}>{copy.retiredDetail}</p>
+          <p className={subtitleClass}>{copy.retiredDetail}</p>
         </section>
       </main>
     </div>

@@ -36,7 +36,7 @@ describe("VUI CSS module contract", () => {
     const modules = cssModuleSources();
     const modulePaths = modules.map(({ path }) => path);
 
-    expect(modules.length).toBeLessThanOrEqual(21);
+    expect(modules.length).toBeLessThanOrEqual(17);
     expect(modulePaths).not.toContain("app/LauncherShell.module.css");
     expect(modulePaths).not.toContain("app/RouteLoadingShell.module.css");
     expect(modulePaths).not.toContain("app/RouteErrorBoundary.module.css");
@@ -45,9 +45,13 @@ describe("VUI CSS module contract", () => {
     expect(modulePaths).not.toContain("components/preview/StructuredLogPreview.module.css");
     expect(modulePaths).not.toContain("routes/AgentManagementNav.module.css");
     expect(modulePaths).not.toContain("routes/GitDiffView.module.css");
+    expect(modulePaths).not.toContain("routes/KernelTaskCenterRoute.module.css");
     expect(modulePaths).not.toContain("routes/PetRoute.module.css");
+    expect(modulePaths).not.toContain("routes/ResetRoute.module.css");
+    expect(modulePaths).not.toContain("routes/SkillsRoute.module.css");
     expect(modulePaths).not.toContain("routes/SupervisedWorkspaceControls.module.css");
     expect(modulePaths).not.toContain("routes/SupervisedWorkspaceTabs.module.css");
+    expect(modulePaths).not.toContain("routes/SupervisedWorktreeReviewPanel.module.css");
 
     const literalColorOffenders = modules.flatMap(({ path, source }) =>
       [...source.matchAll(/#[0-9a-fA-F]{3,8}|rgba?\(/g)].map((match) => `${path}:${lineFor(source, match.index ?? 0)}`),

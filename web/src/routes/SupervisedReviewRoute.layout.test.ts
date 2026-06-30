@@ -6,7 +6,6 @@ import { readFileSync } from "node:fs";
 const routeSource = readFileSync(new URL("./SupervisedReviewRoute.tsx", import.meta.url), "utf-8");
 const stylesSource = readFileSync(new URL("./SupervisedReviewRoute.module.css", import.meta.url), "utf-8");
 const worktreePanelSource = readFileSync(new URL("./SupervisedWorktreeReviewPanel.tsx", import.meta.url), "utf-8");
-const worktreePanelStyles = readFileSync(new URL("./SupervisedWorktreeReviewPanel.module.css", import.meta.url), "utf-8");
 
 describe("SupervisedReviewRoute layout contract", () => {
   it("routes supervised review controls through VUI primitives", () => {
@@ -52,7 +51,7 @@ describe("SupervisedReviewRoute layout contract", () => {
   });
 
   it("keeps worktree review actions explicit in the shared panel", () => {
-    const genericActionsIndex = worktreePanelSource.indexOf("styles.worktreeActionGate");
+    const genericActionsIndex = worktreePanelSource.indexOf("worktreeActionGateClass");
     const actionMapIndex = worktreePanelSource.indexOf("highlightedWorktreeActions.map");
     const selfOriginGateIndex = worktreePanelSource.indexOf("highlightedIsSelfOrigin && highlightedWorktreeRun ? (");
 
@@ -67,9 +66,10 @@ describe("SupervisedReviewRoute layout contract", () => {
     expect(worktreePanelSource).toContain("setSelectedWorktreeRunId");
     expect(worktreePanelSource).toContain("runs.slice(0, 4).map");
     expect(worktreePanelSource).toContain("selfWorktreeMergeRequiresReview");
-    expect(worktreePanelStyles).toContain(".worktreeReviewSurface");
-    expect(worktreePanelStyles).toContain(".worktreeReviewGate .controlActions");
-    expect(worktreePanelStyles).toContain(".worktreeActionGate");
-    expect(worktreePanelStyles).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
+    expect(worktreePanelSource).toContain("worktreeReviewSurfaceClass");
+    expect(worktreePanelSource).toContain("worktreeReviewGateClass");
+    expect(worktreePanelSource).toContain("controlActionsClass");
+    expect(worktreePanelSource).toContain("gateActionGridClass");
+    expect(worktreePanelSource).toContain("grid-cols-2");
   });
 });
