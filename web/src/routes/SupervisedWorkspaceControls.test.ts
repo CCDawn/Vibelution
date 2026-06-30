@@ -51,16 +51,18 @@ describe("supervised workspace controls", () => {
     expect(dictionarySource).not.toContain('supervisedFlowLibrary: "改进提案"');
     expect(dictionarySource).not.toContain('supervisedFlowReview: "样本评审"');
     expect(tabsSource).toContain("flowTabsClass");
-    expect(tabsStylesSource).toContain("grid-cols-[repeat(4,minmax(92px,1fr))]");
+    expect(tabsStylesSource).toContain("grid-cols-[repeat(4,minmax(108px,1fr))]");
     expect(tabsSource).toContain("stepHintClass");
     expect(tabsSource).not.toContain("segmentButton");
   });
 
   it("keeps the supervised flow rail on one dense row before mobile overflow", () => {
-    expect(tabsStylesSource).toContain("grid-cols-[repeat(4,minmax(92px,1fr))]");
-    expect(tabsStylesSource).toContain("min-h-[38px]");
+    expect(tabsStylesSource).toContain("grid-cols-[repeat(4,minmax(108px,1fr))]");
+    expect(tabsStylesSource).toContain("min-h-[44px]");
+    expect(tabsStylesSource).toContain("h-5 w-5");
+    expect(tabsStylesSource).toContain("min-w-6");
     expect(tabsStylesSource).toContain("hidden overflow-hidden");
-    expect(tabsStylesSource).toContain("max-[1120px]:grid-cols-[repeat(4,minmax(88px,1fr))]");
+    expect(tabsStylesSource).toContain("max-[1120px]:grid-cols-[repeat(4,minmax(96px,1fr))]");
     expect(tabsSource).not.toContain("repeat(2");
     expect(controlsStylesSource).toContain("min-h-[34px]");
     expect(controlsStylesSource).toContain("min-h-[26px]");
