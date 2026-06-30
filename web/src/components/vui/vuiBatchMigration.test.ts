@@ -32,6 +32,13 @@ const migrationTargets = [
   },
 ] as const;
 
+const cssModuleFreeTargets = [
+  "components/preview/FilePreview.tsx",
+  "components/preview/StructuredLogPreview.tsx",
+  "routes/GitDiffView.tsx",
+  "routes/PetRoute.tsx",
+] as const;
+
 const slottedListStyleTargets = [
   {
     path: "app/AppShell.module.css",
@@ -164,6 +171,12 @@ describe("VUI batch migration", () => {
       expect(source).not.toContain("<button");
     },
   );
+
+  it.each(cssModuleFreeTargets)("%s no longer imports a local CSS module", (path) => {
+    const source = readTargetSource(path);
+
+    expect(source).not.toContain(".module.css");
+  });
 
   it.each(slottedListStyleTargets)(
     "$path keeps VUI list button grid on internal slots",

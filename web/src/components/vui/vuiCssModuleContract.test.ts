@@ -36,12 +36,16 @@ describe("VUI CSS module contract", () => {
     const modules = cssModuleSources();
     const modulePaths = modules.map(({ path }) => path);
 
-    expect(modules.length).toBeLessThanOrEqual(25);
+    expect(modules.length).toBeLessThanOrEqual(21);
     expect(modulePaths).not.toContain("app/LauncherShell.module.css");
     expect(modulePaths).not.toContain("app/RouteLoadingShell.module.css");
     expect(modulePaths).not.toContain("app/RouteErrorBoundary.module.css");
     expect(modulePaths).not.toContain("components/layout/PaneCollapseHandle.module.css");
+    expect(modulePaths).not.toContain("components/preview/FilePreview.module.css");
+    expect(modulePaths).not.toContain("components/preview/StructuredLogPreview.module.css");
     expect(modulePaths).not.toContain("routes/AgentManagementNav.module.css");
+    expect(modulePaths).not.toContain("routes/GitDiffView.module.css");
+    expect(modulePaths).not.toContain("routes/PetRoute.module.css");
     expect(modulePaths).not.toContain("routes/SupervisedWorkspaceControls.module.css");
     expect(modulePaths).not.toContain("routes/SupervisedWorkspaceTabs.module.css");
 
