@@ -679,6 +679,8 @@ def challenge_cup_research_team_agents_need_repair() -> bool:
                 canvas_agent_ids_by_role[role] = agent_id
         if set(canvas_agent_ids_by_role) != expected_roles:
             return True
+        if _challenge_cup_research_team_duplicate_agent_ids(set(member_agent_ids_by_role.values())):
+            return True
     return False
 
 
@@ -859,6 +861,8 @@ def knowledge_expansion_team_agents_need_repair() -> bool:
                     return True
                 canvas_agent_ids_by_role[role] = agent_id
         if set(canvas_agent_ids_by_role) != expected_roles:
+            return True
+        if _knowledge_expansion_team_duplicate_agent_ids(set(member_agent_ids_by_role.values())):
             return True
     return False
 
@@ -2671,6 +2675,31 @@ def _purge_challenge_cup_research_team_agent(agent_id: str, *, session_service: 
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
     if bool(metadata.get("protected")) or str(agent.get("agentId") or "") == agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID:
         return {"agentId": normalized_agent_id, "deleted": False, "skipped": "protected"}
+    created_by = str(agent.get("createdBy") or "").strip()
+    system_team_purge_kwargs: dict[str, str] | None = None
+    if (
+        str(metadata.get("conversationIndexKind") or "").strip() == agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT
+        and str(metadata.get("conversationIndexVisibility") or "").strip()
+        == agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
+    ):
+        if (
+            created_by == CHALLENGE_CUP_RESEARCH_TEAM_AGENT_CREATED_BY
+            and str(metadata.get("challengeCupTeamId") or "").strip() == CHALLENGE_CUP_RESEARCH_TEAM_ID
+        ):
+            system_team_purge_kwargs = {
+                "expected_created_by": CHALLENGE_CUP_RESEARCH_TEAM_AGENT_CREATED_BY,
+                "expected_team_metadata_key": "challengeCupTeamId",
+                "expected_team_id": CHALLENGE_CUP_RESEARCH_TEAM_ID,
+            }
+        elif (
+            created_by == KNOWLEDGE_EXPANSION_TEAM_AGENT_CREATED_BY
+            and str(metadata.get("knowledgeExpansionTeamId") or "").strip() == KNOWLEDGE_EXPANSION_TEAM_ID
+        ):
+            system_team_purge_kwargs = {
+                "expected_created_by": KNOWLEDGE_EXPANSION_TEAM_AGENT_CREATED_BY,
+                "expected_team_metadata_key": "knowledgeExpansionTeamId",
+                "expected_team_id": KNOWLEDGE_EXPANSION_TEAM_ID,
+            }
     direct_session_id = str(agent.get("directSessionId") or "").strip()
     if direct_session_id and session_service:
         try:
@@ -2679,13 +2708,20 @@ def _purge_challenge_cup_research_team_agent(agent_id: str, *, session_service: 
                 agent_id=normalized_agent_id,
                 agent_display_name=str(agent.get("displayName") or ""),
                 previous_status=str(agent.get("status") or ""),
+                hide_from_index=system_team_purge_kwargs is not None,
             )
         except Exception:
             pass
     try:
-        if str(agent.get("status") or "active").strip() != "archived":
-            agent_directory_service.archive_agent_instance(normalized_agent_id, repair_mode_bindings=True)
-        result = agent_directory_service.purge_archived_agent_instance(normalized_agent_id)
+        if system_team_purge_kwargs is not None:
+            result = agent_directory_service.purge_system_team_agent_instance(
+                normalized_agent_id,
+                **system_team_purge_kwargs,
+            )
+        else:
+            if str(agent.get("status") or "active").strip() != "archived":
+                agent_directory_service.archive_agent_instance(normalized_agent_id, repair_mode_bindings=True)
+            result = agent_directory_service.purge_archived_agent_instance(normalized_agent_id)
         result["orphan"] = False
         return result
     except Exception as exc:
