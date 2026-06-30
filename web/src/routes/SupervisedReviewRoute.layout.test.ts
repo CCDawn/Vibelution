@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
 const routeSource = readFileSync(new URL("./SupervisedReviewRoute.tsx", import.meta.url), "utf-8");
-const stylesSource = readFileSync(new URL("./SupervisedReviewRoute.module.css", import.meta.url), "utf-8");
 const worktreePanelSource = readFileSync(new URL("./SupervisedWorktreeReviewPanel.tsx", import.meta.url), "utf-8");
 
 describe("SupervisedReviewRoute layout contract", () => {
@@ -18,16 +17,16 @@ describe("SupervisedReviewRoute layout contract", () => {
   });
 
   it("keeps the review workspace in split-pane layout at common desktop widths", () => {
-    expect(stylesSource).toContain("@media (min-width: 981px) and (max-width: 1600px)");
-    expect(stylesSource).toContain("grid-template-columns: var(--review-queue-width, 380px) 12px minmax(0, 1fr)");
-    expect(stylesSource).toContain("@media (max-width: 980px)");
-    expect(stylesSource).not.toContain("@media (max-width: 1280px)");
+    expect(routeSource).toContain("grid-cols-[var(--review-queue-width,380px)_12px_minmax(0,1fr)]");
+    expect(routeSource).toContain("max-[980px]:grid-cols-1");
+    expect(routeSource).toContain("max-[980px]:overflow-visible");
+    expect(routeSource).not.toContain("max-[1280px]:grid-cols-1");
   });
 
   it("keeps review empty states compact enough for the first viewport", () => {
-    expect(stylesSource).toContain("min-height: 82px");
-    expect(stylesSource).toContain("padding: 9px 11px");
-    expect(stylesSource).not.toContain("min-height: 118px");
+    expect(routeSource).toContain("min-h-[82px]");
+    expect(routeSource).toContain("px-[11px] py-[9px]");
+    expect(routeSource).not.toContain("min-h-[118px]");
   });
 
   it("hosts candidate worktree review inside the sample review workspace", () => {

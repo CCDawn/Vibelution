@@ -41,6 +41,7 @@ const cssModuleFreeTargets = [
   "routes/PromptTemplatesRoute.tsx",
   "routes/ResetRoute.tsx",
   "routes/SkillsRoute.tsx",
+  "routes/SupervisedReviewRoute.tsx",
   "routes/SupervisedWorktreeReviewPanel.tsx",
 ] as const;
 
