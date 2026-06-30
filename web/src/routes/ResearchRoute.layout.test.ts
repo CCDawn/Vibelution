@@ -7,7 +7,11 @@ describe("ResearchRoute layout contract", () => {
   it("routes Research controls through VUI primitives", () => {
     expect(routeSource).toContain('from "../components/vui"');
     expect(routeSource).toContain("<VButton");
+    expect(routeSource).toContain("<VNativeTextarea");
     expect(routeSource).not.toMatch(/<button\b/);
+    expect(routeSource).not.toMatch(/<input\b/);
+    expect(routeSource).not.toMatch(/<select\b/);
+    expect(routeSource).not.toMatch(/<textarea\b/);
   });
 
   it("renders the API-backed theme discovery MVP", () => {

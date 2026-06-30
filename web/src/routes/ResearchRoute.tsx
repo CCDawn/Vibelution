@@ -38,7 +38,7 @@ import {
   ResearchSource,
   ResearchThemeCard,
 } from "../api/types";
-import { VButton, VRouteHeader } from "../components/vui";
+import { VButton, VNativeTextarea, VRouteHeader } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./ResearchRoute.styles";
 
@@ -736,18 +736,18 @@ export function ResearchRoute() {
             <div className={styles.intakeFields}>
               <label className={`${styles.intakeField} ${styles.intakeField_primary}`}>
                 <span>{copy.openGoal}</span>
-                <textarea value={draft.openGoal} onChange={(event) => setDraft({ ...draft, openGoal: event.target.value })} />
+                <VNativeTextarea value={draft.openGoal} onChange={(event) => setDraft({ ...draft, openGoal: event.target.value })} />
               </label>
               <label className={`${styles.intakeField} ${styles.intakeField_tall}`}>
                 <span>{copy.constraints}</span>
-                <textarea
+                <VNativeTextarea
                   value={draft.constraints}
                   onChange={(event) => setDraft({ ...draft, constraints: event.target.value })}
                 />
               </label>
               <label className={`${styles.intakeField} ${styles.intakeField_medium}`}>
                 <span>{copy.preferences}</span>
-                <textarea
+                <VNativeTextarea
                   value={draft.preferences}
                   onChange={(event) => setDraft({ ...draft, preferences: event.target.value })}
                 />

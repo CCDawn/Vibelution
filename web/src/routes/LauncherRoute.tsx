@@ -48,7 +48,7 @@ import {
   shouldArmBrowserProjectCloseGuard,
   shouldBlockProjectWindowClose,
 } from "../app/projectCloseGuard";
-import { VButton, VRouteHeader } from "../components/vui";
+import { VButton, VNativeInput, VNativeSelect, VRouteHeader } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
 
@@ -753,7 +753,7 @@ function LauncherStartupSettingsPanel({
       </div>
       <label className={styles.settingField}>
         <span>{copy.runtimeProfile}</span>
-        <select
+        <VNativeSelect
           value={draft.runtime.profile}
           disabled={controlsDisabled}
           onChange={(event) => patchDraft({ runtime: { ...draft.runtime, profile: event.target.value } })}
@@ -761,11 +761,11 @@ function LauncherStartupSettingsPanel({
           {draft.runtime.profileOptions.map((profile) => (
             <option key={profile} value={profile}>{runtimeProfileLabel(profile, uiLang)}</option>
           ))}
-        </select>
+        </VNativeSelect>
       </label>
       <label className={styles.settingField}>
         <span>{copy.launcherControlPort}</span>
-        <input
+        <VNativeInput
           type="number"
           min={1}
           max={65535}
@@ -777,7 +777,7 @@ function LauncherStartupSettingsPanel({
       </label>
       <label className={styles.settingField}>
         <span>{copy.backendPort}</span>
-        <input
+        <VNativeInput
           type="number"
           min={1}
           max={65535}
@@ -789,7 +789,7 @@ function LauncherStartupSettingsPanel({
       </label>
       <label className={styles.settingField}>
         <span>{copy.frontendPort}</span>
-        <input
+        <VNativeInput
           type="number"
           min={1}
           max={65535}
@@ -825,7 +825,7 @@ function LauncherStartupSettingsPanel({
       </div>
       <label className={styles.settingField}>
         <span>{copy.windowSize}</span>
-        <select
+        <VNativeSelect
           value={draft.workbench.windowSize}
           disabled={controlsDisabled}
           onChange={(event) => patchDraft({ workbench: { ...draft.workbench, windowSize: event.target.value } })}
@@ -833,22 +833,22 @@ function LauncherStartupSettingsPanel({
           {(draft.workbench.windowSizeOptions.length ? draft.workbench.windowSizeOptions : [{ size: "auto", label: { zh: copy.windowSizeAuto, en: copy.windowSizeAuto } }]).map((option) => (
             <option key={option.size} value={option.size}>{option.label[uiLang] ?? option.size}</option>
           ))}
-        </select>
+        </VNativeSelect>
         {draft.workbench.windowSizeEnvOverride ? <small>{copy.windowSizeEnvOverride}: {draft.workbench.effectiveWindowSize}</small> : null}
       </label>
       <label className={styles.settingField}>
         <span>{copy.interfaceLanguage}</span>
-        <select
+        <VNativeSelect
           value={draft.interface.language}
           disabled={controlsDisabled}
           onChange={(event) => patchDraft({ interface: { ...draft.interface, language: event.target.value } })}
         >
           <option value="zh">{copy.languageZh}</option>
           <option value="en">{copy.languageEn}</option>
-        </select>
+        </VNativeSelect>
       </label>
       <label className={styles.settingToggle}>
-        <input
+        <VNativeInput
           type="checkbox"
           checked={draft.runtime.preflightDoctor}
           disabled={controlsDisabled}
@@ -857,7 +857,7 @@ function LauncherStartupSettingsPanel({
         <span>{copy.preflightDoctor}</span>
       </label>
       <label className={styles.settingToggle}>
-        <input
+        <VNativeInput
           type="checkbox"
           checked={draft.runtime.requireVenv}
           disabled={controlsDisabled}
@@ -1000,11 +1000,11 @@ function DeveloperModePanel({
         <div className={styles.cleanupConsole}>
           <label className={styles.settingField} title={selectedOption.detail}>
             <span>{copy.developerModeAction}</span>
-            <select value={selectedAction} disabled={previewPending || applyPending} onChange={(event) => onSelectAction(event.target.value as LauncherDeveloperCleanupAction)}>
+            <VNativeSelect value={selectedAction} disabled={previewPending || applyPending} onChange={(event) => onSelectAction(event.target.value as LauncherDeveloperCleanupAction)}>
               {actionOptions.map((option) => (
                 <option key={option.action} value={option.action}>{option.label}</option>
               ))}
-            </select>
+            </VNativeSelect>
           </label>
           <div className={styles.cleanupMetrics}>
             <span>{copy.cleanupEstimated}: <strong>{formatBytes(matchingOverview?.sizeBytes ?? plan?.estimatedBytes ?? 0)}</strong></span>

@@ -252,7 +252,7 @@
 
 :where(.vui-routes-researchflowcanvasroute).executionGroup span {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-weight: 780;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -524,7 +524,7 @@
   display: block;
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.5rem;
+  font-size: var(--vui-font-xs);
   font-weight: 780;
   line-height: 1.1;
   text-overflow: ellipsis;
@@ -589,7 +589,7 @@
   box-shadow: var(--vui-shadow-accent);
   cursor: grab;
   font: inherit;
-  font-size: 0.5rem;
+  font-size: var(--vui-font-xs);
   font-weight: 850;
   line-height: 1;
   pointer-events: auto;
@@ -1277,7 +1277,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1567,7 +1567,7 @@
   background: color-mix(in srgb, var(--accent-cool) 10%, transparent);
   cursor: pointer;
   font: inherit;
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-weight: 780;
 }
 

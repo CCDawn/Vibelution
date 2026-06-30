@@ -97,7 +97,7 @@
 :where(.vui-routes-evolutionroute).controlLabel {
   padding: 0 6px 0 8px;
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-evolutionroute).intakeSegmented {
@@ -438,7 +438,7 @@
   display: -webkit-box;
   min-height: 34px;
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.45;
   overflow: hidden;
   -webkit-box-orient: vertical;
@@ -658,7 +658,7 @@
 :where(.vui-routes-evolutionroute).supervisedMemberIdentity span {
   color: var(--fg-tertiary);
   font-family: var(--font-mono);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-evolutionroute).modeTeamPanel {
@@ -871,7 +871,7 @@
   padding: 0 10px;
   border-radius: 999px;
   border: 1px solid var(--border-soft);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1155,7 +1155,7 @@
 :where(.vui-routes-evolutionroute).formHint,
 :where(.vui-routes-evolutionroute).checkboxLabel {
   color: var(--fg-tertiary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-evolutionroute).textInput,
@@ -1344,7 +1344,7 @@
   border-radius: 7px;
   background: color-mix(in srgb, var(--state-warning) 10%, var(--surface-card-subtle));
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.36;
   overflow-wrap: anywhere;
 }
@@ -2275,7 +2275,7 @@
 :where(.vui-routes-evolutionroute).caseTraceStatus,
 :where(.vui-routes-evolutionroute).caseTraceTime {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
@@ -2346,7 +2346,7 @@
   max-height: 360px;
   overflow: auto;
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.55;
 }
 
@@ -2381,7 +2381,7 @@
 
 :where(.vui-routes-evolutionroute).caseTraceStateRow dd {
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.55;
 }
 

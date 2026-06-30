@@ -35,7 +35,7 @@ import {
   LogRoot,
   LogTreeResponse,
 } from "../api/types";
-import { VButton, VIconButton, VRouteHeader, VStatusStrip } from "../components/vui";
+import { VButton, VIconButton, VNativeInput, VRouteHeader, VStatusStrip } from "../components/vui";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { LazyFilePreview } from "../components/preview/LazyFilePreview";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
@@ -1171,7 +1171,7 @@ export function LogsRoute() {
 
               <div className={styles.panelSearch}>
                 <Search size={15} />
-                <input
+                <VNativeInput
                   className={styles.panelSearchInput}
                   type="text"
                   value={fileFilter}

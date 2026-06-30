@@ -23,7 +23,12 @@ describe("LauncherRoute layout contract", () => {
   it("routes launcher controls through VUI primitives", () => {
     expect(routeSource).toContain("from \"../components/vui\"");
     expect(routeSource).toContain("<VButton");
+    expect(routeSource).toContain("<VNativeInput");
+    expect(routeSource).toContain("<VNativeSelect");
     expect(routeSource).not.toMatch(/<button\b/);
+    expect(routeSource).not.toMatch(/<input\b/);
+    expect(routeSource).not.toMatch(/<select\b/);
+    expect(routeSource).not.toMatch(/<textarea\b/);
   });
 
   it("uses shell language state without loading the full app dictionary", () => {

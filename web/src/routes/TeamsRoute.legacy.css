@@ -240,7 +240,7 @@
 :where(.vui-routes-teamsroute).aiSearchScopeHeader strong,
 :where(.vui-routes-teamsroute).aiSearchSourceGroupHeader strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).aiSearchScopeHeader span,
@@ -324,7 +324,7 @@
   display: -webkit-box;
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.38;
   overflow: hidden;
   -webkit-box-orient: vertical;
@@ -484,13 +484,13 @@
 
 :where(.vui-routes-teamsroute).aiSearchSourceItem strong {
   color: var(--fg-primary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).aiSearchSourceItem span,
 :where(.vui-routes-teamsroute).aiSearchSourceItem small {
   color: var(--fg-muted);
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).aiSearchRunPanel {
@@ -799,7 +799,7 @@
 
 :where(.vui-routes-teamsroute).aiSearchRunCardDetails summary {
   color: var(--fg-muted);
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
   cursor: pointer;
 }
@@ -823,7 +823,7 @@
 :where(.vui-routes-teamsroute).aiSearchRunStorage strong {
   flex: 0 0 auto;
   color: var(--fg-muted);
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
   font-weight: 780;
 }
 
@@ -1586,7 +1586,7 @@
 
 :where(.vui-routes-teamsroute).sourceCollectionStageModuleText em {
   color: var(--fg-muted);
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
   font-style: normal;
   font-weight: 760;
 }
@@ -2682,7 +2682,7 @@
 
 :where(.vui-routes-teamsroute).sourceCollectionResultsHeader strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).sourceCollectionResultsHeader span {
@@ -3014,7 +3014,7 @@
     var(--source-workbench-card);
   color: var(--accent-cool-2);
   font-family: inherit;
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
   font-weight: 820;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3082,7 +3082,7 @@
 
 :where(.vui-routes-teamsroute).sourceCollectionSourceDetailHeader div > span {
   color: var(--fg-muted);
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
   white-space: nowrap;
 }
@@ -3944,7 +3944,7 @@
 :where(.vui-routes-teamsroute).researchLoopOutcomeGrid span,
 :where(.vui-routes-teamsroute).researchLoopOutcomeGrid small {
   color: var(--fg-muted);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.42;
 }
 
@@ -4288,7 +4288,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-muted);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-weight: 720;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4338,7 +4338,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--source-step-fg, var(--fg-muted));
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
   font-weight: 820;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4682,7 +4682,7 @@
 
 :where(.vui-routes-teamsroute).node small {
   color: var(--fg-muted);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).nodeRoleBadge {
@@ -4856,7 +4856,7 @@
   border-radius: 8px;
   background: var(--surface-panel);
   color: var(--fg-secondary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
   text-decoration: none;
   white-space: nowrap;
@@ -5000,7 +5000,7 @@
 }
 
 :where(.vui-routes-teamsroute).sectionTitle strong {
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).sectionTitle span,
@@ -5182,7 +5182,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -5352,7 +5352,7 @@
 
 :where(.vui-routes-teamsroute).workflowSourceCollectionDetails summary small {
   color: var(--fg-muted);
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
   font-weight: 720;
 }
 
@@ -5489,7 +5489,7 @@
 
 :where(.vui-routes-teamsroute).workflowSourceCollectionSearchAction strong {
   color: var(--fg-primary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).workflowSourceCollectionSearchAction span {
@@ -5537,14 +5537,14 @@
 
 :where(.vui-routes-teamsroute).workflowSourceCollectionStorageActions strong {
   color: var(--fg-primary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).workflowSourceCollectionStorageActions span,
 :where(.vui-routes-teamsroute).workflowSourceCollectionStorageActions small {
   min-width: 0;
   color: var(--fg-muted);
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
   font-weight: 720;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5657,7 +5657,7 @@
 
 :where(.vui-routes-teamsroute).workflowSourceCollectionAssignments [data-vui="native-button"] span {
   color: var(--fg-muted);
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).workflowSourceCollectionAssignmentActive {
@@ -5947,7 +5947,7 @@
 
 :where(.vui-routes-teamsroute).workflowSourceQualityStats strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).sourceCollectionControlPanel .workflowSourceQualityStats {
@@ -5958,7 +5958,7 @@
 :where(.vui-routes-teamsroute).sourceCollectionControlPanel .workflowSourceQualityStats span {
   min-height: 24px;
   padding: 3px 6px;
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).sourceCollectionControlPanel .workflowSourceQualityStats strong {
@@ -5990,7 +5990,7 @@
 
 :where(.vui-routes-teamsroute).workflowSourceQualityQueue strong {
   color: var(--fg-primary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).workflowSourceQualityQueue small {
@@ -6018,7 +6018,7 @@
 
 :where(.vui-routes-teamsroute).workflowPaperNoteChunkStats strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).workflowPaperNoteChunkPlans {
@@ -6043,7 +6043,7 @@
 
 :where(.vui-routes-teamsroute).workflowPaperNoteChunkPlans strong {
   color: var(--fg-primary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).workflowPaperNoteChunkPlans small {
@@ -6107,7 +6107,7 @@
   border-radius: var(--radius-control);
   background: color-mix(in srgb, var(--accent-cool) 9%, var(--surface-panel-strong));
   color: var(--fg-primary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
 }
 
@@ -6491,7 +6491,7 @@
 }
 
 :where(.vui-routes-teamsroute).sourceCollectionControlPanel .workflowCandidateHeader strong {
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).sourceCollectionControlPanel .workflowCandidateItem p {

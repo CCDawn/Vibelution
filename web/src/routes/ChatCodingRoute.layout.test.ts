@@ -1345,6 +1345,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(agentSessionTabStripSource).toContain("onOpenDirectSession(session.id)");
     expect(agentSessionTabStripSource).toContain("const tabEditing = editingSessionId === session.id");
     expect(agentSessionTabStripSource).toContain("className={styles.agentSessionTabTitleInput}");
+    expect(agentSessionTabStripSource).toContain("<VNativeInput");
+    expect(agentSessionTabStripSource).not.toMatch(/<input\b/);
+    expect(directSessionIndexItemSource).toContain("<VNativeInput");
+    expect(directSessionIndexItemSource).not.toMatch(/<input\b/);
     expect(agentSessionTabStripSource).toContain("onSubmitRename(session)");
     expect(agentSessionTabStripSource).toContain("onCancelRename");
 
