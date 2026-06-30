@@ -66,12 +66,14 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("overscroll-behavior-x: contain");
     expect(shellStyles).toContain(".returnButton");
     expect(shellStyles).toContain("width: 32px");
+    expect(shellStyles).toContain("grid-template-columns: minmax(0, max-content) minmax(0, 1fr) max-content;");
+    expect(shellStyles).toContain("max-width: 100%");
 
     const compactDesktopBlock = shellStyles.slice(
       shellStyles.indexOf("@media (max-width: 1420px)"),
       shellStyles.indexOf("@media (max-width: 1180px)"),
     );
-    expect(compactDesktopBlock).not.toContain(":where(.vui-app-appshell).topClock span:last-child");
+    expect(compactDesktopBlock).toContain(":where(.vui-app-appshell).topClock span:last-child");
     expect(compactDesktopBlock).not.toContain(":where(.vui-app-appshell).statusBadgeValue");
     expect(compactDesktopBlock).toContain("display: none");
 
