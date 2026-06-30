@@ -11,7 +11,6 @@ import { workbenchCodeMirrorTheme } from "../../design/codeMirrorTheme";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { classifyLogText, matchesSeverityFilter, type LogSeverityFilter } from "../../logs/logSeverity";
 import { parseStructuredLogPreview } from "../../logs/structuredLogPreview";
-import styles from "./FilePreview.module.css";
 import { StructuredLogPreview } from "./StructuredLogPreview";
 
 export type FilePreviewProps = {
@@ -32,6 +31,29 @@ type PreviewEditorErrorBoundaryProps = {
 type PreviewEditorErrorBoundaryState = {
   failed: boolean;
 };
+
+const surfaceClass = "grid h-full min-h-0 grid-rows-[auto_1fr_auto]";
+const headerClass = "flex items-start justify-between gap-4 border-b border-vui-border-soft px-5 pb-3.5 pt-[18px]";
+const headerCopyClass = "min-w-0";
+const eyebrowClass = "m-0 mb-1 text-[0.76rem] uppercase tracking-[0.08em] text-vui-fg-tertiary";
+const fileNameClass = "m-0 font-[var(--font-body)] text-[1.02rem] font-bold text-vui-fg-primary";
+const filePathClass = "m-0 mt-2 break-all text-vui-fg-secondary";
+const metaBlockClass = "flex flex-wrap justify-end gap-2";
+const pillClass = "inline-flex items-center rounded-[var(--radius-control)] px-2.5 py-1.5 text-[0.8rem]";
+const changedPillClass = `${pillClass} border border-[color-mix(in_srgb,var(--accent-warm)_18%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_12%,transparent)] text-[var(--accent-warm-2)]`;
+const sourcePillClass = `${pillClass} border border-[color-mix(in_srgb,var(--accent-cool)_18%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] text-vui-fg-secondary`;
+const previewModeGroupClass = "inline-flex items-center gap-1 rounded-lg border border-vui-border-soft bg-[color-mix(in_srgb,var(--surface-raised)_72%,transparent)] p-[3px]";
+const previewModeButtonClass = "min-h-[26px] border-0 bg-transparent px-2 py-[3px] text-[0.78rem] font-[inherit] text-vui-fg-secondary shadow-none";
+const previewModeButtonActiveClass = "bg-[color-mix(in_srgb,var(--accent-cool)_18%,var(--surface-panel))] text-vui-fg-primary";
+const editorWrapClass = [
+  "grid min-h-0 overflow-hidden",
+  "[&_.cm-theme]:h-full [&_.cm-theme]:min-h-0",
+  "[&_.cm-editor]:h-full [&_.cm-editor]:min-h-0",
+  "[&_.cm-scroller]:overflow-auto",
+  "[&_.cm-content]:min-h-full [&_.cm-gutter]:min-h-full",
+].join(" ");
+const plainFallbackClass = "m-0 h-full min-h-0 overflow-auto whitespace-pre-wrap break-words bg-[var(--surface-panel)] px-4 py-3.5 font-[var(--font-mono)] text-[0.86rem] leading-[1.55] text-vui-fg-primary";
+const footnoteClass = "m-0 border-t border-vui-border-soft px-5 pb-3.5 pt-2.5 text-[0.82rem] text-vui-fg-tertiary";
 
 class PreviewEditorErrorBoundary extends Component<
   PreviewEditorErrorBoundaryProps,
@@ -56,7 +78,7 @@ class PreviewEditorErrorBoundary extends Component<
 
   render() {
     if (this.state.failed) {
-      return <pre className={styles.plainFallback}>{this.props.fallbackContent}</pre>;
+      return <pre className={plainFallbackClass}>{this.props.fallbackContent}</pre>;
     }
     return this.props.children;
   }
@@ -155,9 +177,14 @@ const logLineDecorations = EditorView.decorations.compute([], (state) => {
 const logHighlightTheme = EditorView.baseTheme({
   ".cm-logLineError": {
     backgroundColor: "rgba(187, 108, 93, 0.14)",
+    color: "var(--state-error)",
   },
   ".cm-logLineWarning": {
     backgroundColor: "rgba(215, 160, 84, 0.12)",
+    color: "var(--state-warning)",
+  },
+  ".cm-logLineError .cm-cursor, .cm-logLineWarning .cm-cursor": {
+    borderLeftColor: "currentColor",
   },
 });
 
@@ -200,17 +227,19 @@ export function FilePreview({
   }, [file.content, highlightAsLog]);
   const showStructuredPreview = Boolean(structuredModel && viewMode === "structured");
   const previewModeActions = structuredModel ? (
-    <div className={styles.previewModeGroup} role="group" aria-label={t("logPreviewMode")}>
+    <div className={previewModeGroupClass} role="group" aria-label={t("logPreviewMode")}>
       <VButton
         type="button"
-        className={viewMode === "structured" ? `${styles.previewModeButton} ${styles.previewModeButtonActive}` : styles.previewModeButton}
+        variant="ghost"
+        className={viewMode === "structured" ? `${previewModeButtonClass} ${previewModeButtonActiveClass}` : previewModeButtonClass}
         onPress={() => setViewMode("structured")}
       >
         {t("logPreviewStructured")}
       </VButton>
       <VButton
         type="button"
-        className={viewMode === "raw" ? `${styles.previewModeButton} ${styles.previewModeButtonActive}` : styles.previewModeButton}
+        variant="ghost"
+        className={viewMode === "raw" ? `${previewModeButtonClass} ${previewModeButtonActiveClass}` : previewModeButtonClass}
         onPress={() => setViewMode("raw")}
       >
         {t("logPreviewRaw")}
@@ -219,22 +248,22 @@ export function FilePreview({
   ) : null;
 
   return (
-    <div className={styles.surface}>
-      <div className={styles.header}>
-        <div className={styles.headerCopy}>
-          <p className={styles.eyebrow}>{t("readonlyPreview")}</p>
-          <h2 className={styles.fileName}>{file.path.split("/").at(-1)}</h2>
-          <p className={styles.filePath}>{file.path}</p>
+    <div className={surfaceClass}>
+      <div className={headerClass}>
+        <div className={headerCopyClass}>
+          <p className={eyebrowClass}>{t("readonlyPreview")}</p>
+          <h2 className={fileNameClass}>{file.path.split("/").at(-1)}</h2>
+          <p className={filePathClass}>{file.path}</p>
         </div>
-        <div className={styles.metaBlock}>
-          {changed ? <span className={styles.changedPill}>{t("changed")}</span> : null}
-          <span className={styles.sourcePill}>{sourceLabel}</span>
+        <div className={metaBlockClass}>
+          {changed ? <span className={changedPillClass}>{t("changed")}</span> : null}
+          <span className={sourcePillClass}>{sourceLabel}</span>
           {previewModeActions}
           {headerActions}
         </div>
       </div>
 
-      <div className={styles.editorWrap}>
+      <div className={editorWrapClass}>
         {showStructuredPreview && structuredModel ? (
           <StructuredLogPreview model={structuredModel} severityFilter={severityFilter} />
         ) : (
@@ -256,7 +285,7 @@ export function FilePreview({
         )}
       </div>
 
-      {file.truncated ? <p className={styles.footnote}>{t("previewTruncated")}</p> : null}
+      {file.truncated ? <p className={footnoteClass}>{t("previewTruncated")}</p> : null}
     </div>
   );
 }
