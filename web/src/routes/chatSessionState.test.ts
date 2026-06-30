@@ -459,6 +459,18 @@ describe("chatSessionState", () => {
     });
   });
 
+  it("treats a missing session index endpoint as an empty state instead of a blocking sidebar error", () => {
+    expect(
+      deriveSessionListQueryErrorState(undefined, true, {
+        emptyNotFoundAsEmpty: true,
+        error: new Error("Not Found"),
+      }),
+    ).toEqual({
+      blockingError: false,
+      transientError: false,
+    });
+  });
+
   it("accepts stream detail events only for the active session", () => {
     const activeDetail = makeDetail({ id: "session-live" });
     const staleDetail = makeDetail({ id: "older-session", title: "旧会话" });

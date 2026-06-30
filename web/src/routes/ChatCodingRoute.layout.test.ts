@@ -799,16 +799,19 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const runtimeMatchesSelectedSession = Boolean(");
     expect(routeSource).toContain("runtimeActiveChatTurnSessionIds.has(activeSessionId)");
     expect(routeSource).toContain("const runtimeMismatchLine = runtimeActiveChatTurnSessionId && !runtimeMatchesSelectedSession");
-    expect(routeSource).toContain("detail?.agentDisplayName ?? detail?.title ?? directSessionActiveSummary?.agentDisplayName ?? directSessionActiveSummary?.title ?? t(\"loadingSession\")");
+    expect(routeSource).toContain("const noActiveDirectSessionTitle =");
+    expect(routeSource).toMatch(/!\s*activeSessionId\s*\?\s*noActiveDirectSessionTitle/);
     expect(routeSource).toContain("lastContextComposition?.totalTokens ?? sessionContextUsage?.used ?? 0");
     expect(routeSource).toContain("lastContextComposition?.limitTokens ?? sessionContextUsage?.limit ?? 0");
     expect(routeSource).toContain("const compression = runtimeMatchesSelectedSession ? runtime?.contextCompression : undefined");
     expect(routeSource).toContain("runtimeMatchesSelectedSession && runtime?.sessionStateLine");
+    expect(routeSource).toMatch(/!\s*activeSessionId\s*\?\s*noActiveDirectSessionLine/);
     expect(routeSource).toContain("runtimeMismatchLine || (sessionDetailErrorState.blockingError");
     expect(routeSource).toContain("(runtimeMatchesSelectedSession ? runtime?.taskSummary : \"\")");
     expect(routeSource).toContain("detail?.defaultFileContext ?? (runtimeMatchesSelectedSession ? runtime?.defaultRoute : undefined) ?? \"workspace\"");
 
     expect(routeSource).not.toContain("detail?.title ?? runtime?.sessionTitle");
+    expect(routeSource).not.toContain("directSessionActiveSummary?.title ?? t(\"loadingSession\")");
     expect(routeSource).not.toContain("sessionContextUsage?.used ?? runtime?.contextUsage.used");
     expect(routeSource).not.toContain("sessionContextUsage?.limit ?? runtime?.contextUsage.limit");
     expect(routeSource).not.toContain(": runtime?.sessionStateLine");

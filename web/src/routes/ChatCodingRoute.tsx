@@ -4453,13 +4453,18 @@ export function ChatCodingRoute() {
     || !activeGroupRoom
     || !groupRoundRunning
     || stopGroupRoundMutation.isPending;
+  const noActiveDirectSessionTitle = lang === "zh" ? "未选择会话" : "No session selected";
+  const noActiveDirectSessionLine = lang === "zh" ? "选择或新建会话" : "Select or create a chat";
+  const loadingDirectSessionTitle = t("loadingSession");
   const activeSurfaceTitle = groupPanelActive
     ? (
       projectBusActive
         ? (lang === "zh" ? "助手通知流" : "Agent notice stream")
         : activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")
     )
-    : detail?.agentDisplayName ?? detail?.title ?? directSessionActiveSummary?.agentDisplayName ?? directSessionActiveSummary?.title ?? t("loadingSession");
+    : !activeSessionId
+      ? noActiveDirectSessionTitle
+      : detail?.agentDisplayName ?? detail?.title ?? directSessionActiveSummary?.agentDisplayName ?? directSessionActiveSummary?.title ?? loadingDirectSessionTitle;
   const activeSurfaceStatus = groupPanelActive
     ? (
       projectBusActive
@@ -4484,7 +4489,10 @@ export function ChatCodingRoute() {
     errorUpdatedAt: sessionDetailQuery.errorUpdatedAt,
     streamConnected: sessionStreamConnected,
   });
-  const sessionsErrorState = deriveSessionListQueryErrorState(sessionsQuery.data, sessionsQuery.isError);
+  const sessionsErrorState = deriveSessionListQueryErrorState(sessionsQuery.data, sessionsQuery.isError, {
+    emptyNotFoundAsEmpty: true,
+    error: sessionsQuery.error,
+  });
   const sessionDetailErrorMessage = sessionDetailQuery.isError
     ? describeError(sessionDetailQuery.error, t("loadFailed"))
     : "";
@@ -5045,7 +5053,9 @@ export function ChatCodingRoute() {
   })();
   const sessionStateLine = groupPanelActive
     ? activeSurfaceLine
-    : runtimeMatchesSelectedSession && runtime?.sessionStateLine
+    : !activeSessionId
+      ? noActiveDirectSessionLine
+      : runtimeMatchesSelectedSession && runtime?.sessionStateLine
       ? runtime.sessionStateLine
       : runtimeMismatchLine || (sessionDetailErrorState.blockingError
         ? sessionDetailErrorMessage

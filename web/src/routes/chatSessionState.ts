@@ -304,11 +304,17 @@ export function deriveSessionDetailQueryErrorState(
 export function deriveSessionListQueryErrorState(
   sessions: SessionSummary[] | undefined,
   isError: boolean,
+  options: {
+    emptyNotFoundAsEmpty?: boolean;
+    error?: unknown;
+  } = {},
 ): { blockingError: boolean; transientError: boolean } {
   const hasUsableData = Boolean(sessions?.length);
+  const message = options.error instanceof Error ? options.error.message : String(options.error ?? "");
+  const treatAsEmpty = Boolean(options.emptyNotFoundAsEmpty && /not found|404|未找到/i.test(message));
   return {
-    blockingError: isError && !hasUsableData,
-    transientError: isError && hasUsableData,
+    blockingError: isError && !hasUsableData && !treatAsEmpty,
+    transientError: isError && hasUsableData && !treatAsEmpty,
   };
 }
 
