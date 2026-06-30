@@ -71,7 +71,7 @@ import {
   type PublicConfigShape,
 } from "./configRouteLogic";
 import { LazyJsonCodeMirror } from "../components/editor/LazyJsonCodeMirror";
-import { VButton } from "../components/vui";
+import { VButton, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import styles from "./ConfigRoute.styles";
 
@@ -1746,7 +1746,7 @@ function ConfigSectionEditor({
                 <ImageIcon size={16} />
               </span>
             )}
-            <input
+            <VNativeInput
               type="file"
               accept="image/png,image/jpeg,image/webp"
               disabled={disabled || imageUploading}
@@ -1767,7 +1767,7 @@ function ConfigSectionEditor({
               <label className={`${styles.actionButton} ${styles.compactButton} ${styles.fileUploadButton}`}>
                 <Upload size={14} />
                 {imageUploading ? copy.themeBackgroundImageUploading : copy.uploadThemeBackgroundImage}
-                <input
+                <VNativeInput
                   type="file"
                   accept="image/png,image/jpeg,image/webp"
                   disabled={disabled || imageUploading}
@@ -1928,7 +1928,7 @@ function ConfigSectionEditor({
               <span className={styles.avatarImageUploadCue}>
                 <Upload size={12} />
               </span>
-              <input
+              <VNativeInput
                 type="file"
                 accept="image/png,image/jpeg,image/webp"
                 disabled={disabled || imageUploading}
@@ -2007,7 +2007,7 @@ function ConfigSectionEditor({
               </div>
               <label className={styles.avatarCropZoomField}>
                 <span>{copy.avatarCropZoom}</span>
-                <input
+                <VNativeInput
                   type="range"
                   min="1"
                   max="3"
@@ -2047,7 +2047,7 @@ function ConfigSectionEditor({
             <label className={`${styles.actionButton} ${styles.compactButton} ${styles.fileUploadButton}`}>
               <Upload size={14} />
               {cropDraft ? copy.uploadAvatarImage : imageUploading ? copy.avatarImageUploading : copy.uploadAvatarImage}
-              <input
+              <VNativeInput
                 type="file"
                 accept="image/png,image/jpeg,image/webp"
                 disabled={disabled || imageUploading}
@@ -2085,7 +2085,7 @@ function ConfigSectionEditor({
     } else if (kind === "boolean") {
       control = (
         <label className={styles.toggleField}>
-          <input
+          <VNativeInput
             type="checkbox"
             checked={Boolean(fieldValue)}
             onChange={(event) => updateSectionDraft(absolutePath, event.target.checked)}
@@ -2097,20 +2097,20 @@ function ConfigSectionEditor({
       control = (
         <label className={styles.field}>
           <span>{configLabel(metaMap, absolutePath)}</span>
-          <select value={getString(fieldValue)} onChange={(event) => updateSectionDraft(absolutePath, event.target.value)}>
+          <VNativeSelect value={getString(fieldValue)} onChange={(event) => updateSectionDraft(absolutePath, event.target.value)}>
             {(meta?.options ?? []).map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
-          </select>
+          </VNativeSelect>
         </label>
       );
     } else if (kind === "number") {
       control = (
         <label className={styles.field}>
           <span>{configLabel(metaMap, absolutePath)}</span>
-          <input
+          <VNativeInput
             type="number"
             step="any"
             value={getString(fieldValue)}
@@ -2125,7 +2125,7 @@ function ConfigSectionEditor({
       control = (
         <label className={styles.field}>
           <span>{configLabel(metaMap, absolutePath)}</span>
-          <textarea
+          <VNativeTextarea
             rows={Math.max(4, Array.isArray(fieldValue) ? fieldValue.length + 1 : 4)}
             value={Array.isArray(fieldValue) ? fieldValue.join("\n") : getString(fieldValue)}
             onChange={(event) =>
@@ -2144,7 +2144,7 @@ function ConfigSectionEditor({
       control = (
         <label className={styles.field}>
           <span>{configLabel(metaMap, absolutePath)}</span>
-          <textarea
+          <VNativeTextarea
             rows={10}
             value={getString(fieldValue)}
             onChange={(event) => updateSectionDraft(absolutePath, event.target.value)}
@@ -2155,7 +2155,7 @@ function ConfigSectionEditor({
       control = (
         <label className={styles.field}>
           <span>{configLabel(metaMap, absolutePath)}</span>
-          <textarea
+          <VNativeTextarea
             rows={6}
             value={typeof fieldValue === "string" ? fieldValue : formatJson(fieldValue)}
             onChange={(event) => {
@@ -2173,7 +2173,7 @@ function ConfigSectionEditor({
       control = (
         <label className={styles.field}>
           <span>{configLabel(metaMap, absolutePath)}</span>
-          <input
+          <VNativeInput
             type={kind === "secret" ? "password" : "text"}
             value={getString(fieldValue)}
             onChange={(event) => updateSectionDraft(absolutePath, event.target.value)}
@@ -3711,7 +3711,7 @@ export function ConfigRoute() {
           <div className={styles.modelLibraryTestBar}>
             <label className={`${styles.field} ${styles.modelLibraryTestSelect}`}>
               <span>{copy.modelTestSelect}</span>
-              <select
+              <VNativeSelect
                 value={selectedModelTestId}
                 disabled={structuredActionsDisabled || !modelOptions.length}
                 onChange={(event) => setSelectedModelTestId(event.target.value)}
@@ -3722,7 +3722,7 @@ export function ConfigRoute() {
                     {option.label || option.model || option.model_id}
                   </option>
                 ))}
-              </select>
+              </VNativeSelect>
             </label>
             <VButton
               type="button"
@@ -3788,18 +3788,18 @@ export function ConfigRoute() {
                 <div className={styles.formGridWide}>
                   <label className={styles.field}>
                     <span>{copy.providerVendor}</span>
-                    <select value={selectedProviderVendorId} onChange={(event) => applyProviderVendor(event.target.value)}>
+                    <VNativeSelect value={selectedProviderVendorId} onChange={(event) => applyProviderVendor(event.target.value)}>
                       <option value="">{copy.customEntry}</option>
                       {providerVendorGroups.map((group) => (
                         <option key={group.id} value={group.id}>
                           {group.label}
                         </option>
                       ))}
-                    </select>
+                    </VNativeSelect>
                   </label>
                   <label className={styles.field}>
                     <span>{copy.providerTemplate}</span>
-                    <select
+                    <VNativeSelect
                       value={modelEditor.provider_template_id}
                       disabled={!selectedProviderVendorTemplates.length}
                       onChange={(event) => applyProviderTemplate(event.target.value)}
@@ -3810,11 +3810,11 @@ export function ConfigRoute() {
                           {template.label}
                         </option>
                       ))}
-                    </select>
+                    </VNativeSelect>
                   </label>
                   <label className={styles.field}>
                     <span>{copy.modelId}</span>
-                    <input
+                    <VNativeInput
                       value={modelEditor.model_id}
                       onChange={(event) => setModelEditor((current) => ({ ...current, model_id: event.target.value }))}
                       disabled={modelEditor.mode === "edit"}
@@ -3823,15 +3823,15 @@ export function ConfigRoute() {
                   </label>
                   <label className={styles.field}>
                     <span>{copy.label}</span>
-                    <input value={modelEditor.label} onChange={(event) => setModelEditor((current) => ({ ...current, label: event.target.value }))} />
+                    <VNativeInput value={modelEditor.label} onChange={(event) => setModelEditor((current) => ({ ...current, label: event.target.value }))} />
                   </label>
                   <label className={styles.field}>
                     <span>{copy.modelName}</span>
-                    <input value={modelEditor.model} onChange={(event) => setModelEditor((current) => ({ ...current, model: event.target.value }))} />
+                    <VNativeInput value={modelEditor.model} onChange={(event) => setModelEditor((current) => ({ ...current, model: event.target.value }))} />
                   </label>
                   <label className={styles.field}>
                     <span>{copy.providerKind}</span>
-                    <select
+                    <VNativeSelect
                       value={modelEditor.provider.kind}
                       onChange={(event) =>
                         setModelEditor((current) => ({
@@ -3845,11 +3845,11 @@ export function ConfigRoute() {
                           {option.label}
                         </option>
                       ))}
-                    </select>
+                    </VNativeSelect>
                   </label>
                   <label className={styles.field}>
                     <span>{copy.baseUrl}</span>
-                    <input
+                    <VNativeInput
                       value={modelEditor.provider.base_url}
                       onChange={(event) =>
                         setModelEditor((current) => ({
@@ -3861,7 +3861,7 @@ export function ConfigRoute() {
                   </label>
                   <label className={styles.field}>
                     <span>{copy.modelKeyInput}</span>
-                    <input
+                    <VNativeInput
                       type="password"
                       value={modelEditor.api_key}
                       onChange={(event) => setModelEditor((current) => ({ ...current, api_key: event.target.value }))}
@@ -3888,7 +3888,7 @@ export function ConfigRoute() {
                   {discoveredModels.length ? (
                     <label className={`${styles.field} ${styles.profileTableSelect}`}>
                       <span>{copy.discoveredModel}</span>
-                      <select
+                      <VNativeSelect
                         value={selectedDiscoveredModelId}
                         onChange={(event) => {
                           const selected = discoveredModels.find((item) => item.id === event.target.value);
@@ -3902,7 +3902,7 @@ export function ConfigRoute() {
                             {model.label || model.id}
                           </option>
                         ))}
-                      </select>
+                      </VNativeSelect>
                     </label>
                   ) : null}
                   {modelDiscoveryError ? (
@@ -3933,7 +3933,7 @@ export function ConfigRoute() {
                     </label>
                     <label className={styles.field}>
                       <span>{copy.compatMode}</span>
-                      <select
+                      <VNativeSelect
                         value={modelEditor.provider.compat_mode}
                         onChange={(event) =>
                           setModelEditor((current) => ({
@@ -3947,11 +3947,11 @@ export function ConfigRoute() {
                             {option.label}
                           </option>
                         ))}
-                      </select>
+                      </VNativeSelect>
                     </label>
                     <label className={styles.field}>
                       <span>{copy.providerApi}</span>
-                      <input
+                      <VNativeInput
                         value={modelEditor.provider.api}
                         onChange={(event) =>
                           setModelEditor((current) => ({
@@ -3963,7 +3963,7 @@ export function ConfigRoute() {
                     </label>
                     <label className={styles.field}>
                       <span>{copy.contextWindow}</span>
-                      <input
+                      <VNativeInput
                         value={modelEditor.provider.context_window}
                         onChange={(event) =>
                           setModelEditor((current) => ({
@@ -3975,7 +3975,7 @@ export function ConfigRoute() {
                     </label>
                     <label className={styles.field}>
                       <span>{copy.transport}</span>
-                      <select
+                      <VNativeSelect
                         value={modelEditor.details.transport}
                         onChange={(event) =>
                           setModelEditor((current) => ({
@@ -3989,11 +3989,11 @@ export function ConfigRoute() {
                             {option.label}
                           </option>
                         ))}
-                      </select>
+                      </VNativeSelect>
                     </label>
                     <label className={styles.field}>
                       <span>{copy.contract}</span>
-                      <select
+                      <VNativeSelect
                         value={modelEditor.details.contract}
                         onChange={(event) =>
                           setModelEditor((current) => ({
@@ -4007,11 +4007,11 @@ export function ConfigRoute() {
                             {option.label}
                           </option>
                         ))}
-                      </select>
+                      </VNativeSelect>
                     </label>
                     <label className={styles.field}>
                       <span>{copy.modelProtocol}</span>
-                      <input
+                      <VNativeInput
                         value={modelEditor.details.protocol}
                         onChange={(event) =>
                           setModelEditor((current) => ({
@@ -4023,7 +4023,7 @@ export function ConfigRoute() {
                     </label>
                     <label className={styles.field}>
                       <span>{copy.reasoningStateField}</span>
-                      <input
+                      <VNativeInput
                         value={modelEditor.details.reasoning_state_field}
                         onChange={(event) =>
                           setModelEditor((current) => ({
@@ -4035,7 +4035,7 @@ export function ConfigRoute() {
                     </label>
                     <label className={styles.field}>
                       <span>{copy.toolCallingMode}</span>
-                      <select
+                      <VNativeSelect
                         value={modelEditor.details.tool_calling_mode}
                         onChange={(event) =>
                           setModelEditor((current) => ({
@@ -4049,11 +4049,11 @@ export function ConfigRoute() {
                             {option.label}
                           </option>
                         ))}
-                      </select>
+                      </VNativeSelect>
                     </label>
                     <label className={styles.field}>
                       <span>{copy.promptCacheMode}</span>
-                      <select
+                      <VNativeSelect
                         value={modelEditor.details.prompt_cache_mode}
                         onChange={(event) =>
                           setModelEditor((current) => ({
@@ -4071,11 +4071,11 @@ export function ConfigRoute() {
                             {option.label}
                           </option>
                         ))}
-                      </select>
+                      </VNativeSelect>
                     </label>
                     <label className={`${styles.field} ${styles.formGridWideSpan}`}>
                       <span>{copy.modelCompat}</span>
-                      <textarea
+                      <VNativeTextarea
                         value={modelEditor.details.compat}
                         onChange={(event) =>
                           setModelEditor((current) => ({
@@ -4087,7 +4087,7 @@ export function ConfigRoute() {
                     </label>
                     <label className={styles.field}>
                       <span>{copy.temperature}</span>
-                      <input
+                      <VNativeInput
                         value={modelEditor.details.temperature}
                         onChange={(event) =>
                           setModelEditor((current) => ({
@@ -4099,7 +4099,7 @@ export function ConfigRoute() {
                     </label>
                     <label className={styles.field}>
                       <span>{copy.maxOutputTokens}</span>
-                      <input
+                      <VNativeInput
                         value={modelEditor.details.max_output_tokens}
                         onChange={(event) =>
                           setModelEditor((current) => ({
@@ -4111,7 +4111,7 @@ export function ConfigRoute() {
                     </label>
                     <label className={styles.field}>
                       <span>{copy.timeout}</span>
-                      <input
+                      <VNativeInput
                         value={modelEditor.details.timeout}
                         onChange={(event) =>
                           setModelEditor((current) => ({
@@ -4123,7 +4123,7 @@ export function ConfigRoute() {
                     </label>
                     <label className={styles.field}>
                       <span>{copy.connectTimeout}</span>
-                      <input
+                      <VNativeInput
                         value={modelEditor.details.connect_timeout}
                         onChange={(event) =>
                           setModelEditor((current) => ({
@@ -4138,7 +4138,7 @@ export function ConfigRoute() {
 
                 <div className={styles.toggleGrid}>
                   <label className={styles.toggleField}>
-                    <input
+                    <VNativeInput
                       type="checkbox"
                       checked={modelEditor.provider.requires_api_key}
                       onChange={(event) =>
@@ -4152,7 +4152,7 @@ export function ConfigRoute() {
                   </label>
                   <label className={styles.field}>
                     <span>{copy.imageInputSupport}</span>
-                    <select
+                    <VNativeSelect
                       value={modelEditor.details.supports_image_input}
                       onChange={(event) =>
                         setModelEditor((current) => ({
@@ -4167,10 +4167,10 @@ export function ConfigRoute() {
                       <option value="unknown">{copy.imageInputSupportUnknown}</option>
                       <option value="supported">{copy.imageInputSupportSupported}</option>
                       <option value="unsupported">{copy.imageInputSupportUnsupported}</option>
-                    </select>
+                    </VNativeSelect>
                   </label>
                   <label className={styles.toggleField}>
-                    <input
+                    <VNativeInput
                       type="checkbox"
                       checked={modelEditor.details.strict_compatibility}
                       onChange={(event) =>
@@ -4183,7 +4183,7 @@ export function ConfigRoute() {
                     <span>{copy.strictCompatibility}</span>
                   </label>
                   <label className={styles.toggleField}>
-                    <input
+                    <VNativeInput
                       type="checkbox"
                       checked={modelEditor.details.streaming}
                       onChange={(event) =>
@@ -4196,7 +4196,7 @@ export function ConfigRoute() {
                     <span>{copy.streaming}</span>
                   </label>
                   <label className={styles.toggleField}>
-                    <input
+                    <VNativeInput
                       type="checkbox"
                       checked={modelEditor.details.discovery_enabled}
                       onChange={(event) =>
@@ -4209,7 +4209,7 @@ export function ConfigRoute() {
                     <span>{copy.discoveryEnabled}</span>
                   </label>
                   <label className={styles.toggleField}>
-                    <input
+                    <VNativeInput
                       type="checkbox"
                       checked={modelEditor.clear_api_key}
                       onChange={(event) => setModelEditor((current) => ({ ...current, clear_api_key: event.target.checked }))}

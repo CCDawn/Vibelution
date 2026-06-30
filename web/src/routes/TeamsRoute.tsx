@@ -52,7 +52,16 @@ import {
 } from "../api/types";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
-import { VIconButton, VNativeButton, VRouteHeader, VSelect, VStatusStrip } from "../components/vui";
+import {
+  VIconButton,
+  VNativeButton,
+  VNativeInput,
+  VNativeSelect,
+  VNativeTextarea,
+  VRouteHeader,
+  VSelect,
+  VStatusStrip,
+} from "../components/vui";
 import { agentCenterMemoryRoute, teamMemoryRoute } from "./agentCenterRoutes";
 import { agentDisplayInfo } from "./agentDisplay";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
@@ -6825,7 +6834,7 @@ export function TeamsRoute({
         </div>
         <label className={styles.researchStageTopicInput}>
           <span>{lang === "zh" ? "研究主题" : "Research topic"}</span>
-          <input
+          <VNativeInput
             value={sourceCollectionDraft.topic}
             onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, topic: event.target.value }))}
             placeholder={lang === "zh" ? "例如：predictive coding" : "e.g. predictive coding"}
@@ -7171,7 +7180,7 @@ export function TeamsRoute({
               </div>
               <label className={styles.aiSearchRunTopic}>
                 <span>{lang === "zh" ? "主题" : "Topic"}</span>
-                <input
+                <VNativeInput
                   value={aiSearchRunTopic}
                   onChange={(event) => setAiSearchRunTopic(event.target.value)}
                   placeholder={lang === "zh" ? "AI 最新动态" : "Latest AI updates"}
@@ -8431,7 +8440,7 @@ export function TeamsRoute({
       <>
         <label>
           <span>{lang === "zh" ? "来源模式" : "Source mode"}</span>
-          <select
+          <VNativeSelect
             value={mode}
             onChange={(event) =>
               setSourceCollectionDraft((current) => ({
@@ -8445,12 +8454,12 @@ export function TeamsRoute({
                 {sourceCollectionCollectionModeLabel(item, lang)}
               </option>
             ))}
-          </select>
+          </VNativeSelect>
         </label>
         {mode !== "web_search" ? (
           <label>
             <span>{lang === "zh" ? "本地根目录" : "Local roots"}</span>
-            <input
+            <VNativeInput
               value={sourceCollectionDraft.localScanRoots}
               onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, localScanRoots: event.target.value }))}
               placeholder={SOURCE_COLLECTION_LOCAL_SCAN_DEFAULT_ROOTS}
@@ -8507,21 +8516,21 @@ export function TeamsRoute({
           >
           <label>
             <span>{lang === "zh" ? "主题" : "Topic"}</span>
-            <input
+            <VNativeInput
               value={sourceCollectionDraft.topic}
               onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, topic: event.target.value }))}
             />
           </label>
           <label>
             <span>{lang === "zh" ? "标题" : "Title"}</span>
-            <input
+            <VNativeInput
               value={sourceCollectionDraft.title}
               onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, title: event.target.value }))}
             />
           </label>
           <label className={styles.workflowSourceCollectionWide}>
             <span>{lang === "zh" ? "目标" : "Goal"}</span>
-            <textarea
+            <VNativeTextarea
               value={sourceCollectionDraft.goal}
               onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, goal: event.target.value }))}
               rows={2}
@@ -8529,7 +8538,7 @@ export function TeamsRoute({
           </label>
           <label>
             <span>{lang === "zh" ? "搜索种子" : "Query seeds"}</span>
-            <textarea
+            <VNativeTextarea
               value={sourceCollectionDraft.querySeeds}
               onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, querySeeds: event.target.value }))}
               rows={3}
@@ -8537,7 +8546,7 @@ export function TeamsRoute({
           </label>
           <label>
             <span>{lang === "zh" ? "输入引用" : "Input refs"}</span>
-            <textarea
+            <VNativeTextarea
               value={sourceCollectionDraft.inputRefs}
               onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, inputRefs: event.target.value }))}
               rows={3}
@@ -8547,21 +8556,21 @@ export function TeamsRoute({
           {renderSourceCollectionModeFields()}
           <label>
             <span>{lang === "zh" ? "语言" : "Languages"}</span>
-            <input
+            <VNativeInput
               value={sourceCollectionDraft.searchLanguages}
               onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, searchLanguages: event.target.value }))}
             />
           </label>
           <label>
             <span>{lang === "zh" ? "资料类型" : "Source types"}</span>
-            <input
+            <VNativeInput
               value={sourceCollectionDraft.sourceTypes}
               onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, sourceTypes: event.target.value }))}
             />
           </label>
           <label>
             <span>{lang === "zh" ? "每条上限" : "Max results"}</span>
-            <input
+            <VNativeInput
               type="number"
               min={1}
               max={100}
@@ -8585,7 +8594,7 @@ export function TeamsRoute({
         <div className={styles.workflowSourceCollectionRuns}>
           <label>
             <span>{lang === "zh" ? "最近批次" : "Recent runs"}</span>
-            <select
+            <VNativeSelect
               value={selectedSourceCollectionRunEffectiveId}
               onChange={(event) => setSelectedSourceCollectionRunId(event.target.value)}
               disabled={!sourceCollectionRuns.length}
@@ -8599,7 +8608,7 @@ export function TeamsRoute({
               ) : (
                 <option value="">{lang === "zh" ? "暂无批次" : "No runs"}</option>
               )}
-            </select>
+            </VNativeSelect>
           </label>
         </div>
         {renderSourceCollectionStorageActions()}
@@ -8662,7 +8671,7 @@ export function TeamsRoute({
           </div>
           <label>
             <span>{lang === "zh" ? "分工任务" : "Assignment"}</span>
-            <select
+            <VNativeSelect
               value={sourceCollectionOutputDraft.assignmentId || selectedSourceCollectionAssignment?.assignmentId || ""}
               onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, assignmentId: event.target.value }))}
               disabled={!sourceCollectionAssignments.length}
@@ -8672,29 +8681,29 @@ export function TeamsRoute({
                   {sourceCollectionAgentRoleLabel(assignment.agentRole, lang)} · {sourceCollectionStatusLabel(assignment.status, lang)}
                 </option>
               ))}
-            </select>
+            </VNativeSelect>
           </label>
           <label>
             <span>{lang === "zh" ? "类型" : "Type"}</span>
-            <select
+            <VNativeSelect
               value={sourceCollectionOutputDraft.sourceType}
               onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, sourceType: event.target.value }))}
             >
               {["paper", "url", "dataset", "file", "note", "manual"].map((sourceType) => (
                 <option key={sourceType} value={sourceType}>{sourceCollectionSourceTypeLabel(sourceType, lang)}</option>
               ))}
-            </select>
+            </VNativeSelect>
           </label>
           <label>
             <span>{lang === "zh" ? "标题" : "Title"}</span>
-            <input
+            <VNativeInput
               value={sourceCollectionOutputDraft.title}
               onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, title: event.target.value }))}
             />
           </label>
           <label>
             <span>{lang === "zh" ? "来源引用" : "Source ref"}</span>
-            <input
+            <VNativeInput
               value={sourceCollectionOutputDraft.sourceRef}
               onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, sourceRef: event.target.value }))}
               placeholder="https://doi.org/... / local path / dataset id"
@@ -8702,7 +8711,7 @@ export function TeamsRoute({
           </label>
           <label>
             <span>{lang === "zh" ? "原始位置" : "Raw location"}</span>
-            <input
+            <VNativeInput
               value={sourceCollectionOutputDraft.rawLocation}
               onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, rawLocation: event.target.value }))}
               placeholder={lang === "zh" ? "页码、文件路径、段落或采集位置" : "Page range, file path, section, or capture location"}
@@ -8710,7 +8719,7 @@ export function TeamsRoute({
           </label>
           <label className={styles.workflowSourceCollectionWide}>
             <span>{lang === "zh" ? "摘要" : "Summary"}</span>
-            <textarea
+            <VNativeTextarea
               value={sourceCollectionOutputDraft.summary}
               onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, summary: event.target.value }))}
               rows={2}
@@ -8718,7 +8727,7 @@ export function TeamsRoute({
           </label>
           <label className={styles.workflowSourceCollectionWide}>
             <span>{lang === "zh" ? "备注" : "Notes"}</span>
-            <input
+            <VNativeInput
               value={sourceCollectionOutputDraft.notes}
               onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, notes: event.target.value }))}
             />
@@ -9033,17 +9042,17 @@ export function TeamsRoute({
         <div className={styles.researchLoopTemplateBar}>
           <label>
             <span>{lang === "zh" ? "验证模板" : "Template"}</span>
-            <select value={selectedTemplate?.templateId || selectedResearchLoopTemplateId} onChange={(event) => setSelectedResearchLoopTemplateId(event.target.value)}>
+            <VNativeSelect value={selectedTemplate?.templateId || selectedResearchLoopTemplateId} onChange={(event) => setSelectedResearchLoopTemplateId(event.target.value)}>
               {templates.map((template) => (
                 <option key={template.templateId} value={template.templateId}>
                   {lang === "zh" ? template.labelZh : template.label}
                 </option>
               ))}
-            </select>
+            </VNativeSelect>
           </label>
           <label>
             <span>{lang === "zh" ? "研究问题" : "Research question"}</span>
-            <input
+            <VNativeInput
               value={researchLoopCreateDraft.researchQuestion}
               onChange={(event) => setResearchLoopCreateDraft((draft) => ({ ...draft, researchQuestion: event.target.value }))}
               placeholder={activePlan?.goal || activePlan?.topic || sourceCollectionDraft.goal}
@@ -9051,7 +9060,7 @@ export function TeamsRoute({
           </label>
           <label>
             <span>{lang === "zh" ? "约束" : "Constraints"}</span>
-            <input
+            <VNativeInput
               value={researchLoopCreateDraft.constraints}
               onChange={(event) => setResearchLoopCreateDraft((draft) => ({ ...draft, constraints: event.target.value }))}
               placeholder={lang === "zh" ? "算力、数据、环境或复现边界" : "Compute, data, environment, or reproducibility boundary"}
@@ -9090,29 +9099,29 @@ export function TeamsRoute({
             <div className={styles.researchLoopEvidenceForm}>
               <label>
                 <span>{lang === "zh" ? "证据类型" : "Evidence type"}</span>
-                <select
+                <VNativeSelect
                   value={currentEvidenceType}
                   onChange={(event) => setResearchLoopEvidenceDraft((draft) => ({ ...draft, evidenceType: event.target.value }))}
                 >
                   {evidenceOptions.map((item) => (
                     <option key={item} value={item}>{item}</option>
                   ))}
-                </select>
+                </VNativeSelect>
               </label>
               <label>
                 <span>{lang === "zh" ? "状态" : "Status"}</span>
-                <select
+                <VNativeSelect
                   value={researchLoopEvidenceDraft.status}
                   onChange={(event) => setResearchLoopEvidenceDraft((draft) => ({ ...draft, status: event.target.value as ResearchLoopEvidenceStatus }))}
                 >
                   {RESEARCH_LOOP_EVIDENCE_STATUSES.map((status) => (
                     <option key={status} value={status}>{status}</option>
                   ))}
-                </select>
+                </VNativeSelect>
               </label>
               <label>
                 <span>{lang === "zh" ? "指标" : "Metric"}</span>
-                <input
+                <VNativeInput
                   value={researchLoopEvidenceDraft.metricValue}
                   onChange={(event) => setResearchLoopEvidenceDraft((draft) => ({ ...draft, metricValue: event.target.value }))}
                   placeholder={activePlan?.experimentPlan.metric || "0.00"}
@@ -9120,7 +9129,7 @@ export function TeamsRoute({
               </label>
               <label>
                 <span>{lang === "zh" ? "工件" : "Artifact"}</span>
-                <input
+                <VNativeInput
                   value={researchLoopEvidenceDraft.artifactRef}
                   onChange={(event) => setResearchLoopEvidenceDraft((draft) => ({ ...draft, artifactRef: event.target.value }))}
                   placeholder="workspace/experiments/result.json"
@@ -9132,7 +9141,7 @@ export function TeamsRoute({
               </VNativeButton>
               <label className={styles.researchLoopWide}>
                 <span>{lang === "zh" ? "摘要" : "Summary"}</span>
-                <input
+                <VNativeInput
                   value={researchLoopEvidenceDraft.summary}
                   onChange={(event) => setResearchLoopEvidenceDraft((draft) => ({ ...draft, summary: event.target.value }))}
                   placeholder={lang === "zh" ? "证据结论、失败原因或待复核点" : "Evidence outcome, failure reason, or review note"}
@@ -9140,7 +9149,7 @@ export function TeamsRoute({
               </label>
               <label className={styles.researchLoopWide}>
                 <span>{lang === "zh" ? "命令预览" : "Command preview"}</span>
-                <input
+                <VNativeInput
                   value={researchLoopEvidenceDraft.commandPreview}
                   onChange={(event) => setResearchLoopEvidenceDraft((draft) => ({ ...draft, commandPreview: event.target.value }))}
                   placeholder="python experiments/evaluate.py --config config.yaml"
@@ -9148,7 +9157,7 @@ export function TeamsRoute({
               </label>
               <label>
                 <span>{lang === "zh" ? "数据" : "Dataset"}</span>
-                <input
+                <VNativeInput
                   value={researchLoopEvidenceDraft.datasetRefs}
                   onChange={(event) => setResearchLoopEvidenceDraft((draft) => ({ ...draft, datasetRefs: event.target.value }))}
                   placeholder={activePlan?.experimentPlan.dataset || "dataset id"}
@@ -9156,7 +9165,7 @@ export function TeamsRoute({
               </label>
               <label>
                 <span>{lang === "zh" ? "环境" : "Environment"}</span>
-                <input
+                <VNativeInput
                   value={researchLoopEvidenceDraft.environmentRefs}
                   onChange={(event) => setResearchLoopEvidenceDraft((draft) => ({ ...draft, environmentRefs: event.target.value }))}
                   placeholder="conda env / docker image / hardware"
@@ -9164,7 +9173,7 @@ export function TeamsRoute({
               </label>
               <label>
                 <span>{lang === "zh" ? "日志" : "Logs"}</span>
-                <input
+                <VNativeInput
                   value={researchLoopEvidenceDraft.logRefs}
                   onChange={(event) => setResearchLoopEvidenceDraft((draft) => ({ ...draft, logRefs: event.target.value }))}
                   placeholder="logs/experiments/run.log"
@@ -9174,18 +9183,18 @@ export function TeamsRoute({
             <div className={styles.researchLoopDecisionForm}>
               <label>
                 <span>{lang === "zh" ? "决策" : "Decision"}</span>
-                <select
+                <VNativeSelect
                   value={researchLoopDecisionDraft.decision}
                   onChange={(event) => setResearchLoopDecisionDraft((draft) => ({ ...draft, decision: event.target.value as ResearchLoopDecisionValue }))}
                 >
                   {RESEARCH_LOOP_DECISION_VALUES.map((decision) => (
                     <option key={decision} value={decision}>{decision}</option>
                   ))}
-                </select>
+                </VNativeSelect>
               </label>
               <label>
                 <span>{lang === "zh" ? "下一模板" : "Next template"}</span>
-                <select
+                <VNativeSelect
                   value={researchLoopDecisionDraft.nextTemplateId || selectedTemplate?.templateId || activeLoop.templateId}
                   onChange={(event) => setResearchLoopDecisionDraft((draft) => ({ ...draft, nextTemplateId: event.target.value }))}
                 >
@@ -9194,11 +9203,11 @@ export function TeamsRoute({
                       {lang === "zh" ? template.labelZh : template.label}
                     </option>
                   ))}
-                </select>
+                </VNativeSelect>
               </label>
               <label className={styles.researchLoopWide}>
                 <span>{lang === "zh" ? "理由" : "Rationale"}</span>
-                <input
+                <VNativeInput
                   value={researchLoopDecisionDraft.rationale}
                   onChange={(event) => setResearchLoopDecisionDraft((draft) => ({ ...draft, rationale: event.target.value }))}
                   placeholder={lang === "zh" ? "基于证据给出推进、修复或补证据原因" : "Reason to promote, repair, or request more evidence"}
@@ -9210,7 +9219,7 @@ export function TeamsRoute({
               </VNativeButton>
               <label className={styles.researchLoopWide}>
                 <span>{lang === "zh" ? "下一步动作" : "Next actions"}</span>
-                <input
+                <VNativeInput
                   value={researchLoopDecisionDraft.nextActions}
                   onChange={(event) => setResearchLoopDecisionDraft((draft) => ({ ...draft, nextActions: event.target.value }))}
                   placeholder={activeTemplate?.defaultIterationActions?.join(" / ") || "revise hypothesis / add evidence"}
@@ -9381,7 +9390,7 @@ export function TeamsRoute({
               <div className={styles.experimentBaselineForm}>
                 <label>
                   <span>{lang === "zh" ? "工件路径" : "Artifact path"}</span>
-                  <input
+                  <VNativeInput
                     value={experimentBaselineArtifactDraft.artifactPath}
                     onChange={(event) => setExperimentBaselineArtifactDraft((draft) => ({ ...draft, artifactPath: event.target.value }))}
                     placeholder="workspace/experiments/baselines/baseline.json"
@@ -9389,7 +9398,7 @@ export function TeamsRoute({
                 </label>
                 <label>
                   <span>{lang === "zh" ? "复现命令" : "Reproduce"}</span>
-                  <input
+                  <VNativeInput
                     value={experimentBaselineArtifactDraft.reproductionCommand}
                     onChange={(event) => setExperimentBaselineArtifactDraft((draft) => ({ ...draft, reproductionCommand: event.target.value }))}
                     placeholder="python experiments/run_baseline.py"
@@ -9397,7 +9406,7 @@ export function TeamsRoute({
                 </label>
                 <label>
                   <span>{lang === "zh" ? "评估命令" : "Evaluate"}</span>
-                  <input
+                  <VNativeInput
                     value={experimentBaselineArtifactDraft.evaluationCommand}
                     onChange={(event) => setExperimentBaselineArtifactDraft((draft) => ({ ...draft, evaluationCommand: event.target.value }))}
                     placeholder="python experiments/evaluate.py"
@@ -9405,7 +9414,7 @@ export function TeamsRoute({
                 </label>
                 <label>
                   <span>{lang === "zh" ? "指标快照" : "Metric"}</span>
-                  <input
+                  <VNativeInput
                     value={experimentBaselineArtifactDraft.metricValue}
                     onChange={(event) => setExperimentBaselineArtifactDraft((draft) => ({ ...draft, metricValue: event.target.value }))}
                     placeholder={activePlan.experimentPlan.metric || "validation accuracy"}
@@ -9452,7 +9461,7 @@ export function TeamsRoute({
                 <div className={styles.experimentSmokeForm}>
                   <label>
                     <span>{lang === "zh" ? "Smoke 状态" : "Smoke status"}</span>
-                    <select
+                    <VNativeSelect
                       value={experimentSmokeResultDraft.status}
                       onChange={(event) =>
                         setExperimentSmokeResultDraft((draft) => ({
@@ -9469,11 +9478,11 @@ export function TeamsRoute({
                               : (lang === "zh" ? "失败" : "failed")}
                         </option>
                       ))}
-                    </select>
+                    </VNativeSelect>
                   </label>
                   <label>
                     <span>{lang === "zh" ? "Smoke 指标" : "Smoke metric"}</span>
-                    <input
+                    <VNativeInput
                       value={experimentSmokeResultDraft.metricValue}
                       onChange={(event) => setExperimentSmokeResultDraft((draft) => ({ ...draft, metricValue: event.target.value }))}
                       placeholder={activePlan.experimentPlan.metric || "0.00"}
@@ -9481,7 +9490,7 @@ export function TeamsRoute({
                   </label>
                   <label>
                     <span>{lang === "zh" ? "Baseline 指标" : "Baseline metric"}</span>
-                    <input
+                    <VNativeInput
                       value={experimentSmokeResultDraft.baselineMetricValue}
                       onChange={(event) => setExperimentSmokeResultDraft((draft) => ({ ...draft, baselineMetricValue: event.target.value }))}
                       placeholder={activeBaselineArtifact.metricValue || "-"}
@@ -9489,7 +9498,7 @@ export function TeamsRoute({
                   </label>
                   <label>
                     <span>Delta</span>
-                    <input
+                    <VNativeInput
                       value={experimentSmokeResultDraft.delta}
                       onChange={(event) => setExperimentSmokeResultDraft((draft) => ({ ...draft, delta: event.target.value }))}
                       placeholder="+0.00"
@@ -9497,7 +9506,7 @@ export function TeamsRoute({
                   </label>
                   <label>
                     <span>{lang === "zh" ? "结果路径" : "Result path"}</span>
-                    <input
+                    <VNativeInput
                       value={experimentSmokeResultDraft.resultPath}
                       onChange={(event) => setExperimentSmokeResultDraft((draft) => ({ ...draft, resultPath: event.target.value }))}
                       placeholder="workspace/experiments/smoke/result.json"
@@ -9505,7 +9514,7 @@ export function TeamsRoute({
                   </label>
                   <label>
                     <span>{lang === "zh" ? "日志引用" : "Log ref"}</span>
-                    <input
+                    <VNativeInput
                       value={experimentSmokeResultDraft.logRef}
                       onChange={(event) => setExperimentSmokeResultDraft((draft) => ({ ...draft, logRef: event.target.value }))}
                       placeholder="logs/experiments/smoke.log"
@@ -9521,7 +9530,7 @@ export function TeamsRoute({
                   </VNativeButton>
                   <label className={styles.experimentSmokeWide}>
                     <span>{lang === "zh" ? "评估命令" : "Evaluate"}</span>
-                    <input
+                    <VNativeInput
                       value={experimentSmokeResultDraft.evaluationCommand}
                       onChange={(event) => setExperimentSmokeResultDraft((draft) => ({ ...draft, evaluationCommand: event.target.value }))}
                       placeholder={activeBaselineArtifact.evaluationCommand || "python experiments/evaluate_smoke.py"}
@@ -9529,7 +9538,7 @@ export function TeamsRoute({
                   </label>
                   <label className={styles.experimentSmokeWide}>
                     <span>{lang === "zh" ? "备注" : "Notes"}</span>
-                    <input
+                    <VNativeInput
                       value={experimentSmokeResultDraft.notes}
                       onChange={(event) => setExperimentSmokeResultDraft((draft) => ({ ...draft, notes: event.target.value }))}
                       placeholder={lang === "zh" ? "只登记证据，不触发训练" : "Evidence only; no training execution"}
@@ -9571,7 +9580,7 @@ export function TeamsRoute({
                     <div className={styles.experimentSmokeForm}>
                       <label>
                         <span>{lang === "zh" ? "Full-run 状态" : "Full-run status"}</span>
-                        <select
+                        <VNativeSelect
                           value={experimentFullRunResultDraft.status}
                           onChange={(event) =>
                             setExperimentFullRunResultDraft((draft) => ({
@@ -9588,11 +9597,11 @@ export function TeamsRoute({
                                   : (lang === "zh" ? "失败" : "failed")}
                             </option>
                           ))}
-                        </select>
+                        </VNativeSelect>
                       </label>
                       <label>
                         <span>{lang === "zh" ? "Full-run 指标" : "Full-run metric"}</span>
-                        <input
+                        <VNativeInput
                           value={experimentFullRunResultDraft.metricValue}
                           onChange={(event) => setExperimentFullRunResultDraft((draft) => ({ ...draft, metricValue: event.target.value }))}
                           placeholder={activePlan.experimentPlan.metric || "0.00"}
@@ -9600,7 +9609,7 @@ export function TeamsRoute({
                       </label>
                       <label>
                         <span>{lang === "zh" ? "Baseline 指标" : "Baseline metric"}</span>
-                        <input
+                        <VNativeInput
                           value={experimentFullRunResultDraft.baselineMetricValue}
                           onChange={(event) => setExperimentFullRunResultDraft((draft) => ({ ...draft, baselineMetricValue: event.target.value }))}
                           placeholder={activeBaselineArtifact.metricValue || activeSmokeResult?.baselineMetricValue || "-"}
@@ -9608,7 +9617,7 @@ export function TeamsRoute({
                       </label>
                       <label>
                         <span>{lang === "zh" ? "Smoke 指标" : "Smoke metric"}</span>
-                        <input
+                        <VNativeInput
                           value={experimentFullRunResultDraft.smokeMetricValue}
                           onChange={(event) => setExperimentFullRunResultDraft((draft) => ({ ...draft, smokeMetricValue: event.target.value }))}
                           placeholder={activeSmokeResult?.metricValue || "-"}
@@ -9616,7 +9625,7 @@ export function TeamsRoute({
                       </label>
                       <label>
                         <span>Delta</span>
-                        <input
+                        <VNativeInput
                           value={experimentFullRunResultDraft.delta}
                           onChange={(event) => setExperimentFullRunResultDraft((draft) => ({ ...draft, delta: event.target.value }))}
                           placeholder="+0.00"
@@ -9624,7 +9633,7 @@ export function TeamsRoute({
                       </label>
                       <label>
                         <span>{lang === "zh" ? "结果路径" : "Result path"}</span>
-                        <input
+                        <VNativeInput
                           value={experimentFullRunResultDraft.resultPath}
                           onChange={(event) => setExperimentFullRunResultDraft((draft) => ({ ...draft, resultPath: event.target.value }))}
                           placeholder="workspace/experiments/full_run/result.json"
@@ -9632,7 +9641,7 @@ export function TeamsRoute({
                       </label>
                       <label>
                         <span>{lang === "zh" ? "日志引用" : "Log ref"}</span>
-                        <input
+                        <VNativeInput
                           value={experimentFullRunResultDraft.logRef}
                           onChange={(event) => setExperimentFullRunResultDraft((draft) => ({ ...draft, logRef: event.target.value }))}
                           placeholder="logs/experiments/full_run.log"
@@ -9648,7 +9657,7 @@ export function TeamsRoute({
                       </VNativeButton>
                       <label className={styles.experimentSmokeWide}>
                         <span>{lang === "zh" ? "配置路径" : "Config path"}</span>
-                        <input
+                        <VNativeInput
                           value={experimentFullRunResultDraft.configPath}
                           onChange={(event) => setExperimentFullRunResultDraft((draft) => ({ ...draft, configPath: event.target.value }))}
                           placeholder="workspace/experiments/full_run/config.json"
@@ -9656,7 +9665,7 @@ export function TeamsRoute({
                       </label>
                       <label className={styles.experimentSmokeWide}>
                         <span>{lang === "zh" ? "复现命令" : "Reproduce"}</span>
-                        <input
+                        <VNativeInput
                           value={experimentFullRunResultDraft.reproductionCommand}
                           onChange={(event) => setExperimentFullRunResultDraft((draft) => ({ ...draft, reproductionCommand: event.target.value }))}
                           placeholder={activeBaselineArtifact.reproductionCommand || "python experiments/run_full.py"}
@@ -9664,7 +9673,7 @@ export function TeamsRoute({
                       </label>
                       <label className={styles.experimentSmokeWide}>
                         <span>{lang === "zh" ? "评估命令" : "Evaluate"}</span>
-                        <input
+                        <VNativeInput
                           value={experimentFullRunResultDraft.evaluationCommand}
                           onChange={(event) => setExperimentFullRunResultDraft((draft) => ({ ...draft, evaluationCommand: event.target.value }))}
                           placeholder={activeSmokeResult?.evaluationCommand || activeBaselineArtifact.evaluationCommand || "python experiments/evaluate_full.py"}
@@ -9672,7 +9681,7 @@ export function TeamsRoute({
                       </label>
                       <label className={styles.experimentSmokeWide}>
                         <span>{lang === "zh" ? "备注" : "Notes"}</span>
-                        <input
+                        <VNativeInput
                           value={experimentFullRunResultDraft.notes}
                           onChange={(event) => setExperimentFullRunResultDraft((draft) => ({ ...draft, notes: event.target.value }))}
                           placeholder={lang === "zh" ? "只登记外部 full-run 证据" : "External full-run evidence only"}
@@ -9695,7 +9704,7 @@ export function TeamsRoute({
                       <div className={styles.experimentKnowledgeForm}>
                         <label>
                           <span>{lang === "zh" ? "知识库" : "Knowledge base"}</span>
-                          <input
+                          <VNativeInput
                             value={experimentKnowledgeIngestionDraft.knowledgeBaseId}
                             onChange={(event) => setExperimentKnowledgeIngestionDraft((draft) => ({ ...draft, knowledgeBaseId: event.target.value }))}
                             placeholder={`${selectedTeam?.teamId || "research-team"}-challenge-cup-experiments`}
@@ -9703,7 +9712,7 @@ export function TeamsRoute({
                         </label>
                         <label>
                           <span>{lang === "zh" ? "知识域" : "Domain"}</span>
-                          <input
+                          <VNativeInput
                             value={experimentKnowledgeIngestionDraft.targetDomain}
                             onChange={(event) => setExperimentKnowledgeIngestionDraft((draft) => ({ ...draft, targetDomain: event.target.value }))}
                             placeholder={lang === "zh" ? "挑战杯实验结果" : "Challenge Cup experiment results"}
@@ -9711,7 +9720,7 @@ export function TeamsRoute({
                         </label>
                         <label>
                           <span>{lang === "zh" ? "结果标题" : "Title"}</span>
-                          <input
+                          <VNativeInput
                             value={experimentKnowledgeIngestionDraft.title}
                             onChange={(event) => setExperimentKnowledgeIngestionDraft((draft) => ({ ...draft, title: event.target.value }))}
                             placeholder={activePlan.title}
@@ -9719,7 +9728,7 @@ export function TeamsRoute({
                         </label>
                         <label>
                           <span>{lang === "zh" ? "摘要" : "Summary"}</span>
-                          <input
+                          <VNativeInput
                             value={experimentKnowledgeIngestionDraft.summary}
                             onChange={(event) => setExperimentKnowledgeIngestionDraft((draft) => ({ ...draft, summary: event.target.value }))}
                             placeholder={`${activeFullRunResult.metricName || activePlan.experimentPlan.metric || "metric"} = ${activeFullRunResult.metricValue || "-"}`}
@@ -9727,14 +9736,14 @@ export function TeamsRoute({
                         </label>
                         <label className={styles.experimentKnowledgeWide}>
                           <span>{lang === "zh" ? "备注" : "Notes"}</span>
-                          <input
+                          <VNativeInput
                             value={experimentKnowledgeIngestionDraft.notes}
                             onChange={(event) => setExperimentKnowledgeIngestionDraft((draft) => ({ ...draft, notes: event.target.value }))}
                             placeholder={lang === "zh" ? "原始日志只保留引用，正式知识由 Steward 复核" : "Raw logs stay referenced; Steward reviews curated knowledge"}
                           />
                         </label>
                         <label className={styles.experimentKnowledgeToggle}>
-                          <input
+                          <VNativeInput
                             type="checkbox"
                             checked={experimentKnowledgeIngestionDraft.wakeStewardAgent}
                             onChange={(event) => setExperimentKnowledgeIngestionDraft((draft) => ({ ...draft, wakeStewardAgent: event.target.checked }))}
@@ -12190,15 +12199,15 @@ export function TeamsRoute({
               ) : null}
               <label>
                 <span>{lang === "zh" ? "节点名称" : "Node label"}</span>
-                <input value={nodeDraft.label} onChange={(event) => setNodeDraft((current) => ({ ...current, label: event.target.value }))} />
+                <VNativeInput value={nodeDraft.label} onChange={(event) => setNodeDraft((current) => ({ ...current, label: event.target.value }))} />
               </label>
               <label>
                 <span>{lang === "zh" ? "组织角色" : "Role"}</span>
-                <input value={nodeDraft.role} onChange={(event) => setNodeDraft((current) => ({ ...current, role: event.target.value }))} />
+                <VNativeInput value={nodeDraft.role} onChange={(event) => setNodeDraft((current) => ({ ...current, role: event.target.value }))} />
               </label>
               <label>
                 <span>{lang === "zh" ? "绑定 Agent" : "Bound Agent"}</span>
-                <select value={nodeDraft.agentId} onChange={(event) => setNodeDraft((current) => ({ ...current, agentId: event.target.value }))}>
+                <VNativeSelect value={nodeDraft.agentId} onChange={(event) => setNodeDraft((current) => ({ ...current, agentId: event.target.value }))}>
                   <option value="">{lang === "zh" ? "不绑定" : "Unbound"}</option>
                   {activeAgents.map((agent) => {
                     const display = agentDisplayInfo(agent, lang);
@@ -12213,11 +12222,11 @@ export function TeamsRoute({
                       </option>
                     );
                   })}
-                </select>
+                </VNativeSelect>
               </label>
               <label>
                 <span>{lang === "zh" ? "目的" : "Purpose"}</span>
-                <textarea value={nodeDraft.purpose} onChange={(event) => setNodeDraft((current) => ({ ...current, purpose: event.target.value }))} />
+                <VNativeTextarea value={nodeDraft.purpose} onChange={(event) => setNodeDraft((current) => ({ ...current, purpose: event.target.value }))} />
               </label>
               <div className={styles.actionRow}>
                 <VNativeButton type="button" onClick={applyNodeDraft} disabled={!canvas || selectedTeamSaveCanvasPending}>
@@ -12401,21 +12410,21 @@ export function TeamsRoute({
                         >
                           <label>
                             <span>{lang === "zh" ? "主题" : "Topic"}</span>
-                            <input
+                            <VNativeInput
                               value={sourceCollectionDraft.topic}
                               onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, topic: event.target.value }))}
                             />
                           </label>
                           <label>
                             <span>{lang === "zh" ? "标题" : "Title"}</span>
-                            <input
+                            <VNativeInput
                               value={sourceCollectionDraft.title}
                               onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, title: event.target.value }))}
                             />
                           </label>
                           <label className={styles.workflowSourceCollectionWide}>
                             <span>{lang === "zh" ? "目标" : "Goal"}</span>
-                            <textarea
+                            <VNativeTextarea
                               value={sourceCollectionDraft.goal}
                               onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, goal: event.target.value }))}
                               rows={2}
@@ -12423,7 +12432,7 @@ export function TeamsRoute({
                           </label>
                           <label>
                             <span>{lang === "zh" ? "Query seeds" : "Query seeds"}</span>
-                            <textarea
+                            <VNativeTextarea
                               value={sourceCollectionDraft.querySeeds}
                               onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, querySeeds: event.target.value }))}
                               rows={3}
@@ -12431,7 +12440,7 @@ export function TeamsRoute({
                           </label>
                           <label>
                             <span>{lang === "zh" ? "输入引用" : "Input refs"}</span>
-                            <textarea
+                            <VNativeTextarea
                               value={sourceCollectionDraft.inputRefs}
                               onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, inputRefs: event.target.value }))}
                               rows={3}
@@ -12441,21 +12450,21 @@ export function TeamsRoute({
                           {renderSourceCollectionModeFields()}
                           <label>
                             <span>{lang === "zh" ? "语言" : "Languages"}</span>
-                            <input
+                            <VNativeInput
                               value={sourceCollectionDraft.searchLanguages}
                               onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, searchLanguages: event.target.value }))}
                             />
                           </label>
                           <label>
                             <span>{lang === "zh" ? "资料类型" : "Source types"}</span>
-                            <input
+                            <VNativeInput
                               value={sourceCollectionDraft.sourceTypes}
                               onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, sourceTypes: event.target.value }))}
                             />
                           </label>
                           <label>
                             <span>{lang === "zh" ? "每条上限" : "Max results"}</span>
-                            <input
+                            <VNativeInput
                               type="number"
                               min={1}
                               max={100}
@@ -12478,7 +12487,7 @@ export function TeamsRoute({
                         <div className={styles.workflowSourceCollectionRuns}>
                           <label>
                             <span>{lang === "zh" ? "最近批次" : "Recent runs"}</span>
-                            <select
+                            <VNativeSelect
                               value={selectedSourceCollectionRunEffectiveId}
                               onChange={(event) => setSelectedSourceCollectionRunId(event.target.value)}
                               disabled={!sourceCollectionRuns.length}
@@ -12492,7 +12501,7 @@ export function TeamsRoute({
                               ) : (
                                 <option value="">{lang === "zh" ? "暂无批次" : "No runs"}</option>
                               )}
-                            </select>
+                            </VNativeSelect>
                           </label>
                           <div className={styles.workflowSourceCollectionStats}>
                             <span>{lang === "zh" ? "资料" : "records"} <strong>{sourceCollectionCollectedCountText}</strong></span>
@@ -12581,7 +12590,7 @@ export function TeamsRoute({
                           </div>
                           <label>
                             <span>{lang === "zh" ? "Assignment" : "Assignment"}</span>
-                            <select
+                            <VNativeSelect
                               value={sourceCollectionOutputDraft.assignmentId || selectedSourceCollectionAssignment?.assignmentId || ""}
                               onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, assignmentId: event.target.value }))}
                               disabled={!sourceCollectionAssignments.length}
@@ -12591,29 +12600,29 @@ export function TeamsRoute({
                                   {assignment.agentRole} · {assignment.status}
                                 </option>
                               ))}
-                            </select>
+                            </VNativeSelect>
                           </label>
                           <label>
                             <span>{lang === "zh" ? "类型" : "Type"}</span>
-                            <select
+                            <VNativeSelect
                               value={sourceCollectionOutputDraft.sourceType}
                               onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, sourceType: event.target.value }))}
                             >
                               {["paper", "url", "dataset", "file", "note", "manual"].map((sourceType) => (
                                 <option key={sourceType} value={sourceType}>{sourceType}</option>
                               ))}
-                            </select>
+                            </VNativeSelect>
                           </label>
                           <label>
                             <span>{lang === "zh" ? "标题" : "Title"}</span>
-                            <input
+                            <VNativeInput
                               value={sourceCollectionOutputDraft.title}
                               onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, title: event.target.value }))}
                             />
                           </label>
                           <label>
                             <span>{lang === "zh" ? "来源引用" : "Source ref"}</span>
-                            <input
+                            <VNativeInput
                               value={sourceCollectionOutputDraft.sourceRef}
                               onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, sourceRef: event.target.value }))}
                               placeholder="https://doi.org/... / local path / dataset id"
@@ -12621,7 +12630,7 @@ export function TeamsRoute({
                           </label>
                           <label>
                             <span>{lang === "zh" ? "原始位置" : "Raw location"}</span>
-                            <input
+                            <VNativeInput
                               value={sourceCollectionOutputDraft.rawLocation}
                               onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, rawLocation: event.target.value }))}
                               placeholder={lang === "zh" ? "页码、文件路径、段落或采集位置" : "Page range, file path, section, or capture location"}
@@ -12629,7 +12638,7 @@ export function TeamsRoute({
                           </label>
                           <label className={styles.workflowSourceCollectionWide}>
                             <span>{lang === "zh" ? "摘要" : "Summary"}</span>
-                            <textarea
+                            <VNativeTextarea
                               value={sourceCollectionOutputDraft.summary}
                               onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, summary: event.target.value }))}
                               rows={2}
@@ -12637,7 +12646,7 @@ export function TeamsRoute({
                           </label>
                           <label className={styles.workflowSourceCollectionWide}>
                             <span>{lang === "zh" ? "备注" : "Notes"}</span>
-                            <input
+                            <VNativeInput
                               value={sourceCollectionOutputDraft.notes}
                               onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, notes: event.target.value }))}
                             />
@@ -13338,7 +13347,7 @@ export function TeamsRoute({
                       : (lang === "zh" ? "需要先同步群聊" : "sync room first")}
                   </span>
                 </div>
-                <textarea
+                <VNativeTextarea
                   value={teamTaskTopic}
                   onChange={(event) => setTeamTaskTopic(event.target.value)}
                   placeholder={lang === "zh" ? "输入团队要协作处理的议题或任务" : "Enter a topic or task for this team"}
@@ -13417,13 +13426,13 @@ export function TeamsRoute({
                   <strong>{lang === "zh" ? "团队广播" : "Team broadcast"}</strong>
                   <span>{activeTeamMemberCount} active agents</span>
                 </div>
-                <textarea
+                <VNativeTextarea
                   value={teamMessage}
                   onChange={(event) => setTeamMessage(event.target.value)}
                   placeholder={lang === "zh" ? "发送给当前团队 active 成员" : "Send to active members of this team"}
                 />
                 <label className={styles.inlineToggle}>
-                  <input type="checkbox" checked={teamInterrupt} onChange={(event) => setTeamInterrupt(event.target.checked)} />
+                  <VNativeInput type="checkbox" checked={teamInterrupt} onChange={(event) => setTeamInterrupt(event.target.checked)} />
                   <span>{lang === "zh" ? "打断正在直聊中的目标 Agent" : "Interrupt targeted running direct sessions"}</span>
                 </label>
                 <VNativeButton

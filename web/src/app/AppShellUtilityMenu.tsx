@@ -6,7 +6,7 @@ import { ExternalLink, FolderTree, GitBranch, ScrollText, Search } from "lucide-
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import type { FileTreeNode, GitStatusSummary } from "../api/types";
-import { VButton } from "../components/vui";
+import { VButton, VNativeInput } from "../components/vui";
 import type { Language, ShellTranslationKey } from "../i18n/shellDictionary";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
 import { resolvePollingInterval } from "./pollingPolicy";
@@ -320,7 +320,7 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
         </div>
         <div className={styles.utilityFileSearch}>
           <Search size={14} />
-          <input
+          <VNativeInput
             value={utilityFileFilter}
             onFocus={requestUtilityFileTree}
             onChange={(event) => {

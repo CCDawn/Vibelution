@@ -48,7 +48,7 @@
   min-width: 0;
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.18;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -283,7 +283,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1013,12 +1013,12 @@
 
 :where(.vui-routes-toolsroute).toolPermissionRow strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-toolsroute).toolPermissionRow small {
   color: var(--fg-secondary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-toolsroute).toolPermissionMeta {
@@ -1238,7 +1238,7 @@
   border-radius: 8px;
   background: var(--surface-input-strong, color-mix(in srgb, var(--bg-canvas) 68%, transparent));
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.15;
 }
 
@@ -1371,7 +1371,7 @@
 :where(.vui-routes-toolsroute).agentCompatibility p {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.45;
 }
 

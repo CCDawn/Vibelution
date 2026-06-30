@@ -16,7 +16,7 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { VButton, VIconButton, VRouteHeader } from "../components/vui";
+import { VButton, VIconButton, VNativeSelect, VNativeTextarea, VRouteHeader } from "../components/vui";
 import { GitDiffView } from "./GitDiffView";
 import {
   getGitAiDraftBlockReason,
@@ -764,7 +764,7 @@ export function GitRoute() {
             </section>
             <label className={styles.messageField}>
               <span>{t("gitAiAgentLabel")}</span>
-              <select
+              <VNativeSelect
                 value={activeAiModelId}
                 disabled={!aiModelSelectOptions.length || configQuery.isPending}
                 onChange={(event) => setSelectedAiModelId(event.target.value)}
@@ -778,7 +778,7 @@ export function GitRoute() {
                 ) : (
                   <option value="">{t("gitAiAgentDefault")}</option>
                 )}
-              </select>
+              </VNativeSelect>
             </label>
             <div className={styles.modelDefaultRow}>
               <span>{configuredModelId ? `${t("gitAiCurrentDefault")} ${configuredModelId}` : t("gitAiNoDefaultModel")}</span>
@@ -795,7 +795,7 @@ export function GitRoute() {
             </div>
             <label className={`${styles.messageField} ${styles.promptTemplateField}`}>
               <span>{t("gitAiPromptTemplate")}</span>
-              <textarea
+              <VNativeTextarea
                 rows={4}
                 value={aiPromptDraft}
                 placeholder={t("gitAiPromptPlaceholder")}
@@ -817,7 +817,7 @@ export function GitRoute() {
             </div>
             <label className={styles.messageField}>
               <span>{t("gitCommitMessage")}</span>
-              <textarea
+              <VNativeTextarea
                 rows={4}
                 value={commitMessage}
                 placeholder={t("gitCommitMessagePlaceholder")}

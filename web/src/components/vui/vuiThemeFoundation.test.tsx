@@ -1,5 +1,5 @@
 import React from "react";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { Search } from "lucide-react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -16,11 +16,16 @@ import {
 } from "./index";
 
 const designRoot = resolve(import.meta.dirname, "../../design");
+const routesRoot = resolve(import.meta.dirname, "../../routes");
 const baseSource = readFileSync(resolve(designRoot, "base.css"), "utf8");
 const tokensSource = readFileSync(resolve(designRoot, "tokens.css"), "utf8");
 const tailwindSource = readFileSync(resolve(designRoot, "tailwind.css"), "utf8");
 const herouiThemeSource = readFileSync(resolve(designRoot, "heroui-theme.css"), "utf8");
 const routeLegacySource = readFileSync(resolve(designRoot, "vui-route-legacy.css"), "utf8");
+const routeModuleLegacySource = readdirSync(routesRoot)
+  .filter((fileName) => fileName.endsWith(".legacy.css"))
+  .map((fileName) => readFileSync(resolve(routesRoot, fileName), "utf8"))
+  .join("\n");
 const agentWorkspacePanelSource = readFileSync(
   resolve(import.meta.dirname, "product/agent-management/AgentWorkspacePanel.tsx"),
   "utf8",
@@ -113,10 +118,14 @@ describe("VUI dual-theme foundation", () => {
     expect(tokensSource).toContain("--vui-font-chat: 1.0625rem;");
     expect(tokensSource).toContain("--vui-font-title: 1.1875rem;");
     expect(baseSource).toContain("font-size: 16px");
+    expect(tailwindSource).toContain(":where(small)");
+    expect(tailwindSource).toContain(".text-xs");
+    expect(tailwindSource).toContain("font-size: var(--vui-font-xs)");
 
     const vuiSources = [
       agentWorkspacePanelSource,
       agentSummaryStripSource,
+      readFileSync(resolve(import.meta.dirname, "layout/VStatusStrip.tsx"), "utf8"),
       readFileSync(resolve(import.meta.dirname, "display/VMetricStrip.tsx"), "utf8"),
       readFileSync(resolve(import.meta.dirname, "display/VDenseTable.tsx"), "utf8"),
       readFileSync(resolve(import.meta.dirname, "layout/VSection.tsx"), "utf8"),
@@ -131,9 +140,10 @@ describe("VUI dual-theme foundation", () => {
 
   it("keeps migrated route legacy styles free of sub-14px typography", () => {
     const subReadableFontPattern =
-      /(?:font-size:\s*|text-\[)0\.(?:[5-7]\d|8[0-6]|87[0-4])rem\]?/g;
+      /(?:font-size:\s*|text-\[)0\.[5-8]\d*rem\]?/g;
 
     expect(routeLegacySource.match(subReadableFontPattern) ?? []).toEqual([]);
+    expect(routeModuleLegacySource.match(subReadableFontPattern) ?? []).toEqual([]);
   });
 
   it("renders page, surface, section, metric strip, and action group primitives", () => {

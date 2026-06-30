@@ -514,7 +514,7 @@
   border-radius: 6px;
   background: var(--surface-card-subtle);
   color: var(--fg-secondary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   text-align: center;
 }
 
@@ -1813,7 +1813,7 @@
   gap: 4px;
   min-width: min(280px, 100%);
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-logsroute).sceneTechnicalGrid strong {
@@ -1852,7 +1852,7 @@
 
 :where(.vui-routes-logsroute).sceneMetricCard span {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-logsroute).sceneMetricCard strong {

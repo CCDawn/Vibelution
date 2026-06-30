@@ -772,6 +772,12 @@ describe("MemoryRoute layout contract", () => {
   it("routes Memory controls through VUI primitives", () => {
     expect(routeSource).toContain('from "../components/vui"');
     expect(routeSource).toContain("<VButton");
+    expect(routeSource).toContain("<VNativeInput");
+    expect(routeSource).toContain("<VNativeSelect");
+    expect(routeSource).toContain("<VNativeTextarea");
     expect(routeSource).not.toMatch(/<button\b/);
+    expect(routeSource).not.toMatch(/<input\b/);
+    expect(routeSource).not.toMatch(/<select\b/);
+    expect(routeSource).not.toMatch(/<textarea\b/);
   });
 });

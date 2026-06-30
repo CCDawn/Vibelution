@@ -270,6 +270,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("VSelect");
     expect(routeSource).toContain("VStatusStrip");
     expect(routeSource).toContain("VIconButton");
+    expect(routeSource).toContain("VNativeInput");
+    expect(routeSource).toContain("VNativeSelect");
+    expect(routeSource).toContain("VNativeTextarea");
+    expect(routeSource).not.toMatch(/<input\b/);
+    expect(routeSource).not.toMatch(/<select\b/);
+    expect(routeSource).not.toMatch(/<textarea\b/);
     expect(routeSource).toContain("teamContextBar");
     expect(routeSource).toContain("teamSelectField");
     expect(routeSource).toContain("teamContextChips");

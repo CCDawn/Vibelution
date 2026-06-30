@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import { SkillLibraryDetail, SkillLibraryItem, SkillLibraryPayload } from "../api/types";
-import { VButton, VIconButton, VRouteHeader } from "../components/vui";
+import { VButton, VIconButton, VNativeInput, VRouteHeader } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
 
@@ -21,7 +21,7 @@ const managementNavClass = "m-0";
 const summaryGridClass = "grid min-w-0 grid-cols-4 overflow-hidden rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--border-soft)_78%,transparent)] bg-[color-mix(in_srgb,var(--surface-panel)_90%,var(--surface-card))] max-[920px]:grid-cols-1";
 const summaryCardClass = "grid min-h-[26px] min-w-0 grid-cols-[auto_minmax(0,1fr)] items-baseline gap-[5px] border-0 border-r border-[color-mix(in_srgb,var(--border-soft)_58%,transparent)] bg-transparent px-2 py-[3px] last:border-r-0";
 const summaryLabelClass = "text-[var(--vui-font-xs)] text-vui-fg-tertiary";
-const summaryValueClass = "min-w-0 truncate text-[0.8rem] text-vui-fg-primary";
+const summaryValueClass = "min-w-0 truncate text-[var(--vui-font-xs)] text-vui-fg-primary";
 const workspaceClass = "grid min-h-0 grid-cols-[minmax(260px,340px)_minmax(440px,1fr)] gap-1.5 px-2.5 pb-2 pt-1.5 max-[920px]:grid-cols-1 max-[920px]:content-start max-[920px]:overflow-auto";
 const panelClass = "grid min-h-0 min-w-0 content-start gap-[9px] rounded-lg border border-vui-border-soft bg-[var(--surface-panel)] p-2.5";
 const listPanelClass = `${panelClass} grid-rows-[auto_auto_auto_minmax(0,1fr)]`;
@@ -64,7 +64,7 @@ const commandCodeClass = "min-w-0 truncate text-[0.98rem] text-[var(--accent-war
 const commandFeedbackClass = "text-[var(--vui-font-xs)] text-[var(--state-success)]";
 const metaGridClass = "grid grid-cols-[110px_minmax(0,1fr)] gap-x-2.5 gap-y-1.5 rounded-lg border border-vui-border-soft bg-[var(--surface-card)] p-2.5";
 const metaLabelClass = "text-[var(--vui-font-xs)] text-vui-fg-tertiary";
-const metaValueClass = "min-w-0 truncate text-[0.8rem] text-vui-fg-primary";
+const metaValueClass = "min-w-0 truncate text-[var(--vui-font-xs)] text-vui-fg-primary";
 const surfacePanelClass = "grid gap-2 rounded-lg border border-vui-border-soft bg-[var(--surface-panel)] p-2.5";
 const contentHeaderClass = "flex min-w-0 items-start justify-between gap-3";
 const contentPreClass = "m-0 max-h-[48vh] overflow-auto rounded-lg border border-vui-border-soft bg-[var(--surface-input-strong)] p-2.5 text-[var(--vui-font-xs)] leading-[1.48] text-vui-fg-primary whitespace-pre-wrap break-words";
@@ -338,7 +338,7 @@ export function SkillsRoute() {
 
           <label className={searchBoxClass}>
             <Search size={14} />
-            <input className={searchInputClass} value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder={copy.search} />
+            <VNativeInput className={searchInputClass} value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder={copy.search} />
           </label>
 
           <div className={filterRowClass}>
@@ -412,7 +412,7 @@ export function SkillsRoute() {
                 return (
                   <div key={`${skill.path}-${skill.hash}`} className={selectableRowClass}>
                     <label className={rowSelectClass} title={`${copy.bulkSelected}: ${skill.name}`}>
-                      <input
+                      <VNativeInput
                         className={hiddenCheckboxClass}
                         type="checkbox"
                         checked={selected}

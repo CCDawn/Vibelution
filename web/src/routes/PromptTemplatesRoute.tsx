@@ -6,7 +6,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import { AgentInstance, PromptTemplate, PromptTemplateWorkspace } from "../api/types";
-import { VButton, VIconButton, VRouteHeader } from "../components/vui";
+import { VButton, VIconButton, VNativeInput, VNativeSelect, VNativeTextarea, VRouteHeader } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
@@ -39,7 +39,7 @@ const managementNavClass = "m-0";
 const summaryGridClass = "grid min-w-0 grid-cols-4 overflow-hidden rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--border-soft)_78%,transparent)] bg-[color-mix(in_srgb,var(--surface-panel)_90%,var(--surface-card))] max-[980px]:grid-cols-1";
 const summaryCardClass = "grid min-h-[26px] min-w-0 grid-cols-[auto_minmax(0,1fr)] items-baseline gap-[5px] border-0 border-r border-[color-mix(in_srgb,var(--border-soft)_58%,transparent)] bg-transparent px-2 py-[3px] last:border-r-0";
 const summaryLabelClass = "text-[var(--vui-font-xs)] text-vui-fg-tertiary";
-const summaryValueClass = "min-w-0 truncate text-[0.8rem] text-vui-fg-primary";
+const summaryValueClass = "min-w-0 truncate text-[var(--vui-font-xs)] text-vui-fg-primary";
 const workspaceClass = "grid min-h-0 grid-cols-[minmax(300px,392px)_minmax(500px,1fr)] gap-1.5 px-2.5 pb-2 pt-1.5 max-[980px]:grid-cols-1 max-[980px]:content-start max-[980px]:overflow-auto";
 const panelBaseClass = "grid min-h-0 min-w-0 content-start gap-3 rounded-lg border border-vui-border-soft bg-[var(--surface-panel)] p-2.5";
 const listPanelClass = `${panelBaseClass} grid-rows-[auto_auto_auto_auto_minmax(0,1fr)]`;
@@ -87,7 +87,7 @@ const fieldLabelClass = "text-[var(--vui-font-xs)] font-bold text-vui-fg-tertiar
 const fieldInputClass = "min-h-8 w-full min-w-0 rounded-lg border border-vui-border-soft bg-[var(--surface-input-strong)] px-2 text-vui-fg-primary";
 const nameFieldClass = "self-start";
 const contentFieldClass = "grid min-h-0 content-stretch grid-rows-[auto_minmax(0,1fr)] overflow-hidden";
-const contentTextareaClass = "h-full min-h-0 w-full min-w-0 resize-none self-stretch rounded-lg border border-vui-border-soft bg-[var(--surface-input-strong)] p-2.5 font-[var(--font-mono)] text-[0.8rem] leading-[1.5] text-vui-fg-primary";
+const contentTextareaClass = "h-full min-h-0 w-full min-w-0 resize-none self-stretch rounded-lg border border-vui-border-soft bg-[var(--surface-input-strong)] p-2.5 font-[var(--font-mono)] text-[var(--vui-font-xs)] leading-[1.5] text-vui-fg-primary";
 const bottomGridClass = "grid min-h-0 grid-cols-[minmax(0,1fr)_minmax(260px,0.58fr)] gap-2 max-[980px]:grid-cols-1";
 const detailCardClass = "grid min-h-0 min-w-0 content-start gap-2 rounded-lg border border-vui-border-soft bg-[var(--surface-panel)] p-2.5 grid-rows-[auto_minmax(0,1fr)_auto]";
 const agentListClass = "grid min-h-0 min-w-0 content-start gap-2 rounded-lg border border-vui-border-soft bg-[var(--surface-panel)] p-2.5";
@@ -609,7 +609,7 @@ export function PromptTemplatesRoute() {
 
           <label className={searchBoxClass}>
             <Search size={14} />
-            <input className={searchInputClass} value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder={copy.search} />
+            <VNativeInput className={searchInputClass} value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder={copy.search} />
           </label>
 
           <div className={filterRowClass}>
@@ -643,13 +643,13 @@ export function PromptTemplatesRoute() {
             <label className={bulkSelectFieldClass}>
               <Tags size={14} />
               <span>{copy.bulkCategory}</span>
-              <select className={bulkSelectClass} value={bulkCategory} disabled={bulkPromptPending} onChange={(event) => setBulkCategory(event.target.value)}>
+              <VNativeSelect className={bulkSelectClass} value={bulkCategory} disabled={bulkPromptPending} onChange={(event) => setBulkCategory(event.target.value)}>
                 {CATEGORY_FILTERS.filter((filter) => filter !== "all").map((filter) => (
                   <option key={filter} value={filter}>
                     {categoryLabel(filter, lang)}
                   </option>
                 ))}
-              </select>
+              </VNativeSelect>
             </label>
             <VButton
               type="button"
@@ -696,7 +696,7 @@ export function PromptTemplatesRoute() {
                 return (
                   <div key={template.promptTemplateId} className={`${selectableRowClass} ${linkedTarget ? selectableRowLinkedClass : ""}`}>
                     <label className={`${rowSelectClass} ${linkedTarget ? linkedBorderClass : ""}`} title={`${copy.bulkSelected}: ${template.name || template.promptTemplateId}`}>
-                      <input
+                      <VNativeInput
                         className={hiddenCheckboxClass}
                         type="checkbox"
                         checked={selected}
@@ -763,12 +763,12 @@ export function PromptTemplatesRoute() {
 
               <label className={`${fieldClass} ${nameFieldClass}`}>
                 <span className={fieldLabelClass}>{copy.templates}</span>
-                <input className={fieldInputClass} value={editor.name} onChange={(event) => setEditor({ ...editor, name: event.target.value })} />
+                <VNativeInput className={fieldInputClass} value={editor.name} onChange={(event) => setEditor({ ...editor, name: event.target.value })} />
               </label>
 
               <label className={`${fieldClass} ${contentFieldClass}`}>
                 <span className={fieldLabelClass}>{copy.content}</span>
-                <textarea className={contentTextareaClass} value={editor.content} onChange={(event) => setEditor({ ...editor, content: event.target.value })} />
+                <VNativeTextarea className={contentTextareaClass} value={editor.content} onChange={(event) => setEditor({ ...editor, content: event.target.value })} />
               </label>
 
               <div className={bottomGridClass}>
