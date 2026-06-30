@@ -1,4 +1,9 @@
 .route {
+  --fg-muted: var(--fg-tertiary);
+  --accent-primary: var(--accent-cool);
+  --accent-success: var(--state-success);
+  --accent-danger: var(--state-error);
+
   display: flex;
   height: 100%;
   min-height: 0;
@@ -1220,19 +1225,23 @@
 }
 
 .researchStageActions {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 7px;
 }
 
 .researchStageActions button,
 .researchStageActions a {
   display: inline-flex;
-  min-width: 0;
+  min-width: 104px;
+  width: fit-content;
+  max-width: 100%;
   min-height: 32px;
   align-items: center;
   justify-content: center;
   gap: 5px;
+  padding: 0 10px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 35%, var(--border-soft));
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-panel-strong) 82%, transparent);
@@ -1723,9 +1732,9 @@
 .sourceCollectionStagePrimaryAction,
 .sourceCollectionStageSecondaryAction {
   display: inline-flex;
-  min-width: 0;
+  min-width: 112px;
   max-width: 100%;
-  width: 100%;
+  width: fit-content;
   min-height: 26px;
   align-items: center;
   justify-content: center;
@@ -2089,8 +2098,9 @@
 }
 
 .sourceCollectionPanelActions {
-  display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
   margin-top: 10px;
 }
@@ -6796,9 +6806,13 @@
   }
 
   .sourceCollectionCommandBar,
-  .sourceCollectionPanelActions,
   .sourceCollectionPageGrid {
     grid-template-columns: 1fr;
+  }
+
+  .sourceCollectionPanelActions .sourceCollectionStagePrimaryAction,
+  .sourceCollectionPanelActions .sourceCollectionStageSecondaryAction {
+    width: 100%;
   }
 
   .sourceCollectionScreeningListShell {

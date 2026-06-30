@@ -201,4 +201,27 @@ describe("VUI batch migration", () => {
       }
     },
   );
+
+  it("keeps Teams source-collection stage actions compact by default", () => {
+    const source = readTargetSource("routes/TeamsRoute.module.css");
+    const routeBlock = readStyleBlock(source, ".route");
+    const researchActionsBlock = readStyleBlock(source, ".researchStageActions");
+    const researchActionButtonBlock = readStyleBlock(source, ".researchStageActions button,\n.researchStageActions a");
+    const actionBlock = readStyleBlock(source, ".sourceCollectionStagePrimaryAction,\n.sourceCollectionStageSecondaryAction");
+    const panelBlock = readStyleBlock(source, ".sourceCollectionPanelActions");
+
+    expect(routeBlock).toContain("--fg-muted: var(--fg-tertiary);");
+    expect(routeBlock).toContain("--accent-primary: var(--accent-cool);");
+    expect(routeBlock).toContain("--accent-success: var(--state-success);");
+    expect(routeBlock).toContain("--accent-danger: var(--state-error);");
+    expect(researchActionsBlock).toContain("display: flex;");
+    expect(researchActionsBlock).toContain("flex-wrap: wrap;");
+    expect(researchActionsBlock).not.toContain("grid-template-columns");
+    expect(researchActionButtonBlock).toContain("width: fit-content;");
+    expect(researchActionButtonBlock).not.toMatch(/^\s*width:\s*100%;/m);
+    expect(actionBlock).toContain("width: fit-content;");
+    expect(actionBlock).not.toMatch(/^\s*width:\s*100%;/m);
+    expect(panelBlock).toContain("display: flex;");
+    expect(panelBlock).toContain("flex-wrap: wrap;");
+  });
 });
