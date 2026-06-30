@@ -266,6 +266,16 @@ describe("ToolsRoute layout contract", () => {
     expect(stylesSource).toContain("align-items: start");
   });
 
+  it("keeps route layout CSS from restyling raw native form elements", () => {
+    expect(stylesSource).not.toMatch(/\.(scopeSelect|searchBox|rowSelect|toolBundleSelect|image2ModelSelect|agentPolicySelect)\s+(input|select)\b/);
+    expect(stylesSource).toContain('.scopeSelect [data-vui="native-select"]');
+    expect(stylesSource).toContain('.searchBox.searchBox [data-vui="native-input"]');
+    expect(stylesSource).toContain('.rowSelect [data-vui="native-input"]');
+    expect(stylesSource).toContain('.toolBundleSelect [data-vui="native-select"]');
+    expect(stylesSource).toContain('.image2ModelSelect [data-vui="native-select"]');
+    expect(stylesSource).toContain('.agentPolicySelect [data-vui="native-select"]');
+  });
+
   it("keeps bulk controls in compact document flow instead of covering tool rows", () => {
     expect(stylesSource).toContain(".listPanel {\n  grid-template-rows: auto auto auto auto minmax(0, 1fr);\n  overflow: hidden;");
     expect(stylesSource).toContain(".bulkActionBar {\n  display: grid;");

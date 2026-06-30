@@ -207,15 +207,18 @@
   color: var(--fg-secondary);
 }
 
-:where(.vui-routes-agentsroute).searchBox input {
+[data-vui-app] :where(.vui-routes-agentsroute).searchBox.searchBox.searchBox [data-vui="native-input"] {
   min-width: 0;
   width: 100%;
+  min-height: 0;
+  padding: 0;
   border: 0;
   outline: 0;
   background: transparent;
   color: var(--fg-primary);
   font: inherit;
   font-size: var(--vui-font-xs);
+  box-shadow: none;
 }
 
 :where(.vui-routes-agentsroute).groupList {
@@ -549,7 +552,7 @@
   font-weight: 800;
 }
 
-:where(.vui-routes-agentsroute).bulkFieldHeader input {
+:where(.vui-routes-agentsroute).bulkFieldHeader [data-vui="native-input"] {
   width: 14px;
   height: 14px;
   margin: 0;
@@ -714,7 +717,7 @@
   color: var(--accent-warm-2);
 }
 
-:where(.vui-routes-agentsroute).rowSelect input {
+:where(.vui-routes-agentsroute).rowSelect [data-vui="native-input"] {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -912,7 +915,7 @@
   min-width: 0;
 }
 
-:where(.vui-routes-agentsroute).avatarEditorActions input[type="file"] {
+:where(.vui-routes-agentsroute).avatarEditorActions [data-vui="native-input"][type="file"] {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -1148,8 +1151,8 @@
   background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-panel));
 }
 
-:where(.vui-routes-agentsroute).createToolBundleOption input,
-:where(.vui-routes-agentsroute).createToolBundleSelected input {
+:where(.vui-routes-agentsroute).createToolBundleOption [data-vui="native-input"],
+:where(.vui-routes-agentsroute).createToolBundleSelected [data-vui="native-input"] {
   margin-top: 2px;
 }
 
@@ -1818,20 +1821,14 @@
   min-width: 0;
 }
 
-:where(.vui-routes-agentsroute).inlineAdd input {
+:where(.vui-routes-agentsroute).inlineAdd [data-vui="native-input"] {
   min-width: 0;
   min-height: 32px;
-  border-radius: var(--radius-control);
-  font: inherit;
   font-size: var(--vui-font-xs);
 }
 
-:where(.vui-routes-agentsroute).inlineAdd input {
+:where(.vui-routes-agentsroute).inlineAdd [data-vui="native-input"] {
   width: 100%;
-  padding: 0 8px;
-  border: 1px solid var(--border-soft);
-  background: var(--surface-card);
-  color: var(--fg-primary);
 }
 
 :where(.vui-routes-agentsroute).inlineAdd [data-vui="button"] {
@@ -2269,7 +2266,7 @@
   align-items: end;
 }
 
-:where(.vui-routes-agentsroute).compressionToggleField input {
+:where(.vui-routes-agentsroute).compressionToggleField [data-vui="native-input"] {
   justify-self: start;
   width: 18px;
   min-height: 18px;
@@ -2291,7 +2288,7 @@
   font-weight: 700;
 }
 
-:where(.vui-routes-agentsroute).compressionInlineCheck input {
+:where(.vui-routes-agentsroute).compressionInlineCheck [data-vui="native-input"] {
   flex: 0 0 auto;
   width: 16px;
   height: 16px;
@@ -2407,11 +2404,11 @@
   min-width: 0;
 }
 
-:where(.vui-routes-agentsroute).checkField input {
+:where(.vui-routes-agentsroute).checkField [data-vui="native-input"] {
   flex: 0 0 auto;
 }
 
-:where(.vui-routes-agentsroute).roomCheckField input {
+:where(.vui-routes-agentsroute).roomCheckField [data-vui="native-input"] {
   margin: 0;
 }
 
@@ -2524,26 +2521,16 @@
   color: var(--state-error);
 }
 
-:where(.vui-routes-agentsroute).field input,
-:where(.vui-routes-agentsroute).field select,
-:where(.vui-routes-agentsroute).llmSlotField select,
-:where(.vui-routes-agentsroute).fieldWide textarea {
+:where(.vui-routes-agentsroute).field [data-vui="native-input"],
+:where(.vui-routes-agentsroute).field [data-vui="native-select"],
+:where(.vui-routes-agentsroute).llmSlotField [data-vui="native-select"],
+:where(.vui-routes-agentsroute).fieldWide [data-vui="native-textarea"] {
   width: 100%;
   min-width: 0;
-  min-height: 30px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-control);
-  background: var(--surface-panel);
-  color: var(--fg-primary);
-  font: inherit;
   font-size: var(--vui-font-xs);
 }
 
-:where(.vui-routes-agentsroute).field input {
-  padding: 0 9px;
-}
-
-:where(.vui-routes-agentsroute).field .bulkFieldHeader input {
+:where(.vui-routes-agentsroute).field .bulkFieldHeader [data-vui="native-input"] {
   flex: 0 0 auto;
   width: 14px;
   height: 14px;
@@ -2551,18 +2538,9 @@
   padding: 0;
 }
 
-:where(.vui-routes-agentsroute).field select {
-  padding: 0 8px;
-}
-
-:where(.vui-routes-agentsroute).llmSlotField select {
-  padding: 0 8px;
-}
-
-:where(.vui-routes-agentsroute).fieldWide textarea {
+:where(.vui-routes-agentsroute).fieldWide [data-vui="native-textarea"] {
   min-height: 62px;
   resize: vertical;
-  padding: 7px 9px;
   line-height: 1.35;
 }
 
@@ -2578,7 +2556,7 @@
   min-width: 0;
 }
 
-:where(.vui-routes-agentsroute).promptConfigRow select {
+:where(.vui-routes-agentsroute).promptConfigRow [data-vui="native-select"] {
   min-width: 0;
 }
 
@@ -2595,15 +2573,6 @@
 
 :where(.vui-routes-agentsroute).configDeepLinkRow [data-vui="button"] {
   white-space: nowrap;
-}
-
-:where(.vui-routes-agentsroute).field input:focus,
-:where(.vui-routes-agentsroute).field select:focus,
-:where(.vui-routes-agentsroute).promptConfigRow select:focus,
-:where(.vui-routes-agentsroute).llmSlotField select:focus,
-:where(.vui-routes-agentsroute).fieldWide textarea:focus {
-  outline: 2px solid color-mix(in srgb, var(--accent-cool) 24%, transparent);
-  border-color: color-mix(in srgb, var(--accent-cool) 48%, transparent);
 }
 
 :where(.vui-routes-agentsroute).editorActions {
@@ -2739,7 +2708,7 @@
   color: var(--fg-secondary);
 }
 
-:where(.vui-routes-agentsroute).resetOptionField input {
+:where(.vui-routes-agentsroute).resetOptionField [data-vui="native-input"] {
   margin-top: 3px;
 }
 
