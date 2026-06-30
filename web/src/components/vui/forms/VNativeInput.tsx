@@ -1,4 +1,4 @@
-import { type ComponentPropsWithoutRef } from "react";
+import { forwardRef, type ComponentPropsWithoutRef } from "react";
 
 import { vuiFormControlClass } from "./formClasses";
 
@@ -7,13 +7,16 @@ export type VNativeInputProps = ComponentPropsWithoutRef<"input"> & {
   "data-vui"?: string;
 };
 
-export function VNativeInput({
-  density = "compact",
-  className,
-  type,
-  "data-vui": dataVui,
-  ...props
-}: VNativeInputProps) {
+export const VNativeInput = forwardRef<HTMLInputElement, VNativeInputProps>(function VNativeInput(
+  {
+    density = "compact",
+    className,
+    type,
+    "data-vui": dataVui,
+    ...props
+  },
+  ref,
+) {
   const inputType = type ?? "text";
   const isBox = inputType === "checkbox" || inputType === "radio";
   const controlClass = isBox
@@ -28,9 +31,10 @@ export function VNativeInput({
   return (
     <input
       {...props}
+      ref={ref}
       type={inputType}
       data-vui={dataVui ?? "native-input"}
       className={[controlClass, className].filter(Boolean).join(" ")}
     />
   );
-}
+});

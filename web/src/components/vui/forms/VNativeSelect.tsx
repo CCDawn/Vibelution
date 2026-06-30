@@ -1,4 +1,4 @@
-import { type ComponentPropsWithoutRef } from "react";
+import { forwardRef, type ComponentPropsWithoutRef } from "react";
 
 import { vuiFormControlClass } from "./formClasses";
 
@@ -7,17 +7,21 @@ export type VNativeSelectProps = ComponentPropsWithoutRef<"select"> & {
   "data-vui"?: string;
 };
 
-export function VNativeSelect({
-  density = "compact",
-  className,
-  "data-vui": dataVui,
-  ...props
-}: VNativeSelectProps) {
+export const VNativeSelect = forwardRef<HTMLSelectElement, VNativeSelectProps>(function VNativeSelect(
+  {
+    density = "compact",
+    className,
+    "data-vui": dataVui,
+    ...props
+  },
+  ref,
+) {
   return (
     <select
       {...props}
+      ref={ref}
       data-vui={dataVui ?? "native-select"}
       className={[vuiFormControlClass(density), className].filter(Boolean).join(" ")}
     />
   );
-}
+});

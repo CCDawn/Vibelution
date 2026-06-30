@@ -1,4 +1,4 @@
-import { type ComponentPropsWithoutRef } from "react";
+import { forwardRef, type ComponentPropsWithoutRef } from "react";
 
 import { vuiFormControlClass } from "./formClasses";
 
@@ -8,17 +8,21 @@ export type VNativeTextareaProps = ComponentPropsWithoutRef<"textarea"> & {
   "data-vui"?: string;
 };
 
-export function VNativeTextarea({
-  density = "compact",
-  className,
-  minRows,
-  rows,
-  "data-vui": dataVui,
-  ...props
-}: VNativeTextareaProps) {
+export const VNativeTextarea = forwardRef<HTMLTextAreaElement, VNativeTextareaProps>(function VNativeTextarea(
+  {
+    density = "compact",
+    className,
+    minRows,
+    rows,
+    "data-vui": dataVui,
+    ...props
+  },
+  ref,
+) {
   return (
     <textarea
       {...props}
+      ref={ref}
       rows={rows ?? minRows}
       data-vui={dataVui ?? "native-textarea"}
       className={[
@@ -30,4 +34,4 @@ export function VNativeTextarea({
         .join(" ")}
     />
   );
-}
+});

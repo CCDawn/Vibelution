@@ -31,7 +31,7 @@ import {
   ResearchOrgMessageResponse,
   ResearchOrgProposalResponse,
 } from "../api/types";
-import { VButton, VRouteHeader } from "../components/vui";
+import { VButton, VNativeInput, VNativeSelect, VNativeTextarea, VRouteHeader } from "../components/vui";
 import { agentDisplayInfo } from "./agentDisplay";
 import styles from "./ResearchFlowCanvasRoute.styles";
 
@@ -2483,7 +2483,7 @@ export function ResearchFlowCanvasRoute() {
                         </span>
                       </span>
                       {canInlineEditNodeTitle ? (
-                        <input
+                        <VNativeInput
                           className={styles.nodeTitleInput}
                           aria-label={`模块名称：${node.label || node.id}`}
                           value={node.label}
@@ -2649,60 +2649,60 @@ export function ResearchFlowCanvasRoute() {
                     <div className={styles.twoColumns}>
                       <label>
                         通信方式
-                        <select value={orgDeliveryMode} onChange={(event) => setOrgDeliveryMode(event.target.value)}>
+                        <VNativeSelect value={orgDeliveryMode} onChange={(event) => setOrgDeliveryMode(event.target.value)}>
                           {RESEARCH_ORG_DELIVERY_MODE_OPTIONS.map((option) => (
                             <option key={option.value} value={option.value}>
                               {option.label}
                             </option>
                           ))}
-                        </select>
+                        </VNativeSelect>
                       </label>
                       <label>
                         消息类型
-                        <select value={orgMessageType} onChange={(event) => setOrgMessageType(event.target.value)}>
+                        <VNativeSelect value={orgMessageType} onChange={(event) => setOrgMessageType(event.target.value)}>
                           {RESEARCH_ORG_MESSAGE_TYPE_OPTIONS.map((option) => (
                             <option key={option.value} value={option.value}>
                               {option.label}
                             </option>
                           ))}
-                        </select>
+                        </VNativeSelect>
                       </label>
                     </div>
                     {orgDeliveryMode === "private" ? (
                       <label>
                         目标 Agent
-                        <select value={defaultOrganizationTargetId} onChange={(event) => setOrgTargetAgentId(event.target.value)}>
+                        <VNativeSelect value={defaultOrganizationTargetId} onChange={(event) => setOrgTargetAgentId(event.target.value)}>
                           {activeOrganizationAgents.map((agent) => (
                             <option key={agent.agentId} value={agent.agentId}>
                               {agent.agentCode ? `${agent.agentCode} · ${agent.displayName}` : agent.displayName}
                             </option>
                           ))}
-                        </select>
+                        </VNativeSelect>
                       </label>
                     ) : null}
                     {orgDeliveryMode === "zone" ? (
                       <label>
                         目标区域
-                        <select value={orgZoneId} onChange={(event) => setOrgZoneId(event.target.value)}>
+                        <VNativeSelect value={orgZoneId} onChange={(event) => setOrgZoneId(event.target.value)}>
                           <option value="">选择区域</option>
                           {organizationZones.map((zone) => (
                             <option key={zone.zoneId} value={zone.zoneId}>
                               {zone.label || zone.zoneId}
                             </option>
                           ))}
-                        </select>
+                        </VNativeSelect>
                       </label>
                     ) : null}
                     <label>
                       消息正文
-                      <textarea
+                      <VNativeTextarea
                         value={orgMessageContent}
                         onChange={(event) => setOrgMessageContent(event.target.value)}
                         placeholder="例如：请 CEO 组织一次新颖科研主题发现，并让组织顾问评估需要新增哪些专家 Agent。"
                       />
                     </label>
                     <label className={styles.inlineToggle}>
-                      <input
+                      <VNativeInput
                         type="checkbox"
                         checked={orgMailboxOnly}
                         onChange={(event) => setOrgMailboxOnly(event.target.checked)}
