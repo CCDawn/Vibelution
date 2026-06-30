@@ -79,6 +79,7 @@ const styleKeys = [
   "datasetCatalogHeader",
   "datasetCatalogItem",
   "datasetCatalogItemMain",
+  "datasetCatalogItemTitle",
   "datasetCatalogList",
   "datasetCatalogPanel",
   "datasetCatalogStatus",
@@ -332,6 +333,8 @@ const styles = createVuiStyleMap(styleKeys, {
     structuredEmptyState: "min-h-[86px] px-3 py-2.5",
     supervisedMemberRow: "min-h-[34px] font-mono",
     supervisedMembersList: "max-h-[min(238px,34vh)]",
+    datasetCatalogItemTitle:
+      "inline-flex flex-wrap items-baseline gap-x-2 gap-y-0.5 [&_span]:text-[var(--fg-tertiary)]",
     supervisedRunConsole: "[container-type:inline-size]",
     supervisedRunConsoleGrid:
       "grid-cols-[minmax(300px,var(--evolution-live-launch-width,348px))_minmax(0,1fr)_minmax(300px,var(--evolution-live-run-width,360px))] grid-rows-[max-content] items-start max-[900px]:grid-cols-1 max-[900px]:auto-rows-max",
