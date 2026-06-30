@@ -207,6 +207,7 @@ const styleKeys = [
   "currentSessionMetaList",
   "detailNote",
   "directSessionItem",
+  "emptyConversationSurface",
   "emptySurface",
   "featureChip",
   "featureChipActive",
@@ -477,6 +478,8 @@ const styles = createVuiStyleMap(styleKeys, {
     conversationMetaRow: "grid grid-cols-[minmax(0,1fr)_max-content] [&_time]:flex-none [&_time]:overflow-visible [&_time]:text-clip",
     conversationMetaTime: "max-w-[min(164px,68%)] [&_time]:flex-none [&_time]:overflow-visible [&_time]:text-clip",
     conversationTitleRow: "grid grid-cols-[minmax(0,1fr)_fit-content(92px)] max-w-full",
+    emptyConversationSurface:
+      "grid min-h-[74px] w-[min(360px,calc(100%_-_32px))] place-self-center place-items-center rounded-[var(--radius-panel)] border border-dashed border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-row)_58%,transparent)] px-4 py-3 text-center text-[var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-secondary)] shadow-[var(--vui-shadow-hairline)]",
     emptySurface:
       "grid h-full min-h-[min(420px,calc(100dvh_-_190px))] place-items-center px-4 py-8 text-center text-[var(--fg-secondary)]",
     featureChip:
@@ -510,6 +513,8 @@ const styles = createVuiStyleMap(styleKeys, {
     tokenStatusBar: "[&>span]:w-[calc(var(--token-status-value)*1%)]",
   },
   overrides: {
+    compactDetails:
+      "grid min-w-0 gap-1 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-row)_54%,transparent)] px-2 py-1.5 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&>summary]:grid [&>summary]:cursor-pointer [&>summary]:list-none [&>summary]:grid-cols-[14px_minmax(0,1fr)] [&>summary]:items-center [&>summary]:gap-1 [&>summary]:font-semibold [&>summary::-webkit-details-marker]:hidden [&>summary_svg]:transition-transform [&[open]>summary_svg]:rotate-90 [&_.compactDetailsOpenLabel]:hidden [&[open]_.compactDetailsOpenLabel]:inline [&[open]_.compactDetailsClosedLabel]:hidden",
     featureChip:
       "relative !grid min-h-[28px] min-w-0 !w-full max-w-full grid-cols-[auto_minmax(0,1fr)] items-center justify-start gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-1.5 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-content]]:max-w-full [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1 before:content-[''] before:h-1.5 before:w-1.5 before:shrink-0 before:rounded-full before:bg-[var(--fg-tertiary)] [&_em]:shrink-0 [&_em]:not-italic [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:whitespace-nowrap",
     featureChipActive:
