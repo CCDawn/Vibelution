@@ -205,7 +205,7 @@ describe("VUI batch migration", () => {
   it("keeps Teams source-collection stage actions compact by default", () => {
     const source = readTargetSource("routes/TeamsRoute.module.css");
     const researchActionsBlock = readStyleBlock(source, ".researchStageActions");
-    const researchActionButtonBlock = readStyleBlock(source, ".researchStageActions button,\n.researchStageActions a");
+    const researchActionButtonBlock = readStyleBlock(source, ".researchStageActions [data-vui=\"native-button\"],\n.researchStageActions a");
     const actionBlock = readStyleBlock(source, ".sourceCollectionStagePrimaryAction,\n.sourceCollectionStageSecondaryAction");
     const panelBlock = readStyleBlock(source, ".sourceCollectionPanelActions");
 

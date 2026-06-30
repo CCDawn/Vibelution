@@ -33,7 +33,7 @@ export function VSelect({
       variant="secondary"
       className={["w-full min-w-0", className].filter(Boolean).join(" ")}
     >
-      <Select.Trigger className={vuiFormControlClass(density)}>
+      <Select.Trigger data-vui="select-trigger" className={vuiFormControlClass(density)}>
         <Select.Value>{placeholder}</Select.Value>
         <Select.Indicator />
       </Select.Trigger>

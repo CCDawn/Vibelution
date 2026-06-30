@@ -13,7 +13,6 @@ import { WorkbenchDomainRoute } from "../routes/WorkbenchDomainRoute";
 import { WorkbenchModeRoute } from "../routes/WorkbenchModeRoute";
 import { postBrowserTelemetry } from "./browserTelemetry";
 import { recoverFromDynamicImportFetchError } from "./routeChunkRecovery";
-import loadingStyles from "./RouteLoadingShell.module.css";
 
 const AgentsRoute = lazyRoute(() => import("../routes/AgentsRoute").then((module) => ({ default: module.AgentsRoute })));
 type ChatCodingRouteModule = typeof import("../routes/ChatCodingRoute");
@@ -84,6 +83,14 @@ function currentPathname(): string {
   return typeof window === "undefined" ? "" : window.location.pathname;
 }
 
+const routeLoadingSurfaceClass = "grid place-items-center p-6";
+const routeLoadingPanelClass = [
+  "w-[min(360px,100%)] rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-glass",
+  "px-[18px] py-4 text-vui-fg-primary shadow-none backdrop-blur-md",
+].join(" ");
+const routeLoadingTitleClass = "block text-[var(--vui-font-chat)] font-bold leading-[1.35]";
+const routeLoadingMetaClass = "mt-1.5 block text-[var(--vui-font-xs)] leading-[1.35] text-vui-fg-tertiary";
+
 function RouteLoadingShell({ surface }: { surface: RouteErrorSurface }) {
   const label = surface === "launcher" ? "正在打开启动器" : "正在打开工作台";
   return (
@@ -92,11 +99,12 @@ function RouteLoadingShell({ surface }: { surface: RouteErrorSurface }) {
       aria-live="polite"
       aria-busy="true"
       data-vui-app={surface}
-      className={loadingStyles.surface}
+      className={routeLoadingSurfaceClass}
+      style={{ minHeight: "min(520px, calc(100dvh - 96px))" }}
     >
-      <div className={loadingStyles.panel}>
-        <strong className={loadingStyles.title}>{label}</strong>
-        <span className={loadingStyles.meta}>加载界面模块</span>
+      <div className={routeLoadingPanelClass}>
+        <strong className={routeLoadingTitleClass}>{label}</strong>
+        <span className={routeLoadingMetaClass}>加载界面模块</span>
       </div>
     </div>
   );

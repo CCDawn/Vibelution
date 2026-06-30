@@ -5,7 +5,6 @@ import { useShellI18n } from "../i18n/useShellI18n";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "./browserTelemetry";
 import { applyWorkbenchDocumentLanguage } from "./documentLanguage";
 import { applyWorkbenchDocumentTheme, readStoredWorkbenchTheme } from "./themePreference";
-import styles from "./LauncherShell.module.css";
 
 export function LauncherShell() {
   const { lang } = useShellI18n();
@@ -31,7 +30,8 @@ export function LauncherShell() {
 
   return (
     <div
-      className={styles.shell}
+      className="grid h-full min-h-0 min-w-0 overflow-hidden text-vui-fg-primary"
+      style={{ background: "var(--vui-gradient-route-soft), var(--fg-primary)" }}
       data-theme={theme}
       data-vui-app="launcher"
       data-shell="launcher"
