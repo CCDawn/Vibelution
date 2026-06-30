@@ -66,6 +66,14 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("overscroll-behavior-x: contain");
     expect(shellStyles).toContain(".returnButton");
     expect(shellStyles).toContain("width: 32px");
+
+    const compactDesktopBlock = shellStyles.slice(
+      shellStyles.indexOf("@media (max-width: 1420px)"),
+      shellStyles.indexOf("@media (max-width: 1180px)"),
+    );
+    expect(compactDesktopBlock).toContain(":where(.vui-app-appshell).topClock span:last-child");
+    expect(compactDesktopBlock).toContain(":where(.vui-app-appshell).statusBadgeValue");
+    expect(compactDesktopBlock).toContain("display: none");
   });
 
   it("keeps the light shell top bar on light surfaces with a stable brand stack", () => {

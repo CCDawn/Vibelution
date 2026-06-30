@@ -484,7 +484,7 @@ const styles = createVuiStyleMap(styleKeys, {
     featureChipRow: "!grid grid-cols-2 gap-1.5 overflow-visible rounded-none border-0 bg-transparent p-0",
     inlineMetaPill: "[&_strong]:truncate [&_strong]:whitespace-nowrap",
     layout:
-      "grid-cols-[minmax(0,min(var(--chat-left-pane-width,0px),24vw))_minmax(360px,1fr)_minmax(0,min(var(--chat-right-pane-width,0px),22vw))] max-[980px]:grid-cols-[minmax(0,min(var(--chat-left-pane-width,0px),24vw))_minmax(280px,1fr)_minmax(0,min(var(--chat-right-pane-width,0px),22vw))]",
+      "grid-cols-[minmax(0,min(var(--chat-left-pane-width,0px),24vw))_10px_minmax(360px,1fr)_10px_minmax(0,min(var(--chat-right-pane-width,0px),22vw))] max-[980px]:grid-cols-[minmax(0,min(var(--chat-left-pane-width,0px),24vw))_8px_minmax(280px,1fr)_8px_minmax(0,min(var(--chat-right-pane-width,0px),22vw))]",
     leftRail: "flex flex-col gap-[5px] p-1.5",
     rightPane: "grid grid-rows-[auto_auto_1fr] p-1.5",
     sessionContextMenuItem:

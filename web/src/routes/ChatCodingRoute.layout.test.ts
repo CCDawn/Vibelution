@@ -194,6 +194,15 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.layout).toContain("var(--chat-right-pane-width,0px)");
   });
 
+  it("keeps collapse handles in dedicated grid tracks so the conversation stays in the center column", () => {
+    expect(routeStyles.layout).toContain(
+      "grid-cols-[minmax(0,min(var(--chat-left-pane-width,0px),24vw))_10px_minmax(360px,1fr)_10px_minmax(0,min(var(--chat-right-pane-width,0px),22vw))]",
+    );
+    expect(routeStyles.layout).toContain(
+      "max-[980px]:grid-cols-[minmax(0,min(var(--chat-left-pane-width,0px),24vw))_8px_minmax(280px,1fr)_8px_minmax(0,min(var(--chat-right-pane-width,0px),22vw))]",
+    );
+  });
+
   it("centers the direct conversation reading track when both side panes are collapsed", () => {
     expect(routeSource).toContain("const bothSidePanesCollapsed = leftRailCollapsed && rightPaneCollapsed;");
     expect(routeSource).toContain("const conversationFrameClassName = bothSidePanesCollapsed");
