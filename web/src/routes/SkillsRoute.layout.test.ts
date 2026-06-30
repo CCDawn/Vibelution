@@ -4,23 +4,18 @@ import appShellSource from "../app/AppShell.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
 import routeSource from "./SkillsRoute.tsx?raw";
 
-// @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
-import { readFileSync } from "node:fs";
-
-const stylesSource = readFileSync(new URL("./SkillsRoute.module.css", import.meta.url), "utf-8");
-
 describe("SkillsRoute layout contract", () => {
   it("is mounted as an Agent management section", () => {
     expect(routerSource).toContain('path: "agents/skills"');
     expect(routerSource).toContain("<SkillsRoute />");
     expect(routerSource).not.toContain('path: "skills"');
     expect(routerSource).not.toContain('to="/agents/skills" replace');
-    expect(routeSource).toContain('<AgentManagementNav active="skills" className={styles.managementNav} />');
-    expect(routeSource.indexOf('<AgentManagementNav active="skills" className={styles.managementNav} />')).toBeGreaterThan(
-      routeSource.indexOf("</header>"),
+    expect(routeSource).toContain('<AgentManagementNav active="skills" className={managementNavClass} />');
+    expect(routeSource.indexOf('<AgentManagementNav active="skills" className={managementNavClass} />')).toBeGreaterThan(
+      routeSource.indexOf("</VRouteHeader>"),
     );
-    expect(routeSource.indexOf('<AgentManagementNav active="skills" className={styles.managementNav} />')).toBeLessThan(
-      routeSource.indexOf("styles.summaryGrid"),
+    expect(routeSource.indexOf('<AgentManagementNav active="skills" className={managementNavClass} />')).toBeLessThan(
+      routeSource.indexOf("className={summaryGridClass}"),
     );
     expect(appShellSource).not.toContain('to="/skills"');
   });
@@ -51,9 +46,9 @@ describe("SkillsRoute layout contract", () => {
     expect(routeSource).toContain("selectedSkillCommands");
     expect(routeSource).toContain("copySelectedSkillCommands");
     expect(routeSource).toContain("copy.bulkReadOnlyReason");
-    expect(routeSource).toContain("styles.bulkReadOnlyNote");
-    expect(routeSource).toContain("styles.bulkActionBar");
-    expect(routeSource).toContain("styles.selectableRow");
+    expect(routeSource).toContain("bulkReadOnlyNoteClass");
+    expect(routeSource).toContain("bulkActionBarClass");
+    expect(routeSource).toContain("selectableRowClass");
     expect(routeSource).not.toContain('method: "POST"');
     expect(routeSource).not.toContain('method: "PUT"');
     expect(routeSource).not.toContain('method: "PATCH"');
@@ -61,10 +56,14 @@ describe("SkillsRoute layout contract", () => {
   });
 
   it("keeps the narrow skill workspace in normal document flow with compact empty details", () => {
-    const breakpoint = stylesSource.slice(stylesSource.indexOf("@media (max-width: 920px)"));
-
-    expect(breakpoint).toContain(".workspace {\n    overflow: auto;\n    align-content: start;");
-    expect(breakpoint).toContain(".listPanel,\n  .detailPanel {\n    min-height: 0;");
-    expect(breakpoint).toContain(".emptyDetail {\n    min-height: 96px;\n    padding: 12px;");
+    expect(routeSource).toContain("workspaceClass");
+    expect(routeSource).toContain("max-[920px]:grid-cols-1");
+    expect(routeSource).toContain("max-[920px]:content-start");
+    expect(routeSource).toContain("max-[920px]:overflow-auto");
+    expect(routeSource).toContain("listPanelClass");
+    expect(routeSource).toContain("detailPanelClass");
+    expect(routeSource).toContain("emptyDetailClass");
+    expect(routeSource).toContain("min-h-24");
+    expect(routeSource).toContain("p-3");
   });
 });
