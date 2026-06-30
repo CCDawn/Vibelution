@@ -805,6 +805,13 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.operationText).toContain("max-w-full");
     expect(styles.messageBody).toContain("whitespace-pre-wrap");
     expect(styles.messageBody).toContain("[overflow-wrap:anywhere]");
+    expect(styles.messageBody).toContain("max-w-[min(100%,76ch)]");
+    expect(styles.markdownBody).toContain("max-w-[min(100%,76ch)]");
+    expect(styles.responseSegment_answer).toContain("[&_.markdownBody]:max-w-[min(100%,76ch)]");
+    expect(styles.assistantTurn).toContain("[&_.turnContent]:w-[min(100%,920px)]");
+    expect(styles.agentInboxTurn).toContain("[&_.turnContent]:w-[min(100%,920px)]");
+    expect(styles.groupTranscriptTurn).toContain("[&_.turnContent]:w-[min(100%,920px)]");
+    expect(styles.timelineAssistantTextCell).toContain("max-w-[min(100%,920px)]");
   });
 
   it("can render a read-only transcript without the composer", () => {
