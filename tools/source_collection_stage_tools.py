@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 
@@ -319,11 +320,46 @@ def _json_object(raw: str) -> dict[str, Any]:
     text = str(raw or "").strip()
     if not text:
         return {}
+    parsed = _parse_json_object_text(text)
+    if parsed is not None:
+        return parsed
+    extracted = _extract_json_object_text(text)
+    if extracted:
+        parsed = _parse_json_object_text(extracted)
+        if parsed is not None:
+            parsed.setdefault("_structuredResultRecoveredFromText", True)
+            return parsed
+    return {"text": text}
+
+
+def _parse_json_object_text(text: str) -> dict[str, Any] | None:
     try:
         parsed = json.loads(text)
     except Exception:
-        return {"text": text}
-    return parsed if isinstance(parsed, dict) else {"value": parsed}
+        return None
+    if isinstance(parsed, dict):
+        return parsed
+    if isinstance(parsed, str):
+        nested = _extract_json_object_text(parsed) or parsed.strip()
+        if nested and nested != text:
+            return _parse_json_object_text(nested)
+    return {"value": parsed}
+
+
+def _extract_json_object_text(text: str) -> str:
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.IGNORECASE | re.DOTALL)
+    if fenced:
+        return fenced.group(1).strip()
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"\{", text):
+        candidate = text[match.start():]
+        try:
+            parsed, end_index = decoder.raw_decode(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return candidate[:end_index].strip()
+    return ""
 
 
 def _json_list(raw: str) -> list[Any]:
