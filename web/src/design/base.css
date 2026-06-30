@@ -14,6 +14,7 @@ body {
   background: var(--bg-canvas);
   color: var(--fg-primary);
   font-size: 15px;
+  line-height: var(--vui-line-readable);
   text-rendering: optimizeLegibility;
   overflow: hidden;
 }

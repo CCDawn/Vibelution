@@ -52,12 +52,12 @@
 }
 
 .currentSessionBlock .blockEyebrow {
-  font-size: 0.62rem;
+  font-size: var(--vui-font-xs);
   letter-spacing: 0.04em;
 }
 
 .currentSessionBlock .sectionTitle {
-  font-size: 0.77rem;
+  font-size: var(--vui-font-sm);
 }
 
 .currentSessionLine {
@@ -67,7 +67,7 @@
 .blockEyebrow {
   margin: 0;
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -88,7 +88,7 @@
 .sectionTitle {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-md);
   line-height: 1.15;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -108,7 +108,7 @@
 .contextLineCompact {
   margin: 3px 0 0;
   color: var(--fg-secondary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.24;
   -webkit-line-clamp: 2;
 }
@@ -116,7 +116,7 @@
 .sectionMetaLine {
   margin: 0;
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.25;
   -webkit-line-clamp: 1;
 }
@@ -124,7 +124,7 @@
 .oneLineValue {
   margin: 3px 0 0;
   color: var(--fg-primary);
-  font-size: 0.71rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.24;
   -webkit-line-clamp: 2;
 }
@@ -132,12 +132,12 @@
 .oneLineValue span {
   margin-right: 8px;
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
 }
 
 .metricValue {
   color: var(--accent-warm-2);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   white-space: nowrap;
 }
 
@@ -150,7 +150,7 @@
 
 .backendLabel {
   color: var(--fg-tertiary);
-  font-size: 0.75rem;
+  font-size: var(--vui-font-sm);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -162,7 +162,7 @@
   padding: 3px 8px;
   border: 1px solid transparent;
   border-radius: 999px;
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   white-space: nowrap;
 }
 
@@ -174,7 +174,7 @@
   padding: 0 7px;
   border: 1px solid transparent;
   border-radius: 999px;
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   white-space: nowrap;
 }
 
@@ -186,7 +186,7 @@
   padding: 0 7px;
   border: 1px solid transparent;
   border-radius: 999px;
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   white-space: nowrap;
 }
 
@@ -272,7 +272,7 @@
 .backendNote {
   margin: 6px 0 0;
   color: var(--fg-tertiary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.32;
   overflow-wrap: anywhere;
 }
@@ -297,7 +297,7 @@
   border-radius: 7px;
   background: color-mix(in srgb, var(--surface-card) 76%, transparent);
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
 .inlineMetaPill span,
@@ -337,7 +337,7 @@
   min-height: 22px;
   padding: 2px 4px;
   border-radius: 6px;
-  font-size: 0.65rem;
+  font-size: var(--vui-font-xs);
 }
 
 .currentSessionMetaList .inlineMetaPill span,
@@ -353,7 +353,7 @@
 }
 
 .currentSessionMetaList .inlineMetaPill strong {
-  font-size: 0.65rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.1;
 }
 
@@ -368,7 +368,7 @@
   gap: 6px;
   margin-top: 6px;
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.25;
 }
 
@@ -420,7 +420,7 @@
   padding: 4px 6px;
   color: var(--fg-secondary);
   cursor: pointer;
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   list-style: none;
 }
 
@@ -457,7 +457,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.1;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -512,7 +512,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
   letter-spacing: 0;
   line-height: 1;
@@ -525,7 +525,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
   line-height: 1.1;
   text-overflow: ellipsis;
@@ -539,7 +539,7 @@
   gap: 5px;
   min-width: 0;
   color: var(--fg-tertiary);
-  font-size: 0.62rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.1;
   white-space: nowrap;
 }
@@ -572,12 +572,12 @@
 }
 
 .currentSessionBlock .activeSkillIdentity strong {
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
 }
 
 .currentSessionBlock .activeSkillMeta {
   gap: 3px;
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
 }
 
 .contextStatusCard,
@@ -686,7 +686,7 @@
   max-width: 40px;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   font-weight: 860;
   line-height: 1;
   text-align: center;
@@ -710,14 +710,14 @@
 
 .tokenStatusLabel {
   color: var(--fg-secondary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-weight: 780;
   line-height: 1.05;
 }
 
 .tokenStatusMeta {
   color: var(--fg-primary);
-  font-size: 0.75rem;
+  font-size: var(--vui-font-sm);
   font-weight: 820;
   line-height: 1.1;
 }
@@ -765,7 +765,7 @@
 .contextStatusCard .resourceMetric strong,
 .compressionStatusCard .compressionFact strong {
   overflow: hidden;
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -792,7 +792,7 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent-cool) 10%, transparent);
   color: var(--accent-cool);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   line-height: 1;
   white-space: nowrap;
 }
@@ -883,7 +883,7 @@
 
 .featureToggleText strong {
   color: var(--fg-primary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.15;
   white-space: nowrap;
 }
@@ -891,7 +891,7 @@
 .featureToggleText span {
   display: -webkit-box;
   color: var(--fg-tertiary);
-  font-size: 0.64rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.25;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -934,7 +934,7 @@
 .featureChip strong {
   min-width: 0;
   overflow-wrap: anywhere;
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
   font-weight: 650;
 }
 
@@ -945,7 +945,7 @@
   border: 1px solid color-mix(in srgb, var(--fg-tertiary) 22%, transparent);
   border-radius: 999px;
   color: var(--fg-tertiary);
-  font-size: 0.58rem;
+  font-size: var(--vui-font-xs);
   font-style: normal;
   font-weight: 760;
   line-height: 1;
@@ -1009,7 +1009,7 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--surface-card) 6%, transparent);
   color: var(--fg-tertiary);
-  font-size: 0.64rem;
+  font-size: var(--vui-font-xs);
   line-height: 1;
   text-align: center;
   white-space: nowrap;
@@ -1028,7 +1028,7 @@
 .featurePresetNote {
   margin: -1px 0 0;
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.3;
   overflow-wrap: anywhere;
   display: -webkit-box;
@@ -1126,7 +1126,7 @@
     radial-gradient(circle at 34% 24%, color-mix(in srgb, var(--accent-warm) 38%, white), transparent 34%),
     var(--vui-gradient-route-soft);
   font-family: var(--font-display);
-  font-size: 0.65rem;
+  font-size: var(--vui-font-xs);
   font-weight: 800;
 }
 
@@ -1155,7 +1155,7 @@
 
 .agentIndexCopy strong {
   font-family: var(--font-display);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-md);
   line-height: 1.2;
 }
 
@@ -1176,18 +1176,18 @@
 
 .agentIndexCopy span {
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
 }
 
 .agentIndexStatus {
   color: var(--fg-tertiary);
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
 .agentIndexWarning {
   color: var(--state-error);
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
   white-space: nowrap;
 }
@@ -1195,7 +1195,7 @@
 .agentMissingNotice {
   margin: -2px 8px 7px 45px;
   color: var(--state-error);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
@@ -1216,7 +1216,7 @@
 .agentIndexEmptyState p {
   max-width: 25ch;
   margin: 0;
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   line-height: 1.45;
 }
 
@@ -1261,7 +1261,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1269,7 +1269,7 @@
 .resourceMetric strong {
   min-width: 0;
   color: var(--fg-primary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   line-height: 1.2;
   overflow-wrap: break-word;
   word-break: normal;
@@ -1299,14 +1299,14 @@
 .compressionFact span {
   min-width: 0;
   color: var(--fg-tertiary);
-  font-size: 0.64rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.15;
 }
 
 .compressionFact strong {
   min-width: 0;
   color: var(--fg-primary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.25;
   overflow-wrap: break-word;
   word-break: normal;
@@ -1333,13 +1333,13 @@
 }
 
 .cacheStatusCard .cacheDonutCenter strong {
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
 }
 
 .cacheStatusCard .cacheDonutCenter span,
 .cacheStatusCard .cacheDonutCenter small {
   max-width: 34px;
-  font-size: 0.48rem;
+  font-size: var(--vui-font-xs);
 }
 
 .cacheStatusCard .cacheDonutStats {
@@ -1380,7 +1380,7 @@
 .petMiniAvatar .petShowcaseAvatar {
   width: 24px;
   height: 24px;
-  font-size: 0.48rem;
+  font-size: var(--vui-font-xs);
   box-shadow: none;
 }
 
@@ -1409,19 +1409,19 @@
 .companionTopLine strong {
   flex: 1 1 auto;
   color: var(--fg-primary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
 }
 
 .companionTopLine span {
   flex: 0 1 auto;
   color: var(--accent-warm-2);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
 }
 
 .companionCopy p {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 .compactDetails {
@@ -1436,7 +1436,7 @@
   gap: 4px;
   color: var(--fg-tertiary);
   cursor: pointer;
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   list-style: none;
   user-select: none;
 }
@@ -1482,7 +1482,7 @@
   border: 1px solid var(--border-soft);
   border-radius: 7px;
   background: color-mix(in srgb, var(--surface-card) 72%, transparent);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
 .inlineStat strong {
@@ -1512,7 +1512,7 @@
   border-radius: 7px;
   background: color-mix(in srgb, var(--surface-card) 72%, transparent);
   color: var(--fg-secondary);
-  font-size: 0.64rem;
+  font-size: var(--vui-font-xs);
 }
 
 .compressionStrategyRow strong {
@@ -1537,7 +1537,7 @@
   gap: 3px;
   margin: 6px 0 0;
   color: var(--fg-secondary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.35;
 }
 
@@ -1546,7 +1546,7 @@
   gap: 6px;
   margin-top: 0;
   overflow: hidden;
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.2;
 }
 
@@ -1576,7 +1576,7 @@
 
 .vitalLabelRow span {
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
 }
 
 .vitalLabelRow strong,
@@ -1588,7 +1588,7 @@
 
 .contextUsageValue {
   margin: 4px 0 0;
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   line-height: 1.35;
   overflow-wrap: anywhere;
   display: -webkit-box;
@@ -1681,7 +1681,7 @@
   box-shadow: var(--vui-shadow-soft);
   color: color-mix(in srgb, var(--accent-warm-2) 70%, white);
   font-family: var(--font-display);
-  font-size: 0.56rem;
+  font-size: var(--vui-font-xs);
   font-weight: 800;
   letter-spacing: 0.03em;
   text-shadow: 0 1px 4px color-mix(in srgb, var(--bg-canvas) 34%, transparent);
@@ -1869,7 +1869,7 @@
 
 .petShowcaseTop span {
   color: var(--accent-warm-2);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
@@ -1877,7 +1877,7 @@
   margin: 0;
   color: var(--fg-primary);
   font-family: var(--font-display);
-  font-size: 0.9rem;
+  font-size: var(--vui-font-chat);
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1887,7 +1887,7 @@
 .petShowcaseLine {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.3;
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -1918,7 +1918,7 @@
   border-radius: 7px;
   background: color-mix(in srgb, var(--surface-card) 72%, transparent);
   color: var(--fg-secondary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
@@ -1954,7 +1954,7 @@
   grid-column: 1 / -1;
   margin: 0;
   color: var(--accent-warm-2);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.32;
   overflow-wrap: anywhere;
 }
@@ -1988,7 +1988,7 @@
   border-radius: 6px 6px 0 0;
   background: color-mix(in srgb, var(--surface-card) 78%, transparent);
   color: var(--fg-secondary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   text-decoration: none;
   white-space: nowrap;
 }
@@ -2157,7 +2157,7 @@
 
 .agentSessionTabKicker {
   color: var(--fg-tertiary);
-  font-size: 0.62rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
   line-height: 1;
   white-space: nowrap;
@@ -2167,7 +2167,7 @@
   min-width: 0;
   overflow: hidden;
   color: inherit;
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   font-weight: 760;
   line-height: 1.15;
   text-overflow: ellipsis;
@@ -2184,7 +2184,7 @@
   color: var(--fg-primary);
   padding: 0 6px;
   font: inherit;
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   font-weight: 760;
   line-height: 1;
 }
@@ -2245,7 +2245,7 @@
   max-width: 82px;
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
   line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2335,7 +2335,7 @@
 
 .conversationFrameFocus {
   justify-self: center;
-  width: min(calc(100% - 96px), 1120px);
+  width: min(calc(100% - 48px), 1480px);
   max-width: 100%;
 }
 
@@ -2376,7 +2376,7 @@
   color: var(--accent-warm);
   background: var(--bg-canvas);
   font-family: "Cascadia Mono", "Consolas", monospace;
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
 }
 
 .cliAgentTerminalStatus {
@@ -2403,7 +2403,7 @@
   color: var(--accent-warm);
   background: color-mix(in srgb, var(--fg-tertiary) 70%, transparent);
   font-family: inherit;
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
   cursor: pointer;
   white-space: nowrap;
@@ -2442,7 +2442,7 @@
   color: var(--accent-warm);
   background: var(--bg-canvas);
   font-family: "Cascadia Mono", "Consolas", monospace;
-  font-size: 0.82rem;
+  font-size: var(--vui-font-md);
 }
 
 .cliAgentTerminalOutput :global(.xterm) {
@@ -2469,7 +2469,7 @@
   padding: 7px 9px;
   color: var(--accent-warm);
   background: color-mix(in srgb, var(--bg-canvas) 90%, transparent);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   font-weight: 650;
   pointer-events: none;
 }
@@ -2487,7 +2487,7 @@
   border-radius: 7px;
   background: color-mix(in srgb, var(--state-error) 10%, transparent);
   color: var(--state-error);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-md);
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
@@ -2508,7 +2508,7 @@
   border-radius: 7px;
   background: color-mix(in srgb, var(--surface-panel) 82%, var(--accent-cool) 10%);
   color: var(--fg-secondary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   line-height: 1.35;
 }
 
@@ -2552,7 +2552,7 @@
 
 .runtimeNoticeLabel {
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -2612,7 +2612,7 @@
 
 .toolApprovalHeader strong {
   color: var(--fg-primary);
-  font-size: 0.88rem;
+  font-size: var(--vui-font-chat);
   line-height: 1.25;
 }
 
@@ -2622,13 +2622,13 @@
   border: 1px solid color-mix(in srgb, var(--accent-warm) 30%, var(--border-soft));
   border-radius: 999px;
   color: var(--accent-warm-2);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
 .toolApprovalBody p {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   line-height: 1.38;
 }
 
@@ -2645,7 +2645,7 @@
   border-radius: 999px;
   color: var(--accent-cool);
   background: color-mix(in srgb, var(--accent-cool) 9%, transparent);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.25;
   white-space: nowrap;
 }
@@ -2667,7 +2667,7 @@
   border-radius: 7px;
   color: var(--fg-secondary);
   background: var(--surface-panel-muted);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   cursor: pointer;
 }
 
@@ -2834,7 +2834,7 @@
   color: var(--fg-tertiary);
   cursor: pointer;
   font: inherit;
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   font-weight: 760;
 }
 
@@ -2877,7 +2877,7 @@
   gap: 8px;
   min-width: 0;
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   line-height: 1;
 }
 
@@ -2920,7 +2920,7 @@
   gap: 7px;
   min-width: 0;
   color: var(--fg-tertiary);
-  font-size: 0.62rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.2;
 }
 
@@ -3057,7 +3057,7 @@
 
 .cacheDonutCenter strong {
   color: var(--fg-primary);
-  font-size: 0.86rem;
+  font-size: var(--vui-font-md);
   font-weight: 820;
 }
 
@@ -3067,7 +3067,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.52rem;
+  font-size: var(--vui-font-xs);
 }
 
 .cacheDonutStats {
@@ -3075,7 +3075,7 @@
   gap: 4px;
   min-width: 0;
   color: var(--fg-tertiary);
-  font-size: 0.64rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.15;
 }
 
@@ -3092,7 +3092,7 @@
 
 .cacheDonutStats b {
   color: var(--fg-secondary);
-  font-size: 0.58rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
 }
 
@@ -3204,7 +3204,7 @@
 .cacheDetailDonutPanel p {
   margin: 0;
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.4;
 }
 
@@ -3257,7 +3257,7 @@
 
 .cacheDetailSummaryGrid span {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 .cacheDetailSummaryGrid strong {
@@ -3270,7 +3270,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3286,7 +3286,7 @@
   border-radius: 8px;
   color: var(--fg-secondary);
   background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-panel-muted));
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
 .cacheDetailCalibrationNote strong,
@@ -3340,7 +3340,7 @@
   border-radius: 8px;
   background: var(--surface-panel-muted);
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.25;
 }
 
@@ -3355,7 +3355,7 @@
 .cacheDetailDonutLegend b {
   flex: 0 0 auto;
   color: var(--fg-tertiary);
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
 }
 
@@ -3381,7 +3381,7 @@
 .cacheDetailDonutCenter span,
 .cacheDetailDonutCenter small {
   max-width: 76px;
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 .cacheDetailSegmentList {
@@ -3409,12 +3409,12 @@
   gap: 8px;
   min-width: 0;
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
 .cacheDetailSegmentHeader strong {
   color: var(--fg-secondary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
 }
 
 .cacheDetailSegmentHeader span {
@@ -3469,7 +3469,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3479,7 +3479,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3512,7 +3512,7 @@
   border-radius: 999px;
   color: var(--fg-secondary);
   background: var(--surface-panel-muted);
-  font-size: 0.62rem;
+  font-size: var(--vui-font-xs);
   font-weight: 720;
   line-height: 1.25;
 }
@@ -3549,7 +3549,7 @@
   gap: 8px;
   min-width: 0;
   color: var(--fg-tertiary);
-  font-size: 0.64rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.2;
 }
 
@@ -3618,7 +3618,7 @@
 
 .cacheDetailSegmentRow em {
   color: var(--fg-secondary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-style: normal;
   white-space: nowrap;
 }
@@ -3627,7 +3627,7 @@
   display: block;
   margin-top: 2px;
   color: var(--fg-tertiary);
-  font-size: 0.64rem;
+  font-size: var(--vui-font-xs);
   font-style: normal;
 }
 
@@ -3635,7 +3635,7 @@
   padding: 8px 0;
   border-top: 1px solid var(--border-soft);
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
 @media (max-width: 720px) {
@@ -3769,7 +3769,7 @@
   border-radius: var(--radius-panel);
   background: color-mix(in srgb, var(--surface-card) 82%, transparent);
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-md);
 }
 
 .memberIndexSummary strong,
@@ -3782,7 +3782,7 @@
 
 .memberIndexSummary strong {
   color: var(--accent-cool-2);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
 .panelSearch {
@@ -3834,7 +3834,7 @@
   background: var(--surface-panel);
   color: var(--fg-primary);
   font: inherit;
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   cursor: pointer;
   box-shadow: none;
 }
@@ -3856,7 +3856,7 @@
   background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
   color: var(--accent-cool-2);
   font: inherit;
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   cursor: pointer;
 }
 
@@ -3888,7 +3888,7 @@
 
 .groupComposerField span {
   color: var(--fg-tertiary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
 }
 
 .groupComposerInput {
@@ -3900,7 +3900,7 @@
   color: var(--fg-primary);
   padding: 6px 8px;
   font: inherit;
-  font-size: 0.84rem;
+  font-size: var(--vui-font-md);
 }
 
 .groupComposerInput:disabled {
@@ -3952,12 +3952,12 @@
 
 .groupAgentOption strong {
   color: var(--fg-primary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-md);
 }
 
 .groupAgentOption small {
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
 .groupAgentOption .agentRoleTag {
@@ -3979,7 +3979,7 @@
   border: 1px dashed var(--border-soft);
   border-radius: 7px;
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   line-height: 1.4;
 }
 
@@ -3994,7 +3994,7 @@
   background: color-mix(in srgb, var(--accent-cool) 18%, transparent);
   color: var(--accent-cool-2);
   font: inherit;
-  font-size: 0.84rem;
+  font-size: var(--vui-font-md);
   cursor: pointer;
 }
 
@@ -4018,7 +4018,7 @@
   border-radius: 7px;
   color: var(--state-error);
   background: color-mix(in srgb, var(--state-error) 10%, transparent);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-md);
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
@@ -4093,7 +4093,7 @@
 .systemEntryTitle {
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.79rem;
+  font-size: var(--vui-font-sm);
   font-weight: 780;
   line-height: 1.2;
   text-overflow: ellipsis;
@@ -4103,7 +4103,7 @@
 .systemEntryMeta {
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4123,7 +4123,7 @@
   border-radius: var(--radius-control);
   color: var(--fg-secondary);
   background: color-mix(in srgb, var(--surface-card) 58%, transparent);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   font-weight: 780;
 }
 
@@ -4140,7 +4140,7 @@
   border-radius: 999px;
   color: var(--fg-secondary);
   background: color-mix(in srgb, var(--surface-panel) 78%, transparent);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   text-align: center;
 }
 
@@ -4157,7 +4157,7 @@
   color: var(--fg-tertiary);
   cursor: pointer;
   font: inherit;
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
   text-align: left;
 }
@@ -4191,7 +4191,7 @@
   border-radius: 999px;
   color: var(--fg-secondary);
   background: color-mix(in srgb, var(--surface-card) 84%, transparent);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
   text-align: center;
 }
@@ -4199,7 +4199,7 @@
 .conversationGroupHeader[data-vui] {
   justify-content: stretch;
   font: inherit;
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
 }
 
@@ -4227,7 +4227,7 @@
   background: color-mix(in srgb, var(--surface-panel) 82%, transparent);
   color: var(--fg-secondary);
   font: inherit;
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   cursor: pointer;
 }
 
@@ -4238,7 +4238,7 @@
 .sessionLoadMoreButton strong,
 .sessionLoadMoreStatus strong {
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   font-weight: 740;
   white-space: nowrap;
 }
@@ -4270,7 +4270,7 @@
   min-height: 22px;
   padding: 0 8px 0 42px;
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   font-weight: 720;
 }
 
@@ -4298,7 +4298,7 @@
   background: color-mix(in srgb, var(--surface-card) 50%, transparent);
   color: var(--fg-tertiary);
   font: inherit;
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   text-align: left;
   min-width: 0;
 }
@@ -4440,7 +4440,7 @@ a.teamTreeChild:focus-visible {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.84rem;
+  font-size: var(--vui-font-md);
   font-weight: 760;
   line-height: 1.18;
   text-overflow: ellipsis;
@@ -4455,7 +4455,7 @@ a.teamTreeChild:focus-visible {
   border-radius: 50%;
   color: var(--fg-primary);
   font-family: var(--font-body);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
   letter-spacing: 0;
   box-shadow: var(--vui-shadow-inset-accent);
@@ -4503,7 +4503,7 @@ a.teamTreeChild:focus-visible {
   padding: 0 3px;
   border: 0;
   border-radius: 999px;
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
   line-height: 1;
   white-space: nowrap;
@@ -4535,7 +4535,7 @@ a.teamTreeChild:focus-visible {
   padding: 0;
   border: 0;
   border-radius: 0;
-  font-size: 0.62rem;
+  font-size: var(--vui-font-xs);
   font-weight: 680;
   line-height: 1;
   overflow: hidden;
@@ -4583,7 +4583,7 @@ a.teamTreeChild:focus-visible {
   border-radius: 0;
   background: transparent;
   color: var(--fg-secondary);
-  font-size: 0.62rem;
+  font-size: var(--vui-font-xs);
   font-weight: 640;
   line-height: 1;
   overflow: hidden;
@@ -4600,7 +4600,7 @@ a.teamTreeChild:focus-visible {
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
   color: color-mix(in srgb, var(--accent-cool) 64%, var(--fg-secondary));
-  font-size: 0.63rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
 }
 
@@ -4621,7 +4621,7 @@ a.teamTreeChild:focus-visible {
   display: block;
   min-width: 0;
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-weight: 600;
   line-height: 1.2;
   overflow: hidden;
@@ -4639,7 +4639,7 @@ a.teamTreeChild:focus-visible {
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent-cool) 10%, transparent);
   color: color-mix(in srgb, var(--accent-cool) 72%, var(--fg-primary));
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
   line-height: 1;
   white-space: nowrap;
@@ -4660,7 +4660,7 @@ a.teamTreeChild:focus-visible {
   justify-content: center;
   min-height: 16px;
   border-radius: 999px;
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
   font-weight: 720;
   line-height: 1;
   white-space: nowrap;
@@ -4701,7 +4701,7 @@ a.teamTreeChild:focus-visible {
   flex: 0 0 auto;
   display: inline-flex;
   color: color-mix(in srgb, var(--fg-tertiary) 76%, transparent);
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
 }
 
 .sessionItemSummary,
@@ -4714,7 +4714,7 @@ a.teamTreeChild:focus-visible {
   display: block;
   overflow: hidden;
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.18;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4722,13 +4722,13 @@ a.teamTreeChild:focus-visible {
 
 .sessionItemMeta {
   color: var(--fg-tertiary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
 }
 
 .sessionAgentLine {
   margin: 3px 0 0;
   color: var(--accent-cool-2);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4741,7 +4741,7 @@ a.teamTreeChild:focus-visible {
   min-width: 0;
   gap: 3px 6px;
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.1;
 }
 
@@ -4867,7 +4867,7 @@ a.teamTreeChild:focus-visible {
   background: transparent;
   color: var(--fg-secondary);
   font: inherit;
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   font-weight: 700;
   line-height: 1;
   text-align: left;
@@ -4886,7 +4886,7 @@ a.teamTreeChild:focus-visible {
   border: 0;
   background: transparent;
   font: inherit;
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   font-weight: 700;
 }
 
@@ -4929,7 +4929,7 @@ a.teamTreeChild:focus-visible {
 .sessionItemError {
   grid-column: 1 / -1;
   margin: 0;
-  font-size: 0.82rem;
+  font-size: var(--vui-font-md);
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
@@ -4982,7 +4982,7 @@ a.teamTreeChild:focus-visible {
 
 .groupConversationHeader p {
   color: var(--accent-cool-2);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -4995,7 +4995,7 @@ a.teamTreeChild:focus-visible {
 
 .groupConversationHeader span {
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
 }
 
 .groupRefreshButton,
@@ -5015,7 +5015,7 @@ a.teamTreeChild:focus-visible {
 .groupRefreshButton {
   min-height: 32px;
   padding: 0 10px;
-  font-size: 0.8rem;
+  font-size: var(--vui-font-md);
 }
 
 .groupRefreshButton:disabled,
@@ -5059,13 +5059,13 @@ a.teamTreeChild:focus-visible {
 
 .groupManagementHeader strong {
   color: var(--fg-primary);
-  font-size: 0.86rem;
+  font-size: var(--vui-font-md);
 }
 
 .groupManagementHeader span,
 .groupManagementHint {
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   line-height: 1.35;
 }
 
@@ -5094,7 +5094,7 @@ a.teamTreeChild:focus-visible {
   background: var(--surface-card);
   color: var(--fg-secondary);
   font: inherit;
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   cursor: pointer;
 }
 
@@ -5136,7 +5136,7 @@ a.teamTreeChild:focus-visible {
 .groupTitleField span,
 .groupModeSelect span {
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
 .groupTitleField input,
@@ -5150,7 +5150,7 @@ a.teamTreeChild:focus-visible {
   color: var(--fg-primary);
   padding: 0 9px;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--vui-font-md);
 }
 
 .groupManagementCount {
@@ -5166,13 +5166,13 @@ a.teamTreeChild:focus-visible {
 
 .groupManagementCount span {
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   line-height: 1;
 }
 
 .groupManagementCount strong {
   color: var(--fg-primary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-md);
   line-height: 1.15;
 }
 
@@ -5220,7 +5220,7 @@ a.teamTreeChild:focus-visible {
   color: var(--fg-primary);
   background: color-mix(in srgb, var(--accent-cool) 18%, var(--surface-card));
   font-family: var(--font-body);
-  font-size: 0.62rem;
+  font-size: var(--vui-font-xs);
   font-weight: 820;
   overflow: hidden;
   box-shadow: var(--vui-shadow-inset-accent);
@@ -5241,13 +5241,13 @@ a.teamTreeChild:focus-visible {
 }
 
 .groupMemberCopy strong {
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   line-height: 1.15;
 }
 
 .groupMemberCopy small {
   color: var(--fg-tertiary);
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.1;
 }
 
@@ -5259,7 +5259,7 @@ a.teamTreeChild:focus-visible {
 
 .agentMissingInline {
   color: var(--state-error);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
 }
 
@@ -5267,7 +5267,7 @@ a.teamTreeChild:focus-visible {
   display: block;
   margin-top: 4px;
   color: var(--state-error);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.25;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5312,7 +5312,7 @@ a.teamTreeChild:focus-visible {
   gap: 8px;
   min-width: 0;
   color: var(--fg-tertiary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
 }
 
 .projectBusEventActions {
@@ -5330,7 +5330,7 @@ a.teamTreeChild:focus-visible {
   background: color-mix(in srgb, var(--state-warning) 10%, var(--surface-card));
   color: var(--fg-primary);
   font: inherit;
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   cursor: pointer;
 }
 
@@ -5358,7 +5358,7 @@ a.teamTreeChild:focus-visible {
 .projectBusEventBody {
   margin: 0;
   color: var(--fg-primary);
-  font-size: 0.84rem;
+  font-size: var(--vui-font-md);
   line-height: 1.38;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
@@ -5395,7 +5395,7 @@ a.teamTreeChild:focus-visible {
   flex-wrap: wrap;
   gap: 6px;
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
 .projectBusEventMeta span,
@@ -5435,7 +5435,7 @@ a.teamTreeChild:focus-visible {
   justify-content: space-between;
   gap: 12px;
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
 .groupRoundDivider::before,
@@ -5465,7 +5465,7 @@ a.teamTreeChild:focus-visible {
   border-radius: 999px;
   color: var(--fg-tertiary);
   background: color-mix(in srgb, var(--surface-card) 66%, transparent);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   line-height: 1.35;
   text-align: center;
   overflow-wrap: anywhere;
@@ -5490,13 +5490,13 @@ a.teamTreeChild:focus-visible {
 
 .groupTopicBubble span {
   color: var(--accent-warm-2);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
 }
 
 .groupTopicBubble p {
   margin: 0;
-  font-size: 0.84rem;
+  font-size: var(--vui-font-md);
   line-height: 1.34;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
@@ -5526,7 +5526,7 @@ a.teamTreeChild:focus-visible {
   color: var(--accent-cool-2);
   background: color-mix(in srgb, var(--accent-cool) 18%, var(--surface-card));
   font-family: var(--font-body);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   font-weight: 820;
   box-shadow: var(--vui-shadow-inset-accent);
 }
@@ -5561,14 +5561,14 @@ a.teamTreeChild:focus-visible {
 .groupBubbleHeader span,
 .groupBubbleMeta {
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
 .groupBubbleBody {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.92rem;
+  font-size: var(--vui-font-chat);
   line-height: 1.58;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
@@ -5590,7 +5590,7 @@ a.teamTreeChild:focus-visible {
   background: transparent;
   color: var(--accent-cool-2);
   font: inherit;
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
 }
 
@@ -5664,7 +5664,7 @@ a.teamTreeChild:focus-visible {
 .groupMessageCard p {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.9rem;
+  font-size: var(--vui-font-chat);
   line-height: 1.55;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
@@ -5717,7 +5717,7 @@ a.teamTreeChild:focus-visible {
   gap: 7px;
   min-height: 38px;
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   white-space: nowrap;
 }
 

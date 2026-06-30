@@ -448,6 +448,139 @@ def test_supervised_worktree_flow_stops_when_baseline_provider_transport_fails(t
     assert calls == {"modifier": 0, "worktree": 0}
 
 
+@pytest.mark.parametrize("modifier_status", ["cancelled", "failed"])
+def test_supervised_worktree_flow_stops_when_candidate_modifier_does_not_finish(tmp_path, modifier_status):
+    project_root = tmp_path / "project"
+    _init_repo(project_root)
+    (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
+    _write_bundle(project_root)
+    _run_git(project_root, "add", ".")
+    _run_git(project_root, "commit", "-m", "init")
+    calls = {"candidate_eval": 0}
+
+    def worktree_factory(root: Path, run_id: str) -> dict:
+        candidate = _make_candidate_repo(tmp_path, root)
+        return {
+            "path": str(candidate),
+            "baseHead": "base",
+            "checkpointCommit": "base",
+            "checkpointRef": "",
+            "trackedDirty": False,
+            "untrackedFiles": [],
+        }
+
+    def evaluator(_: Path, bundle_name: str, role: str, __: dict) -> dict:
+        if role == "candidate":
+            calls["candidate_eval"] += 1
+        return _fake_evaluator(_, bundle_name, role, __)
+
+    def modifier(_: Path, __: str, ___: dict) -> dict:
+        return {
+            "status": modifier_status,
+            "summary": f"candidate modifier {modifier_status}",
+            "conversationSummary": {
+                "conversation_backend": {
+                    "enabled": True,
+                    "session_id": "session-improver",
+                    "observed_active_turn_id": "turn-improve",
+                }
+            },
+        }
+
+    snapshot = service.run_supervised_worktree_flow(
+        {"sourceKind": "bundle", "bundleName": "closed_loop_v1", "mode": "manual"},
+        project_root=project_root,
+        dependencies=service.WorktreeRunDependencies(
+            evaluation_runner=evaluator,
+            candidate_modifier=modifier,
+            worktree_factory=worktree_factory,
+        ),
+    )
+
+    assert snapshot["status"] == modifier_status
+    assert snapshot["phase"] == "candidate_modify"
+    assert snapshot["runtimeStatus"] == modifier_status
+    assert snapshot["outcome"] == f"candidate_modify_{modifier_status}"
+    assert snapshot["candidate"] == {}
+    assert snapshot["decision"] == {}
+    assert calls["candidate_eval"] == 0
+    assert snapshot["candidateConversationSessionId"] == "session-improver"
+    improve_step = next(item for item in snapshot["workflowSteps"] if item["id"] == "improve")
+    assert improve_step["status"] == modifier_status
+    assert improve_step["conversationSessionId"] == "session-improver"
+
+
+def test_supervised_worktree_flow_stops_when_candidate_modifier_makes_no_changes(tmp_path):
+    project_root = tmp_path / "project"
+    _init_repo(project_root)
+    (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
+    _write_bundle(project_root)
+    _run_git(project_root, "add", ".")
+    _run_git(project_root, "commit", "-m", "init")
+    calls = {"candidate_eval": 0}
+
+    def worktree_factory(root: Path, run_id: str) -> dict:
+        candidate = tmp_path / "candidate-no-change"
+        _init_repo(candidate)
+        for source in root.rglob("*"):
+            if not source.is_file():
+                continue
+            rel = source.relative_to(root)
+            if ".git" in rel.parts:
+                continue
+            target = candidate / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(source.read_bytes())
+        _run_git(candidate, "add", ".")
+        _run_git(candidate, "commit", "-m", "base")
+        return {
+            "path": str(candidate),
+            "baseHead": "base",
+            "checkpointCommit": "base",
+            "checkpointRef": "",
+            "trackedDirty": False,
+            "untrackedFiles": [],
+        }
+
+    def evaluator(_: Path, bundle_name: str, role: str, __: dict) -> dict:
+        if role == "candidate":
+            calls["candidate_eval"] += 1
+        return _fake_evaluator(_, bundle_name, role, __)
+
+    def modifier(_: Path, __: str, ___: dict) -> dict:
+        return {
+            "status": "success",
+            "summary": "candidate only inspected files",
+            "conversationSummary": {
+                "conversation_backend": {
+                    "enabled": True,
+                    "session_id": "session-improver",
+                    "observed_active_turn_id": "turn-improve",
+                }
+            },
+        }
+
+    snapshot = service.run_supervised_worktree_flow(
+        {"sourceKind": "bundle", "bundleName": "closed_loop_v1", "mode": "manual"},
+        project_root=project_root,
+        dependencies=service.WorktreeRunDependencies(
+            evaluation_runner=evaluator,
+            candidate_modifier=modifier,
+            worktree_factory=worktree_factory,
+        ),
+    )
+
+    assert snapshot["status"] == "failed"
+    assert snapshot["phase"] == "candidate_modify"
+    assert snapshot["runtimeStatus"] == "failed"
+    assert snapshot["outcome"] == "candidate_modify_no_changes"
+    assert snapshot["candidateModification"]["status"] == "no_changes"
+    assert snapshot["candidate"] == {}
+    assert snapshot["decision"] == {}
+    assert calls["candidate_eval"] == 0
+    assert snapshot["workflowSteps"][1]["status"] == "failed"
+
+
 def test_merge_analysis_blocks_when_main_workspace_touched_same_file(tmp_path):
     project_root = tmp_path / "project"
     _init_repo(project_root)
@@ -938,6 +1071,70 @@ def test_force_cancel_active_supervised_worktree_run_for_shutdown_releases_snaps
     cancelled_event = next(item for item in scene_events if item[2] == "supervised_worktree_run.shutdown_cancelled")
     assert cancelled_event[1] == "shutdown"
     assert cancelled_event[3]["lifecycle"] is True
+
+
+def test_get_active_run_reconciles_stopped_candidate_conversation(monkeypatch, tmp_path):
+    monkeypatch.setattr(service.work_run_store, "WORK_RUNS_DIR", tmp_path / "work_runs")
+    monkeypatch.setattr(service, "record_runtime_scene_event", lambda *args, **kwargs: {"accepted": True})
+    monkeypatch.setattr(service, "_ACTIVE_RUN_ID", None)
+    service._RUN_CANCEL_EVENTS.clear()
+    run_id = "swte-orphaned-candidate"
+    turn_id = "session-candidate-turn-1"
+    service._persist_snapshot(
+        {
+            "runId": run_id,
+            "runKind": service.RUN_KIND,
+            "leases": service.RUN_LEASES,
+            "status": "running",
+            "phase": "candidate_modify",
+            "runtimeStatus": "running",
+            "outcome": "",
+            "startedAt": "2026-05-22T10:00:00+00:00",
+            "updatedAt": "2026-05-22T10:01:00+00:00",
+            "finishedAt": "",
+            "latestMessage": "候选 agent 正在反思并修改自身。",
+            "candidateWorktree": {"path": str(tmp_path / "candidate"), "preserved": True},
+            "candidateModification": {},
+            "candidate": {},
+            "decision": {},
+            "mergeAnalysis": {},
+            "workflowProgress": {
+                "improve": {
+                    "stepId": "improve",
+                    "status": "running",
+                    "phase": "conversation_turn_running",
+                    "conversationSessionId": "session-candidate",
+                    "conversationTurnId": turn_id,
+                    "livePreview": "正在改良",
+                }
+            },
+        },
+        active_run_id=run_id,
+    )
+    service._work_run_store().persist_snapshot(
+        "chat_turn",
+        {
+            "runId": turn_id,
+            "status": "stopped_by_user",
+            "runtimeStatus": "force_stopped",
+            "updatedAt": "2026-05-22T10:02:00+00:00",
+            "finishedAt": "2026-05-22T10:02:00+00:00",
+        },
+        active_run_id="",
+    )
+
+    active = service.get_active_supervised_worktree_run()
+
+    assert active is None
+    persisted = service.get_supervised_worktree_run(run_id)
+    assert persisted is not None
+    assert persisted["status"] == "cancelled"
+    assert persisted["phase"] == "candidate_modify"
+    assert persisted["runtimeStatus"] == "cancelled"
+    assert persisted["outcome"] == "candidate_modify_cancelled"
+    assert persisted["candidateModification"]["status"] == "cancelled"
+    assert persisted["candidate"] == {}
+    assert persisted["workflowSteps"][1]["status"] == "cancelled"
 
 
 def test_shutdown_cancel_stops_flow_before_candidate_work(tmp_path, monkeypatch):

@@ -480,6 +480,40 @@ def test_knowledge_steward_policy_includes_skill_library_search_tool():
     ]
 
 
+def test_research_agent_creation_and_readiness_report_expose_unified_memory_search(knowledge_env):
+    research_agent = agent_directory_service.create_agent_instance(
+        display_name="Research Memory Agent",
+        primary_mode="research",
+        role_key="research_paper_reader",
+    )
+    research_team = team_service.create_team(
+        name="Research Memory Team",
+        members=[{"agentId": research_agent["agentId"], "role": "member"}],
+    )
+    team_knowledge_service.create_knowledge_base(
+        research_team["teamId"],
+        name="Research Memory KB",
+        actor_agent_id=research_agent["agentId"],
+    )
+
+    assert "unified_memory_search_tool" in research_agent["toolPolicy"]["allowedTools"]
+    assert research_agent["toolPolicy"]["preferredTools"][0] == "unified_memory_search_tool"
+
+    report = team_knowledge_service.get_agent_memory_readiness_report(agent_id=knowledge_env["lead"]["agentId"])
+    row = next(item for item in report["agents"] if item["agentId"] == research_agent["agentId"])
+
+    assert report["schemaVersion"] == team_knowledge_service.SCHEMA_VERSION
+    assert report["operatingBoundary"]["readOnly"] is True
+    assert report["operatingBoundary"]["mutatesFormalKnowledge"] is False
+    assert report["summary"]["agentCount"] >= 4
+    assert report["summary"]["unifiedMemorySearchToolAgentCount"] >= 1
+    assert report["summary"]["visibleKnowledgeBaseCount"] >= 1
+    assert row["memorySearch"]["hasUnifiedMemorySearchTool"] is True
+    assert row["memorySearch"]["primarySearchTool"] == "unified_memory_search_tool"
+    assert row["formalKnowledge"]["visibleKnowledgeBaseCount"] == 1
+    assert row["formalKnowledge"]["effectiveReadScope"] == "team_membership_and_owner_acl"
+
+
 def test_global_knowledge_steward_can_prepare_formal_kb_governance_without_applying(knowledge_env):
     steward_id = agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
     source = _create_central_source_artifact(

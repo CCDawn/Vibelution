@@ -1202,6 +1202,12 @@ class ToolExecutor:
             not bool(getattr(packet, "allow_git_commit", True))
             and normalized_tool in cls._RUNTIME_GOAL_GIT_BLOCKED_TOOLS
         ):
+            if (
+                normalized_tool == "cli_tool"
+                and profile == "supervised_evaluation"
+                and cls._is_supervised_evaluation_validation_cli(tool_args)
+            ):
+                return None
             return (
                 "[运行目标包] 当前能力边界禁止 Git 提交、重启或可能触发 Git 写入的命令。"
                 f"能力 Profile: {profile or 'unknown'}；工具 `{normalized_tool}` 已被拦截。"
@@ -1215,6 +1221,32 @@ class ToolExecutor:
                 f"能力 Profile: {profile or 'unknown'}；工具 `{normalized_tool}` 已被拦截。"
             )
         return None
+
+    @classmethod
+    def _is_supervised_evaluation_validation_cli(cls, tool_args: dict) -> bool:
+        command = str((tool_args or {}).get("command") or "").strip()
+        if not command:
+            return False
+        lowered = command.lower()
+        blocked_fragments = ("&&", "||", "|", ">", "<", "\n", "\r", "`", "$(")
+        if any(fragment in lowered for fragment in blocked_fragments):
+            return False
+        blocked_patterns = (
+            r"\bgit\s+(?:commit|push|merge|reset|checkout|switch|branch|tag|rebase|cherry-pick)\b",
+            r"\b(?:remove-item|del|erase|rmdir)\b",
+            r"(^|\s)rm\s+",
+            r"\btrigger_self_restart_tool\b",
+        )
+        if any(re.search(pattern, lowered) for pattern in blocked_patterns):
+            return False
+        return bool(
+            re.match(
+                r'^(?:&\s*)?(?:(?:"[^"]*(?:python|py)(?:\.exe)?")|(?:[^\s"]*(?:python|py)(?:\.exe)?))\s+-m\s+pytest(?:\s|$)',
+                command,
+                flags=re.IGNORECASE,
+            )
+            or re.match(r"^pytest(?:\.exe)?(?:\s|$)", command, flags=re.IGNORECASE)
+        )
 
     @staticmethod
     def _check_agent_tool_policy_block(tool_name: str, tool_args: dict) -> Optional[str]:

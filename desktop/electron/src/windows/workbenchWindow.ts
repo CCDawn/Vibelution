@@ -9,6 +9,12 @@ export function createWorkbenchWindow(url: string, paths: DesktopPaths): Browser
     title: "Vibelution Workbench",
     icon: resolveWorkspaceIconPath(paths),
     backgroundColor: "#f7fafc",
+    titleBarStyle: "hidden",
+    titleBarOverlay: {
+      color: "#f7fafc",
+      symbolColor: "#475467",
+      height: 34
+    },
     webPreferences: {
       preload: resolvePreloadPath(paths),
       contextIsolation: true,
