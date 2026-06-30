@@ -152,14 +152,21 @@ function renderTree(overrides: Partial<{
 
 describe("ConversationIndexTree", () => {
   it("renders direct, grouped room, team, and standalone group sections together", () => {
-    const markup = renderTree();
+    const markup = renderTree({
+      collapsedConversationGroups: {
+        ...DEFAULT_COLLAPSED_CONVERSATION_GROUPS,
+        teams: false,
+        setupTeams: false,
+        standaloneGroups: false,
+      },
+    });
 
     expect(markup).toContain("用户会话");
     expect(markup).toContain("用户改名");
     expect(markup).toContain("项目群聊");
     expect(markup).toContain("研究团队");
     expect(markup).toContain("待配置团队");
-    expect(markup).not.toContain("空团队");
+    expect(markup).toContain("空团队");
     expect(markup).toContain("未归属群聊");
     expect(markup).toContain("团队群聊");
   });
@@ -186,7 +193,8 @@ describe("ConversationIndexTree", () => {
 
     expect(markup).toContain("用户会话");
     expect(markup).not.toContain("用户改名");
-    expect(markup).toContain("研究团队");
+    expect(markup).toContain("团队");
+    expect(markup).not.toContain("研究团队");
     expect(markup).toContain("待配置团队");
     expect(markup).toContain("未归属群聊");
   });

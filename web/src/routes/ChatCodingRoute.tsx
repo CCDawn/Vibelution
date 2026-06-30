@@ -4347,7 +4347,7 @@ export function ChatCodingRoute() {
     : activeSkillStatus === "missing"
       ? (lang === "zh" ? "缺失" : "missing")
       : (lang === "zh" ? "生效中" : "active");
-  const activeSkillStatusClass = activeSkillStatus === "stale"
+  const activeSkillStatusStyle = activeSkillStatus === "stale"
     ? styles.activeSkillStatus_stale
     : activeSkillStatus === "missing"
       ? styles.activeSkillStatus_missing
@@ -4860,7 +4860,7 @@ export function ChatCodingRoute() {
             : t("petCompanionStable");
   const petPresetLabel = petAvatarPresetLabel(t, pet?.avatarPreset);
   const petAvatarPresetKey = getPetAvatarPresetKey(pet?.avatarPreset);
-  const petAvatarSkinClass = styles[`petShowcaseAvatar_${petAvatarPresetKey}`] ?? styles.petShowcaseAvatar_default;
+  const petAvatarSkinStyle = styles[`petShowcaseAvatar_${petAvatarPresetKey}`] ?? styles.petShowcaseAvatar_default;
   const petAvatarSymbol = getPetAvatarSymbol(pet?.avatarPreset, pet?.name);
   const petInteractionLabels = {
     group: lang === "zh" ? "宠物互动" : "Pet interactions",
@@ -6660,7 +6660,7 @@ export function ChatCodingRoute() {
           ) : null}
           {activeSkillSummary ? (
             <section
-              className={`${styles.activeSkillStatus} ${activeSkillStatusClass}`}
+              className={`${styles.activeSkillStatus} ${activeSkillStatusStyle}`}
               title={activeSkillTitle}
               aria-label={lang === "zh" ? "当前 active skill 状态" : "Current active skill status"}
             >
@@ -6795,7 +6795,7 @@ export function ChatCodingRoute() {
           <p className={styles.contextLineCompact}>{mentalSummary}</p>
           <div className={styles.companionCompact}>
             <div className={styles.petMiniAvatar} aria-hidden="true">
-              <div className={`${styles.petShowcaseAvatar} ${petAvatarSkinClass}`}>
+              <div className={`${styles.petShowcaseAvatar} ${petAvatarSkinStyle}`}>
                 <span className={styles.petShowcaseEarLeft} />
                 <span className={styles.petShowcaseEarRight} />
                 <span className={styles.petShowcaseFace}>

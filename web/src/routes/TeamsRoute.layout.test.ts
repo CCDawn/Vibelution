@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-// @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
-import { readFileSync } from "node:fs";
 import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
 import routeSource from "./TeamsRoute.tsx?raw";
 import routeStyles from "./TeamsRoute.styles";
+import routeStylesModuleSource from "./TeamsRoute.styles.ts?raw";
 import routerSource from "../app/router.tsx?raw";
 
-const routeStylesSource = readFileSync(new URL("./TeamsRoute.legacy.css", import.meta.url), "utf-8");
+const routeStylesSource = [
+  routeStylesModuleSource,
+  ...Object.keys(routeStyles).map((key) => `.${key}`),
+  ...Object.values(routeStyles),
+].join("\n");
 
 describe("TeamsRoute layout contract", () => {
   it("uses shell language state without loading the full app dictionary", () => {
@@ -229,13 +232,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain('view: "graph"');
     expect(routeSource).toContain("teamId: selectedTeam.teamId");
     expect(routeSource).toContain("teamId: selectedTeam?.teamId");
-    expect(routeStylesSource).toContain("grid-template-columns: repeat(auto-fit, minmax(300px, 1fr))");
+    expect(routeStyles.teamMemoryIndex).toContain("grid-cols-[repeat(auto-fit,minmax(300px,1fr))]");
     expect(routeStylesSource).toContain(".teamMemoryMemberTable");
     expect(routeStylesSource).toContain(".teamMemoryMemberHeading");
     expect(routeStylesSource).toContain(".teamMemoryActionRail");
-    expect(routeStylesSource).toContain(".teamMemoryMemberHeading {\n  display: none;");
-    expect(routeStylesSource).toContain(".teamMemoryMemberActions a span {\n  display: none;");
-    expect(routeStylesSource).toContain("min-height: 44px");
+    expect(routeStyles.teamMemoryMemberHeading).toContain("hidden");
+    expect(routeStyles.teamMemoryMemberActions).toContain("[&_a_span]:hidden");
+    expect(routeStyles.teamMemoryActionRail).toContain("min-h-[44px]");
   });
 
   it("keeps only the fixed research and AI search teams in the picker", () => {
@@ -1131,35 +1134,46 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStylesSource).toContain(".sourceCollectionResultSourceMissing");
     expect(routeStylesSource).toContain(".sourceCollectionFilterBar");
     expect(routeStylesSource).toContain(".sourceCollectionFilterActive");
-    expect(routeStylesSource).toContain("grid-template-columns: minmax(220px, 1fr) minmax(80px, 112px) minmax(150px, 240px)");
-    expect(routeStylesSource).toContain("grid-template-rows: auto auto auto");
+    expect(routeStyles.sourceCollectionResultStatus).toContain(
+      "grid-cols-[minmax(220px,1fr)_minmax(80px,112px)_minmax(150px,240px)]",
+    );
+    expect(routeStyles.sourceCollectionResultStatus).toContain("grid-rows-[auto_auto_auto]");
     expect(routeStylesSource).toContain(".sourceCollectionCandidateListShell");
-    expect(routeStylesSource).toContain("overflow-y: auto");
-    expect(routeStylesSource).toContain("scrollbar-gutter: stable");
-    expect(routeStylesSource).toContain("align-items: start");
-    expect(routeStylesSource).toContain("align-content: start");
-    expect(routeStylesSource).toContain("align-self: start");
-    expect(routeStylesSource).toContain("min-height: 0");
+    expect(routeStyles.sourceCollectionCandidateListShell).toContain("overflow-y-auto");
+    expect(routeStyles.sourceCollectionCandidateListShell).toContain("[scrollbar-gutter:stable]");
+    expect(routeStyles.sourceCollectionCandidateListShell).toContain("items-start");
+    expect(routeStyles.sourceCollectionCandidateListShell).toContain("content-start");
+    expect(routeStyles.sourceCollectionCandidateListShell).toContain("self-start");
+    expect(routeStyles.sourceCollectionCandidateListShell).toContain("min-h-0");
     expect(routeStylesSource).not.toContain("grid-template-rows: auto minmax(0, 1fr) auto auto");
-    expect(routeStylesSource).toContain("grid-template-columns: repeat(5, minmax(0, 1fr))");
+    expect(routeStyles.sourceCollectionFilterBar).toContain("grid-cols-[repeat(5,minmax(0,1fr))]");
     expect(routeStylesSource).not.toContain("min-height: 122px");
     expect(routeStylesSource).not.toContain("min-height: 96px");
-    expect(routeStylesSource).toContain("grid-template-columns: 44px minmax(0, 1fr)");
-    expect(routeStylesSource).toContain("-webkit-line-clamp: 2");
-    expect(routeStylesSource).not.toContain("grid-template-columns: 58px minmax(0, 1fr)");
+    expect(routeStyles.sourceCollectionTraceBody).toContain("grid-cols-[44px_minmax(0,1fr)]");
+    expect(routeStyles.sourceCollectionTraceBody).toContain("[&_p]:line-clamp-2");
+    expect(routeStyles.sourceCollectionTraceBody).not.toContain("grid-cols-[58px_minmax(0,1fr)]");
     expect(routeStylesSource).not.toMatch(/\.sourceCollectionTraceBody p \{[\s\S]*?-webkit-line-clamp: 3/);
-    expect(routeStylesSource).toContain("grid-template-columns: minmax(0, 1fr) minmax(320px, 380px)");
-    expect(routeStylesSource).toContain("isolation: isolate");
-    expect(routeStylesSource).toContain("grid-template-rows: auto auto minmax(0, 1fr)");
-    expect(routeStylesSource).toContain("grid-template-columns: minmax(120px, 0.24fr) minmax(0, 1fr) max-content");
-    expect(routeStylesSource).toContain("@media (max-width: 1320px)");
-    expect(routeStylesSource).toContain("grid-column: 1 / -1");
-    expect(routeStylesSource).toContain("grid-row: 2");
-    expect(routeStylesSource).toContain("grid-template-columns: repeat(3, max-content)");
-    expect(routeStylesSource).toContain("grid-template-columns: repeat(3, minmax(0, 1fr))");
-    expect(routeStylesSource).toContain("user-select: none");
-    expect(routeStylesSource).toContain("white-space: nowrap");
-    expect(routeStylesSource).toContain("writing-mode: horizontal-tb");
+    expect(routeStyles.sourceCollectionFocusedPanel).toContain(
+      "grid-cols-[minmax(0,1fr)_minmax(320px,380px)]",
+    );
+    expect(routeStyles.sourceCollectionFocusedPanel).toContain("isolate");
+    expect(routeStyles.sourceCollectionStageWorkspace).toContain("grid-rows-[auto_auto_minmax(0,1fr)]");
+    expect(routeStyles.sourceCollectionStageCardHead).toContain(
+      "grid-cols-[minmax(120px,0.24fr)_minmax(0,1fr)_max-content]",
+    );
+    expect(routeStyles.sourceCollectionStageCardHead).toContain("max-[1320px]:grid-cols-[minmax(0,1fr)]");
+    expect(routeStyles.sourceCollectionStageCardHead).toContain(
+      "max-[1320px]:[&_.sourceCollectionStageProjection]:col-span-full",
+    );
+    expect(routeStyles.sourceCollectionStageCardHead).toContain(
+      "max-[1320px]:[&_.sourceCollectionStageProjection]:row-start-2",
+    );
+    expect(routeStyles.canvasLayoutModeSwitch).toContain("grid-cols-[repeat(auto-fit,minmax(86px,max-content))]");
+    expect(routeStyles.toolbarActions).toContain("flex-wrap");
+    expect(routeStyles.sourceCollectionStageModules).toContain("grid-cols-[repeat(3,minmax(0,1fr))]");
+    expect(routeStyles.sourceCollectionPagination).toContain("select-none");
+    expect(routeStyles.sourceCollectionPagination).toContain("whitespace-nowrap");
+    expect(routeStyles.sourceCollectionPagination).toContain("[writing-mode:horizontal-tb]");
     expect(routeStyles.sourceCollectionControlPanel).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageModules).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageCard).toBeTypeOf("string");
@@ -1255,9 +1269,23 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.aiSearchRunRefs).toBeTypeOf("string");
     expect(routeStyles.workspaceEmpty).toBeTypeOf("string");
     expect(routeStyles.emptyCanvasPanel).toBeTypeOf("string");
-    expect(routeStylesSource).toContain("height: 100%");
-    expect(routeStylesSource).toContain("overflow: hidden");
+    expect(routeStyles.workspaceResearchCanvas).toContain("h-full");
+    expect(routeStyles.workspaceResearchCanvas).toContain("grid-cols-[minmax(520px,1fr)_minmax(300px,380px)]");
+    expect(routeStyles.workspaceResearchCanvas).toContain("overflow-hidden");
+    expect(routeStyles.workflowGraphFrame).toContain("h-full");
+    expect(routeStyles.workflowGraphFrame).toContain("overflow-hidden");
+    expect(routeStyles.canvasPanel).toContain("!flex");
+    expect(routeStyles.inspector).toContain("!flex");
     expect(routeStylesSource).toContain(".canvasLayoutModeSwitch");
+  });
+
+  it("uses a subtle mesh canvas background instead of repeated horizontal route stripes", () => {
+    for (const className of [routeStyles.canvas, routeStyles.emptyCanvasPanel]) {
+      expect(className).toContain("[background-image:linear-gradient(to_right");
+      expect(className).toContain("linear-gradient(to_bottom");
+      expect(className).toContain("[background-size:32px_32px]");
+      expect(className).not.toContain("vui-gradient-route-soft");
+    }
   });
 
   it("keeps the whole knowledge collection completion action on the phase card, not the steward stage card", () => {
@@ -1400,6 +1428,14 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("styles.nodeRoleBadgeLead");
     expect(routeSource).toContain("styles.nodeRoleBadgeAdvisor");
     expect(routeSource).toContain("styles.nodeRoleBadgeSteward");
+    expect(routeStyles.canvasViewport).toContain("h-[760px]");
+    expect(routeStyles.canvasViewport).toContain("w-[1180px]");
+    expect(routeStyles.canvasViewport).toContain("[transform:scale(var(--canvas-scale,1))]");
+    expect(routeStyles.edges).toContain("absolute");
+    expect(routeStyles.edges).toContain("[transform:translate(var(--canvas-offset-x,0px),var(--canvas-offset-y,0px))]");
+    expect(routeStyles.node).toContain("!absolute");
+    expect(routeStyles.node).toContain("left-[calc(var(--canvas-offset-x,0px)+var(--node-x,0px))]");
+    expect(routeStyles.node).toContain("top-[calc(var(--canvas-offset-y,0px)+var(--node-y,0px))]");
   });
 
   it("keeps read-only research canvas auto layout visual-only and deterministic", () => {
