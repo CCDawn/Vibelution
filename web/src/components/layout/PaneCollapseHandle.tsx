@@ -2,7 +2,6 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { KeyboardEvent, MouseEvent, PointerEvent, ReactNode } from "react";
 
 import { VIconButton } from "../vui";
-import styles from "./PaneCollapseHandle.module.css";
 
 type PaneSide = "left" | "right";
 
@@ -26,6 +25,16 @@ function stopHandleDrag(event: PointerEvent<HTMLButtonElement> | MouseEvent<HTML
   event.stopPropagation();
 }
 
+const paneHandleClass = "relative";
+const paneToggleButtonClass = [
+  "absolute left-1/2 top-1/2 z-[2] h-10 w-6 min-w-0 -translate-x-1/2 -translate-y-1/2 px-0",
+  "rounded-[8px] border-vui-border-subtle bg-vui-surface-glass text-vui-fg-secondary shadow-[var(--vui-shadow-soft)]",
+  "transition-[border-color,background-color,color,box-shadow] duration-150",
+  "hover:border-vui-accent-warm hover:bg-vui-control-muted hover:text-[var(--accent-warm-2)] hover:shadow-[var(--vui-shadow-accent)]",
+  "focus-visible:border-vui-accent-warm focus-visible:bg-vui-control-muted focus-visible:text-[var(--accent-warm-2)] focus-visible:shadow-[var(--vui-shadow-accent)]",
+  "[&_svg]:shrink-0",
+].join(" ");
+
 export function PaneCollapseHandle({
   side,
   collapsed,
@@ -47,7 +56,7 @@ export function PaneCollapseHandle({
     : collapsed ? "left" : "right";
   const Icon = iconDirection === "left" ? ChevronLeft : ChevronRight;
   const rootClassName = [
-    styles.handle,
+    paneHandleClass,
     className,
     active ? activeClassName : "",
   ].filter(Boolean).join(" ");
@@ -67,7 +76,7 @@ export function PaneCollapseHandle({
       {children}
       <VIconButton
         type="button"
-        className={styles.toggleButton}
+        className={paneToggleButtonClass}
         label={label}
         title={label}
         aria-pressed={collapsed}

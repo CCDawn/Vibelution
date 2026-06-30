@@ -37,7 +37,7 @@ import { TranslationKey } from "../i18n/dictionary";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { getPetAvatarSymbol } from "./chatCompactPanel";
-import styles from "./SelfEvolutionTrack.module.css";
+import { selfEvolutionTrackStyles as styles } from "./SelfEvolutionTrack.styles";
 
 type SelfEvolutionTrackProps = {
   overview?: SelfEvolutionOverview;

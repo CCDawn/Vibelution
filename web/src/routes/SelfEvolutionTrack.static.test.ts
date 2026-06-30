@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-// @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
-import { readFileSync } from "node:fs";
 import type { SelfEvolutionTransaction } from "../api/types";
 import {
   buildSelfEvolutionTransactionHistoryView,
@@ -15,8 +13,7 @@ import {
   SELF_TRANSACTION_COLLAPSED_LIMIT,
 } from "./SelfEvolutionTrack";
 import selfEvolutionSource from "./SelfEvolutionTrack.tsx?raw";
-
-const selfEvolutionStylesSource = readFileSync(new URL("./SelfEvolutionTrack.module.css", import.meta.url), "utf-8");
+import selfEvolutionStylesSource from "./SelfEvolutionTrack.styles.ts?raw";
 
 function transaction(overrides: Partial<SelfEvolutionTransaction> & { txnId: string }): SelfEvolutionTransaction {
   return {
@@ -80,13 +77,13 @@ describe("SelfEvolutionTrack static assets", () => {
   });
 
   it("keeps the loading shell compact while self-evolution data synchronizes", () => {
-    expect(selfEvolutionStylesSource).toContain(".loadingShell");
-    expect(selfEvolutionStylesSource).toContain("min-height: 148px");
-    expect(selfEvolutionStylesSource).toContain("max-height: 180px");
-    expect(selfEvolutionStylesSource).toContain("align-self: start");
-    expect(selfEvolutionStylesSource).toContain("grid-template-columns: repeat(3, minmax(0, 1fr))");
-    expect(selfEvolutionStylesSource).toContain("min-height: 172px");
-    expect(selfEvolutionStylesSource).toContain("max-height: 210px");
+    expect(selfEvolutionStylesSource).toContain("loadingShell:");
+    expect(selfEvolutionStylesSource).toContain("min-h-[148px]");
+    expect(selfEvolutionStylesSource).toContain("max-h-[180px]");
+    expect(selfEvolutionStylesSource).toContain("self-start");
+    expect(selfEvolutionStylesSource).toContain("grid-cols-3");
+    expect(selfEvolutionStylesSource).toContain("max-[1180px]:min-h-[172px]");
+    expect(selfEvolutionStylesSource).toContain("max-[1180px]:max-h-[210px]");
     expect(selfEvolutionStylesSource).not.toContain("min-height: min(520px, 72vh)");
     expect(selfEvolutionStylesSource).not.toContain("min-height: 360px");
   });

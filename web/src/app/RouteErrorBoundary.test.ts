@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 import { buildRouteErrorBoundaryViewModel } from "./RouteErrorBoundary";
 
 const routeErrorBoundarySource = readFileSync(new URL("./RouteErrorBoundary.tsx", import.meta.url), "utf8");
-const routeErrorBoundaryStyles = readFileSync(new URL("./RouteErrorBoundary.module.css", import.meta.url), "utf8");
 
 describe("RouteErrorBoundary view model", () => {
   it("turns stale dynamic route chunks into a user-facing refresh state", () => {
@@ -35,7 +34,8 @@ describe("RouteErrorBoundary view model", () => {
     expect(routeErrorBoundarySource).toContain("VButton");
     expect(routeErrorBoundarySource).toContain('data-vui-app={surface}');
     expect(routeErrorBoundarySource).not.toContain("<button");
-    expect(routeErrorBoundaryStyles).not.toContain(".primaryAction");
-    expect(routeErrorBoundaryStyles).not.toContain("#2563eb");
+    expect(routeErrorBoundarySource).not.toContain("RouteErrorBoundary.module.css");
+    expect(routeErrorBoundarySource).not.toContain("styles.primaryAction");
+    expect(routeErrorBoundarySource).not.toContain("#2563eb");
   });
 });

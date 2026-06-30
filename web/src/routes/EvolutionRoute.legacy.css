@@ -1,0 +1,3485 @@
+/* source: routes/EvolutionRoute legacy css */
+:where(.vui-routes-evolutionroute).page {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+  height: 100%;
+  min-height: 0;
+  padding: 8px 12px 12px;
+  overflow: hidden;
+}
+
+:where(.vui-routes-evolutionroute).toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).toolbarIntro {
+  display: grid;
+  gap: 2px;
+  min-width: 260px;
+  max-width: min(760px, 100%);
+}
+
+:where(.vui-routes-evolutionroute).eyebrow {
+  margin: 0;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+:where(.vui-routes-evolutionroute).title {
+  margin: 0;
+  font-family: var(--font-body);
+  font-weight: 760;
+  font-size: var(--route-topbar-title-size);
+  line-height: 1.08;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).subtitle {
+  margin: 0;
+  max-width: none;
+  color: var(--fg-secondary);
+  font-size: var(--route-topbar-subtitle-size);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).toolbarControls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex: 1 1 620px;
+  min-width: min(540px, 100%);
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+:where(.vui-routes-evolutionroute).segmented,
+:where(.vui-routes-evolutionroute).intakeControl,
+:where(.vui-routes-evolutionroute).filterSegmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px;
+  border-radius: var(--radius-panel);
+  border: 1px solid var(--border-soft);
+  background: var(--surface-panel);
+}
+
+:where(.vui-routes-evolutionroute).segmentButton,
+:where(.vui-routes-evolutionroute).intakeButton,
+:where(.vui-routes-evolutionroute).filterButton {
+  min-height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--fg-secondary);
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+:where(.vui-routes-evolutionroute).segmentButtonActive,
+:where(.vui-routes-evolutionroute).intakeButtonActive,
+:where(.vui-routes-evolutionroute).filterButtonActive {
+  background: color-mix(in srgb, var(--accent-warm) 16%, transparent);
+  color: var(--accent-warm-2);
+}
+
+:where(.vui-routes-evolutionroute).controlLabel {
+  padding: 0 6px 0 8px;
+  color: var(--fg-secondary);
+  font-size: 0.8rem;
+}
+
+:where(.vui-routes-evolutionroute).intakeSegmented {
+  display: inline-flex;
+  gap: 6px;
+}
+
+:where(.vui-routes-evolutionroute).surface {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-panel);
+  background: var(--surface-panel);
+  box-shadow: none;
+}
+
+:where(.vui-routes-evolutionroute).selfModeStack {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+  min-height: 0;
+  height: 100%;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+:where(.vui-routes-evolutionroute).overviewGrid {
+  display: grid;
+  grid-template-columns:
+    minmax(300px, var(--evolution-live-launch-width, 348px))
+    12px
+    minmax(360px, 1fr)
+    12px
+    minmax(300px, var(--evolution-live-run-width, 360px));
+  grid-template-rows: minmax(0, 1fr);
+  grid-auto-rows: minmax(0, 1fr);
+  grid-template-areas: "launch resize-launch io resize-run run";
+  align-items: stretch;
+  align-content: stretch;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  padding-right: 4px;
+}
+
+:where(.vui-routes-evolutionroute).dashboardLaunch,
+:where(.vui-routes-evolutionroute).dashboardRun,
+:where(.vui-routes-evolutionroute).dashboardIo {
+  min-width: 0;
+  max-width: 100%;
+}
+
+:where(.vui-routes-evolutionroute).overviewGrid > .launchSurface,
+:where(.vui-routes-evolutionroute).overviewGrid > .liveSurface,
+:where(.vui-routes-evolutionroute).overviewGrid > .ioSurface {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+
+:where(.vui-routes-evolutionroute).dashboardLaunch {
+  grid-area: launch;
+}
+
+:where(.vui-routes-evolutionroute).liveLaunchStack {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 8px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+:where(.vui-routes-evolutionroute).liveLaunchStack > .launchSurface {
+  height: 100%;
+  max-height: none;
+  overflow: auto;
+}
+
+:where(.vui-routes-evolutionroute).supervisedRunConsole {
+  container-type: inline-size;
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+:where(.vui-routes-evolutionroute).supervisedRunConsoleHeader {
+  align-items: flex-start;
+}
+
+:where(.vui-routes-evolutionroute).supervisedRunConsoleStatus {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).supervisedRunConsoleGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 7px;
+  min-height: 0;
+}
+
+@container (min-width: 560px) {
+  :where(.vui-routes-evolutionroute).supervisedRunConsoleGrid {
+    grid-template-columns: minmax(0, 1.08fr) minmax(214px, 0.72fr);
+    align-items: start;
+  }
+
+  :where(.vui-routes-evolutionroute).supervisedRunOptions {
+    grid-template-columns: max-content minmax(140px, 1fr);
+  }
+
+  :where(.vui-routes-evolutionroute).supervisedMembersList {
+    max-height: min(238px, 34vh);
+  }
+}
+
+@container (max-width: 430px) {
+  :where(.vui-routes-evolutionroute).supervisedRunOptions {
+    grid-template-columns: 1fr;
+  }
+}
+
+:where(.vui-routes-evolutionroute).supervisedRunSetup {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  min-width: 0;
+  min-height: 0;
+}
+
+:where(.vui-routes-evolutionroute).supervisedRunOptions {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(126px, 1.05fr);
+  gap: 6px;
+  align-items: end;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).supervisedMembersPanel {
+  display: grid;
+  gap: 6px;
+  align-self: start;
+  min-height: 0;
+  padding: 8px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
+  overflow: hidden;
+}
+
+:where(.vui-routes-evolutionroute).supervisedMembersHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).supervisedMembersHeaderActions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).supervisedStepFollowButton {
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 999px;
+  background: var(--surface-card-muted);
+  color: var(--fg-secondary);
+  font: inherit;
+  font-size: var(--vui-font-xs);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+:where(.vui-routes-evolutionroute).supervisedStepFollowButton:hover,
+:where(.vui-routes-evolutionroute).supervisedStepFollowButton:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-card-muted));
+  color: var(--accent-cool-2);
+  outline: none;
+}
+
+:where(.vui-routes-evolutionroute).supervisedMembersList {
+  display: grid;
+  gap: 4px;
+  min-height: 0;
+  max-height: min(118px, 22vh);
+  overflow: auto;
+}
+
+:where(.vui-routes-evolutionroute).supervisedStepMemberRail {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).supervisedStepMemberCard {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 5px 7px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 7px;
+  background: var(--surface-panel);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+:where(.vui-routes-evolutionroute).supervisedStepMemberCard:hover,
+:where(.vui-routes-evolutionroute).supervisedStepMemberCard:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 6%, var(--surface-panel));
+  outline: none;
+}
+
+:where(.vui-routes-evolutionroute).supervisedStepMemberCardActive {
+  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 9%, var(--surface-panel));
+}
+
+:where(.vui-routes-evolutionroute).supervisedWorkflowPanel {
+  display: grid;
+  gap: 8px;
+  align-self: start;
+  min-height: 0;
+  padding: 8px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
+  overflow: hidden;
+}
+
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+  max-height: min(210px, 34vh);
+  overflow: auto;
+}
+
+:where(.vui-routes-evolutionroute).supervisedWorkflowCard {
+  display: grid;
+  min-width: 0;
+  min-height: 118px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--surface-panel);
+  box-shadow: var(--vui-shadow-soft);
+  overflow: hidden;
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+}
+
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardActive {
+  border-color: color-mix(in srgb, var(--accent-cool) 54%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 9%, var(--surface-panel));
+}
+
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardCurrent:not(.supervisedWorkflowCardActive) {
+  border-color: color-mix(in srgb, var(--accent-warm) 40%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-warm) 7%, var(--surface-panel));
+}
+
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardButton {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardButton:hover,
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardButton:focus-visible {
+  background: color-mix(in srgb, var(--accent-cool) 6%, transparent);
+  outline: none;
+}
+
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardTopline,
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardTopline span,
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardButton strong,
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardFooter span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardTopline span {
+  color: var(--fg-primary);
+  font-size: var(--vui-font-xs);
+  font-weight: 750;
+}
+
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardTopline em {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-warm) 14%, transparent);
+  color: var(--accent-warm-2);
+  font-size: var(--vui-font-xs);
+  font-style: normal;
+  font-weight: 750;
+}
+
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardButton strong {
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  font-weight: 650;
+}
+
+:where(.vui-routes-evolutionroute).supervisedWorkflowLivePreview {
+  display: -webkit-box;
+  min-height: 34px;
+  color: var(--fg-tertiary);
+  font-size: 0.7rem;
+  line-height: 1.45;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardFooter {
+  padding: 0 8px 8px;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  font-weight: 650;
+}
+
+:where(.vui-routes-evolutionroute).supervisedWorkflowSessionLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  color: var(--accent-cool-2);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).supervisedWorkflowSessionLink:hover,
+:where(.vui-routes-evolutionroute).supervisedWorkflowSessionLink:focus-visible {
+  color: var(--accent-cool);
+  text-decoration: underline;
+  outline: none;
+}
+
+:where(.vui-routes-evolutionroute).supervisedWorkflowFollowButton {
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 999px;
+  background: var(--surface-card-muted);
+  color: var(--fg-secondary);
+  font: inherit;
+  font-size: var(--vui-font-xs);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+:where(.vui-routes-evolutionroute).supervisedWorkflowFollowButton:hover,
+:where(.vui-routes-evolutionroute).supervisedWorkflowFollowButton:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-card-muted));
+  color: var(--accent-cool-2);
+  outline: none;
+}
+
+:where(.vui-routes-evolutionroute).approvalEvidencePanel {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-height: 100%;
+  padding: 10px;
+}
+
+:where(.vui-routes-evolutionroute).approvalEvidenceItem {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
+}
+
+:where(.vui-routes-evolutionroute).approvalEvidenceItem span {
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  font-weight: 700;
+}
+
+:where(.vui-routes-evolutionroute).approvalEvidenceItem strong {
+  color: var(--fg-primary);
+  font-size: var(--vui-font-xs);
+  font-weight: 700;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+:where(.vui-routes-evolutionroute).approvalEvidenceActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).supervisedStepMemberCardCurrent {
+  border-color: color-mix(in srgb, var(--accent-warm) 34%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-warm) 6%, var(--surface-panel));
+}
+
+:where(.vui-routes-evolutionroute).supervisedStepMemberCard span,
+:where(.vui-routes-evolutionroute).supervisedStepMemberCard strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).supervisedStepMemberLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).supervisedStepMemberCard span {
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  font-weight: 650;
+}
+
+:where(.vui-routes-evolutionroute).supervisedStepMemberLabel em {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-warm) 14%, transparent);
+  color: var(--accent-warm-2);
+  font-size: var(--vui-font-xs);
+  font-style: normal;
+  font-weight: 700;
+}
+
+:where(.vui-routes-evolutionroute).supervisedStepMemberCard strong {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).supervisedMemberRow {
+  display: grid;
+  grid-template-columns: minmax(78px, 0.42fr) minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  min-height: 34px;
+  padding: 5px 7px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 7px;
+  background: var(--surface-panel);
+}
+
+:where(.vui-routes-evolutionroute).supervisedMemberLink {
+  grid-template-columns: minmax(78px, 0.42fr) minmax(0, 1fr) auto;
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+}
+
+:where(.vui-routes-evolutionroute).supervisedMemberLink:hover,
+:where(.vui-routes-evolutionroute).supervisedMemberLink:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-panel));
+  outline: none;
+}
+
+:where(.vui-routes-evolutionroute).supervisedMemberLink:focus-visible {
+  box-shadow: var(--vui-shadow-accent);
+}
+
+:where(.vui-routes-evolutionroute).supervisedMemberLink svg {
+  color: var(--fg-tertiary);
+}
+
+:where(.vui-routes-evolutionroute).supervisedMemberRowActive {
+  border-color: color-mix(in srgb, var(--accent-warm) 44%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-warm) 10%, var(--surface-card-subtle));
+}
+
+:where(.vui-routes-evolutionroute).supervisedMemberRowMissing {
+  opacity: 0.72;
+}
+
+:where(.vui-routes-evolutionroute).supervisedMemberRole,
+:where(.vui-routes-evolutionroute).supervisedMemberIdentity {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).supervisedMemberRole span {
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  font-weight: 600;
+}
+
+:where(.vui-routes-evolutionroute).supervisedMemberRole strong {
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--accent-warm-2);
+  font-size: var(--vui-font-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).supervisedMemberIdentity strong,
+:where(.vui-routes-evolutionroute).supervisedMemberIdentity span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).supervisedMemberIdentity strong {
+  color: var(--fg-primary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).supervisedMemberIdentity span {
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+
+:where(.vui-routes-evolutionroute).modeTeamPanel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+  padding: 10px;
+  overflow: hidden;
+}
+
+:where(.vui-routes-evolutionroute).modeTeamHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).modeTeamStats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+
+:where(.vui-routes-evolutionroute).modeTeamStats span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  padding: 5px 6px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 6px;
+  background: var(--surface-card-subtle);
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).modeTeamStats strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-family: var(--font-mono);
+  font-size: var(--vui-font-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).modeTeamCanvasMap {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  min-height: 0;
+  overflow: auto;
+}
+
+:where(.vui-routes-evolutionroute).modeTeamNode {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--border-hairline);
+  border-left: 2px solid var(--border-soft);
+  border-radius: 7px;
+  background: var(--surface-card-subtle);
+}
+
+:where(.vui-routes-evolutionroute).modeTeamNodeBound {
+  border-left-color: var(--accent-cool);
+}
+
+:where(.vui-routes-evolutionroute).modeTeamNodeStale {
+  border-left-color: var(--state-warning);
+  background: color-mix(in srgb, var(--state-warning) 8%, var(--surface-card-subtle));
+}
+
+:where(.vui-routes-evolutionroute).modeTeamNode strong,
+:where(.vui-routes-evolutionroute).modeTeamNode span,
+:where(.vui-routes-evolutionroute).modeTeamNode small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).modeTeamNode strong {
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).modeTeamNode span {
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).modeTeamNode small {
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).modeTeamEdges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).modeTeamEdges span {
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 999px;
+  background: var(--surface-card-muted);
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).modeTeamEmpty {
+  margin: 0;
+  padding: 10px;
+  border: 1px dashed var(--border-soft);
+  border-radius: 7px;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).liveResizeHandleLaunch {
+  grid-area: resize-launch;
+}
+
+:where(.vui-routes-evolutionroute).dashboardRun {
+  grid-area: run;
+}
+
+:where(.vui-routes-evolutionroute).liveResizeHandleRun {
+  grid-area: resize-run;
+}
+
+:where(.vui-routes-evolutionroute).dashboardIo {
+  grid-area: io;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden !important;
+}
+
+:where(.vui-routes-evolutionroute).overviewWorkspace {
+  display: grid;
+  grid-template-columns: minmax(360px, 1.15fr) minmax(340px, 1fr) minmax(300px, 0.92fr);
+  gap: 10px;
+  align-items: start;
+}
+
+:where(.vui-routes-evolutionroute).overviewSecondaryGrid {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.92fr) minmax(0, 1.28fr);
+  gap: 10px;
+  align-items: start;
+}
+
+:where(.vui-routes-evolutionroute).heroSurface {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+:where(.vui-routes-evolutionroute).heroTop {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+:where(.vui-routes-evolutionroute).heroTitleRow {
+  display: flex;
+  align-items: start;
+  gap: 14px;
+}
+
+:where(.vui-routes-evolutionroute).statusIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  color: var(--accent-warm-2);
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
+}
+
+:where(.vui-routes-evolutionroute).heroHeadingRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).heroHeading {
+  margin: 0;
+  font-size: 1.08rem;
+}
+
+:where(.vui-routes-evolutionroute).statusPill,
+:where(.vui-routes-evolutionroute).secondaryPill,
+:where(.vui-routes-evolutionroute).deltaBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-soft);
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:where(.vui-routes-evolutionroute).statusPill {
+  color: var(--accent-warm-2);
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
+}
+
+:where(.vui-routes-evolutionroute).secondaryPill {
+  color: var(--fg-secondary);
+  background: var(--surface-card-muted);
+}
+
+:where(.vui-routes-evolutionroute).heroSummary,
+:where(.vui-routes-evolutionroute).detailSection p,
+:where(.vui-routes-evolutionroute).listRow p,
+:where(.vui-routes-evolutionroute).runItem p {
+  margin: 0;
+  color: var(--fg-secondary);
+  line-height: 1.6;
+}
+
+:where(.vui-routes-evolutionroute).metricGrid,
+:where(.vui-routes-evolutionroute).metricStrip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+:where(.vui-routes-evolutionroute).summaryMetricStrip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+:where(.vui-routes-evolutionroute).sourceMetricGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+:where(.vui-routes-evolutionroute).metricTile,
+:where(.vui-routes-evolutionroute).stripItem {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 6px 8px;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-card-subtle);
+}
+
+:where(.vui-routes-evolutionroute).metricTile span,
+:where(.vui-routes-evolutionroute).stripItem span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).metricTile strong,
+:where(.vui-routes-evolutionroute).stripItem strong,
+:where(.vui-routes-evolutionroute).mutedCounter {
+  color: var(--fg-primary);
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).surfaceHeader {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 14px 0;
+}
+
+:where(.vui-routes-evolutionroute).headerIcon {
+  color: var(--fg-tertiary);
+}
+
+:where(.vui-routes-evolutionroute).sectionTitle {
+  margin: 3px 0 0;
+  font-size: 1rem;
+  line-height: 1.18;
+}
+
+:where(.vui-routes-evolutionroute).mutedCounter {
+  min-width: 32px;
+  text-align: right;
+  font-size: 1rem;
+}
+
+:where(.vui-routes-evolutionroute).listStack,
+:where(.vui-routes-evolutionroute).trendStack,
+:where(.vui-routes-evolutionroute).actionGrid {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px 14px;
+}
+
+:where(.vui-routes-evolutionroute).listRow,
+:where(.vui-routes-evolutionroute).relatedRow {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--surface-card-muted);
+  border: 1px solid var(--border-hairline);
+}
+
+:where(.vui-routes-evolutionroute).listRowTop,
+:where(.vui-routes-evolutionroute).scoreRow,
+:where(.vui-routes-evolutionroute).metaRow,
+:where(.vui-routes-evolutionroute).detailHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+:where(.vui-routes-evolutionroute).runRecordTitleRow {
+  align-items: flex-start;
+}
+
+:where(.vui-routes-evolutionroute).runRecordIdentity {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).runRecordIdentity strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).runRecordIdentity span,
+:where(.vui-routes-evolutionroute).detailSubtleId {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--vui-font-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).scoreRow span,
+:where(.vui-routes-evolutionroute).metaRow span {
+  color: var(--fg-tertiary);
+}
+
+:where(.vui-routes-evolutionroute).trendRow,
+:where(.vui-routes-evolutionroute).actionButton,
+:where(.vui-routes-evolutionroute).runItem,
+:where(.vui-routes-evolutionroute).inlineAction {
+  border: 1px solid color-mix(in srgb, var(--surface-card) 8%, transparent);
+  border-radius: 8px;
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+:where(.vui-routes-evolutionroute).trendRow {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--surface-card-muted);
+  color: var(--fg-primary);
+  text-align: left;
+}
+
+:where(.vui-routes-evolutionroute).trendRow:hover,
+:where(.vui-routes-evolutionroute).runItem:hover,
+:where(.vui-routes-evolutionroute).inlineAction:hover,
+:where(.vui-routes-evolutionroute).actionButton:hover {
+  border-color: color-mix(in srgb, var(--accent-warm) 26%, transparent);
+  background: var(--surface-card-hover);
+}
+
+:where(.vui-routes-evolutionroute).trendMeta {
+  display: grid;
+  gap: 4px;
+}
+
+:where(.vui-routes-evolutionroute).trendMeta span {
+  color: var(--fg-secondary);
+  font-size: 0.92rem;
+}
+
+:where(.vui-routes-evolutionroute).trendValue {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+:where(.vui-routes-evolutionroute).trendBarTrack {
+  width: 100%;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-resize-track);
+}
+
+:where(.vui-routes-evolutionroute).trendBarFill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--vui-gradient-route-soft);
+}
+
+:where(.vui-routes-evolutionroute).deltaPositive {
+  color: var(--state-success);
+  background: color-mix(in srgb, var(--state-success) 12%, transparent);
+}
+
+:where(.vui-routes-evolutionroute).deltaNegative {
+  color: var(--state-error);
+  background: color-mix(in srgb, var(--state-error) 14%, transparent);
+}
+
+:where(.vui-routes-evolutionroute).deltaNeutral {
+  color: var(--fg-secondary);
+  background: var(--surface-card-muted);
+}
+
+:where(.vui-routes-evolutionroute).actionGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+:where(.vui-routes-evolutionroute).controlSurface {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(0, 1.2fr);
+  gap: 16px;
+  padding: 18px;
+}
+
+:where(.vui-routes-evolutionroute).controlColumn {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+:where(.vui-routes-evolutionroute).formGrid {
+  display: grid;
+  gap: 7px;
+}
+
+:where(.vui-routes-evolutionroute).compactFieldGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.52fr) minmax(108px, 0.68fr);
+  align-items: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).formField {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).proposalEditGrid {
+  display: grid;
+  gap: 12px;
+}
+
+:where(.vui-routes-evolutionroute).sectionHeadingRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).formField label,
+:where(.vui-routes-evolutionroute).formHint,
+:where(.vui-routes-evolutionroute).checkboxLabel {
+  color: var(--fg-tertiary);
+  font-size: 0.8rem;
+}
+
+:where(.vui-routes-evolutionroute).textInput,
+:where(.vui-routes-evolutionroute).selectInput,
+:where(.vui-routes-evolutionroute).textArea {
+  width: 100%;
+  min-width: 0;
+  min-height: 31px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--surface-card) 8%, transparent);
+  border-radius: 7px;
+  background: var(--surface-input);
+  color: var(--fg-primary);
+}
+
+:where(.vui-routes-evolutionroute).textInput:focus,
+:where(.vui-routes-evolutionroute).selectInput:focus,
+:where(.vui-routes-evolutionroute).textArea:focus {
+  outline: 1px solid color-mix(in srgb, var(--accent-warm) 26%, transparent);
+  border-color: color-mix(in srgb, var(--accent-warm) 26%, transparent);
+}
+
+:where(.vui-routes-evolutionroute).textArea {
+  min-height: 86px;
+  padding: 10px 12px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+:where(.vui-routes-evolutionroute).checkboxRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+}
+
+:where(.vui-routes-evolutionroute).checkboxRow input {
+  width: 16px;
+  height: 16px;
+}
+
+:where(.vui-routes-evolutionroute).controlActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).noticeText,
+:where(.vui-routes-evolutionroute).errorText {
+  margin: 0;
+  line-height: 1.4;
+}
+
+:where(.vui-routes-evolutionroute).feedbackText {
+  margin: 0;
+  color: var(--fg-secondary);
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+:where(.vui-routes-evolutionroute).noticeText {
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).errorText {
+  color: var(--state-error);
+}
+
+:where(.vui-routes-evolutionroute).inlineNoticeRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 18px 18px;
+  flex-wrap: wrap;
+}
+
+:where(.vui-routes-evolutionroute).selectionSummary,
+:where(.vui-routes-evolutionroute).bulkToolbarText {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-secondary);
+}
+
+:where(.vui-routes-evolutionroute).datasetMeta {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--surface-card-muted);
+  border: 1px solid var(--border-hairline);
+}
+
+:where(.vui-routes-evolutionroute).datasetMeta strong {
+  color: var(--fg-primary);
+}
+
+:where(.vui-routes-evolutionroute).datasetMetaCompact {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
+  border: 1px solid var(--border-hairline);
+}
+
+:where(.vui-routes-evolutionroute).sourceInventoryBar,
+:where(.vui-routes-evolutionroute).sourceMetaCompact {
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
+}
+
+:where(.vui-routes-evolutionroute).sourceInventoryBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 4px 8px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).sourceInventoryBar span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).sourceInventoryBar strong,
+:where(.vui-routes-evolutionroute).sourceMetaCompact strong {
+  color: var(--fg-primary);
+}
+
+:where(.vui-routes-evolutionroute).sourceMetaCompact {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(96px, auto);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 10px;
+}
+
+:where(.vui-routes-evolutionroute).sourceMetaMain {
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).sourceMetaMain {
+  display: grid;
+  gap: 2px;
+}
+
+:where(.vui-routes-evolutionroute).sourceMetaCompact span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).sourceMetaCompact strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).sourceMetaMain span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).sourceMetaSide {
+  justify-self: end;
+  padding: 5px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--surface-card-muted);
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).sourceWarningStrip {
+  margin: 0;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--state-warning) 40%, var(--border-hairline));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--state-warning) 10%, var(--surface-card-subtle));
+  color: var(--fg-secondary);
+  font-size: 0.8rem;
+  line-height: 1.36;
+  overflow-wrap: anywhere;
+}
+
+:where(.vui-routes-evolutionroute).datasetCatalogPanel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  max-height: min(238px, 34vh);
+  padding: 8px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
+  overflow: hidden;
+}
+
+:where(.vui-routes-evolutionroute).datasetCatalogHeader {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).datasetCatalogHeader > div:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).datasetCatalogHeader strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).datasetCatalogHeader span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).datasetCatalogFilterRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).datasetCatalogFilterButton {
+  min-height: 25px;
+  padding: 0 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--surface-card-muted);
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).datasetCatalogFilterButtonActive {
+  border-color: color-mix(in srgb, var(--accent-warm) 35%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-warm) 12%, var(--surface-card-muted));
+  color: var(--accent-warm-2);
+}
+
+:where(.vui-routes-evolutionroute).datasetCatalogList {
+  display: grid;
+  gap: 6px;
+  min-height: 0;
+  max-height: min(158px, 20vh);
+  overflow: auto;
+  padding-right: 2px;
+}
+
+:where(.vui-routes-evolutionroute).datasetCatalogItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--surface-card-muted);
+}
+
+:where(.vui-routes-evolutionroute).datasetCatalogItemMain {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).datasetCatalogItemMain strong,
+:where(.vui-routes-evolutionroute).datasetCatalogItemMain span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).datasetCatalogItemMain strong {
+  color: var(--fg-primary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).datasetCatalogItemMain span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).datasetCatalogStatus {
+  align-self: start;
+  max-width: 116px;
+  padding: 3px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--surface-card-subtle);
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).datasetCatalogItem p,
+:where(.vui-routes-evolutionroute).datasetCatalogEmpty {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+:where(.vui-routes-evolutionroute).datasetCatalogItem p span {
+  margin-right: 6px;
+  color: var(--fg-secondary);
+  font-weight: 700;
+}
+
+:where(.vui-routes-evolutionroute).sourceSummary {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px 16px;
+}
+
+:where(.vui-routes-evolutionroute).sourceHero {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-card-muted);
+}
+
+:where(.vui-routes-evolutionroute).sourceHero span,
+:where(.vui-routes-evolutionroute).sourceHero small,
+:where(.vui-routes-evolutionroute).sourceNextAction span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).sourceHero strong,
+:where(.vui-routes-evolutionroute).sourceNextAction strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).sourceHero small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).sourceNextAction {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
+  border: 1px solid var(--border-hairline);
+}
+
+:where(.vui-routes-evolutionroute).compactRunList {
+  display: grid;
+  gap: 6px;
+}
+
+:where(.vui-routes-evolutionroute).compactRunRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--surface-card-muted);
+  color: var(--fg-primary);
+  text-align: left;
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+:where(.vui-routes-evolutionroute).compactRunRow:hover {
+  border-color: color-mix(in srgb, var(--accent-warm) 26%, transparent);
+  background: var(--surface-card-hover);
+}
+
+:where(.vui-routes-evolutionroute).compactRunMain {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).compactRunMain strong,
+:where(.vui-routes-evolutionroute).compactRunMain span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).compactRunMain span,
+:where(.vui-routes-evolutionroute).compactRunMeta {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).compactRunMeta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).compactRunMeta strong {
+  color: var(--fg-primary);
+}
+
+:where(.vui-routes-evolutionroute).runMonitor {
+  display: grid;
+  gap: 14px;
+}
+
+:where(.vui-routes-evolutionroute).runMonitorDense,
+:where(.vui-routes-evolutionroute).idleMonitor,
+:where(.vui-routes-evolutionroute).launchSurface,
+:where(.vui-routes-evolutionroute).liveSurface,
+:where(.vui-routes-evolutionroute).ioSurface,
+:where(.vui-routes-evolutionroute).statusSurface,
+:where(.vui-routes-evolutionroute).chatReviewSurface,
+:where(.vui-routes-evolutionroute).summarySurface {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  height: 100%;
+  min-height: 0;
+  padding: 10px 12px 12px;
+}
+
+:where(.vui-routes-evolutionroute).launchSurface,
+:where(.vui-routes-evolutionroute).liveSurface {
+  font-size: 0.9rem;
+}
+
+:where(.vui-routes-evolutionroute).chatReviewSurface .runListScrollable {
+  max-height: 280px;
+}
+
+:where(.vui-routes-evolutionroute).surfaceHeaderCompact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).surfaceHeaderCompact > div {
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).controlFooter {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).closedLoopLaunchBlock {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(92px, auto);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 30%, var(--border-hairline));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent-warm) 8%, var(--surface-card-subtle));
+}
+
+:where(.vui-routes-evolutionroute).closedLoopLaunchBlock > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).closedLoopTitleRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).closedLoopLaunchBlock .closedLoopModeBadge {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 36%, var(--border-hairline));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
+  color: var(--accent-warm-2);
+  font-size: var(--vui-font-xs);
+  font-weight: 740;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).closedLoopLaunchBlock strong,
+:where(.vui-routes-evolutionroute).closedLoopLaunchBlock span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+:where(.vui-routes-evolutionroute).closedLoopLaunchBlock strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: var(--vui-font-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).closedLoopLaunchBlock span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.3;
+}
+
+:where(.vui-routes-evolutionroute).closedLoopLaunchBlock .inlineAction {
+  justify-self: end;
+  min-width: 0;
+  max-width: 100%;
+}
+
+:where(.vui-routes-evolutionroute).monitorSummary {
+  display: grid;
+  gap: 10px;
+}
+
+:where(.vui-routes-evolutionroute).runControlSummaryBody {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).runControlReason {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+:where(.vui-routes-evolutionroute).runNextActionStrip {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-card-subtle);
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.45;
+}
+
+:where(.vui-routes-evolutionroute).runNextActionStrip strong {
+  color: var(--fg-primary);
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).runNextActionStrip span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+:where(.vui-routes-evolutionroute).runSummaryTone_running {
+  border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--border-hairline));
+  background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-card-subtle));
+}
+
+:where(.vui-routes-evolutionroute).runSummaryTone_success {
+  border-color: color-mix(in srgb, var(--state-success) 34%, var(--border-hairline));
+  background: color-mix(in srgb, var(--state-success) 8%, var(--surface-card-subtle));
+}
+
+:where(.vui-routes-evolutionroute).runSummaryTone_warning {
+  border-color: color-mix(in srgb, var(--state-warning) 38%, var(--border-hairline));
+  background: color-mix(in srgb, var(--state-warning) 9%, var(--surface-card-subtle));
+}
+
+:where(.vui-routes-evolutionroute).runSummaryTone_danger {
+  border-color: color-mix(in srgb, var(--state-error) 38%, var(--border-hairline));
+  background: color-mix(in srgb, var(--state-error) 9%, var(--surface-card-subtle));
+}
+
+:where(.vui-routes-evolutionroute).runSummaryTone_idle {
+  border-color: var(--border-hairline);
+  background: var(--surface-card-subtle);
+}
+
+:where(.vui-routes-evolutionroute).monitorMetricsDense {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+:where(.vui-routes-evolutionroute).monitorMetrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+:where(.vui-routes-evolutionroute).statusLead {
+  margin: 0;
+  color: var(--fg-primary);
+  font-size: 0.96rem;
+  line-height: 1.6;
+}
+
+:where(.vui-routes-evolutionroute).statusMetricGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+:where(.vui-routes-evolutionroute).eventList {
+  display: grid;
+  gap: 8px;
+}
+
+:where(.vui-routes-evolutionroute).eventListScrollable {
+  max-height: 220px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+:where(.vui-routes-evolutionroute).eventRow {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background: var(--surface-card-muted);
+  border: 1px solid var(--border-hairline);
+}
+
+:where(.vui-routes-evolutionroute).eventHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).eventHeader strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).eventSummary {
+  margin: 0;
+  color: var(--fg-secondary);
+  line-height: 1.5;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+:where(.vui-routes-evolutionroute).actionRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+:where(.vui-routes-evolutionroute).actionButton,
+:where(.vui-routes-evolutionroute).inlineAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 12px;
+  background: var(--surface-card-muted);
+  color: var(--fg-primary);
+}
+
+:where(.vui-routes-evolutionroute).inlineAction {
+  width: fit-content;
+}
+
+:where(.vui-routes-evolutionroute).dangerInlineAction {
+  border-color: color-mix(in srgb, var(--state-error) 34%, var(--border-hairline));
+  color: var(--state-error);
+  background: color-mix(in srgb, var(--state-error) 7%, var(--surface-card-muted));
+}
+
+:where(.vui-routes-evolutionroute).dangerInlineAction:hover {
+  border-color: color-mix(in srgb, var(--state-error) 52%, var(--border-hairline));
+  background: color-mix(in srgb, var(--state-error) 12%, var(--surface-card-hover));
+}
+
+:where(.vui-routes-evolutionroute).liveStatusRow {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  max-width: min(100%, 320px);
+  flex-wrap: wrap;
+}
+
+:where(.vui-routes-evolutionroute).liveRunToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
+}
+
+:where(.vui-routes-evolutionroute).compactActionGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).compactIconAction,
+:where(.vui-routes-evolutionroute).compactTextAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  border: 1px solid color-mix(in srgb, var(--surface-card) 8%, transparent);
+  border-radius: 8px;
+  background: var(--surface-card-muted);
+  color: var(--fg-primary);
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+:where(.vui-routes-evolutionroute).compactIconAction {
+  width: 36px;
+  padding: 0;
+}
+
+:where(.vui-routes-evolutionroute).compactTextAction {
+  max-width: 190px;
+  padding: 0 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:where(.vui-routes-evolutionroute).compactIconAction:hover,
+:where(.vui-routes-evolutionroute).compactTextAction:hover {
+  border-color: color-mix(in srgb, var(--accent-warm) 26%, transparent);
+  background: var(--surface-card-hover);
+}
+
+:where(.vui-routes-evolutionroute).compactIconAction:disabled,
+:where(.vui-routes-evolutionroute).compactTextAction:disabled {
+  cursor: not-allowed;
+  color: var(--fg-tertiary);
+  opacity: 0.52;
+}
+
+:where(.vui-routes-evolutionroute).dangerIconAction {
+  color: var(--state-error);
+}
+
+:where(.vui-routes-evolutionroute).liveSummaryRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
+  border: 1px solid var(--border-hairline);
+}
+
+:where(.vui-routes-evolutionroute).liveSummaryRow .statusIcon {
+  width: 30px;
+  height: 30px;
+}
+
+:where(.vui-routes-evolutionroute).liveSummaryRow .heroSummary {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+:where(.vui-routes-evolutionroute).truncateText {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).noticeTextCompact,
+:where(.vui-routes-evolutionroute).errorTextCompact,
+:where(.vui-routes-evolutionroute).feedbackTextCompact {
+  margin: 0;
+  padding: 9px 10px;
+  border-radius: 8px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+:where(.vui-routes-evolutionroute).noticeTextCompact {
+  color: var(--fg-secondary);
+  background: var(--surface-card-subtle);
+}
+
+:where(.vui-routes-evolutionroute).feedbackTextCompact {
+  color: var(--fg-secondary);
+  white-space: pre-wrap;
+  background: color-mix(in srgb, var(--state-success) 9%, transparent);
+}
+
+:where(.vui-routes-evolutionroute).errorTextCompact {
+  color: var(--state-error);
+  background: color-mix(in srgb, var(--state-error) 11%, transparent);
+}
+
+:where(.vui-routes-evolutionroute).ioStack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+}
+
+:where(.vui-routes-evolutionroute).liveIoPane {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+:where(.vui-routes-evolutionroute).liveIoResizeHandle {
+  position: relative;
+  min-height: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: row-resize;
+  outline: none;
+  touch-action: none;
+}
+
+:where(.vui-routes-evolutionroute).liveIoResizeHandle::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 3px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-card) 8%, transparent);
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+
+:where(.vui-routes-evolutionroute).liveIoResizeHandle:hover::before,
+:where(.vui-routes-evolutionroute).liveIoResizeHandle:focus-visible::before {
+  background: color-mix(in srgb, var(--accent-warm) 52%, transparent);
+  box-shadow: var(--vui-shadow-soft);
+}
+
+:where(.vui-routes-evolutionroute).ioTranscript {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+:where(.vui-routes-evolutionroute).transcriptSection {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+:where(.vui-routes-evolutionroute).transcriptSection .ioTranscript {
+  flex: 1 1 0;
+}
+
+:where(.vui-routes-evolutionroute).caseConversationShell {
+  display: flex;
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+:where(.vui-routes-evolutionroute).caseConversationTranscript {
+  flex: 1 1 0;
+  min-height: 0;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+:where(.vui-routes-evolutionroute).caseConversationFallback {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  color: var(--fg-secondary);
+}
+
+:where(.vui-routes-evolutionroute).caseTraceTimeline {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 6px 12px 30px;
+}
+
+:where(.vui-routes-evolutionroute).caseTraceTimeline::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 10px;
+  width: 1px;
+  background: color-mix(in srgb, var(--fg-tertiary) 18%, transparent);
+}
+
+:where(.vui-routes-evolutionroute).caseTraceStack {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  min-height: min-content;
+}
+
+:where(.vui-routes-evolutionroute).caseTraceTurn {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).caseTraceSummary {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto 18px;
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+  min-height: 48px;
+  padding: 9px 8px 9px 0;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--surface-card-muted) 72%, transparent);
+  color: var(--fg-secondary);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+:where(.vui-routes-evolutionroute).caseTraceSummary:hover,
+:where(.vui-routes-evolutionroute).caseTraceSummary:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-cool) 26%, transparent);
+  background: color-mix(in srgb, var(--surface-card-muted) 88%, transparent);
+  outline: none;
+}
+
+:where(.vui-routes-evolutionroute).caseTraceSummary:hover .caseTraceTitle,
+:where(.vui-routes-evolutionroute).caseTraceSummary:focus-visible .caseTraceTitle {
+  color: var(--fg-primary);
+}
+
+:where(.vui-routes-evolutionroute).caseTraceIcon {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin-top: 2px;
+  border: 1px solid color-mix(in srgb, var(--fg-tertiary) 16%, transparent);
+  border-radius: 50%;
+  background: var(--surface-panel);
+  color: var(--fg-tertiary);
+}
+
+:where(.vui-routes-evolutionroute).caseTraceTurn_tool .caseTraceIcon {
+  color: color-mix(in srgb, var(--accent-cool) 78%, var(--fg-secondary));
+}
+
+:where(.vui-routes-evolutionroute).caseTraceTurn_assistant .caseTraceIcon,
+:where(.vui-routes-evolutionroute).caseTraceTurn_thought .caseTraceIcon {
+  color: color-mix(in srgb, var(--accent-warm) 80%, var(--fg-secondary));
+}
+
+:where(.vui-routes-evolutionroute).caseTraceTurn_error .caseTraceIcon {
+  color: var(--state-error);
+}
+
+:where(.vui-routes-evolutionroute).caseTraceTurn_input .caseTraceSummary {
+  background: color-mix(in srgb, var(--surface-panel-strong) 46%, transparent);
+}
+
+:where(.vui-routes-evolutionroute).caseTraceTurn_tool .caseTraceSummary {
+  border-left-color: color-mix(in srgb, var(--accent-cool) 42%, transparent);
+}
+
+:where(.vui-routes-evolutionroute).caseTraceTurn_assistant .caseTraceSummary,
+:where(.vui-routes-evolutionroute).caseTraceTurn_thought .caseTraceSummary {
+  border-left-color: color-mix(in srgb, var(--accent-warm) 48%, transparent);
+}
+
+:where(.vui-routes-evolutionroute).caseTraceTurn_error .caseTraceSummary {
+  border-left-color: color-mix(in srgb, var(--state-error) 58%, transparent);
+  background:
+    var(--vui-gradient-route-soft),
+    color-mix(in srgb, var(--surface-card-muted) 78%, transparent);
+}
+
+:where(.vui-routes-evolutionroute).casePreflightIssue {
+  display: grid;
+  gap: 5px;
+  padding: 10px 11px;
+  border: 1px solid color-mix(in srgb, var(--state-warning) 36%, var(--border-hairline));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--state-warning) 9%, var(--surface-card-subtle));
+  color: var(--fg-secondary);
+}
+
+:where(.vui-routes-evolutionroute).casePreflightIssue strong {
+  color: var(--fg-primary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).casePreflightIssue span,
+:where(.vui-routes-evolutionroute).casePreflightIssue small {
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+:where(.vui-routes-evolutionroute).casePreflightIssue small {
+  color: var(--fg-tertiary);
+}
+
+:where(.vui-routes-evolutionroute).caseTraceMessage {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).caseTraceTitle {
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).caseTracePreview {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+:where(.vui-routes-evolutionroute).caseTraceMeta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  padding-top: 1px;
+}
+
+:where(.vui-routes-evolutionroute).caseTraceStatus,
+:where(.vui-routes-evolutionroute).caseTraceTime {
+  color: var(--fg-tertiary);
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).caseTraceStatus {
+  padding: 1px 5px;
+  border: 1px solid color-mix(in srgb, var(--fg-tertiary) 14%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-panel) 78%, transparent);
+}
+
+:where(.vui-routes-evolutionroute).caseTraceChevron {
+  display: grid;
+  place-items: center;
+  min-height: 24px;
+  color: var(--fg-tertiary);
+}
+
+:where(.vui-routes-evolutionroute).caseTraceBody {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0 0 4px 33px;
+  padding: 10px 11px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background:
+    var(--vui-gradient-route-soft),
+    var(--surface-card-muted);
+}
+
+:where(.vui-routes-evolutionroute).caseRawEvidence {
+  flex: 0 0 auto;
+  max-height: 30%;
+  overflow: auto;
+  background: color-mix(in srgb, var(--surface-card-muted) 70%, transparent);
+}
+
+:where(.vui-routes-evolutionroute).caseRawEvidence:not([open]) {
+  max-height: none;
+}
+
+:where(.vui-routes-evolutionroute).caseRawEvidence .ioContent {
+  max-height: 180px;
+}
+
+:where(.vui-routes-evolutionroute).caseTraceSection {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).caseTraceSection span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+:where(.vui-routes-evolutionroute).caseTraceSection pre,
+:where(.vui-routes-evolutionroute).caseTraceStateRow dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+:where(.vui-routes-evolutionroute).caseTraceSection pre {
+  max-height: 360px;
+  overflow: auto;
+  color: var(--fg-secondary);
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+:where(.vui-routes-evolutionroute).caseTraceSectionJson pre {
+  padding: 8px 9px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 82%, transparent);
+  font-family: var(--font-mono);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).caseTraceStateGrid {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).caseTraceStateRow {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  margin: 0;
+}
+
+:where(.vui-routes-evolutionroute).caseTraceStateRow dt {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+:where(.vui-routes-evolutionroute).caseTraceStateRow dd {
+  color: var(--fg-secondary);
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+:where(.vui-routes-evolutionroute).ioEntry {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-card-muted);
+}
+
+:where(.vui-routes-evolutionroute).ioMetaRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).ioMetaRow strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).ioContent {
+  margin: 0;
+  max-height: 280px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: var(--vui-font-xs);
+  line-height: 1.6;
+  color: var(--fg-secondary);
+}
+
+:where(.vui-routes-evolutionroute).collapsibleEvidence {
+  display: grid;
+  gap: 10px;
+}
+
+:where(.vui-routes-evolutionroute).collapsibleEvidence summary {
+  outline: 0;
+}
+
+:where(.vui-routes-evolutionroute).collapsibleEvidence[open] {
+  background: var(--surface-card-subtle);
+}
+
+:where(.vui-routes-evolutionroute).primaryEvidenceBlock .ioContent {
+  max-height: 360px;
+}
+
+:where(.vui-routes-evolutionroute).ioWaitingState {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  min-height: 96px;
+  text-align: center;
+}
+
+:where(.vui-routes-evolutionroute).viewStack {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+:where(.vui-routes-evolutionroute).libraryViewStack {
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  overflow: hidden;
+}
+
+:where(.vui-routes-evolutionroute).librarySummaryBar {
+  display: grid;
+  grid-template-columns: minmax(340px, 1fr) minmax(300px, 0.82fr) minmax(340px, 0.92fr);
+  gap: 8px;
+  align-items: stretch;
+  min-height: 0;
+}
+
+:where(.vui-routes-evolutionroute).librarySummaryBar .summarySurface {
+  gap: 6px;
+  padding: 8px 10px;
+}
+
+:where(.vui-routes-evolutionroute).librarySummaryBar .surfaceHeaderCompact {
+  align-items: center;
+}
+
+:where(.vui-routes-evolutionroute).librarySummaryBar .sectionTitle {
+  margin-top: 2px;
+  font-size: 0.98rem;
+}
+
+:where(.vui-routes-evolutionroute).librarySummaryBar .summaryMetricStrip,
+:where(.vui-routes-evolutionroute).librarySummaryBar .statusMetricGrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+:where(.vui-routes-evolutionroute).librarySummaryBar .stripItem,
+:where(.vui-routes-evolutionroute).librarySummaryBar .metricTile {
+  min-height: 36px;
+  padding: 5px 7px;
+}
+
+:where(.vui-routes-evolutionroute).librarySummaryBar .noticeText,
+:where(.vui-routes-evolutionroute).librarySummaryBar .statusLead {
+  margin: 0;
+  display: -webkit-box;
+  overflow: hidden;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+:where(.vui-routes-evolutionroute).librarySummaryBar .relatedList {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+:where(.vui-routes-evolutionroute).librarySummaryBar .relatedRow {
+  min-height: 32px;
+  padding: 5px 7px;
+}
+
+:where(.vui-routes-evolutionroute).librarySummaryBar .actionRow {
+  gap: 6px;
+}
+
+:where(.vui-routes-evolutionroute).librarySummaryBar .inlineAction {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).runsHeaderSurface {
+  display: grid;
+  gap: 12px;
+  padding-bottom: 18px;
+}
+
+:where(.vui-routes-evolutionroute).runsHeaderBody {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(280px, 0.95fr);
+  gap: 12px;
+  padding: 0 18px;
+}
+
+:where(.vui-routes-evolutionroute).runsGuideCard {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-card-subtle);
+}
+
+:where(.vui-routes-evolutionroute).runsGuideCard p {
+  margin: 0;
+  color: var(--fg-secondary);
+  line-height: 1.55;
+}
+
+:where(.vui-routes-evolutionroute).runsCommandStrip {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.42fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: end;
+  padding: 8px 10px;
+}
+
+:where(.vui-routes-evolutionroute).runsCommandHeader {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: end;
+  gap: 10px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).runsCommandMetrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+
+:where(.vui-routes-evolutionroute).compactFact {
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-card-subtle);
+}
+
+:where(.vui-routes-evolutionroute).compactFact span {
+  min-width: 0;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).compactFact strong {
+  min-width: 0;
+  color: var(--fg-primary);
+  font-size: 0.92rem;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+:where(.vui-routes-evolutionroute).runsWorkspace {
+  display: grid;
+  grid-template-columns: var(--evolution-runs-queue-width, 380px) 12px minmax(0, 1fr);
+  align-items: stretch;
+  min-height: 0;
+}
+
+:where(.vui-routes-evolutionroute).resizeHandle {
+  position: relative;
+  min-width: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  outline: none;
+  touch-action: none;
+}
+
+:where(.vui-routes-evolutionroute).resizeHandle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 3px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-card) 8%, transparent);
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+
+:where(.vui-routes-evolutionroute).resizeHandle:hover::before,
+:where(.vui-routes-evolutionroute).resizeHandle:focus-visible::before {
+  background: color-mix(in srgb, var(--accent-warm) 52%, transparent);
+  box-shadow: var(--vui-shadow-soft);
+}
+
+:where(.vui-routes-evolutionroute).paneCollapsed {
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  visibility: hidden;
+}
+
+:where(.vui-routes-evolutionroute).panelHeader {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+:where(.vui-routes-evolutionroute).runQueuePanel,
+:where(.vui-routes-evolutionroute).runDetailPanel {
+  min-height: 0;
+  padding: 10px 12px;
+}
+
+:where(.vui-routes-evolutionroute).runQueuePanel {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  overflow: auto;
+}
+
+:where(.vui-routes-evolutionroute).runDetailPanel {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  overflow: auto;
+}
+
+:where(.vui-routes-evolutionroute).runListScrollable {
+  display: grid;
+  gap: 6px;
+  max-height: min(620px, 58vh);
+  overflow: auto;
+  padding-right: 4px;
+}
+
+:where(.vui-routes-evolutionroute).structuredEmptyState {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 86px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px dashed color-mix(in srgb, var(--surface-card) 8%, transparent);
+  background: var(--surface-card-subtle);
+}
+
+:where(.vui-routes-evolutionroute).structuredEmptyState h3 {
+  margin: 0;
+  font-size: 0.94rem;
+}
+
+:where(.vui-routes-evolutionroute).structuredEmptyState p {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.36;
+}
+
+:where(.vui-routes-evolutionroute).masterDetail {
+  display: grid;
+  grid-template-columns: var(--evolution-library-list-width, 360px) 12px minmax(0, 1fr);
+  min-height: 0;
+}
+
+:where(.vui-routes-evolutionroute).libraryViewStack .masterDetail {
+  height: 100%;
+  overflow: hidden;
+}
+
+:where(.vui-routes-evolutionroute).listPanel,
+:where(.vui-routes-evolutionroute).detailPanel {
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px;
+}
+
+:where(.vui-routes-evolutionroute).libraryViewStack .listPanel,
+:where(.vui-routes-evolutionroute).libraryViewStack .detailPanel {
+  padding: 12px;
+}
+
+:where(.vui-routes-evolutionroute).detailSectionCompact {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+:where(.vui-routes-evolutionroute).listPanel {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+:where(.vui-routes-evolutionroute).bulkToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+:where(.vui-routes-evolutionroute).bulkToolbarHint {
+  flex-basis: 100%;
+  margin: -2px 0 0;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.45;
+}
+
+:where(.vui-routes-evolutionroute).libraryFilters {
+  display: grid;
+  gap: 10px;
+}
+
+:where(.vui-routes-evolutionroute).filterRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) repeat(2, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+:where(.vui-routes-evolutionroute).filterField {
+  display: grid;
+  gap: 6px;
+}
+
+:where(.vui-routes-evolutionroute).filterField span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).filterMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+:where(.vui-routes-evolutionroute).runItem {
+  display: grid;
+  gap: 6px;
+  padding: 9px 10px;
+  background: var(--surface-card-muted);
+  color: var(--fg-primary);
+  text-align: left;
+}
+
+:where(.vui-routes-evolutionroute).runRecordCard {
+  gap: 10px;
+}
+
+:where(.vui-routes-evolutionroute).runCardButton {
+  display: grid;
+  gap: 8px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+:where(.vui-routes-evolutionroute).runItemActive {
+  border-color: color-mix(in srgb, var(--accent-warm) 28%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 8%, transparent);
+}
+
+:where(.vui-routes-evolutionroute).proposalCard {
+  display: grid;
+  gap: 6px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--surface-card) 8%, transparent);
+  border-radius: 8px;
+  background: var(--surface-card-muted);
+}
+
+:where(.vui-routes-evolutionroute).libraryViewStack .proposalCard {
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+:where(.vui-routes-evolutionroute).selectionBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+:where(.vui-routes-evolutionroute).batchToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).batchToggle input {
+  width: 15px;
+  height: 15px;
+}
+
+:where(.vui-routes-evolutionroute).proposalCardButton {
+  display: grid;
+  gap: 8px;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  background: transparent;
+  color: inherit;
+}
+
+:where(.vui-routes-evolutionroute).cardHeadline {
+  color: var(--fg-primary) !important;
+  font-weight: 600;
+}
+
+:where(.vui-routes-evolutionroute).cardFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  flex-wrap: wrap;
+}
+
+:where(.vui-routes-evolutionroute).detailHeader {
+  align-items: start;
+}
+
+:where(.vui-routes-evolutionroute).detailHeaderActions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+:where(.vui-routes-evolutionroute).detailTitle {
+  margin: 6px 0 0;
+  font-size: 1.28rem;
+}
+
+:where(.vui-routes-evolutionroute).libraryViewStack .detailTitle {
+  font-size: 1.08rem;
+}
+
+:where(.vui-routes-evolutionroute).runDetailOverview {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.42fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-card-subtle);
+}
+
+:where(.vui-routes-evolutionroute).runScorePanel {
+  display: grid;
+  align-content: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).runScorePanel span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).runScorePanel p {
+  margin: 0;
+  color: var(--fg-secondary);
+  line-height: 1.45;
+}
+
+:where(.vui-routes-evolutionroute).runScoreDiagnosis {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface-card-muted);
+}
+
+:where(.vui-routes-evolutionroute).runScoreDiagnosis span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).runScoreDiagnosis p {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--fg-primary);
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+:where(.vui-routes-evolutionroute).runScoreFacts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 4px;
+}
+
+:where(.vui-routes-evolutionroute).runScoreFacts span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).runScoreFacts strong {
+  min-width: 0;
+  color: var(--fg-primary);
+  font-size: var(--vui-font-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).detailLead {
+  margin: 0;
+  font-size: 1.74rem;
+  color: var(--fg-primary) !important;
+  line-height: 1;
+}
+
+:where(.vui-routes-evolutionroute).reviewLead {
+  margin: 0;
+  color: var(--fg-primary) !important;
+  font-size: 1.04rem;
+  line-height: 1.55;
+}
+
+:where(.vui-routes-evolutionroute).detailSection {
+  display: grid;
+  gap: 6px;
+  padding-top: 10px;
+  margin-top: 10px;
+  border-top: 1px solid var(--border-hairline);
+}
+
+:where(.vui-routes-evolutionroute).libraryViewStack .detailSection {
+  gap: 6px;
+  padding-top: 10px;
+  margin-top: 10px;
+}
+
+:where(.vui-routes-evolutionroute).detailSection h3 {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--fg-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+:where(.vui-routes-evolutionroute).relatedList {
+  display: grid;
+  gap: 6px;
+}
+
+:where(.vui-routes-evolutionroute).closedLoopLedger {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 30%, var(--border-hairline));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card-subtle) 88%, var(--accent-cool));
+}
+
+:where(.vui-routes-evolutionroute).closedLoopLedgerHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).closedLoopLedgerHeader > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).closedLoopLedger p {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+:where(.vui-routes-evolutionroute).closedLoopLedgerEvidenceGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+:where(.vui-routes-evolutionroute).closedLoopLedgerEvidenceGrid article {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 6px;
+  background: var(--surface-card-muted);
+}
+
+:where(.vui-routes-evolutionroute).closedLoopLedgerEvidenceGrid span,
+:where(.vui-routes-evolutionroute).closedLoopLedgerEvidenceGrid strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-evolutionroute).closedLoopLedgerEvidenceGrid span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).closedLoopLedgerEvidenceGrid strong {
+  color: var(--fg-primary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).libraryViewStack .detailPanel > .relatedList,
+:where(.vui-routes-evolutionroute).libraryViewStack .detailSection > .relatedList {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+:where(.vui-routes-evolutionroute).libraryViewStack .relatedRow {
+  gap: 4px;
+  min-height: 48px;
+  padding: 9px 10px;
+}
+
+:where(.vui-routes-evolutionroute).libraryViewStack .relatedRow strong,
+:where(.vui-routes-evolutionroute).libraryViewStack .relatedRow span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:where(.vui-routes-evolutionroute).detailFactGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+:where(.vui-routes-evolutionroute).runSignalGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+:where(.vui-routes-evolutionroute).runSignalStack {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+:where(.vui-routes-evolutionroute).runSignalStack h3 {
+  margin: 0;
+  font-size: var(--vui-font-xs);
+  color: var(--fg-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+:where(.vui-routes-evolutionroute).runRuntimeNote {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
+  color: var(--fg-secondary);
+}
+
+:where(.vui-routes-evolutionroute).runRuntimeNote p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+:where(.vui-routes-evolutionroute).dangerDetailSection {
+  opacity: 0.86;
+}
+
+:where(.vui-routes-evolutionroute).detailList {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--fg-secondary);
+  display: grid;
+  gap: 8px;
+}
+
+:where(.vui-routes-evolutionroute).listEmptyState {
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px dashed color-mix(in srgb, var(--surface-card) 8%, transparent);
+  color: var(--fg-secondary);
+}
+
+:where(.vui-routes-evolutionroute).actionGridCompact {
+  display: grid;
+  gap: 10px;
+}
+
+:where(.vui-routes-evolutionroute).pathText {
+  overflow-wrap: anywhere;
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-evolutionroute).rawBlockStack {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+}
+
+:where(.vui-routes-evolutionroute).rawBlock {
+  border: 1px solid color-mix(in srgb, var(--surface-card) 8%, transparent);
+  border-radius: 8px;
+  background: var(--surface-card-muted);
+  padding: 10px 12px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+:where(.vui-routes-evolutionroute).rawBlock summary {
+  cursor: pointer;
+  color: var(--fg-primary);
+  font-weight: 600;
+}
+
+:where(.vui-routes-evolutionroute).rawJson {
+  margin: 12px 0 0;
+  padding: 12px;
+  border-radius: 8px;
+  overflow: auto;
+  background: var(--surface-code);
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.55;
+}
+
+:where(.vui-routes-evolutionroute).emptyState {
+  display: grid;
+  place-items: center;
+  min-height: 180px;
+  color: var(--fg-secondary);
+  text-align: center;
+}
+
+@media (max-width: 1360px) {
+  :where(.vui-routes-evolutionroute).overviewGrid {
+    grid-template-columns: minmax(292px, 0.92fr) 12px minmax(360px, 1.32fr) 12px minmax(292px, 0.9fr);
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-areas:
+      "launch resize-launch io resize-run run";
+    gap: 0;
+    overflow: hidden;
+  }
+
+  :where(.vui-routes-evolutionroute).overviewWorkspace {
+    grid-template-columns: minmax(0, 1.2fr) minmax(320px, 1fr);
+  }
+
+  :where(.vui-routes-evolutionroute).librarySummaryBar {
+    grid-template-columns: minmax(300px, 1fr) minmax(260px, 0.8fr) minmax(300px, 0.9fr);
+  }
+
+  :where(.vui-routes-evolutionroute).statusSurface {
+    grid-column: 1 / -1;
+  }
+
+  :where(.vui-routes-evolutionroute).overviewSecondaryGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  :where(.vui-routes-evolutionroute).runsSurface {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 1200px) {
+  :where(.vui-routes-evolutionroute).toolbar {
+    align-items: flex-start;
+  }
+
+  :where(.vui-routes-evolutionroute).toolbarIntro {
+    min-width: 220px;
+    max-width: min(390px, 100%);
+  }
+
+  :where(.vui-routes-evolutionroute).toolbarControls {
+    min-width: min(500px, 100%);
+  }
+
+  :where(.vui-routes-evolutionroute).overviewGrid {
+    grid-template-columns: minmax(0, 1fr) minmax(292px, 0.82fr);
+    grid-template-rows: minmax(180px, 0.58fr) minmax(300px, 1fr);
+    grid-template-areas:
+      "io io"
+      "launch run";
+    overflow: auto;
+    gap: 10px;
+  }
+
+  :where(.vui-routes-evolutionroute).liveResizeHandle {
+    display: none;
+  }
+
+  :where(.vui-routes-evolutionroute).overviewWorkspace,
+  :where(.vui-routes-evolutionroute).overviewSecondaryGrid,
+  :where(.vui-routes-evolutionroute).runsHeaderBody,
+  :where(.vui-routes-evolutionroute).runsWorkspace,
+  :where(.vui-routes-evolutionroute).runsCommandStrip,
+  :where(.vui-routes-evolutionroute).masterDetail,
+  :where(.vui-routes-evolutionroute).librarySummaryBar .summarySurface,
+  :where(.vui-routes-evolutionroute).controlSurface {
+    grid-template-columns: 1fr;
+  }
+
+  :where(.vui-routes-evolutionroute).libraryViewStack {
+    height: auto;
+    overflow: auto;
+  }
+
+  :where(.vui-routes-evolutionroute).libraryViewStack .masterDetail {
+    height: auto;
+    overflow: visible;
+  }
+
+  :where(.vui-routes-evolutionroute).compactFieldGrid,
+  :where(.vui-routes-evolutionroute).filterRow {
+    grid-template-columns: 1fr;
+  }
+
+  :where(.vui-routes-evolutionroute).liveLaunchStack {
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  :where(.vui-routes-evolutionroute).liveLaunchStack > .launchSurface {
+    max-height: none;
+  }
+
+  :where(.vui-routes-evolutionroute).resizeHandle {
+    display: none;
+  }
+}
+
+@media (min-width: 901px) and (max-width: 1200px) {
+  :where(.vui-routes-evolutionroute).liveLaunchStack > .launchSurface {
+    gap: 6px;
+    padding: 9px 10px;
+  }
+
+  :where(.vui-routes-evolutionroute).liveLaunchStack > .launchSurface > .noticeText,
+  :where(.vui-routes-evolutionroute).liveLaunchStack > .launchSurface .formHint {
+    display: none;
+  }
+
+  :where(.vui-routes-evolutionroute).liveLaunchStack > .launchSurface .compactFieldGrid {
+    gap: 6px;
+  }
+
+  :where(.vui-routes-evolutionroute).liveLaunchStack > .launchSurface .controlFooter {
+    gap: 6px;
+  }
+
+  :where(.vui-routes-evolutionroute).liveLaunchStack > .launchSurface .closedLoopLaunchBlock {
+    padding: 6px 8px;
+  }
+}
+
+@media (max-width: 900px) {
+  :where(.vui-routes-evolutionroute).page {
+    gap: 6px;
+  }
+
+  :where(.vui-routes-evolutionroute).toolbar {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  :where(.vui-routes-evolutionroute).toolbarIntro {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  :where(.vui-routes-evolutionroute).toolbarControls {
+    justify-content: stretch;
+    min-width: 0;
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  :where(.vui-routes-evolutionroute).overviewGrid {
+    grid-template-columns: 1fr;
+    grid-template-rows: max-content max-content max-content;
+    grid-template-areas:
+      "io"
+      "launch"
+      "run";
+    align-content: start;
+    height: auto;
+    min-height: 100%;
+    overflow: auto;
+  }
+
+  :where(.vui-routes-evolutionroute).overviewGrid > .launchSurface,
+  :where(.vui-routes-evolutionroute).overviewGrid > .liveSurface,
+  :where(.vui-routes-evolutionroute).overviewGrid > .ioSurface,
+  :where(.vui-routes-evolutionroute).liveLaunchStack,
+  :where(.vui-routes-evolutionroute).liveSurface {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  :where(.vui-routes-evolutionroute).liveLaunchStack {
+    grid-template-rows: auto;
+    grid-auto-rows: max-content;
+    align-content: start;
+    min-height: 0;
+  }
+
+  :where(.vui-routes-evolutionroute).liveLaunchStack > .launchSurface {
+    height: max-content;
+    min-height: max-content;
+    overflow: visible;
+  }
+
+  :where(.vui-routes-evolutionroute).supervisedMembersPanel {
+    max-height: none;
+  }
+
+  :where(.vui-routes-evolutionroute).supervisedWorkflowPanel {
+    max-height: none;
+  }
+
+  :where(.vui-routes-evolutionroute).supervisedMembersList {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+  }
+
+  :where(.vui-routes-evolutionroute).supervisedWorkflowCardGrid {
+    max-height: none;
+    overflow: visible;
+  }
+
+  :where(.vui-routes-evolutionroute).metricGrid,
+  :where(.vui-routes-evolutionroute).summaryMetricStrip,
+  :where(.vui-routes-evolutionroute).sourceMetricGrid,
+  :where(.vui-routes-evolutionroute).metricStrip,
+  :where(.vui-routes-evolutionroute).actionGrid,
+  :where(.vui-routes-evolutionroute).monitorMetrics,
+  :where(.vui-routes-evolutionroute).monitorMetricsDense,
+  :where(.vui-routes-evolutionroute).statusMetricGrid,
+  :where(.vui-routes-evolutionroute).detailFactGrid,
+  :where(.vui-routes-evolutionroute).runSignalGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  :where(.vui-routes-evolutionroute).runsCommandHeader {
+    flex-direction: column;
+  }
+
+  :where(.vui-routes-evolutionroute).runsCommandMetrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  :where(.vui-routes-evolutionroute).runDetailOverview {
+    grid-template-columns: 1fr;
+  }
+
+  :where(.vui-routes-evolutionroute).librarySummaryBar .summaryMetricStrip,
+  :where(.vui-routes-evolutionroute).librarySummaryBar .statusMetricGrid,
+  :where(.vui-routes-evolutionroute).librarySummaryBar .relatedList,
+  :where(.vui-routes-evolutionroute).libraryViewStack .detailPanel > .relatedList,
+  :where(.vui-routes-evolutionroute).libraryViewStack .detailSection > .relatedList {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  :where(.vui-routes-evolutionroute).page {
+    padding-inline: 14px;
+  }
+
+  :where(.vui-routes-evolutionroute).metricGrid,
+  :where(.vui-routes-evolutionroute).summaryMetricStrip,
+  :where(.vui-routes-evolutionroute).sourceMetricGrid,
+  :where(.vui-routes-evolutionroute).metricStrip,
+  :where(.vui-routes-evolutionroute).actionGrid,
+  :where(.vui-routes-evolutionroute).monitorMetrics,
+  :where(.vui-routes-evolutionroute).monitorMetricsDense,
+  :where(.vui-routes-evolutionroute).statusMetricGrid,
+  :where(.vui-routes-evolutionroute).detailFactGrid,
+  :where(.vui-routes-evolutionroute).runSignalGrid,
+  :where(.vui-routes-evolutionroute).runsCommandMetrics,
+  :where(.vui-routes-evolutionroute).runScoreFacts {
+    grid-template-columns: 1fr;
+  }
+
+  :where(.vui-routes-evolutionroute).toolbarControls {
+    justify-content: flex-start;
+  }
+
+  :where(.vui-routes-evolutionroute).compactRunRow,
+  :where(.vui-routes-evolutionroute).sourceNextAction,
+  :where(.vui-routes-evolutionroute).closedLoopStatus {
+    grid-template-columns: 1fr;
+  }
+
+  :where(.vui-routes-evolutionroute).supervisedWorkflowCardGrid {
+    grid-template-columns: 1fr;
+  }
+
+  :where(.vui-routes-evolutionroute).compactRunMeta {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+}

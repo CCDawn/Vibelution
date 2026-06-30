@@ -1,0 +1,5817 @@
+/* source: routes/ChatCodingRoute legacy css */
+:where(.vui-routes-chatcodingroute).layout {
+  display: grid;
+  grid-template-columns:
+    var(--chat-left-pane-width, 260px)
+    8px
+    minmax(0, 1fr)
+    8px
+    var(--chat-right-pane-width, 340px);
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+:where(.vui-routes-chatcodingroute).leftRail,
+:where(.vui-routes-chatcodingroute).rightPane,
+:where(.vui-routes-chatcodingroute).centerPane,
+:where(.vui-routes-chatcodingroute).centerSurface {
+  min-height: 0;
+}
+
+:where(.vui-routes-chatcodingroute).leftRail {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 6px;
+  background: color-mix(in srgb, var(--surface-panel-muted) 64%, transparent);
+  overflow: auto;
+}
+
+:where(.vui-routes-chatcodingroute).paneCollapsed {
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  visibility: hidden;
+}
+
+:where(.vui-routes-chatcodingroute).leftBlock {
+  padding: 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).currentSessionBlock {
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+}
+
+:where(.vui-routes-chatcodingroute).currentSessionBlock .sectionIdentity {
+  gap: 1px;
+}
+
+:where(.vui-routes-chatcodingroute).currentSessionBlock .blockEyebrow {
+  font-size: var(--vui-font-xs);
+  letter-spacing: 0.04em;
+}
+
+:where(.vui-routes-chatcodingroute).currentSessionBlock .sectionTitle {
+  font-size: var(--vui-font-sm);
+}
+
+:where(.vui-routes-chatcodingroute).currentSessionLine {
+  display: none;
+}
+
+:where(.vui-routes-chatcodingroute).blockEyebrow {
+  margin: 0;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+:where(.vui-routes-chatcodingroute).sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+:where(.vui-routes-chatcodingroute).sectionIdentity {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+:where(.vui-routes-chatcodingroute).sectionTitle {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--vui-font-md);
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).contextLineCompact,
+:where(.vui-routes-chatcodingroute).sectionMetaLine,
+:where(.vui-routes-chatcodingroute).oneLineValue {
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+}
+
+:where(.vui-routes-chatcodingroute).contextLineCompact {
+  margin: 3px 0 0;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.24;
+  -webkit-line-clamp: 2;
+}
+
+:where(.vui-routes-chatcodingroute).sectionMetaLine {
+  margin: 0;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.25;
+  -webkit-line-clamp: 1;
+}
+
+:where(.vui-routes-chatcodingroute).oneLineValue {
+  margin: 3px 0 0;
+  color: var(--fg-primary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.24;
+  -webkit-line-clamp: 2;
+}
+
+:where(.vui-routes-chatcodingroute).oneLineValue span {
+  margin-right: 8px;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-sm);
+}
+
+:where(.vui-routes-chatcodingroute).metricValue {
+  color: var(--accent-warm-2);
+  font-size: var(--vui-font-sm);
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).backendHealthRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+:where(.vui-routes-chatcodingroute).backendLabel {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+:where(.vui-routes-chatcodingroute).backendPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: var(--vui-font-sm);
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).sessionStatePill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 21px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: var(--vui-font-sm);
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).mentalStateBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 21px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: var(--vui-font-sm);
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).backendPillDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+
+:where(.vui-routes-chatcodingroute).backendPill_healthy {
+  color: var(--state-success);
+  background: color-mix(in srgb, var(--accent-cool) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent-cool) 26%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).backendPill_checking {
+  color: var(--accent-warm-2);
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent-warm) 22%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).backendPill_offline,
+:where(.vui-routes-chatcodingroute).backendPill_unhealthy {
+  color: var(--state-error);
+  background: color-mix(in srgb, var(--state-error) 14%, transparent);
+  border-color: color-mix(in srgb, var(--state-error) 24%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).sessionStatePill_idle,
+:where(.vui-routes-chatcodingroute).sessionStatePill_ready,
+:where(.vui-routes-chatcodingroute).sessionStatePill_success {
+  color: var(--state-success);
+  background: color-mix(in srgb, var(--accent-cool) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent-cool) 26%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).sessionStatePill_waiting,
+:where(.vui-routes-chatcodingroute).sessionStatePill_needs_input,
+:where(.vui-routes-chatcodingroute).sessionStatePill_answering {
+  color: var(--accent-warm-2);
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent-warm) 22%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).sessionStatePill_running,
+:where(.vui-routes-chatcodingroute).sessionStatePill_thinking,
+:where(.vui-routes-chatcodingroute).sessionStatePill_tooling,
+:where(.vui-routes-chatcodingroute).sessionStatePill_planning,
+:where(.vui-routes-chatcodingroute).sessionStatePill_reading,
+:where(.vui-routes-chatcodingroute).sessionStatePill_editing,
+:where(.vui-routes-chatcodingroute).sessionStatePill_verifying {
+  color: var(--accent-cool);
+  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent-cool) 22%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).sessionStatePill_failed,
+:where(.vui-routes-chatcodingroute).sessionStatePill_blocked {
+  color: var(--state-error);
+  background: color-mix(in srgb, var(--state-error) 14%, transparent);
+  border-color: color-mix(in srgb, var(--state-error) 24%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).mentalStateBadge_unknown,
+:where(.vui-routes-chatcodingroute).mentalStateBadge_normal,
+:where(.vui-routes-chatcodingroute).mentalStateBadge_productive {
+  color: var(--state-success);
+  background: color-mix(in srgb, var(--accent-cool) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent-cool) 26%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).mentalStateBadge_looping,
+:where(.vui-routes-chatcodingroute).mentalStateBadge_thrashing,
+:where(.vui-routes-chatcodingroute).mentalStateBadge_tunnel_vision,
+:where(.vui-routes-chatcodingroute).mentalStateBadge_disoriented {
+  color: var(--accent-warm-2);
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent-warm) 22%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).backendNote {
+  margin: 6px 0 0;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.32;
+  overflow-wrap: anywhere;
+}
+
+:where(.vui-routes-chatcodingroute).inlineMetaList {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
+  margin-top: 6px;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).inlineMetaPill {
+  display: grid;
+  grid-template-columns: minmax(58px, 0.42fr) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 76%, transparent);
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-chatcodingroute).inlineMetaPill span,
+:where(.vui-routes-chatcodingroute).inlineStat span,
+:where(.vui-routes-chatcodingroute).detailNote span {
+  color: var(--fg-tertiary);
+  flex: 0 0 auto;
+}
+
+:where(.vui-routes-chatcodingroute).inlineMetaPill span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).inlineMetaPill strong {
+  min-width: 0;
+  color: var(--fg-primary);
+  font-weight: 650;
+  line-height: 1.18;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).currentSessionMetaList {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
+  margin-top: 0;
+}
+
+:where(.vui-routes-chatcodingroute).currentSessionMetaList .inlineMetaPill {
+  grid-template-columns: minmax(52px, 0.42fr) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 5px;
+  min-height: 22px;
+  padding: 2px 4px;
+  border-radius: 6px;
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-chatcodingroute).currentSessionMetaList .inlineMetaPill span,
+:where(.vui-routes-chatcodingroute).currentSessionMetaList .inlineMetaPill strong {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+:where(.vui-routes-chatcodingroute).currentSessionMetaList .inlineMetaPill span {
+  line-height: 1.08;
+}
+
+:where(.vui-routes-chatcodingroute).currentSessionMetaList .inlineMetaPill strong {
+  font-size: var(--vui-font-xs);
+  line-height: 1.1;
+}
+
+:where(.vui-routes-chatcodingroute).contextLineCompact.currentSessionLine {
+  display: none;
+}
+
+:where(.vui-routes-chatcodingroute).sessionBindingNotice {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.25;
+}
+
+:where(.vui-routes-chatcodingroute).sessionBindingNotice > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).sessionBindingNotice button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 26%, var(--border-soft));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
+  color: var(--fg-primary);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+:where(.vui-routes-chatcodingroute).sessionBindingNotice button:hover,
+:where(.vui-routes-chatcodingroute).sessionBindingNotice button:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-cool) 48%, var(--border-strong));
+  background: color-mix(in srgb, var(--accent-cool) 14%, transparent);
+  outline: none;
+}
+
+:where(.vui-routes-chatcodingroute).sessionDiagnosticsDetails {
+  display: grid;
+  gap: 0;
+  margin-top: 4px;
+  border: 1px solid color-mix(in srgb, var(--fg-tertiary) 12%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 42%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).sessionDiagnosticsSummary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 25px;
+  padding: 4px 6px;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  font-size: var(--vui-font-xs);
+  list-style: none;
+}
+
+:where(.vui-routes-chatcodingroute).sessionDiagnosticsSummary::-webkit-details-marker {
+  display: none;
+}
+
+:where(.vui-routes-chatcodingroute).sessionDiagnosticsSummaryText {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--fg-secondary);
+  font-weight: 720;
+}
+
+:where(.vui-routes-chatcodingroute).sessionDiagnosticsSummaryText span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).sessionDiagnosticsSummaryText svg {
+  flex: 0 0 auto;
+  transition: transform 140ms ease;
+}
+
+:where(.vui-routes-chatcodingroute).sessionDiagnosticsDetails[open] .sessionDiagnosticsSummaryText svg {
+  transform: rotate(90deg);
+}
+
+:where(.vui-routes-chatcodingroute).sessionDiagnosticsSnapshot {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).sessionDiagnosticsBody {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 6px 6px;
+}
+
+:where(.vui-routes-chatcodingroute).sessionResourceDiagnostics {
+  padding-top: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--border-soft) 64%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).activeSkillStatus {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid color-mix(in srgb, var(--fg-tertiary) 16%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-panel) 74%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).activeSkillStatus_active {
+  border-color: color-mix(in srgb, var(--state-success) 34%, var(--border-soft));
+  background: color-mix(in srgb, var(--state-success) 8%, var(--surface-card));
+}
+
+:where(.vui-routes-chatcodingroute).activeSkillStatus_stale {
+  border-color: color-mix(in srgb, var(--state-warning) 42%, var(--border-soft));
+  background: color-mix(in srgb, var(--state-warning) 10%, var(--surface-card));
+}
+
+:where(.vui-routes-chatcodingroute).activeSkillStatus_missing {
+  border-color: color-mix(in srgb, var(--state-error) 46%, var(--border-soft));
+  background: color-mix(in srgb, var(--state-error) 10%, var(--surface-card));
+}
+
+:where(.vui-routes-chatcodingroute).activeSkillIdentity {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).activeSkillEyebrow {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  font-weight: 760;
+  letter-spacing: 0;
+  line-height: 1;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).activeSkillIdentity strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: var(--vui-font-xs);
+  font-weight: 760;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).activeSkillMeta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).activeSkillMeta span {
+  min-width: 0;
+  overflow: hidden;
+  max-width: 84px;
+  text-overflow: ellipsis;
+}
+
+:where(.vui-routes-chatcodingroute).activeSkillState {
+  color: var(--fg-secondary);
+  font-weight: 760;
+}
+
+:where(.vui-routes-chatcodingroute).leftBlock > .activeSkillStatus {
+  margin-top: 6px;
+}
+
+:where(.vui-routes-chatcodingroute).currentSessionBlock > .activeSkillStatus {
+  margin-top: 0;
+  gap: 5px;
+  padding: 4px 5px;
+  border-radius: 6px;
+}
+
+:where(.vui-routes-chatcodingroute).currentSessionBlock .activeSkillIdentity {
+  gap: 1px;
+}
+
+:where(.vui-routes-chatcodingroute).currentSessionBlock .activeSkillIdentity strong {
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-chatcodingroute).currentSessionBlock .activeSkillMeta {
+  gap: 3px;
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-chatcodingroute).contextStatusCard,
+:where(.vui-routes-chatcodingroute).cacheStatusCard,
+:where(.vui-routes-chatcodingroute).compressionStatusCard,
+:where(.vui-routes-chatcodingroute).compressionStrategyCard,
+:where(.vui-routes-chatcodingroute).tokenCompressionCard,
+:where(.vui-routes-chatcodingroute).runModeBlock {
+  display: grid;
+  gap: 6px;
+}
+
+:where(.vui-routes-chatcodingroute).tokenCompressionCard {
+  gap: 7px;
+  padding: 7px;
+}
+
+:where(.vui-routes-chatcodingroute).tokenStatusVisualGrid {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).tokenStatusMetric {
+  --token-status-value: 0;
+  --token-status-accent: var(--accent-cool);
+  --token-status-track: color-mix(in srgb, var(--fg-tertiary) 16%, transparent);
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 66px;
+  padding: 7px;
+  border: 1px solid color-mix(in srgb, var(--token-status-accent) 24%, var(--border-soft));
+  border-radius: 8px;
+  background:
+    var(--vui-gradient-route-soft),
+    color-mix(in srgb, var(--surface-card) 84%, transparent);
+  color: var(--fg-primary);
+}
+
+:where(.vui-routes-chatcodingroute).tokenStatusMetricButton {
+  width: 100%;
+  appearance: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+:where(.vui-routes-chatcodingroute).tokenStatusMetricButton:hover,
+:where(.vui-routes-chatcodingroute).tokenStatusMetricButton:focus-visible {
+  border-color: color-mix(in srgb, var(--token-status-accent) 44%, var(--border-soft));
+  background:
+    var(--vui-gradient-route-soft),
+    color-mix(in srgb, var(--surface-card) 90%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).tokenStatusMetricButton:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--token-status-accent) 42%, transparent);
+  outline-offset: 2px;
+}
+
+:where(.vui-routes-chatcodingroute).tokenStatusMetricButton[aria-disabled="true"] {
+  cursor: default;
+}
+
+:where(.vui-routes-chatcodingroute).tokenStatusMetric_cache {
+  --token-status-accent: var(--accent-cool);
+}
+
+:where(.vui-routes-chatcodingroute).tokenStatusMetric_modelInput {
+  --token-status-accent: var(--accent-warm);
+}
+
+:where(.vui-routes-chatcodingroute).tokenStatusMetric_compression {
+  --token-status-accent: var(--accent-warm-2);
+}
+
+:where(.vui-routes-chatcodingroute).tokenStatusRing {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: conic-gradient(
+    var(--token-status-accent) calc(var(--token-status-value) * 1%),
+    var(--token-status-track) 0
+  );
+  box-shadow: var(--vui-shadow-inset-accent);
+}
+
+:where(.vui-routes-chatcodingroute).tokenStatusRing::before {
+  position: absolute;
+  inset: 7px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 76%, transparent);
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--surface-card) 92%, transparent);
+  content: "";
+}
+
+:where(.vui-routes-chatcodingroute).tokenStatusRingCore {
+  position: relative;
+  z-index: 1;
+  max-width: 40px;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: var(--vui-font-sm);
+  font-weight: 860;
+  line-height: 1;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).tokenStatusCopy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).tokenStatusLabel,
+:where(.vui-routes-chatcodingroute).tokenStatusMeta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).tokenStatusLabel {
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  font-weight: 780;
+  line-height: 1.05;
+}
+
+:where(.vui-routes-chatcodingroute).tokenStatusMeta {
+  color: var(--fg-primary);
+  font-size: var(--vui-font-sm);
+  font-weight: 820;
+  line-height: 1.1;
+}
+
+:where(.vui-routes-chatcodingroute).tokenStatusBar {
+  display: block;
+  width: 100%;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--token-status-track);
+}
+
+:where(.vui-routes-chatcodingroute).tokenStatusBar span {
+  display: block;
+  width: calc(var(--token-status-value) * 1%);
+  height: 100%;
+  border-radius: inherit;
+  background: var(--vui-gradient-route-soft);
+}
+
+:where(.vui-routes-chatcodingroute).contextStatusCard .contextCompositionPanel {
+  padding-top: 0;
+}
+
+:where(.vui-routes-chatcodingroute).contextStatusCard .resourceSplit,
+:where(.vui-routes-chatcodingroute).compressionStatusCard .compressionFactGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+:where(.vui-routes-chatcodingroute).compressionStatusCard .compressionFactGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+:where(.vui-routes-chatcodingroute).contextStatusCard .resourceMetric,
+:where(.vui-routes-chatcodingroute).compressionStatusCard .compressionFact {
+  padding: 4px 5px;
+}
+
+:where(.vui-routes-chatcodingroute).compressionStatusCard .compressionFact {
+  gap: 1px;
+}
+
+:where(.vui-routes-chatcodingroute).contextStatusCard .resourceMetric strong,
+:where(.vui-routes-chatcodingroute).compressionStatusCard .compressionFact strong {
+  overflow: hidden;
+  font-size: var(--vui-font-xs);
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).compressionStatusCard .compressionFactWide {
+  grid-column: auto;
+}
+
+:where(.vui-routes-chatcodingroute).compressionStatusCard .oneLineValue {
+  margin-top: 0;
+  -webkit-line-clamp: 1;
+}
+
+:where(.vui-routes-chatcodingroute).featurePresetBlock {
+  display: grid;
+  gap: 5px;
+}
+
+:where(.vui-routes-chatcodingroute).featurePresetScope {
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 26%, var(--border-soft));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-cool) 10%, transparent);
+  color: var(--accent-cool);
+  font-size: var(--vui-font-xs);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).featurePrimarySlot {
+  display: grid;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).featureChipRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).runModeBlock .featureChipRow {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+:where(.vui-routes-chatcodingroute).featureToggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px;
+  align-items: center;
+  min-width: 0;
+  min-height: 30px;
+  padding: 5px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 74%, transparent);
+  color: var(--fg-secondary);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+:where(.vui-routes-chatcodingroute).featureToggle:hover {
+  border-color: color-mix(in srgb, var(--accent-cool) 28%, var(--border-soft));
+  background: color-mix(in srgb, var(--surface-card) 88%, var(--accent-cool) 8%);
+}
+
+:where(.vui-routes-chatcodingroute).featureToggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-cool) 70%, white);
+  outline-offset: 2px;
+}
+
+:where(.vui-routes-chatcodingroute).featureToggleActive {
+  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 15%, var(--surface-card));
+  color: var(--fg-primary);
+}
+
+:where(.vui-routes-chatcodingroute).featureTogglePrimary {
+  border-color: color-mix(in srgb, var(--accent-warm) 28%, var(--border-soft));
+  background:
+    var(--vui-gradient-route-soft),
+    color-mix(in srgb, var(--surface-card) 78%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).featureTogglePrimary.featureToggleActive {
+  border-color: color-mix(in srgb, var(--accent-warm) 48%, var(--border-soft));
+  background:
+    var(--vui-gradient-route-soft),
+    color-mix(in srgb, var(--surface-card) 86%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).featureToggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+:where(.vui-routes-chatcodingroute).featureToggleText {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+:where(.vui-routes-chatcodingroute).featureToggleText strong,
+:where(.vui-routes-chatcodingroute).featureToggleText span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:where(.vui-routes-chatcodingroute).featureToggleText strong {
+  color: var(--fg-primary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).featureToggleText span {
+  display: -webkit-box;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.25;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+:where(.vui-routes-chatcodingroute).runModeBlock .featureToggleText span {
+  display: none;
+}
+
+:where(.vui-routes-chatcodingroute).featureChip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 3px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 72%, transparent);
+  color: var(--fg-secondary);
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+:where(.vui-routes-chatcodingroute).runModeBlock .featureChip {
+  min-height: 25px;
+  padding: 2px 5px;
+}
+
+:where(.vui-routes-chatcodingroute).featureChipPrimary {
+  border-color: color-mix(in srgb, var(--accent-warm) 28%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-warm) 9%, var(--surface-card));
+}
+
+:where(.vui-routes-chatcodingroute).featureChip strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--vui-font-xs);
+  font-weight: 650;
+}
+
+:where(.vui-routes-chatcodingroute).featureChip em {
+  flex: 0 0 auto;
+  min-width: 24px;
+  padding: 2px 5px;
+  border: 1px solid color-mix(in srgb, var(--fg-tertiary) 22%, transparent);
+  border-radius: 999px;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  font-style: normal;
+  font-weight: 760;
+  line-height: 1;
+  text-align: center;
+}
+
+:where(.vui-routes-chatcodingroute).featureChip span {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--fg-tertiary);
+  opacity: 0.58;
+}
+
+:where(.vui-routes-chatcodingroute).featureChip:hover {
+  border-color: color-mix(in srgb, var(--accent-cool) 28%, var(--border-soft));
+  color: var(--fg-primary);
+  background: color-mix(in srgb, var(--surface-card) 86%, var(--accent-cool) 8%);
+}
+
+:where(.vui-routes-chatcodingroute).featureChip:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-cool) 70%, white);
+  outline-offset: 2px;
+}
+
+:where(.vui-routes-chatcodingroute).featureChipActive {
+  border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
+  color: var(--fg-primary);
+}
+
+:where(.vui-routes-chatcodingroute).featureChipActive span {
+  background: var(--accent-cool);
+  opacity: 1;
+}
+
+:where(.vui-routes-chatcodingroute).featureChipActive em {
+  border-color: color-mix(in srgb, var(--accent-cool) 38%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
+  color: var(--accent-cool);
+}
+
+:where(.vui-routes-chatcodingroute).featureChipPrimary.featureChipActive {
+  border-color: color-mix(in srgb, var(--accent-warm) 36%, var(--border-soft));
+}
+
+:where(.vui-routes-chatcodingroute).featureChipPrimary.featureChipActive span {
+  background: var(--accent-warm-2);
+}
+
+:where(.vui-routes-chatcodingroute).featureChipPrimary.featureChipActive em {
+  border-color: color-mix(in srgb, var(--accent-warm-2) 42%, transparent);
+  background: color-mix(in srgb, var(--accent-warm-2) 12%, transparent);
+  color: var(--accent-warm-2);
+}
+
+:where(.vui-routes-chatcodingroute).featureToggleState {
+  justify-self: start;
+  min-width: 32px;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-card) 6%, transparent);
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).featureToggleActive .featureToggleState {
+  background: color-mix(in srgb, var(--accent-cool) 24%, transparent);
+  color: var(--accent-cool);
+}
+
+:where(.vui-routes-chatcodingroute).featureTogglePrimary.featureToggleActive .featureToggleState {
+  background: color-mix(in srgb, var(--accent-warm) 24%, transparent);
+  color: var(--accent-warm-2);
+}
+
+:where(.vui-routes-chatcodingroute).featurePresetNote {
+  margin: -1px 0 0;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  overflow: hidden;
+}
+
+:where(.vui-routes-chatcodingroute).groupProfileBlock,
+:where(.vui-routes-chatcodingroute).agentIndexRoster {
+  gap: 8px;
+}
+
+:where(.vui-routes-chatcodingroute).agentIndexList {
+  display: grid;
+  gap: 7px;
+}
+
+:where(.vui-routes-chatcodingroute).agentIndexCard {
+  display: grid;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 68%, transparent);
+  overflow: hidden;
+}
+
+:where(.vui-routes-chatcodingroute).agentIndexHeader {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 7px 8px;
+  background: transparent;
+  color: var(--fg-primary);
+}
+
+:where(.vui-routes-chatcodingroute).agentIndexHeader:hover,
+:where(.vui-routes-chatcodingroute).agentIndexCard:focus-within .agentIndexHeader {
+  background: color-mix(in srgb, var(--surface-panel) 74%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).agentIndexExpandButton,
+:where(.vui-routes-chatcodingroute).agentIndexOpenButton {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+:where(.vui-routes-chatcodingroute).agentIndexExpandButton {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 30px;
+  padding: 0;
+  color: var(--fg-tertiary);
+}
+
+:where(.vui-routes-chatcodingroute).agentIndexExpandButton:hover,
+:where(.vui-routes-chatcodingroute).agentIndexExpandButton:focus-visible,
+:where(.vui-routes-chatcodingroute).agentIndexOpenButton:hover,
+:where(.vui-routes-chatcodingroute).agentIndexOpenButton:focus-visible {
+  color: var(--fg-primary);
+  outline: none;
+}
+
+:where(.vui-routes-chatcodingroute).agentIndexExpandButton > svg {
+  transition: transform 140ms ease;
+}
+
+:where(.vui-routes-chatcodingroute).agentIndexExpandButton[aria-expanded="true"] > svg {
+  transform: rotate(90deg);
+}
+
+:where(.vui-routes-chatcodingroute).agentIndexOpenButton {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+
+:where(.vui-routes-chatcodingroute).agentIndexAvatar {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: var(--fg-primary);
+  background:
+    radial-gradient(circle at 34% 24%, color-mix(in srgb, var(--accent-warm) 38%, white), transparent 34%),
+    var(--vui-gradient-route-soft);
+  font-family: var(--font-display);
+  font-size: var(--vui-font-xs);
+  font-weight: 800;
+}
+
+:where(.vui-routes-chatcodingroute).agentAvatarImage {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
+:where(.vui-routes-chatcodingroute).agentIndexCopy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+:where(.vui-routes-chatcodingroute).agentIndexCopy strong,
+:where(.vui-routes-chatcodingroute).agentIndexCopy span,
+:where(.vui-routes-chatcodingroute).agentIndexCopy em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).agentIndexCopy strong {
+  font-family: var(--font-display);
+  font-size: var(--vui-font-md);
+  line-height: 1.2;
+}
+
+:where(.vui-routes-chatcodingroute).agentIndexNameLine {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+:where(.vui-routes-chatcodingroute).agentIndexNameLine > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-primary);
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).agentIndexCopy span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-chatcodingroute).agentIndexStatus {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).agentIndexWarning {
+  color: var(--state-error);
+  font-size: var(--vui-font-xs);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).agentMissingNotice {
+  margin: -2px 8px 7px 45px;
+  color: var(--state-error);
+  font-size: var(--vui-font-xs);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+:where(.vui-routes-chatcodingroute).agentIndexEmptyState {
+  display: grid;
+  justify-items: center;
+  gap: 9px;
+  min-height: 150px;
+  padding: 18px 10px;
+  border: 1px dashed color-mix(in srgb, var(--fg-tertiary) 18%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 52%, transparent);
+  color: var(--fg-tertiary);
+  text-align: center;
+}
+
+:where(.vui-routes-chatcodingroute).agentIndexEmptyState p {
+  max-width: 25ch;
+  margin: 0;
+  font-size: var(--vui-font-sm);
+  line-height: 1.45;
+}
+
+:where(.vui-routes-chatcodingroute).agentIndexDetails {
+  display: grid;
+  gap: 7px;
+  padding: 0 8px 8px 45px;
+}
+
+:where(.vui-routes-chatcodingroute).agentIndexMentalBlock {
+  display: grid;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 18%, var(--border-soft));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-panel) 58%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).resourceBlock,
+:where(.vui-routes-chatcodingroute).companionBlock {
+  display: grid;
+  gap: 6px;
+}
+
+:where(.vui-routes-chatcodingroute).resourceSplit {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 5px;
+}
+
+:where(.vui-routes-chatcodingroute).resourceMetric {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 5px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 72%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).resourceMetric span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).resourceMetric strong {
+  min-width: 0;
+  color: var(--fg-primary);
+  font-size: var(--vui-font-sm);
+  line-height: 1.2;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+:where(.vui-routes-chatcodingroute).compressionFactGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 5px;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).compressionFact {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 5px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 18%, var(--border-soft));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 64%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).compressionFactWide {
+  grid-column: 1 / -1;
+}
+
+:where(.vui-routes-chatcodingroute).compressionFact span {
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.15;
+}
+
+:where(.vui-routes-chatcodingroute).compressionFact strong {
+  min-width: 0;
+  color: var(--fg-primary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.25;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+:where(.vui-routes-chatcodingroute).cacheStatusCard .cacheDonutPanel {
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 7px;
+}
+
+:where(.vui-routes-chatcodingroute).cacheStatusCard .cacheDonutTrigger,
+:where(.vui-routes-chatcodingroute).cacheStatusCard .cacheDonutShell,
+:where(.vui-routes-chatcodingroute).cacheStatusCard .cacheDonutSvg {
+  width: 72px;
+  height: 72px;
+}
+
+:where(.vui-routes-chatcodingroute).cacheStatusCard .cacheDonutShell {
+  min-width: 72px;
+}
+
+:where(.vui-routes-chatcodingroute).cacheStatusCard .cacheDonutCenter {
+  inset: 19px;
+}
+
+:where(.vui-routes-chatcodingroute).cacheStatusCard .cacheDonutCenter strong {
+  font-size: var(--vui-font-sm);
+}
+
+:where(.vui-routes-chatcodingroute).cacheStatusCard .cacheDonutCenter span,
+:where(.vui-routes-chatcodingroute).cacheStatusCard .cacheDonutCenter small {
+  max-width: 34px;
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-chatcodingroute).cacheStatusCard .cacheDonutStats {
+  gap: 3px;
+}
+
+:where(.vui-routes-chatcodingroute).cacheStatusCard .cacheDonutStats span {
+  grid-template-columns: 25px minmax(0, 1fr);
+  gap: 4px;
+}
+
+:where(.vui-routes-chatcodingroute).companionCompact {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  min-height: 40px;
+  padding: 4px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 16%, var(--border-soft));
+  border-radius: 8px;
+  background:
+    var(--vui-gradient-route-soft),
+    color-mix(in srgb, var(--surface-card) 72%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).petMiniAvatar {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--surface-card) 8%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 78%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).petMiniAvatar .petShowcaseAvatar {
+  width: 24px;
+  height: 24px;
+  font-size: var(--vui-font-xs);
+  box-shadow: none;
+}
+
+:where(.vui-routes-chatcodingroute).companionCopy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+:where(.vui-routes-chatcodingroute).companionTopLine,
+:where(.vui-routes-chatcodingroute).companionTopLine strong,
+:where(.vui-routes-chatcodingroute).companionTopLine span,
+:where(.vui-routes-chatcodingroute).companionCopy p {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).companionTopLine {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+:where(.vui-routes-chatcodingroute).companionTopLine strong {
+  flex: 1 1 auto;
+  color: var(--fg-primary);
+  font-size: var(--vui-font-sm);
+}
+
+:where(.vui-routes-chatcodingroute).companionTopLine span {
+  flex: 0 1 auto;
+  color: var(--accent-warm-2);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-chatcodingroute).companionCopy p {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-chatcodingroute).compactDetails {
+  margin-top: 3px;
+  padding-top: 4px;
+  border-top: 1px solid color-mix(in srgb, var(--surface-card) 6%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).compactDetails summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-tertiary);
+  cursor: pointer;
+  font-size: var(--vui-font-xs);
+  list-style: none;
+  user-select: none;
+}
+
+:where(.vui-routes-chatcodingroute).compactDetails summary::-webkit-details-marker {
+  display: none;
+}
+
+:where(.vui-routes-chatcodingroute).compactDetails summary svg {
+  transition: transform 140ms ease;
+}
+
+:where(.vui-routes-chatcodingroute).compactDetails[open] summary svg {
+  transform: rotate(90deg);
+}
+
+:where(.vui-routes-chatcodingroute).compactDetailsOpenLabel {
+  display: none;
+}
+
+:where(.vui-routes-chatcodingroute).compactDetails[open] .compactDetailsClosedLabel {
+  display: none;
+}
+
+:where(.vui-routes-chatcodingroute).compactDetails[open] .compactDetailsOpenLabel {
+  display: inline;
+}
+
+:where(.vui-routes-chatcodingroute).inlineStatGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+:where(.vui-routes-chatcodingroute).inlineStat {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  align-items: baseline;
+  gap: 2px;
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 72%, transparent);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-chatcodingroute).inlineStat strong {
+  min-width: 0;
+  color: var(--fg-primary);
+  font-weight: 650;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).compressionStrategyList {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 0;
+}
+
+:where(.vui-routes-chatcodingroute).compressionStrategyRow {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 4px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 72%, transparent);
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-chatcodingroute).compressionStrategyRow strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--accent-warm-2);
+  font-weight: 700;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).compressionStrategyRow span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).detailNote {
+  display: grid;
+  gap: 3px;
+  margin: 6px 0 0;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.35;
+}
+
+:where(.vui-routes-chatcodingroute).compressionStrategyCard .detailNote {
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px;
+  margin-top: 0;
+  overflow: hidden;
+  font-size: var(--vui-font-xs);
+  line-height: 1.2;
+}
+
+:where(.vui-routes-chatcodingroute).compressionStrategyCard .detailNote span,
+:where(.vui-routes-chatcodingroute).compressionStrategyCard .detailNote strong {
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).compressionStrategyCard .detailNote strong {
+  overflow: hidden;
+  color: var(--fg-secondary);
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).vitalStackCompact {
+  display: grid;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+:where(.vui-routes-chatcodingroute).vitalItemCompact {
+  display: grid;
+  gap: 4px;
+}
+
+:where(.vui-routes-chatcodingroute).vitalLabelRow span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-sm);
+}
+
+:where(.vui-routes-chatcodingroute).vitalLabelRow strong,
+:where(.vui-routes-chatcodingroute).contextUsageValue {
+  color: var(--fg-primary);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+:where(.vui-routes-chatcodingroute).contextUsageValue {
+  margin: 4px 0 0;
+  font-size: var(--vui-font-sm);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  overflow: hidden;
+}
+
+:where(.vui-routes-chatcodingroute).vitalLabelRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+:where(.vui-routes-chatcodingroute).progressTrack {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-card) 8%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).progressFillWarm,
+:where(.vui-routes-chatcodingroute).progressFillCool {
+  height: 100%;
+  border-radius: inherit;
+}
+
+:where(.vui-routes-chatcodingroute).progressFillWarm {
+  background: var(--vui-gradient-route-soft);
+}
+
+:where(.vui-routes-chatcodingroute).progressFillCool {
+  background: var(--vui-gradient-route-soft);
+}
+
+:where(.vui-routes-chatcodingroute).petShowcase {
+  position: relative;
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 8px 10px;
+  align-items: center;
+  min-height: 96px;
+  margin-top: 0;
+  padding: 8px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 20%, var(--border-soft));
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 15% 15%, color-mix(in srgb, var(--accent-warm) 20%, transparent), transparent 42%),
+    var(--vui-gradient-route-soft);
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseStage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--surface-card) 8%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 78%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseAura {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent-warm) 36%, transparent), transparent 70%);
+  filter: blur(3px);
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar {
+  --pet-body: color-mix(in srgb, var(--accent-warm) 34%, var(--surface-panel-strong));
+  --pet-body-deep: color-mix(in srgb, var(--accent-warm) 58%, var(--surface-card));
+  --pet-mark: color-mix(in srgb, var(--fg-primary) 22%, transparent);
+  --pet-feature: var(--surface-page);
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid color-mix(in srgb, var(--pet-body-deep) 64%, color-mix(in srgb, var(--fg-primary) 8%, transparent));
+  border-radius: 45% 45% 42% 42%;
+  background:
+    radial-gradient(circle at 36% 22%, var(--pet-mark), transparent 30%),
+    var(--vui-gradient-route-soft);
+  box-shadow: var(--vui-shadow-soft);
+  color: color-mix(in srgb, var(--accent-warm-2) 70%, white);
+  font-family: var(--font-display);
+  font-size: var(--vui-font-xs);
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-shadow: 0 1px 4px color-mix(in srgb, var(--bg-canvas) 34%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseSymbol {
+  position: relative;
+  z-index: 1;
+  transform: translateY(1px);
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseEarLeft,
+:where(.vui-routes-chatcodingroute).petShowcaseEarRight,
+:where(.vui-routes-chatcodingroute).petShowcaseFootLeft,
+:where(.vui-routes-chatcodingroute).petShowcaseFootRight,
+:where(.vui-routes-chatcodingroute).petShowcaseFace,
+:where(.vui-routes-chatcodingroute).petShowcaseEye,
+:where(.vui-routes-chatcodingroute).petShowcaseMuzzle {
+  position: absolute;
+  display: block;
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseEarLeft,
+:where(.vui-routes-chatcodingroute).petShowcaseEarRight {
+  z-index: 0;
+  width: 13px;
+  height: 16px;
+  top: -6px;
+  border: 1px solid color-mix(in srgb, var(--pet-body-deep) 70%, color-mix(in srgb, var(--fg-primary) 8%, transparent));
+  background: var(--vui-gradient-route-soft);
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseEarLeft {
+  left: 7px;
+  border-radius: 80% 32% 64% 36%;
+  transform: rotate(-23deg);
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseEarRight {
+  right: 7px;
+  border-radius: 32% 80% 36% 64%;
+  transform: rotate(23deg);
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseFace {
+  z-index: 1;
+  inset: 12px 9px auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transform: none;
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseEye {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--pet-feature);
+  opacity: 0.82;
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseMuzzle {
+  left: 50%;
+  top: 7px;
+  width: 9px;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--pet-feature) 66%, transparent);
+  transform: translateX(-50%);
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseFootLeft,
+:where(.vui-routes-chatcodingroute).petShowcaseFootRight {
+  z-index: 1;
+  bottom: -3px;
+  width: 12px;
+  height: 7px;
+  border-radius: 999px 999px 6px 6px;
+  background: color-mix(in srgb, var(--pet-body-deep) 74%, black);
+  opacity: 0.9;
+  transform: none;
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseFootLeft {
+  left: 8px;
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseFootRight {
+  right: 8px;
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_cat {
+  --pet-body: var(--state-warning);
+  --pet-body-deep: var(--fg-tertiary);
+  --pet-mark: color-mix(in srgb, var(--accent-warm) 32%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_bunny {
+  --pet-body: var(--surface-card);
+  --pet-body-deep: var(--fg-secondary);
+  --pet-mark: color-mix(in srgb, var(--fg-primary) 34%, transparent);
+  border-radius: 47% 47% 40% 40%;
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_bunny .petShowcaseEarLeft,
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_bunny .petShowcaseEarRight {
+  height: 21px;
+  top: -11px;
+  border-radius: 999px 999px 52% 52%;
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_penguin {
+  --pet-body: var(--fg-secondary);
+  --pet-body-deep: var(--bg-canvas);
+  --pet-mark: color-mix(in srgb, var(--accent-warm) 90%, transparent);
+  color: var(--accent-warm-2);
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_penguin .petShowcaseEarLeft,
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_penguin .petShowcaseEarRight {
+  width: 13px;
+  height: 17px;
+  top: 8px;
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_slime {
+  --pet-body: var(--accent-warm);
+  --pet-body-deep: var(--fg-tertiary);
+  --pet-mark: color-mix(in srgb, var(--accent-warm) 42%, transparent);
+  border-radius: 52% 48% 42% 44%;
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_slime .petShowcaseEarLeft,
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_slime .petShowcaseEarRight {
+  display: none;
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_moose {
+  --pet-body: var(--fg-tertiary);
+  --pet-body-deep: var(--fg-tertiary);
+  --pet-mark: color-mix(in srgb, var(--accent-warm) 30%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_moose .petShowcaseEarLeft,
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_moose .petShowcaseEarRight {
+  width: 17px;
+  height: 9px;
+  top: -1px;
+  border-radius: 999px 999px 6px 999px;
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_lobster,
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_shrimp,
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_crab {
+  --pet-body: var(--state-error);
+  --pet-body-deep: var(--fg-tertiary);
+  --pet-mark: color-mix(in srgb, var(--accent-warm) 34%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_chick {
+  --pet-body: var(--state-warning);
+  --pet-body-deep: var(--fg-tertiary);
+  --pet-mark: color-mix(in srgb, var(--accent-warm) 34%, transparent);
+  color: color-mix(in srgb, var(--surface-page) 72%, black);
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_default {
+  --pet-body: color-mix(in srgb, var(--accent-cool) 36%, var(--accent-warm));
+  --pet-body-deep: color-mix(in srgb, var(--accent-cool) 42%, var(--surface-card));
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseInfo {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseTop span {
+  color: var(--accent-warm-2);
+  font-size: var(--vui-font-xs);
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseName {
+  margin: 0;
+  color: var(--fg-primary);
+  font-family: var(--font-display);
+  font-size: var(--vui-font-chat);
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseLine {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseActions {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  min-width: 0;
+  margin-top: 7px;
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseAction,
+:where(.vui-routes-chatcodingroute).petShowcaseActionHint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 26px;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 78%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 72%, transparent);
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseActionHint {
+  display: none;
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseAction span,
+:where(.vui-routes-chatcodingroute).petShowcaseActionHint span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseAction:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseAction:not(:disabled):hover {
+  color: var(--fg-primary);
+  border-color: color-mix(in srgb, var(--accent-warm) 28%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseActionHint {
+  color: var(--accent-warm-2);
+  border-color: color-mix(in srgb, var(--accent-warm) 20%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 10%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).petShowcaseFeedback {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--accent-warm-2);
+  font-size: var(--vui-font-xs);
+  line-height: 1.32;
+  overflow-wrap: anywhere;
+}
+
+:where(.vui-routes-chatcodingroute).centerPane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  background: color-mix(in srgb, var(--surface-page) 10%, transparent);
+  overflow: hidden;
+}
+
+:where(.vui-routes-chatcodingroute).tabStrip {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px 0;
+  overflow-x: auto;
+  align-items: flex-end;
+}
+
+:where(.vui-routes-chatcodingroute).chatReturnLink {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  max-width: min(220px, 40vw);
+  padding: 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px 6px 0 0;
+  background: color-mix(in srgb, var(--surface-card) 78%, transparent);
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-sm);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).chatReturnLink span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:where(.vui-routes-chatcodingroute).chatReturnLink:hover,
+:where(.vui-routes-chatcodingroute).chatReturnLink:focus-visible {
+  color: var(--fg-primary);
+  background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-card));
+}
+
+:where(.vui-routes-chatcodingroute).tab {
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  border-radius: 7px 7px 0 0;
+  padding: 7px 10px;
+  background: transparent;
+  color: var(--fg-secondary);
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).tabActive {
+  color: var(--fg-primary);
+  background: var(--surface-panel-strong);
+  border-color: var(--border-soft);
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabGroup {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 5px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTab {
+  display: inline-grid;
+  grid-template-columns: auto minmax(80px, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 218px;
+  min-width: 140px;
+  max-width: 248px;
+  min-height: 34px;
+  border: 1px solid transparent;
+  border-radius: 7px 7px 0 0;
+  padding: 4px 8px;
+  background: transparent;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabClosable {
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 0 6px 0 8px;
+  cursor: default;
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabMainAction {
+  display: grid;
+  grid-template-columns: auto minmax(74px, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 32px;
+  border: 0;
+  padding: 4px 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabMainAction:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--state-success) 42%, transparent);
+  outline-offset: 2px;
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTab:hover {
+  color: var(--fg-primary);
+  border-color: color-mix(in srgb, var(--border-soft) 72%, transparent);
+  background: color-mix(in srgb, var(--surface-panel-strong) 54%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabActive {
+  color: var(--fg-primary);
+  background: var(--surface-panel-strong);
+  border-color: var(--border-soft);
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabRoot {
+  border-left: 2px solid color-mix(in srgb, var(--accent-warm) 56%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 5%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabChild {
+  border-left: 2px solid color-mix(in srgb, var(--accent-cool) 62%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 7%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabCli {
+  border-left: 2px solid color-mix(in srgb, var(--state-success) 58%, transparent);
+  background: color-mix(in srgb, var(--state-success) 7%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabRoot.agentSessionTabActive {
+  background: color-mix(in srgb, var(--surface-panel-strong) 88%, var(--accent-warm) 12%);
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabChild.agentSessionTabActive {
+  background: color-mix(in srgb, var(--surface-panel-strong) 86%, var(--accent-cool) 14%);
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabCli.agentSessionTabActive {
+  background: color-mix(in srgb, var(--surface-panel-strong) 86%, var(--state-success) 14%);
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabRoot .agentSessionTabIcon {
+  color: var(--accent-warm-2);
+  background: color-mix(in srgb, var(--accent-warm) 14%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabChild .agentSessionTabIcon {
+  color: var(--accent-cool-2);
+  background: color-mix(in srgb, var(--accent-cool) 16%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabCli .agentSessionTabIcon {
+  color: var(--state-success);
+  background: color-mix(in srgb, var(--state-success) 14%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabEditing {
+  grid-template-columns: auto minmax(120px, 1fr) auto;
+  cursor: default;
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  color: var(--accent-cool-2);
+  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabCopy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabCopyCompact {
+  gap: 0;
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabKicker {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  font-weight: 760;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabTitle {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-size: var(--vui-font-sm);
+  font-weight: 760;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabTitleInput {
+  min-width: 0;
+  width: 100%;
+  height: 22px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
+  border-radius: 6px;
+  background: var(--surface-input-strong);
+  color: var(--fg-primary);
+  padding: 0 6px;
+  font: inherit;
+  font-size: var(--vui-font-sm);
+  font-weight: 760;
+  line-height: 1;
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabEditActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabEditButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-card) 90%, transparent);
+  color: var(--fg-tertiary);
+  cursor: pointer;
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabEditButton:hover:not(:disabled),
+:where(.vui-routes-chatcodingroute).agentSessionTabEditButton:focus-visible:not(:disabled) {
+  color: var(--accent-cool-2);
+  border-color: color-mix(in srgb, var(--accent-cool) 34%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabEditButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabCloseButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--fg-tertiary);
+  background: transparent;
+  cursor: pointer;
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabCloseButton:hover,
+:where(.vui-routes-chatcodingroute).agentSessionTabCloseButton:focus-visible {
+  color: var(--state-error);
+  border-color: color-mix(in srgb, var(--state-error) 28%, transparent);
+  background: color-mix(in srgb, var(--state-error) 10%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabMeta {
+  min-width: 0;
+  max-width: 82px;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTab[data-vui],
+:where(.vui-routes-chatcodingroute).agentSessionTabMainAction[data-vui] {
+  justify-content: stretch;
+  font: inherit;
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTab[data-vui] [data-slot="vui-button-content"],
+:where(.vui-routes-chatcodingroute).agentSessionTab[data-vui] [data-slot="vui-button-label"],
+:where(.vui-routes-chatcodingroute).agentSessionTabMainAction[data-vui] [data-slot="vui-button-content"],
+:where(.vui-routes-chatcodingroute).agentSessionTabMainAction[data-vui] [data-slot="vui-button-label"] {
+  display: contents;
+}
+
+:where(.vui-routes-chatcodingroute).agentSessionTabEditButton[data-vui],
+:where(.vui-routes-chatcodingroute).agentSessionTabCloseButton[data-vui] {
+  min-width: 0;
+  padding: 0;
+}
+
+:where(.vui-routes-chatcodingroute).fileTab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  border-radius: 7px 7px 0 0;
+  background: transparent;
+}
+
+:where(.vui-routes-chatcodingroute).fileTabActive {
+  background: var(--surface-panel-strong);
+  border-color: var(--border-soft);
+}
+
+:where(.vui-routes-chatcodingroute).fileTabButton,
+:where(.vui-routes-chatcodingroute).fileTabClose {
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+:where(.vui-routes-chatcodingroute).fileTabButton {
+  padding: 10px 6px 10px 14px;
+  color: var(--fg-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+:where(.vui-routes-chatcodingroute).fileTabActive .fileTabButton {
+  color: var(--fg-primary);
+}
+
+:where(.vui-routes-chatcodingroute).fileTabClose {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px 6px 4px;
+  color: var(--fg-tertiary);
+  cursor: pointer;
+}
+
+:where(.vui-routes-chatcodingroute).fileTabClose:hover {
+  color: var(--fg-primary);
+}
+
+:where(.vui-routes-chatcodingroute).centerSurface {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  background: color-mix(in srgb, var(--surface-panel-strong) 6%, transparent);
+  overflow: hidden;
+}
+
+:where(.vui-routes-chatcodingroute).conversationFrame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+:where(.vui-routes-chatcodingroute).conversationFrameFocus {
+  justify-self: center;
+  width: min(calc(100% - 48px), 1480px);
+  max-width: 100%;
+}
+
+:where(.vui-routes-chatcodingroute).cliAgentRunPanel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  padding: 10px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--surface-panel-strong) 92%, var(--bg-canvas) 8%);
+}
+
+:where(.vui-routes-chatcodingroute).cliAgentRunPanelHidden {
+  display: none;
+}
+
+:where(.vui-routes-chatcodingroute).cliAgentTerminalFrame {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 0;
+  flex: 1 1 auto;
+  border: 1px solid color-mix(in srgb, var(--state-success) 20%, var(--bg-canvas) 80%);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-canvas);
+  box-shadow: var(--vui-shadow-inset-accent);
+}
+
+:where(.vui-routes-chatcodingroute).cliAgentTerminalCommand {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent-cool) 14%, transparent);
+  color: var(--accent-warm);
+  background: var(--bg-canvas);
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: var(--vui-font-sm);
+}
+
+:where(.vui-routes-chatcodingroute).cliAgentTerminalStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 58px;
+  color: var(--accent-warm);
+  font-weight: 780;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).cliAgentTerminalAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: fit-content;
+  min-width: 0;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 32%, transparent);
+  border-radius: 6px;
+  color: var(--accent-warm);
+  background: color-mix(in srgb, var(--fg-tertiary) 70%, transparent);
+  font-family: inherit;
+  font-size: var(--vui-font-xs);
+  font-weight: 760;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).cliAgentTerminalAction:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent-warm) 58%, transparent);
+  background: color-mix(in srgb, var(--fg-tertiary) 82%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).cliAgentTerminalAction:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+:where(.vui-routes-chatcodingroute).cliAgentTerminalCommand code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--accent-warm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).cliAgentTerminalOutputShell {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-canvas);
+}
+
+:where(.vui-routes-chatcodingroute).cliAgentTerminalOutput {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding: 12px;
+  color: var(--accent-warm);
+  background: var(--bg-canvas);
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: var(--vui-font-md);
+}
+
+:where(.vui-routes-chatcodingroute).cliAgentTerminalOutput .xterm {
+  height: 100%;
+  padding: 0;
+}
+
+:where(.vui-routes-chatcodingroute).cliAgentTerminalOutput .xterm-screen,
+:where(.vui-routes-chatcodingroute).cliAgentTerminalOutput .xterm-viewport {
+  background: var(--bg-canvas);
+}
+
+:where(.vui-routes-chatcodingroute).cliAgentTerminalOutput .xterm-viewport {
+  scrollbar-color: color-mix(in srgb, var(--accent-cool) 34%, transparent) transparent;
+}
+
+:where(.vui-routes-chatcodingroute).cliAgentTerminalOverlay {
+  position: absolute;
+  left: 14px;
+  bottom: 12px;
+  max-width: min(420px, calc(100% - 28px));
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 20%, transparent);
+  border-radius: 6px;
+  padding: 7px 9px;
+  color: var(--accent-warm);
+  background: color-mix(in srgb, var(--bg-canvas) 90%, transparent);
+  font-size: var(--vui-font-sm);
+  font-weight: 650;
+  pointer-events: none;
+}
+
+:where(.vui-routes-chatcodingroute).cliAgentTerminalOverlay[data-tone="error"] {
+  border-color: color-mix(in srgb, var(--state-error) 34%, color-mix(in srgb, var(--accent-cool) 20%, transparent));
+  color: var(--accent-warm);
+  background: color-mix(in srgb, var(--fg-tertiary) 92%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).inlineNotice {
+  margin: 10px 14px 0;
+  padding: 8px 11px;
+  border: 1px solid color-mix(in srgb, var(--state-error) 24%, var(--border-soft));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--state-error) 10%, transparent);
+  color: var(--state-error);
+  font-size: var(--vui-font-md);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+:where(.vui-routes-chatcodingroute).runtimeNoticeStack {
+  display: grid;
+  gap: 6px;
+  margin: 10px 14px 0;
+}
+
+:where(.vui-routes-chatcodingroute).runtimeNotice {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 7px;
+  align-items: start;
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-panel) 82%, var(--accent-cool) 10%);
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-sm);
+  line-height: 1.35;
+}
+
+:where(.vui-routes-chatcodingroute).runtimeNotice svg {
+  margin-top: 2px;
+  color: var(--accent-cool);
+}
+
+:where(.vui-routes-chatcodingroute).runtimeNotice_warning {
+  border-color: color-mix(in srgb, var(--accent-warm) 28%, var(--border-soft));
+  background: color-mix(in srgb, var(--surface-panel) 84%, var(--accent-warm) 12%);
+}
+
+:where(.vui-routes-chatcodingroute).runtimeNotice_warning svg {
+  color: var(--accent-warm-2);
+}
+
+:where(.vui-routes-chatcodingroute).runtimeNotice_error {
+  border-color: color-mix(in srgb, var(--state-error) 26%, var(--border-soft));
+  background: color-mix(in srgb, var(--surface-panel) 84%, var(--state-error) 10%);
+}
+
+:where(.vui-routes-chatcodingroute).runtimeNotice_error svg {
+  color: var(--state-error);
+}
+
+:where(.vui-routes-chatcodingroute).runtimeNotice_success {
+  border-color: color-mix(in srgb, var(--state-success) 26%, var(--border-soft));
+  background: color-mix(in srgb, var(--surface-panel) 84%, var(--state-success) 10%);
+}
+
+:where(.vui-routes-chatcodingroute).runtimeNotice_success svg {
+  color: var(--state-success);
+}
+
+:where(.vui-routes-chatcodingroute).runtimeNoticeBody {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).runtimeNoticeLabel {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+:where(.vui-routes-chatcodingroute).runtimeNoticeMessage {
+  color: var(--fg-primary);
+  overflow-wrap: anywhere;
+}
+
+:where(.vui-routes-chatcodingroute).toolApprovalOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 18px 18px 0;
+  pointer-events: none;
+}
+
+:where(.vui-routes-chatcodingroute).toolApprovalDialog {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: 10px;
+  width: min(680px, 100%);
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 34%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel) 96%, var(--accent-warm) 5%);
+  box-shadow: var(--vui-shadow-soft);
+  pointer-events: auto;
+}
+
+:where(.vui-routes-chatcodingroute).toolApprovalIcon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 26%, var(--border-soft));
+  border-radius: 8px;
+  color: var(--accent-warm-2);
+  background: color-mix(in srgb, var(--accent-warm) 10%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).toolApprovalBody {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+:where(.vui-routes-chatcodingroute).toolApprovalHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).toolApprovalHeader strong {
+  color: var(--fg-primary);
+  font-size: var(--vui-font-chat);
+  line-height: 1.25;
+}
+
+:where(.vui-routes-chatcodingroute).toolApprovalHeader span {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 30%, var(--border-soft));
+  border-radius: 999px;
+  color: var(--accent-warm-2);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-chatcodingroute).toolApprovalBody p {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-sm);
+  line-height: 1.38;
+}
+
+:where(.vui-routes-chatcodingroute).toolApprovalToolList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).toolApprovalToolList span {
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 28%, var(--border-soft));
+  border-radius: 999px;
+  color: var(--accent-cool);
+  background: color-mix(in srgb, var(--accent-cool) 9%, transparent);
+  font-size: var(--vui-font-xs);
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).toolApprovalActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+:where(.vui-routes-chatcodingroute).toolApprovalActions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  color: var(--fg-secondary);
+  background: var(--surface-panel-muted);
+  font-size: var(--vui-font-sm);
+  cursor: pointer;
+}
+
+:where(.vui-routes-chatcodingroute).toolApprovalActions button:disabled {
+  cursor: wait;
+  opacity: 0.66;
+}
+
+:where(.vui-routes-chatcodingroute).toolApprovalActions button:hover:not(:disabled) {
+  color: var(--fg-primary);
+  border-color: color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
+}
+
+:where(.vui-routes-chatcodingroute).toolApprovalActions .toolApprovalAllow {
+  color: var(--surface-page);
+  border-color: color-mix(in srgb, var(--accent-cool) 48%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 82%, black 8%);
+}
+
+:where(.vui-routes-chatcodingroute).toolApprovalActions .toolApprovalAllow:hover:not(:disabled) {
+  color: var(--surface-page);
+  border-color: color-mix(in srgb, var(--accent-cool) 58%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 88%, black 6%);
+}
+
+@media (max-width: 720px) {
+  :where(.vui-routes-chatcodingroute).toolApprovalDialog {
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+
+  :where(.vui-routes-chatcodingroute).toolApprovalActions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+
+  :where(.vui-routes-chatcodingroute).cacheDetailOverlay {
+    align-items: start;
+    padding: 12px;
+    overflow: hidden;
+  }
+
+  :where(.vui-routes-chatcodingroute).cacheDetailDialog {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
+    padding: 12px;
+  }
+
+  :where(.vui-routes-chatcodingroute).cacheDetailSummaryGrid,
+  :where(.vui-routes-chatcodingroute).cacheDetailBody {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :where(.vui-routes-chatcodingroute).cacheDetailCalibrationNote {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :where(.vui-routes-chatcodingroute).cacheDetailCalibrationNote strong,
+  :where(.vui-routes-chatcodingroute).cacheDetailCalibrationNote em,
+  :where(.vui-routes-chatcodingroute).cacheDetailCalibrationNote span {
+    white-space: normal;
+  }
+
+  :where(.vui-routes-chatcodingroute).cacheDetailDonutShell,
+  :where(.vui-routes-chatcodingroute).cacheDetailDonutSvg {
+    width: 136px;
+    height: 136px;
+  }
+
+  :where(.vui-routes-chatcodingroute).cacheDetailDonutCenter {
+    inset: 37px;
+  }
+
+  :where(.vui-routes-chatcodingroute).cacheDetailBody,
+  :where(.vui-routes-chatcodingroute).cacheDetailSegmentList {
+    min-height: 0;
+  }
+
+  :where(.vui-routes-chatcodingroute).cacheDetailSegmentList {
+    max-height: calc(100dvh - 300px);
+    overflow: auto;
+  }
+
+  :where(.vui-routes-chatcodingroute).cacheDetailSegmentRow {
+    grid-template-columns: 8px minmax(0, 1fr);
+  }
+
+  :where(.vui-routes-chatcodingroute).cacheDetailSegmentRow em {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
+:where(.vui-routes-chatcodingroute).emptySurface {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 20px;
+  color: var(--fg-secondary);
+  text-align: center;
+  line-height: 1.5;
+}
+
+:where(.vui-routes-chatcodingroute).rightPane {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  padding: 6px;
+  gap: 6px;
+  background: color-mix(in srgb, var(--surface-panel-muted) 90%, transparent);
+  overflow: hidden;
+}
+
+:where(.vui-routes-chatcodingroute).resizeHandle {
+  position: relative;
+  min-height: 0;
+  background: transparent;
+  cursor: col-resize;
+  outline: none;
+  touch-action: none;
+}
+
+:where(.vui-routes-chatcodingroute).resizeHandle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: var(--surface-resize-track);
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+
+:where(.vui-routes-chatcodingroute).resizeHandle:hover::before,
+:where(.vui-routes-chatcodingroute).resizeHandle:focus-visible::before,
+:where(.vui-routes-chatcodingroute).resizeHandleActive::before {
+  background: color-mix(in srgb, var(--accent-warm) 52%, transparent);
+  box-shadow: none;
+}
+
+:where(.vui-routes-chatcodingroute).rightIndexTabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  min-height: 30px;
+  padding: 3px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-panel);
+  background: color-mix(in srgb, var(--surface-card) 76%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).rightIndexTab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 24px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg-tertiary);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--vui-font-sm);
+  font-weight: 760;
+}
+
+:where(.vui-routes-chatcodingroute).rightIndexTab:hover,
+:where(.vui-routes-chatcodingroute).rightIndexTab:focus-visible {
+  color: var(--fg-primary);
+  background: color-mix(in srgb, var(--surface-panel) 76%, transparent);
+  outline: none;
+}
+
+:where(.vui-routes-chatcodingroute).rightIndexTabActive {
+  color: var(--fg-primary);
+  border-color: color-mix(in srgb, var(--accent-cool) 26%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 15%, var(--surface-panel));
+}
+
+:where(.vui-routes-chatcodingroute).rightIndexTab span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionPanel {
+  display: grid;
+  gap: 7px;
+  padding-top: 2px;
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionItem {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1;
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionHeader span,
+:where(.vui-routes-chatcodingroute).contextCompositionHeader strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionHeader strong {
+  color: var(--fg-secondary);
+  font-weight: 760;
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionBar {
+  display: flex;
+  width: 100%;
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-panel) 74%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionSegment {
+  flex: 0 0 auto;
+  min-width: 4px;
+  height: 100%;
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentExact {
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionLegend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.2;
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionLegend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionLegend em {
+  min-width: 0;
+  max-width: 180px;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--fg-tertiary) 82%, transparent);
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionLegend i {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutPanel {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutTrigger {
+  display: inline-grid;
+  place-items: center;
+  width: 86px;
+  height: 86px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutTrigger:hover:not(:disabled) .cacheDonutShell,
+:where(.vui-routes-chatcodingroute).cacheDonutTrigger:focus-visible .cacheDonutShell {
+  filter: drop-shadow(0 0 0.45rem color-mix(in srgb, var(--accent-cool) 28%, transparent));
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutTrigger:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-cool) 58%, transparent);
+  outline-offset: 3px;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutTrigger:disabled {
+  cursor: default;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutShell {
+  position: relative;
+  width: 86px;
+  height: 86px;
+  min-width: 86px;
+  transition: filter 0.15s ease;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutSvg {
+  display: block;
+  width: 86px;
+  height: 86px;
+  overflow: visible;
+  transform: rotate(-90deg);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutTrack {
+  fill: none;
+  stroke: color-mix(in srgb, var(--surface-panel) 78%, var(--fg-tertiary));
+  stroke-linecap: butt;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutOuterTrack {
+  stroke-width: 10;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutInnerTrack {
+  stroke-width: 8;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutSegment {
+  fill: none;
+  stroke-linecap: butt;
+  transition: stroke-width 0.15s ease, filter 0.15s ease;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutSegment:hover {
+  filter: brightness(1.08);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutOuterSegment {
+  stroke-width: 10;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutOuterSegment:hover {
+  stroke-width: 12;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutInnerSegment {
+  stroke-width: 8;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutInnerSegment:hover {
+  stroke-width: 10;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutCenter {
+  position: absolute;
+  inset: 23px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 1px;
+  min-width: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-card) 82%, transparent);
+  color: var(--fg-tertiary);
+  line-height: 1;
+  text-align: center;
+  pointer-events: none;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutCenter strong {
+  color: var(--fg-primary);
+  font-size: var(--vui-font-md);
+  font-weight: 820;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutCenter span,
+:where(.vui-routes-chatcodingroute).cacheDonutCenter small {
+  max-width: 42px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutStats {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.15;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutStats span {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutStats b {
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  font-weight: 760;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentCached {
+  stroke: var(--state-success);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentCacheWrite {
+  stroke: var(--accent-warm);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentUncached {
+  stroke: var(--fg-tertiary);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentMissing {
+  stroke: color-mix(in srgb, var(--fg-tertiary) 46%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentOther {
+  stroke: var(--accent-warm);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentSystem {
+  stroke: var(--accent-cool);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentUser {
+  stroke: var(--accent-warm);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentHistory {
+  stroke: var(--fg-tertiary);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentTask {
+  stroke: var(--state-warning);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentAgent {
+  stroke: var(--state-success);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentProjectRules {
+  stroke: var(--state-error);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentToolDescriptions {
+  stroke: var(--accent-warm);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentToolSchema {
+  stroke: var(--accent-warm);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentProviderUnmapped {
+  stroke: var(--accent-warm);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentGuidance {
+  stroke: var(--accent-warm);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentSkill {
+  stroke: var(--state-error);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentAttachments {
+  stroke: var(--accent-warm);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: start center;
+  overflow: hidden;
+  padding: 30px 22px 22px;
+  background: color-mix(in srgb, var(--fg-tertiary) 38%, transparent);
+  backdrop-filter: blur(3px);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailDialog {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 10px;
+  width: min(1120px, calc(100vw - 44px));
+  max-height: min(860px, calc(100vh - 52px));
+  max-height: min(860px, calc(100dvh - 52px));
+  overflow: hidden;
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel) 98%, var(--surface-page));
+  box-shadow: var(--vui-shadow-soft);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailHeader p,
+:where(.vui-routes-chatcodingroute).cacheDetailDonutPanel p {
+  margin: 0;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.4;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailHeader h3 {
+  margin: 2px 0 0;
+  color: var(--fg-primary);
+  font-size: 1rem;
+  line-height: 1.25;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailCloseButton {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  color: var(--fg-secondary);
+  background: var(--surface-panel-muted);
+  cursor: pointer;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailCloseButton:hover,
+:where(.vui-routes-chatcodingroute).cacheDetailCloseButton:focus-visible {
+  color: var(--fg-primary);
+  border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailCloseButton:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-cool) 50%, transparent);
+  outline-offset: 2px;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSummaryGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSummaryGrid div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 82%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSummaryGrid span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSummaryGrid strong {
+  color: var(--fg-primary);
+  font-size: 1.08rem;
+  line-height: 1.1;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSummaryGrid small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailCalibrationNote {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 6px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 26%, var(--border-soft));
+  border-radius: 8px;
+  color: var(--fg-secondary);
+  background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-panel-muted));
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailCalibrationNote strong,
+:where(.vui-routes-chatcodingroute).cacheDetailCalibrationNote em {
+  color: var(--fg-primary);
+  font-style: normal;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailCalibrationNote span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailBody {
+  display: grid;
+  grid-template-columns: 236px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  min-height: 0;
+  overflow: hidden;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailDonutPanel {
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  align-self: start;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailDonutPanel p {
+  width: 100%;
+  max-height: 7.2em;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-panel-muted);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailDonutLegend {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-panel-muted);
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.25;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailDonutLegend span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailDonutLegend b {
+  flex: 0 0 auto;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  font-weight: 760;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailDonutShell {
+  position: relative;
+  width: 188px;
+  height: 188px;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailDonutSvg {
+  width: 188px;
+  height: 188px;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailDonutCenter {
+  inset: 52px;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailDonutCenter strong {
+  font-size: 1.26rem;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailDonutCenter span,
+:where(.vui-routes-chatcodingroute).cacheDetailDonutCenter small {
+  max-width: 76px;
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentList {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+  max-height: min(620px, calc(100vh - 238px));
+  max-height: min(620px, calc(100dvh - 238px));
+  overflow: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentGroup {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentHeader strong {
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-sm);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentHeader span {
+  flex: 0 0 auto;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentRow {
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr) auto;
+  gap: 7px;
+  align-items: start;
+  min-width: 0;
+  padding: 8px 0;
+  border-top: 1px solid var(--border-soft);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSwatch {
+  width: 7px;
+  height: 42px;
+  margin-top: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg-tertiary) 48%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSwatch.cacheDonutSegmentCached {
+  background: var(--state-success);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSwatch.cacheDonutSegmentCacheWrite {
+  background: var(--accent-warm);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSwatch.cacheDonutSegmentUncached {
+  background: var(--fg-tertiary);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSwatch.cacheDonutSegmentMissing {
+  background: color-mix(in srgb, var(--fg-tertiary) 46%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSwatch.cacheDonutSegmentOther {
+  background: var(--accent-warm);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentText {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentText strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: var(--vui-font-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentText span,
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentText small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentSource {
+  display: block;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentText small {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentMeta b {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  padding: 1px 5px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--fg-secondary);
+  background: var(--surface-panel-muted);
+  font-size: var(--vui-font-xs);
+  font-weight: 720;
+  line-height: 1.25;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentMeta b[data-status="observed_hit"] {
+  color: var(--fg-tertiary);
+  border-color: color-mix(in srgb, var(--state-success) 36%, var(--border-soft));
+  background: color-mix(in srgb, var(--state-success) 12%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentMeta b[data-status="observed_partial"] {
+  color: var(--fg-tertiary);
+  border-color: color-mix(in srgb, var(--state-warning) 38%, var(--border-soft));
+  background: color-mix(in srgb, var(--state-warning) 13%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentMeta b[data-status="observed_miss"],
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentMeta b[data-status="computed_miss"] {
+  color: var(--fg-tertiary);
+  border-color: color-mix(in srgb, var(--fg-tertiary) 38%, var(--border-soft));
+  background: color-mix(in srgb, var(--fg-tertiary) 12%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailBoundary {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  margin-top: 1px;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailBoundaryLabels {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.2;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailBoundaryLabels span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailBoundaryLabels span::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailBoundaryLabels span[data-kind="hit"] {
+  color: var(--fg-tertiary);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailBoundaryLabels span[data-kind="miss"] {
+  color: var(--fg-tertiary);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailBoundaryLabels span[data-kind="unknown"] {
+  color: var(--fg-tertiary);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailBoundaryTrack {
+  display: flex;
+  width: 100%;
+  height: 10px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--fg-tertiary) 20%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-panel-muted) 84%, var(--fg-tertiary) 8%);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailBoundaryTrack span {
+  display: block;
+  min-width: 0;
+  height: 100%;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailBoundaryTrack span + span {
+  border-left: 2px solid color-mix(in srgb, var(--surface-card) 92%, white 8%);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailBoundaryHit {
+  background: var(--state-success);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailBoundaryMiss {
+  background: var(--fg-tertiary);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailBoundaryUnknown {
+  background: repeating-var(--vui-gradient-route-soft);
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentRow em {
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  font-style: normal;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentRow em small {
+  display: block;
+  margin-top: 2px;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  font-style: normal;
+}
+
+:where(.vui-routes-chatcodingroute).cacheDetailEmpty {
+  padding: 8px 0;
+  border-top: 1px solid var(--border-soft);
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+@media (max-width: 720px) {
+  :where(.vui-routes-chatcodingroute).cacheDetailOverlay {
+    place-items: start center;
+    padding: 12px;
+    overflow: hidden;
+  }
+
+  :where(.vui-routes-chatcodingroute).cacheDetailDialog {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
+  }
+
+  :where(.vui-routes-chatcodingroute).cacheDetailSummaryGrid,
+  :where(.vui-routes-chatcodingroute).cacheDetailBody {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :where(.vui-routes-chatcodingroute).cacheDetailBody,
+  :where(.vui-routes-chatcodingroute).cacheDetailSegmentList {
+    min-height: 0;
+  }
+
+  :where(.vui-routes-chatcodingroute).cacheDetailSegmentList {
+    max-height: calc(100dvh - 300px);
+    overflow: auto;
+  }
+
+  :where(.vui-routes-chatcodingroute).cacheDetailDonutShell,
+  :where(.vui-routes-chatcodingroute).cacheDetailDonutSvg {
+    width: 136px;
+    height: 136px;
+  }
+
+  :where(.vui-routes-chatcodingroute).cacheDetailDonutCenter {
+    inset: 37px;
+  }
+
+  :where(.vui-routes-chatcodingroute).cacheDetailSegmentRow {
+    grid-template-columns: 7px minmax(0, 1fr);
+  }
+
+  :where(.vui-routes-chatcodingroute).cacheDetailSegmentRow em {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentSystem {
+  background: var(--accent-cool);
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentUser {
+  background: var(--accent-warm);
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentHistory {
+  background: var(--fg-tertiary);
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentTask {
+  background: var(--state-warning);
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentAgent {
+  background: var(--state-success);
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentProjectRules {
+  background: var(--state-error);
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentToolDescriptions {
+  background: var(--accent-warm);
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentToolSchema {
+  background: var(--accent-warm);
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentProviderUnmapped {
+  background: var(--accent-warm);
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentGuidance {
+  background: var(--accent-warm);
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentSkill {
+  background: var(--state-error);
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentAttachments {
+  background: var(--accent-warm);
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentCached {
+  background: var(--state-success);
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentCacheWrite {
+  background: var(--accent-warm);
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentUncached {
+  background: var(--fg-tertiary);
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentMissing {
+  background: repeating-var(--vui-gradient-route-soft);
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentUnused {
+  background: color-mix(in srgb, var(--fg-tertiary) 14%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentOther {
+  background: var(--accent-warm);
+}
+
+:where(.vui-routes-chatcodingroute).memberIndexSummary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 20%, var(--border-soft));
+  border-radius: var(--radius-panel);
+  background: color-mix(in srgb, var(--surface-card) 82%, transparent);
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-md);
+}
+
+:where(.vui-routes-chatcodingroute).memberIndexSummary strong,
+:where(.vui-routes-chatcodingroute).memberIndexSummary span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).memberIndexSummary strong {
+  color: var(--accent-cool-2);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-chatcodingroute).panelSearch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-panel);
+  background: color-mix(in srgb, var(--surface-card) 86%, transparent);
+  color: var(--fg-tertiary);
+}
+
+:where(.vui-routes-chatcodingroute).panelSearchInput {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-primary);
+  padding: 0;
+  font: inherit;
+  outline: none;
+}
+
+:where(.vui-routes-chatcodingroute).panelBody {
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  padding-right: 2px;
+}
+
+:where(.vui-routes-chatcodingroute).sessionActionRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+
+:where(.vui-routes-chatcodingroute).newSessionButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--fg-primary) 10%, var(--border-soft));
+  border-radius: var(--radius-control);
+  background: var(--surface-panel);
+  color: var(--fg-primary);
+  font: inherit;
+  font-size: var(--vui-font-xs);
+  cursor: pointer;
+  box-shadow: none;
+}
+
+:where(.vui-routes-chatcodingroute).newSessionButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+:where(.vui-routes-chatcodingroute).newGroupButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
+  color: var(--accent-cool-2);
+  font: inherit;
+  font-size: var(--vui-font-xs);
+  cursor: pointer;
+}
+
+:where(.vui-routes-chatcodingroute).newGroupButton[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--accent-cool) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent-cool) 36%, var(--border-soft));
+}
+
+:where(.vui-routes-chatcodingroute).newGroupButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+:where(.vui-routes-chatcodingroute).groupComposerPanel {
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 26%, var(--border-soft));
+  border-radius: 8px;
+  background:
+    var(--vui-gradient-route-soft),
+    var(--surface-panel);
+}
+
+:where(.vui-routes-chatcodingroute).groupComposerField {
+  display: grid;
+  gap: 5px;
+}
+
+:where(.vui-routes-chatcodingroute).groupComposerField span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-chatcodingroute).groupComposerInput {
+  width: 100%;
+  min-height: 30px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: var(--surface-input);
+  color: var(--fg-primary);
+  padding: 6px 8px;
+  font: inherit;
+  font-size: var(--vui-font-md);
+}
+
+:where(.vui-routes-chatcodingroute).groupComposerInput:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+:where(.vui-routes-chatcodingroute).groupAgentPicker {
+  display: grid;
+  gap: 5px;
+  max-height: 190px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+:where(.vui-routes-chatcodingroute).groupAgentOption {
+  display: grid;
+  grid-template-columns: auto 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 86%, transparent);
+  cursor: pointer;
+}
+
+:where(.vui-routes-chatcodingroute).groupAgentOptionSelected {
+  border-color: color-mix(in srgb, var(--accent-cool) 48%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 12%, var(--surface-card));
+}
+
+:where(.vui-routes-chatcodingroute).groupAgentOption input {
+  margin: 0;
+}
+
+:where(.vui-routes-chatcodingroute).groupAgentOption span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+:where(.vui-routes-chatcodingroute).groupAgentOption strong,
+:where(.vui-routes-chatcodingroute).groupAgentOption small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).groupAgentOption strong {
+  color: var(--fg-primary);
+  font-size: var(--vui-font-md);
+}
+
+:where(.vui-routes-chatcodingroute).groupAgentOption small {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-chatcodingroute).groupAgentOption .agentRoleTag {
+  justify-self: start;
+  width: 132px;
+  max-width: 100%;
+}
+
+:where(.vui-routes-chatcodingroute).agentOptionMeta {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 4px;
+}
+
+:where(.vui-routes-chatcodingroute).groupComposerEmpty {
+  margin: 0;
+  padding: 8px;
+  border: 1px dashed var(--border-soft);
+  border-radius: 7px;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-sm);
+  line-height: 1.4;
+}
+
+:where(.vui-routes-chatcodingroute).createGroupButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-cool) 18%, transparent);
+  color: var(--accent-cool-2);
+  font: inherit;
+  font-size: var(--vui-font-md);
+  cursor: pointer;
+}
+
+:where(.vui-routes-chatcodingroute).createGroupButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.54;
+}
+
+:where(.vui-routes-chatcodingroute).panelState {
+  padding: 12px;
+  border: 1px dashed var(--border-soft);
+  border-radius: var(--radius-panel);
+  color: var(--fg-secondary);
+  background: var(--surface-card);
+  line-height: 1.5;
+}
+
+:where(.vui-routes-chatcodingroute).panelNotice {
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--state-error) 24%, var(--border-soft));
+  border-radius: 7px;
+  color: var(--state-error);
+  background: color-mix(in srgb, var(--state-error) 10%, transparent);
+  font-size: var(--vui-font-md);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+:where(.vui-routes-chatcodingroute).conversationGroup {
+  display: grid;
+  gap: 4px;
+}
+
+:where(.vui-routes-chatcodingroute).systemEntryGroup {
+  display: grid;
+  gap: 3px;
+  margin-top: 3px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-soft) 58%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).systemEntryButton {
+  display: grid;
+  grid-template-columns: 25px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 5px 7px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+:where(.vui-routes-chatcodingroute).systemEntryButton:hover,
+:where(.vui-routes-chatcodingroute).systemEntryButton:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-cool) 18%, var(--border-soft));
+  background: color-mix(in srgb, var(--surface-card) 64%, transparent);
+  outline: none;
+}
+
+:where(.vui-routes-chatcodingroute).systemEntryButtonActive {
+  border-color: color-mix(in srgb, var(--accent-cool) 30%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-card));
+}
+
+:where(.vui-routes-chatcodingroute).systemEntryIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 25px;
+  height: 25px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
+  border-radius: 8px;
+  color: var(--accent-cool-2);
+  background: color-mix(in srgb, var(--accent-cool) 10%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).systemEntryCopy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).systemEntryTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).systemEntryTitle {
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: var(--vui-font-sm);
+  font-weight: 780;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).systemEntryMeta {
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).conversationGroup + .conversationGroup {
+  margin-top: 3px;
+}
+
+:where(.vui-routes-chatcodingroute).conversationTreeRootHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 25px;
+  padding: 3px 7px;
+  border-radius: var(--radius-control);
+  color: var(--fg-secondary);
+  background: color-mix(in srgb, var(--surface-card) 58%, transparent);
+  font-size: var(--vui-font-xs);
+  font-weight: 780;
+}
+
+:where(.vui-routes-chatcodingroute).conversationTreeRootHeader span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).conversationTreeRootHeader strong {
+  min-width: 22px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--fg-secondary);
+  background: color-mix(in srgb, var(--surface-panel) 78%, transparent);
+  font-size: var(--vui-font-xs);
+  text-align: center;
+}
+
+:where(.vui-routes-chatcodingroute).conversationGroupHeader {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 25px;
+  padding: 3px 7px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--fg-tertiary);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--vui-font-xs);
+  font-weight: 760;
+  text-align: left;
+}
+
+:where(.vui-routes-chatcodingroute).conversationGroupHeader:hover,
+:where(.vui-routes-chatcodingroute).conversationGroupHeader:focus-visible {
+  background: color-mix(in srgb, var(--surface-card) 72%, transparent);
+  color: var(--fg-primary);
+  outline: none;
+}
+
+:where(.vui-routes-chatcodingroute).conversationGroupHeader svg {
+  transform: rotate(0deg);
+  transition: transform 140ms ease;
+}
+
+:where(.vui-routes-chatcodingroute).conversationGroupHeader[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+
+:where(.vui-routes-chatcodingroute).conversationGroupHeader span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).conversationGroupHeader strong {
+  min-width: 22px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--fg-secondary);
+  background: color-mix(in srgb, var(--surface-card) 84%, transparent);
+  font-size: var(--vui-font-xs);
+  font-weight: 760;
+  text-align: center;
+}
+
+:where(.vui-routes-chatcodingroute).conversationGroupHeader[data-vui] {
+  justify-content: stretch;
+  font: inherit;
+  font-size: var(--vui-font-xs);
+  font-weight: 760;
+}
+
+:where(.vui-routes-chatcodingroute).conversationGroupHeader[data-vui] [data-slot="vui-button-content"],
+:where(.vui-routes-chatcodingroute).conversationGroupHeader[data-vui] [data-slot="vui-button-label"] {
+  display: contents;
+}
+
+:where(.vui-routes-chatcodingroute).conversationGroupList {
+  display: grid;
+  gap: 1px;
+}
+
+:where(.vui-routes-chatcodingroute).sessionLoadMoreButton,
+:where(.vui-routes-chatcodingroute).sessionLoadMoreStatus {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 30px;
+  width: 100%;
+  padding: 5px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, var(--border-soft));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel) 82%, transparent);
+  color: var(--fg-secondary);
+  font: inherit;
+  font-size: var(--vui-font-xs);
+  cursor: pointer;
+}
+
+:where(.vui-routes-chatcodingroute).sessionLoadMoreStatus {
+  cursor: default;
+}
+
+:where(.vui-routes-chatcodingroute).sessionLoadMoreButton strong,
+:where(.vui-routes-chatcodingroute).sessionLoadMoreStatus strong {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  font-weight: 740;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).sessionLoadMoreButton:hover,
+:where(.vui-routes-chatcodingroute).sessionLoadMoreButton:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
+  color: var(--fg-primary);
+}
+
+:where(.vui-routes-chatcodingroute).sessionLoadMoreButton:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+:where(.vui-routes-chatcodingroute).teamTreeGroup {
+  margin-top: 6px;
+}
+
+:where(.vui-routes-chatcodingroute).teamTreeItem {
+  gap: 5px;
+}
+
+:where(.vui-routes-chatcodingroute).teamTreeLabelRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 22px;
+  padding: 0 8px 0 42px;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  font-weight: 720;
+}
+
+:where(.vui-routes-chatcodingroute).teamTreeLabelRow a {
+  color: var(--accent-cool-2);
+  text-decoration: none;
+}
+
+:where(.vui-routes-chatcodingroute).teamTreeChildren {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  padding: 0 6px 5px 42px;
+}
+
+:where(.vui-routes-chatcodingroute).teamTreeChild {
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+  min-height: 27px;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 76%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-card) 50%, transparent);
+  color: var(--fg-tertiary);
+  font: inherit;
+  font-size: var(--vui-font-xs);
+  text-align: left;
+  min-width: 0;
+}
+
+button:where(.vui-routes-chatcodingroute).teamTreeChild {
+  cursor: pointer;
+}
+
+button:where(.vui-routes-chatcodingroute).teamTreeChild,
+a:where(.vui-routes-chatcodingroute).teamTreeChild {
+  text-decoration: none;
+}
+
+button:where(.vui-routes-chatcodingroute).teamTreeChild:hover,
+a:where(.vui-routes-chatcodingroute).teamTreeChild:hover,
+button:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible,
+a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-cool) 32%, var(--border-soft));
+  color: var(--fg-primary);
+  outline: none;
+}
+
+:where(.vui-routes-chatcodingroute).teamTreeChild:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+:where(.vui-routes-chatcodingroute).teamTreeChild span,
+:where(.vui-routes-chatcodingroute).teamTreeChild strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).teamTreeChild strong {
+  color: var(--fg-secondary);
+  font-weight: 760;
+}
+
+:where(.vui-routes-chatcodingroute).sessionItem {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  text-align: left;
+  padding: 3px 4px 3px 7px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-primary);
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+:where(.vui-routes-chatcodingroute).sessionItemActive {
+  border-color: color-mix(in srgb, var(--accent-cool) 20%, transparent);
+  box-shadow: none;
+}
+
+:where(.vui-routes-chatcodingroute).sessionItem[aria-current="true"] {
+  background: color-mix(in srgb, var(--surface-card) 68%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
+}
+
+:where(.vui-routes-chatcodingroute).directSessionItem {
+  padding-right: 4px;
+  box-shadow: none;
+}
+
+:where(.vui-routes-chatcodingroute).groupSessionItem {
+  padding-right: 4px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+:where(.vui-routes-chatcodingroute).groupSessionItem.sessionItemActive,
+:where(.vui-routes-chatcodingroute).groupSessionItem[aria-current="true"] {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-card));
+  box-shadow: var(--vui-shadow-inset-accent);
+}
+
+:where(.vui-routes-chatcodingroute).sessionItem:hover,
+:where(.vui-routes-chatcodingroute).sessionItem:focus-within {
+  background: color-mix(in srgb, var(--surface-card) 58%, transparent);
+  box-shadow: var(--vui-shadow-inset-accent);
+}
+
+:where(.vui-routes-chatcodingroute).sessionItemMain {
+  display: grid;
+  grid-template-columns: 27px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+:where(.vui-routes-chatcodingroute).sessionItemMain:where(div) {
+  cursor: default;
+}
+
+:where(.vui-routes-chatcodingroute).sessionItemMain[data-vui] {
+  justify-content: stretch;
+  font: inherit;
+  font-weight: 760;
+}
+
+:where(.vui-routes-chatcodingroute).sessionItemMain[data-vui] [data-slot="vui-button-content"],
+:where(.vui-routes-chatcodingroute).sessionItemMain[data-vui] [data-slot="vui-button-label"] {
+  display: contents;
+}
+
+:where(.vui-routes-chatcodingroute).sessionItemTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 7px;
+}
+
+:where(.vui-routes-chatcodingroute).sessionItemIdentity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).sessionItemTitle {
+  font-family: var(--font-body);
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: var(--vui-font-md);
+  font-weight: 760;
+  line-height: 1.18;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).conversationAvatar {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: var(--fg-primary);
+  font-family: var(--font-body);
+  font-size: var(--vui-font-xs);
+  font-weight: 760;
+  letter-spacing: 0;
+  box-shadow: var(--vui-shadow-inset-accent);
+}
+
+:where(.vui-routes-chatcodingroute).conversationAvatarDirect {
+  color: color-mix(in srgb, var(--accent-cool) 76%, var(--fg-primary));
+  background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-card));
+}
+
+:where(.vui-routes-chatcodingroute).conversationAvatarGroup {
+  color: var(--accent-cool-2);
+  background: color-mix(in srgb, var(--accent-cool) 18%, var(--surface-card));
+}
+
+:where(.vui-routes-chatcodingroute).conversationCopy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+:where(.vui-routes-chatcodingroute).conversationTitleRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: center;
+  min-width: 0;
+  gap: 5px;
+}
+
+:where(.vui-routes-chatcodingroute).conversationTitleMain {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 5px;
+}
+
+:where(.vui-routes-chatcodingroute).conversationKindBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  min-height: 13px;
+  padding: 0 3px;
+  border: 0;
+  border-radius: 999px;
+  font-size: var(--vui-font-xs);
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).conversationKindBadgeDirect {
+  color: color-mix(in srgb, var(--accent-cool) 64%, var(--fg-tertiary));
+  background: transparent;
+}
+
+:where(.vui-routes-chatcodingroute).conversationKindBadgeChild {
+  color: color-mix(in srgb, var(--accent-cool) 72%, var(--fg-tertiary));
+  background: transparent;
+}
+
+:where(.vui-routes-chatcodingroute).conversationKindBadgeGroup {
+  color: var(--accent-cool-2);
+  border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 14%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).agentRoleTag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 1 auto;
+  min-height: 14px;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  font-size: var(--vui-font-xs);
+  font-weight: 680;
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).agentRoleTag_chat {
+  background: transparent;
+  color: var(--fg-secondary);
+}
+
+:where(.vui-routes-chatcodingroute).agentRoleTag_research {
+  background: transparent;
+  color: color-mix(in srgb, var(--accent-cool) 58%, var(--fg-secondary));
+}
+
+:where(.vui-routes-chatcodingroute).agentRoleTag_self {
+  background: transparent;
+  color: color-mix(in srgb, var(--state-success) 70%, var(--fg-secondary));
+}
+
+:where(.vui-routes-chatcodingroute).agentRoleTag_supervised {
+  background: transparent;
+  color: color-mix(in srgb, var(--state-warning) 68%, var(--fg-secondary));
+}
+
+:where(.vui-routes-chatcodingroute).agentRoleTag_tool,
+:where(.vui-routes-chatcodingroute).agentRoleTag_memory,
+:where(.vui-routes-chatcodingroute).agentRoleTag_general {
+  background: transparent;
+  color: var(--fg-secondary);
+}
+
+:where(.vui-routes-chatcodingroute).agentModelTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1 1 92px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  font-weight: 640;
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).agentModelTitleTag {
+  flex: 0 1 auto;
+  max-width: min(164px, 68%);
+  min-height: 17px;
+  padding: 0 5px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, var(--border-soft));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
+  color: color-mix(in srgb, var(--accent-cool) 64%, var(--fg-secondary));
+  font-size: var(--vui-font-xs);
+  font-weight: 700;
+}
+
+:where(.vui-routes-chatcodingroute).sessionStatusCluster {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+:where(.vui-routes-chatcodingroute).agentModelTag svg {
+  flex: 0 0 auto;
+}
+
+:where(.vui-routes-chatcodingroute).agentModelLine {
+  display: block;
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  font-weight: 600;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).sessionCurrentBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 16px;
+  padding: 1px 5px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 26%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-cool) 10%, transparent);
+  color: color-mix(in srgb, var(--accent-cool) 72%, var(--fg-primary));
+  font-size: var(--vui-font-xs);
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).sessionCurrentIndicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent-cool);
+  box-shadow: var(--vui-shadow-accent);
+}
+
+:where(.vui-routes-chatcodingroute).sessionRunningBadge,
+:where(.vui-routes-chatcodingroute).sessionUnreadBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 16px;
+  border-radius: 999px;
+  font-size: var(--vui-font-xs);
+  font-weight: 720;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).sessionRunningBadge {
+  gap: 3px;
+  padding: 1px 5px;
+  border: 1px solid color-mix(in srgb, var(--state-success) 26%, transparent);
+  background: color-mix(in srgb, var(--state-success) 10%, transparent);
+  color: color-mix(in srgb, var(--state-success) 76%, var(--fg-primary));
+}
+
+:where(.vui-routes-chatcodingroute).sessionRunningBadge svg {
+  flex: 0 0 auto;
+}
+
+:where(.vui-routes-chatcodingroute).sessionUnreadBadge {
+  min-width: 16px;
+  padding: 1px 5px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 30%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
+  color: var(--accent-warm-2);
+}
+
+:where(.vui-routes-chatcodingroute).sessionTitleInput {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 30%, transparent);
+  border-radius: 7px;
+  background: var(--surface-input-strong);
+  color: var(--fg-primary);
+  padding: 7px 8px;
+  font: inherit;
+}
+
+:where(.vui-routes-chatcodingroute).sessionState {
+  flex: 0 0 auto;
+  display: inline-flex;
+  color: color-mix(in srgb, var(--fg-tertiary) 76%, transparent);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-chatcodingroute).sessionItemSummary,
+:where(.vui-routes-chatcodingroute).sessionItemMeta {
+  margin: 0;
+  color: var(--fg-secondary);
+}
+
+:where(.vui-routes-chatcodingroute).sessionItemSummary {
+  display: block;
+  overflow: hidden;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.18;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).sessionItemMeta {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-chatcodingroute).sessionAgentLine {
+  margin: 3px 0 0;
+  color: var(--accent-cool-2);
+  font-size: var(--vui-font-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).conversationMetaRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) fit-content(92px);
+  align-items: center;
+  min-width: 0;
+  gap: 3px 6px;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.1;
+}
+
+:where(.vui-routes-chatcodingroute).conversationMetaMain,
+:where(.vui-routes-chatcodingroute).conversationMetaTime {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 3px;
+}
+
+:where(.vui-routes-chatcodingroute).conversationMetaMain {
+  overflow: hidden;
+  color: var(--fg-secondary);
+}
+
+:where(.vui-routes-chatcodingroute).conversationMetaTime {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  max-width: 92px;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).conversationMetaMain span:not(.conversationKindBadge),
+:where(.vui-routes-chatcodingroute).conversationMetaMain time {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).conversationMetaTime time {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).sessionActionStack {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transform: translateY(-50%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+
+:where(.vui-routes-chatcodingroute).sessionItem:hover .sessionActionStack,
+:where(.vui-routes-chatcodingroute).sessionItem:focus-within .sessionActionStack,
+:where(.vui-routes-chatcodingroute).sessionItem[aria-current="true"] .sessionActionStack {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+:where(.vui-routes-chatcodingroute).directSessionItem:has(.sessionActionStack) {
+  padding-right: 56px;
+}
+
+:where(.vui-routes-chatcodingroute).sessionIconButton,
+:where(.vui-routes-chatcodingroute).sessionDeleteButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-card) 90%, transparent);
+  color: var(--fg-tertiary);
+  cursor: pointer;
+}
+
+:where(.vui-routes-chatcodingroute).sessionIconButton:hover:not(:disabled) {
+  color: var(--accent-warm-2);
+  border-color: color-mix(in srgb, var(--accent-warm) 30%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).sessionDeleteButton:hover:not(:disabled) {
+  color: var(--state-error);
+  border-color: color-mix(in srgb, var(--state-error) 32%, transparent);
+  background: color-mix(in srgb, var(--state-error) 12%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).sessionIconButton:disabled,
+:where(.vui-routes-chatcodingroute).sessionDeleteButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+:where(.vui-routes-chatcodingroute).sessionIconButton[data-vui],
+:where(.vui-routes-chatcodingroute).sessionDeleteButton[data-vui] {
+  min-width: 0;
+  padding: 0;
+}
+
+:where(.vui-routes-chatcodingroute).sessionContextMenu {
+  position: fixed;
+  z-index: 60;
+  display: grid;
+  width: 176px;
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 78%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 92%, transparent);
+  box-shadow: var(--vui-shadow-soft);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+:where(.vui-routes-chatcodingroute).sessionContextMenuItem {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-secondary);
+  font: inherit;
+  font-size: var(--vui-font-sm);
+  font-weight: 700;
+  line-height: 1;
+  text-align: left;
+  cursor: pointer;
+}
+
+:where(.vui-routes-chatcodingroute).sessionContextMenuItem span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).sessionContextMenuItem[data-vui] {
+  justify-content: stretch;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--vui-font-sm);
+  font-weight: 700;
+}
+
+:where(.vui-routes-chatcodingroute).sessionContextMenuItem[data-vui] [data-slot="vui-button-content"] {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+:where(.vui-routes-chatcodingroute).sessionContextMenuItem[data-vui] [data-slot="vui-button-icon"],
+:where(.vui-routes-chatcodingroute).sessionContextMenuItem[data-vui] [data-slot="vui-button-label"] {
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).sessionContextMenuItem:hover:not(:disabled),
+:where(.vui-routes-chatcodingroute).sessionContextMenuItem:focus-visible:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-warm) 13%, transparent);
+  color: var(--fg-primary);
+}
+
+:where(.vui-routes-chatcodingroute).sessionContextMenuDanger {
+  color: color-mix(in srgb, var(--state-error) 82%, var(--fg-secondary));
+}
+
+:where(.vui-routes-chatcodingroute).sessionContextMenuDanger:hover:not(:disabled),
+:where(.vui-routes-chatcodingroute).sessionContextMenuDanger:focus-visible:not(:disabled) {
+  background: color-mix(in srgb, var(--state-error) 12%, transparent);
+  color: var(--state-error);
+}
+
+:where(.vui-routes-chatcodingroute).sessionContextMenuItem:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
+:where(.vui-routes-chatcodingroute).sessionItemNotice,
+:where(.vui-routes-chatcodingroute).sessionItemError {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: var(--vui-font-md);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+:where(.vui-routes-chatcodingroute).sessionItemNotice {
+  color: var(--state-success);
+}
+
+:where(.vui-routes-chatcodingroute).sessionItemError {
+  color: var(--state-error);
+}
+
+:where(.vui-routes-chatcodingroute).childTopLevelSessionItem {
+  border-color: color-mix(in srgb, var(--accent-cool) 22%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 4%, var(--surface-card));
+}
+
+:where(.vui-routes-chatcodingroute).groupConversationFrame {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 0;
+  height: 100%;
+  background: var(--surface-panel);
+}
+
+:where(.vui-routes-chatcodingroute).groupConversationHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+:where(.vui-routes-chatcodingroute).groupConversationHeader div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+:where(.vui-routes-chatcodingroute).groupConversationHeader p,
+:where(.vui-routes-chatcodingroute).groupConversationHeader h2,
+:where(.vui-routes-chatcodingroute).groupConversationHeader span {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).groupConversationHeader p {
+  color: var(--accent-cool-2);
+  font-size: var(--vui-font-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+:where(.vui-routes-chatcodingroute).groupConversationHeader h2 {
+  color: var(--fg-primary);
+  font-family: var(--font-display);
+  font-size: 1rem;
+}
+
+:where(.vui-routes-chatcodingroute).groupConversationHeader span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-sm);
+}
+
+:where(.vui-routes-chatcodingroute).groupRefreshButton,
+:where(.vui-routes-chatcodingroute).groupComposerBar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-card);
+  color: var(--fg-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+:where(.vui-routes-chatcodingroute).groupRefreshButton {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: var(--vui-font-md);
+}
+
+:where(.vui-routes-chatcodingroute).groupRefreshButton:disabled,
+:where(.vui-routes-chatcodingroute).groupComposerBar button:disabled,
+:where(.vui-routes-chatcodingroute).groupComposerBar input:disabled,
+:where(.vui-routes-chatcodingroute).groupManagementActions button:disabled,
+:where(.vui-routes-chatcodingroute).groupTitleField input:disabled,
+:where(.vui-routes-chatcodingroute).groupModeSelect select:disabled,
+:where(.vui-routes-chatcodingroute).groupMemberChip input:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+:where(.vui-routes-chatcodingroute).groupComposerBar .groupStopButton {
+  color: var(--danger, var(--state-error));
+  border-color: color-mix(in srgb, var(--danger, var(--state-error)) 35%, var(--border-soft));
+  background: color-mix(in srgb, var(--danger, var(--state-error)) 12%, var(--surface-card));
+}
+
+:where(.vui-routes-chatcodingroute).groupManagementPanel {
+  display: grid;
+  gap: 11px;
+  padding: 11px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
+  border-radius: 8px;
+  background:
+    var(--vui-gradient-route-soft),
+    var(--surface-panel);
+}
+
+:where(.vui-routes-chatcodingroute).groupManagementHeader {
+  display: grid;
+  gap: 9px;
+}
+
+:where(.vui-routes-chatcodingroute).groupManagementHeader div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+:where(.vui-routes-chatcodingroute).groupManagementHeader strong {
+  color: var(--fg-primary);
+  font-size: var(--vui-font-md);
+}
+
+:where(.vui-routes-chatcodingroute).groupManagementHeader span,
+:where(.vui-routes-chatcodingroute).groupManagementHint {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-sm);
+  line-height: 1.35;
+}
+
+:where(.vui-routes-chatcodingroute).groupManagementHeader span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).groupManagementActions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+:where(.vui-routes-chatcodingroute).groupManagementActions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-card);
+  color: var(--fg-secondary);
+  font: inherit;
+  font-size: var(--vui-font-sm);
+  cursor: pointer;
+}
+
+:where(.vui-routes-chatcodingroute).groupManagementActions button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).groupApplyButton {
+  color: var(--accent-cool-2) !important;
+  border-color: color-mix(in srgb, var(--accent-cool) 36%, var(--border-soft)) !important;
+  background: color-mix(in srgb, var(--accent-cool) 14%, var(--surface-card)) !important;
+}
+
+:where(.vui-routes-chatcodingroute).groupDeleteButton {
+  color: var(--state-error) !important;
+}
+
+:where(.vui-routes-chatcodingroute).groupManagementControls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: start;
+}
+
+:where(.vui-routes-chatcodingroute).groupTitleField {
+  grid-column: 1 / -1;
+}
+
+:where(.vui-routes-chatcodingroute).groupTitleField,
+:where(.vui-routes-chatcodingroute).groupModeSelect {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).groupTitleField span,
+:where(.vui-routes-chatcodingroute).groupModeSelect span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-chatcodingroute).groupTitleField input,
+:where(.vui-routes-chatcodingroute).groupModeSelect select {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-input-strong);
+  color: var(--fg-primary);
+  padding: 0 9px;
+  font: inherit;
+  font-size: var(--vui-font-md);
+}
+
+:where(.vui-routes-chatcodingroute).groupManagementCount {
+  display: grid;
+  place-items: center;
+  min-width: 58px;
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 78%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).groupManagementCount span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1;
+}
+
+:where(.vui-routes-chatcodingroute).groupManagementCount strong {
+  color: var(--fg-primary);
+  font-size: var(--vui-font-md);
+  line-height: 1.15;
+}
+
+:where(.vui-routes-chatcodingroute).groupMemberPicker {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  max-height: min(34vh, 260px);
+  overflow: auto;
+  padding-right: 2px;
+}
+
+:where(.vui-routes-chatcodingroute).groupMemberChip {
+  display: grid;
+  grid-template-columns: auto 26px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 78%, transparent);
+  color: var(--fg-secondary);
+  cursor: pointer;
+}
+
+:where(.vui-routes-chatcodingroute).groupMemberChipSelected {
+  color: var(--fg-primary);
+  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 14%, var(--surface-card));
+}
+
+:where(.vui-routes-chatcodingroute).groupMemberChip input {
+  margin: 0;
+}
+
+:where(.vui-routes-chatcodingroute).agentOptionAvatar {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: var(--fg-primary);
+  background: color-mix(in srgb, var(--accent-cool) 18%, var(--surface-card));
+  font-family: var(--font-body);
+  font-size: var(--vui-font-xs);
+  font-weight: 820;
+  overflow: hidden;
+  box-shadow: var(--vui-shadow-inset-accent);
+}
+
+:where(.vui-routes-chatcodingroute).groupMemberCopy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+:where(.vui-routes-chatcodingroute).groupMemberCopy strong,
+:where(.vui-routes-chatcodingroute).groupMemberCopy small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).groupMemberCopy strong {
+  font-size: var(--vui-font-sm);
+  line-height: 1.15;
+}
+
+:where(.vui-routes-chatcodingroute).groupMemberCopy small {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.1;
+}
+
+:where(.vui-routes-chatcodingroute).groupMemberCopy .agentRoleTag {
+  justify-self: start;
+  width: 132px;
+  max-width: 100%;
+}
+
+:where(.vui-routes-chatcodingroute).agentMissingInline {
+  color: var(--state-error);
+  font-size: var(--vui-font-xs);
+  font-weight: 700;
+}
+
+:where(.vui-routes-chatcodingroute).agentMissingLine {
+  display: block;
+  margin-top: 4px;
+  color: var(--state-error);
+  font-size: var(--vui-font-xs);
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).groupManagementHint {
+  margin: 0;
+}
+
+:where(.vui-routes-chatcodingroute).groupMessageTimeline {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 12px 16px;
+  background:
+    var(--vui-gradient-route-soft),
+    var(--surface-panel);
+}
+
+:where(.vui-routes-chatcodingroute).projectBusEvent {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 78%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).projectBusEventRevoked {
+  border-color: color-mix(in srgb, var(--state-warning) 35%, var(--border-soft));
+  background: color-mix(in srgb, var(--state-warning) 8%, var(--surface-card));
+}
+
+:where(.vui-routes-chatcodingroute).projectBusEventHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-chatcodingroute).projectBusEventActions {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+
+:where(.vui-routes-chatcodingroute).projectBusEventActions button {
+  min-height: 24px;
+  border: 1px solid color-mix(in srgb, var(--state-warning) 42%, var(--border-soft));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--state-warning) 10%, var(--surface-card));
+  color: var(--fg-primary);
+  font: inherit;
+  font-size: var(--vui-font-xs);
+  cursor: pointer;
+}
+
+:where(.vui-routes-chatcodingroute).projectBusEventActions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+:where(.vui-routes-chatcodingroute).projectBusEventHeader div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).projectBusEventHeader strong {
+  color: var(--fg-primary);
+}
+
+:where(.vui-routes-chatcodingroute).projectBusEventHeader time {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).projectBusEventBody {
+  margin: 0;
+  color: var(--fg-primary);
+  font-size: var(--vui-font-md);
+  line-height: 1.38;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+:where(.vui-routes-chatcodingroute).agentMention {
+  display: inline;
+  margin: 0;
+  padding: 0 1px;
+  border: 0;
+  background: transparent;
+  color: var(--accent-warm-2);
+  font: inherit;
+  font-weight: 650;
+  text-align: inherit;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+:where(.vui-routes-chatcodingroute).agentMention:hover {
+  color: var(--accent-warm);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+:where(.vui-routes-chatcodingroute).agentMention:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-warm) 58%, transparent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+:where(.vui-routes-chatcodingroute).projectBusEventMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-chatcodingroute).projectBusEventMeta span,
+:where(.vui-routes-chatcodingroute).kernelTraceLink {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 72%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).kernelTraceLink {
+  max-width: 100%;
+  color: var(--accent-cool-2);
+  font-weight: 760;
+  overflow: hidden;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).kernelTraceLink:hover {
+  border-color: color-mix(in srgb, var(--accent-cool) 50%, var(--border-soft));
+  color: var(--accent-cool);
+}
+
+:where(.vui-routes-chatcodingroute).groupRoundBlock {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).groupRoundDivider {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-routes-chatcodingroute).groupRoundDivider::before,
+:where(.vui-routes-chatcodingroute).groupRoundDivider::after {
+  content: "";
+  height: 1px;
+  min-width: 22px;
+  flex: 1;
+  background: color-mix(in srgb, var(--border-soft) 72%, transparent);
+}
+
+:where(.vui-routes-chatcodingroute).groupRoundDivider span,
+:where(.vui-routes-chatcodingroute).groupRoundDivider time {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).groupRoundSummary {
+  justify-self: center;
+  max-width: min(720px, 88%);
+  margin: 2px 0 0;
+  padding: 7px 11px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--fg-tertiary);
+  background: color-mix(in srgb, var(--surface-card) 66%, transparent);
+  font-size: var(--vui-font-sm);
+  line-height: 1.35;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+:where(.vui-routes-chatcodingroute).groupTopicMessage {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).groupTopicBubble {
+  display: grid;
+  gap: 4px;
+  max-width: min(680px, 72%);
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 28%, var(--border-soft));
+  border-radius: var(--radius-panel);
+  background: color-mix(in srgb, var(--accent-warm) 18%, var(--surface-card));
+  color: var(--fg-primary);
+}
+
+:where(.vui-routes-chatcodingroute).groupTopicBubble span {
+  color: var(--accent-warm-2);
+  font-size: var(--vui-font-xs);
+  font-weight: 760;
+}
+
+:where(.vui-routes-chatcodingroute).groupTopicBubble p {
+  margin: 0;
+  font-size: var(--vui-font-md);
+  line-height: 1.34;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+:where(.vui-routes-chatcodingroute).groupMessageList {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).groupBubbleRow {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: start;
+  gap: 7px;
+  max-width: min(820px, 86%);
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).groupBubbleAvatar {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: var(--accent-cool-2);
+  background: color-mix(in srgb, var(--accent-cool) 18%, var(--surface-card));
+  font-family: var(--font-body);
+  font-size: var(--vui-font-xs);
+  font-weight: 820;
+  box-shadow: var(--vui-shadow-inset-accent);
+}
+
+:where(.vui-routes-chatcodingroute).groupBubble {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 9px 10px 8px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 84%, transparent);
+  border-radius: var(--radius-panel);
+  background: color-mix(in srgb, var(--surface-card) 78%, transparent);
+  box-shadow: none;
+}
+
+:where(.vui-routes-chatcodingroute).groupBubbleHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+:where(.vui-routes-chatcodingroute).groupBubbleHeader strong {
+  min-width: 0;
+  color: var(--fg-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).groupBubbleHeader span,
+:where(.vui-routes-chatcodingroute).groupBubbleMeta {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).groupBubbleBody {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-chat);
+  line-height: 1.58;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+:where(.vui-routes-chatcodingroute).groupBubbleBodyCollapsed {
+  display: -webkit-box;
+  max-height: 7.6em;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+}
+
+:where(.vui-routes-chatcodingroute).groupBubbleToggle {
+  justify-self: start;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-cool-2);
+  font: inherit;
+  font-size: var(--vui-font-xs);
+  font-weight: 760;
+}
+
+:where(.vui-routes-chatcodingroute).groupBubbleToggle:hover {
+  text-decoration: underline;
+}
+
+:where(.vui-routes-chatcodingroute).groupBubbleMeta {
+  justify-self: end;
+}
+
+:where(.vui-routes-chatcodingroute).groupBubbleRowFailed .groupBubble {
+  border-color: color-mix(in srgb, var(--state-error) 36%, var(--border-soft));
+}
+
+:where(.vui-routes-chatcodingroute).groupBubbleRowPending .groupBubble {
+  width: fit-content;
+  min-width: 148px;
+  border-style: dashed;
+}
+
+:where(.vui-routes-chatcodingroute).groupTypingDots {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 18px;
+}
+
+:where(.vui-routes-chatcodingroute).groupTypingDots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-cool-2);
+  opacity: 0.46;
+  animation: groupTypingPulse 1s ease-in-out infinite;
+}
+
+:where(.vui-routes-chatcodingroute).groupTypingDots span:nth-child(2) {
+  animation-delay: 140ms;
+}
+
+:where(.vui-routes-chatcodingroute).groupTypingDots span:nth-child(3) {
+  animation-delay: 280ms;
+}
+
+@keyframes groupTypingPulse {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.36;
+  }
+  50% {
+    transform: translateY(-3px);
+    opacity: 0.86;
+  }
+}
+
+:where(.vui-routes-chatcodingroute).groupMessageCard {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 80%, transparent);
+  border-radius: 8px;
+  background: var(--surface-panel);
+}
+
+:where(.vui-routes-chatcodingroute).groupMessageCardFailed {
+  border-color: color-mix(in srgb, var(--state-error) 36%, var(--border-soft));
+}
+
+:where(.vui-routes-chatcodingroute).groupMessageCard p {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-chat);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+:where(.vui-routes-chatcodingroute).groupEmptyState {
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  min-height: 220px;
+  color: var(--fg-tertiary);
+  text-align: center;
+}
+
+:where(.vui-routes-chatcodingroute).groupEmptyState p {
+  margin: 0;
+}
+
+:where(.vui-routes-chatcodingroute).groupComposerBar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-soft);
+  background: var(--surface-panel-strong);
+}
+
+:where(.vui-routes-chatcodingroute).groupComposerBar input {
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-input-strong);
+  color: var(--fg-primary);
+  font: inherit;
+}
+
+:where(.vui-routes-chatcodingroute).groupComposerBar button {
+  min-height: 38px;
+  padding: 0 13px;
+  color: var(--accent-cool-2);
+  border-color: color-mix(in srgb, var(--accent-cool) 28%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 14%, var(--surface-card));
+}
+
+:where(.vui-routes-chatcodingroute).projectBusInterruptToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-sm);
+  white-space: nowrap;
+}
+
+:where(.vui-routes-chatcodingroute).projectBusInterruptToggle input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent-cool);
+}
+
+@media (max-width: 1180px) {
+  :where(.vui-routes-chatcodingroute).layout {
+    grid-template-columns:
+      minmax(224px, var(--chat-left-pane-width, 260px))
+      8px
+      minmax(0, 1fr)
+      8px
+      minmax(300px, var(--chat-right-pane-width, 340px));
+  }
+
+  :where(.vui-routes-chatcodingroute).leftRail {
+    padding: 6px;
+  }
+
+  :where(.vui-routes-chatcodingroute).rightPane {
+    padding: 6px;
+    gap: 6px;
+  }
+
+  :where(.vui-routes-chatcodingroute).companionCompact {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :where(.vui-routes-chatcodingroute).petMiniAvatar {
+    display: none;
+  }
+}
+
+@media (max-width: 980px) {
+  :where(.vui-routes-chatcodingroute).layoutCenterFirst {
+    grid-template-columns:
+      minmax(0, min(var(--chat-left-pane-width, 0px), 24vw))
+      8px
+      minmax(360px, 1fr)
+      8px
+      minmax(0, min(var(--chat-right-pane-width, 0px), 22vw));
+  }
+
+  :where(.vui-routes-chatcodingroute).layoutCenterFirst .leftRail:not(.paneCollapsed) {
+    padding: 6px;
+    visibility: visible;
+  }
+
+  :where(.vui-routes-chatcodingroute).layoutCenterFirst .rightPane:not(.paneCollapsed) {
+    padding: 6px;
+    visibility: visible;
+  }
+
+  :where(.vui-routes-chatcodingroute).resizeHandle {
+    min-width: 8px;
+  }
+
+  :where(.vui-routes-chatcodingroute).tabStrip {
+    padding: 8px 10px 0;
+  }
+
+  :where(.vui-routes-chatcodingroute).conversationFrameFocus {
+    width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  :where(.vui-routes-chatcodingroute).layoutCenterFirst {
+    grid-template-columns:
+      minmax(0, min(var(--chat-left-pane-width, 0px), 22vw))
+      8px
+      minmax(280px, 1fr)
+      8px
+      minmax(0, min(var(--chat-right-pane-width, 0px), 20vw));
+  }
+
+  :where(.vui-routes-chatcodingroute).resizeHandle::before {
+    width: 1px;
+  }
+
+  :where(.vui-routes-chatcodingroute).tabStrip {
+    gap: 6px;
+    padding: 8px 10px 0;
+  }
+
+  :where(.vui-routes-chatcodingroute).tab,
+  :where(.vui-routes-chatcodingroute).fileTabButton {
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+}

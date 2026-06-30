@@ -33,6 +33,9 @@ describe("VUI legacy bridge", () => {
       "--vui-legacy-field-bg-hover",
       "--vui-legacy-field-fg",
       "--vui-legacy-field-placeholder",
+      "--vui-legacy-control-gap",
+      "--vui-legacy-control-font-size",
+      "--vui-legacy-field-font-size",
       "--vui-legacy-focus-ring",
     ]) {
       expect(bridgeSource).toContain(token);
@@ -41,7 +44,17 @@ describe("VUI legacy bridge", () => {
     expect(bridgeSource).toContain("[data-vui-app]");
     expect(bridgeSource).toContain(':is(button, [role="button"], input, select, textarea)');
     expect(bridgeSource).toContain('[class*="Button"]');
+    expect(bridgeSource).toContain('[class*="Action"]');
+    expect(bridgeSource).toContain('[class*="Toggle"]');
+    expect(bridgeSource).toContain('[class*="Tab"]');
+    expect(bridgeSource).toContain('[class*="Icon"]');
+    expect(bridgeSource).toContain("display: inline-flex");
+    expect(bridgeSource).toContain("padding-inline: var(--vui-legacy-control-padding-x)");
+    expect(bridgeSource).toContain("--vui-legacy-control-font-size: var(--font-size-caption)");
+    expect(bridgeSource).toContain("--vui-legacy-field-font-size: var(--font-size-small)");
     expect(bridgeSource).toContain('input:not([type="checkbox"]):not([type="radio"]):not([type="range"])');
+    expect(bridgeSource).toContain('input[type="checkbox"]');
+    expect(bridgeSource).toContain("accent-color: var(--accent-cool)");
     expect(bridgeSource).toContain("select");
     expect(bridgeSource).toContain("textarea");
     expect(bridgeSource).toContain("box-shadow: none");

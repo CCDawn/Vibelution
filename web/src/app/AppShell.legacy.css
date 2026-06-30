@@ -1,0 +1,2122 @@
+/* source: app/AppShell legacy css */
+:where(.vui-app-appshell).shell {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
+  isolation: isolate;
+  --shell-topbar-height: 62px;
+  --shell-page-end: var(--bg-canvas);
+  --shell-surface: var(--surface-panel);
+  --shell-surface-muted: color-mix(in srgb, var(--bg-canvas) 88%, transparent);
+  --shell-surface-hover: var(--surface-panel-hover);
+  --shell-panel: color-mix(in srgb, var(--bg-canvas) 98%, transparent);
+  --shell-panel-soft: color-mix(in srgb, var(--fg-secondary) 98%, transparent);
+  --shell-card: color-mix(in srgb, var(--bg-canvas) 82%, transparent);
+  --shell-window-control-inset: 0px;
+  --shell-shadow: color-mix(in srgb, var(--bg-canvas) 28%, transparent);
+  --shell-star-color: color-mix(in srgb, var(--accent-warm) 74%, transparent);
+  --shell-star-muted: color-mix(in srgb, var(--accent-warm) 34%, transparent);
+  --shell-star-faint: color-mix(in srgb, var(--accent-warm) 20%, transparent);
+  --shell-nebula-cool: color-mix(in srgb, var(--accent-warm) 18%, transparent);
+  --shell-nebula-warm: color-mix(in srgb, var(--accent-warm) 11%, transparent);
+  background:
+    radial-gradient(ellipse at 52% -18%, color-mix(in srgb, var(--accent-warm) 14%, transparent) 0 18%, transparent 52%),
+    radial-gradient(circle at 16% 18%, var(--shell-nebula-cool) 0 11%, transparent 34%),
+    radial-gradient(circle at 82% 8%, var(--shell-nebula-warm) 0 9%, transparent 31%),
+    var(--vui-gradient-route-soft),
+    var(--vui-gradient-route-soft),
+    var(--vui-gradient-route-soft);
+  background-size: auto, auto, auto, 42px 42px, 42px 42px, auto;
+  color: var(--fg-primary);
+}
+
+:where(.vui-app-appshell).shell[data-theme-background="custom"] {
+  --theme-background-overlay-start: color-mix(in srgb, var(--bg-canvas) 56%, transparent);
+  --theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 44%, transparent);
+  --theme-background-overlay-end: color-mix(in srgb, var(--bg-canvas) 68%, transparent);
+  --theme-background-star-opacity: 0.2;
+  --theme-background-blur: 1px;
+  --shell-surface-muted: color-mix(in srgb, var(--bg-canvas) 82%, transparent);
+  --shell-panel: color-mix(in srgb, var(--bg-canvas) 94%, transparent);
+  --shell-panel-soft: color-mix(in srgb, var(--fg-secondary) 92%, transparent);
+  --shell-card: color-mix(in srgb, var(--bg-canvas) 78%, transparent);
+  background:
+    var(--vui-gradient-route-soft),
+    var(--workbench-theme-background-image),
+    var(--vui-gradient-route-soft);
+  background-position: center, center, center;
+  background-size: auto, cover, auto;
+  background-repeat: no-repeat, no-repeat, no-repeat;
+  background-attachment: fixed, fixed, fixed;
+}
+
+:where(.vui-app-appshell).shell[data-theme-background="custom"][data-theme-background-readability="soft"] {
+  --theme-background-overlay-start: color-mix(in srgb, var(--bg-canvas) 38%, transparent);
+  --theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 26%, transparent);
+  --theme-background-overlay-end: color-mix(in srgb, var(--bg-canvas) 50%, transparent);
+  --theme-background-star-opacity: 0.24;
+  --theme-background-blur: 0px;
+  --shell-surface-muted: color-mix(in srgb, var(--bg-canvas) 72%, transparent);
+  --shell-panel: color-mix(in srgb, var(--bg-canvas) 88%, transparent);
+  --shell-panel-soft: color-mix(in srgb, var(--fg-secondary) 86%, transparent);
+  --shell-card: color-mix(in srgb, var(--bg-canvas) 66%, transparent);
+}
+
+:where(.vui-app-appshell).shell[data-theme-background="custom"][data-theme-background-readability="standard"] {
+  --theme-background-overlay-start: color-mix(in srgb, var(--bg-canvas) 56%, transparent);
+  --theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 44%, transparent);
+  --theme-background-overlay-end: color-mix(in srgb, var(--bg-canvas) 68%, transparent);
+  --theme-background-star-opacity: 0.2;
+  --theme-background-blur: 1px;
+}
+
+:where(.vui-app-appshell).shell[data-theme-background="custom"][data-theme-background-readability="strong"] {
+  --theme-background-overlay-start: color-mix(in srgb, var(--bg-canvas) 74%, transparent);
+  --theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 62%, transparent);
+  --theme-background-overlay-end: color-mix(in srgb, var(--bg-canvas) 82%, transparent);
+  --theme-background-star-opacity: 0.14;
+  --theme-background-blur: 2px;
+  --shell-surface-muted: color-mix(in srgb, var(--bg-canvas) 90%, transparent);
+  --shell-panel: color-mix(in srgb, var(--bg-canvas) 97%, transparent);
+  --shell-panel-soft: color-mix(in srgb, var(--fg-secondary) 96%, transparent);
+  --shell-card: color-mix(in srgb, var(--bg-canvas) 86%, transparent);
+}
+
+:where(.vui-app-appshell).shell::before,
+:where(.vui-app-appshell).shell::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+:where(.vui-app-appshell).shell::before {
+  opacity: 0.95;
+  background-image:
+    radial-gradient(circle at 8% 18%, var(--shell-star-color) 0 1px, transparent 1.6px),
+    radial-gradient(circle at 22% 72%, var(--shell-star-muted) 0 1px, transparent 1.4px),
+    radial-gradient(circle at 38% 28%, color-mix(in srgb, var(--fg-primary) 52%, transparent) 0 1px, transparent 1.5px),
+    radial-gradient(circle at 67% 12%, color-mix(in srgb, var(--accent-warm) 55%, transparent) 0 1px, transparent 1.7px),
+    radial-gradient(circle at 82% 64%, color-mix(in srgb, var(--fg-primary) 42%, transparent) 0 1px, transparent 1.5px),
+    radial-gradient(circle at 92% 34%, var(--shell-star-muted) 0 1px, transparent 1.4px),
+    radial-gradient(circle, var(--shell-star-faint) 0 0.8px, transparent 1.2px),
+    radial-gradient(circle, color-mix(in srgb, var(--fg-primary) 16%, transparent) 0 0.7px, transparent 1px);
+  background-size:
+    263px 211px,
+    307px 239px,
+    359px 293px,
+    421px 271px,
+    331px 367px,
+    503px 317px,
+    89px 113px,
+    137px 173px;
+  background-position:
+    0 0,
+    28px 34px,
+    76px 12px,
+    120px 48px,
+    38px 90px,
+    144px 24px,
+    0 0,
+    44px 58px;
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent-warm) 28%, transparent));
+}
+
+:where(.vui-app-appshell).shell::after {
+  opacity: 0.78;
+  background:
+    radial-gradient(ellipse at 50% 102%, color-mix(in srgb, var(--accent-warm) 16%, transparent), transparent 42%),
+    radial-gradient(circle at 20% 88%, color-mix(in srgb, var(--accent-warm) 12%, transparent), transparent 28%),
+    radial-gradient(circle at 78% 82%, color-mix(in srgb, var(--accent-warm) 10%, transparent), transparent 30%),
+    var(--vui-gradient-route-soft),
+    var(--vui-gradient-route-soft);
+  mix-blend-mode: screen;
+}
+
+:where(.vui-app-appshell).shell[data-theme="light"] {
+  --shell-page-end: var(--bg-canvas);
+  --shell-surface: color-mix(in srgb, var(--surface-panel) 92%, transparent);
+  --shell-surface-muted: color-mix(in srgb, var(--surface-panel) 84%, transparent);
+  --shell-surface-hover: color-mix(in srgb, var(--surface-panel-hover) 94%, transparent);
+  --shell-panel: color-mix(in srgb, var(--surface-panel) 94%, transparent);
+  --shell-panel-soft: color-mix(in srgb, var(--surface-panel) 88%, transparent);
+  --shell-card: color-mix(in srgb, var(--surface-card) 84%, transparent);
+  --shell-shadow: color-mix(in srgb, var(--fg-tertiary) 12%, transparent);
+  --shell-star-color: color-mix(in srgb, var(--accent-warm) 20%, transparent);
+  --shell-star-muted: color-mix(in srgb, var(--fg-tertiary) 14%, transparent);
+  --shell-star-faint: color-mix(in srgb, var(--accent-warm) 8%, transparent);
+  --shell-nebula-cool: color-mix(in srgb, var(--accent-warm) 9%, transparent);
+  --shell-nebula-warm: color-mix(in srgb, var(--fg-tertiary) 8%, transparent);
+  background:
+    radial-gradient(ellipse at 52% -18%, color-mix(in srgb, var(--accent-warm) 8%, transparent) 0 18%, transparent 52%),
+    radial-gradient(circle at 16% 18%, var(--shell-nebula-cool) 0 11%, transparent 34%),
+    radial-gradient(circle at 82% 8%, var(--shell-nebula-warm) 0 9%, transparent 31%),
+    var(--vui-gradient-route-soft);
+}
+
+:where(.vui-app-appshell).shell[data-theme="light"][data-theme-background="custom"] {
+  --theme-background-overlay-start: color-mix(in srgb, var(--bg-canvas) 50%, transparent);
+  --theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 34%, transparent);
+  --theme-background-overlay-end: color-mix(in srgb, var(--bg-canvas) 62%, transparent);
+  --theme-background-star-opacity: 0.18;
+  --theme-background-blur: 1px;
+  --shell-surface-muted: color-mix(in srgb, var(--surface-panel) 78%, transparent);
+  --shell-panel: color-mix(in srgb, var(--surface-panel) 88%, transparent);
+  --shell-panel-soft: color-mix(in srgb, var(--surface-panel) 82%, transparent);
+  --shell-card: color-mix(in srgb, var(--surface-card) 76%, transparent);
+  background:
+    var(--vui-gradient-route-soft),
+    var(--workbench-theme-background-image),
+    var(--vui-gradient-route-soft);
+  background-position: center, center, center;
+  background-size: auto, cover, auto;
+  background-repeat: no-repeat, no-repeat, no-repeat;
+  background-attachment: fixed, fixed, fixed;
+}
+
+:where(.vui-app-appshell).shell[data-theme="light"][data-theme-background="custom"][data-theme-background-readability="soft"] {
+  --theme-background-overlay-start: color-mix(in srgb, var(--bg-canvas) 30%, transparent);
+  --theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 18%, transparent);
+  --theme-background-overlay-end: color-mix(in srgb, var(--bg-canvas) 46%, transparent);
+  --theme-background-star-opacity: 0.22;
+  --theme-background-blur: 0px;
+  --shell-surface-muted: color-mix(in srgb, var(--surface-panel) 68%, transparent);
+  --shell-panel: color-mix(in srgb, var(--surface-panel) 80%, transparent);
+  --shell-panel-soft: color-mix(in srgb, var(--surface-panel) 72%, transparent);
+  --shell-card: color-mix(in srgb, var(--surface-card) 64%, transparent);
+}
+
+:where(.vui-app-appshell).shell[data-theme="light"][data-theme-background="custom"][data-theme-background-readability="strong"] {
+  --theme-background-overlay-start: color-mix(in srgb, var(--bg-canvas) 72%, transparent);
+  --theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 60%, transparent);
+  --theme-background-overlay-end: color-mix(in srgb, var(--bg-canvas) 80%, transparent);
+  --theme-background-star-opacity: 0.12;
+  --theme-background-blur: 2px;
+  --shell-surface-muted: color-mix(in srgb, var(--surface-panel) 90%, transparent);
+  --shell-panel: color-mix(in srgb, var(--surface-panel) 96%, transparent);
+  --shell-panel-soft: color-mix(in srgb, var(--surface-panel) 92%, transparent);
+  --shell-card: color-mix(in srgb, var(--surface-card) 88%, transparent);
+}
+
+:where(.vui-app-appshell).shell[data-theme="light"]::before {
+  opacity: 0.34;
+  filter: none;
+}
+
+:where(.vui-app-appshell).shell[data-theme-background="custom"]::before {
+  opacity: var(--theme-background-star-opacity);
+  -webkit-backdrop-filter: blur(var(--theme-background-blur));
+  backdrop-filter: blur(var(--theme-background-blur));
+}
+
+:where(.vui-app-appshell).shell[data-theme="light"]::after {
+  opacity: 0.28;
+  mix-blend-mode: multiply;
+}
+
+:where(.vui-app-appshell).shutdownOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--surface-overlay);
+  backdrop-filter: blur(12px);
+}
+
+:where(.vui-app-appshell).shutdownPanel {
+  width: min(440px, 100%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 20px 22px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background:
+    var(--vui-gradient-route-soft),
+    var(--shell-panel);
+  box-shadow: var(--vui-shadow-soft);
+}
+
+:where(.vui-app-appshell).startupOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    var(--vui-gradient-route-soft),
+    var(--bg-canvas);
+}
+
+:where(.vui-app-appshell).startupPanel {
+  width: min(460px, 100%);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 22px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background:
+    var(--vui-gradient-route-soft),
+    var(--shell-panel);
+  box-shadow: var(--vui-shadow-soft);
+}
+
+:where(.vui-app-appshell).startupSpinner {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--shell-card);
+  color: var(--accent-warm-2);
+}
+
+:where(.vui-app-appshell).startupCopy {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+:where(.vui-app-appshell).startupKicker {
+  color: var(--accent-warm-2);
+  font-size: var(--vui-font-sm);
+}
+
+:where(.vui-app-appshell).startupCopy strong {
+  color: var(--fg-primary);
+  font-size: 1rem;
+}
+
+:where(.vui-app-appshell).startupCopy p {
+  margin: 0;
+  color: var(--fg-secondary);
+  line-height: 1.5;
+}
+
+:where(.vui-app-appshell).shutdownCopy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+:where(.vui-app-appshell).shutdownCopy strong {
+  font-size: 1rem;
+}
+
+:where(.vui-app-appshell).shutdownCopy p {
+  margin: 0;
+  color: var(--fg-secondary);
+  line-height: 1.5;
+  white-space: pre-line;
+}
+
+:where(.vui-app-appshell).shutdownCancelButton {
+  justify-self: start;
+  min-height: 32px;
+  margin-top: 8px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--shell-card);
+  color: var(--fg-primary);
+  font: inherit;
+  font-size: var(--vui-font-chat);
+  cursor: pointer;
+}
+
+:where(.vui-app-appshell).shutdownCancelButton:hover:not(:disabled),
+:where(.vui-app-appshell).shutdownCancelButton:focus-visible:not(:disabled) {
+  border-color: var(--accent-warm-2);
+  color: var(--accent-warm-2);
+}
+
+:where(.vui-app-appshell).shutdownCancelButton:disabled {
+  cursor: wait;
+  opacity: 0.64;
+}
+
+:where(.vui-app-appshell).shutdownIconSpin,
+:where(.vui-app-appshell).shutdownIconStill {
+  flex: 0 0 auto;
+  color: var(--accent-warm-2);
+}
+
+:where(.vui-app-appshell).shutdownIconSpin {
+  animation: shell-spin 900ms linear infinite;
+}
+
+:where(.vui-app-appshell).topBar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-height: var(--shell-topbar-height);
+  padding: 9px calc(16px + var(--shell-window-control-inset)) 9px 16px;
+  pointer-events: none;
+  -webkit-app-region: drag;
+}
+
+:where(.vui-app-appshell).topBar > * {
+  -webkit-app-region: no-drag;
+}
+
+:where(.vui-app-appshell).topBar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: var(--shell-surface-muted);
+  border-bottom: 1px solid var(--border-hairline);
+  backdrop-filter: blur(16px);
+  pointer-events: none;
+}
+
+:where(.vui-app-appshell).shell[data-theme="light"] .topBar::before {
+  background:
+    var(--vui-gradient-route-soft),
+    color-mix(in srgb, var(--surface-panel) 68%, transparent);
+  box-shadow: var(--vui-shadow-hairline);
+}
+
+:where(.vui-app-appshell).shell[data-desktop-shell="electron"] .topBar {
+  --shell-window-control-inset: 136px;
+}
+
+:where(.vui-app-appshell).shell[data-topbar-mode="hidden"] {
+  --shell-topbar-height: 0px;
+}
+
+:where(.vui-app-appshell).shell[data-topbar-mode="hidden"] .topBar {
+  display: none;
+}
+
+:where(.vui-app-appshell).topBarRestoreButton {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  z-index: 22;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  max-width: min(176px, calc(100vw - 20px));
+  padding: 6px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  color: var(--fg-secondary);
+  background: color-mix(in srgb, var(--shell-surface) 90%, transparent);
+  box-shadow: var(--vui-shadow-soft);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--vui-font-md);
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
+}
+
+:where(.vui-app-appshell).topBarRestoreButton:hover,
+:where(.vui-app-appshell).topBarRestoreButton:focus-visible {
+  border-color: var(--border-strong);
+  color: var(--fg-primary);
+  background: var(--shell-panel-soft);
+}
+
+:where(.vui-app-appshell).topBarRestoreButton:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-cool) 46%, transparent);
+  outline-offset: 2px;
+}
+
+:where(.vui-app-appshell).topBarRestoreButton span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).topBarRestoreButton[data-vui] [data-slot="vui-button-label"] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).brandBlock {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  pointer-events: auto;
+}
+
+:where(.vui-app-appshell).returnButton {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--shell-surface) 88%, transparent);
+  color: var(--fg-secondary);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+:where(.vui-app-appshell).returnButton:hover {
+  border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 10%, var(--shell-surface));
+  color: var(--fg-primary);
+}
+
+:where(.vui-app-appshell).returnButton:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-cool) 46%, transparent);
+  outline-offset: 2px;
+}
+
+:where(.vui-app-appshell).brandCopy {
+  display: grid;
+  grid-template-columns: max-content max-content;
+  grid-template-areas:
+    "brand version"
+    "subtle subtle";
+  align-items: center;
+  gap: 2px 7px;
+  min-width: 0;
+  line-height: 1;
+}
+
+:where(.vui-app-appshell).brand {
+  grid-area: brand;
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).versionPill {
+  grid-area: version;
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--shell-surface-muted) 78%, transparent);
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).brandSubtle {
+  grid-area: subtle;
+  max-width: min(230px, 34vw);
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.08;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).topClock {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 32px;
+  max-width: min(38vw, 300px);
+  padding: 7px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--shell-surface);
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-sm);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).topClock span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:where(.vui-app-appshell).activeWorkChip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: min(28vw, 300px);
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 36%, var(--border-soft));
+  border-radius: 999px;
+  background:
+    var(--vui-gradient-route-soft),
+    var(--shell-surface);
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-sm);
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: var(--vui-shadow-soft);
+  outline: none;
+}
+
+:where(.vui-app-appshell).activeWorkKicker {
+  flex: 0 0 auto;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-app-appshell).activeWorkChip strong {
+  flex: 0 0 auto;
+  color: var(--fg-primary);
+  font-size: var(--vui-font-md);
+}
+
+:where(.vui-app-appshell).activeWorkStatus,
+:where(.vui-app-appshell).activeWorkMore {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--shell-card) 74%, transparent);
+  color: var(--fg-primary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-app-appshell).activeWorkMore {
+  color: var(--accent-warm-2);
+}
+
+:where(.vui-app-appshell).activeWorkChip:focus-visible {
+  box-shadow: var(--vui-shadow-accent);
+}
+
+:where(.vui-app-appshell).activeWorkDetailPanel {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  z-index: 5;
+  width: min(360px, calc(100vw - 32px));
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background:
+    var(--vui-gradient-route-soft),
+    var(--shell-panel);
+  box-shadow: var(--vui-shadow-soft);
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  line-height: 1.35;
+  white-space: normal;
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+:where(.vui-app-appshell).activeWorkChip:hover .activeWorkDetailPanel,
+:where(.vui-app-appshell).activeWorkChip:focus-within .activeWorkDetailPanel {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+:where(.vui-app-appshell).activeWorkDetailHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+:where(.vui-app-appshell).activeWorkDetailHeader strong {
+  color: var(--fg-primary);
+  font-size: var(--vui-font-md);
+}
+
+:where(.vui-app-appshell).activeWorkDetailHeader span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-app-appshell).activeWorkDetailList {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+:where(.vui-app-appshell).activeWorkDetailItem {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--shell-card);
+}
+
+:where(.vui-app-appshell).activeWorkDetailItem > .statusDot {
+  margin-top: 4px;
+}
+
+:where(.vui-app-appshell).activeWorkDetailCopy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+:where(.vui-app-appshell).activeWorkDetailTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+:where(.vui-app-appshell).activeWorkDetailTitle strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: var(--vui-font-md);
+  text-overflow: ellipsis;
+}
+
+:where(.vui-app-appshell).activeWorkDetailTitle span {
+  flex: 0 0 auto;
+  color: var(--accent-warm-2);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-app-appshell).activeWorkDetailCopy p {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-sm);
+  line-height: 1.42;
+  overflow-wrap: anywhere;
+}
+
+:where(.vui-app-appshell).activeWorkDetailCopy code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--vui-font-xs);
+  text-overflow: ellipsis;
+}
+
+:where(.vui-app-appshell).nav {
+  position: relative;
+  z-index: 1;
+  justify-self: center;
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 3px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-panel);
+  background: var(--shell-surface);
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+:where(.vui-app-appshell).nav::-webkit-scrollbar {
+  display: none;
+}
+
+:where(.vui-app-appshell).navLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: var(--fg-secondary);
+  text-decoration: none;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+:where(.vui-app-appshell).navLink:hover {
+  color: var(--fg-primary);
+}
+
+:where(.vui-app-appshell).navLinkDisabled {
+  color: var(--fg-tertiary);
+  cursor: default;
+}
+
+:where(.vui-app-appshell).navLinkActive {
+  background: color-mix(in srgb, var(--accent-warm) 18%, transparent);
+  color: var(--accent-warm-2);
+}
+
+:where(.vui-app-appshell).topActions {
+  position: relative;
+  z-index: 1;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+  pointer-events: auto;
+}
+
+:where(.vui-app-appshell).utilityCluster {
+  position: relative;
+  display: flex;
+  outline: none;
+}
+
+:where(.vui-app-appshell).utilityTrigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--fg-secondary);
+  background: var(--shell-surface);
+  font: inherit;
+  font-size: var(--vui-font-md);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
+}
+
+:where(.vui-app-appshell).utilityTrigger:hover,
+:where(.vui-app-appshell).utilityCluster:focus-within .utilityTrigger {
+  border-color: var(--border-strong);
+  color: var(--fg-primary);
+  background: var(--shell-panel-soft);
+}
+
+:where(.vui-app-appshell).utilityTriggerLabel {
+  color: var(--fg-primary);
+  font-weight: 650;
+}
+
+:where(.vui-app-appshell).utilityChevron {
+  color: var(--fg-tertiary);
+  transition: transform 150ms ease;
+}
+
+:where(.vui-app-appshell).utilityTrigger[data-vui] [data-slot="vui-button-content"] {
+  gap: 7px;
+}
+
+:where(.vui-app-appshell).utilityTrigger[data-vui] [data-slot="vui-button-label"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+:where(.vui-app-appshell).utilityCluster:hover .utilityChevron,
+:where(.vui-app-appshell).utilityCluster:focus-within .utilityChevron,
+:where(.vui-app-appshell).utilityClusterOpen .utilityChevron {
+  transform: rotate(180deg);
+}
+
+:where(.vui-app-appshell).utilityPanel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: min(520px, calc(100vw - 40px));
+  max-height: min(78vh, 760px);
+  overflow: auto;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background:
+    var(--vui-gradient-route-soft),
+    var(--shell-panel);
+  box-shadow: var(--vui-shadow-soft);
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+:where(.vui-app-appshell).utilityPanel[hidden] {
+  display: none;
+}
+
+:where(.vui-app-appshell).utilityClusterOpen .utilityPanel {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+:where(.vui-app-appshell).utilityPanelHeader {
+  display: grid;
+  gap: 4px;
+}
+
+:where(.vui-app-appshell).utilityPanelHeader strong {
+  color: var(--fg-primary);
+  font-size: var(--vui-font-chat);
+}
+
+:where(.vui-app-appshell).utilityPanelHeader span {
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-md);
+  line-height: 1.45;
+}
+
+:where(.vui-app-appshell).utilityButtonGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 8px;
+}
+
+:where(.vui-app-appshell).utilityButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  color: var(--fg-secondary);
+  background: var(--shell-card);
+  text-decoration: none;
+  cursor: pointer;
+  font: inherit;
+  transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
+}
+
+:where(.vui-app-appshell).utilityButton:hover,
+:where(.vui-app-appshell).utilityButtonActive {
+  border-color: var(--border-strong);
+  color: var(--fg-primary);
+  background: color-mix(in srgb, var(--accent-warm) 14%, var(--shell-card));
+}
+
+:where(.vui-app-appshell).utilityButton span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--vui-font-md);
+  font-weight: 650;
+}
+
+:where(.vui-app-appshell).utilityButton [data-slot="vui-button-content"] {
+  max-width: 100%;
+}
+
+:where(.vui-app-appshell).utilityButton [data-slot="vui-button-label"] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).utilityFilePanel {
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--shell-card) 74%, transparent);
+}
+
+:where(.vui-app-appshell).utilityFileHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+:where(.vui-app-appshell).utilityFileHeader div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+:where(.vui-app-appshell).utilityFileHeader strong {
+  color: var(--fg-primary);
+  font-size: var(--vui-font-md);
+}
+
+:where(.vui-app-appshell).utilityFileHeader span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.35;
+}
+
+:where(.vui-app-appshell).utilityFileSearch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--shell-surface);
+  color: var(--fg-tertiary);
+}
+
+:where(.vui-app-appshell).utilityFileSearch input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--fg-primary);
+  font: inherit;
+  font-size: var(--vui-font-sm);
+}
+
+:where(.vui-app-appshell).utilityFileTree {
+  display: grid;
+  gap: 4px;
+  max-height: 260px;
+  overflow: auto;
+  padding-right: 3px;
+}
+
+:where(.vui-app-appshell).utilityFileDir {
+  display: grid;
+  gap: 4px;
+}
+
+:where(.vui-app-appshell).utilityFileDir summary {
+  display: flex;
+  align-items: center;
+  min-height: 26px;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  font-size: var(--vui-font-sm);
+  font-weight: 700;
+  list-style-position: inside;
+}
+
+:where(.vui-app-appshell).utilityFileChildren {
+  display: grid;
+  gap: 4px;
+  padding-left: 10px;
+  border-left: 1px solid color-mix(in srgb, var(--border-soft) 70%, transparent);
+}
+
+:where(.vui-app-appshell).utilityFileButton {
+  display: block;
+  gap: 8px;
+  min-height: 30px;
+  padding: 5px 7px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+:where(.vui-app-appshell).utilityFileButton:hover,
+:where(.vui-app-appshell).utilityFileButton:focus-visible,
+:where(.vui-app-appshell).utilityFileButtonActive {
+  border-color: var(--border-soft);
+  background: color-mix(in srgb, var(--accent-cool) 12%, var(--shell-card));
+  color: var(--fg-primary);
+  outline: none;
+}
+
+:where(.vui-app-appshell).utilityFileButton span,
+:where(.vui-app-appshell).utilityFileButton small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).utilityFileButton span {
+  font-size: var(--vui-font-sm);
+  font-weight: 650;
+}
+
+:where(.vui-app-appshell).utilityFileButton [data-slot="vui-button-content"] {
+  width: 100%;
+}
+
+:where(.vui-app-appshell).utilityFileButton [data-slot="vui-button-label"] {
+  display: grid;
+  grid-template-columns: minmax(0, 0.45fr) minmax(0, 0.55fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+:where(.vui-app-appshell).utilityFileButton small {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-app-appshell).utilityFileState {
+  margin: 0;
+  padding: 9px;
+  border: 1px dashed var(--border-soft);
+  border-radius: 8px;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-sm);
+}
+
+:where(.vui-app-appshell).gitMiniPanel {
+  display: grid;
+  gap: 11px;
+  padding: 11px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--shell-card) 76%, transparent);
+}
+
+:where(.vui-app-appshell).gitMiniHeader {
+  display: grid;
+  grid-template-columns: minmax(116px, auto) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+:where(.vui-app-appshell).gitHeadline {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+:where(.vui-app-appshell).gitHeadline strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: var(--vui-font-md);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).gitHeadline span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).gitChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--fg-secondary);
+  background: var(--shell-surface);
+  font-size: var(--vui-font-md);
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+:where(.vui-app-appshell).gitBranchName {
+  min-width: 0;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-primary);
+  font-weight: 600;
+}
+
+:where(.vui-app-appshell).gitCount {
+  color: var(--accent-warm-2);
+  font-size: var(--vui-font-md);
+}
+
+:where(.vui-app-appshell).gitSignalGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+:where(.vui-app-appshell).gitSignalGrid span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  min-height: 54px;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--shell-card) 86%, transparent);
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-app-appshell).gitSignalGrid strong {
+  color: var(--accent-warm-2);
+  font-size: 1rem;
+}
+
+:where(.vui-app-appshell).gitMetaGrid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 7px 12px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--shell-card);
+}
+
+:where(.vui-app-appshell).gitMetaGrid span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-sm);
+}
+
+:where(.vui-app-appshell).gitMetaGrid strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: var(--vui-font-md);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).gitCountGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+:where(.vui-app-appshell).gitCountGrid span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--shell-card);
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-app-appshell).gitCountGrid strong {
+  color: var(--accent-warm-2);
+  font-size: var(--vui-font-title);
+}
+
+:where(.vui-app-appshell).gitFileList {
+  display: grid;
+  gap: 7px;
+  max-height: 138px;
+  overflow: auto;
+}
+
+:where(.vui-app-appshell).gitSection {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+:where(.vui-app-appshell).gitSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+:where(.vui-app-appshell).gitSectionHeader strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: var(--vui-font-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).gitSectionHeader span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).gitCommitList,
+:where(.vui-app-appshell).gitWorktreeList {
+  display: grid;
+  gap: 6px;
+  max-height: 126px;
+  overflow: auto;
+}
+
+:where(.vui-app-appshell).gitFileItem {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-sm);
+}
+
+:where(.vui-app-appshell).gitCommitItem,
+:where(.vui-app-appshell).gitWorktreeItem {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 76%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--shell-card) 70%, transparent);
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-app-appshell).gitWorktreeItem {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+:where(.vui-app-appshell).gitCommitItem code {
+  color: var(--accent-warm-2);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-app-appshell).gitCommitItem span,
+:where(.vui-app-appshell).gitWorktreeItem strong,
+:where(.vui-app-appshell).gitWorktreeItem small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).gitWorktreeItem strong {
+  color: var(--fg-primary);
+}
+
+:where(.vui-app-appshell).gitWorktreeItem span {
+  color: var(--accent-warm-2);
+  font-size: var(--vui-font-xs);
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).gitWorktreeItem small {
+  grid-column: 1 / -1;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-app-appshell).gitQuietState {
+  margin: 0;
+  padding: 8px;
+  border: 1px dashed var(--border-soft);
+  border-radius: 8px;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.35;
+}
+
+:where(.vui-app-appshell).gitFileItem code {
+  color: var(--accent-warm-2);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-app-appshell).gitFileItem span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).gitFileList p {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-sm);
+  line-height: 1.4;
+}
+
+:where(.vui-app-appshell).statusCluster {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  outline: none;
+}
+
+:where(.vui-app-appshell).statusCluster:focus-visible .statusSummaryChip {
+  box-shadow: var(--vui-shadow-accent);
+}
+
+:where(.vui-app-appshell).statusChipRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+:where(.vui-app-appshell).statusBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(100%, 360px);
+  padding: 7px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--border-soft);
+  color: var(--fg-secondary);
+  background: var(--shell-surface);
+  font-size: var(--vui-font-md);
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).statusSummaryChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 210px;
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--shell-surface);
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-md);
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).statusBadgeLabel {
+  flex: 0 0 auto;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-app-appshell).statusBadgeValue {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-primary);
+  font-size: var(--vui-font-md);
+  font-weight: 600;
+}
+
+:where(.vui-app-appshell).statusSummaryCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--fg-tertiary);
+  background: color-mix(in srgb, var(--shell-card) 74%, transparent);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-app-appshell).statusDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--fg-tertiary);
+}
+
+:where(.vui-app-appshell).status_idle {
+  background: var(--fg-tertiary);
+}
+
+:where(.vui-app-appshell).status_running {
+  background: var(--state-success);
+  box-shadow: var(--vui-shadow-soft);
+}
+
+:where(.vui-app-appshell).status_failed {
+  background: var(--state-error);
+}
+
+:where(.vui-app-appshell).status_caution {
+  background: var(--accent-warm-2);
+  box-shadow: var(--vui-shadow-soft);
+}
+
+:where(.vui-app-appshell).statusGuidePanel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: min(640px, calc(100vw - 40px));
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background:
+    var(--vui-gradient-route-soft),
+    var(--shell-panel);
+  box-shadow: var(--vui-shadow-soft);
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+:where(.vui-app-appshell).statusCluster:hover .statusGuidePanel,
+:where(.vui-app-appshell).statusCluster:focus-within .statusGuidePanel {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+:where(.vui-app-appshell).statusGuideHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+:where(.vui-app-appshell).statusGuideHeader strong {
+  font-size: var(--vui-font-chat);
+}
+
+:where(.vui-app-appshell).statusGuideGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+:where(.vui-app-appshell).statusGuideCard {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--shell-card);
+}
+
+:where(.vui-app-appshell).statusGuideCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+:where(.vui-app-appshell).statusGuideCardHeader span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-sm);
+}
+
+:where(.vui-app-appshell).statusGuideCardHeader strong {
+  color: var(--fg-primary);
+  font-size: var(--vui-font-md);
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).statusGuideList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+:where(.vui-app-appshell).statusGuideListItem {
+  display: inline-grid;
+  grid-template-columns: auto max-content;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 23px;
+  padding: 3px 6px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 74%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--shell-card) 78%, transparent);
+}
+
+:where(.vui-app-appshell).statusGuideListItem[data-current="true"] {
+  border-color: color-mix(in srgb, var(--accent-cool) 48%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 10%, var(--shell-card));
+}
+
+:where(.vui-app-appshell).statusGuideStateLabel {
+  color: var(--fg-primary);
+  font-size: var(--vui-font-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).lifecycleProofCard {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--shell-card);
+}
+
+:where(.vui-app-appshell).lifecycleProofHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+:where(.vui-app-appshell).lifecycleProofHeader span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-sm);
+}
+
+:where(.vui-app-appshell).lifecycleProofHeader strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--fg-primary);
+  font-size: var(--vui-font-md);
+}
+
+:where(.vui-app-appshell).lifecycleProofMeta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+
+:where(.vui-app-appshell).lifecycleProofMeta span {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 78%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--shell-card) 76%, transparent);
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-app-appshell).lifecycleProofMeta strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: var(--vui-font-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).lifecycleProofList {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+:where(.vui-app-appshell).lifecycleProofItem {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 25px;
+  padding: 4px 6px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 70%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--shell-card) 70%, transparent);
+}
+
+:where(.vui-app-appshell).lifecycleProofName {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: var(--vui-font-sm);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).lifecycleProofItem strong {
+  color: var(--accent-warm-2);
+  font-size: var(--vui-font-xs);
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).actionButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  color: var(--fg-primary);
+  border: 1px solid var(--border-soft);
+  background: var(--shell-surface);
+  text-decoration: none;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+:where(.vui-app-appshell).actionButton:hover {
+  border-color: var(--border-strong);
+  background: var(--shell-surface-hover);
+}
+
+:where(.vui-app-appshell).actionIconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  color: var(--fg-primary);
+  border: 1px solid var(--border-soft);
+  background: var(--shell-surface);
+  text-decoration: none;
+  cursor: pointer;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+:where(.vui-app-appshell).actionIconButton:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+:where(.vui-app-appshell).actionIconButton:hover {
+  border-color: var(--border-strong);
+  background: var(--shell-surface-hover);
+}
+
+:where(.vui-app-appshell).lifecycleMenuCluster {
+  position: relative;
+  display: flex;
+  outline: none;
+}
+
+:where(.vui-app-appshell).lifecycleMenuPanel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  display: grid;
+  gap: 5px;
+  min-width: 178px;
+  padding: 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--shell-panel);
+  box-shadow: var(--vui-shadow-soft);
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+:where(.vui-app-appshell).lifecycleMenuPanel[hidden] {
+  display: none;
+}
+
+:where(.vui-app-appshell).lifecycleMenuClusterOpen .lifecycleMenuPanel {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+:where(.vui-app-appshell).lifecycleMenuItem {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg-secondary);
+  font: inherit;
+  font-size: var(--vui-font-md);
+  text-align: left;
+  cursor: pointer;
+}
+
+:where(.vui-app-appshell).lifecycleMenuItem:hover:not(:disabled),
+:where(.vui-app-appshell).lifecycleMenuItem:focus-visible {
+  border-color: var(--border-soft);
+  background: var(--shell-surface-hover);
+  color: var(--fg-primary);
+}
+
+:where(.vui-app-appshell).lifecycleMenuDangerItem {
+  color: color-mix(in srgb, var(--state-error) 78%, var(--fg-secondary));
+}
+
+:where(.vui-app-appshell).lifecycleMenuDangerItem:hover:not(:disabled),
+:where(.vui-app-appshell).lifecycleMenuDangerItem:focus-visible {
+  border-color: color-mix(in srgb, var(--state-error) 48%, var(--border-soft));
+  color: color-mix(in srgb, var(--state-error) 84%, var(--fg-primary));
+}
+
+:where(.vui-app-appshell).lifecycleMenuItem:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+:where(.vui-app-appshell).lifecycleMenuItem span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).lifecycleMenuItem[data-vui] [data-slot="vui-button-content"],
+:where(.vui-app-appshell).lifecycleMenuItem[data-vui] [data-slot="vui-button-label"] {
+  display: contents;
+}
+
+:where(.vui-app-appshell).mainArea {
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+  z-index: 1;
+  padding-top: var(--shell-topbar-height);
+}
+
+@keyframes shell-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 1180px) {
+  :where(.vui-app-appshell).brandSubtle,
+  :where(.vui-app-appshell).topClock span:last-child,
+  :where(.vui-app-appshell).activeWorkKicker,
+  :where(.vui-app-appshell).activeWorkChip strong,
+  :where(.vui-app-appshell).activeWorkStatus,
+  :where(.vui-app-appshell).activeWorkMore,
+  :where(.vui-app-appshell).utilityTriggerLabel,
+  :where(.vui-app-appshell).statusBadgeLabel {
+    display: none;
+  }
+
+  :where(.vui-app-appshell).brandBlock {
+    gap: 8px;
+    overflow: hidden;
+  }
+
+  :where(.vui-app-appshell).brandCopy {
+    gap: 7px;
+  }
+
+  :where(.vui-app-appshell).topClock,
+  :where(.vui-app-appshell).activeWorkChip,
+  :where(.vui-app-appshell).utilityTrigger,
+  :where(.vui-app-appshell).statusSummaryChip {
+    min-height: 30px;
+    padding: 5px 7px;
+  }
+
+  :where(.vui-app-appshell).topClock,
+  :where(.vui-app-appshell).activeWorkChip {
+    flex: 0 0 auto;
+    width: 30px;
+    justify-content: center;
+    gap: 0;
+  }
+
+  :where(.vui-app-appshell).topActions {
+    gap: 4px;
+  }
+
+  :where(.vui-app-appshell).utilityTrigger {
+    gap: 5px;
+  }
+
+  :where(.vui-app-appshell).statusSummaryChip {
+    gap: 6px;
+    max-width: 92px;
+  }
+
+  :where(.vui-app-appshell).navLink {
+    min-height: 28px;
+    padding-inline: 8px;
+    font-size: var(--vui-font-md);
+  }
+
+  :where(.vui-app-appshell).actionIconButton {
+    width: 30px;
+    height: 30px;
+  }
+}
+
+@media (max-width: 980px) {
+  :where(.vui-app-appshell).shell {
+    --shell-topbar-height: 100px;
+  }
+
+  :where(.vui-app-appshell).topBar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "brand actions"
+      "nav nav";
+    align-items: stretch;
+    gap: 8px 10px;
+    padding: 8px 12px;
+  }
+
+  :where(.vui-app-appshell).brandBlock {
+    grid-area: brand;
+    overflow: hidden;
+    gap: 8px;
+  }
+
+  :where(.vui-app-appshell).brandSubtle {
+    display: none;
+  }
+
+  :where(.vui-app-appshell).topClock {
+    max-width: 220px;
+    padding-inline: 8px;
+  }
+
+  :where(.vui-app-appshell).activeWorkChip {
+    max-width: 220px;
+  }
+
+  :where(.vui-app-appshell).nav {
+    grid-area: nav;
+    justify-self: start;
+    max-width: calc(100vw - 24px);
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+
+  :where(.vui-app-appshell).nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  :where(.vui-app-appshell).navLink {
+    flex: 0 0 auto;
+    min-height: 30px;
+    padding-inline: 9px;
+    font-size: var(--vui-font-md);
+  }
+
+  :where(.vui-app-appshell).topActions {
+    grid-area: actions;
+    justify-self: end;
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
+
+  :where(.vui-app-appshell).utilityTriggerLabel,
+  :where(.vui-app-appshell).statusBadgeLabel {
+    display: none;
+  }
+
+  :where(.vui-app-appshell).statusSummaryChip {
+    max-width: 142px;
+    min-height: 32px;
+  }
+
+  :where(.vui-app-appshell).actionIconButton {
+    width: 32px;
+    height: 32px;
+  }
+
+  :where(.vui-app-appshell).statusGuideGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  :where(.vui-app-appshell).lifecycleProofList {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  :where(.vui-app-appshell).shell {
+    --shell-topbar-height: 96px;
+  }
+
+  :where(.vui-app-appshell).topBar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 7px 8px;
+    padding: 7px 10px;
+  }
+
+  :where(.vui-app-appshell).brand {
+    font-size: 1rem;
+  }
+
+  :where(.vui-app-appshell).topClock {
+    max-width: 168px;
+    gap: 6px;
+  }
+
+  :where(.vui-app-appshell).activeWorkChip {
+    max-width: 148px;
+    gap: 6px;
+  }
+
+  :where(.vui-app-appshell).activeWorkKicker,
+  :where(.vui-app-appshell).activeWorkStatus {
+    display: none;
+  }
+
+  :where(.vui-app-appshell).activeWorkDetailPanel {
+    left: 0;
+    width: min(320px, calc(100vw - 20px));
+  }
+
+  :where(.vui-app-appshell).topActions {
+    gap: 4px;
+  }
+
+  :where(.vui-app-appshell).statusSummaryChip {
+    max-width: 104px;
+    padding-inline: 7px;
+  }
+
+  :where(.vui-app-appshell).statusSummaryCount {
+    display: none;
+  }
+
+  :where(.vui-app-appshell).utilityPanel,
+  :where(.vui-app-appshell).statusGuidePanel {
+    right: -10px;
+    width: calc(100vw - 20px);
+  }
+
+  :where(.vui-app-appshell).statusGuideGrid,
+  :where(.vui-app-appshell).lifecycleProofMeta,
+  :where(.vui-app-appshell).lifecycleProofList {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :where(.vui-app-appshell).gitMiniHeader {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :where(.vui-app-appshell).gitSignalGrid,
+  :where(.vui-app-appshell).gitCountGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  :where(.vui-app-appshell).topBar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 7px;
+    padding: 6px 8px;
+  }
+
+  :where(.vui-app-appshell).brandBlock {
+    min-width: 0;
+  }
+
+  :where(.vui-app-appshell).brandCopy {
+    min-width: 0;
+  }
+
+  :where(.vui-app-appshell).versionPill {
+    display: none;
+  }
+
+  :where(.vui-app-appshell).nav {
+    justify-self: stretch;
+    width: 100%;
+    max-width: 100%;
+    gap: 2px;
+    padding: 2px;
+    overflow: hidden;
+  }
+
+  :where(.vui-app-appshell).navLink {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 28px;
+    overflow: hidden;
+    padding-inline: 4px;
+    font-size: var(--vui-font-xs);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  :where(.vui-app-appshell).topActions {
+    min-width: 0;
+    gap: 3px;
+  }
+
+  :where(.vui-app-appshell).utilityTrigger,
+  :where(.vui-app-appshell).statusSummaryChip {
+    max-width: 82px;
+  }
+
+  :where(.vui-app-appshell).actionIconButton {
+    width: 30px;
+    height: 30px;
+  }
+}

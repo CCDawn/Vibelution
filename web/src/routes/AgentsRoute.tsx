@@ -90,7 +90,7 @@ import {
   type AgentTeamIndexGroup,
 } from "./agentWorkspaceCache";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
-import styles from "./AgentsRoute.module.css";
+import styles from "./AgentsRoute.styles";
 
 type FilterId = string;
 

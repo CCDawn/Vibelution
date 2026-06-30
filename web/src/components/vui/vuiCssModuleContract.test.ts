@@ -34,8 +34,29 @@ function lineFor(source: string, index: number) {
 describe("VUI CSS module contract", () => {
   it("keeps route and component CSS modules on semantic visual tokens", () => {
     const modules = cssModuleSources();
+    const modulePaths = modules.map(({ path }) => path);
 
-    expect(modules).toHaveLength(32);
+    expect(modules.length).toBe(0);
+    expect(modulePaths).not.toContain("app/LauncherShell.module.css");
+    expect(modulePaths).not.toContain("app/RouteLoadingShell.module.css");
+    expect(modulePaths).not.toContain("app/RouteErrorBoundary.module.css");
+    expect(modulePaths).not.toContain("components/layout/PaneCollapseHandle.module.css");
+    expect(modulePaths).not.toContain("components/preview/FilePreview.module.css");
+    expect(modulePaths).not.toContain("components/preview/StructuredLogPreview.module.css");
+    expect(modulePaths).not.toContain("routes/AgentManagementNav.module.css");
+    expect(modulePaths).not.toContain("routes/GitRoute.module.css");
+    expect(modulePaths).not.toContain("routes/GitDiffView.module.css");
+    expect(modulePaths).not.toContain("routes/KernelTaskCenterRoute.module.css");
+    expect(modulePaths).not.toContain("routes/LauncherRoute.module.css");
+    expect(modulePaths).not.toContain("routes/PetRoute.module.css");
+    expect(modulePaths).not.toContain("routes/PromptTemplatesRoute.module.css");
+    expect(modulePaths).not.toContain("routes/ResetRoute.module.css");
+    expect(modulePaths).not.toContain("routes/SkillsRoute.module.css");
+    expect(modulePaths).not.toContain("routes/SelfEvolutionTrack.module.css");
+    expect(modulePaths).not.toContain("routes/SupervisedReviewRoute.module.css");
+    expect(modulePaths).not.toContain("routes/SupervisedWorkspaceControls.module.css");
+    expect(modulePaths).not.toContain("routes/SupervisedWorkspaceTabs.module.css");
+    expect(modulePaths).not.toContain("routes/SupervisedWorktreeReviewPanel.module.css");
 
     const literalColorOffenders = modules.flatMap(({ path, source }) =>
       [...source.matchAll(/#[0-9a-fA-F]{3,8}|rgba?\(/g)].map((match) => `${path}:${lineFor(source, match.index ?? 0)}`),

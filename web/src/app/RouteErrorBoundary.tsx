@@ -2,7 +2,6 @@ import { useRouteError } from "react-router-dom";
 
 import { VButton } from "../components/vui";
 import { isDynamicImportFetchError } from "./routeChunkRecovery";
-import styles from "./RouteErrorBoundary.module.css";
 
 export type RouteErrorSurface = "workbench" | "launcher";
 
@@ -26,6 +25,23 @@ function compactTechnicalSummary(error: unknown, limit = 900) {
   }
   return `${compacted.slice(0, Math.max(0, limit - 3))}...`;
 }
+
+const surfaceClass = [
+  "grid min-h-screen place-items-center bg-[image:var(--vui-gradient-route-soft)] p-8 text-vui-fg-primary",
+  "max-[640px]:p-[18px]",
+].join(" ");
+const panelClass = [
+  "w-[min(560px,100%)] rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-glass p-5 shadow-none backdrop-blur-[14px]",
+  "max-[640px]:p-[18px]",
+].join(" ");
+const kickerClass = "mb-2 mt-0 text-[var(--vui-font-sm)] font-bold text-vui-accent-cool";
+const titleClass = "m-0 text-[1.28rem] leading-[1.25] max-[640px]:text-xl";
+const detailClass = "mb-0 mt-3 text-[var(--vui-font-chat)] leading-[1.55] text-vui-fg-secondary";
+const actionsClass = "mt-[18px] flex flex-wrap gap-2";
+const actionButtonClass = "min-w-24";
+const technicalClass = "mt-[18px] border-t border-vui-border-subtle pt-[14px]";
+const technicalSummaryClass = "cursor-pointer text-[var(--vui-font-sm)] font-bold text-vui-fg-tertiary";
+const technicalPreClass = "mt-2.5 max-h-40 overflow-auto whitespace-pre-wrap rounded-[var(--radius-card)] border border-vui-border-subtle bg-[var(--surface-code)] p-3 text-[var(--vui-font-xs)] leading-[1.5] text-vui-fg-primary";
 
 export function buildRouteErrorBoundaryViewModel(
   error: unknown,
@@ -70,22 +86,22 @@ export function RouteErrorBoundary({ surface = "workbench" }: { surface?: RouteE
   };
 
   return (
-    <div className={styles.surface} data-vui-app={surface} role="alert" aria-live="assertive">
-      <section className={styles.panel} aria-label={viewModel.title}>
-        <p className={styles.kicker}>{viewModel.kicker}</p>
-        <h1 className={styles.title}>{viewModel.title}</h1>
-        <p className={styles.detail}>{viewModel.detail}</p>
-        <div className={styles.actions}>
-          <VButton type="button" variant="primary" className={styles.actionButton} onPress={reloadPage}>
+    <div className={surfaceClass} data-vui-app={surface} role="alert" aria-live="assertive">
+      <section className={panelClass} aria-label={viewModel.title}>
+        <p className={kickerClass}>{viewModel.kicker}</p>
+        <h1 className={titleClass}>{viewModel.title}</h1>
+        <p className={detailClass}>{viewModel.detail}</p>
+        <div className={actionsClass}>
+          <VButton type="button" variant="primary" className={actionButtonClass} onPress={reloadPage}>
             {viewModel.primaryActionLabel}
           </VButton>
-          <VButton type="button" variant="secondary" className={styles.actionButton} onPress={goHome}>
+          <VButton type="button" variant="secondary" className={actionButtonClass} onPress={goHome}>
             {viewModel.secondaryActionLabel}
           </VButton>
         </div>
-        <details className={styles.technical}>
-          <summary>技术摘要</summary>
-          <pre>{viewModel.technicalSummary}</pre>
+        <details className={technicalClass}>
+          <summary className={technicalSummaryClass}>技术摘要</summary>
+          <pre className={technicalPreClass}>{viewModel.technicalSummary}</pre>
         </details>
       </section>
     </div>

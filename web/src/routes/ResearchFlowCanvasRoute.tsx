@@ -31,9 +31,9 @@ import {
   ResearchOrgMessageResponse,
   ResearchOrgProposalResponse,
 } from "../api/types";
-import { VButton } from "../components/vui";
+import { VButton, VRouteHeader } from "../components/vui";
 import { agentDisplayInfo } from "./agentDisplay";
-import styles from "./ResearchFlowCanvasRoute.module.css";
+import styles from "./ResearchFlowCanvasRoute.styles";
 
 export type CanvasSelection =
   | { kind: "node"; id: string }
@@ -2223,13 +2223,13 @@ export function ResearchFlowCanvasRoute() {
 
   return (
     <section className={styles.route}>
-      <header className={styles.header}>
-        <div className={styles.heading}>
-          <p>Project Organization Canvas</p>
-          <h1>科研组织画布</h1>
-          <span>持续锁定到项目组织架构；Agent 节点和通信线实时来自科研团队事实源。</span>
-        </div>
-        <div className={styles.headerActions}>
+      <VRouteHeader
+        className={styles.header}
+        eyebrow="Project Organization Canvas"
+        title="科研组织画布"
+        meta="持续锁定到项目组织架构；Agent 节点和通信线实时来自科研团队事实源。"
+        actions={(
+          <div className={styles.headerActions}>
           <Link className={styles.secondaryButton} to="/research">
             <ArrowLeft size={16} />
             返回科研页
@@ -2261,8 +2261,9 @@ export function ResearchFlowCanvasRoute() {
             <Lock size={16} />
             持续锁定
           </VButton>
-        </div>
-      </header>
+          </div>
+        )}
+      />
 
       <section className={styles.executionBar} aria-label="科研组织画布观察状态">
         <div className={styles.executionGroup}>

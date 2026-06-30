@@ -5,19 +5,20 @@ import { Search } from "lucide-react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { VButton, VChip, VIconButton, VPanel, VToolbar, VTooltip } from "./index";
+import { VButton, VChip, VIconButton, VNativeButton, VPanel, VToolbar, VTooltip } from "./index";
 import { VibelutionHeroProvider } from "./renderers/heroui/HeroProvider";
 
 describe("VUI foundation primitives", () => {
-  it("limits Tailwind source scanning to the VUI bootstrap areas", () => {
+  it("scans Tailwind classes from the TSX surfaces replacing CSS modules", () => {
     const tailwindEntry = readFileSync(
       resolve(import.meta.dirname, "../../design/tailwind.css"),
       "utf8",
     );
 
     expect(tailwindEntry).toContain('@source "../app/**/*.{ts,tsx}";');
-    expect(tailwindEntry).toContain('@source "../components/vui/**/*.{ts,tsx}";');
-    expect(tailwindEntry).not.toContain("../routes/");
+    expect(tailwindEntry).toContain('@source "../components/**/*.{ts,tsx}";');
+    expect(tailwindEntry).toContain('@source "../routes/**/*.{ts,tsx}";');
+    expect(tailwindEntry).not.toContain(".test");
   });
 
   it("wraps children in the Vibelution HeroUI provider boundary", () => {
@@ -68,6 +69,16 @@ describe("VUI foundation primitives", () => {
     expect(markup).toContain('data-slot="vui-button-trailing-icon"');
     expect(markup).toContain('title="Search docs"');
     expect(markup).toContain('class="inline-flex items-center gap-1.5"');
+  });
+
+  it("keeps native-only controls behind a VUI marker", () => {
+    const markup = renderToStaticMarkup(
+      <VNativeButton className="compact-native">Open</VNativeButton>,
+    );
+
+    expect(markup).toContain('data-vui="native-button"');
+    expect(markup).toContain('type="button"');
+    expect(markup).toContain('class="compact-native"');
   });
 
   it("renders panels as background-integrated native surfaces", () => {

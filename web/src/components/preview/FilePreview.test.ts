@@ -82,7 +82,7 @@ describe("FilePreview editor fallback contract", () => {
   it("wraps CodeMirror in a local fallback boundary", () => {
     expect(previewSource).toContain("<PreviewEditorErrorBoundary key={editorKey}");
     expect(previewSource).toContain("fallbackContent={displayContent}");
-    expect(previewSource).toContain("className={styles.plainFallback}");
+    expect(previewSource).toContain("className={plainFallbackClass}");
     expect(previewSource).toContain("[file-preview-fallback]");
   });
 

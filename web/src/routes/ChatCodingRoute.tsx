@@ -176,7 +176,7 @@ import {
   tokenizeChatMentions,
   type ChatMentionTarget,
 } from "./chatMentionTokens";
-import styles from "./ChatCodingRoute.module.css";
+import styles from "./ChatCodingRoute.styles";
 
 const CliAgentRunTerminalPanel = lazy(() =>
   import("./chat/CliAgentRunTerminalPanel").then((module) => ({
@@ -1390,9 +1390,9 @@ async function uploadSessionImageAttachment(sessionId: string, attachment: Compo
 }
 
 const RESIZE_HANDLE_WIDTH = 10;
-const MIN_LEFT_PANEL_WIDTH = 192;
+const MIN_LEFT_PANEL_WIDTH = 224;
 const MAX_LEFT_PANEL_WIDTH = 520;
-const MIN_RIGHT_PANEL_WIDTH = 244;
+const MIN_RIGHT_PANEL_WIDTH = 300;
 const MAX_RIGHT_PANEL_WIDTH = 560;
 const TARGET_CENTER_PANE_WIDTH = 520;
 const KEYBOARD_RESIZE_STEP = 24;

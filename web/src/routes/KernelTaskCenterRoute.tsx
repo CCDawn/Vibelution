@@ -7,11 +7,66 @@ import { useSearchParams } from "react-router-dom";
 import { getKernelTaskTimeline, listKernelTasks, selectKernelTaskId } from "../api/kernel";
 import { queryKeys } from "../api/queryKeys";
 import type { KernelDelivery, KernelTask, KernelTimelineItem } from "../api/types";
-import { VButton } from "../components/vui";
+import { VButton, VIconButton, VRouteHeader, VSelect } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
-import styles from "./KernelTaskCenterRoute.module.css";
 
-const STATUS_OPTIONS = ["", "queued", "running", "succeeded", "blocked", "failed", "cancelled"];
+const ALL_STATUS_KEY = "all";
+const STATUS_OPTIONS = ["queued", "running", "succeeded", "blocked", "failed", "cancelled"];
+
+const routeClass = "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-[var(--surface-page)]";
+const headerClass = "mx-2.5 mt-2 min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-gradient-route-soft),color-mix(in_srgb,var(--surface-panel)_86%,transparent)] shadow-[var(--vui-shadow-hairline)]";
+const headerActionsClass = "flex items-center justify-end gap-2 max-[720px]:items-stretch max-[720px]:flex-col";
+const statusFilterClass = "flex min-w-[210px] items-center gap-[7px] text-[0.8rem] text-vui-fg-secondary";
+const statusFilterLabelClass = "whitespace-nowrap text-[var(--vui-font-xs)] font-bold";
+const iconButtonClass = "h-[34px] w-[34px] min-h-[34px] rounded-lg border border-vui-border-soft bg-[var(--surface-card)] text-vui-fg-secondary hover:border-[var(--border-strong)] hover:bg-[var(--surface-panel-hover)] hover:text-vui-fg-primary";
+const workspaceClass = "grid min-h-0 grid-cols-[minmax(320px,420px)_minmax(0,1fr)] gap-2 px-2.5 pb-2.5 pt-2 max-[1120px]:grid-cols-1 max-[720px]:p-2";
+const paneClass = "min-h-0 rounded-lg border border-vui-border-soft bg-[var(--surface-panel)]";
+const taskPaneClass = `${paneClass} grid grid-rows-[auto_minmax(0,1fr)]`;
+const detailPaneClass = `${paneClass} grid content-start gap-2 overflow-auto p-2`;
+const panelHeaderClass = "flex items-center justify-between gap-2 border-b border-vui-border-soft p-2";
+const eyebrowClass = "m-0 mb-0.5 text-[var(--vui-font-xs)] font-bold uppercase tracking-[0.08em] text-vui-fg-tertiary";
+const panelCountClass = "text-base text-vui-fg-primary";
+const taskListClass = "grid min-h-0 content-start gap-[7px] overflow-auto p-2 max-[1120px]:max-h-[min(38vh,320px)]";
+const taskRowClass = "grid w-full gap-1.5 rounded-lg border border-vui-border-soft bg-[var(--surface-panel-muted)] p-2 text-left text-vui-fg-primary hover:border-[var(--border-strong)] hover:bg-[var(--surface-panel-strong)]";
+const taskRowSelectedClass = "border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[var(--surface-active-neutral)] shadow-[var(--vui-shadow-inset-accent)]";
+const taskRowTopClass = "flex items-center justify-between gap-2";
+const taskRowTitleClass = "min-w-0 truncate";
+const taskRowMetaClass = "grid gap-[3px] text-[var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
+const monoCodeClass = "break-words text-[var(--vui-font-xs)] text-vui-fg-tertiary";
+const detailHeaderClass = "flex items-center justify-between gap-2 rounded-lg border border-vui-border-soft bg-[var(--surface-card)] p-2";
+const detailTitleClass = "m-0 text-base text-vui-fg-primary";
+const summaryGridClass = "grid grid-cols-4 gap-2 max-[1120px]:grid-cols-2 max-[720px]:grid-cols-1";
+const metricClass = "flex min-w-0 items-center gap-2 rounded-lg border border-vui-border-soft bg-[var(--surface-card-subtle)] p-2";
+const metricIconClass = "inline-flex text-[var(--accent-cool)]";
+const metricBodyClass = "grid min-w-0 gap-0.5";
+const metricLabelClass = "text-[var(--vui-font-xs)] uppercase tracking-[0.06em] text-vui-fg-tertiary";
+const metricValueClass = "min-w-0 truncate text-[var(--vui-font-xs)] text-vui-fg-primary";
+const selectionNoticeClass = "rounded-lg border border-[color-mix(in_srgb,var(--state-warning)_28%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_8%,transparent)] px-2 py-[7px] text-[var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
+const sectionClass = "grid gap-[7px] rounded-lg border border-vui-border-soft bg-[var(--surface-card)] p-2";
+const sectionHeaderClass = "flex items-center justify-between gap-2";
+const sectionTitleClass = "m-0 text-[0.9rem] text-vui-fg-primary";
+const sectionCountClass = "text-[var(--vui-font-xs)] text-vui-fg-tertiary";
+const deliveryGridClass = "grid gap-1.5";
+const deliveryRowClass = "grid gap-1 rounded-lg bg-[var(--surface-card-subtle)] p-[7px]";
+const deliveryRowTopClass = "flex items-center justify-between gap-2";
+const mutedLineClass = "text-[var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
+const warningLineClass = "text-[var(--vui-font-xs)] not-italic leading-[1.35] text-[var(--state-warning)]";
+const timelineListClass = "grid gap-1.5";
+const timelineRowClass = "grid grid-cols-[14px_minmax(0,1fr)] gap-[7px] rounded-lg bg-[var(--surface-card-subtle)] p-2";
+const timelineDotClass = "mt-[5px] h-[9px] w-[9px] rounded-full bg-vui-fg-tertiary";
+const timelineTitleClass = "flex items-center justify-between gap-2";
+const timelineKindClass = "text-[var(--vui-font-xs)] text-vui-fg-primary";
+const timelineSummaryClass = "m-0 my-[3px] text-[var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
+const chipsClass = "mt-[5px] flex flex-wrap gap-[5px]";
+const chipCodeClass = "rounded-full border border-vui-border-soft bg-[var(--surface-code)] px-1.5 py-[3px] text-[var(--vui-font-xs)] text-vui-fg-tertiary";
+const refListClass = "mt-[5px] flex flex-wrap gap-[5px]";
+const emptyInlineClass = "text-[var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
+const statusPillBaseClass = "inline-flex min-h-[22px] items-center whitespace-nowrap rounded-full border border-vui-border-soft px-[7px] text-[var(--vui-font-xs)]";
+const emptyStateClass = "grid min-h-16 content-start gap-1 rounded-lg border border-dashed border-vui-border-soft bg-[color-mix(in_srgb,var(--surface-card-subtle)_74%,transparent)] p-2.5";
+const emptyStateLoadingClass = "border-solid";
+const emptyStateErrorClass = "border-[color-mix(in_srgb,var(--state-error)_32%,transparent)]";
+const emptyTitleClass = "text-[0.88rem] text-vui-fg-primary";
+const emptyDetailClass = "text-[var(--vui-font-xs)] text-vui-fg-secondary";
 
 const COPY = {
   zh: {
@@ -81,15 +136,15 @@ const COPY = {
 function statusTone(status: string) {
   const normalized = String(status || "").trim().toLowerCase();
   if (normalized === "succeeded" || normalized === "delivered") {
-    return styles.toneSuccess;
+    return "border-[color-mix(in_srgb,var(--state-success)_30%,transparent)] text-[var(--state-success)]";
   }
   if (normalized === "running" || normalized === "queued") {
-    return styles.toneActive;
+    return "border-[color-mix(in_srgb,var(--accent-cool)_30%,transparent)] text-[var(--accent-cool)]";
   }
   if (normalized === "blocked" || normalized === "failed" || normalized === "cancelled") {
-    return styles.toneError;
+    return "border-[color-mix(in_srgb,var(--state-error)_34%,transparent)] text-[var(--state-error)]";
   }
-  return styles.toneIdle;
+  return "text-vui-fg-secondary";
 }
 
 function shortId(value: string) {
@@ -159,52 +214,57 @@ export function KernelTaskCenterRoute() {
     enabled: Boolean(selectedTaskId),
   });
   const timeline = timelineQuery.data;
+  const statusOptions = useMemo(
+    () => [
+      { id: ALL_STATUS_KEY, label: copy.allStatus },
+      ...STATUS_OPTIONS.map((option) => ({ id: option, label: option })),
+    ],
+    [copy.allStatus],
+  );
 
   return (
-    <div className={styles.route}>
-      <header className={styles.header}>
-        <div>
-          <p className={styles.eyebrow}>Kernel</p>
-          <h1>{copy.title}</h1>
-          <p>{copy.subtitle}</p>
-        </div>
-        <div className={styles.headerActions}>
-          <label className={styles.statusFilter}>
-            <span>{copy.status}</span>
-            <select value={status} onChange={(event) => setStatus(event.target.value)}>
-              {STATUS_OPTIONS.map((option) => (
-                <option key={option || "all"} value={option}>
-                  {option || copy.allStatus}
-                </option>
-              ))}
-            </select>
-          </label>
-          <VButton
-            type="button"
-            className={styles.iconButton}
-            onClick={() => {
-              taskQuery.refetch();
-              if (selectedTaskId) {
-                timelineQuery.refetch();
-              }
-            }}
-            title={copy.refresh}
-            aria-label={copy.refresh}
-          >
-            <RefreshCw size={16} />
-          </VButton>
-        </div>
-      </header>
+    <div className={routeClass}>
+      <VRouteHeader
+        className={headerClass}
+        eyebrow="Kernel"
+        title={copy.title}
+        meta={copy.subtitle}
+        actions={(
+          <div className={headerActionsClass}>
+            <div className={statusFilterClass}>
+              <span className={statusFilterLabelClass}>{copy.status}</span>
+              <VSelect
+                aria-label={copy.status}
+                selectedKey={status || ALL_STATUS_KEY}
+                options={statusOptions}
+                placeholder={status || copy.allStatus}
+                onSelectionChange={(key) => setStatus(String(key) === ALL_STATUS_KEY ? "" : String(key))}
+              />
+            </div>
+            <VIconButton
+              label={copy.refresh}
+              className={iconButtonClass}
+              icon={<RefreshCw size={16} />}
+              onPress={() => {
+                taskQuery.refetch();
+                if (selectedTaskId) {
+                  timelineQuery.refetch();
+                }
+              }}
+            />
+          </div>
+        )}
+      />
 
-      <main className={styles.workspace}>
-        <section className={styles.taskPane} aria-label={copy.taskList}>
-          <div className={styles.panelHeader}>
+      <main className={workspaceClass}>
+        <section className={taskPaneClass} aria-label={copy.taskList}>
+          <div className={panelHeaderClass}>
             <div>
-              <p className={styles.eyebrow}>{copy.taskList}</p>
-              <strong>{tasks.length}</strong>
+              <p className={eyebrowClass}>{copy.taskList}</p>
+              <strong className={panelCountClass}>{tasks.length}</strong>
             </div>
           </div>
-          <div className={styles.taskList}>
+          <div className={taskListClass}>
             {taskQuery.isError ? (
               <EmptyState label={copy.loadFailed} detail={describeError(taskQuery.error, copy.loadFailed)} tone="error" />
             ) : taskQuery.isLoading ? (
@@ -225,7 +285,7 @@ export function KernelTaskCenterRoute() {
           </div>
         </section>
 
-        <section className={styles.detailPane} aria-label={copy.detail}>
+        <section className={detailPaneClass} aria-label={copy.detail}>
           {!selectedTaskId ? (
             <EmptyState label={copy.noTimeline} detail={copy.detail} />
           ) : timelineQuery.isError ? (
@@ -234,15 +294,15 @@ export function KernelTaskCenterRoute() {
             <EmptyState label={copy.loading} detail={selectedTaskId} tone="loading" />
           ) : (
             <>
-              <div className={styles.detailHeader}>
+              <div className={detailHeaderClass}>
                 <div>
-                  <p className={styles.eyebrow}>{copy.detail}</p>
-                  <h2>{shortId(timeline.taskId)}</h2>
+                  <p className={eyebrowClass}>{copy.detail}</p>
+                  <h2 className={detailTitleClass}>{shortId(timeline.taskId)}</h2>
                 </div>
                 <StatusPill status={timeline.task.status} />
               </div>
 
-              <div className={styles.summaryGrid}>
+              <div className={summaryGridClass}>
                 <Metric label={copy.factAuthority} value={timeline.readModel.truthSource} icon={<ShieldCheck size={15} />} />
                 <Metric
                   label={copy.viewType}
@@ -254,42 +314,42 @@ export function KernelTaskCenterRoute() {
                 <Metric label={copy.outcome} value={timeline.outcome.status || "-"} icon={<Boxes size={15} />} />
               </div>
 
-              {selectedTaskHiddenFromList ? <div className={styles.selectionNotice}>{copy.taskHidden}</div> : null}
+              {selectedTaskHiddenFromList ? <div className={selectionNoticeClass}>{copy.taskHidden}</div> : null}
 
-              <section className={styles.section}>
-                <div className={styles.sectionHeader}>
-                  <h3>{copy.deliveries}</h3>
-                  <span>{timeline.deliveries.length}</span>
+              <section className={sectionClass}>
+                <div className={sectionHeaderClass}>
+                  <h3 className={sectionTitleClass}>{copy.deliveries}</h3>
+                  <span className={sectionCountClass}>{timeline.deliveries.length}</span>
                 </div>
-                <div className={styles.deliveryGrid}>
+                <div className={deliveryGridClass}>
                   {timeline.deliveries.map((delivery) => (
                     <DeliveryRow key={`${delivery.targetAgentId}-${delivery.inboxMessageId}`} delivery={delivery} copy={copy} />
                   ))}
                 </div>
               </section>
 
-              <section className={styles.section}>
-                <div className={styles.sectionHeader}>
-                  <h3>{copy.projectionRefs}</h3>
-                  <span>{timeline.projectionRefs.length}</span>
+              <section className={sectionClass}>
+                <div className={sectionHeaderClass}>
+                  <h3 className={sectionTitleClass}>{copy.projectionRefs}</h3>
+                  <span className={sectionCountClass}>{timeline.projectionRefs.length}</span>
                 </div>
                 <RefList refs={timeline.projectionRefs} />
               </section>
 
-              <section className={styles.section}>
-                <div className={styles.sectionHeader}>
-                  <h3>{copy.runtimeRefs}</h3>
-                  <span>{timeline.runtimeEvidenceRefs.length}</span>
+              <section className={sectionClass}>
+                <div className={sectionHeaderClass}>
+                  <h3 className={sectionTitleClass}>{copy.runtimeRefs}</h3>
+                  <span className={sectionCountClass}>{timeline.runtimeEvidenceRefs.length}</span>
                 </div>
                 <RefList refs={timeline.runtimeEvidenceRefs} />
               </section>
 
-              <section className={styles.section}>
-                <div className={styles.sectionHeader}>
-                  <h3>{copy.timeline}</h3>
-                  <span>{timeline.timeline.length}</span>
+              <section className={sectionClass}>
+                <div className={sectionHeaderClass}>
+                  <h3 className={sectionTitleClass}>{copy.timeline}</h3>
+                  <span className={sectionCountClass}>{timeline.timeline.length}</span>
                 </div>
-                <div className={styles.timelineList}>
+                <div className={timelineListClass}>
                   {timeline.timeline.map((item, index) => (
                     <TimelineRow key={`${item.kind}-${item.at}-${index}`} item={item} />
                   ))}
@@ -317,18 +377,18 @@ function TaskRow({
   return (
     <VButton
       type="button"
-      className={selected ? `${styles.taskRow} ${styles.taskRowSelected}` : styles.taskRow}
+      className={selected ? `${taskRowClass} ${taskRowSelectedClass}` : taskRowClass}
       onClick={onSelect}
     >
-      <span className={styles.taskRowTop}>
-        <strong>{task.goal || shortId(task.taskId)}</strong>
+      <span className={taskRowTopClass}>
+        <strong className={taskRowTitleClass}>{task.goal || shortId(task.taskId)}</strong>
         <StatusPill status={task.status} />
       </span>
-      <span className={styles.taskRowMeta}>
+      <span className={taskRowMetaClass}>
         <span>{copy.assigned}: {(task.assignedAgentIds ?? []).map(shortId).join(", ") || "-"}</span>
         <span>{copy.updated}: {formatTime(task.updatedAt)}</span>
       </span>
-      <code>{task.taskId}</code>
+      <code className={monoCodeClass}>{task.taskId}</code>
     </VButton>
   );
 }
@@ -341,33 +401,33 @@ function DeliveryRow({
   copy: (typeof COPY)["zh"] | (typeof COPY)["en"];
 }) {
   return (
-    <div className={styles.deliveryRow}>
-      <div>
+    <div className={deliveryRowClass}>
+      <div className={deliveryRowTopClass}>
         <strong>{shortId(delivery.targetAgentId)}</strong>
         <StatusPill status={delivery.status} />
       </div>
-      <span>{copy.inbox}: {shortId(delivery.inboxMessageId)}</span>
-      <span>{copy.wake}: {delivery.wake?.wakeStatus || "-"}</span>
-      {delivery.reason ? <em>{delivery.reason}</em> : null}
+      <span className={mutedLineClass}>{copy.inbox}: {shortId(delivery.inboxMessageId)}</span>
+      <span className={mutedLineClass}>{copy.wake}: {delivery.wake?.wakeStatus || "-"}</span>
+      {delivery.reason ? <em className={warningLineClass}>{delivery.reason}</em> : null}
     </div>
   );
 }
 
 function TimelineRow({ item }: { item: KernelTimelineItem }) {
   return (
-    <div className={styles.timelineRow}>
-      <span className={`${styles.timelineDot} ${statusTone(item.status)}`} />
+    <div className={timelineRowClass}>
+      <span className={`${timelineDotClass} ${statusTone(item.status)}`} />
       <div>
-        <div className={styles.timelineTitle}>
-          <strong>{item.kind}</strong>
+        <div className={timelineTitleClass}>
+          <strong className={timelineKindClass}>{item.kind}</strong>
           <StatusPill status={item.status} />
         </div>
-        <p>{item.summary}</p>
-        <span>{formatTime(item.at)}</span>
+        <p className={timelineSummaryClass}>{item.summary}</p>
+        <span className={mutedLineClass}>{formatTime(item.at)}</span>
         {item.refs.length > 0 ? (
-          <div className={styles.refChips}>
+          <div className={chipsClass}>
             {item.refs.map((ref) => (
-              <code key={`${item.kind}-${ref.kind}-${ref.id}`}>{ref.kind}:{shortId(ref.id)}</code>
+              <code className={chipCodeClass} key={`${item.kind}-${ref.kind}-${ref.id}`}>{ref.kind}:{shortId(ref.id)}</code>
             ))}
           </div>
         ) : null}
@@ -378,10 +438,10 @@ function TimelineRow({ item }: { item: KernelTimelineItem }) {
 
 function RefList({ refs }: { refs: Array<Record<string, unknown>> }) {
   if (refs.length === 0) {
-    return <div className={styles.emptyInline}>-</div>;
+    return <div className={emptyInlineClass}>-</div>;
   }
   return (
-    <div className={styles.refList}>
+    <div className={refListClass}>
       {refs.map((ref, index) => {
         const sourceRef = ref.sourceRef && typeof ref.sourceRef === "object"
           ? ref.sourceRef as Record<string, unknown>
@@ -389,7 +449,7 @@ function RefList({ refs }: { refs: Array<Record<string, unknown>> }) {
         const route = String(ref.canonicalEditRoute ?? sourceRef?.canonicalEditRoute ?? "");
         const owner = String(ref.sourceOwner ?? sourceRef?.owner ?? "");
         return (
-          <code key={`${String(ref.kind ?? "ref")}-${String(ref.id ?? index)}`} title={route || owner}>
+          <code className={chipCodeClass} key={`${String(ref.kind ?? "ref")}-${String(ref.id ?? index)}`} title={route || owner}>
             {String(ref.kind ?? "ref")}:{shortId(String(ref.id ?? ref.eventCode ?? ref.taskId ?? ""))}
             {owner ? ` -> ${owner}` : ""}
           </code>
@@ -401,18 +461,18 @@ function RefList({ refs }: { refs: Array<Record<string, unknown>> }) {
 
 function Metric({ label, value, icon }: { label: string; value: string; icon: ReactNode }) {
   return (
-    <div className={styles.metric}>
-      <span>{icon}</span>
-      <div>
-        <small>{label}</small>
-        <strong>{value || "-"}</strong>
+    <div className={metricClass}>
+      <span className={metricIconClass}>{icon}</span>
+      <div className={metricBodyClass}>
+        <small className={metricLabelClass}>{label}</small>
+        <strong className={metricValueClass}>{value || "-"}</strong>
       </div>
     </div>
   );
 }
 
 function StatusPill({ status }: { status: string }) {
-  return <span className={`${styles.statusPill} ${statusTone(status)}`}>{status || "unknown"}</span>;
+  return <span className={`${statusPillBaseClass} ${statusTone(status)}`}>{status || "unknown"}</span>;
 }
 
 function EmptyState({
@@ -424,10 +484,11 @@ function EmptyState({
   detail: string;
   tone?: "idle" | "loading" | "error";
 }) {
+  const toneClass = tone === "error" ? emptyStateErrorClass : tone === "loading" ? emptyStateLoadingClass : "";
   return (
-    <div className={styles.emptyState} data-tone={tone}>
-      <strong>{label}</strong>
-      <span>{detail}</span>
+    <div className={`${emptyStateClass} ${toneClass}`} data-tone={tone}>
+      <strong className={emptyTitleClass}>{label}</strong>
+      <span className={emptyDetailClass}>{detail}</span>
     </div>
   );
 }
