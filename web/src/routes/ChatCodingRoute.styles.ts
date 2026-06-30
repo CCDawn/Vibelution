@@ -502,6 +502,37 @@ const styles = createVuiStyleMap(styleKeys, {
     tokenStatusVisualGrid: "!grid !w-full grid-cols-1 justify-stretch gap-1.5 rounded-[var(--radius-control)]",
     tokenStatusBar: "[&>span]:w-[calc(var(--token-status-value)*1%)]",
   },
+  overrides: {
+    featureChip:
+      "relative !grid min-h-[28px] min-w-0 !w-full max-w-full grid-cols-[auto_minmax(0,1fr)] items-center justify-start gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-1.5 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-content]]:max-w-full [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1 before:content-[''] before:h-1.5 before:w-1.5 before:shrink-0 before:rounded-full before:bg-[var(--fg-tertiary)] [&_em]:shrink-0 [&_em]:not-italic [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:whitespace-nowrap",
+    featureChipActive:
+      "border-[color-mix(in_srgb,var(--accent-cool)_38%,var(--vui-border-subtle))] text-[var(--fg-primary)] before:bg-[var(--accent-cool)]",
+    featureChipPrimary:
+      "border-[color-mix(in_srgb,var(--accent-warm)_32%,var(--vui-border-subtle))] before:bg-[var(--accent-warm-2)]",
+    featureChipRow: "grid min-w-0 grid-cols-2 gap-1.5 overflow-visible rounded-none border-0 bg-transparent p-0",
+    tokenStatusBar:
+      "relative mt-1 block h-1 overflow-hidden rounded-full bg-[var(--vui-border-subtle)] [&>span]:block [&>span]:h-full [&>span]:rounded-full [&>span]:bg-[var(--accent-cool)] [&>span]:w-[calc(var(--token-status-value)*1%)]",
+    tokenStatusCopy: "grid min-w-0 gap-0.5 overflow-visible [overflow-wrap:anywhere]",
+    tokenStatusLabel:
+      "block min-w-0 max-w-full whitespace-normal text-[11px] font-semibold leading-[1.12] text-vui-fg-secondary",
+    tokenStatusMeta:
+      "block min-w-0 max-w-full line-clamp-2 whitespace-normal text-[10px] leading-[1.14] text-vui-fg-tertiary",
+    tokenStatusMetric:
+      "!grid min-h-[62px] !w-full grid-cols-[38px_minmax(0,1fr)] items-center justify-stretch gap-1.5 overflow-visible rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-1.5 py-1 text-left",
+    tokenStatusMetric_cache:
+      "border-[color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_7%,var(--vui-control-muted))]",
+    tokenStatusMetric_compression:
+      "border-[color-mix(in_srgb,var(--accent-warm)_24%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_7%,var(--vui-control-muted))]",
+    tokenStatusMetric_modelInput:
+      "border-[color-mix(in_srgb,var(--state-success)_22%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-success)_7%,var(--vui-control-muted))]",
+    tokenStatusMetricButton:
+      "!grid !w-full [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+    tokenStatusRing:
+      "relative size-[38px] shrink-0 rounded-full bg-[conic-gradient(var(--accent-cool)_calc(var(--token-status-value)*1%),var(--vui-border-subtle)_0)]",
+    tokenStatusRingCore:
+      "absolute inset-[5px] grid place-items-center rounded-full bg-[var(--surface-card)] text-[10px] font-bold leading-none text-vui-fg-primary",
+    tokenStatusVisualGrid: "!grid w-full grid-cols-1 justify-stretch gap-1.5 rounded-[var(--radius-control)]",
+  },
 });
 
 export default styles;
