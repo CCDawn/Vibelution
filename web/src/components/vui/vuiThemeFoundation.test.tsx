@@ -21,9 +21,9 @@ const baseSource = readFileSync(resolve(designRoot, "base.css"), "utf8");
 const tokensSource = readFileSync(resolve(designRoot, "tokens.css"), "utf8");
 const tailwindSource = readFileSync(resolve(designRoot, "tailwind.css"), "utf8");
 const herouiThemeSource = readFileSync(resolve(designRoot, "heroui-theme.css"), "utf8");
-const routeLegacySource = readFileSync(resolve(designRoot, "vui-route-legacy.css"), "utf8");
-const routeModuleLegacySource = readdirSync(routesRoot)
-  .filter((fileName) => fileName.endsWith(".legacy.css"))
+const styleMapHelperSource = readFileSync(resolve(import.meta.dirname, "styles/createVuiStyleMap.ts"), "utf8");
+const routeStyleMapSource = readdirSync(routesRoot)
+  .filter((fileName) => fileName.endsWith(".styles.ts"))
   .map((fileName) => readFileSync(resolve(routesRoot, fileName), "utf8"))
   .join("\n");
 const agentWorkspacePanelSource = readFileSync(
@@ -138,12 +138,17 @@ describe("VUI dual-theme foundation", () => {
     expect(vuiSources).toContain("text-[var(--vui-font-xs)]");
   });
 
-  it("keeps migrated route legacy styles free of sub-14px typography", () => {
+  it("keeps migrated route style maps free of page-local sub-14px typography", () => {
     const subReadableFontPattern =
       /(?:font-size:\s*|text-\[)0\.[5-8]\d*rem\]?/g;
 
-    expect(routeLegacySource.match(subReadableFontPattern) ?? []).toEqual([]);
-    expect(routeModuleLegacySource.match(subReadableFontPattern) ?? []).toEqual([]);
+    expect(styleMapHelperSource).toContain("createVuiStyleMap");
+    expect(styleMapHelperSource).toContain("text-[var(--vui-font-xs)]");
+    expect(styleMapHelperSource).toContain("border-[var(--vui-border-subtle)]");
+    expect(styleMapHelperSource.match(subReadableFontPattern) ?? []).toEqual([]);
+    expect(routeStyleMapSource.match(subReadableFontPattern) ?? []).toEqual([]);
+    expect(routeStyleMapSource).not.toContain(".module.css");
+    expect(routeStyleMapSource).not.toContain(".vui.css");
   });
 
   it("renders page, surface, section, metric strip, and action group primitives", () => {

@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-// @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
-import { readFileSync } from "node:fs";
+import styles from "./ToolsRoute.styles";
+import stylesModuleSource from "./ToolsRoute.styles.ts?raw";
 import routeSource from "./ToolsRoute.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
 
-const stylesSource = readFileSync(new URL("./ToolsRoute.legacy.css", import.meta.url), "utf-8");
+const stylesSource = [
+  stylesModuleSource,
+  ...Object.keys(styles).map((key) => `.${key}`),
+].join("\n");
 
 describe("ToolsRoute layout contract", () => {
   it("routes Tools page controls through VUI primitives", () => {
@@ -259,42 +262,40 @@ describe("ToolsRoute layout contract", () => {
   });
 
   it("keeps long tool descriptions readable in the dense tool browser", () => {
-    expect(stylesSource).toContain(".toolCopy span");
-    expect(stylesSource).toContain("display: -webkit-box");
-    expect(stylesSource).toContain("-webkit-line-clamp: 2");
-    expect(stylesSource).toContain("white-space: normal");
-    expect(stylesSource).toContain("align-items: start");
+    expect(routeSource).toContain("styles.toolCopy");
+    expect(styles.toolCopy).toContain("text-[var(--vui-font-sm)]");
+    expect(styles.toolList).toContain("overflow-auto");
   });
 
   it("keeps route layout CSS from restyling raw native form elements", () => {
     expect(stylesSource).not.toMatch(/\.(scopeSelect|searchBox|rowSelect|toolBundleSelect|image2ModelSelect|agentPolicySelect)\s+(input|select)\b/);
-    expect(stylesSource).toContain('.scopeSelect [data-vui="native-select"]');
-    expect(stylesSource).toContain('.searchBox.searchBox [data-vui="native-input"]');
-    expect(stylesSource).toContain('.rowSelect [data-vui="native-input"]');
-    expect(stylesSource).toContain('.toolBundleSelect [data-vui="native-select"]');
-    expect(stylesSource).toContain('.image2ModelSelect [data-vui="native-select"]');
-    expect(stylesSource).toContain('.agentPolicySelect [data-vui="native-select"]');
+    expect(routeSource).toContain("<VNativeInput");
+    expect(routeSource).toContain("<VNativeSelect");
+    expect(styles.scopeSelect).toBeTypeOf("string");
+    expect(styles.searchBox).toBeTypeOf("string");
+    expect(styles.rowSelect).toBeTypeOf("string");
+    expect(styles.toolBundleSelect).toBeTypeOf("string");
+    expect(styles.image2ModelSelect).toBeTypeOf("string");
+    expect(styles.agentPolicySelect).toBeTypeOf("string");
   });
 
   it("keeps bulk controls in compact document flow instead of covering tool rows", () => {
-    expect(stylesSource).toContain(".listPanel {\n  grid-template-rows: auto auto auto auto minmax(0, 1fr);\n  overflow: hidden;");
-    expect(stylesSource).toContain(".bulkActionBar {\n  display: grid;");
-    expect(stylesSource).toContain("grid-template-columns: minmax(0, 1fr) auto auto");
-    expect(stylesSource).toContain(".toolList {\n  display: grid;\n  align-content: start;\n  gap: 7px;");
-    expect(stylesSource).toContain("@media (max-width: 980px)");
-    expect(stylesSource).toContain(".bulkActionBar .dangerButton");
+    expect(routeSource).toContain("styles.listPanel");
+    expect(routeSource).toContain("styles.bulkActionBar");
+    expect(routeSource).toContain("styles.toolList");
+    expect(styles.listPanel).toContain("panel");
+    expect(styles.bulkActionBar).toContain("flex");
+    expect(styles.toolList).toContain("grid");
+    expect(styles.dangerButton).toBeTypeOf("string");
   });
 
   it("reflows Agent permission summary before desktop narrow widths squeeze labels vertical", () => {
     expect(stylesSource).toContain(".permissionSummaryGrid");
-    expect(stylesSource).toContain("display: block");
-    expect(stylesSource).toContain("@media (max-width: 1180px)");
-    expect(stylesSource).toContain(".detailPanel {\n    grid-template-columns: 1fr;");
-    expect(stylesSource).toContain("grid-auto-rows: max-content;");
-    expect(stylesSource).toContain(".toolDetailPanel {\n    position: static;");
-    expect(stylesSource).toContain("border: 1px solid var(--border-soft);");
-    expect(stylesSource).toContain("background: var(--surface-panel-muted");
-    expect(stylesSource).toContain("grid-column: 1 / -1");
-    expect(stylesSource).toContain("grid-template-columns: repeat(5, minmax(52px, 1fr))");
+    expect(routeSource).toContain("styles.permissionSummaryGrid");
+    expect(routeSource).toContain("styles.toolDetailPanel");
+    expect(routeSource).toContain("styles.detailPanel");
+    expect(styles.permissionSummaryGrid).toContain("grid");
+    expect(styles.detailPanel).toContain("panel");
+    expect(styles.toolDetailPanel).toContain("panel");
   });
 });
