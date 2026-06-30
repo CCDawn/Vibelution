@@ -1,16 +1,15 @@
-import { readFileSync } from "node:fs";
-
 import { describe, expect, it } from "vitest";
 
 import routeSource from "./LauncherRoute.tsx?raw";
-import styles from "./LauncherRoute.module.css";
+import stylesSource from "./LauncherRoute.styles.ts?raw";
+import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
 import launcherApiSource from "../api/launcher.ts?raw";
 import routerSource from "../app/router.tsx?raw";
 import shellSource from "../app/AppShell.tsx?raw";
 import utilityMenuSource from "../app/AppShellUtilityMenu.tsx?raw";
 import launcherShellSource from "../app/LauncherShell.tsx?raw";
 
-const routeStylesSource = readFileSync(new URL("./LauncherRoute.module.css", import.meta.url), "utf8");
+const routeStylesSource = stylesSource;
 
 const sourceSlice = (source: string, startMarker: string, endMarker: string): string => {
   const startIndex = source.indexOf(startMarker);
@@ -225,36 +224,35 @@ describe("LauncherRoute layout contract", () => {
   it("keeps guidance terse while preserving detail in hover titles", () => {
     expect(routeSource).toContain('className={styles.userGuide} data-tone={userGuideTone} title={userGuideDetail}');
     expect(routeSource).not.toContain("<small title={userGuideDetail}>{userGuideDetailShort}</small>");
-    expect(routeStylesSource).toContain(".userGuide em");
-    expect(routeStylesSource).toContain("overflow-wrap: anywhere");
-    expect(routeStylesSource).toContain("white-space: normal");
-    expect(routeStylesSource).toContain("grid-column: auto");
+    expect(routeStylesSource).toContain("userGuide:");
+    expect(routeStylesSource).toContain("overflow-wrap-anywhere");
+    expect(routeStylesSource).toContain("whitespace-normal");
+    expect(routeStylesSource).toContain("col-auto");
   });
 
   it("uses a light dense Launcher surface with muted action buttons", () => {
-    expect(routeStylesSource).toContain("background:\n    var(--vui-gradient-route-soft),\n    var(--surface-page);");
-    expect(routeStylesSource).toContain("background:\n    var(--vui-gradient-route-soft),\n    color-mix(in srgb, var(--surface-panel) 86%, transparent);");
-    expect(routeStylesSource).toContain("background: color-mix(in srgb, var(--accent-primary) 10%, var(--surface-card))");
-    expect(routeStylesSource).toContain("background: color-mix(in srgb, var(--danger) 7%, var(--surface-card))");
-    expect(routeStylesSource).toContain("min-height: 28px");
-    expect(routeStylesSource).toContain("padding: 0 8px");
-    expect(routeStylesSource).toContain("width: fit-content");
-    expect(routeStylesSource).toContain("white-space: nowrap");
+    expect(routeStylesSource).toContain("bg-[var(--surface-page)]");
+    expect(routeStylesSource).toContain("bg-[color-mix(in_srgb,var(--surface-panel)_86%,transparent)]");
+    expect(routeStylesSource).toContain("bg-[color-mix(in_srgb,var(--accent-primary)_10%,var(--surface-card))]");
+    expect(routeStylesSource).toContain("bg-[color-mix(in_srgb,var(--danger)_7%,var(--surface-card))]");
+    expect(routeStylesSource).toContain("min-h-7");
+    expect(routeStylesSource).toContain("px-2");
+    expect(routeStylesSource).toContain("w-fit");
+    expect(routeStylesSource).toContain("whitespace-nowrap");
     expect(launcherShellSource).toContain("var(--vui-gradient-route-soft)");
     expect(launcherShellSource).toContain("var(--fg-primary)");
   });
 
   it("keeps the complete launcher surface reachable when the window is short", () => {
-    expect(routeStylesSource).toContain("grid-template-rows: auto");
-    expect(routeStylesSource).toContain("align-content: start");
-    expect(routeStylesSource).toContain("overflow-y: auto");
-    expect(routeStylesSource).toContain("overflow-x: hidden");
-    expect(routeStylesSource).toContain("overscroll-behavior: contain");
-    expect(routeStylesSource).toContain("scrollbar-gutter: stable");
-    expect(routeStylesSource).toContain("padding-bottom: max(12px, env(safe-area-inset-bottom))");
-    expect(routeStylesSource).toContain("padding: 6px 12px max(14px, env(safe-area-inset-bottom))");
-    expect(routeStylesSource).toContain("overflow: visible");
-    expect(routeStylesSource).not.toContain("grid-template-rows: auto auto auto auto auto minmax(0, 1fr)");
+    expect(routeStylesSource).toContain("content-start");
+    expect(routeStylesSource).toContain("overflow-y-auto");
+    expect(routeStylesSource).toContain("overflow-x-hidden");
+    expect(routeStylesSource).toContain("overscroll-contain");
+    expect(routeStylesSource).toContain("[scrollbar-gutter:stable]");
+    expect(routeStylesSource).toContain("pb-[max(12px,env(safe-area-inset-bottom))]");
+    expect(routeStylesSource).toContain("pb-[max(14px,env(safe-area-inset-bottom))]");
+    expect(routeStylesSource).toContain("overflow-visible");
+    expect(routeStylesSource).not.toContain("grid-rows-[auto_auto_auto_auto_auto_minmax(0,1fr)]");
   });
 
   it("keeps internal lifecycle fields out of the first-read labels", () => {

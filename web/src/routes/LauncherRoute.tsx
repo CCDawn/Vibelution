@@ -50,7 +50,7 @@ import {
 } from "../app/projectCloseGuard";
 import { VButton, VRouteHeader } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
-import styles from "./LauncherRoute.module.css";
+import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
 
 type LauncherNotice = {
   tone: "neutral" | "success" | "warning" | "error";
