@@ -2782,7 +2782,7 @@ export function ConversationView({
           title={expanded ? t("executionDetailsVisible") : t("executionDetailsHidden")}
         >
           {summaryContent}
-          {!expanded && preview ? <span className={styles.answerOnlyProcessPreview}>{preview}</span> : null}
+          {preview ? <span className={styles.answerOnlyProcessPreview}>{preview}</span> : null}
           {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </VButton>
         {expanded ? <div className={styles.answerOnlyProcessDetails}>{renderDetails()}</div> : null}
@@ -3593,7 +3593,8 @@ export function ConversationView({
                   ? agentInboxSourceLabel(message)
                   : userLabel;
             const editDisabled = Boolean(editUserMessageDisabled);
-            const processDefaultExpanded = operationCollectionTone(operationGroups.timeline) === "failed";
+            const processTone = operationCollectionTone(operationGroups.timeline);
+            const processDefaultExpanded = processTone === "failed" || processTone === "running";
             const renderLegacyProcessDetails = (defaultExpandedOverride?: boolean) => (
               <>
                 {renderThoughtPanel(message, defaultExpandedOverride)}
