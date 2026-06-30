@@ -87,6 +87,15 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.panelBody).toContain("overflow-auto");
   });
 
+  it("keeps the no-session center state compact on wide screens", () => {
+    expect(routeSource).toContain("<div className={styles.emptyConversationSurface}>{t(\"noSessionsYet\")}</div>");
+    expect(routeStyles.emptyConversationSurface).toContain("place-self-center");
+    expect(routeStyles.emptyConversationSurface).toContain("w-[min(360px,calc(100%_-_32px))]");
+    expect(routeStyles.emptyConversationSurface).toContain("min-h-[74px]");
+    expect(routeStyles.emptyConversationSurface).not.toContain("h-full");
+    expect(routeStyles.emptyConversationSurface).not.toContain("min-h-[min(420px,calc(100dvh_-_190px))]");
+  });
+
   it("keeps the conversation page aligned to the V2.1 quiet light style system", () => {
     expect(conversationStyles.surfaceCompact).toContain("bg-[color-mix(in_srgb,var(--surface-panel)_72%,transparent)]");
     expect(conversationStyles.surfaceCompact).not.toContain("bg-[var(--surface-panel-strong)]");
@@ -405,6 +414,18 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.featureChipPrimary).toBeTypeOf("string");
     expect(routeStyles.featureChipRow).toBeTypeOf("string");
     expect(routeStyles.featureChip).toBeTypeOf("string");
+  });
+
+  it("keeps the companion details toggle as a single compact control", () => {
+    expect(routeSource).toContain("<details className={styles.compactDetails}>");
+    expect(routeSource).toContain("<ChevronRight size={14} aria-hidden=\"true\" />");
+    expect(routeStyles.compactDetails).toContain("[&>summary]:list-none");
+    expect(routeStyles.compactDetails).toContain("[&>summary::-webkit-details-marker]:hidden");
+    expect(routeStyles.compactDetails).toContain("[&_.compactDetailsOpenLabel]:hidden");
+    expect(routeStyles.compactDetails).toContain("[&[open]_.compactDetailsOpenLabel]:inline");
+    expect(routeStyles.compactDetails).toContain("[&[open]_.compactDetailsClosedLabel]:hidden");
+    expect(routeStyles.compactDetailsClosedLabel).toContain("compactDetailsClosedLabel");
+    expect(routeStyles.compactDetailsOpenLabel).toContain("compactDetailsOpenLabel");
   });
 
   it("keeps left rail VButton cards from collapsing their internal grid layout", () => {

@@ -6839,7 +6839,7 @@ export function ChatCodingRoute() {
           </div>
           <details className={styles.compactDetails}>
             <summary>
-              <ChevronRight size={14} />
+              <ChevronRight size={14} aria-hidden="true" />
               <span className={styles.compactDetailsClosedLabel}>{t("expandSection")}</span>
               <span className={styles.compactDetailsOpenLabel}>{t("collapseSection")}</span>
             </summary>
@@ -7477,7 +7477,7 @@ export function ChatCodingRoute() {
               </div>
             </div>
           ) : !activeSessionId && !sessionsQuery.isPending ? (
-            <div className={styles.emptySurface}>{t("noSessionsYet")}</div>
+            <div className={styles.emptyConversationSurface}>{t("noSessionsYet")}</div>
           ) : sessionDetailErrorState.blockingError ? (
             <div className={styles.emptySurface}>
               {sessionDetailErrorMessage}
