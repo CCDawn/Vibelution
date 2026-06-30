@@ -1073,6 +1073,58 @@ def test_force_cancel_active_supervised_worktree_run_for_shutdown_releases_snaps
     assert cancelled_event[3]["lifecycle"] is True
 
 
+def test_operator_terminate_action_cancels_active_supervised_worktree_run_and_unlocks(monkeypatch):
+    scene_events: list[tuple[str, str, str, dict]] = []
+
+    def record_scene_event(component, phase, event_code, **kwargs):
+        scene_events.append((component, phase, event_code, kwargs))
+        return {"accepted": True}
+
+    monkeypatch.setattr(service, "record_runtime_scene_event", record_scene_event)
+    run_id = "swte-operator-terminate"
+    snapshot = {
+        "runId": run_id,
+        "runKind": service.RUN_KIND,
+        "leases": service.RUN_LEASES,
+        "status": "running",
+        "phase": "candidate_modify",
+        "runtimeStatus": "running",
+        "outcome": "",
+        "startedAt": "2026-05-22T10:00:00+00:00",
+        "updatedAt": "2026-05-22T10:01:00+00:00",
+        "finishedAt": "",
+        "latestMessage": "候选 agent 正在改良。",
+        "decision": {},
+        "mergeAnalysis": {},
+    }
+    service._persist_snapshot(snapshot, active_run_id=run_id)
+
+    updated = service.execute_supervised_worktree_action(
+        run_id,
+        "terminate",
+        reviewer_note="用户从监督进化页面终止。",
+    )
+
+    assert updated["status"] == "cancelled"
+    assert updated["phase"] == "operator_terminated"
+    assert updated["runtimeStatus"] == "cancelled"
+    assert updated["outcome"] == "operator_cancelled"
+    assert updated["runtimeManagerControl"] == {
+        "reason": "operator_terminate",
+        "message": "用户从监督进化页面终止。",
+    }
+    assert updated["finishedAt"]
+    assert updated["actionStates"]["terminate"]["enabled"] is False
+    assert service.get_active_supervised_worktree_run() is None
+    persisted = service.get_supervised_worktree_run(run_id)
+    assert persisted is not None
+    assert persisted["status"] == "cancelled"
+    assert persisted["runtimeManagerControl"]["reason"] == "operator_terminate"
+    cancelled_event = next(item for item in scene_events if item[2] == "supervised_worktree_run.operator_cancelled")
+    assert cancelled_event[1] == "operator_terminated"
+    assert cancelled_event[3]["lifecycle"] is True
+
+
 def test_get_active_run_reconciles_stopped_candidate_conversation(monkeypatch, tmp_path):
     monkeypatch.setattr(service.work_run_store, "WORK_RUNS_DIR", tmp_path / "work_runs")
     monkeypatch.setattr(service, "record_runtime_scene_event", lambda *args, **kwargs: {"accepted": True})
