@@ -16,7 +16,7 @@ const STATUS_OPTIONS = ["queued", "running", "succeeded", "blocked", "failed", "
 const routeClass = "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-[var(--surface-page)]";
 const headerClass = "mx-2.5 mt-2 min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-gradient-route-soft),color-mix(in_srgb,var(--surface-panel)_86%,transparent)] shadow-[var(--vui-shadow-hairline)]";
 const headerActionsClass = "flex items-center justify-end gap-2 max-[720px]:items-stretch max-[720px]:flex-col";
-const statusFilterClass = "flex min-w-[210px] items-center gap-[7px] text-[0.8rem] text-vui-fg-secondary";
+const statusFilterClass = "flex min-w-[210px] items-center gap-[7px] text-[var(--vui-font-xs)] text-vui-fg-secondary";
 const statusFilterLabelClass = "whitespace-nowrap text-[var(--vui-font-xs)] font-bold";
 const iconButtonClass = "h-[34px] w-[34px] min-h-[34px] rounded-lg border border-vui-border-soft bg-[var(--surface-card)] text-vui-fg-secondary hover:border-[var(--border-strong)] hover:bg-[var(--surface-panel-hover)] hover:text-vui-fg-primary";
 const workspaceClass = "grid min-h-0 grid-cols-[minmax(320px,420px)_minmax(0,1fr)] gap-2 px-2.5 pb-2.5 pt-2 max-[1120px]:grid-cols-1 max-[720px]:p-2";
@@ -65,7 +65,7 @@ const statusPillBaseClass = "inline-flex min-h-[22px] items-center whitespace-no
 const emptyStateClass = "grid min-h-16 content-start gap-1 rounded-lg border border-dashed border-vui-border-soft bg-[color-mix(in_srgb,var(--surface-card-subtle)_74%,transparent)] p-2.5";
 const emptyStateLoadingClass = "border-solid";
 const emptyStateErrorClass = "border-[color-mix(in_srgb,var(--state-error)_32%,transparent)]";
-const emptyTitleClass = "text-[0.88rem] text-vui-fg-primary";
+const emptyTitleClass = "text-[var(--vui-font-xs)] text-vui-fg-primary";
 const emptyDetailClass = "text-[var(--vui-font-xs)] text-vui-fg-secondary";
 
 const COPY = {

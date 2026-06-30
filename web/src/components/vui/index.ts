@@ -10,6 +10,9 @@ export { VMetricStrip, type VMetricStripMetric, type VMetricStripProps, type VMe
 export { VCheckbox, type VCheckboxProps } from "./forms/VCheckbox";
 export { VFieldRow, type VFieldRowProps } from "./forms/VFieldRow";
 export { VInput, type VInputProps } from "./forms/VInput";
+export { VNativeInput, type VNativeInputProps } from "./forms/VNativeInput";
+export { VNativeSelect, type VNativeSelectProps } from "./forms/VNativeSelect";
+export { VNativeTextarea, type VNativeTextareaProps } from "./forms/VNativeTextarea";
 export { VSelect, type VSelectOption, type VSelectProps } from "./forms/VSelect";
 export { VTextarea, type VTextareaProps } from "./forms/VTextarea";
 export { VActionGroup, type VActionGroupProps } from "./layout/VActionGroup";

@@ -190,6 +190,8 @@ describe("AppShell layout contract", () => {
     expect(shellSource).not.toContain("queryKeys.gitStatus()");
     expect(shellSource).not.toContain("queryKeys.fileTree()");
     expect(utilityMenuSource).toContain("utilityPanel");
+    expect(utilityMenuSource).toContain("<VNativeInput");
+    expect(utilityMenuSource).not.toMatch(/<input\b/);
     expect(utilityMenuSource).not.toContain("hidden={!utilityOpen}");
     expect(shellSource).toContain('event.key === "Escape"');
     expect(utilityMenuSource).toContain('to="/logs"');

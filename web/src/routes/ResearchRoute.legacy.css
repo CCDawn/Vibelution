@@ -28,7 +28,7 @@
 :where(.vui-routes-researchroute).panelEyebrow {
   margin: 0;
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -226,7 +226,7 @@
 :where(.vui-routes-researchroute).panelLead {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.45;
 }
 
@@ -306,7 +306,7 @@
   color: var(--fg-primary);
   background: transparent;
   font: inherit;
-  font-size: 0.88rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.55;
   scrollbar-gutter: stable;
 }
@@ -535,7 +535,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -958,7 +958,7 @@
 
 :where(.vui-routes-researchroute).agentTraceBubble strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.3;
 }
 
@@ -1060,7 +1060,7 @@
 
 :where(.vui-routes-researchroute).stageResultItem strong {
   color: var(--fg-tertiary);
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: uppercase;
@@ -1386,7 +1386,7 @@
 :where(.vui-routes-researchroute).guardrailPanel p {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.45;
 }
 
@@ -1440,7 +1440,7 @@
   border-radius: 999px;
   color: var(--fg-secondary);
   background: color-mix(in srgb, var(--surface-panel) 78%, transparent);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1666,7 +1666,7 @@
   position: relative;
   z-index: 1;
   min-width: 0;
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.2;
 }
 
@@ -1765,7 +1765,7 @@
 
 :where(.vui-routes-researchroute).themePlan section strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-researchroute).themePlan ul {

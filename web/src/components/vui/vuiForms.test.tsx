@@ -6,6 +6,9 @@ import {
   VCheckbox,
   VFieldRow,
   VInput,
+  VNativeInput,
+  VNativeSelect,
+  VNativeTextarea,
   VSelect,
   VTextarea,
 } from "./index";
@@ -28,6 +31,11 @@ describe("VUI form primitives", () => {
           </VFieldRow>
           <VInput aria-label="Filter sessions" placeholder="Filter sessions" />
           <VTextarea aria-label="Notes" placeholder="Add notes" minRows={3} />
+          <VNativeInput aria-label="Native title" value="Title" readOnly />
+          <VNativeSelect aria-label="Native status" value="ready" onChange={() => undefined}>
+            <option value="ready">Ready</option>
+          </VNativeSelect>
+          <VNativeTextarea aria-label="Native notes" value="Notes" readOnly minRows={2} />
           <VCheckbox isSelected>Running only</VCheckbox>
         </form>
       </VibelutionHeroProvider>,
@@ -36,6 +44,9 @@ describe("VUI form primitives", () => {
     expect(markup).toContain('data-vui="field-row"');
     expect(markup).toContain('data-vui="field-tooltip"');
     expect(markup).toContain('data-vui="input"');
+    expect(markup).toContain('data-vui="native-input"');
+    expect(markup).toContain('data-vui="native-select"');
+    expect(markup).toContain('data-vui="native-textarea"');
     expect(markup).toContain('data-vui="select"');
     expect(markup).toContain('data-vui="textarea"');
     expect(markup).toContain('data-vui="checkbox"');

@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import type { ComponentProps } from "react";
+import React, { type ComponentProps } from "react";
 import { describe, expect, it } from "vitest";
 
 import type { AgentInstance, SessionReferenceAttachment, SessionSummary } from "../api/types";
@@ -120,6 +120,7 @@ describe("AgentSessionTabStrip", () => {
     });
 
     expect(markup).toContain("新的子任务名");
+    expect(markup).toContain("data-vui=\"native-input\"");
     expect(markup).toContain("agentSessionTabTitleInput");
     expect(markup).toContain("disabled=\"\"");
   });

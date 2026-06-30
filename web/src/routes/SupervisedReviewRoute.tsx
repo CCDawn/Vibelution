@@ -37,7 +37,7 @@ const styles = {
   toolbar: "flex min-w-0 flex-wrap items-center justify-between gap-[var(--route-topbar-gap)]",
   toolbarIntro: "grid min-w-[260px] max-w-[760px] gap-0.5",
   toolbarControls: "flex flex-wrap items-center justify-end gap-3",
-  eyebrow: "m-0 mb-0.5 text-[0.7rem] uppercase tracking-[0.08em] text-[var(--accent-warm-2)]",
+  eyebrow: "m-0 mb-0.5 text-[var(--vui-font-xs)] uppercase tracking-[0.08em] text-[var(--accent-warm-2)]",
   title: "m-0 whitespace-nowrap text-[length:var(--route-topbar-title-size)] leading-[1.08]",
   subtitle:
     "m-0 max-w-none overflow-hidden text-ellipsis whitespace-nowrap text-[length:var(--route-topbar-subtitle-size)] leading-tight text-[var(--fg-secondary)]",

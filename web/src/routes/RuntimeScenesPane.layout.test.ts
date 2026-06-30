@@ -7,7 +7,9 @@ describe("RuntimeScenesPane layout contract", () => {
     expect(paneSource).toContain("from \"../components/vui\"");
     expect(paneSource).toContain("<VButton");
     expect(paneSource).toContain("<VIconButton");
+    expect(paneSource).toContain("<VNativeInput");
     expect(paneSource).not.toMatch(/<button\b/);
+    expect(paneSource).not.toMatch(/<input\b/);
   });
 
   it("renders package diagnosis before evidence metrics and raw log sections", () => {

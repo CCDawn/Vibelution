@@ -26,7 +26,7 @@ import {
 } from "../api/types";
 import { LazyFilePreview } from "../components/preview/LazyFilePreview";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { VButton, VIconButton } from "../components/vui";
+import { VButton, VIconButton, VNativeInput } from "../components/vui";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { TranslationKey } from "../i18n/dictionary";
 import { classifyRuntimeSceneEvent, type LogSeverityFilter, matchesSeverityFilter } from "../logs/logSeverity";
@@ -1556,7 +1556,7 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
         </div>
 
         <div className={styles.panelSearch}>
-          <input
+          <VNativeInput
             className={styles.panelSearchInput}
             type="text"
             value={sceneSearch}

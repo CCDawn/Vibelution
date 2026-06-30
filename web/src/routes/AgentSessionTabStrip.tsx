@@ -2,7 +2,7 @@ import { Bot, Check, MessageCircleHeart, SquareTerminal, X } from "lucide-react"
 import type { DragEvent, MouseEvent as ReactMouseEvent } from "react";
 
 import type { AgentInstance, SessionReferenceAttachment, SessionSummary } from "../api/types";
-import { VButton, VIconButton } from "../components/vui";
+import { VButton, VIconButton, VNativeInput } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import { sessionAgentDisplayInfo } from "./agentDisplay";
 import { isChildSession } from "./DirectSessionIndexItem";
@@ -118,7 +118,7 @@ export function AgentSessionTabStrip({
                 <span className={styles.agentSessionTabKicker}>
                   {sessionIsChild ? (lang === "zh" ? "子对话" : "Child") : t("agentSession")}
                 </span>
-                <input
+                <VNativeInput
                   className={styles.agentSessionTabTitleInput}
                   value={editingSessionTitle}
                   maxLength={120}

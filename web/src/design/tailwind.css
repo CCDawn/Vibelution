@@ -26,3 +26,13 @@
   --radius-vui-control: var(--radius-control);
   --radius-vui-panel: var(--radius-panel);
 }
+
+:where(small) {
+  font-size: var(--vui-font-xs);
+  line-height: var(--vui-line-readable);
+}
+
+.text-xs {
+  font-size: var(--vui-font-xs);
+  line-height: var(--vui-line-readable);
+}
