@@ -410,8 +410,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("开始知识搜集");
     expect(routeSource).toContain("搜索下一批");
     expect(routeSource).toContain("新一轮搜集");
-    expect(routeSource).toContain("资料待审查");
-    expect(routeSource).toContain("可进入实验");
+    expect(routeSource).toContain("继续审查");
+    expect(routeSource).toContain("准备实验");
     expect(routeSource).toContain("正在团队搜索");
     expect(routeSource).toContain("知识搜集操作台");
     expect(routeSource).toContain("sourceCollectionDecisionText");
@@ -458,7 +458,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("当前过滤条件下没有原始资料记录");
     expect(routeSource).toContain("搜索问题");
     expect(routeSource).toContain("待 Agent 复核");
-    expect(routeSource).toContain("缓存");
+    expect(routeSource).not.toContain("<span>{lang === \"zh\" ? \"缓存\" : \"cache\"}");
     expect(routeSource).toContain("sourceCollectionScreeningButtonText");
     expect(routeSource).toContain("sourceCollectionScreeningDisabled");
     expect(routeSource).toContain("openSourceCollectionScreeningPanel");
@@ -527,11 +527,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionStageUserStatusLabel");
     expect(routeSource).toContain("sourceCollectionStageUserSummary");
     expect(routeSource).toContain("sourceCollectionStageRecoveryStatusLabel");
-    expect(routeSource).toContain("sourceCollectionStageTechnicalDetails");
+    expect(routeSource).not.toContain("sourceCollectionStageTechnicalDetails");
     expect(routeSource).toContain("sourceCollectionCandidateEmptyStateText");
     expect(routeSource).toContain("已收到 Agent 结果，等待生成可用资料");
     expect(routeSource).toContain("Agent 返回的候选 ID 没有匹配到本轮资料");
-    expect(routeSource).toContain("技术详情");
+    expect(routeSource).not.toContain("技术详情");
     expect(routeSource).toContain("待补提炼");
     expect(routeSource).toContain("待 Agent 复核");
     expect(routeSource).toContain("继续补全提炼");
@@ -558,7 +558,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("completionGatePassed");
     expect(routeSource).toContain("sourceCollectionTaskToolProgressMetric");
     expect(routeSource).toContain("检查项");
-    expect(routeSource).toContain("仍需完成检查项或生成本阶段产物");
+    expect(routeSource).not.toContain("仍需完成检查项或生成本阶段产物");
     expect(routeSource).toContain("invalidRecordIds");
     expect(routeSource).toContain("本轮未生成候选资料");
     expect(routeSource).toContain("没有生成候选资料");
@@ -573,7 +573,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("待补提炼");
     expect(routeSource).toContain("已审");
     expect(routeSource).toContain("待 Agent 复核");
-    expect(routeSource).toContain("未匹配资料");
+    expect(routeSource).not.toContain("未匹配资料");
     expect(routeSource).toContain("graphForSelectedSourceRun");
     expect(routeSource).toContain("parseSourceCollectionStageModuleId");
     expect(routeSource).toContain("collectionStage");
@@ -620,9 +620,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionStageCardSelected");
     expect(routeSource).not.toContain("sourceCollectionStageOperationPanel");
     expect(routeSource).toContain("aria-pressed");
-    expect(routeSource).toContain("<small>{module.summary}</small>");
-    expect(routeSource).toContain("styles.sourceCollectionStageProjection");
-    expect(routeSource).toContain("styles.sourceCollectionStageTaskSummary");
+    expect(routeSource).not.toContain("<small>{module.summary}</small>");
+    expect(routeSource).not.toContain("sourceCollectionStageProjectionTaskMetric(module.projection");
+    expect(routeSource).not.toContain("<summary>{lang === \"zh\" ? \"技术详情\" : \"Technical details\"}</summary>");
     const graphStateExpression = routeSource.slice(
       routeSource.indexOf("const sourceCollectionGraphStepState"),
       routeSource.indexOf("const sourceCollectionMemoryStepState"),
@@ -669,7 +669,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("researchStageAgentManagementRoute(binding.agentId)");
     expect(routeSource).not.toContain("const chatRoute = researchStageAgentDirectChatRoute");
     expect(routeSource).toContain("Agent 管理");
-    expect(routeSource).toContain("还需补充资料");
+    expect(routeSource).not.toContain("还需补充资料");
     expect(routeSource).toContain("sourceCollectionSearchOpenAssignmentCount");
     expect(routeSource).toContain("sourceCollectionDownstreamOpenAssignmentCount");
     expect(routeSource).toContain("SOURCE_COLLECTION_SEARCH_EXECUTION_ROLES");
@@ -940,12 +940,13 @@ describe("TeamsRoute layout contract", () => {
       routeSource.indexOf("<div className={styles.sourceCollectionCommandStats}>"),
       routeSource.indexOf("<section id=\"source-collection-stage-status\"")
     );
-    expect(sourceCollectionCommandStatsSource).toContain("sourceCollectionSearchOpenAssignmentCountLabel");
-    expect(sourceCollectionCommandStatsSource).toContain("sourceCollectionDownstreamOpenAssignmentCountLabel");
+    expect(sourceCollectionCommandStatsSource).toContain("sourceCollectionConsoleStatusText");
+    expect(sourceCollectionCommandStatsSource).toContain("sourceCollectionBoardNextStepLabel");
     expect(sourceCollectionCommandStatsSource).toContain("sourceCollectionCollectedCountLabel");
-    expect(sourceCollectionCommandStatsSource).toContain("sourceCollectionQueryCountLabel");
-    expect(sourceCollectionCommandStatsSource).not.toContain("`${sourceCollectionSearchOpenAssignmentCount} 项`");
-    expect(sourceCollectionCommandStatsSource).not.toContain("`${sourceCollectionCollectedCount} 条`");
+    expect(sourceCollectionCommandStatsSource).not.toContain("sourceCollectionSearchOpenAssignmentCountLabel");
+    expect(sourceCollectionCommandStatsSource).not.toContain("sourceCollectionDownstreamOpenAssignmentCountLabel");
+    expect(sourceCollectionCommandStatsSource).not.toContain("sourceCollectionQueryCountLabel");
+    expect(sourceCollectionCommandStatsSource).not.toContain("sourceCollectionPromptCacheStatusLabel");
     expect(routeSource).not.toContain("researchStageRoundStatusQueryKey(effectiveTeamId || \"none\"),\n    queryFn: () =>\n      fetchJson<ResearchStageRoundStatusPayload>(\n        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/stage-rounds/status`,\n      ),\n    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data)");
     expect(routeSource).not.toContain("queryKeys.teamWorkflowCandidates(effectiveTeamId || \"none\", TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT),\n    queryFn: () =>\n      fetchJson<TeamWorkflowCandidateListPayload>(\n        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?limit=${TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT}`,\n      ),\n    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data)");
     expect(routeSource).not.toContain("enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data)");
@@ -1137,10 +1138,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStylesSource).toContain(".sourceCollectionResultSourceMissing");
     expect(routeStylesSource).toContain(".sourceCollectionFilterBar");
     expect(routeStylesSource).toContain(".sourceCollectionFilterActive");
-    expect(routeStyles.sourceCollectionResultStatus).toContain(
-      "grid-cols-[minmax(220px,1fr)_minmax(80px,112px)_minmax(150px,240px)]",
+    expect(routeStyles.sourceCollectionResultItem).toContain(
+      "grid-cols-[max-content_minmax(0,1fr)_max-content_minmax(120px,220px)]",
     );
-    expect(routeStyles.sourceCollectionResultStatus).toContain("grid-rows-[auto_auto_auto]");
+    expect(routeStyles.sourceCollectionResultItem).toContain("min-h-[36px]");
+    expect(routeStyles.sourceCollectionResultStatus).toContain("whitespace-nowrap");
+    expect(routeStyles.sourceCollectionResultStatus).not.toContain("grid-rows-[auto_auto_auto]");
     expect(routeStylesSource).toContain(".sourceCollectionCandidateListShell");
     expect(routeStyles.sourceCollectionCandidateListShell).toContain("overflow-y-auto");
     expect(routeStyles.sourceCollectionCandidateListShell).toContain("[scrollbar-gutter:stable]");
@@ -1160,20 +1163,13 @@ describe("TeamsRoute layout contract", () => {
       "grid-cols-[minmax(0,1fr)_minmax(320px,380px)]",
     );
     expect(routeStyles.sourceCollectionFocusedPanel).toContain("isolate");
-    expect(routeStyles.sourceCollectionStageWorkspace).toContain("grid-rows-[auto_auto_minmax(0,1fr)]");
-    expect(routeStyles.sourceCollectionStageCardHead).toContain(
-      "grid-cols-[minmax(120px,0.24fr)_minmax(0,1fr)_max-content]",
-    );
-    expect(routeStyles.sourceCollectionStageCardHead).toContain("max-[1320px]:grid-cols-[minmax(0,1fr)]");
-    expect(routeStyles.sourceCollectionStageCardHead).toContain(
-      "max-[1320px]:[&_.sourceCollectionStageProjection]:col-span-full",
-    );
-    expect(routeStyles.sourceCollectionStageCardHead).toContain(
-      "max-[1320px]:[&_.sourceCollectionStageProjection]:row-start-2",
-    );
+    expect(routeStyles.sourceCollectionStageWorkspace).toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(routeStyles.sourceCollectionStageCard).toContain("border-l-[4px]");
+    expect(routeStyles.sourceCollectionStageCardHead).toContain("grid-cols-[max-content_1fr]");
+    expect(routeStyles.sourceCollectionStageCardHead).not.toContain("sourceCollectionStageProjection");
     expect(routeStyles.canvasLayoutModeSwitch).toContain("grid-cols-[repeat(auto-fit,minmax(86px,max-content))]");
     expect(routeStyles.toolbarActions).toContain("flex-wrap");
-    expect(routeStyles.sourceCollectionStageModules).toContain("grid-cols-[repeat(3,minmax(0,1fr))]");
+    expect(routeStyles.sourceCollectionStageModules).toContain("grid-cols-[repeat(4,minmax(0,1fr))]");
     expect(routeStyles.sourceCollectionPagination).toContain("select-none");
     expect(routeStyles.sourceCollectionPagination).toContain("whitespace-nowrap");
     expect(routeStyles.sourceCollectionPagination).toContain("[writing-mode:horizontal-tb]");
@@ -1209,6 +1205,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionStepFailed).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStepIdle).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStepPending).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionStepActive).toContain("accent-cool");
+    expect(routeStyles.sourceCollectionStepDone).toContain("state-success");
+    expect(routeStyles.sourceCollectionStepFailed).toContain("state-error");
+    expect(routeStyles.sourceCollectionStepPending).toContain("state-warning");
     expect(routeStyles.workflowSourceCollectionStorageDetails).toBeTypeOf("string");
     expect(routeStyles.researchStagePage).toBeTypeOf("string");
     expect(routeStyles.researchStageHeroPanel).toBeTypeOf("string");
@@ -1357,6 +1357,58 @@ describe("TeamsRoute layout contract", () => {
     expect(stageModuleSource).toContain('sourceCollectionStageActionReadinessFor("extraction").disabled');
     expect(stageModuleSource).toContain('sourceCollectionStageActionReadinessFor("relations").disabled');
     expect(stageModuleSource).toContain('sourceCollectionStageActionReadinessFor("ingestion").disabled');
+  });
+
+  it("keeps the source collection workspace in a simple status-board mode", () => {
+    const standaloneSource = routeSource.slice(
+      routeSource.indexOf("if (sourceCollectionStandalone)"),
+      routeSource.indexOf("if (stageStandaloneView)"),
+    );
+    expect(standaloneSource).toContain("sourceCollectionBoardNextStepLabel");
+    expect(standaloneSource).not.toContain("{renderSourceCollectionControlsPanel()}");
+
+    const commandStatsSource = standaloneSource.slice(
+      standaloneSource.indexOf("<div className={styles.sourceCollectionCommandStats}>"),
+      standaloneSource.indexOf("<section id=\"source-collection-stage-status\""),
+    );
+    expect(commandStatsSource).toContain("sourceCollectionConsoleStatusText");
+    expect(commandStatsSource).toContain("sourceCollectionBoardNextStepLabel");
+    expect(commandStatsSource).toContain("sourceCollectionCollectedCountLabel");
+    expect(commandStatsSource).not.toContain("sourceCollectionSearchOpenAssignmentCountLabel");
+    expect(commandStatsSource).not.toContain("sourceCollectionDownstreamOpenAssignmentCountLabel");
+    expect(commandStatsSource).not.toContain("sourceCollectionQueryCountLabel");
+    expect(commandStatsSource).not.toContain("sourceCollectionPromptCacheStatusLabel");
+
+    const stageCardSource = standaloneSource.slice(
+      standaloneSource.indexOf("<section id=\"source-collection-stage-status\""),
+      standaloneSource.indexOf("<div className={styles.sourceCollectionPageGrid}>"),
+    );
+    expect(stageCardSource).toContain("sourceCollectionStepClassName(module.state)");
+    expect(stageCardSource).toContain("module.status");
+    expect(stageCardSource).toContain("module.metric");
+    expect(stageCardSource).toContain("module.nextLabel");
+    expect(stageCardSource).not.toContain("module.summary");
+    expect(stageCardSource).not.toContain("sourceCollectionStageProjectionTaskMetric");
+    expect(stageCardSource).not.toContain("sourceCollectionStageTechnicalDetails");
+
+    const rawRecordSource = routeSource.slice(
+      routeSource.indexOf("function renderSourceCollectionConversation"),
+      routeSource.indexOf("function renderSourceCollectionStorageActions"),
+    );
+    expect(rawRecordSource).toContain("sourceCollectionSimpleRecordStatusLabel");
+    expect(rawRecordSource).not.toContain("<p title={record.summary || record.recordId}>");
+    expect(rawRecordSource).not.toContain("formatTime(record.updatedAt || record.createdAt");
+
+    const candidatePanelSource = routeSource.slice(
+      routeSource.indexOf("function renderSourceCollectionCandidatePanel"),
+      routeSource.indexOf("function renderSourceCollectionGraphPanel"),
+    );
+    expect(candidatePanelSource).toContain("sourceCollectionSimpleCandidateStatusLabel");
+    expect(candidatePanelSource).not.toContain("<p>{candidate.summary || candidate.candidateId}</p>");
+    expect(candidatePanelSource).not.toContain("formatTime(candidate.updatedAt");
+    expect(candidatePanelSource).not.toContain("sourceCollectionStageTechnicalDetails");
+    expect(candidatePanelSource).not.toContain("candidateLatestTask?.summary");
+    expect(candidatePanelSource).not.toContain("blockingReasons");
   });
 
   it("keeps Team actions scoped to the selected Team or message event", () => {
