@@ -9,7 +9,7 @@ import {
   type AgentDisplayInfo,
   type ModelLabelResolver,
 } from "./agentDisplay";
-import styles from "./ChatCodingRoute.module.css";
+import styles from "./ChatCodingRoute.styles";
 
 export function sessionListTitle(
   session: Pick<SessionSummary, "id" | "title" | "agentDisplayName" | "taskTitle" | "resultCard" | "sessionKind">,

@@ -56,7 +56,7 @@ import { VIconButton, VNativeButton, VRouteHeader, VSelect, VStatusStrip } from 
 import { agentCenterMemoryRoute, teamMemoryRoute } from "./agentCenterRoutes";
 import { agentDisplayInfo } from "./agentDisplay";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
-import styles from "./TeamsRoute.module.css";
+import styles from "./TeamsRoute.styles";
 
 const NODE_WIDTH = 172;
 const NODE_HEIGHT = 92;

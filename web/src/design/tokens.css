@@ -101,11 +101,11 @@
   --font-display: "Segoe UI Variable Display", "Segoe UI", sans-serif;
   --font-body: "Segoe UI Variable Text", "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Code", monospace;
-  --vui-font-xs: 0.82rem;
-  --vui-font-sm: 0.88rem;
-  --vui-font-md: 0.94rem;
-  --vui-font-chat: 1.02rem;
-  --vui-font-title: 1.12rem;
+  --vui-font-xs: 0.875rem;
+  --vui-font-sm: 0.9375rem;
+  --vui-font-md: 1rem;
+  --vui-font-chat: 1.0625rem;
+  --vui-font-title: 1.1875rem;
   --vui-line-tight: 1.25;
   --vui-line-readable: 1.58;
   --font-size-micro: var(--vui-font-xs);

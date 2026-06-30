@@ -33,7 +33,7 @@ import {
 } from "../api/types";
 import { VButton, VRouteHeader } from "../components/vui";
 import { agentDisplayInfo } from "./agentDisplay";
-import styles from "./ResearchFlowCanvasRoute.module.css";
+import styles from "./ResearchFlowCanvasRoute.styles";
 
 export type CanvasSelection =
   | { kind: "node"; id: string }

@@ -73,7 +73,7 @@ import {
 import { LazyJsonCodeMirror } from "../components/editor/LazyJsonCodeMirror";
 import { VButton } from "../components/vui";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
-import styles from "./ConfigRoute.module.css";
+import styles from "./ConfigRoute.styles";
 
 type ConfigLanguage = "zh" | "en";
 type NoticeTone = "neutral" | "success" | "error";

@@ -4,7 +4,7 @@ import type { ConversationSummary, Team } from "../api/types";
 import { VButton } from "../components/vui";
 import type { ConversationIndexTeam } from "./conversationIndexModel";
 import { conversationIndexTeamMemberCount } from "./conversationIndexModel";
-import styles from "./ChatCodingRoute.module.css";
+import styles from "./ChatCodingRoute.styles";
 
 export function teamStatusLabel(status: string | undefined, lang: "zh" | "en", fallback: (status: string) => string) {
   const normalized = String(status ?? "").trim().toLowerCase();

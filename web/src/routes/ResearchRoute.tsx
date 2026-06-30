@@ -40,7 +40,7 @@ import {
 } from "../api/types";
 import { VButton, VRouteHeader } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
-import styles from "./ResearchRoute.module.css";
+import styles from "./ResearchRoute.styles";
 
 type DraftInput = {
   openGoal: string;

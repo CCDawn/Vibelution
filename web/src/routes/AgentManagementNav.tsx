@@ -35,7 +35,7 @@ const navClass = [
 
 const linkClass = [
   "inline-flex min-h-6 min-w-[84px] items-center justify-center whitespace-nowrap rounded-[var(--radius-control)] px-[9px]",
-  "text-[0.78rem] font-bold text-vui-fg-secondary no-underline transition-[background,color,box-shadow] duration-150",
+  "text-[var(--vui-font-xs)] font-bold text-vui-fg-secondary no-underline transition-[background,color,box-shadow] duration-150",
   "hover:bg-vui-surface-row-hover hover:text-vui-fg-primary max-[720px]:min-w-max",
 ].join(" ");
 

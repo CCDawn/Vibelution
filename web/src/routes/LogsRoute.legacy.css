@@ -1,4 +1,5 @@
-.route {
+/* source: routes/LogsRoute legacy css */
+:where(.vui-routes-logsroute).route {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   height: 100%;
@@ -6,7 +7,7 @@
   background: color-mix(in srgb, var(--surface-page) 94%, var(--bg-canvas));
 }
 
-.header {
+:where(.vui-routes-logsroute).header {
   margin: 8px 10px 0;
   min-width: 0;
   border-color: var(--vui-border-subtle);
@@ -16,29 +17,29 @@
   box-shadow: var(--vui-shadow-hairline);
 }
 
-.eyebrow,
-.sidebarEyebrow {
+:where(.vui-routes-logsroute).eyebrow,
+:where(.vui-routes-logsroute).sidebarEyebrow {
   margin: 0 0 2px;
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 
-.title,
-.sidebarTitle {
+:where(.vui-routes-logsroute).title,
+:where(.vui-routes-logsroute).sidebarTitle {
   margin: 0;
   font-family: var(--font-body);
   font-weight: 760;
 }
 
-.title {
+:where(.vui-routes-logsroute).title {
   font-size: var(--route-topbar-title-size);
   line-height: 1.1;
   white-space: nowrap;
 }
 
-.subtitle {
+:where(.vui-routes-logsroute).subtitle {
   min-width: 0;
   margin: 0;
   max-width: none;
@@ -50,11 +51,11 @@
   white-space: nowrap;
 }
 
-.headerMeta {
+:where(.vui-routes-logsroute).headerMeta {
   justify-content: flex-end;
 }
 
-.metaPill {
+:where(.vui-routes-logsroute).metaPill {
   display: inline-flex;
   align-items: center;
   min-height: 26px;
@@ -63,10 +64,10 @@
   border: 1px solid var(--border-soft);
   background: var(--surface-panel);
   color: var(--fg-secondary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
 }
 
-.rootButton {
+:where(.vui-routes-logsroute).rootButton {
   display: grid;
   grid-template-rows: auto auto auto auto;
   gap: 4px;
@@ -81,19 +82,19 @@
   text-align: left;
 }
 
-.rootButton[data-vui] [data-slot="vui-button-content"],
-.rootButton[data-vui] [data-slot="vui-button-label"] {
+:where(.vui-routes-logsroute).rootButton[data-vui] [data-slot="vui-button-content"],
+:where(.vui-routes-logsroute).rootButton[data-vui] [data-slot="vui-button-label"] {
   display: contents;
 }
 
-.rootButtonActive {
+:where(.vui-routes-logsroute).rootButtonActive {
   border-color: color-mix(in srgb, var(--accent-warm) 24%, transparent);
   box-shadow: var(--vui-shadow-inset-accent);
   background: var(--surface-panel-strong);
 }
 
-.rootButtonHeader,
-.rootButtonFooter {
+:where(.vui-routes-logsroute).rootButtonHeader,
+:where(.vui-routes-logsroute).rootButtonFooter {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -101,7 +102,7 @@
   min-width: 0;
 }
 
-.rootButtonLabel {
+:where(.vui-routes-logsroute).rootButtonLabel {
   min-width: 0;
   font-family: var(--font-body);
   font-weight: 760;
@@ -111,83 +112,83 @@
   text-overflow: ellipsis;
 }
 
-.rootButtonPath {
+:where(.vui-routes-logsroute).rootButtonPath {
   color: var(--fg-secondary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.rootButtonStats {
+:where(.vui-routes-logsroute).rootButtonStats {
   color: var(--fg-secondary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.35;
 }
 
-.rootButtonStats {
+:where(.vui-routes-logsroute).rootButtonStats {
   color: var(--fg-tertiary);
   min-width: 0;
   white-space: nowrap;
 }
 
-.rootButtonTime {
+:where(.vui-routes-logsroute).rootButtonTime {
   flex: 0 0 auto;
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
-.rootButtonLatest {
+:where(.vui-routes-logsroute).rootButtonLatest {
   display: block;
   min-width: 0;
   color: var(--fg-secondary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.3;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.rootState {
+:where(.vui-routes-logsroute).rootState {
   flex: 0 0 auto;
   color: var(--state-success);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
-.rootStateMissing {
+:where(.vui-routes-logsroute).rootStateMissing {
   color: var(--state-error);
 }
 
-.workspace {
+:where(.vui-routes-logsroute).workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 10px var(--logs-right-rail-width, 250px);
   min-height: 0;
 }
 
-.staticLayout,
-.resizableLayout,
-.sidebar,
-.previewPane,
-.rightRail {
+:where(.vui-routes-logsroute).staticLayout,
+:where(.vui-routes-logsroute).resizableLayout,
+:where(.vui-routes-logsroute).sidebar,
+:where(.vui-routes-logsroute).previewPane,
+:where(.vui-routes-logsroute).rightRail {
   min-height: 0;
 }
 
-.staticLayout {
+:where(.vui-routes-logsroute).staticLayout {
   display: grid;
   grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
   min-height: 0;
 }
 
-.resizableLayout {
+:where(.vui-routes-logsroute).resizableLayout {
   display: flex;
   min-height: 0;
   overflow: hidden;
 }
 
-.sidebar {
+:where(.vui-routes-logsroute).sidebar {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 8px;
@@ -196,7 +197,7 @@
   background: var(--surface-panel-muted);
 }
 
-.resizableLayout > .sidebar {
+:where(.vui-routes-logsroute).resizableLayout > .sidebar {
   flex: 0 0 var(--logs-sidebar-width, 300px);
   width: var(--logs-sidebar-width, 300px);
   min-width: var(--logs-sidebar-width, 300px);
@@ -204,14 +205,14 @@
   border-right: 0;
 }
 
-.paneCollapsed {
+:where(.vui-routes-logsroute).paneCollapsed {
   padding: 0;
   border: 0;
   overflow: hidden;
   visibility: hidden;
 }
 
-.sidebarHeader {
+:where(.vui-routes-logsroute).sidebarHeader {
   display: grid;
   gap: 6px;
   padding: 8px;
@@ -220,12 +221,12 @@
   background: var(--surface-panel);
 }
 
-.selectionToolbar {
+:where(.vui-routes-logsroute).selectionToolbar {
   display: grid;
   gap: 6px;
 }
 
-.selectionPill {
+:where(.vui-routes-logsroute).selectionPill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -236,30 +237,30 @@
   border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, transparent);
   background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
   color: var(--accent-cool);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
 }
 
-.selectionActions {
+:where(.vui-routes-logsroute).selectionActions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 
-.filterGroup,
-.sceneHeaderControls,
-.sceneCardHeaderRow {
+:where(.vui-routes-logsroute).filterGroup,
+:where(.vui-routes-logsroute).sceneHeaderControls,
+:where(.vui-routes-logsroute).sceneCardHeaderRow {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.sceneHeaderControls,
-.sceneCardHeaderRow {
+:where(.vui-routes-logsroute).sceneHeaderControls,
+:where(.vui-routes-logsroute).sceneCardHeaderRow {
   align-items: center;
   justify-content: space-between;
 }
 
-.filterButton {
+:where(.vui-routes-logsroute).filterButton {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -270,30 +271,30 @@
   background: var(--surface-card);
   color: var(--fg-secondary);
   cursor: pointer;
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
-.filterButton[data-vui],
-.toolbarButton[data-vui],
-.deleteButton[data-vui],
-.copyButton[data-vui],
-.clearButton[data-vui] {
+:where(.vui-routes-logsroute).filterButton[data-vui],
+:where(.vui-routes-logsroute).toolbarButton[data-vui],
+:where(.vui-routes-logsroute).deleteButton[data-vui],
+:where(.vui-routes-logsroute).copyButton[data-vui],
+:where(.vui-routes-logsroute).clearButton[data-vui] {
   min-width: 0;
 }
 
-.filterButton:hover {
+:where(.vui-routes-logsroute).filterButton:hover {
   border-color: var(--border-strong);
   background: var(--surface-panel-hover);
 }
 
-.filterButtonActive {
+:where(.vui-routes-logsroute).filterButtonActive {
   border-color: color-mix(in srgb, var(--accent-warm) 28%, transparent);
   background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
   color: var(--fg-primary);
 }
 
-.toolbarButton,
-.deleteButton {
+:where(.vui-routes-logsroute).toolbarButton,
+:where(.vui-routes-logsroute).deleteButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -308,55 +309,55 @@
   cursor: pointer;
 }
 
-.toolbarButton:hover:not(:disabled),
-.deleteButton:hover:not(:disabled) {
+:where(.vui-routes-logsroute).toolbarButton:hover:not(:disabled),
+:where(.vui-routes-logsroute).deleteButton:hover:not(:disabled) {
   border-color: var(--border-strong);
   background: var(--surface-panel-hover);
 }
 
-.deleteButton {
+:where(.vui-routes-logsroute).deleteButton {
   border-color: color-mix(in srgb, var(--state-error) 22%, transparent);
   background: color-mix(in srgb, var(--state-error) 14%, transparent);
   color: var(--state-error);
 }
 
-.deleteButton:hover:not(:disabled) {
+:where(.vui-routes-logsroute).deleteButton:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--state-error) 32%, transparent);
   background: color-mix(in srgb, var(--state-error) 20%, transparent);
 }
 
-.toolbarButton:disabled,
-.deleteButton:disabled,
-.copyButton:disabled,
-.clearButton:disabled,
-.packageSelectButton:disabled,
-.packageFileButton:disabled {
+:where(.vui-routes-logsroute).toolbarButton:disabled,
+:where(.vui-routes-logsroute).deleteButton:disabled,
+:where(.vui-routes-logsroute).copyButton:disabled,
+:where(.vui-routes-logsroute).clearButton:disabled,
+:where(.vui-routes-logsroute).packageSelectButton:disabled,
+:where(.vui-routes-logsroute).packageFileButton:disabled {
   cursor: not-allowed;
   opacity: 0.58;
 }
 
-.notice {
+:where(.vui-routes-logsroute).notice {
   margin: 0;
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.45;
 }
 
-.noticeSuccess {
+:where(.vui-routes-logsroute).noticeSuccess {
   color: var(--state-success);
 }
 
-.noticeError {
+:where(.vui-routes-logsroute).noticeError {
   color: var(--state-error);
 }
 
-.panelSearch {
+:where(.vui-routes-logsroute).panelSearch {
   display: flex;
   align-items: center;
   gap: 6px;
   color: var(--fg-tertiary);
 }
 
-.panelSearchInput {
+:where(.vui-routes-logsroute).panelSearchInput {
   width: 100%;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
@@ -366,7 +367,7 @@
   font: inherit;
 }
 
-.packageList {
+:where(.vui-routes-logsroute).packageList {
   overflow: auto;
   display: grid;
   align-content: start;
@@ -374,16 +375,16 @@
   padding-right: 4px;
 }
 
-.sidebarPath {
+:where(.vui-routes-logsroute).sidebarPath {
   margin: 6px 0 0;
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
-.panelState,
-.emptySurface {
+:where(.vui-routes-logsroute).panelState,
+:where(.vui-routes-logsroute).emptySurface {
   display: grid;
   place-items: center;
   min-height: 0;
@@ -393,18 +394,18 @@
   line-height: 1.5;
 }
 
-.panelState {
+:where(.vui-routes-logsroute).panelState {
   border: 1px dashed var(--border-soft);
   border-radius: 8px;
   background: var(--surface-card);
 }
 
-.emptySurface {
+:where(.vui-routes-logsroute).emptySurface {
   height: 100%;
   background: var(--surface-panel-strong);
 }
 
-.logIndexState {
+:where(.vui-routes-logsroute).logIndexState {
   place-items: start;
   align-content: start;
   gap: 6px;
@@ -412,28 +413,28 @@
   text-align: left;
 }
 
-.logIndexState strong,
-.previewStateHeader strong {
+:where(.vui-routes-logsroute).logIndexState strong,
+:where(.vui-routes-logsroute).previewStateHeader strong {
   color: var(--fg-primary);
-  font-size: 0.84rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.25;
 }
 
-.logIndexState span,
-.previewStateHeader span {
+:where(.vui-routes-logsroute).logIndexState span,
+:where(.vui-routes-logsroute).previewStateHeader span {
   min-width: 0;
 }
 
-.stateKicker {
+:where(.vui-routes-logsroute).stateKicker {
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
   letter-spacing: 0.06em;
   line-height: 1.2;
   text-transform: uppercase;
 }
 
-.stateFactRow {
+:where(.vui-routes-logsroute).stateFactRow {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 5px;
@@ -441,26 +442,26 @@
   margin-top: 2px;
 }
 
-.stateFactRow span {
+:where(.vui-routes-logsroute).stateFactRow span {
   min-height: 24px;
   padding: 5px 6px;
   border: 1px solid var(--border-hairline);
   border-radius: 6px;
   background: var(--surface-card-subtle);
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   text-align: center;
 }
 
-.stateSkeletonStack,
-.previewStateSkeleton {
+:where(.vui-routes-logsroute).stateSkeletonStack,
+:where(.vui-routes-logsroute).previewStateSkeleton {
   display: grid;
   gap: 6px;
   width: 100%;
 }
 
-.stateSkeletonStack span,
-.previewStateSkeleton span {
+:where(.vui-routes-logsroute).stateSkeletonStack span,
+:where(.vui-routes-logsroute).previewStateSkeleton span {
   display: block;
   min-height: 14px;
   border-radius: 5px;
@@ -468,24 +469,24 @@
     var(--vui-gradient-route-soft);
 }
 
-.stateSkeletonStack span:nth-child(2),
-.previewStateSkeleton span:nth-child(2) {
+:where(.vui-routes-logsroute).stateSkeletonStack span:nth-child(2),
+:where(.vui-routes-logsroute).previewStateSkeleton span:nth-child(2) {
   width: 82%;
 }
 
-.stateSkeletonStack span:nth-child(3),
-.previewStateSkeleton span:nth-child(3) {
+:where(.vui-routes-logsroute).stateSkeletonStack span:nth-child(3),
+:where(.vui-routes-logsroute).previewStateSkeleton span:nth-child(3) {
   width: 64%;
 }
 
-.previewStateSurface {
+:where(.vui-routes-logsroute).previewStateSurface {
   place-items: start stretch;
   align-content: start;
   padding: 10px;
   text-align: left;
 }
 
-.previewStateCard {
+:where(.vui-routes-logsroute).previewStateCard {
   display: grid;
   gap: 9px;
   width: min(720px, 100%);
@@ -495,18 +496,18 @@
   background: color-mix(in srgb, var(--surface-panel) 84%, transparent);
 }
 
-.previewStateHeader {
+:where(.vui-routes-logsroute).previewStateHeader {
   display: grid;
   gap: 4px;
 }
 
-.previewStateFlow {
+:where(.vui-routes-logsroute).previewStateFlow {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 5px;
 }
 
-.previewStateFlow span {
+:where(.vui-routes-logsroute).previewStateFlow span {
   min-height: 26px;
   padding: 5px 6px;
   border: 1px solid var(--border-hairline);
@@ -517,30 +518,30 @@
   text-align: center;
 }
 
-.previewStateSkeleton {
+:where(.vui-routes-logsroute).previewStateSkeleton {
   grid-template-columns: minmax(110px, 0.28fr) minmax(0, 1fr);
   align-items: start;
 }
 
-.previewStateSkeleton span:first-child {
+:where(.vui-routes-logsroute).previewStateSkeleton span:first-child {
   min-height: 62px;
 }
 
-.previewStateSkeleton span:nth-child(n + 2) {
+:where(.vui-routes-logsroute).previewStateSkeleton span:nth-child(n + 2) {
   grid-column: 2;
 }
 
-.panelState[data-state-tone="error"],
-.emptySurface[data-state-tone="error"] .previewStateCard {
+:where(.vui-routes-logsroute).panelState[data-state-tone="error"],
+:where(.vui-routes-logsroute).emptySurface[data-state-tone="error"] .previewStateCard {
   border-color: color-mix(in srgb, var(--state-error) 28%, transparent);
 }
 
-.panelState[data-state-tone="missing"],
-.emptySurface[data-state-tone="missing"] .previewStateCard {
+:where(.vui-routes-logsroute).panelState[data-state-tone="missing"],
+:where(.vui-routes-logsroute).emptySurface[data-state-tone="missing"] .previewStateCard {
   border-color: color-mix(in srgb, var(--state-warning) 26%, transparent);
 }
 
-.previewPane {
+:where(.vui-routes-logsroute).previewPane {
   display: grid;
   flex: 1 1 auto;
   min-width: 0;
@@ -549,7 +550,7 @@
   background: var(--surface-panel-strong);
 }
 
-.logPreviewStack {
+:where(.vui-routes-logsroute).logPreviewStack {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 8px;
@@ -557,7 +558,7 @@
   height: 100%;
 }
 
-.diagnosticsPanel {
+:where(.vui-routes-logsroute).diagnosticsPanel {
   display: grid;
   gap: 8px;
   padding: 0;
@@ -566,7 +567,7 @@
   background: var(--surface-input);
 }
 
-.diagnosticsSummaryRow {
+:where(.vui-routes-logsroute).diagnosticsSummaryRow {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -577,52 +578,52 @@
   list-style: none;
 }
 
-.diagnosticsSummaryRow::-webkit-details-marker {
+:where(.vui-routes-logsroute).diagnosticsSummaryRow::-webkit-details-marker {
   display: none;
 }
 
-.diagnosticsSummaryText {
+:where(.vui-routes-logsroute).diagnosticsSummaryText {
   flex: 1 1 auto;
   min-width: 0;
   color: var(--fg-secondary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.diagnosticsInlineMetrics {
+:where(.vui-routes-logsroute).diagnosticsInlineMetrics {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   flex: 0 0 auto;
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
-.diagnosticsInlineMetrics strong {
+:where(.vui-routes-logsroute).diagnosticsInlineMetrics strong {
   color: var(--fg-primary);
 }
 
-.diagnosticsExpandLabel {
+:where(.vui-routes-logsroute).diagnosticsExpandLabel {
   flex: 0 0 auto;
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
-.diagnosticsPanel[open] .diagnosticsExpandLabel {
+:where(.vui-routes-logsroute).diagnosticsPanel[open] .diagnosticsExpandLabel {
   color: var(--fg-secondary);
 }
 
-.diagnosticsDetails {
+:where(.vui-routes-logsroute).diagnosticsDetails {
   display: grid;
   gap: 8px;
   padding: 0 8px 8px;
 }
 
-.diagnosticPill {
+:where(.vui-routes-logsroute).diagnosticPill {
   display: inline-flex;
   align-items: center;
   white-space: nowrap;
@@ -630,40 +631,40 @@
   padding: 0 8px;
   border-radius: 999px;
   border: 1px solid var(--border-soft);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
 }
 
-.diagnosticPillError {
+:where(.vui-routes-logsroute).diagnosticPillError {
   color: var(--state-error);
   border-color: color-mix(in srgb, var(--state-error) 24%, transparent);
   background: color-mix(in srgb, var(--state-error) 14%, transparent);
 }
 
-.diagnosticPillWarning {
+:where(.vui-routes-logsroute).diagnosticPillWarning {
   color: var(--state-warning);
   border-color: color-mix(in srgb, var(--accent-warm) 24%, transparent);
   background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
 }
 
-.diagnosticPillInfo {
+:where(.vui-routes-logsroute).diagnosticPillInfo {
   color: var(--state-success);
   border-color: color-mix(in srgb, var(--accent-cool) 24%, transparent);
   background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
 }
 
-.diagnosticHintGrid article {
+:where(.vui-routes-logsroute).diagnosticHintGrid article {
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel);
 }
 
-.diagnosticHintGrid {
+:where(.vui-routes-logsroute).diagnosticHintGrid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1.2fr);
   gap: 8px;
 }
 
-.diagnosticHintGrid article {
+:where(.vui-routes-logsroute).diagnosticHintGrid article {
   display: grid;
   align-content: start;
   gap: 5px;
@@ -671,32 +672,32 @@
   min-width: 0;
 }
 
-.diagnosticHintGrid span {
+:where(.vui-routes-logsroute).diagnosticHintGrid span {
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
 }
 
-.diagnosticHintGrid strong,
-.diagnosticHintGrid p,
-.diagnosticHintGrid code {
+:where(.vui-routes-logsroute).diagnosticHintGrid strong,
+:where(.vui-routes-logsroute).diagnosticHintGrid p,
+:where(.vui-routes-logsroute).diagnosticHintGrid code {
   margin: 0;
   color: var(--fg-secondary);
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
-.diagnosticHintGrid code {
+:where(.vui-routes-logsroute).diagnosticHintGrid code {
   font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
 }
 
-.eventTypeList {
+:where(.vui-routes-logsroute).eventTypeList {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.resizeHandle {
+:where(.vui-routes-logsroute).resizeHandle {
   position: relative;
   flex: 0 0 12px;
   width: 12px;
@@ -711,7 +712,7 @@
   touch-action: none;
 }
 
-.resizeHandle::before {
+:where(.vui-routes-logsroute).resizeHandle::before {
   content: "";
   position: absolute;
   top: 0;
@@ -724,14 +725,14 @@
   transition: background-color 150ms ease, box-shadow 150ms ease;
 }
 
-.resizeHandle:hover::before,
-.resizeHandle:focus-visible::before,
-.resizeHandleActive::before {
+:where(.vui-routes-logsroute).resizeHandle:hover::before,
+:where(.vui-routes-logsroute).resizeHandle:focus-visible::before,
+:where(.vui-routes-logsroute).resizeHandleActive::before {
   background: color-mix(in srgb, var(--accent-warm) 52%, transparent);
   box-shadow: var(--vui-shadow-soft);
 }
 
-.rightRail {
+:where(.vui-routes-logsroute).rightRail {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 8px;
@@ -740,12 +741,12 @@
   background: var(--surface-panel-muted);
 }
 
-.rightRailResizeHandle {
+:where(.vui-routes-logsroute).rightRailResizeHandle {
   border-left: 1px solid var(--border-soft);
   background: var(--surface-panel-muted);
 }
 
-.railHeader {
+:where(.vui-routes-logsroute).railHeader {
   display: grid;
   gap: 5px;
   padding: 8px;
@@ -754,16 +755,16 @@
   background: var(--surface-panel);
 }
 
-.railTitle {
+:where(.vui-routes-logsroute).railTitle {
   margin: 0;
   font-family: var(--font-display);
   font-size: 0.9rem;
 }
 
-.railText {
+:where(.vui-routes-logsroute).railText {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.35;
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -771,7 +772,7 @@
   overflow: hidden;
 }
 
-.rootNav {
+:where(.vui-routes-logsroute).rootNav {
   display: grid;
   align-content: start;
   gap: 8px;
@@ -779,7 +780,7 @@
   overflow: auto;
 }
 
-.packageButton {
+:where(.vui-routes-logsroute).packageButton {
   display: grid;
   gap: 5px;
   width: 100%;
@@ -793,26 +794,26 @@
   cursor: pointer;
 }
 
-.packageButton[data-vui] [data-slot="vui-button-content"],
-.packageButton[data-vui] [data-slot="vui-button-label"],
-.packageFileButton[data-vui] [data-slot="vui-button-content"],
-.packageFileButton[data-vui] [data-slot="vui-button-label"] {
+:where(.vui-routes-logsroute).packageButton[data-vui] [data-slot="vui-button-content"],
+:where(.vui-routes-logsroute).packageButton[data-vui] [data-slot="vui-button-label"],
+:where(.vui-routes-logsroute).packageFileButton[data-vui] [data-slot="vui-button-content"],
+:where(.vui-routes-logsroute).packageFileButton[data-vui] [data-slot="vui-button-label"] {
   display: contents;
 }
 
-.packageButton:hover {
+:where(.vui-routes-logsroute).packageButton:hover {
   border-color: var(--border-strong);
   background: var(--surface-panel-hover);
 }
 
-.packageButtonActive {
+:where(.vui-routes-logsroute).packageButtonActive {
   border-color: color-mix(in srgb, var(--accent-warm) 24%, transparent);
   background: var(--surface-panel-strong);
   box-shadow: var(--vui-shadow-inset-accent);
 }
 
-.packageButtonHeader,
-.packageFilesHeader {
+:where(.vui-routes-logsroute).packageButtonHeader,
+:where(.vui-routes-logsroute).packageFilesHeader {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -820,8 +821,8 @@
   min-width: 0;
 }
 
-.packageButtonTitle,
-.packageFilesTitle {
+:where(.vui-routes-logsroute).packageButtonTitle,
+:where(.vui-routes-logsroute).packageFilesTitle {
   min-width: 0;
   color: var(--fg-primary);
   font-family: var(--font-display);
@@ -830,16 +831,16 @@
   white-space: nowrap;
 }
 
-.packageButtonCount {
+:where(.vui-routes-logsroute).packageButtonCount {
   flex: 0 0 auto;
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
-.packageButtonPath {
+:where(.vui-routes-logsroute).packageButtonPath {
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -847,7 +848,7 @@
   overflow: hidden;
 }
 
-.packageFilesPanel {
+:where(.vui-routes-logsroute).packageFilesPanel {
   display: grid;
   grid-template-columns: minmax(110px, 170px) minmax(0, 1fr);
   align-items: stretch;
@@ -860,16 +861,16 @@
   background: var(--surface-input);
 }
 
-.packageFilesPanel .packageFilesHeader {
+:where(.vui-routes-logsroute).packageFilesPanel .packageFilesHeader {
   align-content: start;
 }
 
-.packageFilesTitle {
+:where(.vui-routes-logsroute).packageFilesTitle {
   margin: 0;
-  font-size: 0.86rem;
+  font-size: var(--vui-font-xs);
 }
 
-.packageFileList {
+:where(.vui-routes-logsroute).packageFileList {
   display: flex;
   gap: 6px;
   min-width: 0;
@@ -878,7 +879,7 @@
   padding: 0 2px 4px 0;
 }
 
-.packageFileRow {
+:where(.vui-routes-logsroute).packageFileRow {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 6px;
@@ -887,11 +888,11 @@
   min-width: 0;
 }
 
-.packageFileRowActive {
+:where(.vui-routes-logsroute).packageFileRowActive {
   position: relative;
 }
 
-.packageSelectButton {
+:where(.vui-routes-logsroute).packageSelectButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -905,17 +906,17 @@
   cursor: pointer;
 }
 
-.packageSelectButton[data-vui] {
+:where(.vui-routes-logsroute).packageSelectButton[data-vui] {
   min-height: 100%;
 }
 
-.packageSelectButtonActive {
+:where(.vui-routes-logsroute).packageSelectButtonActive {
   color: var(--accent-cool);
   border-color: color-mix(in srgb, var(--accent-cool) 26%, transparent);
   background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
 }
 
-.packageFileButton {
+:where(.vui-routes-logsroute).packageFileButton {
   display: grid;
   gap: 3px;
   width: 100%;
@@ -929,26 +930,26 @@
   cursor: pointer;
 }
 
-.packageFileButtonActive {
+:where(.vui-routes-logsroute).packageFileButtonActive {
   color: var(--fg-primary);
   border-color: color-mix(in srgb, var(--accent-warm) 22%, transparent);
   background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
 }
 
-.packageFileName {
+:where(.vui-routes-logsroute).packageFileName {
   color: var(--fg-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.packageFilePath {
-  font-size: 0.78rem;
+:where(.vui-routes-logsroute).packageFilePath {
+  font-size: var(--vui-font-xs);
   color: var(--fg-tertiary);
   overflow-wrap: anywhere;
 }
 
-.copyButton {
+:where(.vui-routes-logsroute).copyButton {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -961,12 +962,12 @@
   cursor: pointer;
 }
 
-.copyButton:hover {
+:where(.vui-routes-logsroute).copyButton:hover {
   border-color: var(--border-strong);
   background: var(--surface-panel-hover);
 }
 
-.sceneCard {
+:where(.vui-routes-logsroute).sceneCard {
   display: grid;
   gap: 10px;
   padding: 12px;
@@ -975,20 +976,20 @@
   background: var(--surface-panel);
 }
 
-.sceneCardActive {
+:where(.vui-routes-logsroute).sceneCardActive {
   border-color: color-mix(in srgb, var(--accent-warm) 24%, transparent);
   background: var(--surface-panel-strong);
   box-shadow: var(--vui-shadow-inset-accent);
 }
 
-.sceneCardTop {
+:where(.vui-routes-logsroute).sceneCardTop {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 8px;
   align-items: start;
 }
 
-.sceneCardButton {
+:where(.vui-routes-logsroute).sceneCardButton {
   display: grid;
   gap: 8px;
   width: 100%;
@@ -1000,30 +1001,30 @@
   cursor: pointer;
 }
 
-.sceneCardButton[data-vui] [data-slot="vui-button-content"],
-.sceneCardButton[data-vui] [data-slot="vui-button-label"] {
+:where(.vui-routes-logsroute).sceneCardButton[data-vui] [data-slot="vui-button-content"],
+:where(.vui-routes-logsroute).sceneCardButton[data-vui] [data-slot="vui-button-label"] {
   display: contents;
 }
 
-.sceneCardHeader,
-.sceneCardMeta,
-.scenePillRow,
-.timelineHeader,
-.timelineFields,
-.timelineRawRefs,
-.sceneRawHeader,
-.sceneMetricGrid {
+:where(.vui-routes-logsroute).sceneCardHeader,
+:where(.vui-routes-logsroute).sceneCardMeta,
+:where(.vui-routes-logsroute).scenePillRow,
+:where(.vui-routes-logsroute).timelineHeader,
+:where(.vui-routes-logsroute).timelineFields,
+:where(.vui-routes-logsroute).timelineRawRefs,
+:where(.vui-routes-logsroute).sceneRawHeader,
+:where(.vui-routes-logsroute).sceneMetricGrid {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.sceneCardHeader {
+:where(.vui-routes-logsroute).sceneCardHeader {
   align-items: center;
   justify-content: space-between;
 }
 
-.sceneCardStatusGroup {
+:where(.vui-routes-logsroute).sceneCardStatusGroup {
   display: inline-flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -1032,38 +1033,38 @@
   min-width: 0;
 }
 
-.sceneIssueBadge {
+:where(.vui-routes-logsroute).sceneIssueBadge {
   display: inline-flex;
   align-items: center;
   min-height: 22px;
   padding: 2px 7px;
   border: 1px solid transparent;
   border-radius: 999px;
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   font-weight: 650;
   line-height: 1;
   white-space: nowrap;
 }
 
-.sceneIssueBadgeError {
+:where(.vui-routes-logsroute).sceneIssueBadgeError {
   border-color: color-mix(in srgb, var(--danger, var(--state-error)) 42%, transparent);
   background: color-mix(in srgb, var(--danger, var(--state-error)) 14%, transparent);
   color: color-mix(in srgb, var(--danger, var(--state-error)) 78%, var(--fg-primary));
 }
 
-.sceneIssueBadgeWarning {
+:where(.vui-routes-logsroute).sceneIssueBadgeWarning {
   border-color: color-mix(in srgb, var(--accent-warm) 36%, transparent);
   background: color-mix(in srgb, var(--accent-warm) 13%, transparent);
   color: color-mix(in srgb, var(--accent-warm) 72%, var(--fg-primary));
 }
 
-.sceneCardHeader strong,
-.sceneDetailTitle,
-.timelineCode {
+:where(.vui-routes-logsroute).sceneCardHeader strong,
+:where(.vui-routes-logsroute).sceneDetailTitle,
+:where(.vui-routes-logsroute).timelineCode {
   color: var(--fg-primary);
 }
 
-.sceneIndexKey {
+:where(.vui-routes-logsroute).sceneIndexKey {
   display: block;
   min-width: 0;
   width: fit-content;
@@ -1074,35 +1075,35 @@
   background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
   color: var(--accent-cool);
   font-family: var(--font-mono);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.sceneCardStatus,
-.sceneCardMeta,
-.sceneCardSummary,
-.sceneDetailSummary,
-.timelineHeader,
-.timelineMessage,
-.timelineField {
+:where(.vui-routes-logsroute).sceneCardStatus,
+:where(.vui-routes-logsroute).sceneCardMeta,
+:where(.vui-routes-logsroute).sceneCardSummary,
+:where(.vui-routes-logsroute).sceneDetailSummary,
+:where(.vui-routes-logsroute).timelineHeader,
+:where(.vui-routes-logsroute).timelineMessage,
+:where(.vui-routes-logsroute).timelineField {
   color: var(--fg-secondary);
 }
 
-.sceneCardMeta,
-.timelineHeader,
-.timelineField {
-  font-size: 0.78rem;
+:where(.vui-routes-logsroute).sceneCardMeta,
+:where(.vui-routes-logsroute).timelineHeader,
+:where(.vui-routes-logsroute).timelineField {
+  font-size: var(--vui-font-xs);
 }
 
-.sceneCardSummary,
-.timelineMessage {
+:where(.vui-routes-logsroute).sceneCardSummary,
+:where(.vui-routes-logsroute).timelineMessage {
   margin: 0;
   line-height: 1.45;
 }
 
-.sceneDetailSurface {
+:where(.vui-routes-logsroute).sceneDetailSurface {
   display: grid;
   align-content: start;
   gap: 12px;
@@ -1111,19 +1112,19 @@
   overflow: auto;
 }
 
-.sceneDetailHeader,
-.sceneDetailHeaderCompact,
-.sceneInfoGrid {
+:where(.vui-routes-logsroute).sceneDetailHeader,
+:where(.vui-routes-logsroute).sceneDetailHeaderCompact,
+:where(.vui-routes-logsroute).sceneInfoGrid {
   display: grid;
   gap: 16px;
 }
 
-.sceneDetailHeader {
+:where(.vui-routes-logsroute).sceneDetailHeader {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
 }
 
-.sceneDetailHeaderCompact {
+:where(.vui-routes-logsroute).sceneDetailHeaderCompact {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
   gap: 12px;
@@ -1133,35 +1134,35 @@
   background: var(--surface-card);
 }
 
-.sceneIdentityBlock {
+:where(.vui-routes-logsroute).sceneIdentityBlock {
   display: grid;
   gap: 8px;
   min-width: 0;
 }
 
-.sceneDetailTitle {
+:where(.vui-routes-logsroute).sceneDetailTitle {
   margin: 0;
   font-family: var(--font-display);
   font-size: 1.04rem;
   line-height: 1.25;
 }
 
-.sceneQuickFacts,
-.sceneEvidenceStrip,
-.sceneTechnicalGrid {
+:where(.vui-routes-logsroute).sceneQuickFacts,
+:where(.vui-routes-logsroute).sceneEvidenceStrip,
+:where(.vui-routes-logsroute).sceneTechnicalGrid {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
 }
 
-.sceneQuickFacts {
+:where(.vui-routes-logsroute).sceneQuickFacts {
   align-items: center;
 }
 
-.sceneQuickFacts > span,
-.sceneQuickFacts > code,
-.sceneEvidenceStrip > span {
+:where(.vui-routes-logsroute).sceneQuickFacts > span,
+:where(.vui-routes-logsroute).sceneQuickFacts > code,
+:where(.vui-routes-logsroute).sceneEvidenceStrip > span {
   display: inline-flex;
   align-items: center;
   min-height: 28px;
@@ -1170,11 +1171,11 @@
   border-radius: 999px;
   background: var(--surface-panel);
   color: var(--fg-secondary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
-.sceneQuickFacts > code {
+:where(.vui-routes-logsroute).sceneQuickFacts > code {
   max-width: min(520px, 100%);
   border-radius: 6px;
   color: var(--accent-cool);
@@ -1183,23 +1184,23 @@
   text-overflow: ellipsis;
 }
 
-.sceneEvidenceStrip {
+:where(.vui-routes-logsroute).sceneEvidenceStrip {
   padding: 10px 12px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-card-subtle);
 }
 
-.sceneEvidenceStrip > span {
+:where(.vui-routes-logsroute).sceneEvidenceStrip > span {
   border-color: color-mix(in srgb, var(--surface-card) 8%, transparent);
   background: var(--surface-card-subtle);
 }
 
-.sceneEvidenceStrip strong {
+:where(.vui-routes-logsroute).sceneEvidenceStrip strong {
   color: var(--fg-primary);
 }
 
-.packageDiagnosisPanel {
+:where(.vui-routes-logsroute).packageDiagnosisPanel {
   display: grid;
   gap: 12px;
   padding: 14px;
@@ -1208,7 +1209,7 @@
   background: var(--surface-card);
 }
 
-.packageDiagnosisHeader {
+:where(.vui-routes-logsroute).packageDiagnosisHeader {
   display: flex;
   align-items: start;
   justify-content: space-between;
@@ -1216,49 +1217,49 @@
   min-width: 0;
 }
 
-.packageDiagnosisHeader h3,
-.packageDiagnosisSummary,
-.packageDiagnosisGrid p {
+:where(.vui-routes-logsroute).packageDiagnosisHeader h3,
+:where(.vui-routes-logsroute).packageDiagnosisSummary,
+:where(.vui-routes-logsroute).packageDiagnosisGrid p {
   margin: 0;
 }
 
-.packageDiagnosisHeader h3 {
+:where(.vui-routes-logsroute).packageDiagnosisHeader h3 {
   color: var(--fg-primary);
   font-size: 0.96rem;
   line-height: 1.25;
 }
 
-.packageDiagnosisSummary {
+:where(.vui-routes-logsroute).packageDiagnosisSummary {
   color: var(--fg-secondary);
-  font-size: 0.84rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.5;
 }
 
-.packageIssueStateStrip {
+:where(.vui-routes-logsroute).packageIssueStateStrip {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
-.packageIssueStateStrip span {
+:where(.vui-routes-logsroute).packageIssueStateStrip span {
   min-width: 0;
   padding: 8px 9px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-card-subtle);
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.25;
   overflow-wrap: anywhere;
 }
 
-.packageIssueStateStrip strong {
+:where(.vui-routes-logsroute).packageIssueStateStrip strong {
   margin-right: 4px;
   color: var(--fg-primary);
   font-size: 0.9rem;
 }
 
-.packageWorkRunPanel {
+:where(.vui-routes-logsroute).packageWorkRunPanel {
   display: grid;
   gap: 8px;
   min-width: 0;
@@ -1268,7 +1269,7 @@
   background: color-mix(in srgb, var(--accent-cool) 6%, var(--surface-card-subtle));
 }
 
-.packageWorkRunHeader {
+:where(.vui-routes-logsroute).packageWorkRunHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1276,12 +1277,12 @@
   min-width: 0;
 }
 
-.packageWorkRunHeader > span {
+:where(.vui-routes-logsroute).packageWorkRunHeader > span {
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
 }
 
-.packageWorkRunPathButton {
+:where(.vui-routes-logsroute).packageWorkRunPathButton {
   max-width: min(320px, 100%);
   padding: 5px 7px;
   border: 1px solid var(--border-soft);
@@ -1289,57 +1290,57 @@
   background: var(--surface-panel);
   color: var(--accent-cool);
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
 }
 
-.packageWorkRunPathButton:hover {
+:where(.vui-routes-logsroute).packageWorkRunPathButton:hover {
   border-color: var(--border-strong);
   background: var(--surface-panel-hover);
 }
 
-.packageWorkRunPathButton[data-vui] [data-slot="vui-button-label"] {
+:where(.vui-routes-logsroute).packageWorkRunPathButton[data-vui] [data-slot="vui-button-label"] {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.packageWorkRunMetricStrip {
+:where(.vui-routes-logsroute).packageWorkRunMetricStrip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
 }
 
-.packageWorkRunMetricStrip span {
+:where(.vui-routes-logsroute).packageWorkRunMetricStrip span {
   min-width: 0;
   padding: 7px 8px;
   border: 1px solid color-mix(in srgb, var(--surface-card) 8%, transparent);
   border-radius: 8px;
   background: var(--surface-card-subtle);
   color: var(--fg-tertiary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.25;
   overflow-wrap: anywhere;
 }
 
-.packageWorkRunMetricStrip strong {
+:where(.vui-routes-logsroute).packageWorkRunMetricStrip strong {
   margin-right: 4px;
   color: var(--fg-primary);
-  font-size: 0.86rem;
+  font-size: var(--vui-font-xs);
 }
 
-.packageWorkRunList {
+:where(.vui-routes-logsroute).packageWorkRunList {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   gap: 6px;
   min-width: 0;
 }
 
-.packageWorkRunItem {
+:where(.vui-routes-logsroute).packageWorkRunItem {
   display: grid;
   gap: 4px;
   min-width: 0;
@@ -1349,25 +1350,25 @@
   background: var(--surface-panel);
 }
 
-.packageWorkRunItem strong,
-.packageWorkRunItem span {
+:where(.vui-routes-logsroute).packageWorkRunItem strong,
+:where(.vui-routes-logsroute).packageWorkRunItem span {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.packageWorkRunItem strong {
+:where(.vui-routes-logsroute).packageWorkRunItem strong {
   color: var(--fg-primary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.35;
 }
 
-.packageWorkRunItem span {
+:where(.vui-routes-logsroute).packageWorkRunItem span {
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.35;
 }
 
-.packagePrimaryCluster {
+:where(.vui-routes-logsroute).packagePrimaryCluster {
   display: grid;
   gap: 6px;
   min-width: 0;
@@ -1377,34 +1378,34 @@
   background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-card-subtle));
 }
 
-.packagePrimaryCluster > span {
+:where(.vui-routes-logsroute).packagePrimaryCluster > span {
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
 }
 
-.packagePrimaryCluster > strong {
+:where(.vui-routes-logsroute).packagePrimaryCluster > strong {
   color: var(--fg-primary);
-  font-size: 0.86rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
-.packagePrimaryCluster > p {
+:where(.vui-routes-logsroute).packagePrimaryCluster > p {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.4;
 }
 
-.packageClusterRefs {
+:where(.vui-routes-logsroute).packageClusterRefs {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
 }
 
-.packageClusterRefs button,
-.packageClusterItem button {
+:where(.vui-routes-logsroute).packageClusterRefs button,
+:where(.vui-routes-logsroute).packageClusterItem button {
   max-width: 100%;
   padding: 5px 7px;
   border: 1px solid var(--border-soft);
@@ -1412,28 +1413,28 @@
   background: var(--surface-panel);
   color: var(--fg-secondary);
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
 }
 
-.packageClusterRefs button:hover,
-.packageClusterItem button:hover {
+:where(.vui-routes-logsroute).packageClusterRefs button:hover,
+:where(.vui-routes-logsroute).packageClusterItem button:hover {
   border-color: var(--border-strong);
   background: var(--surface-panel-hover);
 }
 
-.packageClusterRefs button[data-vui] [data-slot="vui-button-label"],
-.packageClusterItem button[data-vui] [data-slot="vui-button-label"] {
+:where(.vui-routes-logsroute).packageClusterRefs button[data-vui] [data-slot="vui-button-label"],
+:where(.vui-routes-logsroute).packageClusterItem button[data-vui] [data-slot="vui-button-label"] {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.startupTracePanel {
+:where(.vui-routes-logsroute).startupTracePanel {
   display: grid;
   gap: 10px;
   padding: 10px;
@@ -1442,29 +1443,29 @@
   background: var(--surface-card-subtle);
 }
 
-.startupTraceHeader {
+:where(.vui-routes-logsroute).startupTraceHeader {
   display: grid;
   gap: 4px;
 }
 
-.startupTraceHeader span {
+:where(.vui-routes-logsroute).startupTraceHeader span {
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
 }
 
-.startupTraceHeader strong {
+:where(.vui-routes-logsroute).startupTraceHeader strong {
   color: var(--fg-secondary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.45;
 }
 
-.startupTraceSteps {
+:where(.vui-routes-logsroute).startupTraceSteps {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
   gap: 6px;
 }
 
-.startupTraceStep {
+:where(.vui-routes-logsroute).startupTraceStep {
   display: grid;
   gap: 3px;
   min-height: 46px;
@@ -1477,49 +1478,49 @@
   cursor: pointer;
 }
 
-.startupTraceStep:disabled {
+:where(.vui-routes-logsroute).startupTraceStep:disabled {
   cursor: default;
 }
 
-.startupTraceStep span,
-.startupTraceStep strong {
+:where(.vui-routes-logsroute).startupTraceStep span,
+:where(.vui-routes-logsroute).startupTraceStep strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.startupTraceStep span {
+:where(.vui-routes-logsroute).startupTraceStep span {
   color: var(--fg-primary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
 }
 
-.startupTraceStep strong {
+:where(.vui-routes-logsroute).startupTraceStep strong {
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
-.startupTraceStepMissing {
+:where(.vui-routes-logsroute).startupTraceStepMissing {
   border-color: color-mix(in srgb, var(--accent-warm) 30%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-warm) 8%, var(--surface-input));
 }
 
-.startupTraceStep[data-vui] [data-slot="vui-button-content"],
-.startupTraceStep[data-vui] [data-slot="vui-button-label"] {
+:where(.vui-routes-logsroute).startupTraceStep[data-vui] [data-slot="vui-button-content"],
+:where(.vui-routes-logsroute).startupTraceStep[data-vui] [data-slot="vui-button-label"] {
   display: contents;
 }
 
-.packageDiagnosisGrid,
-.packageDiagnosisEntries {
+:where(.vui-routes-logsroute).packageDiagnosisGrid,
+:where(.vui-routes-logsroute).packageDiagnosisEntries {
   display: grid;
   gap: 10px;
 }
 
-.packageDiagnosisGrid {
+:where(.vui-routes-logsroute).packageDiagnosisGrid {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
 }
 
-.packageDiagnosisGrid article,
-.packageDiagnosisEntries > div {
+:where(.vui-routes-logsroute).packageDiagnosisGrid article,
+:where(.vui-routes-logsroute).packageDiagnosisEntries > div {
   display: grid;
   align-content: start;
   gap: 6px;
@@ -1530,21 +1531,21 @@
   background: var(--surface-card-subtle);
 }
 
-.packageDiagnosisGrid span,
-.packageDiagnosisEntries span {
+:where(.vui-routes-logsroute).packageDiagnosisGrid span,
+:where(.vui-routes-logsroute).packageDiagnosisEntries span {
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
 }
 
-.packageDiagnosisGrid strong,
-.packageDiagnosisGrid p {
+:where(.vui-routes-logsroute).packageDiagnosisGrid strong,
+:where(.vui-routes-logsroute).packageDiagnosisGrid p {
   color: var(--fg-secondary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
-.packageEvidencePaths {
+:where(.vui-routes-logsroute).packageEvidencePaths {
   display: grid;
   gap: 7px;
   min-width: 0;
@@ -1554,19 +1555,19 @@
   background: color-mix(in srgb, var(--accent-cool) 7%, var(--surface-card-subtle));
 }
 
-.packageEvidencePaths > span {
+:where(.vui-routes-logsroute).packageEvidencePaths > span {
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
 }
 
-.packageEvidencePaths > div {
+:where(.vui-routes-logsroute).packageEvidencePaths > div {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
 }
 
-.packageEvidencePaths button {
+:where(.vui-routes-logsroute).packageEvidencePaths button {
   display: inline-grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
@@ -1581,12 +1582,12 @@
   cursor: pointer;
 }
 
-.packageEvidencePaths button:hover {
+:where(.vui-routes-logsroute).packageEvidencePaths button:hover {
   border-color: var(--border-strong);
   background: var(--surface-panel-hover);
 }
 
-.packageEvidencePaths strong {
+:where(.vui-routes-logsroute).packageEvidencePaths strong {
   display: inline-grid;
   place-items: center;
   width: 18px;
@@ -1594,25 +1595,25 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent-cool) 16%, transparent);
   color: var(--fg-primary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
 }
 
-.packageEvidencePaths code {
+:where(.vui-routes-logsroute).packageEvidencePaths code {
   min-width: 0;
   color: var(--accent-cool);
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.packageEvidencePaths button[data-vui] [data-slot="vui-button-content"],
-.packageEvidencePaths button[data-vui] [data-slot="vui-button-label"] {
+:where(.vui-routes-logsroute).packageEvidencePaths button[data-vui] [data-slot="vui-button-content"],
+:where(.vui-routes-logsroute).packageEvidencePaths button[data-vui] [data-slot="vui-button-label"] {
   display: contents;
 }
 
-.packageDiagnosisDetails {
+:where(.vui-routes-logsroute).packageDiagnosisDetails {
   display: grid;
   gap: 10px;
   padding: 0;
@@ -1621,7 +1622,7 @@
   background: var(--surface-input);
 }
 
-.packageDiagnosisSummaryRow {
+:where(.vui-routes-logsroute).packageDiagnosisSummaryRow {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1632,52 +1633,52 @@
   list-style: none;
 }
 
-.packageDiagnosisSummaryRow::-webkit-details-marker {
+:where(.vui-routes-logsroute).packageDiagnosisSummaryRow::-webkit-details-marker {
   display: none;
 }
 
-.packageDiagnosisSummaryText {
+:where(.vui-routes-logsroute).packageDiagnosisSummaryText {
   flex: 1 1 auto;
   min-width: 0;
   color: var(--fg-secondary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.packageDiagnosisInlineMetrics {
+:where(.vui-routes-logsroute).packageDiagnosisInlineMetrics {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   flex: 0 0 auto;
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
-.packageDiagnosisInlineMetrics strong {
+:where(.vui-routes-logsroute).packageDiagnosisInlineMetrics strong {
   color: var(--fg-primary);
 }
 
-.packageDiagnosisExpandLabel {
+:where(.vui-routes-logsroute).packageDiagnosisExpandLabel {
   flex: 0 0 auto;
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
-.packageDiagnosisDetails[open] .packageDiagnosisExpandLabel {
+:where(.vui-routes-logsroute).packageDiagnosisDetails[open] .packageDiagnosisExpandLabel {
   color: var(--fg-secondary);
 }
 
-.packageDiagnosisFoldout {
+:where(.vui-routes-logsroute).packageDiagnosisFoldout {
   display: grid;
   gap: 10px;
   padding: 0 10px 10px;
 }
 
-.packageDiagnosisFoldoutSection {
+:where(.vui-routes-logsroute).packageDiagnosisFoldoutSection {
   display: grid;
   gap: 6px;
   min-width: 0;
@@ -1687,20 +1688,20 @@
   background: var(--surface-card-subtle);
 }
 
-.packageDiagnosisFoldoutSection > span {
+:where(.vui-routes-logsroute).packageDiagnosisFoldoutSection > span {
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
 }
 
-.packageReadingOrder,
-.packageKeyEntries {
+:where(.vui-routes-logsroute).packageReadingOrder,
+:where(.vui-routes-logsroute).packageKeyEntries {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
 }
 
-.packageReadingOrder code {
+:where(.vui-routes-logsroute).packageReadingOrder code {
   max-width: 100%;
   padding: 4px 6px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 18%, transparent);
@@ -1708,12 +1709,12 @@
   background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
   color: var(--accent-cool);
   font-family: var(--font-mono);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.packageKeyEntryButton {
+:where(.vui-routes-logsroute).packageKeyEntryButton {
   display: grid;
   gap: 3px;
   min-width: min(220px, 100%);
@@ -1727,42 +1728,42 @@
   text-align: left;
 }
 
-.packageKeyEntryButton:hover {
+:where(.vui-routes-logsroute).packageKeyEntryButton:hover {
   border-color: var(--border-strong);
   background: var(--surface-panel-hover);
 }
 
-.packageKeyEntryButton strong,
-.packageKeyEntryButton span {
+:where(.vui-routes-logsroute).packageKeyEntryButton strong,
+:where(.vui-routes-logsroute).packageKeyEntryButton span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.packageKeyEntryButton strong {
+:where(.vui-routes-logsroute).packageKeyEntryButton strong {
   color: var(--fg-primary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
 }
 
-.packageKeyEntryButton span {
+:where(.vui-routes-logsroute).packageKeyEntryButton span {
   color: var(--fg-tertiary);
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
-.packageKeyEntryButton[data-vui] [data-slot="vui-button-content"],
-.packageKeyEntryButton[data-vui] [data-slot="vui-button-label"] {
+:where(.vui-routes-logsroute).packageKeyEntryButton[data-vui] [data-slot="vui-button-content"],
+:where(.vui-routes-logsroute).packageKeyEntryButton[data-vui] [data-slot="vui-button-label"] {
   display: contents;
 }
 
-.packageClusterList {
+:where(.vui-routes-logsroute).packageClusterList {
   display: grid;
   gap: 6px;
   min-width: 0;
 }
 
-.packageClusterItem {
+:where(.vui-routes-logsroute).packageClusterItem {
   display: grid;
   gap: 4px;
   min-width: 0;
@@ -1772,42 +1773,42 @@
   background: var(--surface-panel);
 }
 
-.packageClusterItem strong,
-.packageClusterItem span {
+:where(.vui-routes-logsroute).packageClusterItem strong,
+:where(.vui-routes-logsroute).packageClusterItem span {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.packageClusterItem strong {
+:where(.vui-routes-logsroute).packageClusterItem strong {
   color: var(--fg-primary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.35;
 }
 
-.packageClusterItem span {
+:where(.vui-routes-logsroute).packageClusterItem span {
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.35;
 }
 
-.sceneTechnicalDetails {
+:where(.vui-routes-logsroute).sceneTechnicalDetails {
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-card-subtle);
 }
 
-.sceneTechnicalDetails summary {
+:where(.vui-routes-logsroute).sceneTechnicalDetails summary {
   padding: 9px 12px;
   color: var(--fg-secondary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
   cursor: pointer;
 }
 
-.sceneTechnicalGrid {
+:where(.vui-routes-logsroute).sceneTechnicalGrid {
   padding: 0 12px 12px;
 }
 
-.sceneTechnicalGrid span {
+:where(.vui-routes-logsroute).sceneTechnicalGrid span {
   display: grid;
   gap: 4px;
   min-width: min(280px, 100%);
@@ -1815,57 +1816,57 @@
   font-size: 0.8rem;
 }
 
-.sceneTechnicalGrid strong {
+:where(.vui-routes-logsroute).sceneTechnicalGrid strong {
   color: var(--fg-tertiary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   font-weight: 600;
 }
 
-.sceneTechnicalGrid code {
+:where(.vui-routes-logsroute).sceneTechnicalGrid code {
   color: var(--accent-cool);
   font-family: var(--font-mono);
   overflow-wrap: anywhere;
 }
 
-.sceneMetricGrid {
+:where(.vui-routes-logsroute).sceneMetricGrid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 
-.sceneMetricCard,
-.sceneInfoCard,
-.timelineItem,
-.rawFileButton {
+:where(.vui-routes-logsroute).sceneMetricCard,
+:where(.vui-routes-logsroute).sceneInfoCard,
+:where(.vui-routes-logsroute).timelineItem,
+:where(.vui-routes-logsroute).rawFileButton {
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-card);
 }
 
-.sceneMetricCard {
+:where(.vui-routes-logsroute).sceneMetricCard {
   min-height: 58px;
   padding: 8px;
   display: grid;
   gap: 4px;
 }
 
-.sceneMetricCard span {
+:where(.vui-routes-logsroute).sceneMetricCard span {
   color: var(--fg-tertiary);
   font-size: 0.7rem;
 }
 
-.sceneMetricCard strong {
+:where(.vui-routes-logsroute).sceneMetricCard strong {
   color: var(--fg-primary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
   overflow-wrap: anywhere;
 }
 
-.sceneInfoGrid {
+:where(.vui-routes-logsroute).sceneInfoGrid {
   grid-template-columns: minmax(300px, 0.82fr) minmax(420px, 1.18fr);
   gap: 8px;
 }
 
-.sceneInfoCard {
+:where(.vui-routes-logsroute).sceneInfoCard {
   display: grid;
   align-content: start;
   gap: 8px;
@@ -1873,18 +1874,18 @@
   min-height: 0;
 }
 
-.sceneInfoCard h3 {
+:where(.vui-routes-logsroute).sceneInfoCard h3 {
   margin: 0;
   color: var(--fg-primary);
   font-size: 0.96rem;
 }
 
-.timelineList,
-.sceneRawPreview {
+:where(.vui-routes-logsroute).timelineList,
+:where(.vui-routes-logsroute).sceneRawPreview {
   min-height: 0;
 }
 
-.timelineList {
+:where(.vui-routes-logsroute).timelineList {
   display: grid;
   gap: 6px;
   max-height: 520px;
@@ -1892,50 +1893,50 @@
   padding-right: 4px;
 }
 
-.timelineItem {
+:where(.vui-routes-logsroute).timelineItem {
   display: grid;
   gap: 5px;
   padding: 8px;
 }
 
-.timelineItemError {
+:where(.vui-routes-logsroute).timelineItemError {
   border-color: color-mix(in srgb, var(--state-error) 38%, transparent);
   background: color-mix(in srgb, var(--state-error) 12%, transparent);
 }
 
-.timelineItemWarning {
+:where(.vui-routes-logsroute).timelineItemWarning {
   border-color: color-mix(in srgb, var(--state-warning) 34%, transparent);
   background: color-mix(in srgb, var(--state-warning) 10%, transparent);
 }
 
-.timelineItemError .timelineCode,
-.timelineItemError .timelineMessage,
-.timelineItemError .timelineHeader,
-.timelineItemError .timelineField {
+:where(.vui-routes-logsroute).timelineItemError .timelineCode,
+:where(.vui-routes-logsroute).timelineItemError .timelineMessage,
+:where(.vui-routes-logsroute).timelineItemError .timelineHeader,
+:where(.vui-routes-logsroute).timelineItemError .timelineField {
   color: var(--state-error);
 }
 
-.timelineItemWarning .timelineCode,
-.timelineItemWarning .timelineMessage,
-.timelineItemWarning .timelineHeader,
-.timelineItemWarning .timelineField {
+:where(.vui-routes-logsroute).timelineItemWarning .timelineCode,
+:where(.vui-routes-logsroute).timelineItemWarning .timelineMessage,
+:where(.vui-routes-logsroute).timelineItemWarning .timelineHeader,
+:where(.vui-routes-logsroute).timelineItemWarning .timelineField {
   color: var(--state-warning);
 }
 
-.timelineHeader {
+:where(.vui-routes-logsroute).timelineHeader {
   color: var(--fg-tertiary);
 }
 
-.timelineCode {
-  font-size: 0.78rem;
+:where(.vui-routes-logsroute).timelineCode {
+  font-size: var(--vui-font-xs);
   overflow-wrap: anywhere;
 }
 
-.timelineFields {
+:where(.vui-routes-logsroute).timelineFields {
   gap: 5px;
 }
 
-.timelineField {
+:where(.vui-routes-logsroute).timelineField {
   display: inline-flex;
   align-items: center;
   min-height: 22px;
@@ -1944,22 +1945,22 @@
   background: var(--surface-panel-strong);
 }
 
-.timelineRawRefs .toolbarButton {
+:where(.vui-routes-logsroute).timelineRawRefs .toolbarButton {
   justify-content: flex-start;
   text-align: left;
 }
 
-.timelineRawRefs .toolbarButton[data-vui] [data-slot="vui-button-content"],
-.timelineRawRefs .toolbarButton[data-vui] [data-slot="vui-button-label"] {
+:where(.vui-routes-logsroute).timelineRawRefs .toolbarButton[data-vui] [data-slot="vui-button-content"],
+:where(.vui-routes-logsroute).timelineRawRefs .toolbarButton[data-vui] [data-slot="vui-button-label"] {
   display: contents;
 }
 
-.sceneRawHeader {
+:where(.vui-routes-logsroute).sceneRawHeader {
   align-items: start;
   justify-content: space-between;
 }
 
-.packageSectionList {
+:where(.vui-routes-logsroute).packageSectionList {
   display: grid;
   gap: 8px;
   max-height: 260px;
@@ -1967,7 +1968,7 @@
   padding-right: 4px;
 }
 
-.packageSection {
+:where(.vui-routes-logsroute).packageSection {
   display: grid;
   gap: 6px;
   padding: 8px;
@@ -1976,7 +1977,7 @@
   background: var(--surface-card-subtle);
 }
 
-.packageSectionHeader {
+:where(.vui-routes-logsroute).packageSectionHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1984,13 +1985,13 @@
   min-width: 0;
 }
 
-.packageSectionHeader h4 {
+:where(.vui-routes-logsroute).packageSectionHeader h4 {
   margin: 0;
   color: var(--fg-primary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
 }
 
-.packageSectionHeader span {
+:where(.vui-routes-logsroute).packageSectionHeader span {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2000,25 +2001,25 @@
   border-radius: 999px;
   background: var(--surface-panel-strong);
   color: var(--fg-tertiary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
 }
 
-.packageSectionEmpty {
+:where(.vui-routes-logsroute).packageSectionEmpty {
   padding: 8px 10px;
   border: 1px dashed var(--border-soft);
   border-radius: 8px;
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.45;
 }
 
-.rawFileTabs {
+:where(.vui-routes-logsroute).rawFileTabs {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 6px;
 }
 
-.rawFileButton {
+:where(.vui-routes-logsroute).rawFileButton {
   display: grid;
   gap: 3px;
   min-width: 0;
@@ -2026,33 +2027,33 @@
   text-align: left;
   color: var(--fg-secondary);
   cursor: pointer;
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
 }
 
-.rawFileButton span {
+:where(.vui-routes-logsroute).rawFileButton span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.rawFileButtonActive {
+:where(.vui-routes-logsroute).rawFileButtonActive {
   border-color: color-mix(in srgb, var(--accent-warm) 24%, transparent);
   background: color-mix(in srgb, var(--accent-warm) 10%, transparent);
   color: var(--fg-primary);
 }
 
-.rawFileButton[data-vui] [data-slot="vui-button-content"],
-.rawFileButton[data-vui] [data-slot="vui-button-label"] {
+:where(.vui-routes-logsroute).rawFileButton[data-vui] [data-slot="vui-button-content"],
+:where(.vui-routes-logsroute).rawFileButton[data-vui] [data-slot="vui-button-label"] {
   display: contents;
 }
 
-.sceneRawPreview {
+:where(.vui-routes-logsroute).sceneRawPreview {
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   overflow: hidden;
 }
 
-.previewActions {
+:where(.vui-routes-logsroute).previewActions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -2060,7 +2061,7 @@
   gap: 8px;
 }
 
-.clearButton {
+:where(.vui-routes-logsroute).clearButton {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -2073,63 +2074,63 @@
   cursor: pointer;
 }
 
-.clearButton:hover:not(:disabled) {
+:where(.vui-routes-logsroute).clearButton:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--state-error) 32%, transparent);
   background: color-mix(in srgb, var(--state-error) 20%, transparent);
 }
 
 @media (max-width: 960px) {
-  .workspace {
+  :where(.vui-routes-logsroute).workspace {
     grid-template-columns: 1fr;
   }
 
-  .staticLayout,
-  .resizableLayout {
+  :where(.vui-routes-logsroute).staticLayout,
+  :where(.vui-routes-logsroute).resizableLayout {
     display: grid;
     grid-template-columns: 1fr;
   }
 
-  .sidebar {
+  :where(.vui-routes-logsroute).sidebar {
     border-right: 0;
     border-bottom: 1px solid var(--border-soft);
   }
 
-  .resizableLayout > .sidebar {
+  :where(.vui-routes-logsroute).resizableLayout > .sidebar {
     width: auto;
     min-width: 0;
     max-width: none;
   }
 
-  .resizeHandle,
-  .rightRailResizeHandle {
+  :where(.vui-routes-logsroute).resizeHandle,
+  :where(.vui-routes-logsroute).rightRailResizeHandle {
     display: none;
   }
 
-  .rightRail {
+  :where(.vui-routes-logsroute).rightRail {
     border-left: 0;
     border-top: 1px solid var(--border-soft);
   }
 
-  .sceneDetailHeader,
-  .sceneDetailHeaderCompact,
-  .sceneInfoGrid,
-  .diagnosticHintGrid,
-  .packageDiagnosisGrid,
-  .packageDiagnosisDetails {
+  :where(.vui-routes-logsroute).sceneDetailHeader,
+  :where(.vui-routes-logsroute).sceneDetailHeaderCompact,
+  :where(.vui-routes-logsroute).sceneInfoGrid,
+  :where(.vui-routes-logsroute).diagnosticHintGrid,
+  :where(.vui-routes-logsroute).packageDiagnosisGrid,
+  :where(.vui-routes-logsroute).packageDiagnosisDetails {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .packageFilesPanel {
+  :where(.vui-routes-logsroute).packageFilesPanel {
     grid-template-columns: minmax(0, 1fr);
     max-height: none;
   }
 
-  .diagnosticsSummaryRow {
+  :where(.vui-routes-logsroute).diagnosticsSummaryRow {
     align-items: flex-start;
     flex-wrap: wrap;
   }
 
-  .diagnosticsSummaryText {
+  :where(.vui-routes-logsroute).diagnosticsSummaryText {
     flex-basis: 100%;
     order: 3;
     white-space: normal;
@@ -2137,47 +2138,47 @@
 }
 
 @media (max-width: 640px) {
-  .header {
+  :where(.vui-routes-logsroute).header {
     flex-direction: column;
   }
 
-  .header > div:first-child {
+  :where(.vui-routes-logsroute).header > div:first-child {
     grid-template-columns: 1fr;
   }
 
-  .title,
-  .subtitle {
+  :where(.vui-routes-logsroute).title,
+  :where(.vui-routes-logsroute).subtitle {
     white-space: normal;
   }
 
-  .headerMeta {
+  :where(.vui-routes-logsroute).headerMeta {
     justify-content: flex-start;
   }
 
-  .selectionActions {
+  :where(.vui-routes-logsroute).selectionActions {
     grid-template-columns: 1fr;
   }
 
-  .sceneMetricGrid {
+  :where(.vui-routes-logsroute).sceneMetricGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .packageWorkRunHeader {
+  :where(.vui-routes-logsroute).packageWorkRunHeader {
     align-items: flex-start;
     flex-direction: column;
   }
 
-  .packageWorkRunMetricStrip {
+  :where(.vui-routes-logsroute).packageWorkRunMetricStrip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .sceneDetailHeaderCompact {
+  :where(.vui-routes-logsroute).sceneDetailHeaderCompact {
     padding: 12px;
   }
 
-  .sceneQuickFacts > span,
-  .sceneQuickFacts > code,
-  .sceneEvidenceStrip > span {
+  :where(.vui-routes-logsroute).sceneQuickFacts > span,
+  :where(.vui-routes-logsroute).sceneQuickFacts > code,
+  :where(.vui-routes-logsroute).sceneEvidenceStrip > span {
     white-space: normal;
   }
 }

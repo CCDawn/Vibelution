@@ -4,7 +4,7 @@ import type { CSSProperties, PointerEvent } from "react";
 import type { SessionSummary } from "../api/types";
 import { VButton } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
-import styles from "./ChatCodingRoute.module.css";
+import styles from "./ChatCodingRoute.styles";
 
 const MENU_WIDTH = 188;
 const MENU_HEIGHT = 164;

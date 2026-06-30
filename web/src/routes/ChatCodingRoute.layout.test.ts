@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { readFileSync } from "node:fs";
-import conversationStyles from "../components/conversation/ConversationView.module.css";
+import conversationStyles from "../components/conversation/ConversationView.styles";
 import conversationViewSource from "../components/conversation/ConversationView.tsx?raw";
 import routeErrorBoundarySource from "../app/RouteErrorBoundary.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
@@ -16,11 +16,11 @@ import directSessionIndexItemSource from "./DirectSessionIndexItem.tsx?raw";
 import directSessionIndexListSource from "./DirectSessionIndexList.tsx?raw";
 import groupSessionIndexItemsSource from "./GroupSessionIndexItems.tsx?raw";
 import sessionContextMenuSource from "./SessionContextMenu.tsx?raw";
-import routeStyles from "./ChatCodingRoute.module.css";
+import routeStyles from "./ChatCodingRoute.styles";
 
-const routeCssSource = readFileSync(new URL("./ChatCodingRoute.module.css", import.meta.url), "utf-8");
-const conversationCssSource = readFileSync(new URL("../components/conversation/ConversationView.module.css", import.meta.url), "utf-8");
-const appShellCssSource = readFileSync(new URL("../app/AppShell.module.css", import.meta.url), "utf-8");
+const routeCssSource = readFileSync(new URL("./ChatCodingRoute.legacy.css", import.meta.url), "utf-8");
+const conversationCssSource = readFileSync(new URL("../components/conversation/ConversationView.legacy.css", import.meta.url), "utf-8");
+const appShellCssSource = readFileSync(new URL("../app/AppShell.legacy.css", import.meta.url), "utf-8");
 
 function cssRule(source: string, selector: string) {
   const start = source.indexOf(`${selector} {`);
@@ -193,8 +193,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("centerFirstLayout");
     expect(routeSource).toContain("centerFirstAutoCollapseRef");
     expect(routeSource).toContain("window.matchMedia(CHAT_CENTER_FIRST_MEDIA_QUERY)");
-    expect(routeSource).toContain("const MIN_LEFT_PANEL_WIDTH = 192");
-    expect(routeSource).toContain("const MIN_RIGHT_PANEL_WIDTH = 244");
+    expect(routeSource).toContain("const MIN_LEFT_PANEL_WIDTH = 224");
+    expect(routeSource).toContain("const MIN_RIGHT_PANEL_WIDTH = 300");
     expect(routeSource).toContain("const TARGET_CENTER_PANE_WIDTH = 520");
     expect(routeSource).toContain("styles.layoutCenterFirst");
     expect(routeStyles.layout).toBeTypeOf("string");
@@ -203,8 +203,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.rightPane).toBeTypeOf("string");
     expect(routeStyles.resizeHandle).toBeTypeOf("string");
     expect(routeStyles.centerPane).toBeTypeOf("string");
-    expect(routeCssSource).toContain("var(--chat-left-pane-width, 220px)");
-    expect(routeCssSource).toContain("var(--chat-right-pane-width, 284px)");
+    expect(routeCssSource).toContain("var(--chat-left-pane-width, 260px)");
+    expect(routeCssSource).toContain("var(--chat-right-pane-width, 340px)");
   });
 
   it("centers the direct conversation reading track when both side panes are collapsed", () => {
@@ -222,8 +222,10 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("defaults Chat to dense side panes so the center conversation has priority", () => {
-    expect(shellStoreSource).toContain("leftPanelWidth: 220");
-    expect(shellStoreSource).toContain("rightPanelWidth: 284");
+    expect(shellStoreSource).toContain("leftPanelWidth: 260");
+    expect(shellStoreSource).toContain("rightPanelWidth: 340");
+    expect(shellStoreSource).toContain("normalizePersistedChatPanelWidths");
+    expect(shellStoreSource).toContain("merge: (persistedState, currentState)");
     expect(routeSource).toContain('"--chat-left-pane-width": leftRailCollapsed ? "0px" : `${leftPanelWidth}px`');
     expect(routeSource).toContain('"--chat-right-pane-width": rightPaneCollapsed ? "0px" : `${rightPanelWidth}px`');
     expect(routeCssSource).toContain(".leftRail {\n  display: flex;\n  flex-direction: column;\n  gap: 5px;\n  padding: 6px;");
@@ -1468,7 +1470,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeCssSource).toContain("display: none;");
     expect(routeCssSource).toContain(".cliAgentTerminalFrame");
     expect(routeCssSource).toContain(".cliAgentTerminalOutputShell");
-    expect(routeCssSource).toContain(":global(.xterm)");
+    expect(routeCssSource).toContain(".cliAgentTerminalOutput .xterm");
     expect(routeCssSource).toContain(".cliAgentTerminalOutputShell");
     expect(routeCssSource).toContain("background: var(--bg-canvas);");
     expect(routeCssSource).toContain(".cliAgentTerminalStatus");

@@ -1,4 +1,5 @@
-.route {
+/* source: routes/ResearchRoute legacy css */
+:where(.vui-routes-researchroute).route {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   height: 100%;
@@ -7,7 +8,7 @@
   background: var(--surface-page);
 }
 
-.header {
+:where(.vui-routes-researchroute).header {
   margin: 8px 10px 0;
   min-width: 0;
   border-color: var(--vui-border-subtle);
@@ -16,7 +17,7 @@
     color-mix(in srgb, var(--surface-panel) 86%, transparent);
 }
 
-.headerActions {
+:where(.vui-routes-researchroute).headerActions {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
@@ -24,7 +25,7 @@
   gap: 10px;
 }
 
-.panelEyebrow {
+:where(.vui-routes-researchroute).panelEyebrow {
   margin: 0;
   color: var(--fg-tertiary);
   font-size: 0.7rem;
@@ -32,7 +33,7 @@
   text-transform: uppercase;
 }
 
-.summaryGrid {
+:where(.vui-routes-researchroute).summaryGrid {
   display: grid;
   grid-template-columns: repeat(6, minmax(120px, 1fr));
   gap: var(--route-summary-gap);
@@ -41,7 +42,7 @@
   background: color-mix(in srgb, var(--surface-panel) 46%, var(--surface-page));
 }
 
-.subnav {
+:where(.vui-routes-researchroute).subnav {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -51,7 +52,7 @@
   background: var(--surface-panel-muted);
 }
 
-.subnavLink {
+:where(.vui-routes-researchroute).subnavLink {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -62,23 +63,23 @@
   border-radius: 999px;
   color: var(--fg-secondary);
   background: transparent;
-  font-size: 0.75rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
   white-space: nowrap;
   cursor: pointer;
 }
 
-.subnavLink:hover {
+:where(.vui-routes-researchroute).subnavLink:hover {
   color: var(--fg-primary);
   background: var(--surface-card-hover);
 }
 
-.subnavLinkActive {
+:where(.vui-routes-researchroute).subnavLinkActive {
   background: color-mix(in srgb, var(--accent-warm) 18%, transparent);
   color: var(--accent-warm-2);
 }
 
-.workflowModeControl {
+:where(.vui-routes-researchroute).workflowModeControl {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -89,16 +90,16 @@
   background: var(--surface-panel-muted);
 }
 
-.workflowModeControl > span {
+:where(.vui-routes-researchroute).workflowModeControl > span {
   padding: 0 8px;
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
   white-space: nowrap;
 }
 
-.workflowModeButton,
-.workflowModeButton_active {
+:where(.vui-routes-researchroute).workflowModeButton,
+:where(.vui-routes-researchroute).workflowModeButton_active {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -111,36 +112,36 @@
   background: transparent;
   cursor: pointer;
   font: inherit;
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
 }
 
-.workflowModeButton:hover {
+:where(.vui-routes-researchroute).workflowModeButton:hover {
   color: var(--fg-primary);
   background: var(--surface-card-hover);
 }
 
-.workflowModeButton_active {
+:where(.vui-routes-researchroute).workflowModeButton_active {
   color: var(--accent-cool-2);
   background: color-mix(in srgb, var(--accent-cool) 16%, transparent);
 }
 
-.summaryCard,
-.intakePanel,
-.historyPanel,
-.pipelinePanel,
-.processPanel,
-.evidencePanel,
-.agentPanel,
-.outputPanel,
-.guardrailPanel {
+:where(.vui-routes-researchroute).summaryCard,
+:where(.vui-routes-researchroute).intakePanel,
+:where(.vui-routes-researchroute).historyPanel,
+:where(.vui-routes-researchroute).pipelinePanel,
+:where(.vui-routes-researchroute).processPanel,
+:where(.vui-routes-researchroute).evidencePanel,
+:where(.vui-routes-researchroute).agentPanel,
+:where(.vui-routes-researchroute).outputPanel,
+:where(.vui-routes-researchroute).guardrailPanel {
   min-width: 0;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel);
 }
 
-.summaryCard {
+:where(.vui-routes-researchroute).summaryCard {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: baseline;
@@ -148,26 +149,26 @@
   padding: var(--route-summary-padding);
 }
 
-.summaryCard span {
+:where(.vui-routes-researchroute).summaryCard span {
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   white-space: nowrap;
 }
 
-.summaryCard strong {
+:where(.vui-routes-researchroute).summaryCard strong {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
   font-family: var(--font-mono);
-  font-size: 0.84rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.workspace {
+:where(.vui-routes-researchroute).workspace {
   display: grid;
   grid-template-columns: minmax(310px, 380px) minmax(520px, 1fr) minmax(320px, 460px);
   grid-template-rows: minmax(0, 1fr);
@@ -177,8 +178,8 @@
   padding: 0 12px 12px;
 }
 
-.sessionRail,
-.sideColumn {
+:where(.vui-routes-researchroute).sessionRail,
+:where(.vui-routes-researchroute).sideColumn {
   display: grid;
   align-self: stretch;
   align-content: start;
@@ -190,31 +191,31 @@
   padding-right: 2px;
 }
 
-.pipelinePanel,
-.intakePanel,
-.historyPanel,
-.processPanel,
-.evidencePanel,
-.agentPanel,
-.outputPanel,
-.guardrailPanel {
+:where(.vui-routes-researchroute).pipelinePanel,
+:where(.vui-routes-researchroute).intakePanel,
+:where(.vui-routes-researchroute).historyPanel,
+:where(.vui-routes-researchroute).processPanel,
+:where(.vui-routes-researchroute).evidencePanel,
+:where(.vui-routes-researchroute).agentPanel,
+:where(.vui-routes-researchroute).outputPanel,
+:where(.vui-routes-researchroute).guardrailPanel {
   display: grid;
   align-content: start;
   gap: 12px;
   padding: 14px;
 }
 
-.intakePanel {
+:where(.vui-routes-researchroute).intakePanel {
   gap: 13px;
   padding: 16px;
 }
 
-.historyPanel {
+:where(.vui-routes-researchroute).historyPanel {
   gap: 12px;
   padding: 16px;
 }
 
-.pipelinePanel {
+:where(.vui-routes-researchroute).pipelinePanel {
   align-self: stretch;
   grid-template-rows: auto auto minmax(0, 1fr);
   height: 100%;
@@ -222,14 +223,14 @@
   overflow: hidden;
 }
 
-.panelLead {
+:where(.vui-routes-researchroute).panelLead {
   margin: 0;
   color: var(--fg-secondary);
   font-size: 0.8rem;
   line-height: 1.45;
 }
 
-.panelHeader {
+:where(.vui-routes-researchroute).panelHeader {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -237,20 +238,20 @@
   min-width: 0;
 }
 
-.panelHeader h2,
-.guardrailPanel h2 {
+:where(.vui-routes-researchroute).panelHeader h2,
+:where(.vui-routes-researchroute).guardrailPanel h2 {
   margin: 0;
   font-family: var(--font-display);
   font-size: 1rem;
   line-height: 1.2;
 }
 
-.panelHeader svg {
+:where(.vui-routes-researchroute).panelHeader svg {
   flex: 0 0 auto;
   color: var(--accent-cool);
 }
 
-.countPill {
+:where(.vui-routes-researchroute).countPill {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -263,16 +264,16 @@
   color: var(--accent-cool);
   background: color-mix(in srgb, var(--accent-cool) 10%, transparent);
   font-family: var(--font-mono);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
 }
 
-.intakeFields {
+:where(.vui-routes-researchroute).intakeFields {
   display: grid;
   gap: 12px;
   min-width: 0;
 }
 
-.intakeField {
+:where(.vui-routes-researchroute).intakeField {
   display: grid;
   gap: 8px;
   min-width: 0;
@@ -282,19 +283,19 @@
   background: color-mix(in srgb, var(--surface-card) 82%, transparent);
 }
 
-.intakeField_primary {
+:where(.vui-routes-researchroute).intakeField_primary {
   border-color: color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
   background:
     var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-card) 82%, transparent);
 }
 
-.intakeField span {
+:where(.vui-routes-researchroute).intakeField span {
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
 }
 
-.intakeField textarea {
+:where(.vui-routes-researchroute).intakeField textarea {
   width: 100%;
   min-height: 112px;
   max-height: 260px;
@@ -310,31 +311,31 @@
   scrollbar-gutter: stable;
 }
 
-.intakeField_primary textarea {
+:where(.vui-routes-researchroute).intakeField_primary textarea {
   min-height: 156px;
   max-height: 360px;
 }
 
-.intakeField_tall textarea {
+:where(.vui-routes-researchroute).intakeField_tall textarea {
   min-height: 620px;
   max-height: 760px;
 }
 
-.intakeField_medium textarea {
+:where(.vui-routes-researchroute).intakeField_medium textarea {
   min-height: 470px;
   max-height: 640px;
 }
 
-.intakeField:focus-within {
+:where(.vui-routes-researchroute).intakeField:focus-within {
   border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
   box-shadow: var(--vui-shadow-accent);
 }
 
-.intakeField textarea:focus {
+:where(.vui-routes-researchroute).intakeField textarea:focus {
   outline: none;
 }
 
-.sessionList {
+:where(.vui-routes-researchroute).sessionList {
   display: grid;
   gap: 10px;
   max-height: 420px;
@@ -342,7 +343,7 @@
   padding-right: 2px;
 }
 
-.sessionRow {
+:where(.vui-routes-researchroute).sessionRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 42px;
   gap: 0;
@@ -353,13 +354,13 @@
   background: var(--surface-card);
 }
 
-.sessionRow:hover,
-.sessionRow_active {
+:where(.vui-routes-researchroute).sessionRow:hover,
+:where(.vui-routes-researchroute).sessionRow_active {
   border-color: color-mix(in srgb, var(--accent-cool) 40%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-card));
 }
 
-.sessionButton {
+:where(.vui-routes-researchroute).sessionButton {
   display: grid;
   gap: 7px;
   width: 100%;
@@ -373,7 +374,7 @@
   cursor: pointer;
 }
 
-.sessionButton strong {
+:where(.vui-routes-researchroute).sessionButton strong {
   overflow: hidden;
   color: var(--fg-primary);
   display: -webkit-box;
@@ -383,13 +384,13 @@
   -webkit-line-clamp: 3;
 }
 
-.sessionButton span,
-.sessionButton code {
+:where(.vui-routes-researchroute).sessionButton span,
+:where(.vui-routes-researchroute).sessionButton code {
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
-.sessionButton code {
+:where(.vui-routes-researchroute).sessionButton code {
   justify-self: start;
   max-width: 100%;
   overflow: hidden;
@@ -400,7 +401,7 @@
   white-space: nowrap;
 }
 
-.sessionDeleteButton {
+:where(.vui-routes-researchroute).sessionDeleteButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -415,18 +416,18 @@
   cursor: pointer;
 }
 
-.sessionDeleteButton:hover {
+:where(.vui-routes-researchroute).sessionDeleteButton:hover {
   color: var(--state-danger);
   background: color-mix(in srgb, var(--state-danger) 10%, transparent);
 }
 
-.sessionDeleteButton:disabled {
+:where(.vui-routes-researchroute).sessionDeleteButton:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
 
-.stageRail,
-.stageList {
+:where(.vui-routes-researchroute).stageRail,
+:where(.vui-routes-researchroute).stageList {
   display: grid;
   grid-template-columns: 1fr;
   gap: 6px;
@@ -435,7 +436,7 @@
   padding-bottom: 0;
 }
 
-.stageCard {
+:where(.vui-routes-researchroute).stageCard {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(92px, 0.24fr);
   align-items: center;
@@ -449,16 +450,16 @@
   position: relative;
 }
 
-.stageCard_active {
+:where(.vui-routes-researchroute).stageCard_active {
   border-color: color-mix(in srgb, var(--accent-cool) 46%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-card));
 }
 
-.stageCard_compact {
+:where(.vui-routes-researchroute).stageCard_compact {
   grid-template-columns: 1fr;
 }
 
-.stageSelectButton {
+:where(.vui-routes-researchroute).stageSelectButton {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr);
   align-items: center;
@@ -474,13 +475,13 @@
   cursor: pointer;
 }
 
-.stageSelectButton:hover .stageIndex,
-.stageSelectButton[aria-pressed="true"] .stageIndex {
+:where(.vui-routes-researchroute).stageSelectButton:hover .stageIndex,
+:where(.vui-routes-researchroute).stageSelectButton[aria-pressed="true"] .stageIndex {
   color: var(--accent-cool-2);
   background: color-mix(in srgb, var(--accent-cool) 15%, transparent);
 }
 
-.stageIndex {
+:where(.vui-routes-researchroute).stageIndex {
   display: grid;
   grid-template-columns: auto auto;
   place-items: center;
@@ -494,28 +495,28 @@
   background: color-mix(in srgb, var(--accent-cool) 9%, transparent);
 }
 
-.stageIndex span {
+:where(.vui-routes-researchroute).stageIndex span {
   color: var(--fg-tertiary);
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: var(--vui-font-xs);
 }
 
-.stageBody {
+:where(.vui-routes-researchroute).stageBody {
   display: grid;
   grid-template-columns: 1fr;
   align-items: center;
   min-width: 0;
 }
 
-.stageDescription {
+:where(.vui-routes-researchroute).stageDescription {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.35;
 }
 
-.stageHeader,
-.evidenceHeader {
+:where(.vui-routes-researchroute).stageHeader,
+:where(.vui-routes-researchroute).evidenceHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -523,14 +524,14 @@
   min-width: 0;
 }
 
-.stageHeader > div {
+:where(.vui-routes-researchroute).stageHeader > div {
   display: grid;
   gap: 1px;
   min-width: 0;
 }
 
-.stageHeader strong,
-.evidenceHeader strong {
+:where(.vui-routes-researchroute).stageHeader strong,
+:where(.vui-routes-researchroute).evidenceHeader strong {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
@@ -540,36 +541,36 @@
   white-space: nowrap;
 }
 
-.stageHeader small {
+:where(.vui-routes-researchroute).stageHeader small {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.62rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.stageHeader span {
+:where(.vui-routes-researchroute).stageHeader span {
   flex: 0 0 auto;
   color: var(--accent-warm-2);
-  font-size: 0.62rem;
+  font-size: var(--vui-font-xs);
 }
 
-.stageBody .secondaryButton {
+:where(.vui-routes-researchroute).stageBody .secondaryButton {
   justify-self: stretch;
   min-height: 28px;
   padding: 0 7px;
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
 }
 
-.stageBody .secondaryButton span {
+:where(.vui-routes-researchroute).stageBody .secondaryButton span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.stageResult {
+:where(.vui-routes-researchroute).stageResult {
   display: grid;
   grid-template-columns: minmax(220px, 0.85fr) minmax(280px, 1.15fr);
   align-items: stretch;
@@ -581,7 +582,7 @@
   background: color-mix(in srgb, var(--surface-page) 35%, var(--surface-card));
 }
 
-.stageOutput {
+:where(.vui-routes-researchroute).stageOutput {
   display: grid;
   align-content: start;
   gap: 12px;
@@ -590,7 +591,7 @@
   padding-right: 4px;
 }
 
-.stageOutputHeader {
+:where(.vui-routes-researchroute).stageOutputHeader {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);
   align-items: start;
@@ -602,7 +603,7 @@
   background: color-mix(in srgb, var(--surface-panel) 58%, transparent);
 }
 
-.stageOutputHeader > span {
+:where(.vui-routes-researchroute).stageOutputHeader > span {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -613,21 +614,21 @@
   background: color-mix(in srgb, var(--accent-cool) 10%, transparent);
 }
 
-.stageResultSummary {
+:where(.vui-routes-researchroute).stageResultSummary {
   margin: 0;
   color: var(--fg-primary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
   line-height: 1.28;
 }
 
-.stageResultItems {
+:where(.vui-routes-researchroute).stageResultItems {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 5px;
 }
 
-.agentTracePanel {
+:where(.vui-routes-researchroute).agentTracePanel {
   position: relative;
   display: grid;
   gap: 10px;
@@ -638,17 +639,17 @@
   background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
 }
 
-.agentTracePanel_collapsed {
+:where(.vui-routes-researchroute).agentTracePanel_collapsed {
   gap: 0;
   padding-bottom: 8px;
 }
 
-.agentTracePanel_collapsed .agentTraceHeader {
+:where(.vui-routes-researchroute).agentTracePanel_collapsed .agentTraceHeader {
   padding-bottom: 2px;
   border-bottom: 0;
 }
 
-.agentTraceHeader {
+:where(.vui-routes-researchroute).agentTraceHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -658,28 +659,28 @@
   border-bottom: 1px solid var(--border-soft);
 }
 
-.agentTraceHeader > div:first-child {
+:where(.vui-routes-researchroute).agentTraceHeader > div:first-child {
   display: grid;
   gap: 3px;
   min-width: 0;
 }
 
-.agentTraceHeader strong {
+:where(.vui-routes-researchroute).agentTraceHeader strong {
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.84rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.agentTraceHeader span {
+:where(.vui-routes-researchroute).agentTraceHeader span {
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.25;
 }
 
-.agentTraceControls {
+:where(.vui-routes-researchroute).agentTraceControls {
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
@@ -687,7 +688,7 @@
   min-width: 0;
 }
 
-.traceGhostButton {
+:where(.vui-routes-researchroute).traceGhostButton {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -700,26 +701,26 @@
   background: color-mix(in srgb, var(--surface-card) 78%, transparent);
   cursor: pointer;
   font: inherit;
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
-.traceGhostButton span {
+:where(.vui-routes-researchroute).traceGhostButton span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.traceGhostButton:hover {
+:where(.vui-routes-researchroute).traceGhostButton:hover {
   border-color: color-mix(in srgb, var(--accent-cool) 38%, var(--border-soft));
   color: var(--fg-primary);
 }
 
-.traceGhostButton:disabled {
+:where(.vui-routes-researchroute).traceGhostButton:disabled {
   cursor: not-allowed;
   opacity: 0.45;
 }
 
-.agentTraceLivePill {
+:where(.vui-routes-researchroute).agentTraceLivePill {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -729,12 +730,12 @@
   padding: 0 9px;
   color: var(--accent-cool-2);
   background: color-mix(in srgb, var(--accent-cool) 10%, transparent);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
   white-space: nowrap;
 }
 
-.agentTraceTimeline {
+:where(.vui-routes-researchroute).agentTraceTimeline {
   display: grid;
   align-content: start;
   gap: 12px;
@@ -746,15 +747,15 @@
   scrollbar-gutter: stable;
 }
 
-.agentTraceTurn {
+:where(.vui-routes-researchroute).agentTraceTurn {
   display: grid;
   grid-template-columns: 30px minmax(0, 1fr);
   gap: 10px;
   min-width: 0;
 }
 
-.agentTraceAvatar,
-.agentTraceDetailIcon {
+:where(.vui-routes-researchroute).agentTraceAvatar,
+:where(.vui-routes-researchroute).agentTraceDetailIcon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -767,7 +768,7 @@
     var(--vui-gradient-route-soft);
 }
 
-.agentTraceContent {
+:where(.vui-routes-researchroute).agentTraceContent {
   display: grid;
   gap: 7px;
   min-width: 0;
@@ -777,7 +778,7 @@
   background: var(--surface-card);
 }
 
-.agentTraceMeta {
+:where(.vui-routes-researchroute).agentTraceMeta {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -785,41 +786,41 @@
   min-width: 0;
 }
 
-.agentTraceMeta strong {
+:where(.vui-routes-researchroute).agentTraceMeta strong {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.agentTraceMeta time {
+:where(.vui-routes-researchroute).agentTraceMeta time {
   flex: 0 0 auto;
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
-.agentTraceContent p,
-.agentTraceDetailItem p {
+:where(.vui-routes-researchroute).agentTraceContent p,
+:where(.vui-routes-researchroute).agentTraceDetailItem p {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.75rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.45;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
-.agentTraceDetailGroup {
+:where(.vui-routes-researchroute).agentTraceDetailGroup {
   display: grid;
   gap: 8px;
   min-width: 0;
   margin-left: 40px;
 }
 
-.agentTraceDetailSummary {
+:where(.vui-routes-researchroute).agentTraceDetailSummary {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -833,27 +834,27 @@
   background: color-mix(in srgb, var(--surface-card) 78%, transparent);
   cursor: pointer;
   font: inherit;
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
 }
 
-.agentTraceDetailSummary:hover {
+:where(.vui-routes-researchroute).agentTraceDetailSummary:hover {
   color: var(--fg-primary);
   border-color: color-mix(in srgb, var(--accent-warm) 34%, var(--border-soft));
 }
 
-.agentTraceDetailSummary span {
+:where(.vui-routes-researchroute).agentTraceDetailSummary span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.agentTraceDetailSummary em {
+:where(.vui-routes-researchroute).agentTraceDetailSummary em {
   color: var(--fg-tertiary);
   font-style: normal;
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
 }
 
-.agentTraceDetailList {
+:where(.vui-routes-researchroute).agentTraceDetailList {
   position: relative;
   display: grid;
   gap: 6px;
@@ -861,7 +862,7 @@
   padding-left: 16px;
 }
 
-.agentTraceDetailList::before {
+:where(.vui-routes-researchroute).agentTraceDetailList::before {
   content: "";
   position: absolute;
   top: 5px;
@@ -872,7 +873,7 @@
   background: color-mix(in srgb, var(--fg-tertiary) 20%, transparent);
 }
 
-.agentTraceDetailItem {
+:where(.vui-routes-researchroute).agentTraceDetailItem {
   display: grid;
   grid-template-columns: 26px minmax(0, 1fr);
   gap: 8px;
@@ -884,14 +885,14 @@
   background: color-mix(in srgb, var(--surface-card) 72%, transparent);
 }
 
-.agentTraceDetailIcon {
+:where(.vui-routes-researchroute).agentTraceDetailIcon {
   inline-size: 24px;
   block-size: 24px;
   color: var(--fg-secondary);
   background: color-mix(in srgb, var(--surface-page) 60%, transparent);
 }
 
-.traceBackToBottomButton {
+:where(.vui-routes-researchroute).traceBackToBottomButton {
   position: absolute;
   right: 14px;
   bottom: 14px;
@@ -907,15 +908,15 @@
   box-shadow: var(--vui-shadow-soft);
   cursor: pointer;
   font: inherit;
-  font-size: 0.73rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
 }
 
-.traceBackToBottomButton:hover {
+:where(.vui-routes-researchroute).traceBackToBottomButton:hover {
   background: color-mix(in srgb, var(--accent-cool) 12%, var(--surface-card));
 }
 
-.statusSpinner {
+:where(.vui-routes-researchroute).statusSpinner {
   animation: traceSpin 0.9s linear infinite;
 }
 
@@ -925,7 +926,7 @@
   }
 }
 
-.agentTraceBubble {
+:where(.vui-routes-researchroute).agentTraceBubble {
   display: grid;
   grid-template-columns: 52px minmax(0, 1fr);
   gap: 9px;
@@ -936,7 +937,7 @@
   background: var(--surface-card);
 }
 
-.agentTraceBubble > span {
+:where(.vui-routes-researchroute).agentTraceBubble > span {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -945,52 +946,52 @@
   border-radius: 999px;
   color: var(--fg-tertiary);
   background: color-mix(in srgb, var(--surface-page) 60%, transparent);
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
 }
 
-.agentTraceBubble div {
+:where(.vui-routes-researchroute).agentTraceBubble div {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
 
-.agentTraceBubble strong {
+:where(.vui-routes-researchroute).agentTraceBubble strong {
   color: var(--fg-primary);
   font-size: 0.8rem;
   line-height: 1.3;
 }
 
-.agentTraceBubble p {
+:where(.vui-routes-researchroute).agentTraceBubble p {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.42;
   overflow-wrap: anywhere;
 }
 
-.agentTrace_agent {
+:where(.vui-routes-researchroute).agentTrace_agent {
   border-color: color-mix(in srgb, var(--accent-cool) 26%, var(--border-soft));
 }
 
-.agentTrace_tool {
+:where(.vui-routes-researchroute).agentTrace_tool {
   border-color: color-mix(in srgb, var(--accent-warm) 28%, var(--border-soft));
 }
 
-.agentTrace_observation {
+:where(.vui-routes-researchroute).agentTrace_observation {
   border-color: color-mix(in srgb, var(--state-success) 24%, var(--border-soft));
 }
 
-.agentTrace_context {
+:where(.vui-routes-researchroute).agentTrace_context {
   border-color: color-mix(in srgb, var(--fg-tertiary) 18%, var(--border-soft));
 }
 
-.agentTrace_error {
+:where(.vui-routes-researchroute).agentTrace_error {
   border-color: color-mix(in srgb, var(--state-danger) 42%, var(--border-soft));
   background: color-mix(in srgb, var(--state-danger) 9%, var(--surface-card));
 }
 
-.evidenceRequestPanel {
+:where(.vui-routes-researchroute).evidenceRequestPanel {
   display: grid;
   gap: 9px;
   min-width: 0;
@@ -1000,7 +1001,7 @@
   background: color-mix(in srgb, var(--accent-warm) 9%, var(--surface-card));
 }
 
-.evidenceRequestPanel > div {
+:where(.vui-routes-researchroute).evidenceRequestPanel > div {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1008,12 +1009,12 @@
   min-width: 0;
 }
 
-.evidenceRequestPanel strong {
+:where(.vui-routes-researchroute).evidenceRequestPanel strong {
   color: var(--fg-primary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
 }
 
-.evidenceRequestPanel span {
+:where(.vui-routes-researchroute).evidenceRequestPanel span {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1022,30 +1023,30 @@
   border-radius: 999px;
   color: var(--accent-warm-2);
   background: color-mix(in srgb, var(--accent-warm) 16%, transparent);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   font-weight: 800;
 }
 
-.evidenceRequestPanel ul {
+:where(.vui-routes-researchroute).evidenceRequestPanel ul {
   display: grid;
   gap: 5px;
   min-width: 0;
   margin: 0;
   padding-left: 18px;
   color: var(--fg-secondary);
-  font-size: 0.75rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.4;
 }
 
-.evidenceRequestPanel li {
+:where(.vui-routes-researchroute).evidenceRequestPanel li {
   overflow-wrap: anywhere;
 }
 
-.evidenceRequestPanel .secondaryButton {
+:where(.vui-routes-researchroute).evidenceRequestPanel .secondaryButton {
   justify-self: start;
 }
 
-.stageResultItem {
+:where(.vui-routes-researchroute).stageResultItem {
   display: grid;
   align-content: center;
   gap: 2px;
@@ -1057,7 +1058,7 @@
   background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
 }
 
-.stageResultItem strong {
+:where(.vui-routes-researchroute).stageResultItem strong {
   color: var(--fg-tertiary);
   font-size: 0.6rem;
   font-weight: 600;
@@ -1065,10 +1066,10 @@
   text-transform: uppercase;
 }
 
-.stageResultItem em {
+:where(.vui-routes-researchroute).stageResultItem em {
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
   font-style: normal;
   line-height: 1.2;
@@ -1076,7 +1077,7 @@
   white-space: nowrap;
 }
 
-.themeGrid {
+:where(.vui-routes-researchroute).themeGrid {
   display: grid;
   align-content: start;
   gap: 8px;
@@ -1085,7 +1086,7 @@
   padding-right: 4px;
 }
 
-.themeCompareRow {
+:where(.vui-routes-researchroute).themeCompareRow {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr) minmax(156px, 0.34fr) minmax(104px, auto);
   gap: 8px;
@@ -1097,14 +1098,14 @@
   background: var(--surface-card);
 }
 
-.themeCompareRow_selected {
+:where(.vui-routes-researchroute).themeCompareRow_selected {
   border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
   background:
     var(--vui-gradient-route-soft),
     var(--surface-card);
 }
 
-.themeCompareRank {
+:where(.vui-routes-researchroute).themeCompareRank {
   display: grid;
   align-content: center;
   justify-items: center;
@@ -1115,26 +1116,26 @@
   background: color-mix(in srgb, var(--accent-warm) 8%, transparent);
 }
 
-.themeCompareRank span {
+:where(.vui-routes-researchroute).themeCompareRank span {
   color: var(--fg-tertiary);
   font-family: var(--font-mono);
-  font-size: 0.64rem;
+  font-size: var(--vui-font-xs);
 }
 
-.themeCompareRank strong {
+:where(.vui-routes-researchroute).themeCompareRank strong {
   color: var(--accent-warm-2);
   font-family: var(--font-display);
   font-size: 1rem;
   line-height: 1;
 }
 
-.themeCompareMain {
+:where(.vui-routes-researchroute).themeCompareMain {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
 
-.themeCompareHeader {
+:where(.vui-routes-researchroute).themeCompareHeader {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
@@ -1142,48 +1143,48 @@
   min-width: 0;
 }
 
-.themeCompareHeader > div {
+:where(.vui-routes-researchroute).themeCompareHeader > div {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
 
-.themeCompareHeader h3 {
+:where(.vui-routes-researchroute).themeCompareHeader h3 {
   min-width: 0;
   margin: 0;
   overflow: hidden;
   color: var(--fg-primary);
   font-family: var(--font-display);
-  font-size: 0.86rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.themeCompareHeader p,
-.themeCompareQuestion {
+:where(.vui-routes-researchroute).themeCompareHeader p,
+:where(.vui-routes-researchroute).themeCompareQuestion {
   min-width: 0;
   margin: 0;
   overflow: hidden;
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.28;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.themeCompareQuestion {
+:where(.vui-routes-researchroute).themeCompareQuestion {
   color: var(--fg-primary);
 }
 
-.themeCompareTags {
+:where(.vui-routes-researchroute).themeCompareTags {
   display: flex;
   gap: 5px;
   min-width: 0;
   overflow: hidden;
 }
 
-.themeCompareTags code {
+:where(.vui-routes-researchroute).themeCompareTags code {
   min-width: 0;
   overflow: hidden;
   padding: 3px 6px;
@@ -1191,19 +1192,19 @@
   border-radius: 999px;
   color: var(--fg-secondary);
   background: color-mix(in srgb, var(--surface-panel) 78%, transparent);
-  font-size: 0.64rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.themeCompareMetrics {
+:where(.vui-routes-researchroute).themeCompareMetrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
   min-width: 0;
 }
 
-.themeCompareMetrics span {
+:where(.vui-routes-researchroute).themeCompareMetrics span {
   display: grid;
   gap: 1px;
   min-width: 0;
@@ -1213,65 +1214,65 @@
   background: color-mix(in srgb, var(--surface-panel) 76%, transparent);
 }
 
-.themeCompareMetrics strong {
+:where(.vui-routes-researchroute).themeCompareMetrics strong {
   color: var(--fg-primary);
   font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
   line-height: 1;
 }
 
-.themeCompareMetrics em {
+:where(.vui-routes-researchroute).themeCompareMetrics em {
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.58rem;
+  font-size: var(--vui-font-xs);
   font-style: normal;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.themeCompareReview {
+:where(.vui-routes-researchroute).themeCompareReview {
   grid-column: 2 / 4;
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr);
   gap: 6px;
   min-width: 0;
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.28;
 }
 
-.themeCompareReview svg {
+:where(.vui-routes-researchroute).themeCompareReview svg {
   color: var(--accent-cool);
 }
 
-.themeCompareReview span {
+:where(.vui-routes-researchroute).themeCompareReview span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.themeCompareActions {
+:where(.vui-routes-researchroute).themeCompareActions {
   grid-row: span 2;
   display: grid;
   gap: 5px;
   min-width: 0;
 }
 
-.themeCompareActions .primaryButton,
-.themeCompareActions .secondaryButton {
+:where(.vui-routes-researchroute).themeCompareActions .primaryButton,
+:where(.vui-routes-researchroute).themeCompareActions .secondaryButton {
   justify-self: stretch;
   min-height: 28px;
   padding: 0 8px;
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
 }
 
-.themeCompareActions span {
+:where(.vui-routes-researchroute).themeCompareActions span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.themeCard {
+:where(.vui-routes-researchroute).themeCard {
   display: grid;
   grid-template-columns: 56px minmax(0, 1fr);
   gap: 12px;
@@ -1282,14 +1283,14 @@
   background: var(--surface-card);
 }
 
-.themeCard_selected {
+:where(.vui-routes-researchroute).themeCard_selected {
   border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
   background:
     var(--vui-gradient-route-soft),
     var(--surface-card);
 }
 
-.cardPreviewIntro {
+:where(.vui-routes-researchroute).cardPreviewIntro {
   display: grid;
   gap: 7px;
   min-width: 0;
@@ -1299,7 +1300,7 @@
   background: color-mix(in srgb, var(--accent-warm) 7%, transparent);
 }
 
-.cardPreviewIntro > div {
+:where(.vui-routes-researchroute).cardPreviewIntro > div {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1307,21 +1308,21 @@
   min-width: 0;
 }
 
-.cardPreviewIntro strong {
+:where(.vui-routes-researchroute).cardPreviewIntro strong {
   color: var(--fg-primary);
   font-family: var(--font-display);
   font-size: 0.9rem;
 }
 
-.cardPreviewIntro span,
-.cardPreviewIntro p {
+:where(.vui-routes-researchroute).cardPreviewIntro span,
+:where(.vui-routes-researchroute).cardPreviewIntro p {
   margin: 0;
   color: var(--fg-tertiary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.42;
 }
 
-.themeRank {
+:where(.vui-routes-researchroute).themeRank {
   display: grid;
   align-content: center;
   justify-items: center;
@@ -1333,27 +1334,27 @@
   background: color-mix(in srgb, var(--accent-warm) 8%, transparent);
 }
 
-.themeRank span {
+:where(.vui-routes-researchroute).themeRank span {
   color: var(--fg-tertiary);
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
-.themeRank strong {
+:where(.vui-routes-researchroute).themeRank strong {
   color: var(--accent-warm-2);
   font-family: var(--font-display);
   font-size: 1.22rem;
   line-height: 1;
 }
 
-.themeBody,
-.themePlan {
+:where(.vui-routes-researchroute).themeBody,
+:where(.vui-routes-researchroute).themePlan {
   display: grid;
   gap: 10px;
   min-width: 0;
 }
 
-.themeHeader {
+:where(.vui-routes-researchroute).themeHeader {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
@@ -1361,13 +1362,13 @@
   min-width: 0;
 }
 
-.themeHeader > div {
+:where(.vui-routes-researchroute).themeHeader > div {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
 
-.themeHeader h3 {
+:where(.vui-routes-researchroute).themeHeader h3 {
   margin: 0;
   color: var(--fg-primary);
   font-family: var(--font-display);
@@ -1375,31 +1376,31 @@
   line-height: 1.22;
 }
 
-.themeHeader p,
-.questionText,
-.riskText,
-.agentReview p,
-.themePlan p,
-.emptyText,
-.errorText,
-.guardrailPanel p {
+:where(.vui-routes-researchroute).themeHeader p,
+:where(.vui-routes-researchroute).questionText,
+:where(.vui-routes-researchroute).riskText,
+:where(.vui-routes-researchroute).agentReview p,
+:where(.vui-routes-researchroute).themePlan p,
+:where(.vui-routes-researchroute).emptyText,
+:where(.vui-routes-researchroute).errorText,
+:where(.vui-routes-researchroute).guardrailPanel p {
   margin: 0;
   color: var(--fg-secondary);
   font-size: 0.8rem;
   line-height: 1.45;
 }
 
-.questionText {
+:where(.vui-routes-researchroute).questionText {
   color: var(--fg-primary);
 }
 
-.scoreStrip {
+:where(.vui-routes-researchroute).scoreStrip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 7px;
 }
 
-.scoreStrip span {
+:where(.vui-routes-researchroute).scoreStrip span {
   display: grid;
   gap: 2px;
   min-width: 0;
@@ -1409,29 +1410,29 @@
   background: color-mix(in srgb, var(--surface-panel) 76%, transparent);
 }
 
-.scoreStrip strong {
+:where(.vui-routes-researchroute).scoreStrip strong {
   color: var(--fg-primary);
   font-family: var(--font-mono);
-  font-size: 0.86rem;
+  font-size: var(--vui-font-xs);
 }
 
-.scoreStrip em {
+:where(.vui-routes-researchroute).scoreStrip em {
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
   font-style: normal;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.tagRow {
+:where(.vui-routes-researchroute).tagRow {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
 }
 
-.tagRow code {
+:where(.vui-routes-researchroute).tagRow code {
   max-width: 100%;
   overflow: hidden;
   padding: 4px 7px;
@@ -1444,7 +1445,7 @@
   white-space: nowrap;
 }
 
-.agentReview {
+:where(.vui-routes-researchroute).agentReview {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr);
   gap: 8px;
@@ -1455,23 +1456,23 @@
   background: color-mix(in srgb, var(--accent-cool) 7%, transparent);
 }
 
-.agentReview svg {
+:where(.vui-routes-researchroute).agentReview svg {
   color: var(--accent-cool);
 }
 
-.riskText {
+:where(.vui-routes-researchroute).riskText {
   color: var(--fg-tertiary);
 }
 
-.cardActions {
+:where(.vui-routes-researchroute).cardActions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
 }
 
-.primaryButton,
-.secondaryButton {
+:where(.vui-routes-researchroute).primaryButton,
+:where(.vui-routes-researchroute).secondaryButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1481,61 +1482,61 @@
   border-radius: 8px;
   padding: 0 11px;
   font: inherit;
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
   line-height: 1;
   cursor: pointer;
   white-space: nowrap;
 }
 
-.primaryButton {
+:where(.vui-routes-researchroute).primaryButton {
   border: 1px solid color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
   color: var(--surface-page);
   background: var(--accent-cool);
 }
 
-.secondaryButton {
+:where(.vui-routes-researchroute).secondaryButton {
   justify-self: start;
   border: 1px solid var(--border-soft);
   color: var(--fg-secondary);
   background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
 }
 
-.primaryButton:hover:not(:disabled),
-.secondaryButton:hover:not(:disabled) {
+:where(.vui-routes-researchroute).primaryButton:hover:not(:disabled),
+:where(.vui-routes-researchroute).secondaryButton:hover:not(:disabled) {
   filter: brightness(1.05);
 }
 
-.primaryButton:disabled,
-.secondaryButton:disabled {
+:where(.vui-routes-researchroute).primaryButton:disabled,
+:where(.vui-routes-researchroute).secondaryButton:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
 
-.emptyText {
+:where(.vui-routes-researchroute).emptyText {
   padding: 12px;
   border: 1px dashed var(--border-soft);
   border-radius: 8px;
   color: var(--fg-tertiary);
 }
 
-.errorText {
+:where(.vui-routes-researchroute).errorText {
   color: var(--state-danger);
 }
 
-.evidencePanel,
-.agentPanel,
-.outputPanel,
-.guardrailPanel {
+:where(.vui-routes-researchroute).evidencePanel,
+:where(.vui-routes-researchroute).agentPanel,
+:where(.vui-routes-researchroute).outputPanel,
+:where(.vui-routes-researchroute).guardrailPanel {
   max-height: none;
 }
 
-.evidenceList {
+:where(.vui-routes-researchroute).evidenceList {
   display: grid;
   gap: 8px;
   min-width: 0;
 }
 
-.evidenceCard {
+:where(.vui-routes-researchroute).evidenceCard {
   display: grid;
   gap: 7px;
   min-width: 0;
@@ -1545,39 +1546,39 @@
   background: var(--surface-card);
 }
 
-.evidenceCard a {
+:where(.vui-routes-researchroute).evidenceCard a {
   display: grid;
   gap: 2px;
   min-width: 0;
   color: var(--fg-primary);
-  font-size: 0.77rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.35;
   text-decoration: none;
 }
 
-.evidenceCard a:hover {
+:where(.vui-routes-researchroute).evidenceCard a:hover {
   color: var(--accent-cool);
 }
 
-.evidenceCard small,
-.evidenceCard > span {
+:where(.vui-routes-researchroute).evidenceCard small,
+:where(.vui-routes-researchroute).evidenceCard > span {
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
 }
 
-.sourceToggleButton {
+:where(.vui-routes-researchroute).sourceToggleButton {
   justify-self: stretch;
   min-height: 30px;
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
-.agentReport {
+:where(.vui-routes-researchroute).agentReport {
   display: grid;
   gap: 10px;
   min-width: 0;
 }
 
-.agentModeCard {
+:where(.vui-routes-researchroute).agentModeCard {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr);
   gap: 9px;
@@ -1588,7 +1589,7 @@
   background: var(--surface-card);
 }
 
-.agentModeCard > span {
+:where(.vui-routes-researchroute).agentModeCard > span {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1597,37 +1598,37 @@
   border-radius: 8px;
 }
 
-.agentModeCard_live {
+:where(.vui-routes-researchroute).agentModeCard_live {
   border-color: color-mix(in srgb, var(--state-success) 28%, var(--border-soft));
 }
 
-.agentModeCard_live > span {
+:where(.vui-routes-researchroute).agentModeCard_live > span {
   color: var(--state-success);
   background: color-mix(in srgb, var(--state-success) 10%, transparent);
 }
 
-.agentModeCard div {
+:where(.vui-routes-researchroute).agentModeCard div {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
 
-.agentModeCard strong {
+:where(.vui-routes-researchroute).agentModeCard strong {
   color: var(--fg-primary);
-  font-size: 0.84rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.25;
 }
 
-.agentModeCard p,
-.compactList li,
-.okText {
+:where(.vui-routes-researchroute).agentModeCard p,
+:where(.vui-routes-researchroute).compactList li,
+:where(.vui-routes-researchroute).okText {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.42;
 }
 
-.agentModeCard code {
+:where(.vui-routes-researchroute).agentModeCard code {
   justify-self: start;
   max-width: 100%;
   overflow: hidden;
@@ -1635,19 +1636,19 @@
   border: 1px solid var(--border-soft);
   border-radius: 999px;
   color: var(--fg-tertiary);
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.sourceBars {
+:where(.vui-routes-researchroute).sourceBars {
   display: grid;
   grid-template-columns: 1fr;
   gap: 7px;
   min-width: 0;
 }
 
-.sourceBar {
+:where(.vui-routes-researchroute).sourceBar {
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1660,8 +1661,8 @@
   background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
 }
 
-.sourceBar span,
-.sourceBar strong {
+:where(.vui-routes-researchroute).sourceBar span,
+:where(.vui-routes-researchroute).sourceBar strong {
   position: relative;
   z-index: 1;
   min-width: 0;
@@ -1669,19 +1670,19 @@
   line-height: 1.2;
 }
 
-.sourceBar span {
+:where(.vui-routes-researchroute).sourceBar span {
   overflow: hidden;
   color: var(--fg-tertiary);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.sourceBar strong {
+:where(.vui-routes-researchroute).sourceBar strong {
   color: var(--fg-primary);
   font-family: var(--font-mono);
 }
 
-.sourceBar i {
+:where(.vui-routes-researchroute).sourceBar i {
   position: absolute;
   inset-block-end: 0;
   inset-inline-start: 0;
@@ -1691,7 +1692,7 @@
   background: var(--accent-cool);
 }
 
-.compactList {
+:where(.vui-routes-researchroute).compactList {
   display: grid;
   gap: 6px;
   min-width: 0;
@@ -1701,28 +1702,28 @@
   background: var(--surface-card);
 }
 
-.compactList_warning {
+:where(.vui-routes-researchroute).compactList_warning {
   border-color: color-mix(in srgb, var(--state-warning) 28%, var(--border-soft));
   background: color-mix(in srgb, var(--state-warning) 7%, var(--surface-card));
 }
 
-.compactList strong {
+:where(.vui-routes-researchroute).compactList strong {
   color: var(--fg-primary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
 }
 
-.compactList ul {
+:where(.vui-routes-researchroute).compactList ul {
   display: grid;
   gap: 4px;
   margin: 0;
   padding-left: 17px;
 }
 
-.compactList li {
+:where(.vui-routes-researchroute).compactList li {
   overflow-wrap: anywhere;
 }
 
-.okText {
+:where(.vui-routes-researchroute).okText {
   padding: 9px 10px;
   border: 1px solid color-mix(in srgb, var(--state-success) 24%, var(--border-soft));
   border-radius: 8px;
@@ -1730,7 +1731,7 @@
   background: color-mix(in srgb, var(--state-success) 7%, var(--surface-card));
 }
 
-.statePill {
+:where(.vui-routes-researchroute).statePill {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -1740,161 +1741,161 @@
   border: 1px solid currentColor;
   border-radius: 999px;
   background: color-mix(in srgb, currentColor 10%, transparent);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
-.state_ready {
+:where(.vui-routes-researchroute).state_ready {
   color: var(--state-success);
 }
 
-.state_draft {
+:where(.vui-routes-researchroute).state_draft {
   color: var(--accent-warm-2);
 }
 
-.state_blocked {
+:where(.vui-routes-researchroute).state_blocked {
   color: var(--fg-tertiary);
 }
 
-.themePlan section {
+:where(.vui-routes-researchroute).themePlan section {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
 
-.themePlan section strong {
+:where(.vui-routes-researchroute).themePlan section strong {
   color: var(--fg-primary);
   font-size: 0.8rem;
 }
 
-.themePlan ul {
+:where(.vui-routes-researchroute).themePlan ul {
   display: grid;
   gap: 4px;
   margin: 0;
   padding-left: 18px;
   color: var(--fg-secondary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.4;
 }
 
-.guardrailPanel {
+:where(.vui-routes-researchroute).guardrailPanel {
   border-color: color-mix(in srgb, var(--state-warning) 24%, var(--border-soft));
   background: color-mix(in srgb, var(--state-warning) 7%, var(--surface-panel));
 }
 
 @media (max-width: 1580px) {
-  .workspace {
+  :where(.vui-routes-researchroute).workspace {
     grid-template-columns: minmax(250px, 300px) minmax(460px, 1fr) minmax(280px, 340px);
   }
 
-  .sideColumn {
+  :where(.vui-routes-researchroute).sideColumn {
     grid-template-columns: 1fr;
   }
 
-  .stageResultItems {
+  :where(.vui-routes-researchroute).stageResultItems {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 1180px) {
-  .route {
+  :where(.vui-routes-researchroute).route {
     overflow: auto;
   }
 
-  .summaryGrid,
-  .workspace,
-  .sideColumn {
+  :where(.vui-routes-researchroute).summaryGrid,
+  :where(.vui-routes-researchroute).workspace,
+  :where(.vui-routes-researchroute).sideColumn {
     grid-template-columns: 1fr;
   }
 
-  .workspace,
-  .sessionRail,
-  .sideColumn,
-  .pipelinePanel {
+  :where(.vui-routes-researchroute).workspace,
+  :where(.vui-routes-researchroute).sessionRail,
+  :where(.vui-routes-researchroute).sideColumn,
+  :where(.vui-routes-researchroute).pipelinePanel {
     overflow: visible;
   }
 
-  .stageResult {
+  :where(.vui-routes-researchroute).stageResult {
     grid-template-columns: 1fr;
   }
 
-  .stageResultItems {
+  :where(.vui-routes-researchroute).stageResultItems {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .themeCompareRow {
+  :where(.vui-routes-researchroute).themeCompareRow {
     grid-template-columns: 38px minmax(0, 1fr) minmax(132px, 0.3fr);
   }
 
-  .themeCompareActions {
+  :where(.vui-routes-researchroute).themeCompareActions {
     grid-column: 2 / 4;
     grid-row: auto;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .themeCompareReview {
+  :where(.vui-routes-researchroute).themeCompareReview {
     grid-column: 2 / 4;
   }
 }
 
 @media (max-width: 760px) {
-  .header {
+  :where(.vui-routes-researchroute).header {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .headerActions {
+  :where(.vui-routes-researchroute).headerActions {
     justify-content: stretch;
     flex-wrap: wrap;
   }
 
-  .subnav {
+  :where(.vui-routes-researchroute).subnav {
     width: 100%;
     justify-content: stretch;
   }
 
-  .subnavLink {
+  :where(.vui-routes-researchroute).subnavLink {
     flex: 1 1 0;
     min-width: 0;
   }
 
-  .scoreStrip {
+  :where(.vui-routes-researchroute).scoreStrip {
     grid-template-columns: 1fr;
   }
 
-  .stageResultItems {
+  :where(.vui-routes-researchroute).stageResultItems {
     grid-template-columns: 1fr;
   }
 
-  .themeCard,
-  .themeCompareRow,
-  .stageCard {
+  :where(.vui-routes-researchroute).themeCard,
+  :where(.vui-routes-researchroute).themeCompareRow,
+  :where(.vui-routes-researchroute).stageCard {
     grid-template-columns: 1fr;
   }
 
-  .themeCompareRank {
+  :where(.vui-routes-researchroute).themeCompareRank {
     grid-template-columns: auto auto;
     justify-content: start;
     min-height: 34px;
     padding: 0 10px;
   }
 
-  .themeCompareMetrics,
-  .themeCompareActions {
+  :where(.vui-routes-researchroute).themeCompareMetrics,
+  :where(.vui-routes-researchroute).themeCompareActions {
     grid-template-columns: 1fr;
   }
 
-  .themeCompareReview,
-  .themeCompareActions {
+  :where(.vui-routes-researchroute).themeCompareReview,
+  :where(.vui-routes-researchroute).themeCompareActions {
     grid-column: 1;
   }
 
-  .stageSelectButton,
-  .stageBody {
+  :where(.vui-routes-researchroute).stageSelectButton,
+  :where(.vui-routes-researchroute).stageBody {
     grid-template-columns: 1fr;
   }
 
-  .themeRank,
-  .stageIndex {
+  :where(.vui-routes-researchroute).themeRank,
+  :where(.vui-routes-researchroute).stageIndex {
     grid-template-columns: auto auto;
     justify-content: start;
     min-height: 38px;

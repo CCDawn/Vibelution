@@ -4,10 +4,10 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
 import routeSource from "./TeamsRoute.tsx?raw";
-import routeStyles from "./TeamsRoute.module.css";
+import routeStyles from "./TeamsRoute.styles";
 import routerSource from "../app/router.tsx?raw";
 
-const routeStylesSource = readFileSync(new URL("./TeamsRoute.module.css", import.meta.url), "utf-8");
+const routeStylesSource = readFileSync(new URL("./TeamsRoute.legacy.css", import.meta.url), "utf-8");
 
 describe("TeamsRoute layout contract", () => {
   it("uses shell language state without loading the full app dictionary", () => {

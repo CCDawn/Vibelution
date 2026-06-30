@@ -43,7 +43,7 @@ import { useAppI18n } from "../i18n/useAppI18n";
 import { type LogSeverityFilter } from "../logs/logSeverity";
 import { buildLogPackageIndex, logPackageFilePaths, type LogPackageIndexItem } from "./logPackageIndex";
 import { RuntimeScenesPane } from "./RuntimeScenesPane";
-import styles from "./LogsRoute.module.css";
+import styles from "./LogsRoute.styles";
 
 const ROOT_LABEL_KEYS = {
   runtime_scenes: "logsRootRuntimeScenes",

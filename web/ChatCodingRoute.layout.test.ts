@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const chatCss = readFileSync(new URL("./src/routes/ChatCodingRoute.module.css", import.meta.url), "utf-8");
+const chatCss = readFileSync(new URL("./src/routes/ChatCodingRoute.legacy.css", import.meta.url), "utf-8");
 const chatRoute = readFileSync(new URL("./src/routes/ChatCodingRoute.tsx", import.meta.url), "utf-8");
 
 function cssRule(selector: string): string {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return chatCss.match(new RegExp(`${escaped}\\s*\\{[^}]*\\}`, "s"))?.[0] ?? "";
+  return chatCss.match(new RegExp(`[^\\n{]*${escaped}\\s*\\{[^}]*\\}`, "s"))?.[0] ?? "";
 }
 
 describe("ChatCodingRoute layout contract", () => {
