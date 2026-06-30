@@ -379,6 +379,21 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.featureChip).toBeTypeOf("string");
   });
 
+  it("keeps left rail VButton cards from collapsing their internal grid layout", () => {
+    const tokenMetricButtonContentSlot = cssRule(routeCssSource, ':where(.vui-routes-chatcodingroute).tokenStatusMetricButton [data-slot="vui-button-content"]');
+    const tokenMetricButtonLabelSlot = cssRule(routeCssSource, ':where(.vui-routes-chatcodingroute).tokenStatusMetricButton [data-slot="vui-button-label"]');
+    const tokenMetricRule = cssRule(routeCssSource, ".tokenStatusMetric");
+    const featureChipContentSlot = cssRule(routeCssSource, '.featureChip [data-slot="vui-button-content"]');
+    const featureChipLabelSlot = cssRule(routeCssSource, '.featureChip [data-slot="vui-button-label"]');
+
+    expect(tokenMetricRule).toContain("grid-template-columns: 54px minmax(0, 1fr)");
+    expect(tokenMetricButtonContentSlot).toContain("display: contents");
+    expect(tokenMetricButtonLabelSlot).toContain("display: contents");
+    expect(featureChipContentSlot).toContain("min-width: 0");
+    expect(featureChipContentSlot).toContain("width: 100%");
+    expect(featureChipLabelSlot).toContain("overflow: hidden");
+  });
+
   it("keeps group settings in the left rail and moves member status into the right index", () => {
     expect(routeSource).toContain("expandedGroupAgentSessionIds");
     expect(routeSource).toContain("useQueries");
