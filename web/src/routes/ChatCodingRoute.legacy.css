@@ -646,6 +646,14 @@
   cursor: default;
 }
 
+:where(.vui-routes-chatcodingroute).tokenStatusMetricButton [data-slot="vui-button-content"] {
+  display: contents;
+}
+
+:where(.vui-routes-chatcodingroute).tokenStatusMetricButton [data-slot="vui-button-label"] {
+  display: contents;
+}
+
 :where(.vui-routes-chatcodingroute).tokenStatusMetric_cache {
   --token-status-accent: var(--accent-cool);
 }
