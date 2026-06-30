@@ -321,6 +321,10 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(stylesSource).toContain(".supervisedWorkflowCardCurrent");
     expect(stylesSource).toContain(".supervisedWorkflowFollowButton");
     expect(stylesSource).toContain(".supervisedWorkflowLivePreview");
+    expect(styles.supervisedWorkflowCardGrid).toContain("grid-cols-[repeat(4,minmax(168px,1fr))]");
+    expect(styles.supervisedWorkflowCard).toContain("min-h-[112px]");
+    expect(styles.supervisedWorkflowCardButton).toContain("grid-rows-[auto_auto_minmax(0,1fr)]");
+    expect(styles.supervisedWorkflowLivePreview).toContain("line-clamp-2");
   });
 
   it("uses full supervised workflow session details for the conversation surface", () => {

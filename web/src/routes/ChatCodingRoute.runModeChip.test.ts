@@ -15,10 +15,13 @@ describe("ChatCodingRoute run mode chip visual contract", () => {
   });
 
   it("does not collapse VButton slot spans inside run mode chips", () => {
+    expect(styles.featureChipRow).toContain("grid-cols-2");
+    expect(styles.featureChip).toContain("!w-full");
     expect(styles.featureChip).toContain("[&_[data-slot=vui-button-content]]:min-w-0");
     expect(styles.featureChip).toContain("[&_[data-slot=vui-button-content]]:max-w-full");
     expect(styles.featureChip).toContain("[&_[data-slot=vui-button-label]]:min-w-0");
-    expect(styles.featureChip).toContain("[&_[data-slot=vui-button-label]]:overflow-hidden");
+    expect(styles.featureChip).toContain("[&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto]");
+    expect(styles.featureChip).toContain("[&_em]:shrink-0");
     expect(styles.featureChip).toContain("[&_strong]:truncate");
     expect(styles.featureChip).toContain("[&_strong]:whitespace-nowrap");
     expect(styles.featureChip).not.toContain("overflow-wrap:anywhere");

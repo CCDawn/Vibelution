@@ -476,11 +476,12 @@ const styles = createVuiStyleMap(styleKeys, {
     conversationMetaTime: "max-w-[min(164px,68%)] [&_time]:flex-none [&_time]:overflow-visible [&_time]:text-clip",
     conversationTitleRow: "grid grid-cols-[minmax(0,1fr)_fit-content(92px)] max-w-full",
     featureChip:
-      "relative [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-content]]:max-w-full [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:overflow-hidden before:content-[''] before:h-1.5 before:w-1.5 before:shrink-0 before:rounded-full before:bg-[var(--fg-tertiary)] [&_strong]:truncate [&_strong]:whitespace-nowrap",
+      "relative !grid !w-full grid-cols-[auto_minmax(0,1fr)] justify-start gap-1.5 px-1.5 [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-content]]:max-w-full [&_[data-slot=vui-button-content]]:!w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1 before:content-[''] before:h-1.5 before:w-1.5 before:shrink-0 before:rounded-full before:bg-[var(--fg-tertiary)] [&_em]:shrink-0 [&_em]:not-italic [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:whitespace-nowrap",
     featureChipActive:
       "border-[color-mix(in_srgb,var(--accent-cool)_38%,var(--vui-border-subtle))] text-[var(--fg-primary)] before:bg-[var(--accent-cool)]",
     featureChipPrimary:
       "border-[color-mix(in_srgb,var(--accent-warm)_32%,var(--vui-border-subtle))] before:bg-[var(--accent-warm-2)]",
+    featureChipRow: "!grid grid-cols-2 gap-1.5 overflow-visible rounded-none border-0 bg-transparent p-0",
     inlineMetaPill: "[&_strong]:truncate [&_strong]:whitespace-nowrap",
     layout:
       "grid-cols-[minmax(0,min(var(--chat-left-pane-width,0px),24vw))_minmax(360px,1fr)_minmax(0,min(var(--chat-right-pane-width,0px),22vw))] max-[980px]:grid-cols-[minmax(0,min(var(--chat-left-pane-width,0px),24vw))_minmax(280px,1fr)_minmax(0,min(var(--chat-right-pane-width,0px),22vw))]",
@@ -489,15 +490,15 @@ const styles = createVuiStyleMap(styleKeys, {
     sessionContextMenuItem:
       "[&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents [&_[data-slot=vui-button-label]]:col-span-full",
     sessionItemActive: "shadow-[var(--vui-shadow-inset-accent)]",
-    tokenStatusCopy: "min-w-0 overflow-hidden",
-    tokenStatusLabel: "block truncate whitespace-nowrap",
-    tokenStatusMeta: "block truncate whitespace-nowrap",
+    tokenStatusCopy: "min-w-0 overflow-visible [overflow-wrap:anywhere]",
+    tokenStatusLabel: "block max-w-full whitespace-normal text-[11px] leading-[1.12]",
+    tokenStatusMeta: "block max-w-full line-clamp-2 whitespace-normal leading-[1.14]",
     tokenStatusMetric:
-      "!grid min-h-[54px] !w-full grid-cols-[42px_minmax(0,1fr)] items-center justify-stretch gap-1.5 overflow-hidden rounded-[var(--radius-control)]",
+      "!grid min-h-[62px] !w-full grid-cols-[38px_minmax(0,1fr)] items-center justify-stretch gap-1.5 overflow-visible rounded-[var(--radius-control)] px-1.5 py-1",
     tokenStatusMetricButton:
       "!grid !w-full [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
-    tokenStatusRing: "relative size-[42px] shrink-0 bg-[conic-gradient(var(--accent-cool)_calc(var(--token-status-value)*1%),var(--vui-border-subtle)_0)]",
-    tokenStatusRingCore: "max-w-[34px] truncate text-[10px] leading-none",
+    tokenStatusRing: "relative size-[38px] shrink-0 bg-[conic-gradient(var(--accent-cool)_calc(var(--token-status-value)*1%),var(--vui-border-subtle)_0)]",
+    tokenStatusRingCore: "max-w-[32px] truncate text-[10px] leading-none",
     tokenStatusVisualGrid: "!grid !w-full grid-cols-1 justify-stretch gap-1.5 rounded-[var(--radius-control)]",
     tokenStatusBar: "[&>span]:w-[calc(var(--token-status-value)*1%)]",
   },
