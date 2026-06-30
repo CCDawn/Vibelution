@@ -3214,8 +3214,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         return (
                           <article key={item.name} className={styles.datasetCatalogItem}>
                             <div className={styles.datasetCatalogItemMain}>
-                              <strong title={item.name}>{item.name}</strong>
-                              <span>{item.benchmarkFamily || item.taskType || item.bundleName || "--"}</span>
+                              <span className={styles.datasetCatalogItemTitle}>
+                                <strong title={item.name}>{item.name}</strong>
+                                <span>{item.benchmarkFamily || item.taskType || item.bundleName || "--"}</span>
+                              </span>
                             </div>
                             <span className={styles.datasetCatalogStatus}>{statusText}</span>
                             {reason ? (

@@ -106,6 +106,9 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(dictionarySource).toContain('datasetCatalog: "评测集目录"');
     expect(dictionarySource).toContain('datasetCatalogHiddenReason: "隐藏原因"');
     expect(stylesSource).toContain(".datasetCatalogPanel");
+    expect(routeSource).toContain("styles.datasetCatalogItemTitle");
+    expect(styles.datasetCatalogItemTitle).toContain("inline-flex");
+    expect(styles.datasetCatalogItemTitle).toContain("gap-x-2");
   });
 
   it("separates inconclusive terminal status and harness-only datasets from success wording", () => {
