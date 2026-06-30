@@ -17826,6 +17826,7 @@ def _set_session_live_output(
     assistant_delta_state: SessionLiveOutputState | None = None
     checkpoint_snapshot: SessionLiveOutputState | None = None
     delete_checkpoint = False
+    feedback_events_changed = feedback_events is not _UNSET
     publish_full_snapshot = not (
         stage is _UNSET
         and mental_snapshot is _UNSET
@@ -17935,7 +17936,11 @@ def _set_session_live_output(
     elif checkpoint_snapshot is not None:
         _write_session_live_output_checkpoint(session_id, checkpoint_snapshot)
     if assistant_delta_state is not None:
-        _publish_session_assistant_delta(session_id, assistant_delta_state)
+        _publish_session_assistant_delta(
+            session_id,
+            assistant_delta_state,
+            include_feedback_events=feedback_events_changed,
+        )
     if publish_full_snapshot:
         _publish_session_detail_snapshot(session_id)
 
@@ -19927,6 +19932,7 @@ def _publish_session_assistant_delta(
     state: SessionLiveOutputState,
     *,
     done: bool = False,
+    include_feedback_events: bool = True,
 ) -> None:
     started_at = _perf_counter()
     with _SESSION_STREAM_SUBSCRIBERS_LOCK:
@@ -19945,10 +19951,11 @@ def _publish_session_assistant_delta(
         "thoughtDelta": str(state.thought_delta or ""),
         "replaceContent": bool(state.replace_content),
         "replaceThought": bool(state.replace_thought),
-        "feedbackEvents": list(state.feedback_events or []),
         "updatedAt": str(state.updated_at or "").strip() or _now_timestamp(),
         "done": bool(done),
     }
+    if include_feedback_events:
+        event["feedbackEvents"] = list(state.feedback_events or [])
     recovery_event = _assistant_delta_recovery_stream_event(
         {
             **event,

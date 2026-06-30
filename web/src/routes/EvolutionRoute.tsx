@@ -115,6 +115,22 @@ type EvolutionRouteProps = {
 const SELF_OVERVIEW_REFETCH_INTERVAL_MS = 12_000;
 const SELF_OVERVIEW_STALE_TIME_MS = 10_000;
 
+function isSessionNotFoundError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /session not found|会话不存在|未找到会话/i.test(message);
+}
+
+function describeSessionLoadError(error: unknown, lang: string) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (isSessionNotFoundError(error)) {
+    return lang === "zh" ? "会话记录不存在或已被清理。" : "The conversation record no longer exists.";
+  }
+  if (message) {
+    return lang === "zh" ? `会话加载失败：${message}` : `Conversation failed to load: ${message}`;
+  }
+  return lang === "zh" ? "会话加载失败。" : "Conversation failed to load.";
+}
+
 type SupervisedSourceOption =
   | {
       value: string;
@@ -777,6 +793,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [liveLaunchCollapsed, setLiveLaunchCollapsed] = useState(false);
   const [liveRunCollapsed, setLiveRunCollapsed] = useState(false);
   const [expandedCaseTraceItems, setExpandedCaseTraceItems] = useState<Record<string, boolean>>({});
+  const [missingWorkflowSessionIds, setMissingWorkflowSessionIds] = useState<Record<string, boolean>>({});
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
     queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
@@ -1493,12 +1510,53 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const selectedWorkflowSessionPollingActive =
     supervisedPrimaryRunning
     || ["queued", "running", "paused", "stopping"].includes(String(supervisedSelectedWorkflowStep.status || "").trim().toLowerCase());
+  const selectedWorkflowSessionMissing = Boolean(
+    selectedWorkflowConversationSessionKey
+    && missingWorkflowSessionIds[selectedWorkflowConversationSessionKey],
+  );
   const selectedWorkflowSessionDetailQuery = useQuery({
     queryKey: queryKeys.session(selectedWorkflowConversationSessionKey || "none"),
-    enabled: supervisedTrackQueriesEnabled && Boolean(selectedWorkflowConversationSessionKey),
+    enabled: supervisedTrackQueriesEnabled && Boolean(selectedWorkflowConversationSessionKey) && !selectedWorkflowSessionMissing,
     queryFn: () => fetchJson<SessionDetail>(`/api/sessions/${selectedWorkflowConversationSessionKey}`),
     refetchInterval: resolvePollingInterval(pageVisible, selectedWorkflowSessionPollingActive ? 2_000 : 8_000),
+    retry: (failureCount, error) => !isSessionNotFoundError(error) && failureCount < 2,
   });
+  useEffect(() => {
+    const sessionKey = selectedWorkflowConversationSessionKey;
+    if (!sessionKey || !selectedWorkflowSessionDetailQuery.isError || !isSessionNotFoundError(selectedWorkflowSessionDetailQuery.error)) {
+      return;
+    }
+    setMissingWorkflowSessionIds((current) => (
+      current[sessionKey] ? current : { ...current, [sessionKey]: true }
+    ));
+  }, [
+    selectedWorkflowConversationSessionKey,
+    selectedWorkflowSessionDetailQuery.error,
+    selectedWorkflowSessionDetailQuery.isError,
+  ]);
+  useEffect(() => {
+    const sessionKey = selectedWorkflowConversationSessionKey;
+    if (!sessionKey || !selectedWorkflowSessionDetailQuery.data || !missingWorkflowSessionIds[sessionKey]) {
+      return;
+    }
+    setMissingWorkflowSessionIds((current) => {
+      if (!current[sessionKey]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[sessionKey];
+      return next;
+    });
+  }, [
+    missingWorkflowSessionIds,
+    selectedWorkflowConversationSessionKey,
+    selectedWorkflowSessionDetailQuery.data,
+  ]);
+  const selectedWorkflowSessionErrorMessage =
+    selectedWorkflowConversationSessionKey
+    && (selectedWorkflowSessionMissing || selectedWorkflowSessionDetailQuery.isError)
+      ? describeSessionLoadError(selectedWorkflowSessionDetailQuery.error, lang)
+      : "";
   const selectedWorkflowSessionMessages = selectedWorkflowSessionDetailQuery.data?.messages ?? [];
   const selectedWorkflowSnapshotMessages: ConversationMessage[] =
     supervisedSelectedWorkflowStep.conversationMessages?.length
@@ -1516,7 +1574,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           : [];
   const selectedWorkflowHasConversationMessages =
     selectedWorkflowConversationMessages.length > 0
-    || Boolean(selectedWorkflowConversationSessionKey);
+    || Boolean(selectedWorkflowConversationSessionKey && !selectedWorkflowSessionErrorMessage);
   const selectedWorkflowAssistantName =
     supervisedSelectedWorkflowStep.member?.name
     || monitoredRun?.currentAgentBinding?.displayName
@@ -3822,6 +3880,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     {approvalWorktreeActionMutation.error?.message ? (
                       <p className={styles.errorTextCompact}>{approvalWorktreeActionMutation.error.message}</p>
                     ) : null}
+                  </div>
+                ) : selectedWorkflowSessionErrorMessage ? (
+                  <div className={styles.ioStack}>
+                    <div className={styles.caseConversationFallback}>{selectedWorkflowSessionErrorMessage}</div>
                   </div>
                 ) : selectedWorkflowHasConversationMessages ? (
                   <div className={styles.ioStack}>

@@ -1086,12 +1086,18 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("pendingTextLength: String(projectedLayer?.content ?? \"\").length + String(projectedLayer?.thought ?? \"\").length");
   });
 
-  it("backs off index polling when detail streams are connected", () => {
+  it("backs off index polling when detail streams own live queries", () => {
     expect(routeSource).toContain("const ACTIVE_INDEX_POLL_MS = 3_000");
     expect(routeSource).toContain("const directSessionPanelActive = Boolean(activeSessionId) && !groupPanelActive");
-    expect(routeSource).toContain("sessionStreamConnected && directSessionPanelActive ? false : ACTIVE_INDEX_POLL_MS");
-    expect(routeSource).toContain("groupStreamConnected && legacyGroupRoomActive");
-    expect(routeSource).toContain("directSessionPanelActive ? false : ACTIVE_INDEX_POLL_MS");
+    expect(routeSource).toContain("const sessionStreamAvailable = typeof EventSource !== \"undefined\"");
+    expect(routeSource).toContain("const directSessionStreamOwnsLiveQueries = Boolean(");
+    expect(routeSource).toContain("&& sessionStreamShouldConnect");
+    expect(routeSource).toContain("&& directSessionPanelActive");
+    expect(routeSource).toContain("const groupStreamOwnsLiveQueries = Boolean(");
+    expect(routeSource).toContain("&& groupStreamShouldConnect");
+    expect(routeSource).toContain("&& legacyGroupRoomActive");
+    expect(routeSource).toContain("directSessionStreamOwnsLiveQueries ? false : ACTIVE_INDEX_POLL_MS");
+    expect(routeSource).toContain("directSessionStreamOwnsLiveQueries ? false : 3_000");
     expect(routeSource).toContain("mergeSessionDetailIntoConversations(conversations, detail)");
   });
 
@@ -1122,8 +1128,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(sessionStreamEffectSource).not.toContain("directSessionBackgroundSyncActive,");
     expect(sessionStreamEffectSource).not.toContain("pageVisible,");
     expect(routeSource).toContain("if (!groupStreamShouldConnect || typeof EventSource === \"undefined\")");
-    expect(routeSource).toContain("backgroundMs: directSessionBackgroundSyncActive && !sessionStreamConnected ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false");
-    expect(routeSource).toContain("backgroundMs: groupBackgroundSyncActive && !groupStreamConnected ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false");
+    expect(routeSource).toContain("backgroundMs: directSessionBackgroundSyncActive && !directSessionStreamOwnsLiveQueries ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false");
+    expect(routeSource).toContain("groupBackgroundSyncActive && !groupStreamOwnsLiveQueries");
     expect(routeSource).toContain("refetchIntervalInBackground: chatStartupWarmupActive || directSessionBackgroundSyncActive");
     expect(routeSource).toContain("refetchIntervalInBackground: chatStartupWarmupActive || groupBackgroundSyncActive");
   });

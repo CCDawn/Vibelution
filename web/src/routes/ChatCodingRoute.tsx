@@ -2299,6 +2299,17 @@ export function ChatCodingRoute() {
     && activeGroupRoomId
     && (chatPollingVisible || groupBackgroundSyncActive),
   );
+  const sessionStreamAvailable = typeof EventSource !== "undefined";
+  const directSessionStreamOwnsLiveQueries = Boolean(
+    sessionStreamAvailable
+    && sessionStreamShouldConnect
+    && directSessionPanelActive,
+  );
+  const groupStreamOwnsLiveQueries = Boolean(
+    sessionStreamAvailable
+    && groupStreamShouldConnect
+    && legacyGroupRoomActive,
+  );
   useEffect(() => {
     if (!legacyGroupRoomActive && rightIndexPanel === "members") {
       setRightIndexPanel("conversations");
@@ -2341,8 +2352,8 @@ export function ChatCodingRoute() {
     queryText: sessionQueryText,
     refetchInterval: resolvePollingInterval(
       chatPollingVisible,
-      sessionStreamConnected && directSessionPanelActive ? false : ACTIVE_INDEX_POLL_MS,
-      { backgroundMs: directSessionBackgroundSyncActive && !sessionStreamConnected ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false },
+      directSessionStreamOwnsLiveQueries ? false : ACTIVE_INDEX_POLL_MS,
+      { backgroundMs: directSessionBackgroundSyncActive && !directSessionStreamOwnsLiveQueries ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false },
     ),
     refetchIntervalInBackground: chatStartupWarmupActive || directSessionBackgroundSyncActive,
   });
@@ -2363,13 +2374,13 @@ export function ChatCodingRoute() {
     enabled: secondaryChatDataEnabled,
     refetchInterval: resolvePollingInterval(
       chatPollingVisible,
-      (sessionStreamConnected && directSessionPanelActive) || (groupStreamConnected && legacyGroupRoomActive)
+      directSessionStreamOwnsLiveQueries || groupStreamOwnsLiveQueries
         ? false
         : ACTIVE_INDEX_POLL_MS,
       {
         backgroundMs:
-          (directSessionBackgroundSyncActive && !sessionStreamConnected)
-          || (groupBackgroundSyncActive && !groupStreamConnected)
+          (directSessionBackgroundSyncActive && !directSessionStreamOwnsLiveQueries)
+          || (groupBackgroundSyncActive && !groupStreamOwnsLiveQueries)
             ? ACTIVE_BACKGROUND_SYNC_POLL_MS
             : false,
       },
@@ -2606,8 +2617,8 @@ export function ChatCodingRoute() {
     refetchInterval: activeSessionId
       ? resolvePollingInterval(
           chatPollingVisible,
-          sessionStreamConnected ? false : 3_000,
-          { backgroundMs: directSessionBackgroundSyncActive && !sessionStreamConnected ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false },
+          directSessionStreamOwnsLiveQueries ? false : 3_000,
+          { backgroundMs: directSessionBackgroundSyncActive && !directSessionStreamOwnsLiveQueries ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false },
         )
       : false,
     refetchIntervalInBackground: chatStartupWarmupActive || directSessionBackgroundSyncActive,
@@ -2678,8 +2689,8 @@ export function ChatCodingRoute() {
     refetchInterval: activeRootSessionId
       ? resolvePollingInterval(
           chatPollingVisible,
-          sessionStreamConnected ? false : ACTIVE_INDEX_POLL_MS,
-          { backgroundMs: directSessionBackgroundSyncActive && !sessionStreamConnected ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false },
+          directSessionStreamOwnsLiveQueries ? false : ACTIVE_INDEX_POLL_MS,
+          { backgroundMs: directSessionBackgroundSyncActive && !directSessionStreamOwnsLiveQueries ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false },
         )
       : false,
     refetchIntervalInBackground: chatStartupWarmupActive || directSessionBackgroundSyncActive,
