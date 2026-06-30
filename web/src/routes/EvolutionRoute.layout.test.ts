@@ -414,14 +414,16 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(styles.supervisedRunConsoleGrid).toContain("minmax(300px,var(--evolution-live-launch-width,348px))");
     expect(styles.supervisedRunConsoleGrid).toContain("minmax(300px,var(--evolution-live-run-width,360px))");
     expect(styles.supervisedRunConsole).toContain("[container-type:inline-size]");
-    expect(styles.supervisedRunConsoleGrid).toContain("grid-rows-[minmax(0,1fr)]");
+    expect(styles.supervisedRunConsoleGrid).toContain("grid-rows-[max-content]");
+    expect(styles.supervisedRunConsoleGrid).toContain("items-start");
     expect(stylesSource).not.toContain("grid-template-rows: minmax(0, auto) minmax(0, 0.9fr) minmax(150px, 0.82fr)");
     expect(stylesSource).not.toContain("grid-template-rows: minmax(0, auto) minmax(156px, 0.86fr) minmax(150px, 0.74fr)");
     expect(stylesSource).not.toContain("max-height: min(430px, 60vh)");
     expect(styles.noticeText).toContain("max-[1200px]:hidden");
     expect(styles.sourceInventoryBar).toContain("max-[1200px]:hidden");
     expect(styles.sourceMetaCompact).toContain("max-[1200px]:hidden");
-    expect(styles.supervisedRunSetup).toContain("max-h-[min(118px,22vh)]");
+    expect(styles.supervisedRunSetup).toContain("max-h-none");
+    expect(styles.supervisedRunSetup).toContain("overflow-visible");
     expect(styles.supervisedMembersList).toContain("max-h-[min(238px,34vh)]");
     expect(styles.supervisedMemberRow).toContain("min-h-[34px]");
     expect(styles.supervisedMemberRow).not.toContain("min-h-[40px]");
@@ -460,8 +462,8 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("keeps supervised launch from reserving an empty worktree-review track", () => {
-    expect(styles.liveLaunchStack).toContain("grid-rows-[minmax(0,1fr)]");
-    expect(styles.liveLaunchStack).toContain("overflow-hidden");
+    expect(styles.liveLaunchStack).toContain("grid-rows-[max-content]");
+    expect(styles.liveLaunchStack).toContain("overflow-visible");
     expect(styles.launchSurface).toContain("max-h-none");
     expect(stylesSource).not.toContain("max-height: min(430px, 60vh)");
     expect(stylesSource).not.toContain(".worktreeReviewSurface");
