@@ -17469,6 +17469,56 @@ def _source_collection_stage_session_task_turn_result(agent_id: str, session_id:
         if _trim_text(item.get("sessionId"), max_length=160) != session_id:
             continue
         return item
+    ledger_result = _source_collection_stage_session_task_turn_journal_result(session_id, turn_id)
+    if ledger_result:
+        return ledger_result
+    return {}
+
+
+def _source_collection_stage_session_task_turn_journal_result(session_id: str, turn_id: str) -> dict[str, Any]:
+    try:
+        events = load_conversation_events(_project_root(), session_id)
+    except Exception:
+        return {}
+    normalized_turn_id = _trim_text(turn_id, max_length=200)
+    if not normalized_turn_id:
+        return {}
+    for event in reversed(events):
+        event_turn_id = _trim_text(getattr(event, "turn_id", ""), max_length=200)
+        if event_turn_id != normalized_turn_id:
+            continue
+        event_type = _trim_text(getattr(event, "event_type", ""), max_length=80)
+        status = _trim_text(getattr(event, "status", ""), max_length=80).lower()
+        payload = getattr(event, "payload", {})
+        if not isinstance(payload, dict):
+            payload = {}
+        next_status = ""
+        fallback_summary = ""
+        if event_type == "turn_interrupted" or (
+            event_type == "assistant_message" and status in {"cancelled", "canceled", "stopped", "superseded"}
+        ):
+            next_status = "stopped"
+            fallback_summary = "Agent 私聊已停止。"
+        elif event_type == "turn_failed" or (event_type == "assistant_message" and status in {"failed", "error"}):
+            next_status = "failed"
+            fallback_summary = "Agent 私聊执行失败。"
+        if not next_status:
+            continue
+        return {
+            "eventId": _trim_text(getattr(event, "event_id", ""), max_length=160),
+            "runId": normalized_turn_id,
+            "sessionId": _trim_text(session_id, max_length=160),
+            "status": next_status,
+            "summary": (
+                _trim_text(payload.get("summary"), max_length=500)
+                or _trim_text(payload.get("content"), max_length=500)
+                or _trim_text(payload.get("error"), max_length=500)
+                or _trim_text(payload.get("reason"), max_length=500)
+                or fallback_summary
+            ),
+            "createdAt": _trim_text(getattr(event, "timestamp", ""), max_length=120),
+            "source": "conversation_ledger",
+        }
     return {}
 
 
