@@ -37,7 +37,7 @@ import {
   type GitFilter,
 } from "./gitRouteLogic";
 import { clampPaneWidth, keyboardPaneWidth, storedPaneWidth } from "./resizablePane";
-import styles from "./GitRoute.module.css";
+import { gitRouteStyles as styles } from "./GitRoute.styles";
 
 const GIT_CHANGE_PANEL_WIDTH_KEY = "vibelution.git.change-panel-width";
 const GIT_CHANGE_PANEL_BOUNDS = { min: 260, max: 520 };

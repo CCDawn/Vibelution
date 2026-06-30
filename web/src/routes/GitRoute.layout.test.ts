@@ -1,15 +1,13 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { dictionary } from "../i18n/dictionary";
 import routeSource from "./GitRoute.tsx?raw";
+import stylesSource from "./GitRoute.styles.ts?raw";
 import diffViewSource from "./GitDiffView.tsx?raw";
 import logicSource from "./gitRouteLogic.ts?raw";
 import { gitRouteDictionary } from "./gitRouteI18n";
 import gitRouteI18nSource from "./gitRouteI18n.ts?raw";
 import shellDictionarySource from "../i18n/shellDictionary.ts?raw";
-
-const stylesSource = readFileSync(new URL("./GitRoute.module.css", import.meta.url), "utf-8");
 
 describe("GitRoute layout contract", () => {
   it("routes Git page controls through VUI primitives", () => {
@@ -89,27 +87,26 @@ describe("GitRoute layout contract", () => {
     expect(routeSource).toContain('kind: "worktree"');
     expect(routeSource).toContain('kind: "commit"');
     expect(routeSource).toContain("objectDetailQuery");
-    expect(stylesSource).toContain("grid-template-columns: minmax(340px, 0.9fr) minmax(500px, 1.18fr) minmax(270px, 0.62fr)");
-    expect(stylesSource).toContain(".objectDetailPanel");
-    expect(stylesSource).toContain(".objectItemActive");
+    expect(stylesSource).toContain("grid-cols-[minmax(340px,0.9fr)_minmax(500px,1.18fr)_minmax(270px,0.62fr)]");
+    expect(stylesSource).toContain("objectDetailPanel:");
+    expect(stylesSource).toContain("objectItemActive:");
   });
 
   it("keeps the clean Git overview history panel single-column at narrow desktop widths", () => {
-    expect(stylesSource).toContain(".workspace.workspaceOverview .historyPanel");
-    expect(stylesSource).toContain("grid-template-columns: 1fr");
-    expect(stylesSource).toContain("grid-template-rows: auto minmax(0, 1fr)");
+    expect(stylesSource).toContain("historyPanel:");
+    expect(stylesSource).toContain("max-[1200px]:[.workspaceOverview_&]:grid-cols-1");
+    expect(stylesSource).toContain("max-[1200px]:[.workspaceOverview_&]:grid-rows-[auto_minmax(0,1fr)]");
   });
 
   it("keeps manual commit controls compact and moves helper copy to hover", () => {
-    const manualCommitStyles = stylesSource.slice(stylesSource.indexOf(".manualCommitPanel"));
-    const actionStyles = stylesSource.slice(stylesSource.indexOf(".commitActions"));
+    const manualCommitStyles = stylesSource.slice(stylesSource.indexOf("manualCommitPanel:"));
+    const actionStyles = stylesSource.slice(stylesSource.indexOf("commitActions:"));
 
-    expect(manualCommitStyles).toContain("max-height: min(100%, calc(100dvh - 190px))");
-    expect(manualCommitStyles).toContain("overflow: auto");
-    expect(actionStyles).toContain("grid-template-columns: repeat(2, max-content)");
-    expect(actionStyles).toContain("justify-content: end");
-    expect(actionStyles).toContain(".commitActions .secondaryButton");
-    expect(actionStyles).toContain("width: fit-content");
+    expect(manualCommitStyles).toContain("max-h-[min(100%,calc(100dvh-190px))]");
+    expect(manualCommitStyles).toContain("overflow-auto");
+    expect(actionStyles).toContain("grid-cols-[repeat(2,max-content)]");
+    expect(actionStyles).toContain("justify-end");
+    expect(actionStyles).toContain("[&_.secondaryButton]:w-fit");
     expect(routeSource).toContain('title={t("gitAiPromptHint")}');
     expect(routeSource).toContain('title={t("gitCommitHint")}');
     expect(routeSource).not.toContain('<span>{t("gitAiPromptHint")}</span>');
@@ -117,21 +114,23 @@ describe("GitRoute layout contract", () => {
   });
 
   it("keeps Git workspaces from forcing tall empty mobile stacks", () => {
-    const mobileWorkspaceStyles = stylesSource.slice(stylesSource.indexOf("@media (max-width: 860px)"));
+    expect(stylesSource).toContain("max-[860px]:grid-cols-1");
+    expect(stylesSource).toContain("min-h-0");
+    expect(stylesSource).not.toContain("min-height: 720px");
+  });
 
-    expect(mobileWorkspaceStyles).toContain(".workspace {");
-    expect(mobileWorkspaceStyles).toContain("min-height: 0");
-    expect(mobileWorkspaceStyles).not.toContain("min-height: 720px");
+  it("keeps the changed-file selection controls out of the scrollable file-list row", () => {
+    expect(stylesSource).toContain("changePanel:");
+    expect(stylesSource).toContain("grid-rows-[auto_auto_auto_minmax(0,1fr)]");
   });
 
   it("clips long commit titles inside Git cards without local horizontal scrolling", () => {
-    const commitItemStyles = stylesSource.slice(stylesSource.indexOf(".commitItem {"));
-    const commitTitleStyles = stylesSource.slice(stylesSource.indexOf(".commitItem strong"));
+    const commitItemStyles = stylesSource.slice(stylesSource.indexOf("commitItem:"));
 
-    expect(commitItemStyles).toContain("min-width: 0");
-    expect(commitTitleStyles).toContain("display: block");
-    expect(commitTitleStyles).toContain("max-width: 100%");
-    expect(commitTitleStyles).toContain("text-overflow: ellipsis");
-    expect(commitTitleStyles).toContain("white-space: nowrap");
+    expect(commitItemStyles).toContain("min-w-0");
+    expect(commitItemStyles).toContain("[&_strong]:block");
+    expect(commitItemStyles).toContain("[&_strong]:max-w-full");
+    expect(commitItemStyles).toContain("[&_strong]:text-ellipsis");
+    expect(commitItemStyles).toContain("[&_strong]:whitespace-nowrap");
   });
 });
