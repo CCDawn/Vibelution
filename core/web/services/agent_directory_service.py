@@ -650,7 +650,11 @@ def create_agent_instance(
         _ensure_agent_workspace(agent_workspace)
         tool_policy_id = _default_tool_policy_id_for_agent(agent_id, normalized_primary_mode)
         memory_policy_id = f"memory-{agent_id}"
-        tool_policy = _default_tool_policy_for_agent(tool_policy_id, normalized_primary_mode)
+        tool_policy = _default_tool_policy_for_agent(
+            tool_policy_id,
+            normalized_primary_mode,
+            role_key=normalized_role_key,
+        )
         metadata_payload = _with_agent_creation_spec(
             metadata_payload,
             created_by=str(created_by or "user").strip() or "user",
@@ -1532,7 +1536,11 @@ def reset_agent_instance(
             policies = _tool_policies(state)
             if previous_policy_id != DEFAULT_TOOL_POLICY_ID and _count_policy_refs(state.get("agents") or [], "toolPolicyId", previous_policy_id) == 0:
                 policies.pop(previous_policy_id, None)
-            policies[policy_id] = _default_tool_policy_for_agent(policy_id, str(agent.get("primaryMode") or ""))
+            policies[policy_id] = _default_tool_policy_for_agent(
+                policy_id,
+                str(agent.get("primaryMode") or ""),
+                role_key=str(agent.get("roleKey") or ""),
+            )
             state["toolPolicies"] = policies
             updated_tool_policy = normalize_tool_policy(policies.get(policy_id) or default_tool_policy(policy_id), policy_id)
             reset_summary["resetToolPolicy"] = True
@@ -3209,14 +3217,18 @@ def default_research_role_tool_policy(policy_id: str, *, role_key: str = "") -> 
 
 
 def _default_tool_policy_id_for_agent(agent_id: str, primary_mode: str) -> str:
-    if _is_session_agent_primary_mode(primary_mode):
+    normalized_mode = _normalize_primary_mode(primary_mode)
+    if _is_session_agent_primary_mode(normalized_mode) or normalized_mode == "research":
         return f"tool-{agent_id}"
     return DEFAULT_TOOL_POLICY_ID
 
 
-def _default_tool_policy_for_agent(policy_id: str, primary_mode: str) -> dict[str, Any]:
-    if _is_session_agent_primary_mode(primary_mode):
+def _default_tool_policy_for_agent(policy_id: str, primary_mode: str, *, role_key: str = "") -> dict[str, Any]:
+    normalized_mode = _normalize_primary_mode(primary_mode)
+    if _is_session_agent_primary_mode(normalized_mode):
         return default_session_agent_tool_policy(policy_id)
+    if normalized_mode == "research":
+        return default_research_role_tool_policy(policy_id, role_key=role_key)
     return default_tool_policy(policy_id)
 
 
