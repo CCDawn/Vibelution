@@ -133,9 +133,15 @@ describe("GitRoute layout contract", () => {
     const commitItemStyles = stylesSource.slice(stylesSource.indexOf("commitItem:"));
 
     expect(commitItemStyles).toContain("min-w-0");
+    expect(commitItemStyles).toContain("!grid");
+    expect(commitItemStyles).toContain("!h-auto");
+    expect(commitItemStyles).toContain("!min-h-[72px]");
+    expect(commitItemStyles).toContain("[&_[data-slot=vui-button-content]]:!grid");
+    expect(commitItemStyles).toContain("[&_[data-slot=vui-button-label]]:!grid");
     expect(commitItemStyles).toContain("[&_strong]:block");
     expect(commitItemStyles).toContain("[&_strong]:max-w-full");
     expect(commitItemStyles).toContain("[&_strong]:text-ellipsis");
     expect(commitItemStyles).toContain("[&_strong]:whitespace-nowrap");
+    expect(commitItemStyles).toContain("[&_strong]:leading-snug");
   });
 });
