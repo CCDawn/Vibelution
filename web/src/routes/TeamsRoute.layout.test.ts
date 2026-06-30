@@ -547,6 +547,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("materializedSources");
     expect(routeSource).toContain("SourceCollectionCoverageSummary");
     expect(routeSource).toContain("coverageSummary");
+    expect(routeSource).toContain("currentCoverageSummary");
+    expect(routeSource).toContain("partial_current_inputs");
+    expect(routeSource).toContain("当前批次还有资料未处理");
     expect(routeSource).toContain("SourceCollectionStageClosureSummary");
     expect(routeSource).toContain("closureSummary");
     expect(routeSource).toContain("SourceCollectionStageTaskToolProgress");

@@ -422,6 +422,7 @@ type SourceCollectionStageCardProjection = {
   agentTaskStatus?: string;
   artifactStatus?: string;
   artifactSummary?: string;
+  currentCoverageSummary?: SourceCollectionCoverageSummary;
   counts?: {
     input?: number;
     artifact?: number;
@@ -520,7 +521,7 @@ function sourceCollectionStageProjectionState(
   if (projection.status === "agent_blocked") {
     return "failed";
   }
-  if (projection.status === "agent_done_artifact_pending" || projection.status === "pending") {
+  if (projection.status === "partial_current_inputs" || projection.status === "agent_done_artifact_pending" || projection.status === "pending") {
     return "pending";
   }
   return projection.status === "idle" ? "idle" : fallback;
@@ -632,11 +633,15 @@ function sourceCollectionStageProjectionTaskMetric(
   const evidenceCount = typeof latestTask.evidenceRefCount === "number" ? latestTask.evidenceRefCount : 0;
   const nextActionCount = typeof latestTask.nextActionCount === "number" ? latestTask.nextActionCount : 0;
   const taskStatusLabel = sourceCollectionStageTaskStatusLabel(latestTask.status || projection?.agentTaskStatus, lang);
+  const currentCoverageMetric = sourceCollectionCoverageMetric(projection?.currentCoverageSummary, lang, projection?.stageId);
   const coverageMetric = sourceCollectionCoverageMetric(latestTask.coverageSummary, lang, projection?.stageId);
   const taskProgressMetric = sourceCollectionTaskToolProgressMetric(
     latestTask.closureSummary?.taskToolProgress || latestTask.taskToolProgress,
     lang,
   );
+  if (currentCoverageMetric && projection?.currentCoverageSummary?.complete === false) {
+    return `${taskStatusLabel}${taskProgressMetric ? ` · ${taskProgressMetric}` : ""} · ${currentCoverageMetric}${historicalTaskCount > 0 ? (lang === "zh" ? ` · 历史 ${historicalTaskCount}` : ` · historical ${historicalTaskCount}`) : ""}`;
+  }
   if (coverageMetric) {
     return `${taskStatusLabel}${taskProgressMetric ? ` · ${taskProgressMetric}` : ""} · ${coverageMetric}${historicalTaskCount > 0 ? (lang === "zh" ? ` · 历史 ${historicalTaskCount}` : ` · historical ${historicalTaskCount}`) : ""}`;
   }
@@ -667,7 +672,11 @@ function sourceCollectionStageArtifactSummaryLabel(
     return `${artifact} 条可处理原始资料${excludedText}；${pending} 个搜索任务待执行`;
   }
   if (projection.stageId === "extraction") {
-    const coverage = sourceCollectionCoverageMetric(projection.latestTask?.coverageSummary, lang, projection.stageId);
+    const coverage = sourceCollectionCoverageMetric(
+      projection.currentCoverageSummary?.complete === false ? projection.currentCoverageSummary : projection.latestTask?.coverageSummary,
+      lang,
+      projection.stageId,
+    );
     if (coverage) {
       return `${coverage}${excludedText}`;
     }
@@ -690,6 +699,9 @@ function sourceCollectionStageBlockingReasonLabel(reason: string, lang: "zh" | "
     return reason;
   }
   const normalized = reason.trim();
+  if (normalized.startsWith("Current stage coverage is partial:")) {
+    return "当前批次还有资料未处理，需要继续本阶段补齐。";
+  }
   if (normalized.startsWith("Agent writeback has partial candidate coverage:")) {
     return "Agent 只处理了部分候选，需要继续分页读取并补齐逐候选结果。";
   }
@@ -784,6 +796,10 @@ function sourceCollectionStageUserStatusLabel(
   if (syncing) {
     return lang === "zh" ? "正在同步 Agent 结果" : "Syncing Agent result";
   }
+  const currentCoverage = projection.currentCoverageSummary;
+  if (currentCoverage?.applicable && currentCoverage.complete === false) {
+    return sourceCollectionStageRecoveryStatusLabel(projection.stageId, lang);
+  }
   const closure = projection.latestTask?.closureSummary;
   if (closure?.userStatus === "failed") {
     if (projection.stageId === "extraction") {
@@ -799,6 +815,9 @@ function sourceCollectionStageUserStatusLabel(
   }
   const coverage = projection.latestTask?.coverageSummary;
   if (coverage?.applicable && coverage.complete === false) {
+    return sourceCollectionStageRecoveryStatusLabel(projection.stageId, lang);
+  }
+  if (projection.status === "partial_current_inputs") {
     return sourceCollectionStageRecoveryStatusLabel(projection.stageId, lang);
   }
   if (projection.status === "agent_done_artifact_pending") {
@@ -849,6 +868,18 @@ function sourceCollectionStageUserSummary(
   const closure = projection.latestTask?.closureSummary;
   const excluded = typeof projection.counts?.excluded === "number" ? projection.counts.excluded : 0;
   const artifact = typeof projection.counts?.artifact === "number" ? projection.counts.artifact : 0;
+  const currentCoverage = projection.currentCoverageSummary;
+  const currentTotal = typeof currentCoverage?.total === "number" ? currentCoverage.total : 0;
+  const currentProcessed = typeof currentCoverage?.processed === "number" ? currentCoverage.processed : 0;
+  const currentMissing = typeof currentCoverage?.missing === "number" ? currentCoverage.missing : 0;
+  const currentInvalid = typeof currentCoverage?.invalid === "number" ? currentCoverage.invalid : 0;
+  if (currentCoverage?.applicable && currentCoverage.complete === false && currentTotal > 0) {
+    if (lang === "zh") {
+      const invalidText = currentInvalid > 0 ? `无效 ID ${currentInvalid} 条。` : "";
+      return `${objectLabel}当前进度 ${currentProcessed}/${currentTotal}，还有 ${currentMissing} 条需要补齐。${invalidText}建议：${sourceCollectionStageRecoveryActionLabel(projection.stageId, lang)}。`;
+    }
+    return `${currentProcessed}/${currentTotal} current inputs processed; ${currentMissing} still need work${currentInvalid > 0 ? `; ${currentInvalid} invalid IDs` : ""}.`;
+  }
   if (closure?.userStatus === "failed" && projection.stageId === "extraction" && lang === "zh") {
     if (excluded > 0 && artifact <= 0) {
       return `本轮没有生成候选资料；已移出 ${excluded} 条无有效内容来源，避免后续重复处理。建议：继续搜索新资料。`;

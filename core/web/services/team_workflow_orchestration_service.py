@@ -16861,9 +16861,9 @@ def _source_collection_stage_cards_projection(
             "relations",
             stage_task_groups.get("relations", ([], []))[0],
             artifact_count=_source_collection_count(graph_summary.get("nodeCount")),
-            input_count=len(source_candidates),
+            input_count=len(approved_sources),
             output_count=_source_collection_count(graph_summary.get("edgeCount")),
-            pending_count=0 if graph_summary else len(source_candidates),
+            pending_count=0 if graph_summary else len(approved_sources),
             artifact_status="ready" if graph_summary else "empty",
             artifact_summary=f"{_source_collection_count(graph_summary.get('nodeCount'))} graph nodes; {_source_collection_count(graph_summary.get('edgeCount'))} graph edges.",
             historical_task_count=len(stage_task_groups.get("relations", ([], []))[1]),
@@ -16872,9 +16872,9 @@ def _source_collection_stage_cards_projection(
             "ingestion",
             stage_task_groups.get("ingestion", ([], []))[0],
             artifact_count=max(steward_pack_count, formal_synced_count),
-            input_count=len(approved_sources) or len(source_candidates),
+            input_count=len(approved_sources),
             output_count=formal_synced_count,
-            pending_count=pending_steward_pack_count,
+            pending_count=pending_steward_pack_count if steward_pack_count else len(approved_sources),
             artifact_status="ready" if formal_synced_count else ("partial" if steward_pack_count else "empty"),
             artifact_summary=f"{steward_pack_count} 个入库审核包；{formal_synced_count} 个正式知识同步标记。",
             historical_task_count=len(stage_task_groups.get("ingestion", ([], []))[1]),
@@ -16925,6 +16925,27 @@ def _source_collection_stage_card_projection(
     coverage_missing = _source_collection_count(coverage_summary.get("missing")) + _source_collection_count(coverage_summary.get("invalid"))
     coverage_incomplete = bool(coverage_summary.get("applicable")) and not bool(coverage_summary.get("complete"))
     effective_pending_count = max(pending_count, coverage_missing)
+    current_total = max(
+        0,
+        _source_collection_count(artifact_count),
+        _source_collection_count(output_count) + effective_pending_count,
+    )
+    current_processed = max(0, current_total - effective_pending_count) if current_total else 0
+    current_coverage_summary = (
+        {
+            "applicable": True,
+            "coverageKind": f"{stage_id}_current_inputs",
+            "complete": effective_pending_count <= 0,
+            "total": current_total,
+            "processed": min(current_processed, current_total),
+            "missing": max(0, effective_pending_count),
+            "invalid": 0,
+            "blocked": 0,
+            "duplicate": 0,
+        }
+        if current_total > 0
+        else {}
+    )
     task_completed = agent_status == "completed"
     task_settled = agent_status in {"completed", "needs_review"}
     task_blocked = agent_status in {"blocked", "failed"}
@@ -16938,6 +16959,8 @@ def _source_collection_stage_card_projection(
         card_status = "agent_blocked"
     elif task_completed and artifact_complete:
         card_status = "closed_loop"
+    elif task_settled and effective_pending_count > 0 and artifact_count > 0:
+        card_status = "partial_current_inputs"
     elif task_settled and artifact_ready:
         card_status = "artifact_ready_agent_needs_review"
     elif task_settled:
@@ -16963,6 +16986,7 @@ def _source_collection_stage_card_projection(
         "agentTaskStatus": agent_status,
         "artifactStatus": artifact_status,
         "artifactSummary": artifact_summary,
+        "currentCoverageSummary": current_coverage_summary,
         "counts": {
             "input": input_count,
             "artifact": artifact_count,
@@ -16975,7 +16999,14 @@ def _source_collection_stage_card_projection(
         "latestTask": _source_collection_stage_task_card_summary(latest_task) if latest_task else {},
         "resultKeys": result_keys,
         "nextActions": [_trim_text(item, max_length=500) for item in next_actions if _trim_text(item, max_length=500)][:6],
-        "blockingReasons": _source_collection_stage_card_blocking_reasons(card_status, artifact_status, artifact_count, effective_pending_count, coverage_summary),
+        "blockingReasons": _source_collection_stage_card_blocking_reasons(
+            card_status,
+            artifact_status,
+            artifact_count,
+            effective_pending_count,
+            coverage_summary,
+            current_coverage_summary=current_coverage_summary,
+        ),
     }
 
 
@@ -17140,9 +17171,18 @@ def _source_collection_stage_card_blocking_reasons(
     artifact_count: int,
     pending_count: int,
     coverage_summary: dict[str, Any] | None = None,
+    *,
+    current_coverage_summary: dict[str, Any] | None = None,
 ) -> list[str]:
     reasons: list[str] = []
     coverage = coverage_summary if isinstance(coverage_summary, dict) else {}
+    current_coverage = current_coverage_summary if isinstance(current_coverage_summary, dict) else {}
+    if card_status == "partial_current_inputs" and bool(current_coverage.get("applicable")):
+        reasons.append(
+            "Current stage coverage is partial: "
+            f"{_source_collection_count(current_coverage.get('processed'))}/{_source_collection_count(current_coverage.get('total'))} processed, "
+            f"{_source_collection_count(current_coverage.get('missing'))} pending."
+        )
     if bool(coverage.get("applicable")) and not bool(coverage.get("complete")):
         reasons.append(
             "Agent writeback has partial candidate coverage: "

@@ -3009,9 +3009,11 @@ def test_source_collection_stage_card_projection_is_scoped_to_current_run_artifa
     assert projection["summary"]["formalKnowledgeSyncCount"] == 0
     assert card_by_stage["extraction"]["status"] == "pending"
     assert card_by_stage["extraction"]["counts"]["artifact"] == 1
-    assert card_by_stage["relations"]["status"] == "pending"
+    assert card_by_stage["relations"]["status"] == "idle"
+    assert card_by_stage["relations"]["counts"]["input"] == 0
     assert card_by_stage["relations"]["counts"]["artifact"] == 0
-    assert card_by_stage["ingestion"]["status"] == "pending"
+    assert card_by_stage["ingestion"]["status"] == "idle"
+    assert card_by_stage["ingestion"]["counts"]["input"] == 0
     assert card_by_stage["ingestion"]["counts"]["artifact"] == 0
 
 
@@ -3150,7 +3152,7 @@ def test_source_collection_stage_card_projection_does_not_close_partial_needs_re
                 "updatedAt": "2026-06-25T00:00:00+00:00",
             }
         ],
-        artifact_count=5,
+        artifact_count=10,
         input_count=10,
         output_count=1,
         pending_count=5,
@@ -3158,11 +3160,95 @@ def test_source_collection_stage_card_projection_does_not_close_partial_needs_re
         artifact_summary="5/10 source candidates assessed; 1 approved.",
     )
 
-    assert card["status"] == "agent_done_artifact_pending"
+    assert card["status"] == "partial_current_inputs"
     assert card["isClosedLoop"] is False
     assert card["agentTaskStatus"] == "needs_review"
     assert card["counts"]["pending"] == 5
+    assert card["currentCoverageSummary"]["processed"] == 5
+    assert card["currentCoverageSummary"]["total"] == 10
     assert card["blockingReasons"]
+
+
+def test_source_collection_stage_card_projection_marks_stale_success_as_partial_current_inputs():
+    card = team_workflow_orchestration_service._source_collection_stage_card_projection(
+        "extraction",
+        [
+            {
+                "taskId": "stagetask-extraction-previous-success",
+                "stageId": "extraction",
+                "agentId": "source-extractor-agent",
+                "agentRole": "source_extractor",
+                "sessionId": "session-source-extractor",
+                "status": "completed",
+                "summary": "Agent completed the previous 15 candidates.",
+                "updatedAt": "2026-06-30T00:00:00+00:00",
+                "result": {
+                    "coverageSummary": {
+                        "applicable": True,
+                        "coverageKind": "candidate_extractions",
+                        "complete": True,
+                        "total": 15,
+                        "processed": 15,
+                        "missing": 0,
+                        "invalid": 0,
+                    }
+                },
+            }
+        ],
+        artifact_count=21,
+        input_count=26,
+        output_count=15,
+        pending_count=6,
+        artifact_status="partial",
+        artifact_summary="21 source_manifest candidates; 15/21 assessed; 15 approved.",
+    )
+
+    assert card["status"] == "partial_current_inputs"
+    assert card["isClosedLoop"] is False
+    assert card["latestTask"]["coverageSummary"]["processed"] == 15
+    assert card["latestTask"]["coverageSummary"]["total"] == 15
+    assert card["currentCoverageSummary"]["processed"] == 15
+    assert card["currentCoverageSummary"]["total"] == 21
+    assert card["currentCoverageSummary"]["missing"] == 6
+    assert any("Current stage coverage is partial" in reason for reason in card["blockingReasons"])
+
+
+def test_source_collection_stage_card_projection_counts_approved_sources_pending_ingestion(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队", members=[])
+    run = data_processing_service.create_processing_run(
+        title="Knowledge collection current round",
+        scope={"teamId": team["teamId"], "workflowStage": "knowledge_collection"},
+        metadata={"startedFrom": "team_workflow_source_collection"},
+    )
+    source = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "candidateType": "source_manifest",
+            "title": "Predictive coding source",
+            "sourceUrl": "https://doi.org/10.0000/predictive-coding-source",
+            "sourceKind": "paper",
+            "summary": "Relevant predictive coding source.",
+            "metadata": {"sourceCollectionRunId": run["runId"]},
+        },
+    )["candidate"]
+    team_workflow_orchestration_service.assess_source_candidate_quality(
+        team["teamId"],
+        source["candidateId"],
+        {"decision": "approved", "notes": "Ready for ingestion."},
+    )
+
+    projection = team_workflow_orchestration_service._source_collection_stage_cards_projection(team["teamId"], run["runId"])
+
+    ingestion_card = next(item for item in projection["cards"] if item["stageId"] == "ingestion")
+    assert ingestion_card["status"] == "pending"
+    assert ingestion_card["counts"]["input"] == 1
+    assert ingestion_card["counts"]["pending"] == 1
+    assert ingestion_card["currentCoverageSummary"]["total"] == 1
+    assert ingestion_card["currentCoverageSummary"]["missing"] == 1
+    relations_card = next(item for item in projection["cards"] if item["stageId"] == "relations")
+    assert relations_card["counts"]["input"] == 1
+    assert relations_card["counts"]["pending"] == 1
 
 
 def test_research_stage_status_reconciles_completed_stage_task_turn_result(tmp_path, monkeypatch):
