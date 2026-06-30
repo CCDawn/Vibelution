@@ -148,7 +148,14 @@ describe("MemoryRoute layout contract", () => {
   it("keeps dense Memory workspaces bounded with internal scrolling", () => {
     expect(styles.workspace).toContain("grid-rows-[minmax(0,1fr)]");
     expect(styles.workspace).toContain("overflow-auto");
+    expect(styles.summaryGrid).toContain("grid-cols-[repeat(6,minmax(118px,1fr))]");
+    expect(styles.summaryCard).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(styles.overviewGrid).toContain("grid-cols-[repeat(2,minmax(0,1fr))]");
+    expect(styles.reviewQueuePanel).toContain("max-h-[min(280px,34vh)]");
     expect(styles.reviewQueueList).toContain("overflow-auto");
+    expect(styles.compactItemPrimary).toContain("flex");
+    expect(styles.compactItemPrimary).not.toContain("rounded-[var(--radius-control)]");
+    expect(styles.compactItemSummary).toContain("line-clamp-2");
     expect(styles.overviewPanel).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(styles.overviewPanel).toContain("overflow-auto");
   });

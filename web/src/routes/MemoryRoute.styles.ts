@@ -242,6 +242,14 @@ const styleKeys = [
 ] as const;
 
 const styles = createVuiStyleMap(styleKeys, {
+  overrides: {
+    compactItemMeta:
+      "flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] [&>span]:min-w-0 [&>span]:truncate",
+    compactItemPrimary:
+      "flex min-w-0 flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5 text-[var(--vui-font-xs)] leading-tight [&>strong]:min-w-0 [&>strong]:font-semibold [&>strong]:text-[var(--fg-primary)] [&>span]:shrink-0 [&>span]:text-[var(--fg-tertiary)]",
+    compactItemSummary:
+      "line-clamp-2 min-w-0 text-[var(--vui-font-xs)] leading-[1.35] text-[var(--fg-secondary)]",
+  },
   extensions: {
     cleanupPathList: "[&_span]:truncate",
     collapsedFormButton: "max-h-[92px]",
@@ -269,15 +277,21 @@ const styles = createVuiStyleMap(styleKeys, {
     graphTypeList: "[&_button]:w-full [&_[data-active=true]]:border-[var(--accent-cool)]",
     manageWorkspace:
       "grid-cols-[minmax(300px,0.76fr)_minmax(0,1fr)] grid-rows-[minmax(210px,0.58fr)_minmax(260px,1fr)] [&_.manageListPanel]:row-span-2 [&_.detailPanel]:col-start-2 [&_.detailPanel]:row-start-2 [&_.detailPanel]:max-h-none",
+    overviewGrid: "grid-cols-[repeat(2,minmax(0,1fr))] gap-2 max-[900px]:grid-cols-1",
     overviewPanel: "grid-rows-[auto_minmax(0,1fr)] overflow-auto",
     panelLead: "hidden",
     reviewQueueList: "overflow-auto",
+    reviewQueuePanel: "max-h-[min(280px,34vh)] overflow-auto",
     reviewReasonList: "hidden",
     sourceGovernanceColumn: "[&_.sourceGovernanceControls]:grid-cols-[minmax(240px,0.92fr)_minmax(250px,1.08fr)]",
     stewardMission: "[&_small]:hidden",
     stewardMetric: "[&_small]:hidden",
     stewardRecommendations: "hidden",
     stewardWorkbench: "hidden",
+    summaryCard:
+      "grid min-h-[54px] grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-2 py-1.5 [&>span]:text-[var(--vui-font-xs)] [&>strong]:text-[var(--vui-font-title)]",
+    summaryGrid:
+      "grid-cols-[repeat(6,minmax(118px,1fr))] gap-1.5 max-[1180px]:grid-cols-3 max-[720px]:grid-cols-2",
     workspace: "grid-rows-[minmax(0,1fr)] overflow-auto",
   },
 });
