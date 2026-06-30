@@ -1301,6 +1301,30 @@ describe("ChatCodingRoute layout contract", () => {
     expect(directSessionIndexItemSource).not.toContain("styles.sessionCurrentIndicator");
   });
 
+  it("keeps conversation index item skeletons compact instead of nested row cards", () => {
+    for (const skeletonClass of [
+      routeStyles.sessionItemMain,
+      routeStyles.conversationTitleRow,
+      routeStyles.conversationMetaRow,
+    ]) {
+      expect(skeletonClass).not.toContain("bg-[var(--vui-surface-row)]");
+      expect(skeletonClass).not.toContain("border border-[var(--vui-border-subtle)]");
+      expect(skeletonClass).not.toContain("rounded-[var(--radius-control)]");
+    }
+
+    expect(routeStyles.sessionItem).toContain("grid-cols-[minmax(0,1fr)]");
+    expect(routeStyles.sessionItem).toContain("!px-1.5");
+    expect(routeStyles.sessionItemMain).toContain("grid-cols-[27px_minmax(0,1fr)]");
+    expect(routeStyles.sessionItemMain).toContain("[&_[data-slot=vui-button-content]]:contents");
+    expect(routeStyles.conversationCopy).toContain("overflow-hidden");
+    expect(routeStyles.conversationTitleMain).toContain("overflow-hidden");
+    expect(routeStyles.sessionItemTitle).toContain("truncate");
+    expect(routeStyles.sessionStatusCluster).not.toContain("rounded-full");
+    expect(routeStyles.sessionStatusCluster).toContain("justify-end");
+    expect(routeStyles.agentModelTag).toContain("max-w-[120px]");
+    expect(routeStyles.agentModelTag).toContain("[&_span]:truncate");
+  });
+
   it("moves direct session actions into a right-click context menu", () => {
     expect(routeSource).toContain("type SessionContextMenuState");
     expect(routeSource).toContain("const [sessionContextMenu, setSessionContextMenu]");

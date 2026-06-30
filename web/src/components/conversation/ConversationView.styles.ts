@@ -310,7 +310,7 @@ const styles = createVuiStyleMap(styleKeys, {
     reActResultToggle: "border-0 bg-transparent",
     reActThoughtText: "border-l-0 bg-transparent",
     responseLabel: "text-[var(--vui-font-md)]",
-    responseSegment_answer: "[&_.markdownBody]:max-w-[min(100%,76ch)]",
+    responseSegment_answer: "[&_.markdownBody]:max-w-[min(100%,76ch)] [&_.responseSegmentHeader]:hidden",
     responseToggle:
       "border-0 bg-transparent p-0 text-[var(--fg-secondary)] hover:border-transparent hover:bg-transparent [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:inline-flex [&_[data-slot=vui-button-label]]:gap-[7px]",
     sendButton: "bg-[color-mix(in_srgb,var(--accent-cool)_14%,var(--surface-card))] shadow-none hover:translate-y-0",
@@ -324,6 +324,32 @@ const styles = createVuiStyleMap(styleKeys, {
     timelineThoughtText: "border-0 bg-transparent",
     turnSpeaker: "text-[var(--vui-font-md)]",
     userCard: "bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel))]",
+  },
+  overrides: {
+    agentInboxTurn:
+      "grid w-full min-w-0 grid-cols-[34px_minmax(0,1fr)] gap-x-3 justify-self-stretch [&_.turnContent]:w-[min(100%,920px)] [&_.turnContent]:p-0 [&_.turnContent]:border-l-0",
+    assistantTurn:
+      "grid w-full min-w-0 grid-cols-[34px_minmax(0,1fr)] gap-x-3 justify-self-stretch [&_.turnContent]:w-[min(100%,920px)] [&_.turnContent]:p-0 [&_.turnContent]:border-l-0",
+    assistantTurnContinuation:
+      "grid w-full min-w-0 grid-cols-[34px_minmax(0,1fr)] gap-x-3 [&_.turnAvatar]:bg-transparent [&_.turnContent]:gap-1",
+    groupTranscriptTurn:
+      "grid w-full min-w-0 grid-cols-[34px_minmax(0,1fr)] gap-x-3 justify-self-stretch [&_.turnContent]:w-[min(100%,920px)] [&_.turnContent]:p-0 [&_.turnContent]:border-l-0",
+    turnAvatar:
+      "mt-0.5 grid size-8 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--vui-control-muted)] text-[var(--fg-tertiary)]",
+    turnAvatarImage:
+      "block h-full w-full rounded-[inherit] object-cover",
+    turnContent:
+      "grid min-w-0 gap-[5px]",
+    turnMeta:
+      "inline-flex min-w-0 items-center justify-start gap-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    turnMetaActions:
+      "inline-flex min-w-0 items-center justify-start gap-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    turnMetaIdentity:
+      "flex min-w-0 items-center gap-2",
+    turnSpeaker:
+      "min-w-0 truncate text-[var(--vui-font-md)] font-semibold leading-tight text-[var(--fg-primary)]",
+    userTurn:
+      "grid w-full min-w-0 grid-cols-[minmax(0,1fr)_34px] gap-x-3 justify-self-stretch [&_.turnAvatar]:col-start-2 [&_.turnAvatar]:row-start-1 [&_.turnContent]:col-start-1 [&_.turnContent]:row-start-1 [&_.turnContent]:justify-self-end [&_.turnContent]:w-[min(82%,860px)] [&_.turnMeta]:justify-self-end [&_.turnMeta]:justify-end [&_.turnMeta]:text-right [&_.turnMetaActions]:justify-end [&_.turnMetaIdentity]:justify-end [&_.turnSpeaker]:hidden",
   },
 });
 
