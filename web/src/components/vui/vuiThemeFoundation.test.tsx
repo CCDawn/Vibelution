@@ -16,6 +16,7 @@ import {
 } from "./index";
 
 const designRoot = resolve(import.meta.dirname, "../../design");
+const baseSource = readFileSync(resolve(designRoot, "base.css"), "utf8");
 const tokensSource = readFileSync(resolve(designRoot, "tokens.css"), "utf8");
 const tailwindSource = readFileSync(resolve(designRoot, "tailwind.css"), "utf8");
 const herouiThemeSource = readFileSync(resolve(designRoot, "heroui-theme.css"), "utf8");
@@ -55,6 +56,11 @@ describe("VUI dual-theme foundation", () => {
       "--surface-elevated",
       "--surface-toolbar",
       "--border-subtle",
+      "--font-size-micro",
+      "--font-size-caption",
+      "--font-size-small",
+      "--font-size-body",
+      "--font-size-title",
     ]) {
       expect(tokensSource).toContain(token);
     }
@@ -65,6 +71,11 @@ describe("VUI dual-theme foundation", () => {
     expect(lightThemeBlock).toContain("--vui-status-info-bg");
     expect(lightThemeBlock).toContain("--accent-cool-contrast");
     expect(lightThemeBlock).toContain("--surface-elevated");
+  });
+
+  it("keeps the app readable without relying on browser zoom", () => {
+    expect(baseSource).toContain("font-size: 15px");
+    expect(baseSource).not.toContain("font-size: 14px");
   });
 
   it("maps Tailwind and HeroUI bridge classes to Vibelution semantic tokens", () => {
