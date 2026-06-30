@@ -336,6 +336,19 @@ const styles = createVuiStyleMap(styleKeys, {
     supervisedRunConsoleGrid:
       "grid-cols-[minmax(300px,var(--evolution-live-launch-width,348px))_minmax(0,1fr)_minmax(300px,var(--evolution-live-run-width,360px))] grid-rows-[minmax(0,1fr)] max-[900px]:grid-cols-1 max-[900px]:auto-rows-max",
     supervisedRunSetup: "max-h-[min(118px,22vh)]",
+    supervisedWorkflowCard: "min-h-[112px] overflow-visible p-2",
+    supervisedWorkflowCardButton:
+      "!grid !h-full !min-h-[86px] !w-full !max-w-none grid-rows-[auto_auto_minmax(0,1fr)] items-start justify-stretch gap-1.5 p-2 text-left [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+    supervisedWorkflowCardFooter: "mt-1 grid w-full grid-cols-2 gap-1",
+    supervisedWorkflowCardGrid:
+      "grid-cols-[repeat(4,minmax(168px,1fr))] gap-1.5 overflow-visible max-[1280px]:grid-cols-2 max-[760px]:grid-cols-1",
+    supervisedWorkflowCardTopline:
+      "flex min-h-0 w-full items-center justify-between gap-1 rounded-none border-0 bg-transparent p-0 text-[var(--vui-font-xs)] leading-tight",
+    supervisedWorkflowFollowButton: "min-h-[26px] px-2 text-[var(--vui-font-xs)]",
+    supervisedWorkflowLivePreview: "line-clamp-2 min-h-[30px] text-[var(--vui-font-xs)] leading-[1.28]",
+    supervisedWorkflowPanel: "overflow-visible",
+    supervisedWorkflowSessionLink:
+      "min-h-[24px] w-full justify-center px-1.5 text-[var(--vui-font-xs)] leading-none",
     transcriptSection: "flex-1 basis-0 bg-transparent",
   },
 });

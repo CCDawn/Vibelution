@@ -366,25 +366,27 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps left rail VButton cards from collapsing their internal grid layout", () => {
-    expect(routeStyles.tokenStatusMetric).toContain("grid-cols-[42px_minmax(0,1fr)]");
+    expect(routeStyles.tokenStatusMetric).toContain("grid-cols-[38px_minmax(0,1fr)]");
     expect(routeStyles.tokenStatusMetric).toContain("!grid");
     expect(routeStyles.tokenStatusMetric).toContain("!w-full");
-    expect(routeStyles.tokenStatusMetric).toContain("overflow-hidden");
+    expect(routeStyles.tokenStatusMetric).toContain("overflow-visible");
     expect(routeStyles.tokenStatusVisualGrid).toContain("!grid");
     expect(routeStyles.tokenStatusVisualGrid).toContain("grid-cols-1");
     expect(routeStyles.tokenStatusVisualGrid).toContain("w-full");
     expect(routeStyles.tokenStatusCopy).toContain("min-w-0");
-    expect(routeStyles.tokenStatusLabel).toContain("truncate");
-    expect(routeStyles.tokenStatusMeta).toContain("whitespace-nowrap");
-    expect(routeStyles.tokenStatusRing).toContain("size-[42px]");
+    expect(routeStyles.tokenStatusCopy).toContain("overflow-visible");
+    expect(routeStyles.tokenStatusLabel).toContain("whitespace-normal");
+    expect(routeStyles.tokenStatusMeta).toContain("line-clamp-2");
+    expect(routeStyles.tokenStatusRing).toContain("size-[38px]");
     expect(routeStyles.tokenStatusRingCore).toContain("text-[10px]");
     expect(routeStyles.tokenStatusMetricButton).toContain("[&_[data-slot=vui-button-content]]:contents");
     expect(routeStyles.tokenStatusMetricButton).toContain("!grid");
     expect(routeStyles.tokenStatusMetricButton).toContain("!w-full");
     expect(routeStyles.tokenStatusMetricButton).toContain("[&_[data-slot=vui-button-label]]:contents");
+    expect(routeStyles.featureChipRow).toContain("grid-cols-2");
     expect(routeStyles.featureChip).toContain("[&_[data-slot=vui-button-content]]:min-w-0");
     expect(routeStyles.featureChip).toContain("[&_[data-slot=vui-button-content]]:max-w-full");
-    expect(routeStyles.featureChip).toContain("[&_[data-slot=vui-button-label]]:overflow-hidden");
+    expect(routeStyles.featureChip).toContain("[&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto]");
   });
 
   it("keeps group settings in the left rail and moves member status into the right index", () => {
