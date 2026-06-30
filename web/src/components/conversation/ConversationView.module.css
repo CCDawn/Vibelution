@@ -42,7 +42,7 @@
 .eyebrow {
   margin: 0 0 4px;
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -66,7 +66,7 @@
   border: 1px solid color-mix(in srgb, var(--accent-warm) 22%, transparent);
   background: color-mix(in srgb, var(--accent-warm) 10%, transparent);
   color: var(--accent-warm-2);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-md);
   text-transform: capitalize;
 }
 
@@ -102,7 +102,7 @@
 .summaryLabel {
   margin: 0 0 8px;
   color: var(--fg-tertiary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -154,7 +154,7 @@
   align-items: center;
   padding: 5px 9px;
   border-radius: 999px;
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
 }
 
 .statPill {
@@ -169,7 +169,7 @@
 
 .toolsLabel {
   color: var(--fg-tertiary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -177,7 +177,7 @@
 .updateLine {
   margin: 0;
   color: var(--fg-tertiary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-md);
 }
 
 .timeline {
@@ -227,7 +227,7 @@
   color: var(--fg-secondary);
   cursor: pointer;
   font: inherit;
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   font-weight: 650;
 }
 
@@ -300,20 +300,20 @@
   min-width: 0;
   color: var(--fg-tertiary);
   font-family: var(--font-mono);
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.3;
 }
 
 .turnErrorNoticeMeta span:first-child {
   color: color-mix(in srgb, var(--accent-warm-2) 76%, var(--fg-tertiary));
   font-family: var(--font-sans);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   font-weight: 720;
 }
 
 .turnErrorNoticeText {
   color: color-mix(in srgb, var(--fg-secondary) 72%, var(--fg-tertiary));
-  font-size: 0.85rem;
+  font-size: var(--vui-font-md);
   line-height: 1.55;
   overflow-wrap: anywhere;
 }
@@ -334,7 +334,7 @@
   gap: 8px;
   align-items: start;
   min-width: 0;
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   line-height: 1.42;
 }
 
@@ -363,7 +363,7 @@
   border-radius: 7px;
   background: color-mix(in srgb, var(--surface-card) 86%, var(--accent-cool) 5%);
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   line-height: 1.35;
 }
 
@@ -388,7 +388,7 @@
   overflow: hidden;
   color: var(--fg-tertiary);
   font-family: var(--font-mono);
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -396,7 +396,7 @@
 .cliAgentLifecycleTime {
   color: var(--fg-tertiary);
   font-family: var(--font-mono);
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
@@ -420,7 +420,7 @@
   border: 1px solid var(--border-soft);
   background: color-mix(in srgb, var(--surface-card) 72%, transparent);
   color: var(--accent-warm-2);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   font-weight: 760;
 }
 
@@ -496,7 +496,7 @@
   width: fit-content;
   max-width: 100%;
   color: var(--fg-secondary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.2;
 }
 
@@ -515,7 +515,7 @@
   min-width: 0;
   color: var(--fg-secondary);
   font-family: var(--font-mono);
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
@@ -571,7 +571,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-md);
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -585,7 +585,7 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
   color: var(--accent-warm-2);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
   white-space: nowrap;
 }
@@ -601,7 +601,7 @@
   border-radius: 8px 4px 8px 8px;
   background: color-mix(in srgb, var(--surface-card) 72%, var(--accent-cool) 4%);
   color: var(--fg-secondary);
-  font-size: 0.9rem;
+  font-size: var(--vui-font-chat);
   font-weight: 430;
   line-height: 1.56;
   overflow-wrap: anywhere;
@@ -620,7 +620,7 @@
   border-radius: 4px 8px 8px 8px;
   background: color-mix(in srgb, var(--surface-card) 82%, var(--accent-cool) 3%);
   color: var(--fg-secondary);
-  font-size: 0.9rem;
+  font-size: var(--vui-font-chat);
   font-weight: 430;
   line-height: 1.56;
   overflow-wrap: anywhere;
@@ -654,7 +654,7 @@
   background: color-mix(in srgb, var(--surface-card) 38%, transparent);
   color: var(--fg-tertiary);
   font-family: var(--font-mono);
-  font-size: 0.64rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -691,7 +691,7 @@
   color: var(--fg-secondary);
   cursor: pointer;
   font: inherit;
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   font-weight: 650;
 }
 
@@ -706,7 +706,7 @@
   max-width: min(54vw, 560px);
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   font-weight: 450;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -723,7 +723,7 @@
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-card) 88%, var(--fg-tertiary) 2%);
   color: var(--fg-tertiary);
-  font-size: 0.86rem;
+  font-size: var(--vui-font-md);
   font-weight: 420;
   line-height: 1.54;
   overflow-wrap: anywhere;
@@ -767,7 +767,7 @@
   align-items: center;
   gap: 6px;
   color: var(--fg-tertiary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
 }
 
 .userAttachmentMeta span {
@@ -813,7 +813,7 @@
   color: var(--fg-secondary);
   cursor: pointer;
   font: inherit;
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   font-weight: 620;
 }
 
@@ -842,7 +842,7 @@
   max-width: min(46vw, 420px);
   overflow: hidden;
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   font-weight: 450;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -853,7 +853,7 @@
   max-width: min(34vw, 320px);
   overflow: hidden;
   color: var(--fg-secondary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   font-weight: 520;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -867,10 +867,9 @@
 }
 
 .answerOnlyProcessToggle {
-  display: inline-grid;
-  grid-template-columns: 14px auto auto minmax(0, 1fr) 14px;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 0;
   width: fit-content;
   max-width: 100%;
   min-height: 22px;
@@ -881,7 +880,20 @@
   color: var(--fg-secondary);
   cursor: pointer;
   font: inherit;
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
+}
+
+.answerOnlyProcessToggle [data-slot="vui-button-content"] {
+  display: contents;
+}
+
+.answerOnlyProcessToggle [data-slot="vui-button-label"] {
+  display: inline-grid;
+  grid-template-columns: 14px auto auto minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .answerOnlyProcessToggle:hover {
@@ -889,8 +901,11 @@
 }
 
 .answerOnlyProcessStatic {
-  grid-template-columns: 14px auto auto;
   cursor: default;
+}
+
+.answerOnlyProcessStatic [data-slot="vui-button-label"] {
+  grid-template-columns: 14px auto auto;
 }
 
 .answerOnlyProcessIcon {
@@ -946,7 +961,7 @@
   max-width: 100%;
   overflow: hidden;
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.35;
 }
 
@@ -1003,7 +1018,7 @@
   background: transparent;
   color: var(--fg-secondary);
   font: inherit;
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   font-weight: 620;
   line-height: 1.5;
 }
@@ -1029,7 +1044,7 @@ button.timelineCellHeader:hover,
 
 .timelineCellMeta {
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   font-weight: 520;
 }
 
@@ -1043,7 +1058,7 @@ button.timelineCellHeader:hover,
   background: transparent;
   color: color-mix(in srgb, var(--fg-secondary) 95%, transparent);
   font-family: inherit;
-  font-size: 0.86rem;
+  font-size: var(--vui-font-md);
   line-height: 1.72;
   white-space: pre-wrap;
   word-break: break-word;
@@ -1076,7 +1091,7 @@ button.timelineCellHeader:hover,
   margin: 0 0 0 21px;
   color: var(--fg-secondary);
   font-family: inherit;
-  font-size: 0.82rem;
+  font-size: var(--vui-font-md);
   line-height: 1.62;
   white-space: pre-wrap;
   word-break: break-word;
@@ -1099,7 +1114,7 @@ button.timelineCellHeader:hover,
   gap: 5px 10px;
   min-width: 0;
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   line-height: 1.55;
 }
 
@@ -1187,7 +1202,7 @@ button.timelineCellHeader:hover,
   max-width: min(44vw, 460px);
   overflow: hidden;
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   font-weight: 660;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1198,7 +1213,7 @@ button.timelineCellHeader:hover,
   max-width: min(26vw, 220px);
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   font-weight: 610;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1221,7 +1236,7 @@ button.timelineCellHeader:hover,
 
 .reActOperationSectionLabel {
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   font-weight: 680;
 }
 
@@ -1242,7 +1257,7 @@ button.timelineCellHeader:hover,
   overflow: visible;
   color: var(--fg-secondary);
   font-family: inherit;
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   line-height: 1.62;
   white-space: pre-wrap;
   word-break: break-word;
@@ -1269,7 +1284,7 @@ button.timelineCellHeader:hover,
   min-width: 0;
   max-width: 100%;
   color: var(--fg-secondary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   line-height: 1.55;
 }
 
@@ -1290,7 +1305,7 @@ button.timelineCellHeader:hover,
   align-items: center;
   gap: 5px;
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
@@ -1347,7 +1362,7 @@ button.timelineCellHeader:hover,
 
 .reActResultLabel {
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   font-weight: 680;
 }
 
@@ -1379,7 +1394,7 @@ button.timelineCellHeader:hover,
   border: 1px dashed color-mix(in srgb, var(--fg-tertiary) 18%, transparent);
   border-radius: var(--radius-control);
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-weight: 540;
 }
 
@@ -1392,11 +1407,11 @@ button.timelineCellHeader:hover,
 
 .operationItem {
   display: grid;
-  grid-template-columns: 22px minmax(0, max-content) auto auto 16px;
-  justify-content: start;
+  grid-template-columns: 22px minmax(0, 1fr) auto auto 16px;
+  justify-content: stretch;
   gap: 7px;
   align-items: center;
-  width: fit-content;
+  width: min(100%, 860px);
   min-height: 30px;
   min-width: 0;
   max-width: 100%;
@@ -1406,7 +1421,7 @@ button.timelineCellHeader:hover,
 }
 
 .operationItemTool {
-  grid-template-columns: minmax(0, max-content) auto auto 16px;
+  grid-template-columns: minmax(0, 1fr) auto auto 16px;
 }
 
 .operationItem_status {
@@ -1415,7 +1430,7 @@ button.timelineCellHeader:hover,
 
 .operationItem_tool .operationName {
   font-family: var(--font-mono);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
 }
 
 .operationItem_thought .operationName {
@@ -1454,27 +1469,28 @@ button.timelineCellHeader:hover,
 .operationText {
   display: grid;
   min-width: 0;
-  max-width: min(58vw, 620px);
+  max-width: 100%;
   gap: 2px;
 }
 
 .operationName,
 .operationSummaryText {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .operationName {
   color: var(--fg-secondary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   font-weight: 590;
 }
 
 .operationSummaryText {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 .operationStatus {
@@ -1482,7 +1498,7 @@ button.timelineCellHeader:hover,
   align-items: center;
   gap: 5px;
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
@@ -1516,7 +1532,7 @@ button.timelineCellHeader:hover,
 .operationDuration {
   min-width: 42px;
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   text-align: right;
   white-space: nowrap;
 }
@@ -1581,14 +1597,14 @@ button.timelineCellHeader:hover,
   align-items: center;
   justify-content: space-between;
   color: var(--fg-secondary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
 }
 
 .computerUseHeader code {
   color: var(--fg-tertiary);
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   font-weight: 500;
 }
 
@@ -1596,7 +1612,7 @@ button.timelineCellHeader:hover,
 .computerUseError {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   line-height: 1.45;
 }
 
@@ -1618,7 +1634,7 @@ button.timelineCellHeader:hover,
   margin: 0;
   padding-left: 18px;
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
 .computerUseSteps li {
@@ -1628,7 +1644,7 @@ button.timelineCellHeader:hover,
 .computerUseSteps span {
   color: var(--fg-tertiary);
   font-family: var(--font-mono);
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
 }
 
 .computerUseSteps p {
@@ -1650,7 +1666,7 @@ button.timelineCellHeader:hover,
   color: var(--fg-secondary);
   cursor: pointer;
   font: inherit;
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
 }
 
@@ -1703,14 +1719,14 @@ button.timelineCellHeader:hover,
 
 .mentalMetaItem small {
   color: var(--fg-tertiary);
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 .mentalMetaItem strong {
   color: var(--fg-secondary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   font-weight: 620;
   white-space: nowrap;
 }
@@ -1734,7 +1750,7 @@ button.timelineCellHeader:hover,
 
 .mentalBodyRow span {
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -1748,7 +1764,7 @@ button.timelineCellHeader:hover,
 
 .operationDetailLabel {
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1764,7 +1780,7 @@ button.timelineCellHeader:hover,
   background: color-mix(in srgb, var(--surface-panel-strong) 84%, transparent);
   color: var(--fg-secondary);
   font-family: var(--font-mono);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1795,8 +1811,20 @@ button.timelineCellHeader:hover,
   color: var(--fg-secondary);
   cursor: pointer;
   font: inherit;
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-weight: 600;
+}
+
+.responseToggle [data-slot="vui-button-content"] {
+  display: contents;
+}
+
+.responseToggle [data-slot="vui-button-label"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .responseBody {
@@ -1885,7 +1913,7 @@ button.timelineCellHeader:hover,
   gap: 8px;
   align-items: start;
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
 }
 
 .imageArtifactMeta {
@@ -1960,7 +1988,7 @@ button.timelineCellHeader:hover,
 
 .responseSegment_status .responseSegmentHeader {
   flex: 0 0 auto;
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   letter-spacing: 0;
 }
 
@@ -1979,14 +2007,14 @@ button.timelineCellHeader:hover,
 
 .responseSegment_status .messageBody {
   margin: 0;
-  overflow: hidden;
+  overflow: visible;
   color: inherit;
-  font-size: 0.88rem;
+  font-size: var(--vui-font-chat);
   font-weight: 430;
   line-height: 1.5;
-  overflow-wrap: normal;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: pre-wrap;
 }
 
 .responseSegment_commit,
@@ -2006,7 +2034,7 @@ button.timelineCellHeader:hover,
   gap: 8px;
   min-width: 0;
   color: var(--fg-tertiary);
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -2045,7 +2073,7 @@ button.timelineCellHeader:hover,
   background: color-mix(in srgb, var(--surface-card) 66%, transparent);
   color: var(--fg-primary);
   font-family: "Cascadia Mono", "Cascadia Code", Consolas, var(--font-mono);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
   line-height: 1.42;
@@ -2098,7 +2126,7 @@ button.timelineCellHeader:hover,
   margin: 0;
   padding-left: 20px;
   color: var(--fg-secondary);
-  font-size: 0.9rem;
+  font-size: var(--vui-font-chat);
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
@@ -2164,7 +2192,7 @@ button.timelineCellHeader:hover,
   gap: 10px;
   margin-bottom: 10px;
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
 }
 
 .userCard .messageMeta {
@@ -2174,7 +2202,7 @@ button.timelineCellHeader:hover,
 .messageBody {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.9rem;
+  font-size: var(--vui-font-chat);
   font-weight: 430;
   white-space: pre-wrap;
   line-height: 1.56;
@@ -2187,7 +2215,7 @@ button.timelineCellHeader:hover,
   min-width: 0;
   max-width: min(100%, 76ch);
   color: var(--fg-secondary);
-  font-size: 0.9rem;
+  font-size: var(--vui-font-chat);
   font-weight: 430;
   line-height: 1.58;
   overflow-wrap: anywhere;
@@ -2225,18 +2253,18 @@ button.timelineCellHeader:hover,
 
 .markdownHeading1,
 .markdownHeading2 {
-  font-size: 0.96rem;
+  font-size: var(--vui-font-title);
   font-weight: 720;
 }
 
 .markdownHeading3 {
-  font-size: 0.9rem;
+  font-size: var(--vui-font-chat);
   font-weight: 700;
 }
 
 .markdownHeading4 {
   color: var(--fg-secondary);
-  font-size: 0.86rem;
+  font-size: var(--vui-font-md);
   font-weight: 660;
 }
 
@@ -2272,7 +2300,7 @@ button.timelineCellHeader:hover,
   gap: 10px;
   min-width: 0;
   color: var(--fg-tertiary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
 }
 
 .markdownImageCaption span {
@@ -2324,7 +2352,7 @@ button.timelineCellHeader:hover,
   gap: 12px;
   align-items: center;
   color: var(--fg-secondary);
-  font-size: 0.84rem;
+  font-size: var(--vui-font-md);
 }
 
 .imagePreviewToolbar > span {
@@ -2383,7 +2411,7 @@ button.timelineCellHeader:hover,
   max-width: 100%;
   border-collapse: collapse;
   color: var(--fg-primary);
-  font-size: 0.86rem;
+  font-size: var(--vui-font-md);
   font-variant-numeric: tabular-nums;
   line-height: 1.42;
   table-layout: fixed;
@@ -2475,7 +2503,7 @@ button.timelineCellHeader:hover,
 .thoughtSectionLabel,
 .responseLabel {
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -2517,7 +2545,7 @@ button.timelineCellHeader:hover,
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
   color: var(--accent-cool);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
 }
 
 .toolRow {
@@ -2576,13 +2604,13 @@ button.timelineCellHeader:hover,
 
 .turnErrorDetail {
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-md);
   line-height: 1.4;
 }
 
 .turnErrorLabel {
   color: var(--state-error);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -2591,7 +2619,7 @@ button.timelineCellHeader:hover,
   flex: 0 0 auto;
   max-width: 220px;
   color: var(--state-error);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2621,7 +2649,7 @@ button.timelineCellHeader:hover,
   color: inherit;
   cursor: pointer;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--vui-font-md);
   text-align: left;
 }
 
@@ -2639,7 +2667,7 @@ button.timelineCellHeader:hover,
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent-cool) 14%, transparent);
   color: var(--accent-cool);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   font-weight: 720;
 }
 
@@ -2669,7 +2697,7 @@ button.timelineCellHeader:hover,
   flex-wrap: wrap;
   gap: 7px;
   color: var(--fg-tertiary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
 }
 
 .nextStateSignalKind {
@@ -2680,7 +2708,7 @@ button.timelineCellHeader:hover,
 .nextStateSignalText {
   margin: 0;
   color: var(--fg-primary);
-  font-size: 0.84rem;
+  font-size: var(--vui-font-md);
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
@@ -2689,7 +2717,7 @@ button.timelineCellHeader:hover,
   min-width: 0;
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2712,7 +2740,7 @@ button.timelineCellHeader:hover,
 .composerError {
   margin: 0;
   color: var(--state-error);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-md);
   line-height: 1.45;
 }
 
@@ -2726,7 +2754,7 @@ button.timelineCellHeader:hover,
   border-radius: 8px;
   background: color-mix(in srgb, var(--accent-warm) 5%, var(--surface-card));
   color: color-mix(in srgb, var(--fg-secondary) 86%, var(--fg-tertiary));
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   line-height: 1.35;
 }
 
@@ -2748,7 +2776,7 @@ button.timelineCellHeader:hover,
   border-radius: 8px;
   background: color-mix(in srgb, var(--accent-cool) 9%, var(--surface-card));
   color: var(--fg-secondary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-md);
 }
 
 .composerModeNoticeIcon {
@@ -2807,7 +2835,7 @@ button.timelineCellHeader:hover,
   min-width: 0;
   overflow: hidden;
   color: var(--fg-secondary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2874,13 +2902,13 @@ button.timelineCellHeader:hover,
 
 .composerReferenceCopy strong {
   color: var(--fg-secondary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-sm);
   font-weight: 720;
 }
 
 .composerReferenceCopy small {
   color: var(--fg-tertiary);
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
   font-weight: 620;
 }
 
@@ -2911,7 +2939,7 @@ button.timelineCellHeader:hover,
   color: var(--fg-primary);
   padding: 10px 12px;
   font: inherit;
-  font-size: 0.88rem;
+  font-size: var(--vui-font-chat);
   line-height: 1.48;
 }
 
@@ -3119,12 +3147,12 @@ button.timelineCellHeader:hover,
   }
 
   .operationItem {
-    grid-template-columns: 20px minmax(0, max-content) auto 20px;
+    grid-template-columns: 20px minmax(0, 1fr) auto 20px;
     gap: 6px;
   }
 
   .operationText {
-    max-width: min(68vw, 420px);
+    max-width: 100%;
   }
 
   .reActOperationTitle {
@@ -3145,7 +3173,7 @@ button.timelineCellHeader:hover,
   }
 
   .operationStatus {
-    font-size: 0.68rem;
+    font-size: var(--vui-font-xs);
   }
 
   .responseSegmentHeader {

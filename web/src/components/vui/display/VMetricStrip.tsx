@@ -65,7 +65,7 @@ export function VMetricStrip({
             aria-label={status.ariaLabel}
             className={[
               "vui-tone-" + (status.tone ?? "neutral"),
-              "inline-flex min-w-0 items-center justify-center truncate rounded-full border border-vui-border-hairline px-2 py-0.5 text-[0.68rem] font-semibold leading-none",
+              "inline-flex min-w-0 items-center justify-center truncate rounded-full border border-vui-border-hairline px-2 py-0.5 text-[var(--vui-font-xs)] font-semibold leading-none",
             ].join(" ")}
           >
             {status.label}
@@ -85,10 +85,10 @@ export function VMetricStrip({
             .filter(Boolean)
             .join(" ")}
         >
-          <span className="truncate text-[0.63rem] font-semibold uppercase tracking-[0.04em] text-vui-fg-tertiary">
+          <span className="truncate text-[var(--vui-font-xs)] font-semibold uppercase tracking-[0.04em] text-vui-fg-tertiary">
             {metric.label}
           </span>
-          <strong className={["truncate text-[0.8rem] leading-none", toneTextClass(metric.tone)].join(" ")}>
+          <strong className={["truncate text-[var(--vui-font-md)] leading-none", toneTextClass(metric.tone)].join(" ")}>
             {metric.value}
           </strong>
         </div>

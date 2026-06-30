@@ -58,7 +58,7 @@ export function VButton({
       {...titleProps}
       data-vui={dataVui ?? "button"}
       size={vuiControlHeight(density)}
-      className={[variantClass(variant), "min-w-0 px-2 font-semibold", className]
+      className={[variantClass(variant), "min-w-0 px-2 text-[var(--vui-font-sm)] font-semibold", className]
         .filter(Boolean)
         .join(" ")}
     >

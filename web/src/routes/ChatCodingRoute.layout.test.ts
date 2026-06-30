@@ -19,6 +19,8 @@ import routeStyles from "./ChatCodingRoute.module.css";
 const routeCssSource = readFileSync(new URL("./ChatCodingRoute.module.css", import.meta.url), "utf-8");
 const conversationCssSource = readFileSync(new URL("../components/conversation/ConversationView.module.css", import.meta.url), "utf-8");
 const appShellCssSource = readFileSync(new URL("../app/AppShell.module.css", import.meta.url), "utf-8");
+const routeLoadingShellCssSource = readFileSync(new URL("../app/RouteLoadingShell.module.css", import.meta.url), "utf-8");
+const routeErrorBoundaryCssSource = readFileSync(new URL("../app/RouteErrorBoundary.module.css", import.meta.url), "utf-8");
 
 function cssRule(source: string, selector: string) {
   const start = source.indexOf(`${selector} {`);
@@ -212,7 +214,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("<div className={conversationFrameClassName}>");
     expect(routeStyles.conversationFrameFocus).toBeTypeOf("string");
     expect(routeCssSource).toMatch(
-      /\.conversationFrameFocus\s*\{[\s\S]*?justify-self:\s*center;[\s\S]*?width:\s*min\(calc\(100% - 96px\), 1120px\);[\s\S]*?max-width:\s*100%;[\s\S]*?\}/,
+      /\.conversationFrameFocus\s*\{[\s\S]*?justify-self:\s*center;[\s\S]*?width:\s*min\(calc\(100% - 48px\), 1480px\);[\s\S]*?max-width:\s*100%;[\s\S]*?\}/,
     );
     expect(routeCssSource).toMatch(
       /@media \(max-width: 980px\)\s*\{[\s\S]*?\.conversationFrameFocus\s*\{[\s\S]*?width:\s*100%;[\s\S]*?\}/,
@@ -228,6 +230,22 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeCssSource).toContain(".rightPane {\n  display: grid;\n  grid-template-rows: auto auto 1fr;\n  padding: 6px;");
     expect(routeCssSource).toContain("padding: 8px 10px 0");
     expect(routeCssSource).not.toContain(".sessionAgentStatusControl");
+  });
+
+  it("uses shared readable scale tokens instead of page-local micro typography", () => {
+    const chatSurfaceCss = [
+      appShellCssSource,
+      routeCssSource,
+      conversationCssSource,
+      routeLoadingShellCssSource,
+      routeErrorBoundaryCssSource,
+    ].join("\n");
+
+    expect(chatSurfaceCss).toContain("var(--vui-font-xs)");
+    expect(chatSurfaceCss).toContain("var(--vui-font-sm)");
+    expect(chatSurfaceCss).toContain("var(--vui-font-md)");
+    expect(conversationCssSource).toContain("var(--vui-font-chat)");
+    expect(chatSurfaceCss).not.toMatch(/font-size:\s*0\.(?:6\d|7[0-7])rem/);
   });
 
   it("uses the unified Agent session tab strip for multi-session or CLI states", () => {
@@ -289,12 +307,18 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeCssSource).toContain("min-height: 44px");
     expect(routeCssSource).toContain("width: 26px");
     expect(routeCssSource).toContain("height: 26px");
-    expect(routeCssSource).toContain("font-size: 0.84rem");
-    expect(routeCssSource).toContain("font-size: 0.68rem");
+    expect(routeCssSource).toContain("font-size: var(--vui-font-md)");
+    expect(routeCssSource).toContain("font-size: var(--vui-font-xs)");
     expect(routeCssSource).toContain("grid-template-columns: minmax(0, 1fr) fit-content(92px)");
     expect(routeCssSource).toContain("max-width: 100%");
     expect(conversationCssSource).toContain(".surfaceCompact .timeline {\n  padding: 9px 12px 11px;");
     expect(conversationCssSource).toContain(".surfaceCompact .composer {\n  gap: 7px;\n  padding: 6px 10px 8px;");
+  });
+
+  it("does not ship micro typography in the chat workbench surface", () => {
+    expect(routeCssSource).not.toMatch(/font-size:\s*0\.(?:6\d|7[0-7])rem/);
+    expect(routeCssSource).toContain(".agentModelTag");
+    expect(routeCssSource).toContain("font-size: var(--vui-font-xs)");
   });
 
   it("clamps responsive side panes so the center conversation remains visible near 1024px", () => {

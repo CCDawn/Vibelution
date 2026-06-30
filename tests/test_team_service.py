@@ -218,6 +218,7 @@ def test_research_team_sync_applies_challenge_cup_agent_tool_profiles(tmp_path, 
             "source_finder",
             [
                 "agent_message_tool",
+                "unified_memory_search_tool",
                 "research_knowledge_query_tool",
                 "task_create_tool",
                 "task_update_tool",
@@ -235,6 +236,7 @@ def test_research_team_sync_applies_challenge_cup_agent_tool_profiles(tmp_path, 
             "source_extractor",
             [
                 "agent_message_tool",
+                "unified_memory_search_tool",
                 "research_knowledge_query_tool",
                 "task_create_tool",
                 "task_update_tool",
@@ -248,6 +250,7 @@ def test_research_team_sync_applies_challenge_cup_agent_tool_profiles(tmp_path, 
             "source_relation_mapper",
             [
                 "agent_message_tool",
+                "unified_memory_search_tool",
                 "research_knowledge_query_tool",
                 "task_create_tool",
                 "task_update_tool",
@@ -291,6 +294,7 @@ def test_research_team_repair_applies_challenge_cup_agent_tool_profiles(tmp_path
     assert agent["roleKey"] == "source_finder"
     assert agent["toolPolicy"]["allowedTools"] == [
         "agent_message_tool",
+        "unified_memory_search_tool",
         "research_knowledge_query_tool",
         "task_create_tool",
         "task_update_tool",

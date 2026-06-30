@@ -35,7 +35,7 @@ export function AgentBulkActionBar({
         ariaLabel={ariaLabel}
         className="w-full !flex-nowrap overflow-x-auto gap-1.5 [scrollbar-width:thin] [&_button]:whitespace-nowrap"
       >
-        <div className="inline-flex min-h-[26px] shrink-0 items-center gap-1.5 text-[0.76rem] font-semibold text-vui-fg-secondary [&>strong]:text-vui-fg-primary">
+        <div className="inline-flex min-h-[var(--vui-control-height-compact)] shrink-0 items-center gap-1.5 text-[var(--vui-font-sm)] font-semibold text-vui-fg-secondary [&>strong]:text-vui-fg-primary">
           {summary}
         </div>
         {selectionActions ? (

@@ -2420,6 +2420,195 @@ def knowledge_permission_audit(*, agent_id: str = "") -> dict[str, Any]:
     }
 
 
+def get_agent_memory_readiness_report(*, agent_id: str = "") -> dict[str, Any]:
+    """Report whether active Agents can practically read governed memory."""
+
+    payload = _build_agent_memory_readiness_report(agent_id=agent_id)
+    _record_event(
+        "knowledge.agent_memory_readiness.viewed",
+        "",
+        "",
+        actor_agent_id=str(payload.get("agentId") or ""),
+        fields={
+            "agentCount": int((payload.get("summary") or {}).get("agentCount") or 0),
+            "unifiedToolAgentCount": int((payload.get("summary") or {}).get("unifiedMemorySearchToolAgentCount") or 0),
+            "visibleKnowledgeBaseCount": int((payload.get("summary") or {}).get("visibleKnowledgeBaseCount") or 0),
+        },
+    )
+    return payload
+
+
+def _build_agent_memory_readiness_report(*, agent_id: str = "") -> dict[str, Any]:
+    _sync_roots()
+    normalized_agent_id = str(agent_id or "").strip()
+    try:
+        agents = agent_directory_service.list_agents(include_archived=False)
+    except Exception:
+        agents = []
+    rows: list[dict[str, Any]] = []
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        row = _agent_memory_readiness_row(agent)
+        if row:
+            rows.append(row)
+    rows.sort(key=lambda item: (str(item.get("primaryMode") or ""), str(item.get("displayName") or ""), str(item.get("agentId") or "")))
+    summary = {
+        "agentCount": len(rows),
+        "unifiedMemorySearchToolAgentCount": sum(1 for row in rows if row["memorySearch"]["hasUnifiedMemorySearchTool"]),
+        "legacyResearchKnowledgeToolAgentCount": sum(1 for row in rows if row["memorySearch"]["hasResearchKnowledgeQueryTool"]),
+        "runtimeMemorySearchToolAgentCount": sum(1 for row in rows if row["memorySearch"]["hasSearchMemoryTool"]),
+        "skillLibrarySearchToolAgentCount": sum(1 for row in rows if row["memorySearch"]["hasSkillLibrarySearchTool"]),
+        "agentsWithVisibleKnowledgeBaseCount": sum(1 for row in rows if int(row["formalKnowledge"]["visibleKnowledgeBaseCount"]) > 0),
+        "visibleKnowledgeBaseCount": sum(int(row["formalKnowledge"]["visibleKnowledgeBaseCount"]) for row in rows),
+        "visibleKnowledgeItemCount": sum(int(row["formalKnowledge"]["visibleKnowledgeItemCount"]) for row in rows),
+        "visibleSourceArtifactCount": sum(int(row["formalKnowledge"]["visibleSourceArtifactCount"]) for row in rows),
+        "missingUnifiedMemorySearchToolCount": sum(1 for row in rows if not row["memorySearch"]["hasUnifiedMemorySearchTool"]),
+        "formalKnowledgeEmptyAgentCount": sum(1 for row in rows if int(row["formalKnowledge"]["visibleKnowledgeBaseCount"]) == 0),
+    }
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "agentId": normalized_agent_id,
+        "operatingBoundary": {
+            "readOnly": True,
+            "mutatesFormalKnowledge": False,
+            "includesFormalKnowledgeBodies": False,
+            "usesTeamKnowledgeAcl": True,
+            "honorsMemoryPolicy": True,
+            "countsOnly": True,
+        },
+        "summary": summary,
+        "agents": rows,
+        "recommendations": _agent_memory_readiness_recommendations(summary),
+        "updatedAt": utc_now_iso(),
+    }
+
+
+def _agent_memory_readiness_row(agent: dict[str, Any]) -> dict[str, Any]:
+    agent_id_value = str(agent.get("agentId") or "").strip()
+    if not agent_id_value:
+        return {}
+    try:
+        tool_policy = agent.get("toolPolicy") if isinstance(agent.get("toolPolicy"), dict) else agent_directory_service.resolve_tool_policy_for_agent(agent_id_value)
+    except Exception:
+        tool_policy = {}
+    try:
+        memory_policy = agent.get("memoryPolicy") if isinstance(agent.get("memoryPolicy"), dict) else agent_directory_service.resolve_memory_policy_for_agent(agent_id_value)
+    except Exception:
+        memory_policy = {}
+    allowed_tools = _unique_strings((tool_policy or {}).get("allowedTools") or [])
+    preferred_tools = _unique_strings((tool_policy or {}).get("preferredTools") or [])
+    allowed_set = set(allowed_tools)
+    preferred_set = set(preferred_tools)
+    search_tool_priority = (
+        "unified_memory_search_tool",
+        "skill_library_search_tool",
+        "research_knowledge_query_tool",
+        "search_memory_tool",
+    )
+    primary_search_tool = next((tool for tool in preferred_tools if tool in search_tool_priority), "")
+    if not primary_search_tool:
+        primary_search_tool = next((tool for tool in search_tool_priority if tool in allowed_set), "")
+    formal_visibility = _agent_formal_knowledge_visibility(agent_id_value, memory_policy if isinstance(memory_policy, dict) else {})
+    has_unified = "unified_memory_search_tool" in allowed_set
+    readiness_status = "ready"
+    if not has_unified:
+        readiness_status = "missing_unified_memory_search_tool"
+    elif int(formal_visibility["visibleKnowledgeBaseCount"]) == 0:
+        readiness_status = "tool_ready_no_visible_formal_knowledge"
+    return {
+        "agentId": agent_id_value,
+        "agentCode": str(agent.get("agentCode") or ""),
+        "displayName": str(agent.get("displayName") or ""),
+        "primaryMode": str(agent.get("primaryMode") or ""),
+        "roleKey": str(agent.get("roleKey") or ""),
+        "status": str(agent.get("status") or ""),
+        "toolPolicyId": str((tool_policy or {}).get("policyId") or agent.get("toolPolicyId") or ""),
+        "memoryPolicyId": str((memory_policy or {}).get("policyId") or agent.get("memoryPolicyId") or ""),
+        "readinessStatus": readiness_status,
+        "memorySearch": {
+            "hasUnifiedMemorySearchTool": has_unified,
+            "hasResearchKnowledgeQueryTool": "research_knowledge_query_tool" in allowed_set,
+            "hasSearchMemoryTool": "search_memory_tool" in allowed_set,
+            "hasSkillLibrarySearchTool": "skill_library_search_tool" in allowed_set,
+            "unifiedMemorySearchPreferred": "unified_memory_search_tool" in preferred_set,
+            "primarySearchTool": primary_search_tool,
+            "allowedSearchTools": [tool for tool in search_tool_priority if tool in allowed_set],
+            "preferredSearchTools": [tool for tool in preferred_tools if tool in search_tool_priority],
+        },
+        "formalKnowledge": formal_visibility,
+    }
+
+
+def _agent_formal_knowledge_visibility(agent_id: str, memory_policy: dict[str, Any]) -> dict[str, Any]:
+    read_policy = set(_unique_strings((memory_policy or {}).get("readKnowledgeBaseIds") or []))
+    visible_bases: list[dict[str, Any]] = []
+    item_count = 0
+    source_artifact_count = 0
+    for owner in _iter_knowledge_owners(agent_id=agent_id, include_archived=True):
+        for base in _knowledge_bases_for_owner(owner):
+            base_id = str(base.get("knowledgeBaseId") or "").strip()
+            if not base_id:
+                continue
+            scoped_base_id = _owner_scoped_knowledge_base_id(owner, base_id)
+            if not knowledge_base_policy_allows(scoped_base_id, read_policy):
+                continue
+            if not _can_access(owner, base, agent_id, "read"):
+                continue
+            owner_items = [
+                item
+                for item in _read_jsonl(_items_path_for_owner(owner))
+                if str(item.get("knowledgeBaseId") or "").strip() == base_id
+            ]
+            owner_artifacts = _source_artifacts_for_base(owner, base_id)
+            item_count += len(owner_items)
+            source_artifact_count += len(owner_artifacts)
+            visible_bases.append(
+                {
+                    "ownerType": owner["ownerType"],
+                    "ownerId": owner["ownerId"],
+                    "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
+                    "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
+                    "knowledgeBaseId": base_id,
+                    "scopedKnowledgeBaseId": scoped_base_id,
+                    "knowledgeBaseName": str(base.get("name") or ""),
+                    "itemCount": len(owner_items),
+                    "sourceArtifactCount": len(owner_artifacts),
+                }
+            )
+    return {
+        "effectiveReadScope": "explicit_memory_policy" if read_policy else "team_membership_and_owner_acl",
+        "readKnowledgeBaseIdCount": len(read_policy),
+        "visibleKnowledgeBaseCount": len(visible_bases),
+        "visibleKnowledgeItemCount": item_count,
+        "visibleSourceArtifactCount": source_artifact_count,
+        "knowledgeBases": visible_bases[:20],
+    }
+
+
+def _agent_memory_readiness_recommendations(summary: dict[str, Any]) -> list[dict[str, Any]]:
+    recommendations: list[dict[str, Any]] = []
+    if int(summary.get("missingUnifiedMemorySearchToolCount") or 0) > 0:
+        recommendations.append(
+            {
+                "recommendationId": "agent_memory_tool_policy_unified_search",
+                "severity": "warning",
+                "title": "Some active Agents cannot use unified memory search.",
+                "nextStep": "Repair their role tool profiles or explicit ToolPolicy.allowedTools to include unified_memory_search_tool.",
+            }
+        )
+    if int(summary.get("formalKnowledgeEmptyAgentCount") or 0) > 0:
+        recommendations.append(
+            {
+                "recommendationId": "agent_memory_formal_knowledge_empty",
+                "severity": "info",
+                "title": "Some Agents have no visible formal knowledge bases.",
+                "nextStep": "Create owner-scoped Agent/Team knowledge bases or attach the Agent to a Team with governed memory.",
+            }
+        )
+    return recommendations
+
+
 def team_knowledge_memory_section_summary() -> dict[str, Any]:
     """Return a lightweight summary for /api/memory/overview."""
 

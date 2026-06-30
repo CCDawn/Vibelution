@@ -348,6 +348,26 @@ def run_supervised_conversation_harness(
         or latest_detail.get("lastTurnStatus")
         or ""
     ).strip().lower()
+    if last_status in {"cancelled", "canceled", "stopped", "stopped_by_user", "superseded"}:
+        return _conversation_harness_result(
+            run_id=run_id,
+            status="cancelled",
+            reason="隐藏监督会话已被停止或取消。",
+            started_at=started_at,
+            repo_root=repo_root,
+            timeout_seconds=timeout_seconds,
+            expect_restart=expect_restart,
+            scenario=scenario,
+            agent_binding=binding,
+            session_id=session_id,
+            prompt_text=prompt_text,
+            assistant_text=assistant_text,
+            evolution_summary=evolution_summary,
+            primary_returncode=None,
+            mental_model_mode=normalized_mental_mode,
+            mental_model_enabled=mental_model_enabled,
+            completion_snapshot=latest_completion_snapshot,
+        )
     primary_returncode = 0 if last_status in {"ready", "completed", "done", "success", "paused_limit"} else 1
     inferred_status, inferred_reason = infer_result_status(
         timed_out=False,
