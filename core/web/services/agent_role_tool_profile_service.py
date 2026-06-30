@@ -36,6 +36,7 @@ RESEARCH_FORBIDDEN_TOOLS = KNOWLEDGE_STEWARD_TOOLS
 
 RESEARCH_STAGE_TOOLS = (
     "agent_message_tool",
+    "unified_memory_search_tool",
     "research_knowledge_query_tool",
     "task_create_tool",
     "task_update_tool",
@@ -58,18 +59,21 @@ RESEARCH_GOVERNANCE_TOOLS = (
 )
 CHALLENGE_CUP_EXPERIMENT_TOOLS = (
     "agent_message_tool",
+    "unified_memory_search_tool",
     "research_knowledge_query_tool",
     "challenge_cup_experiment_context_tool",
     "challenge_cup_experiment_writeback_tool",
 )
 CHALLENGE_CUP_ITERATION_TOOLS = (
     "agent_message_tool",
+    "unified_memory_search_tool",
     "research_knowledge_query_tool",
     "challenge_cup_iteration_context_tool",
     "challenge_cup_iteration_writeback_tool",
 )
 CHALLENGE_CUP_VERSIONING_TOOLS = (
     "agent_message_tool",
+    "unified_memory_search_tool",
     "research_knowledge_query_tool",
     "challenge_cup_versioning_context_tool",
     "challenge_cup_versioning_writeback_tool",
@@ -155,6 +159,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         "ai_search_scope_lead",
         allowed_tools=(
             "agent_message_tool",
+            "unified_memory_search_tool",
             "research_knowledge_query_tool",
             "batch_web_search_tool",
             "paper_search_tool",
@@ -164,6 +169,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "search_memory_tool",
         ),
         preferred_tools=(
+            "unified_memory_search_tool",
             "research_knowledge_query_tool",
             "batch_web_search_tool",
             "paper_search_tool",
@@ -177,6 +183,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         "global_primary_sources",
         allowed_tools=(
             "agent_message_tool",
+            "unified_memory_search_tool",
             "research_knowledge_query_tool",
             "web_fetch_tool",
             "batch_web_search_tool",
@@ -186,6 +193,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "search_memory_tool",
         ),
         preferred_tools=(
+            "unified_memory_search_tool",
             "research_knowledge_query_tool",
             "batch_web_search_tool",
             "paper_search_tool",
@@ -200,6 +208,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         "cn_primary_sources",
         allowed_tools=(
             "agent_message_tool",
+            "unified_memory_search_tool",
             "research_knowledge_query_tool",
             "web_fetch_tool",
             "batch_web_search_tool",
@@ -209,6 +218,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "search_memory_tool",
         ),
         preferred_tools=(
+            "unified_memory_search_tool",
             "research_knowledge_query_tool",
             "batch_web_search_tool",
             "news_search_tool",
@@ -223,6 +233,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         "signal_quality_gate",
         allowed_tools=(
             "agent_message_tool",
+            "unified_memory_search_tool",
             "research_knowledge_query_tool",
             "web_fetch_tool",
             "batch_web_search_tool",
@@ -233,6 +244,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "search_memory_tool",
         ),
         preferred_tools=(
+            "unified_memory_search_tool",
             "research_knowledge_query_tool",
             "web_fetch_tool",
             "search_summarize_sources_tool",
@@ -246,12 +258,14 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         "research_source_default",
         allowed_tools=(
             "agent_message_tool",
+            "unified_memory_search_tool",
             "research_knowledge_query_tool",
             "web_fetch_tool",
             *SEARCH_TOOLS,
             "search_memory_tool",
         ),
         preferred_tools=(
+            "unified_memory_search_tool",
             "research_knowledge_query_tool",
             "batch_web_search_tool",
             "paper_search_tool",
@@ -264,6 +278,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         "research_role_default",
         allowed_tools=(
             "agent_message_tool",
+            "unified_memory_search_tool",
             "research_knowledge_query_tool",
             "batch_web_search_tool",
             "paper_search_tool",
@@ -271,6 +286,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "search_summarize_sources_tool",
         ),
         preferred_tools=(
+            "unified_memory_search_tool",
             "agent_message_tool",
             "batch_web_search_tool",
             "paper_search_tool",
@@ -285,6 +301,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         preferred_tools=(
             "source_collection_context_tool",
             "source_collection_stage_writeback_tool",
+            "unified_memory_search_tool",
             "batch_web_search_tool",
             "paper_search_tool",
             "project_search_tool",
@@ -301,6 +318,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         preferred_tools=(
             "source_collection_context_tool",
             "source_collection_stage_writeback_tool",
+            "unified_memory_search_tool",
             "web_fetch_tool",
             "search_summarize_sources_tool",
             "research_knowledge_query_tool",
@@ -322,6 +340,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         preferred_tools=(
             "source_collection_context_tool",
             "source_collection_stage_writeback_tool",
+            "unified_memory_search_tool",
             "research_knowledge_query_tool",
             "agent_message_tool",
         ),
@@ -337,6 +356,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "task_update_tool",
             "source_collection_context_tool",
             "source_collection_stage_writeback_tool",
+            "unified_memory_search_tool",
             *KNOWLEDGE_STEWARD_TOOLS,
         ),
         preferred_tools=(
@@ -344,6 +364,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "task_update_tool",
             "source_collection_context_tool",
             "source_collection_stage_writeback_tool",
+            "unified_memory_search_tool",
             "knowledge_governance_tasks_tool",
             "knowledge_operations_health_tool",
             "knowledge_governance_plan_tool",
@@ -362,6 +383,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         "challenge_cup_coordinator",
         allowed_tools=(
             "agent_message_tool",
+            "unified_memory_search_tool",
             "research_knowledge_query_tool",
             "source_collection_context_tool",
             "challenge_cup_experiment_context_tool",
@@ -370,6 +392,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         ),
         preferred_tools=(
             "agent_message_tool",
+            "unified_memory_search_tool",
             "research_knowledge_query_tool",
             "source_collection_context_tool",
             "challenge_cup_experiment_context_tool",
@@ -387,6 +410,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         preferred_tools=(
             "challenge_cup_experiment_context_tool",
             "challenge_cup_experiment_writeback_tool",
+            "unified_memory_search_tool",
             "research_knowledge_query_tool",
             "agent_message_tool",
         ),
@@ -402,6 +426,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         preferred_tools=(
             "challenge_cup_experiment_context_tool",
             "challenge_cup_experiment_writeback_tool",
+            "unified_memory_search_tool",
             "research_knowledge_query_tool",
             "agent_message_tool",
         ),
@@ -418,6 +443,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "challenge_cup_iteration_context_tool",
             "challenge_cup_iteration_writeback_tool",
             "challenge_cup_experiment_context_tool",
+            "unified_memory_search_tool",
             "research_knowledge_query_tool",
             "agent_message_tool",
         ),
@@ -434,6 +460,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "challenge_cup_versioning_context_tool",
             "challenge_cup_versioning_writeback_tool",
             "challenge_cup_iteration_context_tool",
+            "unified_memory_search_tool",
             "research_knowledge_query_tool",
             "agent_message_tool",
         ),
@@ -447,6 +474,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         "research_paper_reader",
         allowed_tools=(
             "agent_message_tool",
+            "unified_memory_search_tool",
             "research_knowledge_query_tool",
             "web_fetch_tool",
             "batch_web_search_tool",
@@ -454,6 +482,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "search_summarize_sources_tool",
         ),
         preferred_tools=(
+            "unified_memory_search_tool",
             "research_knowledge_query_tool",
             "paper_search_tool",
             "web_fetch_tool",
@@ -531,9 +560,10 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "get_memory_summary_tool",
             "search_memory_tool",
             "read_dynamic_prompt_tool",
+            "unified_memory_search_tool",
             "research_knowledge_query_tool",
         ),
-        preferred_tools=("agent_message_tool", "agent_tool_permission_request_tool", "research_knowledge_query_tool"),
+        preferred_tools=("agent_message_tool", "agent_tool_permission_request_tool", "unified_memory_search_tool", "research_knowledge_query_tool"),
         forbidden_tools=(*FORMAL_KNOWLEDGE_WRITE_TOOLS, *SEARCH_DISABLED_TOOLS),
         mutation_access="restricted",
         role_family="research_governance",

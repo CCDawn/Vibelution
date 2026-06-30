@@ -20,6 +20,7 @@ from core.web.services.team_knowledge_service import (
     create_refinement_proposal,
     collect_source_to_inbox,
     create_source_artifact_from_central_source,
+    get_agent_memory_readiness_report,
     get_knowledge_dashboard_snapshot,
     get_knowledge_governance_plan,
     get_knowledge_operations_health,
@@ -226,6 +227,17 @@ def knowledge_operations_health(agentId: str = "") -> dict:
     normalized_agent_id = _require_agent_id(agentId, purpose="knowledge operations health")
     try:
         return get_knowledge_operations_health(agent_id=normalized_agent_id)
+    except TeamKnowledgePermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except TeamKnowledgeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/knowledge/agent-readiness")
+def knowledge_agent_readiness(agentId: str = "") -> dict:
+    normalized_agent_id = _require_agent_id(agentId, purpose="knowledge agent readiness")
+    try:
+        return get_agent_memory_readiness_report(agent_id=normalized_agent_id)
     except TeamKnowledgePermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except TeamKnowledgeError as exc:
