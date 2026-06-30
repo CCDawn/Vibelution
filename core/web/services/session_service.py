@@ -2355,6 +2355,8 @@ def _session_agent_visible_in_indexes(summary: dict[str, Any]) -> bool:
     conversation_index_kind = str(summary.get("conversationIndexKind") or "").strip()
     conversation_index_visibility = str(summary.get("conversationIndexVisibility") or "").strip()
     if str(summary.get("agentStatusCode") or "").strip() == "deleted_agent":
+        if bool(summary.get("hiddenFromIndex") or summary.get("hidden_from_index")):
+            return False
         return True
     if bool(summary.get("agentMissing")):
         return False
@@ -6724,6 +6726,7 @@ def mark_direct_session_agent_deleted(
     agent_id: str,
     agent_display_name: str = "",
     previous_status: str = "",
+    hide_from_index: bool = False,
     include_restore_token: bool = False,
 ) -> dict[str, Any]:
     """Keep direct-session history while preventing Agent repair from recreating a purged Agent."""
@@ -6771,6 +6774,7 @@ def mark_direct_session_agent_deleted(
                     agent_id=normalized_agent_id,
                     agent_display_name=agent_display_name,
                     previous_status=previous_status,
+                    hide_from_index=hide_from_index,
                     timestamp=now,
                 ) or changed
                 break
@@ -6787,6 +6791,7 @@ def mark_direct_session_agent_deleted(
                     agent_id=normalized_agent_id,
                     agent_display_name=agent_display_name,
                     previous_status=previous_status,
+                    hide_from_index=hide_from_index,
                     timestamp=now,
                 )
                 conversations.append(conversation)
@@ -6918,6 +6923,7 @@ def _mark_conversation_agent_deleted(
     agent_id: str,
     agent_display_name: str,
     previous_status: str,
+    hide_from_index: bool = False,
     timestamp: str,
 ) -> bool:
     changed = False
@@ -6940,6 +6946,16 @@ def _mark_conversation_agent_deleted(
     if conversation.get("agentStatusCode") != "deleted_agent":
         conversation["agentStatusCode"] = "deleted_agent"
         changed = True
+    if hide_from_index:
+        if conversation.get("hiddenFromIndex") is not True:
+            conversation["hiddenFromIndex"] = True
+            changed = True
+        if conversation.get("conversationIndexKind") != agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN:
+            conversation["conversationIndexKind"] = agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN
+            changed = True
+        if conversation.get("conversationIndexVisibility") != agent_directory_service.CONVERSATION_INDEX_VISIBILITY_HIDDEN:
+            conversation["conversationIndexVisibility"] = agent_directory_service.CONVERSATION_INDEX_VISIBILITY_HIDDEN
+            changed = True
     if conversation.get("agentDirectSessionMismatch"):
         conversation["agentDirectSessionMismatch"] = False
         changed = True

@@ -1359,7 +1359,12 @@ def archive_agent_instance(agent_id: str, *, repair_mode_bindings: bool = True) 
     return _agent_to_api(agent)
 
 
-def purge_archived_agent_instance(agent_id: str, *, allow_active: bool = False) -> dict[str, Any]:
+def purge_archived_agent_instance(
+    agent_id: str,
+    *,
+    allow_active: bool = False,
+    _allow_protected_system_repair: bool = False,
+) -> dict[str, Any]:
     """Physically remove an AgentInstance and its private workspace."""
 
     normalized_agent_id = str(agent_id or "").strip()
@@ -1373,7 +1378,7 @@ def purge_archived_agent_instance(agent_id: str, *, allow_active: bool = False) 
         previous_status = str(agent.get("status") or "active").strip() or "active"
         if previous_status != "archived" and not allow_active:
             raise AgentDirectoryError("Only archived Agents can be permanently deleted.")
-        if _agent_archive_protected(agent):
+        if _agent_archive_protected(agent) and not _allow_protected_system_repair:
             raise AgentDirectoryError("Protected core Agent cannot be purged.")
         agent_snapshot = dict(agent)
         agent_snapshot["status"] = previous_status
@@ -1393,7 +1398,7 @@ def purge_archived_agent_instance(agent_id: str, *, allow_active: bool = False) 
         current_status = str(agent.get("status") or "active").strip() or "active"
         if current_status != "archived" and not allow_active:
             raise AgentDirectoryError("Only archived Agents can be permanently deleted.")
-        if _agent_archive_protected(agent):
+        if _agent_archive_protected(agent) and not _allow_protected_system_repair:
             raise AgentDirectoryError("Protected core Agent cannot be purged.")
         agents = [
             item
@@ -1431,6 +1436,48 @@ def purge_archived_agent_instance(agent_id: str, *, allow_active: bool = False) 
     }
     _record_agent_purged_event(agent_snapshot, result)
     return result
+
+
+def purge_system_team_agent_instance(
+    agent_id: str,
+    *,
+    expected_created_by: str,
+    expected_team_metadata_key: str,
+    expected_team_id: str,
+) -> dict[str, Any]:
+    """Purge a stale system-team Agent after validating its ownership boundary."""
+
+    normalized_agent_id = str(agent_id or "").strip()
+    normalized_created_by = str(expected_created_by or "").strip()
+    normalized_team_key = str(expected_team_metadata_key or "").strip()
+    normalized_team_id = str(expected_team_id or "").strip()
+    if not normalized_agent_id or not normalized_created_by or not normalized_team_key or not normalized_team_id:
+        raise AgentDirectoryError("System team purge requires agent id, owner, team key, and team id.")
+    if normalized_agent_id == KNOWLEDGE_STEWARD_AGENT_ID:
+        raise AgentDirectoryError("Knowledge steward Agent cannot be purged by system team repair.")
+
+    with _STATE_LOCK:
+        state = load_state()
+        agent = _find_agent(state, normalized_agent_id)
+        if agent is None:
+            raise AgentNotFoundError(f"Agent not found: {normalized_agent_id}")
+        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        if bool(metadata.get("protected")):
+            raise AgentDirectoryError("Protected core Agent cannot be purged.")
+        if str(agent.get("createdBy") or "").strip() != normalized_created_by:
+            raise AgentDirectoryError("System team purge owner mismatch.")
+        if str(metadata.get(normalized_team_key) or "").strip() != normalized_team_id:
+            raise AgentDirectoryError("System team purge team mismatch.")
+        if str(metadata.get("conversationIndexKind") or "").strip() != CONVERSATION_INDEX_KIND_TEAM_AGENT:
+            raise AgentDirectoryError("System team purge requires a team Agent.")
+        if str(metadata.get("conversationIndexVisibility") or "").strip() != CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE:
+            raise AgentDirectoryError("System team purge requires a team-private Agent.")
+
+    return purge_archived_agent_instance(
+        normalized_agent_id,
+        allow_active=True,
+        _allow_protected_system_repair=True,
+    )
 
 
 def ensure_agent_purge_workspace_deletable(agent: dict[str, Any]) -> dict[str, Any]:
@@ -4526,7 +4573,7 @@ def _ensure_knowledge_steward_agent(state: dict[str, Any]) -> dict[str, Any]:
         repaired_fields.append("agentCode")
 
     metadata = dict(agent.get("metadata") or {})
-    merged_metadata = _merge_system_agent_metadata(metadata, _knowledge_steward_metadata())
+    merged_metadata = _knowledge_steward_merged_metadata(metadata)
     if metadata != merged_metadata:
         agent["metadata"] = merged_metadata
         changed = True
@@ -4641,6 +4688,9 @@ def _knowledge_steward_metadata() -> dict[str, Any]:
         "systemRole": KNOWLEDGE_STEWARD_ROLE_KEY,
         "fixedRole": True,
         "protected": True,
+        "conversationIndexKind": CONVERSATION_INDEX_KIND_PERSONAL_AGENT,
+        "conversationIndexVisibility": CONVERSATION_INDEX_VISIBILITY_USER_VISIBLE,
+        "showInSessionIndex": True,
         "functionalDisplayName": KNOWLEDGE_STEWARD_FUNCTIONAL_NAME,
         "displayNameSource": "generated_person_name",
         "agentMode": "general",
@@ -4670,6 +4720,28 @@ def _knowledge_steward_metadata() -> dict[str, Any]:
             "taskTypes": ["knowledge_governance", "source_ingestion", "rating_suggestion", "review_preparation"],
         },
     }
+
+
+def _knowledge_steward_merged_metadata(current: dict[str, Any]) -> dict[str, Any]:
+    metadata = dict(current or {})
+    for key in (
+        "teamId",
+        "challengeCupTeamId",
+        "challengeCupTeamManagedVersion",
+        "challengeCupTeamRole",
+        "challengeCupTeamRoleKey",
+        "knowledgeExpansionTeamId",
+        "knowledgeExpansionTeamManagedVersion",
+        "knowledgeExpansionTeamRole",
+        "knowledgeExpansionTeamRoleKey",
+        "researchTeamRole",
+        "researchTeamRoleKey",
+        "researchAgentKey",
+        "teamRole",
+        "teamRoleKey",
+    ):
+        metadata.pop(key, None)
+    return _merge_system_agent_metadata(metadata, _knowledge_steward_metadata())
 
 
 def _ensure_fixed_role_profiles(agent: dict[str, Any]) -> bool:
