@@ -61,7 +61,7 @@ import {
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { LazyConversationView } from "../components/conversation/LazyConversationView";
-import { VButton } from "../components/vui";
+import { VButton, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { useShellStore } from "../store/shellStore";
 import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
@@ -3192,7 +3192,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           : "A dataset is materialized first; a bundle runs directly."}
                       >
                         <label htmlFor="supervised-source">{lang === "zh" ? "评测来源" : "Evaluation source"}</label>
-                        <select
+                        <VNativeSelect
                           id="supervised-source"
                           className={styles.selectInput}
                           value={selectedSourceValue}
@@ -3226,12 +3226,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                               ))}
                             </optgroup>
                           ) : null}
-                        </select>
+                        </VNativeSelect>
                       </div>
                       {sourceKind === "dataset" ? (
                         <div className={styles.formField} title={t("caseLimitHint")}>
                           <label htmlFor="supervised-limit">{t("caseLimit")}</label>
-                          <input
+                          <VNativeInput
                             id="supervised-limit"
                             className={styles.textInput}
                             type="number"
@@ -3267,7 +3267,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
 
                   <div className={styles.supervisedRunOptions}>
                     <label className={styles.checkboxRow} title={t("keepWorktreeLabel")}>
-                      <input
+                      <VNativeInput
                         type="checkbox"
                         checked={keepWorktree}
                         onChange={(event) => setKeepWorktree(event.target.checked)}
@@ -3276,7 +3276,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     </label>
                     <div className={styles.formField} title={t("supervisedMentalModeHint")}>
                       <label htmlFor="supervised-mental-mode">{t("supervisedMentalMode")}</label>
-                      <select
+                      <VNativeSelect
                         id="supervised-mental-mode"
                         className={styles.selectInput}
                         value={supervisedMentalModelMode}
@@ -3285,7 +3285,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         <option value="follow">{t("supervisedMentalModeFollow")}</option>
                         <option value="enabled">{t("supervisedMentalModeEnabled")}</option>
                         <option value="disabled">{t("supervisedMentalModeDisabled")}</option>
-                      </select>
+                      </VNativeSelect>
                     </div>
                   </div>
 
@@ -4138,7 +4138,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     >
                       <div className={styles.selectionBar}>
                         <label className={styles.batchToggle}>
-                          <input
+                          <VNativeInput
                             type="checkbox"
                             checked={selectedRunIdSet.has(run.id)}
                             disabled={!run.canDelete}
@@ -4657,7 +4657,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   <div className={styles.filterRow}>
                     <label className={styles.filterField}>
                       <span>{t("proposalTarget")}</span>
-                      <input
+                      <VNativeInput
                         type="text"
                         className={styles.textInput}
                         value={librarySearchInput}
@@ -4667,7 +4667,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     </label>
                     <label className={styles.filterField}>
                       <span>{t("filterByStatus")}</span>
-                      <select
+                      <VNativeSelect
                         className={styles.selectInput}
                         value={libraryStatusFilter}
                         onChange={(event) => setLibraryStatusFilter(event.target.value as LibraryStatusFilter)}
@@ -4677,11 +4677,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             {status === "all" ? t("filterAll") : statusLabel(status)}
                           </option>
                         ))}
-                      </select>
+                      </VNativeSelect>
                     </label>
                     <label className={styles.filterField}>
                       <span>{t("filterByDeleteState")}</span>
-                      <select
+                      <VNativeSelect
                         className={styles.selectInput}
                         value={libraryDeleteFilter}
                         onChange={(event) => setLibraryDeleteFilter(event.target.value as LibraryDeleteFilter)}
@@ -4689,7 +4689,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         <option value="all">{t("filterAll")}</option>
                         <option value="deletable">{t("filterDeletableOnly")}</option>
                         <option value="blocked">{t("filterBlockedOnly")}</option>
-                      </select>
+                      </VNativeSelect>
                     </label>
                   </div>
                   <div className={styles.filterMeta}>
@@ -4726,7 +4726,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       >
                         <div className={styles.selectionBar}>
                           <label className={styles.batchToggle}>
-                            <input
+                            <VNativeInput
                               type="checkbox"
                               disabled={!item.canDelete}
                               checked={proposalSelected(item.sourceRun)}
@@ -4775,7 +4775,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       >
                         <div className={styles.selectionBar}>
                           <label className={styles.batchToggle}>
-                            <input
+                            <VNativeInput
                               type="checkbox"
                               disabled={!item.canDelete}
                               checked={proposalSelected(item.sourceRun)}
@@ -4896,7 +4896,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         <div className={styles.proposalEditGrid}>
                           <label className={styles.formField}>
                             <span>{t("proposalImprovementType")}</span>
-                            <input
+                            <VNativeInput
                               className={styles.textInput}
                               value={proposalEditDraft.improvementType}
                               onChange={(event) => updateProposalEditDraft("improvementType", event.target.value)}
@@ -4904,7 +4904,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           </label>
                           <label className={styles.formField}>
                             <span>{t("proposalExpectedEffect")}</span>
-                            <textarea
+                            <VNativeTextarea
                               className={styles.textArea}
                               rows={3}
                               value={proposalEditDraft.expectedEffect}
@@ -4913,7 +4913,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           </label>
                           <label className={styles.formField}>
                             <span>{t("proposalDraftSummary")}</span>
-                            <textarea
+                            <VNativeTextarea
                               className={styles.textArea}
                               rows={3}
                               value={proposalEditDraft.summary}
@@ -4922,7 +4922,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           </label>
                           <label className={styles.formField}>
                             <span>{t("proposalCandidatePrompt")}</span>
-                            <textarea
+                            <VNativeTextarea
                               className={styles.textArea}
                               rows={6}
                               value={proposalEditDraft.candidatePrompt}
@@ -4931,7 +4931,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           </label>
                           <label className={styles.formField}>
                             <span>{t("proposalBaselinePrompt")}</span>
-                            <textarea
+                            <VNativeTextarea
                               className={styles.textArea}
                               rows={5}
                               value={proposalEditDraft.baselinePrompt}
@@ -4940,7 +4940,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           </label>
                           <label className={styles.formField}>
                             <span>{t("proposalEditNote")}</span>
-                            <input
+                            <VNativeInput
                               className={styles.textInput}
                               value={proposalEditDraft.editNote}
                               onChange={(event) => updateProposalEditDraft("editNote", event.target.value)}

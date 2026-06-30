@@ -92,6 +92,17 @@ describe("DirectSessionIndexItem helpers", () => {
     expect(markup).toContain("模型：mimo-v2.5");
   });
 
+  it("renders rename input through the VUI native input boundary", () => {
+    const markup = renderDirectItem({
+      editing: true,
+      editingTitle: "重命名",
+    });
+
+    expect(markup).toContain('data-vui="native-input"');
+    expect(markup).toContain("sessionTitleInput");
+    expect(markup).toContain("重命名");
+  });
+
   it("places the model badge beside the session title without repeating it in metadata", () => {
     const markup = renderDirectItem();
 

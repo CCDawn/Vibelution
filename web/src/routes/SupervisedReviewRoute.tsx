@@ -16,7 +16,7 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { VButton } from "../components/vui";
+import { VButton, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { createEvolutionWorkspaceCache } from "./evolutionWorkspaceCache";
 import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
@@ -37,7 +37,7 @@ const styles = {
   toolbar: "flex min-w-0 flex-wrap items-center justify-between gap-[var(--route-topbar-gap)]",
   toolbarIntro: "grid min-w-[260px] max-w-[760px] gap-0.5",
   toolbarControls: "flex flex-wrap items-center justify-end gap-3",
-  eyebrow: "m-0 mb-0.5 text-[0.7rem] uppercase tracking-[0.08em] text-[var(--accent-warm-2)]",
+  eyebrow: "m-0 mb-0.5 text-[var(--vui-font-xs)] uppercase tracking-[0.08em] text-[var(--accent-warm-2)]",
   title: "m-0 whitespace-nowrap text-[length:var(--route-topbar-title-size)] leading-[1.08]",
   subtitle:
     "m-0 max-w-none overflow-hidden text-ellipsis whitespace-nowrap text-[length:var(--route-topbar-subtitle-size)] leading-tight text-[var(--fg-secondary)]",
@@ -649,7 +649,7 @@ export function SupervisedReviewRoute() {
             </div>
             <label className={styles.searchField}>
               <Search size={14} />
-              <input
+              <VNativeInput
                 type="text"
                 value={searchInput}
                 onChange={(event) => setSearchInput(event.target.value)}
@@ -902,7 +902,7 @@ export function SupervisedReviewRoute() {
                 <div className={styles.formGrid}>
                   <label className={styles.formField}>
                     <span>{lang === "zh" ? "原因分类" : "Reason code"}</span>
-                    <select
+                    <VNativeSelect
                       value={reasonCode}
                       disabled={detailCandidate.status !== "pending"}
                       onChange={(event) => setReasonCode(event.target.value)}
@@ -911,13 +911,13 @@ export function SupervisedReviewRoute() {
                       {reasonOptions.map((option) => (
                         <option key={option.value} value={option.value}>{option.label}</option>
                       ))}
-                    </select>
+                    </VNativeSelect>
                   </label>
 
                   {draftDecision === "negative" ? (
                     <label className={styles.formField}>
                       <span>{lang === "zh" ? "错误类型" : "Error type"}</span>
-                      <input
+                      <VNativeInput
                         type="text"
                         value={errorType}
                         disabled={detailCandidate.status !== "pending"}
@@ -930,7 +930,7 @@ export function SupervisedReviewRoute() {
                   {draftDecision === "negative" ? (
                     <label className={styles.formField}>
                       <span>{lang === "zh" ? "正确原则" : "Correct principle"}</span>
-                      <input
+                      <VNativeInput
                         type="text"
                         value={correctPrinciple}
                         disabled={detailCandidate.status !== "pending"}
@@ -943,7 +943,7 @@ export function SupervisedReviewRoute() {
                   {draftDecision === "negative" ? (
                     <label className={styles.formField}>
                       <span>{lang === "zh" ? "理想做法" : "Ideal behavior"}</span>
-                      <input
+                      <VNativeInput
                         type="text"
                         value={idealBehavior}
                         disabled={detailCandidate.status !== "pending"}
@@ -956,7 +956,7 @@ export function SupervisedReviewRoute() {
 
                 <label className={styles.textAreaField}>
                   <span>{lang === "zh" ? "评审备注" : "Reviewer note"}</span>
-                  <textarea
+                  <VNativeTextarea
                     value={reviewerNote}
                     disabled={detailCandidate.status !== "pending"}
                     onChange={(event) => setReviewerNote(event.target.value)}

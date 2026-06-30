@@ -223,7 +223,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -879,7 +879,7 @@
   border-radius: 8px;
   background: color-mix(in srgb, var(--state-warning) 10%, transparent);
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-memoryroute).panelNotice svg,
@@ -906,7 +906,7 @@
   border-radius: 8px;
   background: color-mix(in srgb, var(--state-danger) 10%, transparent);
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-memoryroute).panelError svg {
@@ -1769,7 +1769,7 @@
   background: var(--surface-card);
   color: var(--fg-secondary);
   font: inherit;
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-memoryroute).sourceChip span,
@@ -1784,7 +1784,7 @@
 :where(.vui-routes-memoryroute).sourceChipActive strong {
   flex: 0 0 auto;
   color: inherit;
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-memoryroute).sourceChip:hover {
@@ -1972,7 +1972,7 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--surface-panel) 76%, transparent);
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-memoryroute).itemSelectionRow input {
@@ -2190,7 +2190,7 @@
 :where(.vui-routes-memoryroute).compactItemSummary {
   display: block;
   color: var(--fg-secondary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-memoryroute).effectiveGrid .compactMemoryList {
@@ -2322,7 +2322,7 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
   color: var(--accent-cool);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
@@ -2336,7 +2336,7 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--surface-card) 74%, transparent);
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
@@ -3026,7 +3026,7 @@
   border-radius: var(--radius-control);
   background: var(--surface-panel-muted);
   color: var(--fg-secondary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3430,7 +3430,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3579,12 +3579,12 @@
   flex: 0 0 auto;
   min-height: 26px;
   padding: 0 8px;
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-memoryroute).bulkActionBar .countPill {
   min-height: 22px;
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-memoryroute).editPreviewPanel {
@@ -3632,7 +3632,7 @@
 
 :where(.vui-routes-memoryroute).editPreviewGrid span {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-memoryroute).editPreviewGrid p {

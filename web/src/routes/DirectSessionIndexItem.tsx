@@ -2,7 +2,7 @@ import { Bot, Check, Clock3, Cpu, LoaderCircle, MessageCircle, X } from "lucide-
 import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
 
 import type { AgentInstance, SessionSummary } from "../api/types";
-import { VButton, VIconButton } from "../components/vui";
+import { VButton, VIconButton, VNativeInput } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import {
   sessionAgentDisplayInfo,
@@ -331,7 +331,7 @@ export function DirectSessionIndexItem({
           <span className={styles.conversationCopy}>
             <span className={styles.conversationTitleRow}>
               <span className={styles.conversationTitleMain}>
-                <input
+                <VNativeInput
                   className={styles.sessionTitleInput}
                   value={editingTitle}
                   maxLength={120}

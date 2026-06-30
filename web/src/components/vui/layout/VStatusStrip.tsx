@@ -43,7 +43,7 @@ export function VStatusStrip({ className, items, ...props }: VStatusStripProps) 
           data-vui="status-strip-item"
           className={[
             "inline-grid min-h-7 grid-cols-[auto_auto] items-center gap-1 rounded-md",
-            "border border-vui-border-subtle px-2 text-xs font-semibold",
+            "border border-vui-border-subtle px-2 text-[var(--vui-font-xs)] font-semibold leading-[var(--vui-line-readable)]",
             toneClass(item.tone),
           ].join(" ")}
         >

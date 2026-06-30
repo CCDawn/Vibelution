@@ -41,7 +41,11 @@ describe("SelfEvolutionTrack static assets", () => {
   it("routes self-evolution controls through VUI primitives", () => {
     expect(selfEvolutionSource).toContain('from "../components/vui"');
     expect(selfEvolutionSource).toContain("<VButton");
+    expect(selfEvolutionSource).toContain("<VNativeInput");
     expect(selfEvolutionSource).not.toMatch(/<button\b/);
+    expect(selfEvolutionSource).not.toMatch(/<input\b/);
+    expect(selfEvolutionSource).not.toMatch(/<select\b/);
+    expect(selfEvolutionSource).not.toMatch(/<textarea\b/);
   });
 
   it("does not use remote placeholder images that pollute runtime scene logs", () => {

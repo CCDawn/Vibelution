@@ -88,7 +88,7 @@ import { COMPOSER_SESSION_REFERENCE_MIME } from "../components/conversation/conv
 import { LazyConversationView } from "../components/conversation/LazyConversationView";
 import { isAgentInboxMessage, isTurnErrorMessage } from "../components/conversation/messageSections";
 import { LazyFilePreview } from "../components/preview/LazyFilePreview";
-import { VButton } from "../components/vui";
+import { VButton, VNativeInput, VNativeSelect } from "../components/vui";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../app/browserTelemetry";
 import { getPageInstanceId } from "../app/pageInstance";
 import { resolvePollingInterval, usePageVisibility, useStartupWarmup } from "../app/pollingPolicy";
@@ -6508,7 +6508,7 @@ export function ChatCodingRoute() {
               <div className={styles.groupManagementControls}>
                 <label className={styles.groupTitleField}>
                   <span>{lang === "zh" ? "群名" : "Name"}</span>
-                  <input
+                  <VNativeInput
                     value={groupManageTitleDraft}
                     maxLength={80}
                     disabled={activeGroupTeamOwned || groupRoundActive || updateGroupRoomMutation.isPending}
@@ -6520,7 +6520,7 @@ export function ChatCodingRoute() {
                 </label>
                 <label className={styles.groupModeSelect}>
                   <span>{lang === "zh" ? "调度模式" : "Mode"}</span>
-                  <select
+                  <VNativeSelect
                     value={groupManageModeDraft}
                     disabled={activeGroupTeamOwned || groupRoundActive || updateGroupRoomMutation.isPending}
                     onChange={(event) => {
@@ -6533,11 +6533,11 @@ export function ChatCodingRoute() {
                         {chatRoomModeLabel(mode, lang)}
                       </option>
                     ))}
-                  </select>
+                  </VNativeSelect>
                 </label>
                 <label className={styles.groupModeSelect}>
                   <span>{lang === "zh" ? "对话目的" : "Purpose"}</span>
-                  <select
+                  <VNativeSelect
                     value={groupManagePurposeDraft}
                     disabled={activeGroupTeamOwned || groupRoundRunning || updateGroupRoomMutation.isPending}
                     onChange={(event) => {
@@ -6550,7 +6550,7 @@ export function ChatCodingRoute() {
                         {chatRoomPurposeLabel(purpose, lang)}
                       </option>
                     ))}
-                  </select>
+                  </VNativeSelect>
                 </label>
                 <div className={styles.groupManagementCount}>
                   <span>{lang === "zh" ? "已选" : "Selected"}</span>
@@ -6576,7 +6576,7 @@ export function ChatCodingRoute() {
                             : styles.groupMemberChip
                         }
                       >
-                        <input
+                        <VNativeInput
                           type="checkbox"
                           checked={selected}
                           disabled={activeGroupTeamOwned || groupRoundActive || updateGroupRoomMutation.isPending}
@@ -7236,7 +7236,7 @@ export function ChatCodingRoute() {
                 )}
               </div>
               <div className={styles.groupComposerBar}>
-                <input
+                <VNativeInput
                   value={projectBusDraft}
                   onChange={(event) => setProjectBusDraft(event.target.value)}
                   disabled={sendProjectBusMessageMutation.isPending}
@@ -7249,7 +7249,7 @@ export function ChatCodingRoute() {
                   }}
                 />
                 <label className={styles.projectBusInterruptToggle}>
-                  <input
+                  <VNativeInput
                     type="checkbox"
                     checked={projectBusInterruptTargets}
                     onChange={(event) => setProjectBusInterruptTargets(event.target.checked)}
@@ -7408,7 +7408,7 @@ export function ChatCodingRoute() {
                 )}
               </div>
               <div className={styles.groupComposerBar}>
-                <input
+                <VNativeInput
                   value={groupTopicDraft}
                   onChange={(event) => setGroupTopicDraft(event.target.value)}
                   disabled={startGroupRoundMutation.isPending}
@@ -7693,7 +7693,7 @@ export function ChatCodingRoute() {
         ) : (
           <div className={styles.panelSearch}>
             <Search size={15} />
-            <input
+            <VNativeInput
               className={styles.panelSearchInput}
               type="text"
               value={sessionFilter}
@@ -7909,7 +7909,7 @@ export function ChatCodingRoute() {
               <section className={styles.groupComposerPanel} aria-label={lang === "zh" ? "新建群聊" : "New group chat"}>
                 <label className={styles.groupComposerField}>
                   <span>{lang === "zh" ? "群名" : "Name"}</span>
-                  <input
+                  <VNativeInput
                     className={styles.groupComposerInput}
                     value={groupTitleDraft}
                     maxLength={80}
@@ -7918,7 +7918,7 @@ export function ChatCodingRoute() {
                 </label>
                 <label className={styles.groupComposerField}>
                   <span>{lang === "zh" ? "调度模式" : "Mode"}</span>
-                  <select
+                  <VNativeSelect
                     className={styles.groupComposerInput}
                     value={groupModeDraft}
                     onChange={(event) => setGroupModeDraft(event.target.value)}
@@ -7929,11 +7929,11 @@ export function ChatCodingRoute() {
                         {chatRoomModeLabel(mode, lang)}
                       </option>
                     ))}
-                  </select>
+                  </VNativeSelect>
                 </label>
                 <label className={styles.groupComposerField}>
                   <span>{lang === "zh" ? "对话目的" : "Purpose"}</span>
-                  <select
+                  <VNativeSelect
                     className={styles.groupComposerInput}
                     value={groupPurposeDraft}
                     onChange={(event) => setGroupPurposeDraft(event.target.value)}
@@ -7944,7 +7944,7 @@ export function ChatCodingRoute() {
                         {chatRoomPurposeLabel(purpose, lang)}
                       </option>
                     ))}
-                  </select>
+                  </VNativeSelect>
                 </label>
                 <div className={styles.groupAgentPicker} aria-label={lang === "zh" ? "选择参与助手" : "Choose agents"}>
                   {agentsQuery.isPending ? (
@@ -7955,7 +7955,7 @@ export function ChatCodingRoute() {
                       const display = agentDisplayInfo(agent, lang, { resolveModelLabel });
                       return (
                         <label key={agent.agentId} className={selected ? `${styles.groupAgentOption} ${styles.groupAgentOptionSelected}` : styles.groupAgentOption}>
-                          <input
+                          <VNativeInput
                             type="checkbox"
                             checked={selected}
                             disabled={createGroupRoomMutation.isPending}

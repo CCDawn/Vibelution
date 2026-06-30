@@ -46,6 +46,10 @@ describe("SkillsRoute layout contract", () => {
     expect(routeSource).toContain("selectedSkillCommands");
     expect(routeSource).toContain("copySelectedSkillCommands");
     expect(routeSource).toContain("copy.bulkReadOnlyReason");
+    expect(routeSource).toContain("<VNativeInput");
+    expect(routeSource).not.toMatch(/<input\b/);
+    expect(routeSource).not.toMatch(/<select\b/);
+    expect(routeSource).not.toMatch(/<textarea\b/);
     expect(routeSource).toContain("bulkReadOnlyNoteClass");
     expect(routeSource).toContain("bulkActionBarClass");
     expect(routeSource).toContain("selectableRowClass");

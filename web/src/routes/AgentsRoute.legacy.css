@@ -236,7 +236,7 @@
   margin: 0;
   padding: 0 2px;
   color: var(--fg-tertiary);
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
   letter-spacing: 0.08em;
   line-height: 1.2;
@@ -265,7 +265,7 @@
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-card) 86%, var(--bg-canvas));
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
   cursor: pointer;
   list-style: none;
@@ -1005,7 +1005,7 @@
   background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
   color: var(--accent-cool);
   font-style: normal;
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
@@ -1044,7 +1044,7 @@
 
 :where(.vui-routes-agentsroute).healthGuidePanel span {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
 }
 
@@ -1052,7 +1052,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1219,7 +1219,7 @@
 :where(.vui-routes-agentsroute).detailTabActive span {
   max-width: 100%;
   overflow: hidden;
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1338,7 +1338,7 @@
 :where(.vui-routes-agentsroute).managementChecklist button span {
   min-width: 0;
   overflow: hidden;
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-weight: 720;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1360,7 +1360,7 @@
   display: inline-flex;
   align-items: center;
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
   white-space: nowrap;
 }
@@ -1536,7 +1536,7 @@
 
 :where(.vui-routes-agentsroute).workspaceScopePanel strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).workspaceScopePanel small {
@@ -1576,7 +1576,7 @@
 
 :where(.vui-routes-agentsroute).toolBundlePanelHeader strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).toolBundlePanelHeader span {
@@ -1718,7 +1718,7 @@
 
 :where(.vui-routes-agentsroute).toolGovernanceItem small {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).governanceActions {
@@ -1869,7 +1869,7 @@
 
 :where(.vui-routes-agentsroute).runHistoryItem strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).runHistoryItem span {
@@ -1879,7 +1879,7 @@
 
 :where(.vui-routes-agentsroute).runHistoryItem small {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).runtimeFocusPanel {
@@ -2070,7 +2070,7 @@
 
 :where(.vui-routes-agentsroute).activityTimelineItem strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).activityTimelineItem p {
@@ -2085,7 +2085,7 @@
 
 :where(.vui-routes-agentsroute).activityTimelineItem small {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).timelineActions {
@@ -2155,7 +2155,7 @@
 
 :where(.vui-routes-agentsroute).inboxMessageItem strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).inboxMessageItem p {
@@ -2170,7 +2170,7 @@
 
 :where(.vui-routes-agentsroute).inboxMessageItem small {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).field {
@@ -2388,7 +2388,7 @@
 
 :where(.vui-routes-agentsroute).toolPermissionGroupHeader span {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).toolPermissionGroupHeader small {
@@ -2471,7 +2471,7 @@
 :where(.vui-routes-agentsroute).roomCheckField strong,
 :where(.vui-routes-agentsroute).toolPermissionRow strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).roomCheckField small,
@@ -2536,7 +2536,7 @@
   background: var(--surface-panel);
   color: var(--fg-primary);
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).field input {
@@ -2925,7 +2925,7 @@
 
 :where(.vui-routes-agentsroute).boundarySummaryGrid small {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).referenceItem,

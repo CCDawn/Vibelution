@@ -5586,7 +5586,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   margin: 0;
   padding: 0 2px;
   color: var(--fg-tertiary);
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
   letter-spacing: 0.08em;
   line-height: 1.2;
@@ -5615,7 +5615,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-card) 86%, var(--bg-canvas));
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
   cursor: pointer;
   list-style: none;
@@ -6355,7 +6355,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
   color: var(--accent-cool);
   font-style: normal;
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
@@ -6394,7 +6394,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
 
 :where(.vui-routes-agentsroute).healthGuidePanel span {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
 }
 
@@ -6402,7 +6402,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -6569,7 +6569,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
 :where(.vui-routes-agentsroute).detailTabActive span {
   max-width: 100%;
   overflow: hidden;
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -6688,7 +6688,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
 :where(.vui-routes-agentsroute).managementChecklist button span {
   min-width: 0;
   overflow: hidden;
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-weight: 720;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -6710,7 +6710,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   display: inline-flex;
   align-items: center;
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
   white-space: nowrap;
 }
@@ -6886,7 +6886,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
 
 :where(.vui-routes-agentsroute).workspaceScopePanel strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).workspaceScopePanel small {
@@ -6926,7 +6926,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
 
 :where(.vui-routes-agentsroute).toolBundlePanelHeader strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).toolBundlePanelHeader span {
@@ -7068,7 +7068,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
 
 :where(.vui-routes-agentsroute).toolGovernanceItem small {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).governanceActions {
@@ -7219,7 +7219,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
 
 :where(.vui-routes-agentsroute).runHistoryItem strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).runHistoryItem span {
@@ -7229,7 +7229,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
 
 :where(.vui-routes-agentsroute).runHistoryItem small {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).runtimeFocusPanel {
@@ -7420,7 +7420,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
 
 :where(.vui-routes-agentsroute).activityTimelineItem strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).activityTimelineItem p {
@@ -7435,7 +7435,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
 
 :where(.vui-routes-agentsroute).activityTimelineItem small {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).timelineActions {
@@ -7505,7 +7505,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
 
 :where(.vui-routes-agentsroute).inboxMessageItem strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).inboxMessageItem p {
@@ -7520,7 +7520,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
 
 :where(.vui-routes-agentsroute).inboxMessageItem small {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).field {
@@ -7738,7 +7738,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
 
 :where(.vui-routes-agentsroute).toolPermissionGroupHeader span {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).toolPermissionGroupHeader small {
@@ -7821,7 +7821,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
 :where(.vui-routes-agentsroute).roomCheckField strong,
 :where(.vui-routes-agentsroute).toolPermissionRow strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).roomCheckField small,
@@ -7886,7 +7886,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   background: var(--surface-panel);
   color: var(--fg-primary);
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).field input {
@@ -8275,7 +8275,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
 
 :where(.vui-routes-agentsroute).boundarySummaryGrid small {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-agentsroute).referenceItem,
@@ -14557,7 +14557,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-configroute).metricCard span {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-configroute).metricCard strong {
@@ -14567,7 +14567,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-configroute).metricCard small {
   color: var(--fg-secondary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.2;
 }
 
@@ -14996,7 +14996,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-configroute).modelCenterSummaryBar strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-configroute).modelCenterSummaryBar .summaryBarWarning {
@@ -15065,7 +15065,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-configroute).profileTable th {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
   text-transform: none;
   letter-spacing: 0;
@@ -15236,7 +15236,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 :where(.vui-routes-configroute).modelInventoryTable .profileTaskCell strong,
 :where(.vui-routes-configroute).modelInventoryTable .profileModelCell strong,
 :where(.vui-routes-configroute).modelInventoryTable .profileMetaCell strong {
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.12;
 }
 
@@ -15244,7 +15244,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 :where(.vui-routes-configroute).modelInventoryTable .profileModelCell span,
 :where(.vui-routes-configroute).modelInventoryTable .profileMetaCell span:not(.inlineBadge) {
   margin-bottom: 2px;
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.14;
 }
 
@@ -15385,7 +15385,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-configroute).agentRunPanelHeader span {
   color: var(--fg-tertiary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-configroute).agentRunList {
@@ -15466,7 +15466,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   border-radius: 999px;
   color: var(--fg-secondary);
   background: var(--surface-card-muted);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
 }
 
@@ -15590,7 +15590,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   display: grid;
   gap: 4px;
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   overflow-wrap: anywhere;
 }
 
@@ -15960,7 +15960,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 :where(.vui-routes-configroute).cardMeta {
   display: grid;
   gap: 6px;
-  font-size: 0.88rem;
+  font-size: var(--vui-font-xs);
   min-width: 0;
 }
 
@@ -16087,7 +16087,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   gap: 6px;
   flex-wrap: wrap;
   color: var(--fg-tertiary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   min-width: 0;
 }
 
@@ -16309,7 +16309,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   color: var(--fg-secondary);
   overflow-wrap: anywhere;
   line-height: 1.34;
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-configroute).treeFieldCardView .treeFieldValue {
@@ -16379,7 +16379,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 :where(.vui-routes-configroute).userProfileAvatarHeader strong {
   flex: 0 0 auto;
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
   line-height: 1.2;
 }
@@ -16809,7 +16809,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 :where(.vui-routes-configroute).inlineError {
   margin: 0;
   color: var(--state-error);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.35;
 }
 
@@ -16914,7 +16914,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   border: 1px solid var(--border-hairline);
   border-radius: var(--control-radius);
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   background: var(--surface-card-subtle);
 }
 
@@ -17224,7 +17224,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 :where(.vui-routes-evolutionroute).controlLabel {
   padding: 0 6px 0 8px;
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-evolutionroute).intakeSegmented {
@@ -17565,7 +17565,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   display: -webkit-box;
   min-height: 34px;
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.45;
   overflow: hidden;
   -webkit-box-orient: vertical;
@@ -17785,7 +17785,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 :where(.vui-routes-evolutionroute).supervisedMemberIdentity span {
   color: var(--fg-tertiary);
   font-family: var(--font-mono);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-evolutionroute).modeTeamPanel {
@@ -17998,7 +17998,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   padding: 0 10px;
   border-radius: 999px;
   border: 1px solid var(--border-soft);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -18282,7 +18282,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 :where(.vui-routes-evolutionroute).formHint,
 :where(.vui-routes-evolutionroute).checkboxLabel {
   color: var(--fg-tertiary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-evolutionroute).textInput,
@@ -18471,7 +18471,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   border-radius: 7px;
   background: color-mix(in srgb, var(--state-warning) 10%, var(--surface-card-subtle));
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.36;
   overflow-wrap: anywhere;
 }
@@ -19402,7 +19402,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 :where(.vui-routes-evolutionroute).caseTraceStatus,
 :where(.vui-routes-evolutionroute).caseTraceTime {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
@@ -19473,7 +19473,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   max-height: 360px;
   overflow: auto;
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.55;
 }
 
@@ -19508,7 +19508,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-evolutionroute).caseTraceStateRow dd {
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.55;
 }
 
@@ -21128,7 +21128,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   border-radius: 6px;
   background: var(--surface-card-subtle);
   color: var(--fg-secondary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   text-align: center;
 }
 
@@ -22427,7 +22427,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   gap: 4px;
   min-width: min(280px, 100%);
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-logsroute).sceneTechnicalGrid strong {
@@ -22466,7 +22466,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-logsroute).sceneMetricCard span {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-logsroute).sceneMetricCard strong {
@@ -23023,7 +23023,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -23679,7 +23679,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   border-radius: 8px;
   background: color-mix(in srgb, var(--state-warning) 10%, transparent);
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-memoryroute).panelNotice svg,
@@ -23706,7 +23706,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   border-radius: 8px;
   background: color-mix(in srgb, var(--state-danger) 10%, transparent);
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-memoryroute).panelError svg {
@@ -24569,7 +24569,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   background: var(--surface-card);
   color: var(--fg-secondary);
   font: inherit;
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-memoryroute).sourceChip span,
@@ -24584,7 +24584,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 :where(.vui-routes-memoryroute).sourceChipActive strong {
   flex: 0 0 auto;
   color: inherit;
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-memoryroute).sourceChip:hover {
@@ -24772,7 +24772,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   border-radius: 999px;
   background: color-mix(in srgb, var(--surface-panel) 76%, transparent);
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-memoryroute).itemSelectionRow input {
@@ -24990,7 +24990,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 :where(.vui-routes-memoryroute).compactItemSummary {
   display: block;
   color: var(--fg-secondary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-memoryroute).effectiveGrid .compactMemoryList {
@@ -25122,7 +25122,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
   color: var(--accent-cool);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
@@ -25136,7 +25136,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   border-radius: 999px;
   background: color-mix(in srgb, var(--surface-card) 74%, transparent);
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
@@ -25826,7 +25826,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   border-radius: var(--radius-control);
   background: var(--surface-panel-muted);
   color: var(--fg-secondary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -26230,7 +26230,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -26379,12 +26379,12 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   flex: 0 0 auto;
   min-height: 26px;
   padding: 0 8px;
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-memoryroute).bulkActionBar .countPill {
   min-height: 22px;
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-memoryroute).editPreviewPanel {
@@ -26432,7 +26432,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-memoryroute).editPreviewGrid span {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-memoryroute).editPreviewGrid p {
@@ -27524,7 +27524,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-researchflowcanvasroute).executionGroup span {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-weight: 780;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -27796,7 +27796,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   display: block;
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.5rem;
+  font-size: var(--vui-font-xs);
   font-weight: 780;
   line-height: 1.1;
   text-overflow: ellipsis;
@@ -27861,7 +27861,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   box-shadow: var(--vui-shadow-accent);
   cursor: grab;
   font: inherit;
-  font-size: 0.5rem;
+  font-size: var(--vui-font-xs);
   font-weight: 850;
   line-height: 1;
   pointer-events: auto;
@@ -28549,7 +28549,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -28839,7 +28839,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   background: color-mix(in srgb, var(--accent-cool) 10%, transparent);
   cursor: pointer;
   font: inherit;
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-weight: 780;
 }
 
@@ -29126,7 +29126,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 :where(.vui-routes-researchroute).panelEyebrow {
   margin: 0;
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -29324,7 +29324,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 :where(.vui-routes-researchroute).panelLead {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.45;
 }
 
@@ -29404,7 +29404,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   color: var(--fg-primary);
   background: transparent;
   font: inherit;
-  font-size: 0.88rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.55;
   scrollbar-gutter: stable;
 }
@@ -29633,7 +29633,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -30056,7 +30056,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-researchroute).agentTraceBubble strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.3;
 }
 
@@ -30158,7 +30158,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-researchroute).stageResultItem strong {
   color: var(--fg-tertiary);
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: uppercase;
@@ -30484,7 +30484,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 :where(.vui-routes-researchroute).guardrailPanel p {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.45;
 }
 
@@ -30538,7 +30538,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   border-radius: 999px;
   color: var(--fg-secondary);
   background: color-mix(in srgb, var(--surface-panel) 78%, transparent);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -30764,7 +30764,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   position: relative;
   z-index: 1;
   min-width: 0;
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.2;
 }
 
@@ -30863,7 +30863,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-researchroute).themePlan section strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-researchroute).themePlan ul {
@@ -31244,7 +31244,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 :where(.vui-routes-teamsroute).aiSearchScopeHeader strong,
 :where(.vui-routes-teamsroute).aiSearchSourceGroupHeader strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).aiSearchScopeHeader span,
@@ -31328,7 +31328,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   display: -webkit-box;
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.38;
   overflow: hidden;
   -webkit-box-orient: vertical;
@@ -31488,13 +31488,13 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-teamsroute).aiSearchSourceItem strong {
   color: var(--fg-primary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).aiSearchSourceItem span,
 :where(.vui-routes-teamsroute).aiSearchSourceItem small {
   color: var(--fg-muted);
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).aiSearchRunPanel {
@@ -31803,7 +31803,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-teamsroute).aiSearchRunCardDetails summary {
   color: var(--fg-muted);
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
   cursor: pointer;
 }
@@ -31827,7 +31827,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 :where(.vui-routes-teamsroute).aiSearchRunStorage strong {
   flex: 0 0 auto;
   color: var(--fg-muted);
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
   font-weight: 780;
 }
 
@@ -32590,7 +32590,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-teamsroute).sourceCollectionStageModuleText em {
   color: var(--fg-muted);
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
   font-style: normal;
   font-weight: 760;
 }
@@ -33686,7 +33686,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-teamsroute).sourceCollectionResultsHeader strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).sourceCollectionResultsHeader span {
@@ -34018,7 +34018,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
     var(--source-workbench-card);
   color: var(--accent-cool-2);
   font-family: inherit;
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
   font-weight: 820;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -34086,7 +34086,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-teamsroute).sourceCollectionSourceDetailHeader div > span {
   color: var(--fg-muted);
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
   white-space: nowrap;
 }
@@ -34948,7 +34948,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 :where(.vui-routes-teamsroute).researchLoopOutcomeGrid span,
 :where(.vui-routes-teamsroute).researchLoopOutcomeGrid small {
   color: var(--fg-muted);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.42;
 }
 
@@ -35292,7 +35292,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-muted);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-weight: 720;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -35342,7 +35342,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   min-width: 0;
   overflow: hidden;
   color: var(--source-step-fg, var(--fg-muted));
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
   font-weight: 820;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -35686,7 +35686,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-teamsroute).node small {
   color: var(--fg-muted);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).nodeRoleBadge {
@@ -35860,7 +35860,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   border-radius: 8px;
   background: var(--surface-panel);
   color: var(--fg-secondary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
   text-decoration: none;
   white-space: nowrap;
@@ -36004,7 +36004,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 }
 
 :where(.vui-routes-teamsroute).sectionTitle strong {
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).sectionTitle span,
@@ -36186,7 +36186,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -36356,7 +36356,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-teamsroute).workflowSourceCollectionDetails summary small {
   color: var(--fg-muted);
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
   font-weight: 720;
 }
 
@@ -36493,7 +36493,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-teamsroute).workflowSourceCollectionSearchAction strong {
   color: var(--fg-primary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).workflowSourceCollectionSearchAction span {
@@ -36541,14 +36541,14 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-teamsroute).workflowSourceCollectionStorageActions strong {
   color: var(--fg-primary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).workflowSourceCollectionStorageActions span,
 :where(.vui-routes-teamsroute).workflowSourceCollectionStorageActions small {
   min-width: 0;
   color: var(--fg-muted);
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
   font-weight: 720;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -36661,7 +36661,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-teamsroute).workflowSourceCollectionAssignments [data-vui="native-button"] span {
   color: var(--fg-muted);
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).workflowSourceCollectionAssignmentActive {
@@ -36951,7 +36951,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-teamsroute).workflowSourceQualityStats strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).sourceCollectionControlPanel .workflowSourceQualityStats {
@@ -36962,7 +36962,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 :where(.vui-routes-teamsroute).sourceCollectionControlPanel .workflowSourceQualityStats span {
   min-height: 24px;
   padding: 3px 6px;
-  font-size: 0.6rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).sourceCollectionControlPanel .workflowSourceQualityStats strong {
@@ -36994,7 +36994,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-teamsroute).workflowSourceQualityQueue strong {
   color: var(--fg-primary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).workflowSourceQualityQueue small {
@@ -37022,7 +37022,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-teamsroute).workflowPaperNoteChunkStats strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).workflowPaperNoteChunkPlans {
@@ -37047,7 +37047,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-teamsroute).workflowPaperNoteChunkPlans strong {
   color: var(--fg-primary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).workflowPaperNoteChunkPlans small {
@@ -37111,7 +37111,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   border-radius: var(--radius-control);
   background: color-mix(in srgb, var(--accent-cool) 9%, var(--surface-panel-strong));
   color: var(--fg-primary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
 }
 
@@ -37495,7 +37495,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 }
 
 :where(.vui-routes-teamsroute).sourceCollectionControlPanel .workflowCandidateHeader strong {
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-teamsroute).sourceCollectionControlPanel .workflowCandidateItem p {
@@ -37918,7 +37918,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   min-width: 0;
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.18;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -38153,7 +38153,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -38883,12 +38883,12 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 
 :where(.vui-routes-toolsroute).toolPermissionRow strong {
   color: var(--fg-primary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-toolsroute).toolPermissionRow small {
   color: var(--fg-secondary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
 }
 
 :where(.vui-routes-toolsroute).toolPermissionMeta {
@@ -39108,7 +39108,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   border-radius: 8px;
   background: var(--surface-input-strong, color-mix(in srgb, var(--bg-canvas) 68%, transparent));
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.15;
 }
 
@@ -39241,7 +39241,7 @@ a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
 :where(.vui-routes-toolsroute).agentCompatibility p {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.45;
 }
 

@@ -143,7 +143,12 @@ describe("ConversationView VUI control contract", () => {
   it("routes conversation controls through VUI primitives", () => {
     expect(conversationViewSource).toContain('from "../vui"');
     expect(conversationViewSource).toContain("<VButton");
+    expect(conversationViewSource).toContain("<VNativeInput");
+    expect(conversationViewSource).toContain("<VNativeTextarea");
     expect(conversationViewSource).not.toMatch(/<button\b/);
+    expect(conversationViewSource).not.toMatch(/<input\b/);
+    expect(conversationViewSource).not.toMatch(/<select\b/);
+    expect(conversationViewSource).not.toMatch(/<textarea\b/);
   });
 });
 
@@ -1581,7 +1586,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("composerRoundButtonPrimary");
     expect(html).toContain("stopButton");
     const textarea = html.match(/<textarea[^>]*>/)?.[0] ?? "";
-    expect(textarea).not.toContain("disabled");
+    expect(textarea).not.toMatch(/\sdisabled(?:[=>\s]|$)/);
   });
 
   it("keeps the running composer stop-only until guidance text exists", () => {

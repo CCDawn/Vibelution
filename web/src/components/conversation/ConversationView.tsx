@@ -80,7 +80,7 @@ import {
   restoreTimelineRowKeyAnchor,
   type TimelineScrollRowKeyAnchor,
 } from "./timelineScrollAnchor";
-import { VButton } from "../vui";
+import { VButton, VNativeInput, VNativeTextarea } from "../vui";
 import styles from "./ConversationView.styles";
 
 const RUNNING_OPERATION_STATUSES = new Set(["queued", "pending", "running", "thinking", "tooling", "answering"]);
@@ -3838,7 +3838,7 @@ export function ConversationView({
               })}
             </div>
           ) : null}
-          <textarea
+          <VNativeTextarea
             ref={composerInputRef}
             className={styles.input}
             value={composerValue}
@@ -3879,7 +3879,7 @@ export function ConversationView({
             }}
           />
         </div>
-        <input
+        <VNativeInput
           ref={attachmentInputRef}
           className={styles.hiddenAttachmentInput}
           type="file"
