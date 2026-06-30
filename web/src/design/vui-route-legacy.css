@@ -9413,7 +9413,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
 :where(.vui-routes-chatcodingroute).featureChip {
   display: inline-flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 4px;
   min-width: 0;
   max-width: 100%;
@@ -9424,10 +9424,21 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   background: color-mix(in srgb, var(--surface-card) 72%, transparent);
   color: var(--fg-secondary);
   cursor: pointer;
+  overflow: hidden;
   transition:
     background 140ms ease,
     border-color 140ms ease,
     color 140ms ease;
+}
+
+:where(.vui-routes-chatcodingroute).featureChip::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--fg-tertiary);
+  opacity: 0.58;
 }
 
 :where(.vui-routes-chatcodingroute).runModeBlock .featureChip {
@@ -9440,11 +9451,39 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   background: color-mix(in srgb, var(--accent-warm) 9%, var(--surface-card));
 }
 
-:where(.vui-routes-chatcodingroute).featureChip strong {
+:where(.vui-routes-chatcodingroute).featureChip [data-slot="vui-button-content"] {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
   min-width: 0;
-  overflow-wrap: anywhere;
+  max-width: 100%;
+  width: 100%;
+}
+
+:where(.vui-routes-chatcodingroute).featureChip [data-slot="vui-button-label"] {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+:where(.vui-routes-chatcodingroute).featureChip strong {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--vui-font-xs);
   font-weight: 650;
+  line-height: 1;
 }
 
 :where(.vui-routes-chatcodingroute).featureChip em {
@@ -9459,15 +9498,6 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   font-weight: 760;
   line-height: 1;
   text-align: center;
-}
-
-:where(.vui-routes-chatcodingroute).featureChip span {
-  flex: 0 0 auto;
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--fg-tertiary);
-  opacity: 0.58;
 }
 
 :where(.vui-routes-chatcodingroute).featureChip:hover {
@@ -9486,7 +9516,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   color: var(--fg-primary);
 }
 
-:where(.vui-routes-chatcodingroute).featureChipActive span {
+:where(.vui-routes-chatcodingroute).featureChipActive::before {
   background: var(--accent-cool);
   opacity: 1;
 }
@@ -9501,7 +9531,7 @@ button:where(.vui-components-conversation-conversationview).timelineCellHeader:h
   border-color: color-mix(in srgb, var(--accent-warm) 36%, var(--border-soft));
 }
 
-:where(.vui-routes-chatcodingroute).featureChipPrimary.featureChipActive span {
+:where(.vui-routes-chatcodingroute).featureChipPrimary.featureChipActive::before {
   background: var(--accent-warm-2);
 }
 
