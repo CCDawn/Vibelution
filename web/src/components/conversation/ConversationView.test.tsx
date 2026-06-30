@@ -245,6 +245,35 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.answerOnlyProcessToggle).toContain("text-[var(--fg-secondary)]");
   });
 
+  it("keeps message turn skeletons structural instead of nested row cards", () => {
+    for (const skeletonClass of [
+      styles.assistantTurn,
+      styles.agentInboxTurn,
+      styles.groupTranscriptTurn,
+      styles.userTurn,
+      styles.assistantTurnContinuation,
+      styles.turnContent,
+      styles.turnMeta,
+      styles.turnMetaIdentity,
+      styles.turnMetaActions,
+      styles.turnSpeaker,
+      styles.turnAvatar,
+      styles.turnAvatarImage,
+    ]) {
+      expect(skeletonClass).not.toContain("bg-[var(--vui-surface-row)]");
+      expect(skeletonClass).not.toContain("border border-[var(--vui-border-subtle)]");
+      expect(skeletonClass).not.toMatch(/(?:^|\s)p-2(?:\s|$)/);
+    }
+
+    expect(styles.assistantTurn).toContain("grid-cols-[34px_minmax(0,1fr)]");
+    expect(styles.userTurn).toContain("grid-cols-[minmax(0,1fr)_34px]");
+    expect(styles.turnContent).toContain("gap-[5px]");
+    expect(styles.turnMeta).toContain("inline-flex");
+    expect(styles.turnSpeaker).toContain("truncate");
+    expect(styles.turnAvatarImage).toContain("object-cover");
+    expect(styles.responseSegment_answer).toContain("[&_.responseSegmentHeader]:hidden");
+  });
+
   it("uses shared readable scale tokens for dense conversation text", () => {
     expect(conversationViewStylesSource).toContain("var(--vui-font-xs)");
     expect(conversationViewStylesSource).toContain("var(--vui-font-sm)");
