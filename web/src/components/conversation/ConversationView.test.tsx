@@ -17,6 +17,7 @@ import {
   extractComposerImageDropFiles,
   extractComposerSessionReferenceDrop,
   hasComposerImageDragPayload,
+  resolveTimelineFollowState,
   safeConversationMarkdownUrl,
   shouldShowNextStateSignalInConversation,
 } from "./ConversationView";
@@ -3392,5 +3393,46 @@ describe("ConversationView timeline scroll signal", () => {
     ]);
 
     expect(after).not.toBe(before);
+  });
+});
+
+describe("ConversationView timeline follow-latest state", () => {
+  it("keeps following latest output when content growth alone moves the viewport away from bottom", () => {
+    const state = resolveTimelineFollowState({
+      scrollHeight: 1200,
+      clientHeight: 500,
+      scrollTop: 650,
+      previousScrollTop: 650,
+      wasFollowingLatest: true,
+    });
+
+    expect(state.isAtBottom).toBe(false);
+    expect(state.shouldFollowLatest).toBe(true);
+  });
+
+  it("stops following latest output after an intentional upward scroll", () => {
+    const state = resolveTimelineFollowState({
+      scrollHeight: 1200,
+      clientHeight: 500,
+      scrollTop: 420,
+      previousScrollTop: 650,
+      wasFollowingLatest: true,
+    });
+
+    expect(state.isAtBottom).toBe(false);
+    expect(state.shouldFollowLatest).toBe(false);
+  });
+
+  it("resumes following latest output when the user returns near the bottom", () => {
+    const state = resolveTimelineFollowState({
+      scrollHeight: 1200,
+      clientHeight: 500,
+      scrollTop: 688,
+      previousScrollTop: 420,
+      wasFollowingLatest: false,
+    });
+
+    expect(state.isAtBottom).toBe(true);
+    expect(state.shouldFollowLatest).toBe(true);
   });
 });

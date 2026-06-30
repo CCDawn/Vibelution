@@ -91,10 +91,23 @@ const RESPONSE_PARSE_CACHE_LIMIT = 80;
 const MARKDOWN_PARSE_CACHE_LIMIT = 160;
 const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
 const COMPUTER_USE_TOOL_NAME = "computer_use_task_tool";
+const TIMELINE_BOTTOM_THRESHOLD_PX = 32;
+const TIMELINE_UPWARD_SCROLL_THRESHOLD_PX = 2;
 export type ConversationProcessDisplayMode = "answer" | "trace";
 
 type OperationDetailKind = "thought" | "status" | "tool";
 type OperationDetailRow = { label: string; value: string };
+type TimelineFollowStateInput = {
+  scrollHeight: number;
+  clientHeight: number;
+  scrollTop: number;
+  previousScrollTop: number;
+  wasFollowingLatest: boolean;
+};
+type TimelineFollowState = {
+  isAtBottom: boolean;
+  shouldFollowLatest: boolean;
+};
 
 type ComposerDragData = {
   files?: ArrayLike<File> | Iterable<File> | null;
@@ -104,6 +117,31 @@ type ComposerDragData = {
 } | null | undefined;
 
 export { COMPOSER_SESSION_REFERENCE_MIME } from "./conversationConstants";
+
+export function isTimelineNearBottom(
+  { scrollHeight, clientHeight, scrollTop }: Pick<TimelineFollowStateInput, "scrollHeight" | "clientHeight" | "scrollTop">,
+  thresholdPx = TIMELINE_BOTTOM_THRESHOLD_PX,
+) {
+  return scrollHeight - scrollTop - clientHeight <= thresholdPx;
+}
+
+export function resolveTimelineFollowState({
+  scrollHeight,
+  clientHeight,
+  scrollTop,
+  previousScrollTop,
+  wasFollowingLatest,
+}: TimelineFollowStateInput): TimelineFollowState {
+  const isAtBottom = isTimelineNearBottom({ scrollHeight, clientHeight, scrollTop });
+  if (isAtBottom) {
+    return { isAtBottom: true, shouldFollowLatest: true };
+  }
+  const userScrolledUp = scrollTop < previousScrollTop - TIMELINE_UPWARD_SCROLL_THRESHOLD_PX;
+  return {
+    isAtBottom: false,
+    shouldFollowLatest: userScrolledUp ? false : wasFollowingLatest,
+  };
+}
 
 export function extractComposerImageDropFiles(data: ComposerDragData): File[] {
   const files = data?.files;
@@ -881,6 +919,8 @@ export function ConversationView({
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const initializedSessionRef = useRef("");
   const atBottomRef = useRef(true);
+  const followLatestRef = useRef(true);
+  const lastTimelineScrollTopRef = useRef(0);
   const lastComposerFocusSignalRef = useRef("");
   const defaultExpansionRef = useRef<Record<string, Record<string, boolean>>>({});
   const responseSegmentCacheRef = useRef<Map<string, ResponseSegment[]>>(new Map());
@@ -1168,6 +1208,8 @@ export function ConversationView({
     historyScrollAnchorRef.current = null;
     if (restoreTimelineRowKeyAnchor(timelineRef.current, anchor)) {
       atBottomRef.current = false;
+      followLatestRef.current = false;
+      lastTimelineScrollTopRef.current = timelineRef.current?.scrollTop ?? 0;
       setIsAtBottom(false);
     }
   }, [activeTimelineMessages.length, allMessagesVisible]);
@@ -1181,25 +1223,31 @@ export function ConversationView({
       initializedSessionRef.current = sessionId;
       timeline.scrollTop = timeline.scrollHeight;
       atBottomRef.current = true;
+      followLatestRef.current = true;
+      lastTimelineScrollTopRef.current = timeline.scrollTop;
       setIsAtBottom(true);
       return;
     }
-    if (autoScrollToLatest && atBottomRef.current) {
+    if (autoScrollToLatest && followLatestRef.current) {
       timeline.scrollTop = timeline.scrollHeight;
+      atBottomRef.current = true;
+      lastTimelineScrollTopRef.current = timeline.scrollTop;
       setIsAtBottom(true);
     }
   }, [autoScrollToLatest, sessionId, timelineScrollSignal]);
 
   useEffect(() => {
-    if (!streamingTimelineScrollSignal || !autoScrollToLatest || !atBottomRef.current) {
+    if (!streamingTimelineScrollSignal || !autoScrollToLatest || !followLatestRef.current) {
       return undefined;
     }
     const frameId = window.requestAnimationFrame(() => {
       const timeline = timelineRef.current;
-      if (!timeline || !atBottomRef.current) {
+      if (!timeline || !followLatestRef.current) {
         return;
       }
       timeline.scrollTop = timeline.scrollHeight;
+      atBottomRef.current = true;
+      lastTimelineScrollTopRef.current = timeline.scrollTop;
       setIsAtBottom(true);
     });
     return () => window.cancelAnimationFrame(frameId);
@@ -1211,10 +1259,17 @@ export function ConversationView({
       return;
     }
     const handleScroll = () => {
-      const distance = timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight;
-      const nextAtBottom = distance < 16;
-      atBottomRef.current = nextAtBottom;
-      setIsAtBottom(nextAtBottom);
+      const nextState = resolveTimelineFollowState({
+        scrollHeight: timeline.scrollHeight,
+        clientHeight: timeline.clientHeight,
+        scrollTop: timeline.scrollTop,
+        previousScrollTop: lastTimelineScrollTopRef.current,
+        wasFollowingLatest: followLatestRef.current,
+      });
+      lastTimelineScrollTopRef.current = timeline.scrollTop;
+      atBottomRef.current = nextState.isAtBottom;
+      followLatestRef.current = nextState.shouldFollowLatest;
+      setIsAtBottom(nextState.isAtBottom);
     };
     handleScroll();
     timeline.addEventListener("scroll", handleScroll);
@@ -1401,12 +1456,15 @@ export function ConversationView({
     }
     timeline.scrollTo({ top: timeline.scrollHeight, behavior: "smooth" });
     atBottomRef.current = true;
+    followLatestRef.current = true;
+    lastTimelineScrollTopRef.current = timeline.scrollTop;
     setIsAtBottom(true);
   }
 
   function showEarlierMessages() {
     historyScrollAnchorRef.current = captureTimelineRowKeyAnchor(timelineRef.current);
     atBottomRef.current = false;
+    followLatestRef.current = false;
     setIsAtBottom(false);
     setAllMessagesVisible(true);
   }
