@@ -38,6 +38,7 @@ const cssModuleFreeTargets = [
   "routes/GitRoute.tsx",
   "routes/GitDiffView.tsx",
   "routes/KernelTaskCenterRoute.tsx",
+  "routes/LauncherRoute.tsx",
   "routes/PetRoute.tsx",
   "routes/PromptTemplatesRoute.tsx",
   "routes/ResetRoute.tsx",
@@ -116,7 +117,7 @@ const routeShellTargets = [
 
 const routeStyleTargets = [
   {
-    path: "routes/LauncherRoute.module.css",
+    path: "routes/LauncherRoute.styles.ts",
     forbidden: [
       "--surface-page: var(--fg-primary)",
       "--surface-header: color-mix(in srgb, var(--fg-primary)",

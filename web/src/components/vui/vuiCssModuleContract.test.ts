@@ -36,7 +36,7 @@ describe("VUI CSS module contract", () => {
     const modules = cssModuleSources();
     const modulePaths = modules.map(({ path }) => path);
 
-    expect(modules.length).toBeLessThanOrEqual(13);
+    expect(modules.length).toBeLessThanOrEqual(12);
     expect(modulePaths).not.toContain("app/LauncherShell.module.css");
     expect(modulePaths).not.toContain("app/RouteLoadingShell.module.css");
     expect(modulePaths).not.toContain("app/RouteErrorBoundary.module.css");
@@ -47,6 +47,7 @@ describe("VUI CSS module contract", () => {
     expect(modulePaths).not.toContain("routes/GitRoute.module.css");
     expect(modulePaths).not.toContain("routes/GitDiffView.module.css");
     expect(modulePaths).not.toContain("routes/KernelTaskCenterRoute.module.css");
+    expect(modulePaths).not.toContain("routes/LauncherRoute.module.css");
     expect(modulePaths).not.toContain("routes/PetRoute.module.css");
     expect(modulePaths).not.toContain("routes/PromptTemplatesRoute.module.css");
     expect(modulePaths).not.toContain("routes/ResetRoute.module.css");
