@@ -48,7 +48,12 @@ import {
 import { applyWorkbenchDocumentLanguage } from "./documentLanguage";
 import { resolvePollingInterval, useStartupWarmup } from "./pollingPolicy";
 import { recoverFromBuiltAssetResourceError, recoverFromDynamicImportFetchError } from "./routeChunkRecovery";
-import { nextWorkbenchTheme, readStoredWorkbenchTheme, writeStoredWorkbenchTheme } from "./themePreference";
+import {
+  applyWorkbenchDocumentTheme,
+  nextWorkbenchTheme,
+  readStoredWorkbenchTheme,
+  writeStoredWorkbenchTheme,
+} from "./themePreference";
 import { isWorkbenchDomainEnabled, isWorkbenchModeEnabled } from "./workbenchContract";
 import { requestWorkbenchExitGuard } from "./workbenchExitGuard";
 import {
@@ -1462,8 +1467,9 @@ export function AppShell() {
 
   useEffect(() => {
     applyWorkbenchDocumentLanguage(document, lang);
+    applyWorkbenchDocumentTheme(document, theme);
     document.title = t("appTitle");
-  }, [lang, t]);
+  }, [lang, t, theme]);
 
   useEffect(() => {
     if (!utilityOpen) {

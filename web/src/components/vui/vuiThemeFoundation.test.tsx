@@ -43,6 +43,18 @@ describe("VUI dual-theme foundation", () => {
       "--vui-status-warning-bg",
       "--vui-status-danger-bg",
       "--vui-shadow-none",
+      "--fg-muted",
+      "--fg-subtle",
+      "--accent-primary",
+      "--accent-success",
+      "--accent-warning",
+      "--accent-danger",
+      "--accent-cool-contrast",
+      "--state-danger",
+      "--surface-base",
+      "--surface-elevated",
+      "--surface-toolbar",
+      "--border-subtle",
     ]) {
       expect(tokensSource).toContain(token);
     }
@@ -51,6 +63,8 @@ describe("VUI dual-theme foundation", () => {
     expect(lightThemeBlock).toContain("--vui-surface-glass");
     expect(lightThemeBlock).toContain("--vui-control-muted");
     expect(lightThemeBlock).toContain("--vui-status-info-bg");
+    expect(lightThemeBlock).toContain("--accent-cool-contrast");
+    expect(lightThemeBlock).toContain("--surface-elevated");
   });
 
   it("maps Tailwind and HeroUI bridge classes to Vibelution semantic tokens", () => {
