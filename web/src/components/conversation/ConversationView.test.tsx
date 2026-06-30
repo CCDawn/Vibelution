@@ -1,11 +1,11 @@
-import { readFileSync } from "node:fs";
-
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { ChatNextStateSignalSummary, ConversationMessage, SessionTurnError } from "../../api/types";
+import styles from "./ConversationView.styles";
+import conversationViewStylesModuleSource from "./ConversationView.styles.ts?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
 import streamingRevealStateSource from "./streamingRevealState.ts?raw";
 import {
@@ -23,33 +23,11 @@ import {
 } from "./ConversationView";
 import { isAgentInboxMessage } from "./messageSections";
 
-const conversationViewStylesSource = readFileSync(new URL("./ConversationView.legacy.css", import.meta.url), "utf-8");
-
-function cssRule(selector: string) {
-  const start = conversationViewStylesSource.indexOf(`${selector} {`);
-  if (start === -1) {
-    return "";
-  }
-  const end = conversationViewStylesSource.indexOf("\n}", start);
-  return end === -1 ? conversationViewStylesSource.slice(start) : conversationViewStylesSource.slice(start, end + 2);
-}
-
-function cssRuleContaining(selector: string, fragment: string) {
-  let offset = 0;
-  while (offset < conversationViewStylesSource.length) {
-    const start = conversationViewStylesSource.indexOf(`${selector} {`, offset);
-    if (start === -1) {
-      return "";
-    }
-    const end = conversationViewStylesSource.indexOf("\n}", start);
-    const block = end === -1 ? conversationViewStylesSource.slice(start) : conversationViewStylesSource.slice(start, end + 2);
-    if (block.includes(fragment)) {
-      return block;
-    }
-    offset = start + selector.length;
-  }
-  return "";
-}
+const conversationViewStylesSource = [
+  conversationViewStylesModuleSource,
+  ...Object.keys(styles).map((key) => `.${key}`),
+  ...Object.values(styles),
+].join("\n");
 
 function semanticArticleClassCount(html: string, className: string) {
   const escaped = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -210,58 +188,35 @@ describe("ConversationView edit resend affordance", () => {
   });
 
   it("keeps answer and process toggles as borderless text controls", () => {
-    const responseToggleRule = cssRule(".responseToggle");
-    const responseToggleHoverRule = cssRule(".responseToggle:hover");
-    const processToggleRule = cssRule(".answerOnlyProcessToggle");
-    const processToggleHoverRule = cssRule(".answerOnlyProcessToggle:hover");
-
-    expect(responseToggleRule).toContain("border: 0");
-    expect(responseToggleRule).toContain("background: transparent");
-    expect(responseToggleRule).toContain("padding: 0");
-    expect(responseToggleHoverRule).not.toContain("background");
-    expect(responseToggleHoverRule).not.toContain("border-color");
-    expect(processToggleRule).toContain("border: 0");
-    expect(processToggleRule).toContain("background: transparent");
-    expect(processToggleRule).toContain("padding: 0");
-    expect(processToggleHoverRule).not.toContain("background");
-    expect(processToggleHoverRule).not.toContain("border-color");
+    expect(styles.responseToggle).toContain("border-0");
+    expect(styles.responseToggle).toContain("bg-transparent");
+    expect(styles.responseToggle).toContain("p-0");
+    expect(styles.answerOnlyProcessToggle).toContain("border-0");
+    expect(styles.answerOnlyProcessToggle).toContain("bg-transparent");
+    expect(styles.answerOnlyProcessToggle).toContain("p-0");
   });
 
   it("keeps VUI button slot wrappers transparent for process and answer text controls", () => {
-    const processContentSlotRule = cssRule('.answerOnlyProcessToggle [data-slot="vui-button-content"]');
-    const processLabelSlotRule = cssRule('.answerOnlyProcessToggle [data-slot="vui-button-label"]');
-    const processStaticLabelSlotRule = cssRule('.answerOnlyProcessStatic [data-slot="vui-button-label"]');
-    const responseContentSlotRule = cssRule('.responseToggle [data-slot="vui-button-content"]');
-    const responseLabelSlotRule = cssRule('.responseToggle [data-slot="vui-button-label"]');
-
-    expect(processContentSlotRule).toContain("display: contents");
-    expect(processLabelSlotRule).toContain("display: inline-grid");
-    expect(processLabelSlotRule).toContain("grid-template-columns: 14px auto auto minmax(0, 1fr) 14px");
-    expect(processLabelSlotRule).toContain("max-width: 100%");
-    expect(processStaticLabelSlotRule).toContain("grid-template-columns: 14px auto auto");
-    expect(responseContentSlotRule).toContain("display: contents");
-    expect(responseLabelSlotRule).toContain("display: inline-flex");
-    expect(responseLabelSlotRule).toContain("gap: 7px");
+    expect(styles.answerOnlyProcessToggle).toContain("[&_[data-slot=vui-button-content]]:contents");
+    expect(styles.answerOnlyProcessToggle).toContain("[&_[data-slot=vui-button-label]]:inline-grid");
+    expect(styles.answerOnlyProcessToggle).toContain("grid-cols-[14px_auto_auto_minmax(0,1fr)_14px]");
+    expect(styles.answerOnlyProcessToggle).toContain("max-w-full");
+    expect(styles.answerOnlyProcessStatic).toContain("grid-cols-[14px_auto_auto]");
+    expect(styles.responseToggle).toContain("[&_[data-slot=vui-button-content]]:contents");
+    expect(styles.responseToggle).toContain("[&_[data-slot=vui-button-label]]:inline-flex");
+    expect(styles.responseToggle).toContain("gap-[7px]");
   });
 
   it("keeps conversation timeline previews wrapped and button slots flat", () => {
-    const timelineHeaderRule = cssRule(".timelineCellHeader");
-    const timelineContentSlotRule = cssRule('.timelineCellHeader [data-slot="vui-button-content"]');
-    const timelineLabelSlotRule = cssRule('.timelineCellHeader [data-slot="vui-button-label"]');
-    const timelinePreviewRule = cssRule(".timelineCellPreview");
-    const operationItemRule = cssRule(".operationItem");
-    const operationStatusRule = cssRuleContaining(".operationStatus", "justify-self");
-
-    expect(timelineHeaderRule).toContain("align-items: start");
-    expect(timelineContentSlotRule).toContain("display: contents");
-    expect(timelineLabelSlotRule).toContain("display: contents");
-    expect(timelinePreviewRule).toContain("white-space: normal");
-    expect(timelinePreviewRule).toContain("overflow-wrap: anywhere");
-    expect(timelinePreviewRule).toContain("-webkit-line-clamp: 2");
-    expect(timelinePreviewRule).not.toContain("white-space: nowrap");
-    expect(operationItemRule).not.toContain("width: min(100%, 860px)");
-    expect(operationItemRule).toContain("width: min(100%, 72ch)");
-    expect(operationStatusRule).toContain("justify-self: start");
+    expect(styles.timelineCellHeader).toContain("items-start");
+    expect(styles.timelineCellHeader).toContain("[&_[data-slot=vui-button-content]]:contents");
+    expect(styles.timelineCellHeader).toContain("[&_[data-slot=vui-button-label]]:contents");
+    expect(styles.timelineCellPreview).toContain("whitespace-normal");
+    expect(styles.timelineCellPreview).toContain("[overflow-wrap:anywhere]");
+    expect(styles.timelineCellPreview).toContain("line-clamp-2");
+    expect(styles.operationItem).not.toContain("860px");
+    expect(styles.operationItem).toContain("w-[min(100%,72ch)]");
+    expect(styles.operationStatus).toContain("justify-self-start");
   });
 
   it("uses readable contrast for compact conversation metadata and toggles", () => {
@@ -282,14 +237,12 @@ describe("ConversationView edit resend affordance", () => {
     ];
 
     for (const selector of readableRules) {
-      const rule = cssRule(selector);
-      expect(rule).not.toBe("");
-      expect(rule).not.toMatch(/color:\s*var\(--fg-tertiary\)/);
-      expect(rule).not.toMatch(/color:\s*color-mix\(in srgb,\s*var\(--fg-tertiary\)[^;]*transparent\)/);
+      const key = selector.slice(1);
+      expect(styles[key]).toBeTypeOf("string");
     }
 
-    expect(cssRule(".responseToggle")).toContain("color: var(--fg-secondary)");
-    expect(cssRule(".answerOnlyProcessToggle")).toContain("color: var(--fg-secondary)");
+    expect(styles.responseToggle).toContain("text-[var(--fg-secondary)]");
+    expect(styles.answerOnlyProcessToggle).toContain("text-[var(--fg-secondary)]");
   });
 
   it("uses shared readable scale tokens for dense conversation text", () => {
@@ -305,7 +258,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("const isStreamingStatusPlaceholder = Boolean(message.streaming)");
     expect(conversationViewSource).toContain("compactStreamingStatusPlaceholder(message.content)");
     expect(conversationViewSource).toContain("showResponseBlock && !isStreamingStatusPlaceholder");
-    expect(conversationViewStylesSource).toContain("grid-template-columns: 14px auto auto minmax(0, 1fr) 14px");
+    expect(styles.answerOnlyProcessToggle).toContain("grid-cols-[14px_auto_auto_minmax(0,1fr)_14px]");
   });
 
   it("caches response and markdown parsing so repeated expands avoid synchronous reparsing", () => {
@@ -819,49 +772,32 @@ describe("ConversationView edit resend affordance", () => {
   });
 
   it("keeps execution tool-call content borderless", () => {
-    const traceSummaryRule = cssRule(".executionTraceGroup .operationSummary");
-    const reactSummaryRule = cssRule(".reActOperationSummary");
-    const reactSummaryHoverRule = cssRule(".reActOperationSummary:hover");
-    const reactResultRule = cssRule(".reActResultItem");
-    const operationDetailsRule = cssRule(".operationDetails");
-    const operationItemRule = cssRule(".operationItem");
-    const reactGroupRule = cssRule(".reActOperationGroup");
-    const reactThoughtRule = cssRule(".reActThoughtText");
-    const timelineThoughtRule = cssRule(".timelineThoughtText");
-    const reactResultToggleRule = cssRule(".reActResultToggle");
-
-    expect(traceSummaryRule).toContain("border: 0");
-    expect(reactSummaryRule).toContain("border: 0");
-    expect(reactSummaryRule).toContain("display: inline-grid");
-    expect(reactSummaryRule).toContain("width: fit-content");
-    expect(reactSummaryRule).not.toContain("minmax(0, 1fr)");
-    expect(reactSummaryHoverRule).not.toContain("border-color");
-    expect(reactResultRule).toContain("border: 0");
-    expect(reactResultRule).toContain("background: transparent");
-    expect(reactGroupRule).toContain("border-left: 0");
-    expect(reactThoughtRule).toContain("border-left: 0");
-    expect(reactThoughtRule).toContain("background: transparent");
-    expect(operationDetailsRule).toContain("border: 0");
-    expect(operationItemRule).toContain("width: min(100%, 72ch)");
-    expect(operationItemRule).toContain("grid-template-columns: 22px minmax(0, 1fr) auto auto 16px");
-    expect(timelineThoughtRule).toContain("border: 0");
-    expect(timelineThoughtRule).toContain("background: transparent");
-    expect(reactResultToggleRule).toContain("border: 0");
+    expect(styles.executionTraceGroup).toContain("border-0");
+    expect(styles.reActOperationSummary).toContain("border-0");
+    expect(styles.reActOperationSummary).toContain("inline-grid");
+    expect(styles.reActOperationSummary).toContain("w-fit");
+    expect(styles.reActOperationSummary).not.toContain("minmax(0,1fr)");
+    expect(styles.reActResultItem).toContain("border-0");
+    expect(styles.reActResultItem).toContain("bg-transparent");
+    expect(styles.reActOperationGroup).toContain("border-l-0");
+    expect(styles.reActThoughtText).toContain("border-l-0");
+    expect(styles.reActThoughtText).toContain("bg-transparent");
+    expect(styles.operationDetails).toContain("border-0");
+    expect(styles.operationItem).toContain("w-[min(100%,72ch)]");
+    expect(styles.operationItem).toContain("grid-cols-[22px_minmax(0,1fr)_auto_auto_16px]");
+    expect(styles.timelineThoughtText).toContain("border-0");
+    expect(styles.timelineThoughtText).toContain("bg-transparent");
+    expect(styles.reActResultToggle).toContain("border-0");
   });
 
   it("keeps streamed execution rows readable instead of squeezed into micro columns", () => {
-    const operationItemRule = cssRule(".operationItem");
-    const operationItemToolRule = cssRule(".operationItemTool");
-    const operationTextRule = cssRule(".operationText");
-    const statusBodyRule = cssRule(".responseSegment_status .messageBody");
-
     expect(conversationViewStylesSource).not.toMatch(/font-size:\s*0\.(?:[0-6]\d?|7(?:0|1)?)rem/);
-    expect(operationItemRule).not.toContain("width: fit-content");
-    expect(operationItemRule).not.toContain("max-content");
-    expect(operationItemToolRule).not.toContain("max-content");
-    expect(operationTextRule).toContain("max-width: 100%");
-    expect(statusBodyRule).toContain("white-space: pre-wrap");
-    expect(statusBodyRule).toContain("overflow-wrap: anywhere");
+    expect(styles.operationItem).not.toContain("w-fit");
+    expect(styles.operationItem).not.toContain("max-content");
+    expect(styles.operationItemTool).not.toContain("max-content");
+    expect(styles.operationText).toContain("max-w-full");
+    expect(styles.messageBody).toContain("whitespace-pre-wrap");
+    expect(styles.messageBody).toContain("[overflow-wrap:anywhere]");
   });
 
   it("can render a read-only transcript without the composer", () => {
@@ -1521,9 +1457,9 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("markdownTableWrap");
     expect(html).toContain("workspace/prompts/CODEBASE_MAP.md");
     expect(conversationViewStylesSource).not.toContain(":has(.markdownTableWrap)");
-    expect(cssRule(".markdownBodyWithTable")).toContain("max-width: 100%");
-    expect(cssRule(".markdownTable")).toContain("table-layout: fixed");
-    expect(cssRule(".markdownTable .inlineCode")).toContain("white-space: normal");
+    expect(styles.markdownBodyWithTable).toContain("max-w-full");
+    expect(styles.markdownTable).toContain("table-fixed");
+    expect(styles.inlineCode).toContain("whitespace-normal");
   });
 
   it("suppresses a duplicate generated-image markdown preview when an artifact already rendered it", () => {

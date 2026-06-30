@@ -4,6 +4,7 @@ import { Outlet } from "react-router-dom";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "./browserTelemetry";
 import { applyWorkbenchDocumentLanguage } from "./documentLanguage";
+import styles from "./LauncherShell.styles";
 import { applyWorkbenchDocumentTheme, readStoredWorkbenchTheme } from "./themePreference";
 
 export function LauncherShell() {
@@ -30,8 +31,7 @@ export function LauncherShell() {
 
   return (
     <div
-      className="grid h-full min-h-0 min-w-0 overflow-hidden text-vui-fg-primary"
-      style={{ background: "var(--vui-gradient-route-soft), var(--fg-primary)" }}
+      className={styles.root}
       data-theme={theme}
       data-vui-app="launcher"
       data-shell="launcher"

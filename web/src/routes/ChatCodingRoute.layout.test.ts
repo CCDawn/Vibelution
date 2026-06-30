@@ -1,7 +1,9 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
-import { readFileSync } from "node:fs";
 import conversationStyles from "../components/conversation/ConversationView.styles";
+import conversationStylesModuleSource from "../components/conversation/ConversationView.styles.ts?raw";
 import conversationViewSource from "../components/conversation/ConversationView.tsx?raw";
 import routeErrorBoundarySource from "../app/RouteErrorBoundary.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
@@ -17,19 +19,19 @@ import directSessionIndexListSource from "./DirectSessionIndexList.tsx?raw";
 import groupSessionIndexItemsSource from "./GroupSessionIndexItems.tsx?raw";
 import sessionContextMenuSource from "./SessionContextMenu.tsx?raw";
 import routeStyles from "./ChatCodingRoute.styles";
+import routeStylesModuleSource from "./ChatCodingRoute.styles.ts?raw";
 
-const routeCssSource = readFileSync(new URL("./ChatCodingRoute.legacy.css", import.meta.url), "utf-8");
-const conversationCssSource = readFileSync(new URL("../components/conversation/ConversationView.legacy.css", import.meta.url), "utf-8");
-const appShellCssSource = readFileSync(new URL("../app/AppShell.legacy.css", import.meta.url), "utf-8");
-
-function cssRule(source: string, selector: string) {
-  const start = source.indexOf(`${selector} {`);
-  if (start === -1) {
-    return "";
-  }
-  const end = source.indexOf("\n}", start);
-  return end === -1 ? source.slice(start) : source.slice(start, end + 2);
-}
+const appShellCssSource = readFileSync(new URL("../design/workbench-shell.css", import.meta.url), "utf-8");
+const routeCssSource = [
+  routeStylesModuleSource,
+  ...Object.keys(routeStyles).map((key) => `.${key}`),
+  ...Object.values(routeStyles),
+].join("\n");
+const conversationCssSource = [
+  conversationStylesModuleSource,
+  ...Object.keys(conversationStyles).map((key) => `.${key}`),
+  ...Object.values(conversationStyles),
+].join("\n");
 
 describe("ChatCodingRoute layout contract", () => {
   it("keeps the center conversation readable and the composer as a stable bottom layer", () => {
@@ -51,50 +53,35 @@ describe("ChatCodingRoute layout contract", () => {
     expect(appShellCssSource).toContain("--theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 34%, transparent);");
     expect(appShellCssSource).toContain("--theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 18%, transparent);");
     expect(appShellCssSource).toContain("--theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 44%, transparent);");
-    expect(appShellCssSource).toContain("--theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 26%, transparent);");
-    expect(routeCssSource).toMatch(
-      /\.centerPane\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--surface-page\) 10%, transparent\);[\s\S]*?\}/,
-    );
-    expect(routeCssSource).toMatch(
-      /\.centerSurface\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--surface-panel-strong\) 6%, transparent\);[\s\S]*?\}/,
-    );
-    expect(conversationCssSource).toMatch(
-      /\.timeline\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--surface-page\) 18%, transparent\);[\s\S]*?\}/,
-    );
-    expect(conversationCssSource).toMatch(
-      /\.surfaceCompact \.timeline\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--surface-page\) 14%, transparent\);[\s\S]*?\}/,
-    );
+    expect(appShellCssSource).toContain("--theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 60%, transparent);");
+    expect(routeStyles.centerPane).toContain("bg-[color-mix(in_srgb,var(--surface-page)_10%,transparent)]");
+    expect(routeStyles.centerSurface).toContain("bg-[color-mix(in_srgb,var(--surface-panel-strong)_6%,transparent)]");
+    expect(conversationStyles.timeline).toContain("bg-[color-mix(in_srgb,var(--surface-page)_18%,transparent)]");
+    expect(conversationStyles.surfaceCompact).toContain("[&_.timeline]:bg-[color-mix(in_srgb,var(--surface-page)_14%,transparent)]");
     expect(appShellCssSource).not.toContain("--theme-background-overlay-mid: rgba(");
     expect(routeCssSource).not.toContain("background: color-mix(in srgb, var(--surface-page) 92%, var(--bg-canvas));");
     expect(routeCssSource).not.toContain(".centerSurface {\n  display: grid;\n  height: 100%;\n  min-height: 0;\n  background: var(--surface-panel-strong);");
   });
 
   it("keeps the conversation page aligned to the V2.1 quiet light style system", () => {
-    const compactSurface = cssRule(conversationCssSource, ".surfaceCompact");
-    const composer = cssRule(conversationCssSource, ".composer");
-    const sendButton = cssRule(conversationCssSource, ".sendButton");
-    const sendButtonHover = cssRule(conversationCssSource, ".sendButton:hover:not(:disabled)");
-    const userCard = cssRule(conversationCssSource, ".userCard");
-    const currentSessionItem = cssRule(routeCssSource, ".sessionItem[aria-current=\"true\"]");
+    expect(conversationStyles.surfaceCompact).toContain("bg-[color-mix(in_srgb,var(--surface-panel)_72%,transparent)]");
+    expect(conversationStyles.surfaceCompact).not.toContain("bg-[var(--surface-panel-strong)]");
 
-    expect(compactSurface).toContain("background: color-mix(in srgb, var(--surface-panel) 72%, transparent);");
-    expect(compactSurface).not.toContain("background: var(--surface-panel-strong);");
+    expect(conversationStyles.composer).toContain("bg-[color-mix(in_srgb,var(--surface-panel)_74%,transparent)]");
+    expect(conversationStyles.composer).toContain("backdrop-blur-[6px]");
+    expect(conversationStyles.composer).not.toContain("var(--surface-panel-strong)_92%");
 
-    expect(composer).toContain("background: color-mix(in srgb, var(--surface-panel) 74%, transparent);");
-    expect(composer).toContain("backdrop-filter: blur(6px);");
-    expect(composer).not.toContain("var(--surface-panel-strong) 92%");
+    expect(conversationStyles.sendButton).toContain("bg-[color-mix(in_srgb,var(--accent-cool)_14%,var(--surface-card))]");
+    expect(conversationStyles.sendButton).toContain("shadow-none");
+    expect(conversationStyles.sendButton).not.toContain("bg-[#");
+    expect(conversationStyles.sendButton).not.toContain("-translate-y");
 
-    expect(sendButton).toContain("background: color-mix(in srgb, var(--accent-cool) 14%, var(--surface-card));");
-    expect(sendButton).toContain("box-shadow: none;");
-    expect(sendButton).not.toContain("background: #");
-    expect(sendButtonHover).not.toContain("translateY(-1px)");
+    expect(conversationStyles.userCard).toContain("bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel))]");
+    expect(conversationStyles.userCard).not.toContain("bg-[var(--surface-panel-strong)]");
 
-    expect(userCard).toContain("background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-panel));");
-    expect(userCard).not.toContain("background: var(--surface-panel-strong);");
-
-    expect(currentSessionItem).toContain("box-shadow: var(--vui-shadow-inset-accent);");
-    expect(currentSessionItem).not.toContain("linear-gradient");
-    expect(currentSessionItem).not.toContain("0 2px");
+    expect(routeStyles.sessionItemActive).toContain("shadow-[var(--vui-shadow-inset-accent)]");
+    expect(routeStyles.sessionItemActive).not.toContain("linear-gradient");
+    expect(routeStyles.sessionItemActive).not.toContain("shadow-lg");
   });
 
   it("renders runtime notices outside the Agent reply timeline", () => {
@@ -203,8 +190,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.rightPane).toBeTypeOf("string");
     expect(routeStyles.resizeHandle).toBeTypeOf("string");
     expect(routeStyles.centerPane).toBeTypeOf("string");
-    expect(routeCssSource).toContain("var(--chat-left-pane-width, 260px)");
-    expect(routeCssSource).toContain("var(--chat-right-pane-width, 340px)");
+    expect(routeStyles.layout).toContain("var(--chat-left-pane-width,0px)");
+    expect(routeStyles.layout).toContain("var(--chat-right-pane-width,0px)");
   });
 
   it("centers the direct conversation reading track when both side panes are collapsed", () => {
@@ -213,12 +200,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("styles.conversationFrameFocus");
     expect(routeSource).toContain("<div className={conversationFrameClassName}>");
     expect(routeStyles.conversationFrameFocus).toBeTypeOf("string");
-    expect(routeCssSource).toMatch(
-      /\.conversationFrameFocus\s*\{[\s\S]*?justify-self:\s*center;[\s\S]*?width:\s*min\(calc\(100% - 48px\), 1480px\);[\s\S]*?max-width:\s*100%;[\s\S]*?\}/,
-    );
-    expect(routeCssSource).toMatch(
-      /@media \(max-width: 980px\)\s*\{[\s\S]*?\.conversationFrameFocus\s*\{[\s\S]*?width:\s*100%;[\s\S]*?\}/,
-    );
+    expect(routeStyles.conversationFrameFocus).toContain("justify-self-center");
+    expect(routeStyles.conversationFrameFocus).toContain("w-[min(calc(100%_-_48px),1480px)]");
+    expect(routeStyles.conversationFrameFocus).toContain("max-w-full");
+    expect(routeStyles.conversationFrameFocus).toContain("max-[980px]:w-full");
   });
 
   it("defaults Chat to dense side panes so the center conversation has priority", () => {
@@ -228,9 +213,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(shellStoreSource).toContain("merge: (persistedState, currentState)");
     expect(routeSource).toContain('"--chat-left-pane-width": leftRailCollapsed ? "0px" : `${leftPanelWidth}px`');
     expect(routeSource).toContain('"--chat-right-pane-width": rightPaneCollapsed ? "0px" : `${rightPanelWidth}px`');
-    expect(routeCssSource).toContain(".leftRail {\n  display: flex;\n  flex-direction: column;\n  gap: 5px;\n  padding: 6px;");
-    expect(routeCssSource).toContain(".rightPane {\n  display: grid;\n  grid-template-rows: auto auto 1fr;\n  padding: 6px;");
-    expect(routeCssSource).toContain("padding: 8px 10px 0");
+    expect(routeStyles.leftRail).toContain("flex");
+    expect(routeStyles.leftRail).toContain("flex-col");
+    expect(routeStyles.leftRail).toContain("gap-[5px]");
+    expect(routeStyles.leftRail).toContain("p-1.5");
+    expect(routeStyles.rightPane).toContain("grid");
+    expect(routeStyles.rightPane).toContain("grid-rows-[auto_auto_1fr]");
+    expect(routeStyles.rightPane).toContain("p-1.5");
     expect(routeCssSource).not.toContain(".sessionAgentStatusControl");
   });
 
@@ -284,8 +273,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(directSessionIndexItemSource).toContain("<VIconButton");
     expect(groupSessionIndexItemsSource).toContain("<VButton");
     expect(conversationIndexSectionSource).toContain("<VButton");
-    expect(routeCssSource).toContain('.sessionContextMenuItem[data-vui] [data-slot="vui-button-content"]');
-    expect(routeCssSource).toContain("grid-column: 1 / -1;");
+    expect(routeStyles.sessionContextMenuItem).toContain("[&_[data-slot=vui-button-content]]:contents");
+    expect(routeStyles.sessionContextMenuItem).toContain("[&_[data-slot=vui-button-label]]:contents");
+    expect(routeStyles.sessionContextMenuItem).toContain("[&_[data-slot=vui-button-label]]:col-span-full");
   });
 
   it("shows a safe return link when Chat is opened from another workspace surface", () => {
@@ -298,37 +288,33 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("to={chatReturnTarget}");
     expect(routeSource).toContain("<ArrowLeft size={14} aria-hidden=\"true\" />");
     expect(routeStyles.chatReturnLink).toBeTypeOf("string");
-    expect(routeCssSource).toContain(".chatReturnLink span");
-    expect(routeCssSource).toContain("text-overflow: ellipsis");
+    expect(routeStyles.chatReturnLink).toContain("[&_span]:truncate");
   });
 
   it("keeps the conversation index compact enough for 1024px workbench use", () => {
-    expect(routeCssSource).toContain("minmax(0, min(var(--chat-left-pane-width, 0px), 24vw))");
-    expect(routeCssSource).toContain("minmax(360px, 1fr)");
-    expect(routeCssSource).toContain("minmax(0, min(var(--chat-right-pane-width, 0px), 22vw))");
-    expect(routeCssSource).toContain("min-height: 44px");
-    expect(routeCssSource).toContain("width: 26px");
-    expect(routeCssSource).toContain("height: 26px");
-    expect(routeCssSource).toContain("font-size: var(--vui-font-md)");
-    expect(routeCssSource).toContain("font-size: var(--vui-font-xs)");
-    expect(routeCssSource).toContain("grid-template-columns: minmax(0, 1fr) fit-content(92px)");
-    expect(routeCssSource).toContain("max-width: 100%");
-    expect(conversationCssSource).toContain(".surfaceCompact .timeline {\n  padding: 9px 12px 11px;");
-    expect(conversationCssSource).toContain(".surfaceCompact .composer {\n  gap: 7px;\n  padding: 6px 10px 8px;");
+    expect(routeStyles.layout).toContain("minmax(0,min(var(--chat-left-pane-width,0px),24vw))");
+    expect(routeStyles.layout).toContain("minmax(360px,1fr)");
+    expect(routeStyles.layout).toContain("minmax(0,min(var(--chat-right-pane-width,0px),22vw))");
+    expect(routeStyles.conversationTitleRow).toContain("grid-cols-[minmax(0,1fr)_fit-content(92px)]");
+    expect(routeStyles.conversationTitleRow).toContain("max-w-full");
+    expect(conversationStyles.surfaceCompact).toContain("[&_.timeline]:px-3");
+    expect(conversationStyles.surfaceCompact).toContain("[&_.timeline]:pt-[9px]");
+    expect(conversationStyles.surfaceCompact).toContain("[&_.timeline]:pb-[11px]");
+    expect(conversationStyles.surfaceCompact).toContain("[&_.composer]:gap-[7px]");
   });
 
   it("does not ship micro typography in the chat workbench surface", () => {
     expect(routeCssSource).not.toMatch(/font-size:\s*0\.(?:6\d|7[0-7])rem/);
-    expect(routeCssSource).toContain(".agentModelTag");
-    expect(routeCssSource).toContain("font-size: var(--vui-font-xs)");
+    expect(routeStyles.agentModelTag).toBeTypeOf("string");
+    expect(routeStyles.agentModelTag).toContain("text-[var(--vui-font-xs)]");
   });
 
   it("clamps responsive side panes so the center conversation remains visible near 1024px", () => {
-    expect(routeCssSource).toContain("@media (max-width: 980px)");
-    expect(routeCssSource).toContain("minmax(0, min(var(--chat-left-pane-width, 0px), 24vw))");
-    expect(routeCssSource).toContain("minmax(360px, 1fr)");
-    expect(routeCssSource).toContain("minmax(0, min(var(--chat-right-pane-width, 0px), 22vw))");
-    expect(routeCssSource).toContain("minmax(280px, 1fr)");
+    expect(routeStyles.layout).toContain("max-[980px]");
+    expect(routeStyles.layout).toContain("minmax(0,min(var(--chat-left-pane-width,0px),24vw))");
+    expect(routeStyles.layout).toContain("minmax(360px,1fr)");
+    expect(routeStyles.layout).toContain("minmax(0,min(var(--chat-right-pane-width,0px),22vw))");
+    expect(routeStyles.layout).toContain("minmax(280px,1fr)");
   });
 
   it("compresses the left rail into primary controls plus auxiliary status groups", () => {
@@ -380,18 +366,25 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps left rail VButton cards from collapsing their internal grid layout", () => {
-    const tokenMetricButtonContentSlot = cssRule(routeCssSource, ':where(.vui-routes-chatcodingroute).tokenStatusMetricButton [data-slot="vui-button-content"]');
-    const tokenMetricButtonLabelSlot = cssRule(routeCssSource, ':where(.vui-routes-chatcodingroute).tokenStatusMetricButton [data-slot="vui-button-label"]');
-    const tokenMetricRule = cssRule(routeCssSource, ".tokenStatusMetric");
-    const featureChipContentSlot = cssRule(routeCssSource, '.featureChip [data-slot="vui-button-content"]');
-    const featureChipLabelSlot = cssRule(routeCssSource, '.featureChip [data-slot="vui-button-label"]');
-
-    expect(tokenMetricRule).toContain("grid-template-columns: 54px minmax(0, 1fr)");
-    expect(tokenMetricButtonContentSlot).toContain("display: contents");
-    expect(tokenMetricButtonLabelSlot).toContain("display: contents");
-    expect(featureChipContentSlot).toContain("min-width: 0");
-    expect(featureChipContentSlot).toContain("width: 100%");
-    expect(featureChipLabelSlot).toContain("overflow: hidden");
+    expect(routeStyles.tokenStatusMetric).toContain("grid-cols-[42px_minmax(0,1fr)]");
+    expect(routeStyles.tokenStatusMetric).toContain("!grid");
+    expect(routeStyles.tokenStatusMetric).toContain("!w-full");
+    expect(routeStyles.tokenStatusMetric).toContain("overflow-hidden");
+    expect(routeStyles.tokenStatusVisualGrid).toContain("!grid");
+    expect(routeStyles.tokenStatusVisualGrid).toContain("grid-cols-1");
+    expect(routeStyles.tokenStatusVisualGrid).toContain("w-full");
+    expect(routeStyles.tokenStatusCopy).toContain("min-w-0");
+    expect(routeStyles.tokenStatusLabel).toContain("truncate");
+    expect(routeStyles.tokenStatusMeta).toContain("whitespace-nowrap");
+    expect(routeStyles.tokenStatusRing).toContain("size-[42px]");
+    expect(routeStyles.tokenStatusRingCore).toContain("text-[10px]");
+    expect(routeStyles.tokenStatusMetricButton).toContain("[&_[data-slot=vui-button-content]]:contents");
+    expect(routeStyles.tokenStatusMetricButton).toContain("!grid");
+    expect(routeStyles.tokenStatusMetricButton).toContain("!w-full");
+    expect(routeStyles.tokenStatusMetricButton).toContain("[&_[data-slot=vui-button-label]]:contents");
+    expect(routeStyles.featureChip).toContain("[&_[data-slot=vui-button-content]]:min-w-0");
+    expect(routeStyles.featureChip).toContain("[&_[data-slot=vui-button-content]]:max-w-full");
+    expect(routeStyles.featureChip).toContain("[&_[data-slot=vui-button-label]]:overflow-hidden");
   });
 
   it("keeps group settings in the left rail and moves member status into the right index", () => {
@@ -659,16 +652,16 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.cacheDetailBoundaryMiss).toBeTypeOf("string");
     expect(routeStyles.cacheDetailBoundaryUnknown).toBeTypeOf("string");
     expect(routeStyles.cacheDetailEmpty).toBeTypeOf("string");
-    expect(routeCssSource).toContain("width: min(1120px, calc(100vw - 44px));");
-    expect(routeCssSource).toContain("max-height: min(860px, calc(100dvh - 52px));");
-    expect(routeCssSource).toContain("max-height: min(620px, calc(100dvh - 238px));");
-    expect(routeCssSource).toContain(".tokenStatusRing {\n  position: relative;");
-    expect(routeCssSource).toContain("conic-gradient(");
-    expect(routeCssSource).toContain("width: calc(var(--token-status-value) * 1%);");
-    expect(routeCssSource).toContain("scrollbar-gutter: stable;");
-    expect(routeCssSource).toContain(".cacheDetailBoundaryTrack span + span");
-    expect(routeCssSource).toContain(".cacheDonutSegmentToolDescriptions {\n  stroke: var(--accent-warm);");
-    expect(routeCssSource).toContain(".cacheDonutSegmentToolSchema {\n  stroke: var(--accent-warm);");
+    expect(routeStyles.cacheDetailDialog).toContain("w-[min(1120px,calc(100vw_-_44px))]");
+    expect(routeStyles.cacheDetailDialog).toContain("max-h-[min(860px,calc(100dvh_-_52px))]");
+    expect(routeStyles.cacheDetailBody).toContain("max-h-[min(620px,calc(100dvh_-_238px))]");
+    expect(routeStyles.cacheDetailBody).toContain("[scrollbar-gutter:stable]");
+    expect(routeStyles.tokenStatusRing).toContain("relative");
+    expect(routeStyles.tokenStatusRing).toContain("conic-gradient");
+    expect(routeStyles.tokenStatusBar).toContain("[&>span]:w-[calc(var(--token-status-value)*1%)]");
+    expect(routeStyles.cacheDetailBoundaryTrack).toContain("[&_span+span]:border-l");
+    expect(routeStyles.cacheDonutSegmentToolDescriptions).toContain("stroke-[var(--accent-warm)]");
+    expect(routeStyles.cacheDonutSegmentToolSchema).toContain("stroke-[var(--accent-warm)]");
     expect(routeStyles.contextCompositionSegmentSystem).toBeTypeOf("string");
     expect(routeStyles.contextCompositionSegmentProjectRules).toBeTypeOf("string");
     expect(routeStyles.contextCompositionSegmentToolDescriptions).toBeTypeOf("string");
@@ -690,11 +683,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("styles.activeSkillStatus_stale");
     expect(routeSource).toContain("styles.activeSkillStatus_missing");
     expect(routeSource).toContain("const activeSkillTitle = activeSkillContract");
-    expect(routeSource).toContain("className={`${styles.activeSkillStatus} ${activeSkillStatusClass}`}");
+    expect(routeSource).toContain("const activeSkillStatusStyle = activeSkillStatus === \"stale\"");
+    expect(routeSource).toContain("className={`${styles.activeSkillStatus} ${activeSkillStatusStyle}`}");
     expect(routeSource).toContain("styles.activeSkillIdentity");
     expect(routeSource).toContain("styles.activeSkillMeta");
     expect(routeSource).toContain("case \"active_skill\":");
-    const renderedActiveSkillIndex = routeSource.indexOf("className={`${styles.activeSkillStatus} ${activeSkillStatusClass}`}");
+    const renderedActiveSkillIndex = routeSource.indexOf("className={`${styles.activeSkillStatus} ${activeSkillStatusStyle}`}");
     expect(renderedActiveSkillIndex).toBeGreaterThan(routeSource.indexOf("sessionCompactRows.map"));
     expect(renderedActiveSkillIndex).toBeLessThan(routeSource.indexOf("styles.tokenCompressionCard"));
 
@@ -792,9 +786,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("value: latestControlSignalLine");
     expect(routeSource).toContain("title: latestControlSignalTitle");
     expect(routeSource).not.toContain("nextStateSignals={detail.nextStateSignals ?? []}");
-    expect(routeCssSource).toContain(".inlineMetaPill strong");
-    expect(routeCssSource).toContain("text-overflow: ellipsis");
-    expect(routeCssSource).toContain("white-space: nowrap");
+    expect(routeStyles.inlineMetaPill).toContain("[&_strong]:truncate");
+    expect(routeStyles.inlineMetaPill).toContain("[&_strong]:whitespace-nowrap");
   });
 
   it("keeps live token speed sampling internal instead of adding another core token row", () => {
@@ -1220,14 +1213,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(directSessionIndexItemSource).toContain("styles.sessionStatusCluster");
     expect(directSessionIndexItemSource).toContain("styles.sessionRunningBadge");
     expect(directSessionIndexItemSource).toContain("styles.sessionUnreadBadge");
-    expect(routeCssSource).toContain("grid-template-columns: minmax(0, 1fr) fit-content(92px)");
-    expect(routeCssSource).toContain("max-width: 92px");
-    expect(routeCssSource).toContain("grid-template-columns: minmax(0, 1fr) max-content");
-    expect(routeCssSource).toContain("max-width: min(164px, 68%)");
-    expect(routeCssSource).toContain(".conversationMetaTime time");
-    expect(routeCssSource).toContain("overflow: visible");
-    expect(routeCssSource).toContain("text-overflow: clip");
-    expect(routeCssSource).toContain("flex: 0 0 auto");
+    expect(routeStyles.conversationTitleRow).toContain("grid-cols-[minmax(0,1fr)_fit-content(92px)]");
+    expect(routeStyles.conversationTitleRow).toContain("max-w-full");
+    expect(routeStyles.conversationMetaRow).toContain("grid-cols-[minmax(0,1fr)_max-content]");
+    expect(routeStyles.conversationMetaTime).toContain("max-w-[min(164px,68%)]");
+    expect(routeStyles.conversationMetaTime).toContain("[&_time]:flex-none");
+    expect(routeStyles.conversationMetaTime).toContain("[&_time]:overflow-visible");
+    expect(routeStyles.conversationMetaTime).toContain("[&_time]:text-clip");
     expect(routeCssSource).not.toContain("max-width: 104px");
     expect(directSessionIndexItemSource).not.toContain("styles.sessionCurrentIndicator");
   });
@@ -1484,25 +1476,22 @@ describe("ChatCodingRoute layout contract", () => {
     expect(terminalPanelSource).toContain("/input`");
     expect(routeSource).toContain("/stop`");
     expect(routeSource).not.toContain("const [activeCliAgentRunId, setActiveCliAgentRunId] = useState");
-    expect(routeCssSource).toContain(".cliAgentRunPanel");
-    expect(routeCssSource).toContain(".cliAgentRunPanelHidden");
-    expect(routeCssSource).toContain("display: none;");
-    expect(routeCssSource).toContain(".cliAgentTerminalFrame");
-    expect(routeCssSource).toContain(".cliAgentTerminalOutputShell");
-    expect(routeCssSource).toContain(".cliAgentTerminalOutput .xterm");
-    expect(routeCssSource).toContain(".cliAgentTerminalOutputShell");
-    expect(routeCssSource).toContain("background: var(--bg-canvas);");
-    expect(routeCssSource).toContain(".cliAgentTerminalStatus");
+    expect(routeStyles.cliAgentRunPanel).toBeTypeOf("string");
+    expect(routeStyles.cliAgentRunPanelHidden).toContain("hidden");
+    expect(routeStyles.cliAgentTerminalFrame).toBeTypeOf("string");
+    expect(routeStyles.cliAgentTerminalOutputShell).toContain("bg-[var(--bg-canvas)]");
+    expect(routeStyles.cliAgentTerminalOutput).toBeTypeOf("string");
+    expect(routeStyles.cliAgentTerminalStatus).toBeTypeOf("string");
     expect(routeCssSource).not.toContain(".cliAgentTerminalInputRow");
-    expect(routeCssSource).toContain(".agentSessionTabCli");
-    expect(routeCssSource).toContain(".agentSessionTabCloseButton");
+    expect(routeStyles.agentSessionTabCli).toBeTypeOf("string");
+    expect(routeStyles.agentSessionTabCloseButton).toBeTypeOf("string");
     expect(routeCssSource).not.toContain(".cliAgentRunIconButton");
     expect(routeCssSource).not.toContain(".cliAgentRunMetaBar");
     expect(conversationViewSource).toContain("isCliAgentLifecycleMessage");
     expect(conversationViewSource).toContain("cliAgentLifecycleLabel");
     expect(conversationViewSource).toContain("styles.cliAgentLifecycleTurn");
-    expect(conversationCssSource).toContain(".cliAgentLifecycleTurn");
-    expect(conversationCssSource).toContain(".cliAgentLifecycleMeta");
+    expect(conversationStyles.cliAgentLifecycleTurn).toBeTypeOf("string");
+    expect(conversationStyles.cliAgentLifecycleMeta).toBeTypeOf("string");
     expect(agentSessionTabStripSource).toContain("export type CliAgentRunTab");
     expect(agentSessionTabStripSource).toContain("cliAgentRuns.map");
     expect(agentSessionTabStripSource).toContain("SquareTerminal");

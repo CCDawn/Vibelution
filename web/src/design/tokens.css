@@ -63,6 +63,11 @@
     color-mix(in srgb, var(--surface-page) 92%, transparent),
     color-mix(in srgb, var(--surface-panel) 78%, transparent)
   );
+  --vui-gradient-background-readable: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-canvas) 48%, transparent),
+    var(--theme-background-overlay-mid)
+  );
 
   --fg-primary: #f3f4f6;
   --fg-secondary: #b8c0cc;
@@ -199,6 +204,11 @@
     180deg,
     color-mix(in srgb, var(--surface-page) 96%, transparent),
     color-mix(in srgb, var(--surface-panel) 88%, transparent)
+  );
+  --vui-gradient-background-readable: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-canvas) 48%, transparent),
+    var(--theme-background-overlay-mid)
   );
 
   --fg-primary: #101828;

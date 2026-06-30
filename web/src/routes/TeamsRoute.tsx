@@ -6131,13 +6131,13 @@ export function TeamsRoute({
     const blockedCount = bindings.filter((binding) => binding.agentId && !binding.agent).length
       + bindings.filter((binding) => binding.agent && researchStageAgentConfigTone(binding.agent) === "blocked").length;
     const missingCount = bindings.filter((binding) => !binding.agentId).length;
-    const toneClass = blockedCount > 0
+    const toneStyle = blockedCount > 0
       ? styles.researchStageAgentSummaryBlocked
       : missingCount > 0
         ? styles.researchStageAgentSummaryMissing
         : styles.researchStageAgentSummaryReady;
     return (
-      <div className={`${styles.researchStageAgentSummary} ${toneClass}`}>
+      <div className={`${styles.researchStageAgentSummary} ${toneStyle}`}>
         <Bot size={13} />
         <span>{lang === "zh" ? "阶段 Agent" : "Stage Agents"}</span>
         <strong>{readyCount}/{bindings.length}</strong>
@@ -7109,7 +7109,7 @@ export function TeamsRoute({
   function renderAiSearchSourceScopePanel() {
     const scope = selectedTeam?.sourceScope ?? null;
     const latestRunCounts = latestAiSearchRun ? aiSearchRunCounts(latestAiSearchRun) : null;
-    const latestRunStatusClass =
+    const latestRunStatusStyle =
       latestAiSearchRun?.status === "failed"
         ? styles.aiSearchRunStatusFailed
         : latestAiSearchRun?.status === "partial"
@@ -7204,7 +7204,7 @@ export function TeamsRoute({
                       <strong>{latestAiSearchRun.title}</strong>
                       <span>{latestAiSearchRun.runId} · {latestAiSearchRun.topic}</span>
                     </div>
-                    <span className={`${styles.aiSearchRunStatus} ${latestRunStatusClass}`}>
+                    <span className={`${styles.aiSearchRunStatus} ${latestRunStatusStyle}`}>
                       {aiSearchRunStatusLabel(latestAiSearchRun.status, lang)}
                     </span>
                   </div>

@@ -2745,7 +2745,7 @@ export function ConversationView({
       return null;
     }
     const tone = operationCollectionTone(operations);
-    const toneClass = styles[`answerOnlyProcessGroup_${tone}` as keyof typeof styles] ?? "";
+    const toneStyle = styles[`answerOnlyProcessGroup_${tone}` as keyof typeof styles] ?? "";
     const expanded = getExpansionState(messageId, "process", defaultExpanded);
     const preview = inlinePreview || processSummaryPreview(operations);
     const title = processSummaryTitle(tone);
@@ -2761,7 +2761,7 @@ export function ConversationView({
     );
     if (!hasExpandableDetails) {
       return (
-        <section className={[styles.answerOnlyProcessGroup, toneClass].filter(Boolean).join(" ")}>
+        <section className={[styles.answerOnlyProcessGroup, toneStyle].filter(Boolean).join(" ")}>
           <div
             className={[styles.answerOnlyProcessToggle, styles.answerOnlyProcessStatic].filter(Boolean).join(" ")}
             role={tone === "running" ? "status" : undefined}
@@ -2773,7 +2773,7 @@ export function ConversationView({
       );
     }
     return (
-      <section className={[styles.answerOnlyProcessGroup, toneClass].filter(Boolean).join(" ")}>
+      <section className={[styles.answerOnlyProcessGroup, toneStyle].filter(Boolean).join(" ")}>
         <VButton
           type="button"
           className={styles.answerOnlyProcessToggle}

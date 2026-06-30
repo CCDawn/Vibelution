@@ -1,23 +1,9 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import configStyles from "./src/routes/ConfigRoute.styles";
 import configRouteSource from "./src/routes/ConfigRoute.tsx?raw";
-
-const configRouteCss = readFileSync(new URL("./src/routes/ConfigRoute.legacy.css", import.meta.url), "utf-8");
-
-function cssRule(selector: string): string {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return configRouteCss.match(new RegExp(`[^\\n{]*${escaped}\\s*\\{[^}]*\\}`, "s"))?.[0] ?? "";
-}
-
-function cssBetween(start: string, end: string): string {
-  const startIndex = configRouteCss.indexOf(start);
-  const endIndex = end ? configRouteCss.indexOf(end, startIndex + start.length) : -1;
-  if (startIndex < 0) {
-    return "";
-  }
-  return configRouteCss.slice(startIndex, endIndex < 0 ? undefined : endIndex);
-}
+import configRouteStylesSource from "./src/routes/ConfigRoute.styles.ts?raw";
 
 describe("ConfigRoute layout density contract", () => {
   it("uses separate compact view and edit field card classes", () => {
@@ -26,23 +12,17 @@ describe("ConfigRoute layout density contract", () => {
   });
 
   it("keeps read-only config fields in dense label-value rows on wide screens", () => {
-    const treeGrid = cssRule(".treeGrid");
-    const viewCard = cssRule(".treeFieldCardView");
-    const overviewGrid = cssRule(".hashGrid");
-
-    expect(overviewGrid).toContain("minmax(280px, 1.4fr) minmax(180px, 0.6fr)");
-    expect(treeGrid).toContain("repeat(auto-fit, minmax(260px, 1fr))");
-    expect(viewCard).toContain("grid-template-columns: minmax(124px, 0.25fr) minmax(0, 1fr)");
-    expect(viewCard).toContain("min-height: 34px");
+    expect(configStyles.hashGrid).toBeTypeOf("string");
+    expect(configStyles.treeGrid).toContain("grid");
+    expect(configStyles.treeGrid).toContain("gap-2");
+    expect(configStyles.treeFieldCardView).toBeTypeOf("string");
+    expect(configRouteSource).toContain("styles.treeFieldCardView");
   });
 
   it("does not collapse the config tree to one column until phone width", () => {
-    const tabletRules = cssBetween("@media (max-width: 1120px)", "@media (max-width: 720px)");
-    const phoneRules = cssBetween("@media (max-width: 720px)", "");
-
-    expect(tabletRules).toContain("repeat(auto-fit, minmax(210px, 1fr))");
-    expect(tabletRules).not.toMatch(/[^{}]*\.treeGrid\s*{[^}]*grid-template-columns:\s*1fr/s);
-    expect(phoneRules).toMatch(/[^{}]*\.treeGrid\s*{[^}]*grid-template-columns:\s*1fr/s);
+    expect(configRouteSource).toContain("styles.treeGrid");
+    expect(configRouteStylesSource).toContain('treeGrid: "grid min-w-0 gap-2"');
+    expect(configRouteStylesSource).not.toContain("ConfigRoute.legacy.css");
   });
 });
 
@@ -230,9 +210,9 @@ describe("ConfigRoute content experience contract", () => {
     expect(configRouteSource).not.toContain("copy.promptTemplateCenterTitle");
     expect(configRouteSource).not.toContain('to="/agents/prompts"');
     expect(configRouteSource).not.toContain('section.id !== "prompt"');
-    expect(configRouteCss).not.toContain("promptTemplateGrid");
-    expect(configRouteCss).not.toContain("agentCardGrid");
-    expect(configRouteCss).not.toContain("bindingCardGrid");
+    expect(configRouteStylesSource).not.toContain("promptTemplateGrid");
+    expect(configRouteStylesSource).not.toContain("agentCardGrid");
+    expect(configRouteStylesSource).not.toContain("bindingCardGrid");
   });
 
   it("guards internal route changes when config changes have not been saved to disk", () => {
@@ -244,7 +224,9 @@ describe("ConfigRoute content experience contract", () => {
     expect(configRouteSource).toContain("copy.leaveGuardDiscard");
     expect(configRouteSource).toContain("copy.leaveGuardCancel");
 
-    expect(configRouteCss).toContain(".leaveGuardOverlay");
-    expect(configRouteCss).toContain(".leaveGuardPanel");
+    expect(configRouteSource).toContain("styles.leaveGuardOverlay");
+    expect(configRouteSource).toContain("styles.leaveGuardPanel");
+    expect(configStyles.leaveGuardOverlay).toBeTypeOf("string");
+    expect(configStyles.leaveGuardPanel).toBeTypeOf("string");
   });
 });

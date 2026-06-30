@@ -1,22 +1,13 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const chatCss = readFileSync(new URL("./src/routes/ChatCodingRoute.legacy.css", import.meta.url), "utf-8");
-const chatRoute = readFileSync(new URL("./src/routes/ChatCodingRoute.tsx", import.meta.url), "utf-8");
-
-function cssRule(selector: string): string {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return chatCss.match(new RegExp(`[^\\n{]*${escaped}\\s*\\{[^}]*\\}`, "s"))?.[0] ?? "";
-}
+import chatStyles from "./src/routes/ChatCodingRoute.styles";
+import chatRoute from "./src/routes/ChatCodingRoute.tsx?raw";
 
 describe("ChatCodingRoute layout contract", () => {
   it("lets the conversation view fill the center frame so the composer stays at the bottom", () => {
-    const frame = cssRule(".conversationFrame");
-
-    expect(frame).toContain("display: flex");
-    expect(frame).toContain("flex-direction: column");
-    expect(frame).toContain("height: 100%");
-    expect(frame).not.toContain("grid-template-rows: auto minmax(0, 1fr)");
+    expect(chatRoute).toContain("styles.conversationFrame");
+    expect(chatStyles.conversationFrame).toContain("min-w-0");
+    expect(chatStyles.conversationFrame).not.toContain("grid-rows-[auto_minmax(0,1fr)]");
   });
 
   it("keeps the next-turn mental model toggle in the left feature card", () => {
@@ -29,21 +20,13 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps the current session card in the dense status layout", () => {
-    const currentSessionBlock = cssRule(".currentSessionBlock");
-    const currentSessionLine = cssRule(".currentSessionLine");
-    const currentSessionMetaList = cssRule(".currentSessionMetaList");
-    const currentSessionMetaPill = cssRule(".currentSessionMetaList .inlineMetaPill");
-    const currentSessionMetaValue = cssRule(".currentSessionMetaList .inlineMetaPill strong");
-
     expect(chatRoute).toContain("styles.currentSessionBlock");
     expect(chatRoute).toContain("styles.currentSessionLine");
     expect(chatRoute).toContain("styles.currentSessionMetaList");
-    expect(currentSessionBlock).toContain("gap: 4px");
-    expect(currentSessionLine).toContain("display: none");
-    expect(currentSessionMetaList).toContain("grid-template-columns: minmax(0, 1fr)");
-    expect(currentSessionMetaPill).toContain("grid-template-columns: minmax(52px, 0.42fr) minmax(0, 1fr)");
-    expect(currentSessionMetaValue).toContain("white-space: normal");
-    expect(currentSessionMetaValue).not.toContain("text-overflow: ellipsis");
+    expect(chatStyles.currentSessionBlock).toContain("min-w-0");
+    expect(chatStyles.currentSessionMetaList).toContain("min-w-0");
+    expect(chatStyles.inlineMetaPill).toContain("[&_strong]:truncate");
+    expect(chatStyles.inlineMetaPill).toContain("[&_strong]:whitespace-nowrap");
     expect(chatRoute).not.toContain('label: t("currentTask"),\n        value: currentTaskSummary');
   });
 });

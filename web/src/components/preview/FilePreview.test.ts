@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildFilePreviewKey } from "./FilePreview";
 import previewSource from "./FilePreview.tsx?raw";
+import stylesSource from "./FilePreview.styles.ts?raw";
 
 describe("buildFilePreviewKey", () => {
   it("changes when the preview content or log filter changes", () => {
@@ -82,7 +83,8 @@ describe("FilePreview editor fallback contract", () => {
   it("wraps CodeMirror in a local fallback boundary", () => {
     expect(previewSource).toContain("<PreviewEditorErrorBoundary key={editorKey}");
     expect(previewSource).toContain("fallbackContent={displayContent}");
-    expect(previewSource).toContain("className={plainFallbackClass}");
+    expect(previewSource).toContain("className={styles.plainFallbackClass}");
+    expect(stylesSource).toContain("plainFallbackClass");
     expect(previewSource).toContain("[file-preview-fallback]");
   });
 

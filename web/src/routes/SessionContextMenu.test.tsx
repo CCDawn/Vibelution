@@ -1,3 +1,4 @@
+import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
@@ -55,7 +56,7 @@ describe("SessionContextMenu", () => {
 
     expect(markup).toContain("role=\"menu\"");
     expect(markup).toContain("aria-label=\"会话操作\"");
-    expect(markup).toContain("role=\"menuitem\"");
+    expect(markup.match(/data-vui="button"/g)?.length).toBe(3);
     expect(markup).toContain("加入评审");
     expect(markup).toContain("重命名");
     expect(markup).toContain("移除会话记录");
