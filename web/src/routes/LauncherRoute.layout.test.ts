@@ -9,10 +9,8 @@ import routerSource from "../app/router.tsx?raw";
 import shellSource from "../app/AppShell.tsx?raw";
 import utilityMenuSource from "../app/AppShellUtilityMenu.tsx?raw";
 import launcherShellSource from "../app/LauncherShell.tsx?raw";
-import launcherShellStyles from "../app/LauncherShell.module.css";
 
 const routeStylesSource = readFileSync(new URL("./LauncherRoute.module.css", import.meta.url), "utf8");
-const launcherShellStylesSource = readFileSync(new URL("../app/LauncherShell.module.css", import.meta.url), "utf8");
 
 const sourceSlice = (source: string, startMarker: string, endMarker: string): string => {
   const startIndex = source.indexOf(startMarker);
@@ -51,7 +49,8 @@ describe("LauncherRoute layout contract", () => {
     expect(launcherShellSource).toContain("<Outlet />");
     expect(launcherShellSource).not.toContain("<nav");
     expect(launcherShellSource).not.toContain("NavLink");
-    expect(launcherShellStyles.shell).toBeTypeOf("string");
+    expect(launcherShellSource).toContain('data-vui-app="launcher"');
+    expect(launcherShellSource).toContain("text-vui-fg-primary");
   });
 
   it("uses the typed launcher lifecycle API client", () => {
@@ -215,7 +214,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("userGuideDetailShort");
     expect(routeSource).toContain("noticeTextShort");
     expect(routeSource).toContain("helperTitle={lifecycleDisplay.detail}");
-    expect(routeSource).toContain("title={lifecycleDisplay.detail || copy.subtitle}");
+    expect(routeSource).toContain("aria-label={lifecycleDisplay.detail || copy.subtitle}");
     expect(routeSource).toContain("title={notice.text}");
     expect(routeSource).toContain("title={row.technical}");
     expect(routeSource).not.toContain("<p className={styles.subtitle}>{lifecycleDisplay.detail || copy.subtitle}</p>");
@@ -233,16 +232,16 @@ describe("LauncherRoute layout contract", () => {
   });
 
   it("uses a light dense Launcher surface with muted action buttons", () => {
-    expect(routeStylesSource).toContain("--surface-page: var(--fg-primary)");
-    expect(routeStylesSource).toContain("--surface-header: color-mix(in srgb, var(--fg-primary) 94%, transparent)");
-    expect(routeStylesSource).toContain("background: color-mix(in srgb, var(--accent-primary) 10%, var(--fg-primary))");
-    expect(routeStylesSource).toContain("background: color-mix(in srgb, var(--danger) 7%, var(--fg-primary))");
+    expect(routeStylesSource).toContain("background:\n    var(--vui-gradient-route-soft),\n    var(--surface-page);");
+    expect(routeStylesSource).toContain("background:\n    var(--vui-gradient-route-soft),\n    color-mix(in srgb, var(--surface-panel) 86%, transparent);");
+    expect(routeStylesSource).toContain("background: color-mix(in srgb, var(--accent-primary) 10%, var(--surface-card))");
+    expect(routeStylesSource).toContain("background: color-mix(in srgb, var(--danger) 7%, var(--surface-card))");
     expect(routeStylesSource).toContain("min-height: 28px");
     expect(routeStylesSource).toContain("padding: 0 8px");
     expect(routeStylesSource).toContain("width: fit-content");
     expect(routeStylesSource).toContain("white-space: nowrap");
-    expect(launcherShellStylesSource).toContain("var(--vui-gradient-route-soft)");
-    expect(launcherShellStylesSource).toContain("var(--fg-primary)");
+    expect(launcherShellSource).toContain("var(--vui-gradient-route-soft)");
+    expect(launcherShellSource).toContain("var(--fg-primary)");
   });
 
   it("keeps the complete launcher surface reachable when the window is short", () => {
@@ -373,7 +372,7 @@ describe("LauncherRoute layout contract", () => {
     const statusBarActions = sourceSlice(
       routeSource,
       '<div className={styles.statusBarActions} aria-label={copy.lifecycleControls}>',
-      "\n          </div>\n        </div>",
+      "\n              {bundle?.url ? (",
     );
     const refreshIndex = statusBarActions.indexOf("statusQuery.refetch()");
     const startIndex = statusBarActions.indexOf('controlMutation.mutate("start")');
@@ -390,7 +389,7 @@ describe("LauncherRoute layout contract", () => {
     const dangerActions = sourceSlice(
       routeSource,
       '<div className={styles.dangerActions}>',
-      "\n        </div>\n      </div>",
+      "\n        </div>\n      </div>\n\n      <LauncherStartupSettingsPanel",
     );
     expect(dangerActions).toContain('controlMutation.mutate("force-stop")');
     expect(dangerActions).toContain("copy.forceStop");

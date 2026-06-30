@@ -1,6 +1,7 @@
 export { VButton, type VButtonProps } from "./primitives/VButton";
 export { VChip, type VChipProps } from "./primitives/VChip";
 export { VIconButton, type VIconButtonProps } from "./primitives/VIconButton";
+export { VNativeButton, type VNativeButtonProps } from "./primitives/VNativeButton";
 export { VPanel, type VPanelProps } from "./primitives/VPanel";
 export { VSurface, type VSurfaceProps } from "./primitives/VSurface";
 export { VTooltip, type VTooltipProps } from "./primitives/VTooltip";

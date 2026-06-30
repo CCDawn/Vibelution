@@ -1,6 +1,7 @@
 import { CircleHelp } from "lucide-react";
 import { type ReactNode } from "react";
 
+import { VNativeButton } from "../primitives/VNativeButton";
 import { VTooltip } from "../primitives/VTooltip";
 import { vuiFormHelperClass, vuiFormLabelClass } from "./formClasses";
 
@@ -40,14 +41,14 @@ export function VFieldRow({
         {labelNode}
         {tooltip ? (
           <VTooltip content={tooltip}>
-            <button
+            <VNativeButton
               aria-label="Field details"
               data-vui="field-tooltip"
               type="button"
               className="inline-flex size-4 items-center justify-center rounded-full text-vui-fg-tertiary hover:text-vui-fg-secondary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-vui-accent-cool"
             >
               <CircleHelp size={13} strokeWidth={1.7} />
-            </button>
+            </VNativeButton>
           </VTooltip>
         ) : null}
       </div>

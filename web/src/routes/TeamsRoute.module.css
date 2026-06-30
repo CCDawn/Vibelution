@@ -34,9 +34,9 @@
 }
 
 .iconButton,
-.toolbarActions button,
+.toolbarActions [data-vui="native-button"],
 .toolbarActions .toolbarLink,
-.actionRow button {
+.actionRow [data-vui="native-button"] {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
@@ -54,10 +54,10 @@
 }
 
 .iconButton:disabled,
-.toolbarActions button:disabled,
-.actionRow button:disabled,
-.teamMessageForm button:disabled,
-.teamTaskForm button:disabled {
+.toolbarActions [data-vui="native-button"]:disabled,
+.actionRow [data-vui="native-button"]:disabled,
+.teamMessageForm [data-vui="native-button"]:disabled,
+.teamTaskForm [data-vui="native-button"]:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -548,7 +548,7 @@
   white-space: nowrap;
 }
 
-.aiSearchRunHeader button {
+.aiSearchRunHeader [data-vui="native-button"] {
   display: inline-flex;
   flex: 0 0 auto;
   min-height: 28px;
@@ -565,7 +565,7 @@
   cursor: pointer;
 }
 
-.aiSearchRunHeader button:disabled {
+.aiSearchRunHeader [data-vui="native-button"]:disabled {
   cursor: not-allowed;
   opacity: 0.58;
 }
@@ -866,7 +866,7 @@
   font-weight: 740;
 }
 
-.researchStageLauncherHeader button {
+.researchStageLauncherHeader [data-vui="native-button"] {
   display: inline-flex;
   width: 28px;
   height: 28px;
@@ -1226,7 +1226,7 @@
   gap: 7px;
 }
 
-.researchStageActions button,
+.researchStageActions [data-vui="native-button"],
 .researchStageActions a {
   display: inline-flex;
   min-width: 104px;
@@ -1247,12 +1247,12 @@
   white-space: nowrap;
 }
 
-.researchStageActions button:first-child {
+.researchStageActions [data-vui="native-button"]:first-child {
   border-color: color-mix(in srgb, var(--accent-success) 38%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-success) 12%, var(--surface-panel-strong));
 }
 
-.researchStageActions button:disabled {
+.researchStageActions [data-vui="native-button"]:disabled {
   cursor: not-allowed;
   opacity: 0.58;
 }
@@ -1375,7 +1375,7 @@
 }
 
 .sourceCollectionPageActions a,
-.sourceCollectionPageActions button,
+.sourceCollectionPageActions [data-vui="native-button"],
 .sourceCollectionUnavailable a {
   display: inline-flex;
   min-height: 30px;
@@ -1392,7 +1392,7 @@
   text-decoration: none;
 }
 
-.sourceCollectionPageActions button:disabled {
+.sourceCollectionPageActions [data-vui="native-button"]:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -2309,7 +2309,7 @@
   min-width: 0;
 }
 
-.sourceCollectionStageChatActions button,
+.sourceCollectionStageChatActions [data-vui="native-button"],
 .sourceCollectionStageChatActions a {
   display: inline-flex;
   align-items: center;
@@ -2333,15 +2333,15 @@
   white-space: nowrap;
 }
 
-.sourceCollectionStageChatActions button:hover,
-.sourceCollectionStageChatActions button:focus-visible,
+.sourceCollectionStageChatActions [data-vui="native-button"]:hover,
+.sourceCollectionStageChatActions [data-vui="native-button"]:focus-visible,
 .sourceCollectionStageChatActions a:hover,
 .sourceCollectionStageChatActions a:focus-visible {
   border-color: color-mix(in srgb, var(--accent-success) 44%, var(--accent-cool));
   outline: none;
 }
 
-.sourceCollectionStageChatActions button:disabled {
+.sourceCollectionStageChatActions [data-vui="native-button"]:disabled {
   cursor: wait;
   opacity: 0.68;
 }
@@ -2584,7 +2584,7 @@
 
 .sourceCollectionTraceRefs span,
 .sourceCollectionTraceStorage span,
-.sourceCollectionTraceStorage button {
+.sourceCollectionTraceStorage [data-vui="native-button"] {
   max-width: 100%;
   padding: 2px 6px;
   border-radius: 999px;
@@ -2598,19 +2598,19 @@
 }
 
 .sourceCollectionTraceStorage span,
-.sourceCollectionTraceStorage button {
+.sourceCollectionTraceStorage [data-vui="native-button"] {
   border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
   color: color-mix(in srgb, var(--accent-cool) 72%, var(--fg-secondary));
 }
 
-.sourceCollectionTraceStorage button {
+.sourceCollectionTraceStorage [data-vui="native-button"] {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   cursor: pointer;
 }
 
-.sourceCollectionTraceStorage button:disabled {
+.sourceCollectionTraceStorage [data-vui="native-button"]:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -2698,7 +2698,7 @@
   padding-bottom: 1px;
 }
 
-.sourceCollectionFilterBar button {
+.sourceCollectionFilterBar [data-vui="native-button"] {
   display: inline-flex;
   min-width: 76px;
   min-height: 28px;
@@ -2716,8 +2716,8 @@
   cursor: pointer;
 }
 
-.sourceCollectionFilterBar button:hover,
-.sourceCollectionFilterBar button:focus-visible,
+.sourceCollectionFilterBar [data-vui="native-button"]:hover,
+.sourceCollectionFilterBar [data-vui="native-button"]:focus-visible,
 .sourceCollectionFilterActive {
   border-color: color-mix(in srgb, var(--accent-primary) 48%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-primary) 9%, var(--surface-card));
@@ -2870,7 +2870,7 @@
   gap: 6px;
 }
 
-.sourceCollectionPagination button {
+.sourceCollectionPagination [data-vui="native-button"] {
   min-height: 24px;
   padding: 0 8px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 26%, var(--border-soft));
@@ -2882,7 +2882,7 @@
   font-weight: 820;
 }
 
-.sourceCollectionPagination button:disabled {
+.sourceCollectionPagination [data-vui="native-button"]:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -3066,7 +3066,7 @@
 .sourceCollectionSourceDetailHeader strong,
 .sourceCollectionSourceDetailHeader span,
 .sourceCollectionSourceDetailActions a,
-.sourceCollectionSourceDetailActions button,
+.sourceCollectionSourceDetailActions [data-vui="native-button"],
 .sourceCollectionSourceDetailFacts code {
   min-width: 0;
   overflow: hidden;
@@ -3094,7 +3094,7 @@
 }
 
 .sourceCollectionSourceDetailActions a,
-.sourceCollectionSourceDetailActions button {
+.sourceCollectionSourceDetailActions [data-vui="native-button"] {
   display: inline-flex;
   max-width: 100%;
   min-height: 26px;
@@ -3128,12 +3128,12 @@
 }
 
 .sourceCollectionSourceDetailActions a:hover,
-.sourceCollectionSourceDetailActions button:hover:not(:disabled) {
+.sourceCollectionSourceDetailActions [data-vui="native-button"]:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--accent-cool) 54%, var(--border-strong));
   background: color-mix(in srgb, var(--accent-cool) 14%, var(--surface-panel-strong));
 }
 
-.sourceCollectionSourceDetailActions button:disabled {
+.sourceCollectionSourceDetailActions [data-vui="native-button"]:disabled {
   cursor: not-allowed;
   opacity: 0.58;
 }
@@ -3345,7 +3345,7 @@
   justify-content: flex-end;
 }
 
-.researchStagePageActions button {
+.researchStagePageActions [data-vui="native-button"] {
   display: inline-flex;
   min-height: 30px;
   align-items: center;
@@ -3360,7 +3360,7 @@
   font-weight: 760;
 }
 
-.researchStagePageActions button:disabled {
+.researchStagePageActions [data-vui="native-button"]:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -3416,7 +3416,7 @@
   line-height: 1.4;
 }
 
-.experimentLedgerHeader button {
+.experimentLedgerHeader [data-vui="native-button"] {
   display: inline-flex;
   min-height: 30px;
   align-items: center;
@@ -3431,7 +3431,7 @@
   font-weight: 760;
 }
 
-.experimentLedgerHeader button:disabled {
+.experimentLedgerHeader [data-vui="native-button"]:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -3605,7 +3605,7 @@
   box-shadow: var(--vui-shadow-accent);
 }
 
-.experimentBaselineForm button {
+.experimentBaselineForm [data-vui="native-button"] {
   display: inline-flex;
   min-height: 30px;
   align-items: center;
@@ -3621,7 +3621,7 @@
   white-space: nowrap;
 }
 
-.experimentBaselineForm button:disabled {
+.experimentBaselineForm [data-vui="native-button"]:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -3780,7 +3780,7 @@
   box-shadow: var(--vui-shadow-accent);
 }
 
-.experimentSmokeForm button {
+.experimentSmokeForm [data-vui="native-button"] {
   display: inline-flex;
   min-height: 30px;
   align-items: center;
@@ -3796,7 +3796,7 @@
   white-space: nowrap;
 }
 
-.experimentSmokeForm button:disabled {
+.experimentSmokeForm [data-vui="native-button"]:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -3870,7 +3870,7 @@
   box-shadow: var(--vui-shadow-accent);
 }
 
-.experimentKnowledgeForm button {
+.experimentKnowledgeForm [data-vui="native-button"] {
   display: inline-flex;
   min-height: 30px;
   align-items: center;
@@ -3886,7 +3886,7 @@
   white-space: nowrap;
 }
 
-.experimentKnowledgeForm button:disabled {
+.experimentKnowledgeForm [data-vui="native-button"]:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -3947,10 +3947,10 @@
   line-height: 1.42;
 }
 
-.researchLoopHeader button,
-.researchLoopTemplateBar button,
-.researchLoopEvidenceForm button,
-.researchLoopDecisionForm button {
+.researchLoopHeader [data-vui="native-button"],
+.researchLoopTemplateBar [data-vui="native-button"],
+.researchLoopEvidenceForm [data-vui="native-button"],
+.researchLoopDecisionForm [data-vui="native-button"] {
   display: inline-flex;
   min-height: 30px;
   align-items: center;
@@ -3966,10 +3966,10 @@
   white-space: nowrap;
 }
 
-.researchLoopHeader button:disabled,
-.researchLoopTemplateBar button:disabled,
-.researchLoopEvidenceForm button:disabled,
-.researchLoopDecisionForm button:disabled {
+.researchLoopHeader [data-vui="native-button"]:disabled,
+.researchLoopTemplateBar [data-vui="native-button"]:disabled,
+.researchLoopEvidenceForm [data-vui="native-button"]:disabled,
+.researchLoopDecisionForm [data-vui="native-button"]:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -4386,7 +4386,7 @@
 }
 
 .knowledgeCompletionFlowActions a,
-.knowledgeCompletionFlowActions button {
+.knowledgeCompletionFlowActions [data-vui="native-button"] {
   display: inline-flex;
   min-width: 0;
   min-height: 26px;
@@ -4403,7 +4403,7 @@
   text-decoration: none;
 }
 
-.knowledgeCompletionFlowActions button:disabled {
+.knowledgeCompletionFlowActions [data-vui="native-button"]:disabled {
   opacity: 0.54;
 }
 
@@ -4453,7 +4453,7 @@
   background: color-mix(in srgb, var(--surface-panel-strong) 86%, transparent);
 }
 
-.toolbarActions .canvasLayoutModeSwitch button {
+.toolbarActions .canvasLayoutModeSwitch [data-vui="native-button"] {
   min-height: 26px;
   padding: 0 8px;
   border: 0;
@@ -4461,7 +4461,7 @@
   background: transparent;
 }
 
-.toolbarActions .canvasLayoutModeSwitch button + button {
+.toolbarActions .canvasLayoutModeSwitch [data-vui="native-button"] + [data-vui="native-button"] {
   border-left: 1px solid var(--border-soft);
 }
 
@@ -5020,8 +5020,8 @@
   min-height: 14px;
 }
 
-.teamMessageForm button,
-.teamTaskForm button {
+.teamMessageForm [data-vui="native-button"],
+.teamTaskForm [data-vui="native-button"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -5035,7 +5035,7 @@
   font-weight: 750;
 }
 
-.teamTaskForm button {
+.teamTaskForm [data-vui="native-button"] {
   border-color: color-mix(in srgb, var(--accent-success) 34%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-success) 9%, var(--surface-panel-strong));
 }
@@ -5401,8 +5401,8 @@
   grid-column: span 2;
 }
 
-.workflowSourceCollectionForm button,
-.workflowSourceCollectionOutputForm button {
+.workflowSourceCollectionForm [data-vui="native-button"],
+.workflowSourceCollectionOutputForm [data-vui="native-button"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -5417,8 +5417,8 @@
   font-weight: 760;
 }
 
-.workflowSourceCollectionForm button:disabled,
-.workflowSourceCollectionOutputForm button:disabled {
+.workflowSourceCollectionForm [data-vui="native-button"]:disabled,
+.workflowSourceCollectionOutputForm [data-vui="native-button"]:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -5498,7 +5498,7 @@
   line-height: 1.32;
 }
 
-.workflowSourceCollectionSearchAction button {
+.workflowSourceCollectionSearchAction [data-vui="native-button"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -5514,7 +5514,7 @@
   font-weight: 780;
 }
 
-.workflowSourceCollectionSearchAction button:disabled {
+.workflowSourceCollectionSearchAction [data-vui="native-button"]:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -5560,7 +5560,7 @@
   gap: 5px;
 }
 
-.workflowSourceCollectionStorageButtons button {
+.workflowSourceCollectionStorageButtons [data-vui="native-button"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -5576,7 +5576,7 @@
   white-space: nowrap;
 }
 
-.workflowSourceCollectionStorageButtons button:disabled {
+.workflowSourceCollectionStorageButtons [data-vui="native-button"]:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -5628,7 +5628,7 @@
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 }
 
-.workflowSourceCollectionAssignments button {
+.workflowSourceCollectionAssignments [data-vui="native-button"] {
   display: grid;
   gap: 2px;
   min-width: 0;
@@ -5641,20 +5641,20 @@
   text-align: left;
 }
 
-.workflowSourceCollectionAssignments button strong,
-.workflowSourceCollectionAssignments button span {
+.workflowSourceCollectionAssignments [data-vui="native-button"] strong,
+.workflowSourceCollectionAssignments [data-vui="native-button"] span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.workflowSourceCollectionAssignments button strong {
+.workflowSourceCollectionAssignments [data-vui="native-button"] strong {
   color: var(--fg-primary);
   font-size: 0.68rem;
 }
 
-.workflowSourceCollectionAssignments button span {
+.workflowSourceCollectionAssignments [data-vui="native-button"] span {
   color: var(--fg-muted);
   font-size: 0.6rem;
 }
@@ -6094,7 +6094,7 @@
   font-size: 0.68rem;
 }
 
-.workflowGraphHeader button {
+.workflowGraphHeader [data-vui="native-button"] {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
@@ -6295,7 +6295,7 @@
   gap: 5px;
 }
 
-.workflowCandidateListHeader button {
+.workflowCandidateListHeader [data-vui="native-button"] {
   min-height: 24px;
   padding: 0 8px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 30%, var(--border-soft));
@@ -6308,7 +6308,7 @@
   white-space: nowrap;
 }
 
-.workflowCandidateListHeader button:disabled {
+.workflowCandidateListHeader [data-vui="native-button"]:disabled {
   cursor: not-allowed;
   opacity: 0.52;
 }
@@ -6449,7 +6449,7 @@
   min-width: 0;
 }
 
-.workflowCandidateActions button {
+.workflowCandidateActions [data-vui="native-button"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -6468,7 +6468,7 @@
   white-space: nowrap;
 }
 
-.workflowCandidateActions button:disabled {
+.workflowCandidateActions [data-vui="native-button"]:disabled {
   cursor: not-allowed;
   opacity: 0.54;
 }
@@ -6517,7 +6517,7 @@
   gap: 4px;
 }
 
-.sourceCollectionControlPanel .workflowCandidateActions button {
+.sourceCollectionControlPanel .workflowCandidateActions [data-vui="native-button"] {
   min-height: 24px;
   padding: 0 7px;
   font-size: 0.62rem;
@@ -6782,7 +6782,7 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .sourceCollectionStageChatActions button,
+  .sourceCollectionStageChatActions [data-vui="native-button"],
   .sourceCollectionStageChatActions a {
     width: 100%;
   }
