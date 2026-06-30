@@ -464,7 +464,11 @@ describe("EvolutionRoute library user flow contract", () => {
   it("keeps supervised launch from reserving an empty worktree-review track", () => {
     expect(styles.liveLaunchStack).toContain("grid-rows-[max-content]");
     expect(styles.liveLaunchStack).toContain("overflow-visible");
+    expect(styles.liveLaunchStack).toContain("max-h-none");
     expect(styles.launchSurface).toContain("max-h-none");
+    expect(styles.supervisedWorkflowCard).toContain("grid-rows-[1fr_auto]");
+    expect(styles.supervisedWorkflowCard).toContain("overflow-visible");
+    expect(styles.supervisedWorkflowCardFooter).toContain("min-h-[26px]");
     expect(stylesSource).not.toContain("max-height: min(430px, 60vh)");
     expect(stylesSource).not.toContain(".worktreeReviewSurface");
     expect(worktreePanelSource).toContain("worktreeReviewSurfaceClass");
