@@ -867,10 +867,9 @@
 }
 
 .answerOnlyProcessToggle {
-  display: inline-grid;
-  grid-template-columns: 14px auto auto minmax(0, 1fr) 14px;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 0;
   width: fit-content;
   max-width: 100%;
   min-height: 22px;
@@ -884,13 +883,29 @@
   font-size: var(--vui-font-xs);
 }
 
+.answerOnlyProcessToggle [data-slot="vui-button-content"] {
+  display: contents;
+}
+
+.answerOnlyProcessToggle [data-slot="vui-button-label"] {
+  display: inline-grid;
+  grid-template-columns: 14px auto auto minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .answerOnlyProcessToggle:hover {
   color: var(--fg-secondary);
 }
 
 .answerOnlyProcessStatic {
-  grid-template-columns: 14px auto auto;
   cursor: default;
+}
+
+.answerOnlyProcessStatic [data-slot="vui-button-label"] {
+  grid-template-columns: 14px auto auto;
 }
 
 .answerOnlyProcessIcon {
@@ -1798,6 +1813,18 @@ button.timelineCellHeader:hover,
   font: inherit;
   font-size: var(--vui-font-xs);
   font-weight: 600;
+}
+
+.responseToggle [data-slot="vui-button-content"] {
+  display: contents;
+}
+
+.responseToggle [data-slot="vui-button-label"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .responseBody {

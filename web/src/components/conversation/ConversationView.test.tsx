@@ -199,6 +199,23 @@ describe("ConversationView edit resend affordance", () => {
     expect(processToggleHoverRule).not.toContain("border-color");
   });
 
+  it("keeps VUI button slot wrappers transparent for process and answer text controls", () => {
+    const processContentSlotRule = cssRule('.answerOnlyProcessToggle [data-slot="vui-button-content"]');
+    const processLabelSlotRule = cssRule('.answerOnlyProcessToggle [data-slot="vui-button-label"]');
+    const processStaticLabelSlotRule = cssRule('.answerOnlyProcessStatic [data-slot="vui-button-label"]');
+    const responseContentSlotRule = cssRule('.responseToggle [data-slot="vui-button-content"]');
+    const responseLabelSlotRule = cssRule('.responseToggle [data-slot="vui-button-label"]');
+
+    expect(processContentSlotRule).toContain("display: contents");
+    expect(processLabelSlotRule).toContain("display: inline-grid");
+    expect(processLabelSlotRule).toContain("grid-template-columns: 14px auto auto minmax(0, 1fr) 14px");
+    expect(processLabelSlotRule).toContain("max-width: 100%");
+    expect(processStaticLabelSlotRule).toContain("grid-template-columns: 14px auto auto");
+    expect(responseContentSlotRule).toContain("display: contents");
+    expect(responseLabelSlotRule).toContain("display: inline-flex");
+    expect(responseLabelSlotRule).toContain("gap: 7px");
+  });
+
   it("uses readable contrast for compact conversation metadata and toggles", () => {
     const readableRules = [
       ".turnMeta",
