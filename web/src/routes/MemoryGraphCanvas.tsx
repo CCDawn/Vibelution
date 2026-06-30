@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { MemoryKnowledgeGraphEdge, MemoryKnowledgeGraphNode } from "../api/types";
-import styles from "./MemoryRoute.module.css";
+import styles from "./MemoryRoute.styles";
 
 type ThreeModule = typeof import("three");
 type ThreeMaterial = import("three").Material;

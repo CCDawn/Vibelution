@@ -67,7 +67,7 @@ import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy"
 import { VButton, VRouteHeader } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
-import styles from "./MemoryRoute.module.css";
+import styles from "./MemoryRoute.styles";
 
 const MemoryGraphCanvas = lazy(() => import("./MemoryGraphCanvas").then((module) => ({ default: module.MemoryGraphCanvas })));
 

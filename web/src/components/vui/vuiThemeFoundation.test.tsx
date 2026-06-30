@@ -18,9 +18,9 @@ import {
 const designRoot = resolve(import.meta.dirname, "../../design");
 const baseSource = readFileSync(resolve(designRoot, "base.css"), "utf8");
 const tokensSource = readFileSync(resolve(designRoot, "tokens.css"), "utf8");
-const baseSource = readFileSync(resolve(designRoot, "base.css"), "utf8");
 const tailwindSource = readFileSync(resolve(designRoot, "tailwind.css"), "utf8");
 const herouiThemeSource = readFileSync(resolve(designRoot, "heroui-theme.css"), "utf8");
+const routeLegacySource = readFileSync(resolve(designRoot, "vui-route-legacy.css"), "utf8");
 const agentWorkspacePanelSource = readFileSync(
   resolve(import.meta.dirname, "product/agent-management/AgentWorkspacePanel.tsx"),
   "utf8",
@@ -75,8 +75,9 @@ describe("VUI dual-theme foundation", () => {
   });
 
   it("keeps the app readable without relying on browser zoom", () => {
-    expect(baseSource).toContain("font-size: 15px");
+    expect(baseSource).toContain("font-size: 16px");
     expect(baseSource).not.toContain("font-size: 14px");
+    expect(baseSource).not.toContain("font-size: 15px");
   });
 
   it("maps Tailwind and HeroUI bridge classes to Vibelution semantic tokens", () => {
@@ -106,7 +107,12 @@ describe("VUI dual-theme foundation", () => {
       expect(tokensSource).toContain(token);
     }
 
-    expect(baseSource).toContain("font-size: 15px");
+    expect(tokensSource).toContain("--vui-font-xs: 0.875rem;");
+    expect(tokensSource).toContain("--vui-font-sm: 0.9375rem;");
+    expect(tokensSource).toContain("--vui-font-md: 1rem;");
+    expect(tokensSource).toContain("--vui-font-chat: 1.0625rem;");
+    expect(tokensSource).toContain("--vui-font-title: 1.1875rem;");
+    expect(baseSource).toContain("font-size: 16px");
 
     const vuiSources = [
       agentWorkspacePanelSource,
@@ -121,6 +127,13 @@ describe("VUI dual-theme foundation", () => {
     expect(vuiSources).not.toMatch(/text-\[0\.(?:6\d|7[0-7])rem\]/);
     expect(vuiSources).not.toContain("text-xs");
     expect(vuiSources).toContain("text-[var(--vui-font-xs)]");
+  });
+
+  it("keeps migrated route legacy styles free of sub-14px typography", () => {
+    const subReadableFontPattern =
+      /(?:font-size:\s*|text-\[)0\.(?:[5-7]\d|8[0-6]|87[0-4])rem\]?/g;
+
+    expect(routeLegacySource.match(subReadableFontPattern) ?? []).toEqual([]);
   });
 
   it("renders page, surface, section, metric strip, and action group primitives", () => {

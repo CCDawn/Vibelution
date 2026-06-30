@@ -1,24 +1,25 @@
-.layout {
+/* source: routes/ChatCodingRoute legacy css */
+:where(.vui-routes-chatcodingroute).layout {
   display: grid;
   grid-template-columns:
-    var(--chat-left-pane-width, 220px)
+    var(--chat-left-pane-width, 260px)
     8px
     minmax(0, 1fr)
     8px
-    var(--chat-right-pane-width, 284px);
+    var(--chat-right-pane-width, 340px);
   height: 100%;
   min-height: 0;
   overflow: hidden;
 }
 
-.leftRail,
-.rightPane,
-.centerPane,
-.centerSurface {
+:where(.vui-routes-chatcodingroute).leftRail,
+:where(.vui-routes-chatcodingroute).rightPane,
+:where(.vui-routes-chatcodingroute).centerPane,
+:where(.vui-routes-chatcodingroute).centerSurface {
   min-height: 0;
 }
 
-.leftRail {
+:where(.vui-routes-chatcodingroute).leftRail {
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -27,44 +28,44 @@
   overflow: auto;
 }
 
-.paneCollapsed {
+:where(.vui-routes-chatcodingroute).paneCollapsed {
   padding: 0;
   border: 0;
   overflow: hidden;
   visibility: hidden;
 }
 
-.leftBlock {
+:where(.vui-routes-chatcodingroute).leftBlock {
   padding: 7px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
 }
 
-.currentSessionBlock {
+:where(.vui-routes-chatcodingroute).currentSessionBlock {
   display: grid;
   gap: 4px;
   padding: 6px;
 }
 
-.currentSessionBlock .sectionIdentity {
+:where(.vui-routes-chatcodingroute).currentSessionBlock .sectionIdentity {
   gap: 1px;
 }
 
-.currentSessionBlock .blockEyebrow {
+:where(.vui-routes-chatcodingroute).currentSessionBlock .blockEyebrow {
   font-size: var(--vui-font-xs);
   letter-spacing: 0.04em;
 }
 
-.currentSessionBlock .sectionTitle {
+:where(.vui-routes-chatcodingroute).currentSessionBlock .sectionTitle {
   font-size: var(--vui-font-sm);
 }
 
-.currentSessionLine {
+:where(.vui-routes-chatcodingroute).currentSessionLine {
   display: none;
 }
 
-.blockEyebrow {
+:where(.vui-routes-chatcodingroute).blockEyebrow {
   margin: 0;
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
@@ -72,20 +73,20 @@
   letter-spacing: 0.06em;
 }
 
-.sectionHeader {
+:where(.vui-routes-chatcodingroute).sectionHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
 }
 
-.sectionIdentity {
+:where(.vui-routes-chatcodingroute).sectionIdentity {
   display: grid;
   min-width: 0;
   gap: 3px;
 }
 
-.sectionTitle {
+:where(.vui-routes-chatcodingroute).sectionTitle {
   margin: 0;
   font-family: var(--font-display);
   font-size: var(--vui-font-md);
@@ -95,9 +96,9 @@
   white-space: nowrap;
 }
 
-.contextLineCompact,
-.sectionMetaLine,
-.oneLineValue {
+:where(.vui-routes-chatcodingroute).contextLineCompact,
+:where(.vui-routes-chatcodingroute).sectionMetaLine,
+:where(.vui-routes-chatcodingroute).oneLineValue {
   min-width: 0;
   overflow: hidden;
   display: -webkit-box;
@@ -105,7 +106,7 @@
   overflow-wrap: anywhere;
 }
 
-.contextLineCompact {
+:where(.vui-routes-chatcodingroute).contextLineCompact {
   margin: 3px 0 0;
   color: var(--fg-secondary);
   font-size: var(--vui-font-xs);
@@ -113,7 +114,7 @@
   -webkit-line-clamp: 2;
 }
 
-.sectionMetaLine {
+:where(.vui-routes-chatcodingroute).sectionMetaLine {
   margin: 0;
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
@@ -121,7 +122,7 @@
   -webkit-line-clamp: 1;
 }
 
-.oneLineValue {
+:where(.vui-routes-chatcodingroute).oneLineValue {
   margin: 3px 0 0;
   color: var(--fg-primary);
   font-size: var(--vui-font-xs);
@@ -129,33 +130,33 @@
   -webkit-line-clamp: 2;
 }
 
-.oneLineValue span {
+:where(.vui-routes-chatcodingroute).oneLineValue span {
   margin-right: 8px;
   color: var(--fg-tertiary);
   font-size: var(--vui-font-sm);
 }
 
-.metricValue {
+:where(.vui-routes-chatcodingroute).metricValue {
   color: var(--accent-warm-2);
   font-size: var(--vui-font-sm);
   white-space: nowrap;
 }
 
-.backendHealthRow {
+:where(.vui-routes-chatcodingroute).backendHealthRow {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
-.backendLabel {
+:where(.vui-routes-chatcodingroute).backendLabel {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-sm);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 
-.backendPill {
+:where(.vui-routes-chatcodingroute).backendPill {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -166,7 +167,7 @@
   white-space: nowrap;
 }
 
-.sessionStatePill {
+:where(.vui-routes-chatcodingroute).sessionStatePill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -178,7 +179,7 @@
   white-space: nowrap;
 }
 
-.mentalStateBadge {
+:where(.vui-routes-chatcodingroute).mentalStateBadge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -190,7 +191,7 @@
   white-space: nowrap;
 }
 
-.backendPillDot {
+:where(.vui-routes-chatcodingroute).backendPillDot {
   width: 8px;
   height: 8px;
   border-radius: 999px;
@@ -198,78 +199,78 @@
   flex: 0 0 auto;
 }
 
-.backendPill_healthy {
+:where(.vui-routes-chatcodingroute).backendPill_healthy {
   color: var(--state-success);
   background: color-mix(in srgb, var(--accent-cool) 14%, transparent);
   border-color: color-mix(in srgb, var(--accent-cool) 26%, transparent);
 }
 
-.backendPill_checking {
+:where(.vui-routes-chatcodingroute).backendPill_checking {
   color: var(--accent-warm-2);
   background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
   border-color: color-mix(in srgb, var(--accent-warm) 22%, transparent);
 }
 
-.backendPill_offline,
-.backendPill_unhealthy {
+:where(.vui-routes-chatcodingroute).backendPill_offline,
+:where(.vui-routes-chatcodingroute).backendPill_unhealthy {
   color: var(--state-error);
   background: color-mix(in srgb, var(--state-error) 14%, transparent);
   border-color: color-mix(in srgb, var(--state-error) 24%, transparent);
 }
 
-.sessionStatePill_idle,
-.sessionStatePill_ready,
-.sessionStatePill_success {
+:where(.vui-routes-chatcodingroute).sessionStatePill_idle,
+:where(.vui-routes-chatcodingroute).sessionStatePill_ready,
+:where(.vui-routes-chatcodingroute).sessionStatePill_success {
   color: var(--state-success);
   background: color-mix(in srgb, var(--accent-cool) 14%, transparent);
   border-color: color-mix(in srgb, var(--accent-cool) 26%, transparent);
 }
 
-.sessionStatePill_waiting,
-.sessionStatePill_needs_input,
-.sessionStatePill_answering {
+:where(.vui-routes-chatcodingroute).sessionStatePill_waiting,
+:where(.vui-routes-chatcodingroute).sessionStatePill_needs_input,
+:where(.vui-routes-chatcodingroute).sessionStatePill_answering {
   color: var(--accent-warm-2);
   background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
   border-color: color-mix(in srgb, var(--accent-warm) 22%, transparent);
 }
 
-.sessionStatePill_running,
-.sessionStatePill_thinking,
-.sessionStatePill_tooling,
-.sessionStatePill_planning,
-.sessionStatePill_reading,
-.sessionStatePill_editing,
-.sessionStatePill_verifying {
+:where(.vui-routes-chatcodingroute).sessionStatePill_running,
+:where(.vui-routes-chatcodingroute).sessionStatePill_thinking,
+:where(.vui-routes-chatcodingroute).sessionStatePill_tooling,
+:where(.vui-routes-chatcodingroute).sessionStatePill_planning,
+:where(.vui-routes-chatcodingroute).sessionStatePill_reading,
+:where(.vui-routes-chatcodingroute).sessionStatePill_editing,
+:where(.vui-routes-chatcodingroute).sessionStatePill_verifying {
   color: var(--accent-cool);
   background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
   border-color: color-mix(in srgb, var(--accent-cool) 22%, transparent);
 }
 
-.sessionStatePill_failed,
-.sessionStatePill_blocked {
+:where(.vui-routes-chatcodingroute).sessionStatePill_failed,
+:where(.vui-routes-chatcodingroute).sessionStatePill_blocked {
   color: var(--state-error);
   background: color-mix(in srgb, var(--state-error) 14%, transparent);
   border-color: color-mix(in srgb, var(--state-error) 24%, transparent);
 }
 
-.mentalStateBadge_unknown,
-.mentalStateBadge_normal,
-.mentalStateBadge_productive {
+:where(.vui-routes-chatcodingroute).mentalStateBadge_unknown,
+:where(.vui-routes-chatcodingroute).mentalStateBadge_normal,
+:where(.vui-routes-chatcodingroute).mentalStateBadge_productive {
   color: var(--state-success);
   background: color-mix(in srgb, var(--accent-cool) 14%, transparent);
   border-color: color-mix(in srgb, var(--accent-cool) 26%, transparent);
 }
 
-.mentalStateBadge_looping,
-.mentalStateBadge_thrashing,
-.mentalStateBadge_tunnel_vision,
-.mentalStateBadge_disoriented {
+:where(.vui-routes-chatcodingroute).mentalStateBadge_looping,
+:where(.vui-routes-chatcodingroute).mentalStateBadge_thrashing,
+:where(.vui-routes-chatcodingroute).mentalStateBadge_tunnel_vision,
+:where(.vui-routes-chatcodingroute).mentalStateBadge_disoriented {
   color: var(--accent-warm-2);
   background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
   border-color: color-mix(in srgb, var(--accent-warm) 22%, transparent);
 }
 
-.backendNote {
+:where(.vui-routes-chatcodingroute).backendNote {
   margin: 6px 0 0;
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
@@ -277,7 +278,7 @@
   overflow-wrap: anywhere;
 }
 
-.inlineMetaList {
+:where(.vui-routes-chatcodingroute).inlineMetaList {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 3px;
@@ -285,7 +286,7 @@
   min-width: 0;
 }
 
-.inlineMetaPill {
+:where(.vui-routes-chatcodingroute).inlineMetaPill {
   display: grid;
   grid-template-columns: minmax(58px, 0.42fr) minmax(0, 1fr);
   align-items: baseline;
@@ -300,21 +301,21 @@
   font-size: var(--vui-font-xs);
 }
 
-.inlineMetaPill span,
-.inlineStat span,
-.detailNote span {
+:where(.vui-routes-chatcodingroute).inlineMetaPill span,
+:where(.vui-routes-chatcodingroute).inlineStat span,
+:where(.vui-routes-chatcodingroute).detailNote span {
   color: var(--fg-tertiary);
   flex: 0 0 auto;
 }
 
-.inlineMetaPill span {
+:where(.vui-routes-chatcodingroute).inlineMetaPill span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.inlineMetaPill strong {
+:where(.vui-routes-chatcodingroute).inlineMetaPill strong {
   min-width: 0;
   color: var(--fg-primary);
   font-weight: 650;
@@ -324,13 +325,13 @@
   white-space: nowrap;
 }
 
-.currentSessionMetaList {
+:where(.vui-routes-chatcodingroute).currentSessionMetaList {
   grid-template-columns: minmax(0, 1fr);
   gap: 3px;
   margin-top: 0;
 }
 
-.currentSessionMetaList .inlineMetaPill {
+:where(.vui-routes-chatcodingroute).currentSessionMetaList .inlineMetaPill {
   grid-template-columns: minmax(52px, 0.42fr) minmax(0, 1fr);
   align-items: baseline;
   gap: 5px;
@@ -340,28 +341,28 @@
   font-size: var(--vui-font-xs);
 }
 
-.currentSessionMetaList .inlineMetaPill span,
-.currentSessionMetaList .inlineMetaPill strong {
+:where(.vui-routes-chatcodingroute).currentSessionMetaList .inlineMetaPill span,
+:where(.vui-routes-chatcodingroute).currentSessionMetaList .inlineMetaPill strong {
   overflow: visible;
   text-overflow: clip;
   white-space: normal;
   overflow-wrap: anywhere;
 }
 
-.currentSessionMetaList .inlineMetaPill span {
+:where(.vui-routes-chatcodingroute).currentSessionMetaList .inlineMetaPill span {
   line-height: 1.08;
 }
 
-.currentSessionMetaList .inlineMetaPill strong {
+:where(.vui-routes-chatcodingroute).currentSessionMetaList .inlineMetaPill strong {
   font-size: var(--vui-font-xs);
   line-height: 1.1;
 }
 
-.contextLineCompact.currentSessionLine {
+:where(.vui-routes-chatcodingroute).contextLineCompact.currentSessionLine {
   display: none;
 }
 
-.sessionBindingNotice {
+:where(.vui-routes-chatcodingroute).sessionBindingNotice {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -372,14 +373,14 @@
   line-height: 1.25;
 }
 
-.sessionBindingNotice > span {
+:where(.vui-routes-chatcodingroute).sessionBindingNotice > span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.sessionBindingNotice button {
+:where(.vui-routes-chatcodingroute).sessionBindingNotice button {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -394,14 +395,14 @@
   cursor: pointer;
 }
 
-.sessionBindingNotice button:hover,
-.sessionBindingNotice button:focus-visible {
+:where(.vui-routes-chatcodingroute).sessionBindingNotice button:hover,
+:where(.vui-routes-chatcodingroute).sessionBindingNotice button:focus-visible {
   border-color: color-mix(in srgb, var(--accent-cool) 48%, var(--border-strong));
   background: color-mix(in srgb, var(--accent-cool) 14%, transparent);
   outline: none;
 }
 
-.sessionDiagnosticsDetails {
+:where(.vui-routes-chatcodingroute).sessionDiagnosticsDetails {
   display: grid;
   gap: 0;
   margin-top: 4px;
@@ -410,7 +411,7 @@
   background: color-mix(in srgb, var(--surface-card) 42%, transparent);
 }
 
-.sessionDiagnosticsSummary {
+:where(.vui-routes-chatcodingroute).sessionDiagnosticsSummary {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -424,11 +425,11 @@
   list-style: none;
 }
 
-.sessionDiagnosticsSummary::-webkit-details-marker {
+:where(.vui-routes-chatcodingroute).sessionDiagnosticsSummary::-webkit-details-marker {
   display: none;
 }
 
-.sessionDiagnosticsSummaryText {
+:where(.vui-routes-chatcodingroute).sessionDiagnosticsSummaryText {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -437,23 +438,23 @@
   font-weight: 720;
 }
 
-.sessionDiagnosticsSummaryText span {
+:where(.vui-routes-chatcodingroute).sessionDiagnosticsSummaryText span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.sessionDiagnosticsSummaryText svg {
+:where(.vui-routes-chatcodingroute).sessionDiagnosticsSummaryText svg {
   flex: 0 0 auto;
   transition: transform 140ms ease;
 }
 
-.sessionDiagnosticsDetails[open] .sessionDiagnosticsSummaryText svg {
+:where(.vui-routes-chatcodingroute).sessionDiagnosticsDetails[open] .sessionDiagnosticsSummaryText svg {
   transform: rotate(90deg);
 }
 
-.sessionDiagnosticsSnapshot {
+:where(.vui-routes-chatcodingroute).sessionDiagnosticsSnapshot {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-tertiary);
@@ -463,19 +464,19 @@
   white-space: nowrap;
 }
 
-.sessionDiagnosticsBody {
+:where(.vui-routes-chatcodingroute).sessionDiagnosticsBody {
   display: grid;
   gap: 6px;
   min-width: 0;
   padding: 0 6px 6px;
 }
 
-.sessionResourceDiagnostics {
+:where(.vui-routes-chatcodingroute).sessionResourceDiagnostics {
   padding-top: 7px;
   border-top: 1px solid color-mix(in srgb, var(--border-soft) 64%, transparent);
 }
 
-.activeSkillStatus {
+:where(.vui-routes-chatcodingroute).activeSkillStatus {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -487,28 +488,28 @@
   background: color-mix(in srgb, var(--surface-panel) 74%, transparent);
 }
 
-.activeSkillStatus_active {
+:where(.vui-routes-chatcodingroute).activeSkillStatus_active {
   border-color: color-mix(in srgb, var(--state-success) 34%, var(--border-soft));
   background: color-mix(in srgb, var(--state-success) 8%, var(--surface-card));
 }
 
-.activeSkillStatus_stale {
+:where(.vui-routes-chatcodingroute).activeSkillStatus_stale {
   border-color: color-mix(in srgb, var(--state-warning) 42%, var(--border-soft));
   background: color-mix(in srgb, var(--state-warning) 10%, var(--surface-card));
 }
 
-.activeSkillStatus_missing {
+:where(.vui-routes-chatcodingroute).activeSkillStatus_missing {
   border-color: color-mix(in srgb, var(--state-error) 46%, var(--border-soft));
   background: color-mix(in srgb, var(--state-error) 10%, var(--surface-card));
 }
 
-.activeSkillIdentity {
+:where(.vui-routes-chatcodingroute).activeSkillIdentity {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
 
-.activeSkillEyebrow {
+:where(.vui-routes-chatcodingroute).activeSkillEyebrow {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-tertiary);
@@ -521,7 +522,7 @@
   white-space: nowrap;
 }
 
-.activeSkillIdentity strong {
+:where(.vui-routes-chatcodingroute).activeSkillIdentity strong {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
@@ -532,7 +533,7 @@
   white-space: nowrap;
 }
 
-.activeSkillMeta {
+:where(.vui-routes-chatcodingroute).activeSkillMeta {
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
@@ -544,64 +545,64 @@
   white-space: nowrap;
 }
 
-.activeSkillMeta span {
+:where(.vui-routes-chatcodingroute).activeSkillMeta span {
   min-width: 0;
   overflow: hidden;
   max-width: 84px;
   text-overflow: ellipsis;
 }
 
-.activeSkillState {
+:where(.vui-routes-chatcodingroute).activeSkillState {
   color: var(--fg-secondary);
   font-weight: 760;
 }
 
-.leftBlock > .activeSkillStatus {
+:where(.vui-routes-chatcodingroute).leftBlock > .activeSkillStatus {
   margin-top: 6px;
 }
 
-.currentSessionBlock > .activeSkillStatus {
+:where(.vui-routes-chatcodingroute).currentSessionBlock > .activeSkillStatus {
   margin-top: 0;
   gap: 5px;
   padding: 4px 5px;
   border-radius: 6px;
 }
 
-.currentSessionBlock .activeSkillIdentity {
+:where(.vui-routes-chatcodingroute).currentSessionBlock .activeSkillIdentity {
   gap: 1px;
 }
 
-.currentSessionBlock .activeSkillIdentity strong {
+:where(.vui-routes-chatcodingroute).currentSessionBlock .activeSkillIdentity strong {
   font-size: var(--vui-font-xs);
 }
 
-.currentSessionBlock .activeSkillMeta {
+:where(.vui-routes-chatcodingroute).currentSessionBlock .activeSkillMeta {
   gap: 3px;
   font-size: var(--vui-font-xs);
 }
 
-.contextStatusCard,
-.cacheStatusCard,
-.compressionStatusCard,
-.compressionStrategyCard,
-.tokenCompressionCard,
-.runModeBlock {
+:where(.vui-routes-chatcodingroute).contextStatusCard,
+:where(.vui-routes-chatcodingroute).cacheStatusCard,
+:where(.vui-routes-chatcodingroute).compressionStatusCard,
+:where(.vui-routes-chatcodingroute).compressionStrategyCard,
+:where(.vui-routes-chatcodingroute).tokenCompressionCard,
+:where(.vui-routes-chatcodingroute).runModeBlock {
   display: grid;
   gap: 6px;
 }
 
-.tokenCompressionCard {
+:where(.vui-routes-chatcodingroute).tokenCompressionCard {
   gap: 7px;
   padding: 7px;
 }
 
-.tokenStatusVisualGrid {
+:where(.vui-routes-chatcodingroute).tokenStatusVisualGrid {
   display: grid;
   gap: 6px;
   min-width: 0;
 }
 
-.tokenStatusMetric {
+:where(.vui-routes-chatcodingroute).tokenStatusMetric {
   --token-status-value: 0;
   --token-status-accent: var(--accent-cool);
   --token-status-track: color-mix(in srgb, var(--fg-tertiary) 16%, transparent);
@@ -620,7 +621,7 @@
   color: var(--fg-primary);
 }
 
-.tokenStatusMetricButton {
+:where(.vui-routes-chatcodingroute).tokenStatusMetricButton {
   width: 100%;
   appearance: none;
   font: inherit;
@@ -628,36 +629,36 @@
   cursor: pointer;
 }
 
-.tokenStatusMetricButton:hover,
-.tokenStatusMetricButton:focus-visible {
+:where(.vui-routes-chatcodingroute).tokenStatusMetricButton:hover,
+:where(.vui-routes-chatcodingroute).tokenStatusMetricButton:focus-visible {
   border-color: color-mix(in srgb, var(--token-status-accent) 44%, var(--border-soft));
   background:
     var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-card) 90%, transparent);
 }
 
-.tokenStatusMetricButton:focus-visible {
+:where(.vui-routes-chatcodingroute).tokenStatusMetricButton:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--token-status-accent) 42%, transparent);
   outline-offset: 2px;
 }
 
-.tokenStatusMetricButton[aria-disabled="true"] {
+:where(.vui-routes-chatcodingroute).tokenStatusMetricButton[aria-disabled="true"] {
   cursor: default;
 }
 
-.tokenStatusMetric_cache {
+:where(.vui-routes-chatcodingroute).tokenStatusMetric_cache {
   --token-status-accent: var(--accent-cool);
 }
 
-.tokenStatusMetric_modelInput {
+:where(.vui-routes-chatcodingroute).tokenStatusMetric_modelInput {
   --token-status-accent: var(--accent-warm);
 }
 
-.tokenStatusMetric_compression {
+:where(.vui-routes-chatcodingroute).tokenStatusMetric_compression {
   --token-status-accent: var(--accent-warm-2);
 }
 
-.tokenStatusRing {
+:where(.vui-routes-chatcodingroute).tokenStatusRing {
   position: relative;
   display: grid;
   place-items: center;
@@ -671,7 +672,7 @@
   box-shadow: var(--vui-shadow-inset-accent);
 }
 
-.tokenStatusRing::before {
+:where(.vui-routes-chatcodingroute).tokenStatusRing::before {
   position: absolute;
   inset: 7px;
   border: 1px solid color-mix(in srgb, var(--border-soft) 76%, transparent);
@@ -680,7 +681,7 @@
   content: "";
 }
 
-.tokenStatusRingCore {
+:where(.vui-routes-chatcodingroute).tokenStatusRingCore {
   position: relative;
   z-index: 1;
   max-width: 40px;
@@ -694,35 +695,35 @@
   white-space: nowrap;
 }
 
-.tokenStatusCopy {
+:where(.vui-routes-chatcodingroute).tokenStatusCopy {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
 
-.tokenStatusLabel,
-.tokenStatusMeta {
+:where(.vui-routes-chatcodingroute).tokenStatusLabel,
+:where(.vui-routes-chatcodingroute).tokenStatusMeta {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.tokenStatusLabel {
+:where(.vui-routes-chatcodingroute).tokenStatusLabel {
   color: var(--fg-secondary);
   font-size: var(--vui-font-xs);
   font-weight: 780;
   line-height: 1.05;
 }
 
-.tokenStatusMeta {
+:where(.vui-routes-chatcodingroute).tokenStatusMeta {
   color: var(--fg-primary);
   font-size: var(--vui-font-sm);
   font-weight: 820;
   line-height: 1.1;
 }
 
-.tokenStatusBar {
+:where(.vui-routes-chatcodingroute).tokenStatusBar {
   display: block;
   width: 100%;
   height: 5px;
@@ -731,7 +732,7 @@
   background: var(--token-status-track);
 }
 
-.tokenStatusBar span {
+:where(.vui-routes-chatcodingroute).tokenStatusBar span {
   display: block;
   width: calc(var(--token-status-value) * 1%);
   height: 100%;
@@ -739,31 +740,31 @@
   background: var(--vui-gradient-route-soft);
 }
 
-.contextStatusCard .contextCompositionPanel {
+:where(.vui-routes-chatcodingroute).contextStatusCard .contextCompositionPanel {
   padding-top: 0;
 }
 
-.contextStatusCard .resourceSplit,
-.compressionStatusCard .compressionFactGrid {
+:where(.vui-routes-chatcodingroute).contextStatusCard .resourceSplit,
+:where(.vui-routes-chatcodingroute).compressionStatusCard .compressionFactGrid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 4px;
 }
 
-.compressionStatusCard .compressionFactGrid {
+:where(.vui-routes-chatcodingroute).compressionStatusCard .compressionFactGrid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.contextStatusCard .resourceMetric,
-.compressionStatusCard .compressionFact {
+:where(.vui-routes-chatcodingroute).contextStatusCard .resourceMetric,
+:where(.vui-routes-chatcodingroute).compressionStatusCard .compressionFact {
   padding: 4px 5px;
 }
 
-.compressionStatusCard .compressionFact {
+:where(.vui-routes-chatcodingroute).compressionStatusCard .compressionFact {
   gap: 1px;
 }
 
-.contextStatusCard .resourceMetric strong,
-.compressionStatusCard .compressionFact strong {
+:where(.vui-routes-chatcodingroute).contextStatusCard .resourceMetric strong,
+:where(.vui-routes-chatcodingroute).compressionStatusCard .compressionFact strong {
   overflow: hidden;
   font-size: var(--vui-font-xs);
   line-height: 1.15;
@@ -771,21 +772,21 @@
   white-space: nowrap;
 }
 
-.compressionStatusCard .compressionFactWide {
+:where(.vui-routes-chatcodingroute).compressionStatusCard .compressionFactWide {
   grid-column: auto;
 }
 
-.compressionStatusCard .oneLineValue {
+:where(.vui-routes-chatcodingroute).compressionStatusCard .oneLineValue {
   margin-top: 0;
   -webkit-line-clamp: 1;
 }
 
-.featurePresetBlock {
+:where(.vui-routes-chatcodingroute).featurePresetBlock {
   display: grid;
   gap: 5px;
 }
 
-.featurePresetScope {
+:where(.vui-routes-chatcodingroute).featurePresetScope {
   flex: 0 0 auto;
   padding: 3px 6px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 26%, var(--border-soft));
@@ -797,23 +798,23 @@
   white-space: nowrap;
 }
 
-.featurePrimarySlot {
+:where(.vui-routes-chatcodingroute).featurePrimarySlot {
   display: grid;
   min-width: 0;
 }
 
-.featureChipRow {
+:where(.vui-routes-chatcodingroute).featureChipRow {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 3px;
   min-width: 0;
 }
 
-.runModeBlock .featureChipRow {
+:where(.vui-routes-chatcodingroute).runModeBlock .featureChipRow {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.featureToggle {
+:where(.vui-routes-chatcodingroute).featureToggle {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 5px;
@@ -833,62 +834,62 @@
     color 140ms ease;
 }
 
-.featureToggle:hover {
+:where(.vui-routes-chatcodingroute).featureToggle:hover {
   border-color: color-mix(in srgb, var(--accent-cool) 28%, var(--border-soft));
   background: color-mix(in srgb, var(--surface-card) 88%, var(--accent-cool) 8%);
 }
 
-.featureToggle:focus-visible {
+:where(.vui-routes-chatcodingroute).featureToggle:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent-cool) 70%, white);
   outline-offset: 2px;
 }
 
-.featureToggleActive {
+:where(.vui-routes-chatcodingroute).featureToggleActive {
   border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-cool) 15%, var(--surface-card));
   color: var(--fg-primary);
 }
 
-.featureTogglePrimary {
+:where(.vui-routes-chatcodingroute).featureTogglePrimary {
   border-color: color-mix(in srgb, var(--accent-warm) 28%, var(--border-soft));
   background:
     var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-card) 78%, transparent);
 }
 
-.featureTogglePrimary.featureToggleActive {
+:where(.vui-routes-chatcodingroute).featureTogglePrimary.featureToggleActive {
   border-color: color-mix(in srgb, var(--accent-warm) 48%, var(--border-soft));
   background:
     var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-card) 86%, transparent);
 }
 
-.featureToggle:disabled {
+:where(.vui-routes-chatcodingroute).featureToggle:disabled {
   cursor: not-allowed;
   opacity: 0.58;
 }
 
-.featureToggleText {
+:where(.vui-routes-chatcodingroute).featureToggleText {
   display: grid;
   min-width: 0;
   gap: 2px;
 }
 
-.featureToggleText strong,
-.featureToggleText span {
+:where(.vui-routes-chatcodingroute).featureToggleText strong,
+:where(.vui-routes-chatcodingroute).featureToggleText span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.featureToggleText strong {
+:where(.vui-routes-chatcodingroute).featureToggleText strong {
   color: var(--fg-primary);
   font-size: var(--vui-font-xs);
   line-height: 1.15;
   white-space: nowrap;
 }
 
-.featureToggleText span {
+:where(.vui-routes-chatcodingroute).featureToggleText span {
   display: -webkit-box;
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
@@ -897,11 +898,11 @@
   -webkit-line-clamp: 2;
 }
 
-.runModeBlock .featureToggleText span {
+:where(.vui-routes-chatcodingroute).runModeBlock .featureToggleText span {
   display: none;
 }
 
-.featureChip {
+:where(.vui-routes-chatcodingroute).featureChip {
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
@@ -921,24 +922,24 @@
     color 140ms ease;
 }
 
-.runModeBlock .featureChip {
+:where(.vui-routes-chatcodingroute).runModeBlock .featureChip {
   min-height: 25px;
   padding: 2px 5px;
 }
 
-.featureChipPrimary {
+:where(.vui-routes-chatcodingroute).featureChipPrimary {
   border-color: color-mix(in srgb, var(--accent-warm) 28%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-warm) 9%, var(--surface-card));
 }
 
-.featureChip strong {
+:where(.vui-routes-chatcodingroute).featureChip strong {
   min-width: 0;
   overflow-wrap: anywhere;
   font-size: var(--vui-font-xs);
   font-weight: 650;
 }
 
-.featureChip em {
+:where(.vui-routes-chatcodingroute).featureChip em {
   flex: 0 0 auto;
   min-width: 24px;
   padding: 2px 5px;
@@ -952,7 +953,7 @@
   text-align: center;
 }
 
-.featureChip span {
+:where(.vui-routes-chatcodingroute).featureChip span {
   flex: 0 0 auto;
   width: 6px;
   height: 6px;
@@ -961,48 +962,48 @@
   opacity: 0.58;
 }
 
-.featureChip:hover {
+:where(.vui-routes-chatcodingroute).featureChip:hover {
   border-color: color-mix(in srgb, var(--accent-cool) 28%, var(--border-soft));
   color: var(--fg-primary);
   background: color-mix(in srgb, var(--surface-card) 86%, var(--accent-cool) 8%);
 }
 
-.featureChip:focus-visible {
+:where(.vui-routes-chatcodingroute).featureChip:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent-cool) 70%, white);
   outline-offset: 2px;
 }
 
-.featureChipActive {
+:where(.vui-routes-chatcodingroute).featureChipActive {
   border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
   color: var(--fg-primary);
 }
 
-.featureChipActive span {
+:where(.vui-routes-chatcodingroute).featureChipActive span {
   background: var(--accent-cool);
   opacity: 1;
 }
 
-.featureChipActive em {
+:where(.vui-routes-chatcodingroute).featureChipActive em {
   border-color: color-mix(in srgb, var(--accent-cool) 38%, transparent);
   background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
   color: var(--accent-cool);
 }
 
-.featureChipPrimary.featureChipActive {
+:where(.vui-routes-chatcodingroute).featureChipPrimary.featureChipActive {
   border-color: color-mix(in srgb, var(--accent-warm) 36%, var(--border-soft));
 }
 
-.featureChipPrimary.featureChipActive span {
+:where(.vui-routes-chatcodingroute).featureChipPrimary.featureChipActive span {
   background: var(--accent-warm-2);
 }
 
-.featureChipPrimary.featureChipActive em {
+:where(.vui-routes-chatcodingroute).featureChipPrimary.featureChipActive em {
   border-color: color-mix(in srgb, var(--accent-warm-2) 42%, transparent);
   background: color-mix(in srgb, var(--accent-warm-2) 12%, transparent);
   color: var(--accent-warm-2);
 }
 
-.featureToggleState {
+:where(.vui-routes-chatcodingroute).featureToggleState {
   justify-self: start;
   min-width: 32px;
   padding: 2px 5px;
@@ -1015,17 +1016,17 @@
   white-space: nowrap;
 }
 
-.featureToggleActive .featureToggleState {
+:where(.vui-routes-chatcodingroute).featureToggleActive .featureToggleState {
   background: color-mix(in srgb, var(--accent-cool) 24%, transparent);
   color: var(--accent-cool);
 }
 
-.featureTogglePrimary.featureToggleActive .featureToggleState {
+:where(.vui-routes-chatcodingroute).featureTogglePrimary.featureToggleActive .featureToggleState {
   background: color-mix(in srgb, var(--accent-warm) 24%, transparent);
   color: var(--accent-warm-2);
 }
 
-.featurePresetNote {
+:where(.vui-routes-chatcodingroute).featurePresetNote {
   margin: -1px 0 0;
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
@@ -1037,17 +1038,17 @@
   overflow: hidden;
 }
 
-.groupProfileBlock,
-.agentIndexRoster {
+:where(.vui-routes-chatcodingroute).groupProfileBlock,
+:where(.vui-routes-chatcodingroute).agentIndexRoster {
   gap: 8px;
 }
 
-.agentIndexList {
+:where(.vui-routes-chatcodingroute).agentIndexList {
   display: grid;
   gap: 7px;
 }
 
-.agentIndexCard {
+:where(.vui-routes-chatcodingroute).agentIndexCard {
   display: grid;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
@@ -1055,7 +1056,7 @@
   overflow: hidden;
 }
 
-.agentIndexHeader {
+:where(.vui-routes-chatcodingroute).agentIndexHeader {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: center;
@@ -1066,13 +1067,13 @@
   color: var(--fg-primary);
 }
 
-.agentIndexHeader:hover,
-.agentIndexCard:focus-within .agentIndexHeader {
+:where(.vui-routes-chatcodingroute).agentIndexHeader:hover,
+:where(.vui-routes-chatcodingroute).agentIndexCard:focus-within .agentIndexHeader {
   background: color-mix(in srgb, var(--surface-panel) 74%, transparent);
 }
 
-.agentIndexExpandButton,
-.agentIndexOpenButton {
+:where(.vui-routes-chatcodingroute).agentIndexExpandButton,
+:where(.vui-routes-chatcodingroute).agentIndexOpenButton {
   border: 0;
   background: transparent;
   color: inherit;
@@ -1080,7 +1081,7 @@
   font: inherit;
 }
 
-.agentIndexExpandButton {
+:where(.vui-routes-chatcodingroute).agentIndexExpandButton {
   display: grid;
   place-items: center;
   width: 18px;
@@ -1089,23 +1090,23 @@
   color: var(--fg-tertiary);
 }
 
-.agentIndexExpandButton:hover,
-.agentIndexExpandButton:focus-visible,
-.agentIndexOpenButton:hover,
-.agentIndexOpenButton:focus-visible {
+:where(.vui-routes-chatcodingroute).agentIndexExpandButton:hover,
+:where(.vui-routes-chatcodingroute).agentIndexExpandButton:focus-visible,
+:where(.vui-routes-chatcodingroute).agentIndexOpenButton:hover,
+:where(.vui-routes-chatcodingroute).agentIndexOpenButton:focus-visible {
   color: var(--fg-primary);
   outline: none;
 }
 
-.agentIndexExpandButton > svg {
+:where(.vui-routes-chatcodingroute).agentIndexExpandButton > svg {
   transition: transform 140ms ease;
 }
 
-.agentIndexExpandButton[aria-expanded="true"] > svg {
+:where(.vui-routes-chatcodingroute).agentIndexExpandButton[aria-expanded="true"] > svg {
   transform: rotate(90deg);
 }
 
-.agentIndexOpenButton {
+:where(.vui-routes-chatcodingroute).agentIndexOpenButton {
   display: grid;
   grid-template-columns: 30px minmax(0, 1fr);
   align-items: center;
@@ -1115,7 +1116,7 @@
   text-align: left;
 }
 
-.agentIndexAvatar {
+:where(.vui-routes-chatcodingroute).agentIndexAvatar {
   display: grid;
   place-items: center;
   width: 30px;
@@ -1130,7 +1131,7 @@
   font-weight: 800;
 }
 
-.agentAvatarImage {
+:where(.vui-routes-chatcodingroute).agentAvatarImage {
   display: block;
   width: 100%;
   height: 100%;
@@ -1138,35 +1139,35 @@
   object-fit: cover;
 }
 
-.agentIndexCopy {
+:where(.vui-routes-chatcodingroute).agentIndexCopy {
   display: grid;
   min-width: 0;
   gap: 2px;
 }
 
-.agentIndexCopy strong,
-.agentIndexCopy span,
-.agentIndexCopy em {
+:where(.vui-routes-chatcodingroute).agentIndexCopy strong,
+:where(.vui-routes-chatcodingroute).agentIndexCopy span,
+:where(.vui-routes-chatcodingroute).agentIndexCopy em {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.agentIndexCopy strong {
+:where(.vui-routes-chatcodingroute).agentIndexCopy strong {
   font-family: var(--font-display);
   font-size: var(--vui-font-md);
   line-height: 1.2;
 }
 
-.agentIndexNameLine {
+:where(.vui-routes-chatcodingroute).agentIndexNameLine {
   display: flex;
   min-width: 0;
   align-items: center;
   gap: 8px;
 }
 
-.agentIndexNameLine > span {
+:where(.vui-routes-chatcodingroute).agentIndexNameLine > span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1174,25 +1175,25 @@
   white-space: nowrap;
 }
 
-.agentIndexCopy span {
+:where(.vui-routes-chatcodingroute).agentIndexCopy span {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
 }
 
-.agentIndexStatus {
+:where(.vui-routes-chatcodingroute).agentIndexStatus {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
-.agentIndexWarning {
+:where(.vui-routes-chatcodingroute).agentIndexWarning {
   color: var(--state-error);
   font-size: var(--vui-font-xs);
   font-weight: 700;
   white-space: nowrap;
 }
 
-.agentMissingNotice {
+:where(.vui-routes-chatcodingroute).agentMissingNotice {
   margin: -2px 8px 7px 45px;
   color: var(--state-error);
   font-size: var(--vui-font-xs);
@@ -1200,7 +1201,7 @@
   overflow-wrap: anywhere;
 }
 
-.agentIndexEmptyState {
+:where(.vui-routes-chatcodingroute).agentIndexEmptyState {
   display: grid;
   justify-items: center;
   gap: 9px;
@@ -1213,20 +1214,20 @@
   text-align: center;
 }
 
-.agentIndexEmptyState p {
+:where(.vui-routes-chatcodingroute).agentIndexEmptyState p {
   max-width: 25ch;
   margin: 0;
   font-size: var(--vui-font-sm);
   line-height: 1.45;
 }
 
-.agentIndexDetails {
+:where(.vui-routes-chatcodingroute).agentIndexDetails {
   display: grid;
   gap: 7px;
   padding: 0 8px 8px 45px;
 }
 
-.agentIndexMentalBlock {
+:where(.vui-routes-chatcodingroute).agentIndexMentalBlock {
   display: grid;
   gap: 5px;
   padding: 7px;
@@ -1235,19 +1236,19 @@
   background: color-mix(in srgb, var(--surface-panel) 58%, transparent);
 }
 
-.resourceBlock,
-.companionBlock {
+:where(.vui-routes-chatcodingroute).resourceBlock,
+:where(.vui-routes-chatcodingroute).companionBlock {
   display: grid;
   gap: 6px;
 }
 
-.resourceSplit {
+:where(.vui-routes-chatcodingroute).resourceSplit {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
   gap: 5px;
 }
 
-.resourceMetric {
+:where(.vui-routes-chatcodingroute).resourceMetric {
   display: grid;
   gap: 2px;
   min-width: 0;
@@ -1257,7 +1258,7 @@
   background: color-mix(in srgb, var(--surface-card) 72%, transparent);
 }
 
-.resourceMetric span {
+:where(.vui-routes-chatcodingroute).resourceMetric span {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-tertiary);
@@ -1266,7 +1267,7 @@
   white-space: nowrap;
 }
 
-.resourceMetric strong {
+:where(.vui-routes-chatcodingroute).resourceMetric strong {
   min-width: 0;
   color: var(--fg-primary);
   font-size: var(--vui-font-sm);
@@ -1275,14 +1276,14 @@
   word-break: normal;
 }
 
-.compressionFactGrid {
+:where(.vui-routes-chatcodingroute).compressionFactGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
   gap: 5px;
   min-width: 0;
 }
 
-.compressionFact {
+:where(.vui-routes-chatcodingroute).compressionFact {
   display: grid;
   gap: 2px;
   min-width: 0;
@@ -1292,18 +1293,18 @@
   background: color-mix(in srgb, var(--surface-card) 64%, transparent);
 }
 
-.compressionFactWide {
+:where(.vui-routes-chatcodingroute).compressionFactWide {
   grid-column: 1 / -1;
 }
 
-.compressionFact span {
+:where(.vui-routes-chatcodingroute).compressionFact span {
   min-width: 0;
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
   line-height: 1.15;
 }
 
-.compressionFact strong {
+:where(.vui-routes-chatcodingroute).compressionFact strong {
   min-width: 0;
   color: var(--fg-primary);
   font-size: var(--vui-font-xs);
@@ -1312,46 +1313,46 @@
   word-break: normal;
 }
 
-.cacheStatusCard .cacheDonutPanel {
+:where(.vui-routes-chatcodingroute).cacheStatusCard .cacheDonutPanel {
   grid-template-columns: 72px minmax(0, 1fr);
   gap: 7px;
 }
 
-.cacheStatusCard .cacheDonutTrigger,
-.cacheStatusCard .cacheDonutShell,
-.cacheStatusCard .cacheDonutSvg {
+:where(.vui-routes-chatcodingroute).cacheStatusCard .cacheDonutTrigger,
+:where(.vui-routes-chatcodingroute).cacheStatusCard .cacheDonutShell,
+:where(.vui-routes-chatcodingroute).cacheStatusCard .cacheDonutSvg {
   width: 72px;
   height: 72px;
 }
 
-.cacheStatusCard .cacheDonutShell {
+:where(.vui-routes-chatcodingroute).cacheStatusCard .cacheDonutShell {
   min-width: 72px;
 }
 
-.cacheStatusCard .cacheDonutCenter {
+:where(.vui-routes-chatcodingroute).cacheStatusCard .cacheDonutCenter {
   inset: 19px;
 }
 
-.cacheStatusCard .cacheDonutCenter strong {
+:where(.vui-routes-chatcodingroute).cacheStatusCard .cacheDonutCenter strong {
   font-size: var(--vui-font-sm);
 }
 
-.cacheStatusCard .cacheDonutCenter span,
-.cacheStatusCard .cacheDonutCenter small {
+:where(.vui-routes-chatcodingroute).cacheStatusCard .cacheDonutCenter span,
+:where(.vui-routes-chatcodingroute).cacheStatusCard .cacheDonutCenter small {
   max-width: 34px;
   font-size: var(--vui-font-xs);
 }
 
-.cacheStatusCard .cacheDonutStats {
+:where(.vui-routes-chatcodingroute).cacheStatusCard .cacheDonutStats {
   gap: 3px;
 }
 
-.cacheStatusCard .cacheDonutStats span {
+:where(.vui-routes-chatcodingroute).cacheStatusCard .cacheDonutStats span {
   grid-template-columns: 25px minmax(0, 1fr);
   gap: 4px;
 }
 
-.companionCompact {
+:where(.vui-routes-chatcodingroute).companionCompact {
   display: grid;
   grid-template-columns: 30px minmax(0, 1fr);
   gap: 6px;
@@ -1366,7 +1367,7 @@
     color-mix(in srgb, var(--surface-card) 72%, transparent);
 }
 
-.petMiniAvatar {
+:where(.vui-routes-chatcodingroute).petMiniAvatar {
   display: grid;
   place-items: center;
   width: 30px;
@@ -1377,60 +1378,60 @@
   background: color-mix(in srgb, var(--surface-card) 78%, transparent);
 }
 
-.petMiniAvatar .petShowcaseAvatar {
+:where(.vui-routes-chatcodingroute).petMiniAvatar .petShowcaseAvatar {
   width: 24px;
   height: 24px;
   font-size: var(--vui-font-xs);
   box-shadow: none;
 }
 
-.companionCopy {
+:where(.vui-routes-chatcodingroute).companionCopy {
   display: grid;
   min-width: 0;
   gap: 2px;
 }
 
-.companionTopLine,
-.companionTopLine strong,
-.companionTopLine span,
-.companionCopy p {
+:where(.vui-routes-chatcodingroute).companionTopLine,
+:where(.vui-routes-chatcodingroute).companionTopLine strong,
+:where(.vui-routes-chatcodingroute).companionTopLine span,
+:where(.vui-routes-chatcodingroute).companionCopy p {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.companionTopLine {
+:where(.vui-routes-chatcodingroute).companionTopLine {
   display: flex;
   align-items: baseline;
   gap: 6px;
 }
 
-.companionTopLine strong {
+:where(.vui-routes-chatcodingroute).companionTopLine strong {
   flex: 1 1 auto;
   color: var(--fg-primary);
   font-size: var(--vui-font-sm);
 }
 
-.companionTopLine span {
+:where(.vui-routes-chatcodingroute).companionTopLine span {
   flex: 0 1 auto;
   color: var(--accent-warm-2);
   font-size: var(--vui-font-xs);
 }
 
-.companionCopy p {
+:where(.vui-routes-chatcodingroute).companionCopy p {
   margin: 0;
   color: var(--fg-secondary);
   font-size: var(--vui-font-xs);
 }
 
-.compactDetails {
+:where(.vui-routes-chatcodingroute).compactDetails {
   margin-top: 3px;
   padding-top: 4px;
   border-top: 1px solid color-mix(in srgb, var(--surface-card) 6%, transparent);
 }
 
-.compactDetails summary {
+:where(.vui-routes-chatcodingroute).compactDetails summary {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -1441,38 +1442,38 @@
   user-select: none;
 }
 
-.compactDetails summary::-webkit-details-marker {
+:where(.vui-routes-chatcodingroute).compactDetails summary::-webkit-details-marker {
   display: none;
 }
 
-.compactDetails summary svg {
+:where(.vui-routes-chatcodingroute).compactDetails summary svg {
   transition: transform 140ms ease;
 }
 
-.compactDetails[open] summary svg {
+:where(.vui-routes-chatcodingroute).compactDetails[open] summary svg {
   transform: rotate(90deg);
 }
 
-.compactDetailsOpenLabel {
+:where(.vui-routes-chatcodingroute).compactDetailsOpenLabel {
   display: none;
 }
 
-.compactDetails[open] .compactDetailsClosedLabel {
+:where(.vui-routes-chatcodingroute).compactDetails[open] .compactDetailsClosedLabel {
   display: none;
 }
 
-.compactDetails[open] .compactDetailsOpenLabel {
+:where(.vui-routes-chatcodingroute).compactDetails[open] .compactDetailsOpenLabel {
   display: inline;
 }
 
-.inlineStatGrid {
+:where(.vui-routes-chatcodingroute).inlineStatGrid {
   display: grid;
   grid-template-columns: 1fr;
   gap: 5px;
   margin-top: 6px;
 }
 
-.inlineStat {
+:where(.vui-routes-chatcodingroute).inlineStat {
   display: grid;
   grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
   align-items: baseline;
@@ -1485,7 +1486,7 @@
   font-size: var(--vui-font-xs);
 }
 
-.inlineStat strong {
+:where(.vui-routes-chatcodingroute).inlineStat strong {
   min-width: 0;
   color: var(--fg-primary);
   font-weight: 650;
@@ -1495,14 +1496,14 @@
   white-space: nowrap;
 }
 
-.compressionStrategyList {
+:where(.vui-routes-chatcodingroute).compressionStrategyList {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 4px;
   margin-top: 0;
 }
 
-.compressionStrategyRow {
+:where(.vui-routes-chatcodingroute).compressionStrategyRow {
   display: grid;
   gap: 1px;
   min-width: 0;
@@ -1515,7 +1516,7 @@
   font-size: var(--vui-font-xs);
 }
 
-.compressionStrategyRow strong {
+:where(.vui-routes-chatcodingroute).compressionStrategyRow strong {
   min-width: 0;
   overflow: hidden;
   color: var(--accent-warm-2);
@@ -1525,14 +1526,14 @@
   white-space: nowrap;
 }
 
-.compressionStrategyRow span {
+:where(.vui-routes-chatcodingroute).compressionStrategyRow span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.detailNote {
+:where(.vui-routes-chatcodingroute).detailNote {
   display: grid;
   gap: 3px;
   margin: 6px 0 0;
@@ -1541,7 +1542,7 @@
   line-height: 1.35;
 }
 
-.compressionStrategyCard .detailNote {
+:where(.vui-routes-chatcodingroute).compressionStrategyCard .detailNote {
   grid-template-columns: auto minmax(0, 1fr);
   gap: 6px;
   margin-top: 0;
@@ -1550,12 +1551,12 @@
   line-height: 1.2;
 }
 
-.compressionStrategyCard .detailNote span,
-.compressionStrategyCard .detailNote strong {
+:where(.vui-routes-chatcodingroute).compressionStrategyCard .detailNote span,
+:where(.vui-routes-chatcodingroute).compressionStrategyCard .detailNote strong {
   min-width: 0;
 }
 
-.compressionStrategyCard .detailNote strong {
+:where(.vui-routes-chatcodingroute).compressionStrategyCard .detailNote strong {
   overflow: hidden;
   color: var(--fg-secondary);
   font-weight: 650;
@@ -1563,30 +1564,30 @@
   white-space: nowrap;
 }
 
-.vitalStackCompact {
+:where(.vui-routes-chatcodingroute).vitalStackCompact {
   display: grid;
   gap: 5px;
   margin-top: 6px;
 }
 
-.vitalItemCompact {
+:where(.vui-routes-chatcodingroute).vitalItemCompact {
   display: grid;
   gap: 4px;
 }
 
-.vitalLabelRow span {
+:where(.vui-routes-chatcodingroute).vitalLabelRow span {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-sm);
 }
 
-.vitalLabelRow strong,
-.contextUsageValue {
+:where(.vui-routes-chatcodingroute).vitalLabelRow strong,
+:where(.vui-routes-chatcodingroute).contextUsageValue {
   color: var(--fg-primary);
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
 
-.contextUsageValue {
+:where(.vui-routes-chatcodingroute).contextUsageValue {
   margin: 4px 0 0;
   font-size: var(--vui-font-sm);
   line-height: 1.35;
@@ -1597,35 +1598,35 @@
   overflow: hidden;
 }
 
-.vitalLabelRow {
+:where(.vui-routes-chatcodingroute).vitalLabelRow {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
 
-.progressTrack {
+:where(.vui-routes-chatcodingroute).progressTrack {
   height: 6px;
   overflow: hidden;
   border-radius: 999px;
   background: color-mix(in srgb, var(--surface-card) 8%, transparent);
 }
 
-.progressFillWarm,
-.progressFillCool {
+:where(.vui-routes-chatcodingroute).progressFillWarm,
+:where(.vui-routes-chatcodingroute).progressFillCool {
   height: 100%;
   border-radius: inherit;
 }
 
-.progressFillWarm {
+:where(.vui-routes-chatcodingroute).progressFillWarm {
   background: var(--vui-gradient-route-soft);
 }
 
-.progressFillCool {
+:where(.vui-routes-chatcodingroute).progressFillCool {
   background: var(--vui-gradient-route-soft);
 }
 
-.petShowcase {
+:where(.vui-routes-chatcodingroute).petShowcase {
   position: relative;
   display: grid;
   grid-template-columns: 54px minmax(0, 1fr);
@@ -1642,7 +1643,7 @@
     var(--vui-gradient-route-soft);
 }
 
-.petShowcaseStage {
+:where(.vui-routes-chatcodingroute).petShowcaseStage {
   position: relative;
   display: grid;
   place-items: center;
@@ -1654,7 +1655,7 @@
   background: color-mix(in srgb, var(--surface-card) 78%, transparent);
 }
 
-.petShowcaseAura {
+:where(.vui-routes-chatcodingroute).petShowcaseAura {
   position: absolute;
   width: 44px;
   height: 44px;
@@ -1663,7 +1664,7 @@
   filter: blur(3px);
 }
 
-.petShowcaseAvatar {
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar {
   --pet-body: color-mix(in srgb, var(--accent-warm) 34%, var(--surface-panel-strong));
   --pet-body-deep: color-mix(in srgb, var(--accent-warm) 58%, var(--surface-card));
   --pet-mark: color-mix(in srgb, var(--fg-primary) 22%, transparent);
@@ -1687,25 +1688,25 @@
   text-shadow: 0 1px 4px color-mix(in srgb, var(--bg-canvas) 34%, transparent);
 }
 
-.petShowcaseSymbol {
+:where(.vui-routes-chatcodingroute).petShowcaseSymbol {
   position: relative;
   z-index: 1;
   transform: translateY(1px);
 }
 
-.petShowcaseEarLeft,
-.petShowcaseEarRight,
-.petShowcaseFootLeft,
-.petShowcaseFootRight,
-.petShowcaseFace,
-.petShowcaseEye,
-.petShowcaseMuzzle {
+:where(.vui-routes-chatcodingroute).petShowcaseEarLeft,
+:where(.vui-routes-chatcodingroute).petShowcaseEarRight,
+:where(.vui-routes-chatcodingroute).petShowcaseFootLeft,
+:where(.vui-routes-chatcodingroute).petShowcaseFootRight,
+:where(.vui-routes-chatcodingroute).petShowcaseFace,
+:where(.vui-routes-chatcodingroute).petShowcaseEye,
+:where(.vui-routes-chatcodingroute).petShowcaseMuzzle {
   position: absolute;
   display: block;
 }
 
-.petShowcaseEarLeft,
-.petShowcaseEarRight {
+:where(.vui-routes-chatcodingroute).petShowcaseEarLeft,
+:where(.vui-routes-chatcodingroute).petShowcaseEarRight {
   z-index: 0;
   width: 13px;
   height: 16px;
@@ -1714,19 +1715,19 @@
   background: var(--vui-gradient-route-soft);
 }
 
-.petShowcaseEarLeft {
+:where(.vui-routes-chatcodingroute).petShowcaseEarLeft {
   left: 7px;
   border-radius: 80% 32% 64% 36%;
   transform: rotate(-23deg);
 }
 
-.petShowcaseEarRight {
+:where(.vui-routes-chatcodingroute).petShowcaseEarRight {
   right: 7px;
   border-radius: 32% 80% 36% 64%;
   transform: rotate(23deg);
 }
 
-.petShowcaseFace {
+:where(.vui-routes-chatcodingroute).petShowcaseFace {
   z-index: 1;
   inset: 12px 9px auto;
   display: flex;
@@ -1735,7 +1736,7 @@
   transform: none;
 }
 
-.petShowcaseEye {
+:where(.vui-routes-chatcodingroute).petShowcaseEye {
   width: 4px;
   height: 4px;
   border-radius: 999px;
@@ -1743,7 +1744,7 @@
   opacity: 0.82;
 }
 
-.petShowcaseMuzzle {
+:where(.vui-routes-chatcodingroute).petShowcaseMuzzle {
   left: 50%;
   top: 7px;
   width: 9px;
@@ -1753,8 +1754,8 @@
   transform: translateX(-50%);
 }
 
-.petShowcaseFootLeft,
-.petShowcaseFootRight {
+:where(.vui-routes-chatcodingroute).petShowcaseFootLeft,
+:where(.vui-routes-chatcodingroute).petShowcaseFootRight {
   z-index: 1;
   bottom: -3px;
   width: 12px;
@@ -1765,101 +1766,101 @@
   transform: none;
 }
 
-.petShowcaseFootLeft {
+:where(.vui-routes-chatcodingroute).petShowcaseFootLeft {
   left: 8px;
 }
 
-.petShowcaseFootRight {
+:where(.vui-routes-chatcodingroute).petShowcaseFootRight {
   right: 8px;
 }
 
-.petShowcaseAvatar_cat {
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_cat {
   --pet-body: var(--state-warning);
   --pet-body-deep: var(--fg-tertiary);
   --pet-mark: color-mix(in srgb, var(--accent-warm) 32%, transparent);
 }
 
-.petShowcaseAvatar_bunny {
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_bunny {
   --pet-body: var(--surface-card);
   --pet-body-deep: var(--fg-secondary);
   --pet-mark: color-mix(in srgb, var(--fg-primary) 34%, transparent);
   border-radius: 47% 47% 40% 40%;
 }
 
-.petShowcaseAvatar_bunny .petShowcaseEarLeft,
-.petShowcaseAvatar_bunny .petShowcaseEarRight {
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_bunny .petShowcaseEarLeft,
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_bunny .petShowcaseEarRight {
   height: 21px;
   top: -11px;
   border-radius: 999px 999px 52% 52%;
 }
 
-.petShowcaseAvatar_penguin {
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_penguin {
   --pet-body: var(--fg-secondary);
   --pet-body-deep: var(--bg-canvas);
   --pet-mark: color-mix(in srgb, var(--accent-warm) 90%, transparent);
   color: var(--accent-warm-2);
 }
 
-.petShowcaseAvatar_penguin .petShowcaseEarLeft,
-.petShowcaseAvatar_penguin .petShowcaseEarRight {
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_penguin .petShowcaseEarLeft,
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_penguin .petShowcaseEarRight {
   width: 13px;
   height: 17px;
   top: 8px;
 }
 
-.petShowcaseAvatar_slime {
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_slime {
   --pet-body: var(--accent-warm);
   --pet-body-deep: var(--fg-tertiary);
   --pet-mark: color-mix(in srgb, var(--accent-warm) 42%, transparent);
   border-radius: 52% 48% 42% 44%;
 }
 
-.petShowcaseAvatar_slime .petShowcaseEarLeft,
-.petShowcaseAvatar_slime .petShowcaseEarRight {
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_slime .petShowcaseEarLeft,
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_slime .petShowcaseEarRight {
   display: none;
 }
 
-.petShowcaseAvatar_moose {
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_moose {
   --pet-body: var(--fg-tertiary);
   --pet-body-deep: var(--fg-tertiary);
   --pet-mark: color-mix(in srgb, var(--accent-warm) 30%, transparent);
 }
 
-.petShowcaseAvatar_moose .petShowcaseEarLeft,
-.petShowcaseAvatar_moose .petShowcaseEarRight {
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_moose .petShowcaseEarLeft,
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_moose .petShowcaseEarRight {
   width: 17px;
   height: 9px;
   top: -1px;
   border-radius: 999px 999px 6px 999px;
 }
 
-.petShowcaseAvatar_lobster,
-.petShowcaseAvatar_shrimp,
-.petShowcaseAvatar_crab {
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_lobster,
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_shrimp,
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_crab {
   --pet-body: var(--state-error);
   --pet-body-deep: var(--fg-tertiary);
   --pet-mark: color-mix(in srgb, var(--accent-warm) 34%, transparent);
 }
 
-.petShowcaseAvatar_chick {
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_chick {
   --pet-body: var(--state-warning);
   --pet-body-deep: var(--fg-tertiary);
   --pet-mark: color-mix(in srgb, var(--accent-warm) 34%, transparent);
   color: color-mix(in srgb, var(--surface-page) 72%, black);
 }
 
-.petShowcaseAvatar_default {
+:where(.vui-routes-chatcodingroute).petShowcaseAvatar_default {
   --pet-body: color-mix(in srgb, var(--accent-cool) 36%, var(--accent-warm));
   --pet-body-deep: color-mix(in srgb, var(--accent-cool) 42%, var(--surface-card));
 }
 
-.petShowcaseInfo {
+:where(.vui-routes-chatcodingroute).petShowcaseInfo {
   display: grid;
   min-width: 0;
   gap: 3px;
 }
 
-.petShowcaseTop {
+:where(.vui-routes-chatcodingroute).petShowcaseTop {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1867,13 +1868,13 @@
   min-width: 0;
 }
 
-.petShowcaseTop span {
+:where(.vui-routes-chatcodingroute).petShowcaseTop span {
   color: var(--accent-warm-2);
   font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
-.petShowcaseName {
+:where(.vui-routes-chatcodingroute).petShowcaseName {
   margin: 0;
   color: var(--fg-primary);
   font-family: var(--font-display);
@@ -1884,7 +1885,7 @@
   white-space: nowrap;
 }
 
-.petShowcaseLine {
+:where(.vui-routes-chatcodingroute).petShowcaseLine {
   margin: 0;
   color: var(--fg-secondary);
   font-size: var(--vui-font-xs);
@@ -1896,7 +1897,7 @@
   overflow-wrap: anywhere;
 }
 
-.petShowcaseActions {
+:where(.vui-routes-chatcodingroute).petShowcaseActions {
   grid-column: 1 / -1;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1905,8 +1906,8 @@
   margin-top: 7px;
 }
 
-.petShowcaseAction,
-.petShowcaseActionHint {
+:where(.vui-routes-chatcodingroute).petShowcaseAction,
+:where(.vui-routes-chatcodingroute).petShowcaseActionHint {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1922,35 +1923,35 @@
   white-space: nowrap;
 }
 
-.petShowcaseActionHint {
+:where(.vui-routes-chatcodingroute).petShowcaseActionHint {
   display: none;
 }
 
-.petShowcaseAction span,
-.petShowcaseActionHint span {
+:where(.vui-routes-chatcodingroute).petShowcaseAction span,
+:where(.vui-routes-chatcodingroute).petShowcaseActionHint span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.petShowcaseAction:disabled {
+:where(.vui-routes-chatcodingroute).petShowcaseAction:disabled {
   cursor: not-allowed;
   opacity: 0.72;
 }
 
-.petShowcaseAction:not(:disabled):hover {
+:where(.vui-routes-chatcodingroute).petShowcaseAction:not(:disabled):hover {
   color: var(--fg-primary);
   border-color: color-mix(in srgb, var(--accent-warm) 28%, transparent);
   background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
 }
 
-.petShowcaseActionHint {
+:where(.vui-routes-chatcodingroute).petShowcaseActionHint {
   color: var(--accent-warm-2);
   border-color: color-mix(in srgb, var(--accent-warm) 20%, transparent);
   background: color-mix(in srgb, var(--accent-warm) 10%, transparent);
 }
 
-.petShowcaseFeedback {
+:where(.vui-routes-chatcodingroute).petShowcaseFeedback {
   grid-column: 1 / -1;
   margin: 0;
   color: var(--accent-warm-2);
@@ -1959,7 +1960,7 @@
   overflow-wrap: anywhere;
 }
 
-.centerPane {
+:where(.vui-routes-chatcodingroute).centerPane {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
@@ -1968,7 +1969,7 @@
   overflow: hidden;
 }
 
-.tabStrip {
+:where(.vui-routes-chatcodingroute).tabStrip {
   display: flex;
   gap: 6px;
   padding: 8px 10px 0;
@@ -1976,7 +1977,7 @@
   align-items: flex-end;
 }
 
-.chatReturnLink {
+:where(.vui-routes-chatcodingroute).chatReturnLink {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -1993,18 +1994,18 @@
   white-space: nowrap;
 }
 
-.chatReturnLink span {
+:where(.vui-routes-chatcodingroute).chatReturnLink span {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.chatReturnLink:hover,
-.chatReturnLink:focus-visible {
+:where(.vui-routes-chatcodingroute).chatReturnLink:hover,
+:where(.vui-routes-chatcodingroute).chatReturnLink:focus-visible {
   color: var(--fg-primary);
   background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-card));
 }
 
-.tab {
+:where(.vui-routes-chatcodingroute).tab {
   flex: 0 0 auto;
   border: 1px solid transparent;
   border-radius: 7px 7px 0 0;
@@ -2014,13 +2015,13 @@
   white-space: nowrap;
 }
 
-.tabActive {
+:where(.vui-routes-chatcodingroute).tabActive {
   color: var(--fg-primary);
   background: var(--surface-panel-strong);
   border-color: var(--border-soft);
 }
 
-.agentSessionTabGroup {
+:where(.vui-routes-chatcodingroute).agentSessionTabGroup {
   display: inline-flex;
   align-items: stretch;
   gap: 5px;
@@ -2029,7 +2030,7 @@
   overflow-x: auto;
 }
 
-.agentSessionTab {
+:where(.vui-routes-chatcodingroute).agentSessionTab {
   display: inline-grid;
   grid-template-columns: auto minmax(80px, 1fr) auto;
   align-items: center;
@@ -2048,13 +2049,13 @@
   overflow: hidden;
 }
 
-.agentSessionTabClosable {
+:where(.vui-routes-chatcodingroute).agentSessionTabClosable {
   grid-template-columns: minmax(0, 1fr) auto;
   padding: 0 6px 0 8px;
   cursor: default;
 }
 
-.agentSessionTabMainAction {
+:where(.vui-routes-chatcodingroute).agentSessionTabMainAction {
   display: grid;
   grid-template-columns: auto minmax(74px, 1fr) auto;
   align-items: center;
@@ -2069,71 +2070,71 @@
   cursor: pointer;
 }
 
-.agentSessionTabMainAction:focus-visible {
+:where(.vui-routes-chatcodingroute).agentSessionTabMainAction:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--state-success) 42%, transparent);
   outline-offset: 2px;
 }
 
-.agentSessionTab:hover {
+:where(.vui-routes-chatcodingroute).agentSessionTab:hover {
   color: var(--fg-primary);
   border-color: color-mix(in srgb, var(--border-soft) 72%, transparent);
   background: color-mix(in srgb, var(--surface-panel-strong) 54%, transparent);
 }
 
-.agentSessionTabActive {
+:where(.vui-routes-chatcodingroute).agentSessionTabActive {
   color: var(--fg-primary);
   background: var(--surface-panel-strong);
   border-color: var(--border-soft);
 }
 
-.agentSessionTabRoot {
+:where(.vui-routes-chatcodingroute).agentSessionTabRoot {
   border-left: 2px solid color-mix(in srgb, var(--accent-warm) 56%, transparent);
   background: color-mix(in srgb, var(--accent-warm) 5%, transparent);
 }
 
-.agentSessionTabChild {
+:where(.vui-routes-chatcodingroute).agentSessionTabChild {
   border-left: 2px solid color-mix(in srgb, var(--accent-cool) 62%, transparent);
   background: color-mix(in srgb, var(--accent-cool) 7%, transparent);
 }
 
-.agentSessionTabCli {
+:where(.vui-routes-chatcodingroute).agentSessionTabCli {
   border-left: 2px solid color-mix(in srgb, var(--state-success) 58%, transparent);
   background: color-mix(in srgb, var(--state-success) 7%, transparent);
 }
 
-.agentSessionTabRoot.agentSessionTabActive {
+:where(.vui-routes-chatcodingroute).agentSessionTabRoot.agentSessionTabActive {
   background: color-mix(in srgb, var(--surface-panel-strong) 88%, var(--accent-warm) 12%);
 }
 
-.agentSessionTabChild.agentSessionTabActive {
+:where(.vui-routes-chatcodingroute).agentSessionTabChild.agentSessionTabActive {
   background: color-mix(in srgb, var(--surface-panel-strong) 86%, var(--accent-cool) 14%);
 }
 
-.agentSessionTabCli.agentSessionTabActive {
+:where(.vui-routes-chatcodingroute).agentSessionTabCli.agentSessionTabActive {
   background: color-mix(in srgb, var(--surface-panel-strong) 86%, var(--state-success) 14%);
 }
 
-.agentSessionTabRoot .agentSessionTabIcon {
+:where(.vui-routes-chatcodingroute).agentSessionTabRoot .agentSessionTabIcon {
   color: var(--accent-warm-2);
   background: color-mix(in srgb, var(--accent-warm) 14%, transparent);
 }
 
-.agentSessionTabChild .agentSessionTabIcon {
+:where(.vui-routes-chatcodingroute).agentSessionTabChild .agentSessionTabIcon {
   color: var(--accent-cool-2);
   background: color-mix(in srgb, var(--accent-cool) 16%, transparent);
 }
 
-.agentSessionTabCli .agentSessionTabIcon {
+:where(.vui-routes-chatcodingroute).agentSessionTabCli .agentSessionTabIcon {
   color: var(--state-success);
   background: color-mix(in srgb, var(--state-success) 14%, transparent);
 }
 
-.agentSessionTabEditing {
+:where(.vui-routes-chatcodingroute).agentSessionTabEditing {
   grid-template-columns: auto minmax(120px, 1fr) auto;
   cursor: default;
 }
 
-.agentSessionTabIcon {
+:where(.vui-routes-chatcodingroute).agentSessionTabIcon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2144,18 +2145,18 @@
   background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
 }
 
-.agentSessionTabCopy {
+:where(.vui-routes-chatcodingroute).agentSessionTabCopy {
   display: grid;
   gap: 2px;
   min-width: 0;
   text-align: left;
 }
 
-.agentSessionTabCopyCompact {
+:where(.vui-routes-chatcodingroute).agentSessionTabCopyCompact {
   gap: 0;
 }
 
-.agentSessionTabKicker {
+:where(.vui-routes-chatcodingroute).agentSessionTabKicker {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
   font-weight: 760;
@@ -2163,7 +2164,7 @@
   white-space: nowrap;
 }
 
-.agentSessionTabTitle {
+:where(.vui-routes-chatcodingroute).agentSessionTabTitle {
   min-width: 0;
   overflow: hidden;
   color: inherit;
@@ -2174,7 +2175,7 @@
   white-space: nowrap;
 }
 
-.agentSessionTabTitleInput {
+:where(.vui-routes-chatcodingroute).agentSessionTabTitleInput {
   min-width: 0;
   width: 100%;
   height: 22px;
@@ -2189,13 +2190,13 @@
   line-height: 1;
 }
 
-.agentSessionTabEditActions {
+:where(.vui-routes-chatcodingroute).agentSessionTabEditActions {
   display: inline-flex;
   align-items: center;
   gap: 3px;
 }
 
-.agentSessionTabEditButton {
+:where(.vui-routes-chatcodingroute).agentSessionTabEditButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2208,19 +2209,19 @@
   cursor: pointer;
 }
 
-.agentSessionTabEditButton:hover:not(:disabled),
-.agentSessionTabEditButton:focus-visible:not(:disabled) {
+:where(.vui-routes-chatcodingroute).agentSessionTabEditButton:hover:not(:disabled),
+:where(.vui-routes-chatcodingroute).agentSessionTabEditButton:focus-visible:not(:disabled) {
   color: var(--accent-cool-2);
   border-color: color-mix(in srgb, var(--accent-cool) 34%, transparent);
   background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
 }
 
-.agentSessionTabEditButton:disabled {
+:where(.vui-routes-chatcodingroute).agentSessionTabEditButton:disabled {
   cursor: not-allowed;
   opacity: 0.46;
 }
 
-.agentSessionTabCloseButton {
+:where(.vui-routes-chatcodingroute).agentSessionTabCloseButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2233,14 +2234,14 @@
   cursor: pointer;
 }
 
-.agentSessionTabCloseButton:hover,
-.agentSessionTabCloseButton:focus-visible {
+:where(.vui-routes-chatcodingroute).agentSessionTabCloseButton:hover,
+:where(.vui-routes-chatcodingroute).agentSessionTabCloseButton:focus-visible {
   color: var(--state-error);
   border-color: color-mix(in srgb, var(--state-error) 28%, transparent);
   background: color-mix(in srgb, var(--state-error) 10%, transparent);
 }
 
-.agentSessionTabMeta {
+:where(.vui-routes-chatcodingroute).agentSessionTabMeta {
   min-width: 0;
   max-width: 82px;
   overflow: hidden;
@@ -2251,26 +2252,26 @@
   white-space: nowrap;
 }
 
-.agentSessionTab[data-vui],
-.agentSessionTabMainAction[data-vui] {
+:where(.vui-routes-chatcodingroute).agentSessionTab[data-vui],
+:where(.vui-routes-chatcodingroute).agentSessionTabMainAction[data-vui] {
   justify-content: stretch;
   font: inherit;
 }
 
-.agentSessionTab[data-vui] [data-slot="vui-button-content"],
-.agentSessionTab[data-vui] [data-slot="vui-button-label"],
-.agentSessionTabMainAction[data-vui] [data-slot="vui-button-content"],
-.agentSessionTabMainAction[data-vui] [data-slot="vui-button-label"] {
+:where(.vui-routes-chatcodingroute).agentSessionTab[data-vui] [data-slot="vui-button-content"],
+:where(.vui-routes-chatcodingroute).agentSessionTab[data-vui] [data-slot="vui-button-label"],
+:where(.vui-routes-chatcodingroute).agentSessionTabMainAction[data-vui] [data-slot="vui-button-content"],
+:where(.vui-routes-chatcodingroute).agentSessionTabMainAction[data-vui] [data-slot="vui-button-label"] {
   display: contents;
 }
 
-.agentSessionTabEditButton[data-vui],
-.agentSessionTabCloseButton[data-vui] {
+:where(.vui-routes-chatcodingroute).agentSessionTabEditButton[data-vui],
+:where(.vui-routes-chatcodingroute).agentSessionTabCloseButton[data-vui] {
   min-width: 0;
   padding: 0;
 }
 
-.fileTab {
+:where(.vui-routes-chatcodingroute).fileTab {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -2280,30 +2281,30 @@
   background: transparent;
 }
 
-.fileTabActive {
+:where(.vui-routes-chatcodingroute).fileTabActive {
   background: var(--surface-panel-strong);
   border-color: var(--border-soft);
 }
 
-.fileTabButton,
-.fileTabClose {
+:where(.vui-routes-chatcodingroute).fileTabButton,
+:where(.vui-routes-chatcodingroute).fileTabClose {
   border: 0;
   background: transparent;
   color: inherit;
 }
 
-.fileTabButton {
+:where(.vui-routes-chatcodingroute).fileTabButton {
   padding: 10px 6px 10px 14px;
   color: var(--fg-secondary);
   white-space: nowrap;
   cursor: pointer;
 }
 
-.fileTabActive .fileTabButton {
+:where(.vui-routes-chatcodingroute).fileTabActive .fileTabButton {
   color: var(--fg-primary);
 }
 
-.fileTabClose {
+:where(.vui-routes-chatcodingroute).fileTabClose {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2312,11 +2313,11 @@
   cursor: pointer;
 }
 
-.fileTabClose:hover {
+:where(.vui-routes-chatcodingroute).fileTabClose:hover {
   color: var(--fg-primary);
 }
 
-.centerSurface {
+:where(.vui-routes-chatcodingroute).centerSurface {
   display: grid;
   height: 100%;
   min-height: 0;
@@ -2324,7 +2325,7 @@
   overflow: hidden;
 }
 
-.conversationFrame {
+:where(.vui-routes-chatcodingroute).conversationFrame {
   position: relative;
   display: flex;
   flex-direction: column;
@@ -2333,13 +2334,13 @@
   overflow: hidden;
 }
 
-.conversationFrameFocus {
+:where(.vui-routes-chatcodingroute).conversationFrameFocus {
   justify-self: center;
   width: min(calc(100% - 48px), 1480px);
   max-width: 100%;
 }
 
-.cliAgentRunPanel {
+:where(.vui-routes-chatcodingroute).cliAgentRunPanel {
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -2349,11 +2350,11 @@
   background: color-mix(in srgb, var(--surface-panel-strong) 92%, var(--bg-canvas) 8%);
 }
 
-.cliAgentRunPanelHidden {
+:where(.vui-routes-chatcodingroute).cliAgentRunPanelHidden {
   display: none;
 }
 
-.cliAgentTerminalFrame {
+:where(.vui-routes-chatcodingroute).cliAgentTerminalFrame {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   min-height: 0;
@@ -2365,7 +2366,7 @@
   box-shadow: var(--vui-shadow-inset-accent);
 }
 
-.cliAgentTerminalCommand {
+:where(.vui-routes-chatcodingroute).cliAgentTerminalCommand {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 8px;
@@ -2379,7 +2380,7 @@
   font-size: var(--vui-font-sm);
 }
 
-.cliAgentTerminalStatus {
+:where(.vui-routes-chatcodingroute).cliAgentTerminalStatus {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -2389,7 +2390,7 @@
   white-space: nowrap;
 }
 
-.cliAgentTerminalAction {
+:where(.vui-routes-chatcodingroute).cliAgentTerminalAction {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2409,17 +2410,17 @@
   white-space: nowrap;
 }
 
-.cliAgentTerminalAction:hover:not(:disabled) {
+:where(.vui-routes-chatcodingroute).cliAgentTerminalAction:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--accent-warm) 58%, transparent);
   background: color-mix(in srgb, var(--fg-tertiary) 82%, transparent);
 }
 
-.cliAgentTerminalAction:disabled {
+:where(.vui-routes-chatcodingroute).cliAgentTerminalAction:disabled {
   cursor: wait;
   opacity: 0.58;
 }
 
-.cliAgentTerminalCommand code {
+:where(.vui-routes-chatcodingroute).cliAgentTerminalCommand code {
   min-width: 0;
   overflow: hidden;
   color: var(--accent-warm);
@@ -2427,14 +2428,14 @@
   white-space: nowrap;
 }
 
-.cliAgentTerminalOutputShell {
+:where(.vui-routes-chatcodingroute).cliAgentTerminalOutputShell {
   position: relative;
   min-height: 0;
   overflow: hidden;
   background: var(--bg-canvas);
 }
 
-.cliAgentTerminalOutput {
+:where(.vui-routes-chatcodingroute).cliAgentTerminalOutput {
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -2445,21 +2446,21 @@
   font-size: var(--vui-font-md);
 }
 
-.cliAgentTerminalOutput :global(.xterm) {
+:where(.vui-routes-chatcodingroute).cliAgentTerminalOutput .xterm {
   height: 100%;
   padding: 0;
 }
 
-.cliAgentTerminalOutput :global(.xterm-screen),
-.cliAgentTerminalOutput :global(.xterm-viewport) {
+:where(.vui-routes-chatcodingroute).cliAgentTerminalOutput .xterm-screen,
+:where(.vui-routes-chatcodingroute).cliAgentTerminalOutput .xterm-viewport {
   background: var(--bg-canvas);
 }
 
-.cliAgentTerminalOutput :global(.xterm-viewport) {
+:where(.vui-routes-chatcodingroute).cliAgentTerminalOutput .xterm-viewport {
   scrollbar-color: color-mix(in srgb, var(--accent-cool) 34%, transparent) transparent;
 }
 
-.cliAgentTerminalOverlay {
+:where(.vui-routes-chatcodingroute).cliAgentTerminalOverlay {
   position: absolute;
   left: 14px;
   bottom: 12px;
@@ -2474,13 +2475,13 @@
   pointer-events: none;
 }
 
-.cliAgentTerminalOverlay[data-tone="error"] {
+:where(.vui-routes-chatcodingroute).cliAgentTerminalOverlay[data-tone="error"] {
   border-color: color-mix(in srgb, var(--state-error) 34%, color-mix(in srgb, var(--accent-cool) 20%, transparent));
   color: var(--accent-warm);
   background: color-mix(in srgb, var(--fg-tertiary) 92%, transparent);
 }
 
-.inlineNotice {
+:where(.vui-routes-chatcodingroute).inlineNotice {
   margin: 10px 14px 0;
   padding: 8px 11px;
   border: 1px solid color-mix(in srgb, var(--state-error) 24%, var(--border-soft));
@@ -2492,13 +2493,13 @@
   overflow-wrap: anywhere;
 }
 
-.runtimeNoticeStack {
+:where(.vui-routes-chatcodingroute).runtimeNoticeStack {
   display: grid;
   gap: 6px;
   margin: 10px 14px 0;
 }
 
-.runtimeNotice {
+:where(.vui-routes-chatcodingroute).runtimeNotice {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr);
   gap: 7px;
@@ -2512,57 +2513,57 @@
   line-height: 1.35;
 }
 
-.runtimeNotice svg {
+:where(.vui-routes-chatcodingroute).runtimeNotice svg {
   margin-top: 2px;
   color: var(--accent-cool);
 }
 
-.runtimeNotice_warning {
+:where(.vui-routes-chatcodingroute).runtimeNotice_warning {
   border-color: color-mix(in srgb, var(--accent-warm) 28%, var(--border-soft));
   background: color-mix(in srgb, var(--surface-panel) 84%, var(--accent-warm) 12%);
 }
 
-.runtimeNotice_warning svg {
+:where(.vui-routes-chatcodingroute).runtimeNotice_warning svg {
   color: var(--accent-warm-2);
 }
 
-.runtimeNotice_error {
+:where(.vui-routes-chatcodingroute).runtimeNotice_error {
   border-color: color-mix(in srgb, var(--state-error) 26%, var(--border-soft));
   background: color-mix(in srgb, var(--surface-panel) 84%, var(--state-error) 10%);
 }
 
-.runtimeNotice_error svg {
+:where(.vui-routes-chatcodingroute).runtimeNotice_error svg {
   color: var(--state-error);
 }
 
-.runtimeNotice_success {
+:where(.vui-routes-chatcodingroute).runtimeNotice_success {
   border-color: color-mix(in srgb, var(--state-success) 26%, var(--border-soft));
   background: color-mix(in srgb, var(--surface-panel) 84%, var(--state-success) 10%);
 }
 
-.runtimeNotice_success svg {
+:where(.vui-routes-chatcodingroute).runtimeNotice_success svg {
   color: var(--state-success);
 }
 
-.runtimeNoticeBody {
+:where(.vui-routes-chatcodingroute).runtimeNoticeBody {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
 
-.runtimeNoticeLabel {
+:where(.vui-routes-chatcodingroute).runtimeNoticeLabel {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
 
-.runtimeNoticeMessage {
+:where(.vui-routes-chatcodingroute).runtimeNoticeMessage {
   color: var(--fg-primary);
   overflow-wrap: anywhere;
 }
 
-.toolApprovalOverlay {
+:where(.vui-routes-chatcodingroute).toolApprovalOverlay {
   position: absolute;
   inset: 0;
   z-index: 8;
@@ -2573,7 +2574,7 @@
   pointer-events: none;
 }
 
-.toolApprovalDialog {
+:where(.vui-routes-chatcodingroute).toolApprovalDialog {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr) auto;
   gap: 10px;
@@ -2586,7 +2587,7 @@
   pointer-events: auto;
 }
 
-.toolApprovalIcon {
+:where(.vui-routes-chatcodingroute).toolApprovalIcon {
   display: grid;
   place-items: center;
   width: 34px;
@@ -2597,26 +2598,26 @@
   background: color-mix(in srgb, var(--accent-warm) 10%, transparent);
 }
 
-.toolApprovalBody {
+:where(.vui-routes-chatcodingroute).toolApprovalBody {
   display: grid;
   min-width: 0;
   gap: 5px;
 }
 
-.toolApprovalHeader {
+:where(.vui-routes-chatcodingroute).toolApprovalHeader {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
 
-.toolApprovalHeader strong {
+:where(.vui-routes-chatcodingroute).toolApprovalHeader strong {
   color: var(--fg-primary);
   font-size: var(--vui-font-chat);
   line-height: 1.25;
 }
 
-.toolApprovalHeader span {
+:where(.vui-routes-chatcodingroute).toolApprovalHeader span {
   flex: 0 0 auto;
   padding: 2px 7px;
   border: 1px solid color-mix(in srgb, var(--accent-warm) 30%, var(--border-soft));
@@ -2625,21 +2626,21 @@
   font-size: var(--vui-font-xs);
 }
 
-.toolApprovalBody p {
+:where(.vui-routes-chatcodingroute).toolApprovalBody p {
   margin: 0;
   color: var(--fg-secondary);
   font-size: var(--vui-font-sm);
   line-height: 1.38;
 }
 
-.toolApprovalToolList {
+:where(.vui-routes-chatcodingroute).toolApprovalToolList {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
   min-width: 0;
 }
 
-.toolApprovalToolList span {
+:where(.vui-routes-chatcodingroute).toolApprovalToolList span {
   padding: 2px 7px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 28%, var(--border-soft));
   border-radius: 999px;
@@ -2650,13 +2651,13 @@
   white-space: nowrap;
 }
 
-.toolApprovalActions {
+:where(.vui-routes-chatcodingroute).toolApprovalActions {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.toolApprovalActions button {
+:where(.vui-routes-chatcodingroute).toolApprovalActions button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2671,97 +2672,97 @@
   cursor: pointer;
 }
 
-.toolApprovalActions button:disabled {
+:where(.vui-routes-chatcodingroute).toolApprovalActions button:disabled {
   cursor: wait;
   opacity: 0.66;
 }
 
-.toolApprovalActions button:hover:not(:disabled) {
+:where(.vui-routes-chatcodingroute).toolApprovalActions button:hover:not(:disabled) {
   color: var(--fg-primary);
   border-color: color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
 }
 
-.toolApprovalActions .toolApprovalAllow {
+:where(.vui-routes-chatcodingroute).toolApprovalActions .toolApprovalAllow {
   color: var(--surface-page);
   border-color: color-mix(in srgb, var(--accent-cool) 48%, transparent);
   background: color-mix(in srgb, var(--accent-cool) 82%, black 8%);
 }
 
-.toolApprovalActions .toolApprovalAllow:hover:not(:disabled) {
+:where(.vui-routes-chatcodingroute).toolApprovalActions .toolApprovalAllow:hover:not(:disabled) {
   color: var(--surface-page);
   border-color: color-mix(in srgb, var(--accent-cool) 58%, transparent);
   background: color-mix(in srgb, var(--accent-cool) 88%, black 6%);
 }
 
 @media (max-width: 720px) {
-  .toolApprovalDialog {
+  :where(.vui-routes-chatcodingroute).toolApprovalDialog {
     grid-template-columns: 30px minmax(0, 1fr);
   }
 
-  .toolApprovalActions {
+  :where(.vui-routes-chatcodingroute).toolApprovalActions {
     grid-column: 1 / -1;
     justify-content: flex-end;
   }
 
-  .cacheDetailOverlay {
+  :where(.vui-routes-chatcodingroute).cacheDetailOverlay {
     align-items: start;
     padding: 12px;
     overflow: hidden;
   }
 
-  .cacheDetailDialog {
+  :where(.vui-routes-chatcodingroute).cacheDetailDialog {
     width: calc(100vw - 24px);
     max-height: calc(100vh - 24px);
     max-height: calc(100dvh - 24px);
     padding: 12px;
   }
 
-  .cacheDetailSummaryGrid,
-  .cacheDetailBody {
+  :where(.vui-routes-chatcodingroute).cacheDetailSummaryGrid,
+  :where(.vui-routes-chatcodingroute).cacheDetailBody {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .cacheDetailCalibrationNote {
+  :where(.vui-routes-chatcodingroute).cacheDetailCalibrationNote {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .cacheDetailCalibrationNote strong,
-  .cacheDetailCalibrationNote em,
-  .cacheDetailCalibrationNote span {
+  :where(.vui-routes-chatcodingroute).cacheDetailCalibrationNote strong,
+  :where(.vui-routes-chatcodingroute).cacheDetailCalibrationNote em,
+  :where(.vui-routes-chatcodingroute).cacheDetailCalibrationNote span {
     white-space: normal;
   }
 
-  .cacheDetailDonutShell,
-  .cacheDetailDonutSvg {
+  :where(.vui-routes-chatcodingroute).cacheDetailDonutShell,
+  :where(.vui-routes-chatcodingroute).cacheDetailDonutSvg {
     width: 136px;
     height: 136px;
   }
 
-  .cacheDetailDonutCenter {
+  :where(.vui-routes-chatcodingroute).cacheDetailDonutCenter {
     inset: 37px;
   }
 
-  .cacheDetailBody,
-  .cacheDetailSegmentList {
+  :where(.vui-routes-chatcodingroute).cacheDetailBody,
+  :where(.vui-routes-chatcodingroute).cacheDetailSegmentList {
     min-height: 0;
   }
 
-  .cacheDetailSegmentList {
+  :where(.vui-routes-chatcodingroute).cacheDetailSegmentList {
     max-height: calc(100dvh - 300px);
     overflow: auto;
   }
 
-  .cacheDetailSegmentRow {
+  :where(.vui-routes-chatcodingroute).cacheDetailSegmentRow {
     grid-template-columns: 8px minmax(0, 1fr);
   }
 
-  .cacheDetailSegmentRow em {
+  :where(.vui-routes-chatcodingroute).cacheDetailSegmentRow em {
     grid-column: 2;
     justify-self: start;
   }
 }
 
-.emptySurface {
+:where(.vui-routes-chatcodingroute).emptySurface {
   display: grid;
   place-items: center;
   height: 100%;
@@ -2771,7 +2772,7 @@
   line-height: 1.5;
 }
 
-.rightPane {
+:where(.vui-routes-chatcodingroute).rightPane {
   display: grid;
   grid-template-rows: auto auto 1fr;
   padding: 6px;
@@ -2780,7 +2781,7 @@
   overflow: hidden;
 }
 
-.resizeHandle {
+:where(.vui-routes-chatcodingroute).resizeHandle {
   position: relative;
   min-height: 0;
   background: transparent;
@@ -2789,7 +2790,7 @@
   touch-action: none;
 }
 
-.resizeHandle::before {
+:where(.vui-routes-chatcodingroute).resizeHandle::before {
   content: "";
   position: absolute;
   top: 0;
@@ -2802,14 +2803,14 @@
   transition: background-color 150ms ease, box-shadow 150ms ease;
 }
 
-.resizeHandle:hover::before,
-.resizeHandle:focus-visible::before,
-.resizeHandleActive::before {
+:where(.vui-routes-chatcodingroute).resizeHandle:hover::before,
+:where(.vui-routes-chatcodingroute).resizeHandle:focus-visible::before,
+:where(.vui-routes-chatcodingroute).resizeHandleActive::before {
   background: color-mix(in srgb, var(--accent-warm) 52%, transparent);
   box-shadow: none;
 }
 
-.rightIndexTabs {
+:where(.vui-routes-chatcodingroute).rightIndexTabs {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 4px;
@@ -2820,7 +2821,7 @@
   background: color-mix(in srgb, var(--surface-card) 76%, transparent);
 }
 
-.rightIndexTab {
+:where(.vui-routes-chatcodingroute).rightIndexTab {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2838,39 +2839,39 @@
   font-weight: 760;
 }
 
-.rightIndexTab:hover,
-.rightIndexTab:focus-visible {
+:where(.vui-routes-chatcodingroute).rightIndexTab:hover,
+:where(.vui-routes-chatcodingroute).rightIndexTab:focus-visible {
   color: var(--fg-primary);
   background: color-mix(in srgb, var(--surface-panel) 76%, transparent);
   outline: none;
 }
 
-.rightIndexTabActive {
+:where(.vui-routes-chatcodingroute).rightIndexTabActive {
   color: var(--fg-primary);
   border-color: color-mix(in srgb, var(--accent-cool) 26%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-cool) 15%, var(--surface-panel));
 }
 
-.rightIndexTab span {
+:where(.vui-routes-chatcodingroute).rightIndexTab span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.contextCompositionPanel {
+:where(.vui-routes-chatcodingroute).contextCompositionPanel {
   display: grid;
   gap: 7px;
   padding-top: 2px;
 }
 
-.contextCompositionItem {
+:where(.vui-routes-chatcodingroute).contextCompositionItem {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
 
-.contextCompositionHeader {
+:where(.vui-routes-chatcodingroute).contextCompositionHeader {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: baseline;
@@ -2881,20 +2882,20 @@
   line-height: 1;
 }
 
-.contextCompositionHeader span,
-.contextCompositionHeader strong {
+:where(.vui-routes-chatcodingroute).contextCompositionHeader span,
+:where(.vui-routes-chatcodingroute).contextCompositionHeader strong {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.contextCompositionHeader strong {
+:where(.vui-routes-chatcodingroute).contextCompositionHeader strong {
   color: var(--fg-secondary);
   font-weight: 760;
 }
 
-.contextCompositionBar {
+:where(.vui-routes-chatcodingroute).contextCompositionBar {
   display: flex;
   width: 100%;
   height: 7px;
@@ -2903,17 +2904,17 @@
   background: color-mix(in srgb, var(--surface-panel) 74%, transparent);
 }
 
-.contextCompositionSegment {
+:where(.vui-routes-chatcodingroute).contextCompositionSegment {
   flex: 0 0 auto;
   min-width: 4px;
   height: 100%;
 }
 
-.contextCompositionSegmentExact {
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentExact {
   min-width: 0;
 }
 
-.contextCompositionLegend {
+:where(.vui-routes-chatcodingroute).contextCompositionLegend {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -2924,14 +2925,14 @@
   line-height: 1.2;
 }
 
-.contextCompositionLegend span {
+:where(.vui-routes-chatcodingroute).contextCompositionLegend span {
   display: inline-flex;
   align-items: center;
   gap: 3px;
   min-width: 0;
 }
 
-.contextCompositionLegend em {
+:where(.vui-routes-chatcodingroute).contextCompositionLegend em {
   min-width: 0;
   max-width: 180px;
   overflow: hidden;
@@ -2941,14 +2942,14 @@
   white-space: nowrap;
 }
 
-.contextCompositionLegend i {
+:where(.vui-routes-chatcodingroute).contextCompositionLegend i {
   flex: 0 0 auto;
   width: 6px;
   height: 6px;
   border-radius: 999px;
 }
 
-.cacheDonutPanel {
+:where(.vui-routes-chatcodingroute).cacheDonutPanel {
   display: grid;
   grid-template-columns: 86px minmax(0, 1fr);
   align-items: center;
@@ -2956,7 +2957,7 @@
   min-width: 0;
 }
 
-.cacheDonutTrigger {
+:where(.vui-routes-chatcodingroute).cacheDonutTrigger {
   display: inline-grid;
   place-items: center;
   width: 86px;
@@ -2969,21 +2970,21 @@
   cursor: pointer;
 }
 
-.cacheDonutTrigger:hover:not(:disabled) .cacheDonutShell,
-.cacheDonutTrigger:focus-visible .cacheDonutShell {
+:where(.vui-routes-chatcodingroute).cacheDonutTrigger:hover:not(:disabled) .cacheDonutShell,
+:where(.vui-routes-chatcodingroute).cacheDonutTrigger:focus-visible .cacheDonutShell {
   filter: drop-shadow(0 0 0.45rem color-mix(in srgb, var(--accent-cool) 28%, transparent));
 }
 
-.cacheDonutTrigger:focus-visible {
+:where(.vui-routes-chatcodingroute).cacheDonutTrigger:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent-cool) 58%, transparent);
   outline-offset: 3px;
 }
 
-.cacheDonutTrigger:disabled {
+:where(.vui-routes-chatcodingroute).cacheDonutTrigger:disabled {
   cursor: default;
 }
 
-.cacheDonutShell {
+:where(.vui-routes-chatcodingroute).cacheDonutShell {
   position: relative;
   width: 86px;
   height: 86px;
@@ -2991,7 +2992,7 @@
   transition: filter 0.15s ease;
 }
 
-.cacheDonutSvg {
+:where(.vui-routes-chatcodingroute).cacheDonutSvg {
   display: block;
   width: 86px;
   height: 86px;
@@ -2999,47 +3000,47 @@
   transform: rotate(-90deg);
 }
 
-.cacheDonutTrack {
+:where(.vui-routes-chatcodingroute).cacheDonutTrack {
   fill: none;
   stroke: color-mix(in srgb, var(--surface-panel) 78%, var(--fg-tertiary));
   stroke-linecap: butt;
 }
 
-.cacheDonutOuterTrack {
+:where(.vui-routes-chatcodingroute).cacheDonutOuterTrack {
   stroke-width: 10;
 }
 
-.cacheDonutInnerTrack {
+:where(.vui-routes-chatcodingroute).cacheDonutInnerTrack {
   stroke-width: 8;
 }
 
-.cacheDonutSegment {
+:where(.vui-routes-chatcodingroute).cacheDonutSegment {
   fill: none;
   stroke-linecap: butt;
   transition: stroke-width 0.15s ease, filter 0.15s ease;
 }
 
-.cacheDonutSegment:hover {
+:where(.vui-routes-chatcodingroute).cacheDonutSegment:hover {
   filter: brightness(1.08);
 }
 
-.cacheDonutOuterSegment {
+:where(.vui-routes-chatcodingroute).cacheDonutOuterSegment {
   stroke-width: 10;
 }
 
-.cacheDonutOuterSegment:hover {
+:where(.vui-routes-chatcodingroute).cacheDonutOuterSegment:hover {
   stroke-width: 12;
 }
 
-.cacheDonutInnerSegment {
+:where(.vui-routes-chatcodingroute).cacheDonutInnerSegment {
   stroke-width: 8;
 }
 
-.cacheDonutInnerSegment:hover {
+:where(.vui-routes-chatcodingroute).cacheDonutInnerSegment:hover {
   stroke-width: 10;
 }
 
-.cacheDonutCenter {
+:where(.vui-routes-chatcodingroute).cacheDonutCenter {
   position: absolute;
   inset: 23px;
   display: grid;
@@ -3055,14 +3056,14 @@
   pointer-events: none;
 }
 
-.cacheDonutCenter strong {
+:where(.vui-routes-chatcodingroute).cacheDonutCenter strong {
   color: var(--fg-primary);
   font-size: var(--vui-font-md);
   font-weight: 820;
 }
 
-.cacheDonutCenter span,
-.cacheDonutCenter small {
+:where(.vui-routes-chatcodingroute).cacheDonutCenter span,
+:where(.vui-routes-chatcodingroute).cacheDonutCenter small {
   max-width: 42px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3070,7 +3071,7 @@
   font-size: var(--vui-font-xs);
 }
 
-.cacheDonutStats {
+:where(.vui-routes-chatcodingroute).cacheDonutStats {
   display: grid;
   gap: 4px;
   min-width: 0;
@@ -3079,7 +3080,7 @@
   line-height: 1.15;
 }
 
-.cacheDonutStats span {
+:where(.vui-routes-chatcodingroute).cacheDonutStats span {
   display: grid;
   grid-template-columns: 30px minmax(0, 1fr);
   align-items: center;
@@ -3090,81 +3091,81 @@
   white-space: nowrap;
 }
 
-.cacheDonutStats b {
+:where(.vui-routes-chatcodingroute).cacheDonutStats b {
   color: var(--fg-secondary);
   font-size: var(--vui-font-xs);
   font-weight: 760;
 }
 
-.cacheDonutSegmentCached {
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentCached {
   stroke: var(--state-success);
 }
 
-.cacheDonutSegmentCacheWrite {
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentCacheWrite {
   stroke: var(--accent-warm);
 }
 
-.cacheDonutSegmentUncached {
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentUncached {
   stroke: var(--fg-tertiary);
 }
 
-.cacheDonutSegmentMissing {
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentMissing {
   stroke: color-mix(in srgb, var(--fg-tertiary) 46%, transparent);
 }
 
-.cacheDonutSegmentOther {
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentOther {
   stroke: var(--accent-warm);
 }
 
-.cacheDonutSegmentSystem {
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentSystem {
   stroke: var(--accent-cool);
 }
 
-.cacheDonutSegmentUser {
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentUser {
   stroke: var(--accent-warm);
 }
 
-.cacheDonutSegmentHistory {
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentHistory {
   stroke: var(--fg-tertiary);
 }
 
-.cacheDonutSegmentTask {
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentTask {
   stroke: var(--state-warning);
 }
 
-.cacheDonutSegmentAgent {
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentAgent {
   stroke: var(--state-success);
 }
 
-.cacheDonutSegmentProjectRules {
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentProjectRules {
   stroke: var(--state-error);
 }
 
-.cacheDonutSegmentToolDescriptions {
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentToolDescriptions {
   stroke: var(--accent-warm);
 }
 
-.cacheDonutSegmentToolSchema {
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentToolSchema {
   stroke: var(--accent-warm);
 }
 
-.cacheDonutSegmentProviderUnmapped {
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentProviderUnmapped {
   stroke: var(--accent-warm);
 }
 
-.cacheDonutSegmentGuidance {
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentGuidance {
   stroke: var(--accent-warm);
 }
 
-.cacheDonutSegmentSkill {
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentSkill {
   stroke: var(--state-error);
 }
 
-.cacheDonutSegmentAttachments {
+:where(.vui-routes-chatcodingroute).cacheDonutSegmentAttachments {
   stroke: var(--accent-warm);
 }
 
-.cacheDetailOverlay {
+:where(.vui-routes-chatcodingroute).cacheDetailOverlay {
   position: fixed;
   inset: 0;
   z-index: 60;
@@ -3176,7 +3177,7 @@
   backdrop-filter: blur(3px);
 }
 
-.cacheDetailDialog {
+:where(.vui-routes-chatcodingroute).cacheDetailDialog {
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr);
   gap: 10px;
@@ -3191,7 +3192,7 @@
   box-shadow: var(--vui-shadow-soft);
 }
 
-.cacheDetailHeader {
+:where(.vui-routes-chatcodingroute).cacheDetailHeader {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -3200,22 +3201,22 @@
   border-bottom: 1px solid var(--border-soft);
 }
 
-.cacheDetailHeader p,
-.cacheDetailDonutPanel p {
+:where(.vui-routes-chatcodingroute).cacheDetailHeader p,
+:where(.vui-routes-chatcodingroute).cacheDetailDonutPanel p {
   margin: 0;
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
   line-height: 1.4;
 }
 
-.cacheDetailHeader h3 {
+:where(.vui-routes-chatcodingroute).cacheDetailHeader h3 {
   margin: 2px 0 0;
   color: var(--fg-primary);
   font-size: 1rem;
   line-height: 1.25;
 }
 
-.cacheDetailCloseButton {
+:where(.vui-routes-chatcodingroute).cacheDetailCloseButton {
   display: inline-grid;
   place-items: center;
   width: 30px;
@@ -3228,24 +3229,24 @@
   cursor: pointer;
 }
 
-.cacheDetailCloseButton:hover,
-.cacheDetailCloseButton:focus-visible {
+:where(.vui-routes-chatcodingroute).cacheDetailCloseButton:hover,
+:where(.vui-routes-chatcodingroute).cacheDetailCloseButton:focus-visible {
   color: var(--fg-primary);
   border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
 }
 
-.cacheDetailCloseButton:focus-visible {
+:where(.vui-routes-chatcodingroute).cacheDetailCloseButton:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent-cool) 50%, transparent);
   outline-offset: 2px;
 }
 
-.cacheDetailSummaryGrid {
+:where(.vui-routes-chatcodingroute).cacheDetailSummaryGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
 }
 
-.cacheDetailSummaryGrid div {
+:where(.vui-routes-chatcodingroute).cacheDetailSummaryGrid div {
   display: grid;
   gap: 2px;
   min-width: 0;
@@ -3255,18 +3256,18 @@
   background: color-mix(in srgb, var(--surface-card) 82%, transparent);
 }
 
-.cacheDetailSummaryGrid span {
+:where(.vui-routes-chatcodingroute).cacheDetailSummaryGrid span {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
 }
 
-.cacheDetailSummaryGrid strong {
+:where(.vui-routes-chatcodingroute).cacheDetailSummaryGrid strong {
   color: var(--fg-primary);
   font-size: 1.08rem;
   line-height: 1.1;
 }
 
-.cacheDetailSummaryGrid small {
+:where(.vui-routes-chatcodingroute).cacheDetailSummaryGrid small {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-secondary);
@@ -3275,7 +3276,7 @@
   white-space: nowrap;
 }
 
-.cacheDetailCalibrationNote {
+:where(.vui-routes-chatcodingroute).cacheDetailCalibrationNote {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -3289,22 +3290,22 @@
   font-size: var(--vui-font-xs);
 }
 
-.cacheDetailCalibrationNote strong,
-.cacheDetailCalibrationNote em {
+:where(.vui-routes-chatcodingroute).cacheDetailCalibrationNote strong,
+:where(.vui-routes-chatcodingroute).cacheDetailCalibrationNote em {
   color: var(--fg-primary);
   font-style: normal;
   font-weight: 760;
   white-space: nowrap;
 }
 
-.cacheDetailCalibrationNote span {
+:where(.vui-routes-chatcodingroute).cacheDetailCalibrationNote span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.cacheDetailBody {
+:where(.vui-routes-chatcodingroute).cacheDetailBody {
   display: grid;
   grid-template-columns: 236px minmax(0, 1fr);
   gap: 16px;
@@ -3313,7 +3314,7 @@
   overflow: hidden;
 }
 
-.cacheDetailDonutPanel {
+:where(.vui-routes-chatcodingroute).cacheDetailDonutPanel {
   display: grid;
   justify-items: center;
   gap: 7px;
@@ -3321,7 +3322,7 @@
   min-width: 0;
 }
 
-.cacheDetailDonutPanel p {
+:where(.vui-routes-chatcodingroute).cacheDetailDonutPanel p {
   width: 100%;
   max-height: 7.2em;
   overflow: auto;
@@ -3331,7 +3332,7 @@
   background: var(--surface-panel-muted);
 }
 
-.cacheDetailDonutLegend {
+:where(.vui-routes-chatcodingroute).cacheDetailDonutLegend {
   display: grid;
   gap: 4px;
   width: 100%;
@@ -3344,7 +3345,7 @@
   line-height: 1.25;
 }
 
-.cacheDetailDonutLegend span {
+:where(.vui-routes-chatcodingroute).cacheDetailDonutLegend span {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3352,39 +3353,39 @@
   min-width: 0;
 }
 
-.cacheDetailDonutLegend b {
+:where(.vui-routes-chatcodingroute).cacheDetailDonutLegend b {
   flex: 0 0 auto;
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
   font-weight: 760;
 }
 
-.cacheDetailDonutShell {
+:where(.vui-routes-chatcodingroute).cacheDetailDonutShell {
   position: relative;
   width: 188px;
   height: 188px;
 }
 
-.cacheDetailDonutSvg {
+:where(.vui-routes-chatcodingroute).cacheDetailDonutSvg {
   width: 188px;
   height: 188px;
 }
 
-.cacheDetailDonutCenter {
+:where(.vui-routes-chatcodingroute).cacheDetailDonutCenter {
   inset: 52px;
 }
 
-.cacheDetailDonutCenter strong {
+:where(.vui-routes-chatcodingroute).cacheDetailDonutCenter strong {
   font-size: 1.26rem;
 }
 
-.cacheDetailDonutCenter span,
-.cacheDetailDonutCenter small {
+:where(.vui-routes-chatcodingroute).cacheDetailDonutCenter span,
+:where(.vui-routes-chatcodingroute).cacheDetailDonutCenter small {
   max-width: 76px;
   font-size: var(--vui-font-xs);
 }
 
-.cacheDetailSegmentList {
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentList {
   display: grid;
   gap: 8px;
   min-width: 0;
@@ -3396,13 +3397,13 @@
   scrollbar-gutter: stable;
 }
 
-.cacheDetailSegmentGroup {
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentGroup {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
 
-.cacheDetailSegmentHeader {
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3412,16 +3413,16 @@
   font-size: var(--vui-font-xs);
 }
 
-.cacheDetailSegmentHeader strong {
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentHeader strong {
   color: var(--fg-secondary);
   font-size: var(--vui-font-sm);
 }
 
-.cacheDetailSegmentHeader span {
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentHeader span {
   flex: 0 0 auto;
 }
 
-.cacheDetailSegmentRow {
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentRow {
   display: grid;
   grid-template-columns: 7px minmax(0, 1fr) auto;
   gap: 7px;
@@ -3431,7 +3432,7 @@
   border-top: 1px solid var(--border-soft);
 }
 
-.cacheDetailSwatch {
+:where(.vui-routes-chatcodingroute).cacheDetailSwatch {
   width: 7px;
   height: 42px;
   margin-top: 2px;
@@ -3439,33 +3440,33 @@
   background: color-mix(in srgb, var(--fg-tertiary) 48%, transparent);
 }
 
-.cacheDetailSwatch.cacheDonutSegmentCached {
+:where(.vui-routes-chatcodingroute).cacheDetailSwatch.cacheDonutSegmentCached {
   background: var(--state-success);
 }
 
-.cacheDetailSwatch.cacheDonutSegmentCacheWrite {
+:where(.vui-routes-chatcodingroute).cacheDetailSwatch.cacheDonutSegmentCacheWrite {
   background: var(--accent-warm);
 }
 
-.cacheDetailSwatch.cacheDonutSegmentUncached {
+:where(.vui-routes-chatcodingroute).cacheDetailSwatch.cacheDonutSegmentUncached {
   background: var(--fg-tertiary);
 }
 
-.cacheDetailSwatch.cacheDonutSegmentMissing {
+:where(.vui-routes-chatcodingroute).cacheDetailSwatch.cacheDonutSegmentMissing {
   background: color-mix(in srgb, var(--fg-tertiary) 46%, transparent);
 }
 
-.cacheDetailSwatch.cacheDonutSegmentOther {
+:where(.vui-routes-chatcodingroute).cacheDetailSwatch.cacheDonutSegmentOther {
   background: var(--accent-warm);
 }
 
-.cacheDetailSegmentText {
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentText {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
 
-.cacheDetailSegmentText strong {
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentText strong {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
@@ -3474,8 +3475,8 @@
   white-space: nowrap;
 }
 
-.cacheDetailSegmentText span,
-.cacheDetailSegmentText small {
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentText span,
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentText small {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-tertiary);
@@ -3485,24 +3486,24 @@
   white-space: nowrap;
 }
 
-.cacheDetailSegmentSource {
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentSource {
   display: block;
 }
 
-.cacheDetailSegmentText small {
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentText small {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   white-space: normal;
 }
 
-.cacheDetailSegmentMeta {
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentMeta {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
 }
 
-.cacheDetailSegmentMeta b {
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentMeta b {
   display: inline-flex;
   align-items: center;
   width: fit-content;
@@ -3517,33 +3518,33 @@
   line-height: 1.25;
 }
 
-.cacheDetailSegmentMeta b[data-status="observed_hit"] {
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentMeta b[data-status="observed_hit"] {
   color: var(--fg-tertiary);
   border-color: color-mix(in srgb, var(--state-success) 36%, var(--border-soft));
   background: color-mix(in srgb, var(--state-success) 12%, transparent);
 }
 
-.cacheDetailSegmentMeta b[data-status="observed_partial"] {
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentMeta b[data-status="observed_partial"] {
   color: var(--fg-tertiary);
   border-color: color-mix(in srgb, var(--state-warning) 38%, var(--border-soft));
   background: color-mix(in srgb, var(--state-warning) 13%, transparent);
 }
 
-.cacheDetailSegmentMeta b[data-status="observed_miss"],
-.cacheDetailSegmentMeta b[data-status="computed_miss"] {
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentMeta b[data-status="observed_miss"],
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentMeta b[data-status="computed_miss"] {
   color: var(--fg-tertiary);
   border-color: color-mix(in srgb, var(--fg-tertiary) 38%, var(--border-soft));
   background: color-mix(in srgb, var(--fg-tertiary) 12%, transparent);
 }
 
-.cacheDetailBoundary {
+:where(.vui-routes-chatcodingroute).cacheDetailBoundary {
   display: grid;
   gap: 4px;
   min-width: 0;
   margin-top: 1px;
 }
 
-.cacheDetailBoundaryLabels {
+:where(.vui-routes-chatcodingroute).cacheDetailBoundaryLabels {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3553,7 +3554,7 @@
   line-height: 1.2;
 }
 
-.cacheDetailBoundaryLabels span {
+:where(.vui-routes-chatcodingroute).cacheDetailBoundaryLabels span {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -3563,7 +3564,7 @@
   white-space: nowrap;
 }
 
-.cacheDetailBoundaryLabels span::before {
+:where(.vui-routes-chatcodingroute).cacheDetailBoundaryLabels span::before {
   content: "";
   flex: 0 0 auto;
   width: 7px;
@@ -3572,19 +3573,19 @@
   background: currentColor;
 }
 
-.cacheDetailBoundaryLabels span[data-kind="hit"] {
+:where(.vui-routes-chatcodingroute).cacheDetailBoundaryLabels span[data-kind="hit"] {
   color: var(--fg-tertiary);
 }
 
-.cacheDetailBoundaryLabels span[data-kind="miss"] {
+:where(.vui-routes-chatcodingroute).cacheDetailBoundaryLabels span[data-kind="miss"] {
   color: var(--fg-tertiary);
 }
 
-.cacheDetailBoundaryLabels span[data-kind="unknown"] {
+:where(.vui-routes-chatcodingroute).cacheDetailBoundaryLabels span[data-kind="unknown"] {
   color: var(--fg-tertiary);
 }
 
-.cacheDetailBoundaryTrack {
+:where(.vui-routes-chatcodingroute).cacheDetailBoundaryTrack {
   display: flex;
   width: 100%;
   height: 10px;
@@ -3594,36 +3595,36 @@
   background: color-mix(in srgb, var(--surface-panel-muted) 84%, var(--fg-tertiary) 8%);
 }
 
-.cacheDetailBoundaryTrack span {
+:where(.vui-routes-chatcodingroute).cacheDetailBoundaryTrack span {
   display: block;
   min-width: 0;
   height: 100%;
 }
 
-.cacheDetailBoundaryTrack span + span {
+:where(.vui-routes-chatcodingroute).cacheDetailBoundaryTrack span + span {
   border-left: 2px solid color-mix(in srgb, var(--surface-card) 92%, white 8%);
 }
 
-.cacheDetailBoundaryHit {
+:where(.vui-routes-chatcodingroute).cacheDetailBoundaryHit {
   background: var(--state-success);
 }
 
-.cacheDetailBoundaryMiss {
+:where(.vui-routes-chatcodingroute).cacheDetailBoundaryMiss {
   background: var(--fg-tertiary);
 }
 
-.cacheDetailBoundaryUnknown {
+:where(.vui-routes-chatcodingroute).cacheDetailBoundaryUnknown {
   background: repeating-var(--vui-gradient-route-soft);
 }
 
-.cacheDetailSegmentRow em {
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentRow em {
   color: var(--fg-secondary);
   font-size: var(--vui-font-xs);
   font-style: normal;
   white-space: nowrap;
 }
 
-.cacheDetailSegmentRow em small {
+:where(.vui-routes-chatcodingroute).cacheDetailSegmentRow em small {
   display: block;
   margin-top: 2px;
   color: var(--fg-tertiary);
@@ -3631,7 +3632,7 @@
   font-style: normal;
 }
 
-.cacheDetailEmpty {
+:where(.vui-routes-chatcodingroute).cacheDetailEmpty {
   padding: 8px 0;
   border-top: 1px solid var(--border-soft);
   color: var(--fg-tertiary);
@@ -3639,126 +3640,126 @@
 }
 
 @media (max-width: 720px) {
-  .cacheDetailOverlay {
+  :where(.vui-routes-chatcodingroute).cacheDetailOverlay {
     place-items: start center;
     padding: 12px;
     overflow: hidden;
   }
 
-  .cacheDetailDialog {
+  :where(.vui-routes-chatcodingroute).cacheDetailDialog {
     width: calc(100vw - 24px);
     max-height: calc(100vh - 24px);
     max-height: calc(100dvh - 24px);
   }
 
-  .cacheDetailSummaryGrid,
-  .cacheDetailBody {
+  :where(.vui-routes-chatcodingroute).cacheDetailSummaryGrid,
+  :where(.vui-routes-chatcodingroute).cacheDetailBody {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .cacheDetailBody,
-  .cacheDetailSegmentList {
+  :where(.vui-routes-chatcodingroute).cacheDetailBody,
+  :where(.vui-routes-chatcodingroute).cacheDetailSegmentList {
     min-height: 0;
   }
 
-  .cacheDetailSegmentList {
+  :where(.vui-routes-chatcodingroute).cacheDetailSegmentList {
     max-height: calc(100dvh - 300px);
     overflow: auto;
   }
 
-  .cacheDetailDonutShell,
-  .cacheDetailDonutSvg {
+  :where(.vui-routes-chatcodingroute).cacheDetailDonutShell,
+  :where(.vui-routes-chatcodingroute).cacheDetailDonutSvg {
     width: 136px;
     height: 136px;
   }
 
-  .cacheDetailDonutCenter {
+  :where(.vui-routes-chatcodingroute).cacheDetailDonutCenter {
     inset: 37px;
   }
 
-  .cacheDetailSegmentRow {
+  :where(.vui-routes-chatcodingroute).cacheDetailSegmentRow {
     grid-template-columns: 7px minmax(0, 1fr);
   }
 
-  .cacheDetailSegmentRow em {
+  :where(.vui-routes-chatcodingroute).cacheDetailSegmentRow em {
     grid-column: 2;
     justify-self: start;
   }
 }
 
-.contextCompositionSegmentSystem {
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentSystem {
   background: var(--accent-cool);
 }
 
-.contextCompositionSegmentUser {
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentUser {
   background: var(--accent-warm);
 }
 
-.contextCompositionSegmentHistory {
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentHistory {
   background: var(--fg-tertiary);
 }
 
-.contextCompositionSegmentTask {
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentTask {
   background: var(--state-warning);
 }
 
-.contextCompositionSegmentAgent {
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentAgent {
   background: var(--state-success);
 }
 
-.contextCompositionSegmentProjectRules {
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentProjectRules {
   background: var(--state-error);
 }
 
-.contextCompositionSegmentToolDescriptions {
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentToolDescriptions {
   background: var(--accent-warm);
 }
 
-.contextCompositionSegmentToolSchema {
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentToolSchema {
   background: var(--accent-warm);
 }
 
-.contextCompositionSegmentProviderUnmapped {
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentProviderUnmapped {
   background: var(--accent-warm);
 }
 
-.contextCompositionSegmentGuidance {
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentGuidance {
   background: var(--accent-warm);
 }
 
-.contextCompositionSegmentSkill {
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentSkill {
   background: var(--state-error);
 }
 
-.contextCompositionSegmentAttachments {
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentAttachments {
   background: var(--accent-warm);
 }
 
-.contextCompositionSegmentCached {
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentCached {
   background: var(--state-success);
 }
 
-.contextCompositionSegmentCacheWrite {
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentCacheWrite {
   background: var(--accent-warm);
 }
 
-.contextCompositionSegmentUncached {
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentUncached {
   background: var(--fg-tertiary);
 }
 
-.contextCompositionSegmentMissing {
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentMissing {
   background: repeating-var(--vui-gradient-route-soft);
 }
 
-.contextCompositionSegmentUnused {
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentUnused {
   background: color-mix(in srgb, var(--fg-tertiary) 14%, transparent);
 }
 
-.contextCompositionSegmentOther {
+:where(.vui-routes-chatcodingroute).contextCompositionSegmentOther {
   background: var(--accent-warm);
 }
 
-.memberIndexSummary {
+:where(.vui-routes-chatcodingroute).memberIndexSummary {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -3772,20 +3773,20 @@
   font-size: var(--vui-font-md);
 }
 
-.memberIndexSummary strong,
-.memberIndexSummary span {
+:where(.vui-routes-chatcodingroute).memberIndexSummary strong,
+:where(.vui-routes-chatcodingroute).memberIndexSummary span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.memberIndexSummary strong {
+:where(.vui-routes-chatcodingroute).memberIndexSummary strong {
   color: var(--accent-cool-2);
   font-size: var(--vui-font-xs);
 }
 
-.panelSearch {
+:where(.vui-routes-chatcodingroute).panelSearch {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -3797,7 +3798,7 @@
   color: var(--fg-tertiary);
 }
 
-.panelSearchInput {
+:where(.vui-routes-chatcodingroute).panelSearchInput {
   width: 100%;
   min-width: 0;
   border: 0;
@@ -3808,7 +3809,7 @@
   outline: none;
 }
 
-.panelBody {
+:where(.vui-routes-chatcodingroute).panelBody {
   overflow: auto;
   display: grid;
   align-content: start;
@@ -3816,13 +3817,13 @@
   padding-right: 2px;
 }
 
-.sessionActionRow {
+:where(.vui-routes-chatcodingroute).sessionActionRow {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 5px;
 }
 
-.newSessionButton {
+:where(.vui-routes-chatcodingroute).newSessionButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3839,12 +3840,12 @@
   box-shadow: none;
 }
 
-.newSessionButton:disabled {
+:where(.vui-routes-chatcodingroute).newSessionButton:disabled {
   cursor: not-allowed;
   opacity: 0.58;
 }
 
-.newGroupButton {
+:where(.vui-routes-chatcodingroute).newGroupButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3860,17 +3861,17 @@
   cursor: pointer;
 }
 
-.newGroupButton[aria-expanded="true"] {
+:where(.vui-routes-chatcodingroute).newGroupButton[aria-expanded="true"] {
   background: color-mix(in srgb, var(--accent-cool) 18%, transparent);
   border-color: color-mix(in srgb, var(--accent-cool) 36%, var(--border-soft));
 }
 
-.newGroupButton:disabled {
+:where(.vui-routes-chatcodingroute).newGroupButton:disabled {
   cursor: not-allowed;
   opacity: 0.58;
 }
 
-.groupComposerPanel {
+:where(.vui-routes-chatcodingroute).groupComposerPanel {
   display: grid;
   gap: 8px;
   padding: 9px;
@@ -3881,17 +3882,17 @@
     var(--surface-panel);
 }
 
-.groupComposerField {
+:where(.vui-routes-chatcodingroute).groupComposerField {
   display: grid;
   gap: 5px;
 }
 
-.groupComposerField span {
+:where(.vui-routes-chatcodingroute).groupComposerField span {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
 }
 
-.groupComposerInput {
+:where(.vui-routes-chatcodingroute).groupComposerInput {
   width: 100%;
   min-height: 30px;
   border: 1px solid var(--border-soft);
@@ -3903,12 +3904,12 @@
   font-size: var(--vui-font-md);
 }
 
-.groupComposerInput:disabled {
+:where(.vui-routes-chatcodingroute).groupComposerInput:disabled {
   cursor: not-allowed;
   opacity: 0.58;
 }
 
-.groupAgentPicker {
+:where(.vui-routes-chatcodingroute).groupAgentPicker {
   display: grid;
   gap: 5px;
   max-height: 190px;
@@ -3916,7 +3917,7 @@
   padding-right: 2px;
 }
 
-.groupAgentOption {
+:where(.vui-routes-chatcodingroute).groupAgentOption {
   display: grid;
   grid-template-columns: auto 28px minmax(0, 1fr);
   align-items: center;
@@ -3928,52 +3929,52 @@
   cursor: pointer;
 }
 
-.groupAgentOptionSelected {
+:where(.vui-routes-chatcodingroute).groupAgentOptionSelected {
   border-color: color-mix(in srgb, var(--accent-cool) 48%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-cool) 12%, var(--surface-card));
 }
 
-.groupAgentOption input {
+:where(.vui-routes-chatcodingroute).groupAgentOption input {
   margin: 0;
 }
 
-.groupAgentOption span {
+:where(.vui-routes-chatcodingroute).groupAgentOption span {
   min-width: 0;
   display: grid;
   gap: 2px;
 }
 
-.groupAgentOption strong,
-.groupAgentOption small {
+:where(.vui-routes-chatcodingroute).groupAgentOption strong,
+:where(.vui-routes-chatcodingroute).groupAgentOption small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.groupAgentOption strong {
+:where(.vui-routes-chatcodingroute).groupAgentOption strong {
   color: var(--fg-primary);
   font-size: var(--vui-font-md);
 }
 
-.groupAgentOption small {
+:where(.vui-routes-chatcodingroute).groupAgentOption small {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
 }
 
-.groupAgentOption .agentRoleTag {
+:where(.vui-routes-chatcodingroute).groupAgentOption .agentRoleTag {
   justify-self: start;
   width: 132px;
   max-width: 100%;
 }
 
-.agentOptionMeta {
+:where(.vui-routes-chatcodingroute).agentOptionMeta {
   display: flex;
   align-items: center;
   min-width: 0;
   gap: 4px;
 }
 
-.groupComposerEmpty {
+:where(.vui-routes-chatcodingroute).groupComposerEmpty {
   margin: 0;
   padding: 8px;
   border: 1px dashed var(--border-soft);
@@ -3983,7 +3984,7 @@
   line-height: 1.4;
 }
 
-.createGroupButton {
+:where(.vui-routes-chatcodingroute).createGroupButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3998,12 +3999,12 @@
   cursor: pointer;
 }
 
-.createGroupButton:disabled {
+:where(.vui-routes-chatcodingroute).createGroupButton:disabled {
   cursor: not-allowed;
   opacity: 0.54;
 }
 
-.panelState {
+:where(.vui-routes-chatcodingroute).panelState {
   padding: 12px;
   border: 1px dashed var(--border-soft);
   border-radius: var(--radius-panel);
@@ -4012,7 +4013,7 @@
   line-height: 1.5;
 }
 
-.panelNotice {
+:where(.vui-routes-chatcodingroute).panelNotice {
   padding: 7px 8px;
   border: 1px solid color-mix(in srgb, var(--state-error) 24%, var(--border-soft));
   border-radius: 7px;
@@ -4023,12 +4024,12 @@
   overflow-wrap: anywhere;
 }
 
-.conversationGroup {
+:where(.vui-routes-chatcodingroute).conversationGroup {
   display: grid;
   gap: 4px;
 }
 
-.systemEntryGroup {
+:where(.vui-routes-chatcodingroute).systemEntryGroup {
   display: grid;
   gap: 3px;
   margin-top: 3px;
@@ -4036,7 +4037,7 @@
   border-bottom: 1px solid color-mix(in srgb, var(--border-soft) 58%, transparent);
 }
 
-.systemEntryButton {
+:where(.vui-routes-chatcodingroute).systemEntryButton {
   display: grid;
   grid-template-columns: 25px minmax(0, 1fr);
   align-items: center;
@@ -4053,19 +4054,19 @@
   text-align: left;
 }
 
-.systemEntryButton:hover,
-.systemEntryButton:focus-visible {
+:where(.vui-routes-chatcodingroute).systemEntryButton:hover,
+:where(.vui-routes-chatcodingroute).systemEntryButton:focus-visible {
   border-color: color-mix(in srgb, var(--accent-cool) 18%, var(--border-soft));
   background: color-mix(in srgb, var(--surface-card) 64%, transparent);
   outline: none;
 }
 
-.systemEntryButtonActive {
+:where(.vui-routes-chatcodingroute).systemEntryButtonActive {
   border-color: color-mix(in srgb, var(--accent-cool) 30%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-card));
 }
 
-.systemEntryIcon {
+:where(.vui-routes-chatcodingroute).systemEntryIcon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4077,20 +4078,20 @@
   background: color-mix(in srgb, var(--accent-cool) 10%, transparent);
 }
 
-.systemEntryCopy {
+:where(.vui-routes-chatcodingroute).systemEntryCopy {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
 
-.systemEntryTitleRow {
+:where(.vui-routes-chatcodingroute).systemEntryTitleRow {
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
 }
 
-.systemEntryTitle {
+:where(.vui-routes-chatcodingroute).systemEntryTitle {
   overflow: hidden;
   color: var(--fg-primary);
   font-size: var(--vui-font-sm);
@@ -4100,7 +4101,7 @@
   white-space: nowrap;
 }
 
-.systemEntryMeta {
+:where(.vui-routes-chatcodingroute).systemEntryMeta {
   overflow: hidden;
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
@@ -4109,11 +4110,11 @@
   white-space: nowrap;
 }
 
-.conversationGroup + .conversationGroup {
+:where(.vui-routes-chatcodingroute).conversationGroup + .conversationGroup {
   margin-top: 3px;
 }
 
-.conversationTreeRootHeader {
+:where(.vui-routes-chatcodingroute).conversationTreeRootHeader {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -4127,13 +4128,13 @@
   font-weight: 780;
 }
 
-.conversationTreeRootHeader span {
+:where(.vui-routes-chatcodingroute).conversationTreeRootHeader span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.conversationTreeRootHeader strong {
+:where(.vui-routes-chatcodingroute).conversationTreeRootHeader strong {
   min-width: 22px;
   padding: 2px 6px;
   border: 1px solid var(--border-soft);
@@ -4144,7 +4145,7 @@
   text-align: center;
 }
 
-.conversationGroupHeader {
+:where(.vui-routes-chatcodingroute).conversationGroupHeader {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -4162,29 +4163,29 @@
   text-align: left;
 }
 
-.conversationGroupHeader:hover,
-.conversationGroupHeader:focus-visible {
+:where(.vui-routes-chatcodingroute).conversationGroupHeader:hover,
+:where(.vui-routes-chatcodingroute).conversationGroupHeader:focus-visible {
   background: color-mix(in srgb, var(--surface-card) 72%, transparent);
   color: var(--fg-primary);
   outline: none;
 }
 
-.conversationGroupHeader svg {
+:where(.vui-routes-chatcodingroute).conversationGroupHeader svg {
   transform: rotate(0deg);
   transition: transform 140ms ease;
 }
 
-.conversationGroupHeader[aria-expanded="true"] svg {
+:where(.vui-routes-chatcodingroute).conversationGroupHeader[aria-expanded="true"] svg {
   transform: rotate(90deg);
 }
 
-.conversationGroupHeader span {
+:where(.vui-routes-chatcodingroute).conversationGroupHeader span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.conversationGroupHeader strong {
+:where(.vui-routes-chatcodingroute).conversationGroupHeader strong {
   min-width: 22px;
   padding: 2px 6px;
   border: 1px solid var(--border-soft);
@@ -4196,25 +4197,25 @@
   text-align: center;
 }
 
-.conversationGroupHeader[data-vui] {
+:where(.vui-routes-chatcodingroute).conversationGroupHeader[data-vui] {
   justify-content: stretch;
   font: inherit;
   font-size: var(--vui-font-xs);
   font-weight: 760;
 }
 
-.conversationGroupHeader[data-vui] [data-slot="vui-button-content"],
-.conversationGroupHeader[data-vui] [data-slot="vui-button-label"] {
+:where(.vui-routes-chatcodingroute).conversationGroupHeader[data-vui] [data-slot="vui-button-content"],
+:where(.vui-routes-chatcodingroute).conversationGroupHeader[data-vui] [data-slot="vui-button-label"] {
   display: contents;
 }
 
-.conversationGroupList {
+:where(.vui-routes-chatcodingroute).conversationGroupList {
   display: grid;
   gap: 1px;
 }
 
-.sessionLoadMoreButton,
-.sessionLoadMoreStatus {
+:where(.vui-routes-chatcodingroute).sessionLoadMoreButton,
+:where(.vui-routes-chatcodingroute).sessionLoadMoreStatus {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -4231,38 +4232,38 @@
   cursor: pointer;
 }
 
-.sessionLoadMoreStatus {
+:where(.vui-routes-chatcodingroute).sessionLoadMoreStatus {
   cursor: default;
 }
 
-.sessionLoadMoreButton strong,
-.sessionLoadMoreStatus strong {
+:where(.vui-routes-chatcodingroute).sessionLoadMoreButton strong,
+:where(.vui-routes-chatcodingroute).sessionLoadMoreStatus strong {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
   font-weight: 740;
   white-space: nowrap;
 }
 
-.sessionLoadMoreButton:hover,
-.sessionLoadMoreButton:focus-visible {
+:where(.vui-routes-chatcodingroute).sessionLoadMoreButton:hover,
+:where(.vui-routes-chatcodingroute).sessionLoadMoreButton:focus-visible {
   border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
   color: var(--fg-primary);
 }
 
-.sessionLoadMoreButton:disabled {
+:where(.vui-routes-chatcodingroute).sessionLoadMoreButton:disabled {
   cursor: wait;
   opacity: 0.62;
 }
 
-.teamTreeGroup {
+:where(.vui-routes-chatcodingroute).teamTreeGroup {
   margin-top: 6px;
 }
 
-.teamTreeItem {
+:where(.vui-routes-chatcodingroute).teamTreeItem {
   gap: 5px;
 }
 
-.teamTreeLabelRow {
+:where(.vui-routes-chatcodingroute).teamTreeLabelRow {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -4274,19 +4275,19 @@
   font-weight: 720;
 }
 
-.teamTreeLabelRow a {
+:where(.vui-routes-chatcodingroute).teamTreeLabelRow a {
   color: var(--accent-cool-2);
   text-decoration: none;
 }
 
-.teamTreeChildren {
+:where(.vui-routes-chatcodingroute).teamTreeChildren {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 5px;
   padding: 0 6px 5px 42px;
 }
 
-.teamTreeChild {
+:where(.vui-routes-chatcodingroute).teamTreeChild {
   display: inline-grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -4303,42 +4304,42 @@
   min-width: 0;
 }
 
-button.teamTreeChild {
+button:where(.vui-routes-chatcodingroute).teamTreeChild {
   cursor: pointer;
 }
 
-button.teamTreeChild,
-a.teamTreeChild {
+button:where(.vui-routes-chatcodingroute).teamTreeChild,
+a:where(.vui-routes-chatcodingroute).teamTreeChild {
   text-decoration: none;
 }
 
-button.teamTreeChild:hover,
-a.teamTreeChild:hover,
-button.teamTreeChild:focus-visible,
-a.teamTreeChild:focus-visible {
+button:where(.vui-routes-chatcodingroute).teamTreeChild:hover,
+a:where(.vui-routes-chatcodingroute).teamTreeChild:hover,
+button:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible,
+a:where(.vui-routes-chatcodingroute).teamTreeChild:focus-visible {
   border-color: color-mix(in srgb, var(--accent-cool) 32%, var(--border-soft));
   color: var(--fg-primary);
   outline: none;
 }
 
-.teamTreeChild:disabled {
+:where(.vui-routes-chatcodingroute).teamTreeChild:disabled {
   cursor: not-allowed;
   opacity: 0.58;
 }
 
-.teamTreeChild span,
-.teamTreeChild strong {
+:where(.vui-routes-chatcodingroute).teamTreeChild span,
+:where(.vui-routes-chatcodingroute).teamTreeChild strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.teamTreeChild strong {
+:where(.vui-routes-chatcodingroute).teamTreeChild strong {
   color: var(--fg-secondary);
   font-weight: 760;
 }
 
-.sessionItem {
+:where(.vui-routes-chatcodingroute).sessionItem {
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -4355,42 +4356,42 @@ a.teamTreeChild:focus-visible {
     box-shadow 140ms ease;
 }
 
-.sessionItemActive {
+:where(.vui-routes-chatcodingroute).sessionItemActive {
   border-color: color-mix(in srgb, var(--accent-cool) 20%, transparent);
   box-shadow: none;
 }
 
-.sessionItem[aria-current="true"] {
+:where(.vui-routes-chatcodingroute).sessionItem[aria-current="true"] {
   background: color-mix(in srgb, var(--surface-card) 68%, transparent);
   box-shadow: var(--vui-shadow-inset-accent);
 }
 
-.directSessionItem {
+:where(.vui-routes-chatcodingroute).directSessionItem {
   padding-right: 4px;
   box-shadow: none;
 }
 
-.groupSessionItem {
+:where(.vui-routes-chatcodingroute).groupSessionItem {
   padding-right: 4px;
   border-color: transparent;
   background: transparent;
   box-shadow: none;
 }
 
-.groupSessionItem.sessionItemActive,
-.groupSessionItem[aria-current="true"] {
+:where(.vui-routes-chatcodingroute).groupSessionItem.sessionItemActive,
+:where(.vui-routes-chatcodingroute).groupSessionItem[aria-current="true"] {
   border-color: transparent;
   background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-card));
   box-shadow: var(--vui-shadow-inset-accent);
 }
 
-.sessionItem:hover,
-.sessionItem:focus-within {
+:where(.vui-routes-chatcodingroute).sessionItem:hover,
+:where(.vui-routes-chatcodingroute).sessionItem:focus-within {
   background: color-mix(in srgb, var(--surface-card) 58%, transparent);
   box-shadow: var(--vui-shadow-inset-accent);
 }
 
-.sessionItemMain {
+:where(.vui-routes-chatcodingroute).sessionItemMain {
   display: grid;
   grid-template-columns: 27px minmax(0, 1fr);
   align-items: center;
@@ -4405,29 +4406,29 @@ a.teamTreeChild:focus-visible {
   cursor: pointer;
 }
 
-.sessionItemMain:where(div) {
+:where(.vui-routes-chatcodingroute).sessionItemMain:where(div) {
   cursor: default;
 }
 
-.sessionItemMain[data-vui] {
+:where(.vui-routes-chatcodingroute).sessionItemMain[data-vui] {
   justify-content: stretch;
   font: inherit;
   font-weight: 760;
 }
 
-.sessionItemMain[data-vui] [data-slot="vui-button-content"],
-.sessionItemMain[data-vui] [data-slot="vui-button-label"] {
+:where(.vui-routes-chatcodingroute).sessionItemMain[data-vui] [data-slot="vui-button-content"],
+:where(.vui-routes-chatcodingroute).sessionItemMain[data-vui] [data-slot="vui-button-label"] {
   display: contents;
 }
 
-.sessionItemTop {
+:where(.vui-routes-chatcodingroute).sessionItemTop {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 7px;
 }
 
-.sessionItemIdentity {
+:where(.vui-routes-chatcodingroute).sessionItemIdentity {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -4435,7 +4436,7 @@ a.teamTreeChild:focus-visible {
   min-width: 0;
 }
 
-.sessionItemTitle {
+:where(.vui-routes-chatcodingroute).sessionItemTitle {
   font-family: var(--font-body);
   min-width: 0;
   overflow: hidden;
@@ -4447,7 +4448,7 @@ a.teamTreeChild:focus-visible {
   white-space: nowrap;
 }
 
-.conversationAvatar {
+:where(.vui-routes-chatcodingroute).conversationAvatar {
   display: grid;
   place-items: center;
   width: 26px;
@@ -4461,23 +4462,23 @@ a.teamTreeChild:focus-visible {
   box-shadow: var(--vui-shadow-inset-accent);
 }
 
-.conversationAvatarDirect {
+:where(.vui-routes-chatcodingroute).conversationAvatarDirect {
   color: color-mix(in srgb, var(--accent-cool) 76%, var(--fg-primary));
   background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-card));
 }
 
-.conversationAvatarGroup {
+:where(.vui-routes-chatcodingroute).conversationAvatarGroup {
   color: var(--accent-cool-2);
   background: color-mix(in srgb, var(--accent-cool) 18%, var(--surface-card));
 }
 
-.conversationCopy {
+:where(.vui-routes-chatcodingroute).conversationCopy {
   display: grid;
   min-width: 0;
   gap: 4px;
 }
 
-.conversationTitleRow {
+:where(.vui-routes-chatcodingroute).conversationTitleRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) max-content;
   align-items: center;
@@ -4485,14 +4486,14 @@ a.teamTreeChild:focus-visible {
   gap: 5px;
 }
 
-.conversationTitleMain {
+:where(.vui-routes-chatcodingroute).conversationTitleMain {
   display: inline-flex;
   align-items: center;
   min-width: 0;
   gap: 5px;
 }
 
-.conversationKindBadge {
+:where(.vui-routes-chatcodingroute).conversationKindBadge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4509,23 +4510,23 @@ a.teamTreeChild:focus-visible {
   white-space: nowrap;
 }
 
-.conversationKindBadgeDirect {
+:where(.vui-routes-chatcodingroute).conversationKindBadgeDirect {
   color: color-mix(in srgb, var(--accent-cool) 64%, var(--fg-tertiary));
   background: transparent;
 }
 
-.conversationKindBadgeChild {
+:where(.vui-routes-chatcodingroute).conversationKindBadgeChild {
   color: color-mix(in srgb, var(--accent-cool) 72%, var(--fg-tertiary));
   background: transparent;
 }
 
-.conversationKindBadgeGroup {
+:where(.vui-routes-chatcodingroute).conversationKindBadgeGroup {
   color: var(--accent-cool-2);
   border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-cool) 14%, transparent);
 }
 
-.agentRoleTag {
+:where(.vui-routes-chatcodingroute).agentRoleTag {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4543,34 +4544,34 @@ a.teamTreeChild:focus-visible {
   white-space: nowrap;
 }
 
-.agentRoleTag_chat {
+:where(.vui-routes-chatcodingroute).agentRoleTag_chat {
   background: transparent;
   color: var(--fg-secondary);
 }
 
-.agentRoleTag_research {
+:where(.vui-routes-chatcodingroute).agentRoleTag_research {
   background: transparent;
   color: color-mix(in srgb, var(--accent-cool) 58%, var(--fg-secondary));
 }
 
-.agentRoleTag_self {
+:where(.vui-routes-chatcodingroute).agentRoleTag_self {
   background: transparent;
   color: color-mix(in srgb, var(--state-success) 70%, var(--fg-secondary));
 }
 
-.agentRoleTag_supervised {
+:where(.vui-routes-chatcodingroute).agentRoleTag_supervised {
   background: transparent;
   color: color-mix(in srgb, var(--state-warning) 68%, var(--fg-secondary));
 }
 
-.agentRoleTag_tool,
-.agentRoleTag_memory,
-.agentRoleTag_general {
+:where(.vui-routes-chatcodingroute).agentRoleTag_tool,
+:where(.vui-routes-chatcodingroute).agentRoleTag_memory,
+:where(.vui-routes-chatcodingroute).agentRoleTag_general {
   background: transparent;
   color: var(--fg-secondary);
 }
 
-.agentModelTag {
+:where(.vui-routes-chatcodingroute).agentModelTag {
   display: inline-flex;
   align-items: center;
   gap: 2px;
@@ -4591,7 +4592,7 @@ a.teamTreeChild:focus-visible {
   white-space: nowrap;
 }
 
-.agentModelTitleTag {
+:where(.vui-routes-chatcodingroute).agentModelTitleTag {
   flex: 0 1 auto;
   max-width: min(164px, 68%);
   min-height: 17px;
@@ -4604,7 +4605,7 @@ a.teamTreeChild:focus-visible {
   font-weight: 700;
 }
 
-.sessionStatusCluster {
+:where(.vui-routes-chatcodingroute).sessionStatusCluster {
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
@@ -4613,11 +4614,11 @@ a.teamTreeChild:focus-visible {
   max-width: 100%;
 }
 
-.agentModelTag svg {
+:where(.vui-routes-chatcodingroute).agentModelTag svg {
   flex: 0 0 auto;
 }
 
-.agentModelLine {
+:where(.vui-routes-chatcodingroute).agentModelLine {
   display: block;
   min-width: 0;
   color: var(--fg-tertiary);
@@ -4629,7 +4630,7 @@ a.teamTreeChild:focus-visible {
   white-space: nowrap;
 }
 
-.sessionCurrentBadge {
+:where(.vui-routes-chatcodingroute).sessionCurrentBadge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4645,7 +4646,7 @@ a.teamTreeChild:focus-visible {
   white-space: nowrap;
 }
 
-.sessionCurrentIndicator {
+:where(.vui-routes-chatcodingroute).sessionCurrentIndicator {
   width: 6px;
   height: 6px;
   border-radius: 999px;
@@ -4653,8 +4654,8 @@ a.teamTreeChild:focus-visible {
   box-shadow: var(--vui-shadow-accent);
 }
 
-.sessionRunningBadge,
-.sessionUnreadBadge {
+:where(.vui-routes-chatcodingroute).sessionRunningBadge,
+:where(.vui-routes-chatcodingroute).sessionUnreadBadge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4666,7 +4667,7 @@ a.teamTreeChild:focus-visible {
   white-space: nowrap;
 }
 
-.sessionRunningBadge {
+:where(.vui-routes-chatcodingroute).sessionRunningBadge {
   gap: 3px;
   padding: 1px 5px;
   border: 1px solid color-mix(in srgb, var(--state-success) 26%, transparent);
@@ -4674,11 +4675,11 @@ a.teamTreeChild:focus-visible {
   color: color-mix(in srgb, var(--state-success) 76%, var(--fg-primary));
 }
 
-.sessionRunningBadge svg {
+:where(.vui-routes-chatcodingroute).sessionRunningBadge svg {
   flex: 0 0 auto;
 }
 
-.sessionUnreadBadge {
+:where(.vui-routes-chatcodingroute).sessionUnreadBadge {
   min-width: 16px;
   padding: 1px 5px;
   border: 1px solid color-mix(in srgb, var(--accent-warm) 30%, transparent);
@@ -4686,7 +4687,7 @@ a.teamTreeChild:focus-visible {
   color: var(--accent-warm-2);
 }
 
-.sessionTitleInput {
+:where(.vui-routes-chatcodingroute).sessionTitleInput {
   min-width: 0;
   width: 100%;
   border: 1px solid color-mix(in srgb, var(--accent-warm) 30%, transparent);
@@ -4697,20 +4698,20 @@ a.teamTreeChild:focus-visible {
   font: inherit;
 }
 
-.sessionState {
+:where(.vui-routes-chatcodingroute).sessionState {
   flex: 0 0 auto;
   display: inline-flex;
   color: color-mix(in srgb, var(--fg-tertiary) 76%, transparent);
   font-size: var(--vui-font-xs);
 }
 
-.sessionItemSummary,
-.sessionItemMeta {
+:where(.vui-routes-chatcodingroute).sessionItemSummary,
+:where(.vui-routes-chatcodingroute).sessionItemMeta {
   margin: 0;
   color: var(--fg-secondary);
 }
 
-.sessionItemSummary {
+:where(.vui-routes-chatcodingroute).sessionItemSummary {
   display: block;
   overflow: hidden;
   color: var(--fg-secondary);
@@ -4720,12 +4721,12 @@ a.teamTreeChild:focus-visible {
   white-space: nowrap;
 }
 
-.sessionItemMeta {
+:where(.vui-routes-chatcodingroute).sessionItemMeta {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
 }
 
-.sessionAgentLine {
+:where(.vui-routes-chatcodingroute).sessionAgentLine {
   margin: 3px 0 0;
   color: var(--accent-cool-2);
   font-size: var(--vui-font-sm);
@@ -4734,7 +4735,7 @@ a.teamTreeChild:focus-visible {
   white-space: nowrap;
 }
 
-.conversationMetaRow {
+:where(.vui-routes-chatcodingroute).conversationMetaRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) fit-content(92px);
   align-items: center;
@@ -4745,41 +4746,41 @@ a.teamTreeChild:focus-visible {
   line-height: 1.1;
 }
 
-.conversationMetaMain,
-.conversationMetaTime {
+:where(.vui-routes-chatcodingroute).conversationMetaMain,
+:where(.vui-routes-chatcodingroute).conversationMetaTime {
   display: inline-flex;
   align-items: center;
   min-width: 0;
   gap: 3px;
 }
 
-.conversationMetaMain {
+:where(.vui-routes-chatcodingroute).conversationMetaMain {
   overflow: hidden;
   color: var(--fg-secondary);
 }
 
-.conversationMetaTime {
+:where(.vui-routes-chatcodingroute).conversationMetaTime {
   flex: 0 0 auto;
   justify-content: flex-end;
   max-width: 92px;
   white-space: nowrap;
 }
 
-.conversationMetaMain span:not(.conversationKindBadge),
-.conversationMetaMain time {
+:where(.vui-routes-chatcodingroute).conversationMetaMain span:not(.conversationKindBadge),
+:where(.vui-routes-chatcodingroute).conversationMetaMain time {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.conversationMetaTime time {
+:where(.vui-routes-chatcodingroute).conversationMetaTime time {
   overflow: visible;
   text-overflow: clip;
   white-space: nowrap;
 }
 
-.sessionActionStack {
+:where(.vui-routes-chatcodingroute).sessionActionStack {
   position: absolute;
   top: 50%;
   right: 6px;
@@ -4792,19 +4793,19 @@ a.teamTreeChild:focus-visible {
   transition: opacity 140ms ease;
 }
 
-.sessionItem:hover .sessionActionStack,
-.sessionItem:focus-within .sessionActionStack,
-.sessionItem[aria-current="true"] .sessionActionStack {
+:where(.vui-routes-chatcodingroute).sessionItem:hover .sessionActionStack,
+:where(.vui-routes-chatcodingroute).sessionItem:focus-within .sessionActionStack,
+:where(.vui-routes-chatcodingroute).sessionItem[aria-current="true"] .sessionActionStack {
   opacity: 1;
   pointer-events: auto;
 }
 
-.directSessionItem:has(.sessionActionStack) {
+:where(.vui-routes-chatcodingroute).directSessionItem:has(.sessionActionStack) {
   padding-right: 56px;
 }
 
-.sessionIconButton,
-.sessionDeleteButton {
+:where(.vui-routes-chatcodingroute).sessionIconButton,
+:where(.vui-routes-chatcodingroute).sessionDeleteButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4817,31 +4818,31 @@ a.teamTreeChild:focus-visible {
   cursor: pointer;
 }
 
-.sessionIconButton:hover:not(:disabled) {
+:where(.vui-routes-chatcodingroute).sessionIconButton:hover:not(:disabled) {
   color: var(--accent-warm-2);
   border-color: color-mix(in srgb, var(--accent-warm) 30%, transparent);
   background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
 }
 
-.sessionDeleteButton:hover:not(:disabled) {
+:where(.vui-routes-chatcodingroute).sessionDeleteButton:hover:not(:disabled) {
   color: var(--state-error);
   border-color: color-mix(in srgb, var(--state-error) 32%, transparent);
   background: color-mix(in srgb, var(--state-error) 12%, transparent);
 }
 
-.sessionIconButton:disabled,
-.sessionDeleteButton:disabled {
+:where(.vui-routes-chatcodingroute).sessionIconButton:disabled,
+:where(.vui-routes-chatcodingroute).sessionDeleteButton:disabled {
   cursor: not-allowed;
   opacity: 0.45;
 }
 
-.sessionIconButton[data-vui],
-.sessionDeleteButton[data-vui] {
+:where(.vui-routes-chatcodingroute).sessionIconButton[data-vui],
+:where(.vui-routes-chatcodingroute).sessionDeleteButton[data-vui] {
   min-width: 0;
   padding: 0;
 }
 
-.sessionContextMenu {
+:where(.vui-routes-chatcodingroute).sessionContextMenu {
   position: fixed;
   z-index: 60;
   display: grid;
@@ -4855,7 +4856,7 @@ a.teamTreeChild:focus-visible {
   backdrop-filter: blur(8px);
 }
 
-.sessionContextMenuItem {
+:where(.vui-routes-chatcodingroute).sessionContextMenuItem {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
@@ -4874,14 +4875,14 @@ a.teamTreeChild:focus-visible {
   cursor: pointer;
 }
 
-.sessionContextMenuItem span {
+:where(.vui-routes-chatcodingroute).sessionContextMenuItem span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.sessionContextMenuItem[data-vui] {
+:where(.vui-routes-chatcodingroute).sessionContextMenuItem[data-vui] {
   justify-content: stretch;
   border: 0;
   background: transparent;
@@ -4890,7 +4891,7 @@ a.teamTreeChild:focus-visible {
   font-weight: 700;
 }
 
-.sessionContextMenuItem[data-vui] [data-slot="vui-button-content"] {
+:where(.vui-routes-chatcodingroute).sessionContextMenuItem[data-vui] [data-slot="vui-button-content"] {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
@@ -4899,34 +4900,34 @@ a.teamTreeChild:focus-visible {
   width: 100%;
 }
 
-.sessionContextMenuItem[data-vui] [data-slot="vui-button-icon"],
-.sessionContextMenuItem[data-vui] [data-slot="vui-button-label"] {
+:where(.vui-routes-chatcodingroute).sessionContextMenuItem[data-vui] [data-slot="vui-button-icon"],
+:where(.vui-routes-chatcodingroute).sessionContextMenuItem[data-vui] [data-slot="vui-button-label"] {
   min-width: 0;
 }
 
-.sessionContextMenuItem:hover:not(:disabled),
-.sessionContextMenuItem:focus-visible:not(:disabled) {
+:where(.vui-routes-chatcodingroute).sessionContextMenuItem:hover:not(:disabled),
+:where(.vui-routes-chatcodingroute).sessionContextMenuItem:focus-visible:not(:disabled) {
   background: color-mix(in srgb, var(--accent-warm) 13%, transparent);
   color: var(--fg-primary);
 }
 
-.sessionContextMenuDanger {
+:where(.vui-routes-chatcodingroute).sessionContextMenuDanger {
   color: color-mix(in srgb, var(--state-error) 82%, var(--fg-secondary));
 }
 
-.sessionContextMenuDanger:hover:not(:disabled),
-.sessionContextMenuDanger:focus-visible:not(:disabled) {
+:where(.vui-routes-chatcodingroute).sessionContextMenuDanger:hover:not(:disabled),
+:where(.vui-routes-chatcodingroute).sessionContextMenuDanger:focus-visible:not(:disabled) {
   background: color-mix(in srgb, var(--state-error) 12%, transparent);
   color: var(--state-error);
 }
 
-.sessionContextMenuItem:disabled {
+:where(.vui-routes-chatcodingroute).sessionContextMenuItem:disabled {
   cursor: not-allowed;
   opacity: 0.46;
 }
 
-.sessionItemNotice,
-.sessionItemError {
+:where(.vui-routes-chatcodingroute).sessionItemNotice,
+:where(.vui-routes-chatcodingroute).sessionItemError {
   grid-column: 1 / -1;
   margin: 0;
   font-size: var(--vui-font-md);
@@ -4934,20 +4935,20 @@ a.teamTreeChild:focus-visible {
   overflow-wrap: anywhere;
 }
 
-.sessionItemNotice {
+:where(.vui-routes-chatcodingroute).sessionItemNotice {
   color: var(--state-success);
 }
 
-.sessionItemError {
+:where(.vui-routes-chatcodingroute).sessionItemError {
   color: var(--state-error);
 }
 
-.childTopLevelSessionItem {
+:where(.vui-routes-chatcodingroute).childTopLevelSessionItem {
   border-color: color-mix(in srgb, var(--accent-cool) 22%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-cool) 4%, var(--surface-card));
 }
 
-.groupConversationFrame {
+:where(.vui-routes-chatcodingroute).groupConversationFrame {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   min-height: 0;
@@ -4955,7 +4956,7 @@ a.teamTreeChild:focus-visible {
   background: var(--surface-panel);
 }
 
-.groupConversationHeader {
+:where(.vui-routes-chatcodingroute).groupConversationHeader {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -4964,15 +4965,15 @@ a.teamTreeChild:focus-visible {
   border-bottom: 1px solid var(--border-soft);
 }
 
-.groupConversationHeader div {
+:where(.vui-routes-chatcodingroute).groupConversationHeader div {
   min-width: 0;
   display: grid;
   gap: 4px;
 }
 
-.groupConversationHeader p,
-.groupConversationHeader h2,
-.groupConversationHeader span {
+:where(.vui-routes-chatcodingroute).groupConversationHeader p,
+:where(.vui-routes-chatcodingroute).groupConversationHeader h2,
+:where(.vui-routes-chatcodingroute).groupConversationHeader span {
   margin: 0;
   min-width: 0;
   overflow: hidden;
@@ -4980,26 +4981,26 @@ a.teamTreeChild:focus-visible {
   white-space: nowrap;
 }
 
-.groupConversationHeader p {
+:where(.vui-routes-chatcodingroute).groupConversationHeader p {
   color: var(--accent-cool-2);
   font-size: var(--vui-font-xs);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 
-.groupConversationHeader h2 {
+:where(.vui-routes-chatcodingroute).groupConversationHeader h2 {
   color: var(--fg-primary);
   font-family: var(--font-display);
   font-size: 1rem;
 }
 
-.groupConversationHeader span {
+:where(.vui-routes-chatcodingroute).groupConversationHeader span {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-sm);
 }
 
-.groupRefreshButton,
-.groupComposerBar button {
+:where(.vui-routes-chatcodingroute).groupRefreshButton,
+:where(.vui-routes-chatcodingroute).groupComposerBar button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -5012,30 +5013,30 @@ a.teamTreeChild:focus-visible {
   cursor: pointer;
 }
 
-.groupRefreshButton {
+:where(.vui-routes-chatcodingroute).groupRefreshButton {
   min-height: 32px;
   padding: 0 10px;
   font-size: var(--vui-font-md);
 }
 
-.groupRefreshButton:disabled,
-.groupComposerBar button:disabled,
-.groupComposerBar input:disabled,
-.groupManagementActions button:disabled,
-.groupTitleField input:disabled,
-.groupModeSelect select:disabled,
-.groupMemberChip input:disabled {
+:where(.vui-routes-chatcodingroute).groupRefreshButton:disabled,
+:where(.vui-routes-chatcodingroute).groupComposerBar button:disabled,
+:where(.vui-routes-chatcodingroute).groupComposerBar input:disabled,
+:where(.vui-routes-chatcodingroute).groupManagementActions button:disabled,
+:where(.vui-routes-chatcodingroute).groupTitleField input:disabled,
+:where(.vui-routes-chatcodingroute).groupModeSelect select:disabled,
+:where(.vui-routes-chatcodingroute).groupMemberChip input:disabled {
   cursor: not-allowed;
   opacity: 0.56;
 }
 
-.groupComposerBar .groupStopButton {
+:where(.vui-routes-chatcodingroute).groupComposerBar .groupStopButton {
   color: var(--danger, var(--state-error));
   border-color: color-mix(in srgb, var(--danger, var(--state-error)) 35%, var(--border-soft));
   background: color-mix(in srgb, var(--danger, var(--state-error)) 12%, var(--surface-card));
 }
 
-.groupManagementPanel {
+:where(.vui-routes-chatcodingroute).groupManagementPanel {
   display: grid;
   gap: 11px;
   padding: 11px;
@@ -5046,43 +5047,43 @@ a.teamTreeChild:focus-visible {
     var(--surface-panel);
 }
 
-.groupManagementHeader {
+:where(.vui-routes-chatcodingroute).groupManagementHeader {
   display: grid;
   gap: 9px;
 }
 
-.groupManagementHeader div:first-child {
+:where(.vui-routes-chatcodingroute).groupManagementHeader div:first-child {
   display: grid;
   min-width: 0;
   gap: 3px;
 }
 
-.groupManagementHeader strong {
+:where(.vui-routes-chatcodingroute).groupManagementHeader strong {
   color: var(--fg-primary);
   font-size: var(--vui-font-md);
 }
 
-.groupManagementHeader span,
-.groupManagementHint {
+:where(.vui-routes-chatcodingroute).groupManagementHeader span,
+:where(.vui-routes-chatcodingroute).groupManagementHint {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-sm);
   line-height: 1.35;
 }
 
-.groupManagementHeader span {
+:where(.vui-routes-chatcodingroute).groupManagementHeader span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.groupManagementActions {
+:where(.vui-routes-chatcodingroute).groupManagementActions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 7px;
 }
 
-.groupManagementActions button {
+:where(.vui-routes-chatcodingroute).groupManagementActions button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -5098,49 +5099,49 @@ a.teamTreeChild:focus-visible {
   cursor: pointer;
 }
 
-.groupManagementActions button span {
+:where(.vui-routes-chatcodingroute).groupManagementActions button span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.groupApplyButton {
+:where(.vui-routes-chatcodingroute).groupApplyButton {
   color: var(--accent-cool-2) !important;
   border-color: color-mix(in srgb, var(--accent-cool) 36%, var(--border-soft)) !important;
   background: color-mix(in srgb, var(--accent-cool) 14%, var(--surface-card)) !important;
 }
 
-.groupDeleteButton {
+:where(.vui-routes-chatcodingroute).groupDeleteButton {
   color: var(--state-error) !important;
 }
 
-.groupManagementControls {
+:where(.vui-routes-chatcodingroute).groupManagementControls {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 9px;
   align-items: start;
 }
 
-.groupTitleField {
+:where(.vui-routes-chatcodingroute).groupTitleField {
   grid-column: 1 / -1;
 }
 
-.groupTitleField,
-.groupModeSelect {
+:where(.vui-routes-chatcodingroute).groupTitleField,
+:where(.vui-routes-chatcodingroute).groupModeSelect {
   display: grid;
   gap: 5px;
   min-width: 0;
 }
 
-.groupTitleField span,
-.groupModeSelect span {
+:where(.vui-routes-chatcodingroute).groupTitleField span,
+:where(.vui-routes-chatcodingroute).groupModeSelect span {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
 }
 
-.groupTitleField input,
-.groupModeSelect select {
+:where(.vui-routes-chatcodingroute).groupTitleField input,
+:where(.vui-routes-chatcodingroute).groupModeSelect select {
   width: 100%;
   min-width: 0;
   min-height: 32px;
@@ -5153,7 +5154,7 @@ a.teamTreeChild:focus-visible {
   font-size: var(--vui-font-md);
 }
 
-.groupManagementCount {
+:where(.vui-routes-chatcodingroute).groupManagementCount {
   display: grid;
   place-items: center;
   min-width: 58px;
@@ -5164,19 +5165,19 @@ a.teamTreeChild:focus-visible {
   background: color-mix(in srgb, var(--surface-card) 78%, transparent);
 }
 
-.groupManagementCount span {
+:where(.vui-routes-chatcodingroute).groupManagementCount span {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
   line-height: 1;
 }
 
-.groupManagementCount strong {
+:where(.vui-routes-chatcodingroute).groupManagementCount strong {
   color: var(--fg-primary);
   font-size: var(--vui-font-md);
   line-height: 1.15;
 }
 
-.groupMemberPicker {
+:where(.vui-routes-chatcodingroute).groupMemberPicker {
   grid-column: 1 / -1;
   display: grid;
   gap: 6px;
@@ -5186,7 +5187,7 @@ a.teamTreeChild:focus-visible {
   padding-right: 2px;
 }
 
-.groupMemberChip {
+:where(.vui-routes-chatcodingroute).groupMemberChip {
   display: grid;
   grid-template-columns: auto 26px minmax(0, 1fr) auto;
   align-items: center;
@@ -5201,17 +5202,17 @@ a.teamTreeChild:focus-visible {
   cursor: pointer;
 }
 
-.groupMemberChipSelected {
+:where(.vui-routes-chatcodingroute).groupMemberChipSelected {
   color: var(--fg-primary);
   border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-cool) 14%, var(--surface-card));
 }
 
-.groupMemberChip input {
+:where(.vui-routes-chatcodingroute).groupMemberChip input {
   margin: 0;
 }
 
-.agentOptionAvatar {
+:where(.vui-routes-chatcodingroute).agentOptionAvatar {
   display: grid;
   place-items: center;
   width: 26px;
@@ -5226,44 +5227,44 @@ a.teamTreeChild:focus-visible {
   box-shadow: var(--vui-shadow-inset-accent);
 }
 
-.groupMemberCopy {
+:where(.vui-routes-chatcodingroute).groupMemberCopy {
   display: grid;
   min-width: 0;
   gap: 1px;
 }
 
-.groupMemberCopy strong,
-.groupMemberCopy small {
+:where(.vui-routes-chatcodingroute).groupMemberCopy strong,
+:where(.vui-routes-chatcodingroute).groupMemberCopy small {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.groupMemberCopy strong {
+:where(.vui-routes-chatcodingroute).groupMemberCopy strong {
   font-size: var(--vui-font-sm);
   line-height: 1.15;
 }
 
-.groupMemberCopy small {
+:where(.vui-routes-chatcodingroute).groupMemberCopy small {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
   line-height: 1.1;
 }
 
-.groupMemberCopy .agentRoleTag {
+:where(.vui-routes-chatcodingroute).groupMemberCopy .agentRoleTag {
   justify-self: start;
   width: 132px;
   max-width: 100%;
 }
 
-.agentMissingInline {
+:where(.vui-routes-chatcodingroute).agentMissingInline {
   color: var(--state-error);
   font-size: var(--vui-font-xs);
   font-weight: 700;
 }
 
-.agentMissingLine {
+:where(.vui-routes-chatcodingroute).agentMissingLine {
   display: block;
   margin-top: 4px;
   color: var(--state-error);
@@ -5274,11 +5275,11 @@ a.teamTreeChild:focus-visible {
   white-space: nowrap;
 }
 
-.groupManagementHint {
+:where(.vui-routes-chatcodingroute).groupManagementHint {
   margin: 0;
 }
 
-.groupMessageTimeline {
+:where(.vui-routes-chatcodingroute).groupMessageTimeline {
   min-height: 0;
   overflow: auto;
   display: grid;
@@ -5290,7 +5291,7 @@ a.teamTreeChild:focus-visible {
     var(--surface-panel);
 }
 
-.projectBusEvent {
+:where(.vui-routes-chatcodingroute).projectBusEvent {
   display: grid;
   gap: 6px;
   min-width: 0;
@@ -5300,12 +5301,12 @@ a.teamTreeChild:focus-visible {
   background: color-mix(in srgb, var(--surface-card) 78%, transparent);
 }
 
-.projectBusEventRevoked {
+:where(.vui-routes-chatcodingroute).projectBusEventRevoked {
   border-color: color-mix(in srgb, var(--state-warning) 35%, var(--border-soft));
   background: color-mix(in srgb, var(--state-warning) 8%, var(--surface-card));
 }
 
-.projectBusEventHeader {
+:where(.vui-routes-chatcodingroute).projectBusEventHeader {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -5315,7 +5316,7 @@ a.teamTreeChild:focus-visible {
   font-size: var(--vui-font-xs);
 }
 
-.projectBusEventActions {
+:where(.vui-routes-chatcodingroute).projectBusEventActions {
   display: inline-flex !important;
   align-items: center;
   justify-content: flex-end;
@@ -5323,7 +5324,7 @@ a.teamTreeChild:focus-visible {
   flex: 0 0 auto;
 }
 
-.projectBusEventActions button {
+:where(.vui-routes-chatcodingroute).projectBusEventActions button {
   min-height: 24px;
   border: 1px solid color-mix(in srgb, var(--state-warning) 42%, var(--border-soft));
   border-radius: 7px;
@@ -5334,28 +5335,28 @@ a.teamTreeChild:focus-visible {
   cursor: pointer;
 }
 
-.projectBusEventActions button:disabled {
+:where(.vui-routes-chatcodingroute).projectBusEventActions button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
 
-.projectBusEventHeader div {
+:where(.vui-routes-chatcodingroute).projectBusEventHeader div {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
   min-width: 0;
 }
 
-.projectBusEventHeader strong {
+:where(.vui-routes-chatcodingroute).projectBusEventHeader strong {
   color: var(--fg-primary);
 }
 
-.projectBusEventHeader time {
+:where(.vui-routes-chatcodingroute).projectBusEventHeader time {
   flex: 0 0 auto;
   white-space: nowrap;
 }
 
-.projectBusEventBody {
+:where(.vui-routes-chatcodingroute).projectBusEventBody {
   margin: 0;
   color: var(--fg-primary);
   font-size: var(--vui-font-md);
@@ -5364,7 +5365,7 @@ a.teamTreeChild:focus-visible {
   white-space: pre-wrap;
 }
 
-.agentMention {
+:where(.vui-routes-chatcodingroute).agentMention {
   display: inline;
   margin: 0;
   padding: 0 1px;
@@ -5378,19 +5379,19 @@ a.teamTreeChild:focus-visible {
   text-decoration: none;
 }
 
-.agentMention:hover {
+:where(.vui-routes-chatcodingroute).agentMention:hover {
   color: var(--accent-warm);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
-.agentMention:focus-visible {
+:where(.vui-routes-chatcodingroute).agentMention:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent-warm) 58%, transparent);
   outline-offset: 2px;
   border-radius: 3px;
 }
 
-.projectBusEventMeta {
+:where(.vui-routes-chatcodingroute).projectBusEventMeta {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -5398,8 +5399,8 @@ a.teamTreeChild:focus-visible {
   font-size: var(--vui-font-xs);
 }
 
-.projectBusEventMeta span,
-.kernelTraceLink {
+:where(.vui-routes-chatcodingroute).projectBusEventMeta span,
+:where(.vui-routes-chatcodingroute).kernelTraceLink {
   display: inline-flex;
   align-items: center;
   padding: 3px 7px;
@@ -5408,7 +5409,7 @@ a.teamTreeChild:focus-visible {
   background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
 }
 
-.kernelTraceLink {
+:where(.vui-routes-chatcodingroute).kernelTraceLink {
   max-width: 100%;
   color: var(--accent-cool-2);
   font-weight: 760;
@@ -5418,18 +5419,18 @@ a.teamTreeChild:focus-visible {
   white-space: nowrap;
 }
 
-.kernelTraceLink:hover {
+:where(.vui-routes-chatcodingroute).kernelTraceLink:hover {
   border-color: color-mix(in srgb, var(--accent-cool) 50%, var(--border-soft));
   color: var(--accent-cool);
 }
 
-.groupRoundBlock {
+:where(.vui-routes-chatcodingroute).groupRoundBlock {
   display: grid;
   gap: 8px;
   min-width: 0;
 }
 
-.groupRoundDivider {
+:where(.vui-routes-chatcodingroute).groupRoundDivider {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -5438,8 +5439,8 @@ a.teamTreeChild:focus-visible {
   font-size: var(--vui-font-xs);
 }
 
-.groupRoundDivider::before,
-.groupRoundDivider::after {
+:where(.vui-routes-chatcodingroute).groupRoundDivider::before,
+:where(.vui-routes-chatcodingroute).groupRoundDivider::after {
   content: "";
   height: 1px;
   min-width: 22px;
@@ -5447,8 +5448,8 @@ a.teamTreeChild:focus-visible {
   background: color-mix(in srgb, var(--border-soft) 72%, transparent);
 }
 
-.groupRoundDivider span,
-.groupRoundDivider time {
+:where(.vui-routes-chatcodingroute).groupRoundDivider span,
+:where(.vui-routes-chatcodingroute).groupRoundDivider time {
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -5456,7 +5457,7 @@ a.teamTreeChild:focus-visible {
   white-space: nowrap;
 }
 
-.groupRoundSummary {
+:where(.vui-routes-chatcodingroute).groupRoundSummary {
   justify-self: center;
   max-width: min(720px, 88%);
   margin: 2px 0 0;
@@ -5471,13 +5472,13 @@ a.teamTreeChild:focus-visible {
   overflow-wrap: anywhere;
 }
 
-.groupTopicMessage {
+:where(.vui-routes-chatcodingroute).groupTopicMessage {
   display: flex;
   justify-content: flex-end;
   min-width: 0;
 }
 
-.groupTopicBubble {
+:where(.vui-routes-chatcodingroute).groupTopicBubble {
   display: grid;
   gap: 4px;
   max-width: min(680px, 72%);
@@ -5488,13 +5489,13 @@ a.teamTreeChild:focus-visible {
   color: var(--fg-primary);
 }
 
-.groupTopicBubble span {
+:where(.vui-routes-chatcodingroute).groupTopicBubble span {
   color: var(--accent-warm-2);
   font-size: var(--vui-font-xs);
   font-weight: 760;
 }
 
-.groupTopicBubble p {
+:where(.vui-routes-chatcodingroute).groupTopicBubble p {
   margin: 0;
   font-size: var(--vui-font-md);
   line-height: 1.34;
@@ -5502,13 +5503,13 @@ a.teamTreeChild:focus-visible {
   white-space: pre-wrap;
 }
 
-.groupMessageList {
+:where(.vui-routes-chatcodingroute).groupMessageList {
   display: grid;
   gap: 7px;
   min-width: 0;
 }
 
-.groupBubbleRow {
+:where(.vui-routes-chatcodingroute).groupBubbleRow {
   display: grid;
   grid-template-columns: 30px minmax(0, 1fr);
   align-items: start;
@@ -5517,7 +5518,7 @@ a.teamTreeChild:focus-visible {
   min-width: 0;
 }
 
-.groupBubbleAvatar {
+:where(.vui-routes-chatcodingroute).groupBubbleAvatar {
   display: grid;
   place-items: center;
   width: 30px;
@@ -5531,7 +5532,7 @@ a.teamTreeChild:focus-visible {
   box-shadow: var(--vui-shadow-inset-accent);
 }
 
-.groupBubble {
+:where(.vui-routes-chatcodingroute).groupBubble {
   display: grid;
   gap: 5px;
   min-width: 0;
@@ -5542,7 +5543,7 @@ a.teamTreeChild:focus-visible {
   box-shadow: none;
 }
 
-.groupBubbleHeader {
+:where(.vui-routes-chatcodingroute).groupBubbleHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -5550,7 +5551,7 @@ a.teamTreeChild:focus-visible {
   min-width: 0;
 }
 
-.groupBubbleHeader strong {
+:where(.vui-routes-chatcodingroute).groupBubbleHeader strong {
   min-width: 0;
   color: var(--fg-primary);
   overflow: hidden;
@@ -5558,14 +5559,14 @@ a.teamTreeChild:focus-visible {
   white-space: nowrap;
 }
 
-.groupBubbleHeader span,
-.groupBubbleMeta {
+:where(.vui-routes-chatcodingroute).groupBubbleHeader span,
+:where(.vui-routes-chatcodingroute).groupBubbleMeta {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
-.groupBubbleBody {
+:where(.vui-routes-chatcodingroute).groupBubbleBody {
   margin: 0;
   color: var(--fg-secondary);
   font-size: var(--vui-font-chat);
@@ -5574,7 +5575,7 @@ a.teamTreeChild:focus-visible {
   white-space: pre-wrap;
 }
 
-.groupBubbleBodyCollapsed {
+:where(.vui-routes-chatcodingroute).groupBubbleBodyCollapsed {
   display: -webkit-box;
   max-height: 7.6em;
   overflow: hidden;
@@ -5582,7 +5583,7 @@ a.teamTreeChild:focus-visible {
   -webkit-line-clamp: 5;
 }
 
-.groupBubbleToggle {
+:where(.vui-routes-chatcodingroute).groupBubbleToggle {
   justify-self: start;
   min-height: 24px;
   padding: 0;
@@ -5594,32 +5595,32 @@ a.teamTreeChild:focus-visible {
   font-weight: 760;
 }
 
-.groupBubbleToggle:hover {
+:where(.vui-routes-chatcodingroute).groupBubbleToggle:hover {
   text-decoration: underline;
 }
 
-.groupBubbleMeta {
+:where(.vui-routes-chatcodingroute).groupBubbleMeta {
   justify-self: end;
 }
 
-.groupBubbleRowFailed .groupBubble {
+:where(.vui-routes-chatcodingroute).groupBubbleRowFailed .groupBubble {
   border-color: color-mix(in srgb, var(--state-error) 36%, var(--border-soft));
 }
 
-.groupBubbleRowPending .groupBubble {
+:where(.vui-routes-chatcodingroute).groupBubbleRowPending .groupBubble {
   width: fit-content;
   min-width: 148px;
   border-style: dashed;
 }
 
-.groupTypingDots {
+:where(.vui-routes-chatcodingroute).groupTypingDots {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   min-height: 18px;
 }
 
-.groupTypingDots span {
+:where(.vui-routes-chatcodingroute).groupTypingDots span {
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -5628,11 +5629,11 @@ a.teamTreeChild:focus-visible {
   animation: groupTypingPulse 1s ease-in-out infinite;
 }
 
-.groupTypingDots span:nth-child(2) {
+:where(.vui-routes-chatcodingroute).groupTypingDots span:nth-child(2) {
   animation-delay: 140ms;
 }
 
-.groupTypingDots span:nth-child(3) {
+:where(.vui-routes-chatcodingroute).groupTypingDots span:nth-child(3) {
   animation-delay: 280ms;
 }
 
@@ -5648,7 +5649,7 @@ a.teamTreeChild:focus-visible {
   }
 }
 
-.groupMessageCard {
+:where(.vui-routes-chatcodingroute).groupMessageCard {
   display: grid;
   gap: 7px;
   padding: 10px;
@@ -5657,11 +5658,11 @@ a.teamTreeChild:focus-visible {
   background: var(--surface-panel);
 }
 
-.groupMessageCardFailed {
+:where(.vui-routes-chatcodingroute).groupMessageCardFailed {
   border-color: color-mix(in srgb, var(--state-error) 36%, var(--border-soft));
 }
 
-.groupMessageCard p {
+:where(.vui-routes-chatcodingroute).groupMessageCard p {
   margin: 0;
   color: var(--fg-secondary);
   font-size: var(--vui-font-chat);
@@ -5670,7 +5671,7 @@ a.teamTreeChild:focus-visible {
   white-space: pre-wrap;
 }
 
-.groupEmptyState {
+:where(.vui-routes-chatcodingroute).groupEmptyState {
   display: grid;
   place-items: center;
   gap: 10px;
@@ -5679,11 +5680,11 @@ a.teamTreeChild:focus-visible {
   text-align: center;
 }
 
-.groupEmptyState p {
+:where(.vui-routes-chatcodingroute).groupEmptyState p {
   margin: 0;
 }
 
-.groupComposerBar {
+:where(.vui-routes-chatcodingroute).groupComposerBar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 10px;
@@ -5692,7 +5693,7 @@ a.teamTreeChild:focus-visible {
   background: var(--surface-panel-strong);
 }
 
-.groupComposerBar input {
+:where(.vui-routes-chatcodingroute).groupComposerBar input {
   min-width: 0;
   min-height: 38px;
   padding: 0 12px;
@@ -5703,7 +5704,7 @@ a.teamTreeChild:focus-visible {
   font: inherit;
 }
 
-.groupComposerBar button {
+:where(.vui-routes-chatcodingroute).groupComposerBar button {
   min-height: 38px;
   padding: 0 13px;
   color: var(--accent-cool-2);
@@ -5711,7 +5712,7 @@ a.teamTreeChild:focus-visible {
   background: color-mix(in srgb, var(--accent-cool) 14%, var(--surface-card));
 }
 
-.projectBusInterruptToggle {
+:where(.vui-routes-chatcodingroute).projectBusInterruptToggle {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -5721,7 +5722,7 @@ a.teamTreeChild:focus-visible {
   white-space: nowrap;
 }
 
-.projectBusInterruptToggle input {
+:where(.vui-routes-chatcodingroute).projectBusInterruptToggle input {
   width: 15px;
   height: 15px;
   margin: 0;
@@ -5729,35 +5730,35 @@ a.teamTreeChild:focus-visible {
 }
 
 @media (max-width: 1180px) {
-  .layout {
+  :where(.vui-routes-chatcodingroute).layout {
     grid-template-columns:
-      minmax(192px, var(--chat-left-pane-width, 220px))
+      minmax(224px, var(--chat-left-pane-width, 260px))
       8px
       minmax(0, 1fr)
       8px
-      minmax(244px, var(--chat-right-pane-width, 284px));
+      minmax(300px, var(--chat-right-pane-width, 340px));
   }
 
-  .leftRail {
+  :where(.vui-routes-chatcodingroute).leftRail {
     padding: 6px;
   }
 
-  .rightPane {
+  :where(.vui-routes-chatcodingroute).rightPane {
     padding: 6px;
     gap: 6px;
   }
 
-  .companionCompact {
+  :where(.vui-routes-chatcodingroute).companionCompact {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .petMiniAvatar {
+  :where(.vui-routes-chatcodingroute).petMiniAvatar {
     display: none;
   }
 }
 
 @media (max-width: 980px) {
-  .layoutCenterFirst {
+  :where(.vui-routes-chatcodingroute).layoutCenterFirst {
     grid-template-columns:
       minmax(0, min(var(--chat-left-pane-width, 0px), 24vw))
       8px
@@ -5766,31 +5767,31 @@ a.teamTreeChild:focus-visible {
       minmax(0, min(var(--chat-right-pane-width, 0px), 22vw));
   }
 
-  .layoutCenterFirst .leftRail:not(.paneCollapsed) {
+  :where(.vui-routes-chatcodingroute).layoutCenterFirst .leftRail:not(.paneCollapsed) {
     padding: 6px;
     visibility: visible;
   }
 
-  .layoutCenterFirst .rightPane:not(.paneCollapsed) {
+  :where(.vui-routes-chatcodingroute).layoutCenterFirst .rightPane:not(.paneCollapsed) {
     padding: 6px;
     visibility: visible;
   }
 
-  .resizeHandle {
+  :where(.vui-routes-chatcodingroute).resizeHandle {
     min-width: 8px;
   }
 
-  .tabStrip {
+  :where(.vui-routes-chatcodingroute).tabStrip {
     padding: 8px 10px 0;
   }
 
-  .conversationFrameFocus {
+  :where(.vui-routes-chatcodingroute).conversationFrameFocus {
     width: 100%;
   }
 }
 
 @media (max-width: 640px) {
-  .layoutCenterFirst {
+  :where(.vui-routes-chatcodingroute).layoutCenterFirst {
     grid-template-columns:
       minmax(0, min(var(--chat-left-pane-width, 0px), 22vw))
       8px
@@ -5799,17 +5800,17 @@ a.teamTreeChild:focus-visible {
       minmax(0, min(var(--chat-right-pane-width, 0px), 20vw));
   }
 
-  .resizeHandle::before {
+  :where(.vui-routes-chatcodingroute).resizeHandle::before {
     width: 1px;
   }
 
-  .tabStrip {
+  :where(.vui-routes-chatcodingroute).tabStrip {
     gap: 6px;
     padding: 8px 10px 0;
   }
 
-  .tab,
-  .fileTabButton {
+  :where(.vui-routes-chatcodingroute).tab,
+  :where(.vui-routes-chatcodingroute).fileTabButton {
     padding-top: 8px;
     padding-bottom: 8px;
   }

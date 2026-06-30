@@ -1,4 +1,5 @@
-.page {
+/* source: routes/EvolutionRoute legacy css */
+:where(.vui-routes-evolutionroute).page {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 8px;
@@ -8,7 +9,7 @@
   overflow: hidden;
 }
 
-.toolbar {
+:where(.vui-routes-evolutionroute).toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -17,22 +18,22 @@
   min-width: 0;
 }
 
-.toolbarIntro {
+:where(.vui-routes-evolutionroute).toolbarIntro {
   display: grid;
   gap: 2px;
   min-width: 260px;
   max-width: min(760px, 100%);
 }
 
-.eyebrow {
+:where(.vui-routes-evolutionroute).eyebrow {
   margin: 0;
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 
-.title {
+:where(.vui-routes-evolutionroute).title {
   margin: 0;
   font-family: var(--font-body);
   font-weight: 760;
@@ -41,7 +42,7 @@
   white-space: nowrap;
 }
 
-.subtitle {
+:where(.vui-routes-evolutionroute).subtitle {
   margin: 0;
   max-width: none;
   color: var(--fg-secondary);
@@ -51,7 +52,7 @@
   white-space: nowrap;
 }
 
-.toolbarControls {
+:where(.vui-routes-evolutionroute).toolbarControls {
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -62,9 +63,9 @@
   overflow: hidden;
 }
 
-.segmented,
-.intakeControl,
-.filterSegmented {
+:where(.vui-routes-evolutionroute).segmented,
+:where(.vui-routes-evolutionroute).intakeControl,
+:where(.vui-routes-evolutionroute).filterSegmented {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -74,9 +75,9 @@
   background: var(--surface-panel);
 }
 
-.segmentButton,
-.intakeButton,
-.filterButton {
+:where(.vui-routes-evolutionroute).segmentButton,
+:where(.vui-routes-evolutionroute).intakeButton,
+:where(.vui-routes-evolutionroute).filterButton {
   min-height: 26px;
   padding: 0 8px;
   border: 0;
@@ -86,32 +87,32 @@
   transition: background-color 140ms ease, color 140ms ease;
 }
 
-.segmentButtonActive,
-.intakeButtonActive,
-.filterButtonActive {
+:where(.vui-routes-evolutionroute).segmentButtonActive,
+:where(.vui-routes-evolutionroute).intakeButtonActive,
+:where(.vui-routes-evolutionroute).filterButtonActive {
   background: color-mix(in srgb, var(--accent-warm) 16%, transparent);
   color: var(--accent-warm-2);
 }
 
-.controlLabel {
+:where(.vui-routes-evolutionroute).controlLabel {
   padding: 0 6px 0 8px;
   color: var(--fg-secondary);
   font-size: 0.8rem;
 }
 
-.intakeSegmented {
+:where(.vui-routes-evolutionroute).intakeSegmented {
   display: inline-flex;
   gap: 6px;
 }
 
-.surface {
+:where(.vui-routes-evolutionroute).surface {
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-panel);
   background: var(--surface-panel);
   box-shadow: none;
 }
 
-.selfModeStack {
+:where(.vui-routes-evolutionroute).selfModeStack {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 8px;
@@ -121,7 +122,7 @@
   padding-right: 4px;
 }
 
-.overviewGrid {
+:where(.vui-routes-evolutionroute).overviewGrid {
   display: grid;
   grid-template-columns:
     minmax(300px, var(--evolution-live-launch-width, 348px))
@@ -140,26 +141,26 @@
   padding-right: 4px;
 }
 
-.dashboardLaunch,
-.dashboardRun,
-.dashboardIo {
+:where(.vui-routes-evolutionroute).dashboardLaunch,
+:where(.vui-routes-evolutionroute).dashboardRun,
+:where(.vui-routes-evolutionroute).dashboardIo {
   min-width: 0;
   max-width: 100%;
 }
 
-.overviewGrid > .launchSurface,
-.overviewGrid > .liveSurface,
-.overviewGrid > .ioSurface {
+:where(.vui-routes-evolutionroute).overviewGrid > .launchSurface,
+:where(.vui-routes-evolutionroute).overviewGrid > .liveSurface,
+:where(.vui-routes-evolutionroute).overviewGrid > .ioSurface {
   height: 100%;
   min-height: 0;
   overflow: auto;
 }
 
-.dashboardLaunch {
+:where(.vui-routes-evolutionroute).dashboardLaunch {
   grid-area: launch;
 }
 
-.liveLaunchStack {
+:where(.vui-routes-evolutionroute).liveLaunchStack {
   display: grid;
   grid-template-rows: minmax(0, 1fr);
   gap: 8px;
@@ -168,22 +169,22 @@
   overflow: hidden;
 }
 
-.liveLaunchStack > .launchSurface {
+:where(.vui-routes-evolutionroute).liveLaunchStack > .launchSurface {
   height: 100%;
   max-height: none;
   overflow: auto;
 }
 
-.supervisedRunConsole {
+:where(.vui-routes-evolutionroute).supervisedRunConsole {
   container-type: inline-size;
   grid-template-rows: auto auto minmax(0, 1fr);
 }
 
-.supervisedRunConsoleHeader {
+:where(.vui-routes-evolutionroute).supervisedRunConsoleHeader {
   align-items: flex-start;
 }
 
-.supervisedRunConsoleStatus {
+:where(.vui-routes-evolutionroute).supervisedRunConsoleStatus {
   display: inline-flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -191,7 +192,7 @@
   min-width: 0;
 }
 
-.supervisedRunConsoleGrid {
+:where(.vui-routes-evolutionroute).supervisedRunConsoleGrid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 7px;
@@ -199,27 +200,27 @@
 }
 
 @container (min-width: 560px) {
-  .supervisedRunConsoleGrid {
+  :where(.vui-routes-evolutionroute).supervisedRunConsoleGrid {
     grid-template-columns: minmax(0, 1.08fr) minmax(214px, 0.72fr);
     align-items: start;
   }
 
-  .supervisedRunOptions {
+  :where(.vui-routes-evolutionroute).supervisedRunOptions {
     grid-template-columns: max-content minmax(140px, 1fr);
   }
 
-  .supervisedMembersList {
+  :where(.vui-routes-evolutionroute).supervisedMembersList {
     max-height: min(238px, 34vh);
   }
 }
 
 @container (max-width: 430px) {
-  .supervisedRunOptions {
+  :where(.vui-routes-evolutionroute).supervisedRunOptions {
     grid-template-columns: 1fr;
   }
 }
 
-.supervisedRunSetup {
+:where(.vui-routes-evolutionroute).supervisedRunSetup {
   display: grid;
   align-content: start;
   gap: 7px;
@@ -227,7 +228,7 @@
   min-height: 0;
 }
 
-.supervisedRunOptions {
+:where(.vui-routes-evolutionroute).supervisedRunOptions {
   display: grid;
   grid-template-columns: minmax(0, 0.95fr) minmax(126px, 1.05fr);
   gap: 6px;
@@ -235,7 +236,7 @@
   min-width: 0;
 }
 
-.supervisedMembersPanel {
+:where(.vui-routes-evolutionroute).supervisedMembersPanel {
   display: grid;
   gap: 6px;
   align-self: start;
@@ -247,7 +248,7 @@
   overflow: hidden;
 }
 
-.supervisedMembersHeader {
+:where(.vui-routes-evolutionroute).supervisedMembersHeader {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -255,7 +256,7 @@
   min-width: 0;
 }
 
-.supervisedMembersHeaderActions {
+:where(.vui-routes-evolutionroute).supervisedMembersHeaderActions {
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
@@ -263,7 +264,7 @@
   min-width: 0;
 }
 
-.supervisedStepFollowButton {
+:where(.vui-routes-evolutionroute).supervisedStepFollowButton {
   min-height: 24px;
   padding: 0 8px;
   border: 1px solid var(--border-hairline);
@@ -271,22 +272,22 @@
   background: var(--surface-card-muted);
   color: var(--fg-secondary);
   font: inherit;
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
   transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
 }
 
-.supervisedStepFollowButton:hover,
-.supervisedStepFollowButton:focus-visible {
+:where(.vui-routes-evolutionroute).supervisedStepFollowButton:hover,
+:where(.vui-routes-evolutionroute).supervisedStepFollowButton:focus-visible {
   border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-card-muted));
   color: var(--accent-cool-2);
   outline: none;
 }
 
-.supervisedMembersList {
+:where(.vui-routes-evolutionroute).supervisedMembersList {
   display: grid;
   gap: 4px;
   min-height: 0;
@@ -294,14 +295,14 @@
   overflow: auto;
 }
 
-.supervisedStepMemberRail {
+:where(.vui-routes-evolutionroute).supervisedStepMemberRail {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 4px;
   min-width: 0;
 }
 
-.supervisedStepMemberCard {
+:where(.vui-routes-evolutionroute).supervisedStepMemberCard {
   display: grid;
   gap: 2px;
   min-width: 0;
@@ -317,19 +318,19 @@
   transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
 }
 
-.supervisedStepMemberCard:hover,
-.supervisedStepMemberCard:focus-visible {
+:where(.vui-routes-evolutionroute).supervisedStepMemberCard:hover,
+:where(.vui-routes-evolutionroute).supervisedStepMemberCard:focus-visible {
   border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-cool) 6%, var(--surface-panel));
   outline: none;
 }
 
-.supervisedStepMemberCardActive {
+:where(.vui-routes-evolutionroute).supervisedStepMemberCardActive {
   border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-cool) 9%, var(--surface-panel));
 }
 
-.supervisedWorkflowPanel {
+:where(.vui-routes-evolutionroute).supervisedWorkflowPanel {
   display: grid;
   gap: 8px;
   align-self: start;
@@ -341,7 +342,7 @@
   overflow: hidden;
 }
 
-.supervisedWorkflowCardGrid {
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
@@ -350,7 +351,7 @@
   overflow: auto;
 }
 
-.supervisedWorkflowCard {
+:where(.vui-routes-evolutionroute).supervisedWorkflowCard {
   display: grid;
   min-width: 0;
   min-height: 118px;
@@ -362,17 +363,17 @@
   transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
 }
 
-.supervisedWorkflowCardActive {
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardActive {
   border-color: color-mix(in srgb, var(--accent-cool) 54%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-cool) 9%, var(--surface-panel));
 }
 
-.supervisedWorkflowCardCurrent:not(.supervisedWorkflowCardActive) {
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardCurrent:not(.supervisedWorkflowCardActive) {
   border-color: color-mix(in srgb, var(--accent-warm) 40%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-warm) 7%, var(--surface-panel));
 }
 
-.supervisedWorkflowCardButton {
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardButton {
   display: grid;
   gap: 5px;
   width: 100%;
@@ -386,14 +387,14 @@
   cursor: pointer;
 }
 
-.supervisedWorkflowCardButton:hover,
-.supervisedWorkflowCardButton:focus-visible {
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardButton:hover,
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardButton:focus-visible {
   background: color-mix(in srgb, var(--accent-cool) 6%, transparent);
   outline: none;
 }
 
-.supervisedWorkflowCardTopline,
-.supervisedWorkflowCardFooter {
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardTopline,
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardFooter {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -401,39 +402,39 @@
   min-width: 0;
 }
 
-.supervisedWorkflowCardTopline span,
-.supervisedWorkflowCardButton strong,
-.supervisedWorkflowCardFooter span {
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardTopline span,
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardButton strong,
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardFooter span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.supervisedWorkflowCardTopline span {
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardTopline span {
   color: var(--fg-primary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
   font-weight: 750;
 }
 
-.supervisedWorkflowCardTopline em {
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardTopline em {
   flex: 0 0 auto;
   padding: 1px 6px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent-warm) 14%, transparent);
   color: var(--accent-warm-2);
-  font-size: 0.62rem;
+  font-size: var(--vui-font-xs);
   font-style: normal;
   font-weight: 750;
 }
 
-.supervisedWorkflowCardButton strong {
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardButton strong {
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   font-weight: 650;
 }
 
-.supervisedWorkflowLivePreview {
+:where(.vui-routes-evolutionroute).supervisedWorkflowLivePreview {
   display: -webkit-box;
   min-height: 34px;
   color: var(--fg-tertiary);
@@ -444,14 +445,14 @@
   -webkit-line-clamp: 2;
 }
 
-.supervisedWorkflowCardFooter {
+:where(.vui-routes-evolutionroute).supervisedWorkflowCardFooter {
   padding: 0 8px 8px;
   color: var(--fg-secondary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   font-weight: 650;
 }
 
-.supervisedWorkflowSessionLink {
+:where(.vui-routes-evolutionroute).supervisedWorkflowSessionLink {
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -461,14 +462,14 @@
   white-space: nowrap;
 }
 
-.supervisedWorkflowSessionLink:hover,
-.supervisedWorkflowSessionLink:focus-visible {
+:where(.vui-routes-evolutionroute).supervisedWorkflowSessionLink:hover,
+:where(.vui-routes-evolutionroute).supervisedWorkflowSessionLink:focus-visible {
   color: var(--accent-cool);
   text-decoration: underline;
   outline: none;
 }
 
-.supervisedWorkflowFollowButton {
+:where(.vui-routes-evolutionroute).supervisedWorkflowFollowButton {
   min-height: 24px;
   padding: 0 8px;
   border: 1px solid var(--border-hairline);
@@ -476,22 +477,22 @@
   background: var(--surface-card-muted);
   color: var(--fg-secondary);
   font: inherit;
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
   transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
 }
 
-.supervisedWorkflowFollowButton:hover,
-.supervisedWorkflowFollowButton:focus-visible {
+:where(.vui-routes-evolutionroute).supervisedWorkflowFollowButton:hover,
+:where(.vui-routes-evolutionroute).supervisedWorkflowFollowButton:focus-visible {
   border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-card-muted));
   color: var(--accent-cool-2);
   outline: none;
 }
 
-.approvalEvidencePanel {
+:where(.vui-routes-evolutionroute).approvalEvidencePanel {
   display: grid;
   gap: 8px;
   align-content: start;
@@ -499,7 +500,7 @@
   padding: 10px;
 }
 
-.approvalEvidenceItem {
+:where(.vui-routes-evolutionroute).approvalEvidenceItem {
   display: grid;
   gap: 4px;
   min-width: 0;
@@ -509,21 +510,21 @@
   background: var(--surface-card-subtle);
 }
 
-.approvalEvidenceItem span {
+:where(.vui-routes-evolutionroute).approvalEvidenceItem span {
   color: var(--fg-secondary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
 }
 
-.approvalEvidenceItem strong {
+:where(.vui-routes-evolutionroute).approvalEvidenceItem strong {
   color: var(--fg-primary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
   line-height: 1.5;
   word-break: break-word;
 }
 
-.approvalEvidenceActions {
+:where(.vui-routes-evolutionroute).approvalEvidenceActions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -531,49 +532,49 @@
   min-width: 0;
 }
 
-.supervisedStepMemberCardCurrent {
+:where(.vui-routes-evolutionroute).supervisedStepMemberCardCurrent {
   border-color: color-mix(in srgb, var(--accent-warm) 34%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-warm) 6%, var(--surface-panel));
 }
 
-.supervisedStepMemberCard span,
-.supervisedStepMemberCard strong {
+:where(.vui-routes-evolutionroute).supervisedStepMemberCard span,
+:where(.vui-routes-evolutionroute).supervisedStepMemberCard strong {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.supervisedStepMemberLabel {
+:where(.vui-routes-evolutionroute).supervisedStepMemberLabel {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   min-width: 0;
 }
 
-.supervisedStepMemberCard span {
+:where(.vui-routes-evolutionroute).supervisedStepMemberCard span {
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   font-weight: 650;
 }
 
-.supervisedStepMemberLabel em {
+:where(.vui-routes-evolutionroute).supervisedStepMemberLabel em {
   flex: 0 0 auto;
   padding: 1px 5px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent-warm) 14%, transparent);
   color: var(--accent-warm-2);
-  font-size: 0.62rem;
+  font-size: var(--vui-font-xs);
   font-style: normal;
   font-weight: 700;
 }
 
-.supervisedStepMemberCard strong {
+:where(.vui-routes-evolutionroute).supervisedStepMemberCard strong {
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
 }
 
-.supervisedMemberRow {
+:where(.vui-routes-evolutionroute).supervisedMemberRow {
   display: grid;
   grid-template-columns: minmax(78px, 0.42fr) minmax(0, 1fr);
   gap: 6px;
@@ -586,81 +587,81 @@
   background: var(--surface-panel);
 }
 
-.supervisedMemberLink {
+:where(.vui-routes-evolutionroute).supervisedMemberLink {
   grid-template-columns: minmax(78px, 0.42fr) minmax(0, 1fr) auto;
   color: inherit;
   text-decoration: none;
   transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
 }
 
-.supervisedMemberLink:hover,
-.supervisedMemberLink:focus-visible {
+:where(.vui-routes-evolutionroute).supervisedMemberLink:hover,
+:where(.vui-routes-evolutionroute).supervisedMemberLink:focus-visible {
   border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-panel));
   outline: none;
 }
 
-.supervisedMemberLink:focus-visible {
+:where(.vui-routes-evolutionroute).supervisedMemberLink:focus-visible {
   box-shadow: var(--vui-shadow-accent);
 }
 
-.supervisedMemberLink svg {
+:where(.vui-routes-evolutionroute).supervisedMemberLink svg {
   color: var(--fg-tertiary);
 }
 
-.supervisedMemberRowActive {
+:where(.vui-routes-evolutionroute).supervisedMemberRowActive {
   border-color: color-mix(in srgb, var(--accent-warm) 44%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-warm) 10%, var(--surface-card-subtle));
 }
 
-.supervisedMemberRowMissing {
+:where(.vui-routes-evolutionroute).supervisedMemberRowMissing {
   opacity: 0.72;
 }
 
-.supervisedMemberRole,
-.supervisedMemberIdentity {
+:where(.vui-routes-evolutionroute).supervisedMemberRole,
+:where(.vui-routes-evolutionroute).supervisedMemberIdentity {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
 
-.supervisedMemberRole span {
+:where(.vui-routes-evolutionroute).supervisedMemberRole span {
   color: var(--fg-secondary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
   font-weight: 600;
 }
 
-.supervisedMemberRole strong {
+:where(.vui-routes-evolutionroute).supervisedMemberRole strong {
   width: fit-content;
   max-width: 100%;
   min-width: 0;
   overflow: hidden;
   color: var(--accent-warm-2);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.supervisedMemberIdentity strong,
-.supervisedMemberIdentity span {
+:where(.vui-routes-evolutionroute).supervisedMemberIdentity strong,
+:where(.vui-routes-evolutionroute).supervisedMemberIdentity span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.supervisedMemberIdentity strong {
+:where(.vui-routes-evolutionroute).supervisedMemberIdentity strong {
   color: var(--fg-primary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
 }
 
-.supervisedMemberIdentity span {
+:where(.vui-routes-evolutionroute).supervisedMemberIdentity span {
   color: var(--fg-tertiary);
   font-family: var(--font-mono);
   font-size: 0.7rem;
 }
 
-.modeTeamPanel {
+:where(.vui-routes-evolutionroute).modeTeamPanel {
   display: grid;
   gap: 8px;
   min-width: 0;
@@ -669,7 +670,7 @@
   overflow: hidden;
 }
 
-.modeTeamHeader {
+:where(.vui-routes-evolutionroute).modeTeamHeader {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -677,13 +678,13 @@
   min-width: 0;
 }
 
-.modeTeamStats {
+:where(.vui-routes-evolutionroute).modeTeamStats {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 5px;
 }
 
-.modeTeamStats span {
+:where(.vui-routes-evolutionroute).modeTeamStats span {
   display: grid;
   gap: 1px;
   min-width: 0;
@@ -692,20 +693,20 @@
   border-radius: 6px;
   background: var(--surface-card-subtle);
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
 }
 
-.modeTeamStats strong {
+:where(.vui-routes-evolutionroute).modeTeamStats strong {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
   font-family: var(--font-mono);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.modeTeamCanvasMap {
+:where(.vui-routes-evolutionroute).modeTeamCanvasMap {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
@@ -713,7 +714,7 @@
   overflow: auto;
 }
 
-.modeTeamNode {
+:where(.vui-routes-evolutionroute).modeTeamNode {
   display: grid;
   gap: 2px;
   min-width: 0;
@@ -724,118 +725,118 @@
   background: var(--surface-card-subtle);
 }
 
-.modeTeamNodeBound {
+:where(.vui-routes-evolutionroute).modeTeamNodeBound {
   border-left-color: var(--accent-cool);
 }
 
-.modeTeamNodeStale {
+:where(.vui-routes-evolutionroute).modeTeamNodeStale {
   border-left-color: var(--state-warning);
   background: color-mix(in srgb, var(--state-warning) 8%, var(--surface-card-subtle));
 }
 
-.modeTeamNode strong,
-.modeTeamNode span,
-.modeTeamNode small {
+:where(.vui-routes-evolutionroute).modeTeamNode strong,
+:where(.vui-routes-evolutionroute).modeTeamNode span,
+:where(.vui-routes-evolutionroute).modeTeamNode small {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.modeTeamNode strong {
-  font-size: 0.78rem;
+:where(.vui-routes-evolutionroute).modeTeamNode strong {
+  font-size: var(--vui-font-xs);
 }
 
-.modeTeamNode span {
+:where(.vui-routes-evolutionroute).modeTeamNode span {
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
-.modeTeamNode small {
+:where(.vui-routes-evolutionroute).modeTeamNode small {
   color: var(--fg-tertiary);
   font-family: var(--font-mono);
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
 }
 
-.modeTeamEdges {
+:where(.vui-routes-evolutionroute).modeTeamEdges {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
   min-width: 0;
 }
 
-.modeTeamEdges span {
+:where(.vui-routes-evolutionroute).modeTeamEdges span {
   max-width: 100%;
   padding: 2px 6px;
   border: 1px solid var(--border-hairline);
   border-radius: 999px;
   background: var(--surface-card-muted);
   color: var(--fg-secondary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
 }
 
-.modeTeamEmpty {
+:where(.vui-routes-evolutionroute).modeTeamEmpty {
   margin: 0;
   padding: 10px;
   border: 1px dashed var(--border-soft);
   border-radius: 7px;
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
 }
 
-.liveResizeHandleLaunch {
+:where(.vui-routes-evolutionroute).liveResizeHandleLaunch {
   grid-area: resize-launch;
 }
 
-.dashboardRun {
+:where(.vui-routes-evolutionroute).dashboardRun {
   grid-area: run;
 }
 
-.liveResizeHandleRun {
+:where(.vui-routes-evolutionroute).liveResizeHandleRun {
   grid-area: resize-run;
 }
 
-.dashboardIo {
+:where(.vui-routes-evolutionroute).dashboardIo {
   grid-area: io;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden !important;
 }
 
-.overviewWorkspace {
+:where(.vui-routes-evolutionroute).overviewWorkspace {
   display: grid;
   grid-template-columns: minmax(360px, 1.15fr) minmax(340px, 1fr) minmax(300px, 0.92fr);
   gap: 10px;
   align-items: start;
 }
 
-.overviewSecondaryGrid {
+:where(.vui-routes-evolutionroute).overviewSecondaryGrid {
   display: grid;
   grid-template-columns: minmax(300px, 0.92fr) minmax(0, 1.28fr);
   gap: 10px;
   align-items: start;
 }
 
-.heroSurface {
+:where(.vui-routes-evolutionroute).heroSurface {
   display: grid;
   gap: 12px;
   padding: 14px 16px;
 }
 
-.heroTop {
+:where(.vui-routes-evolutionroute).heroTop {
   display: flex;
   align-items: start;
   justify-content: space-between;
   gap: 16px;
 }
 
-.heroTitleRow {
+:where(.vui-routes-evolutionroute).heroTitleRow {
   display: flex;
   align-items: start;
   gap: 14px;
 }
 
-.statusIcon {
+:where(.vui-routes-evolutionroute).statusIcon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -846,7 +847,7 @@
   background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
 }
 
-.heroHeadingRow {
+:where(.vui-routes-evolutionroute).heroHeadingRow {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -854,14 +855,14 @@
   min-width: 0;
 }
 
-.heroHeading {
+:where(.vui-routes-evolutionroute).heroHeading {
   margin: 0;
   font-size: 1.08rem;
 }
 
-.statusPill,
-.secondaryPill,
-.deltaBadge {
+:where(.vui-routes-evolutionroute).statusPill,
+:where(.vui-routes-evolutionroute).secondaryPill,
+:where(.vui-routes-evolutionroute).deltaBadge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -876,46 +877,46 @@
   text-overflow: ellipsis;
 }
 
-.statusPill {
+:where(.vui-routes-evolutionroute).statusPill {
   color: var(--accent-warm-2);
   background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
 }
 
-.secondaryPill {
+:where(.vui-routes-evolutionroute).secondaryPill {
   color: var(--fg-secondary);
   background: var(--surface-card-muted);
 }
 
-.heroSummary,
-.detailSection p,
-.listRow p,
-.runItem p {
+:where(.vui-routes-evolutionroute).heroSummary,
+:where(.vui-routes-evolutionroute).detailSection p,
+:where(.vui-routes-evolutionroute).listRow p,
+:where(.vui-routes-evolutionroute).runItem p {
   margin: 0;
   color: var(--fg-secondary);
   line-height: 1.6;
 }
 
-.metricGrid,
-.metricStrip {
+:where(.vui-routes-evolutionroute).metricGrid,
+:where(.vui-routes-evolutionroute).metricStrip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
 
-.summaryMetricStrip {
+:where(.vui-routes-evolutionroute).summaryMetricStrip {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
-.sourceMetricGrid {
+:where(.vui-routes-evolutionroute).sourceMetricGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
-.metricTile,
-.stripItem {
+:where(.vui-routes-evolutionroute).metricTile,
+:where(.vui-routes-evolutionroute).stripItem {
   display: grid;
   gap: 3px;
   min-width: 0;
@@ -926,15 +927,15 @@
   background: var(--surface-card-subtle);
 }
 
-.metricTile span,
-.stripItem span {
+:where(.vui-routes-evolutionroute).metricTile span,
+:where(.vui-routes-evolutionroute).stripItem span {
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
 }
 
-.metricTile strong,
-.stripItem strong,
-.mutedCounter {
+:where(.vui-routes-evolutionroute).metricTile strong,
+:where(.vui-routes-evolutionroute).stripItem strong,
+:where(.vui-routes-evolutionroute).mutedCounter {
   color: var(--fg-primary);
   font-weight: 600;
   min-width: 0;
@@ -943,7 +944,7 @@
   white-space: nowrap;
 }
 
-.surfaceHeader {
+:where(.vui-routes-evolutionroute).surfaceHeader {
   display: flex;
   align-items: start;
   justify-content: space-between;
@@ -951,32 +952,32 @@
   padding: 14px 14px 0;
 }
 
-.headerIcon {
+:where(.vui-routes-evolutionroute).headerIcon {
   color: var(--fg-tertiary);
 }
 
-.sectionTitle {
+:where(.vui-routes-evolutionroute).sectionTitle {
   margin: 3px 0 0;
   font-size: 1rem;
   line-height: 1.18;
 }
 
-.mutedCounter {
+:where(.vui-routes-evolutionroute).mutedCounter {
   min-width: 32px;
   text-align: right;
   font-size: 1rem;
 }
 
-.listStack,
-.trendStack,
-.actionGrid {
+:where(.vui-routes-evolutionroute).listStack,
+:where(.vui-routes-evolutionroute).trendStack,
+:where(.vui-routes-evolutionroute).actionGrid {
   display: grid;
   gap: 8px;
   padding: 12px 14px 14px;
 }
 
-.listRow,
-.relatedRow {
+:where(.vui-routes-evolutionroute).listRow,
+:where(.vui-routes-evolutionroute).relatedRow {
   display: grid;
   gap: 6px;
   padding: 12px 14px;
@@ -985,27 +986,27 @@
   border: 1px solid var(--border-hairline);
 }
 
-.listRowTop,
-.scoreRow,
-.metaRow,
-.detailHeader {
+:where(.vui-routes-evolutionroute).listRowTop,
+:where(.vui-routes-evolutionroute).scoreRow,
+:where(.vui-routes-evolutionroute).metaRow,
+:where(.vui-routes-evolutionroute).detailHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
-.runRecordTitleRow {
+:where(.vui-routes-evolutionroute).runRecordTitleRow {
   align-items: flex-start;
 }
 
-.runRecordIdentity {
+:where(.vui-routes-evolutionroute).runRecordIdentity {
   display: grid;
   gap: 3px;
   min-width: 0;
 }
 
-.runRecordIdentity strong {
+:where(.vui-routes-evolutionroute).runRecordIdentity strong {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
@@ -1013,32 +1014,32 @@
   white-space: nowrap;
 }
 
-.runRecordIdentity span,
-.detailSubtleId {
+:where(.vui-routes-evolutionroute).runRecordIdentity span,
+:where(.vui-routes-evolutionroute).detailSubtleId {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-tertiary);
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.scoreRow span,
-.metaRow span {
+:where(.vui-routes-evolutionroute).scoreRow span,
+:where(.vui-routes-evolutionroute).metaRow span {
   color: var(--fg-tertiary);
 }
 
-.trendRow,
-.actionButton,
-.runItem,
-.inlineAction {
+:where(.vui-routes-evolutionroute).trendRow,
+:where(.vui-routes-evolutionroute).actionButton,
+:where(.vui-routes-evolutionroute).runItem,
+:where(.vui-routes-evolutionroute).inlineAction {
   border: 1px solid color-mix(in srgb, var(--surface-card) 8%, transparent);
   border-radius: 8px;
   transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
 }
 
-.trendRow {
+:where(.vui-routes-evolutionroute).trendRow {
   display: grid;
   gap: 10px;
   padding: 12px 14px;
@@ -1047,32 +1048,32 @@
   text-align: left;
 }
 
-.trendRow:hover,
-.runItem:hover,
-.inlineAction:hover,
-.actionButton:hover {
+:where(.vui-routes-evolutionroute).trendRow:hover,
+:where(.vui-routes-evolutionroute).runItem:hover,
+:where(.vui-routes-evolutionroute).inlineAction:hover,
+:where(.vui-routes-evolutionroute).actionButton:hover {
   border-color: color-mix(in srgb, var(--accent-warm) 26%, transparent);
   background: var(--surface-card-hover);
 }
 
-.trendMeta {
+:where(.vui-routes-evolutionroute).trendMeta {
   display: grid;
   gap: 4px;
 }
 
-.trendMeta span {
+:where(.vui-routes-evolutionroute).trendMeta span {
   color: var(--fg-secondary);
   font-size: 0.92rem;
 }
 
-.trendValue {
+:where(.vui-routes-evolutionroute).trendValue {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
 }
 
-.trendBarTrack {
+:where(.vui-routes-evolutionroute).trendBarTrack {
   width: 100%;
   height: 8px;
   overflow: hidden;
@@ -1080,50 +1081,50 @@
   background: var(--surface-resize-track);
 }
 
-.trendBarFill {
+:where(.vui-routes-evolutionroute).trendBarFill {
   height: 100%;
   border-radius: inherit;
   background: var(--vui-gradient-route-soft);
 }
 
-.deltaPositive {
+:where(.vui-routes-evolutionroute).deltaPositive {
   color: var(--state-success);
   background: color-mix(in srgb, var(--state-success) 12%, transparent);
 }
 
-.deltaNegative {
+:where(.vui-routes-evolutionroute).deltaNegative {
   color: var(--state-error);
   background: color-mix(in srgb, var(--state-error) 14%, transparent);
 }
 
-.deltaNeutral {
+:where(.vui-routes-evolutionroute).deltaNeutral {
   color: var(--fg-secondary);
   background: var(--surface-card-muted);
 }
 
-.actionGrid {
+:where(.vui-routes-evolutionroute).actionGrid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.controlSurface {
+:where(.vui-routes-evolutionroute).controlSurface {
   display: grid;
   grid-template-columns: minmax(320px, 1fr) minmax(0, 1.2fr);
   gap: 16px;
   padding: 18px;
 }
 
-.controlColumn {
+:where(.vui-routes-evolutionroute).controlColumn {
   display: grid;
   gap: 14px;
   align-content: start;
 }
 
-.formGrid {
+:where(.vui-routes-evolutionroute).formGrid {
   display: grid;
   gap: 7px;
 }
 
-.compactFieldGrid {
+:where(.vui-routes-evolutionroute).compactFieldGrid {
   display: grid;
   grid-template-columns: minmax(0, 1.52fr) minmax(108px, 0.68fr);
   align-items: start;
@@ -1131,18 +1132,18 @@
   min-width: 0;
 }
 
-.formField {
+:where(.vui-routes-evolutionroute).formField {
   display: grid;
   gap: 3px;
   min-width: 0;
 }
 
-.proposalEditGrid {
+:where(.vui-routes-evolutionroute).proposalEditGrid {
   display: grid;
   gap: 12px;
 }
 
-.sectionHeadingRow {
+:where(.vui-routes-evolutionroute).sectionHeadingRow {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1150,16 +1151,16 @@
   min-width: 0;
 }
 
-.formField label,
-.formHint,
-.checkboxLabel {
+:where(.vui-routes-evolutionroute).formField label,
+:where(.vui-routes-evolutionroute).formHint,
+:where(.vui-routes-evolutionroute).checkboxLabel {
   color: var(--fg-tertiary);
   font-size: 0.8rem;
 }
 
-.textInput,
-.selectInput,
-.textArea {
+:where(.vui-routes-evolutionroute).textInput,
+:where(.vui-routes-evolutionroute).selectInput,
+:where(.vui-routes-evolutionroute).textArea {
   width: 100%;
   min-width: 0;
   min-height: 31px;
@@ -1170,62 +1171,62 @@
   color: var(--fg-primary);
 }
 
-.textInput:focus,
-.selectInput:focus,
-.textArea:focus {
+:where(.vui-routes-evolutionroute).textInput:focus,
+:where(.vui-routes-evolutionroute).selectInput:focus,
+:where(.vui-routes-evolutionroute).textArea:focus {
   outline: 1px solid color-mix(in srgb, var(--accent-warm) 26%, transparent);
   border-color: color-mix(in srgb, var(--accent-warm) 26%, transparent);
 }
 
-.textArea {
+:where(.vui-routes-evolutionroute).textArea {
   min-height: 86px;
   padding: 10px 12px;
   resize: vertical;
   line-height: 1.5;
 }
 
-.checkboxRow {
+:where(.vui-routes-evolutionroute).checkboxRow {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   min-height: 26px;
 }
 
-.checkboxRow input {
+:where(.vui-routes-evolutionroute).checkboxRow input {
   width: 16px;
   height: 16px;
 }
 
-.controlActions {
+:where(.vui-routes-evolutionroute).controlActions {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
 }
 
-.noticeText,
-.errorText {
+:where(.vui-routes-evolutionroute).noticeText,
+:where(.vui-routes-evolutionroute).errorText {
   margin: 0;
   line-height: 1.4;
 }
 
-.feedbackText {
+:where(.vui-routes-evolutionroute).feedbackText {
   margin: 0;
   color: var(--fg-secondary);
   line-height: 1.55;
   white-space: pre-wrap;
 }
 
-.noticeText {
+:where(.vui-routes-evolutionroute).noticeText {
   color: var(--fg-secondary);
-  font-size: 0.84rem;
+  font-size: var(--vui-font-xs);
 }
 
-.errorText {
+:where(.vui-routes-evolutionroute).errorText {
   color: var(--state-error);
 }
 
-.inlineNoticeRow {
+:where(.vui-routes-evolutionroute).inlineNoticeRow {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1234,15 +1235,15 @@
   flex-wrap: wrap;
 }
 
-.selectionSummary,
-.bulkToolbarText {
+:where(.vui-routes-evolutionroute).selectionSummary,
+:where(.vui-routes-evolutionroute).bulkToolbarText {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   color: var(--fg-secondary);
 }
 
-.datasetMeta {
+:where(.vui-routes-evolutionroute).datasetMeta {
   display: grid;
   gap: 6px;
   padding: 12px 14px;
@@ -1251,11 +1252,11 @@
   border: 1px solid var(--border-hairline);
 }
 
-.datasetMeta strong {
+:where(.vui-routes-evolutionroute).datasetMeta strong {
   color: var(--fg-primary);
 }
 
-.datasetMetaCompact {
+:where(.vui-routes-evolutionroute).datasetMetaCompact {
   display: grid;
   gap: 8px;
   padding: 12px 14px;
@@ -1264,14 +1265,14 @@
   border: 1px solid var(--border-hairline);
 }
 
-.sourceInventoryBar,
-.sourceMetaCompact {
+:where(.vui-routes-evolutionroute).sourceInventoryBar,
+:where(.vui-routes-evolutionroute).sourceMetaCompact {
   border: 1px solid var(--border-hairline);
   border-radius: 8px;
   background: var(--surface-card-subtle);
 }
 
-.sourceInventoryBar {
+:where(.vui-routes-evolutionroute).sourceInventoryBar {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 10px;
@@ -1279,20 +1280,20 @@
   min-width: 0;
 }
 
-.sourceInventoryBar span {
+:where(.vui-routes-evolutionroute).sourceInventoryBar span {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   color: var(--fg-tertiary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
 }
 
-.sourceInventoryBar strong,
-.sourceMetaCompact strong {
+:where(.vui-routes-evolutionroute).sourceInventoryBar strong,
+:where(.vui-routes-evolutionroute).sourceMetaCompact strong {
   color: var(--fg-primary);
 }
 
-.sourceMetaCompact {
+:where(.vui-routes-evolutionroute).sourceMetaCompact {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(96px, auto);
   align-items: center;
@@ -1301,33 +1302,33 @@
   padding: 7px 10px;
 }
 
-.sourceMetaMain {
+:where(.vui-routes-evolutionroute).sourceMetaMain {
   min-width: 0;
 }
 
-.sourceMetaMain {
+:where(.vui-routes-evolutionroute).sourceMetaMain {
   display: grid;
   gap: 2px;
 }
 
-.sourceMetaCompact span {
+:where(.vui-routes-evolutionroute).sourceMetaCompact span {
   color: var(--fg-tertiary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
 }
 
-.sourceMetaCompact strong {
+:where(.vui-routes-evolutionroute).sourceMetaCompact strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.sourceMetaMain span {
+:where(.vui-routes-evolutionroute).sourceMetaMain span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.sourceMetaSide {
+:where(.vui-routes-evolutionroute).sourceMetaSide {
   justify-self: end;
   padding: 5px 9px;
   border: 1px solid var(--border-soft);
@@ -1336,7 +1337,7 @@
   white-space: nowrap;
 }
 
-.sourceWarningStrip {
+:where(.vui-routes-evolutionroute).sourceWarningStrip {
   margin: 0;
   padding: 7px 9px;
   border: 1px solid color-mix(in srgb, var(--state-warning) 40%, var(--border-hairline));
@@ -1348,7 +1349,7 @@
   overflow-wrap: anywhere;
 }
 
-.datasetCatalogPanel {
+:where(.vui-routes-evolutionroute).datasetCatalogPanel {
   display: grid;
   gap: 8px;
   min-width: 0;
@@ -1360,19 +1361,19 @@
   overflow: hidden;
 }
 
-.datasetCatalogHeader {
+:where(.vui-routes-evolutionroute).datasetCatalogHeader {
   display: grid;
   gap: 6px;
   min-width: 0;
 }
 
-.datasetCatalogHeader > div:first-child {
+:where(.vui-routes-evolutionroute).datasetCatalogHeader > div:first-child {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
 
-.datasetCatalogHeader strong {
+:where(.vui-routes-evolutionroute).datasetCatalogHeader strong {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
@@ -1380,36 +1381,36 @@
   white-space: nowrap;
 }
 
-.datasetCatalogHeader span {
+:where(.vui-routes-evolutionroute).datasetCatalogHeader span {
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
 }
 
-.datasetCatalogFilterRow {
+:where(.vui-routes-evolutionroute).datasetCatalogFilterRow {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
   min-width: 0;
 }
 
-.datasetCatalogFilterButton {
+:where(.vui-routes-evolutionroute).datasetCatalogFilterButton {
   min-height: 25px;
   padding: 0 7px;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
   background: var(--surface-card-muted);
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
-.datasetCatalogFilterButtonActive {
+:where(.vui-routes-evolutionroute).datasetCatalogFilterButtonActive {
   border-color: color-mix(in srgb, var(--accent-warm) 35%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-warm) 12%, var(--surface-card-muted));
   color: var(--accent-warm-2);
 }
 
-.datasetCatalogList {
+:where(.vui-routes-evolutionroute).datasetCatalogList {
   display: grid;
   gap: 6px;
   min-height: 0;
@@ -1418,7 +1419,7 @@
   padding-right: 2px;
 }
 
-.datasetCatalogItem {
+:where(.vui-routes-evolutionroute).datasetCatalogItem {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 4px 8px;
@@ -1429,31 +1430,31 @@
   background: var(--surface-card-muted);
 }
 
-.datasetCatalogItemMain {
+:where(.vui-routes-evolutionroute).datasetCatalogItemMain {
   display: grid;
   gap: 1px;
   min-width: 0;
 }
 
-.datasetCatalogItemMain strong,
-.datasetCatalogItemMain span {
+:where(.vui-routes-evolutionroute).datasetCatalogItemMain strong,
+:where(.vui-routes-evolutionroute).datasetCatalogItemMain span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.datasetCatalogItemMain strong {
+:where(.vui-routes-evolutionroute).datasetCatalogItemMain strong {
   color: var(--fg-primary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
 }
 
-.datasetCatalogItemMain span {
+:where(.vui-routes-evolutionroute).datasetCatalogItemMain span {
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
-.datasetCatalogStatus {
+:where(.vui-routes-evolutionroute).datasetCatalogStatus {
   align-self: start;
   max-width: 116px;
   padding: 3px 7px;
@@ -1461,36 +1462,36 @@
   border-radius: 999px;
   background: var(--surface-card-subtle);
   color: var(--fg-secondary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.datasetCatalogItem p,
-.datasetCatalogEmpty {
+:where(.vui-routes-evolutionroute).datasetCatalogItem p,
+:where(.vui-routes-evolutionroute).datasetCatalogEmpty {
   grid-column: 1 / -1;
   margin: 0;
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
-.datasetCatalogItem p span {
+:where(.vui-routes-evolutionroute).datasetCatalogItem p span {
   margin-right: 6px;
   color: var(--fg-secondary);
   font-weight: 700;
 }
 
-.sourceSummary {
+:where(.vui-routes-evolutionroute).sourceSummary {
   display: grid;
   gap: 10px;
   padding: 14px 16px 16px;
 }
 
-.sourceHero {
+:where(.vui-routes-evolutionroute).sourceHero {
   display: grid;
   gap: 5px;
   min-width: 0;
@@ -1500,15 +1501,15 @@
   background: var(--surface-card-muted);
 }
 
-.sourceHero span,
-.sourceHero small,
-.sourceNextAction span {
+:where(.vui-routes-evolutionroute).sourceHero span,
+:where(.vui-routes-evolutionroute).sourceHero small,
+:where(.vui-routes-evolutionroute).sourceNextAction span {
   color: var(--fg-tertiary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
 }
 
-.sourceHero strong,
-.sourceNextAction strong {
+:where(.vui-routes-evolutionroute).sourceHero strong,
+:where(.vui-routes-evolutionroute).sourceNextAction strong {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
@@ -1516,13 +1517,13 @@
   white-space: nowrap;
 }
 
-.sourceHero small {
+:where(.vui-routes-evolutionroute).sourceHero small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.sourceNextAction {
+:where(.vui-routes-evolutionroute).sourceNextAction {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
@@ -1533,12 +1534,12 @@
   border: 1px solid var(--border-hairline);
 }
 
-.compactRunList {
+:where(.vui-routes-evolutionroute).compactRunList {
   display: grid;
   gap: 6px;
 }
 
-.compactRunRow {
+:where(.vui-routes-evolutionroute).compactRunRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
@@ -1553,32 +1554,32 @@
   transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
 }
 
-.compactRunRow:hover {
+:where(.vui-routes-evolutionroute).compactRunRow:hover {
   border-color: color-mix(in srgb, var(--accent-warm) 26%, transparent);
   background: var(--surface-card-hover);
 }
 
-.compactRunMain {
+:where(.vui-routes-evolutionroute).compactRunMain {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
 
-.compactRunMain strong,
-.compactRunMain span {
+:where(.vui-routes-evolutionroute).compactRunMain strong,
+:where(.vui-routes-evolutionroute).compactRunMain span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.compactRunMain span,
-.compactRunMeta {
+:where(.vui-routes-evolutionroute).compactRunMain span,
+:where(.vui-routes-evolutionroute).compactRunMeta {
   color: var(--fg-tertiary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
 }
 
-.compactRunMeta {
+:where(.vui-routes-evolutionroute).compactRunMeta {
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
@@ -1587,23 +1588,23 @@
   white-space: nowrap;
 }
 
-.compactRunMeta strong {
+:where(.vui-routes-evolutionroute).compactRunMeta strong {
   color: var(--fg-primary);
 }
 
-.runMonitor {
+:where(.vui-routes-evolutionroute).runMonitor {
   display: grid;
   gap: 14px;
 }
 
-.runMonitorDense,
-.idleMonitor,
-.launchSurface,
-.liveSurface,
-.ioSurface,
-.statusSurface,
-.chatReviewSurface,
-.summarySurface {
+:where(.vui-routes-evolutionroute).runMonitorDense,
+:where(.vui-routes-evolutionroute).idleMonitor,
+:where(.vui-routes-evolutionroute).launchSurface,
+:where(.vui-routes-evolutionroute).liveSurface,
+:where(.vui-routes-evolutionroute).ioSurface,
+:where(.vui-routes-evolutionroute).statusSurface,
+:where(.vui-routes-evolutionroute).chatReviewSurface,
+:where(.vui-routes-evolutionroute).summarySurface {
   display: grid;
   align-content: start;
   gap: 8px;
@@ -1612,16 +1613,16 @@
   padding: 10px 12px 12px;
 }
 
-.launchSurface,
-.liveSurface {
+:where(.vui-routes-evolutionroute).launchSurface,
+:where(.vui-routes-evolutionroute).liveSurface {
   font-size: 0.9rem;
 }
 
-.chatReviewSurface .runListScrollable {
+:where(.vui-routes-evolutionroute).chatReviewSurface .runListScrollable {
   max-height: 280px;
 }
 
-.surfaceHeaderCompact {
+:where(.vui-routes-evolutionroute).surfaceHeaderCompact {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1629,17 +1630,17 @@
   min-width: 0;
 }
 
-.surfaceHeaderCompact > div {
+:where(.vui-routes-evolutionroute).surfaceHeaderCompact > div {
   min-width: 0;
 }
 
-.controlFooter {
+:where(.vui-routes-evolutionroute).controlFooter {
   display: grid;
   gap: 6px;
   min-width: 0;
 }
 
-.closedLoopLaunchBlock {
+:where(.vui-routes-evolutionroute).closedLoopLaunchBlock {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(92px, auto);
   align-items: center;
@@ -1651,79 +1652,79 @@
   background: color-mix(in srgb, var(--accent-warm) 8%, var(--surface-card-subtle));
 }
 
-.closedLoopLaunchBlock > div {
+:where(.vui-routes-evolutionroute).closedLoopLaunchBlock > div {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
 
-.closedLoopTitleRow {
+:where(.vui-routes-evolutionroute).closedLoopTitleRow {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
 }
 
-.closedLoopLaunchBlock .closedLoopModeBadge {
+:where(.vui-routes-evolutionroute).closedLoopLaunchBlock .closedLoopModeBadge {
   flex: 0 0 auto;
   padding: 2px 6px;
   border: 1px solid color-mix(in srgb, var(--accent-warm) 36%, var(--border-hairline));
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
   color: var(--accent-warm-2);
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
   font-weight: 740;
   line-height: 1;
   white-space: nowrap;
 }
 
-.closedLoopLaunchBlock strong,
-.closedLoopLaunchBlock span {
+:where(.vui-routes-evolutionroute).closedLoopLaunchBlock strong,
+:where(.vui-routes-evolutionroute).closedLoopLaunchBlock span {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.closedLoopLaunchBlock strong {
+:where(.vui-routes-evolutionroute).closedLoopLaunchBlock strong {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.closedLoopLaunchBlock span {
+:where(.vui-routes-evolutionroute).closedLoopLaunchBlock span {
   color: var(--fg-tertiary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.3;
 }
 
-.closedLoopLaunchBlock .inlineAction {
+:where(.vui-routes-evolutionroute).closedLoopLaunchBlock .inlineAction {
   justify-self: end;
   min-width: 0;
   max-width: 100%;
 }
 
-.monitorSummary {
+:where(.vui-routes-evolutionroute).monitorSummary {
   display: grid;
   gap: 10px;
 }
 
-.runControlSummaryBody {
+:where(.vui-routes-evolutionroute).runControlSummaryBody {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
 
-.runControlReason {
+:where(.vui-routes-evolutionroute).runControlReason {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
-.runNextActionStrip {
+:where(.vui-routes-evolutionroute).runNextActionStrip {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 8px;
@@ -1734,82 +1735,82 @@
   border: 1px solid var(--border-hairline);
   background: var(--surface-card-subtle);
   color: var(--fg-secondary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.45;
 }
 
-.runNextActionStrip strong {
+:where(.vui-routes-evolutionroute).runNextActionStrip strong {
   color: var(--fg-primary);
   white-space: nowrap;
 }
 
-.runNextActionStrip span {
+:where(.vui-routes-evolutionroute).runNextActionStrip span {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.runSummaryTone_running {
+:where(.vui-routes-evolutionroute).runSummaryTone_running {
   border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--border-hairline));
   background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-card-subtle));
 }
 
-.runSummaryTone_success {
+:where(.vui-routes-evolutionroute).runSummaryTone_success {
   border-color: color-mix(in srgb, var(--state-success) 34%, var(--border-hairline));
   background: color-mix(in srgb, var(--state-success) 8%, var(--surface-card-subtle));
 }
 
-.runSummaryTone_warning {
+:where(.vui-routes-evolutionroute).runSummaryTone_warning {
   border-color: color-mix(in srgb, var(--state-warning) 38%, var(--border-hairline));
   background: color-mix(in srgb, var(--state-warning) 9%, var(--surface-card-subtle));
 }
 
-.runSummaryTone_danger {
+:where(.vui-routes-evolutionroute).runSummaryTone_danger {
   border-color: color-mix(in srgb, var(--state-error) 38%, var(--border-hairline));
   background: color-mix(in srgb, var(--state-error) 9%, var(--surface-card-subtle));
 }
 
-.runSummaryTone_idle {
+:where(.vui-routes-evolutionroute).runSummaryTone_idle {
   border-color: var(--border-hairline);
   background: var(--surface-card-subtle);
 }
 
-.monitorMetricsDense {
+:where(.vui-routes-evolutionroute).monitorMetricsDense {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 
-.monitorMetrics {
+:where(.vui-routes-evolutionroute).monitorMetrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 
-.statusLead {
+:where(.vui-routes-evolutionroute).statusLead {
   margin: 0;
   color: var(--fg-primary);
   font-size: 0.96rem;
   line-height: 1.6;
 }
 
-.statusMetricGrid {
+:where(.vui-routes-evolutionroute).statusMetricGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
-.eventList {
+:where(.vui-routes-evolutionroute).eventList {
   display: grid;
   gap: 8px;
 }
 
-.eventListScrollable {
+:where(.vui-routes-evolutionroute).eventListScrollable {
   max-height: 220px;
   overflow: auto;
   padding-right: 4px;
 }
 
-.eventRow {
+:where(.vui-routes-evolutionroute).eventRow {
   display: grid;
   gap: 5px;
   min-width: 0;
@@ -1819,7 +1820,7 @@
   border: 1px solid var(--border-hairline);
 }
 
-.eventHeader {
+:where(.vui-routes-evolutionroute).eventHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1827,14 +1828,14 @@
   min-width: 0;
 }
 
-.eventHeader strong {
+:where(.vui-routes-evolutionroute).eventHeader strong {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.eventSummary {
+:where(.vui-routes-evolutionroute).eventSummary {
   margin: 0;
   color: var(--fg-secondary);
   line-height: 1.5;
@@ -1844,14 +1845,14 @@
   -webkit-line-clamp: 2;
 }
 
-.actionRow {
+:where(.vui-routes-evolutionroute).actionRow {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
 }
 
-.actionButton,
-.inlineAction {
+:where(.vui-routes-evolutionroute).actionButton,
+:where(.vui-routes-evolutionroute).inlineAction {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1862,22 +1863,22 @@
   color: var(--fg-primary);
 }
 
-.inlineAction {
+:where(.vui-routes-evolutionroute).inlineAction {
   width: fit-content;
 }
 
-.dangerInlineAction {
+:where(.vui-routes-evolutionroute).dangerInlineAction {
   border-color: color-mix(in srgb, var(--state-error) 34%, var(--border-hairline));
   color: var(--state-error);
   background: color-mix(in srgb, var(--state-error) 7%, var(--surface-card-muted));
 }
 
-.dangerInlineAction:hover {
+:where(.vui-routes-evolutionroute).dangerInlineAction:hover {
   border-color: color-mix(in srgb, var(--state-error) 52%, var(--border-hairline));
   background: color-mix(in srgb, var(--state-error) 12%, var(--surface-card-hover));
 }
 
-.liveStatusRow {
+:where(.vui-routes-evolutionroute).liveStatusRow {
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -1887,7 +1888,7 @@
   flex-wrap: wrap;
 }
 
-.liveRunToolbar {
+:where(.vui-routes-evolutionroute).liveRunToolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1899,15 +1900,15 @@
   background: var(--surface-card-subtle);
 }
 
-.compactActionGroup {
+:where(.vui-routes-evolutionroute).compactActionGroup {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
 }
 
-.compactIconAction,
-.compactTextAction {
+:where(.vui-routes-evolutionroute).compactIconAction,
+:where(.vui-routes-evolutionroute).compactTextAction {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1920,12 +1921,12 @@
   transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
 }
 
-.compactIconAction {
+:where(.vui-routes-evolutionroute).compactIconAction {
   width: 36px;
   padding: 0;
 }
 
-.compactTextAction {
+:where(.vui-routes-evolutionroute).compactTextAction {
   max-width: 190px;
   padding: 0 10px;
   white-space: nowrap;
@@ -1933,24 +1934,24 @@
   text-overflow: ellipsis;
 }
 
-.compactIconAction:hover,
-.compactTextAction:hover {
+:where(.vui-routes-evolutionroute).compactIconAction:hover,
+:where(.vui-routes-evolutionroute).compactTextAction:hover {
   border-color: color-mix(in srgb, var(--accent-warm) 26%, transparent);
   background: var(--surface-card-hover);
 }
 
-.compactIconAction:disabled,
-.compactTextAction:disabled {
+:where(.vui-routes-evolutionroute).compactIconAction:disabled,
+:where(.vui-routes-evolutionroute).compactTextAction:disabled {
   cursor: not-allowed;
   color: var(--fg-tertiary);
   opacity: 0.52;
 }
 
-.dangerIconAction {
+:where(.vui-routes-evolutionroute).dangerIconAction {
   color: var(--state-error);
 }
 
-.liveSummaryRow {
+:where(.vui-routes-evolutionroute).liveSummaryRow {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 10px;
@@ -1962,19 +1963,19 @@
   border: 1px solid var(--border-hairline);
 }
 
-.liveSummaryRow .statusIcon {
+:where(.vui-routes-evolutionroute).liveSummaryRow .statusIcon {
   width: 30px;
   height: 30px;
 }
 
-.liveSummaryRow .heroSummary {
+:where(.vui-routes-evolutionroute).liveSummaryRow .heroSummary {
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
 }
 
-.truncateText {
+:where(.vui-routes-evolutionroute).truncateText {
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
@@ -1982,9 +1983,9 @@
   white-space: nowrap;
 }
 
-.noticeTextCompact,
-.errorTextCompact,
-.feedbackTextCompact {
+:where(.vui-routes-evolutionroute).noticeTextCompact,
+:where(.vui-routes-evolutionroute).errorTextCompact,
+:where(.vui-routes-evolutionroute).feedbackTextCompact {
   margin: 0;
   padding: 9px 10px;
   border-radius: 8px;
@@ -1992,23 +1993,23 @@
   overflow-wrap: anywhere;
 }
 
-.noticeTextCompact {
+:where(.vui-routes-evolutionroute).noticeTextCompact {
   color: var(--fg-secondary);
   background: var(--surface-card-subtle);
 }
 
-.feedbackTextCompact {
+:where(.vui-routes-evolutionroute).feedbackTextCompact {
   color: var(--fg-secondary);
   white-space: pre-wrap;
   background: color-mix(in srgb, var(--state-success) 9%, transparent);
 }
 
-.errorTextCompact {
+:where(.vui-routes-evolutionroute).errorTextCompact {
   color: var(--state-error);
   background: color-mix(in srgb, var(--state-error) 11%, transparent);
 }
 
-.ioStack {
+:where(.vui-routes-evolutionroute).ioStack {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -2016,14 +2017,14 @@
   min-height: 0;
 }
 
-.liveIoPane {
+:where(.vui-routes-evolutionroute).liveIoPane {
   height: 100%;
   min-height: 0;
   overflow: auto;
   padding-right: 4px;
 }
 
-.liveIoResizeHandle {
+:where(.vui-routes-evolutionroute).liveIoResizeHandle {
   position: relative;
   min-height: 12px;
   padding: 0;
@@ -2034,7 +2035,7 @@
   touch-action: none;
 }
 
-.liveIoResizeHandle::before {
+:where(.vui-routes-evolutionroute).liveIoResizeHandle::before {
   content: "";
   position: absolute;
   top: 50%;
@@ -2047,13 +2048,13 @@
   transition: background-color 150ms ease, box-shadow 150ms ease;
 }
 
-.liveIoResizeHandle:hover::before,
-.liveIoResizeHandle:focus-visible::before {
+:where(.vui-routes-evolutionroute).liveIoResizeHandle:hover::before,
+:where(.vui-routes-evolutionroute).liveIoResizeHandle:focus-visible::before {
   background: color-mix(in srgb, var(--accent-warm) 52%, transparent);
   box-shadow: var(--vui-shadow-soft);
 }
 
-.ioTranscript {
+:where(.vui-routes-evolutionroute).ioTranscript {
   display: grid;
   align-content: start;
   gap: 8px;
@@ -2062,7 +2063,7 @@
   padding-right: 4px;
 }
 
-.transcriptSection {
+:where(.vui-routes-evolutionroute).transcriptSection {
   display: flex;
   flex: 1 1 0;
   flex-direction: column;
@@ -2072,17 +2073,17 @@
   background: transparent;
 }
 
-.transcriptSection .ioTranscript {
+:where(.vui-routes-evolutionroute).transcriptSection .ioTranscript {
   flex: 1 1 0;
 }
 
-.caseConversationShell {
+:where(.vui-routes-evolutionroute).caseConversationShell {
   display: flex;
   flex: 1 1 0;
   min-height: 0;
 }
 
-.caseConversationTranscript {
+:where(.vui-routes-evolutionroute).caseConversationTranscript {
   flex: 1 1 0;
   min-height: 0;
   padding: 0 !important;
@@ -2091,14 +2092,14 @@
   box-shadow: none !important;
 }
 
-.caseConversationFallback {
+:where(.vui-routes-evolutionroute).caseConversationFallback {
   display: grid;
   min-height: 180px;
   place-items: center;
   color: var(--fg-secondary);
 }
 
-.caseTraceTimeline {
+:where(.vui-routes-evolutionroute).caseTraceTimeline {
   position: relative;
   display: flex;
   align-items: stretch;
@@ -2108,7 +2109,7 @@
   padding: 8px 6px 12px 30px;
 }
 
-.caseTraceTimeline::before {
+:where(.vui-routes-evolutionroute).caseTraceTimeline::before {
   content: "";
   position: absolute;
   top: 10px;
@@ -2118,7 +2119,7 @@
   background: color-mix(in srgb, var(--fg-tertiary) 18%, transparent);
 }
 
-.caseTraceStack {
+:where(.vui-routes-evolutionroute).caseTraceStack {
   position: relative;
   z-index: 1;
   display: flex;
@@ -2130,13 +2131,13 @@
   min-height: min-content;
 }
 
-.caseTraceTurn {
+:where(.vui-routes-evolutionroute).caseTraceTurn {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
 
-.caseTraceSummary {
+:where(.vui-routes-evolutionroute).caseTraceSummary {
   display: grid;
   grid-template-columns: 26px minmax(0, 1fr) auto 18px;
   gap: 10px;
@@ -2153,19 +2154,19 @@
   text-align: left;
 }
 
-.caseTraceSummary:hover,
-.caseTraceSummary:focus-visible {
+:where(.vui-routes-evolutionroute).caseTraceSummary:hover,
+:where(.vui-routes-evolutionroute).caseTraceSummary:focus-visible {
   border-color: color-mix(in srgb, var(--accent-cool) 26%, transparent);
   background: color-mix(in srgb, var(--surface-card-muted) 88%, transparent);
   outline: none;
 }
 
-.caseTraceSummary:hover .caseTraceTitle,
-.caseTraceSummary:focus-visible .caseTraceTitle {
+:where(.vui-routes-evolutionroute).caseTraceSummary:hover .caseTraceTitle,
+:where(.vui-routes-evolutionroute).caseTraceSummary:focus-visible .caseTraceTitle {
   color: var(--fg-primary);
 }
 
-.caseTraceIcon {
+:where(.vui-routes-evolutionroute).caseTraceIcon {
   position: relative;
   z-index: 1;
   display: grid;
@@ -2179,40 +2180,40 @@
   color: var(--fg-tertiary);
 }
 
-.caseTraceTurn_tool .caseTraceIcon {
+:where(.vui-routes-evolutionroute).caseTraceTurn_tool .caseTraceIcon {
   color: color-mix(in srgb, var(--accent-cool) 78%, var(--fg-secondary));
 }
 
-.caseTraceTurn_assistant .caseTraceIcon,
-.caseTraceTurn_thought .caseTraceIcon {
+:where(.vui-routes-evolutionroute).caseTraceTurn_assistant .caseTraceIcon,
+:where(.vui-routes-evolutionroute).caseTraceTurn_thought .caseTraceIcon {
   color: color-mix(in srgb, var(--accent-warm) 80%, var(--fg-secondary));
 }
 
-.caseTraceTurn_error .caseTraceIcon {
+:where(.vui-routes-evolutionroute).caseTraceTurn_error .caseTraceIcon {
   color: var(--state-error);
 }
 
-.caseTraceTurn_input .caseTraceSummary {
+:where(.vui-routes-evolutionroute).caseTraceTurn_input .caseTraceSummary {
   background: color-mix(in srgb, var(--surface-panel-strong) 46%, transparent);
 }
 
-.caseTraceTurn_tool .caseTraceSummary {
+:where(.vui-routes-evolutionroute).caseTraceTurn_tool .caseTraceSummary {
   border-left-color: color-mix(in srgb, var(--accent-cool) 42%, transparent);
 }
 
-.caseTraceTurn_assistant .caseTraceSummary,
-.caseTraceTurn_thought .caseTraceSummary {
+:where(.vui-routes-evolutionroute).caseTraceTurn_assistant .caseTraceSummary,
+:where(.vui-routes-evolutionroute).caseTraceTurn_thought .caseTraceSummary {
   border-left-color: color-mix(in srgb, var(--accent-warm) 48%, transparent);
 }
 
-.caseTraceTurn_error .caseTraceSummary {
+:where(.vui-routes-evolutionroute).caseTraceTurn_error .caseTraceSummary {
   border-left-color: color-mix(in srgb, var(--state-error) 58%, transparent);
   background:
     var(--vui-gradient-route-soft),
     color-mix(in srgb, var(--surface-card-muted) 78%, transparent);
 }
 
-.casePreflightIssue {
+:where(.vui-routes-evolutionroute).casePreflightIssue {
   display: grid;
   gap: 5px;
   padding: 10px 11px;
@@ -2222,48 +2223,48 @@
   color: var(--fg-secondary);
 }
 
-.casePreflightIssue strong {
+:where(.vui-routes-evolutionroute).casePreflightIssue strong {
   color: var(--fg-primary);
-  font-size: 0.86rem;
+  font-size: var(--vui-font-xs);
 }
 
-.casePreflightIssue span,
-.casePreflightIssue small {
+:where(.vui-routes-evolutionroute).casePreflightIssue span,
+:where(.vui-routes-evolutionroute).casePreflightIssue small {
   color: var(--fg-secondary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
 
-.casePreflightIssue small {
+:where(.vui-routes-evolutionroute).casePreflightIssue small {
   color: var(--fg-tertiary);
 }
 
-.caseTraceMessage {
+:where(.vui-routes-evolutionroute).caseTraceMessage {
   display: grid;
   gap: 3px;
   min-width: 0;
 }
 
-.caseTraceTitle {
+:where(.vui-routes-evolutionroute).caseTraceTitle {
   color: var(--fg-secondary);
-  font-size: 0.84rem;
+  font-size: var(--vui-font-xs);
   font-weight: 650;
   white-space: nowrap;
 }
 
-.caseTracePreview {
+:where(.vui-routes-evolutionroute).caseTracePreview {
   display: -webkit-box;
   min-width: 0;
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.35;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
 
-.caseTraceMeta {
+:where(.vui-routes-evolutionroute).caseTraceMeta {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -2271,28 +2272,28 @@
   padding-top: 1px;
 }
 
-.caseTraceStatus,
-.caseTraceTime {
+:where(.vui-routes-evolutionroute).caseTraceStatus,
+:where(.vui-routes-evolutionroute).caseTraceTime {
   color: var(--fg-tertiary);
   font-size: 0.7rem;
   white-space: nowrap;
 }
 
-.caseTraceStatus {
+:where(.vui-routes-evolutionroute).caseTraceStatus {
   padding: 1px 5px;
   border: 1px solid color-mix(in srgb, var(--fg-tertiary) 14%, transparent);
   border-radius: 999px;
   background: color-mix(in srgb, var(--surface-panel) 78%, transparent);
 }
 
-.caseTraceChevron {
+:where(.vui-routes-evolutionroute).caseTraceChevron {
   display: grid;
   place-items: center;
   min-height: 24px;
   color: var(--fg-tertiary);
 }
 
-.caseTraceBody {
+:where(.vui-routes-evolutionroute).caseTraceBody {
   display: grid;
   gap: 8px;
   min-width: 0;
@@ -2305,43 +2306,43 @@
     var(--surface-card-muted);
 }
 
-.caseRawEvidence {
+:where(.vui-routes-evolutionroute).caseRawEvidence {
   flex: 0 0 auto;
   max-height: 30%;
   overflow: auto;
   background: color-mix(in srgb, var(--surface-card-muted) 70%, transparent);
 }
 
-.caseRawEvidence:not([open]) {
+:where(.vui-routes-evolutionroute).caseRawEvidence:not([open]) {
   max-height: none;
 }
 
-.caseRawEvidence .ioContent {
+:where(.vui-routes-evolutionroute).caseRawEvidence .ioContent {
   max-height: 180px;
 }
 
-.caseTraceSection {
+:where(.vui-routes-evolutionroute).caseTraceSection {
   display: grid;
   gap: 5px;
   min-width: 0;
 }
 
-.caseTraceSection span {
+:where(.vui-routes-evolutionroute).caseTraceSection span {
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
-.caseTraceSection pre,
-.caseTraceStateRow dd {
+:where(.vui-routes-evolutionroute).caseTraceSection pre,
+:where(.vui-routes-evolutionroute).caseTraceStateRow dd {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.caseTraceSection pre {
+:where(.vui-routes-evolutionroute).caseTraceSection pre {
   max-height: 360px;
   overflow: auto;
   color: var(--fg-secondary);
@@ -2349,42 +2350,42 @@
   line-height: 1.55;
 }
 
-.caseTraceSectionJson pre {
+:where(.vui-routes-evolutionroute).caseTraceSectionJson pre {
   padding: 8px 9px;
   border-radius: 6px;
   background: color-mix(in srgb, var(--surface-panel-strong) 82%, transparent);
   font-family: var(--font-mono);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
 }
 
-.caseTraceStateGrid {
+:where(.vui-routes-evolutionroute).caseTraceStateGrid {
   display: grid;
   gap: 7px;
   min-width: 0;
 }
 
-.caseTraceStateRow {
+:where(.vui-routes-evolutionroute).caseTraceStateRow {
   display: grid;
   gap: 3px;
   min-width: 0;
   margin: 0;
 }
 
-.caseTraceStateRow dt {
+:where(.vui-routes-evolutionroute).caseTraceStateRow dt {
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
-.caseTraceStateRow dd {
+:where(.vui-routes-evolutionroute).caseTraceStateRow dd {
   color: var(--fg-secondary);
   font-size: 0.8rem;
   line-height: 1.55;
 }
 
-.ioEntry {
+:where(.vui-routes-evolutionroute).ioEntry {
   display: grid;
   gap: 7px;
   min-width: 0;
@@ -2394,7 +2395,7 @@
   background: var(--surface-card-muted);
 }
 
-.ioMetaRow {
+:where(.vui-routes-evolutionroute).ioMetaRow {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2402,43 +2403,43 @@
   min-width: 0;
 }
 
-.ioMetaRow strong {
+:where(.vui-routes-evolutionroute).ioMetaRow strong {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.ioContent {
+:where(.vui-routes-evolutionroute).ioContent {
   margin: 0;
   max-height: 280px;
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-family: Consolas, "SFMono-Regular", monospace;
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.6;
   color: var(--fg-secondary);
 }
 
-.collapsibleEvidence {
+:where(.vui-routes-evolutionroute).collapsibleEvidence {
   display: grid;
   gap: 10px;
 }
 
-.collapsibleEvidence summary {
+:where(.vui-routes-evolutionroute).collapsibleEvidence summary {
   outline: 0;
 }
 
-.collapsibleEvidence[open] {
+:where(.vui-routes-evolutionroute).collapsibleEvidence[open] {
   background: var(--surface-card-subtle);
 }
 
-.primaryEvidenceBlock .ioContent {
+:where(.vui-routes-evolutionroute).primaryEvidenceBlock .ioContent {
   max-height: 360px;
 }
 
-.ioWaitingState {
+:where(.vui-routes-evolutionroute).ioWaitingState {
   display: grid;
   place-items: center;
   height: 100%;
@@ -2446,7 +2447,7 @@
   text-align: center;
 }
 
-.viewStack {
+:where(.vui-routes-evolutionroute).viewStack {
   display: grid;
   gap: 16px;
   align-content: start;
@@ -2455,13 +2456,13 @@
   padding-right: 4px;
 }
 
-.libraryViewStack {
+:where(.vui-routes-evolutionroute).libraryViewStack {
   grid-template-rows: auto minmax(0, 1fr);
   height: 100%;
   overflow: hidden;
 }
 
-.librarySummaryBar {
+:where(.vui-routes-evolutionroute).librarySummaryBar {
   display: grid;
   grid-template-columns: minmax(340px, 1fr) minmax(300px, 0.82fr) minmax(340px, 0.92fr);
   gap: 8px;
@@ -2469,34 +2470,34 @@
   min-height: 0;
 }
 
-.librarySummaryBar .summarySurface {
+:where(.vui-routes-evolutionroute).librarySummaryBar .summarySurface {
   gap: 6px;
   padding: 8px 10px;
 }
 
-.librarySummaryBar .surfaceHeaderCompact {
+:where(.vui-routes-evolutionroute).librarySummaryBar .surfaceHeaderCompact {
   align-items: center;
 }
 
-.librarySummaryBar .sectionTitle {
+:where(.vui-routes-evolutionroute).librarySummaryBar .sectionTitle {
   margin-top: 2px;
   font-size: 0.98rem;
 }
 
-.librarySummaryBar .summaryMetricStrip,
-.librarySummaryBar .statusMetricGrid {
+:where(.vui-routes-evolutionroute).librarySummaryBar .summaryMetricStrip,
+:where(.vui-routes-evolutionroute).librarySummaryBar .statusMetricGrid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
 }
 
-.librarySummaryBar .stripItem,
-.librarySummaryBar .metricTile {
+:where(.vui-routes-evolutionroute).librarySummaryBar .stripItem,
+:where(.vui-routes-evolutionroute).librarySummaryBar .metricTile {
   min-height: 36px;
   padding: 5px 7px;
 }
 
-.librarySummaryBar .noticeText,
-.librarySummaryBar .statusLead {
+:where(.vui-routes-evolutionroute).librarySummaryBar .noticeText,
+:where(.vui-routes-evolutionroute).librarySummaryBar .statusLead {
   margin: 0;
   display: -webkit-box;
   overflow: hidden;
@@ -2505,40 +2506,40 @@
   -webkit-line-clamp: 2;
 }
 
-.librarySummaryBar .relatedList {
+:where(.vui-routes-evolutionroute).librarySummaryBar .relatedList {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 
-.librarySummaryBar .relatedRow {
+:where(.vui-routes-evolutionroute).librarySummaryBar .relatedRow {
   min-height: 32px;
   padding: 5px 7px;
 }
 
-.librarySummaryBar .actionRow {
+:where(.vui-routes-evolutionroute).librarySummaryBar .actionRow {
   gap: 6px;
 }
 
-.librarySummaryBar .inlineAction {
+:where(.vui-routes-evolutionroute).librarySummaryBar .inlineAction {
   min-height: 32px;
   padding: 0 10px;
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
 }
 
-.runsHeaderSurface {
+:where(.vui-routes-evolutionroute).runsHeaderSurface {
   display: grid;
   gap: 12px;
   padding-bottom: 18px;
 }
 
-.runsHeaderBody {
+:where(.vui-routes-evolutionroute).runsHeaderBody {
   display: grid;
   grid-template-columns: minmax(0, 1.7fr) minmax(280px, 0.95fr);
   gap: 12px;
   padding: 0 18px;
 }
 
-.runsGuideCard {
+:where(.vui-routes-evolutionroute).runsGuideCard {
   display: grid;
   gap: 10px;
   padding: 12px 14px;
@@ -2547,13 +2548,13 @@
   background: var(--surface-card-subtle);
 }
 
-.runsGuideCard p {
+:where(.vui-routes-evolutionroute).runsGuideCard p {
   margin: 0;
   color: var(--fg-secondary);
   line-height: 1.55;
 }
 
-.runsCommandStrip {
+:where(.vui-routes-evolutionroute).runsCommandStrip {
   display: grid;
   grid-template-columns: minmax(220px, 0.42fr) minmax(0, 1fr);
   gap: 10px;
@@ -2561,7 +2562,7 @@
   padding: 8px 10px;
 }
 
-.runsCommandHeader {
+:where(.vui-routes-evolutionroute).runsCommandHeader {
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -2570,13 +2571,13 @@
   min-width: 0;
 }
 
-.runsCommandMetrics {
+:where(.vui-routes-evolutionroute).runsCommandMetrics {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 6px;
 }
 
-.compactFact {
+:where(.vui-routes-evolutionroute).compactFact {
   display: grid;
   align-content: center;
   gap: 3px;
@@ -2588,16 +2589,16 @@
   background: var(--surface-card-subtle);
 }
 
-.compactFact span {
+:where(.vui-routes-evolutionroute).compactFact span {
   min-width: 0;
   color: var(--fg-secondary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.compactFact strong {
+:where(.vui-routes-evolutionroute).compactFact strong {
   min-width: 0;
   color: var(--fg-primary);
   font-size: 0.92rem;
@@ -2605,14 +2606,14 @@
   overflow-wrap: anywhere;
 }
 
-.runsWorkspace {
+:where(.vui-routes-evolutionroute).runsWorkspace {
   display: grid;
   grid-template-columns: var(--evolution-runs-queue-width, 380px) 12px minmax(0, 1fr);
   align-items: stretch;
   min-height: 0;
 }
 
-.resizeHandle {
+:where(.vui-routes-evolutionroute).resizeHandle {
   position: relative;
   min-width: 12px;
   padding: 0;
@@ -2623,7 +2624,7 @@
   touch-action: none;
 }
 
-.resizeHandle::before {
+:where(.vui-routes-evolutionroute).resizeHandle::before {
   content: "";
   position: absolute;
   top: 0;
@@ -2636,47 +2637,47 @@
   transition: background-color 150ms ease, box-shadow 150ms ease;
 }
 
-.resizeHandle:hover::before,
-.resizeHandle:focus-visible::before {
+:where(.vui-routes-evolutionroute).resizeHandle:hover::before,
+:where(.vui-routes-evolutionroute).resizeHandle:focus-visible::before {
   background: color-mix(in srgb, var(--accent-warm) 52%, transparent);
   box-shadow: var(--vui-shadow-soft);
 }
 
-.paneCollapsed {
+:where(.vui-routes-evolutionroute).paneCollapsed {
   padding: 0;
   border: 0;
   overflow: hidden;
   visibility: hidden;
 }
 
-.panelHeader {
+:where(.vui-routes-evolutionroute).panelHeader {
   display: flex;
   align-items: start;
   justify-content: space-between;
   gap: 12px;
 }
 
-.runQueuePanel,
-.runDetailPanel {
+:where(.vui-routes-evolutionroute).runQueuePanel,
+:where(.vui-routes-evolutionroute).runDetailPanel {
   min-height: 0;
   padding: 10px 12px;
 }
 
-.runQueuePanel {
+:where(.vui-routes-evolutionroute).runQueuePanel {
   display: grid;
   align-content: start;
   gap: 10px;
   overflow: auto;
 }
 
-.runDetailPanel {
+:where(.vui-routes-evolutionroute).runDetailPanel {
   display: grid;
   align-content: start;
   gap: 10px;
   overflow: auto;
 }
 
-.runListScrollable {
+:where(.vui-routes-evolutionroute).runListScrollable {
   display: grid;
   gap: 6px;
   max-height: min(620px, 58vh);
@@ -2684,7 +2685,7 @@
   padding-right: 4px;
 }
 
-.structuredEmptyState {
+:where(.vui-routes-evolutionroute).structuredEmptyState {
   display: grid;
   align-content: start;
   gap: 8px;
@@ -2695,54 +2696,54 @@
   background: var(--surface-card-subtle);
 }
 
-.structuredEmptyState h3 {
+:where(.vui-routes-evolutionroute).structuredEmptyState h3 {
   margin: 0;
   font-size: 0.94rem;
 }
 
-.structuredEmptyState p {
+:where(.vui-routes-evolutionroute).structuredEmptyState p {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.36;
 }
 
-.masterDetail {
+:where(.vui-routes-evolutionroute).masterDetail {
   display: grid;
   grid-template-columns: var(--evolution-library-list-width, 360px) 12px minmax(0, 1fr);
   min-height: 0;
 }
 
-.libraryViewStack .masterDetail {
+:where(.vui-routes-evolutionroute).libraryViewStack .masterDetail {
   height: 100%;
   overflow: hidden;
 }
 
-.listPanel,
-.detailPanel {
+:where(.vui-routes-evolutionroute).listPanel,
+:where(.vui-routes-evolutionroute).detailPanel {
   min-height: 0;
   overflow: auto;
   padding: 10px 12px;
 }
 
-.libraryViewStack .listPanel,
-.libraryViewStack .detailPanel {
+:where(.vui-routes-evolutionroute).libraryViewStack .listPanel,
+:where(.vui-routes-evolutionroute).libraryViewStack .detailPanel {
   padding: 12px;
 }
 
-.detailSectionCompact {
+:where(.vui-routes-evolutionroute).detailSectionCompact {
   margin-top: 0;
   padding-top: 0;
   border-top: 0;
 }
 
-.listPanel {
+:where(.vui-routes-evolutionroute).listPanel {
   display: grid;
   align-content: start;
   gap: 10px;
 }
 
-.bulkToolbar {
+:where(.vui-routes-evolutionroute).bulkToolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2750,36 +2751,36 @@
   flex-wrap: wrap;
 }
 
-.bulkToolbarHint {
+:where(.vui-routes-evolutionroute).bulkToolbarHint {
   flex-basis: 100%;
   margin: -2px 0 0;
   color: var(--fg-tertiary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.45;
 }
 
-.libraryFilters {
+:where(.vui-routes-evolutionroute).libraryFilters {
   display: grid;
   gap: 10px;
 }
 
-.filterRow {
+:where(.vui-routes-evolutionroute).filterRow {
   display: grid;
   grid-template-columns: minmax(0, 1.7fr) repeat(2, minmax(150px, 1fr));
   gap: 10px;
 }
 
-.filterField {
+:where(.vui-routes-evolutionroute).filterField {
   display: grid;
   gap: 6px;
 }
 
-.filterField span {
+:where(.vui-routes-evolutionroute).filterField span {
   color: var(--fg-tertiary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
 }
 
-.filterMeta {
+:where(.vui-routes-evolutionroute).filterMeta {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2787,7 +2788,7 @@
   flex-wrap: wrap;
 }
 
-.runItem {
+:where(.vui-routes-evolutionroute).runItem {
   display: grid;
   gap: 6px;
   padding: 9px 10px;
@@ -2796,11 +2797,11 @@
   text-align: left;
 }
 
-.runRecordCard {
+:where(.vui-routes-evolutionroute).runRecordCard {
   gap: 10px;
 }
 
-.runCardButton {
+:where(.vui-routes-evolutionroute).runCardButton {
   display: grid;
   gap: 8px;
   border: 0;
@@ -2810,12 +2811,12 @@
   text-align: left;
 }
 
-.runItemActive {
+:where(.vui-routes-evolutionroute).runItemActive {
   border-color: color-mix(in srgb, var(--accent-warm) 28%, transparent);
   background: color-mix(in srgb, var(--accent-warm) 8%, transparent);
 }
 
-.proposalCard {
+:where(.vui-routes-evolutionroute).proposalCard {
   display: grid;
   gap: 6px;
   padding: 9px 10px;
@@ -2824,12 +2825,12 @@
   background: var(--surface-card-muted);
 }
 
-.libraryViewStack .proposalCard {
+:where(.vui-routes-evolutionroute).libraryViewStack .proposalCard {
   gap: 8px;
   padding: 10px 12px;
 }
 
-.selectionBar {
+:where(.vui-routes-evolutionroute).selectionBar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2837,20 +2838,20 @@
   flex-wrap: wrap;
 }
 
-.batchToggle {
+:where(.vui-routes-evolutionroute).batchToggle {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   color: var(--fg-tertiary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
 }
 
-.batchToggle input {
+:where(.vui-routes-evolutionroute).batchToggle input {
   width: 15px;
   height: 15px;
 }
 
-.proposalCardButton {
+:where(.vui-routes-evolutionroute).proposalCardButton {
   display: grid;
   gap: 8px;
   border: 0;
@@ -2860,26 +2861,26 @@
   color: inherit;
 }
 
-.cardHeadline {
+:where(.vui-routes-evolutionroute).cardHeadline {
   color: var(--fg-primary) !important;
   font-weight: 600;
 }
 
-.cardFooter {
+:where(.vui-routes-evolutionroute).cardFooter {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   color: var(--fg-tertiary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
   flex-wrap: wrap;
 }
 
-.detailHeader {
+:where(.vui-routes-evolutionroute).detailHeader {
   align-items: start;
 }
 
-.detailHeaderActions {
+:where(.vui-routes-evolutionroute).detailHeaderActions {
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
@@ -2887,16 +2888,16 @@
   flex-wrap: wrap;
 }
 
-.detailTitle {
+:where(.vui-routes-evolutionroute).detailTitle {
   margin: 6px 0 0;
   font-size: 1.28rem;
 }
 
-.libraryViewStack .detailTitle {
+:where(.vui-routes-evolutionroute).libraryViewStack .detailTitle {
   font-size: 1.08rem;
 }
 
-.runDetailOverview {
+:where(.vui-routes-evolutionroute).runDetailOverview {
   display: grid;
   grid-template-columns: minmax(190px, 0.42fr) minmax(0, 1fr);
   gap: 10px;
@@ -2907,25 +2908,25 @@
   background: var(--surface-card-subtle);
 }
 
-.runScorePanel {
+:where(.vui-routes-evolutionroute).runScorePanel {
   display: grid;
   align-content: center;
   gap: 6px;
   min-width: 0;
 }
 
-.runScorePanel span {
+:where(.vui-routes-evolutionroute).runScorePanel span {
   color: var(--fg-tertiary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
 }
 
-.runScorePanel p {
+:where(.vui-routes-evolutionroute).runScorePanel p {
   margin: 0;
   color: var(--fg-secondary);
   line-height: 1.45;
 }
 
-.runScoreDiagnosis {
+:where(.vui-routes-evolutionroute).runScoreDiagnosis {
   display: grid;
   gap: 3px;
   min-width: 0;
@@ -2934,12 +2935,12 @@
   background: var(--surface-card-muted);
 }
 
-.runScoreDiagnosis span {
+:where(.vui-routes-evolutionroute).runScoreDiagnosis span {
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
 }
 
-.runScoreDiagnosis p {
+:where(.vui-routes-evolutionroute).runScoreDiagnosis p {
   display: -webkit-box;
   overflow: hidden;
   color: var(--fg-primary);
@@ -2947,45 +2948,45 @@
   -webkit-box-orient: vertical;
 }
 
-.runScoreFacts {
+:where(.vui-routes-evolutionroute).runScoreFacts {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
   margin-top: 4px;
 }
 
-.runScoreFacts span {
+:where(.vui-routes-evolutionroute).runScoreFacts span {
   display: grid;
   gap: 2px;
   min-width: 0;
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
 }
 
-.runScoreFacts strong {
+:where(.vui-routes-evolutionroute).runScoreFacts strong {
   min-width: 0;
   color: var(--fg-primary);
-  font-size: 0.86rem;
+  font-size: var(--vui-font-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.detailLead {
+:where(.vui-routes-evolutionroute).detailLead {
   margin: 0;
   font-size: 1.74rem;
   color: var(--fg-primary) !important;
   line-height: 1;
 }
 
-.reviewLead {
+:where(.vui-routes-evolutionroute).reviewLead {
   margin: 0;
   color: var(--fg-primary) !important;
   font-size: 1.04rem;
   line-height: 1.55;
 }
 
-.detailSection {
+:where(.vui-routes-evolutionroute).detailSection {
   display: grid;
   gap: 6px;
   padding-top: 10px;
@@ -2993,13 +2994,13 @@
   border-top: 1px solid var(--border-hairline);
 }
 
-.libraryViewStack .detailSection {
+:where(.vui-routes-evolutionroute).libraryViewStack .detailSection {
   gap: 6px;
   padding-top: 10px;
   margin-top: 10px;
 }
 
-.detailSection h3 {
+:where(.vui-routes-evolutionroute).detailSection h3 {
   margin: 0;
   font-size: 0.92rem;
   color: var(--fg-tertiary);
@@ -3007,12 +3008,12 @@
   letter-spacing: 0.06em;
 }
 
-.relatedList {
+:where(.vui-routes-evolutionroute).relatedList {
   display: grid;
   gap: 6px;
 }
 
-.closedLoopLedger {
+:where(.vui-routes-evolutionroute).closedLoopLedger {
   display: grid;
   gap: 8px;
   min-width: 0;
@@ -3022,7 +3023,7 @@
   background: color-mix(in srgb, var(--surface-card-subtle) 88%, var(--accent-cool));
 }
 
-.closedLoopLedgerHeader {
+:where(.vui-routes-evolutionroute).closedLoopLedgerHeader {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -3030,27 +3031,27 @@
   min-width: 0;
 }
 
-.closedLoopLedgerHeader > div {
+:where(.vui-routes-evolutionroute).closedLoopLedgerHeader > div {
   display: grid;
   gap: 3px;
   min-width: 0;
 }
 
-.closedLoopLedger p {
+:where(.vui-routes-evolutionroute).closedLoopLedger p {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
-.closedLoopLedgerEvidenceGrid {
+:where(.vui-routes-evolutionroute).closedLoopLedgerEvidenceGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 
-.closedLoopLedgerEvidenceGrid article {
+:where(.vui-routes-evolutionroute).closedLoopLedgerEvidenceGrid article {
   display: grid;
   gap: 3px;
   min-width: 0;
@@ -3060,71 +3061,71 @@
   background: var(--surface-card-muted);
 }
 
-.closedLoopLedgerEvidenceGrid span,
-.closedLoopLedgerEvidenceGrid strong {
+:where(.vui-routes-evolutionroute).closedLoopLedgerEvidenceGrid span,
+:where(.vui-routes-evolutionroute).closedLoopLedgerEvidenceGrid strong {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.closedLoopLedgerEvidenceGrid span {
+:where(.vui-routes-evolutionroute).closedLoopLedgerEvidenceGrid span {
   color: var(--fg-tertiary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
 }
 
-.closedLoopLedgerEvidenceGrid strong {
+:where(.vui-routes-evolutionroute).closedLoopLedgerEvidenceGrid strong {
   color: var(--fg-primary);
-  font-size: 0.84rem;
+  font-size: var(--vui-font-xs);
 }
 
-.libraryViewStack .detailPanel > .relatedList,
-.libraryViewStack .detailSection > .relatedList {
+:where(.vui-routes-evolutionroute).libraryViewStack .detailPanel > .relatedList,
+:where(.vui-routes-evolutionroute).libraryViewStack .detailSection > .relatedList {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
-.libraryViewStack .relatedRow {
+:where(.vui-routes-evolutionroute).libraryViewStack .relatedRow {
   gap: 4px;
   min-height: 48px;
   padding: 9px 10px;
 }
 
-.libraryViewStack .relatedRow strong,
-.libraryViewStack .relatedRow span {
+:where(.vui-routes-evolutionroute).libraryViewStack .relatedRow strong,
+:where(.vui-routes-evolutionroute).libraryViewStack .relatedRow span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.detailFactGrid {
+:where(.vui-routes-evolutionroute).detailFactGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
-.runSignalGrid {
+:where(.vui-routes-evolutionroute).runSignalGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
-.runSignalStack {
+:where(.vui-routes-evolutionroute).runSignalStack {
   display: grid;
   align-content: start;
   gap: 8px;
   min-width: 0;
 }
 
-.runSignalStack h3 {
+:where(.vui-routes-evolutionroute).runSignalStack h3 {
   margin: 0;
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
   color: var(--fg-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
 
-.runRuntimeNote {
+:where(.vui-routes-evolutionroute).runRuntimeNote {
   display: grid;
   gap: 4px;
   padding: 8px 10px;
@@ -3133,16 +3134,16 @@
   color: var(--fg-secondary);
 }
 
-.runRuntimeNote p {
+:where(.vui-routes-evolutionroute).runRuntimeNote p {
   margin: 0;
   line-height: 1.45;
 }
 
-.dangerDetailSection {
+:where(.vui-routes-evolutionroute).dangerDetailSection {
   opacity: 0.86;
 }
 
-.detailList {
+:where(.vui-routes-evolutionroute).detailList {
   margin: 0;
   padding-left: 18px;
   color: var(--fg-secondary);
@@ -3150,31 +3151,31 @@
   gap: 8px;
 }
 
-.listEmptyState {
+:where(.vui-routes-evolutionroute).listEmptyState {
   padding: 10px;
   border-radius: 8px;
   border: 1px dashed color-mix(in srgb, var(--surface-card) 8%, transparent);
   color: var(--fg-secondary);
 }
 
-.actionGridCompact {
+:where(.vui-routes-evolutionroute).actionGridCompact {
   display: grid;
   gap: 10px;
 }
 
-.pathText {
+:where(.vui-routes-evolutionroute).pathText {
   overflow-wrap: anywhere;
   font-family: Consolas, "SFMono-Regular", monospace;
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
 }
 
-.rawBlockStack {
+:where(.vui-routes-evolutionroute).rawBlockStack {
   display: grid;
   gap: 8px;
   width: 100%;
 }
 
-.rawBlock {
+:where(.vui-routes-evolutionroute).rawBlock {
   border: 1px solid color-mix(in srgb, var(--surface-card) 8%, transparent);
   border-radius: 8px;
   background: var(--surface-card-muted);
@@ -3183,24 +3184,24 @@
   overflow: hidden;
 }
 
-.rawBlock summary {
+:where(.vui-routes-evolutionroute).rawBlock summary {
   cursor: pointer;
   color: var(--fg-primary);
   font-weight: 600;
 }
 
-.rawJson {
+:where(.vui-routes-evolutionroute).rawJson {
   margin: 12px 0 0;
   padding: 12px;
   border-radius: 8px;
   overflow: auto;
   background: var(--surface-code);
   color: var(--fg-secondary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.55;
 }
 
-.emptyState {
+:where(.vui-routes-evolutionroute).emptyState {
   display: grid;
   place-items: center;
   min-height: 180px;
@@ -3209,7 +3210,7 @@
 }
 
 @media (max-width: 1360px) {
-  .overviewGrid {
+  :where(.vui-routes-evolutionroute).overviewGrid {
     grid-template-columns: minmax(292px, 0.92fr) 12px minmax(360px, 1.32fr) 12px minmax(292px, 0.9fr);
     grid-template-rows: minmax(0, 1fr);
     grid-template-areas:
@@ -3218,42 +3219,42 @@
     overflow: hidden;
   }
 
-  .overviewWorkspace {
+  :where(.vui-routes-evolutionroute).overviewWorkspace {
     grid-template-columns: minmax(0, 1.2fr) minmax(320px, 1fr);
   }
 
-  .librarySummaryBar {
+  :where(.vui-routes-evolutionroute).librarySummaryBar {
     grid-template-columns: minmax(300px, 1fr) minmax(260px, 0.8fr) minmax(300px, 0.9fr);
   }
 
-  .statusSurface {
+  :where(.vui-routes-evolutionroute).statusSurface {
     grid-column: 1 / -1;
   }
 
-  .overviewSecondaryGrid {
+  :where(.vui-routes-evolutionroute).overviewSecondaryGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .runsSurface {
+  :where(.vui-routes-evolutionroute).runsSurface {
     grid-column: 1 / -1;
   }
 }
 
 @media (max-width: 1200px) {
-  .toolbar {
+  :where(.vui-routes-evolutionroute).toolbar {
     align-items: flex-start;
   }
 
-  .toolbarIntro {
+  :where(.vui-routes-evolutionroute).toolbarIntro {
     min-width: 220px;
     max-width: min(390px, 100%);
   }
 
-  .toolbarControls {
+  :where(.vui-routes-evolutionroute).toolbarControls {
     min-width: min(500px, 100%);
   }
 
-  .overviewGrid {
+  :where(.vui-routes-evolutionroute).overviewGrid {
     grid-template-columns: minmax(0, 1fr) minmax(292px, 0.82fr);
     grid-template-rows: minmax(180px, 0.58fr) minmax(300px, 1fr);
     grid-template-areas:
@@ -3263,90 +3264,90 @@
     gap: 10px;
   }
 
-  .liveResizeHandle {
+  :where(.vui-routes-evolutionroute).liveResizeHandle {
     display: none;
   }
 
-  .overviewWorkspace,
-  .overviewSecondaryGrid,
-  .runsHeaderBody,
-  .runsWorkspace,
-  .runsCommandStrip,
-  .masterDetail,
-  .librarySummaryBar .summarySurface,
-  .controlSurface {
+  :where(.vui-routes-evolutionroute).overviewWorkspace,
+  :where(.vui-routes-evolutionroute).overviewSecondaryGrid,
+  :where(.vui-routes-evolutionroute).runsHeaderBody,
+  :where(.vui-routes-evolutionroute).runsWorkspace,
+  :where(.vui-routes-evolutionroute).runsCommandStrip,
+  :where(.vui-routes-evolutionroute).masterDetail,
+  :where(.vui-routes-evolutionroute).librarySummaryBar .summarySurface,
+  :where(.vui-routes-evolutionroute).controlSurface {
     grid-template-columns: 1fr;
   }
 
-  .libraryViewStack {
+  :where(.vui-routes-evolutionroute).libraryViewStack {
     height: auto;
     overflow: auto;
   }
 
-  .libraryViewStack .masterDetail {
+  :where(.vui-routes-evolutionroute).libraryViewStack .masterDetail {
     height: auto;
     overflow: visible;
   }
 
-  .compactFieldGrid,
-  .filterRow {
+  :where(.vui-routes-evolutionroute).compactFieldGrid,
+  :where(.vui-routes-evolutionroute).filterRow {
     grid-template-columns: 1fr;
   }
 
-  .liveLaunchStack {
+  :where(.vui-routes-evolutionroute).liveLaunchStack {
     grid-template-rows: minmax(0, 1fr);
   }
 
-  .liveLaunchStack > .launchSurface {
+  :where(.vui-routes-evolutionroute).liveLaunchStack > .launchSurface {
     max-height: none;
   }
 
-  .resizeHandle {
+  :where(.vui-routes-evolutionroute).resizeHandle {
     display: none;
   }
 }
 
 @media (min-width: 901px) and (max-width: 1200px) {
-  .liveLaunchStack > .launchSurface {
+  :where(.vui-routes-evolutionroute).liveLaunchStack > .launchSurface {
     gap: 6px;
     padding: 9px 10px;
   }
 
-  .liveLaunchStack > .launchSurface > .noticeText,
-  .liveLaunchStack > .launchSurface .formHint {
+  :where(.vui-routes-evolutionroute).liveLaunchStack > .launchSurface > .noticeText,
+  :where(.vui-routes-evolutionroute).liveLaunchStack > .launchSurface .formHint {
     display: none;
   }
 
-  .liveLaunchStack > .launchSurface .compactFieldGrid {
+  :where(.vui-routes-evolutionroute).liveLaunchStack > .launchSurface .compactFieldGrid {
     gap: 6px;
   }
 
-  .liveLaunchStack > .launchSurface .controlFooter {
+  :where(.vui-routes-evolutionroute).liveLaunchStack > .launchSurface .controlFooter {
     gap: 6px;
   }
 
-  .liveLaunchStack > .launchSurface .closedLoopLaunchBlock {
+  :where(.vui-routes-evolutionroute).liveLaunchStack > .launchSurface .closedLoopLaunchBlock {
     padding: 6px 8px;
   }
 }
 
 @media (max-width: 900px) {
-  .page {
+  :where(.vui-routes-evolutionroute).page {
     gap: 6px;
   }
 
-  .toolbar {
+  :where(.vui-routes-evolutionroute).toolbar {
     display: grid;
     grid-template-columns: 1fr;
     gap: 6px;
   }
 
-  .toolbarIntro {
+  :where(.vui-routes-evolutionroute).toolbarIntro {
     min-width: 0;
     max-width: 100%;
   }
 
-  .toolbarControls {
+  :where(.vui-routes-evolutionroute).toolbarControls {
     justify-content: stretch;
     min-width: 0;
     width: 100%;
@@ -3354,7 +3355,7 @@
     scrollbar-width: thin;
   }
 
-  .overviewGrid {
+  :where(.vui-routes-evolutionroute).overviewGrid {
     grid-template-columns: 1fr;
     grid-template-rows: max-content max-content max-content;
     grid-template-areas:
@@ -3367,116 +3368,116 @@
     overflow: auto;
   }
 
-  .overviewGrid > .launchSurface,
-  .overviewGrid > .liveSurface,
-  .overviewGrid > .ioSurface,
-  .liveLaunchStack,
-  .liveSurface {
+  :where(.vui-routes-evolutionroute).overviewGrid > .launchSurface,
+  :where(.vui-routes-evolutionroute).overviewGrid > .liveSurface,
+  :where(.vui-routes-evolutionroute).overviewGrid > .ioSurface,
+  :where(.vui-routes-evolutionroute).liveLaunchStack,
+  :where(.vui-routes-evolutionroute).liveSurface {
     height: auto;
     min-height: 0;
     overflow: visible;
   }
 
-  .liveLaunchStack {
+  :where(.vui-routes-evolutionroute).liveLaunchStack {
     grid-template-rows: auto;
     grid-auto-rows: max-content;
     align-content: start;
     min-height: 0;
   }
 
-  .liveLaunchStack > .launchSurface {
+  :where(.vui-routes-evolutionroute).liveLaunchStack > .launchSurface {
     height: max-content;
     min-height: max-content;
     overflow: visible;
   }
 
-  .supervisedMembersPanel {
+  :where(.vui-routes-evolutionroute).supervisedMembersPanel {
     max-height: none;
   }
 
-  .supervisedWorkflowPanel {
+  :where(.vui-routes-evolutionroute).supervisedWorkflowPanel {
     max-height: none;
   }
 
-  .supervisedMembersList {
+  :where(.vui-routes-evolutionroute).supervisedMembersList {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     overflow: visible;
   }
 
-  .supervisedWorkflowCardGrid {
+  :where(.vui-routes-evolutionroute).supervisedWorkflowCardGrid {
     max-height: none;
     overflow: visible;
   }
 
-  .metricGrid,
-  .summaryMetricStrip,
-  .sourceMetricGrid,
-  .metricStrip,
-  .actionGrid,
-  .monitorMetrics,
-  .monitorMetricsDense,
-  .statusMetricGrid,
-  .detailFactGrid,
-  .runSignalGrid {
+  :where(.vui-routes-evolutionroute).metricGrid,
+  :where(.vui-routes-evolutionroute).summaryMetricStrip,
+  :where(.vui-routes-evolutionroute).sourceMetricGrid,
+  :where(.vui-routes-evolutionroute).metricStrip,
+  :where(.vui-routes-evolutionroute).actionGrid,
+  :where(.vui-routes-evolutionroute).monitorMetrics,
+  :where(.vui-routes-evolutionroute).monitorMetricsDense,
+  :where(.vui-routes-evolutionroute).statusMetricGrid,
+  :where(.vui-routes-evolutionroute).detailFactGrid,
+  :where(.vui-routes-evolutionroute).runSignalGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .runsCommandHeader {
+  :where(.vui-routes-evolutionroute).runsCommandHeader {
     flex-direction: column;
   }
 
-  .runsCommandMetrics {
+  :where(.vui-routes-evolutionroute).runsCommandMetrics {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .runDetailOverview {
+  :where(.vui-routes-evolutionroute).runDetailOverview {
     grid-template-columns: 1fr;
   }
 
-  .librarySummaryBar .summaryMetricStrip,
-  .librarySummaryBar .statusMetricGrid,
-  .librarySummaryBar .relatedList,
-  .libraryViewStack .detailPanel > .relatedList,
-  .libraryViewStack .detailSection > .relatedList {
+  :where(.vui-routes-evolutionroute).librarySummaryBar .summaryMetricStrip,
+  :where(.vui-routes-evolutionroute).librarySummaryBar .statusMetricGrid,
+  :where(.vui-routes-evolutionroute).librarySummaryBar .relatedList,
+  :where(.vui-routes-evolutionroute).libraryViewStack .detailPanel > .relatedList,
+  :where(.vui-routes-evolutionroute).libraryViewStack .detailSection > .relatedList {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 640px) {
-  .page {
+  :where(.vui-routes-evolutionroute).page {
     padding-inline: 14px;
   }
 
-  .metricGrid,
-  .summaryMetricStrip,
-  .sourceMetricGrid,
-  .metricStrip,
-  .actionGrid,
-  .monitorMetrics,
-  .monitorMetricsDense,
-  .statusMetricGrid,
-  .detailFactGrid,
-  .runSignalGrid,
-  .runsCommandMetrics,
-  .runScoreFacts {
+  :where(.vui-routes-evolutionroute).metricGrid,
+  :where(.vui-routes-evolutionroute).summaryMetricStrip,
+  :where(.vui-routes-evolutionroute).sourceMetricGrid,
+  :where(.vui-routes-evolutionroute).metricStrip,
+  :where(.vui-routes-evolutionroute).actionGrid,
+  :where(.vui-routes-evolutionroute).monitorMetrics,
+  :where(.vui-routes-evolutionroute).monitorMetricsDense,
+  :where(.vui-routes-evolutionroute).statusMetricGrid,
+  :where(.vui-routes-evolutionroute).detailFactGrid,
+  :where(.vui-routes-evolutionroute).runSignalGrid,
+  :where(.vui-routes-evolutionroute).runsCommandMetrics,
+  :where(.vui-routes-evolutionroute).runScoreFacts {
     grid-template-columns: 1fr;
   }
 
-  .toolbarControls {
+  :where(.vui-routes-evolutionroute).toolbarControls {
     justify-content: flex-start;
   }
 
-  .compactRunRow,
-  .sourceNextAction,
-  .closedLoopStatus {
+  :where(.vui-routes-evolutionroute).compactRunRow,
+  :where(.vui-routes-evolutionroute).sourceNextAction,
+  :where(.vui-routes-evolutionroute).closedLoopStatus {
     grid-template-columns: 1fr;
   }
 
-  .supervisedWorkflowCardGrid {
+  :where(.vui-routes-evolutionroute).supervisedWorkflowCardGrid {
     grid-template-columns: 1fr;
   }
 
-  .compactRunMeta {
+  :where(.vui-routes-evolutionroute).compactRunMeta {
     justify-content: flex-start;
     flex-wrap: wrap;
   }

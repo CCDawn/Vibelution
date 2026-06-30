@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import routeSource from "./EvolutionRoute.tsx?raw";
 
-const stylesSource = readFileSync(new URL("./EvolutionRoute.module.css", import.meta.url), "utf-8");
+const stylesSource = readFileSync(new URL("./EvolutionRoute.legacy.css", import.meta.url), "utf-8");
 const worktreePanelSource = readFileSync(new URL("./SupervisedWorktreeReviewPanel.tsx", import.meta.url), "utf-8");
 const dictionarySource = readFileSync(new URL("../i18n/dictionary.ts", import.meta.url), "utf-8");
 const apiTypesSource = readFileSync(new URL("../api/types.ts", import.meta.url), "utf-8");

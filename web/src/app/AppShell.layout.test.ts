@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import styles from "./AppShell.module.css";
+import styles from "./AppShell.styles";
 import indexHtml from "../../index.html?raw";
 import manifestSource from "../../public/manifest.webmanifest?raw";
 import shellSource from "./AppShell.tsx?raw";
@@ -12,7 +12,7 @@ import useShellI18nSource from "../i18n/useShellI18n.ts?raw";
 import utilityMenuSource from "./AppShellUtilityMenu.tsx?raw";
 import statusGuideSource from "./AppShellStatusGuidePanel.tsx?raw";
 
-const shellStyles = readFileSync(fileURLToPath(new URL("./AppShell.module.css", import.meta.url)), "utf8");
+const shellStyles = readFileSync(fileURLToPath(new URL("./AppShell.legacy.css", import.meta.url)), "utf8");
 
 describe("AppShell layout contract", () => {
   it("routes shell controls through VUI primitives", () => {
@@ -81,8 +81,8 @@ describe("AppShell layout contract", () => {
   });
 
   it("syncs the selected theme to the document root for global VUI tokens", () => {
-    expect(shellSource).toContain("applyWorkbenchDocumentTheme(document, theme)");
-    expect(shellSource).toContain("}, [lang, t, theme])");
+    expect(shellSource).toContain("syncWorkbenchThemeRoot(theme)");
+    expect(shellSource).toContain("useEffect(() => syncWorkbenchThemeRoot(theme), [theme])");
     expect(launcherShellSource).toContain("applyWorkbenchDocumentTheme(document, theme)");
     expect(launcherShellSource).toContain("}, [lang, theme])");
   });

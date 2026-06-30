@@ -5,7 +5,7 @@ import { getEffectiveIntakeMode } from "./SupervisedWorkspaceControls";
 
 const controlsSource = readFileSync(new URL("./SupervisedWorkspaceControls.tsx", import.meta.url), "utf-8");
 const tabsSource = readFileSync(new URL("./SupervisedWorkspaceTabs.tsx", import.meta.url), "utf-8");
-const evolutionStylesSource = readFileSync(new URL("./EvolutionRoute.module.css", import.meta.url), "utf-8");
+const evolutionStylesSource = readFileSync(new URL("./EvolutionRoute.legacy.css", import.meta.url), "utf-8");
 const evolutionRouteSource = readFileSync(new URL("./EvolutionRoute.tsx", import.meta.url), "utf-8");
 const dictionarySource = readFileSync(new URL("../i18n/dictionary.ts", import.meta.url), "utf-8");
 

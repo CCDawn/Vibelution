@@ -1,4 +1,5 @@
-.route {
+/* source: routes/ResearchFlowCanvasRoute legacy css */
+:where(.vui-routes-researchflowcanvasroute).route {
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr);
   height: 100%;
@@ -7,7 +8,7 @@
   background: color-mix(in srgb, var(--surface-page) 94%, var(--bg-canvas));
 }
 
-.header {
+:where(.vui-routes-researchflowcanvasroute).header {
   margin: 8px 10px 0;
   min-width: 0;
   border-color: var(--vui-border-subtle);
@@ -16,7 +17,7 @@
     color-mix(in srgb, var(--surface-panel) 86%, transparent);
 }
 
-.headerActions {
+:where(.vui-routes-researchflowcanvasroute).headerActions {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
@@ -24,9 +25,9 @@
   gap: 8px;
 }
 
-.primaryButton,
-.secondaryButton,
-.dangerButton {
+:where(.vui-routes-researchflowcanvasroute).primaryButton,
+:where(.vui-routes-researchflowcanvasroute).secondaryButton,
+:where(.vui-routes-researchflowcanvasroute).dangerButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -38,14 +39,14 @@
   color: var(--fg-primary);
   background: var(--surface-panel);
   font: inherit;
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
   text-decoration: none;
   white-space: nowrap;
   cursor: pointer;
 }
 
-.iconButton {
+:where(.vui-routes-researchflowcanvasroute).iconButton {
   display: inline-grid;
   place-items: center;
   width: 30px;
@@ -57,16 +58,16 @@
   cursor: pointer;
 }
 
-.iconButton:hover {
+:where(.vui-routes-researchflowcanvasroute).iconButton:hover {
   background: var(--surface-card-hover);
 }
 
-.iconButton:disabled {
+:where(.vui-routes-researchflowcanvasroute).iconButton:disabled {
   cursor: not-allowed;
   opacity: 0.5;
 }
 
-.zoomControl {
+:where(.vui-routes-researchflowcanvasroute).zoomControl {
   position: absolute;
   top: 12px;
   left: 12px;
@@ -81,16 +82,16 @@
   background: color-mix(in srgb, var(--surface-panel) 76%, var(--surface-page));
 }
 
-.zoomControl span {
+:where(.vui-routes-researchflowcanvasroute).zoomControl span {
   min-width: 42px;
   color: var(--fg-secondary);
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
   text-align: center;
 }
 
-.reconnectHint {
+:where(.vui-routes-researchflowcanvasroute).reconnectHint {
   position: absolute;
   top: 12px;
   left: 154px;
@@ -104,43 +105,43 @@
   color: var(--accent-cool-2);
   background: color-mix(in srgb, var(--surface-panel) 88%, var(--accent-cool) 12%);
   box-shadow: none;
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.primaryButton {
+:where(.vui-routes-researchflowcanvasroute).primaryButton {
   border-color: color-mix(in srgb, var(--accent-cool) 52%, var(--border-soft));
   color: var(--accent-cool-2);
   background: color-mix(in srgb, var(--accent-cool) 16%, var(--surface-panel));
 }
 
-.dangerButton {
+:where(.vui-routes-researchflowcanvasroute).dangerButton {
   border-color: color-mix(in srgb, var(--danger) 44%, var(--border-soft));
   color: var(--danger);
 }
 
-.primaryButton:disabled,
-.secondaryButton:disabled,
-.dangerButton:disabled {
+:where(.vui-routes-researchflowcanvasroute).primaryButton:disabled,
+:where(.vui-routes-researchflowcanvasroute).secondaryButton:disabled,
+:where(.vui-routes-researchflowcanvasroute).dangerButton:disabled {
   cursor: not-allowed;
   opacity: 0.5;
 }
 
-.secondaryButton:hover,
-.dangerButton:hover,
-.primaryButton:hover {
+:where(.vui-routes-researchflowcanvasroute).secondaryButton:hover,
+:where(.vui-routes-researchflowcanvasroute).dangerButton:hover,
+:where(.vui-routes-researchflowcanvasroute).primaryButton:hover {
   background: var(--surface-card-hover);
 }
 
-.lockButtonActive {
+:where(.vui-routes-researchflowcanvasroute).lockButtonActive {
   color: var(--surface-page);
   border-color: color-mix(in srgb, var(--success) 64%, var(--border-soft));
   background: color-mix(in srgb, var(--success) 78%, var(--accent-cool));
 }
 
-.moduleTemplateSelect {
+:where(.vui-routes-researchflowcanvasroute).moduleTemplateSelect {
   min-width: 180px;
   max-width: 260px;
   min-height: 34px;
@@ -150,16 +151,16 @@
   color: var(--fg-primary);
   background: var(--surface-page);
   font: inherit;
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
   font-weight: 720;
 }
 
-.moduleTemplateSelect:disabled {
+:where(.vui-routes-researchflowcanvasroute).moduleTemplateSelect:disabled {
   cursor: not-allowed;
   opacity: 0.5;
 }
 
-.leaveGuardOverlay {
+:where(.vui-routes-researchflowcanvasroute).leaveGuardOverlay {
   position: fixed;
   inset: 0;
   z-index: 80;
@@ -170,7 +171,7 @@
   backdrop-filter: blur(6px);
 }
 
-.leaveGuardPanel {
+:where(.vui-routes-researchflowcanvasroute).leaveGuardPanel {
   display: grid;
   gap: 14px;
   width: min(540px, 100%);
@@ -183,45 +184,45 @@
   box-shadow: var(--shadow-strong);
 }
 
-.leaveGuardCopy {
+:where(.vui-routes-researchflowcanvasroute).leaveGuardCopy {
   display: grid;
   gap: 7px;
 }
 
-.leaveGuardCopy p,
-.leaveGuardCopy h2,
-.leaveGuardCopy span {
+:where(.vui-routes-researchflowcanvasroute).leaveGuardCopy p,
+:where(.vui-routes-researchflowcanvasroute).leaveGuardCopy h2,
+:where(.vui-routes-researchflowcanvasroute).leaveGuardCopy span {
   margin: 0;
 }
 
-.leaveGuardCopy p {
+:where(.vui-routes-researchflowcanvasroute).leaveGuardCopy p {
   color: var(--warning);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.leaveGuardCopy h2 {
+:where(.vui-routes-researchflowcanvasroute).leaveGuardCopy h2 {
   color: var(--fg-primary);
   font-size: 1.02rem;
   line-height: 1.3;
 }
 
-.leaveGuardCopy span {
+:where(.vui-routes-researchflowcanvasroute).leaveGuardCopy span {
   color: var(--fg-secondary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.5;
 }
 
-.leaveGuardActions {
+:where(.vui-routes-researchflowcanvasroute).leaveGuardActions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
 }
 
-.executionBar {
+:where(.vui-routes-researchflowcanvasroute).executionBar {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -231,7 +232,7 @@
   background: color-mix(in srgb, var(--surface-panel) 58%, var(--surface-page));
 }
 
-.executionGroup {
+:where(.vui-routes-researchflowcanvasroute).executionGroup {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -239,17 +240,17 @@
   max-width: 420px;
 }
 
-.executionGroup strong {
+:where(.vui-routes-researchflowcanvasroute).executionGroup strong {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-secondary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   font-weight: 720;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.executionGroup span {
+:where(.vui-routes-researchflowcanvasroute).executionGroup span {
   color: var(--fg-tertiary);
   font-size: 0.7rem;
   font-weight: 780;
@@ -258,18 +259,18 @@
   white-space: nowrap;
 }
 
-.executionHint {
+:where(.vui-routes-researchflowcanvasroute).executionHint {
   min-width: 0;
   margin: 0 0 0 auto;
   overflow: hidden;
   color: var(--fg-secondary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.observerStatus {
+:where(.vui-routes-researchflowcanvasroute).observerStatus {
   display: grid;
   gap: 2px;
   min-width: 108px;
@@ -279,79 +280,79 @@
   background: color-mix(in srgb, var(--surface-panel) 72%, var(--surface-page));
 }
 
-.observerStatus span {
+:where(.vui-routes-researchflowcanvasroute).observerStatus span {
   color: var(--fg-tertiary);
-  font-size: 0.62rem;
+  font-size: var(--vui-font-xs);
   font-weight: 820;
   letter-spacing: 0.07em;
   text-transform: uppercase;
 }
 
-.observerStatus strong {
+:where(.vui-routes-researchflowcanvasroute).observerStatus strong {
   color: var(--fg-secondary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.1;
 }
 
-.observerStatusActive {
+:where(.vui-routes-researchflowcanvasroute).observerStatusActive {
   border-color: color-mix(in srgb, var(--success) 44%, var(--border-soft));
   background: color-mix(in srgb, var(--success) 11%, var(--surface-panel));
 }
 
-.observerStatusActive strong {
+:where(.vui-routes-researchflowcanvasroute).observerStatusActive strong {
   color: var(--success);
 }
 
-.validationConnectionNotice {
+:where(.vui-routes-researchflowcanvasroute).validationConnectionNotice {
   margin: 0;
   color: var(--accent-cool-2);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   font-weight: 760;
 }
 
-.validationIssue {
+:where(.vui-routes-researchflowcanvasroute).validationIssue {
   display: flex;
   align-items: flex-start;
   gap: 8px;
   min-width: 0;
 }
 
-.validationIssue span {
+:where(.vui-routes-researchflowcanvasroute).validationIssue span {
   flex: 0 0 auto;
   padding: 1px 6px;
   border-radius: 999px;
-  font-size: 0.64rem;
+  font-size: var(--vui-font-xs);
   font-weight: 840;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
-.validationIssueError {
+:where(.vui-routes-researchflowcanvasroute).validationIssueError {
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 14%, var(--surface-panel));
 }
 
-.validationIssueWarning {
+:where(.vui-routes-researchflowcanvasroute).validationIssueWarning {
   color: var(--warning);
   background: color-mix(in srgb, var(--warning) 14%, var(--surface-panel));
 }
 
-.validationIssue p {
+:where(.vui-routes-researchflowcanvasroute).validationIssue p {
   margin: 0;
   min-width: 0;
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.35;
 }
 
-.body {
+:where(.vui-routes-researchflowcanvasroute).body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
   min-height: 0;
   overflow: hidden;
 }
 
-.canvasShell {
+:where(.vui-routes-researchflowcanvasroute).canvasShell {
   position: relative;
   min-width: 0;
   min-height: 0;
@@ -364,7 +365,7 @@
   background-size: 28px 28px;
 }
 
-.canvasScroller {
+:where(.vui-routes-researchflowcanvasroute).canvasScroller {
   width: 100%;
   height: 100%;
   overflow: auto;
@@ -372,13 +373,13 @@
   touch-action: none;
 }
 
-.canvasViewport {
+:where(.vui-routes-researchflowcanvasroute).canvasViewport {
   position: relative;
   min-width: 100%;
   min-height: 100%;
 }
 
-.canvas {
+:where(.vui-routes-researchflowcanvasroute).canvas {
   position: relative;
   min-width: 100%;
   min-height: 100%;
@@ -387,40 +388,40 @@
   user-select: none;
 }
 
-.canvasPanning {
+:where(.vui-routes-researchflowcanvasroute).canvasPanning {
   cursor: grabbing;
 }
 
-.canvasLocked {
+:where(.vui-routes-researchflowcanvasroute).canvasLocked {
   cursor: default;
 }
 
-.edges {
+:where(.vui-routes-researchflowcanvasroute).edges {
   position: absolute;
   inset: 0;
   overflow: visible;
   pointer-events: none;
 }
 
-.edgeTrack,
-.edgePath {
+:where(.vui-routes-researchflowcanvasroute).edgeTrack,
+:where(.vui-routes-researchflowcanvasroute).edgePath {
   fill: none;
   stroke-linecap: round;
   stroke-linejoin: round;
   pointer-events: none;
 }
 
-.edgeTrack {
+:where(.vui-routes-researchflowcanvasroute).edgeTrack {
   stroke: color-mix(in srgb, var(--surface-page) 78%, transparent);
   stroke-width: 5px;
 }
 
-.edgePath {
+:where(.vui-routes-researchflowcanvasroute).edgePath {
   stroke: color-mix(in srgb, var(--fg-tertiary) 50%, transparent);
   stroke-width: 1.45px;
 }
 
-.edgeArrowHead {
+:where(.vui-routes-researchflowcanvasroute).edgeArrowHead {
   fill: color-mix(in srgb, var(--fg-tertiary) 76%, transparent);
   stroke: color-mix(in srgb, var(--surface-page) 78%, transparent);
   stroke-linejoin: round;
@@ -428,75 +429,75 @@
   pointer-events: none;
 }
 
-.edgeType_success .edgePath {
+:where(.vui-routes-researchflowcanvasroute).edgeType_success .edgePath {
   stroke: color-mix(in srgb, var(--accent-cool) 48%, var(--fg-tertiary));
 }
 
-.edgeType_success .edgeArrowHead {
+:where(.vui-routes-researchflowcanvasroute).edgeType_success .edgeArrowHead {
   fill: color-mix(in srgb, var(--accent-cool) 62%, var(--fg-tertiary));
 }
 
-.edgeType_evidence_loop .edgePath {
+:where(.vui-routes-researchflowcanvasroute).edgeType_evidence_loop .edgePath {
   stroke: color-mix(in srgb, var(--accent-warm) 72%, var(--fg-tertiary));
   stroke-dasharray: 8 6;
 }
 
-.edgeType_evidence_loop .edgeArrowHead {
+:where(.vui-routes-researchflowcanvasroute).edgeType_evidence_loop .edgeArrowHead {
   fill: color-mix(in srgb, var(--accent-warm) 72%, var(--fg-tertiary));
 }
 
-.edgeType_approval_gate .edgePath {
+:where(.vui-routes-researchflowcanvasroute).edgeType_approval_gate .edgePath {
   stroke: color-mix(in srgb, var(--success) 72%, var(--fg-tertiary));
   stroke-width: 1.9px;
 }
 
-.edgeType_approval_gate .edgeArrowHead {
+:where(.vui-routes-researchflowcanvasroute).edgeType_approval_gate .edgeArrowHead {
   fill: color-mix(in srgb, var(--success) 72%, var(--fg-tertiary));
 }
 
-.edgeType_human_handoff .edgePath {
+:where(.vui-routes-researchflowcanvasroute).edgeType_human_handoff .edgePath {
   stroke: color-mix(in srgb, var(--warning) 72%, var(--fg-tertiary));
   stroke-dasharray: 3 5;
 }
 
-.edgeType_human_handoff .edgeArrowHead {
+:where(.vui-routes-researchflowcanvasroute).edgeType_human_handoff .edgeArrowHead {
   fill: color-mix(in srgb, var(--warning) 72%, var(--fg-tertiary));
 }
 
-.edgeType_selection .edgePath {
+:where(.vui-routes-researchflowcanvasroute).edgeType_selection .edgePath {
   stroke: color-mix(in srgb, var(--accent-cool) 82%, var(--success));
   stroke-width: 1.9px;
 }
 
-.edgeType_selection .edgeArrowHead {
+:where(.vui-routes-researchflowcanvasroute).edgeType_selection .edgeArrowHead {
   fill: color-mix(in srgb, var(--accent-cool) 82%, var(--success));
 }
 
-.edgeType_failure .edgePath,
-.edgeType_blocked .edgePath {
+:where(.vui-routes-researchflowcanvasroute).edgeType_failure .edgePath,
+:where(.vui-routes-researchflowcanvasroute).edgeType_blocked .edgePath {
   stroke: color-mix(in srgb, var(--danger) 78%, var(--fg-tertiary));
   stroke-dasharray: 10 5;
 }
 
-.edgeType_failure .edgeArrowHead,
-.edgeType_blocked .edgeArrowHead {
+:where(.vui-routes-researchflowcanvasroute).edgeType_failure .edgeArrowHead,
+:where(.vui-routes-researchflowcanvasroute).edgeType_blocked .edgeArrowHead {
   fill: color-mix(in srgb, var(--danger) 78%, var(--fg-tertiary));
 }
 
-.edgeActive .edgePath {
+:where(.vui-routes-researchflowcanvasroute).edgeActive .edgePath {
   stroke: var(--accent-cool);
   stroke-width: 2.6px;
 }
 
-.edgeActive .edgeArrowHead {
+:where(.vui-routes-researchflowcanvasroute).edgeActive .edgeArrowHead {
   fill: var(--accent-cool);
 }
 
-.edgeActive .edgeTrack {
+:where(.vui-routes-researchflowcanvasroute).edgeActive .edgeTrack {
   stroke: color-mix(in srgb, var(--accent-cool) 18%, var(--surface-page));
 }
 
-.edgeHotspot {
+:where(.vui-routes-researchflowcanvasroute).edgeHotspot {
   position: absolute;
   z-index: 3;
   width: 72px;
@@ -519,7 +520,7 @@
   transition: width 0.16s ease, min-height 0.16s ease, opacity 0.16s ease, background 0.16s ease;
 }
 
-.edgeHotspot span {
+:where(.vui-routes-researchflowcanvasroute).edgeHotspot span {
   display: block;
   overflow: hidden;
   color: var(--fg-tertiary);
@@ -530,7 +531,7 @@
   white-space: nowrap;
 }
 
-.edgeHotspot::after {
+:where(.vui-routes-researchflowcanvasroute).edgeHotspot::after {
   content: "";
   display: block;
   width: 18px;
@@ -543,38 +544,38 @@
   line-height: 1.1;
 }
 
-.edgeHotspotOffset {
+:where(.vui-routes-researchflowcanvasroute).edgeHotspotOffset {
   outline: 1px solid color-mix(in srgb, var(--accent-warm) 36%, transparent);
 }
 
-.edgeHotspot:hover {
+:where(.vui-routes-researchflowcanvasroute).edgeHotspot:hover {
   z-index: 8;
   width: 132px;
   min-height: 34px;
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
   opacity: 1;
   color: var(--fg-primary);
   border-color: var(--accent-cool);
   background: color-mix(in srgb, var(--surface-panel) 94%, transparent);
 }
 
-.edgeHotspot:hover::after {
+:where(.vui-routes-researchflowcanvasroute).edgeHotspot:hover::after {
   content: none;
 }
 
-.edgeHotspotActive {
+:where(.vui-routes-researchflowcanvasroute).edgeHotspotActive {
   color: var(--accent-cool-2);
   border-color: var(--accent-cool);
   background: color-mix(in srgb, var(--accent-cool) 16%, var(--surface-panel));
 }
 
-.edgeEndpoints {
+:where(.vui-routes-researchflowcanvasroute).edgeEndpoints {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
 
-.edgeEndpointHandle {
+:where(.vui-routes-researchflowcanvasroute).edgeEndpointHandle {
   position: absolute;
   z-index: 6;
   display: grid;
@@ -594,15 +595,15 @@
   pointer-events: auto;
 }
 
-.edgeEndpointHandle:active,
-.edgeEndpointHandleActive {
+:where(.vui-routes-researchflowcanvasroute).edgeEndpointHandle:active,
+:where(.vui-routes-researchflowcanvasroute).edgeEndpointHandleActive {
   cursor: grabbing;
   border-color: var(--accent-warm);
   background: var(--accent-warm-2);
   box-shadow: var(--vui-shadow-accent);
 }
 
-.node {
+:where(.vui-routes-researchflowcanvasroute).node {
   position: absolute;
   z-index: 4;
   display: grid;
@@ -620,7 +621,7 @@
   text-align: left;
 }
 
-.node::before {
+:where(.vui-routes-researchflowcanvasroute).node::before {
   content: "";
   position: absolute;
   top: 8px;
@@ -632,82 +633,82 @@
   opacity: 0.7;
 }
 
-.node:active {
+:where(.vui-routes-researchflowcanvasroute).node:active {
   cursor: grabbing;
 }
 
-.nodeActive {
+:where(.vui-routes-researchflowcanvasroute).nodeActive {
   border-color: var(--accent-cool);
   box-shadow: var(--vui-shadow-accent);
 }
 
-.nodeConnectSource {
+:where(.vui-routes-researchflowcanvasroute).nodeConnectSource {
   border-color: var(--accent-warm);
   box-shadow: var(--vui-shadow-accent);
 }
 
-.nodeReconnectTarget {
+:where(.vui-routes-researchflowcanvasroute).nodeReconnectTarget {
   border-color: var(--accent-warm);
   background: color-mix(in srgb, var(--surface-panel) 86%, var(--accent-warm) 14%);
   box-shadow: var(--vui-shadow-accent);
 }
 
-.nodeStatus_idle::before {
+:where(.vui-routes-researchflowcanvasroute).nodeStatus_idle::before {
   background: var(--fg-tertiary);
 }
 
-.nodeStatus_ready::before,
-.nodeStatus_running::before,
-.nodeStatus_needs_input::before {
+:where(.vui-routes-researchflowcanvasroute).nodeStatus_ready::before,
+:where(.vui-routes-researchflowcanvasroute).nodeStatus_running::before,
+:where(.vui-routes-researchflowcanvasroute).nodeStatus_needs_input::before {
   background: var(--accent-cool);
 }
 
-.nodeStatus_done::before {
+:where(.vui-routes-researchflowcanvasroute).nodeStatus_done::before {
   background: var(--success);
 }
 
-.nodeStatus_failed::before,
-.nodeStatus_blocked::before {
+:where(.vui-routes-researchflowcanvasroute).nodeStatus_failed::before,
+:where(.vui-routes-researchflowcanvasroute).nodeStatus_blocked::before {
   background: var(--danger);
 }
 
-.nodeStatus_stale::before,
-.nodeStatus_needs_review::before,
-.nodeStatus_needs_evidence::before {
+:where(.vui-routes-researchflowcanvasroute).nodeStatus_stale::before,
+:where(.vui-routes-researchflowcanvasroute).nodeStatus_needs_review::before,
+:where(.vui-routes-researchflowcanvasroute).nodeStatus_needs_evidence::before {
   background: var(--warning);
 }
 
-.nodeStatus_skipped::before {
+:where(.vui-routes-researchflowcanvasroute).nodeStatus_skipped::before {
   background: var(--fg-secondary);
 }
 
-.nodeWithIssue {
+:where(.vui-routes-researchflowcanvasroute).nodeWithIssue {
   border-color: color-mix(in srgb, var(--warning) 34%, var(--border-soft));
 }
 
-.nodeWithError {
+:where(.vui-routes-researchflowcanvasroute).nodeWithError {
   border-color: color-mix(in srgb, var(--danger) 48%, var(--border-soft));
 }
 
-.nodeTopline {
+:where(.vui-routes-researchflowcanvasroute).nodeTopline {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   min-width: 0;
   color: var(--fg-tertiary);
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
   font-weight: 780;
 }
 
-.nodeStatusCluster {
+:where(.vui-routes-researchflowcanvasroute).nodeStatusCluster {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   min-width: 0;
 }
 
-.nodeStatusDot {
+:where(.vui-routes-researchflowcanvasroute).nodeStatusDot {
   width: 7px;
   height: 7px;
   border-radius: 999px;
@@ -715,7 +716,7 @@
   box-shadow: var(--vui-shadow-accent);
 }
 
-.statusPill {
+:where(.vui-routes-researchflowcanvasroute).statusPill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -728,39 +729,39 @@
   white-space: nowrap;
 }
 
-.nodeIssueBadgeError,
-.nodeIssueBadgeWarning {
+:where(.vui-routes-researchflowcanvasroute).nodeIssueBadgeError,
+:where(.vui-routes-researchflowcanvasroute).nodeIssueBadgeWarning {
   justify-self: start;
   min-height: 18px;
   padding: 2px 7px;
   border-radius: 999px;
-  font-size: 0.62rem;
+  font-size: var(--vui-font-xs);
   font-weight: 820;
   line-height: 1;
 }
 
-.nodeIssueBadgeError {
+:where(.vui-routes-researchflowcanvasroute).nodeIssueBadgeError {
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 14%, transparent);
 }
 
-.nodeIssueBadgeWarning {
+:where(.vui-routes-researchflowcanvasroute).nodeIssueBadgeWarning {
   color: var(--warning);
   background: color-mix(in srgb, var(--warning) 14%, transparent);
 }
 
-.node strong {
+:where(.vui-routes-researchflowcanvasroute).node strong {
   display: block;
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.86rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.nodeTitleInput {
+:where(.vui-routes-researchflowcanvasroute).nodeTitleInput {
   display: block;
   box-sizing: border-box;
   width: 100%;
@@ -773,81 +774,81 @@
   color: var(--fg-primary);
   background: color-mix(in srgb, var(--surface-panel) 82%, var(--accent-cool) 18%);
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
   font-weight: 830;
   line-height: 1.2;
   text-overflow: ellipsis;
   cursor: text;
 }
 
-.nodeTitleInput:focus {
+:where(.vui-routes-researchflowcanvasroute).nodeTitleInput:focus {
   border-color: var(--accent-cool);
   box-shadow: var(--vui-shadow-accent);
 }
 
-.nodeMeta {
+:where(.vui-routes-researchflowcanvasroute).nodeMeta {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   min-width: 0;
   overflow: hidden;
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.node small {
+:where(.vui-routes-researchflowcanvasroute).node small {
   display: -webkit-box;
   min-width: 0;
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.28;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
 
-.status_idle {
+:where(.vui-routes-researchflowcanvasroute).status_idle {
   color: var(--fg-tertiary);
   background: var(--surface-panel-muted);
 }
 
-.status_ready {
+:where(.vui-routes-researchflowcanvasroute).status_ready {
   color: var(--accent-cool-2);
   background: color-mix(in srgb, var(--accent-cool) 15%, transparent);
 }
 
-.status_running {
+:where(.vui-routes-researchflowcanvasroute).status_running {
   color: var(--accent-warm-2);
   background: color-mix(in srgb, var(--accent-warm) 18%, transparent);
 }
 
-.status_done {
+:where(.vui-routes-researchflowcanvasroute).status_done {
   color: var(--success);
   background: color-mix(in srgb, var(--success) 15%, transparent);
 }
 
-.status_failed,
-.status_blocked {
+:where(.vui-routes-researchflowcanvasroute).status_failed,
+:where(.vui-routes-researchflowcanvasroute).status_blocked {
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 14%, transparent);
 }
 
-.status_stale,
-.status_needs_review,
-.status_needs_input,
-.status_needs_evidence {
+:where(.vui-routes-researchflowcanvasroute).status_stale,
+:where(.vui-routes-researchflowcanvasroute).status_needs_review,
+:where(.vui-routes-researchflowcanvasroute).status_needs_input,
+:where(.vui-routes-researchflowcanvasroute).status_needs_evidence {
   color: var(--warning);
   background: color-mix(in srgb, var(--warning) 16%, transparent);
 }
 
-.status_skipped {
+:where(.vui-routes-researchflowcanvasroute).status_skipped {
   color: var(--fg-secondary);
   background: color-mix(in srgb, var(--fg-secondary) 13%, transparent);
 }
 
-.agentRoleTag {
+:where(.vui-routes-researchflowcanvasroute).agentRoleTag {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -858,46 +859,46 @@
   border: 1px solid var(--border-soft);
   border-radius: 999px;
   overflow: hidden;
-  font-size: 0.64rem;
+  font-size: var(--vui-font-xs);
   font-weight: 780;
   line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.agentRoleTag_chat {
+:where(.vui-routes-researchflowcanvasroute).agentRoleTag_chat {
   border-color: color-mix(in srgb, var(--accent-warm) 34%, var(--border-soft));
   color: var(--accent-warm-2);
   background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
 }
 
-.agentRoleTag_research {
+:where(.vui-routes-researchflowcanvasroute).agentRoleTag_research {
   border-color: color-mix(in srgb, var(--accent-cool) 36%, var(--border-soft));
   color: var(--accent-cool-2);
   background: color-mix(in srgb, var(--accent-cool) 13%, transparent);
 }
 
-.agentRoleTag_self {
+:where(.vui-routes-researchflowcanvasroute).agentRoleTag_self {
   border-color: color-mix(in srgb, var(--success) 34%, var(--border-soft));
   color: var(--success);
   background: color-mix(in srgb, var(--success) 12%, transparent);
 }
 
-.agentRoleTag_supervised {
+:where(.vui-routes-researchflowcanvasroute).agentRoleTag_supervised {
   border-color: color-mix(in srgb, var(--warning) 36%, var(--border-soft));
   color: var(--warning);
   background: color-mix(in srgb, var(--warning) 12%, transparent);
 }
 
-.agentRoleTag_tool,
-.agentRoleTag_memory,
-.agentRoleTag_general {
+:where(.vui-routes-researchflowcanvasroute).agentRoleTag_tool,
+:where(.vui-routes-researchflowcanvasroute).agentRoleTag_memory,
+:where(.vui-routes-researchflowcanvasroute).agentRoleTag_general {
   border-color: color-mix(in srgb, var(--fg-tertiary) 28%, var(--border-soft));
   color: var(--fg-secondary);
   background: color-mix(in srgb, var(--fg-tertiary) 9%, transparent);
 }
 
-.readonlyDetailHeader {
+:where(.vui-routes-researchflowcanvasroute).readonlyDetailHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -905,7 +906,7 @@
   min-width: 0;
 }
 
-.readonlyDetailHeader strong {
+:where(.vui-routes-researchflowcanvasroute).readonlyDetailHeader strong {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
@@ -914,7 +915,7 @@
   white-space: nowrap;
 }
 
-.readonlySpecGrid {
+:where(.vui-routes-researchflowcanvasroute).readonlySpecGrid {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 7px 10px;
@@ -925,39 +926,39 @@
   background: var(--surface-page);
 }
 
-.readonlySpecGrid span {
+:where(.vui-routes-researchflowcanvasroute).readonlySpecGrid span {
   color: var(--fg-tertiary);
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
   font-weight: 780;
   text-transform: uppercase;
 }
 
-.readonlySpecGrid strong,
-.readonlySpecGrid code {
+:where(.vui-routes-researchflowcanvasroute).readonlySpecGrid strong,
+:where(.vui-routes-researchflowcanvasroute).readonlySpecGrid code {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.readonlyDescription {
+:where(.vui-routes-researchflowcanvasroute).readonlyDescription {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.45;
 }
 
-.emptyState {
+:where(.vui-routes-researchflowcanvasroute).emptyState {
   display: grid;
   place-items: center;
   height: 100%;
   color: var(--fg-secondary);
-  font-size: 0.86rem;
+  font-size: var(--vui-font-xs);
 }
 
-.inspector {
+:where(.vui-routes-researchflowcanvasroute).inspector {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
@@ -966,63 +967,63 @@
   background: var(--surface-panel);
 }
 
-.inspectorHeader {
+:where(.vui-routes-researchflowcanvasroute).inspectorHeader {
   display: grid;
   gap: 5px;
   padding: 14px;
   border-bottom: 1px solid var(--border-soft);
 }
 
-.inspectorHeader p {
+:where(.vui-routes-researchflowcanvasroute).inspectorHeader p {
   margin: 0;
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   font-weight: 780;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.inspectorHeader strong {
+:where(.vui-routes-researchflowcanvasroute).inspectorHeader strong {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.inspectorHeader span {
+:where(.vui-routes-researchflowcanvasroute).inspectorHeader span {
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
-.selectionSummary {
+:where(.vui-routes-researchflowcanvasroute).selectionSummary {
   min-width: 0;
   overflow: hidden;
   color: var(--accent-cool-2) !important;
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.inspectorHeader .saveStatusIdle {
+:where(.vui-routes-researchflowcanvasroute).inspectorHeader .saveStatusIdle {
   color: var(--fg-secondary);
 }
 
-.inspectorHeader .saveStatusSuccess {
+:where(.vui-routes-researchflowcanvasroute).inspectorHeader .saveStatusSuccess {
   color: var(--success);
 }
 
-.inspectorHeader .saveStatusWarning {
+:where(.vui-routes-researchflowcanvasroute).inspectorHeader .saveStatusWarning {
   color: var(--warning);
 }
 
-.inspectorHeader .saveStatusError {
+:where(.vui-routes-researchflowcanvasroute).inspectorHeader .saveStatusError {
   color: var(--danger);
 }
 
-.inspectorBody {
+:where(.vui-routes-researchflowcanvasroute).inspectorBody {
   display: grid;
   grid-template-columns: 76px minmax(0, 1fr);
   min-width: 0;
@@ -1030,7 +1031,7 @@
   overflow: hidden;
 }
 
-.inspectorTabs {
+:where(.vui-routes-researchflowcanvasroute).inspectorTabs {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1041,7 +1042,7 @@
   background: color-mix(in srgb, var(--surface-panel) 72%, var(--surface-page));
 }
 
-.inspectorTab {
+:where(.vui-routes-researchflowcanvasroute).inspectorTab {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1056,24 +1057,24 @@
   background: transparent;
   cursor: pointer;
   font: inherit;
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   font-weight: 780;
   line-height: 1.25;
   text-align: center;
 }
 
-.inspectorTab:hover {
+:where(.vui-routes-researchflowcanvasroute).inspectorTab:hover {
   color: var(--fg-primary);
   background: var(--surface-card-hover);
 }
 
-.inspectorTabActive {
+:where(.vui-routes-researchflowcanvasroute).inspectorTabActive {
   border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
   color: var(--accent-cool-2);
   background: color-mix(in srgb, var(--accent-cool) 14%, transparent);
 }
 
-.inspectorTabBadge {
+:where(.vui-routes-researchflowcanvasroute).inspectorTabBadge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1084,17 +1085,17 @@
   color: var(--fg-primary);
   background: color-mix(in srgb, var(--surface-page) 84%, transparent);
   font-family: var(--font-mono);
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
 }
 
-.inspectorContent {
+:where(.vui-routes-researchflowcanvasroute).inspectorContent {
   display: grid;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
 
-.editorStack {
+:where(.vui-routes-researchflowcanvasroute).editorStack {
   display: grid;
   align-content: start;
   gap: 12px;
@@ -1105,23 +1106,23 @@
   border: 0;
 }
 
-.editorStack:disabled {
+:where(.vui-routes-researchflowcanvasroute).editorStack:disabled {
   opacity: 0.88;
 }
 
-.editorStack label {
+:where(.vui-routes-researchflowcanvasroute).editorStack label {
   display: grid;
   gap: 6px;
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   font-weight: 780;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
-.editorStack input,
-.editorStack select,
-.editorStack textarea {
+:where(.vui-routes-researchflowcanvasroute).editorStack input,
+:where(.vui-routes-researchflowcanvasroute).editorStack select,
+:where(.vui-routes-researchflowcanvasroute).editorStack textarea {
   width: 100%;
   min-width: 0;
   border: 1px solid var(--border-soft);
@@ -1129,38 +1130,38 @@
   color: var(--fg-primary);
   background: var(--surface-page);
   font: inherit;
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
 }
 
-.editorStack input,
-.editorStack select {
+:where(.vui-routes-researchflowcanvasroute).editorStack input,
+:where(.vui-routes-researchflowcanvasroute).editorStack select {
   min-height: 34px;
   padding: 0 10px;
 }
 
-.editorStack textarea {
+:where(.vui-routes-researchflowcanvasroute).editorStack textarea {
   min-height: 86px;
   resize: vertical;
   padding: 9px 10px;
   line-height: 1.45;
 }
 
-.fieldHint {
+:where(.vui-routes-researchflowcanvasroute).fieldHint {
   margin: -6px 0 0;
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.35;
 }
 
-.editorStack input:disabled,
-.editorStack select:disabled,
-.editorStack textarea:disabled,
-.templateBlock select:disabled {
+:where(.vui-routes-researchflowcanvasroute).editorStack input:disabled,
+:where(.vui-routes-researchflowcanvasroute).editorStack select:disabled,
+:where(.vui-routes-researchflowcanvasroute).editorStack textarea:disabled,
+:where(.vui-routes-researchflowcanvasroute).templateBlock select:disabled {
   cursor: not-allowed;
   opacity: 0.72;
 }
 
-.issuePanel {
+:where(.vui-routes-researchflowcanvasroute).issuePanel {
   display: grid;
   align-content: start;
   gap: 12px;
@@ -1169,7 +1170,7 @@
   padding: 14px;
 }
 
-.organizationPanel {
+:where(.vui-routes-researchflowcanvasroute).organizationPanel {
   display: grid;
   align-content: start;
   gap: 12px;
@@ -1178,13 +1179,13 @@
   padding: 14px;
 }
 
-.organizationSummaryGrid {
+:where(.vui-routes-researchflowcanvasroute).organizationSummaryGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
-.organizationMetric {
+:where(.vui-routes-researchflowcanvasroute).organizationMetric {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 4px 8px;
@@ -1196,54 +1197,54 @@
   background: var(--surface-page);
 }
 
-.organizationMetric svg {
+:where(.vui-routes-researchflowcanvasroute).organizationMetric svg {
   color: var(--accent-cool-2);
 }
 
-.organizationMetric span {
+:where(.vui-routes-researchflowcanvasroute).organizationMetric span {
   color: var(--fg-tertiary);
-  font-size: 0.66rem;
+  font-size: var(--vui-font-xs);
   font-weight: 780;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
-.organizationMetric strong {
+:where(.vui-routes-researchflowcanvasroute).organizationMetric strong {
   grid-column: 1 / -1;
   color: var(--fg-primary);
   font-size: 1.1rem;
   line-height: 1;
 }
 
-.organizationSectionHeader {
+:where(.vui-routes-researchflowcanvasroute).organizationSectionHeader {
   display: grid;
   gap: 3px;
   min-width: 0;
 }
 
-.organizationSectionHeader strong {
+:where(.vui-routes-researchflowcanvasroute).organizationSectionHeader strong {
   color: var(--fg-primary);
-  font-size: 0.82rem;
+  font-size: var(--vui-font-xs);
 }
 
-.organizationSectionHeader span {
+:where(.vui-routes-researchflowcanvasroute).organizationSectionHeader span {
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.35;
 }
 
-.organizationAgentList,
-.organizationProposalList,
-.organizationMessageList,
-.organizationAuditList {
+:where(.vui-routes-researchflowcanvasroute).organizationAgentList,
+:where(.vui-routes-researchflowcanvasroute).organizationProposalList,
+:where(.vui-routes-researchflowcanvasroute).organizationMessageList,
+:where(.vui-routes-researchflowcanvasroute).organizationAuditList {
   display: grid;
   gap: 8px;
   min-width: 0;
 }
 
-.organizationAgentCard,
-.organizationProposalCard,
-.organizationAuditCard {
+:where(.vui-routes-researchflowcanvasroute).organizationAgentCard,
+:where(.vui-routes-researchflowcanvasroute).organizationProposalCard,
+:where(.vui-routes-researchflowcanvasroute).organizationAuditCard {
   display: grid;
   gap: 8px;
   min-width: 0;
@@ -1253,25 +1254,25 @@
   background: var(--surface-page);
 }
 
-.organizationProposalCard {
+:where(.vui-routes-researchflowcanvasroute).organizationProposalCard {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
 }
 
-.organizationAgentCard strong,
-.organizationProposalCard strong,
-.organizationAuditCard strong {
+:where(.vui-routes-researchflowcanvasroute).organizationAgentCard strong,
+:where(.vui-routes-researchflowcanvasroute).organizationProposalCard strong,
+:where(.vui-routes-researchflowcanvasroute).organizationAuditCard strong {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.organizationAgentMeta,
-.organizationProposalCard span,
-.organizationAuditHeader span {
+:where(.vui-routes-researchflowcanvasroute).organizationAgentMeta,
+:where(.vui-routes-researchflowcanvasroute).organizationProposalCard span,
+:where(.vui-routes-researchflowcanvasroute).organizationAuditHeader span {
   display: block;
   min-width: 0;
   overflow: hidden;
@@ -1281,16 +1282,16 @@
   white-space: nowrap;
 }
 
-.organizationBadgeRow {
+:where(.vui-routes-researchflowcanvasroute).organizationBadgeRow {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
 }
 
-.organizationBadge,
-.organizationBadgeProtected,
-.organizationBadgeBlocked {
+:where(.vui-routes-researchflowcanvasroute).organizationBadge,
+:where(.vui-routes-researchflowcanvasroute).organizationBadgeProtected,
+:where(.vui-routes-researchflowcanvasroute).organizationBadgeBlocked {
   display: inline-flex;
   align-items: center;
   min-height: 22px;
@@ -1300,21 +1301,21 @@
   border-radius: 999px;
   color: var(--fg-secondary);
   background: var(--surface-panel);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   font-weight: 740;
 }
 
-.organizationBadgeProtected {
+:where(.vui-routes-researchflowcanvasroute).organizationBadgeProtected {
   border-color: color-mix(in srgb, var(--accent-warm) 40%, var(--border-soft));
   color: var(--accent-warm);
 }
 
-.organizationBadgeBlocked {
+:where(.vui-routes-researchflowcanvasroute).organizationBadgeBlocked {
   border-color: color-mix(in srgb, var(--danger) 35%, var(--border-soft));
   color: var(--danger);
 }
 
-.organizationForm {
+:where(.vui-routes-researchflowcanvasroute).organizationForm {
   display: grid;
   gap: 10px;
   min-width: 0;
@@ -1324,19 +1325,19 @@
   background: color-mix(in srgb, var(--surface-page) 88%, var(--surface-panel));
 }
 
-.organizationForm label {
+:where(.vui-routes-researchflowcanvasroute).organizationForm label {
   display: grid;
   gap: 6px;
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   font-weight: 780;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
-.organizationForm input,
-.organizationForm select,
-.organizationForm textarea {
+:where(.vui-routes-researchflowcanvasroute).organizationForm input,
+:where(.vui-routes-researchflowcanvasroute).organizationForm select,
+:where(.vui-routes-researchflowcanvasroute).organizationForm textarea {
   width: 100%;
   min-width: 0;
   border: 1px solid var(--border-soft);
@@ -1344,22 +1345,22 @@
   color: var(--fg-primary);
   background: var(--surface-page);
   font: inherit;
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
 }
 
-.organizationForm select {
+:where(.vui-routes-researchflowcanvasroute).organizationForm select {
   min-height: 34px;
   padding: 0 10px;
 }
 
-.organizationForm textarea {
+:where(.vui-routes-researchflowcanvasroute).organizationForm textarea {
   min-height: 96px;
   resize: vertical;
   padding: 9px 10px;
   line-height: 1.45;
 }
 
-.inlineToggle {
+:where(.vui-routes-researchflowcanvasroute).inlineToggle {
   display: flex !important;
   grid-template-columns: none !important;
   align-items: center;
@@ -1369,19 +1370,19 @@
   text-transform: none !important;
 }
 
-.inlineToggle input {
+:where(.vui-routes-researchflowcanvasroute).inlineToggle input {
   width: 16px;
   height: 16px;
 }
 
-.organizationActionRow {
+:where(.vui-routes-researchflowcanvasroute).organizationActionRow {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
 }
 
-.organizationAuditHeader {
+:where(.vui-routes-researchflowcanvasroute).organizationAuditHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1389,44 +1390,44 @@
   min-width: 0;
 }
 
-.organizationAuditHeader svg {
+:where(.vui-routes-researchflowcanvasroute).organizationAuditHeader svg {
   flex: 0 0 auto;
   color: var(--accent-cool-2);
 }
 
-.organizationAuditCard p {
+:where(.vui-routes-researchflowcanvasroute).organizationAuditCard p {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.4;
 }
 
-.organizationAuditCard code {
+:where(.vui-routes-researchflowcanvasroute).organizationAuditCard code {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.organizationAuditAllowed {
+:where(.vui-routes-researchflowcanvasroute).organizationAuditAllowed {
   border-color: color-mix(in srgb, var(--success) 28%, var(--border-soft));
 }
 
-.organizationAuditBlocked {
+:where(.vui-routes-researchflowcanvasroute).organizationAuditBlocked {
   border-color: color-mix(in srgb, var(--danger) 30%, var(--border-soft));
 }
 
-.issueSummary {
+:where(.vui-routes-researchflowcanvasroute).issueSummary {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
-.issueSummaryError,
-.issueSummaryWarning,
-.issueSummaryOk {
+:where(.vui-routes-researchflowcanvasroute).issueSummaryError,
+:where(.vui-routes-researchflowcanvasroute).issueSummaryWarning,
+:where(.vui-routes-researchflowcanvasroute).issueSummaryOk {
   display: grid;
   gap: 4px;
   min-width: 0;
@@ -1436,43 +1437,43 @@
   background: color-mix(in srgb, var(--surface-card) 82%, transparent);
 }
 
-.issueSummaryError {
+:where(.vui-routes-researchflowcanvasroute).issueSummaryError {
   border-color: color-mix(in srgb, var(--danger) 42%, var(--border-soft));
   background: color-mix(in srgb, var(--danger) 10%, var(--surface-card));
 }
 
-.issueSummaryWarning {
+:where(.vui-routes-researchflowcanvasroute).issueSummaryWarning {
   border-color: color-mix(in srgb, var(--warning) 42%, var(--border-soft));
   background: color-mix(in srgb, var(--warning) 10%, var(--surface-card));
 }
 
-.issueSummaryOk {
+:where(.vui-routes-researchflowcanvasroute).issueSummaryOk {
   border-color: color-mix(in srgb, var(--success) 30%, var(--border-soft));
   background: color-mix(in srgb, var(--success) 8%, var(--surface-card));
 }
 
-.issueSummary span {
+:where(.vui-routes-researchflowcanvasroute).issueSummary span {
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   font-weight: 820;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
-.issueSummary strong {
+:where(.vui-routes-researchflowcanvasroute).issueSummary strong {
   color: var(--fg-primary);
   font-family: var(--font-mono);
   font-size: 1.08rem;
   line-height: 1;
 }
 
-.issueList {
+:where(.vui-routes-researchflowcanvasroute).issueList {
   display: grid;
   gap: 8px;
   min-width: 0;
 }
 
-.issueCard {
+:where(.vui-routes-researchflowcanvasroute).issueCard {
   display: grid;
   gap: 10px;
   min-width: 0;
@@ -1482,7 +1483,7 @@
   background: color-mix(in srgb, var(--surface-card) 80%, transparent);
 }
 
-.issueCardHeader {
+:where(.vui-routes-researchflowcanvasroute).issueCardHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1490,56 +1491,56 @@
   min-width: 0;
 }
 
-.issueCardHeader code {
+:where(.vui-routes-researchflowcanvasroute).issueCardHeader code {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.64rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.issueCardBody {
+:where(.vui-routes-researchflowcanvasroute).issueCardBody {
   display: grid;
   gap: 5px;
   min-width: 0;
 }
 
-.issueCardBody span {
+:where(.vui-routes-researchflowcanvasroute).issueCardBody span {
   color: var(--fg-tertiary);
-  font-size: 0.64rem;
+  font-size: var(--vui-font-xs);
   font-weight: 820;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
-.issueCardBody strong,
-.issueCardBody p {
+:where(.vui-routes-researchflowcanvasroute).issueCardBody strong,
+:where(.vui-routes-researchflowcanvasroute).issueCardBody p {
   margin: 0;
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.issueCardBody strong {
+:where(.vui-routes-researchflowcanvasroute).issueCardBody strong {
   color: var(--fg-primary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
 }
 
-.issueCardBody p {
+:where(.vui-routes-researchflowcanvasroute).issueCardBody p {
   color: var(--fg-secondary);
-  font-size: 0.74rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.45;
 }
 
-.issueCardError {
+:where(.vui-routes-researchflowcanvasroute).issueCardError {
   border-color: color-mix(in srgb, var(--danger) 42%, var(--border-soft));
 }
 
-.issueCardWarning {
+:where(.vui-routes-researchflowcanvasroute).issueCardWarning {
   border-color: color-mix(in srgb, var(--warning) 36%, var(--border-soft));
 }
 
-.issueMeta {
+:where(.vui-routes-researchflowcanvasroute).issueMeta {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1547,16 +1548,16 @@
   min-width: 0;
 }
 
-.issueMeta code {
+:where(.vui-routes-researchflowcanvasroute).issueMeta code {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.issueFocusButton {
+:where(.vui-routes-researchflowcanvasroute).issueFocusButton {
   flex: 0 0 auto;
   min-height: 28px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
@@ -1570,11 +1571,11 @@
   font-weight: 780;
 }
 
-.issueFocusButton:hover {
+:where(.vui-routes-researchflowcanvasroute).issueFocusButton:hover {
   background: color-mix(in srgb, var(--accent-cool) 18%, var(--surface-card-hover));
 }
 
-.issueEmpty {
+:where(.vui-routes-researchflowcanvasroute).issueEmpty {
   display: grid;
   place-items: center;
   gap: 8px;
@@ -1586,18 +1587,18 @@
   text-align: center;
 }
 
-.issueEmpty strong {
+:where(.vui-routes-researchflowcanvasroute).issueEmpty strong {
   color: var(--success);
   font-size: 0.9rem;
 }
 
-.issueEmpty span {
+:where(.vui-routes-researchflowcanvasroute).issueEmpty span {
   color: var(--fg-secondary);
-  font-size: 0.76rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.45;
 }
 
-.contractPanel {
+:where(.vui-routes-researchflowcanvasroute).contractPanel {
   display: grid;
   gap: 8px;
   padding: 10px;
@@ -1606,46 +1607,46 @@
   background: color-mix(in srgb, var(--surface-panel) 88%, var(--surface-page));
 }
 
-.contractBlock {
+:where(.vui-routes-researchflowcanvasroute).contractBlock {
   display: grid;
   gap: 6px;
 }
 
-.contractBlock > span {
+:where(.vui-routes-researchflowcanvasroute).contractBlock > span {
   color: var(--fg-tertiary);
-  font-size: 0.67rem;
+  font-size: var(--vui-font-xs);
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.contractChips {
+:where(.vui-routes-researchflowcanvasroute).contractChips {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.contractChip,
-.contractChipMuted {
+:where(.vui-routes-researchflowcanvasroute).contractChip,
+:where(.vui-routes-researchflowcanvasroute).contractChipMuted {
   min-height: 22px;
   padding: 2px 8px;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
-  font-size: 0.68rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.25;
 }
 
-.contractChip {
+:where(.vui-routes-researchflowcanvasroute).contractChip {
   color: var(--fg-primary);
   background: color-mix(in srgb, var(--surface-panel) 72%, var(--accent-cool) 12%);
 }
 
-.contractChipMuted {
+:where(.vui-routes-researchflowcanvasroute).contractChipMuted {
   color: var(--fg-tertiary);
   background: color-mix(in srgb, var(--surface-panel) 72%, var(--surface-page));
 }
 
-.templatePanel {
+:where(.vui-routes-researchflowcanvasroute).templatePanel {
   display: grid;
   gap: 8px;
   padding: 10px;
@@ -1654,20 +1655,20 @@
   background: color-mix(in srgb, var(--surface-panel) 88%, var(--surface-page));
 }
 
-.templateBlock {
+:where(.vui-routes-researchflowcanvasroute).templateBlock {
   display: grid;
   gap: 6px;
 }
 
-.templateBlock > span {
+:where(.vui-routes-researchflowcanvasroute).templateBlock > span {
   color: var(--fg-tertiary);
-  font-size: 0.67rem;
+  font-size: var(--vui-font-xs);
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.templateBlock select {
+:where(.vui-routes-researchflowcanvasroute).templateBlock select {
   width: 100%;
   min-width: 0;
   min-height: 34px;
@@ -1677,11 +1678,11 @@
   color: var(--fg-primary);
   background: var(--surface-page);
   font: inherit;
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
 }
 
-.templateHint,
-.edgeConditionHint {
+:where(.vui-routes-researchflowcanvasroute).templateHint,
+:where(.vui-routes-researchflowcanvasroute).edgeConditionHint {
   display: grid;
   gap: 4px;
   padding: 10px;
@@ -1690,38 +1691,38 @@
   background: var(--surface-page);
 }
 
-.templateHint strong,
-.edgeConditionHint strong {
+:where(.vui-routes-researchflowcanvasroute).templateHint strong,
+:where(.vui-routes-researchflowcanvasroute).edgeConditionHint strong {
   color: var(--fg-primary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
 }
 
-.templateHint span,
-.edgeConditionHint span {
+:where(.vui-routes-researchflowcanvasroute).templateHint span,
+:where(.vui-routes-researchflowcanvasroute).edgeConditionHint span {
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.4;
 }
 
-.templateActions {
+:where(.vui-routes-researchflowcanvasroute).templateActions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
 }
 
-.templateActions .secondaryButton {
+:where(.vui-routes-researchflowcanvasroute).templateActions .secondaryButton {
   min-height: 30px;
   padding: 0 10px;
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
 }
 
-.twoColumns {
+:where(.vui-routes-researchflowcanvasroute).twoColumns {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
-.edgePair {
+:where(.vui-routes-researchflowcanvasroute).edgePair {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
@@ -1732,20 +1733,20 @@
   background: var(--surface-page);
 }
 
-.edgePair span {
+:where(.vui-routes-researchflowcanvasroute).edgePair span {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-secondary);
-  font-size: 0.75rem;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.edgePair strong {
+:where(.vui-routes-researchflowcanvasroute).edgePair strong {
   color: var(--accent-cool-2);
 }
 
-.edgeTypeHint {
+:where(.vui-routes-researchflowcanvasroute).edgeTypeHint {
   display: grid;
   gap: 5px;
   padding: 10px;
@@ -1754,23 +1755,23 @@
   background: var(--surface-page);
 }
 
-.edgeTypeHint strong {
+:where(.vui-routes-researchflowcanvasroute).edgeTypeHint strong {
   color: var(--fg-primary);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-xs);
 }
 
-.edgeTypeHint span {
+:where(.vui-routes-researchflowcanvasroute).edgeTypeHint span {
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: var(--vui-font-xs);
   line-height: 1.4;
 }
 
-.edgeIssueList {
+:where(.vui-routes-researchflowcanvasroute).edgeIssueList {
   display: grid;
   gap: 6px;
 }
 
-.emptyInspector {
+:where(.vui-routes-researchflowcanvasroute).emptyInspector {
   display: grid;
   align-content: center;
   gap: 8px;
@@ -1780,43 +1781,43 @@
   text-align: center;
 }
 
-.emptyInspector strong {
+:where(.vui-routes-researchflowcanvasroute).emptyInspector strong {
   color: var(--fg-primary);
   font-size: 0.92rem;
 }
 
-.emptyInspector span {
-  font-size: 0.78rem;
+:where(.vui-routes-researchflowcanvasroute).emptyInspector span {
+  font-size: var(--vui-font-xs);
   line-height: 1.5;
 }
 
 @media (max-width: 1100px) {
-  .header {
+  :where(.vui-routes-researchflowcanvasroute).header {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .headerActions {
+  :where(.vui-routes-researchflowcanvasroute).headerActions {
     justify-content: flex-start;
     overflow-x: auto;
     padding-bottom: 2px;
   }
 
-  .executionBar {
+  :where(.vui-routes-researchflowcanvasroute).executionBar {
     align-items: stretch;
     flex-wrap: wrap;
   }
 
-  .executionHint {
+  :where(.vui-routes-researchflowcanvasroute).executionHint {
     flex-basis: 100%;
     margin-left: 0;
   }
 
-  .body {
+  :where(.vui-routes-researchflowcanvasroute).body {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) minmax(280px, 38vh);
   }
 
-  .canvasShell {
+  :where(.vui-routes-researchflowcanvasroute).canvasShell {
     border-right: 0;
     border-bottom: 1px solid var(--border-soft);
   }

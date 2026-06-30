@@ -26,7 +26,7 @@ import { useAppI18n } from "../i18n/useAppI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { clampPaneWidth, keyboardPaneWidth, storedPaneWidth } from "./resizablePane";
-import styles from "./ToolsRoute.module.css";
+import styles from "./ToolsRoute.styles";
 
 type ToolFilter = "all" | "built_in" | "generated" | "llm" | "enabled";
 type ToolPolicyMode = "inherited" | "explicit_required" | "allowed" | "blocked" | "excluded";

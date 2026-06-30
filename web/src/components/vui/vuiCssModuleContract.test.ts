@@ -36,7 +36,7 @@ describe("VUI CSS module contract", () => {
     const modules = cssModuleSources();
     const modulePaths = modules.map(({ path }) => path);
 
-    expect(modules.length).toBeLessThanOrEqual(12);
+    expect(modules.length).toBe(0);
     expect(modulePaths).not.toContain("app/LauncherShell.module.css");
     expect(modulePaths).not.toContain("app/RouteLoadingShell.module.css");
     expect(modulePaths).not.toContain("app/RouteErrorBoundary.module.css");

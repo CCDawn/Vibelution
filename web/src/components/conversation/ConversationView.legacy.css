@@ -1,4 +1,5 @@
-.surface {
+/* source: components/conversation/ConversationView legacy css */
+:where(.vui-components-conversation-conversationview).surface {
   display: flex;
   flex-direction: column;
   position: relative;
@@ -7,7 +8,7 @@
   overflow: hidden;
 }
 
-.surfaceCompact {
+:where(.vui-components-conversation-conversationview).surfaceCompact {
   border-radius: 8px;
   border: 1px solid color-mix(in srgb, var(--border-hairline) 92%, transparent);
   background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
@@ -15,7 +16,7 @@
   backdrop-filter: blur(6px);
 }
 
-.header {
+:where(.vui-components-conversation-conversationview).header {
   flex: 0 0 auto;
   display: flex;
   align-items: flex-start;
@@ -26,12 +27,12 @@
   background: color-mix(in srgb, var(--surface-toolbar, var(--surface-panel)) 64%, transparent);
 }
 
-.surfaceCompact .header {
+:where(.vui-components-conversation-conversationview).surfaceCompact .header {
   padding: 9px 13px 7px;
   align-items: center;
 }
 
-.headerControls {
+:where(.vui-components-conversation-conversationview).headerControls {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -39,7 +40,7 @@
   gap: 10px;
 }
 
-.eyebrow {
+:where(.vui-components-conversation-conversationview).eyebrow {
   margin: 0 0 4px;
   color: var(--fg-tertiary);
   font-size: var(--vui-font-sm);
@@ -47,18 +48,18 @@
   letter-spacing: 0.08em;
 }
 
-.title {
+:where(.vui-components-conversation-conversationview).title {
   margin: 0;
   font-family: var(--font-body);
   font-size: 1.04rem;
   font-weight: 760;
 }
 
-.surfaceCompact .title {
+:where(.vui-components-conversation-conversationview).surfaceCompact .title {
   font-size: 1rem;
 }
 
-.phase {
+:where(.vui-components-conversation-conversationview).phase {
   display: inline-flex;
   align-items: center;
   padding: 6px 10px;
@@ -70,7 +71,7 @@
   text-transform: capitalize;
 }
 
-.summaryGrid {
+:where(.vui-components-conversation-conversationview).summaryGrid {
   flex: 0 0 auto;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -78,12 +79,12 @@
   padding: 14px 20px 0;
 }
 
-.surfaceCompact .summaryGrid {
+:where(.vui-components-conversation-conversationview).surfaceCompact .summaryGrid {
   gap: 8px;
   padding: 8px 16px 0;
 }
 
-.summaryCard {
+:where(.vui-components-conversation-conversationview).summaryCard {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
@@ -94,12 +95,12 @@
   background: var(--surface-panel);
 }
 
-.surfaceCompact .summaryCard {
+:where(.vui-components-conversation-conversationview).surfaceCompact .summaryCard {
   min-height: 78px;
   padding: 9px 10px;
 }
 
-.summaryLabel {
+:where(.vui-components-conversation-conversationview).summaryLabel {
   margin: 0 0 8px;
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
@@ -107,7 +108,7 @@
   letter-spacing: 0.08em;
 }
 
-.summaryValue {
+:where(.vui-components-conversation-conversationview).summaryValue {
   margin: 0;
   color: var(--fg-primary);
   line-height: 1.55;
@@ -119,7 +120,7 @@
   overflow-wrap: anywhere;
 }
 
-.metaStack {
+:where(.vui-components-conversation-conversationview).metaStack {
   flex: 0 0 auto;
   display: grid;
   gap: 12px;
@@ -127,29 +128,29 @@
   min-height: 0;
 }
 
-.surfaceCompact .metaStack {
+:where(.vui-components-conversation-conversationview).surfaceCompact .metaStack {
   gap: 8px;
   padding: 8px 16px 0;
 }
 
-.sessionMeta {
+:where(.vui-components-conversation-conversationview).sessionMeta {
   display: grid;
   gap: 10px;
 }
 
-.supplemental {
+:where(.vui-components-conversation-conversationview).supplemental {
   display: grid;
   gap: 10px;
 }
 
-.statRow {
+:where(.vui-components-conversation-conversationview).statRow {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.statPill,
-.toolPill {
+:where(.vui-components-conversation-conversationview).statPill,
+:where(.vui-components-conversation-conversationview).toolPill {
   display: inline-flex;
   align-items: center;
   padding: 5px 9px;
@@ -157,30 +158,30 @@
   font-size: var(--vui-font-sm);
 }
 
-.statPill {
+:where(.vui-components-conversation-conversationview).statPill {
   color: var(--fg-secondary);
   background: var(--surface-panel-strong);
 }
 
-.toolsBlock {
+:where(.vui-components-conversation-conversationview).toolsBlock {
   display: grid;
   gap: 8px;
 }
 
-.toolsLabel {
+:where(.vui-components-conversation-conversationview).toolsLabel {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 
-.updateLine {
+:where(.vui-components-conversation-conversationview).updateLine {
   margin: 0;
   color: var(--fg-tertiary);
   font-size: var(--vui-font-md);
 }
 
-.timeline {
+:where(.vui-components-conversation-conversationview).timeline {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
@@ -193,13 +194,13 @@
   background: color-mix(in srgb, var(--surface-page) 18%, transparent);
 }
 
-.surfaceCompact .timeline {
+:where(.vui-components-conversation-conversationview).surfaceCompact .timeline {
   padding: 9px 12px 11px;
   gap: 7px;
   background: color-mix(in srgb, var(--surface-page) 14%, transparent);
 }
 
-.emptyState {
+:where(.vui-components-conversation-conversationview).emptyState {
   padding: 18px;
   border: 1px dashed var(--border-soft);
   border-radius: 8px;
@@ -207,14 +208,14 @@
   background: var(--surface-card);
 }
 
-.timelineHistoryGate {
+:where(.vui-components-conversation-conversationview).timelineHistoryGate {
   display: flex;
   justify-content: center;
   width: 100%;
   padding: 2px 0 4px;
 }
 
-.timelineHistoryButton {
+:where(.vui-components-conversation-conversationview).timelineHistoryButton {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -231,16 +232,16 @@
   font-weight: 650;
 }
 
-.timelineHistoryButton:hover {
+:where(.vui-components-conversation-conversationview).timelineHistoryButton:hover {
   border-color: color-mix(in srgb, var(--accent-cool) 34%, transparent);
   background: color-mix(in srgb, var(--surface-card) 88%, var(--accent-cool) 8%);
   color: var(--fg-primary);
 }
 
-.assistantTurn,
-.agentInboxTurn,
-.groupTranscriptTurn,
-.userTurn {
+:where(.vui-components-conversation-conversationview).assistantTurn,
+:where(.vui-components-conversation-conversationview).agentInboxTurn,
+:where(.vui-components-conversation-conversationview).groupTranscriptTurn,
+:where(.vui-components-conversation-conversationview).userTurn {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr);
   column-gap: 12px;
@@ -249,24 +250,24 @@
   align-items: start;
 }
 
-.userTurn {
+:where(.vui-components-conversation-conversationview).userTurn {
   grid-template-columns: minmax(0, 1fr) 34px;
   justify-self: stretch;
 }
 
-.assistantTurn {
+:where(.vui-components-conversation-conversationview).assistantTurn {
   justify-self: stretch;
 }
 
-.agentInboxTurn {
+:where(.vui-components-conversation-conversationview).agentInboxTurn {
   justify-self: stretch;
 }
 
-.groupTranscriptTurn {
+:where(.vui-components-conversation-conversationview).groupTranscriptTurn {
   justify-self: stretch;
 }
 
-.turnErrorNotice {
+:where(.vui-components-conversation-conversationview).turnErrorNotice {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);
   align-items: start;
@@ -276,7 +277,7 @@
   color: color-mix(in srgb, var(--fg-tertiary) 84%, var(--accent-warm));
 }
 
-.turnErrorNoticeIcon {
+:where(.vui-components-conversation-conversationview).turnErrorNoticeIcon {
   display: grid;
   place-items: center;
   width: 24px;
@@ -285,7 +286,7 @@
   opacity: 0.82;
 }
 
-.turnErrorNoticeBody {
+:where(.vui-components-conversation-conversationview).turnErrorNoticeBody {
   display: grid;
   gap: 4px;
   min-width: 0;
@@ -293,7 +294,7 @@
   padding-top: 1px;
 }
 
-.turnErrorNoticeMeta {
+:where(.vui-components-conversation-conversationview).turnErrorNoticeMeta {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -304,21 +305,21 @@
   line-height: 1.3;
 }
 
-.turnErrorNoticeMeta span:first-child {
+:where(.vui-components-conversation-conversationview).turnErrorNoticeMeta span:first-child {
   color: color-mix(in srgb, var(--accent-warm-2) 76%, var(--fg-tertiary));
   font-family: var(--font-sans);
   font-size: var(--vui-font-xs);
   font-weight: 720;
 }
 
-.turnErrorNoticeText {
+:where(.vui-components-conversation-conversationview).turnErrorNoticeText {
   color: color-mix(in srgb, var(--fg-secondary) 72%, var(--fg-tertiary));
   font-size: var(--vui-font-md);
   line-height: 1.55;
   overflow-wrap: anywhere;
 }
 
-.turnErrorReasonList {
+:where(.vui-components-conversation-conversationview).turnErrorReasonList {
   display: grid;
   gap: 5px;
   margin: 2px 0 0;
@@ -328,7 +329,7 @@
   background: color-mix(in srgb, var(--accent-warm) 6%, transparent);
 }
 
-.turnErrorReasonRow {
+:where(.vui-components-conversation-conversationview).turnErrorReasonRow {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr);
   gap: 8px;
@@ -338,20 +339,20 @@
   line-height: 1.42;
 }
 
-.turnErrorReasonRow dt {
+:where(.vui-components-conversation-conversationview).turnErrorReasonRow dt {
   margin: 0;
   color: color-mix(in srgb, var(--accent-warm-2) 78%, var(--fg-tertiary));
   font-weight: 740;
 }
 
-.turnErrorReasonRow dd {
+:where(.vui-components-conversation-conversationview).turnErrorReasonRow dd {
   margin: 0;
   min-width: 0;
   color: var(--fg-secondary);
   overflow-wrap: anywhere;
 }
 
-.cliAgentLifecycleTurn {
+:where(.vui-components-conversation-conversationview).cliAgentLifecycleTurn {
   display: inline-grid;
   grid-template-columns: 18px minmax(0, auto) minmax(0, auto) auto;
   gap: 7px;
@@ -367,13 +368,13 @@
   line-height: 1.35;
 }
 
-.cliAgentLifecycleIcon {
+:where(.vui-components-conversation-conversationview).cliAgentLifecycleIcon {
   display: grid;
   place-items: center;
   color: var(--accent-cool);
 }
 
-.cliAgentLifecycleText {
+:where(.vui-components-conversation-conversationview).cliAgentLifecycleText {
   min-width: 0;
   color: var(--fg-secondary);
   font-weight: 720;
@@ -382,7 +383,7 @@
   white-space: nowrap;
 }
 
-.cliAgentLifecycleMeta {
+:where(.vui-components-conversation-conversationview).cliAgentLifecycleMeta {
   min-width: 0;
   max-width: 220px;
   overflow: hidden;
@@ -393,14 +394,14 @@
   white-space: nowrap;
 }
 
-.cliAgentLifecycleTime {
+:where(.vui-components-conversation-conversationview).cliAgentLifecycleTime {
   color: var(--fg-tertiary);
   font-family: var(--font-mono);
   font-size: var(--vui-font-xs);
   white-space: nowrap;
 }
 
-.turnEditing .turnContent {
+:where(.vui-components-conversation-conversationview).turnEditing .turnContent {
   padding: 10px 12px;
   border: 1px solid color-mix(in srgb, var(--accent-warm) 42%, transparent);
   border-radius: 8px;
@@ -410,7 +411,7 @@
   box-shadow: var(--vui-shadow-accent);
 }
 
-.turnAvatar {
+:where(.vui-components-conversation-conversationview).turnAvatar {
   display: grid;
   place-items: center;
   width: 32px;
@@ -424,70 +425,70 @@
   font-weight: 760;
 }
 
-.userTurn .turnAvatar {
+:where(.vui-components-conversation-conversationview).userTurn .turnAvatar {
   grid-column: 2;
   grid-row: 1;
   color: var(--accent-cool-2);
   background: color-mix(in srgb, var(--accent-cool) 9%, var(--surface-card));
 }
 
-.agentInboxTurn .turnAvatar {
+:where(.vui-components-conversation-conversationview).agentInboxTurn .turnAvatar {
   color: var(--accent-cool-2);
   background: color-mix(in srgb, var(--surface-panel-strong) 86%, var(--accent-cool) 7%);
 }
 
-.groupTranscriptTurn .turnAvatar {
+:where(.vui-components-conversation-conversationview).groupTranscriptTurn .turnAvatar {
   color: var(--fg-tertiary);
   background: color-mix(in srgb, var(--surface-panel-strong) 90%, var(--fg-tertiary) 5%);
 }
 
-.turnAvatarImage {
+:where(.vui-components-conversation-conversationview).turnAvatarImage {
   width: 100%;
   height: 100%;
   border-radius: inherit;
   object-fit: cover;
 }
-.assistantTurnContinuation .turnAvatar {
+:where(.vui-components-conversation-conversationview).assistantTurnContinuation .turnAvatar {
   border-color: transparent;
   background: transparent;
 }
 
-.assistantTurnContinuation .turnContent {
+:where(.vui-components-conversation-conversationview).assistantTurnContinuation .turnContent {
   gap: 4px;
 }
 
-.turnContent {
+:where(.vui-components-conversation-conversationview).turnContent {
   display: grid;
   min-width: 0;
   gap: 5px;
 }
 
-.userTurn .turnContent {
+:where(.vui-components-conversation-conversationview).userTurn .turnContent {
   grid-column: 1;
   grid-row: 1;
   justify-self: end;
   width: min(82%, 860px);
 }
 
-.assistantTurn .turnContent {
+:where(.vui-components-conversation-conversationview).assistantTurn .turnContent {
   width: min(100%, 920px);
   padding: 0;
   border-left: 0;
 }
 
-.agentInboxTurn .turnContent {
+:where(.vui-components-conversation-conversationview).agentInboxTurn .turnContent {
   width: min(100%, 920px);
   padding: 0;
   border-left: 0;
 }
 
-.groupTranscriptTurn .turnContent {
+:where(.vui-components-conversation-conversationview).groupTranscriptTurn .turnContent {
   width: min(100%, 920px);
   padding: 0;
   border-left: 0;
 }
 
-.turnMeta {
+:where(.vui-components-conversation-conversationview).turnMeta {
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
@@ -500,14 +501,14 @@
   line-height: 1.2;
 }
 
-.turnMetaIdentity {
+:where(.vui-components-conversation-conversationview).turnMetaIdentity {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
 
-.turnMetaActions {
+:where(.vui-components-conversation-conversationview).turnMetaActions {
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
@@ -519,7 +520,7 @@
   white-space: nowrap;
 }
 
-.turnIconButton {
+:where(.vui-components-conversation-conversationview).turnIconButton {
   display: inline-grid;
   place-items: center;
   width: 24px;
@@ -531,43 +532,43 @@
   cursor: pointer;
 }
 
-.turnIconButton:hover {
+:where(.vui-components-conversation-conversationview).turnIconButton:hover {
   border-color: color-mix(in srgb, var(--accent-cool) 38%, transparent);
   color: var(--fg-primary);
   background: color-mix(in srgb, var(--accent-cool) 10%, transparent);
 }
 
-.turnIconButtonActive {
+:where(.vui-components-conversation-conversationview).turnIconButtonActive {
   border-color: color-mix(in srgb, var(--accent-warm) 42%, transparent);
   color: var(--accent-warm-2);
   background: color-mix(in srgb, var(--accent-warm) 14%, transparent);
 }
 
-.turnIconButton:disabled {
+:where(.vui-components-conversation-conversationview).turnIconButton:disabled {
   cursor: not-allowed;
   opacity: 0.42;
 }
 
-.userTurn .turnMeta {
+:where(.vui-components-conversation-conversationview).userTurn .turnMeta {
   justify-self: end;
   flex-direction: row;
   justify-content: flex-end;
   text-align: right;
 }
 
-.userTurn .turnMetaIdentity {
+:where(.vui-components-conversation-conversationview).userTurn .turnMetaIdentity {
   justify-content: flex-end;
 }
 
-.userTurn .turnMetaActions {
+:where(.vui-components-conversation-conversationview).userTurn .turnMetaActions {
   justify-content: flex-end;
 }
 
-.userTurn .turnSpeaker {
+:where(.vui-components-conversation-conversationview).userTurn .turnSpeaker {
   display: none;
 }
 
-.turnSpeaker {
+:where(.vui-components-conversation-conversationview).turnSpeaker {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
@@ -577,7 +578,7 @@
   white-space: nowrap;
 }
 
-.turnEditBadge {
+:where(.vui-components-conversation-conversationview).turnEditBadge {
   display: inline-flex;
   align-items: center;
   padding: 3px 7px;
@@ -590,7 +591,7 @@
   white-space: nowrap;
 }
 
-.userMessageBody {
+:where(.vui-components-conversation-conversationview).userMessageBody {
   justify-self: end;
   box-sizing: border-box;
   width: fit-content;
@@ -609,7 +610,7 @@
   white-space: pre-wrap;
 }
 
-.agentInboxMessageBody {
+:where(.vui-components-conversation-conversationview).agentInboxMessageBody {
   justify-self: start;
   box-sizing: border-box;
   width: fit-content;
@@ -628,7 +629,7 @@
   white-space: pre-wrap;
 }
 
-.agentInboxSection {
+:where(.vui-components-conversation-conversationview).agentInboxSection {
   display: grid;
   justify-self: start;
   gap: 6px;
@@ -636,14 +637,14 @@
   min-width: 0;
 }
 
-.researchOrgChipRow {
+:where(.vui-components-conversation-conversationview).researchOrgChipRow {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
   min-width: 0;
 }
 
-.researchOrgChip {
+:where(.vui-components-conversation-conversationview).researchOrgChip {
   display: inline-flex;
   align-items: center;
   min-height: 21px;
@@ -661,23 +662,23 @@
   white-space: nowrap;
 }
 
-.researchOrgChip_intent {
+:where(.vui-components-conversation-conversationview).researchOrgChip_intent {
   border-color: color-mix(in srgb, var(--accent-cool) 30%, transparent);
   background: color-mix(in srgb, var(--accent-cool) 9%, transparent);
   color: color-mix(in srgb, var(--accent-cool-2) 82%, var(--fg-secondary));
 }
 
-.researchOrgChip_wake {
+:where(.vui-components-conversation-conversationview).researchOrgChip_wake {
   border-color: color-mix(in srgb, var(--accent-warm) 28%, transparent);
   background: color-mix(in srgb, var(--accent-warm) 8%, transparent);
   color: color-mix(in srgb, var(--accent-warm-2) 78%, var(--fg-secondary));
 }
 
-.researchOrgChip_meta {
+:where(.vui-components-conversation-conversationview).researchOrgChip_meta {
   color: color-mix(in srgb, var(--fg-tertiary) 88%, var(--fg-secondary));
 }
 
-.agentInboxToggle {
+:where(.vui-components-conversation-conversationview).agentInboxToggle {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -695,13 +696,13 @@
   font-weight: 650;
 }
 
-.agentInboxToggle:hover {
+:where(.vui-components-conversation-conversationview).agentInboxToggle:hover {
   color: var(--fg-primary);
   border-color: color-mix(in srgb, var(--accent-cool) 34%, transparent);
   background: color-mix(in srgb, var(--surface-card) 70%, var(--accent-cool) 7%);
 }
 
-.agentInboxPreview {
+:where(.vui-components-conversation-conversationview).agentInboxPreview {
   min-width: 0;
   max-width: min(54vw, 560px);
   overflow: hidden;
@@ -712,7 +713,7 @@
   white-space: nowrap;
 }
 
-.groupTranscriptBody {
+:where(.vui-components-conversation-conversationview).groupTranscriptBody {
   justify-self: start;
   box-sizing: border-box;
   width: fit-content;
@@ -731,13 +732,13 @@
   white-space: pre-wrap;
 }
 
-.userMessageBody .messageBody {
+:where(.vui-components-conversation-conversationview).userMessageBody .messageBody {
   font-size: inherit;
   font-weight: inherit;
   line-height: inherit;
 }
 
-.userAttachmentGrid {
+:where(.vui-components-conversation-conversationview).userAttachmentGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(126px, 180px));
   justify-content: end;
@@ -745,14 +746,14 @@
   margin-top: 8px;
 }
 
-.userAttachment {
+:where(.vui-components-conversation-conversationview).userAttachment {
   display: grid;
   gap: 6px;
   margin: 0;
   min-width: 0;
 }
 
-.userAttachmentImage {
+:where(.vui-components-conversation-conversationview).userAttachmentImage {
   width: 100%;
   aspect-ratio: 4 / 3;
   border: 1px solid var(--border-soft);
@@ -761,7 +762,7 @@
   background: var(--surface-input-strong);
 }
 
-.userAttachmentMeta {
+:where(.vui-components-conversation-conversationview).userAttachmentMeta {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -770,36 +771,36 @@
   font-size: var(--vui-font-xs);
 }
 
-.userAttachmentMeta span {
+:where(.vui-components-conversation-conversationview).userAttachmentMeta span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.operationGroup {
+:where(.vui-components-conversation-conversationview).operationGroup {
   display: grid;
   gap: 5px;
   min-width: 0;
   max-width: 100%;
 }
 
-.executionTraceGroup {
+:where(.vui-components-conversation-conversationview).executionTraceGroup {
   gap: 4px;
 }
 
-.auxiliaryBlock {
+:where(.vui-components-conversation-conversationview).auxiliaryBlock {
   display: grid;
   gap: 6px;
   min-width: 0;
   max-width: 100%;
 }
 
-.auxiliaryBlock_mental {
+:where(.vui-components-conversation-conversationview).auxiliaryBlock_mental {
   margin-top: 2px;
 }
 
-.operationSummary {
+:where(.vui-components-conversation-conversationview).operationSummary {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -817,27 +818,27 @@
   font-weight: 620;
 }
 
-.executionTraceGroup .operationSummary {
+:where(.vui-components-conversation-conversationview).executionTraceGroup .operationSummary {
   min-height: 26px;
   border: 0;
   background: color-mix(in srgb, var(--surface-card) 54%, transparent);
 }
 
-.executionTraceGroup .operationSummary:hover {
+:where(.vui-components-conversation-conversationview).executionTraceGroup .operationSummary:hover {
   border-color: transparent;
 }
 
-.executionRequestSummary {
+:where(.vui-components-conversation-conversationview).executionRequestSummary {
   cursor: default;
   color: color-mix(in srgb, var(--accent-cool-2) 84%, var(--fg-secondary));
 }
 
-.operationSummary:hover,
-.responseToggle:hover {
+:where(.vui-components-conversation-conversationview).operationSummary:hover,
+:where(.vui-components-conversation-conversationview).responseToggle:hover {
   color: var(--fg-primary);
 }
 
-.operationSummaryPreview {
+:where(.vui-components-conversation-conversationview).operationSummaryPreview {
   min-width: 0;
   max-width: min(46vw, 420px);
   overflow: hidden;
@@ -848,7 +849,7 @@
   white-space: nowrap;
 }
 
-.operationSummaryCount {
+:where(.vui-components-conversation-conversationview).operationSummaryCount {
   min-width: 0;
   max-width: min(34vw, 320px);
   overflow: hidden;
@@ -859,14 +860,14 @@
   white-space: nowrap;
 }
 
-.answerOnlyProcessGroup {
+:where(.vui-components-conversation-conversationview).answerOnlyProcessGroup {
   display: grid;
   gap: 5px;
   min-width: 0;
   max-width: 100%;
 }
 
-.answerOnlyProcessToggle {
+:where(.vui-components-conversation-conversationview).answerOnlyProcessToggle {
   display: inline-flex;
   align-items: center;
   gap: 0;
@@ -883,11 +884,11 @@
   font-size: var(--vui-font-xs);
 }
 
-.answerOnlyProcessToggle [data-slot="vui-button-content"] {
+:where(.vui-components-conversation-conversationview).answerOnlyProcessToggle [data-slot="vui-button-content"] {
   display: contents;
 }
 
-.answerOnlyProcessToggle [data-slot="vui-button-label"] {
+:where(.vui-components-conversation-conversationview).answerOnlyProcessToggle [data-slot="vui-button-label"] {
   display: inline-grid;
   grid-template-columns: 14px auto auto minmax(0, 1fr) 14px;
   align-items: center;
@@ -896,55 +897,55 @@
   max-width: 100%;
 }
 
-.answerOnlyProcessToggle:hover {
+:where(.vui-components-conversation-conversationview).answerOnlyProcessToggle:hover {
   color: var(--fg-secondary);
 }
 
-.answerOnlyProcessStatic {
+:where(.vui-components-conversation-conversationview).answerOnlyProcessStatic {
   cursor: default;
 }
 
-.answerOnlyProcessStatic [data-slot="vui-button-label"] {
+:where(.vui-components-conversation-conversationview).answerOnlyProcessStatic [data-slot="vui-button-label"] {
   grid-template-columns: 14px auto auto;
 }
 
-.answerOnlyProcessIcon {
+:where(.vui-components-conversation-conversationview).answerOnlyProcessIcon {
   display: inline-grid;
   place-items: center;
   color: color-mix(in srgb, var(--accent-cool-2) 70%, var(--fg-secondary));
 }
 
-.answerOnlyProcessGroup_failed .answerOnlyProcessIcon,
-.answerOnlyProcessGroup_failed .answerOnlyProcessTitle {
+:where(.vui-components-conversation-conversationview).answerOnlyProcessGroup_failed .answerOnlyProcessIcon,
+:where(.vui-components-conversation-conversationview).answerOnlyProcessGroup_failed .answerOnlyProcessTitle {
   color: var(--danger);
 }
 
-.answerOnlyProcessTitle {
+:where(.vui-components-conversation-conversationview).answerOnlyProcessTitle {
   color: var(--fg-primary);
   font-weight: 620;
   white-space: nowrap;
 }
 
-.answerOnlyProcessMeta,
-.answerOnlyProcessPreview {
+:where(.vui-components-conversation-conversationview).answerOnlyProcessMeta,
+:where(.vui-components-conversation-conversationview).answerOnlyProcessPreview {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.answerOnlyProcessMeta {
+:where(.vui-components-conversation-conversationview).answerOnlyProcessMeta {
   color: var(--fg-secondary);
   font-weight: 520;
 }
 
-.answerOnlyProcessPreview {
+:where(.vui-components-conversation-conversationview).answerOnlyProcessPreview {
   max-width: min(48vw, 520px);
   color: var(--fg-secondary);
   font-weight: 430;
 }
 
-.answerOnlyProcessDetails {
+:where(.vui-components-conversation-conversationview).answerOnlyProcessDetails {
   display: grid;
   gap: 8px;
   min-width: 0;
@@ -952,7 +953,7 @@
   padding-left: 4px;
 }
 
-.operationStatusLine {
+:where(.vui-components-conversation-conversationview).operationStatusLine {
   display: flex;
   align-items: center;
   flex-wrap: nowrap;
@@ -965,20 +966,20 @@
   line-height: 1.35;
 }
 
-.operationStatusLine span + span::before {
+:where(.vui-components-conversation-conversationview).operationStatusLine span + span::before {
   content: "·";
   margin-right: 10px;
   color: color-mix(in srgb, var(--fg-tertiary) 54%, transparent);
 }
 
-.operationStatusLead {
+:where(.vui-components-conversation-conversationview).operationStatusLead {
   flex: 0 0 auto;
   min-width: 0;
   color: color-mix(in srgb, var(--accent-cool-2) 82%, var(--fg-secondary));
   font-weight: 650;
 }
 
-.operationStatusMeta {
+:where(.vui-components-conversation-conversationview).operationStatusMeta {
   min-width: 0;
   overflow: hidden;
   color: color-mix(in srgb, var(--fg-tertiary) 80%, transparent);
@@ -987,26 +988,26 @@
   white-space: nowrap;
 }
 
-.conversationCellTimeline {
+:where(.vui-components-conversation-conversationview).conversationCellTimeline {
   display: grid;
   gap: 10px;
   min-width: 0;
   max-width: 100%;
 }
 
-.timelineThoughtCell,
-.timelineOperationCell,
-.timelineAssistantTextCell {
+:where(.vui-components-conversation-conversationview).timelineThoughtCell,
+:where(.vui-components-conversation-conversationview).timelineOperationCell,
+:where(.vui-components-conversation-conversationview).timelineAssistantTextCell {
   min-width: 0;
   max-width: 100%;
 }
 
-.timelineThoughtCell {
+:where(.vui-components-conversation-conversationview).timelineThoughtCell {
   display: grid;
   gap: 6px;
 }
 
-.timelineCellHeader {
+:where(.vui-components-conversation-conversationview).timelineCellHeader {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -1023,16 +1024,16 @@
   line-height: 1.5;
 }
 
-button.timelineCellHeader {
+button:where(.vui-components-conversation-conversationview).timelineCellHeader {
   cursor: pointer;
 }
 
-button.timelineCellHeader:hover,
-.timelineCellDetailButton:hover {
+button:where(.vui-components-conversation-conversationview).timelineCellHeader:hover,
+:where(.vui-components-conversation-conversationview).timelineCellDetailButton:hover {
   color: var(--fg-primary);
 }
 
-.timelineCellPreview {
+:where(.vui-components-conversation-conversationview).timelineCellPreview {
   min-width: 0;
   max-width: min(58vw, 640px);
   overflow: hidden;
@@ -1042,13 +1043,13 @@ button.timelineCellHeader:hover,
   white-space: nowrap;
 }
 
-.timelineCellMeta {
+:where(.vui-components-conversation-conversationview).timelineCellMeta {
   color: var(--fg-secondary);
   font-size: var(--vui-font-xs);
   font-weight: 520;
 }
 
-.timelineThoughtText {
+:where(.vui-components-conversation-conversationview).timelineThoughtText {
   position: relative;
   min-width: 0;
   max-width: 100%;
@@ -1064,7 +1065,7 @@ button.timelineCellHeader:hover,
   word-break: break-word;
 }
 
-.timelineThoughtText::before {
+:where(.vui-components-conversation-conversationview).timelineThoughtText::before {
   content: "";
   position: absolute;
   left: 0;
@@ -1075,17 +1076,17 @@ button.timelineCellHeader:hover,
   background: var(--vui-gradient-route-soft);
 }
 
-.timelineAssistantTextCell {
+:where(.vui-components-conversation-conversationview).timelineAssistantTextCell {
   color: var(--fg-primary);
 }
 
-.timelineOperationCell {
+:where(.vui-components-conversation-conversationview).timelineOperationCell {
   display: grid;
   gap: 6px;
   color: var(--fg-secondary);
 }
 
-.timelineOperationResult {
+:where(.vui-components-conversation-conversationview).timelineOperationResult {
   min-width: 0;
   max-width: 100%;
   margin: 0 0 0 21px;
@@ -1097,18 +1098,18 @@ button.timelineCellHeader:hover,
   word-break: break-word;
 }
 
-.timelineOperationCell_failed .timelineCellHeader {
+:where(.vui-components-conversation-conversationview).timelineOperationCell_failed .timelineCellHeader {
   color: var(--danger);
 }
 
-.timelineCommandList {
+:where(.vui-components-conversation-conversationview).timelineCommandList {
   display: grid;
   gap: 5px;
   min-width: 0;
   padding-left: 22px;
 }
 
-.timelineCommandRow {
+:where(.vui-components-conversation-conversationview).timelineCommandRow {
   display: flex;
   flex-wrap: wrap;
   gap: 5px 10px;
@@ -1118,16 +1119,16 @@ button.timelineCellHeader:hover,
   line-height: 1.55;
 }
 
-.timelineCommandRow span:first-child {
+:where(.vui-components-conversation-conversationview).timelineCommandRow span:first-child {
   color: var(--fg-secondary);
   font-weight: 620;
 }
 
-.timelineCommandError {
+:where(.vui-components-conversation-conversationview).timelineCommandError {
   color: var(--danger);
 }
 
-.timelineCellDetailButton {
+:where(.vui-components-conversation-conversationview).timelineCellDetailButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1141,14 +1142,14 @@ button.timelineCellHeader:hover,
   cursor: pointer;
 }
 
-.reActOperationList {
+:where(.vui-components-conversation-conversationview).reActOperationList {
   display: grid;
   gap: 6px;
   min-width: 0;
   max-width: 100%;
 }
 
-.reActOperationGroup {
+:where(.vui-components-conversation-conversationview).reActOperationGroup {
   display: grid;
   gap: 4px;
   min-width: 0;
@@ -1157,23 +1158,23 @@ button.timelineCellHeader:hover,
   border-left: 0;
 }
 
-.reActOperationGroup_running {
+:where(.vui-components-conversation-conversationview).reActOperationGroup_running {
   color: var(--fg-primary);
 }
 
-.reActOperationGroup_failed {
+:where(.vui-components-conversation-conversationview).reActOperationGroup_failed {
   color: var(--danger);
 }
 
-.reActOperationGroup_done {
+:where(.vui-components-conversation-conversationview).reActOperationGroup_done {
   color: var(--fg-secondary);
 }
 
-.reActOperationGroup_pending {
+:where(.vui-components-conversation-conversationview).reActOperationGroup_pending {
   color: var(--fg-tertiary);
 }
 
-.reActOperationSummary {
+:where(.vui-components-conversation-conversationview).reActOperationSummary {
   display: inline-grid;
   grid-template-columns: auto minmax(0, max-content) auto auto;
   align-items: center;
@@ -1192,12 +1193,12 @@ button.timelineCellHeader:hover,
   font: inherit;
 }
 
-.reActOperationSummary:hover {
+:where(.vui-components-conversation-conversationview).reActOperationSummary:hover {
   background: transparent;
   color: var(--fg-primary);
 }
 
-.reActOperationTitle {
+:where(.vui-components-conversation-conversationview).reActOperationTitle {
   min-width: 0;
   max-width: min(44vw, 460px);
   overflow: hidden;
@@ -1208,7 +1209,7 @@ button.timelineCellHeader:hover,
   white-space: nowrap;
 }
 
-.reActOperationMeta {
+:where(.vui-components-conversation-conversationview).reActOperationMeta {
   min-width: 0;
   max-width: min(26vw, 220px);
   overflow: hidden;
@@ -1219,7 +1220,7 @@ button.timelineCellHeader:hover,
   white-space: nowrap;
 }
 
-.reActOperationBody {
+:where(.vui-components-conversation-conversationview).reActOperationBody {
   display: grid;
   gap: 7px;
   min-width: 0;
@@ -1227,30 +1228,30 @@ button.timelineCellHeader:hover,
   padding: 1px 0 4px 29px;
 }
 
-.reActOperationSection {
+:where(.vui-components-conversation-conversationview).reActOperationSection {
   display: grid;
   gap: 5px;
   min-width: 0;
   max-width: 100%;
 }
 
-.reActOperationSectionLabel {
+:where(.vui-components-conversation-conversationview).reActOperationSectionLabel {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
   font-weight: 680;
 }
 
-.reActThoughtStack,
-.reActResultList,
-.reActToolList {
+:where(.vui-components-conversation-conversationview).reActThoughtStack,
+:where(.vui-components-conversation-conversationview).reActResultList,
+:where(.vui-components-conversation-conversationview).reActToolList {
   display: grid;
   gap: 5px;
   min-width: 0;
   max-width: 100%;
 }
 
-.reActThoughtText,
-.reActResultValue {
+:where(.vui-components-conversation-conversationview).reActThoughtText,
+:where(.vui-components-conversation-conversationview).reActResultValue {
   min-width: 0;
   max-width: 100%;
   margin: 0;
@@ -1263,20 +1264,20 @@ button.timelineCellHeader:hover,
   word-break: break-word;
 }
 
-.reActThoughtText {
+:where(.vui-components-conversation-conversationview).reActThoughtText {
   padding: 0;
   border-left: 0;
   background: transparent;
 }
 
-.reActToolItem {
+:where(.vui-components-conversation-conversationview).reActToolItem {
   display: grid;
   gap: 4px;
   min-width: 0;
   max-width: 100%;
 }
 
-.reActToolLine {
+:where(.vui-components-conversation-conversationview).reActToolLine {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
@@ -1288,19 +1289,19 @@ button.timelineCellHeader:hover,
   line-height: 1.55;
 }
 
-.reActToolName {
+:where(.vui-components-conversation-conversationview).reActToolName {
   color: var(--fg-primary);
   font-weight: 660;
 }
 
-.reActToolSummary {
+:where(.vui-components-conversation-conversationview).reActToolSummary {
   min-width: min(100%, 220px);
   max-width: min(100%, 720px);
   color: var(--fg-secondary);
   overflow-wrap: anywhere;
 }
 
-.reActToolStatus {
+:where(.vui-components-conversation-conversationview).reActToolStatus {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -1309,7 +1310,7 @@ button.timelineCellHeader:hover,
   white-space: nowrap;
 }
 
-.reActToolDetailToggle {
+:where(.vui-components-conversation-conversationview).reActToolDetailToggle {
   display: inline-grid;
   place-items: center;
   width: 18px;
@@ -1321,11 +1322,11 @@ button.timelineCellHeader:hover,
   cursor: pointer;
 }
 
-.reActToolDetailToggle:hover {
+:where(.vui-components-conversation-conversationview).reActToolDetailToggle:hover {
   color: var(--fg-primary);
 }
 
-.reActResultToggle {
+:where(.vui-components-conversation-conversationview).reActResultToggle {
   display: inline-flex;
   align-items: center;
   justify-content: start;
@@ -1341,11 +1342,11 @@ button.timelineCellHeader:hover,
   font: inherit;
 }
 
-.reActResultToggle:hover {
+:where(.vui-components-conversation-conversationview).reActResultToggle:hover {
   color: var(--fg-primary);
 }
 
-.reActResultItem {
+:where(.vui-components-conversation-conversationview).reActResultItem {
   display: grid;
   gap: 4px;
   min-width: 0;
@@ -1356,17 +1357,17 @@ button.timelineCellHeader:hover,
   background: transparent;
 }
 
-.reActResultItem_failed {
+:where(.vui-components-conversation-conversationview).reActResultItem_failed {
   color: var(--danger);
 }
 
-.reActResultLabel {
+:where(.vui-components-conversation-conversationview).reActResultLabel {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
   font-weight: 680;
 }
 
-.operationTimeline {
+:where(.vui-components-conversation-conversationview).operationTimeline {
   position: relative;
   display: grid;
   gap: 1px;
@@ -1377,7 +1378,7 @@ button.timelineCellHeader:hover,
   overflow: hidden;
 }
 
-.operationTimeline::before {
+:where(.vui-components-conversation-conversationview).operationTimeline::before {
   content: "";
   position: absolute;
   left: 7px;
@@ -1387,7 +1388,7 @@ button.timelineCellHeader:hover,
   background: color-mix(in srgb, var(--fg-tertiary) 20%, transparent);
 }
 
-.operationTimelineTrimmed {
+:where(.vui-components-conversation-conversationview).operationTimelineTrimmed {
   min-width: 0;
   max-width: 100%;
   padding: 4px 8px;
@@ -1398,14 +1399,14 @@ button.timelineCellHeader:hover,
   font-weight: 540;
 }
 
-.operationItemWrap {
+:where(.vui-components-conversation-conversationview).operationItemWrap {
   display: grid;
   gap: 5px;
   min-width: 0;
   max-width: 100%;
 }
 
-.operationItem {
+:where(.vui-components-conversation-conversationview).operationItem {
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr) auto auto 16px;
   justify-content: stretch;
@@ -1420,24 +1421,24 @@ button.timelineCellHeader:hover,
   border-radius: 6px;
 }
 
-.operationItemTool {
+:where(.vui-components-conversation-conversationview).operationItemTool {
   grid-template-columns: minmax(0, 1fr) auto auto 16px;
 }
 
-.operationItem_status {
+:where(.vui-components-conversation-conversationview).operationItem_status {
   color: color-mix(in srgb, var(--fg-tertiary) 88%, var(--fg-secondary));
 }
 
-.operationItem_tool .operationName {
+:where(.vui-components-conversation-conversationview).operationItem_tool .operationName {
   font-family: var(--font-mono);
   font-size: var(--vui-font-xs);
 }
 
-.operationItem_thought .operationName {
+:where(.vui-components-conversation-conversationview).operationItem_thought .operationName {
   color: color-mix(in srgb, var(--accent-cool-2) 82%, var(--fg-secondary));
 }
 
-.operationItemActive {
+:where(.vui-components-conversation-conversationview).operationItemActive {
   margin-left: -5px;
   padding-left: 5px;
   padding-right: 5px;
@@ -1445,11 +1446,11 @@ button.timelineCellHeader:hover,
   color: var(--fg-primary);
 }
 
-.operationItemActive .operationStatus {
+:where(.vui-components-conversation-conversationview).operationItemActive .operationStatus {
   color: color-mix(in srgb, var(--accent-cool-2) 86%, var(--fg-secondary));
 }
 
-.operationIcon {
+:where(.vui-components-conversation-conversationview).operationIcon {
   display: grid;
   place-items: center;
   width: 22px;
@@ -1457,24 +1458,24 @@ button.timelineCellHeader:hover,
   color: var(--fg-secondary);
 }
 
-.operationIcon_thought,
-.operationIcon_mental {
+:where(.vui-components-conversation-conversationview).operationIcon_thought,
+:where(.vui-components-conversation-conversationview).operationIcon_mental {
   color: color-mix(in srgb, var(--accent-warm) 78%, var(--fg-secondary));
 }
 
-.operationIcon_tool {
+:where(.vui-components-conversation-conversationview).operationIcon_tool {
   color: var(--fg-secondary);
 }
 
-.operationText {
+:where(.vui-components-conversation-conversationview).operationText {
   display: grid;
   min-width: 0;
   max-width: 100%;
   gap: 2px;
 }
 
-.operationName,
-.operationSummaryText {
+:where(.vui-components-conversation-conversationview).operationName,
+:where(.vui-components-conversation-conversationview).operationSummaryText {
   min-width: 0;
   overflow: visible;
   text-overflow: clip;
@@ -1482,18 +1483,18 @@ button.timelineCellHeader:hover,
   overflow-wrap: anywhere;
 }
 
-.operationName {
+:where(.vui-components-conversation-conversationview).operationName {
   color: var(--fg-secondary);
   font-size: var(--vui-font-sm);
   font-weight: 590;
 }
 
-.operationSummaryText {
+:where(.vui-components-conversation-conversationview).operationSummaryText {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
 }
 
-.operationStatus {
+:where(.vui-components-conversation-conversationview).operationStatus {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -1502,12 +1503,12 @@ button.timelineCellHeader:hover,
   white-space: nowrap;
 }
 
-.statusSpinner {
+:where(.vui-components-conversation-conversationview).statusSpinner {
   flex: 0 0 auto;
   animation: status-spin 0.9s linear infinite;
 }
 
-.statusRunningDot {
+:where(.vui-components-conversation-conversationview).statusRunningDot {
   display: none;
   flex: 0 0 auto;
   color: var(--accent);
@@ -1520,16 +1521,16 @@ button.timelineCellHeader:hover,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .statusSpinner {
+  :where(.vui-components-conversation-conversationview).statusSpinner {
     display: none;
   }
 
-  .statusRunningDot {
+  :where(.vui-components-conversation-conversationview).statusRunningDot {
     display: inline-block;
   }
 }
 
-.operationDuration {
+:where(.vui-components-conversation-conversationview).operationDuration {
   min-width: 42px;
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
@@ -1537,14 +1538,14 @@ button.timelineCellHeader:hover,
   white-space: nowrap;
 }
 
-.operationChevron {
+:where(.vui-components-conversation-conversationview).operationChevron {
   display: grid;
   place-items: center;
   width: 16px;
   color: var(--fg-tertiary);
 }
 
-.operationDetailToggle {
+:where(.vui-components-conversation-conversationview).operationDetailToggle {
   display: grid;
   place-items: center;
   width: 20px;
@@ -1556,13 +1557,13 @@ button.timelineCellHeader:hover,
   cursor: pointer;
 }
 
-.operationDetailToggle:hover {
+:where(.vui-components-conversation-conversationview).operationDetailToggle:hover {
   border-color: transparent;
   background: color-mix(in srgb, var(--surface-card) 72%, var(--accent-warm) 6%);
   color: var(--fg-primary);
 }
 
-.operationDetails {
+:where(.vui-components-conversation-conversationview).operationDetails {
   display: grid;
   gap: 7px;
   min-width: 0;
@@ -1574,11 +1575,11 @@ button.timelineCellHeader:hover,
   background: color-mix(in srgb, var(--surface-card) 36%, transparent);
 }
 
-.operationDetails_thought {
+:where(.vui-components-conversation-conversationview).operationDetails_thought {
   background: color-mix(in srgb, var(--accent-warm) 7%, var(--surface-card));
 }
 
-.computerUsePanel {
+:where(.vui-components-conversation-conversationview).computerUsePanel {
   display: grid;
   gap: 8px;
   width: min(460px, calc(100% - 29px));
@@ -1590,7 +1591,7 @@ button.timelineCellHeader:hover,
   background: color-mix(in srgb, var(--surface-card) 70%, transparent);
 }
 
-.computerUseHeader {
+:where(.vui-components-conversation-conversationview).computerUseHeader {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
@@ -1601,26 +1602,26 @@ button.timelineCellHeader:hover,
   font-weight: 700;
 }
 
-.computerUseHeader code {
+:where(.vui-components-conversation-conversationview).computerUseHeader code {
   color: var(--fg-tertiary);
   font-family: var(--font-mono);
   font-size: var(--vui-font-xs);
   font-weight: 500;
 }
 
-.computerUseSummary,
-.computerUseError {
+:where(.vui-components-conversation-conversationview).computerUseSummary,
+:where(.vui-components-conversation-conversationview).computerUseError {
   margin: 0;
   color: var(--fg-secondary);
   font-size: var(--vui-font-sm);
   line-height: 1.45;
 }
 
-.computerUseError {
+:where(.vui-components-conversation-conversationview).computerUseError {
   color: var(--danger);
 }
 
-.computerUseScreenshot {
+:where(.vui-components-conversation-conversationview).computerUseScreenshot {
   display: block;
   width: 100%;
   max-height: 260px;
@@ -1628,7 +1629,7 @@ button.timelineCellHeader:hover,
   background: var(--surface-page);
 }
 
-.computerUseSteps {
+:where(.vui-components-conversation-conversationview).computerUseSteps {
   display: grid;
   gap: 5px;
   margin: 0;
@@ -1637,27 +1638,27 @@ button.timelineCellHeader:hover,
   font-size: var(--vui-font-xs);
 }
 
-.computerUseSteps li {
+:where(.vui-components-conversation-conversationview).computerUseSteps li {
   padding-left: 2px;
 }
 
-.computerUseSteps span {
+:where(.vui-components-conversation-conversationview).computerUseSteps span {
   color: var(--fg-tertiary);
   font-family: var(--font-mono);
   font-size: var(--vui-font-xs);
 }
 
-.computerUseSteps p {
+:where(.vui-components-conversation-conversationview).computerUseSteps p {
   margin: 1px 0 0;
 }
 
-.computerUseActions {
+:where(.vui-components-conversation-conversationview).computerUseActions {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
 }
 
-.computerUseActions button {
+:where(.vui-components-conversation-conversationview).computerUseActions button {
   min-height: 28px;
   padding: 4px 9px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 28%, transparent);
@@ -1670,17 +1671,17 @@ button.timelineCellHeader:hover,
   font-weight: 700;
 }
 
-.computerUseActions button:hover {
+:where(.vui-components-conversation-conversationview).computerUseActions button:hover {
   border-color: color-mix(in srgb, var(--accent-cool) 45%, transparent);
   color: var(--fg-primary);
 }
 
-.computerUseActions button:disabled {
+:where(.vui-components-conversation-conversationview).computerUseActions button:disabled {
   cursor: wait;
   opacity: 0.64;
 }
 
-.auxiliaryPanel {
+:where(.vui-components-conversation-conversationview).auxiliaryPanel {
   display: grid;
   gap: 9px;
   min-width: 0;
@@ -1692,22 +1693,22 @@ button.timelineCellHeader:hover,
   background: color-mix(in srgb, var(--surface-card) 62%, transparent);
 }
 
-.auxiliaryPanel_thought {
+:where(.vui-components-conversation-conversationview).auxiliaryPanel_thought {
   border-color: color-mix(in srgb, var(--accent-warm) 20%, transparent);
 }
 
-.auxiliaryPanel_mental {
+:where(.vui-components-conversation-conversationview).auxiliaryPanel_mental {
   border-color: color-mix(in srgb, var(--accent-cool) 20%, transparent);
 }
 
-.mentalMetaGrid {
+:where(.vui-components-conversation-conversationview).mentalMetaGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(110px, max-content));
   gap: 8px;
   align-items: stretch;
 }
 
-.mentalMetaItem {
+:where(.vui-components-conversation-conversationview).mentalMetaItem {
   display: grid;
   gap: 3px;
   min-width: 0;
@@ -1717,27 +1718,27 @@ button.timelineCellHeader:hover,
   background: color-mix(in srgb, var(--surface-panel-strong) 72%, transparent);
 }
 
-.mentalMetaItem small {
+:where(.vui-components-conversation-conversationview).mentalMetaItem small {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
-.mentalMetaItem strong {
+:where(.vui-components-conversation-conversationview).mentalMetaItem strong {
   color: var(--fg-secondary);
   font-size: var(--vui-font-sm);
   font-weight: 620;
   white-space: nowrap;
 }
 
-.mentalBodyList {
+:where(.vui-components-conversation-conversationview).mentalBodyList {
   display: grid;
   gap: 7px;
   min-width: 0;
 }
 
-.mentalBodyRow {
+:where(.vui-components-conversation-conversationview).mentalBodyRow {
   display: grid;
   gap: 3px;
   min-width: 0;
@@ -1748,7 +1749,7 @@ button.timelineCellHeader:hover,
   overflow-wrap: anywhere;
 }
 
-.mentalBodyRow span {
+:where(.vui-components-conversation-conversationview).mentalBodyRow span {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
   font-weight: 700;
@@ -1756,13 +1757,13 @@ button.timelineCellHeader:hover,
   letter-spacing: 0.04em;
 }
 
-.operationDetailRow {
+:where(.vui-components-conversation-conversationview).operationDetailRow {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
 
-.operationDetailLabel {
+:where(.vui-components-conversation-conversationview).operationDetailLabel {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
   font-weight: 700;
@@ -1770,7 +1771,7 @@ button.timelineCellHeader:hover,
   text-transform: uppercase;
 }
 
-.operationDetailValue {
+:where(.vui-components-conversation-conversationview).operationDetailValue {
   max-width: 100%;
   max-height: 220px;
   margin: 0;
@@ -1786,19 +1787,19 @@ button.timelineCellHeader:hover,
   overflow-wrap: anywhere;
 }
 
-.responseSection {
+:where(.vui-components-conversation-conversationview).responseSection {
   display: grid;
   gap: 6px;
   min-width: 0;
   max-width: 100%;
 }
 
-.responseSection:not(:has(.responseToggle)) .responseBody {
+:where(.vui-components-conversation-conversationview).responseSection:not(:has(.responseToggle)) .responseBody {
   padding-top: 0;
   border-top: 0;
 }
 
-.responseToggle {
+:where(.vui-components-conversation-conversationview).responseToggle {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -1815,11 +1816,11 @@ button.timelineCellHeader:hover,
   font-weight: 600;
 }
 
-.responseToggle [data-slot="vui-button-content"] {
+:where(.vui-components-conversation-conversationview).responseToggle [data-slot="vui-button-content"] {
   display: contents;
 }
 
-.responseToggle [data-slot="vui-button-label"] {
+:where(.vui-components-conversation-conversationview).responseToggle [data-slot="vui-button-label"] {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -1827,7 +1828,7 @@ button.timelineCellHeader:hover,
   max-width: 100%;
 }
 
-.responseBody {
+:where(.vui-components-conversation-conversationview).responseBody {
   display: grid;
   gap: 8px;
   min-width: 0;
@@ -1837,7 +1838,7 @@ button.timelineCellHeader:hover,
   overflow: hidden;
 }
 
-.responseSection .responseBody {
+:where(.vui-components-conversation-conversationview).responseSection .responseBody {
   width: 100%;
   max-width: 100%;
   padding: 0;
@@ -1846,14 +1847,14 @@ button.timelineCellHeader:hover,
   background: transparent;
 }
 
-.responseSection .responseBody:has(> .responseSegment_status:only-child) {
+:where(.vui-components-conversation-conversationview).responseSection .responseBody:has(> .responseSegment_status:only-child) {
   width: 100%;
   padding: 2px 0 0;
   border: 0;
   background: transparent;
 }
 
-.imageArtifact {
+:where(.vui-components-conversation-conversationview).imageArtifact {
   display: grid;
   gap: 7px;
   width: min(420px, 100%);
@@ -1861,14 +1862,14 @@ button.timelineCellHeader:hover,
   margin: 0;
 }
 
-.imageArtifactFrame {
+:where(.vui-components-conversation-conversationview).imageArtifactFrame {
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 20%, transparent);
   border-radius: 8px;
   background: var(--surface-panel-strong);
 }
 
-.imagePreviewButton {
+:where(.vui-components-conversation-conversationview).imagePreviewButton {
   display: block;
   width: 100%;
   padding: 0;
@@ -1878,28 +1879,28 @@ button.timelineCellHeader:hover,
   cursor: zoom-in;
 }
 
-.imagePreviewButton:hover .imagePreview,
-.imagePreviewButton:hover .markdownImage {
+:where(.vui-components-conversation-conversationview).imagePreviewButton:hover .imagePreview,
+:where(.vui-components-conversation-conversationview).imagePreviewButton:hover .markdownImage {
   border-color: color-mix(in srgb, var(--accent-cool) 42%, transparent);
 }
 
-.imagePreviewButton:focus-visible {
+:where(.vui-components-conversation-conversationview).imagePreviewButton:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent-cool) 70%, transparent);
   outline-offset: 3px;
 }
 
-.imageArtifactFrame.imagePreviewButton {
+:where(.vui-components-conversation-conversationview).imageArtifactFrame.imagePreviewButton {
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 20%, transparent);
   border-radius: 8px;
   background: var(--surface-panel-strong);
 }
 
-.imageArtifactFrame.imagePreviewButton:hover {
+:where(.vui-components-conversation-conversationview).imageArtifactFrame.imagePreviewButton:hover {
   border-color: color-mix(in srgb, var(--accent-cool) 42%, transparent);
 }
 
-.imagePreview {
+:where(.vui-components-conversation-conversationview).imagePreview {
   display: block;
   width: 100%;
   aspect-ratio: 1 / 1;
@@ -1907,7 +1908,7 @@ button.timelineCellHeader:hover,
   background: var(--surface-page);
 }
 
-.imageArtifactFooter {
+:where(.vui-components-conversation-conversationview).imageArtifactFooter {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 30px;
   gap: 8px;
@@ -1916,18 +1917,18 @@ button.timelineCellHeader:hover,
   font-size: var(--vui-font-sm);
 }
 
-.imageArtifactMeta {
+:where(.vui-components-conversation-conversationview).imageArtifactMeta {
   display: grid;
   gap: 2px;
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.imageArtifactPrompt {
+:where(.vui-components-conversation-conversationview).imageArtifactPrompt {
   color: var(--fg-secondary);
 }
 
-.imageDownloadButton {
+:where(.vui-components-conversation-conversationview).imageDownloadButton {
   display: inline-grid;
   place-items: center;
   width: 30px;
@@ -1939,13 +1940,13 @@ button.timelineCellHeader:hover,
   text-decoration: none;
 }
 
-.imageDownloadButton:hover {
+:where(.vui-components-conversation-conversationview).imageDownloadButton:hover {
   border-color: color-mix(in srgb, var(--accent-cool) 44%, transparent);
   color: var(--fg-primary);
   background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
 }
 
-.responseSegment {
+:where(.vui-components-conversation-conversationview).responseSegment {
   display: grid;
   gap: 5px;
   min-width: 0;
@@ -1957,7 +1958,7 @@ button.timelineCellHeader:hover,
   background: color-mix(in srgb, var(--surface-card) 38%, transparent);
 }
 
-.responseSegment_answer {
+:where(.vui-components-conversation-conversationview).responseSegment_answer {
   padding: 0;
   border: 0;
   border-left-color: transparent;
@@ -1965,16 +1966,16 @@ button.timelineCellHeader:hover,
   overflow: hidden;
 }
 
-.responseSegment_answer .markdownBody {
+:where(.vui-components-conversation-conversationview).responseSegment_answer .markdownBody {
   max-width: min(100%, 76ch);
 }
 
-.responseSegment_answer .markdownBodyWithTable {
+:where(.vui-components-conversation-conversationview).responseSegment_answer .markdownBodyWithTable {
   width: 100%;
   max-width: 100%;
 }
 
-.responseSegment_status {
+:where(.vui-components-conversation-conversationview).responseSegment_status {
   display: inline-flex;
   align-items: baseline;
   gap: 10px;
@@ -1986,18 +1987,18 @@ button.timelineCellHeader:hover,
   color: color-mix(in srgb, var(--fg-secondary) 78%, var(--fg-tertiary));
 }
 
-.responseSegment_status .responseSegmentHeader {
+:where(.vui-components-conversation-conversationview).responseSegment_status .responseSegmentHeader {
   flex: 0 0 auto;
   font-size: var(--vui-font-xs);
   letter-spacing: 0;
 }
 
-.responseSegment_status .responseSegmentLabel {
+:where(.vui-components-conversation-conversationview).responseSegment_status .responseSegmentLabel {
   color: color-mix(in srgb, var(--fg-tertiary) 82%, var(--fg-secondary));
   font-weight: 650;
 }
 
-.responseSegment_status .markdownBody {
+:where(.vui-components-conversation-conversationview).responseSegment_status .markdownBody {
   display: block;
   min-width: 0;
   max-width: 100%;
@@ -2005,7 +2006,7 @@ button.timelineCellHeader:hover,
   color: inherit;
 }
 
-.responseSegment_status .messageBody {
+:where(.vui-components-conversation-conversationview).responseSegment_status .messageBody {
   margin: 0;
   overflow: visible;
   color: inherit;
@@ -2017,18 +2018,18 @@ button.timelineCellHeader:hover,
   white-space: pre-wrap;
 }
 
-.responseSegment_commit,
-.responseSegment_verification {
+:where(.vui-components-conversation-conversationview).responseSegment_commit,
+:where(.vui-components-conversation-conversationview).responseSegment_verification {
   border-left-color: color-mix(in srgb, var(--accent-cool) 58%, transparent);
 }
 
-.responseSegment_files,
-.responseSegment_logs,
-.responseSegment_code {
+:where(.vui-components-conversation-conversationview).responseSegment_files,
+:where(.vui-components-conversation-conversationview).responseSegment_logs,
+:where(.vui-components-conversation-conversationview).responseSegment_code {
   border-left-color: color-mix(in srgb, var(--fg-tertiary) 34%, transparent);
 }
 
-.responseSegmentHeader {
+:where(.vui-components-conversation-conversationview).responseSegmentHeader {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -2039,16 +2040,16 @@ button.timelineCellHeader:hover,
   letter-spacing: 0.06em;
 }
 
-.responseSegment_answer .responseSegmentHeader {
+:where(.vui-components-conversation-conversationview).responseSegment_answer .responseSegmentHeader {
   display: none;
 }
 
-.responseSegmentLabel {
+:where(.vui-components-conversation-conversationview).responseSegmentLabel {
   color: inherit;
   font-weight: 720;
 }
 
-.responseSegmentMeta {
+:where(.vui-components-conversation-conversationview).responseSegmentMeta {
   max-width: 160px;
   overflow: hidden;
   color: var(--fg-tertiary);
@@ -2057,7 +2058,7 @@ button.timelineCellHeader:hover,
   white-space: nowrap;
 }
 
-.responseSegmentPre {
+:where(.vui-components-conversation-conversationview).responseSegmentPre {
   box-sizing: border-box;
   width: 100%;
   max-width: 100%;
@@ -2083,7 +2084,7 @@ button.timelineCellHeader:hover,
   word-break: normal;
 }
 
-.responseSegmentPre code {
+:where(.vui-components-conversation-conversationview).responseSegmentPre code {
   display: block;
   min-width: max-content;
   font: inherit;
@@ -2092,7 +2093,7 @@ button.timelineCellHeader:hover,
   word-break: normal;
 }
 
-.inlineCode {
+:where(.vui-components-conversation-conversationview).inlineCode {
   display: inline;
   padding: 0.1em 0.32em;
   border-radius: 6px;
@@ -2103,24 +2104,24 @@ button.timelineCellHeader:hover,
   white-space: break-spaces;
 }
 
-.inlineLink {
+:where(.vui-components-conversation-conversationview).inlineLink {
   color: var(--accent-cool);
   font-weight: 620;
   text-decoration: none;
   overflow-wrap: anywhere;
 }
 
-.inlineLink:hover {
+:where(.vui-components-conversation-conversationview).inlineLink:hover {
   color: var(--fg-primary);
   text-decoration: underline;
 }
 
-.inlineStrong {
+:where(.vui-components-conversation-conversationview).inlineStrong {
   color: var(--fg-primary);
   font-weight: 720;
 }
 
-.responseSegmentList {
+:where(.vui-components-conversation-conversationview).responseSegmentList {
   display: grid;
   gap: 3px;
   margin: 0;
@@ -2131,7 +2132,7 @@ button.timelineCellHeader:hover,
   overflow-wrap: anywhere;
 }
 
-.messageCard {
+:where(.vui-components-conversation-conversationview).messageCard {
   position: relative;
   box-sizing: border-box;
   width: fit-content;
@@ -2144,7 +2145,7 @@ button.timelineCellHeader:hover,
   box-shadow: none;
 }
 
-.messageCard::before {
+:where(.vui-components-conversation-conversationview).messageCard::before {
   content: "";
   position: absolute;
   top: 12px;
@@ -2153,7 +2154,7 @@ button.timelineCellHeader:hover,
   border-radius: 999px;
 }
 
-.assistantCard {
+:where(.vui-components-conversation-conversationview).assistantCard {
   justify-self: start;
   width: 100%;
   max-width: 100%;
@@ -2164,12 +2165,12 @@ button.timelineCellHeader:hover,
   box-shadow: none;
 }
 
-.assistantCard::before {
+:where(.vui-components-conversation-conversationview).assistantCard::before {
   left: 7px;
   background: color-mix(in srgb, var(--accent-warm) 42%, transparent);
 }
 
-.userCard {
+:where(.vui-components-conversation-conversationview).userCard {
   justify-self: end;
   min-width: min(180px, 100%);
   max-width: min(68%, 760px);
@@ -2180,12 +2181,12 @@ button.timelineCellHeader:hover,
   box-shadow: none;
 }
 
-.userCard::before {
+:where(.vui-components-conversation-conversationview).userCard::before {
   right: 7px;
   background: color-mix(in srgb, var(--accent-cool) 42%, transparent);
 }
 
-.messageMeta {
+:where(.vui-components-conversation-conversationview).messageMeta {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2195,11 +2196,11 @@ button.timelineCellHeader:hover,
   font-size: var(--vui-font-sm);
 }
 
-.userCard .messageMeta {
+:where(.vui-components-conversation-conversationview).userCard .messageMeta {
   justify-content: flex-end;
 }
 
-.messageBody {
+:where(.vui-components-conversation-conversationview).messageBody {
   margin: 0;
   color: var(--fg-secondary);
   font-size: var(--vui-font-chat);
@@ -2209,7 +2210,7 @@ button.timelineCellHeader:hover,
   overflow-wrap: anywhere;
 }
 
-.markdownBody {
+:where(.vui-components-conversation-conversationview).markdownBody {
   display: grid;
   gap: 7px;
   min-width: 0;
@@ -2221,20 +2222,20 @@ button.timelineCellHeader:hover,
   overflow-wrap: anywhere;
 }
 
-.markdownBodyWithTable {
+:where(.vui-components-conversation-conversationview).markdownBodyWithTable {
   width: 100%;
   max-width: 100%;
 }
 
-.streamingResponseText {
+:where(.vui-components-conversation-conversationview).streamingResponseText {
   display: grid;
 }
 
-.streamingCodeBlock {
+:where(.vui-components-conversation-conversationview).streamingCodeBlock {
   border-color: color-mix(in srgb, var(--accent) 24%, var(--border-subtle));
 }
 
-.markdownBlockquote {
+:where(.vui-components-conversation-conversationview).markdownBlockquote {
   margin: 0;
   padding: 4px 0 4px 10px;
   border-left: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border-subtle));
@@ -2242,7 +2243,7 @@ button.timelineCellHeader:hover,
   white-space: pre-wrap;
 }
 
-.markdownHeading {
+:where(.vui-components-conversation-conversationview).markdownHeading {
   margin: 0;
   color: var(--fg-primary);
   font-family: var(--font-body);
@@ -2251,24 +2252,24 @@ button.timelineCellHeader:hover,
   overflow-wrap: anywhere;
 }
 
-.markdownHeading1,
-.markdownHeading2 {
+:where(.vui-components-conversation-conversationview).markdownHeading1,
+:where(.vui-components-conversation-conversationview).markdownHeading2 {
   font-size: var(--vui-font-title);
   font-weight: 720;
 }
 
-.markdownHeading3 {
+:where(.vui-components-conversation-conversationview).markdownHeading3 {
   font-size: var(--vui-font-chat);
   font-weight: 700;
 }
 
-.markdownHeading4 {
+:where(.vui-components-conversation-conversationview).markdownHeading4 {
   color: var(--fg-secondary);
   font-size: var(--vui-font-md);
   font-weight: 660;
 }
 
-.markdownDivider {
+:where(.vui-components-conversation-conversationview).markdownDivider {
   width: 100%;
   height: 1px;
   margin: 2px 0;
@@ -2276,14 +2277,14 @@ button.timelineCellHeader:hover,
   background: color-mix(in srgb, var(--fg-tertiary) 18%, transparent);
 }
 
-.markdownImageFigure {
+:where(.vui-components-conversation-conversationview).markdownImageFigure {
   display: grid;
   gap: 7px;
   width: min(100%, 420px);
   margin: 4px 0;
 }
 
-.markdownImage {
+:where(.vui-components-conversation-conversationview).markdownImage {
   display: block;
   width: 100%;
   max-height: min(58vh, 620px);
@@ -2293,7 +2294,7 @@ button.timelineCellHeader:hover,
   background: var(--surface-page);
 }
 
-.markdownImageCaption {
+:where(.vui-components-conversation-conversationview).markdownImageCaption {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2303,26 +2304,26 @@ button.timelineCellHeader:hover,
   font-size: var(--vui-font-xs);
 }
 
-.markdownImageCaption span {
+:where(.vui-components-conversation-conversationview).markdownImageCaption span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.markdownImageLink {
+:where(.vui-components-conversation-conversationview).markdownImageLink {
   flex: 0 0 auto;
   color: var(--accent-cool);
   font-weight: 650;
   text-decoration: none;
 }
 
-.markdownImageLink:hover {
+:where(.vui-components-conversation-conversationview).markdownImageLink:hover {
   color: var(--fg-primary);
   text-decoration: underline;
 }
 
-.imagePreviewOverlay {
+:where(.vui-components-conversation-conversationview).imagePreviewOverlay {
   position: fixed;
   inset: 0;
   z-index: 60;
@@ -2333,7 +2334,7 @@ button.timelineCellHeader:hover,
   backdrop-filter: blur(10px);
 }
 
-.imagePreviewDialog {
+:where(.vui-components-conversation-conversationview).imagePreviewDialog {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 12px;
@@ -2346,7 +2347,7 @@ button.timelineCellHeader:hover,
   box-shadow: var(--vui-shadow-soft);
 }
 
-.imagePreviewToolbar {
+:where(.vui-components-conversation-conversationview).imagePreviewToolbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
@@ -2355,20 +2356,20 @@ button.timelineCellHeader:hover,
   font-size: var(--vui-font-md);
 }
 
-.imagePreviewToolbar > span {
+:where(.vui-components-conversation-conversationview).imagePreviewToolbar > span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.imagePreviewActions {
+:where(.vui-components-conversation-conversationview).imagePreviewActions {
   display: inline-flex;
   gap: 8px;
   align-items: center;
 }
 
-.imagePreviewCloseButton {
+:where(.vui-components-conversation-conversationview).imagePreviewCloseButton {
   display: inline-grid;
   place-items: center;
   width: 30px;
@@ -2380,12 +2381,12 @@ button.timelineCellHeader:hover,
   cursor: pointer;
 }
 
-.imagePreviewCloseButton:hover {
+:where(.vui-components-conversation-conversationview).imagePreviewCloseButton:hover {
   border-color: color-mix(in srgb, var(--accent-warm) 38%, transparent);
   color: var(--fg-primary);
 }
 
-.imagePreviewLarge {
+:where(.vui-components-conversation-conversationview).imagePreviewLarge {
   display: block;
   width: 100%;
   max-height: calc(min(88vh, 860px) - 74px);
@@ -2394,7 +2395,7 @@ button.timelineCellHeader:hover,
   background: var(--surface-page);
 }
 
-.markdownTableWrap {
+:where(.vui-components-conversation-conversationview).markdownTableWrap {
   width: 100%;
   min-width: 0;
   max-width: 100%;
@@ -2405,7 +2406,7 @@ button.timelineCellHeader:hover,
   background: color-mix(in srgb, var(--surface-card) 56%, transparent);
 }
 
-.markdownTable {
+:where(.vui-components-conversation-conversationview).markdownTable {
   width: 100%;
   min-width: 100%;
   max-width: 100%;
@@ -2417,8 +2418,8 @@ button.timelineCellHeader:hover,
   table-layout: fixed;
 }
 
-.markdownTable th,
-.markdownTable td {
+:where(.vui-components-conversation-conversationview).markdownTable th,
+:where(.vui-components-conversation-conversationview).markdownTable td {
   padding: 6px 8px;
   border-bottom: 1px solid color-mix(in srgb, var(--fg-tertiary) 10%, transparent);
   text-align: left;
@@ -2427,40 +2428,40 @@ button.timelineCellHeader:hover,
   word-break: break-word;
 }
 
-.markdownTable th {
+:where(.vui-components-conversation-conversationview).markdownTable th {
   color: var(--fg-secondary);
   font-weight: 720;
   background: color-mix(in srgb, var(--surface-card) 76%, transparent);
 }
 
-.markdownTable th:first-child,
-.markdownTable td:first-child {
+:where(.vui-components-conversation-conversationview).markdownTable th:first-child,
+:where(.vui-components-conversation-conversationview).markdownTable td:first-child {
   width: 22%;
   color: var(--fg-primary);
   font-weight: 680;
 }
 
-.markdownTable .inlineCode {
+:where(.vui-components-conversation-conversationview).markdownTable .inlineCode {
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
 
-.markdownTable tr:last-child td {
+:where(.vui-components-conversation-conversationview).markdownTable tr:last-child td {
   border-bottom: 0;
 }
 
-.sectionBlock {
+:where(.vui-components-conversation-conversationview).sectionBlock {
   display: grid;
   gap: 10px;
   margin-bottom: 12px;
 }
 
-.messageCard > :last-child {
+:where(.vui-components-conversation-conversationview).messageCard > :last-child {
   margin-bottom: 0;
 }
 
-.sectionToggle {
+:where(.vui-components-conversation-conversationview).sectionToggle {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -2473,11 +2474,11 @@ button.timelineCellHeader:hover,
   cursor: pointer;
 }
 
-.sectionToggle:hover {
+:where(.vui-components-conversation-conversationview).sectionToggle:hover {
   color: var(--fg-primary);
 }
 
-.sectionPanel {
+:where(.vui-components-conversation-conversationview).sectionPanel {
   display: grid;
   gap: 12px;
   padding: 12px 13px;
@@ -2486,31 +2487,31 @@ button.timelineCellHeader:hover,
   background: color-mix(in srgb, var(--surface-card) 74%, transparent);
 }
 
-.mentalSnapshot,
-.thoughtTextBlock,
-.responseBlock {
+:where(.vui-components-conversation-conversationview).mentalSnapshot,
+:where(.vui-components-conversation-conversationview).thoughtTextBlock,
+:where(.vui-components-conversation-conversationview).responseBlock {
   display: grid;
   gap: 8px;
 }
 
-.thoughtSectionHeader {
+:where(.vui-components-conversation-conversationview).thoughtSectionHeader {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
 
-.thoughtSectionLabel,
-.responseLabel {
+:where(.vui-components-conversation-conversationview).thoughtSectionLabel,
+:where(.vui-components-conversation-conversationview).responseLabel {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 
-.mentalSummary,
-.mentalWhisper,
-.thoughtText {
+:where(.vui-components-conversation-conversationview).mentalSummary,
+:where(.vui-components-conversation-conversationview).mentalWhisper,
+:where(.vui-components-conversation-conversationview).thoughtText {
   margin: 0;
   color: var(--fg-primary);
   white-space: pre-wrap;
@@ -2518,7 +2519,7 @@ button.timelineCellHeader:hover,
   overflow-wrap: anywhere;
 }
 
-.mentalIntervention {
+:where(.vui-components-conversation-conversationview).mentalIntervention {
   margin: 0;
   color: var(--accent-warm-2);
   white-space: pre-wrap;
@@ -2526,18 +2527,18 @@ button.timelineCellHeader:hover,
   overflow-wrap: anywhere;
 }
 
-.mentalWhisper {
+:where(.vui-components-conversation-conversationview).mentalWhisper {
   display: grid;
   gap: 6px;
 }
 
-.thoughtMetaRow {
+:where(.vui-components-conversation-conversationview).thoughtMetaRow {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.thoughtMetaPill {
+:where(.vui-components-conversation-conversationview).thoughtMetaPill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -2548,19 +2549,19 @@ button.timelineCellHeader:hover,
   font-size: var(--vui-font-sm);
 }
 
-.toolRow {
+:where(.vui-components-conversation-conversationview).toolRow {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 14px;
 }
 
-.toolPill {
+:where(.vui-components-conversation-conversationview).toolPill {
   background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
   color: var(--accent-cool);
 }
 
-.composer {
+:where(.vui-components-conversation-conversationview).composer {
   flex: 0 0 auto;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto auto;
@@ -2575,12 +2576,12 @@ button.timelineCellHeader:hover,
   backdrop-filter: blur(6px);
 }
 
-.surfaceCompact .composer {
+:where(.vui-components-conversation-conversationview).surfaceCompact .composer {
   gap: 7px;
   padding: 6px 10px 8px;
 }
 
-.turnError {
+:where(.vui-components-conversation-conversationview).turnError {
   flex: 0 0 auto;
   display: flex;
   align-items: flex-start;
@@ -2594,7 +2595,7 @@ button.timelineCellHeader:hover,
   color: var(--fg-primary);
 }
 
-.turnErrorText {
+:where(.vui-components-conversation-conversationview).turnErrorText {
   display: grid;
   gap: 4px;
   min-width: 0;
@@ -2602,20 +2603,20 @@ button.timelineCellHeader:hover,
   overflow-wrap: anywhere;
 }
 
-.turnErrorDetail {
+:where(.vui-components-conversation-conversationview).turnErrorDetail {
   color: var(--fg-secondary);
   font-size: var(--vui-font-md);
   line-height: 1.4;
 }
 
-.turnErrorLabel {
+:where(.vui-components-conversation-conversationview).turnErrorLabel {
   color: var(--state-error);
   font-size: var(--vui-font-xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
 
-.turnErrorType {
+:where(.vui-components-conversation-conversationview).turnErrorType {
   flex: 0 0 auto;
   max-width: 220px;
   color: var(--state-error);
@@ -2625,7 +2626,7 @@ button.timelineCellHeader:hover,
   white-space: nowrap;
 }
 
-.nextStateSignals {
+:where(.vui-components-conversation-conversationview).nextStateSignals {
   flex: 0 0 auto;
   display: grid;
   gap: 8px;
@@ -2637,7 +2638,7 @@ button.timelineCellHeader:hover,
   color: var(--fg-secondary);
 }
 
-.nextStateSignalsToggle {
+:where(.vui-components-conversation-conversationview).nextStateSignalsToggle {
   display: grid;
   grid-template-columns: auto auto auto minmax(0, 1fr);
   align-items: center;
@@ -2653,11 +2654,11 @@ button.timelineCellHeader:hover,
   text-align: left;
 }
 
-.nextStateSignalsToggle:hover {
+:where(.vui-components-conversation-conversationview).nextStateSignalsToggle:hover {
   color: var(--fg-primary);
 }
 
-.nextStateSignalsCount {
+:where(.vui-components-conversation-conversationview).nextStateSignalsCount {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2671,7 +2672,7 @@ button.timelineCellHeader:hover,
   font-weight: 720;
 }
 
-.nextStateSignalsSummary {
+:where(.vui-components-conversation-conversationview).nextStateSignalsSummary {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-tertiary);
@@ -2679,20 +2680,20 @@ button.timelineCellHeader:hover,
   white-space: nowrap;
 }
 
-.nextStateSignalList {
+:where(.vui-components-conversation-conversationview).nextStateSignalList {
   display: grid;
   gap: 8px;
   padding-top: 8px;
   border-top: 1px solid color-mix(in srgb, var(--fg-tertiary) 14%, transparent);
 }
 
-.nextStateSignalItem {
+:where(.vui-components-conversation-conversationview).nextStateSignalItem {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
 
-.nextStateSignalMeta {
+:where(.vui-components-conversation-conversationview).nextStateSignalMeta {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
@@ -2700,12 +2701,12 @@ button.timelineCellHeader:hover,
   font-size: var(--vui-font-xs);
 }
 
-.nextStateSignalKind {
+:where(.vui-components-conversation-conversationview).nextStateSignalKind {
   color: var(--accent-cool);
   font-weight: 720;
 }
 
-.nextStateSignalText {
+:where(.vui-components-conversation-conversationview).nextStateSignalText {
   margin: 0;
   color: var(--fg-primary);
   font-size: var(--vui-font-md);
@@ -2713,7 +2714,7 @@ button.timelineCellHeader:hover,
   overflow-wrap: anywhere;
 }
 
-.nextStateSignalEvent {
+:where(.vui-components-conversation-conversationview).nextStateSignalEvent {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-tertiary);
@@ -2722,29 +2723,29 @@ button.timelineCellHeader:hover,
   white-space: nowrap;
 }
 
-.composerField {
+:where(.vui-components-conversation-conversationview).composerField {
   display: grid;
   gap: 6px;
 }
 
-.composerFieldDragActive .input {
+:where(.vui-components-conversation-conversationview).composerFieldDragActive .input {
   border-color: color-mix(in srgb, var(--accent-cool) 54%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-cool) 9%, var(--surface-input-strong));
   box-shadow: var(--vui-shadow-inset-accent);
 }
 
-.composerFieldDragActive .composerAttachmentTray {
+:where(.vui-components-conversation-conversationview).composerFieldDragActive .composerAttachmentTray {
   opacity: 0.82;
 }
 
-.composerError {
+:where(.vui-components-conversation-conversationview).composerError {
   margin: 0;
   color: var(--state-error);
   font-size: var(--vui-font-md);
   line-height: 1.45;
 }
 
-.composerGuidance {
+:where(.vui-components-conversation-conversationview).composerGuidance {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -2758,14 +2759,14 @@ button.timelineCellHeader:hover,
   line-height: 1.35;
 }
 
-.composerGuidanceIcon {
+:where(.vui-components-conversation-conversationview).composerGuidanceIcon {
   display: inline-grid;
   flex: 0 0 auto;
   place-items: center;
   color: var(--accent-warm);
 }
 
-.composerModeNotice {
+:where(.vui-components-conversation-conversationview).composerModeNotice {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2779,7 +2780,7 @@ button.timelineCellHeader:hover,
   font-size: var(--vui-font-md);
 }
 
-.composerModeNoticeIcon {
+:where(.vui-components-conversation-conversationview).composerModeNoticeIcon {
   display: inline-grid;
   place-items: center;
   flex: 0 0 auto;
@@ -2790,7 +2791,7 @@ button.timelineCellHeader:hover,
   color: var(--accent-cool);
 }
 
-.composerModeNotice button {
+:where(.vui-components-conversation-conversationview).composerModeNotice button {
   flex: 0 0 auto;
   border: none;
   background: transparent;
@@ -2800,17 +2801,17 @@ button.timelineCellHeader:hover,
   font-weight: 650;
 }
 
-.composerModeNotice button:hover {
+:where(.vui-components-conversation-conversationview).composerModeNotice button:hover {
   color: var(--fg-primary);
 }
 
-.composerAttachmentTray {
+:where(.vui-components-conversation-conversationview).composerAttachmentTray {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.composerAttachmentChip {
+:where(.vui-components-conversation-conversationview).composerAttachmentChip {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr) auto;
   align-items: center;
@@ -2823,7 +2824,7 @@ button.timelineCellHeader:hover,
   background: color-mix(in srgb, var(--accent-cool) 7%, var(--surface-card));
 }
 
-.composerAttachmentChip img {
+:where(.vui-components-conversation-conversationview).composerAttachmentChip img {
   width: 34px;
   height: 32px;
   border-radius: 6px;
@@ -2831,7 +2832,7 @@ button.timelineCellHeader:hover,
   background: var(--surface-input-strong);
 }
 
-.composerAttachmentChip span {
+:where(.vui-components-conversation-conversationview).composerAttachmentChip span {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-secondary);
@@ -2840,7 +2841,7 @@ button.timelineCellHeader:hover,
   white-space: nowrap;
 }
 
-.composerAttachmentChip button {
+:where(.vui-components-conversation-conversationview).composerAttachmentChip button {
   display: inline-grid;
   place-items: center;
   width: 22px;
@@ -2852,18 +2853,18 @@ button.timelineCellHeader:hover,
   cursor: pointer;
 }
 
-.composerAttachmentChip button:hover {
+:where(.vui-components-conversation-conversationview).composerAttachmentChip button:hover {
   background: color-mix(in srgb, var(--state-error) 12%, transparent);
   color: var(--state-error);
 }
 
-.composerReferenceTray {
+:where(.vui-components-conversation-conversationview).composerReferenceTray {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
 }
 
-.composerReferenceChip {
+:where(.vui-components-conversation-conversationview).composerReferenceChip {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr) auto;
   align-items: center;
@@ -2876,7 +2877,7 @@ button.timelineCellHeader:hover,
   background: color-mix(in srgb, var(--accent-warm) 7%, var(--surface-card));
 }
 
-.composerReferenceIcon {
+:where(.vui-components-conversation-conversationview).composerReferenceIcon {
   display: grid;
   place-items: center;
   width: 24px;
@@ -2886,33 +2887,33 @@ button.timelineCellHeader:hover,
   color: var(--accent-warm-2);
 }
 
-.composerReferenceCopy {
+:where(.vui-components-conversation-conversationview).composerReferenceCopy {
   display: grid;
   min-width: 0;
   gap: 2px;
 }
 
-.composerReferenceCopy strong,
-.composerReferenceCopy small {
+:where(.vui-components-conversation-conversationview).composerReferenceCopy strong,
+:where(.vui-components-conversation-conversationview).composerReferenceCopy small {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.composerReferenceCopy strong {
+:where(.vui-components-conversation-conversationview).composerReferenceCopy strong {
   color: var(--fg-secondary);
   font-size: var(--vui-font-sm);
   font-weight: 720;
 }
 
-.composerReferenceCopy small {
+:where(.vui-components-conversation-conversationview).composerReferenceCopy small {
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
   font-weight: 620;
 }
 
-.composerReferenceChip button {
+:where(.vui-components-conversation-conversationview).composerReferenceChip button {
   display: inline-grid;
   place-items: center;
   width: 22px;
@@ -2924,12 +2925,12 @@ button.timelineCellHeader:hover,
   cursor: pointer;
 }
 
-.composerReferenceChip button:hover {
+:where(.vui-components-conversation-conversationview).composerReferenceChip button:hover {
   background: color-mix(in srgb, var(--state-error) 12%, transparent);
   color: var(--state-error);
 }
 
-.input {
+:where(.vui-components-conversation-conversationview).input {
   min-height: 50px;
   max-height: 164px;
   resize: none;
@@ -2943,22 +2944,22 @@ button.timelineCellHeader:hover,
   line-height: 1.48;
 }
 
-.surfaceCompact .input {
+:where(.vui-components-conversation-conversationview).surfaceCompact .input {
   min-height: 44px;
   max-height: 132px;
   padding: 8px 10px;
 }
 
-.input:disabled {
+:where(.vui-components-conversation-conversationview).input:disabled {
   color: var(--fg-tertiary);
   cursor: not-allowed;
 }
 
-.hiddenAttachmentInput {
+:where(.vui-components-conversation-conversationview).hiddenAttachmentInput {
   display: none;
 }
 
-.attachButton {
+:where(.vui-components-conversation-conversationview).attachButton {
   grid-area: attach;
   align-self: end;
   display: inline-grid;
@@ -2973,17 +2974,17 @@ button.timelineCellHeader:hover,
   transition: background 120ms ease, border-color 120ms ease;
 }
 
-.attachButton:hover:not(:disabled) {
+:where(.vui-components-conversation-conversationview).attachButton:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent-cool) 18%, transparent);
   border-color: color-mix(in srgb, var(--accent-cool) 32%, transparent);
 }
 
-.attachButton:disabled {
+:where(.vui-components-conversation-conversationview).attachButton:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.sendButton {
+:where(.vui-components-conversation-conversationview).sendButton {
   grid-area: primary;
   align-self: end;
   display: inline-grid;
@@ -3006,65 +3007,65 @@ button.timelineCellHeader:hover,
     box-shadow 120ms ease;
 }
 
-.surfaceCompact .sendButton {
+:where(.vui-components-conversation-conversationview).surfaceCompact .sendButton {
   width: 40px;
   height: 40px;
 }
 
-.sendButton:hover:not(:disabled) {
+:where(.vui-components-conversation-conversationview).sendButton:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent-cool) 19%, var(--surface-card));
   border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
   color: var(--fg-primary);
   box-shadow: none;
 }
 
-.sendButton:active:not(:disabled) {
+:where(.vui-components-conversation-conversationview).sendButton:active:not(:disabled) {
   transform: translateY(0);
 }
 
-.composerRoundButton > svg {
+:where(.vui-components-conversation-conversationview).composerRoundButton > svg {
   display: block;
 }
 
-.composerRoundButtonPrimary {
+:where(.vui-components-conversation-conversationview).composerRoundButtonPrimary {
   background: color-mix(in srgb, var(--accent-cool) 14%, var(--surface-card));
   color: color-mix(in srgb, var(--accent-cool) 78%, var(--fg-primary));
 }
 
-.stopButton {
+:where(.vui-components-conversation-conversationview).stopButton {
   grid-area: stop;
   border-color: color-mix(in srgb, var(--state-error) 30%, var(--border-soft));
   background: color-mix(in srgb, var(--state-error) 12%, var(--surface-card));
   color: var(--state-error);
 }
 
-.stopButton:hover:not(:disabled) {
+:where(.vui-components-conversation-conversationview).stopButton:hover:not(:disabled) {
   background: color-mix(in srgb, var(--state-error) 18%, var(--surface-card));
   border-color: color-mix(in srgb, var(--state-error) 44%, var(--border-soft));
 }
 
-.sendButton:disabled {
+:where(.vui-components-conversation-conversationview).sendButton:disabled {
   cursor: not-allowed;
   opacity: 0.58;
 }
 
-.composer > .input {
+:where(.vui-components-conversation-conversationview).composer > .input {
   grid-area: field;
 }
 
-.composer > .attachButton {
+:where(.vui-components-conversation-conversationview).composer > .attachButton {
   grid-area: attach;
 }
 
-.composer > .sendButton {
+:where(.vui-components-conversation-conversationview).composer > .sendButton {
   grid-area: primary;
 }
 
-.composer > .stopButton {
+:where(.vui-components-conversation-conversationview).composer > .stopButton {
   grid-area: stop;
 }
 
-.backToBottomButton {
+:where(.vui-components-conversation-conversationview).backToBottomButton {
   position: absolute;
   right: 28px;
   bottom: 110px;
@@ -3082,140 +3083,140 @@ button.timelineCellHeader:hover,
   backdrop-filter: blur(6px);
 }
 
-.backToBottomButton:hover {
+:where(.vui-components-conversation-conversationview).backToBottomButton:hover {
   border-color: color-mix(in srgb, var(--accent-warm) 38%, transparent);
   background: color-mix(in srgb, var(--surface-panel) 88%, transparent);
 }
 
-.backToBottomButton span {
+:where(.vui-components-conversation-conversationview).backToBottomButton span {
   white-space: nowrap;
 }
 
-.backToBottomButton svg {
+:where(.vui-components-conversation-conversationview).backToBottomButton svg {
   flex: 0 0 auto;
 }
 
 @media (max-width: 1280px) {
-  .summaryGrid {
+  :where(.vui-components-conversation-conversationview).summaryGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 760px) {
-  .timeline {
+  :where(.vui-components-conversation-conversationview).timeline {
     padding: 16px 12px;
     gap: 14px;
   }
 
-  .backToBottomButton {
+  :where(.vui-components-conversation-conversationview).backToBottomButton {
     right: 16px;
     bottom: 100px;
   }
 
-  .messageCard {
+  :where(.vui-components-conversation-conversationview).messageCard {
     min-width: min(220px, 100%);
     max-width: 100%;
   }
 
-  .assistantTurn,
-  .userTurn {
+  :where(.vui-components-conversation-conversationview).assistantTurn,
+  :where(.vui-components-conversation-conversationview).userTurn {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .turnAvatar {
+  :where(.vui-components-conversation-conversationview).turnAvatar {
     display: none;
   }
 
-  .userTurn .turnContent,
-  .assistantTurn .turnContent {
+  :where(.vui-components-conversation-conversationview).userTurn .turnContent,
+  :where(.vui-components-conversation-conversationview).assistantTurn .turnContent {
     grid-column: 1;
     width: 100%;
   }
 
-  .userMessageBody {
+  :where(.vui-components-conversation-conversationview).userMessageBody {
     width: fit-content;
     max-width: 100%;
   }
 
-  .operationTimeline {
+  :where(.vui-components-conversation-conversationview).operationTimeline {
     margin-left: 0;
     padding-left: 16px;
   }
 
-  .operationTimeline::before {
+  :where(.vui-components-conversation-conversationview).operationTimeline::before {
     left: 5px;
   }
 
-  .operationItem {
+  :where(.vui-components-conversation-conversationview).operationItem {
     grid-template-columns: 20px minmax(0, 1fr) auto 20px;
     gap: 6px;
   }
 
-  .operationText {
+  :where(.vui-components-conversation-conversationview).operationText {
     max-width: 100%;
   }
 
-  .reActOperationTitle {
+  :where(.vui-components-conversation-conversationview).reActOperationTitle {
     max-width: min(62vw, 360px);
   }
 
-  .reActOperationMeta {
+  :where(.vui-components-conversation-conversationview).reActOperationMeta {
     max-width: min(34vw, 180px);
   }
 
-  .operationDuration,
-  .operationChevron {
+  :where(.vui-components-conversation-conversationview).operationDuration,
+  :where(.vui-components-conversation-conversationview).operationChevron {
     display: none;
   }
 
-  .operationDetails {
+  :where(.vui-components-conversation-conversationview).operationDetails {
     margin-left: 20px;
   }
 
-  .operationStatus {
+  :where(.vui-components-conversation-conversationview).operationStatus {
     font-size: var(--vui-font-xs);
   }
 
-  .responseSegmentHeader {
+  :where(.vui-components-conversation-conversationview).responseSegmentHeader {
     flex-wrap: wrap;
   }
 
-  .responseSegmentMeta {
+  :where(.vui-components-conversation-conversationview).responseSegmentMeta {
     max-width: 100%;
   }
 
-  .composer {
+  :where(.vui-components-conversation-conversationview).composer {
     grid-template-columns: minmax(0, 1fr) auto auto auto;
     padding: 10px 12px 12px;
   }
 
-  .sendButton {
+  :where(.vui-components-conversation-conversationview).sendButton {
     justify-self: end;
   }
 
-  .attachButton {
+  :where(.vui-components-conversation-conversationview).attachButton {
     justify-self: end;
   }
 
-  .turnError {
+  :where(.vui-components-conversation-conversationview).turnError {
     margin-inline: 14px;
     flex-direction: column;
   }
 
-  .turnErrorType {
+  :where(.vui-components-conversation-conversationview).turnErrorType {
     max-width: 100%;
   }
 
-  .imagePreviewOverlay {
+  :where(.vui-components-conversation-conversationview).imagePreviewOverlay {
     padding: 12px;
   }
 
-  .imagePreviewDialog {
+  :where(.vui-components-conversation-conversationview).imagePreviewDialog {
     max-height: 92vh;
     padding: 10px;
   }
 
-  .imagePreviewLarge {
+  :where(.vui-components-conversation-conversationview).imagePreviewLarge {
     max-height: calc(92vh - 72px);
   }
 }

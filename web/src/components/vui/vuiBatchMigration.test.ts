@@ -50,7 +50,7 @@ const cssModuleFreeTargets = [
 
 const slottedListStyleTargets = [
   {
-    path: "app/AppShell.module.css",
+    path: "app/AppShell.legacy.css",
     outerSelector: ".utilityFileButton",
     contentSlot: '.utilityFileButton [data-slot="vui-button-content"]',
     labelSlot: '.utilityFileButton [data-slot="vui-button-label"]',
@@ -124,19 +124,19 @@ const routeStyleTargets = [
     ],
   },
   {
-    path: "routes/ChatCodingRoute.module.css",
+    path: "routes/ChatCodingRoute.legacy.css",
     forbidden: ["border-left: 3px"],
   },
   {
-    path: "routes/EvolutionRoute.module.css",
+    path: "routes/EvolutionRoute.legacy.css",
     forbidden: ["border-left: 3px"],
   },
   {
-    path: "routes/AgentsRoute.module.css",
+    path: "routes/AgentsRoute.legacy.css",
     forbidden: ["background: color-mix(in srgb, var(--accent-cool) 90%, var(--fg-primary))"],
   },
   {
-    path: "routes/TeamsRoute.module.css",
+    path: "routes/TeamsRoute.legacy.css",
     forbidden: [
       "background: color-mix(in srgb, var(--fg-primary) 78%, transparent)",
       "border-left-width: 4px",
@@ -229,10 +229,10 @@ describe("VUI batch migration", () => {
   );
 
   it("keeps Teams source-collection stage actions compact by default", () => {
-    const source = readTargetSource("routes/TeamsRoute.module.css");
+    const source = readTargetSource("routes/TeamsRoute.legacy.css");
     const researchActionsBlock = readStyleBlock(source, ".researchStageActions");
-    const researchActionButtonBlock = readStyleBlock(source, ".researchStageActions [data-vui=\"native-button\"],\n.researchStageActions a");
-    const actionBlock = readStyleBlock(source, ".sourceCollectionStagePrimaryAction,\n.sourceCollectionStageSecondaryAction");
+    const researchActionButtonBlock = readStyleBlock(source, ".researchStageActions [data-vui=\"native-button\"]");
+    const actionBlock = readStyleBlock(source, ".sourceCollectionStagePrimaryAction");
     const panelBlock = readStyleBlock(source, ".sourceCollectionPanelActions");
 
     expect(researchActionsBlock).toContain("display: flex;");
