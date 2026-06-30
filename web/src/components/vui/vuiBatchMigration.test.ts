@@ -38,6 +38,7 @@ const cssModuleFreeTargets = [
   "routes/GitDiffView.tsx",
   "routes/KernelTaskCenterRoute.tsx",
   "routes/PetRoute.tsx",
+  "routes/PromptTemplatesRoute.tsx",
   "routes/ResetRoute.tsx",
   "routes/SkillsRoute.tsx",
   "routes/SupervisedWorktreeReviewPanel.tsx",
@@ -49,12 +50,6 @@ const slottedListStyleTargets = [
     outerSelector: ".utilityFileButton",
     contentSlot: '.utilityFileButton [data-slot="vui-button-content"]',
     labelSlot: '.utilityFileButton [data-slot="vui-button-label"]',
-  },
-  {
-    path: "routes/PromptTemplatesRoute.module.css",
-    outerSelector: ".templateButton,\n.templateButtonActive",
-    contentSlot: '.templateButton [data-slot="vui-button-content"]',
-    labelSlot: '.templateButton [data-slot="vui-button-label"]',
   },
 ] as const;
 
@@ -192,6 +187,14 @@ describe("VUI batch migration", () => {
     const source = readTargetSource("routes/SkillsRoute.tsx");
 
     expect(source).toContain("skillButtonBaseClass");
+    expect(source).toContain("[&_[data-slot=vui-button-content]]:w-full");
+    expect(source).toContain("[&_[data-slot=vui-button-label]]:grid");
+  });
+
+  it("routes/PromptTemplatesRoute.tsx keeps VUI list button grid on internal slots", () => {
+    const source = readTargetSource("routes/PromptTemplatesRoute.tsx");
+
+    expect(source).toContain("templateButtonBaseClass");
     expect(source).toContain("[&_[data-slot=vui-button-content]]:w-full");
     expect(source).toContain("[&_[data-slot=vui-button-label]]:grid");
   });
