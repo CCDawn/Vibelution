@@ -1,9 +1,4 @@
 .route {
-  --fg-muted: var(--fg-tertiary);
-  --accent-primary: var(--accent-cool);
-  --accent-success: var(--state-success);
-  --accent-danger: var(--state-error);
-
   display: flex;
   height: 100%;
   min-height: 0;

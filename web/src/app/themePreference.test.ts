@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_WORKBENCH_THEME,
   WORKBENCH_THEME_STORAGE_KEY,
+  applyWorkbenchDocumentTheme,
   nextWorkbenchTheme,
   normalizeWorkbenchTheme,
   readStoredWorkbenchTheme,
@@ -45,5 +46,25 @@ describe("themePreference", () => {
   it("toggles between light and dark", () => {
     expect(nextWorkbenchTheme("dark")).toBe("light");
     expect(nextWorkbenchTheme("light")).toBe("dark");
+  });
+
+  it("syncs the selected theme to the document root for global tokens", () => {
+    const attributes = new Map<string, string>();
+    const documentElement = {
+      getAttribute(name: string) {
+        return attributes.get(name) ?? null;
+      },
+      setAttribute(name: string, value: string) {
+        attributes.set(name, value);
+      },
+    };
+
+    applyWorkbenchDocumentTheme({ documentElement } as unknown as Document, "light");
+
+    expect(documentElement.getAttribute("data-theme")).toBe("light");
+
+    applyWorkbenchDocumentTheme({ documentElement } as unknown as Document, "dark");
+
+    expect(documentElement.getAttribute("data-theme")).toBe("dark");
   });
 });

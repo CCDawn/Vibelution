@@ -80,6 +80,13 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("max-width: min(230px, 34vw)");
   });
 
+  it("syncs the selected theme to the document root for global VUI tokens", () => {
+    expect(shellSource).toContain("applyWorkbenchDocumentTheme(document, theme)");
+    expect(shellSource).toContain("}, [lang, t, theme])");
+    expect(launcherShellSource).toContain("applyWorkbenchDocumentTheme(document, theme)");
+    expect(launcherShellSource).toContain("}, [lang, theme])");
+  });
+
   it("can hide the web top bar while keeping a restore control", () => {
     expect(shellSource).toContain("useShellStore");
     expect(shellSource).toContain("topBarMode");
@@ -361,6 +368,8 @@ describe("AppShell layout contract", () => {
   it("themes the managed app window chrome to match the light-first shell", () => {
     const manifest = JSON.parse(manifestSource);
 
+    expect(indexHtml).toContain('data-theme="light"');
+    expect(indexHtml).toContain('localStorage.getItem("vibelution.workbench.theme")');
     expect(indexHtml).toContain('name="theme-color" content="#f7f8fa"');
     expect(indexHtml).toContain('name="color-scheme" content="light dark"');
     expect(indexHtml).toContain('rel="manifest" href="/manifest.webmanifest"');
