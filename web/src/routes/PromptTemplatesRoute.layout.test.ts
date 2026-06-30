@@ -1,22 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-// @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
-import { readFileSync } from "node:fs";
 import routerSource from "../app/router.tsx?raw";
 import routeSource from "./PromptTemplatesRoute.tsx?raw";
-
-const stylesSource = readFileSync(new URL("./PromptTemplatesRoute.module.css", import.meta.url), "utf-8");
 
 describe("PromptTemplatesRoute layout contract", () => {
   it("lives inside Agent management navigation with the shared nav row", () => {
     expect(routerSource).toContain('path: "agents/prompts"');
     expect(routerSource).toContain("<PromptTemplatesRoute />");
-    expect(routeSource).toContain('<AgentManagementNav active="prompts" className={styles.managementNav} />');
-    expect(routeSource.indexOf('<AgentManagementNav active="prompts" className={styles.managementNav} />')).toBeGreaterThan(
-      routeSource.indexOf("</header>"),
+    expect(routeSource).toContain('<AgentManagementNav active="prompts" className={managementNavClass} />');
+    expect(routeSource.indexOf('<AgentManagementNav active="prompts" className={managementNavClass} />')).toBeGreaterThan(
+      routeSource.indexOf("</VRouteHeader>"),
     );
-    expect(routeSource.indexOf('<AgentManagementNav active="prompts" className={styles.managementNav} />')).toBeLessThan(
-      routeSource.indexOf("styles.summaryGrid"),
+    expect(routeSource.indexOf('<AgentManagementNav active="prompts" className={managementNavClass} />')).toBeLessThan(
+      routeSource.indexOf("className={summaryGridClass}"),
     );
   });
 
@@ -55,11 +51,11 @@ describe("PromptTemplatesRoute layout contract", () => {
     expect(routeSource).toContain('next.delete("category")');
     expect(routeSource).toContain('next.set("category", categoryFilter)');
     expect(routeSource).toContain('"research"');
-    expect(routeSource).toContain("styles.workspace");
-    expect(routeSource).toContain("styles.listPanel");
-    expect(routeSource).toContain("styles.editorPanel");
-    expect(routeSource).toContain("styles.templateList");
-    expect(routeSource).toContain("styles.agentList");
+    expect(routeSource).toContain("workspaceClass");
+    expect(routeSource).toContain("listPanelClass");
+    expect(routeSource).toContain("editorPanelClass");
+    expect(routeSource).toContain("templateListClass");
+    expect(routeSource).toContain("agentListClass");
   });
 
   it("supports Agent config deep links and preserves return navigation", () => {
@@ -67,20 +63,17 @@ describe("PromptTemplatesRoute layout contract", () => {
     expect(routeSource).toContain('searchParams.get("template")');
     expect(routeSource).toContain('searchParams.get("focus")');
     expect(routeSource).toContain("safeAgentCenterReturnToPath(searchParams.get(\"returnTo\"))");
-    expect(routeSource).toContain("styles.returnButton");
-    expect(routeSource).toContain("styles.selectableRowLinked");
-    expect(routeSource).toContain("styles.agentItemLinked");
-    expect(routeSource).toContain("styles.editorPanelFocused");
-    expect(stylesSource).toContain(".returnButton");
-    expect(stylesSource).toContain(".selectableRowLinked");
-    expect(stylesSource).toContain(".agentItemLinked");
-    expect(stylesSource).toContain(".editorPanelFocused");
+    expect(routeSource).toContain("returnButtonClass");
+    expect(routeSource).toContain("selectableRowLinkedClass");
+    expect(routeSource).toContain("agentItemLinkedClass");
+    expect(routeSource).toContain("editorPanelFocusedClass");
+    expect(routeSource).toContain("linkedBorderClass");
   });
 
   it("keeps the prompt content editor as the primary visible area", () => {
-    expect(routeSource).toContain("styles.nameField");
-    expect(routeSource).toContain("styles.contentField");
-    expect(routeSource.indexOf("styles.contentField")).toBeLessThan(routeSource.indexOf("styles.bottomGrid"));
+    expect(routeSource).toContain("nameFieldClass");
+    expect(routeSource).toContain("contentFieldClass");
+    expect(routeSource.indexOf("contentFieldClass")).toBeLessThan(routeSource.indexOf("bottomGridClass"));
   });
 
   it("supports bulk prompt selection with safe existing mutations", () => {
@@ -92,26 +85,26 @@ describe("PromptTemplatesRoute layout contract", () => {
     expect(routeSource).toContain("copy.bulkResetConfirm");
     expect(routeSource).toContain("window.confirm(copy.bulkDeactivateConfirm)");
     expect(routeSource).toContain("window.confirm(copy.bulkResetConfirm)");
-    expect(routeSource).toContain("styles.bulkActionBar");
-    expect(routeSource).toContain("styles.selectableRow");
+    expect(routeSource).toContain("bulkActionBarClass");
+    expect(routeSource).toContain("selectableRowClass");
     expect(routeSource).toContain('method: "PATCH"');
     expect(routeSource).toContain('method: "POST"');
     expect(routeSource).toContain("/reset`");
   });
 
   it("keeps bulk prompt controls in their own compact row above the list", () => {
-    expect(stylesSource).toContain("grid-template-rows: auto auto auto auto minmax(0, 1fr)");
-    expect(stylesSource).toContain(".bulkActionBar");
-    expect(stylesSource).toContain("display: grid");
-    expect(stylesSource).toContain("grid-template-columns: auto auto minmax(118px, 1fr)");
-    expect(stylesSource).toContain("min-height: 26px");
+    expect(routeSource).toContain("listPanelClass");
+    expect(routeSource).toContain("grid-rows-[auto_auto_auto_auto_minmax(0,1fr)]");
+    expect(routeSource).toContain("bulkActionBarClass");
+    expect(routeSource).toContain("grid-cols-[auto_auto_minmax(118px,1fr)]");
+    expect(routeSource).toContain("min-h-[26px]");
   });
 
   it("keeps the narrow prompt workspace scrollable without oversized editor panels", () => {
-    const breakpoint = stylesSource.slice(stylesSource.indexOf("@media (max-width: 980px)"));
-
-    expect(breakpoint).toContain(".workspace {\n    overflow: auto;\n    align-content: start;");
-    expect(breakpoint).toContain(".listPanel,\n  .editorPanel {\n    min-height: 0;");
-    expect(breakpoint).toContain("grid-template-rows: auto auto minmax(180px, 0.8fr) auto auto");
+    expect(routeSource).toContain("workspaceClass");
+    expect(routeSource).toContain("max-[980px]:grid-cols-1");
+    expect(routeSource).toContain("max-[980px]:content-start");
+    expect(routeSource).toContain("max-[980px]:overflow-auto");
+    expect(routeSource).toContain("max-[980px]:grid-rows-[auto_auto_minmax(180px,0.8fr)_auto_auto]");
   });
 });
