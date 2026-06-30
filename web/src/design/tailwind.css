@@ -1,7 +1,8 @@
 @import "tailwindcss" source(none);
 
 @source "../app/**/*.{ts,tsx}";
-@source "../components/vui/**/*.{ts,tsx}";
+@source "../components/**/*.{ts,tsx}";
+@source "../routes/**/*.{ts,tsx}";
 
 @theme inline {
   --font-sans: var(--font-body);

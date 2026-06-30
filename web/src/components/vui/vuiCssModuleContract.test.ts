@@ -36,11 +36,14 @@ describe("VUI CSS module contract", () => {
     const modules = cssModuleSources();
     const modulePaths = modules.map(({ path }) => path);
 
-    expect(modules.length).toBeLessThanOrEqual(28);
+    expect(modules.length).toBeLessThanOrEqual(25);
     expect(modulePaths).not.toContain("app/LauncherShell.module.css");
     expect(modulePaths).not.toContain("app/RouteLoadingShell.module.css");
+    expect(modulePaths).not.toContain("app/RouteErrorBoundary.module.css");
     expect(modulePaths).not.toContain("components/layout/PaneCollapseHandle.module.css");
     expect(modulePaths).not.toContain("routes/AgentManagementNav.module.css");
+    expect(modulePaths).not.toContain("routes/SupervisedWorkspaceControls.module.css");
+    expect(modulePaths).not.toContain("routes/SupervisedWorkspaceTabs.module.css");
 
     const literalColorOffenders = modules.flatMap(({ path, source }) =>
       [...source.matchAll(/#[0-9a-fA-F]{3,8}|rgba?\(/g)].map((match) => `${path}:${lineFor(source, match.index ?? 0)}`),
