@@ -33,6 +33,23 @@ function cssRule(selector: string) {
   return end === -1 ? conversationViewStylesSource.slice(start) : conversationViewStylesSource.slice(start, end + 2);
 }
 
+function cssRuleContaining(selector: string, fragment: string) {
+  let offset = 0;
+  while (offset < conversationViewStylesSource.length) {
+    const start = conversationViewStylesSource.indexOf(`${selector} {`, offset);
+    if (start === -1) {
+      return "";
+    }
+    const end = conversationViewStylesSource.indexOf("\n}", start);
+    const block = end === -1 ? conversationViewStylesSource.slice(start) : conversationViewStylesSource.slice(start, end + 2);
+    if (block.includes(fragment)) {
+      return block;
+    }
+    offset = start + selector.length;
+  }
+  return "";
+}
+
 function semanticArticleClassCount(html: string, className: string) {
   const escaped = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return html.match(new RegExp(`<article class="[^"]*(?:\\s|^)${escaped}(?:\\s|")`, "g"))?.length ?? 0;
@@ -224,6 +241,26 @@ describe("ConversationView edit resend affordance", () => {
     expect(responseContentSlotRule).toContain("display: contents");
     expect(responseLabelSlotRule).toContain("display: inline-flex");
     expect(responseLabelSlotRule).toContain("gap: 7px");
+  });
+
+  it("keeps conversation timeline previews wrapped and button slots flat", () => {
+    const timelineHeaderRule = cssRule(".timelineCellHeader");
+    const timelineContentSlotRule = cssRule('.timelineCellHeader [data-slot="vui-button-content"]');
+    const timelineLabelSlotRule = cssRule('.timelineCellHeader [data-slot="vui-button-label"]');
+    const timelinePreviewRule = cssRule(".timelineCellPreview");
+    const operationItemRule = cssRule(".operationItem");
+    const operationStatusRule = cssRuleContaining(".operationStatus", "justify-self");
+
+    expect(timelineHeaderRule).toContain("align-items: start");
+    expect(timelineContentSlotRule).toContain("display: contents");
+    expect(timelineLabelSlotRule).toContain("display: contents");
+    expect(timelinePreviewRule).toContain("white-space: normal");
+    expect(timelinePreviewRule).toContain("overflow-wrap: anywhere");
+    expect(timelinePreviewRule).toContain("-webkit-line-clamp: 2");
+    expect(timelinePreviewRule).not.toContain("white-space: nowrap");
+    expect(operationItemRule).not.toContain("width: min(100%, 860px)");
+    expect(operationItemRule).toContain("width: min(100%, 72ch)");
+    expect(operationStatusRule).toContain("justify-self: start");
   });
 
   it("uses readable contrast for compact conversation metadata and toggles", () => {
@@ -804,7 +841,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(reactThoughtRule).toContain("border-left: 0");
     expect(reactThoughtRule).toContain("background: transparent");
     expect(operationDetailsRule).toContain("border: 0");
-    expect(operationItemRule).toContain("width: min(100%, 860px)");
+    expect(operationItemRule).toContain("width: min(100%, 72ch)");
     expect(operationItemRule).toContain("grid-template-columns: 22px minmax(0, 1fr) auto auto 16px");
     expect(timelineThoughtRule).toContain("border: 0");
     expect(timelineThoughtRule).toContain("background: transparent");

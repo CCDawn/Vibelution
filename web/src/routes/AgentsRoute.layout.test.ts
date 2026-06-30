@@ -1115,6 +1115,42 @@ describe("AgentsRoute layout contract", () => {
     }
   });
 
+  it("keeps Agent route form CSS on VUI native slots instead of raw elements", () => {
+    const rawNativeFormSelectors = [
+      ".searchBox input",
+      ".bulkFieldHeader input",
+      ".rowSelect input",
+      ".avatarEditorActions input",
+      ".createToolBundleOption input",
+      ".createToolBundleSelected input",
+      ".inlineAdd input",
+      ".compressionToggleField input",
+      ".compressionInlineCheck input",
+      ".checkField input",
+      ".roomCheckField input",
+      ".field input",
+      ".field select",
+      ".llmSlotField select",
+      ".fieldWide textarea",
+      ".promptConfigRow select",
+      ".resetOptionField input",
+    ];
+
+    for (const selector of rawNativeFormSelectors) {
+      expect(stylesSource).not.toContain(selector);
+    }
+
+    expect(stylesSource).toContain('.searchBox.searchBox [data-vui="native-input"]');
+    expect(stylesSource).toContain('.bulkFieldHeader [data-vui="native-input"]');
+    expect(stylesSource).toContain('.rowSelect [data-vui="native-input"]');
+    expect(stylesSource).toContain('.avatarEditorActions [data-vui="native-input"][type="file"]');
+    expect(stylesSource).toContain('.createToolBundleOption [data-vui="native-input"]');
+    expect(stylesSource).toContain('.inlineAdd [data-vui="native-input"]');
+    expect(stylesSource).toContain('.field [data-vui="native-input"]');
+    expect(stylesSource).toContain('.field [data-vui="native-select"]');
+    expect(stylesSource).toContain('.fieldWide [data-vui="native-textarea"]');
+  });
+
   it("renders Agent micro action controls through VUI buttons instead of route-local button CSS", () => {
     const avatarActionStart = routeSource.indexOf("className={styles.avatarEditorActions}");
     const avatarActionSource = routeSource.slice(
