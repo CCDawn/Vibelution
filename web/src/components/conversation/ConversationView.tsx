@@ -20,7 +20,7 @@ import {
   TerminalSquare,
   Wrench,
 } from "lucide-react";
-import { DragEvent, ReactNode, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { DragEvent, ReactNode, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
   ChatNextStateSignalSummary,
@@ -840,6 +840,87 @@ export type ConversationViewProps = {
   onSafeGuidance?: () => void;
   onInterruptGuidance?: () => void;
 };
+
+type ConversationTurnRowProps = {
+  message: ConversationMessage;
+  previousMessage?: ConversationMessage;
+  rowIdentity: ConversationTimelineRowIdentity;
+  defaultResponseExpanded: boolean;
+  latestUserMessageId: string;
+  editingMessageId?: string;
+  editUserMessageLabel?: string;
+  editUserMessageDisabled?: boolean;
+  composerPlaceholder: string;
+  answerOnlyProcessMode: boolean;
+  showMentalSnapshots: boolean;
+  lang: "zh" | "en";
+  assistantLabel: string;
+  assistantAvatarImageUrl?: string;
+  assistantAvatarFallback?: string;
+  userLabel: string;
+  userAvatarLabel: string;
+  userAvatarImageUrl?: string;
+  operationLabels: {
+    thought: string;
+    mental: string;
+    status: string;
+  };
+  resolveTurnAvatar?: (message: ConversationMessage) => TurnAvatarResolution | undefined;
+  onEditUserMessage?: (message: ConversationMessage) => void;
+  sectionExpansion: Record<string, Record<string, boolean>>;
+  computerUseSessionResults: Record<string, ComputerUseResult>;
+  computerUseSessionPending: Record<string, "confirm" | "cancel" | undefined>;
+  imageArtifactUrlsBeforeMessage?: Set<string>;
+  renderTurn: () => ReactNode;
+};
+
+function conversationTimelineRowIdentityIsEqual(
+  previous: ConversationTimelineRowIdentity,
+  next: ConversationTimelineRowIdentity,
+) {
+  return previous.messageId === next.messageId
+    && previous.rowKey === next.rowKey
+    && previous.messageKey === next.messageKey
+    && previous.processKey === next.processKey
+    && previous.answerKey === next.answerKey;
+}
+
+function conversationTurnRowPropsAreEqual(
+  previous: ConversationTurnRowProps,
+  next: ConversationTurnRowProps,
+) {
+  return previous.message === next.message
+    && previous.previousMessage === next.previousMessage
+    && conversationTimelineRowIdentityIsEqual(previous.rowIdentity, next.rowIdentity)
+    && previous.defaultResponseExpanded === next.defaultResponseExpanded
+    && previous.latestUserMessageId === next.latestUserMessageId
+    && previous.editingMessageId === next.editingMessageId
+    && previous.editUserMessageLabel === next.editUserMessageLabel
+    && previous.editUserMessageDisabled === next.editUserMessageDisabled
+    && previous.composerPlaceholder === next.composerPlaceholder
+    && previous.answerOnlyProcessMode === next.answerOnlyProcessMode
+    && previous.showMentalSnapshots === next.showMentalSnapshots
+    && previous.lang === next.lang
+    && previous.assistantLabel === next.assistantLabel
+    && previous.assistantAvatarImageUrl === next.assistantAvatarImageUrl
+    && previous.assistantAvatarFallback === next.assistantAvatarFallback
+    && previous.userLabel === next.userLabel
+    && previous.userAvatarLabel === next.userAvatarLabel
+    && previous.userAvatarImageUrl === next.userAvatarImageUrl
+    && previous.operationLabels === next.operationLabels
+    && previous.resolveTurnAvatar === next.resolveTurnAvatar
+    && previous.onEditUserMessage === next.onEditUserMessage
+    && previous.sectionExpansion === next.sectionExpansion
+    && previous.computerUseSessionResults === next.computerUseSessionResults
+    && previous.computerUseSessionPending === next.computerUseSessionPending
+    && previous.imageArtifactUrlsBeforeMessage === next.imageArtifactUrlsBeforeMessage;
+}
+
+const ConversationTurnRow = React.memo(function ConversationTurnRow({
+  renderTurn,
+}: ConversationTurnRowProps) {
+  return <>{renderTurn()}</>;
+}, conversationTurnRowPropsAreEqual);
 
 export function ConversationView({
   sessionId,
@@ -3514,7 +3595,35 @@ export function ConversationView({
                 </VButton>
               </div>
             ) : null}
-            {activeTimelineMessages.map((message, index) => {
+            {activeTimelineMessages.map((message, index) => (
+              <ConversationTurnRow
+                key={activeTimelineRowIdentities[index].rowKey}
+                message={message}
+                previousMessage={activeTimelineMessages[index - 1]}
+                rowIdentity={activeTimelineRowIdentities[index]}
+                defaultResponseExpanded={defaultExpandedResponseIds.has(message.id)}
+                latestUserMessageId={latestUserMessageId}
+                editingMessageId={editingMessageId}
+                editUserMessageLabel={editUserMessageLabel}
+                editUserMessageDisabled={editUserMessageDisabled}
+                composerPlaceholder={composerPlaceholder}
+                answerOnlyProcessMode={answerOnlyProcessMode}
+                showMentalSnapshots={showMentalSnapshots}
+                lang={lang}
+                assistantLabel={assistantLabel}
+                assistantAvatarImageUrl={assistantAvatarImageUrl}
+                assistantAvatarFallback={assistantAvatarFallback}
+                userLabel={userLabel}
+                userAvatarLabel={userAvatarLabel}
+                userAvatarImageUrl={userAvatarImageUrl}
+                operationLabels={operationLabels}
+                resolveTurnAvatar={resolveTurnAvatar}
+                onEditUserMessage={onEditUserMessage}
+                sectionExpansion={sectionExpansion}
+                computerUseSessionResults={computerUseSessionResults}
+                computerUseSessionPending={computerUseSessionPending}
+                imageArtifactUrlsBeforeMessage={imageArtifactUrlsBeforeMessage.get(message.id)}
+                renderTurn={() => {
             const rowIdentity = activeTimelineRowIdentities[index];
             if (isCliAgentLifecycleMessage(message)) {
               const detail = cliAgentLifecycleDetail(message);
@@ -3789,7 +3898,9 @@ export function ConversationView({
                 </div>
               </article>
             );
-            })}
+                }}
+              />
+            ))}
           </>
         )}
       </div>
