@@ -190,16 +190,21 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.rightPane).toBeTypeOf("string");
     expect(routeStyles.resizeHandle).toBeTypeOf("string");
     expect(routeStyles.centerPane).toBeTypeOf("string");
-    expect(routeStyles.layout).toContain("var(--chat-left-pane-width,0px)");
-    expect(routeStyles.layout).toContain("var(--chat-right-pane-width,0px)");
+    expect(routeStyles.layout).toContain("var(--chat-left-pane-width,220px)");
+    expect(routeStyles.layout).toContain("var(--chat-right-pane-width,284px)");
+    expect(routeStyles.layoutCenterFirst).toContain("var(--chat-left-pane-width,0px)");
+    expect(routeStyles.layoutCenterFirst).toContain("var(--chat-right-pane-width,0px)");
   });
 
   it("keeps collapse handles in dedicated grid tracks so the conversation stays in the center column", () => {
     expect(routeStyles.layout).toContain(
-      "grid-cols-[minmax(0,min(var(--chat-left-pane-width,0px),24vw))_10px_minmax(360px,1fr)_10px_minmax(0,min(var(--chat-right-pane-width,0px),22vw))]",
+      "grid-cols-[var(--chat-left-pane-width,220px)_8px_minmax(0,1fr)_8px_var(--chat-right-pane-width,284px)]",
     );
     expect(routeStyles.layout).toContain(
-      "max-[980px]:grid-cols-[minmax(0,min(var(--chat-left-pane-width,0px),24vw))_8px_minmax(280px,1fr)_8px_minmax(0,min(var(--chat-right-pane-width,0px),22vw))]",
+      "max-[980px]:grid-cols-[minmax(192px,var(--chat-left-pane-width,220px))_8px_minmax(0,1fr)_8px_minmax(244px,var(--chat-right-pane-width,284px))]",
+    );
+    expect(routeStyles.layoutCenterFirst).toContain(
+      "grid-cols-[minmax(0,min(var(--chat-left-pane-width,0px),24vw))_8px_minmax(360px,1fr)_8px_minmax(0,min(var(--chat-right-pane-width,0px),22vw))]",
     );
   });
 
@@ -301,9 +306,10 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps the conversation index compact enough for 1024px workbench use", () => {
-    expect(routeStyles.layout).toContain("minmax(0,min(var(--chat-left-pane-width,0px),24vw))");
-    expect(routeStyles.layout).toContain("minmax(360px,1fr)");
-    expect(routeStyles.layout).toContain("minmax(0,min(var(--chat-right-pane-width,0px),22vw))");
+    expect(routeStyles.layout).toContain("minmax(192px,var(--chat-left-pane-width,220px))");
+    expect(routeStyles.layout).toContain("minmax(0,1fr)");
+    expect(routeStyles.layout).toContain("minmax(244px,var(--chat-right-pane-width,284px))");
+    expect(routeStyles.layoutCenterFirst).toContain("minmax(360px,1fr)");
     expect(routeStyles.conversationTitleRow).toContain("grid-cols-[minmax(0,1fr)_fit-content(92px)]");
     expect(routeStyles.conversationTitleRow).toContain("max-w-full");
     expect(conversationStyles.surfaceCompact).toContain("[&_.timeline]:px-3");
@@ -318,12 +324,15 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.agentModelTag).toContain("text-[var(--vui-font-xs)]");
   });
 
-  it("clamps responsive side panes so the center conversation remains visible near 1024px", () => {
+  it("clamps responsive side panes in center-first mode so the conversation remains visible near 1024px", () => {
     expect(routeStyles.layout).toContain("max-[980px]");
-    expect(routeStyles.layout).toContain("minmax(0,min(var(--chat-left-pane-width,0px),24vw))");
-    expect(routeStyles.layout).toContain("minmax(360px,1fr)");
-    expect(routeStyles.layout).toContain("minmax(0,min(var(--chat-right-pane-width,0px),22vw))");
-    expect(routeStyles.layout).toContain("minmax(280px,1fr)");
+    expect(routeStyles.layout).toContain("minmax(192px,var(--chat-left-pane-width,220px))");
+    expect(routeStyles.layout).toContain("minmax(0,1fr)");
+    expect(routeStyles.layout).toContain("minmax(244px,var(--chat-right-pane-width,284px))");
+    expect(routeStyles.layoutCenterFirst).toContain("minmax(0,min(var(--chat-left-pane-width,0px),24vw))");
+    expect(routeStyles.layoutCenterFirst).toContain("minmax(360px,1fr)");
+    expect(routeStyles.layoutCenterFirst).toContain("minmax(0,min(var(--chat-right-pane-width,0px),22vw))");
+    expect(routeStyles.layoutCenterFirst).toContain("minmax(280px,1fr)");
   });
 
   it("compresses the left rail into primary controls plus auxiliary status groups", () => {

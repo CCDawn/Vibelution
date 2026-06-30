@@ -71,9 +71,16 @@ describe("AppShell layout contract", () => {
       shellStyles.indexOf("@media (max-width: 1420px)"),
       shellStyles.indexOf("@media (max-width: 1180px)"),
     );
-    expect(compactDesktopBlock).toContain(":where(.vui-app-appshell).topClock span:last-child");
-    expect(compactDesktopBlock).toContain(":where(.vui-app-appshell).statusBadgeValue");
+    expect(compactDesktopBlock).not.toContain(":where(.vui-app-appshell).topClock span:last-child");
+    expect(compactDesktopBlock).not.toContain(":where(.vui-app-appshell).statusBadgeValue");
     expect(compactDesktopBlock).toContain("display: none");
+
+    const narrowDesktopBlock = shellStyles.slice(
+      shellStyles.indexOf("@media (max-width: 1180px)"),
+      shellStyles.indexOf("@media (max-width: 980px)"),
+    );
+    expect(narrowDesktopBlock).toContain(":where(.vui-app-appshell).topClock span:last-child");
+    expect(narrowDesktopBlock).not.toContain(":where(.vui-app-appshell).statusBadgeValue");
   });
 
   it("keeps the light shell top bar on light surfaces with a stable brand stack", () => {

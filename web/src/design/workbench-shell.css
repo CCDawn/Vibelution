@@ -364,8 +364,6 @@
 
 @media (max-width: 1420px) {
   :where(.vui-app-appshell).utilityTriggerLabel,
-  :where(.vui-app-appshell).topClock span:last-child,
-  :where(.vui-app-appshell).statusBadgeValue,
   :where(.vui-app-appshell).statusBadgeLabel {
     display: none;
   }
@@ -373,8 +371,8 @@
 
 @media (max-width: 1180px) {
   :where(.vui-app-appshell).brandSubtle,
+  :where(.vui-app-appshell).topClock span:last-child,
   :where(.vui-app-appshell).utilityTriggerLabel,
-  :where(.vui-app-appshell).statusBadgeValue,
   :where(.vui-app-appshell).statusBadgeLabel {
     display: none;
   }
