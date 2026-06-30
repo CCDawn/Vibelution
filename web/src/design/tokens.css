@@ -101,6 +101,11 @@
   --font-display: "Segoe UI Variable Display", "Segoe UI", sans-serif;
   --font-body: "Segoe UI Variable Text", "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Code", monospace;
+  --font-size-micro: 0.72rem;
+  --font-size-caption: 0.78rem;
+  --font-size-small: 0.82rem;
+  --font-size-body: 0.9rem;
+  --font-size-title: 1rem;
 
   --radius-control: 7px;
   --radius-panel: 8px;

@@ -17,9 +17,9 @@
   --vui-legacy-control-padding-x: 8px;
   --vui-legacy-field-padding-x: 9px;
   --vui-legacy-control-gap: 6px;
-  --vui-legacy-control-font-size: 0.76rem;
+  --vui-legacy-control-font-size: var(--font-size-caption);
   --vui-legacy-control-font-weight: 650;
-  --vui-legacy-field-font-size: 0.78rem;
+  --vui-legacy-field-font-size: var(--font-size-small);
   --vui-legacy-focus-ring: var(--vui-focus-ring);
 }
 

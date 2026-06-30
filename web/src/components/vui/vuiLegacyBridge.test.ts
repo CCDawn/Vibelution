@@ -34,6 +34,8 @@ describe("VUI legacy bridge", () => {
       "--vui-legacy-field-fg",
       "--vui-legacy-field-placeholder",
       "--vui-legacy-control-gap",
+      "--vui-legacy-control-font-size",
+      "--vui-legacy-field-font-size",
       "--vui-legacy-focus-ring",
     ]) {
       expect(bridgeSource).toContain(token);
@@ -48,6 +50,8 @@ describe("VUI legacy bridge", () => {
     expect(bridgeSource).toContain('[class*="Icon"]');
     expect(bridgeSource).toContain("display: inline-flex");
     expect(bridgeSource).toContain("padding-inline: var(--vui-legacy-control-padding-x)");
+    expect(bridgeSource).toContain("--vui-legacy-control-font-size: var(--font-size-caption)");
+    expect(bridgeSource).toContain("--vui-legacy-field-font-size: var(--font-size-small)");
     expect(bridgeSource).toContain('input:not([type="checkbox"]):not([type="radio"]):not([type="range"])');
     expect(bridgeSource).toContain('input[type="checkbox"]');
     expect(bridgeSource).toContain("accent-color: var(--accent-cool)");
