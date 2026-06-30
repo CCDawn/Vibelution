@@ -517,6 +517,26 @@ const styles = createVuiStyleMap(styleKeys, {
     featureChipPrimary:
       "border-[color-mix(in_srgb,var(--accent-warm)_32%,var(--vui-border-subtle))] before:bg-[var(--accent-warm-2)]",
     featureChipRow: "grid min-w-0 grid-cols-2 gap-1.5 overflow-visible rounded-none border-0 bg-transparent p-0",
+    panelNotice:
+      "grid min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_22%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_5%,var(--vui-surface-row))] px-2 py-1.5 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)]",
+    panelState:
+      "grid min-h-[42px] min-w-0 place-items-center rounded-[var(--radius-control)] border border-dashed border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-row)_66%,transparent)] px-2 py-2 text-center text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-tertiary)]",
+    systemEntryButton:
+      "!grid min-h-[48px] !w-full grid-cols-[26px_minmax(0,1fr)] items-center justify-start gap-2 overflow-hidden rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,transparent)] px-2 py-1.5 text-left text-[var(--fg-secondary)] shadow-none transition-colors hover:border-[color-mix(in_srgb,var(--accent-cool)_26%,var(--vui-border-subtle))] hover:bg-[color-mix(in_srgb,var(--accent-cool)_6%,var(--vui-surface-row))] [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+    systemEntryButtonActive:
+      "border-[color-mix(in_srgb,var(--accent-cool)_36%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_9%,var(--vui-surface-row))] text-[var(--fg-primary)]",
+    systemEntryCopy:
+      "grid min-w-0 gap-0.5 overflow-hidden text-left",
+    systemEntryGroup:
+      "grid min-w-0 gap-1.5 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] p-2 shadow-[var(--vui-shadow-hairline)]",
+    systemEntryIcon:
+      "grid size-[26px] shrink-0 place-items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] text-[var(--fg-secondary)]",
+    systemEntryMeta:
+      "block min-w-0 truncate text-[10px] font-medium leading-tight text-[var(--fg-tertiary)]",
+    systemEntryTitle:
+      "block min-w-0 truncate text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-primary)]",
+    systemEntryTitleRow:
+      "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-1",
     tokenStatusBar:
       "relative mt-1 block h-1 overflow-hidden rounded-full bg-[var(--vui-border-subtle)] [&>span]:block [&>span]:h-full [&>span]:rounded-full [&>span]:bg-[var(--accent-cool)] [&>span]:w-[calc(var(--token-status-value)*1%)]",
     tokenStatusCopy: "grid min-w-0 gap-0.5 overflow-visible [overflow-wrap:anywhere]",
