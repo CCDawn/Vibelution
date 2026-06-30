@@ -92,7 +92,7 @@ import {
   storedPaneWidth,
 } from "./resizablePane";
 import { savePendingSelfEvolutionHandoff } from "./selfEvolutionHandoff";
-import styles from "./EvolutionRoute.module.css";
+import styles from "./EvolutionRoute.styles";
 
 type RunFilter = "all" | "success" | "failed";
 type LibraryView = "items" | "pending";

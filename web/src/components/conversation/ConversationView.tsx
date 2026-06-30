@@ -81,7 +81,7 @@ import {
   type TimelineScrollRowKeyAnchor,
 } from "./timelineScrollAnchor";
 import { VButton } from "../vui";
-import styles from "./ConversationView.module.css";
+import styles from "./ConversationView.styles";
 
 const RUNNING_OPERATION_STATUSES = new Set(["queued", "pending", "running", "thinking", "tooling", "answering"]);
 const DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT = 3;

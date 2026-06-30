@@ -4,6 +4,7 @@ export const WORKBENCH_THEME_STORAGE_KEY = "vibelution.workbench.theme";
 export const DEFAULT_WORKBENCH_THEME: WorkbenchTheme = "light";
 
 type ThemeStorage = Pick<Storage, "getItem" | "setItem">;
+type ThemeDocumentTarget = Pick<Document, "documentElement">;
 
 function browserStorage(): ThemeStorage | null {
   if (typeof window === "undefined") {
@@ -40,4 +41,8 @@ export function writeStoredWorkbenchTheme(theme: WorkbenchTheme, storage: ThemeS
 
 export function nextWorkbenchTheme(theme: WorkbenchTheme): WorkbenchTheme {
   return theme === "dark" ? "light" : "dark";
+}
+
+export function applyWorkbenchDocumentTheme(targetDocument: ThemeDocumentTarget, theme: WorkbenchTheme): void {
+  targetDocument.documentElement.setAttribute("data-theme", theme);
 }

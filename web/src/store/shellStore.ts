@@ -22,9 +22,21 @@ type ShellState = {
 };
 
 const DEFAULT_CHAT_PANEL_WIDTHS: ChatPanelWidths = {
-  leftPanelWidth: 220,
-  rightPanelWidth: 284,
+  leftPanelWidth: 260,
+  rightPanelWidth: 340,
 };
+
+function normalizePanelWidth(value: unknown, fallback: number) {
+  const numericValue = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numericValue) ? Math.max(fallback, Math.round(numericValue)) : fallback;
+}
+
+function normalizePersistedChatPanelWidths(widths: Partial<ChatPanelWidths> | undefined): ChatPanelWidths {
+  return {
+    leftPanelWidth: normalizePanelWidth(widths?.leftPanelWidth, DEFAULT_CHAT_PANEL_WIDTHS.leftPanelWidth),
+    rightPanelWidth: normalizePanelWidth(widths?.rightPanelWidth, DEFAULT_CHAT_PANEL_WIDTHS.rightPanelWidth),
+  };
+}
 
 const NOOP_SHELL_STORAGE: StateStorage = {
   getItem: () => null,
@@ -67,6 +79,15 @@ export const useShellStore = create<ShellState>()(
         chatPanelWidths: state.chatPanelWidths,
         topBarMode: state.topBarMode,
       }),
+      merge: (persistedState, currentState) => {
+        const persistedShellState =
+          persistedState && typeof persistedState === "object" ? persistedState as Partial<ShellState> : {};
+        return {
+          ...currentState,
+          ...persistedShellState,
+          chatPanelWidths: normalizePersistedChatPanelWidths(persistedShellState.chatPanelWidths),
+        };
+      },
     },
   ),
 );

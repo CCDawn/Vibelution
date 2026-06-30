@@ -48,9 +48,9 @@ import {
   shouldArmBrowserProjectCloseGuard,
   shouldBlockProjectWindowClose,
 } from "../app/projectCloseGuard";
-import { VButton } from "../components/vui";
+import { VButton, VRouteHeader } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
-import styles from "./LauncherRoute.module.css";
+import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
 
 type LauncherNotice = {
   tone: "neutral" | "success" | "warning" | "error";
@@ -2547,40 +2547,42 @@ export function LauncherRoute() {
 
   return (
     <section className={styles.route} aria-label={copy.title}>
-      <header className={styles.header}>
-        <div>
-          <p className={styles.eyebrow}>{copy.eyebrow}</p>
-          <h1 className={styles.title}>{copy.title}</h1>
-          <p className={styles.subtitle} title={lifecycleDisplay.detail || copy.subtitle}>{lifecycleDetailShort || copy.subtitle}</p>
-        </div>
-        <div className={styles.statusBar}>
-          <div className={styles.statusBarReason} data-tone={userGuideTone} title={statusBarBlockerReason}>
-            <span>{copy.lifecycleStatus}</span>
-            <strong>{projectSummary}</strong>
-            <small>{statusBarReasonText}</small>
+      <VRouteHeader
+        className={styles.header}
+        aria-label={lifecycleDisplay.detail || copy.subtitle}
+        eyebrow={copy.eyebrow}
+        title={copy.title}
+        meta={lifecycleDetailShort || copy.subtitle}
+        actions={(
+          <div className={styles.statusBar}>
+            <div className={styles.statusBarReason} data-tone={userGuideTone} title={statusBarBlockerReason}>
+              <span>{copy.lifecycleStatus}</span>
+              <strong>{projectSummary}</strong>
+              <small>{statusBarReasonText}</small>
+            </div>
+            <div className={styles.statusBarActions} aria-label={copy.lifecycleControls}>
+              <VButton type="button" variant="secondary" className={styles.statusBarButton} onPress={() => void statusQuery.refetch()} isDisabled={statusQuery.isFetching} title={copy.refresh} icon={statusQuery.isFetching ? <LoaderCircle size={15} className={styles.spin} /> : <RefreshCw size={15} />}>
+                <span>{copy.refresh}</span>
+              </VButton>
+              <VButton type="button" variant="primary" className={`${styles.statusBarButton} ${styles.primaryButton}`} onPress={() => controlMutation.mutate("start")} isDisabled={startDisabled} title={startDisabled ? startDisabledReason : copy.start} icon={<Play size={15} />}>
+                <span>{copy.start}</span>
+              </VButton>
+              <VButton type="button" variant="secondary" className={styles.statusBarButton} onPress={() => controlMutation.mutate("restart")} isDisabled={destructiveActionDisabled} title={destructiveActionDisabled ? destructiveActionDisabledReason : copy.restart} icon={<RefreshCw size={15} />}>
+                <span>{copy.restart}</span>
+              </VButton>
+              <VButton type="button" variant="secondary" className={styles.statusBarButton} onPress={() => controlMutation.mutate("stop")} isDisabled={stopDisabled} title={stopDisabled ? stopDisabledReason : copy.stop} icon={<Square size={15} />}>
+                <span>{copy.stop}</span>
+              </VButton>
+              {bundle?.url ? (
+                <a className={styles.statusBarButton} href={bundle.url} target="_blank" rel="noreferrer" title={copy.open}>
+                  <ExternalLink size={15} />
+                  <span>{copy.open}</span>
+                </a>
+              ) : null}
+            </div>
           </div>
-          <div className={styles.statusBarActions} aria-label={copy.lifecycleControls}>
-            <VButton type="button" variant="secondary" className={styles.statusBarButton} onPress={() => void statusQuery.refetch()} isDisabled={statusQuery.isFetching} title={copy.refresh} icon={statusQuery.isFetching ? <LoaderCircle size={15} className={styles.spin} /> : <RefreshCw size={15} />}>
-              <span>{copy.refresh}</span>
-            </VButton>
-            <VButton type="button" variant="primary" className={`${styles.statusBarButton} ${styles.primaryButton}`} onPress={() => controlMutation.mutate("start")} isDisabled={startDisabled} title={startDisabled ? startDisabledReason : copy.start} icon={<Play size={15} />}>
-              <span>{copy.start}</span>
-            </VButton>
-            <VButton type="button" variant="secondary" className={styles.statusBarButton} onPress={() => controlMutation.mutate("restart")} isDisabled={destructiveActionDisabled} title={destructiveActionDisabled ? destructiveActionDisabledReason : copy.restart} icon={<RefreshCw size={15} />}>
-              <span>{copy.restart}</span>
-            </VButton>
-            <VButton type="button" variant="secondary" className={styles.statusBarButton} onPress={() => controlMutation.mutate("stop")} isDisabled={stopDisabled} title={stopDisabled ? stopDisabledReason : copy.stop} icon={<Square size={15} />}>
-              <span>{copy.stop}</span>
-            </VButton>
-            {bundle?.url ? (
-              <a className={styles.statusBarButton} href={bundle.url} target="_blank" rel="noreferrer" title={copy.open}>
-                <ExternalLink size={15} />
-                <span>{copy.open}</span>
-              </a>
-            ) : null}
-          </div>
-        </div>
-      </header>
+        )}
+      />
 
       <div className={styles.summaryStrip} data-tone={launcherStatusDisconnected ? "neutral" : headerTone}>
         <Metric label={copy.lifecycleStatus} value={projectSummary} helper={lifecycleDetailShort} helperTitle={lifecycleDisplay.detail} tone={lifecycleDisplay.tone} />

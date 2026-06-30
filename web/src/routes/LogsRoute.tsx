@@ -35,7 +35,7 @@ import {
   LogRoot,
   LogTreeResponse,
 } from "../api/types";
-import { VButton, VIconButton } from "../components/vui";
+import { VButton, VIconButton, VRouteHeader, VStatusStrip } from "../components/vui";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { LazyFilePreview } from "../components/preview/LazyFilePreview";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
@@ -43,7 +43,7 @@ import { useAppI18n } from "../i18n/useAppI18n";
 import { type LogSeverityFilter } from "../logs/logSeverity";
 import { buildLogPackageIndex, logPackageFilePaths, type LogPackageIndexItem } from "./logPackageIndex";
 import { RuntimeScenesPane } from "./RuntimeScenesPane";
-import styles from "./LogsRoute.module.css";
+import styles from "./LogsRoute.styles";
 
 const ROOT_LABEL_KEYS = {
   runtime_scenes: "logsRootRuntimeScenes",
@@ -1081,18 +1081,23 @@ export function LogsRoute() {
 
   return (
     <div className={styles.route}>
-      <header className={styles.header}>
-        <div>
-          <p className={styles.eyebrow}>{t("navLogs")}</p>
-          <h1 className={styles.title}>{t("logsTitle")}</h1>
-          <p className={styles.subtitle} title={t("logsSubtitle")}>{logsCompactSubtitle}</p>
-        </div>
-        <div className={styles.headerMeta}>
-          <span className={styles.metaPill}>{t("readonlyPreview")}</span>
-          <span className={styles.metaPill}>{t("copyEnabled")}</span>
-          <span className={styles.metaPill}>{t("cleanupEnabled")}</span>
-        </div>
-      </header>
+      <VRouteHeader
+        className={styles.header}
+        aria-label={t("logsSubtitle")}
+        eyebrow={t("navLogs")}
+        title={t("logsTitle")}
+        meta={logsCompactSubtitle}
+        actions={(
+          <VStatusStrip
+            className={styles.headerMeta}
+            items={[
+              { label: lang === "zh" ? "预览" : "Preview", value: t("readonlyPreview") },
+              { label: lang === "zh" ? "复制" : "Copy", value: t("copyEnabled"), tone: "success" },
+              { label: lang === "zh" ? "清理" : "Clean", value: t("cleanupEnabled"), tone: "warning" },
+            ]}
+          />
+        )}
+      />
 
       <div ref={workspaceRef} className={styles.workspace} style={layoutStyle}>
         {activeRoot && isRuntimeScenesRoot ? (

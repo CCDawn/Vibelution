@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchJson } from "../../api/client";
 import { VButton } from "../../components/vui";
 import type { CliAgentRunView, CliAgentTerminalSession } from "../ChatCodingRoute";
-import styles from "../ChatCodingRoute.module.css";
+import styles from "../ChatCodingRoute.styles";
 import "@xterm/xterm/css/xterm.css";
 
 type CliAgentTerminalEvent = {

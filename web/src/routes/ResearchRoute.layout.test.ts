@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import styles from "./ResearchRoute.module.css";
+import styles from "./ResearchRoute.styles";
 import routeSource from "./ResearchRoute.tsx?raw";
 
 describe("ResearchRoute layout contract", () => {

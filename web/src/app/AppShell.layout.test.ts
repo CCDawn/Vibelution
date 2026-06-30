@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import styles from "./AppShell.module.css";
+import styles from "./AppShell.styles";
 import indexHtml from "../../index.html?raw";
 import manifestSource from "../../public/manifest.webmanifest?raw";
 import shellSource from "./AppShell.tsx?raw";
@@ -12,7 +12,7 @@ import useShellI18nSource from "../i18n/useShellI18n.ts?raw";
 import utilityMenuSource from "./AppShellUtilityMenu.tsx?raw";
 import statusGuideSource from "./AppShellStatusGuidePanel.tsx?raw";
 
-const shellStyles = readFileSync(fileURLToPath(new URL("./AppShell.module.css", import.meta.url)), "utf8");
+const shellStyles = readFileSync(fileURLToPath(new URL("./AppShell.legacy.css", import.meta.url)), "utf8");
 
 describe("AppShell layout contract", () => {
   it("routes shell controls through VUI primitives", () => {
@@ -74,9 +74,17 @@ describe("AppShell layout contract", () => {
     expect(lightThemeBlock).not.toContain("--shell-surface: color-mix(in srgb, var(--fg-primary)");
     expect(lightThemeBlock).not.toContain("--shell-panel: var(--fg-primary)");
     expect(shellStyles).toContain('.shell[data-theme="light"] .topBar::before');
-    expect(shellStyles).toContain("background: color-mix(in srgb, var(--surface-panel) 86%, transparent)");
+    expect(shellStyles).toContain("color-mix(in srgb, var(--surface-panel) 68%, transparent)");
+    expect(shellStyles).not.toContain("background: color-mix(in srgb, var(--surface-panel) 86%, transparent)");
     expect(shellStyles).toContain('grid-template-areas:\n    "brand version"\n    "subtle subtle";');
     expect(shellStyles).toContain("max-width: min(230px, 34vw)");
+  });
+
+  it("syncs the selected theme to the document root for global VUI tokens", () => {
+    expect(shellSource).toContain("syncWorkbenchThemeRoot(theme)");
+    expect(shellSource).toContain("useEffect(() => syncWorkbenchThemeRoot(theme), [theme])");
+    expect(launcherShellSource).toContain("applyWorkbenchDocumentTheme(document, theme)");
+    expect(launcherShellSource).toContain("}, [lang, theme])");
   });
 
   it("can hide the web top bar while keeping a restore control", () => {
@@ -360,6 +368,8 @@ describe("AppShell layout contract", () => {
   it("themes the managed app window chrome to match the light-first shell", () => {
     const manifest = JSON.parse(manifestSource);
 
+    expect(indexHtml).toContain('data-theme="light"');
+    expect(indexHtml).toContain('localStorage.getItem("vibelution.workbench.theme")');
     expect(indexHtml).toContain('name="theme-color" content="#f7f8fa"');
     expect(indexHtml).toContain('name="color-scheme" content="light dark"');
     expect(indexHtml).toContain('rel="manifest" href="/manifest.webmanifest"');

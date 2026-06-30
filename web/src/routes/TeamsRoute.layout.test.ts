@@ -4,10 +4,10 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
 import routeSource from "./TeamsRoute.tsx?raw";
-import routeStyles from "./TeamsRoute.module.css";
+import routeStyles from "./TeamsRoute.styles";
 import routerSource from "../app/router.tsx?raw";
 
-const routeStylesSource = readFileSync(new URL("./TeamsRoute.module.css", import.meta.url), "utf-8");
+const routeStylesSource = readFileSync(new URL("./TeamsRoute.legacy.css", import.meta.url), "utf-8");
 
 describe("TeamsRoute layout contract", () => {
   it("uses shell language state without loading the full app dictionary", () => {
@@ -259,13 +259,17 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("const hasTeams = visibleTeams.length > 0");
     expect(routeSource).toContain("visibleTeamSummary.activeTeamCount");
     expect(routeSource).toContain("visibleTeams.map((team) => (");
-    expect(routeSource).toContain("visibleTeams.find((team) => team.teamId === event.target.value)");
+    expect(routeSource).toContain("visibleTeams.find((team) => team.teamId === String(key))");
     expect(routeSource).toContain("visibleTeams.find((team) => team.teamId === effectiveTeamId)");
     expect(routeSource).not.toContain("{teams.map((team) => (");
     expect(routeSource).not.toContain("teams[0]?.teamId");
   });
 
   it("renders a dense list canvas inspector workflow", () => {
+    expect(routeSource).toContain("VRouteHeader");
+    expect(routeSource).toContain("VSelect");
+    expect(routeSource).toContain("VStatusStrip");
+    expect(routeSource).toContain("VIconButton");
     expect(routeSource).toContain("teamContextBar");
     expect(routeSource).toContain("teamSelectField");
     expect(routeSource).toContain("teamContextChips");
@@ -278,6 +282,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("teamPickerSummary");
     expect(routeSource).not.toContain("summaryBar");
     expect(routeSource).toContain("aria-label={lang === \"zh\" ? \"选择团队\" : \"Select team\"}");
+    expect(routeSource).not.toContain("<select\n            value={selectedTeam?.teamId ?? effectiveTeamId}");
     expect(routeSource).not.toContain("className={styles.teamPanel}");
     expect(routeSource).toContain("canvasPanel");
     expect(routeSource).toContain("inspector");
@@ -746,7 +751,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("启动实验规划");
     expect(routeSource).toContain("启动迭代");
     expect(routeSource).not.toContain("{researchWorkflowTeamSelected ? renderResearchWorkspaceNav() : null}");
-    expect(routeSource).toContain("onChange={(event) => {");
+    expect(routeSource).toContain("onSelectionChange={(key) => {");
     expect(routeSource).toContain("selectTeamRecord(nextTeam)");
     expect(routeSource).toContain("setResearchWorkspaceView(\"overview\")");
     expect(routeSource).not.toContain("{renderResearchWorkspaceNav()}");

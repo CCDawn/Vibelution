@@ -22,7 +22,7 @@ import {
 } from "./ConversationView";
 import { isAgentInboxMessage } from "./messageSections";
 
-const conversationViewStylesSource = readFileSync(new URL("./ConversationView.module.css", import.meta.url), "utf-8");
+const conversationViewStylesSource = readFileSync(new URL("./ConversationView.legacy.css", import.meta.url), "utf-8");
 
 function cssRule(selector: string) {
   const start = conversationViewStylesSource.indexOf(`${selector} {`);
@@ -31,6 +31,11 @@ function cssRule(selector: string) {
   }
   const end = conversationViewStylesSource.indexOf("\n}", start);
   return end === -1 ? conversationViewStylesSource.slice(start) : conversationViewStylesSource.slice(start, end + 2);
+}
+
+function semanticArticleClassCount(html: string, className: string) {
+  const escaped = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return html.match(new RegExp(`<article class="[^"]*(?:\\s|^)${escaped}(?:\\s|")`, "g"))?.length ?? 0;
 }
 
 function renderConversation(
@@ -498,7 +503,7 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html).toContain("最终回答已经落库。");
     expect(html).not.toContain("临时活动层旧尾巴。");
-    expect(html.match(/<article class="_assistantTurn_/g)?.length ?? 0).toBe(1);
+    expect(semanticArticleClassCount(html, "assistantTurn")).toBe(1);
   });
 
   it("merges a same-turn live overlay into the active assistant turn instead of rendering duplicates", () => {
@@ -715,7 +720,7 @@ describe("ConversationView edit resend affordance", () => {
       { useDefaultProcessDisplayMode: true },
     );
 
-    expect(html.match(/<article class="_assistantTurn_/g)?.length ?? 0).toBe(1);
+    expect(semanticArticleClassCount(html, "assistantTurn")).toBe(1);
     expect(html).toContain("工具调用 4");
     expect(html).not.toContain("工具调用 1");
   });
@@ -974,7 +979,7 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html.match(/src="\/api\/agents\/avatar-image\/agent-zhounanzhi\.png"/g)?.length ?? 0).toBe(1);
     expect(html.match(/周南栀/g)?.length ?? 0).toBe(1);
-    expect(html.match(/<article class="_assistantTurn_/g)?.length ?? 0).toBe(1);
+    expect(semanticArticleClassCount(html, "assistantTurn")).toBe(1);
     expect(html.match(/assistantTurnContinuation/g)?.length ?? 0).toBe(0);
     expect(html.indexOf("answerOnlyProcessGroup")).toBeLessThan(html.indexOf("responseSection"));
     expect(html).toContain("上下文已读取，继续整理结果。");
@@ -1032,7 +1037,7 @@ describe("ConversationView edit resend affordance", () => {
       { useDefaultProcessDisplayMode: true },
     );
 
-    expect(html.match(/<article class="_assistantTurn_/g)?.length ?? 0).toBe(1);
+    expect(semanticArticleClassCount(html, "assistantTurn")).toBe(1);
     expect(html).toContain("这是最终回答，默认应该直接可见。");
   });
 

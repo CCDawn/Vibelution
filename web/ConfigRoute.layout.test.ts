@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 
 import configRouteSource from "./src/routes/ConfigRoute.tsx?raw";
 
-const configRouteCss = readFileSync(new URL("./src/routes/ConfigRoute.module.css", import.meta.url), "utf-8");
+const configRouteCss = readFileSync(new URL("./src/routes/ConfigRoute.legacy.css", import.meta.url), "utf-8");
 
 function cssRule(selector: string): string {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return configRouteCss.match(new RegExp(`${escaped}\\s*\\{[^}]*\\}`, "s"))?.[0] ?? "";
+  return configRouteCss.match(new RegExp(`[^\\n{]*${escaped}\\s*\\{[^}]*\\}`, "s"))?.[0] ?? "";
 }
 
 function cssBetween(start: string, end: string): string {
@@ -41,8 +41,8 @@ describe("ConfigRoute layout density contract", () => {
     const phoneRules = cssBetween("@media (max-width: 720px)", "");
 
     expect(tabletRules).toContain("repeat(auto-fit, minmax(210px, 1fr))");
-    expect(tabletRules).not.toMatch(/\.treeGrid\s*{[^}]*grid-template-columns:\s*1fr/s);
-    expect(phoneRules).toMatch(/\.treeGrid\s*{[^}]*grid-template-columns:\s*1fr/s);
+    expect(tabletRules).not.toMatch(/[^{}]*\.treeGrid\s*{[^}]*grid-template-columns:\s*1fr/s);
+    expect(phoneRules).toMatch(/[^{}]*\.treeGrid\s*{[^}]*grid-template-columns:\s*1fr/s);
   });
 });
 
@@ -141,10 +141,10 @@ describe("ConfigRoute content experience contract", () => {
   it("guards model library action buttons against invalid or locked edits", () => {
     expect(configRouteSource).toContain("const modelEditorRequiredFieldsReady = Boolean(modelEditor.model.trim() && modelEditor.provider.base_url.trim())");
     expect(configRouteSource).toContain("const canSubmitModelEditor = !structuredActionsDisabled && modelEditorRequiredFieldsReady");
-    expect(configRouteSource).toContain("disabled={!canSubmitModelEditor}");
+    expect(configRouteSource).toContain("isDisabled={!canSubmitModelEditor}");
     expect(configRouteSource).toContain("setModelEditorError(copy.modelRequiredFieldsMissing)");
-    expect(configRouteSource).toContain("disabled={structuredActionsDisabled || !row.editable || !option}");
-    expect(configRouteSource).toContain("disabled={structuredActionsDisabled}");
+    expect(configRouteSource).toContain("isDisabled={structuredActionsDisabled || !row.editable || !option}");
+    expect(configRouteSource).toContain("isDisabled={structuredActionsDisabled}");
   });
 
   it("labels the bulk image capability check as saved-model scoped", () => {

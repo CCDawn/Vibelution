@@ -5,11 +5,11 @@ import { readFileSync } from "node:fs";
 import routeSource from "./AgentsRoute.tsx?raw";
 import agentManagementNavSource from "./AgentManagementNav.tsx?raw";
 import agentWorkspaceCacheSource from "./agentWorkspaceCache.ts?raw";
-import styles from "./AgentsRoute.module.css";
+import styles from "./AgentsRoute.styles";
 import routerSource from "../app/router.tsx?raw";
 import shellSource from "../app/AppShell.tsx?raw";
 
-const stylesSource = readFileSync(new URL("./AgentsRoute.module.css", import.meta.url), "utf-8");
+const stylesSource = readFileSync(new URL("./AgentsRoute.legacy.css", import.meta.url), "utf-8");
 
 function sourceBlocksForStyle(styleName: string): string[] {
   const marker = `className={styles.${styleName}}`;

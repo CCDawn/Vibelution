@@ -52,10 +52,11 @@ import {
 } from "../api/types";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
+import { VIconButton, VNativeButton, VRouteHeader, VSelect, VStatusStrip } from "../components/vui";
 import { agentCenterMemoryRoute, teamMemoryRoute } from "./agentCenterRoutes";
 import { agentDisplayInfo } from "./agentDisplay";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
-import styles from "./TeamsRoute.module.css";
+import styles from "./TeamsRoute.styles";
 
 const NODE_WIDTH = 172;
 const NODE_HEIGHT = 92;
@@ -6554,7 +6555,7 @@ export function TeamsRoute({
         {SOURCE_COLLECTION_SOURCE_FILTERS.map((filter) => {
           const selected = sourceCollectionSourceFilter === filter;
           return (
-            <button
+            <VNativeButton
               key={filter}
               type="button"
               className={selected ? styles.sourceCollectionFilterActive : ""}
@@ -6563,7 +6564,7 @@ export function TeamsRoute({
             >
               <span>{sourceCollectionSourceFilterLabel(filter, lang)}</span>
               <strong>{loading ? loadingValue : counts[filter] ?? 0}</strong>
-            </button>
+            </VNativeButton>
           );
         })}
       </div>
@@ -6623,13 +6624,13 @@ export function TeamsRoute({
       >
         <span>{lang === "zh" ? `第 ${start}-${end} 条 / 共 ${total} 条` : `${start}-${end} of ${total}`}</span>
         <div>
-          <button type="button" disabled={page <= 1} onClick={() => setSourceCollectionResultPage(stageId, page - 1)}>
+          <VNativeButton type="button" disabled={page <= 1} onClick={() => setSourceCollectionResultPage(stageId, page - 1)}>
             {lang === "zh" ? "上一页" : "Previous"}
-          </button>
+          </VNativeButton>
           <strong>{page}/{pageCount}</strong>
-          <button type="button" disabled={page >= pageCount} onClick={() => setSourceCollectionResultPage(stageId, page + 1)}>
+          <VNativeButton type="button" disabled={page >= pageCount} onClick={() => setSourceCollectionResultPage(stageId, page + 1)}>
             {lang === "zh" ? "下一页" : "Next"}
-          </button>
+          </VNativeButton>
         </div>
       </div>
     );
@@ -6818,9 +6819,9 @@ export function TeamsRoute({
                 : (lang === "zh" ? "选择一个阶段开始" : "Choose a stage to start")}
             </span>
           </div>
-          <button type="button" onClick={() => void researchStageRoundStatusQuery.refetch()} disabled={researchStageRoundStatusQuery.isFetching}>
+          <VNativeButton type="button" onClick={() => void researchStageRoundStatusQuery.refetch()} disabled={researchStageRoundStatusQuery.isFetching}>
             <RefreshCw size={13} />
-          </button>
+          </VNativeButton>
         </div>
         <label className={styles.researchStageTopicInput}>
           <span>{lang === "zh" ? "研究主题" : "Research topic"}</span>
@@ -6863,7 +6864,7 @@ export function TeamsRoute({
                 )}
                 {renderResearchStageAgentSummary(stageType)}
                 <div className={styles.researchStageActions}>
-                  <button
+                  <VNativeButton
                     type="button"
                     onClick={() => runStagePrimaryAction(stageType)}
                     disabled={disabled}
@@ -6871,9 +6872,9 @@ export function TeamsRoute({
                   >
                     {stageType === "knowledge_collection" && selectedSourceCollectionRun && sourceCollectionSearchOpenAssignmentCount > 0 ? <Search size={13} /> : <Play size={13} />}
                     {primaryLabel}
-                  </button>
+                  </VNativeButton>
                   {stageType === "knowledge_collection" ? (
-                    <button
+                    <VNativeButton
                       type="button"
                       onClick={runKnowledgeCollectionCompletionAction}
                       disabled={sourceCollectionCompletionActionDisabled}
@@ -6881,10 +6882,10 @@ export function TeamsRoute({
                     >
                       <CheckCircle2 size={13} />
                       {sourceCollectionCompletionActionLabel}
-                    </button>
+                    </VNativeButton>
                   ) : null}
                   {stageType === "knowledge_collection" ? (
-                    <button
+                    <VNativeButton
                       type="button"
                       onClick={() => {
                         if (!selectedTeam?.teamId) {
@@ -6907,7 +6908,7 @@ export function TeamsRoute({
                     >
                       <Plus size={13} />
                       {lang === "zh" ? "新一轮搜集" : "New round"}
-                    </button>
+                    </VNativeButton>
                   ) : null}
                   <Link to={researchWorkspaceStageRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID, stageType)}>
                     <Link2 size={13} />
@@ -7072,12 +7073,12 @@ export function TeamsRoute({
                     <Link2 size={13} />
                     {lang === "zh" ? "阶段详情" : "Stage detail"}
                   </Link>
-                  <button type="button" onClick={() => openSourceCollectionStageAgentChat(node.stageId)}>
+                  <VNativeButton type="button" onClick={() => openSourceCollectionStageAgentChat(node.stageId)}>
                     <MessageSquare size={13} />
                     {lang === "zh" ? "Agent 私聊" : "Agent chat"}
-                  </button>
+                  </VNativeButton>
                   {nodeState === "failed" ? (
-                    <button
+                    <VNativeButton
                       type="button"
                       onClick={runKnowledgeCollectionCompletionAction}
                       disabled={sourceCollectionCompletionActionDisabled || selectedTeamKnowledgeCollectionIngestPending}
@@ -7085,7 +7086,7 @@ export function TeamsRoute({
                     >
                       <RefreshCw size={13} />
                       {lang === "zh" ? "重试失败节点" : "Retry failed node"}
-                    </button>
+                    </VNativeButton>
                   ) : null}
                 </div>
               </article>
@@ -7161,12 +7162,12 @@ export function TeamsRoute({
                   <strong>{lang === "zh" ? "启动一轮搜索" : "Start a search round"}</strong>
                   <span>{lang === "zh" ? "主题 -> 可信来源 -> 摘要/引用 -> 运行记录" : "Topic -> trusted sources -> summary/refs -> run record"}</span>
                 </div>
-                <button type="submit" disabled={!aiSearchRunCanStart}>
+                <VNativeButton type="submit" disabled={!aiSearchRunCanStart}>
                   <Search size={13} />
                   {selectedTeamStartAiSearchPending
                     ? (lang === "zh" ? "搜索中" : "Searching")
                     : (lang === "zh" ? "启动一键搜索" : "Start search")}
-                </button>
+                </VNativeButton>
               </div>
               <label className={styles.aiSearchRunTopic}>
                 <span>{lang === "zh" ? "主题" : "Topic"}</span>
@@ -7490,20 +7491,20 @@ export function TeamsRoute({
           <strong>{lang === "zh" ? "本轮产物" : "Run artifacts"}</strong>
         </div>
         <div className={styles.workflowSourceCollectionStorageButtons}>
-          <button
+          <VNativeButton
             type="button"
             disabled={selectedSourceCollectionStorageOpenPending}
             onClick={() => openSourceCollectionStorageTarget("run_directory")}
           >
             <Link2 size={12} />
             {sourceCollectionStorageTargetLabel("run_directory", lang)}
-          </button>
+          </VNativeButton>
         </div>
         <details className={styles.workflowSourceCollectionStorageDetails}>
           <summary>{lang === "zh" ? "更多证据文件" : "More evidence files"}</summary>
           <div className={styles.workflowSourceCollectionStorageButtons}>
             {detailActions.map((target) => (
-              <button
+              <VNativeButton
                 key={target}
                 type="button"
                 disabled={selectedSourceCollectionStorageOpenPending}
@@ -7511,7 +7512,7 @@ export function TeamsRoute({
               >
                 <Link2 size={12} />
                 {sourceCollectionStorageTargetLabel(target, lang)}
-              </button>
+              </VNativeButton>
             ))}
           </div>
           <small title={selectedSourceCollectionStorageArtifacts.runDirectory}>
@@ -7578,7 +7579,7 @@ export function TeamsRoute({
                 </a>
               ) : null}
               {fileStorageTarget ? (
-                <button
+                <VNativeButton
                   type="button"
                   onClick={() => openSourceCollectionStorageTarget(fileStorageTarget, runId)}
                   disabled={selectedSourceCollectionStorageOpenPending}
@@ -7586,7 +7587,7 @@ export function TeamsRoute({
                 >
                   <Link2 size={12} />
                   {sourceCollectionStorageTargetLabel(fileStorageTarget, lang)}
-                </button>
+                </VNativeButton>
               ) : null}
             </>
           ) : (
@@ -7597,7 +7598,7 @@ export function TeamsRoute({
             </span>
           )}
           {runId ? storageTargets.map((target) => (
-            <button
+            <VNativeButton
               key={`${selectedSourceCollectionCandidate.candidateId}-${target}`}
               type="button"
               onClick={() => openSourceCollectionStorageTarget(target, runId)}
@@ -7605,7 +7606,7 @@ export function TeamsRoute({
             >
               <Link2 size={12} />
               {sourceCollectionStorageTargetLabel(target, lang)}
-            </button>
+            </VNativeButton>
           )) : null}
         </div>
         {hasSearchEvidence ? (
@@ -7700,7 +7701,7 @@ export function TeamsRoute({
           <span>{lang === "zh" ? "待 Agent 复核" : "pending agent review"} <strong>{sourceCollectionRunPendingScreeningCountText}</strong></span>
         </div>
         <div className={styles.sourceCollectionPanelActions}>
-          <button
+          <VNativeButton
             type="button"
             className={styles.sourceCollectionStagePrimaryAction}
             onClick={runSourceCollectionScreeningAction}
@@ -7709,8 +7710,8 @@ export function TeamsRoute({
           >
             <CheckCircle2 size={13} />
             {sourceCollectionScreeningButtonText}
-          </button>
-          <button
+          </VNativeButton>
+          <VNativeButton
             type="button"
             className={styles.sourceCollectionStageSecondaryAction}
             onClick={openSourceCollectionScreeningPanel}
@@ -7719,7 +7720,7 @@ export function TeamsRoute({
           >
             <Eye size={13} />
             {lang === "zh" ? "查看筛选结果" : "View results"}
-          </button>
+          </VNativeButton>
         </div>
         {screeningCandidates.length ? (
           <div
@@ -7792,7 +7793,7 @@ export function TeamsRoute({
                       )}
                     </div>
                     <div className={styles.workflowCandidateActions}>
-                      <button
+                      <VNativeButton
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation();
@@ -7811,8 +7812,8 @@ export function TeamsRoute({
                         {candidateQualityPending && assessSourceQualityMutation.variables?.decision === "approved"
                           ? (lang === "zh" ? "筛选中" : "Assessing")
                           : (lang === "zh" ? "通过复核" : "Approve")}
-                      </button>
-                      <button
+                      </VNativeButton>
+                      <VNativeButton
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation();
@@ -7831,8 +7832,8 @@ export function TeamsRoute({
                         {candidateQualityPending && assessSourceQualityMutation.variables?.decision === "needs_revision"
                           ? (lang === "zh" ? "退回中" : "Returning")
                           : (lang === "zh" ? "退回补资料" : "Repair")}
-                      </button>
-                      <button
+                      </VNativeButton>
+                      <VNativeButton
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation();
@@ -7852,7 +7853,7 @@ export function TeamsRoute({
                           : chunkPlanSummary
                             ? (lang === "zh" ? "重建分块" : "Rebuild chunks")
                             : (lang === "zh" ? "生成分块" : "Plan chunks")}
-                      </button>
+                      </VNativeButton>
                     </div>
                   </article>
                 );
@@ -8573,12 +8574,12 @@ export function TeamsRoute({
               }
             />
           </label>
-          <button type="submit" disabled={!sourceCollectionCanStart || selectedTeamStartSourceCollectionPending}>
+          <VNativeButton type="submit" disabled={!sourceCollectionCanStart || selectedTeamStartSourceCollectionPending}>
             <Search size={13} />
             {selectedTeamStartSourceCollectionPending
               ? (lang === "zh" ? "启动中" : "Starting")
               : (lang === "zh" ? "启动搜集批次" : "Start collection")}
-          </button>
+          </VNativeButton>
           </form>
         </details>
         <div className={styles.workflowSourceCollectionRuns}>
@@ -8609,7 +8610,7 @@ export function TeamsRoute({
           {sourceCollectionAssignments.length ? (
             <div className={styles.workflowSourceCollectionAssignments}>
               {sourceCollectionAssignments.map((assignment) => (
-                <button
+                <VNativeButton
                   key={assignment.assignmentId}
                   type="button"
                   className={assignment.assignmentId === selectedSourceCollectionAssignment?.assignmentId ? styles.workflowSourceCollectionAssignmentActive : ""}
@@ -8619,7 +8620,7 @@ export function TeamsRoute({
                   <span>
                     {sourceCollectionStatusLabel(assignment.status, lang)} · {assignment.scope.queryCount ?? assignment.scope.assignedQueries?.length ?? 0} {lang === "zh" ? "条搜索" : "queries"}
                   </span>
-                </button>
+                </VNativeButton>
               ))}
             </div>
           ) : (
@@ -8722,12 +8723,12 @@ export function TeamsRoute({
               onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, notes: event.target.value }))}
             />
           </label>
-          <button type="submit" disabled={!canRecordSourceCollectionOutput}>
+          <VNativeButton type="submit" disabled={!canRecordSourceCollectionOutput}>
             <CheckCircle2 size={13} />
             {selectedTeamRecordSourceCollectionOutputPending
               ? (lang === "zh" ? "回写中" : "Writing")
               : (lang === "zh" ? "回写并导入候选" : "Write back and import")}
-          </button>
+          </VNativeButton>
           </form>
         </details>
         </>
@@ -8886,7 +8887,7 @@ export function TeamsRoute({
             <span className={styles.sourceCollectionStageHandoffNext}><b>{lang === "zh" ? "下一步" : "Next"}</b>{activeModule.nextLabel}</span>
           </div>
           <div className={styles.sourceCollectionStageChatActions}>
-            <button
+            <VNativeButton
               type="button"
               className={activeModule.actionTone === "primary" ? styles.sourceCollectionStagePrimaryAction : styles.sourceCollectionStageSecondaryAction}
               disabled={activeModule.actionDisabled}
@@ -8895,7 +8896,7 @@ export function TeamsRoute({
             >
               {renderSourceCollectionStageActionIcon(activeModule.actionIcon)}
               {activeModule.actionLabel}
-            </button>
+            </VNativeButton>
             {primaryStageAgentChatRoute ? (
               <Link
                 to={primaryStageAgentChatRoute}
@@ -8905,7 +8906,7 @@ export function TeamsRoute({
                 {lang === "zh" ? "进入 Agent 私聊" : "Open Agent chat"}
               </Link>
             ) : (
-              <button
+              <VNativeButton
                 type="button"
                 title={primaryStageAgentFallbackTitle}
                 onClick={() => openSourceCollectionStageAgentChat(activeModule.id)}
@@ -8913,7 +8914,7 @@ export function TeamsRoute({
               >
                 <MessageSquare size={13} />
                 {primaryStageAgentFallbackLabel}
-              </button>
+              </VNativeButton>
             )}
             <Link to={primaryStageAgentConfigRoute} title={lang === "zh" ? "当前阶段 Agent 配置" : "Current stage Agent configuration"}>
               <Link2 size={13} />
@@ -9006,10 +9007,10 @@ export function TeamsRoute({
                   : (lang === "zh" ? "选择模板后登记证据和迭代决策" : "Select a template, then record evidence and decisions"))}
             </span>
           </div>
-          <button type="button" onClick={() => void researchLoopStatusQuery.refetch()} disabled={researchLoopStatusQuery.isFetching}>
+          <VNativeButton type="button" onClick={() => void researchLoopStatusQuery.refetch()} disabled={researchLoopStatusQuery.isFetching}>
             <RefreshCw size={13} />
             {lang === "zh" ? "刷新" : "Refresh"}
-          </button>
+          </VNativeButton>
         </div>
         <div className={styles.researchLoopStats}>
           <span>
@@ -9056,10 +9057,10 @@ export function TeamsRoute({
               placeholder={lang === "zh" ? "算力、数据、环境或复现边界" : "Compute, data, environment, or reproducibility boundary"}
             />
           </label>
-          <button type="button" onClick={() => createResearchLoopFromWorkspace(activePlan)} disabled={!canCreateLoop}>
+          <VNativeButton type="button" onClick={() => createResearchLoopFromWorkspace(activePlan)} disabled={!canCreateLoop}>
             <Plus size={13} />
             {selectedTeamCreateResearchLoopPending ? (lang === "zh" ? "创建中" : "Creating") : (lang === "zh" ? "创建 loop" : "Create loop")}
-          </button>
+          </VNativeButton>
         </div>
         {selectedTemplate ? (
           <div className={styles.researchLoopTemplateSummary}>
@@ -9125,10 +9126,10 @@ export function TeamsRoute({
                   placeholder="workspace/experiments/result.json"
                 />
               </label>
-              <button type="button" onClick={() => recordResearchLoopEvidenceFromWorkspace(activeLoop)} disabled={!canRecordEvidence}>
+              <VNativeButton type="button" onClick={() => recordResearchLoopEvidenceFromWorkspace(activeLoop)} disabled={!canRecordEvidence}>
                 <Save size={13} />
                 {selectedTeamRecordResearchLoopEvidencePending ? (lang === "zh" ? "登记中" : "Recording") : (lang === "zh" ? "登记证据" : "Record evidence")}
-              </button>
+              </VNativeButton>
               <label className={styles.researchLoopWide}>
                 <span>{lang === "zh" ? "摘要" : "Summary"}</span>
                 <input
@@ -9203,10 +9204,10 @@ export function TeamsRoute({
                   placeholder={lang === "zh" ? "基于证据给出推进、修复或补证据原因" : "Reason to promote, repair, or request more evidence"}
                 />
               </label>
-              <button type="button" onClick={() => recordResearchLoopDecisionFromWorkspace(activeLoop)} disabled={!canRecordDecision}>
+              <VNativeButton type="button" onClick={() => recordResearchLoopDecisionFromWorkspace(activeLoop)} disabled={!canRecordDecision}>
                 <Send size={13} />
                 {selectedTeamRecordResearchLoopDecisionPending ? (lang === "zh" ? "提交中" : "Submitting") : (lang === "zh" ? "登记决策" : "Record decision")}
-              </button>
+              </VNativeButton>
               <label className={styles.researchLoopWide}>
                 <span>{lang === "zh" ? "下一步动作" : "Next actions"}</span>
                 <input
@@ -9320,12 +9321,12 @@ export function TeamsRoute({
                   : (lang === "zh" ? "等待实验阶段状态" : "Waiting for experiment status"))}
             </span>
           </div>
-          <button type="button" onClick={createExperimentPlanFromWorkspace} disabled={!canDraftPlan}>
+          <VNativeButton type="button" onClick={createExperimentPlanFromWorkspace} disabled={!canDraftPlan}>
             <Save size={13} />
             {selectedTeamCreateExperimentPlanPending
               ? (lang === "zh" ? "生成中" : "Drafting")
               : (lang === "zh" ? "生成计划草稿" : "Draft plan")}
-          </button>
+          </VNativeButton>
         </div>
         <div className={styles.experimentLedgerStats}>
           <span>
@@ -9410,12 +9411,12 @@ export function TeamsRoute({
                     placeholder={activePlan.experimentPlan.metric || "validation accuracy"}
                   />
                 </label>
-                <button type="button" onClick={() => registerExperimentBaselineArtifactFromWorkspace(activePlan)} disabled={!canRegisterBaselineArtifact}>
+                <VNativeButton type="button" onClick={() => registerExperimentBaselineArtifactFromWorkspace(activePlan)} disabled={!canRegisterBaselineArtifact}>
                   <Save size={13} />
                   {selectedTeamRegisterExperimentBaselineArtifactPending
                     ? (lang === "zh" ? "登记中" : "Registering")
                     : (lang === "zh" ? "登记基线工件" : "Register baseline")}
-                </button>
+                </VNativeButton>
               </div>
             )}
             {activeBaselineArtifact ? (
@@ -9510,14 +9511,14 @@ export function TeamsRoute({
                       placeholder="logs/experiments/smoke.log"
                     />
                   </label>
-                  <button type="button" onClick={() => registerExperimentSmokeResultFromWorkspace(activePlan)} disabled={!canRegisterSmokeResult}>
+                  <VNativeButton type="button" onClick={() => registerExperimentSmokeResultFromWorkspace(activePlan)} disabled={!canRegisterSmokeResult}>
                     <Save size={13} />
                     {selectedTeamRegisterExperimentSmokeResultPending
                       ? (lang === "zh" ? "登记中" : "Registering")
                       : activeSmokeResult
                         ? (lang === "zh" ? "更新 smoke 结果" : "Update smoke result")
                         : (lang === "zh" ? "登记 smoke 结果" : "Register smoke")}
-                  </button>
+                  </VNativeButton>
                   <label className={styles.experimentSmokeWide}>
                     <span>{lang === "zh" ? "评估命令" : "Evaluate"}</span>
                     <input
@@ -9637,14 +9638,14 @@ export function TeamsRoute({
                           placeholder="logs/experiments/full_run.log"
                         />
                       </label>
-                      <button type="button" onClick={() => registerExperimentFullRunResultFromWorkspace(activePlan)} disabled={!canRegisterFullRunResult}>
+                      <VNativeButton type="button" onClick={() => registerExperimentFullRunResultFromWorkspace(activePlan)} disabled={!canRegisterFullRunResult}>
                         <Save size={13} />
                         {selectedTeamRegisterExperimentFullRunResultPending
                           ? (lang === "zh" ? "登记中" : "Registering")
                           : activeFullRunResult
                             ? (lang === "zh" ? "更新 full-run" : "Update full-run")
                             : (lang === "zh" ? "登记 full-run" : "Register full-run")}
-                      </button>
+                      </VNativeButton>
                       <label className={styles.experimentSmokeWide}>
                         <span>{lang === "zh" ? "配置路径" : "Config path"}</span>
                         <input
@@ -9740,12 +9741,12 @@ export function TeamsRoute({
                           />
                           <span>{lang === "zh" ? "立即唤醒知识库管理员" : "Wake knowledge base admin"}</span>
                         </label>
-                        <button type="button" onClick={() => requestExperimentKnowledgeIngestionFromWorkspace(activePlan)} disabled={!canRequestKnowledgeIngestion}>
+                        <VNativeButton type="button" onClick={() => requestExperimentKnowledgeIngestionFromWorkspace(activePlan)} disabled={!canRequestKnowledgeIngestion}>
                           <Send size={13} />
                           {selectedTeamRequestExperimentKnowledgeIngestionPending
                             ? (lang === "zh" ? "通知中" : "Notifying")
                             : (lang === "zh" ? "通知知识库管理员" : "Notify admin")}
-                        </button>
+                        </VNativeButton>
                       </div>
                     ) : null}
                   </div>
@@ -9860,7 +9861,7 @@ export function TeamsRoute({
                 {lang === "zh" ? "团队讨论" : "Team discussion"}
               </Link>
             ) : (
-              <button
+              <VNativeButton
                 type="button"
                 onClick={() => selectedTeam?.teamId && syncTeamChatRoomMutation.mutate(selectedTeam.teamId)}
                 disabled={!selectedTeam || activeTeamMemberCount === 0 || selectedTeamSyncPending}
@@ -9869,16 +9870,16 @@ export function TeamsRoute({
                 {selectedTeamSyncPending
                   ? (lang === "zh" ? "同步中" : "Syncing")
                   : (lang === "zh" ? "同步团队讨论" : "Sync team discussion")}
-              </button>
+              </VNativeButton>
             )}
             <Link to={teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)}>
               <ArrowLeft size={14} />
               {lang === "zh" ? "返回团队页面" : "Back to team"}
             </Link>
-            <button type="button" onClick={() => void researchStageRoundStatusQuery.refetch()} disabled={researchStageRoundStatusQuery.isFetching}>
+            <VNativeButton type="button" onClick={() => void researchStageRoundStatusQuery.refetch()} disabled={researchStageRoundStatusQuery.isFetching}>
               <RefreshCw size={14} />
               {lang === "zh" ? "刷新" : "Refresh"}
-            </button>
+            </VNativeButton>
           </div>
         </header>
         <main className={styles.researchStagePageBody}>
@@ -9911,14 +9912,14 @@ export function TeamsRoute({
               </span>
             </div>
             <div className={styles.researchStagePageActions}>
-              <button type="button" onClick={() => launchResearchStage(stageType)} disabled={disabled}>
+              <VNativeButton type="button" onClick={() => launchResearchStage(stageType)} disabled={disabled}>
                 <Play size={13} />
                 {stagePhase?.primaryAction || config.primaryAction}
-              </button>
-              <button type="button" onClick={() => launchResearchStage(stageType, "new_round")} disabled={disabled}>
+              </VNativeButton>
+              <VNativeButton type="button" onClick={() => launchResearchStage(stageType, "new_round")} disabled={disabled}>
                 <Plus size={13} />
                 {stagePhase?.secondaryAction || config.secondaryAction}
-              </button>
+              </VNativeButton>
             </div>
             {selectedTeamStartResearchStageError ? <div className={styles.workflowError}>{selectedTeamStartResearchStageError.message}</div> : null}
             {selectedTeamStartResearchStageResult?.stageRound.stageType === stageType ? (
@@ -11756,6 +11757,16 @@ export function TeamsRoute({
       `${lang === "zh" ? "成员源" : "Member source"} Agent Center`,
     ].filter(Boolean).join("\n")
     : (lang === "zh" ? "仅显示 AI 搜索、知识库扩充和挑战杯科研团队。" : "Only AI search, knowledge expansion, and research teams are shown.");
+  const visibleTeamOptions = visibleTeams.length
+    ? visibleTeams.map((team) => ({
+      id: team.teamId,
+      label: team.name,
+      description: team.purpose || team.teamId,
+    }))
+    : [{
+      id: "",
+      label: lang === "zh" ? "正在读取团队" : "Loading teams",
+    }];
 
   if (sourceCollectionStandalone) {
     return (
@@ -11777,7 +11788,7 @@ export function TeamsRoute({
                 {lang === "zh" ? "团队讨论" : "Team discussion"}
               </Link>
             ) : (
-              <button
+              <VNativeButton
                 type="button"
                 onClick={() => selectedTeam?.teamId && syncTeamChatRoomMutation.mutate(selectedTeam.teamId)}
                 disabled={!selectedTeam || activeTeamMemberCount === 0 || selectedTeamSyncPending}
@@ -11786,16 +11797,16 @@ export function TeamsRoute({
                 {selectedTeamSyncPending
                   ? (lang === "zh" ? "同步中" : "Syncing")
                   : (lang === "zh" ? "同步团队讨论" : "Sync team discussion")}
-              </button>
+              </VNativeButton>
             )}
             <Link to={teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)}>
               <ArrowLeft size={14} />
               {lang === "zh" ? "返回团队页面" : "Back to team"}
             </Link>
-            <button type="button" onClick={() => void sourceCollectionRunsQuery.refetch()} disabled={sourceCollectionRunsQuery.isFetching}>
+            <VNativeButton type="button" onClick={() => void sourceCollectionRunsQuery.refetch()} disabled={sourceCollectionRunsQuery.isFetching}>
               <RefreshCw size={14} />
               {lang === "zh" ? "刷新" : "Refresh"}
-            </button>
+            </VNativeButton>
           </div>
         </header>
         {researchWorkflowTeamSelected ? (
@@ -11895,47 +11906,52 @@ export function TeamsRoute({
 
   return (
     <section className={styles.route}>
-      <header className={styles.teamContextBar} title={selectedTeamContextTitle}>
-        <div className={styles.teamTitleBlock}>
-          <span>{lang === "zh" ? "团队工作台 / 组织画布" : "Team Workspace / Canvas"}</span>
-          <h1>{lang === "zh" ? "团队组织画布" : "Team Organization Canvas"}</h1>
-        </div>
-        <label className={styles.teamSelectField}>
-          <span>{lang === "zh" ? "团队" : "Team"}</span>
-          <select
-            value={selectedTeam?.teamId ?? effectiveTeamId}
-            onChange={(event) => {
-              const nextTeam = visibleTeams.find((team) => team.teamId === event.target.value);
-              if (nextTeam) {
-                selectTeamRecord(nextTeam);
-              }
-            }}
-            disabled={!visibleTeams.length}
-            aria-label={lang === "zh" ? "选择团队" : "Select team"}
-          >
-            {visibleTeams.length ? (
-              visibleTeams.map((team) => (
-                <option key={team.teamId} value={team.teamId}>
-                  {team.name}
-                </option>
-              ))
-            ) : (
-              <option value="">{lang === "zh" ? "正在读取团队" : "Loading teams"}</option>
-            )}
-          </select>
-        </label>
-        <div className={styles.teamContextChips} aria-label={lang === "zh" ? "团队概况" : "Team summary"}>
-          <span>{lang === "zh" ? "团队" : "Teams"} <strong>{visibleTeamSummary.activeTeamCount}</strong></span>
-          <span>{lang === "zh" ? "成员" : "Members"} <strong>{visibleTeamSummary.memberCount}</strong></span>
-          <span>{lang === "zh" ? "失效" : "Stale"} <strong>{visibleTeamSummary.staleMemberCount}</strong></span>
-          <span>{lang === "zh" ? "来源" : "Source"} <strong>Agent Center</strong></span>
-        </div>
-        <div className={styles.teamContextActions}>
-          <button type="button" className={styles.iconButton} onClick={() => teamsQuery.refetch()} title={lang === "zh" ? "刷新团队" : "Refresh teams"}>
-            <RefreshCw size={15} />
-          </button>
-        </div>
-      </header>
+      <VRouteHeader
+        className={styles.teamContextBar}
+        aria-label={selectedTeamContextTitle}
+        eyebrow={lang === "zh" ? "团队工作台 / 组织画布" : "Team Workspace / Canvas"}
+        title={lang === "zh" ? "团队组织画布" : "Team Organization Canvas"}
+        meta={selectedTeam?.name ?? (lang === "zh" ? "暂无团队" : "No team")}
+        actions={(
+          <div className={styles.teamContextActions}>
+            <div className={styles.teamSelectField}>
+              <span>{lang === "zh" ? "团队" : "Team"}</span>
+              <VSelect
+                aria-label={lang === "zh" ? "选择团队" : "Select team"}
+                selectedKey={selectedTeam?.teamId ?? effectiveTeamId}
+                options={visibleTeamOptions}
+                placeholder={selectedTeam?.name ?? (lang === "zh" ? "选择团队" : "Select team")}
+                isDisabled={!visibleTeams.length}
+                onSelectionChange={(key) => {
+                  const nextTeam = visibleTeams.find((team) => team.teamId === String(key));
+                  if (nextTeam) {
+                    selectTeamRecord(nextTeam);
+                  }
+                }}
+              />
+            </div>
+            <VIconButton
+              label={lang === "zh" ? "刷新团队" : "Refresh teams"}
+              icon={<RefreshCw size={15} />}
+              onPress={() => void teamsQuery.refetch()}
+            />
+          </div>
+        )}
+      />
+      <VStatusStrip
+        className={styles.teamContextChips}
+        aria-label={lang === "zh" ? "团队概况" : "Team summary"}
+        items={[
+          { label: lang === "zh" ? "团队" : "Teams", value: visibleTeamSummary.activeTeamCount, tone: "info" },
+          { label: lang === "zh" ? "成员" : "Members", value: visibleTeamSummary.memberCount, tone: "success" },
+          {
+            label: lang === "zh" ? "失效" : "Stale",
+            value: visibleTeamSummary.staleMemberCount,
+            tone: visibleTeamSummary.staleMemberCount > 0 ? "warning" : "neutral",
+          },
+          { label: lang === "zh" ? "来源" : "Source", value: "Agent Center" },
+        ]}
+      />
       <div className={workspaceClassName}>
         <main className={canvasPanelClassName} id="research-organization-canvas">
           <div className={styles.canvasToolbar}>
@@ -11981,7 +11997,7 @@ export function TeamsRoute({
               ) : null}
               {researchCanvasReadOnly ? (
                 <div className={styles.canvasLayoutModeSwitch} role="group" aria-label={lang === "zh" ? "画布排版模式" : "Canvas layout mode"}>
-                  <button
+                  <VNativeButton
                     type="button"
                     className={researchCanvasAutoLayoutActive ? styles.layerButtonActive : ""}
                     onClick={() => setResearchCanvasLayoutMode("auto")}
@@ -11989,18 +12005,18 @@ export function TeamsRoute({
                   >
                     <RefreshCw size={14} />
                     {lang === "zh" ? "自动排版" : "Auto layout"}
-                  </button>
-                  <button
+                  </VNativeButton>
+                  <VNativeButton
                     type="button"
                     className={!researchCanvasAutoLayoutActive ? styles.layerButtonActive : ""}
                     onClick={() => setResearchCanvasLayoutMode("source")}
                     title={lang === "zh" ? "显示画布文件中的原始坐标" : "Show the original coordinates from the canvas file"}
                   >
                     {lang === "zh" ? "原始坐标" : "Original"}
-                  </button>
+                  </VNativeButton>
                 </div>
               ) : null}
-              <button
+              <VNativeButton
                 type="button"
                 className={showCommunicationEdges ? styles.layerButtonActive : ""}
                 onClick={() => setShowCommunicationEdges((current) => !current)}
@@ -12009,7 +12025,7 @@ export function TeamsRoute({
               >
                 <Link2 size={14} />
                 {communicationEdgeButtonLabel}
-              </button>
+              </VNativeButton>
               {researchCanvasReadOnly ? (
                 <Link className={styles.toolbarLink} to={teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)}>
                   <ArrowLeft size={14} />
@@ -12022,7 +12038,7 @@ export function TeamsRoute({
                       {lang === "zh" ? "打开群聊" : "Open room"}
                     </Link>
                   ) : (
-                    <button
+                    <VNativeButton
                       type="button"
                       onClick={() => selectedTeam?.teamId && syncTeamChatRoomMutation.mutate(selectedTeam.teamId)}
                       disabled={!selectedTeam || activeTeamMemberCount === 0 || selectedTeamSyncPending}
@@ -12031,13 +12047,13 @@ export function TeamsRoute({
                       {selectedTeamSyncPending
                         ? (lang === "zh" ? "同步中" : "Syncing")
                         : (lang === "zh" ? "同步群聊" : "Sync room")}
-                    </button>
+                    </VNativeButton>
                   )}
-                  <button type="button" onClick={addNode} disabled={!canvas}>
+                  <VNativeButton type="button" onClick={addNode} disabled={!canvas}>
                     <Plus size={14} />
                     {lang === "zh" ? "节点" : "Node"}
-                  </button>
-                  <button
+                  </VNativeButton>
+                  <VNativeButton
                     type="button"
                     className={styles.dangerButton}
                     onClick={() => selectedTeam?.teamId && archiveTeamMutation.mutate(selectedTeam.teamId)}
@@ -12046,7 +12062,7 @@ export function TeamsRoute({
                   >
                     <Archive size={14} />
                     {selectedTeamArchiveDisabledReason ? (lang === "zh" ? "系统团队不可归档" : "System team") : (lang === "zh" ? "归档" : "Archive")}
-                  </button>
+                  </VNativeButton>
                 </>
               )}
             </div>
@@ -12085,7 +12101,7 @@ export function TeamsRoute({
                   const display = agent ? agentDisplayInfo(agent, lang) : null;
                   const functionLabel = teamNodeFunctionLabel(node, display?.functionLabel, lang);
                   return (
-                    <button
+                    <VNativeButton
                       key={node.id}
                       type="button"
                       className={[
@@ -12106,7 +12122,7 @@ export function TeamsRoute({
                       <strong>{node.label}</strong>
                       <span className={`${styles.nodeRoleBadge} ${roleBadgeTone(node, display?.tone)}`}>{functionLabel}</span>
                       <small>{node.agentCode || node.status}</small>
-                    </button>
+                    </VNativeButton>
                   );
                 })}
               </div>
@@ -12204,19 +12220,19 @@ export function TeamsRoute({
                 <textarea value={nodeDraft.purpose} onChange={(event) => setNodeDraft((current) => ({ ...current, purpose: event.target.value }))} />
               </label>
               <div className={styles.actionRow}>
-                <button type="button" onClick={applyNodeDraft} disabled={!canvas || selectedTeamSaveCanvasPending}>
+                <VNativeButton type="button" onClick={applyNodeDraft} disabled={!canvas || selectedTeamSaveCanvasPending}>
                   <Save size={14} />
                   {lang === "zh" ? "保存节点" : "Save node"}
-                </button>
-                <button type="button" onClick={connectFromLead} disabled={!canvas || !selectedNode || canvas.nodes[0]?.id === selectedNode.id}>
+                </VNativeButton>
+                <VNativeButton type="button" onClick={connectFromLead} disabled={!canvas || !selectedNode || canvas.nodes[0]?.id === selectedNode.id}>
                   <Link2 size={14} />
                   {lang === "zh" ? "接入主干" : "Connect"}
-                </button>
-                <button type="button" onClick={unbindSelectedNode} disabled={!canvas || !selectedNode?.agentId || selectedTeamSaveCanvasPending}>
+                </VNativeButton>
+                <VNativeButton type="button" onClick={unbindSelectedNode} disabled={!canvas || !selectedNode?.agentId || selectedTeamSaveCanvasPending}>
                   <Unlink size={14} />
                   {lang === "zh" ? "解绑节点" : "Unbind"}
-                </button>
-                <button
+                </VNativeButton>
+                <VNativeButton
                   type="button"
                   className={styles.dangerButton}
                   onClick={deleteSelectedNode}
@@ -12224,7 +12240,7 @@ export function TeamsRoute({
                 >
                   <Trash2 size={14} />
                   {lang === "zh" ? "删除节点" : "Delete"}
-                </button>
+                </VNativeButton>
               </div>
               <div className={styles.issueList}>
                 {(validation?.issues ?? []).length ? (
@@ -12452,12 +12468,12 @@ export function TeamsRoute({
                               }
                             />
                           </label>
-                          <button type="submit" disabled={!sourceCollectionCanStart || selectedTeamStartSourceCollectionPending}>
+                          <VNativeButton type="submit" disabled={!sourceCollectionCanStart || selectedTeamStartSourceCollectionPending}>
                             <Search size={13} />
                             {selectedTeamStartSourceCollectionPending
                               ? (lang === "zh" ? "启动中" : "Starting")
                               : (lang === "zh" ? "启动搜集批次" : "Start collection")}
-                          </button>
+                          </VNativeButton>
                         </form>
                         <div className={styles.workflowSourceCollectionRuns}>
                           <label>
@@ -12514,7 +12530,7 @@ export function TeamsRoute({
                         {sourceCollectionAssignments.length ? (
                           <div className={styles.workflowSourceCollectionAssignments}>
                             {sourceCollectionAssignments.map((assignment) => (
-                              <button
+                              <VNativeButton
                                 key={assignment.assignmentId}
                                 type="button"
                                 className={assignment.assignmentId === selectedSourceCollectionAssignment?.assignmentId ? styles.workflowSourceCollectionAssignmentActive : ""}
@@ -12524,7 +12540,7 @@ export function TeamsRoute({
                               >
                                 <strong>{assignment.agentRole}</strong>
                                 <span>{assignment.status} · {assignment.scope.queryCount ?? assignment.scope.assignedQueries?.length ?? 0} queries</span>
-                              </button>
+                              </VNativeButton>
                             ))}
                           </div>
                         ) : (
@@ -12626,12 +12642,12 @@ export function TeamsRoute({
                               onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, notes: event.target.value }))}
                             />
                           </label>
-                          <button type="submit" disabled={!canRecordSourceCollectionOutput}>
+                          <VNativeButton type="submit" disabled={!canRecordSourceCollectionOutput}>
                             <CheckCircle2 size={13} />
                             {selectedTeamRecordSourceCollectionOutputPending
                               ? (lang === "zh" ? "回写中" : "Writing")
                               : (lang === "zh" ? "回写并导入候选" : "Write back and import")}
-                          </button>
+                          </VNativeButton>
                         </form>
                         <div className={styles.workflowIngestionBoundary}>
                           <span>{lang === "zh" ? "执行器：手动/Agent 均可提交 CollectionOutput" : "Executor: manual or Agent CollectionOutput"}</span>
@@ -12874,7 +12890,7 @@ export function TeamsRoute({
                                 : (lang === "zh" ? "未生成" : "not built")}
                             </span>
                           </div>
-                          <button
+                          <VNativeButton
                             type="button"
                             onClick={runSourceCollectionGraphAction}
                             disabled={sourceCollectionGraphActionDisabled}
@@ -12882,7 +12898,7 @@ export function TeamsRoute({
                           >
                             <RefreshCw size={13} />
                             {sourceCollectionGraphActionLabel}
-                          </button>
+                          </VNativeButton>
                         </div>
                         {teamWorkflowCandidateGraph && teamWorkflowCandidateGraphLayout ? (
                           <>
@@ -13131,17 +13147,17 @@ export function TeamsRoute({
                               </span>
                             </div>
                             <div>
-                              <button type="button" onClick={openSourceCollectionCandidatePanel} disabled={!selectedTeam?.teamId}>
+                              <VNativeButton type="button" onClick={openSourceCollectionCandidatePanel} disabled={!selectedTeam?.teamId}>
                                 {lang === "zh" ? "查看完整候选库" : "Full library"}
-                              </button>
-                              <button
+                              </VNativeButton>
+                              <VNativeButton
                                 type="button"
                                 onClick={openSourceCollectionScreeningPanel}
                                 disabled={sourceCollectionScreeningDisabled}
                                 title={sourceCollectionActionDisabledTitle(sourceCollectionScreeningActionReadiness, lang === "zh" ? "进入资料提炼复核" : "Open review")}
                               >
                                 {lang === "zh" ? "进入资料提炼复核" : "Open review"}
-                              </button>
+                              </VNativeButton>
                             </div>
                           </div>
                           <div
@@ -13192,7 +13208,7 @@ export function TeamsRoute({
                                 </div>
                                 {candidate.candidateType === "source_manifest" ? (
                                   <div className={styles.workflowCandidateActions}>
-                                    <button
+                                    <VNativeButton
                                       type="button"
                                       onClick={() => {
                                         if (!selectedTeam?.teamId || selectedTeamSourceQualityPending) {
@@ -13211,8 +13227,8 @@ export function TeamsRoute({
                                       {candidateQualityPending && assessSourceQualityMutation.variables?.decision === "approved"
                                         ? (lang === "zh" ? "筛选中" : "Assessing")
                                         : (lang === "zh" ? "通过复核" : "Approve source")}
-                                    </button>
-                                    <button
+                                    </VNativeButton>
+                                    <VNativeButton
                                       type="button"
                                       onClick={() => {
                                         if (!selectedTeam?.teamId || selectedTeamSourceQualityPending) {
@@ -13231,8 +13247,8 @@ export function TeamsRoute({
                                       {candidateQualityPending && assessSourceQualityMutation.variables?.decision === "needs_revision"
                                         ? (lang === "zh" ? "退回中" : "Returning")
                                         : (lang === "zh" ? "退回补资料" : "Needs repair")}
-                                    </button>
-                                    <button
+                                    </VNativeButton>
+                                    <VNativeButton
                                       type="button"
                                       onClick={() => {
                                         if (!selectedTeam?.teamId || !canPlanPaperNoteChunks || planPaperNoteChunksMutation.isPending) {
@@ -13256,7 +13272,7 @@ export function TeamsRoute({
                                         : chunkPlanSummary
                                         ? (lang === "zh" ? "重建分块计划" : "Rebuild chunk plan")
                                         : (lang === "zh" ? "生成分块计划" : "Generate chunk plan")}
-                                    </button>
+                                    </VNativeButton>
                                   </div>
                                 ) : null}
                               </article>
@@ -13327,7 +13343,7 @@ export function TeamsRoute({
                   onChange={(event) => setTeamTaskTopic(event.target.value)}
                   placeholder={lang === "zh" ? "输入团队要协作处理的议题或任务" : "Enter a topic or task for this team"}
                 />
-                <button
+                <VNativeButton
                   type="submit"
                   disabled={!canStartTeamRound || selectedTeamStartRoundPending}
                 >
@@ -13335,7 +13351,7 @@ export function TeamsRoute({
                   {selectedTeamStartRoundPending
                     ? (lang === "zh" ? "启动中" : "Starting")
                     : (lang === "zh" ? "启动团队讨论" : "Start team round")}
-                </button>
+                </VNativeButton>
                 {selectedTeamStartRoundResult ? (
                   <div className={styles.messageResult}>
                     <strong>{selectedTeamStartRoundResult.rounds.length}</strong>
@@ -13410,13 +13426,13 @@ export function TeamsRoute({
                   <input type="checkbox" checked={teamInterrupt} onChange={(event) => setTeamInterrupt(event.target.checked)} />
                   <span>{lang === "zh" ? "打断正在直聊中的目标 Agent" : "Interrupt targeted running direct sessions"}</span>
                 </label>
-                <button
+                <VNativeButton
                   type="submit"
                   disabled={!selectedTeam || !teamMessage.trim() || activeTeamMemberCount === 0 || selectedTeamMessagePending}
                 >
                   <Send size={14} />
                   {lang === "zh" ? "发送给团队" : "Send to team"}
-                </button>
+                </VNativeButton>
                 {selectedTeamMessageResult ? (
                   <div className={styles.messageResult}>
                     <strong>{selectedTeamMessageResult.deliveries.length}</strong>
@@ -13471,14 +13487,14 @@ export function TeamsRoute({
                             ))}
                           </div>
                           {event.createdBy === "user" && !revoked ? (
-                            <button
+                            <VNativeButton
                               type="button"
                               className={styles.revokeButton}
                               disabled={revokePending}
                               onClick={() => selectedTeam?.teamId && revokeTeamMessageMutation.mutate({ teamId: selectedTeam.teamId, eventId: event.eventId })}
                             >
                               {revokePending ? (lang === "zh" ? "撤回中" : "Revoking") : (lang === "zh" ? "撤回" : "Revoke")}
-                            </button>
+                            </VNativeButton>
                           ) : null}
                         </article>
                       );

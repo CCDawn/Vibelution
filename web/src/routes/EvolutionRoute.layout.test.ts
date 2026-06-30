@@ -4,8 +4,8 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import routeSource from "./EvolutionRoute.tsx?raw";
 
-const stylesSource = readFileSync(new URL("./EvolutionRoute.module.css", import.meta.url), "utf-8");
-const worktreeReviewStylesSource = readFileSync(new URL("./SupervisedWorktreeReviewPanel.module.css", import.meta.url), "utf-8");
+const stylesSource = readFileSync(new URL("./EvolutionRoute.legacy.css", import.meta.url), "utf-8");
+const worktreePanelSource = readFileSync(new URL("./SupervisedWorktreeReviewPanel.tsx", import.meta.url), "utf-8");
 const dictionarySource = readFileSync(new URL("../i18n/dictionary.ts", import.meta.url), "utf-8");
 const apiTypesSource = readFileSync(new URL("../api/types.ts", import.meta.url), "utf-8");
 
@@ -484,7 +484,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(stylesSource).toContain("max-height: none");
     expect(stylesSource).not.toContain("max-height: min(430px, 60vh)");
     expect(stylesSource).not.toContain(".worktreeReviewSurface");
-    expect(worktreeReviewStylesSource).toContain(".worktreeReviewSurface");
+    expect(worktreePanelSource).toContain("worktreeReviewSurfaceClass");
   });
 
   it("renders supervised case transcript with a read-only conversation view and trace fallback", () => {

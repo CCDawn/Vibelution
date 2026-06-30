@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import routeSource from "./ToolsRoute.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
 
-const stylesSource = readFileSync(new URL("./ToolsRoute.module.css", import.meta.url), "utf-8");
+const stylesSource = readFileSync(new URL("./ToolsRoute.legacy.css", import.meta.url), "utf-8");
 
 describe("ToolsRoute layout contract", () => {
   it("routes Tools page controls through VUI primitives", () => {
@@ -21,11 +21,9 @@ describe("ToolsRoute layout contract", () => {
     expect(routerSource).not.toContain('path: "tools"');
     expect(routerSource).not.toContain('to="/agents/tools" replace');
     expect(routeSource).toContain('<AgentManagementNav active="tools" className={styles.managementNav} />');
-    expect(routeSource.indexOf('<AgentManagementNav active="tools" className={styles.managementNav} />')).toBeGreaterThan(
-      routeSource.indexOf("</header>"),
-    );
-    expect(routeSource.indexOf('<AgentManagementNav active="tools" className={styles.managementNav} />')).toBeLessThan(
-      routeSource.indexOf("styles.summaryGrid"),
+    const controlStrip = routeSource.slice(routeSource.indexOf("<div className={styles.controlStrip}>"));
+    expect(controlStrip.indexOf('<AgentManagementNav active="tools" className={styles.managementNav} />')).toBeLessThan(
+      controlStrip.indexOf("styles.summaryGrid"),
     );
   });
 

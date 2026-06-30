@@ -6,7 +6,6 @@ import { ConfigSummary, EvolutionOverview } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { VButton } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
-import styles from "./SupervisedWorkspaceControls.module.css";
 import {
   SupervisedWorkspaceTabs,
   type SupervisedWorkspaceTabSummary,
@@ -34,6 +33,15 @@ export function getEffectiveIntakeMode(
   }
   return "manual_review";
 }
+
+const intakeControlClass = "inline-flex min-h-[34px] flex-none items-center gap-1 whitespace-nowrap rounded-full border border-vui-border-soft bg-vui-surface-panel p-[3px]";
+const controlLabelClass = "py-0 pl-[7px] pr-[5px] text-[var(--vui-font-xs)] text-vui-fg-secondary max-[760px]:hidden";
+const intakeSegmentedClass = "inline-flex gap-1";
+const intakeButtonClass = [
+  "min-h-[26px] rounded-full border-0 bg-transparent px-2 text-[var(--vui-font-xs)] text-vui-fg-secondary",
+  "transition-colors duration-150 hover:bg-vui-surface-row-hover hover:text-vui-fg-primary disabled:cursor-wait disabled:opacity-70",
+].join(" ");
+const intakeButtonActiveClass = "bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] text-[var(--accent-warm-2)]";
 
 export function SupervisedWorkspaceControls({
   activeView,
@@ -97,17 +105,17 @@ export function SupervisedWorkspaceControls({
         summaries={tabSummaries}
       />
 
-      <div className={styles.intakeControl}>
-        <span className={styles.controlLabel}>{t("intakeMode")}</span>
-        <div className={styles.intakeSegmented}>
+      <div className={intakeControlClass}>
+        <span className={controlLabelClass}>{t("intakeMode")}</span>
+        <div className={intakeSegmentedClass}>
           {(["manual_review", "auto"] as const).map((mode) => (
             <VButton
               key={mode}
               type="button"
               className={
                 currentIntakeMode === mode
-                  ? `${styles.intakeButton} ${styles.intakeButtonActive}`
-                  : styles.intakeButton
+                  ? `${intakeButtonClass} ${intakeButtonActiveClass}`
+                  : intakeButtonClass
               }
               aria-pressed={currentIntakeMode === mode}
               isDisabled={intakeModeMutation.isPending}

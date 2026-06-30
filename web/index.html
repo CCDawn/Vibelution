@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN" translate="no" class="notranslate">
+<html lang="zh-CN" translate="no" class="notranslate" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <meta name="google" content="notranslate" />
@@ -14,6 +14,17 @@
   </head>
   <body translate="no" class="notranslate">
     <div id="root"></div>
+    <script>
+      (() => {
+        try {
+          const theme = localStorage.getItem("vibelution.workbench.theme");
+          if (theme === "dark" || theme === "light") {
+            document.documentElement.setAttribute("data-theme", theme);
+          }
+        } catch {
+        }
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
   </html>

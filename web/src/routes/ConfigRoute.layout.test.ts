@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import routeSource from "./ConfigRoute.tsx?raw";
 
-const stylesSource = readFileSync(new URL("./ConfigRoute.module.css", import.meta.url), "utf-8");
+const stylesSource = readFileSync(new URL("./ConfigRoute.legacy.css", import.meta.url), "utf-8");
 
 describe("ConfigRoute layout contract", () => {
   it("uses a full workspace placeholder for initial loading and load failure states", () => {

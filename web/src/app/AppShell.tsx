@@ -78,7 +78,7 @@ import {
 import { VButton, VIconButton } from "../components/vui";
 import { getPageInstanceId } from "./pageInstance";
 import { useShellStore } from "../store/shellStore";
-import styles from "./AppShell.module.css";
+import styles from "./AppShell.styles";
 import packageJson from "../../package.json";
 
 const LazyAppShellUtilityMenu = lazy(() =>

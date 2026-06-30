@@ -38,9 +38,9 @@ import {
   ResearchSource,
   ResearchThemeCard,
 } from "../api/types";
-import { VButton } from "../components/vui";
+import { VButton, VRouteHeader } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
-import styles from "./ResearchRoute.module.css";
+import styles from "./ResearchRoute.styles";
 
 type DraftInput = {
   openGoal: string;
@@ -642,13 +642,13 @@ export function ResearchRoute() {
 
   return (
     <section className={styles.route}>
-      <header className={styles.header}>
-        <div className={styles.heroCopy}>
-          <p className={styles.eyebrow}>{copy.eyebrow}</p>
-          <h1 className={styles.title}>{t("researchPageTitle")}</h1>
-          <p className={styles.subtitle}>{copy.subtitle}</p>
-        </div>
-        <div className={styles.headerActions}>
+      <VRouteHeader
+        className={styles.header}
+        eyebrow={copy.eyebrow}
+        title={t("researchPageTitle")}
+        meta={copy.subtitle}
+        actions={(
+          <div className={styles.headerActions}>
           <nav className={styles.subnav} aria-label={copy.researchView}>
             <span className={`${styles.subnavLink} ${styles.subnavLinkActive}`}>
               {copy.researchView}
@@ -692,8 +692,9 @@ export function ResearchRoute() {
               {copy.continueWorkflow}
             </VButton>
           )}
-        </div>
-      </header>
+          </div>
+        )}
+      />
 
       <div className={styles.summaryGrid}>
         <section className={styles.summaryCard}>

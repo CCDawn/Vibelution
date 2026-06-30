@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import styles from "./ResearchFlowCanvasRoute.module.css";
+import styles from "./ResearchFlowCanvasRoute.styles";
 import routeSource from "./ResearchFlowCanvasRoute.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
 

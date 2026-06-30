@@ -79,6 +79,20 @@
   --success: var(--state-success);
   --warning: var(--state-warning);
   --danger: var(--state-error);
+  --state-danger: var(--state-error);
+
+  --fg-muted: var(--fg-tertiary);
+  --fg-subtle: var(--fg-tertiary);
+  --accent: var(--accent-cool);
+  --accent-primary: var(--accent-cool);
+  --accent-success: var(--state-success);
+  --accent-warning: var(--state-warning);
+  --accent-danger: var(--state-error);
+  --accent-cool-contrast: #061512;
+  --surface-base: var(--surface-page);
+  --surface-elevated: var(--surface-raised);
+  --surface-toolbar: var(--vui-surface-toolbar);
+  --border-subtle: var(--vui-border-subtle);
 
   --border-soft: rgba(226, 232, 240, 0.1);
   --border-strong: rgba(226, 232, 240, 0.16);
@@ -87,13 +101,18 @@
   --font-display: "Segoe UI Variable Display", "Segoe UI", sans-serif;
   --font-body: "Segoe UI Variable Text", "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Code", monospace;
-  --vui-font-xs: 0.82rem;
-  --vui-font-sm: 0.88rem;
-  --vui-font-md: 0.94rem;
-  --vui-font-chat: 1.02rem;
-  --vui-font-title: 1.12rem;
+  --vui-font-xs: 0.875rem;
+  --vui-font-sm: 0.9375rem;
+  --vui-font-md: 1rem;
+  --vui-font-chat: 1.0625rem;
+  --vui-font-title: 1.1875rem;
   --vui-line-tight: 1.25;
   --vui-line-readable: 1.58;
+  --font-size-micro: var(--vui-font-xs);
+  --font-size-caption: var(--vui-font-xs);
+  --font-size-small: var(--vui-font-sm);
+  --font-size-body: var(--vui-font-md);
+  --font-size-title: var(--vui-font-title);
 
   --radius-control: 7px;
   --radius-panel: 8px;
@@ -197,6 +216,20 @@
   --success: var(--state-success);
   --warning: var(--state-warning);
   --danger: var(--state-error);
+  --state-danger: var(--state-error);
+
+  --fg-muted: var(--fg-tertiary);
+  --fg-subtle: var(--fg-tertiary);
+  --accent: var(--accent-cool);
+  --accent-primary: var(--accent-cool);
+  --accent-success: var(--state-success);
+  --accent-warning: var(--state-warning);
+  --accent-danger: var(--state-error);
+  --accent-cool-contrast: #ffffff;
+  --surface-base: var(--surface-page);
+  --surface-elevated: var(--surface-raised);
+  --surface-toolbar: var(--vui-surface-toolbar);
+  --border-subtle: var(--vui-border-subtle);
 
   --border-soft: rgba(15, 23, 42, 0.1);
   --border-strong: rgba(15, 23, 42, 0.16);

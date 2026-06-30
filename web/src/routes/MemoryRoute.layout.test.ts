@@ -7,7 +7,7 @@ import routerSource from "../app/router.tsx?raw";
 import appShellSource from "../app/AppShell.tsx?raw";
 import graphCanvasSource from "./MemoryGraphCanvas.tsx?raw";
 
-const memoryCssSource = readFileSync(new URL("./MemoryRoute.module.css", import.meta.url), "utf-8");
+const memoryCssSource = readFileSync(new URL("./MemoryRoute.legacy.css", import.meta.url), "utf-8");
 const graphWorkerSource = readFileSync(new URL("./memoryGraphLayout.worker.ts", import.meta.url), "utf-8");
 
 describe("MemoryRoute layout contract", () => {
@@ -46,7 +46,8 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("className={styles.returnButton}");
     expect(routeSource).toContain("to={returnToPath}");
     expect(memoryCssSource).toContain(".returnButton");
-    expect(memoryCssSource).toContain("grid-template-columns: minmax(0, 1fr) auto auto");
+    expect(memoryCssSource).toContain(".headerActions");
+    expect(memoryCssSource).toContain("justify-content: flex-end");
   });
 
   it("exposes manual memory management actions through guarded API mutations", () => {
@@ -513,7 +514,7 @@ describe("MemoryRoute layout contract", () => {
   });
 
   it("keeps explanatory Memory platform copy out of persistent paragraphs", () => {
-    expect(routeSource).toContain("title={memoryViewSubtitle(copy, forcedView)}");
+    expect(routeSource).toContain("meta={memoryViewSubtitle(copy, forcedView)}");
     expect(routeSource).toContain('title={copy.projectMemoryQueueHint}');
     expect(routeSource).toContain('title={copy.reviewQueueHint}');
     expect(routeSource).toContain('title={copy.knowledgeSubtitle}');
@@ -529,8 +530,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).not.toContain("<p>{copy.managementHint}</p>");
     expect(routeSource).not.toContain("<p>{copy.ragRetrievalHint}</p>");
     expect(routeSource).not.toContain("<span>{copy.cleanupNoBackup}</span>");
-    expect(memoryCssSource).toContain(".subtitle {\n  display: none;");
-    expect(memoryCssSource).toContain(".panelLead,\n.manageFormPanel > p {\n  display: none;");
+    expect(memoryCssSource).toContain(":where(.vui-routes-memoryroute).panelLead,\n:where(.vui-routes-memoryroute).manageFormPanel > p {\n  display: none;");
   });
 
   it("surfaces agent visibility, prompt injection, and raw content in the detail pane", () => {
@@ -753,7 +753,7 @@ describe("MemoryRoute layout contract", () => {
     expect(memoryCssSource).toContain(".contractForbiddenList {\n  display: none;");
     expect(memoryCssSource).toContain(".stewardRecommendations {\n  display: none;");
     expect(memoryCssSource).toContain(".stewardWorkbench {\n  display: none;");
-    expect(memoryCssSource).toContain(".stewardMission small,\n.stewardMetric small {\n  display: none;");
+    expect(memoryCssSource).toContain(".stewardMission small,\n:where(.vui-routes-memoryroute).stewardMetric small {\n  display: none;");
     expect(memoryCssSource).toContain(".knowledgeGovernanceDeck {\n    grid-template-columns: minmax(0, 1fr);");
   });
 
