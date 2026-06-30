@@ -4651,7 +4651,21 @@ def _source_collection_stage_writeback_quality_decision(payload: dict[str, Any])
         max_length=80,
     ).lower()
     normalized = raw.replace("-", "_").replace(" ", "_")
-    if normalized in {"pass", "passed", "approve", "approved", "accept", "accepted", "source_quality_approved"}:
+    if normalized in {
+        "pass",
+        "passed",
+        "approve",
+        "approved",
+        "accept",
+        "accepted",
+        "keep",
+        "kept",
+        "retain",
+        "retained",
+        "keep_with_notes",
+        "conditional_keep",
+        "source_quality_approved",
+    }:
         return "approved"
     if normalized in {"reject", "rejected", "irrelevant", "discard", "discarded", "source_quality_rejected"}:
         return "rejected"
@@ -16738,6 +16752,24 @@ def _source_collection_stage_cards_projection(
         excluded_source_count = _source_collection_count(excluded_source_summary.get("excludedCount"))
     except data_processing_service.DataProcessingError:
         pass
+    assignment_stage_summary: dict[str, int] = {}
+    try:
+        assignments_payload = data_processing_service.list_collection_assignments(normalized_run_id)
+        projection_assignments = [
+            item for item in list(assignments_payload.get("assignments") or [])
+            if isinstance(item, dict)
+        ]
+        assignment_stage_summary = _source_collection_assignment_stage_summary(projection_assignments)
+    except data_processing_service.DataProcessingError:
+        assignment_stage_summary = {}
+    finding_open_assignment_count = (
+        _source_collection_count(assignment_stage_summary.get("searchOpenAssignmentCount"))
+        if assignment_stage_summary
+        else _source_collection_count(run_summary.get("openAssignmentCount"))
+    )
+    downstream_open_assignment_count = _source_collection_count(
+        assignment_stage_summary.get("downstreamOpenAssignmentCount")
+    )
     with _WORKFLOW_LOCK:
         candidate_store = _load_candidate_store(normalized_team_id)
     all_candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
@@ -16802,11 +16834,16 @@ def _source_collection_stage_cards_projection(
             artifact_count=active_record_count,
             input_count=_source_collection_count(run_summary.get("assignmentCount")),
             output_count=active_record_count,
-            pending_count=_source_collection_count(run_summary.get("openAssignmentCount")),
+            pending_count=finding_open_assignment_count,
             artifact_status="ready" if active_record_count > 0 else "empty",
-            artifact_summary=f"{active_record_count} active DataRecord records; {excluded_source_count} excluded; {_source_collection_count(run_summary.get('openAssignmentCount'))} assignments remain.",
+            artifact_summary=f"{active_record_count} active DataRecord records; {excluded_source_count} excluded; {finding_open_assignment_count} search assignments remain.",
             historical_task_count=len(stage_task_groups.get("finding", ([], []))[1]),
-            extra_counts={"excluded": excluded_source_count, "rawRecord": raw_record_count},
+            extra_counts={
+                "excluded": excluded_source_count,
+                "rawRecord": raw_record_count,
+                "searchOpenAssignment": finding_open_assignment_count,
+                "downstreamOpenAssignment": downstream_open_assignment_count,
+            },
         ),
         _source_collection_stage_card_projection(
             "extraction",
@@ -17226,7 +17263,7 @@ def _reconcile_source_collection_stage_session_task_sources(team_id: str, run_id
         )
         and bool(_source_collection_stage_writeback_candidate_decisions(result))
     )
-    if should_reconcile_quality and (not existing_quality_status or existing_quality_status == "failed"):
+    if should_reconcile_quality and existing_quality_status in {"", "failed", "no_assessable_decisions"}:
         materialized_quality = _materialize_source_collection_stage_writeback_quality(
             team_id,
             run_id,
