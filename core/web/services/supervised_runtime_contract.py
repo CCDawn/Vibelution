@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 
-SUPERVISED_ROLE_CONTRACT_VERSION = 2
+SUPERVISED_ROLE_CONTRACT_VERSION = 3
 
 SUPERVISED_ROLE_RUNTIME_TOOLS: dict[str, tuple[str, ...]] = {
     "baseline": (
@@ -21,6 +21,8 @@ SUPERVISED_ROLE_RUNTIME_TOOLS: dict[str, tuple[str, ...]] = {
         "close_evolution_transaction_tool",
         "grep_search_tool",
         "code_symbol_tool",
+        "apply_patch_tool",
+        "write_file_tool",
         "cli_tool",
         "python_lint_tool",
     ),

@@ -699,6 +699,59 @@ class TestToolExecutorExecute:
         assert "已回退到通用工具预览" in str(result)
         assert "当前可用工具包括" in str(result)
 
+    def test_supervised_evaluation_runtime_goal_allows_safe_pytest_cli(self, executor):
+        session = reset_session_state()
+        session.set_runtime_goal_packet(
+            SimpleNamespace(
+                capability_profile="supervised_evaluation",
+                allow_file_writes=True,
+                allow_git_commit=False,
+                allow_evolution_transaction=True,
+                allow_subagents=False,
+            )
+        )
+        called = {"command": ""}
+
+        def fake_cli_tool(command="", timeout=60):
+            called["command"] = command
+            return "pytest ok"
+
+        executor.register_tool("cli_tool", fake_cli_tool, timeout=5)
+
+        result, action = executor.execute(
+            "cli_tool",
+            {"command": "python -m pytest tests/test_dataset_registry.py -q", "timeout": 120},
+        )
+
+        assert action is None
+        assert result == "pytest ok"
+        assert called["command"] == "python -m pytest tests/test_dataset_registry.py -q"
+
+    def test_supervised_evaluation_runtime_goal_still_blocks_git_cli(self, executor):
+        session = reset_session_state()
+        session.set_runtime_goal_packet(
+            SimpleNamespace(
+                capability_profile="supervised_evaluation",
+                allow_file_writes=True,
+                allow_git_commit=False,
+                allow_evolution_transaction=True,
+                allow_subagents=False,
+            )
+        )
+        called = {"value": False}
+
+        def fake_cli_tool(command="", timeout=60):
+            called["value"] = True
+            return "should not run"
+
+        executor.register_tool("cli_tool", fake_cli_tool, timeout=5)
+
+        result, action = executor.execute("cli_tool", {"command": "git commit -m supervised"})
+
+        assert action is None
+        assert called["value"] is False
+        assert "禁止 Git" in str(result)
+
     def test_execute_read_file(self, executor):
         """测试读取文件工具"""
         # 创建一个测试文件
