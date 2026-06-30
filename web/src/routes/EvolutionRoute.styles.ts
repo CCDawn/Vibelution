@@ -325,7 +325,7 @@ const styles = createVuiStyleMap(styleKeys, {
     launchSurface: "max-h-none",
     librarySummaryBar: "grid-cols-[minmax(300px,1fr)_minmax(260px,0.8fr)_minmax(300px,0.9fr)]",
     liveLaunchStack:
-      "grid-rows-[minmax(0,1fr)] overflow-hidden max-h-none max-[1360px]:grid max-[900px]:h-auto max-[900px]:overflow-auto max-[900px]:content-start max-[900px]:grid-rows-[max-content_max-content_max-content]",
+      "grid-rows-[max-content] overflow-visible max-h-none max-[1360px]:grid max-[900px]:h-auto max-[900px]:overflow-auto max-[900px]:content-start max-[900px]:grid-rows-[max-content_max-content_max-content]",
     noticeText: "max-[1200px]:hidden",
     sourceInventoryBar: "max-[1200px]:hidden",
     sourceMetaCompact: "max-[1200px]:hidden",
@@ -334,14 +334,14 @@ const styles = createVuiStyleMap(styleKeys, {
     supervisedMembersList: "max-h-[min(238px,34vh)]",
     supervisedRunConsole: "[container-type:inline-size]",
     supervisedRunConsoleGrid:
-      "grid-cols-[minmax(300px,var(--evolution-live-launch-width,348px))_minmax(0,1fr)_minmax(300px,var(--evolution-live-run-width,360px))] grid-rows-[minmax(0,1fr)] max-[900px]:grid-cols-1 max-[900px]:auto-rows-max",
-    supervisedRunSetup: "max-h-[min(118px,22vh)]",
-    supervisedWorkflowCard: "min-h-[112px] overflow-visible p-2",
+      "grid-cols-[minmax(300px,var(--evolution-live-launch-width,348px))_minmax(0,1fr)_minmax(300px,var(--evolution-live-run-width,360px))] grid-rows-[max-content] items-start max-[900px]:grid-cols-1 max-[900px]:auto-rows-max",
+    supervisedRunSetup: "max-h-none overflow-visible",
+    supervisedWorkflowCard: "grid min-h-[148px] grid-rows-[1fr_auto] overflow-visible p-2",
     supervisedWorkflowCardButton:
-      "!grid !h-full !min-h-[86px] !w-full !max-w-none grid-rows-[auto_auto_minmax(0,1fr)] items-start justify-stretch gap-1.5 p-2 text-left [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
-    supervisedWorkflowCardFooter: "mt-1 grid w-full grid-cols-2 gap-1",
+      "!grid !h-full !min-h-[106px] !w-full !max-w-none grid-rows-[auto_auto_minmax(0,1fr)] items-start justify-stretch gap-1.5 p-2 text-left [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+    supervisedWorkflowCardFooter: "mt-1 grid min-h-[26px] w-full grid-cols-2 gap-1",
     supervisedWorkflowCardGrid:
-      "grid-cols-[repeat(4,minmax(168px,1fr))] gap-1.5 overflow-visible max-[1280px]:grid-cols-2 max-[760px]:grid-cols-1",
+      "grid-cols-[repeat(4,minmax(168px,1fr))] items-stretch gap-1.5 overflow-visible max-[1280px]:grid-cols-2 max-[760px]:grid-cols-1",
     supervisedWorkflowCardTopline:
       "flex min-h-0 w-full items-center justify-between gap-1 rounded-none border-0 bg-transparent p-0 text-[var(--vui-font-xs)] leading-tight",
     supervisedWorkflowFollowButton: "min-h-[26px] px-2 text-[var(--vui-font-xs)]",

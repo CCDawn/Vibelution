@@ -383,6 +383,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.tokenStatusMetricButton).toContain("!grid");
     expect(routeStyles.tokenStatusMetricButton).toContain("!w-full");
     expect(routeStyles.tokenStatusMetricButton).toContain("[&_[data-slot=vui-button-label]]:contents");
+    expect(routeStyles.tokenStatusMetric_cache).not.toContain("inline-flex");
+    expect(routeStyles.tokenStatusMetric_modelInput).not.toContain("inline-flex");
+    expect(routeStyles.tokenStatusMetric_compression).not.toContain("inline-flex");
     expect(routeStyles.featureChipRow).toContain("grid-cols-2");
     expect(routeStyles.featureChip).toContain("[&_[data-slot=vui-button-content]]:min-w-0");
     expect(routeStyles.featureChip).toContain("[&_[data-slot=vui-button-content]]:max-w-full");
