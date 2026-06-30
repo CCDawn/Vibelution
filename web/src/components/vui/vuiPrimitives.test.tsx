@@ -9,15 +9,16 @@ import { VButton, VChip, VIconButton, VNativeButton, VPanel, VToolbar, VTooltip 
 import { VibelutionHeroProvider } from "./renderers/heroui/HeroProvider";
 
 describe("VUI foundation primitives", () => {
-  it("limits Tailwind source scanning to the VUI bootstrap areas", () => {
+  it("scans Tailwind classes from the TSX surfaces replacing CSS modules", () => {
     const tailwindEntry = readFileSync(
       resolve(import.meta.dirname, "../../design/tailwind.css"),
       "utf8",
     );
 
     expect(tailwindEntry).toContain('@source "../app/**/*.{ts,tsx}";');
-    expect(tailwindEntry).toContain('@source "../components/vui/**/*.{ts,tsx}";');
-    expect(tailwindEntry).not.toContain("../routes/");
+    expect(tailwindEntry).toContain('@source "../components/**/*.{ts,tsx}";');
+    expect(tailwindEntry).toContain('@source "../routes/**/*.{ts,tsx}";');
+    expect(tailwindEntry).not.toContain(".test");
   });
 
   it("wraps children in the Vibelution HeroUI provider boundary", () => {

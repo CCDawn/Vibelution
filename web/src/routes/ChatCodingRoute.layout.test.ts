@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import conversationStyles from "../components/conversation/ConversationView.module.css";
 import conversationViewSource from "../components/conversation/ConversationView.tsx?raw";
+import routeErrorBoundarySource from "../app/RouteErrorBoundary.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
 import shellStoreSource from "../store/shellStore.ts?raw";
 import agentSessionTabStripSource from "./AgentSessionTabStrip.tsx?raw";
@@ -20,7 +21,6 @@ import routeStyles from "./ChatCodingRoute.module.css";
 const routeCssSource = readFileSync(new URL("./ChatCodingRoute.module.css", import.meta.url), "utf-8");
 const conversationCssSource = readFileSync(new URL("../components/conversation/ConversationView.module.css", import.meta.url), "utf-8");
 const appShellCssSource = readFileSync(new URL("../app/AppShell.module.css", import.meta.url), "utf-8");
-const routeErrorBoundaryCssSource = readFileSync(new URL("../app/RouteErrorBoundary.module.css", import.meta.url), "utf-8");
 
 function cssRule(source: string, selector: string) {
   const start = source.indexOf(`${selector} {`);
@@ -238,7 +238,7 @@ describe("ChatCodingRoute layout contract", () => {
       routeCssSource,
       conversationCssSource,
       routerSource,
-      routeErrorBoundaryCssSource,
+      routeErrorBoundarySource,
     ].join("\n");
 
     expect(chatSurfaceCss).toContain("var(--vui-font-xs)");
