@@ -453,12 +453,37 @@ const styles = createVuiStyleMap(styleKeys, {
     sourceCollectionFocusedPanel:
       "grid-cols-[minmax(0,1fr)_minmax(320px,380px)] isolate",
     sourceCollectionPagination: "select-none whitespace-nowrap [writing-mode:horizontal-tb]",
-    sourceCollectionResultStatus:
-      "grid-cols-[minmax(220px,1fr)_minmax(80px,112px)_minmax(150px,240px)] grid-rows-[auto_auto_auto]",
+    sourceCollectionCommandStats:
+      "grid-cols-[repeat(3,minmax(120px,1fr))] max-[860px]:grid-cols-[1fr] [&_span]:min-h-[30px]",
+    sourceCollectionPageGrid: "grid-cols-[minmax(0,1fr)]",
+    sourceCollectionResultItem:
+      "grid-cols-[max-content_minmax(0,1fr)_max-content_minmax(120px,220px)] min-h-[36px] items-center gap-2 px-2 py-1 max-[820px]:grid-cols-[max-content_minmax(0,1fr)]",
+    sourceCollectionResultContent:
+      "min-w-0 [&_strong]:block [&_strong]:truncate",
+    sourceCollectionResultMeta:
+      "flex min-w-[76px] flex-nowrap items-center gap-1 whitespace-nowrap text-[var(--vui-font-xs)] text-[var(--fg-tertiary)] [&_span:first-child]:text-[var(--fg-secondary)] max-[820px]:hidden",
+    sourceCollectionResultSource:
+      "grid grid-cols-[max-content_minmax(0,1fr)] items-center gap-1 overflow-hidden text-[var(--vui-font-xs)] [&_a]:truncate [&_code]:truncate max-[820px]:col-span-2",
+    sourceCollectionResultStatus: "whitespace-nowrap justify-self-start",
+    sourceCollectionStageCard:
+      "min-h-[112px] border-l-[4px] [border-left-color:var(--source-step-color,var(--vui-border-subtle))] px-2 py-2",
     sourceCollectionStageCardHead:
-      "grid-cols-[minmax(120px,0.24fr)_minmax(0,1fr)_max-content] max-[1320px]:grid-cols-[minmax(0,1fr)] max-[1320px]:[&_.sourceCollectionStageProjection]:col-span-full max-[1320px]:[&_.sourceCollectionStageProjection]:row-start-2",
-    sourceCollectionStageModules: "grid-cols-[repeat(3,minmax(0,1fr))]",
-    sourceCollectionStageWorkspace: "grid-rows-[auto_auto_minmax(0,1fr)]",
+      "grid-cols-[max-content_1fr] items-center gap-2 [&_span]:justify-self-end [&_span]:whitespace-nowrap",
+    sourceCollectionStageModuleText:
+      "[&_b]:text-[var(--vui-font-base)] [&_em]:text-[var(--vui-font-sm)] [&_small]:line-clamp-1",
+    sourceCollectionStageModules:
+      "grid-cols-[repeat(4,minmax(0,1fr))] max-[1220px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[720px]:grid-cols-[1fr]",
+    sourceCollectionStageWorkspace: "grid-rows-[auto_minmax(0,1fr)]",
+    sourceCollectionStepActive:
+      "[--source-step-color:var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_52%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-base))]",
+    sourceCollectionStepDone:
+      "[--source-step-color:var(--state-success)] border-[color-mix(in_srgb,var(--state-success)_48%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-success)_8%,var(--vui-surface-base))]",
+    sourceCollectionStepFailed:
+      "[--source-step-color:var(--state-error)] border-[color-mix(in_srgb,var(--state-error)_50%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_8%,var(--vui-surface-base))]",
+    sourceCollectionStepIdle:
+      "[--source-step-color:var(--fg-tertiary)] border-[color-mix(in_srgb,var(--fg-tertiary)_26%,var(--vui-border-subtle))] bg-[var(--vui-surface-base)]",
+    sourceCollectionStepPending:
+      "[--source-step-color:var(--state-warning)] border-[color-mix(in_srgb,var(--state-warning)_48%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_8%,var(--vui-surface-base))]",
     sourceCollectionTraceBody: "grid-cols-[44px_minmax(0,1fr)] [&_p]:line-clamp-2",
     teamContextActions: "!flex flex-nowrap items-center justify-end gap-1.5",
     teamContextBar:
@@ -474,6 +499,8 @@ const styles = createVuiStyleMap(styleKeys, {
     toolbarActions:
       "!flex min-w-[220px] max-w-[min(100%,560px)] flex-wrap items-center justify-end gap-1.5 overflow-visible [&_a]:min-w-[72px] [&_a]:whitespace-nowrap [&_button]:min-w-[72px] [&_button]:whitespace-nowrap",
     workflowGraphFrame: "h-full overflow-hidden",
+    workflowCandidateItem:
+      "grid grid-cols-[minmax(0,1fr)_minmax(120px,220px)] min-h-[40px] items-center gap-2 px-2 py-1 max-[820px]:grid-cols-[minmax(0,1fr)]",
     workspace:
       "!grid min-h-0 grid-cols-[minmax(520px,1fr)_minmax(300px,380px)] gap-2 overflow-hidden px-2 pb-2 pt-1",
     workspaceResearch: "grid-cols-[minmax(0,1fr)]",
