@@ -1496,8 +1496,10 @@ def test_session_live_output_publishes_lightweight_assistant_delta_without_detai
     subscriber: queue.Queue[dict[str, object]] = queue.Queue(maxsize=8)
     session_service._register_session_stream_subscriber("session-live", subscriber)
     session_service._set_session_running("session-live", True, turn_id="turn-running")
+    content_delta_event: dict[str, object] | None = None
     try:
         session_service._set_session_live_output("session-live", turn_id="turn-running", content="hello")
+        content_delta_event = subscriber.get_nowait()
         session_service._set_session_live_output(
             "session-live",
             turn_id="turn-running",
@@ -1519,9 +1521,10 @@ def test_session_live_output_publishes_lightweight_assistant_delta_without_detai
 
     assert detail_calls == 0
     assert subscriber.qsize() >= 1
-    events = []
+    events = [content_delta_event]
     while not subscriber.empty():
         events.append(subscriber.get_nowait())
+    assert content_delta_event is not None
     assert all(item["type"] == "assistant_delta" for item in events)
     assert all("timelineItems" not in item for item in events)
     event = events[-1]
@@ -1533,6 +1536,7 @@ def test_session_live_output_publishes_lightweight_assistant_delta_without_detai
     assert all(item["thought"] == "" for item in events)
     assert any(item["contentDelta"] == "hello" for item in events)
     assert any(item["thoughtDelta"] == "thinking" for item in events)
+    assert "feedbackEvents" not in content_delta_event
     assert all(item["replaceContent"] is False for item in events)
     assert all(item["replaceThought"] is False for item in events)
     assert any((item.get("feedbackEvents") or [{}])[0].get("kind") == "thought" for item in events)
