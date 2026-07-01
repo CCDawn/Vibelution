@@ -232,7 +232,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain('view: "graph"');
     expect(routeSource).toContain("teamId: selectedTeam.teamId");
     expect(routeSource).toContain("teamId: selectedTeam?.teamId");
-    expect(routeStyles.teamMemoryIndex).toContain("grid-cols-[repeat(auto-fit,minmax(300px,1fr))]");
+    expect(routeStyles.teamMemoryMemberTable).toContain("grid-cols-[repeat(auto-fill,minmax(240px,1fr))]");
     expect(routeStylesSource).toContain(".teamMemoryMemberTable");
     expect(routeStylesSource).toContain(".teamMemoryMemberHeading");
     expect(routeStylesSource).toContain(".teamMemoryActionRail");
