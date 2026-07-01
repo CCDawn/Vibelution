@@ -45,12 +45,9 @@ import {
   EvolutionLibraryEntry,
   EvolutionWorkspaceSnapshot,
   SupervisedWorktreeRun,
-  SelfEvolutionActiveRun,
   SelfEvolutionOverview,
   SelfEvolutionTransaction,
   SelfEvolutionHistoryDeleteResponse,
-  SelfEvolutionHandoffResponse,
-  SelfEvolutionRunStreamEvent,
   EvolutionRun,
   EvolutionRoleConversationSession,
   EvolutionClosedLoopRecord,
@@ -89,7 +86,6 @@ import {
   storedPaneSize,
   storedPaneWidth,
 } from "./resizablePane";
-import { savePendingSelfEvolutionHandoff } from "./selfEvolutionHandoff";
 import styles from "./EvolutionRoute.module.css";
 
 type RunFilter = "all" | "success" | "failed";
@@ -218,14 +214,6 @@ type SupervisedMentalModelMode = "follow" | "enabled" | "disabled";
 
 function clampScore(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
-}
-
-function isSelfRunExecutingStatus(status: string) {
-  return ["queued", "running", "stopping"].includes(String(status || "").trim().toLowerCase());
-}
-
-function isSelfRunLockedStatus(status: string) {
-  return ["queued", "running", "stopping", "paused"].includes(String(status || "").trim().toLowerCase());
 }
 
 function isLocalSupervisedStartPlaceholder(run: EvolutionActiveRun | null | undefined): run is EvolutionActiveRun {
@@ -720,7 +708,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [supervisedStartCommand, setSupervisedStartCommand] = useState<EvolutionRunCommandAccepted | null>(null);
   const [selfGoalInput, setSelfGoalInput] = useState("");
   const [selfGoalInitialized, setSelfGoalInitialized] = useState(false);
-  const [liveSelfRun, setLiveSelfRun] = useState<SelfEvolutionActiveRun | null>(null);
   const [actionFeedback, setActionFeedback] = useState("");
   const [selfActionFeedback, setSelfActionFeedback] = useState("");
   const [runRecordsFeedback, setRunRecordsFeedback] = useState("");
@@ -822,13 +809,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     queryFn: () => fetchJson<SelfEvolutionOverview>("/api/evolution/self/overview"),
     staleTime: SELF_OVERVIEW_STALE_TIME_MS,
     refetchInterval: resolvePollingInterval(pageVisible, SELF_OVERVIEW_REFETCH_INTERVAL_MS),
-    refetchIntervalInBackground: false,
-    enabled: selfTrackQueriesEnabled,
-  });
-  const selfLatestRunQuery = useQuery({
-    queryKey: queryKeys.evolutionSelfLatestRun(),
-    queryFn: () => fetchJson<SelfEvolutionActiveRun | null>("/api/evolution/self/latest-run"),
-    refetchInterval: resolvePollingInterval(pageVisible, 4_000),
     refetchIntervalInBackground: false,
     enabled: selfTrackQueriesEnabled,
   });
@@ -1055,29 +1035,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const invalidateSelfEvolution = async () => {
     await evolutionWorkspaceCache.afterSelfEvolutionChanged();
   };
-  const startSelfRunMutation = useMutation({
-    onMutate: () => {
-      setSelfActionFeedback("");
-    },
-    mutationFn: () =>
-      fetchJson<SelfEvolutionActiveRun>("/api/evolution/self/runs", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          goal: selfGoalInput.trim(),
-        }),
-      }).then((snapshot) => requireEvolutionRunSnapshot(snapshot, "self-evolution start")),
-    onSuccess: async (snapshot) => {
-      setSelfActionFeedback("");
-      setLiveSelfRun(snapshot);
-      await invalidateSelfEvolution();
-    },
-  });
   const startSelfWorktreeRunMutation = useMutation({
     onMutate: () => {
-      startSelfRunMutation.reset();
       setSelfActionFeedback("");
     },
     mutationFn: () => {
@@ -1107,85 +1066,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     onSuccess: async (snapshot) => {
       setSelfActionFeedback(snapshot.latestMessage || t("startSelfWorktreeQueued"));
       await evolutionWorkspaceCache.afterWorktreeRunChanged();
-    },
-  });
-  const stopSelfRunMutation = useMutation({
-    onMutate: () => {
-      setSelfActionFeedback("");
-    },
-    mutationFn: (runId: string) =>
-      fetchJson<SelfEvolutionActiveRun>(`/api/evolution/self/runs/${runId}/terminate`, {
-        method: "POST",
-      }).then((snapshot) => requireEvolutionRunSnapshot(snapshot, "self-evolution terminate")),
-    onSuccess: async (snapshot) => {
-      setSelfActionFeedback(snapshot.latestMessage || snapshot.stopReason || "");
-      setLiveSelfRun(snapshot);
-      await invalidateSelfEvolution();
-    },
-  });
-  const pauseSelfRunMutation = useMutation({
-    onMutate: () => {
-      setSelfActionFeedback("");
-    },
-    mutationFn: (runId: string) =>
-      fetchJson<SelfEvolutionActiveRun>(`/api/evolution/self/runs/${runId}/pause`, {
-        method: "POST",
-      }).then((snapshot) => requireEvolutionRunSnapshot(snapshot, "self-evolution pause")),
-    onSuccess: async (snapshot) => {
-      setSelfActionFeedback(snapshot.latestMessage || snapshot.stopReason || "");
-      setLiveSelfRun(snapshot);
-      await invalidateSelfEvolution();
-    },
-  });
-  const resumeSelfRunMutation = useMutation({
-    onMutate: () => {
-      setSelfActionFeedback("");
-    },
-    mutationFn: (runId: string) =>
-      fetchJson<SelfEvolutionActiveRun>(`/api/evolution/self/runs/${runId}/resume`, {
-        method: "POST",
-      }).then((snapshot) => requireEvolutionRunSnapshot(snapshot, "self-evolution resume")),
-    onSuccess: async (snapshot) => {
-      setSelfActionFeedback(snapshot.latestMessage || "");
-      setLiveSelfRun(snapshot);
-      await invalidateSelfEvolution();
-    },
-  });
-  const rollbackSelfRunMutation = useMutation({
-    onMutate: () => {
-      setSelfActionFeedback("");
-    },
-    mutationFn: (runId: string) =>
-      fetchJson<SelfEvolutionActiveRun>(`/api/evolution/self/runs/${runId}/rollback`, {
-        method: "POST",
-      }).then((snapshot) => requireEvolutionRunSnapshot(snapshot, "self-evolution rollback")),
-    onSuccess: async (snapshot) => {
-      setSelfActionFeedback(snapshot.rollback?.reason || snapshot.latestMessage || "");
-      setLiveSelfRun(snapshot);
-      await invalidateSelfEvolution();
-    },
-  });
-  const handoffSelfRunMutation = useMutation({
-    onMutate: () => {
-      setSelfActionFeedback("");
-    },
-    mutationFn: (runId: string) =>
-      fetchJson<SelfEvolutionHandoffResponse>(`/api/evolution/self/runs/${runId}/handoff`, {
-        method: "POST",
-      }),
-    onSuccess: async (payload) => {
-      setSelfActionFeedback(payload.message || "");
-      if (payload.run) {
-        setLiveSelfRun(requireEvolutionRunSnapshot(payload.run, "self-evolution handoff"));
-      }
-      await evolutionWorkspaceCache.afterSelfHandoff();
-      if (payload.status === "ready" && payload.content) {
-        savePendingSelfEvolutionHandoff({
-          sessionId: payload.sessionId || "",
-          content: payload.content,
-        });
-        void navigate("/chat");
-      }
     },
   });
   const deleteSelfHistoryMutation = useMutation({
@@ -1236,6 +1116,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       }),
     onSuccess: async (snapshot) => {
       setActionFeedback(snapshot.latestMessage || statusLabel(snapshot.status));
+      if (isSelfEvolutionWorktreeRun(snapshot)) {
+        setSelfActionFeedback(snapshot.latestMessage || statusLabel(snapshot.status));
+      }
       await evolutionWorkspaceCache.afterWorktreeRunChanged();
     },
   });
@@ -1251,13 +1134,18 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const currentSupervisedAgentBindings = workspaceSnapshot?.currentAgentBindings ?? EMPTY_AGENT_BINDINGS;
   const activeWorktreeRun = workspaceSnapshot?.worktreeActiveRun ?? null;
   const worktreeRuns = workspaceSnapshot?.worktreeRuns ?? EMPTY_WORKTREE_RUNS;
+  const selfWorktreeRuns = workspaceSnapshot?.selfWorktreeRuns ?? worktreeRuns.filter((run) => isSelfEvolutionWorktreeRun(run));
+  const selfWorktreeRun =
+    workspaceSnapshot?.selfWorktreeActiveRun
+    ?? (isSelfEvolutionWorktreeRun(activeWorktreeRun) ? activeWorktreeRun : null)
+    ?? selfWorktreeRuns[0]
+    ?? null;
   const reviewCandidateWorktree = activeWorktreeRun ?? worktreeRuns[0] ?? null;
   const reviewCandidateGate = reviewCandidateWorktree?.reviewGate ?? reviewCandidateWorktree?.mergeAnalysis?.reviewGate;
   const highlightedReviewPending = isSelfEvolutionWorktreeRun(reviewCandidateWorktree)
     && Boolean(reviewCandidateGate?.required)
     && String(reviewCandidateGate?.status || "").trim().toLowerCase() !== "approved";
   const selfOverview = selfOverviewQuery.data ?? workspaceSnapshot?.selfOverview;
-  const latestSelfRunSnapshot = selectRunSnapshotWithRunId(selfLatestRunQuery.data ?? workspaceSnapshot?.selfLatestRun);
   const selfTransactions = selfTransactionsQuery.data ?? workspaceSnapshot?.selfTransactions ?? [];
   const selfTrackLoading = selfTrackQueriesEnabled
     && !selfOverview
@@ -1584,13 +1472,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     ?? startWorktreeRunMutation.error?.message
     ?? startSimulationWorktreeRunMutation.error?.message
     ?? "";
-  const monitoredSelfRun = latestSelfRunSnapshot ?? liveSelfRun;
-  const lockedSelfRun =
-    monitoredSelfRun
-    && isSelfRunLockedStatus(monitoredSelfRun.status || "")
-      ? monitoredSelfRun
-      : null;
-  const selfRunLocked = Boolean(lockedSelfRun);
+  const selfRunLocked = Boolean(
+    selfWorktreeRun
+    && ["queued", "running", "paused", "stopping"].includes(String(selfWorktreeRun.status || "").trim().toLowerCase()),
+  );
   const selectedDataset = workbenchControl?.datasets.find((item) => item.name === datasetName) ?? null;
   const datasetCatalog = workbenchControl?.datasetCatalog ?? workbenchControl?.datasets ?? [];
   const primaryDatasets = useMemo(
@@ -2032,57 +1917,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     setSelfGoalInput(workspaceSnapshot.selfOverview.goal);
     setSelfGoalInitialized(true);
   }, [selfGoalInitialized, workspaceSnapshot?.selfOverview?.goal]);
-
-  useEffect(() => {
-    if (latestSelfRunSnapshot) {
-      setLiveSelfRun(latestSelfRunSnapshot);
-      return;
-    }
-    setLiveSelfRun((current) => {
-      if (current && !isSelfRunLockedStatus(current.status || "")) {
-        return current;
-      }
-      return null;
-    });
-  }, [latestSelfRunSnapshot]);
-
-  useEffect(() => {
-    if (!pageVisible) {
-      return;
-    }
-    const target = monitoredSelfRun;
-    if (!target || !isSelfRunExecutingStatus(target.status || "")) {
-      return;
-    }
-    if (typeof EventSource === "undefined") {
-      return;
-    }
-
-    const source = new EventSource(`/api/evolution/self/runs/${target.runId}/events`);
-    const handleSnapshot = (message: MessageEvent) => {
-      const snapshot = parseRunStreamSnapshot<SelfEvolutionActiveRun>(message.data, "self-evolution stream");
-      if (!snapshot) {
-        return;
-      }
-      const payload = JSON.parse(message.data) as SelfEvolutionRunStreamEvent;
-      setLiveSelfRun(snapshot);
-      if (payload.terminal) {
-        void evolutionWorkspaceCache.afterSelfEvolutionChanged();
-        source.close();
-      }
-    };
-
-    source.addEventListener("self_evolution_run", handleSnapshot as EventListener);
-    source.onerror = () => {
-      source.close();
-      void evolutionWorkspaceCache.refreshSelfLatestRun();
-    };
-
-    return () => {
-      source.removeEventListener("self_evolution_run", handleSnapshot as EventListener);
-      source.close();
-    };
-  }, [evolutionWorkspaceCache, monitoredSelfRun?.runId, monitoredSelfRun?.status, pageVisible]);
 
   useEffect(() => {
     if (!pageVisible) {
@@ -3010,32 +2844,17 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         )}>
           <LazySelfEvolutionTrack
             overview={selfOverview}
-            latestRun={monitoredSelfRun}
+            worktreeRun={selfWorktreeRun}
             goalInput={selfGoalInput}
             onGoalInputChange={setSelfGoalInput}
-            onStartRun={() => startSelfRunMutation.mutate()}
-            onStartWorktreeRun={() => startSelfWorktreeRunMutation.mutate()}
-            onPauseRun={() => monitoredSelfRun && pauseSelfRunMutation.mutate(monitoredSelfRun.runId)}
-            onResumeRun={() => monitoredSelfRun && resumeSelfRunMutation.mutate(monitoredSelfRun.runId)}
-            onTerminateRun={() => monitoredSelfRun && stopSelfRunMutation.mutate(monitoredSelfRun.runId)}
-            onRollbackRun={() => monitoredSelfRun && rollbackSelfRunMutation.mutate(monitoredSelfRun.runId)}
-            onHandoffRun={() => monitoredSelfRun && handoffSelfRunMutation.mutate(monitoredSelfRun.runId)}
+            onStartRun={() => startSelfWorktreeRunMutation.mutate()}
+            onWorktreeAction={(runId, action) => approvalWorktreeActionMutation.mutate({ runId, action })}
             onDeleteHistoryGroups={(txnIds) => deleteSelfHistoryMutation.mutate(txnIds)}
-            startPending={startSelfRunMutation.isPending}
-            startWorktreePending={startSelfWorktreeRunMutation.isPending}
-            pausePending={pauseSelfRunMutation.isPending}
-            resumePending={resumeSelfRunMutation.isPending}
-            terminatePending={stopSelfRunMutation.isPending}
-            rollbackPending={rollbackSelfRunMutation.isPending}
-            handoffPending={handoffSelfRunMutation.isPending}
+            startPending={startSelfWorktreeRunMutation.isPending}
+            worktreeActionPending={approvalWorktreeActionMutation.isPending}
             deleteHistoryPending={deleteSelfHistoryMutation.isPending}
-            startError={startSelfRunMutation.error?.message ?? ""}
             startWorktreeError={startSelfWorktreeRunMutation.error?.message ?? ""}
-            pauseError={pauseSelfRunMutation.error?.message ?? ""}
-            resumeError={resumeSelfRunMutation.error?.message ?? ""}
-            terminateError={stopSelfRunMutation.error?.message ?? ""}
-            rollbackError={rollbackSelfRunMutation.error?.message ?? ""}
-            handoffError={handoffSelfRunMutation.error?.message ?? ""}
+            worktreeActionError={approvalWorktreeActionMutation.error?.message ?? ""}
             deleteHistoryError={deleteSelfHistoryMutation.error?.message ?? ""}
             actionFeedback={selfActionFeedback}
             runLocked={selfRunLocked}

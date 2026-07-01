@@ -46,19 +46,8 @@ from core.web.services.self_evolution_service import (
 )
 from core.web.services.self_evolution_control_service import (
     SelfEvolutionRunBusyError,
-    SelfEvolutionRunNotFoundError,
     SelfEvolutionRunValidationError,
-    get_active_self_evolution_run,
-    get_latest_self_evolution_run,
-    get_self_evolution_run_snapshot,
-    handoff_self_evolution_run_to_session,
-    request_pause_self_evolution_run,
-    request_stop_self_evolution_run,
-    rollback_self_evolution_run,
-    resume_self_evolution_run,
-    start_self_evolution_run,
     start_self_evolution_worktree_run,
-    stream_self_evolution_run_events,
 )
 from core.web.services.supervised_control_service import (
     SupervisedRunDeleteError,
@@ -160,14 +149,6 @@ class ProposalUpdatePayload(BaseModel):
     editNote: str | None = None
 
 
-class SelfEvolutionRunStartPayload(BaseModel):
-    goal: str = ""
-    writeIntent: bool | None = None
-    requiresWorktreeIsolation: bool | None = None
-    riskProfile: str | None = None
-    riskLevel: str | None = None
-
-
 class SelfEvolutionHistoryDeletePayload(BaseModel):
     txnIds: list[str] = Field(default_factory=list)
 
@@ -184,6 +165,19 @@ class ChatReviewActionPayload(BaseModel):
 class ChatReviewBulkDeletePayload(BaseModel):
     candidateIds: list[str] = Field(default_factory=list)
     reviewerNote: str = ""
+
+
+def _is_self_evolution_worktree_run(run: dict | None) -> bool:
+    if not isinstance(run, dict):
+        return False
+    origin = run.get("selfEvolutionOrigin") if isinstance(run.get("selfEvolutionOrigin"), dict) else {}
+    if str(origin.get("sourceTrack") or "").strip() == "self_evolution":
+        return True
+    start_request = run.get("startRequest") if isinstance(run.get("startRequest"), dict) else {}
+    return (
+        str(start_request.get("requestSource") or "").strip() == "api:evolution.self.worktree-runs"
+        or str(start_request.get("initiator") or "").strip() == "self_evolution_risky_write"
+    )
 
 
 @router.get("/evolution/overview")
@@ -238,6 +232,10 @@ def evolution_workspace_snapshot(includeSelf: bool = False) -> dict:
         "self_transactions",
         list_self_evolution_transactions if includeSelf else (lambda: []),
     )
+    worktree_active_run = timed("worktree_active_run", get_active_supervised_worktree_run)
+    worktree_runs = timed("worktree_runs", list_supervised_worktree_runs)
+    self_worktree_runs = [item for item in worktree_runs if _is_self_evolution_worktree_run(item)]
+    self_worktree_active_run = worktree_active_run if _is_self_evolution_worktree_run(worktree_active_run) else None
     payload = {
         "overview": dashboard["overview"],
         "runs": dashboard["runs"],
@@ -250,10 +248,11 @@ def evolution_workspace_snapshot(includeSelf: bool = False) -> dict:
         "currentAgentBindingSource": current_agent_binding_source,
         "currentAgentBindingStatus": current_agent_binding_status,
         "currentAgentBindingIssues": current_agent_binding_issues,
-        "worktreeActiveRun": timed("worktree_active_run", get_active_supervised_worktree_run),
-        "worktreeRuns": timed("worktree_runs", list_supervised_worktree_runs),
+        "worktreeActiveRun": worktree_active_run,
+        "worktreeRuns": worktree_runs,
         "selfOverview": self_overview,
-        "selfLatestRun": timed("self_latest_run", get_latest_self_evolution_run if includeSelf else (lambda: None)),
+        "selfWorktreeActiveRun": self_worktree_active_run,
+        "selfWorktreeRuns": self_worktree_runs if includeSelf else [],
         "selfTransactions": self_transactions,
     }
     duration_ms = (time.perf_counter() - started_at) * 1000
@@ -625,101 +624,6 @@ def self_evolution_delete_history(payload: SelfEvolutionHistoryDeletePayload) ->
     try:
         return delete_self_evolution_history_groups(payload.txnIds)
     except SelfEvolutionHistoryDeleteError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-@router.get("/evolution/self/active-run")
-def self_evolution_active_run() -> dict | None:
-    return get_active_self_evolution_run()
-
-
-@router.get("/evolution/self/latest-run")
-def self_evolution_latest_run() -> dict | None:
-    return get_latest_self_evolution_run()
-
-
-@router.get("/evolution/self/runs/{run_id}/events")
-def self_evolution_run_events(run_id: str) -> StreamingResponse:
-    snapshot = get_self_evolution_run_snapshot(run_id)
-    if snapshot is None:
-        raise HTTPException(status_code=404, detail="Self-evolution run not found")
-    return StreamingResponse(
-        stream_self_evolution_run_events(run_id, initial_snapshot=snapshot),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        },
-    )
-
-
-@router.post("/evolution/self/runs", status_code=status.HTTP_202_ACCEPTED)
-def self_evolution_start_run(payload: SelfEvolutionRunStartPayload) -> dict:
-    try:
-        return start_self_evolution_run(payload.model_dump())
-    except SelfEvolutionRunBusyError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except SelfEvolutionRunValidationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-@router.post("/evolution/self/runs/{run_id}/terminate")
-def self_evolution_terminate_run(run_id: str) -> dict:
-    try:
-        return request_stop_self_evolution_run(run_id)
-    except SelfEvolutionRunNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except SelfEvolutionRunBusyError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except SelfEvolutionRunValidationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-@router.post("/evolution/self/runs/{run_id}/pause")
-def self_evolution_pause_run(run_id: str) -> dict:
-    try:
-        return request_pause_self_evolution_run(run_id)
-    except SelfEvolutionRunNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except SelfEvolutionRunBusyError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except SelfEvolutionRunValidationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-@router.post("/evolution/self/runs/{run_id}/resume")
-def self_evolution_resume_run(run_id: str) -> dict:
-    try:
-        return resume_self_evolution_run(run_id)
-    except SelfEvolutionRunNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except SelfEvolutionRunBusyError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except SelfEvolutionRunValidationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-@router.post("/evolution/self/runs/{run_id}/rollback")
-def self_evolution_rollback_run(run_id: str) -> dict:
-    try:
-        return rollback_self_evolution_run(run_id)
-    except SelfEvolutionRunNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except SelfEvolutionRunBusyError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except SelfEvolutionRunValidationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-@router.post("/evolution/self/runs/{run_id}/handoff")
-def self_evolution_handoff_run(run_id: str) -> dict:
-    try:
-        return handoff_self_evolution_run_to_session(run_id)
-    except SelfEvolutionRunNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except SelfEvolutionRunBusyError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except SelfEvolutionRunValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 

@@ -334,6 +334,15 @@ def test_self_origin_worktree_flow_carries_goal_and_requires_review(tmp_path):
     assert "supervised_review_pending" in snapshot["mergeAnalysis"]["blockers"]
     assert snapshot["actionStates"]["approveReview"]["enabled"] is True
     assert snapshot["actionStates"]["merge"]["enabled"] is False
+    assert [item["id"] for item in snapshot["workflowSteps"]] == ["self_evolution", "approval"]
+    self_step = snapshot["workflowSteps"][0]
+    approval_step = snapshot["workflowSteps"][1]
+    assert self_step["label"] == "自进化"
+    assert self_step["ownerKind"] == "agent"
+    assert self_step["role"] == "candidate"
+    assert approval_step["label"] == "审批"
+    assert approval_step["ownerKind"] == "human"
+    assert approval_step["conversationSessionId"] == ""
 
 
 def test_real_worktree_flow_uses_supervised_conversation_chain_for_candidate_branch(tmp_path, monkeypatch):

@@ -45,12 +45,16 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("libraryListCollapsed");
   });
 
-  it("routes risky self-evolution writes into the supervised worktree endpoint", () => {
+  it("routes self-evolution starts only into the reviewed worktree endpoint", () => {
     expect(routeSource).toContain("startSelfWorktreeRunMutation");
     expect(routeSource).toContain('"/api/evolution/self/worktree-runs"');
     expect(routeSource).toContain('mode: "manual"');
-    expect(routeSource).toContain("onStartWorktreeRun={() => startSelfWorktreeRunMutation.mutate()}");
+    expect(routeSource).toContain("onStartRun={() => startSelfWorktreeRunMutation.mutate()}");
     expect(routeSource).toContain("startWorktreeError={startSelfWorktreeRunMutation.error?.message ?? \"\"}");
+    expect(routeSource).not.toContain('"/api/evolution/self/runs"');
+    expect(routeSource).not.toContain("startSelfRunMutation");
+    expect(routeSource).not.toContain("liveSelfRun");
+    expect(routeSource).not.toContain("SelfEvolutionActiveRun");
   });
 
   it("keeps candidate worktree review out of the live left rail", () => {
@@ -153,21 +157,25 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("styles.closedLoopLedger");
   });
 
-  it("loads self-evolution from dedicated endpoints before falling back to the workspace snapshot", () => {
+  it("loads self-evolution history separately but current flow from worktree snapshot", () => {
     expect(routeSource).toContain("queryKeys.evolutionSelfOverview()");
     expect(routeSource).toContain('"/api/evolution/self/overview"');
-    expect(routeSource).toContain("queryKeys.evolutionSelfLatestRun()");
-    expect(routeSource).toContain('"/api/evolution/self/latest-run"');
     expect(routeSource).toContain("queryKeys.evolutionSelfTransactions()");
     expect(routeSource).toContain('"/api/evolution/self/transactions"');
     expect(routeSource).toContain("const selfOverview = selfOverviewQuery.data ?? workspaceSnapshot?.selfOverview");
-    expect(routeSource).toContain("selfLatestRunQuery.data ?? workspaceSnapshot?.selfLatestRun");
+    expect(routeSource).toContain("workspaceSnapshot?.selfWorktreeActiveRun");
+    expect(routeSource).toContain("workspaceSnapshot?.selfWorktreeRuns");
     expect(routeSource).toContain("const selfTransactions = selfTransactionsQuery.data ?? workspaceSnapshot?.selfTransactions ?? []");
     expect(routeSource).toContain("const selfTrackLoading = selfTrackQueriesEnabled");
     expect(routeSource).toContain("overview={selfOverview}");
+    expect(routeSource).toContain("worktreeRun={selfWorktreeRun}");
     expect(routeSource).toContain("transactions={selfTransactions}");
     expect(routeSource).toContain("loading={selfTrackLoading}");
     expect(routeSource).not.toContain("loading={workspaceSnapshotQuery.isLoading}");
+    expect(routeSource).not.toContain("queryKeys.evolutionSelfLatestRun()");
+    expect(routeSource).not.toContain('"/api/evolution/self/latest-run"');
+    expect(routeSource).not.toContain("selfLatestRunQuery");
+    expect(routeSource).not.toContain("workspaceSnapshot?.selfLatestRun");
   });
 
   it("does not poll self-evolution detail endpoints while the supervised track is active", () => {
