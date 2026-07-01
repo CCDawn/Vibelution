@@ -49,6 +49,7 @@ from core.web.services.self_evolution_control_service import (
     SelfEvolutionRunNotFoundError,
     SelfEvolutionRunValidationError,
     execute_self_observation_action,
+    get_active_self_observation_run,
     get_self_observation_run_snapshot,
     start_self_evolution_worktree_run,
     start_self_observation_run,
@@ -251,6 +252,10 @@ def evolution_workspace_snapshot(includeSelf: bool = False) -> dict:
     worktree_runs = timed("worktree_runs", list_supervised_worktree_runs)
     self_worktree_runs = [item for item in worktree_runs if _is_self_evolution_worktree_run(item)]
     self_worktree_active_run = worktree_active_run if _is_self_evolution_worktree_run(worktree_active_run) else None
+    self_observation_active_run = timed(
+        "self_observation_active_run",
+        get_active_self_observation_run if includeSelf else (lambda: None),
+    )
     payload = {
         "overview": dashboard["overview"],
         "runs": dashboard["runs"],
@@ -268,6 +273,7 @@ def evolution_workspace_snapshot(includeSelf: bool = False) -> dict:
         "selfOverview": self_overview,
         "selfWorktreeActiveRun": self_worktree_active_run,
         "selfWorktreeRuns": self_worktree_runs if includeSelf else [],
+        "selfObservationActiveRun": self_observation_active_run,
         "selfTransactions": self_transactions,
     }
     duration_ms = (time.perf_counter() - started_at) * 1000
