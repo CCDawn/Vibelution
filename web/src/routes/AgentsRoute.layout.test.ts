@@ -18,6 +18,10 @@ const filterRailSource = readFileSync(
   new URL("../components/vui/product/agent-management/AgentFilterRail.tsx", import.meta.url),
   "utf-8",
 );
+const denseListSource = readFileSync(
+  new URL("../components/vui/product/agent-management/AgentDenseList.tsx", import.meta.url),
+  "utf-8",
+);
 
 function sourceBlocksForStyle(styleName: string): string[] {
   const marker = `className={styles.${styleName}}`;
@@ -138,7 +142,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("<AgentFilterRail");
     expect(routeSource).toContain("styles.agentPanel");
     expect(routeSource).toContain("styles.detailPanel");
-    expect(routeSource).toContain("styles.agentTable");
+    expect(routeSource).toContain("<AgentDenseList");
     expect(routeSource).toContain("agent.avatarImageUrl");
     expect(routeSource).toContain("styles.agentAvatarImage");
     expect(routeSource).toContain("/api/agents/avatar-options");
@@ -446,9 +450,10 @@ describe("AgentsRoute layout contract", () => {
   it("keeps Agent Center helper copy in hover text instead of permanent explanatory blocks", () => {
     expect(routeSource).toContain("<div title={copy.subtitle}>");
     expect(routeSource).not.toContain("<p className={styles.subtitle}>{copy.subtitle}</p>");
-    expect(routeSource).toContain("<span className={styles.healthCell} title={issueSummary(agent.health, lang)}>");
+    expect(routeSource).toContain("issueSummary: issueSummary(agent.health, lang)");
+    expect(denseListSource).toContain("title={row.issueSummary}");
     expect(routeSource).not.toContain("<small>{issueSummary(agent.health, lang)}</small>");
-    expect(routeSource).toContain("<div title={column.description}>");
+    expect(denseListSource).toContain("title={column.description}");
     expect(routeSource).not.toContain("<span>{column.description}</span>");
     expect(routeSource).toContain("title={createToolBundleSummaryValue.meta || copy.createAgentToolBundleEmpty}");
     expect(routeSource).not.toContain("<small>{createToolBundleSummaryValue.meta || copy.createAgentToolBundleEmpty}</small>");
@@ -492,7 +497,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("function issueDisplayTitle");
     expect(routeSource).toContain("Inbox 有待处理消息");
     expect(routeSource).toContain("这是 Inbox 待办提醒，不代表配置坏了");
-    expect(routeSource).toContain("styles.healthCell");
+    expect(routeSource).toContain("issueTone: issueTone(agent.health)");
     expect(routeSource).toContain("styles.detailHealthStatus");
     expect(routeSource).toContain("copy.healthNextStep");
     expect(routeSource).toContain("copy.statusReminders");
@@ -736,8 +741,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.nonSessionAgentColumn");
     expect(routeSource).toContain("nonSessionAgents = agents.filter((agent) => !isWorkSessionAgent(agent))");
     expect(routeSource).toContain("buildVisibleAgentColumns(visibleAgents, copy, teamIndexGroups)");
-    expect(routeSource).toContain("styles.agentColumnGrid");
-    expect(routeSource).toContain("styles.agentColumnHeader");
+    expect(routeSource).toContain("<AgentDenseList");
+    expect(denseListSource).toContain('data-vui-product="agent-dense-list"');
     expect(routeSource).toContain("非会话 Agent");
     expect(routeSource).toContain("Non-session Agents");
   });
@@ -949,8 +954,8 @@ describe("AgentsRoute layout contract", () => {
 
   it("keeps the desktop workspace as three scan-friendly columns", () => {
     expect(routeSource).toContain("styles.workspace");
-    expect(routeSource).toContain("styles.agentTableHead");
-    expect(routeSource).toContain("styles.agentRow");
+    expect(denseListSource).toContain("max-[860px]:hidden");
+    expect(denseListSource).toContain('data-vui="agent-row"');
     expect(routeSource).toContain("styles.detailPanel");
     expect(styles.workspace).toBeTruthy();
     expect(stylesSource).toContain("grid-template-columns: minmax(214px, 268px) minmax(430px, 1.08fr) minmax(330px, 0.86fr)");
@@ -982,8 +987,8 @@ describe("AgentsRoute layout contract", () => {
 
   it("renders every Agent as a person name plus colored functional role tag", () => {
     expect(routeSource).toContain("agentDisplayInfo(agent, lang)");
-    expect(routeSource).toContain("styles.agentRoleTag");
-    expect(routeSource).toContain("agentRoleTag_${display.tone}");
+    expect(routeSource).toContain("roleTone: display.tone");
+    expect(denseListSource).toContain("function roleToneClass");
     expect(routeSource).toContain("display.functionLabel");
   });
 
@@ -1029,8 +1034,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("onPress={bulkApplyAgentConfig}");
     expect(routeSource).toContain("styles.bulkSelectionList");
     expect(routeSource).toContain("styles.bulkFieldHeader");
-    expect(routeSource).toContain("styles.agentRowBulkSelected");
-    expect(routeSource).toContain("styles.agentRowShell");
+    expect(routeSource).toContain("bulkSelected: selectedBulkAgentIds.has(agent.agentId)");
+    expect(denseListSource).toContain("onToggleBulk");
     expect(stylesSource).toContain("grid-template-rows: auto auto minmax(0, 1fr)");
     expect(routeSource).not.toContain("styles.bulkActionBar");
     expect(stylesSource).not.toContain(".bulkActionBar {");
