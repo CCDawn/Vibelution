@@ -5694,17 +5694,15 @@ export function AgentsRoute() {
                 <Bot size={16} />
               </div>
               <div className={styles.createAgentGrid}>
-                <label className={styles.field}>
-                  <span>{copy.createAgentName}</span>
-                  <input
+                <VFieldRow label={copy.createAgentName}>
+                  <VNativeInput
                     value={createDraft.displayName}
                     placeholder={copy.createAgentNamePlaceholder}
                     onChange={(event) => updateCreateDraft({ displayName: event.target.value })}
                   />
-                </label>
-                <label className={styles.field}>
-                  <span>{copy.model}</span>
-                  <select
+                </VFieldRow>
+                <VFieldRow label={copy.model}>
+                  <VNativeSelect
                     value={agentLlmSlotModelId(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0])}
                     onChange={(event) => updateCreateDraft({
                       llmBindings: updateAgentLlmSlotBinding(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0], event.target.value),
@@ -5715,11 +5713,10 @@ export function AgentsRoute() {
                         {model.label}
                       </option>
                     ))}
-                  </select>
-                </label>
-                <label className={styles.field}>
-                  <span>{copy.modeMembership}</span>
-                  <select
+                  </VNativeSelect>
+                </VFieldRow>
+                <VFieldRow label={copy.modeMembership}>
+                  <VNativeSelect
                     value={createDraft.primaryMode}
                     onChange={(event) => {
                       const primaryMode = event.target.value;
@@ -5734,47 +5731,43 @@ export function AgentsRoute() {
                         {modeLabel(mode, lang)}
                       </option>
                     ))}
-                  </select>
-                </label>
+                  </VNativeSelect>
+                </VFieldRow>
                 {!createDraftIsWorkSession ? (
-                  <label className={styles.field}>
-                    <span>{copy.createAgentRole}</span>
-                    <input
+                  <VFieldRow label={copy.createAgentRole}>
+                    <VNativeInput
                       value={createDraft.roleKey}
                       placeholder={copy.createAgentRolePlaceholder}
                       onChange={(event) => updateCreateDraft({ roleKey: event.target.value })}
                     />
-                  </label>
+                  </VFieldRow>
                 ) : null}
-                <label className={styles.field}>
-                  <span>{copy.prompt}</span>
-                  <select value={createDraft.promptTemplateId} onChange={(event) => updateCreateDraft({ promptTemplateId: event.target.value })}>
+                <VFieldRow label={copy.prompt}>
+                  <VNativeSelect value={createDraft.promptTemplateId} onChange={(event) => updateCreateDraft({ promptTemplateId: event.target.value })}>
                     <option value="">-</option>
                     {workspace?.promptTemplates.map((template) => (
                       <option key={template.promptTemplateId || template.templateId} value={template.promptTemplateId || template.templateId || ""}>
                         {promptTemplateOptionLabel(template, lang)}
                       </option>
                     ))}
-                  </select>
-                </label>
+                  </VNativeSelect>
+                </VFieldRow>
                 {!createDraftIsWorkSession ? (
                   <>
-                    <label className={styles.fieldWide}>
-                      <span>{copy.createAgentPersonaSummary}</span>
-                      <textarea
+                    <VFieldRow label={copy.createAgentPersonaSummary} className="col-span-full">
+                      <VNativeTextarea
                         value={createDraft.personaSummary}
                         placeholder={copy.createAgentPersonaPlaceholder}
                         onChange={(event) => updateCreateDraft({ personaSummary: event.target.value })}
                       />
-                    </label>
-                    <label className={styles.fieldWide}>
-                      <span>{copy.createAgentTaskMission}</span>
-                      <textarea
+                    </VFieldRow>
+                    <VFieldRow label={copy.createAgentTaskMission} className="col-span-full">
+                      <VNativeTextarea
                         value={createDraft.taskMission}
                         placeholder={copy.createAgentTaskMissionPlaceholder}
                         onChange={(event) => updateCreateDraft({ taskMission: event.target.value })}
                       />
-                    </label>
+                    </VFieldRow>
                   </>
                 ) : null}
                 <section className={styles.fieldWide} title={copy.createAgentToolBundlesHint}>
@@ -7706,26 +7699,24 @@ export function AgentsRoute() {
                       </label>
                     </div>
                     <div className={styles.editorGrid}>
-                      <label className={styles.field}>
-                        <span>{copy.maxConcurrent}</span>
-                        <input
+                      <VFieldRow label={copy.maxConcurrent}>
+                        <VNativeInput
                           type="number"
                           min={0}
                           max={8}
                           value={delegationPolicyDraft.maxConcurrent}
                           onChange={(event) => updateDelegationPolicyDraft({ maxConcurrent: clampNumber(event.target.value, 0, 8, 0) })}
                         />
-                      </label>
-                      <label className={styles.field}>
-                        <span>{copy.maxDepth}</span>
-                        <input
+                      </VFieldRow>
+                      <VFieldRow label={copy.maxDepth}>
+                        <VNativeInput
                           type="number"
                           min={0}
                           max={4}
                           value={delegationPolicyDraft.maxDepth}
                           onChange={(event) => updateDelegationPolicyDraft({ maxDepth: clampNumber(event.target.value, 0, 4, 0) })}
                         />
-                      </label>
+                      </VFieldRow>
                     </div>
                     <div className={styles.contextModeGrid}>
                       <label className={styles.checkField}>
@@ -7768,22 +7759,20 @@ export function AgentsRoute() {
                       </label>
                     </div>
                     <div className={styles.editorGrid}>
-                      <label className={styles.field}>
-                        <span>{copy.reviewMode}</span>
-                        <select value={supervisionPolicyDraft.reviewMode} onChange={(event) => updateSupervisionPolicyDraft({ reviewMode: event.target.value })}>
+                      <VFieldRow label={copy.reviewMode}>
+                        <VNativeSelect value={supervisionPolicyDraft.reviewMode} onChange={(event) => updateSupervisionPolicyDraft({ reviewMode: event.target.value })}>
                           <option value="advisory">{lang === "zh" ? "建议" : "Advisory"}</option>
                           <option value="required">{lang === "zh" ? "强制" : "Required"}</option>
                           <option value="disabled">{lang === "zh" ? "关闭" : "Disabled"}</option>
-                        </select>
-                      </label>
-                      <label className={styles.field}>
-                        <span>{copy.evidenceLevel}</span>
-                        <select value={supervisionPolicyDraft.evidenceLevel} onChange={(event) => updateSupervisionPolicyDraft({ evidenceLevel: event.target.value })}>
+                        </VNativeSelect>
+                      </VFieldRow>
+                      <VFieldRow label={copy.evidenceLevel}>
+                        <VNativeSelect value={supervisionPolicyDraft.evidenceLevel} onChange={(event) => updateSupervisionPolicyDraft({ evidenceLevel: event.target.value })}>
                           <option value="light">{lang === "zh" ? "轻量" : "Light"}</option>
                           <option value="standard">{lang === "zh" ? "标准" : "Standard"}</option>
                           <option value="strict">{lang === "zh" ? "严格" : "Strict"}</option>
-                        </select>
-                      </label>
+                        </VNativeSelect>
+                      </VFieldRow>
                     </div>
                     <div className={styles.pathList}>
                       <span>{copy.communication}: {selectedAgent.agentInboxPendingCount ?? 0} pending</span>
