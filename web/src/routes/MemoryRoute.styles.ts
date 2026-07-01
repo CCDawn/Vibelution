@@ -267,6 +267,10 @@ const styles = createVuiStyleMap(styleKeys, {
     knowledgeGovernanceDeck: "hidden max-[900px]:grid-cols-[minmax(0,1fr)]",
     knowledgeMain: "[&_.managementPanel]:content-start",
     knowledgeModeTabs: "grid-cols-[repeat(5,minmax(0,1fr))]",
+    knowledgeModeTab:
+      "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1 min-w-0 min-h-[28px] px-1.5 rounded-[7px] border border-[var(--border-soft)] bg-[color:color-mix(in_srgb,var(--surface-panel)_88%,transparent)] text-[var(--fg-secondary)] text-left cursor-pointer [&_span]:min-w-0 [&_span]:truncate",
+    knowledgeModeTabActive:
+      "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1 min-w-0 min-h-[28px] px-1.5 rounded-[7px] border border-[color:color-mix(in_srgb,var(--accent-cool)_42%,var(--border-soft))] bg-[color:color-mix(in_srgb,var(--accent-cool)_12%,var(--surface-panel))] text-[var(--fg-primary)] text-left cursor-pointer [&_span]:min-w-0 [&_span]:truncate",
     knowledgeViewStack: "flex [&>.summaryGrid]:grid-cols-[repeat(4,minmax(0,1fr))] [&>.knowledgeWorkspace]:flex-1 [&>.knowledgeGovernanceDeck]:hidden",
     knowledgeWorkspace:
       "grid-cols-[minmax(170px,205px)_minmax(0,1.24fr)_minmax(260px,0.62fr)]",
@@ -284,6 +288,12 @@ const styles = createVuiStyleMap(styleKeys, {
     reviewQueuePanel: "max-h-[min(280px,34vh)] overflow-auto",
     reviewReasonList: "hidden",
     sourceGovernanceColumn: "[&_.sourceGovernanceControls]:grid-cols-[minmax(240px,0.92fr)_minmax(250px,1.08fr)]",
+    subnav:
+      "inline-flex items-center justify-self-start gap-[3px] min-w-0 p-[3px] rounded-[7px] border border-[var(--border-soft)] bg-[color:var(--surface-panel-muted)]",
+    subnavLink:
+      "inline-flex items-center justify-center min-h-[24px] min-w-[74px] px-[9px] rounded-[7px] text-[var(--fg-secondary)] font-[700] no-underline whitespace-nowrap hover:text-[var(--fg-primary)] hover:bg-[color:var(--surface-card-hover)]",
+    subnavLinkActive:
+      "!bg-[color:color-mix(in_srgb,var(--accent-warm)_18%,transparent)] !text-[var(--accent-warm-2)]",
     stewardMission: "[&_small]:hidden",
     stewardMetric: "[&_small]:hidden",
     stewardRecommendations: "hidden",
