@@ -1133,6 +1133,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const latestSupervisedRunSnapshot = selectRunSnapshotWithRunId(workspaceSnapshot?.latestRun);
   const currentSupervisedAgentBindings = workspaceSnapshot?.currentAgentBindings ?? EMPTY_AGENT_BINDINGS;
   const activeWorktreeRun = workspaceSnapshot?.worktreeActiveRun ?? null;
+  const supervisedWorktreeLiveRun = activeWorktreeRun && !isSelfEvolutionWorktreeRun(activeWorktreeRun)
+    ? activeWorktreeRun
+    : null;
   const worktreeRuns = workspaceSnapshot?.worktreeRuns ?? EMPTY_WORKTREE_RUNS;
   const selfWorktreeRuns = workspaceSnapshot?.selfWorktreeRuns ?? worktreeRuns.filter((run) => isSelfEvolutionWorktreeRun(run));
   const selfWorktreeRun =
@@ -1181,7 +1184,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     : null;
   const monitoredRun = effectiveActiveRunSnapshot
     ?? visibleLiveRunSnapshot;
-  const supervisedWorkflowRun = activeWorktreeRun ?? monitoredRun;
+  const supervisedWorkflowRun = supervisedWorktreeLiveRun ?? monitoredRun;
   const supervisedMembersRun = monitoredRun;
   const supervisedMembersUseRunBindings = hasSupervisedAgentBindings(supervisedWorkflowRun?.agentBindings);
   const supervisedMembersBindings = supervisedMembersUseRunBindings
@@ -1455,17 +1458,36 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const pauseSupervisedAction = monitoredRun?.actionStates?.pause;
   const resumeSupervisedAction = monitoredRun?.actionStates?.resume;
   const retrySupervisedAction = monitoredRun?.actionStates?.retry;
-  const terminateSupervisedAction = monitoredRun?.actionStates?.terminate;
+  const legacyTerminateSupervisedAction = monitoredRun?.actionStates?.terminate;
+  const terminateWorktreeAction = supervisedWorktreeLiveRun?.actionStates?.terminate;
+  const terminateSupervisedAction = terminateWorktreeAction ?? legacyTerminateSupervisedAction;
   const deleteSupervisedAction = monitoredRun?.actionStates?.delete;
   const canPauseSupervisedRun = Boolean(monitoredRun && pauseSupervisedAction?.enabled);
   const canResumeSupervisedRun = Boolean(monitoredRun && resumeSupervisedAction?.enabled);
   const canRetrySupervisedRun = Boolean(monitoredRun && retrySupervisedAction?.enabled);
-  const canTerminateSupervisedRun = Boolean(monitoredRun && terminateSupervisedAction?.enabled);
+  const canTerminateSupervisedRun = Boolean(
+    supervisedWorktreeLiveRun
+      ? terminateWorktreeAction?.enabled
+      : monitoredRun && legacyTerminateSupervisedAction?.enabled,
+  );
   const canDeleteSupervisedRun = Boolean(monitoredRun && deleteSupervisedAction?.enabled);
+  const terminateSupervisedPending = supervisedWorktreeLiveRun
+    ? approvalWorktreeActionMutation.isPending
+    : terminateRunMutation.isPending;
+  const handleTerminateSupervisedRun = () => {
+    if (supervisedWorktreeLiveRun) {
+      approvalWorktreeActionMutation.mutate({ runId: supervisedWorktreeLiveRun.runId, action: "terminate" });
+      return;
+    }
+    if (monitoredRun) {
+      terminateRunMutation.mutate(monitoredRun.runId);
+    }
+  };
   const supervisedControlError =
     pauseRunMutation.error?.message
     ?? resumeRunMutation.error?.message
     ?? retryRunMutation.error?.message
+    ?? approvalWorktreeActionMutation.error?.message
     ?? terminateRunMutation.error?.message
     ?? deleteRunMutation.error?.message
     ?? startRunMutation.error?.message
@@ -3316,12 +3338,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       <button
                         type="button"
                         className={styles.compactIconAction}
-                        disabled={!canTerminateSupervisedRun || terminateRunMutation.isPending}
+                        disabled={!canTerminateSupervisedRun || terminateSupervisedPending}
                         title={disabledReason(terminateSupervisedAction) || t("terminateSupervisedRun")}
-                        onClick={() => monitoredRun && terminateRunMutation.mutate(monitoredRun.runId)}
+                        onClick={handleTerminateSupervisedRun}
                         aria-label={t("terminateSupervisedRun")}
                       >
-                        {terminateRunMutation.isPending ? <LoaderCircle size={15} /> : <Square size={15} />}
+                        {terminateSupervisedPending ? <LoaderCircle size={15} /> : <Square size={15} />}
                       </button>
                     </div>
                     <div className={styles.compactActionGroup}>
