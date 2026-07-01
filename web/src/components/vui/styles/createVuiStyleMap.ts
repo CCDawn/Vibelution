@@ -6,6 +6,12 @@ type VuiStyleMapOptions = {
 };
 
 const BASE = "min-w-0";
+// Responsive multi-column default for card/metric/stats grids. Without this a
+// bare createVuiStyleMap("...Cards"/"...Grid") key emits only `grid gap-2`,
+// which collapses every card/metric strip into a single vertical column. Auto-fit
+// keeps a single item at one column and flows the rest into responsive columns.
+// Stripped automatically when a route supplies its own grid-cols extension.
+const AUTO_FIT_COLS = "grid-cols-[repeat(auto-fit,minmax(min(9rem,100%),1fr))]";
 const SURFACE =
   "min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)]";
 const PANEL = `${SURFACE} p-2`;
@@ -121,7 +127,7 @@ function classesForKey(key: string): string {
     classes.push("flex min-w-0 flex-wrap items-center gap-1.5");
   }
   if (includesAny(words, ["grid", "cards", "columns", "stats", "metrics", "subgrid"])) {
-    classes.push("grid min-w-0 gap-2");
+    classes.push(`grid min-w-0 gap-2 ${AUTO_FIT_COLS}`);
   }
   if (includesAny(words, ["list", "queue", "timeline", "items", "tree", "rail"])) {
     classes.push("grid min-h-0 min-w-0 content-start gap-1.5 overflow-auto");
@@ -207,7 +213,17 @@ export function createVuiStyleMap<const TKeys extends readonly string[]>(
       return cached;
     }
     const includeKeyClass = options.includeKeyClass ?? true;
-    const className = [options.baseClassName, includeKeyClass ? key : "", classesForKey(key), options.extensions?.[key]]
+    const extension = options.extensions?.[key];
+    let base = classesForKey(key);
+    // A route-supplied grid-cols extension is authoritative — drop the auto-fit
+    // default so the two column templates never fight over source order.
+    if (extension && /grid-cols-|grid-template-columns/.test(extension)) {
+      base = base
+        .split(/\s+/)
+        .filter((className) => className !== AUTO_FIT_COLS)
+        .join(" ");
+    }
+    const className = [options.baseClassName, includeKeyClass ? key : "", base, extension]
       .filter(Boolean)
       .join(" ");
     cache.set(key, className);
