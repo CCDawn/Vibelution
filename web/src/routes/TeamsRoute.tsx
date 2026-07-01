@@ -11756,7 +11756,7 @@ export function TeamsRoute({
   const teamUnavailableDetail = teamsQuery.error instanceof Error ? teamsQuery.error.message : "";
   const workspaceClassName = [
     styles.workspace,
-    researchWorkflowTeamSelected ? styles.workspaceResearch : "",
+    researchWorkflowTeamSelected && !researchCanvasVisible ? styles.workspaceResearch : "",
     researchCanvasVisible ? styles.workspaceResearchCanvas : "",
   ].filter(Boolean).join(" ");
   const canvasPanelClassName = [

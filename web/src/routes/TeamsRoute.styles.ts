@@ -515,7 +515,7 @@ const styles = createVuiStyleMap(styleKeys, {
       "grid grid-cols-[minmax(0,1fr)_minmax(120px,220px)] min-h-[40px] items-center gap-2 px-2 py-1 max-[820px]:grid-cols-[minmax(0,1fr)]",
     workspace:
       "!grid min-h-0 grid-cols-[minmax(520px,1fr)_minmax(300px,380px)] gap-2 overflow-hidden px-2 pb-2 pt-1",
-    workspaceResearch: "grid-cols-[minmax(0,1fr)]",
+    workspaceResearch: "!grid-cols-[minmax(0,1fr)]",
     workspaceResearchCanvas:
       "!grid h-full grid-cols-[minmax(520px,1fr)_minmax(300px,380px)] overflow-hidden",
   },
