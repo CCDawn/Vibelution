@@ -560,7 +560,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("AgentModeMembershipDraft");
     expect(routeSource).toContain("membershipDraftFromWorkspace");
     expect(routeSource).toContain("/mode-membership");
-    expect(routeSource).toContain("chatDefault: event.target.checked");
+    expect(routeSource).toContain("chatDefault: value");
     expect(routeSource).toContain("copy.researchPool");
     expect(routeSource).toContain("copy.supervisedSlot");
     expect(routeSource).toContain("copy.selfEvolutionSlot");
