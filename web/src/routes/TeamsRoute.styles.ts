@@ -3,6 +3,14 @@ import { createVuiStyleMap } from "../components/vui/styles/createVuiStyleMap";
 const canvasMeshBackgroundClass =
   "bg-[color-mix(in_srgb,var(--vui-surface-glass)_94%,white_6%)] [background-image:linear-gradient(to_right,color-mix(in_srgb,var(--vui-border-subtle)_45%,transparent)_1px,transparent_1px),linear-gradient(to_bottom,color-mix(in_srgb,var(--vui-border-subtle)_32%,transparent)_1px,transparent_1px)] [background-size:32px_32px]";
 
+// Single bordered inline-flex action-link grammar for `<a>` / bare <VNativeButton>
+// inside Teams action rails. The lossy migration dropped the original
+// `.rail a { display:inline-flex }` descendant rules, so icon+text links
+// collapsed into stacked icon-over-text. One shared fragment keeps the button
+// grammar consistent (per the 6/29 spec) instead of per-rail variants.
+const RAIL = "[&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap"
+  + " [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]";
+
 const styleKeys = [
   "actionRow",
   "aiSearchRunCard",
@@ -456,9 +464,16 @@ const styles = createVuiStyleMap(styleKeys, {
       "!flex min-w-0 items-center justify-between gap-2 [&_a]:inline-flex [&_a]:shrink-0 [&_a]:min-h-[28px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-[5px] [&_a]:px-[9px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_28%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--surface-card)_74%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap",
     sourceCollectionStagePrimaryAction: "w-fit max-w-full",
     sourceCollectionStageSecondaryAction: "w-fit max-w-full",
+    sourceCollectionSourceDetailActions: `!flex flex-wrap gap-1.5 min-w-0 ${RAIL}`,
+    sourceCollectionStageAgentHeader: `!flex items-center justify-between gap-2 min-w-0 [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&>div_strong]:truncate [&>div_strong]:text-[var(--fg-primary)] [&>div_span]:truncate [&>div_span]:text-[var(--fg-muted)] ${RAIL}`,
+    sourceCollectionStageAgentCard: `${RAIL}`,
+    sourceCollectionSearchEvidenceBody: `!grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-[5px] min-w-0 [&>span]:grid [&>span]:gap-0.5 [&>span]:min-w-0 ${RAIL}`,
+    nodeSourceAuthority: `!grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 p-2 rounded-lg border border-[color:color-mix(in_srgb,var(--accent-cool)_26%,var(--border-soft))] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,var(--surface-panel-strong))] [&>div]:grid [&>div]:gap-0.5 [&>div]:min-w-0 ${RAIL}`,
+    sourceCollectionUnavailable: `!grid gap-2 content-center justify-items-start p-[18px] rounded-lg border border-[var(--border-soft)] bg-[image:var(--vui-gradient-route-soft)] bg-[color:var(--source-workbench-panel)] [&_strong]:text-[var(--fg-primary)] [&_span]:text-[var(--fg-muted)] ${RAIL}`,
+    knowledgeCompletionFlowActions: `!flex flex-wrap gap-1.5 min-w-0 mt-auto ${RAIL}`,
+    researchStageActions: `!flex flex-wrap items-center gap-[7px] ${RAIL} [&_a]:min-w-[104px] [&_[data-vui=native-button]]:min-w-[104px]`,
     sourceCollectionStageChatActions:
       "!grid grid-cols-[repeat(3,max-content)] items-center justify-end gap-1.5 min-w-0 max-[720px]:grid-cols-[1fr] [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[30px] [&_a]:w-max [&_a]:max-w-full [&_a]:px-3 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_42%,var(--border-soft))] [&_a]:bg-[image:var(--vui-gradient-route-soft)] [&_a]:bg-[color:var(--source-workbench-card)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[840] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:min-h-[30px]",
-    sourceCollectionSourceDetailActions: "flex-wrap",
     sourceCollectionPanelActions: "flex-wrap",
     sourceCollectionCandidateListShell:
       "min-h-0 content-start items-start self-start overflow-y-auto [scrollbar-gutter:stable]",
@@ -519,7 +534,8 @@ const styles = createVuiStyleMap(styleKeys, {
     teamMemoryIndexHeader:
       "!flex min-w-0 items-center justify-between gap-2 [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&>div_strong]:truncate [&>div_strong]:text-[var(--fg-primary)] [&>div_span]:truncate [&>div_span]:text-[var(--fg-muted)] [&>div_span]:font-[760]",
     teamMemoryMemberTable: "!grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2",
-    teamMemoryMemberActions: "[&_a_span]:hidden",
+    teamMemoryMemberActions:
+      "!flex items-center justify-end gap-[5px] min-w-0 [&_a_span]:hidden [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:w-[26px] [&_a]:min-w-[26px] [&_a]:min-h-[24px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_30%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--surface-panel)_88%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:no-underline",
     teamMemoryMemberHeading: "hidden",
     teamUnavailableActions:
       "!flex min-w-0 justify-end gap-1.5 [&_button]:min-w-[78px]",
