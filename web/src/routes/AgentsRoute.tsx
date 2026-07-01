@@ -7338,24 +7338,22 @@ export function AgentsRoute() {
                   </label>
                 </div>
                 <div className={styles.editorGrid}>
-                  <label className={styles.field}>
-                    <span>{copy.supervisedSlot}</span>
-                    <select value={membershipDraft.supervisedSlot} onChange={(event) => updateMembershipDraft({ supervisedSlot: event.target.value })}>
+                  <VFieldRow label={copy.supervisedSlot}>
+                    <VNativeSelect value={membershipDraft.supervisedSlot} onChange={(event) => updateMembershipDraft({ supervisedSlot: event.target.value })}>
                       <option value="">{copy.noSlot}</option>
                       {Object.keys(workspace?.modeBindings.supervised_evolution?.slots ?? {}).map((slot) => (
                         <option key={slot} value={slot}>{slot}</option>
                       ))}
-                    </select>
-                  </label>
-                  <label className={styles.field}>
-                    <span>{copy.selfEvolutionSlot}</span>
-                    <select value={membershipDraft.selfEvolutionSlot} onChange={(event) => updateMembershipDraft({ selfEvolutionSlot: event.target.value })}>
+                    </VNativeSelect>
+                  </VFieldRow>
+                  <VFieldRow label={copy.selfEvolutionSlot}>
+                    <VNativeSelect value={membershipDraft.selfEvolutionSlot} onChange={(event) => updateMembershipDraft({ selfEvolutionSlot: event.target.value })}>
                       <option value="">{copy.noSlot}</option>
                       {Object.keys(workspace?.modeBindings.self_evolution?.slots ?? {}).map((slot) => (
                         <option key={slot} value={slot}>{slot}</option>
                       ))}
-                    </select>
-                  </label>
+                    </VNativeSelect>
+                  </VFieldRow>
                 </div>
                 <div className={styles.editorActions}>
                   <VButton
