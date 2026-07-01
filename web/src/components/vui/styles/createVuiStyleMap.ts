@@ -223,6 +223,17 @@ export function createVuiStyleMap<const TKeys extends readonly string[]>(
         .filter((className) => className !== AUTO_FIT_COLS)
         .join(" ");
     }
+    // A grid column/row template is inert without `display: grid`. Some routes set
+    // grid-cols/grid-rows on keys whose semantic base is flex/panel/row/text, so
+    // the template is silently ignored and content stacks in a single column.
+    // Ensure a grid display whenever a template is supplied but none is present.
+    if (
+      extension
+      && /grid-cols-|grid-rows-|grid-template/.test(extension)
+      && !/(?:^|\s)!?grid(?:\s|$)/.test(`${base} ${extension}`)
+    ) {
+      base = `${base} grid`;
+    }
     const className = [options.baseClassName, includeKeyClass ? key : "", base, extension]
       .filter(Boolean)
       .join(" ");
