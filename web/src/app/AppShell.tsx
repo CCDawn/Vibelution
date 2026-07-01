@@ -70,7 +70,6 @@ import {
   buildProjectWindowCloseBlockedTelemetry,
   hasRecentControlledProjectLifecycleOperation,
   isElectronDesktopShell,
-  markControlledProjectLifecycleOperation,
   projectWindowCloseGuardMessage,
   shouldArmBrowserProjectCloseGuard,
   shouldBlockWorkbenchWindowClose,
@@ -1462,15 +1461,12 @@ export function AppShell() {
         }),
         { preferBeacon: true },
       );
-      markControlledProjectLifecycleOperation("stop");
-      void beginShutdown();
       applyBeforeUnloadProjectCloseGuard(event, workbenchCloseGuardMessage);
     }
 
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [
-    beginShutdown,
     emitBrowserTelemetry,
     frontendRefreshRequested,
     restartRequested,

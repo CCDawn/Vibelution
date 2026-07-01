@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import configStyles from "./src/routes/ConfigRoute.styles";
 import configRouteSource from "./src/routes/ConfigRoute.tsx?raw";
-import configRouteStylesSource from "./src/routes/ConfigRoute.styles.ts?raw";
+
+const configRouteStylesSource = readFileSync(new URL("./src/routes/ConfigRoute.module.css", import.meta.url), "utf-8");
 
 describe("ConfigRoute layout density contract", () => {
   it("uses separate compact view and edit field card classes", () => {
@@ -12,16 +12,17 @@ describe("ConfigRoute layout density contract", () => {
   });
 
   it("keeps read-only config fields in dense label-value rows on wide screens", () => {
-    expect(configStyles.hashGrid).toBeTypeOf("string");
-    expect(configStyles.treeGrid).toContain("grid");
-    expect(configStyles.treeGrid).toContain("gap-2");
-    expect(configStyles.treeFieldCardView).toBeTypeOf("string");
+    expect(configRouteStylesSource).toContain(".hashGrid");
+    expect(configRouteStylesSource).toContain(".treeGrid");
+    expect(configRouteStylesSource).toContain("display: grid");
+    expect(configRouteStylesSource).toContain("gap: 6px");
+    expect(configRouteStylesSource).toContain(".treeFieldCardView");
     expect(configRouteSource).toContain("styles.treeFieldCardView");
   });
 
   it("does not collapse the config tree to one column until phone width", () => {
     expect(configRouteSource).toContain("styles.treeGrid");
-    expect(configRouteStylesSource).toContain('treeGrid: "grid min-w-0 gap-2"');
+    expect(configRouteStylesSource).toContain("grid-template-columns: repeat(auto-fit, minmax(220px, 1fr))");
     expect(configRouteStylesSource).not.toContain("ConfigRoute.legacy.css");
   });
 });
@@ -226,7 +227,7 @@ describe("ConfigRoute content experience contract", () => {
 
     expect(configRouteSource).toContain("styles.leaveGuardOverlay");
     expect(configRouteSource).toContain("styles.leaveGuardPanel");
-    expect(configStyles.leaveGuardOverlay).toBeTypeOf("string");
-    expect(configStyles.leaveGuardPanel).toBeTypeOf("string");
+    expect(configRouteStylesSource).toContain(".leaveGuardOverlay");
+    expect(configRouteStylesSource).toContain(".leaveGuardPanel");
   });
 });

@@ -90,6 +90,20 @@ function toneFor(words: string[]): string {
   return "";
 }
 
+function lastWord(words: string[]): string {
+  return words[words.length - 1] ?? "";
+}
+
+function isExplicitButtonKey(words: string[]): boolean {
+  const last = lastWord(words);
+  return last === "button" || last === "trigger" || last === "tab";
+}
+
+function isExplicitPillKey(words: string[]): boolean {
+  const last = lastWord(words);
+  return last === "pill" || last === "badge" || last === "chip" || last === "tag";
+}
+
 function classesForKey(key: string): string {
   const words = splitKey(key);
   const classes = [BASE];
@@ -115,7 +129,7 @@ function classesForKey(key: string): string {
   if (includesAny(words, ["row", "item", "turn", "entry", "line"])) {
     classes.push(`${ROW} p-2`);
   }
-  if (includesAny(words, ["button", "trigger", "tab", "link"])) {
+  if (isExplicitButtonKey(words)) {
     classes.push(includesAny(words, ["icon", "round", "avatar"]) ? ICON_BUTTON : BUTTON);
   }
   if (includesAny(words, ["primary"])) {
@@ -124,7 +138,7 @@ function classesForKey(key: string): string {
   if (includesAny(words, ["danger", "delete", "remove", "error", "failed"])) {
     classes.push(toneClasses.danger);
   }
-  if (includesAny(words, ["pill", "badge", "chip", "tag", "state", "status", "role", "count"])) {
+  if (isExplicitPillKey(words)) {
     classes.push(PILL);
   }
   if (includesAny(words, ["dot"])) {

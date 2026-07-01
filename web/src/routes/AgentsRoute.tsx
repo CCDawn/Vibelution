@@ -66,7 +66,7 @@ import {
   AgentWorkspacePanel,
   type AgentSummaryMetric,
 } from "../components/vui/product/agent-management";
-import { VButton, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
+import { VButton } from "../components/vui";
 import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
@@ -90,7 +90,7 @@ import {
   type AgentTeamIndexGroup,
 } from "./agentWorkspaceCache";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentsRoute.module.css";
 
 type FilterId = string;
 
@@ -5065,7 +5065,7 @@ export function AgentsRoute() {
     setBulkSelectionAnchorAgentId(agentId);
   };
 
-  const handleAgentRowSelect = (agent: AgentConfigWorkspaceAgent, event: MouseEvent<Element>) => {
+  const handleAgentRowSelect = (agent: AgentConfigWorkspaceAgent, event: MouseEvent<HTMLButtonElement>) => {
     if (event.ctrlKey || event.metaKey || event.shiftKey) {
       event.preventDefault();
       toggleBulkAgent(agent.agentId, event.shiftKey ? true : !selectedBulkAgentIds.has(agent.agentId), event.shiftKey);
@@ -5454,7 +5454,7 @@ export function AgentsRoute() {
     return (
       <div key={agent.agentId} className={styles.agentRowShell}>
         <label className={styles.rowSelect} title={`${copy.bulkSelected}: ${display.name}`}>
-          <VNativeInput
+          <input
             type="checkbox"
             checked={bulkSelected}
             aria-label={`${copy.bulkSelected}: ${display.name}`}
@@ -5466,7 +5466,7 @@ export function AgentsRoute() {
           />
           {bulkSelected ? <CheckSquare size={15} /> : <Square size={15} />}
         </label>
-        <VButton
+        <button
           type="button"
           className={rowClassName}
           onClick={(event) => handleAgentRowSelect(agent, event)}
@@ -5499,7 +5499,7 @@ export function AgentsRoute() {
               {issueLabel(agent.health, lang)}
             </span>
           </span>
-        </VButton>
+        </button>
       </div>
     );
   };
@@ -5530,10 +5530,10 @@ export function AgentsRoute() {
   );
 
   const bulkPromptPicker = (
-    <label className={styles.bulkPromptPicker}>
-      <span>{copy.bulkPromptLabel}</span>
-      <VNativeSelect
-        className={styles.bulkPromptSelect}
+    <label className="inline-flex min-w-[180px] max-w-full items-center gap-1.5 text-[0.74rem] font-semibold text-vui-fg-secondary">
+      <span className="shrink-0 whitespace-nowrap">{copy.bulkPromptLabel}</span>
+      <select
+        className="min-h-[26px] min-w-0 flex-1 rounded-[var(--radius-control)] border border-vui-border-subtle bg-[var(--surface-input-strong)] px-2 text-vui-fg-primary"
         value={bulkPromptTemplateId}
         disabled={bulkAgentPending}
         onChange={(event) => setBulkPromptTemplateId(event.target.value)}
@@ -5544,7 +5544,7 @@ export function AgentsRoute() {
             {promptTemplateOptionLabel(template, lang)}
           </option>
         ))}
-      </VNativeSelect>
+      </select>
     </label>
   );
 
@@ -5607,7 +5607,7 @@ export function AgentsRoute() {
         <AgentWorkspacePanel as="aside" ariaLabel={copy.agentFilters} className={styles.filterPanel}>
           <label className={styles.searchBox}>
             <Search size={15} />
-            <VNativeInput value={searchText} placeholder={copy.search} onChange={(event) => setSearchText(event.target.value)} />
+            <input value={searchText} placeholder={copy.search} onChange={(event) => setSearchText(event.target.value)} />
           </label>
           <nav className={styles.groupList} aria-label={copy.agentFilters}>
             {groupedFilters.map((section) => (
@@ -5619,7 +5619,7 @@ export function AgentsRoute() {
                     const description = groupDescription(group, copy);
                     const displayLabel = groupDisplayLabel(group, copy);
                     return (
-                      <VButton
+                      <button
                         key={group.id}
                         type="button"
                         className={active ? `${styles.groupButton} ${styles.groupButtonActive}` : styles.groupButton}
@@ -5638,7 +5638,7 @@ export function AgentsRoute() {
                         {group.healthCount ? (
                           <em>{group.id === "setup:inbox" ? copy.statusReminderShort : copy.healthIssueShort} {group.healthCount}</em>
                         ) : null}
-                      </VButton>
+                      </button>
                     );
                   })}
                 </div>
@@ -5660,7 +5660,7 @@ export function AgentsRoute() {
                           const description = groupDescription(group, copy);
                           const displayLabel = groupDisplayLabel(group, copy);
                           return (
-                            <VButton
+                            <button
                               key={group.id}
                               type="button"
                               className={active ? `${styles.groupButton} ${styles.groupButtonActive}` : styles.groupButton}
@@ -5679,7 +5679,7 @@ export function AgentsRoute() {
                               {group.healthCount ? (
                                 <em>{group.id === "setup:inbox" ? copy.statusReminderShort : copy.healthIssueShort} {group.healthCount}</em>
                               ) : null}
-                            </VButton>
+                            </button>
                           );
                         })}
                       </div>
@@ -5730,7 +5730,7 @@ export function AgentsRoute() {
               <div className={styles.createAgentGrid}>
                 <label className={styles.field}>
                   <span>{copy.createAgentName}</span>
-                  <VNativeInput
+                  <input
                     value={createDraft.displayName}
                     placeholder={copy.createAgentNamePlaceholder}
                     onChange={(event) => updateCreateDraft({ displayName: event.target.value })}
@@ -5738,7 +5738,7 @@ export function AgentsRoute() {
                 </label>
                 <label className={styles.field}>
                   <span>{copy.model}</span>
-                  <VNativeSelect
+                  <select
                     value={agentLlmSlotModelId(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0])}
                     onChange={(event) => updateCreateDraft({
                       llmBindings: updateAgentLlmSlotBinding(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0], event.target.value),
@@ -5749,11 +5749,11 @@ export function AgentsRoute() {
                         {model.label}
                       </option>
                     ))}
-                  </VNativeSelect>
+                  </select>
                 </label>
                 <label className={styles.field}>
                   <span>{copy.modeMembership}</span>
-                  <VNativeSelect
+                  <select
                     value={createDraft.primaryMode}
                     onChange={(event) => {
                       const primaryMode = event.target.value;
@@ -5768,12 +5768,12 @@ export function AgentsRoute() {
                         {modeLabel(mode, lang)}
                       </option>
                     ))}
-                  </VNativeSelect>
+                  </select>
                 </label>
                 {!createDraftIsWorkSession ? (
                   <label className={styles.field}>
                     <span>{copy.createAgentRole}</span>
-                    <VNativeInput
+                    <input
                       value={createDraft.roleKey}
                       placeholder={copy.createAgentRolePlaceholder}
                       onChange={(event) => updateCreateDraft({ roleKey: event.target.value })}
@@ -5782,20 +5782,20 @@ export function AgentsRoute() {
                 ) : null}
                 <label className={styles.field}>
                   <span>{copy.prompt}</span>
-                  <VNativeSelect value={createDraft.promptTemplateId} onChange={(event) => updateCreateDraft({ promptTemplateId: event.target.value })}>
+                  <select value={createDraft.promptTemplateId} onChange={(event) => updateCreateDraft({ promptTemplateId: event.target.value })}>
                     <option value="">-</option>
                     {workspace?.promptTemplates.map((template) => (
                       <option key={template.promptTemplateId || template.templateId} value={template.promptTemplateId || template.templateId || ""}>
                         {promptTemplateOptionLabel(template, lang)}
                       </option>
                     ))}
-                  </VNativeSelect>
+                  </select>
                 </label>
                 {!createDraftIsWorkSession ? (
                   <>
                     <label className={styles.fieldWide}>
                       <span>{copy.createAgentPersonaSummary}</span>
-                      <VNativeTextarea
+                      <textarea
                         value={createDraft.personaSummary}
                         placeholder={copy.createAgentPersonaPlaceholder}
                         onChange={(event) => updateCreateDraft({ personaSummary: event.target.value })}
@@ -5803,7 +5803,7 @@ export function AgentsRoute() {
                     </label>
                     <label className={styles.fieldWide}>
                       <span>{copy.createAgentTaskMission}</span>
-                      <VNativeTextarea
+                      <textarea
                         value={createDraft.taskMission}
                         placeholder={copy.createAgentTaskMissionPlaceholder}
                         onChange={(event) => updateCreateDraft({ taskMission: event.target.value })}
@@ -5823,7 +5823,7 @@ export function AgentsRoute() {
                             className={selected ? styles.createToolBundleSelected : styles.createToolBundleOption}
                             title={[bundle.label, toolBundleMeta(bundle, lang), bundle.description].filter(Boolean).join("\n")}
                           >
-                            <VNativeInput
+                            <input
                               type="checkbox"
                               checked={selected}
                               onChange={(event) => {
@@ -5844,7 +5844,7 @@ export function AgentsRoute() {
                       })}
                     </div>
                   ) : (
-                    <VNativeInput
+                    <input
                       value={createDraft.allowedTools}
                       placeholder={copy.createAgentAllowedToolsPlaceholder}
                       onChange={(event) => updateCreateDraft({ allowedTools: event.target.value })}
@@ -5949,7 +5949,7 @@ export function AgentsRoute() {
               <div className={styles.returnBannerCopy}>
                 <strong>{copy.returnBannerTitle}</strong>
               </div>
-              <VButton
+              <button
                 type="button"
                 className={styles.returnBannerButton}
                 onClick={() => navigate(returnToPath)}
@@ -5957,7 +5957,7 @@ export function AgentsRoute() {
               >
                 <ArrowLeft size={16} />
                 <span>{returnToLabel}</span>
-              </VButton>
+              </button>
             </section>
           ) : null}
           {selectedBulkAgents.length > 1 ? (
@@ -5980,7 +5980,7 @@ export function AgentsRoute() {
               <div className={styles.editorGrid}>
                 <label className={styles.field}>
                   <span className={styles.bulkFieldHeader}>
-                    <VNativeInput
+                    <input
                       type="checkbox"
                       checked={bulkConfigApply.dialogueModelId}
                       onChange={(event) => toggleBulkConfigApply("dialogueModelId", event.target.checked)}
@@ -5988,7 +5988,7 @@ export function AgentsRoute() {
                     {copy.bulkApplyField}
                   </span>
                   <span>{copy.bulkDialogueModel}</span>
-                  <VNativeSelect
+                  <select
                     value={bulkConfigDraft.dialogueModelId}
                     disabled={!bulkConfigApply.dialogueModelId || bulkAgentPending}
                     onChange={(event) => updateBulkConfigDraft({ dialogueModelId: event.target.value })}
@@ -5999,11 +5999,11 @@ export function AgentsRoute() {
                         {model.label}
                       </option>
                     ))}
-                  </VNativeSelect>
+                  </select>
                 </label>
                 <label className={styles.field}>
                   <span className={styles.bulkFieldHeader}>
-                    <VNativeInput
+                    <input
                       type="checkbox"
                       checked={bulkConfigApply.promptTemplateId}
                       onChange={(event) => toggleBulkConfigApply("promptTemplateId", event.target.checked)}
@@ -6011,7 +6011,7 @@ export function AgentsRoute() {
                     {copy.bulkApplyField}
                   </span>
                   <span>{copy.prompt}</span>
-                  <VNativeSelect
+                  <select
                     value={bulkConfigDraft.promptTemplateId}
                     disabled={!bulkConfigApply.promptTemplateId || bulkAgentPending}
                     onChange={(event) => updateBulkConfigDraft({ promptTemplateId: event.target.value })}
@@ -6022,11 +6022,11 @@ export function AgentsRoute() {
                         {promptTemplateOptionLabel(template, lang)}
                       </option>
                     ))}
-                  </VNativeSelect>
+                  </select>
                 </label>
                 <label className={styles.field}>
                   <span className={styles.bulkFieldHeader}>
-                    <VNativeInput
+                    <input
                       type="checkbox"
                       checked={bulkConfigApply.primaryMode}
                       onChange={(event) => toggleBulkConfigApply("primaryMode", event.target.checked)}
@@ -6034,7 +6034,7 @@ export function AgentsRoute() {
                     {copy.bulkApplyField}
                   </span>
                   <span>{copy.bulkPrimaryMode}</span>
-                  <VNativeSelect
+                  <select
                     value={bulkConfigDraft.primaryMode}
                     disabled={!bulkConfigApply.primaryMode || bulkAgentPending}
                     onChange={(event) => updateBulkConfigDraft({ primaryMode: event.target.value })}
@@ -6045,11 +6045,11 @@ export function AgentsRoute() {
                         {modeLabel(mode, lang)}
                       </option>
                     ))}
-                  </VNativeSelect>
+                  </select>
                 </label>
                 <label className={styles.field}>
                   <span className={styles.bulkFieldHeader}>
-                    <VNativeInput
+                    <input
                       type="checkbox"
                       checked={bulkConfigApply.roleKey}
                       onChange={(event) => toggleBulkConfigApply("roleKey", event.target.checked)}
@@ -6057,7 +6057,7 @@ export function AgentsRoute() {
                     {copy.bulkApplyField}
                   </span>
                   <span>{copy.bulkRoleKey}</span>
-                  <VNativeInput
+                  <input
                     value={bulkConfigDraft.roleKey}
                     placeholder={bulkConfigMixed.roleKey ? copy.bulkEditMixed : "-"}
                     disabled={!bulkConfigApply.roleKey || bulkAgentPending}
@@ -6094,7 +6094,7 @@ export function AgentsRoute() {
             <>
               <section className={styles.detailHeader} title={copy.routeHint}>
                 <div className={styles.avatarEditorAnchor}>
-                  <VButton
+                  <button
                     type="button"
                     className={styles.detailAvatarButton}
                     onClick={() => setAvatarEditorOpen((current) => !current)}
@@ -6107,7 +6107,7 @@ export function AgentsRoute() {
                       selectedAgent.avatarImageUrl,
                       avatarInitials(selectedAgent.agentCode, agentLabel(selectedAgent)),
                     )}
-                  </VButton>
+                  </button>
                   {avatarEditorOpen ? (
                     <section className={styles.avatarEditorPanel} title={copy.avatarEditorHint}>
                       <div className={styles.avatarEditorHeader}>
@@ -6115,12 +6115,12 @@ export function AgentsRoute() {
                           <p className={styles.panelEyebrow}>{copy.avatarEditorTitle}</p>
                           <strong>{copy.editAvatar}</strong>
                         </div>
-                        <VButton type="button" className={styles.iconButton} onClick={() => setAvatarEditorOpen(false)} aria-label={lang === "zh" ? "关闭" : "Close"}>
+                        <button type="button" className={styles.iconButton} onClick={() => setAvatarEditorOpen(false)} aria-label={lang === "zh" ? "关闭" : "Close"}>
                           ×
-                        </VButton>
+                        </button>
                       </div>
                       <div className={styles.avatarEditorActions}>
-                        <VNativeInput
+                        <input
                           ref={selectedAgentAvatarInputRef}
                           type="file"
                           accept="image/png,image/jpeg,image/webp"
@@ -6148,16 +6148,16 @@ export function AgentsRoute() {
                           {avatarOptionsQuery.data.options.map((option) => {
                             const selected = option.path === selectedAgent.avatarImagePath;
                             return (
-                              <VButton
+                              <button
                                 key={option.path}
                                 type="button"
                                 className={selected ? `${styles.avatarOption} ${styles.avatarOptionSelected}` : styles.avatarOption}
                                 onClick={() => selectAgentAvatar(option.path)}
-                                isDisabled={selectedAgentAvatarUpdatePending}
+                                disabled={selectedAgentAvatarUpdatePending}
                                 title={option.filename}
                               >
                                 <img src={option.url} alt="" />
-                              </VButton>
+                              </button>
                             );
                           })}
                         </div>
@@ -6185,7 +6185,7 @@ export function AgentsRoute() {
 
               <nav className={styles.detailTabs} aria-label={copy.title}>
                 {panes.map((pane) => (
-                  <VButton
+                  <button
                     key={pane.id}
                     type="button"
                     className={activePane === pane.id ? styles.detailTabActive : styles.detailTab}
@@ -6193,7 +6193,7 @@ export function AgentsRoute() {
                   >
                     <span>{pane.label}</span>
                     <strong>{pane.count}</strong>
-                  </VButton>
+                  </button>
                 ))}
               </nav>
 
@@ -6208,7 +6208,7 @@ export function AgentsRoute() {
                 </div>
                 <div className={styles.managementChecklist}>
                   {managementBrief.items.map((item) => (
-                    <VButton
+                    <button
                       key={item.id}
                       type="button"
                       className={item.complete ? styles.managementChecklistDone : styles.managementChecklistMissing}
@@ -6216,14 +6216,14 @@ export function AgentsRoute() {
                     >
                       {item.complete ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
                       <span>{item.label}</span>
-                    </VButton>
+                    </button>
                   ))}
                 </div>
                 <div className={styles.nextActionList}>
                   <span>{copy.nextActionsTitle}</span>
                   {managementBrief.actions.length ? (
                     managementBrief.actions.map((action) => (
-                      <VButton
+                      <button
                         key={action.id}
                         type="button"
                         title={action.detail}
@@ -6236,7 +6236,7 @@ export function AgentsRoute() {
                         }}
                       >
                         <strong>{action.label}</strong>
-                      </VButton>
+                      </button>
                     ))
                   ) : (
                     <p>{copy.nextAllReady}</p>
@@ -6391,16 +6391,16 @@ export function AgentsRoute() {
                 <div className={styles.editorGrid}>
                   <label className={styles.field}>
                     <span>Agent</span>
-                    <VNativeInput
+                    <input
                       value={configDraft.displayName}
                       onChange={(event) => updateDraft({ displayName: event.target.value })}
                     />
                   </label>
                   <label className={styles.field}>
                     <span>{copy.status}</span>
-                    <VNativeSelect value={configDraft.status} onChange={(event) => updateDraft({ status: event.target.value })}>
+                    <select value={configDraft.status} onChange={(event) => updateDraft({ status: event.target.value })}>
                       <option value="active">{lang === "zh" ? "活跃" : "Active"}</option>
-                    </VNativeSelect>
+                    </select>
                   </label>
                   <section className={styles.fieldWide} title={copy.llmSlotsHint}>
                     <span>{copy.llmSlots}</span>
@@ -6424,7 +6424,7 @@ export function AgentsRoute() {
                             <span>
                               <strong>{slot.label}</strong>
                             </span>
-                            <VNativeSelect
+                            <select
                               value={selectedSlotModelId}
                               onChange={(event) => {
                                 const nextBindings = updateAgentLlmSlotBinding(configDraft.llmBindings, slot, event.target.value);
@@ -6444,9 +6444,9 @@ export function AgentsRoute() {
                                   {model.label}
                                 </option>
                               ))}
-                            </VNativeSelect>
+                            </select>
                             {supportsReasoningEffort ? (
-                              <VNativeSelect
+                              <select
                                 value={normalizeAgentReasoningEffort(configDraft.reasoningEffortBySlot[slot.slot])}
                                 aria-label={`${slot.label} ${copy.reasoningEffort}`}
                                 onChange={(event) => updateDraft({
@@ -6461,7 +6461,7 @@ export function AgentsRoute() {
                                 <option value="low">{copy.reasoningEffort}: {copy.reasoningEffortLow}</option>
                                 <option value="medium">{copy.reasoningEffort}: {copy.reasoningEffortMedium}</option>
                                 <option value="high">{copy.reasoningEffort}: {copy.reasoningEffortHigh}</option>
-                              </VNativeSelect>
+                              </select>
                             ) : null}
                           </label>
                         );
@@ -6481,14 +6481,14 @@ export function AgentsRoute() {
                   <section className={`${styles.fieldWide} ${styles.promptConfigField}`}>
                     <span>{copy.prompt}</span>
                     <div className={styles.promptConfigRow}>
-                      <VNativeSelect value={configDraft.promptTemplateId} onChange={(event) => updateDraft({ promptTemplateId: event.target.value })}>
+                      <select value={configDraft.promptTemplateId} onChange={(event) => updateDraft({ promptTemplateId: event.target.value })}>
                         <option value="">-</option>
                         {workspace?.promptTemplates.map((template) => (
                           <option key={template.promptTemplateId || template.templateId} value={template.promptTemplateId || template.templateId || ""}>
                             {promptTemplateOptionLabel(template, lang)}
                           </option>
                         ))}
-                      </VNativeSelect>
+                      </select>
                       <VButton
                         type="button"
                         variant="secondary"
@@ -6501,30 +6501,30 @@ export function AgentsRoute() {
                   </section>
                   <label className={styles.field} title={[toolPolicySourceLine, toolPolicySource?.description || copy.toolPolicyPickerHint].filter(Boolean).join("\n")}>
                     <span>{copy.tools}</span>
-                    <VNativeSelect value={configDraft.toolPolicyId} onChange={(event) => updateDraft({ toolPolicyId: event.target.value })}>
+                    <select value={configDraft.toolPolicyId} onChange={(event) => updateDraft({ toolPolicyId: event.target.value })}>
                       {workspace?.toolPolicies.map((policy) => (
                         <option key={policy.policyId} value={policy.policyId}>
                           {policy.policyId} · {policy.allowedToolCount}/{policy.blockedToolCount}
                         </option>
                       ))}
-                    </VNativeSelect>
+                    </select>
                   </label>
                   <label className={styles.field} title={copy.memoryPolicyPickerHint}>
                     <span>{copy.memory}</span>
-                    <VNativeSelect value={configDraft.memoryPolicyId} onChange={(event) => updateDraft({ memoryPolicyId: event.target.value })}>
+                    <select value={configDraft.memoryPolicyId} onChange={(event) => updateDraft({ memoryPolicyId: event.target.value })}>
                       {workspace?.memoryPolicies.map((policy) => (
                         <option key={policy.policyId} value={policy.policyId}>
                           {policy.policyId} · {policy.privateMemoryRoot || "-"}
                         </option>
                       ))}
-                    </VNativeSelect>
+                    </select>
                   </label>
                   <section className={styles.fieldWide} title={contextCompressionPolicyLine}>
                     <span>{copy.contextCompressionPolicy}</span>
                     <div className={styles.compressionPolicyGrid}>
                       <label className={styles.field}>
                         <span>{copy.contextCompressionPolicy}</span>
-                        <VNativeSelect
+                        <select
                           value={configDraft.contextCompressionPolicy.mode}
                           onChange={(event) => updateContextCompressionDraft({
                             mode: event.target.value === "custom" ? "custom" : "inherit",
@@ -6532,11 +6532,11 @@ export function AgentsRoute() {
                         >
                           <option value="inherit">{copy.contextCompressionInherit}</option>
                           <option value="custom">{copy.contextCompressionCustom}</option>
-                        </VNativeSelect>
+                        </select>
                       </label>
                       <label className={`${styles.field} ${styles.compressionToggleField}`}>
                         <span>{copy.contextCompressionEnabled}</span>
-                        <VNativeInput
+                        <input
                           type="checkbox"
                           checked={configDraft.contextCompressionPolicy.enabled}
                           disabled={!contextCompressionCustom}
@@ -6545,7 +6545,7 @@ export function AgentsRoute() {
                       </label>
                       <label className={styles.field}>
                         <span>{copy.contextCompressionMaxTokenLimit}</span>
-                        <VNativeInput
+                        <input
                           type="number"
                           min={1}
                           value={configDraft.contextCompressionPolicy.maxTokenLimit}
@@ -6555,7 +6555,7 @@ export function AgentsRoute() {
                       </label>
                       <label className={styles.field}>
                         <span>{copy.contextCompressionMaxCount}</span>
-                        <VNativeInput
+                        <input
                           type="number"
                           min={0}
                           value={configDraft.contextCompressionPolicy.maxCompressionsPerSession}
@@ -6567,7 +6567,7 @@ export function AgentsRoute() {
                     <div className={styles.compressionPolicySubgrid}>
                       <label className={styles.field}>
                         <span>{copy.contextCompressionThresholds} · {lang === "zh" ? "轻量" : "Light"}</span>
-                        <VNativeInput
+                        <input
                           type="number"
                           min={1}
                           max={100}
@@ -6578,7 +6578,7 @@ export function AgentsRoute() {
                       </label>
                       <label className={styles.field}>
                         <span>{copy.contextCompressionThresholds} · {lang === "zh" ? "标准" : "Standard"}</span>
-                        <VNativeInput
+                        <input
                           type="number"
                           min={1}
                           max={100}
@@ -6589,7 +6589,7 @@ export function AgentsRoute() {
                       </label>
                       <label className={styles.field}>
                         <span>{copy.contextCompressionThresholds} · {lang === "zh" ? "深度" : "Deep"}</span>
-                        <VNativeInput
+                        <input
                           type="number"
                           min={1}
                           max={100}
@@ -6600,7 +6600,7 @@ export function AgentsRoute() {
                       </label>
                       <label className={styles.field}>
                         <span>{copy.contextCompressionThresholds} · {lang === "zh" ? "紧急" : "Emergency"}</span>
-                        <VNativeInput
+                        <input
                           type="number"
                           min={1}
                           max={100}
@@ -6611,7 +6611,7 @@ export function AgentsRoute() {
                       </label>
                       <label className={styles.field}>
                         <span>{copy.contextCompressionSummaryChars} · {lang === "zh" ? "轻量" : "Light"}</span>
-                        <VNativeInput
+                        <input
                           type="number"
                           min={1}
                           value={configDraft.contextCompressionPolicy.lightSummaryChars}
@@ -6621,7 +6621,7 @@ export function AgentsRoute() {
                       </label>
                       <label className={styles.field}>
                         <span>{copy.contextCompressionSummaryChars} · {lang === "zh" ? "标准" : "Standard"}</span>
-                        <VNativeInput
+                        <input
                           type="number"
                           min={1}
                           value={configDraft.contextCompressionPolicy.standardSummaryChars}
@@ -6631,7 +6631,7 @@ export function AgentsRoute() {
                       </label>
                       <label className={styles.field}>
                         <span>{copy.contextCompressionSummaryChars} · {lang === "zh" ? "深度" : "Deep"}</span>
-                        <VNativeInput
+                        <input
                           type="number"
                           min={1}
                           value={configDraft.contextCompressionPolicy.deepSummaryChars}
@@ -6641,7 +6641,7 @@ export function AgentsRoute() {
                       </label>
                       <label className={styles.field}>
                         <span>{copy.contextCompressionSummaryChars} · {lang === "zh" ? "紧急" : "Emergency"}</span>
-                        <VNativeInput
+                        <input
                           type="number"
                           min={1}
                           value={configDraft.contextCompressionPolicy.emergencySummaryChars}
@@ -6653,7 +6653,7 @@ export function AgentsRoute() {
                     <div className={styles.compressionPolicyFooter}>
                       <label className={styles.field}>
                         <span>{copy.contextCompressionKeepAi}</span>
-                        <VNativeInput
+                        <input
                           type="number"
                           min={0}
                           value={configDraft.contextCompressionPolicy.keepAiMessages}
@@ -6662,7 +6662,7 @@ export function AgentsRoute() {
                         />
                       </label>
                       <label className={styles.compressionInlineCheck}>
-                        <VNativeInput
+                        <input
                           type="checkbox"
                           checked={configDraft.contextCompressionPolicy.preserveErrors}
                           disabled={!contextCompressionCustom}
@@ -6671,7 +6671,7 @@ export function AgentsRoute() {
                         <span>{copy.contextCompressionPreserveErrors}</span>
                       </label>
                       <label className={styles.compressionInlineCheck}>
-                        <VNativeInput
+                        <input
                           type="checkbox"
                           checked={configDraft.contextCompressionPolicy.extractKeyDecisions}
                           disabled={!contextCompressionCustom}
@@ -6719,19 +6719,19 @@ export function AgentsRoute() {
                 <div className={styles.editorGrid}>
                   <label className={styles.field}>
                     <span>{copy.gender}</span>
-                    <VNativeInput value={personaDraft.gender} onChange={(event) => updatePersonaDraft({ gender: event.target.value })} />
+                    <input value={personaDraft.gender} onChange={(event) => updatePersonaDraft({ gender: event.target.value })} />
                   </label>
                   <label className={styles.field}>
                     <span>{copy.age}</span>
-                    <VNativeInput value={personaDraft.age} onChange={(event) => updatePersonaDraft({ age: event.target.value })} />
+                    <input value={personaDraft.age} onChange={(event) => updatePersonaDraft({ age: event.target.value })} />
                   </label>
                   <label className={styles.field}>
                     <span>{copy.pronouns}</span>
-                    <VNativeInput value={personaDraft.pronouns} onChange={(event) => updatePersonaDraft({ pronouns: event.target.value })} />
+                    <input value={personaDraft.pronouns} onChange={(event) => updatePersonaDraft({ pronouns: event.target.value })} />
                   </label>
                   <label className={styles.field}>
                     <span>{copy.expertise}</span>
-                    <VNativeInput
+                    <input
                       value={personaDraft.expertise}
                       placeholder={copy.expertisePlaceholder}
                       onChange={(event) => updatePersonaDraft({ expertise: event.target.value })}
@@ -6739,29 +6739,29 @@ export function AgentsRoute() {
                   </label>
                   <label className={styles.fieldWide}>
                     <span>{copy.personality}</span>
-                    <VNativeTextarea value={personaDraft.personality} onChange={(event) => updatePersonaDraft({ personality: event.target.value })} />
+                    <textarea value={personaDraft.personality} onChange={(event) => updatePersonaDraft({ personality: event.target.value })} />
                   </label>
                   <label className={styles.fieldWide}>
                     <span>{copy.communicationStyle}</span>
-                    <VNativeTextarea
+                    <textarea
                       value={personaDraft.communicationStyle}
                       onChange={(event) => updatePersonaDraft({ communicationStyle: event.target.value })}
                     />
                   </label>
                   <label className={styles.fieldWide}>
                     <span>{copy.background}</span>
-                    <VNativeTextarea value={personaDraft.background} onChange={(event) => updatePersonaDraft({ background: event.target.value })} />
+                    <textarea value={personaDraft.background} onChange={(event) => updatePersonaDraft({ background: event.target.value })} />
                   </label>
                   <label className={styles.fieldWide}>
                     <span>{copy.collaborationPreference}</span>
-                    <VNativeTextarea
+                    <textarea
                       value={personaDraft.collaborationPreference}
                       onChange={(event) => updatePersonaDraft({ collaborationPreference: event.target.value })}
                     />
                   </label>
                   <label className={styles.fieldWide}>
                     <span>{copy.identityNotes}</span>
-                    <VNativeTextarea value={personaDraft.identityNotes} onChange={(event) => updatePersonaDraft({ identityNotes: event.target.value })} />
+                    <textarea value={personaDraft.identityNotes} onChange={(event) => updatePersonaDraft({ identityNotes: event.target.value })} />
                   </label>
                 </div>
                 <div className={styles.editorActions}>
@@ -6864,11 +6864,11 @@ export function AgentsRoute() {
                 <div className={styles.editorGrid}>
                   <label className={styles.fieldWide}>
                     <span>{copy.mission}</span>
-                    <VNativeTextarea value={taskDraft.mission} onChange={(event) => updateTaskDraft({ mission: event.target.value })} />
+                    <textarea value={taskDraft.mission} onChange={(event) => updateTaskDraft({ mission: event.target.value })} />
                   </label>
                   <label className={styles.fieldWide}>
                     <span>{copy.taskTypes}</span>
-                    <VNativeInput
+                    <input
                       value={taskDraft.taskTypes}
                       placeholder={copy.taskTypesPlaceholder}
                       onChange={(event) => updateTaskDraft({ taskTypes: event.target.value })}
@@ -6876,31 +6876,31 @@ export function AgentsRoute() {
                   </label>
                   <label className={styles.fieldWide}>
                     <span>{copy.responsibilities}</span>
-                    <VNativeTextarea value={taskDraft.responsibilities} onChange={(event) => updateTaskDraft({ responsibilities: event.target.value })} />
+                    <textarea value={taskDraft.responsibilities} onChange={(event) => updateTaskDraft({ responsibilities: event.target.value })} />
                   </label>
                   <label className={styles.fieldWide}>
                     <span>{copy.preferredTasks}</span>
-                    <VNativeTextarea value={taskDraft.preferredTasks} onChange={(event) => updateTaskDraft({ preferredTasks: event.target.value })} />
+                    <textarea value={taskDraft.preferredTasks} onChange={(event) => updateTaskDraft({ preferredTasks: event.target.value })} />
                   </label>
                   <label className={styles.fieldWide}>
                     <span>{copy.avoidTasks}</span>
-                    <VNativeTextarea value={taskDraft.avoidTasks} onChange={(event) => updateTaskDraft({ avoidTasks: event.target.value })} />
+                    <textarea value={taskDraft.avoidTasks} onChange={(event) => updateTaskDraft({ avoidTasks: event.target.value })} />
                   </label>
                   <label className={styles.fieldWide}>
                     <span>{copy.successCriteria}</span>
-                    <VNativeTextarea value={taskDraft.successCriteria} onChange={(event) => updateTaskDraft({ successCriteria: event.target.value })} />
+                    <textarea value={taskDraft.successCriteria} onChange={(event) => updateTaskDraft({ successCriteria: event.target.value })} />
                   </label>
                   <label className={styles.fieldWide}>
                     <span>{copy.deliverables}</span>
-                    <VNativeTextarea value={taskDraft.deliverables} onChange={(event) => updateTaskDraft({ deliverables: event.target.value })} />
+                    <textarea value={taskDraft.deliverables} onChange={(event) => updateTaskDraft({ deliverables: event.target.value })} />
                   </label>
                   <label className={styles.fieldWide}>
                     <span>{copy.constraints}</span>
-                    <VNativeTextarea value={taskDraft.constraints} onChange={(event) => updateTaskDraft({ constraints: event.target.value })} />
+                    <textarea value={taskDraft.constraints} onChange={(event) => updateTaskDraft({ constraints: event.target.value })} />
                   </label>
                   <label className={styles.fieldWide}>
                     <span>{copy.handoffNotes}</span>
-                    <VNativeTextarea value={taskDraft.handoffNotes} onChange={(event) => updateTaskDraft({ handoffNotes: event.target.value })} />
+                    <textarea value={taskDraft.handoffNotes} onChange={(event) => updateTaskDraft({ handoffNotes: event.target.value })} />
                   </label>
                 </div>
                 <div className={styles.editorActions}>
@@ -7030,7 +7030,7 @@ export function AgentsRoute() {
                   </div>
                   <div className={styles.resetOptionGrid}>
                     <label className={styles.resetOptionField} title={copy.resetClearRuntimeStateHint}>
-                      <VNativeInput
+                      <input
                         type="checkbox"
                         checked={resetOptions.clearRuntimeState}
                         onChange={(event) => updateResetOption("clearRuntimeState", event.target.checked)}
@@ -7040,7 +7040,7 @@ export function AgentsRoute() {
                       </span>
                     </label>
                     <label className={styles.resetOptionField} title={copy.resetDirectSessionHint}>
-                      <VNativeInput
+                      <input
                         type="checkbox"
                         checked={resetOptions.resetDirectSession}
                         onChange={(event) => updateResetOption("resetDirectSession", event.target.checked)}
@@ -7050,7 +7050,7 @@ export function AgentsRoute() {
                       </span>
                     </label>
                     <label className={styles.resetOptionField} title={copy.resetPersonaProfileHint}>
-                      <VNativeInput
+                      <input
                         type="checkbox"
                         checked={resetOptions.resetPersonaProfile}
                         onChange={(event) => updateResetOption("resetPersonaProfile", event.target.checked)}
@@ -7060,7 +7060,7 @@ export function AgentsRoute() {
                       </span>
                     </label>
                     <label className={styles.resetOptionField} title={copy.resetTaskProfileHint}>
-                      <VNativeInput
+                      <input
                         type="checkbox"
                         checked={resetOptions.resetTaskProfile}
                         onChange={(event) => updateResetOption("resetTaskProfile", event.target.checked)}
@@ -7070,7 +7070,7 @@ export function AgentsRoute() {
                       </span>
                     </label>
                     <label className={styles.resetOptionField} title={copy.resetToolPolicyHint}>
-                      <VNativeInput
+                      <input
                         type="checkbox"
                         checked={resetOptions.resetToolPolicy}
                         onChange={(event) => updateResetOption("resetToolPolicy", event.target.checked)}
@@ -7080,7 +7080,7 @@ export function AgentsRoute() {
                       </span>
                     </label>
                     <label className={styles.resetOptionField} title={copy.resetMemoryPolicyHint}>
-                      <VNativeInput
+                      <input
                         type="checkbox"
                         checked={resetOptions.resetMemoryPolicy}
                         onChange={(event) => updateResetOption("resetMemoryPolicy", event.target.checked)}
@@ -7090,7 +7090,7 @@ export function AgentsRoute() {
                       </span>
                     </label>
                     <label className={styles.resetOptionField} title={copy.resetRuntimePolicyHint}>
-                      <VNativeInput
+                      <input
                         type="checkbox"
                         checked={resetOptions.resetRuntimePolicy}
                         onChange={(event) => updateResetOption("resetRuntimePolicy", event.target.checked)}
@@ -7182,7 +7182,7 @@ export function AgentsRoute() {
                       )) : <small>{copy.noSharedGroups}</small>}
                     </div>
                     <div className={styles.inlineAdd}>
-                      <VNativeInput
+                      <input
                         list="agent-memory-groups"
                         value={memoryPolicyDraft.newReadGroup}
                         placeholder={copy.sharedGroupPlaceholder}
@@ -7210,7 +7210,7 @@ export function AgentsRoute() {
                       )) : <small>{copy.noSharedGroups}</small>}
                     </div>
                     <div className={styles.inlineAdd}>
-                      <VNativeInput
+                      <input
                         list="agent-memory-groups"
                         value={memoryPolicyDraft.newWriteGroup}
                         placeholder={copy.sharedGroupPlaceholder}
@@ -7238,7 +7238,7 @@ export function AgentsRoute() {
                       )) : <small>{copy.noKnowledgeBaseIds}</small>}
                     </div>
                     <div className={styles.inlineAdd}>
-                      <VNativeInput
+                      <input
                         value={memoryPolicyDraft.newReadKnowledgeBaseId}
                         placeholder={copy.knowledgeBasePlaceholder}
                         onChange={(event) => updateMemoryDraftField({ newReadKnowledgeBaseId: event.target.value })}
@@ -7265,7 +7265,7 @@ export function AgentsRoute() {
                       )) : <small>{copy.noKnowledgeBaseIds}</small>}
                     </div>
                     <div className={styles.inlineAdd}>
-                      <VNativeInput
+                      <input
                         value={memoryPolicyDraft.newProposeKnowledgeBaseId}
                         placeholder={copy.knowledgeBasePlaceholder}
                         onChange={(event) => updateMemoryDraftField({ newProposeKnowledgeBaseId: event.target.value })}
@@ -7292,7 +7292,7 @@ export function AgentsRoute() {
                       )) : <small>{copy.noKnowledgeBaseIds}</small>}
                     </div>
                     <div className={styles.inlineAdd}>
-                      <VNativeInput
+                      <input
                         value={memoryPolicyDraft.newReviewKnowledgeBaseId}
                         placeholder={copy.knowledgeBasePlaceholder}
                         onChange={(event) => updateMemoryDraftField({ newReviewKnowledgeBaseId: event.target.value })}
@@ -7319,7 +7319,7 @@ export function AgentsRoute() {
                       )) : <small>{copy.noKnowledgeBaseIds}</small>}
                     </div>
                     <div className={styles.inlineAdd}>
-                      <VNativeInput
+                      <input
                         value={memoryPolicyDraft.newRateKnowledgeBaseId}
                         placeholder={copy.knowledgeBasePlaceholder}
                         onChange={(event) => updateMemoryDraftField({ newRateKnowledgeBaseId: event.target.value })}
@@ -7378,7 +7378,7 @@ export function AgentsRoute() {
                 </div>
                 <div className={styles.toggleGrid}>
                   <label className={styles.checkField}>
-                    <VNativeInput
+                    <input
                       type="checkbox"
                       checked={membershipDraft.chatDefault}
                       onChange={(event) => updateMembershipDraft({ chatDefault: event.target.checked, chatAvailable: event.target.checked ? true : membershipDraft.chatAvailable })}
@@ -7386,7 +7386,7 @@ export function AgentsRoute() {
                     <span>{copy.chatDefault}</span>
                   </label>
                   <label className={styles.checkField}>
-                    <VNativeInput
+                    <input
                       type="checkbox"
                       checked={membershipDraft.chatAvailable}
                       onChange={(event) => updateMembershipDraft({ chatAvailable: event.target.checked, chatDefault: event.target.checked ? membershipDraft.chatDefault : false })}
@@ -7394,7 +7394,7 @@ export function AgentsRoute() {
                     <span>{copy.chatAvailable}</span>
                   </label>
                   <label className={styles.checkField}>
-                    <VNativeInput
+                    <input
                       type="checkbox"
                       checked={membershipDraft.researchPool}
                       onChange={(event) => updateMembershipDraft({ researchPool: event.target.checked })}
@@ -7405,21 +7405,21 @@ export function AgentsRoute() {
                 <div className={styles.editorGrid}>
                   <label className={styles.field}>
                     <span>{copy.supervisedSlot}</span>
-                    <VNativeSelect value={membershipDraft.supervisedSlot} onChange={(event) => updateMembershipDraft({ supervisedSlot: event.target.value })}>
+                    <select value={membershipDraft.supervisedSlot} onChange={(event) => updateMembershipDraft({ supervisedSlot: event.target.value })}>
                       <option value="">{copy.noSlot}</option>
                       {Object.keys(workspace?.modeBindings.supervised_evolution?.slots ?? {}).map((slot) => (
                         <option key={slot} value={slot}>{slot}</option>
                       ))}
-                    </VNativeSelect>
+                    </select>
                   </label>
                   <label className={styles.field}>
                     <span>{copy.selfEvolutionSlot}</span>
-                    <VNativeSelect value={membershipDraft.selfEvolutionSlot} onChange={(event) => updateMembershipDraft({ selfEvolutionSlot: event.target.value })}>
+                    <select value={membershipDraft.selfEvolutionSlot} onChange={(event) => updateMembershipDraft({ selfEvolutionSlot: event.target.value })}>
                       <option value="">{copy.noSlot}</option>
                       {Object.keys(workspace?.modeBindings.self_evolution?.slots ?? {}).map((slot) => (
                         <option key={slot} value={slot}>{slot}</option>
                       ))}
-                    </VNativeSelect>
+                    </select>
                   </label>
                 </div>
                 <div className={styles.editorActions}>
@@ -7747,7 +7747,7 @@ export function AgentsRoute() {
                     <span>{copy.delegationPolicyTitle}</span>
                     <div className={styles.toggleGrid}>
                       <label className={styles.checkField}>
-                        <VNativeInput
+                        <input
                           type="checkbox"
                           checked={delegationPolicyDraft.allowSubagents}
                           onChange={(event) => updateDelegationPolicyDraft({ allowSubagents: event.target.checked })}
@@ -7755,7 +7755,7 @@ export function AgentsRoute() {
                         <span>{copy.allowSubagents}</span>
                       </label>
                       <label className={styles.checkField}>
-                        <VNativeInput
+                        <input
                           type="checkbox"
                           checked={delegationPolicyDraft.allowWakeMessages}
                           onChange={(event) => updateDelegationPolicyDraft({ allowWakeMessages: event.target.checked })}
@@ -7766,7 +7766,7 @@ export function AgentsRoute() {
                     <div className={styles.editorGrid}>
                       <label className={styles.field}>
                         <span>{copy.maxConcurrent}</span>
-                        <VNativeInput
+                        <input
                           type="number"
                           min={0}
                           max={8}
@@ -7776,7 +7776,7 @@ export function AgentsRoute() {
                       </label>
                       <label className={styles.field}>
                         <span>{copy.maxDepth}</span>
-                        <VNativeInput
+                        <input
                           type="number"
                           min={0}
                           max={4}
@@ -7787,7 +7787,7 @@ export function AgentsRoute() {
                     </div>
                     <div className={styles.contextModeGrid}>
                       <label className={styles.checkField}>
-                        <VNativeInput
+                        <input
                           type="checkbox"
                           checked={delegationPolicyDraft.allowedContextModes.includes("isolated")}
                           onChange={(event) => toggleDelegationContextMode("isolated", event.target.checked)}
@@ -7795,7 +7795,7 @@ export function AgentsRoute() {
                         <span>{copy.allowedContextModes}: isolated</span>
                       </label>
                       <label className={styles.checkField}>
-                        <VNativeInput
+                        <input
                           type="checkbox"
                           checked={delegationPolicyDraft.allowedContextModes.includes("fork")}
                           onChange={(event) => toggleDelegationContextMode("fork", event.target.checked)}
@@ -7808,7 +7808,7 @@ export function AgentsRoute() {
                     <span>{copy.supervisionPolicyTitle}</span>
                     <div className={styles.toggleGrid}>
                       <label className={styles.checkField}>
-                        <VNativeInput
+                        <input
                           type="checkbox"
                           checked={supervisionPolicyDraft.supervisionEnabled}
                           onChange={(event) => updateSupervisionPolicyDraft({ supervisionEnabled: event.target.checked })}
@@ -7816,7 +7816,7 @@ export function AgentsRoute() {
                         <span>{copy.supervisionEnabled}</span>
                       </label>
                       <label className={styles.checkField}>
-                        <VNativeInput
+                        <input
                           type="checkbox"
                           checked={supervisionPolicyDraft.requiresReview}
                           disabled={supervisionPolicyDraft.reviewMode === "required" || supervisionPolicyDraft.reviewMode === "disabled"}
@@ -7828,19 +7828,19 @@ export function AgentsRoute() {
                     <div className={styles.editorGrid}>
                       <label className={styles.field}>
                         <span>{copy.reviewMode}</span>
-                        <VNativeSelect value={supervisionPolicyDraft.reviewMode} onChange={(event) => updateSupervisionPolicyDraft({ reviewMode: event.target.value })}>
+                        <select value={supervisionPolicyDraft.reviewMode} onChange={(event) => updateSupervisionPolicyDraft({ reviewMode: event.target.value })}>
                           <option value="advisory">{lang === "zh" ? "建议" : "Advisory"}</option>
                           <option value="required">{lang === "zh" ? "强制" : "Required"}</option>
                           <option value="disabled">{lang === "zh" ? "关闭" : "Disabled"}</option>
-                        </VNativeSelect>
+                        </select>
                       </label>
                       <label className={styles.field}>
                         <span>{copy.evidenceLevel}</span>
-                        <VNativeSelect value={supervisionPolicyDraft.evidenceLevel} onChange={(event) => updateSupervisionPolicyDraft({ evidenceLevel: event.target.value })}>
+                        <select value={supervisionPolicyDraft.evidenceLevel} onChange={(event) => updateSupervisionPolicyDraft({ evidenceLevel: event.target.value })}>
                           <option value="light">{lang === "zh" ? "轻量" : "Light"}</option>
                           <option value="standard">{lang === "zh" ? "标准" : "Standard"}</option>
                           <option value="strict">{lang === "zh" ? "严格" : "Strict"}</option>
-                        </VNativeSelect>
+                        </select>
                       </label>
                     </div>
                     <div className={styles.pathList}>

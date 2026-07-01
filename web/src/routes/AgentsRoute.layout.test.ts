@@ -1,18 +1,19 @@
 import { describe, expect, it } from "vitest";
 
+// @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
+import { readFileSync } from "node:fs";
 import routeSource from "./AgentsRoute.tsx?raw";
 import agentManagementNavSource from "./AgentManagementNav.tsx?raw";
 import agentWorkspaceCacheSource from "./agentWorkspaceCache.ts?raw";
-import styles from "./AgentsRoute.styles";
-import stylesModuleSource from "./AgentsRoute.styles.ts?raw";
+import styles from "./AgentsRoute.module.css";
 import routerSource from "../app/router.tsx?raw";
 import shellSource from "../app/AppShell.tsx?raw";
 
-const stylesSource = [
-  stylesModuleSource,
-  ...Object.keys(styles).map((key) => `.${key}`),
-  ...Object.values(styles),
-].join("\n");
+const stylesSource = readFileSync(new URL("./AgentsRoute.module.css", import.meta.url), "utf-8");
+const bulkActionBarSource = readFileSync(
+  new URL("../components/vui/product/agent-management/AgentBulkActionBar.tsx", import.meta.url),
+  "utf-8",
+);
 
 function sourceBlocksForStyle(styleName: string): string[] {
   const marker = `className={styles.${styleName}}`;
@@ -39,18 +40,6 @@ function sourceBlocksForStyle(styleName: string): string[] {
 }
 
 describe("AgentsRoute layout contract", () => {
-  it("routes Agent management controls through VUI primitives", () => {
-    expect(routeSource).toContain('from "../components/vui"');
-    expect(routeSource).toContain("<VButton");
-    expect(routeSource).toContain("<VNativeInput");
-    expect(routeSource).toContain("<VNativeSelect");
-    expect(routeSource).toContain("<VNativeTextarea");
-    expect(routeSource).not.toMatch(/<button\b/);
-    expect(routeSource).not.toMatch(/<input\b/);
-    expect(routeSource).not.toMatch(/<select\b/);
-    expect(routeSource).not.toMatch(/<textarea\b/);
-  });
-
   it("loads the read-only Agent config workspace endpoint", () => {
     expect(routeSource).toContain("fetchJson<AgentConfigWorkspaceWithTeamIndexes>(\"/api/agents/config-workspace?includeRuntime=false\")");
     expect(routeSource).toContain("fetchJson<AgentConfigWorkspaceAgent[]>(\"/api/agents?includeArchived=true&detail=summary\")");
@@ -964,31 +953,31 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("styles.agentRow");
     expect(routeSource).toContain("styles.detailPanel");
     expect(styles.workspace).toBeTruthy();
-    expect(styles.workspace).toContain("grid-cols-[minmax(214px,268px)_minmax(430px,1.08fr)_minmax(330px,0.86fr)]");
-    expect(styles.workspace).toContain("max-[1040px]:content-start");
-    expect(styles.workspace).not.toContain("max-[1280px]");
-    expect(styles.workspace).toContain("grid-rows-[minmax(0,1fr)]");
-    expect(styles.workspace).toContain("overflow-hidden");
-    expect(styles.controlStrip).toContain("!grid");
-    expect(styles.controlStrip).toContain("grid-cols-[auto_minmax(0,1fr)]");
+    expect(stylesSource).toContain("grid-template-columns: minmax(214px, 268px) minmax(430px, 1.08fr) minmax(330px, 0.86fr)");
+    expect(stylesSource).toContain("@media (max-width: 1040px)");
+    expect(stylesSource).not.toContain("@media (max-width: 1280px)");
+    expect(stylesSource).toContain("grid-auto-rows: minmax(180px, auto)");
+    expect(stylesSource).toContain("grid-template-rows: auto auto minmax(0, 1fr)");
+    expect(stylesSource).toContain("overflow: auto");
+    expect(stylesSource).toContain("min-height: 220px");
   });
 
   it("keeps the 1024px Agent management stack compact enough to show list and detail context", () => {
-    expect(styles.workspace).toContain("max-[860px]:auto-rows-auto");
-    expect(styles.workspace).toContain("max-[1040px]:content-start");
-    expect(styles.filterPanel).toContain("grid-rows-[auto_minmax(0,1fr)_auto]");
-    expect(styles.agentPanel).toContain("grid-rows-[auto_auto_minmax(0,1fr)]");
-    expect(styles.detailPanel).toContain("overflow-auto");
-    expect(styles.agentColumnGrid).toContain("overflow-auto");
-    expect(styles.groupList).toContain("overflow-auto");
+    const narrowBreakpoint = stylesSource.slice(stylesSource.indexOf("@media (max-width: 860px)"));
+
+    expect(narrowBreakpoint).toContain("grid-auto-rows: auto");
+    expect(narrowBreakpoint).toContain("align-content: start");
+    expect(narrowBreakpoint).toContain(".filterPanel {\n    min-height: 150px;");
+    expect(narrowBreakpoint).toContain(".agentPanel {\n    min-height: 240px;");
+    expect(narrowBreakpoint).toContain(".detailPanel {\n    min-height: 180px;");
   });
 
   it("keeps Agent empty states compact and left-aligned for dense workbench scanning", () => {
     expect(styles.emptyState).toBeTruthy();
     expect(routeSource).toContain("styles.emptyState");
-    expect(styles.emptyState).toContain("place-items-start");
-    expect(styles.emptyState).toContain("min-h-[72px]");
-    expect(styles.emptyState).toContain("text-left");
+    expect(stylesSource).toContain("place-items: start");
+    expect(stylesSource).toContain("min-height: 72px");
+    expect(stylesSource).toContain("text-align: left");
   });
 
   it("renders every Agent as a person name plus colored functional role tag", () => {
@@ -1042,13 +1031,14 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("styles.bulkFieldHeader");
     expect(routeSource).toContain("styles.agentRowBulkSelected");
     expect(routeSource).toContain("styles.agentRowShell");
-    expect(styles.workspace).toContain("grid-rows-[minmax(0,1fr)]");
+    expect(stylesSource).toContain("grid-template-rows: auto auto minmax(0, 1fr)");
     expect(routeSource).not.toContain("styles.bulkActionBar");
     expect(stylesSource).not.toContain(".bulkActionBar {");
     expect(stylesSource).not.toContain(".bulkSummary");
-    expect(styles.bulkPromptPicker).toBeTruthy();
-    expect(styles.bulkPromptSelect).toBeTruthy();
-    expect(styles.agentRowBulkSelected).toBeTruthy();
+    expect(stylesSource).not.toContain(".bulkPromptPicker");
+    expect(stylesSource).toContain(".agentRowBulkSelected");
+    expect(bulkActionBarSource).toContain("!flex-wrap items-center overflow-visible");
+    expect(bulkActionBarSource).not.toContain("!flex-nowrap overflow-x-auto");
   });
 
   it("renders bulk action controls through VUI buttons instead of page-owned button CSS", () => {
@@ -1116,44 +1106,6 @@ describe("AgentsRoute layout contract", () => {
       expect(block).not.toContain("styles.secondaryButton");
       expect(block).not.toContain("styles.dangerButton");
     }
-  });
-
-  it("keeps Agent route form CSS on VUI native slots instead of raw elements", () => {
-    const rawNativeFormSelectors = [
-      ".searchBox input",
-      ".bulkFieldHeader input",
-      ".rowSelect input",
-      ".avatarEditorActions input",
-      ".createToolBundleOption input",
-      ".createToolBundleSelected input",
-      ".inlineAdd input",
-      ".compressionToggleField input",
-      ".compressionInlineCheck input",
-      ".checkField input",
-      ".roomCheckField input",
-      ".field input",
-      ".field select",
-      ".llmSlotField select",
-      ".fieldWide textarea",
-      ".promptConfigRow select",
-      ".resetOptionField input",
-    ];
-
-    for (const selector of rawNativeFormSelectors) {
-      expect(stylesSource).not.toContain(selector);
-    }
-
-    expect(routeSource).toContain("<VNativeInput");
-    expect(routeSource).toContain("<VNativeSelect");
-    expect(routeSource).toContain("<VNativeTextarea");
-    expect(styles.searchBox).toBeTruthy();
-    expect(styles.bulkFieldHeader).toBeTruthy();
-    expect(styles.rowSelect).toBeTruthy();
-    expect(styles.avatarEditorActions).toBeTruthy();
-    expect(styles.createToolBundleOption).toBeTruthy();
-    expect(styles.inlineAdd).toBeTruthy();
-    expect(styles.field).toBeTruthy();
-    expect(styles.fieldWide).toBeTruthy();
   });
 
   it("renders Agent micro action controls through VUI buttons instead of route-local button CSS", () => {

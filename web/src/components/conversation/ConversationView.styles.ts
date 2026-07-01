@@ -326,6 +326,18 @@ const styles = createVuiStyleMap(styleKeys, {
     userCard: "bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel))]",
   },
   overrides: {
+    surface:
+      "relative flex h-full max-h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)]",
+    surfaceCompact:
+      "rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--surface-panel)_72%,transparent)] backdrop-blur-[6px] [&_.timeline]:bg-[color-mix(in_srgb,var(--surface-page)_14%,transparent)] [&_.timeline]:px-3 [&_.timeline]:pt-[9px] [&_.timeline]:pb-[11px] [&_.composer]:gap-[7px] [&_.composer]:px-2.5 [&_.composer]:pt-1.5 [&_.composer]:pb-2",
+    timeline:
+      "grid min-h-0 min-w-0 flex-1 content-start gap-[10px] overflow-auto bg-[color-mix(in_srgb,var(--surface-page)_18%,transparent)] px-5 py-4 [scrollbar-gutter:stable]",
+    composer:
+      "grid flex-none grid-cols-[minmax(0,1fr)_auto_auto_auto] items-end gap-2 border-t border-[color-mix(in_srgb,var(--border-soft)_82%,transparent)] bg-[color-mix(in_srgb,var(--surface-panel)_74%,transparent)] px-[11px] py-[7px] pb-[9px] backdrop-blur-[6px] shadow-none",
+    markdownTable:
+      "min-w-full table-fixed",
+    markdownTableWrap:
+      "max-w-full overflow-x-auto overflow-y-hidden [scrollbar-gutter:stable]",
     agentInboxTurn:
       "grid w-full min-w-0 grid-cols-[34px_minmax(0,1fr)] gap-x-3 justify-self-stretch [&_.turnContent]:w-[min(100%,920px)] [&_.turnContent]:p-0 [&_.turnContent]:border-l-0",
     assistantTurn:

@@ -24,12 +24,13 @@ export function AgentPageHeader({
   return (
     <header
       data-vui-product="agent-page-header"
-      aria-label={`${eyebrow}: ${title}`}
-      title={eyebrow}
       className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-vui-border-hairline bg-vui-surface-page/76 px-3 py-1"
     >
-      <div className="grid min-w-0">
-        <h1 className="m-0 truncate text-[var(--vui-font-title)] font-bold leading-tight text-vui-fg-primary">
+      <div className="grid min-w-0 gap-0.5">
+        <span className="truncate text-[0.64rem] font-semibold uppercase tracking-[0.06em] text-vui-fg-tertiary">
+          {eyebrow}
+        </span>
+        <h1 className="m-0 truncate text-[0.95rem] font-bold leading-tight text-vui-fg-primary">
           {title}
         </h1>
       </div>

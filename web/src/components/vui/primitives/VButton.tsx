@@ -51,6 +51,7 @@ export function VButton({
   ...props
 }: VButtonProps) {
   const titleProps = title ? ({ title } as Record<string, string>) : undefined;
+  const isIconOnly = Boolean(props.isIconOnly);
 
   return (
     <Button
@@ -65,12 +66,26 @@ export function VButton({
       <span
         data-slot="vui-button-content"
         title={title}
-        className="inline-flex items-center gap-1.5"
+        className="inline-flex min-w-0 max-w-full items-center justify-center gap-1.5"
       >
-        {icon ? <span data-slot="vui-button-icon">{icon}</span> : null}
-        {children ? <span data-slot="vui-button-label">{children}</span> : null}
+        {icon ? (
+          <span data-slot="vui-button-icon" className="inline-grid shrink-0 place-items-center">
+            {icon}
+          </span>
+        ) : null}
+        {isIconOnly && children ? (
+          <span data-slot="vui-button-icon" className="inline-grid shrink-0 place-items-center">
+            {children}
+          </span>
+        ) : children ? (
+          <span data-slot="vui-button-label" className="min-w-0 truncate whitespace-nowrap">
+            {children}
+          </span>
+        ) : null}
         {trailingIcon ? (
-          <span data-slot="vui-button-trailing-icon">{trailingIcon}</span>
+          <span data-slot="vui-button-trailing-icon" className="inline-grid shrink-0 place-items-center">
+            {trailingIcon}
+          </span>
         ) : null}
       </span>
     </Button>
