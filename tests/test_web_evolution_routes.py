@@ -71,6 +71,9 @@ def isolate_evolution_live_state():
         self_evolution_control_service._RUN_STATES.clear()
         self_evolution_control_service._RUN_INTERNALS.clear()
         self_evolution_control_service._ACTIVE_RUN_ID = None
+    with self_evolution_control_service._OBSERVATION_RUN_STATE_LOCK:
+        self_evolution_control_service._OBSERVATION_RUNS.clear()
+        self_evolution_control_service._ACTIVE_OBSERVATION_RUN_ID = ""
     with self_evolution_control_service._RUN_SUBSCRIBERS_LOCK:
         self_evolution_control_service._RUN_SUBSCRIBERS.clear()
     with session_service._RUNNING_SESSIONS_LOCK:
@@ -104,6 +107,9 @@ def isolate_evolution_live_state():
         self_evolution_control_service._RUN_STATES.clear()
         self_evolution_control_service._RUN_INTERNALS.clear()
         self_evolution_control_service._ACTIVE_RUN_ID = None
+    with self_evolution_control_service._OBSERVATION_RUN_STATE_LOCK:
+        self_evolution_control_service._OBSERVATION_RUNS.clear()
+        self_evolution_control_service._ACTIVE_OBSERVATION_RUN_ID = ""
     with self_evolution_control_service._RUN_SUBSCRIBERS_LOCK:
         self_evolution_control_service._RUN_SUBSCRIBERS.clear()
     with session_service._RUNNING_SESSIONS_LOCK:
@@ -1756,6 +1762,46 @@ def test_start_supervised_run_from_dataset_exposes_active_snapshot_and_sse(tmp_p
     assert bundle_path.exists()
 
     _reset_supervised_live_state()
+
+
+def test_self_observation_start_route_returns_no_tool_snapshot(monkeypatch):
+    monkeypatch.setattr(
+        self_evolution_control_service,
+        "get_workbench_contract",
+        lambda: {"modeAvailability": {"self_evolution": True}},
+    )
+    monkeypatch.setattr(self_evolution_control_service, "_run_self_observation_turn", lambda context: None)
+    self_evolution_control_service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
+
+    response = client.post(
+        "/api/evolution/self/observation-runs",
+        json={"goal": "观察思考", "durationSeconds": 60},
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["runKind"] == "self_observation_run"
+    assert payload["allowedTools"] == []
+    assert payload["worktreeCreated"] is False
+
+
+def test_self_observation_terminate_route(monkeypatch):
+    monkeypatch.setattr(
+        self_evolution_control_service,
+        "get_workbench_contract",
+        lambda: {"modeAvailability": {"self_evolution": True}},
+    )
+    monkeypatch.setattr(self_evolution_control_service, "_run_self_observation_turn", lambda context: None)
+    self_evolution_control_service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
+    started = self_evolution_control_service.start_self_observation_run({"goal": "观察终止", "durationSeconds": 60})
+
+    response = client.post(
+        f"/api/evolution/self/observation-runs/{started['runId']}/actions",
+        json={"action": "terminate"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "terminated"
 
 def test_active_supervised_run_events_is_quiet_when_no_active_run():
     _reset_supervised_live_state()

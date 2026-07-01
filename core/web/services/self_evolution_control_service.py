@@ -2268,6 +2268,67 @@ def start_self_observation_run(payload: dict[str, Any]) -> dict[str, Any]:
     return get_self_observation_run_snapshot(run_id) or snapshot
 
 
+def execute_self_observation_action(run_id: str, action: str) -> dict[str, Any]:
+    global _ACTIVE_OBSERVATION_RUN_ID
+    normalized_run_id = str(run_id or "").strip()
+    normalized_action = str(action or "").strip().lower()
+    if not normalized_run_id:
+        raise SelfEvolutionRunValidationError("Missing self observation run id.")
+    if normalized_action not in {"terminate", "stop", "cancel"}:
+        raise SelfEvolutionRunValidationError("Unsupported self observation action.")
+
+    now = _now_timestamp()
+    with _OBSERVATION_RUN_STATE_LOCK:
+        snapshot = _OBSERVATION_RUNS.get(normalized_run_id)
+        if snapshot is None:
+            raise SelfEvolutionRunNotFoundError("Self observation run not found.")
+        if str(snapshot.get("status") or "").lower() not in {"queued", "running"}:
+            raise SelfEvolutionRunBusyError("Self observation run is not active.")
+        snapshot["status"] = "terminated"
+        snapshot["phase"] = "terminated"
+        snapshot["runtimeStatus"] = "terminated"
+        snapshot["updatedAt"] = now
+        snapshot["finishedAt"] = now
+        snapshot["latestMessage"] = text_for(
+            get_web_language(),
+            zh="自主观察已由用户终止。",
+            en="Observation run terminated by user.",
+        )
+        snapshot["report"] = snapshot.get("report") or text_for(
+            get_web_language(),
+            zh="观察被用户终止，未生成完整结束报告。",
+            en="Observation run was terminated by user before a final report was generated.",
+        )
+        action_states = snapshot.get("actionStates")
+        if not isinstance(action_states, dict):
+            action_states = {}
+            snapshot["actionStates"] = action_states
+        action_states["terminate"] = {
+            "enabled": False,
+            "label": "已终止",
+            "reason": "operator_terminated",
+        }
+        if _ACTIVE_OBSERVATION_RUN_ID == normalized_run_id:
+            _ACTIVE_OBSERVATION_RUN_ID = ""
+        return dict(snapshot)
+
+
+def stream_self_observation_run_events(run_id: str, initial_snapshot: dict[str, Any] | None = None):
+    normalized_run_id = str(run_id or "").strip()
+    if initial_snapshot:
+        yield _encode_sse_event("self_observation_run", initial_snapshot)
+    while normalized_run_id:
+        snapshot = get_self_observation_run_snapshot(normalized_run_id)
+        if snapshot is None:
+            return
+        if not initial_snapshot:
+            yield _encode_sse_event("self_observation_run", snapshot)
+        initial_snapshot = None
+        if str(snapshot.get("status") or "").lower() not in {"queued", "running"}:
+            return
+        time.sleep(1.0)
+
+
 def _mark_run_paused(
     run_id: str,
     *,
