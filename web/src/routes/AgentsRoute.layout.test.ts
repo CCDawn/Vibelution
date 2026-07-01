@@ -1037,8 +1037,8 @@ describe("AgentsRoute layout contract", () => {
     expect(stylesSource).not.toContain(".bulkSummary");
     expect(stylesSource).not.toContain(".bulkPromptPicker");
     expect(stylesSource).toContain(".agentRowBulkSelected");
-    expect(bulkActionBarSource).toContain("!flex-wrap items-center overflow-visible");
-    expect(bulkActionBarSource).not.toContain("!flex-nowrap overflow-x-auto");
+    expect(bulkActionBarSource).toContain("!flex-nowrap items-center overflow-x-auto");
+    expect(bulkActionBarSource).not.toContain("!flex-wrap items-center overflow-visible");
   });
 
   it("renders bulk action controls through VUI buttons instead of page-owned button CSS", () => {
@@ -1055,7 +1055,14 @@ describe("AgentsRoute layout contract", () => {
       bulkDestructiveStart,
       routeSource.indexOf("return (", bulkDestructiveStart),
     );
+    const bulkPromptSource = routeSource.slice(
+      routeSource.indexOf("const bulkPromptPicker"),
+      routeSource.indexOf("const bulkMutationActions"),
+    );
 
+    expect(bulkPromptSource).toContain("<VNativeSelect");
+    expect(bulkPromptSource).not.toContain("styles.bulkPromptSelect");
+    expect(bulkPromptSource).not.toContain("styles.bulkPromptField");
     expect(bulkSelectionSource).toContain("<VButton");
     expect(bulkSelectionSource).toContain('variant="secondary"');
     expect(bulkSelectionSource).not.toContain("styles.secondaryButton");

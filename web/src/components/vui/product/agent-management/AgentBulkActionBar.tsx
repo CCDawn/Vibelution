@@ -33,13 +33,13 @@ export function AgentBulkActionBar({
     >
       <VToolbar
         ariaLabel={ariaLabel}
-        className="w-full !flex-wrap items-center overflow-visible gap-1.5 [&_button]:whitespace-nowrap"
+        className="w-full !flex-nowrap items-center overflow-x-auto gap-1.5 [&_button]:whitespace-nowrap"
       >
         <div className="inline-flex min-h-[26px] shrink-0 items-center gap-1.5 text-[0.76rem] font-semibold text-vui-fg-secondary [&>strong]:text-vui-fg-primary">
           {summary}
         </div>
         {selectionActions ? (
-          <VActionGroup ariaLabel={`${ariaLabel} selection`} className="shrink-0 !flex-wrap justify-start">
+          <VActionGroup ariaLabel={`${ariaLabel} selection`} className="shrink-0 !flex-nowrap justify-start">
             {selectionActions}
           </VActionGroup>
         ) : null}
@@ -47,12 +47,12 @@ export function AgentBulkActionBar({
           <div className="min-w-[156px] flex-[1_1_190px]">{promptPicker}</div>
         ) : null}
         {mutationActions ? (
-          <VActionGroup ariaLabel={`${ariaLabel} mutation`} className="shrink-0 !flex-wrap justify-end">
+          <VActionGroup ariaLabel={`${ariaLabel} mutation`} className="shrink-0 !flex-nowrap justify-end">
             {mutationActions}
           </VActionGroup>
         ) : null}
         {destructiveActions ? (
-          <VActionGroup ariaLabel={`${ariaLabel} destructive`} className="shrink-0 !flex-wrap justify-end">
+          <VActionGroup ariaLabel={`${ariaLabel} destructive`} className="shrink-0 !flex-nowrap justify-end">
             {destructiveActions}
           </VActionGroup>
         ) : null}
