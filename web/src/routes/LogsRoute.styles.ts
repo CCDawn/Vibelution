@@ -179,6 +179,16 @@ const styleKeys = [
   "workspace",
 ] as const;
 
-const styles = createVuiStyleMap(styleKeys);
+const styles = createVuiStyleMap(styleKeys, {
+  extensions: {
+    // Let the single workspace child fill and bound the available height.
+    workspace: "grid-rows-[minmax(0,1fr)] overflow-hidden",
+    // Real sidebar | resize-handle | detail split shared by LogsRoute and
+    // RuntimeScenesPane; the generic layout rule only emits a single column,
+    // which stacks/overlaps the panes.
+    resizableLayout:
+      "!grid grid-cols-[var(--logs-sidebar-width)_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] min-h-0 overflow-hidden",
+  },
+});
 
 export default styles;
