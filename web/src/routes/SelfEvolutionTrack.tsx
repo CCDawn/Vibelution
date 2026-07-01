@@ -922,45 +922,39 @@ export function SelfEvolutionTrack({
     );
   }
 
-  function renderObservationPanel(options?: { compact?: boolean }) {
-    const compact = Boolean(options?.compact);
-    const metricValueClass = compact ? styles.secondaryPill : styles.statusPill;
+  function renderObservationPanel() {
     return (
-      <section className={observationRunModeActive && compact ? styles.subsurface : styles.observationPanel}>
+      <section className={styles.observationPanel}>
         <div className={styles.sectionHeader}>
           <div>
             <p className={styles.eyebrow}>{lang === "zh" ? "纯观察沙盒" : "No-tool sandbox"}</p>
             <h3 className={styles.sectionTitle}>{lang === "zh" ? "自主观察" : "Observation"}</h3>
           </div>
-          <span className={metricValueClass}>{statusLabel(observationRun?.status || "idle")}</span>
+          <span className={styles.statusPill}>{statusLabel(observationRun?.status || "idle")}</span>
         </div>
 
-        {!compact ? (
-          <div className={styles.formField}>
-            <span>{lang === "zh" ? "观察目标" : "Observation goal"}</span>
-            <VNativeTextarea
-              className={styles.textArea}
-              rows={3}
-              value={observationGoalInput}
-              onChange={(event) => setObservationGoalInput(event.target.value)}
-              placeholder={lang === "zh" ? "描述要观察 Agent 如何思考的问题" : "Describe what you want to observe"}
-            />
-          </div>
-        ) : null}
+        <div className={styles.formField}>
+          <span>{lang === "zh" ? "观察目标" : "Observation goal"}</span>
+          <VNativeTextarea
+            className={styles.textArea}
+            rows={3}
+            value={observationGoalInput}
+            onChange={(event) => setObservationGoalInput(event.target.value)}
+            placeholder={lang === "zh" ? "描述要观察 Agent 如何思考的问题" : "Describe what you want to observe"}
+          />
+        </div>
 
-        {!compact ? (
-          <div className={styles.formField}>
-            <span>{lang === "zh" ? "运行时长（秒）" : "Duration seconds"}</span>
-            <VNativeInput
-              className={styles.textInput}
-              type="number"
-              min={30}
-              max={3600}
-              value={String(normalizedObservationDuration)}
-              onChange={(event) => setObservationDurationSeconds(Number(event.target.value || 300))}
-            />
-          </div>
-        ) : null}
+        <div className={styles.formField}>
+          <span>{lang === "zh" ? "运行时长（秒）" : "Duration seconds"}</span>
+          <VNativeInput
+            className={styles.textInput}
+            type="number"
+            min={30}
+            max={3600}
+            value={String(normalizedObservationDuration)}
+            onChange={(event) => setObservationDurationSeconds(Number(event.target.value || 300))}
+          />
+        </div>
 
         <p className={styles.noticeText}>
           {lang === "zh"
@@ -984,17 +978,15 @@ export function SelfEvolutionTrack({
         </div>
 
         <div className={styles.conversationActions}>
-          {!compact ? (
-            <VButton
-              type="button"
-              className={styles.secondaryAction}
-              isDisabled={observationStartPending || observationRunActive || !observationGoalValue}
-              onClick={() => onStartObservation({ goal: observationGoalValue, durationSeconds: normalizedObservationDuration })}
-            >
-              {observationStartPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ArrowUpRight size={15} />}
-              {observationStartPending ? (lang === "zh" ? "启动中" : "Starting") : (lang === "zh" ? "开始自主观察" : "Start observation")}
-            </VButton>
-          ) : null}
+          <VButton
+            type="button"
+            className={styles.secondaryAction}
+            isDisabled={observationStartPending || observationRunActive || !observationGoalValue}
+            onClick={() => onStartObservation({ goal: observationGoalValue, durationSeconds: normalizedObservationDuration })}
+          >
+            {observationStartPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ArrowUpRight size={15} />}
+            {observationStartPending ? (lang === "zh" ? "启动中" : "Starting") : (lang === "zh" ? "开始自主观察" : "Start observation")}
+          </VButton>
           {observationRun && observationRunActive ? (
             <VButton
               type="button"
@@ -1062,7 +1054,7 @@ export function SelfEvolutionTrack({
             </article>
             <article className={styles.stripItem}>
               <span>{lang === "zh" ? "时长" : "Duration"}</span>
-              <strong>{compactDuration(observationRun?.durationSeconds ?? normalizedObservationDuration, lang)}</strong>
+              <strong>{observationRun?.durationSeconds != null ? compactDuration(observationRun.durationSeconds, lang) : "--"}</strong>
             </article>
             <article className={styles.stripItem}>
               <span>{lang === "zh" ? "工具" : "Tools"}</span>
@@ -1081,8 +1073,6 @@ export function SelfEvolutionTrack({
             </div>
           ) : null}
 
-          {renderObservationPanel({ compact: true })}
-
           <section className={styles.subsurface}>
             <div className={styles.subsurfaceHeader}>
               <div>
@@ -1092,28 +1082,44 @@ export function SelfEvolutionTrack({
               <span className={styles.secondaryPill}>{statusLabel(observationRun?.runtimeStatus || observationRun?.status || "idle")}</span>
             </div>
 
-            <div className={styles.detailStack}>
-              <div className={styles.detailRow}>
-                <span>{lang === "zh" ? "观察目标" : "Observation goal"}</span>
-                <strong>{observationRun?.goal || observationGoalValue || "--"}</strong>
+              <div className={styles.detailStack}>
+                <div className={styles.detailRow}>
+                  <span>{lang === "zh" ? "观察目标" : "Observation goal"}</span>
+                  <strong>{observationRun?.goal || "--"}</strong>
+                </div>
+                <div className={styles.detailRow}>
+                  <span>{lang === "zh" ? "阶段" : "Phase"}</span>
+                  <strong>{statusLabel(observationRun?.phase || observationRun?.runtimeStatus || observationRun?.status || "idle")}</strong>
+                </div>
+                <div className={styles.detailRow}>
+                  <span>{lang === "zh" ? "开始时间" : "Started"}</span>
+                  <strong>{compactTimestamp(observationRun?.startedAt || observationRun?.updatedAt || "")}</strong>
+                </div>
+                <div className={styles.detailRow}>
+                  <span>{t("lastUpdated")}</span>
+                  <strong>{compactTimestamp(observationRun?.updatedAt || "")}</strong>
+                </div>
               </div>
-              <div className={styles.detailRow}>
-                <span>{lang === "zh" ? "阶段" : "Phase"}</span>
-                <strong>{statusLabel(observationRun?.phase || observationRun?.runtimeStatus || observationRun?.status || "idle")}</strong>
+
+              <div className={styles.listBlock}>
+                {observationRun?.latestMessage ? (
+                  <div className={styles.listItem}>
+                    <div className={styles.itemTop}>
+                      <strong>{lang === "zh" ? "最新输出" : "Latest output"}</strong>
+                      <span className={styles.secondaryPill}>{statusLabel(observationRun?.runtimeStatus || observationRun?.status || "idle")}</span>
+                    </div>
+                    <span className={styles.mutedText}>{observationRun.latestMessage}</span>
+                  </div>
+                ) : (
+                  <div className={styles.emptyState}>{lang === "zh" ? "还没有观察输出。" : "No observation output yet."}</div>
+                )}
+                {observationRun?.report ? <pre className={styles.rawBlock}>{observationRun.report}</pre> : null}
+                {observationRun?.boundaryViolation ? <p className={styles.errorText}>{observationRun.boundaryViolation}</p> : null}
               </div>
-              <div className={styles.detailRow}>
-                <span>{lang === "zh" ? "开始时间" : "Started"}</span>
-                <strong>{compactTimestamp(observationRun?.startedAt || observationRun?.updatedAt || "")}</strong>
-              </div>
-              <div className={styles.detailRow}>
-                <span>{t("lastUpdated")}</span>
-                <strong>{compactTimestamp(observationRun?.updatedAt || "")}</strong>
-              </div>
-            </div>
-          </section>
+            </section>
+          </div>
         </div>
-      </div>
-    );
+      );
   }
 
   return (

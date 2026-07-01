@@ -181,23 +181,36 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("renderObservationStatusSurface()");
     expect(selfEvolutionSource).toContain("OBSERVATION_MODE_TOOL_COUNT");
     expect(selfEvolutionSource).toContain("OBSERVATION_MODE_WORKTREE_STATE");
+    expect(selfEvolutionSource).toContain('const OBSERVATION_MODE_TOOL_COUNT = "0";');
+    expect(selfEvolutionSource).toContain('const OBSERVATION_MODE_WORKTREE_STATE = "no";');
     expect(selfEvolutionSource).toContain("onStartObservation");
     expect(selfEvolutionSource).toContain("onTerminateObservation");
     expect(selfEvolutionSource).not.toContain("onRequestObservationTool");
     expect(selfEvolutionSource).not.toContain("observationToolRequest");
+    expect(selfEvolutionSource).not.toContain("allowedTools.length");
+    expect(selfEvolutionSource).not.toContain("worktreeCreated");
   });
 
   it("keeps the observation status surface isolated from worktree approval semantics", () => {
-    expect(observationStatusSurface).toContain("renderObservationPanel({ compact: true })");
     expect(observationStatusSurface).toContain("OBSERVATION_MODE_TOOL_COUNT");
     expect(observationStatusSurface).toContain("OBSERVATION_MODE_WORKTREE_STATE");
+    expect(observationStatusSurface).toContain("statusLabel(observationRun?.status || \"idle\")");
+    expect(observationStatusSurface).toContain("observationRun?.goal || \"--\"");
+    expect(observationStatusSurface).toContain("observationRun?.durationSeconds != null");
+    expect(observationStatusSurface).toContain("observationRun?.latestMessage");
+    expect(observationStatusSurface).not.toContain("renderObservationPanel(");
     expect(observationStatusSurface).not.toContain("overview.worktree");
+    expect(observationStatusSurface).not.toContain("worktreeRun");
     expect(observationStatusSurface).not.toContain("approvalEvidenceItems");
     expect(observationStatusSurface).not.toContain("approve_review");
+    expect(observationStatusSurface).not.toContain("merge");
+    expect(observationStatusSurface).not.toContain("discard");
+    expect(observationStatusSurface).not.toContain("tool request");
     expect(observationStatusSurface).not.toContain('onWorktreeAction(worktreeRun.runId, "merge")');
     expect(observationStatusSurface).not.toContain('onWorktreeAction(worktreeRun.runId, "discard")');
     expect(observationStatusSurface).not.toContain("dirtyFlags");
     expect(observationStatusSurface).not.toContain("changedFiles");
+    expect(observationStatusSurface).not.toContain("terminateAction");
   });
 
   it("keeps the pet companion read-only inside self-evolution", () => {
