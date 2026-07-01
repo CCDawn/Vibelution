@@ -944,7 +944,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("historicalTask");
     expect(routeSource).toContain("历史任务 ${historicalTaskCount} 已忽略");
     const sourceCollectionCommandStatsSource = routeSource.slice(
-      routeSource.indexOf("<div className={styles.sourceCollectionCommandStats}>"),
+      routeSource.indexOf("<TeamStageCommandBar"),
       routeSource.indexOf("id=\"source-collection-stage-status\"")
     );
     expect(sourceCollectionCommandStatsSource).toContain("sourceCollectionConsoleStatusText");
@@ -1385,7 +1385,7 @@ describe("TeamsRoute layout contract", () => {
     expect(standaloneSource).not.toContain("{renderSourceCollectionControlsPanel()}");
 
     const commandStatsSource = standaloneSource.slice(
-      standaloneSource.indexOf("<div className={styles.sourceCollectionCommandStats}>"),
+      standaloneSource.indexOf("<TeamStageCommandBar"),
       standaloneSource.indexOf("id=\"source-collection-stage-status\""),
     );
     expect(commandStatsSource).toContain("sourceCollectionConsoleStatusText");

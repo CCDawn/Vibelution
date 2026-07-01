@@ -64,6 +64,7 @@ import {
 } from "../components/vui";
 import {
   TeamStageCard,
+  TeamStageCommandBar,
   TeamStagePipeline,
   type TeamStageTone,
 } from "../components/vui/product/team-management";
@@ -11835,17 +11836,17 @@ export function TeamsRoute({
         </header>
         {researchWorkflowTeamSelected ? (
           <main className={styles.sourceCollectionPageBody}>
-            <section className={`${styles.sourceCollectionCommandBar} ${sourceCollectionStepClassName(sourceCollectionConsoleState)}`} aria-label={lang === "zh" ? "知识搜集操作台" : "Knowledge collection command bar"}>
-              <div className={styles.sourceCollectionCommandTitle}>
-                <strong>{sourceCollectionRunTitleLabel(selectedSourceCollectionRun?.title || sourceCollectionDraft.title, lang)}</strong>
-                <span>{sourceCollectionDecisionText}</span>
-              </div>
-              <div className={styles.sourceCollectionCommandStats}>
-                <span>{lang === "zh" ? "当前" : "status"} <strong>{sourceCollectionConsoleStatusText}</strong></span>
-                <span>{lang === "zh" ? "下一步" : "next"} <strong>{sourceCollectionBoardNextStepLabel}</strong></span>
-                <span>{lang === "zh" ? "资料" : "sources"} <strong>{sourceCollectionCollectedCountLabel}</strong></span>
-              </div>
-            </section>
+            <TeamStageCommandBar
+              ariaLabel={lang === "zh" ? "知识搜集操作台" : "Knowledge collection command bar"}
+              tone={sourceCollectionConsoleState as TeamStageTone}
+              title={sourceCollectionRunTitleLabel(selectedSourceCollectionRun?.title || sourceCollectionDraft.title, lang)}
+              subtitle={sourceCollectionDecisionText}
+              stats={[
+                { key: "status", label: lang === "zh" ? "当前" : "status", value: sourceCollectionConsoleStatusText },
+                { key: "next", label: lang === "zh" ? "下一步" : "next", value: sourceCollectionBoardNextStepLabel },
+                { key: "sources", label: lang === "zh" ? "资料" : "sources", value: sourceCollectionCollectedCountLabel },
+              ]}
+            />
             <TeamStagePipeline
               id="source-collection-stage-status"
               ariaLabel={lang === "zh" ? "知识搜集内部模块" : "Knowledge collection modules"}
