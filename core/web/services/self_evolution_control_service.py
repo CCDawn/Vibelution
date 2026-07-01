@@ -83,6 +83,7 @@ _RUN_SUBSCRIBERS: dict[str, set[queue.Queue[dict[str, Any]]]] = {}
 _RUN_EXECUTING_STATUSES = {"queued", "running", "stopping"}
 _RUN_LOCKED_STATUSES = {"queued", "running", "stopping", "paused"}
 _RUN_FINAL_STATUSES = {"done", "failed", "cancelled"}
+_OBSERVATION_OPERATOR_TERMINAL_STATUSES = {"terminated", "cancelled", "stopped"}
 _OBSERVATION_RUN_STATE_LOCK = threading.RLock()
 _OBSERVATION_RUNS: dict[str, dict[str, Any]] = {}
 _ACTIVE_OBSERVATION_RUN_ID: str = ""
@@ -2101,6 +2102,16 @@ def force_cancel_active_self_observation_runs_for_shutdown(reason: str = "") -> 
     return closed
 
 
+def _self_observation_has_operator_terminal_state(snapshot: dict[str, Any] | None) -> bool:
+    if not isinstance(snapshot, dict):
+        return False
+    for key in ("status", "phase", "runtimeStatus"):
+        value = str(snapshot.get(key) or "").strip().lower()
+        if value in _OBSERVATION_OPERATOR_TERMINAL_STATUSES:
+            return True
+    return False
+
+
 def _set_self_observation_terminal_state(
     run_id: str,
     *,
@@ -2115,6 +2126,10 @@ def _set_self_observation_terminal_state(
         snapshot = _OBSERVATION_RUNS.get(str(run_id or "").strip())
         if not snapshot:
             return None
+        if _self_observation_has_operator_terminal_state(snapshot):
+            if _ACTIVE_OBSERVATION_RUN_ID == snapshot.get("runId"):
+                _ACTIVE_OBSERVATION_RUN_ID = ""
+            return dict(snapshot)
         snapshot["status"] = status
         snapshot["phase"] = status
         snapshot["runtimeStatus"] = status
@@ -2148,6 +2163,7 @@ def _set_self_observation_terminal_state(
 
 
 def _run_self_observation_turn(context: dict[str, Any]) -> None:
+    global _ACTIVE_OBSERVATION_RUN_ID
     run_id = str((context or {}).get("runId") or "").strip()
     goal = str((context or {}).get("goal") or DEFAULT_SELF_EVOLUTION_GOAL).strip() or DEFAULT_SELF_EVOLUTION_GOAL
     duration_seconds = _normalize_observation_duration((context or {}).get("durationSeconds"))
@@ -2157,6 +2173,10 @@ def _run_self_observation_turn(context: dict[str, Any]) -> None:
     with _OBSERVATION_RUN_STATE_LOCK:
         snapshot = _OBSERVATION_RUNS.get(run_id)
         if not snapshot:
+            return None
+        if _self_observation_has_operator_terminal_state(snapshot):
+            if _ACTIVE_OBSERVATION_RUN_ID == snapshot.get("runId"):
+                _ACTIVE_OBSERVATION_RUN_ID = ""
             return None
         snapshot["status"] = "running"
         snapshot["phase"] = "running"
