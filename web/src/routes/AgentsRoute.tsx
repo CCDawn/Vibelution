@@ -61,9 +61,11 @@ import {
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import {
   AgentBulkActionBar,
+  AgentFilterRail,
   AgentPageHeader,
   AgentSummaryStrip,
   AgentWorkspacePanel,
+  type AgentFilterSectionView,
   type AgentSummaryMetric,
 } from "../components/vui/product/agent-management";
 import { VButton, VHStack, VNativeSelect } from "../components/vui";
@@ -5574,6 +5576,73 @@ export function AgentsRoute() {
     </VButton>
   );
 
+  const handleSelectFilterGroup = (groupId: string) => {
+    setActiveFilter(groupId);
+    setSelectedAgentId("");
+  };
+
+  const filterHealthLabel = (group: { id: string; healthCount?: number }) =>
+    group.healthCount
+      ? `${group.id === "setup:inbox" ? copy.statusReminderShort : copy.healthIssueShort} ${group.healthCount}`
+      : undefined;
+
+  const filterSections: AgentFilterSectionView[] = groupedFilters.map((section) => ({
+    id: section.id,
+    label: section.label,
+    groups: section.groups.map((group) => {
+      const displayLabel = groupDisplayLabel(group, copy);
+      return {
+        id: group.id,
+        label: displayLabel,
+        title: groupDescription(group, copy),
+        ariaLabel: groupAriaLabel(displayLabel, group, copy, lang),
+        count: group.count,
+        icon:
+          section.id === "management" ? (
+            <CheckCircle2 size={15} />
+          ) : section.id === "boundary" ? (
+            <UserRound size={15} />
+          ) : section.id === "team_index" ? (
+            <Users size={15} />
+          ) : group.id === "needs_review" ? (
+            <AlertTriangle size={15} />
+          ) : (
+            <Bot size={15} />
+          ),
+        healthLabel: filterHealthLabel(group),
+      };
+    }),
+  }));
+
+  const advancedFilterSections: AgentFilterSectionView[] = advancedGroupedFilters.map((section) => ({
+    id: section.id,
+    label: section.label,
+    groups: section.groups.map((group) => {
+      const displayLabel = groupDisplayLabel(group, copy);
+      return {
+        id: group.id,
+        label: displayLabel,
+        title: groupDescription(group, copy),
+        ariaLabel: groupAriaLabel(displayLabel, group, copy, lang),
+        count: group.count,
+        icon:
+          section.id === "source_scope" ? (
+            <Database size={15} />
+          ) : section.id === "reference" ? (
+            <Users size={15} />
+          ) : (
+            <Layers3 size={15} />
+          ),
+        healthLabel: filterHealthLabel(group),
+      };
+    }),
+  }));
+
+  const agentStoragePaths = [
+    workspace?.storage.agentRegistryPath ?? "workspace/agents/agents.json",
+    workspace?.storage.modeBindingPath ?? "workspace/agent_config/mode_bindings.json",
+  ];
+
   return (
     <section className={styles.route}>
       <div title={copy.subtitle}>
@@ -5607,97 +5676,20 @@ export function AgentsRoute() {
       </div>
 
       <div className={createOpen ? `${styles.workspace} ${styles.workspaceCreating}` : styles.workspace}>
-        <AgentWorkspacePanel as="aside" ariaLabel={copy.agentFilters} className={styles.filterPanel}>
-          <label className={styles.searchBox}>
-            <Search size={15} />
-            <input value={searchText} placeholder={copy.search} onChange={(event) => setSearchText(event.target.value)} />
-          </label>
-          <nav className={styles.groupList} aria-label={copy.agentFilters}>
-            {groupedFilters.map((section) => (
-              <section key={section.id} className={styles.groupSection}>
-                <p className={styles.groupSectionTitle}>{section.label}</p>
-                <div className={styles.groupSectionItems}>
-                  {section.groups.map((group) => {
-                    const active = activeFilter === group.id;
-                    const description = groupDescription(group, copy);
-                    const displayLabel = groupDisplayLabel(group, copy);
-                    return (
-                      <button
-                        key={group.id}
-                        type="button"
-                        className={active ? `${styles.groupButton} ${styles.groupButtonActive}` : styles.groupButton}
-                        onClick={() => {
-                          setActiveFilter(group.id);
-                          setSelectedAgentId("");
-                        }}
-                        aria-label={groupAriaLabel(displayLabel, group, copy, lang)}
-                        title={description}
-                      >
-                        <span>
-                          {section.id === "management" ? <CheckCircle2 size={15} /> : section.id === "boundary" ? <UserRound size={15} /> : section.id === "team_index" ? <Users size={15} /> : group.id === "needs_review" ? <AlertTriangle size={15} /> : <Bot size={15} />}
-                          {displayLabel}
-                        </span>
-                        <strong>{group.count}</strong>
-                        {group.healthCount ? (
-                          <em>{group.id === "setup:inbox" ? copy.statusReminderShort : copy.healthIssueShort} {group.healthCount}</em>
-                        ) : null}
-                      </button>
-                    );
-                  })}
-                </div>
-              </section>
-            ))}
-            {advancedGroupedFilters.length ? (
-              <details className={styles.advancedFilterSection}>
-                <summary className={styles.advancedFilterSummary}>
-                  <span>{copy.moreFilters}</span>
-                  <strong>{advancedFilterCount}</strong>
-                </summary>
-                <div className={styles.advancedFilterBody}>
-                  {advancedGroupedFilters.map((section) => (
-                    <section key={section.id} className={styles.groupSection}>
-                      <p className={styles.groupSectionTitle}>{section.label}</p>
-                      <div className={styles.groupSectionItems}>
-                        {section.groups.map((group) => {
-                          const active = activeFilter === group.id;
-                          const description = groupDescription(group, copy);
-                          const displayLabel = groupDisplayLabel(group, copy);
-                          return (
-                            <button
-                              key={group.id}
-                              type="button"
-                              className={active ? `${styles.groupButton} ${styles.groupButtonActive}` : styles.groupButton}
-                              onClick={() => {
-                                setActiveFilter(group.id);
-                                setSelectedAgentId("");
-                              }}
-                              aria-label={groupAriaLabel(displayLabel, group, copy, lang)}
-                              title={description}
-                            >
-                              <span>
-                                {section.id === "source_scope" ? <Database size={15} /> : section.id === "reference" ? <Users size={15} /> : <Layers3 size={15} />}
-                                {displayLabel}
-                              </span>
-                              <strong>{group.count}</strong>
-                              {group.healthCount ? (
-                                <em>{group.id === "setup:inbox" ? copy.statusReminderShort : copy.healthIssueShort} {group.healthCount}</em>
-                              ) : null}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </section>
-                  ))}
-                </div>
-              </details>
-            ) : null}
-          </nav>
-          <section className={styles.storagePanel}>
-            <p className={styles.panelEyebrow}>{copy.readOnly}</p>
-            <code>{workspace?.storage.agentRegistryPath ?? "workspace/agents/agents.json"}</code>
-            <code>{workspace?.storage.modeBindingPath ?? "workspace/agent_config/mode_bindings.json"}</code>
-          </section>
-        </AgentWorkspacePanel>
+        <AgentFilterRail
+          ariaLabel={copy.agentFilters}
+          searchValue={searchText}
+          searchPlaceholder={copy.search}
+          onSearchChange={setSearchText}
+          sections={filterSections}
+          advancedSections={advancedFilterSections}
+          advancedLabel={copy.moreFilters}
+          advancedCount={advancedFilterCount}
+          activeGroupId={activeFilter}
+          onSelectGroup={handleSelectFilterGroup}
+          storageLabel={copy.readOnly}
+          storagePaths={agentStoragePaths}
+        />
 
         <AgentWorkspacePanel
           as="main"
