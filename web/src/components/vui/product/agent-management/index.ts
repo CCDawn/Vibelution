@@ -3,6 +3,13 @@ export {
   type AgentBulkActionBarProps,
 } from "./AgentBulkActionBar";
 export {
+  AgentDenseList,
+  type AgentDenseColumn,
+  type AgentDenseListColumnLabels,
+  type AgentDenseListProps,
+  type AgentDenseRow,
+} from "./AgentDenseList";
+export {
   AgentFilterRail,
   type AgentFilterGroupView,
   type AgentFilterRailProps,

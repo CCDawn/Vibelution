@@ -61,10 +61,12 @@ import {
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import {
   AgentBulkActionBar,
+  AgentDenseList,
   AgentFilterRail,
   AgentPageHeader,
   AgentSummaryStrip,
   AgentWorkspacePanel,
+  type AgentDenseColumn,
   type AgentFilterSectionView,
   type AgentSummaryMetric,
 } from "../components/vui/product/agent-management";
@@ -5443,70 +5445,6 @@ export function AgentsRoute() {
     }
   };
 
-  const renderAgentRow = (agent: AgentConfigWorkspaceAgent) => {
-    const active = selectedAgent?.agentId === agent.agentId;
-    const tone = issueTone(agent.health);
-    const display = agentDisplayInfo(agent, lang);
-    const modelDisplay = agentDialogueModelDisplay(agent, lang);
-    const bulkSelected = selectedBulkAgentIds.has(agent.agentId);
-    const rowClassName = [
-      styles.agentRow,
-      active ? styles.agentRowActive : "",
-      bulkSelected ? styles.agentRowBulkSelected : "",
-    ].filter(Boolean).join(" ");
-    return (
-      <div key={agent.agentId} className={styles.agentRowShell}>
-        <label className={styles.rowSelect} title={`${copy.bulkSelected}: ${display.name}`}>
-          <input
-            type="checkbox"
-            checked={bulkSelected}
-            aria-label={`${copy.bulkSelected}: ${display.name}`}
-            onChange={(event) => toggleBulkAgent(
-              agent.agentId,
-              event.target.checked,
-              Boolean((event.nativeEvent as globalThis.MouseEvent).shiftKey),
-            )}
-          />
-          {bulkSelected ? <CheckSquare size={15} /> : <Square size={15} />}
-        </label>
-        <button
-          type="button"
-          className={rowClassName}
-          onClick={(event) => handleAgentRowSelect(agent, event)}
-        >
-          <span className={styles.agentIdentity}>
-            {renderAgentAvatar(
-              styles.agentAvatar,
-              agent.avatarImageUrl,
-              avatarInitials(agent.agentCode, display.name),
-            )}
-            <span className={styles.agentIdentityCopy}>
-              <strong>{display.name}</strong>
-              <em className={`${styles.agentRoleTag} ${styles[`agentRoleTag_${display.tone}`]}`}>
-                {display.functionLabel}
-              </em>
-            </span>
-          </span>
-          <span title={modelDisplay.detail}>{modelDisplay.label}</span>
-          <span>{promptTemplateDisplayName(agent.promptTemplate, agent.promptTemplateId, lang)}</span>
-          <span className={`${styles.runtimePill} ${styles[`runtime_${runtimeStatusTone(agent)}`]}`}>
-            {runtimeStatusLabel(agent, lang)}
-          </span>
-          <span className={styles.modeList}>
-            {uniqueModes(agent).slice(0, 3).map((mode) => (
-              <em key={`${agent.agentId}:${mode}`}>{modeLabel(mode, lang)}</em>
-            ))}
-          </span>
-          <span className={styles.healthCell} title={issueSummary(agent.health, lang)}>
-            <span className={`${styles.issuePill} ${styles[`issue_${tone}`]}`}>
-              {issueLabel(agent.health, lang)}
-            </span>
-          </span>
-        </button>
-      </div>
-    );
-  };
-
   const bulkActionSummary = (
     <>
       <CheckSquare size={15} />
@@ -5642,6 +5580,39 @@ export function AgentsRoute() {
     workspace?.storage.agentRegistryPath ?? "workspace/agents/agents.json",
     workspace?.storage.modeBindingPath ?? "workspace/agent_config/mode_bindings.json",
   ];
+
+  const agentRowLookup = new Map<string, AgentConfigWorkspaceAgent>();
+  const denseColumns: AgentDenseColumn[] = visibleAgentColumns.map((column) => ({
+    id: column.id,
+    label: column.label,
+    description: column.description,
+    count: column.agents.length,
+    rows: column.agents.map((agent) => {
+      agentRowLookup.set(agent.agentId, agent);
+      const display = agentDisplayInfo(agent, lang);
+      const modelDisplay = agentDialogueModelDisplay(agent, lang);
+      return {
+        id: agent.agentId,
+        name: display.name,
+        roleLabel: display.functionLabel,
+        roleTone: display.tone,
+        avatarUrl: agent.avatarImageUrl,
+        avatarInitials: avatarInitials(agent.agentCode, display.name),
+        modelLabel: modelDisplay.label,
+        modelDetail: modelDisplay.detail,
+        promptLabel: promptTemplateDisplayName(agent.promptTemplate, agent.promptTemplateId, lang),
+        runtimeLabel: runtimeStatusLabel(agent, lang),
+        runtimeTone: runtimeStatusTone(agent),
+        modes: uniqueModes(agent).slice(0, 3).map((mode) => modeLabel(mode, lang)),
+        issueLabel: issueLabel(agent.health, lang),
+        issueTone: issueTone(agent.health),
+        issueSummary: issueSummary(agent.health, lang),
+        active: selectedAgent?.agentId === agent.agentId,
+        bulkSelected: selectedBulkAgentIds.has(agent.agentId),
+        selectLabel: `${copy.bulkSelected}: ${display.name}`,
+      };
+    }),
+  }));
 
   return (
     <section className={styles.route}>
@@ -5900,29 +5871,24 @@ export function AgentsRoute() {
           ) : visibleAgents.length === 0 ? (
             <VEmptyState icon={<Bot size={22} />} title={copy.noAgents} />
           ) : (
-            <div className={styles.agentColumnGrid}>
-              {visibleAgentColumns.map((column) => (
-                <section key={column.id} className={styles.agentColumn} aria-label={column.label}>
-                  <div className={styles.agentColumnHeader}>
-                    <div title={column.description}>
-                      <strong>{column.label}</strong>
-                    </div>
-                    <em>{column.agents.length}</em>
-                  </div>
-                  <div className={styles.agentTable}>
-                    <div className={styles.agentTableHead}>
-                      <span>Agent</span>
-                      <span>{copy.model}</span>
-                      <span>{copy.prompt}</span>
-                      <span>{copy.runtimeStatus}</span>
-                      <span>{copy.modeMembership}</span>
-                      <span>{copy.statusReminders}</span>
-                    </div>
-                    {column.agents.map(renderAgentRow)}
-                  </div>
-                </section>
-              ))}
-            </div>
+            <AgentDenseList
+              columns={denseColumns}
+              columnLabels={{
+                agent: "Agent",
+                model: copy.model,
+                prompt: copy.prompt,
+                runtime: copy.runtimeStatus,
+                modes: copy.modeMembership,
+                reminders: copy.statusReminders,
+              }}
+              onSelectRow={(rowId, event) => {
+                const agent = agentRowLookup.get(rowId);
+                if (agent) {
+                  handleAgentRowSelect(agent, event);
+                }
+              }}
+              onToggleBulk={(rowId, checked, shiftKey) => toggleBulkAgent(rowId, checked, shiftKey)}
+            />
           )}
         </AgentWorkspacePanel>
 
