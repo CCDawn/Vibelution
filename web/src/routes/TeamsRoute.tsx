@@ -62,6 +62,11 @@ import {
   VSelect,
   VStatusStrip,
 } from "../components/vui";
+import {
+  TeamStageCard,
+  TeamStagePipeline,
+  type TeamStageTone,
+} from "../components/vui/product/team-management";
 import { agentCenterMemoryRoute, teamMemoryRoute } from "./agentCenterRoutes";
 import { agentDisplayInfo } from "./agentDisplay";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
@@ -11708,19 +11713,6 @@ export function TeamsRoute({
           artifactIds: [],
           detail: module.summary,
         }));
-  const sourceCollectionStageCardKeyDown = (
-    event: ReactKeyboardEvent<HTMLElement>,
-    onDetail: () => void,
-  ) => {
-    if (event.target instanceof Element && event.target.closest("button, a")) {
-      return;
-    }
-    if (event.key !== "Enter" && event.key !== " ") {
-      return;
-    }
-    event.preventDefault();
-    onDetail();
-  };
   const renderSourceCollectionStageActionIcon = (icon: SourceCollectionStageModule["actionIcon"]) => {
     if (icon === "search") {
       return <Search size={13} />;
@@ -11854,57 +11846,39 @@ export function TeamsRoute({
                 <span>{lang === "zh" ? "资料" : "sources"} <strong>{sourceCollectionCollectedCountLabel}</strong></span>
               </div>
             </section>
-            <section id="source-collection-stage-status" className={styles.sourceCollectionStageModules} aria-label={lang === "zh" ? "知识搜集内部模块" : "Knowledge collection modules"}>
-              {sourceCollectionStageModules.map((module, index) => (
-                <article
-                  key={module.id}
-                  className={[
-                    styles.sourceCollectionStageCard,
-                    sourceCollectionStepClassName(module.state),
-                    module.id === selectedSourceCollectionStageId ? styles.sourceCollectionStageCardSelected : "",
-                  ].filter(Boolean).join(" ")}
-                  role="button"
-                  tabIndex={0}
-                  aria-pressed={module.id === selectedSourceCollectionStageId}
-                  title={module.detailLabel}
-                  onClick={(event) => {
-                    if (event.target instanceof Element && event.target.closest("button, a")) {
-                      return;
+            <TeamStagePipeline
+              id="source-collection-stage-status"
+              ariaLabel={lang === "zh" ? "知识搜集内部模块" : "Knowledge collection modules"}
+            >
+              {sourceCollectionStageModules.map((module, index) => {
+                const cardActionReadiness = sourceCollectionStageActionReadinessFor(module.id);
+                return (
+                  <TeamStageCard
+                    key={module.id}
+                    index={index}
+                    tone={module.state as TeamStageTone}
+                    selected={module.id === selectedSourceCollectionStageId}
+                    title={module.detailLabel}
+                    onActivate={module.onDetail}
+                    status={module.status}
+                    label={module.label}
+                    metric={module.metric}
+                    nextLabel={`${lang === "zh" ? "下一步：" : "Next: "}${module.nextLabel}`}
+                    actions={
+                      <VNativeButton
+                        type="button"
+                        disabled={module.actionDisabled}
+                        onClick={module.onAction}
+                        title={sourceCollectionActionDisabledTitle(cardActionReadiness, module.actionLabel)}
+                      >
+                        {renderSourceCollectionStageActionIcon(module.actionIcon)}
+                        {module.actionLabel}
+                      </VNativeButton>
                     }
-                    module.onDetail();
-                  }}
-                  onKeyDown={(event) => sourceCollectionStageCardKeyDown(event, module.onDetail)}
-                >
-                  {(() => {
-                    const cardActionReadiness = sourceCollectionStageActionReadinessFor(module.id);
-                    return (
-                      <>
-                  <div className={styles.sourceCollectionStageCardHead}>
-                    <strong>{String(index + 1).padStart(2, "0")}</strong>
-                    <span>{module.status}</span>
-                  </div>
-                  <span className={styles.sourceCollectionStageModuleText}>
-                    <b>{module.label}</b>
-                    <em>{module.metric}</em>
-                    <small>{lang === "zh" ? "下一步：" : "Next: "}{module.nextLabel}</small>
-                  </span>
-                  <div className={styles.sourceCollectionStageCardActions}>
-                    <VNativeButton
-                      type="button"
-                      disabled={module.actionDisabled}
-                      onClick={module.onAction}
-                      title={sourceCollectionActionDisabledTitle(cardActionReadiness, module.actionLabel)}
-                    >
-                      {renderSourceCollectionStageActionIcon(module.actionIcon)}
-                      {module.actionLabel}
-                    </VNativeButton>
-                  </div>
-                      </>
-                    );
-                  })()}
-                </article>
-              ))}
-            </section>
+                  />
+                );
+              })}
+            </TeamStagePipeline>
             <div className={styles.sourceCollectionPageGrid}>
               {renderSourceCollectionActiveStagePanel()}
             </div>

@@ -6,6 +6,9 @@
   --bg-panel-soft: #1b2029;
   --bg-active: #232a36;
 
+  --source-workbench-card: var(--bg-canvas);
+  --source-workbench-panel: var(--bg-canvas);
+
   --surface-page: rgba(13, 15, 19, 0.86);
   --surface-header: rgba(18, 21, 28, 0.88);
   --surface-panel: rgba(21, 25, 32, 0.9);
@@ -147,6 +150,9 @@
   --bg-panel: #ffffff;
   --bg-panel-soft: #f1f4f8;
   --bg-active: #e8edf5;
+
+  --source-workbench-card: var(--bg-canvas);
+  --source-workbench-panel: var(--bg-canvas);
 
   --surface-page: #f7f8fa;
   --surface-header: rgba(255, 255, 255, 0.94);
