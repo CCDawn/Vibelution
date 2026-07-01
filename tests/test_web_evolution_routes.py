@@ -1803,6 +1803,31 @@ def test_self_observation_terminate_route(monkeypatch):
     assert response.status_code == 200
     assert response.json()["status"] == "terminated"
 
+
+def test_self_observation_action_route_returns_409_for_non_active_run(monkeypatch):
+    monkeypatch.setattr(
+        self_evolution_control_service,
+        "get_workbench_contract",
+        lambda: {"modeAvailability": {"self_evolution": True}},
+    )
+    monkeypatch.setattr(self_evolution_control_service, "_run_self_observation_turn", lambda context: None)
+    self_evolution_control_service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
+    started = self_evolution_control_service.start_self_observation_run({"goal": "观察终止", "durationSeconds": 60})
+
+    first = client.post(
+        f"/api/evolution/self/observation-runs/{started['runId']}/actions",
+        json={"action": "terminate"},
+    )
+    second = client.post(
+        f"/api/evolution/self/observation-runs/{started['runId']}/actions",
+        json={"action": "terminate"},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert "not active" in second.json()["detail"]
+
+
 def test_active_supervised_run_events_is_quiet_when_no_active_run():
     _reset_supervised_live_state()
 

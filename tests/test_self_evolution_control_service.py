@@ -1174,6 +1174,48 @@ def test_execute_self_observation_action_rejects_unsupported_action():
         service.execute_self_observation_action("self-observe-missing", "approve")
 
 
+def test_set_self_observation_terminal_state_preserves_operator_termination(monkeypatch):
+    monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+    monkeypatch.setattr(service, "_run_self_observation_turn", lambda context: None)
+    service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
+
+    snapshot = service.start_self_observation_run({"goal": "观察规划能力", "durationSeconds": 90})
+    service.execute_self_observation_action(snapshot["runId"], "terminate")
+
+    service._set_self_observation_terminal_state(
+        snapshot["runId"],
+        status="done",
+        latest_message="worker finished",
+        report="worker report",
+    )
+
+    persisted = service.get_self_observation_run_snapshot(snapshot["runId"])
+    assert persisted is not None
+    assert persisted["status"] == "terminated"
+    assert persisted["phase"] == "terminated"
+    assert persisted["runtimeStatus"] == "terminated"
+    assert persisted["latestMessage"] == "自主观察已由用户终止。"
+
+
+def test_run_self_observation_turn_preserves_operator_termination(monkeypatch):
+    monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+    monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: None)
+    service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
+
+    snapshot = service.start_self_observation_run({"goal": "观察规划能力", "durationSeconds": 90})
+    service.execute_self_observation_action(snapshot["runId"], "terminate")
+    service._run_self_observation_turn(
+        {"runId": snapshot["runId"], "goal": "观察规划能力", "durationSeconds": 90}
+    )
+
+    persisted = service.get_self_observation_run_snapshot(snapshot["runId"])
+    assert persisted is not None
+    assert persisted["status"] == "terminated"
+    assert persisted["phase"] == "terminated"
+    assert persisted["runtimeStatus"] == "terminated"
+    assert persisted["latestMessage"] == "自主观察已由用户终止。"
+
+
 def test_stream_self_observation_run_events_emits_snapshot_and_stops_for_terminal_run():
     snapshot = {
         "runId": "self-observe-stream",
