@@ -13,7 +13,7 @@ export type TeamStageTone = "active" | "done" | "failed" | "idle" | "pending";
  * the `--source-step-border` / `--source-step-fg` custom properties the card
  * cascades into its border + text colours.
  */
-const TONE_STYLE: Record<TeamStageTone, CSSProperties> = {
+export const TEAM_STAGE_TONE_STYLE: Record<TeamStageTone, CSSProperties> = {
   active: {
     ["--source-step-border" as string]:
       "color-mix(in srgb, var(--accent-cool) 58%, var(--border-strong))",
@@ -112,7 +112,7 @@ export function TeamStageCard({
       data-vui-product="team-stage-card"
       data-tone={tone}
       className={[CARD_BASE, selected ? CARD_SELECTED : ""].filter(Boolean).join(" ")}
-      style={TONE_STYLE[tone]}
+      style={TEAM_STAGE_TONE_STYLE[tone]}
       role="button"
       tabIndex={0}
       aria-pressed={selected}
