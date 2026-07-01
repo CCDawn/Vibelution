@@ -1501,7 +1501,10 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("workspace/prompts/CODEBASE_MAP.md");
     expect(conversationViewStylesSource).not.toContain(":has(.markdownTableWrap)");
     expect(styles.markdownBodyWithTable).toContain("max-w-full");
+    expect(styles.markdownTableWrap).toContain("max-w-full");
+    expect(styles.markdownTableWrap).toContain("overflow-x-auto");
     expect(styles.markdownTable).toContain("table-fixed");
+    expect(styles.markdownTable).toContain("min-w-full");
     expect(styles.inlineCode).toContain("whitespace-normal");
   });
 

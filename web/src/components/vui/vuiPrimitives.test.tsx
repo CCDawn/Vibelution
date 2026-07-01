@@ -68,7 +68,12 @@ describe("VUI foundation primitives", () => {
     expect(markup).toContain('data-slot="vui-button-label"');
     expect(markup).toContain('data-slot="vui-button-trailing-icon"');
     expect(markup).toContain('title="Search docs"');
-    expect(markup).toContain('class="inline-flex items-center gap-1.5"');
+    expect(markup).toContain(
+      'class="inline-flex min-w-0 max-w-full items-center justify-center gap-1.5"',
+    );
+    expect(markup).toContain(
+      'data-slot="vui-button-label" class="min-w-0 truncate whitespace-nowrap"',
+    );
   });
 
   it("keeps native-only controls behind a VUI marker", () => {

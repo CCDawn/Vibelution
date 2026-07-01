@@ -76,6 +76,18 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.centerSurface).toContain("h-full");
     expect(routeStyles.centerSurface).toContain("min-h-0");
     expect(routeStyles.centerSurface).toContain("overflow-hidden");
+    expect(routeStyles.conversationFrame).toContain("flex");
+    expect(routeStyles.conversationFrame).toContain("h-full");
+    expect(routeStyles.conversationFrame).toContain("min-h-0");
+    expect(routeStyles.conversationFrame).toContain("overflow-hidden");
+    expect(conversationStyles.surface).toContain("flex");
+    expect(conversationStyles.surface).toContain("h-full");
+    expect(conversationStyles.surface).toContain("min-h-0");
+    expect(conversationStyles.surface).toContain("overflow-hidden");
+    expect(conversationStyles.timeline).toContain("flex-1");
+    expect(conversationStyles.timeline).toContain("min-h-0");
+    expect(conversationStyles.timeline).toContain("overflow-auto");
+    expect(conversationStyles.composer).toContain("flex-none");
     expect(routeStyles.emptySurface).toContain("grid");
     expect(routeStyles.emptySurface).toContain("min-h-[min(420px,calc(100dvh_-_190px))]");
     expect(routeStyles.emptySurface).toContain("place-items-center");
@@ -234,10 +246,10 @@ describe("ChatCodingRoute layout contract", () => {
       "grid-cols-[var(--chat-left-pane-width,220px)_8px_minmax(0,1fr)_8px_var(--chat-right-pane-width,284px)]",
     );
     expect(routeStyles.layout).toContain(
-      "max-[980px]:grid-cols-[minmax(192px,var(--chat-left-pane-width,220px))_8px_minmax(0,1fr)_8px_minmax(244px,var(--chat-right-pane-width,284px))]",
+      "max-[1100px]:grid-cols-[var(--chat-left-pane-width,220px)_8px_minmax(0,1fr)_8px_var(--chat-right-pane-width,284px)]",
     );
     expect(routeStyles.layoutCenterFirst).toContain(
-      "grid-cols-[minmax(0,min(var(--chat-left-pane-width,0px),24vw))_8px_minmax(360px,1fr)_8px_minmax(0,min(var(--chat-right-pane-width,0px),22vw))]",
+      "!grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_8px_minmax(520px,1fr)_8px_minmax(0,var(--chat-right-pane-width,0px))]",
     );
   });
 
@@ -339,11 +351,12 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps the conversation index compact enough for 1024px workbench use", () => {
-    expect(routeStyles.layout).toContain("minmax(192px,var(--chat-left-pane-width,220px))");
     expect(routeStyles.layout).toContain("minmax(0,1fr)");
-    expect(routeStyles.layout).toContain("minmax(244px,var(--chat-right-pane-width,284px))");
-    expect(routeStyles.layoutCenterFirst).toContain("minmax(360px,1fr)");
-    expect(routeStyles.conversationTitleRow).toContain("grid-cols-[minmax(0,1fr)_fit-content(92px)]");
+    expect(routeStyles.layout).not.toContain("minmax(192px,var(--chat-left-pane-width,220px))");
+    expect(routeStyles.layout).not.toContain("minmax(244px,var(--chat-right-pane-width,284px))");
+    expect(routeStyles.layoutCenterFirst).toContain("max-[980px]:!grid-cols");
+    expect(routeStyles.layoutCenterFirst).toContain("minmax(420px,1fr)");
+    expect(routeStyles.conversationTitleRow).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(routeStyles.conversationTitleRow).toContain("max-w-full");
     expect(conversationStyles.surfaceCompact).toContain("[&_.timeline]:px-3");
     expect(conversationStyles.surfaceCompact).toContain("[&_.timeline]:pt-[9px]");
@@ -358,14 +371,18 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("clamps responsive side panes in center-first mode so the conversation remains visible near 1024px", () => {
-    expect(routeStyles.layout).toContain("max-[980px]");
-    expect(routeStyles.layout).toContain("minmax(192px,var(--chat-left-pane-width,220px))");
+    expect(routeStyles.layout).toContain("max-[1100px]");
     expect(routeStyles.layout).toContain("minmax(0,1fr)");
-    expect(routeStyles.layout).toContain("minmax(244px,var(--chat-right-pane-width,284px))");
-    expect(routeStyles.layoutCenterFirst).toContain("minmax(0,min(var(--chat-left-pane-width,0px),24vw))");
-    expect(routeStyles.layoutCenterFirst).toContain("minmax(360px,1fr)");
-    expect(routeStyles.layoutCenterFirst).toContain("minmax(0,min(var(--chat-right-pane-width,0px),22vw))");
+    expect(routeStyles.layout).not.toContain("minmax(192px,var(--chat-left-pane-width,220px))");
+    expect(routeStyles.layout).not.toContain("minmax(244px,var(--chat-right-pane-width,284px))");
+    expect(routeStyles.layoutCenterFirst).toContain("!grid-cols-[minmax(0,var(--chat-left-pane-width,0px))");
+    expect(routeStyles.layoutCenterFirst).toContain("max-[980px]:!grid-cols");
+    expect(routeStyles.layoutCenterFirst).toContain("minmax(420px,1fr)");
+    expect(routeStyles.layoutCenterFirst).toContain("max-[640px]:!grid-cols");
     expect(routeStyles.layoutCenterFirst).toContain("minmax(280px,1fr)");
+    expect(routeStyles.paneCollapsed).toContain("!overflow-hidden");
+    expect(routeStyles.paneCollapsed).toContain("invisible");
+    expect(routeStyles.paneCollapsed).not.toContain("!hidden");
   });
 
   it("compresses the left rail into primary controls plus auxiliary status groups", () => {
@@ -941,6 +958,13 @@ describe("ChatCodingRoute layout contract", () => {
 
     expect(routeStyles.sessionActionRow).toBeTypeOf("string");
     expect(routeStyles.newGroupButton).toBeTypeOf("string");
+    expect(routeStyles.sessionActionRow).toContain("grid-cols-[auto_auto]");
+    expect(routeStyles.newSessionButton).toContain("!h-[32px]");
+    expect(routeStyles.newSessionButton).toContain("min-h-[32px]");
+    expect(routeStyles.newSessionButton).toContain("!w-auto");
+    expect(routeStyles.newGroupButton).toContain("!h-[32px]");
+    expect(routeStyles.newGroupButton).toContain("min-h-[32px]");
+    expect(routeStyles.newGroupButton).toContain("!w-auto");
     expect(routeStyles.systemEntryGroup).toBeTypeOf("string");
     expect(routeStyles.systemEntryButton).toBeTypeOf("string");
     expect(routeStyles.systemEntryIcon).toBeTypeOf("string");
@@ -1290,10 +1314,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(directSessionIndexItemSource).toContain("styles.sessionStatusCluster");
     expect(directSessionIndexItemSource).toContain("styles.sessionRunningBadge");
     expect(directSessionIndexItemSource).toContain("styles.sessionUnreadBadge");
-    expect(routeStyles.conversationTitleRow).toContain("grid-cols-[minmax(0,1fr)_fit-content(92px)]");
+    expect(routeStyles.conversationTitleRow).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(routeStyles.conversationTitleRow).toContain("max-w-full");
     expect(routeStyles.conversationMetaRow).toContain("grid-cols-[minmax(0,1fr)_max-content]");
-    expect(routeStyles.conversationMetaTime).toContain("max-w-[min(164px,68%)]");
+    expect(routeStyles.conversationMetaTime).toContain("max-w-[112px]");
     expect(routeStyles.conversationMetaTime).toContain("[&_time]:flex-none");
     expect(routeStyles.conversationMetaTime).toContain("[&_time]:overflow-visible");
     expect(routeStyles.conversationMetaTime).toContain("[&_time]:text-clip");
@@ -1313,7 +1337,7 @@ describe("ChatCodingRoute layout contract", () => {
     }
 
     expect(routeStyles.sessionItem).toContain("grid-cols-[minmax(0,1fr)]");
-    expect(routeStyles.sessionItem).toContain("!px-1.5");
+    expect(routeStyles.sessionItem).toContain("!px-1");
     expect(routeStyles.sessionItemMain).toContain("grid-cols-[27px_minmax(0,1fr)]");
     expect(routeStyles.sessionItemMain).toContain("[&_[data-slot=vui-button-content]]:contents");
     expect(routeStyles.conversationCopy).toContain("overflow-hidden");
@@ -1321,7 +1345,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.sessionItemTitle).toContain("truncate");
     expect(routeStyles.sessionStatusCluster).not.toContain("rounded-full");
     expect(routeStyles.sessionStatusCluster).toContain("justify-end");
-    expect(routeStyles.agentModelTag).toContain("max-w-[120px]");
+    expect(routeStyles.agentModelTag).toContain("max-w-[96px]");
     expect(routeStyles.agentModelTag).toContain("[&_span]:truncate");
   });
 
@@ -1695,6 +1719,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.conversationGroup).toBeTypeOf("string");
     expect(routeStyles.conversationGroupHeader).toBeTypeOf("string");
     expect(routeStyles.conversationGroupList).toBeTypeOf("string");
+    expect(routeStyles.conversationGroupHeader).toContain("min-h-[28px]");
+    expect(routeStyles.conversationGroupHeader).toContain("grid-cols-[14px_minmax(0,1fr)_auto]");
+    expect(routeStyles.conversationGroupHeader).toContain("bg-transparent");
+    expect(routeStyles.conversationGroupList).toContain("gap-1");
   });
 
   it("loads session index pages through the paginated query endpoint", () => {

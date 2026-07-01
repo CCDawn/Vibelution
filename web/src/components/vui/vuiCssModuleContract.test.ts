@@ -4,6 +4,11 @@ import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const sourceRoot = resolve(import.meta.dirname, "../..");
+const allowedRestoredRouteModules = [
+  "routes/AgentsRoute.module.css",
+  "routes/ConfigRoute.module.css",
+  "routes/EvolutionRoute.module.css",
+] as const;
 
 function walkCssModules(dir: string): string[] {
   if (!existsSync(dir)) {
@@ -36,7 +41,7 @@ describe("VUI CSS module contract", () => {
     const modules = cssModuleSources();
     const modulePaths = modules.map(({ path }) => path);
 
-    expect(modules.length).toBe(0);
+    expect(modulePaths).toEqual([...allowedRestoredRouteModules]);
     expect(modulePaths).not.toContain("app/LauncherShell.module.css");
     expect(modulePaths).not.toContain("app/RouteLoadingShell.module.css");
     expect(modulePaths).not.toContain("app/RouteErrorBoundary.module.css");

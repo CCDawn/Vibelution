@@ -56,12 +56,10 @@ import {
   EvolutionClosedLoopRecord,
   EvolutionWorkflowStep,
   ConversationMessage,
-  SessionDetail,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { LazyConversationView } from "../components/conversation/LazyConversationView";
-import { VButton, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { useShellStore } from "../store/shellStore";
 import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
@@ -92,7 +90,7 @@ import {
   storedPaneWidth,
 } from "./resizablePane";
 import { savePendingSelfEvolutionHandoff } from "./selfEvolutionHandoff";
-import styles from "./EvolutionRoute.styles";
+import styles from "./EvolutionRoute.module.css";
 
 type RunFilter = "all" | "success" | "failed";
 type LibraryView = "items" | "pending";
@@ -114,22 +112,6 @@ type EvolutionRouteProps = {
 };
 const SELF_OVERVIEW_REFETCH_INTERVAL_MS = 12_000;
 const SELF_OVERVIEW_STALE_TIME_MS = 10_000;
-
-function isSessionNotFoundError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error ?? "");
-  return /session not found|会话不存在|未找到会话/i.test(message);
-}
-
-function describeSessionLoadError(error: unknown, lang: string) {
-  const message = error instanceof Error ? error.message : String(error ?? "");
-  if (isSessionNotFoundError(error)) {
-    return lang === "zh" ? "会话记录不存在或已被清理。" : "The conversation record no longer exists.";
-  }
-  if (message) {
-    return lang === "zh" ? `会话加载失败：${message}` : `Conversation failed to load: ${message}`;
-  }
-  return lang === "zh" ? "会话加载失败。" : "Conversation failed to load.";
-}
 
 type SupervisedSourceOption =
   | {
@@ -793,7 +775,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [liveLaunchCollapsed, setLiveLaunchCollapsed] = useState(false);
   const [liveRunCollapsed, setLiveRunCollapsed] = useState(false);
   const [expandedCaseTraceItems, setExpandedCaseTraceItems] = useState<Record<string, boolean>>({});
-  const [missingWorkflowSessionIds, setMissingWorkflowSessionIds] = useState<Record<string, boolean>>({});
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
     queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
@@ -1343,10 +1324,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     || monitoredRun?.currentCaseIo?.conversationPath?.replace(/^session:/, "")
     || monitoredRun?.runId
     || "supervised-case";
-  const monitoredCaseRealConversationSessionId =
-    monitoredRun?.currentCaseIo?.conversationSessionId
-    || monitoredRun?.currentCaseIo?.conversationPath?.replace(/^session:/, "")
-    || "";
   const monitoredCaseTraceItems = useMemo(
     () =>
       buildSupervisedCaseTraceItems(monitoredCaseTranscript, {
@@ -1495,86 +1472,17 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       value: supervisedWorkflowRun?.workflowSteps?.find((step) => step.id === "approval")?.summary || "--",
     },
   ];
-  const selectedWorkflowConversationSessionId =
-    supervisedSelectedWorkflowStep.conversationSessionId
-    || (supervisedSelectedWorkflowStep.id === supervisedRuntimeWorkflowStepId ? monitoredCaseConversationSessionId : "")
-    || supervisedSelectedWorkflowStep.id;
-  const selectedWorkflowConversationSessionKey =
-    supervisedSelectedWorkflowStep.id === "approval"
-      ? ""
-      : String(
-          supervisedSelectedWorkflowStep.conversationSessionId
-          || (supervisedSelectedWorkflowStep.id === supervisedRuntimeWorkflowStepId ? monitoredCaseRealConversationSessionId : "")
-          || "",
-        ).trim();
-  const selectedWorkflowSessionPollingActive =
-    supervisedPrimaryRunning
-    || ["queued", "running", "paused", "stopping"].includes(String(supervisedSelectedWorkflowStep.status || "").trim().toLowerCase());
-  const selectedWorkflowSessionMissing = Boolean(
-    selectedWorkflowConversationSessionKey
-    && missingWorkflowSessionIds[selectedWorkflowConversationSessionKey],
-  );
-  const selectedWorkflowSessionDetailQuery = useQuery({
-    queryKey: queryKeys.session(selectedWorkflowConversationSessionKey || "none"),
-    enabled: supervisedTrackQueriesEnabled && Boolean(selectedWorkflowConversationSessionKey) && !selectedWorkflowSessionMissing,
-    queryFn: () => fetchJson<SessionDetail>(`/api/sessions/${selectedWorkflowConversationSessionKey}`),
-    refetchInterval: resolvePollingInterval(pageVisible, selectedWorkflowSessionPollingActive ? 2_000 : 8_000),
-    retry: (failureCount, error) => !isSessionNotFoundError(error) && failureCount < 2,
-  });
-  useEffect(() => {
-    const sessionKey = selectedWorkflowConversationSessionKey;
-    if (!sessionKey || !selectedWorkflowSessionDetailQuery.isError || !isSessionNotFoundError(selectedWorkflowSessionDetailQuery.error)) {
-      return;
-    }
-    setMissingWorkflowSessionIds((current) => (
-      current[sessionKey] ? current : { ...current, [sessionKey]: true }
-    ));
-  }, [
-    selectedWorkflowConversationSessionKey,
-    selectedWorkflowSessionDetailQuery.error,
-    selectedWorkflowSessionDetailQuery.isError,
-  ]);
-  useEffect(() => {
-    const sessionKey = selectedWorkflowConversationSessionKey;
-    if (!sessionKey || !selectedWorkflowSessionDetailQuery.data || !missingWorkflowSessionIds[sessionKey]) {
-      return;
-    }
-    setMissingWorkflowSessionIds((current) => {
-      if (!current[sessionKey]) {
-        return current;
-      }
-      const next = { ...current };
-      delete next[sessionKey];
-      return next;
-    });
-  }, [
-    missingWorkflowSessionIds,
-    selectedWorkflowConversationSessionKey,
-    selectedWorkflowSessionDetailQuery.data,
-  ]);
-  const selectedWorkflowSessionErrorMessage =
-    selectedWorkflowConversationSessionKey
-    && (selectedWorkflowSessionMissing || selectedWorkflowSessionDetailQuery.isError)
-      ? describeSessionLoadError(selectedWorkflowSessionDetailQuery.error, lang)
-      : "";
-  const selectedWorkflowSessionMessages = selectedWorkflowSessionDetailQuery.data?.messages ?? [];
-  const selectedWorkflowSnapshotMessages: ConversationMessage[] =
+  const selectedWorkflowConversationMessages: ConversationMessage[] =
     supervisedSelectedWorkflowStep.conversationMessages?.length
       ? supervisedSelectedWorkflowStep.conversationMessages
       : supervisedSelectedWorkflowStep.id === supervisedRuntimeWorkflowStepId
         ? monitoredCaseConversationMessages
         : [];
-  const selectedWorkflowConversationMessages: ConversationMessage[] =
-    selectedWorkflowSessionMessages.length
-      ? selectedWorkflowSessionMessages
-      : selectedWorkflowConversationSessionKey
-        ? []
-        : selectedWorkflowSnapshotMessages.length
-          ? selectedWorkflowSnapshotMessages
-          : [];
-  const selectedWorkflowHasConversationMessages =
-    selectedWorkflowConversationMessages.length > 0
-    || Boolean(selectedWorkflowConversationSessionKey && !selectedWorkflowSessionErrorMessage);
+  const selectedWorkflowHasConversationMessages = selectedWorkflowConversationMessages.length > 0;
+  const selectedWorkflowConversationSessionId =
+    supervisedSelectedWorkflowStep.conversationSessionId
+    || (supervisedSelectedWorkflowStep.id === supervisedRuntimeWorkflowStepId ? monitoredCaseConversationSessionId : "")
+    || supervisedSelectedWorkflowStep.id;
   const selectedWorkflowAssistantName =
     supervisedSelectedWorkflowStep.member?.name
     || monitoredRun?.currentAgentBinding?.displayName
@@ -3060,7 +2968,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 { key: "supervised", label: t("supervisedEvolutionMode") },
                 { key: "self", label: t("selfEvolutionMode") },
               ] as const).map((track) => (
-                <VButton
+                <button
                   key={track.key}
                   type="button"
                   className={
@@ -3071,7 +2979,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   onClick={() => setEvolutionTrack(track.key)}
                 >
                   {track.label}
-                </VButton>
+                </button>
               ))}
             </div>
           ) : null}
@@ -3188,7 +3096,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         ["blocked", t("datasetCatalogBlocked"), datasetCatalogGroups.blocked.length],
                         ["roadmap", t("datasetCatalogRoadmap"), datasetCatalogGroups.roadmap.length],
                       ] as Array<[DatasetCatalogFilter, string, number]>).map(([filter, label, count]) => (
-                        <VButton
+                        <button
                           key={filter}
                           type="button"
                           className={
@@ -3200,7 +3108,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           aria-pressed={selectedDatasetCatalogFilter === filter}
                         >
                           {label} {count}
-                        </VButton>
+                        </button>
                       ))}
                     </div>
                   </div>
@@ -3214,10 +3122,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         return (
                           <article key={item.name} className={styles.datasetCatalogItem}>
                             <div className={styles.datasetCatalogItemMain}>
-                              <span className={styles.datasetCatalogItemTitle}>
-                                <strong title={item.name}>{item.name}</strong>
-                                <span>{item.benchmarkFamily || item.taskType || item.bundleName || "--"}</span>
-                              </span>
+                              <strong title={item.name}>{item.name}</strong>
+                              <span>{item.benchmarkFamily || item.taskType || item.bundleName || "--"}</span>
                             </div>
                             <span className={styles.datasetCatalogStatus}>{statusText}</span>
                             {reason ? (
@@ -3252,7 +3158,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           : "A dataset is materialized first; a bundle runs directly."}
                       >
                         <label htmlFor="supervised-source">{lang === "zh" ? "评测来源" : "Evaluation source"}</label>
-                        <VNativeSelect
+                        <select
                           id="supervised-source"
                           className={styles.selectInput}
                           value={selectedSourceValue}
@@ -3286,12 +3192,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                               ))}
                             </optgroup>
                           ) : null}
-                        </VNativeSelect>
+                        </select>
                       </div>
                       {sourceKind === "dataset" ? (
                         <div className={styles.formField} title={t("caseLimitHint")}>
                           <label htmlFor="supervised-limit">{t("caseLimit")}</label>
-                          <VNativeInput
+                          <input
                             id="supervised-limit"
                             className={styles.textInput}
                             type="number"
@@ -3327,7 +3233,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
 
                   <div className={styles.supervisedRunOptions}>
                     <label className={styles.checkboxRow} title={t("keepWorktreeLabel")}>
-                      <VNativeInput
+                      <input
                         type="checkbox"
                         checked={keepWorktree}
                         onChange={(event) => setKeepWorktree(event.target.checked)}
@@ -3336,7 +3242,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     </label>
                     <div className={styles.formField} title={t("supervisedMentalModeHint")}>
                       <label htmlFor="supervised-mental-mode">{t("supervisedMentalMode")}</label>
-                      <VNativeSelect
+                      <select
                         id="supervised-mental-mode"
                         className={styles.selectInput}
                         value={supervisedMentalModelMode}
@@ -3345,16 +3251,16 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         <option value="follow">{t("supervisedMentalModeFollow")}</option>
                         <option value="enabled">{t("supervisedMentalModeEnabled")}</option>
                         <option value="disabled">{t("supervisedMentalModeDisabled")}</option>
-                      </VNativeSelect>
+                      </select>
                     </div>
                   </div>
 
                   <div className={styles.controlFooter}>
                     <div className={styles.controlActions}>
-                      <VButton
+                      <button
                         type="button"
                         className={styles.inlineAction}
-                        isDisabled={
+                        disabled={
                           runLocked
                           || worktreeRunLocked
                           || !workbenchControl
@@ -3367,7 +3273,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       >
                         {supervisedStartSubmitting || supervisedPrimaryRunning ? <LoaderCircle size={15} /> : <Play size={15} />}
                         {supervisedStartButtonLabel}
-                      </VButton>
+                      </button>
                     </div>
                     <div className={styles.closedLoopLaunchBlock} title={t("closedLoopLaunchPanelHint")}>
                       <div>
@@ -3381,10 +3287,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             : "Runs the orchestration rehearsal without real LLM self-editing."}
                         </span>
                       </div>
-                      <VButton
+                      <button
                         type="button"
                         className={styles.inlineAction}
-                        isDisabled={
+                        disabled={
                           runLocked
                           || worktreeRunLocked
                           || !workbenchControl
@@ -3397,7 +3303,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       >
                         {startSimulationWorktreeRunMutation.isPending ? <LoaderCircle size={15} /> : <Sparkles size={15} />}
                         {t("startClosedLoopRun")}
-                      </VButton>
+                      </button>
                     </div>
                     {runLocked || worktreeRunLocked ? <p className={styles.noticeText}>{t("runningLockHint")}</p> : null}
                     {supervisedControlError ? (
@@ -3423,14 +3329,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     </div>
                     <div className={styles.supervisedMembersHeaderActions}>
                       {supervisedWorkflowManualSelection ? (
-                        <VButton
+                        <button
                           type="button"
                           className={styles.supervisedWorkflowFollowButton}
                           onClick={() => setSelectedSupervisedWorkflowStepId(null)}
                           title={lang === "zh" ? "回到当前执行阶段" : "Follow the current run stage"}
                         >
                           {lang === "zh" ? "跟随现场" : "Follow live"}
-                        </VButton>
+                        </button>
                       ) : null}
                       <span className={styles.secondaryPill}>{supervisedWorkflowCards.length}</span>
                     </div>
@@ -3458,7 +3364,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                                 : styles.supervisedWorkflowCard
                           }
                         >
-                          <VButton
+                          <button
                             type="button"
                             className={styles.supervisedWorkflowCardButton}
                             aria-pressed={selected}
@@ -3473,7 +3379,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             <span className={styles.supervisedWorkflowLivePreview}>
                               {step.livePreview || step.summary || (lang === "zh" ? "等待实时输出" : "Waiting for live output")}
                             </span>
-                          </VButton>
+                          </button>
                           <div className={styles.supervisedWorkflowCardFooter}>
                             <span>{stepMetric}</span>
                             {stepRoute ? (
@@ -3558,68 +3464,68 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 <div className={styles.runMonitorDense}>
                   <div className={styles.liveRunToolbar}>
                     <div className={styles.compactActionGroup}>
-                      <VButton
+                      <button
                         type="button"
                         className={styles.compactIconAction}
-                        isDisabled={!canPauseSupervisedRun || pauseRunMutation.isPending}
+                        disabled={!canPauseSupervisedRun || pauseRunMutation.isPending}
                         title={disabledReason(pauseSupervisedAction) || t("pauseSupervisedRun")}
                         onClick={() => monitoredRun && pauseRunMutation.mutate(monitoredRun.runId)}
                         aria-label={t("pauseSupervisedRun")}
                       >
                         {pauseRunMutation.isPending ? <LoaderCircle size={15} /> : <Pause size={15} />}
-                      </VButton>
-                      <VButton
+                      </button>
+                      <button
                         type="button"
                         className={styles.compactIconAction}
-                        isDisabled={!canResumeSupervisedRun || resumeRunMutation.isPending}
+                        disabled={!canResumeSupervisedRun || resumeRunMutation.isPending}
                         title={disabledReason(resumeSupervisedAction) || t("resumeSupervisedRun")}
                         onClick={() => monitoredRun && resumeRunMutation.mutate(monitoredRun.runId)}
                         aria-label={t("resumeSupervisedRun")}
                       >
                         {resumeRunMutation.isPending ? <LoaderCircle size={15} /> : <Play size={15} />}
-                      </VButton>
-                      <VButton
+                      </button>
+                      <button
                         type="button"
                         className={styles.compactIconAction}
-                        isDisabled={!canRetrySupervisedRun || retryRunMutation.isPending}
+                        disabled={!canRetrySupervisedRun || retryRunMutation.isPending}
                         title={disabledReason(retrySupervisedAction) || t("retrySupervisedRun")}
                         onClick={() => monitoredRun && retryRunMutation.mutate(monitoredRun.runId)}
                         aria-label={t("retrySupervisedRun")}
                       >
                         {retryRunMutation.isPending ? <LoaderCircle size={15} /> : <RefreshCw size={15} />}
-                      </VButton>
-                      <VButton
+                      </button>
+                      <button
                         type="button"
                         className={styles.compactIconAction}
-                        isDisabled={!canTerminateSupervisedRun || terminateRunMutation.isPending}
+                        disabled={!canTerminateSupervisedRun || terminateRunMutation.isPending}
                         title={disabledReason(terminateSupervisedAction) || t("terminateSupervisedRun")}
                         onClick={() => monitoredRun && terminateRunMutation.mutate(monitoredRun.runId)}
                         aria-label={t("terminateSupervisedRun")}
                       >
                         {terminateRunMutation.isPending ? <LoaderCircle size={15} /> : <Square size={15} />}
-                      </VButton>
+                      </button>
                     </div>
                     <div className={styles.compactActionGroup}>
                       {monitoredRun.sessionId ? (
-                        <VButton
+                        <button
                           type="button"
                           className={styles.compactTextAction}
                           onClick={() => openRun(monitoredRun.sessionId)}
                         >
                           <Activity size={15} />
                           {t("openLatestRuns")}
-                        </VButton>
+                        </button>
                       ) : null}
-                      <VButton
+                      <button
                         type="button"
                         className={`${styles.compactIconAction} ${styles.dangerIconAction}`}
-                        isDisabled={!canDeleteSupervisedRun || deleteRunMutation.isPending}
+                        disabled={!canDeleteSupervisedRun || deleteRunMutation.isPending}
                         title={disabledReason(deleteSupervisedAction) || t("deleteSupervisedRun")}
                         onClick={() => monitoredRun && deleteRunMutation.mutate(monitoredRun.runId)}
                         aria-label={t("deleteSupervisedRun")}
                       >
                         {deleteRunMutation.isPending ? <LoaderCircle size={15} /> : <Trash2 size={15} />}
-                      </VButton>
+                      </button>
                     </div>
                   </div>
 
@@ -3747,7 +3653,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         </article>
                       </div>
                       <div className={styles.actionRow}>
-                        <VButton
+                        <button
                           type="button"
                           className={styles.inlineAction}
                           onClick={() => {
@@ -3758,7 +3664,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         >
                           <LibraryBig size={15} />
                           {lang === "zh" ? "审查入口" : "Review"}
-                        </VButton>
+                        </button>
                       </div>
                     </div>
                   ) : null}
@@ -3787,16 +3693,16 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     </article>
                   </div>
                   <div className={styles.actionRow}>
-                    <VButton
+                    <button
                       type="button"
                       className={styles.inlineAction}
-                      isDisabled={!overviewLatestRunId}
+                      disabled={!overviewLatestRunId}
                       onClick={() => openRun(overviewLatestRunId || null)}
                     >
                       <Activity size={15} />
                       {t("openLatestRuns")}
-                    </VButton>
-                    <VButton
+                    </button>
+                    <button
                       type="button"
                       className={styles.inlineAction}
                       onClick={() => {
@@ -3806,7 +3712,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     >
                       <LibraryBig size={15} />
                       {t("openLibraryQueue")}
-                    </VButton>
+                    </button>
                   </div>
                 </div>
               )}
@@ -3857,35 +3763,31 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     ))}
                     <div className={styles.approvalEvidenceActions}>
                       {reviewCandidateWorktree?.actionStates?.approveReview?.enabled ? (
-                        <VButton
+                        <button
                           type="button"
                           className={styles.inlineAction}
-                          isDisabled={approvalWorktreeActionMutation.isPending}
+                          disabled={approvalWorktreeActionMutation.isPending}
                           onClick={() => approvalWorktreeActionMutation.mutate({ runId: reviewCandidateWorktree.runId, action: "approve_review" })}
                         >
                           {approvalWorktreeActionMutation.isPending ? <LoaderCircle size={15} /> : <CheckCircle2 size={15} />}
                           {lang === "zh" ? "审批通过" : "Approve"}
-                        </VButton>
+                        </button>
                       ) : null}
                       {reviewCandidateWorktree?.actionStates?.merge?.enabled ? (
-                        <VButton
+                        <button
                           type="button"
                           className={styles.inlineAction}
-                          isDisabled={approvalWorktreeActionMutation.isPending}
+                          disabled={approvalWorktreeActionMutation.isPending}
                           onClick={() => approvalWorktreeActionMutation.mutate({ runId: reviewCandidateWorktree.runId, action: "merge" })}
                         >
                           {approvalWorktreeActionMutation.isPending ? <LoaderCircle size={15} /> : <Save size={15} />}
                           {lang === "zh" ? "人工入库" : "Store"}
-                        </VButton>
+                        </button>
                       ) : null}
                     </div>
                     {approvalWorktreeActionMutation.error?.message ? (
                       <p className={styles.errorTextCompact}>{approvalWorktreeActionMutation.error.message}</p>
                     ) : null}
-                  </div>
-                ) : selectedWorkflowSessionErrorMessage ? (
-                  <div className={styles.ioStack}>
-                    <div className={styles.caseConversationFallback}>{selectedWorkflowSessionErrorMessage}</div>
                   </div>
                 ) : selectedWorkflowHasConversationMessages ? (
                   <div className={styles.ioStack}>
@@ -3970,7 +3872,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                                       key={entry.key}
                                       className={`${styles.caseTraceTurn} ${styles[`caseTraceTurn_${entry.tone}`]}`}
                                     >
-                                      <VButton
+                                      <button
                                         type="button"
                                         className={styles.caseTraceSummary}
                                         aria-expanded={expanded}
@@ -3992,7 +3894,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                                         <span className={styles.caseTraceChevron}>
                                           {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                                         </span>
-                                      </VButton>
+                                      </button>
                                       {expanded ? (
                                         <div className={styles.caseTraceBody}>
                                           {entry.sections.map((section, sectionIndex) => renderCaseTraceSection(section, sectionIndex))}
@@ -4030,7 +3932,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 )}
               </div>
 
-              <VButton
+              <button
                 type="button"
                 className={styles.liveIoResizeHandle}
                 aria-label={resizeLiveIoLabel}
@@ -4053,7 +3955,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               </div>
               <div className={styles.filterSegmented}>
                 {(["all", "success", "failed"] as const).map((filter) => (
-                  <VButton
+                  <button
                     key={filter}
                     type="button"
                     className={
@@ -4064,7 +3966,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     onClick={() => setRunFilter(filter)}
                   >
                     {filter === "all" ? t("allRuns") : supervisedRunBucketLabel(filter, lang, statusLabel)}
-                  </VButton>
+                  </button>
                 ))}
               </div>
             </div>
@@ -4120,32 +4022,32 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     <span>{selectedRunIds.length}</span>
                   </div>
                   <div className={styles.actionRow}>
-                    <VButton
+                    <button
                       type="button"
                       className={styles.inlineAction}
-                      isDisabled={visibleDeletableRunIds.length === 0 || allVisibleDeletableRunsSelected}
+                      disabled={visibleDeletableRunIds.length === 0 || allVisibleDeletableRunsSelected}
                       onClick={selectVisibleRunRecords}
                     >
                       <CheckCircle2 size={15} />
                       {t("selectVisibleRuns")}
-                    </VButton>
-                    <VButton
+                    </button>
+                    <button
                       type="button"
                       className={styles.inlineAction}
-                      isDisabled={selectedRunIds.length === 0}
+                      disabled={selectedRunIds.length === 0}
                       onClick={() => setSelectedRunIds([])}
                     >
                       {t("clearSelection")}
-                    </VButton>
-                    <VButton
+                    </button>
+                    <button
                       type="button"
                       className={styles.inlineAction}
-                      isDisabled={selectedRunIds.length === 0 || bulkDeleteRunRecordsMutation.isPending}
+                      disabled={selectedRunIds.length === 0 || bulkDeleteRunRecordsMutation.isPending}
                       onClick={triggerBulkRunRecordDelete}
                     >
                       {bulkDeleteRunRecordsMutation.isPending ? <LoaderCircle size={15} /> : <Trash2 size={15} />}
                       {t("deleteSelectedRuns")}
-                    </VButton>
+                    </button>
                   </div>
                   <p className={styles.bulkToolbarHint}>{t("runBatchDeleteHint")}</p>
                 </div>
@@ -4160,14 +4062,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   <h3>{t("noSupervisedRunsYet")}</h3>
                   <p>{t("noRunsRecordedHint")}</p>
                   <div className={styles.actionRow}>
-                    <VButton
+                    <button
                       type="button"
                       className={styles.inlineAction}
                       onClick={() => goToSupervisedView("live")}
                     >
                       <ArrowUpRight size={15} />
                       {t("returnToOverview")}
-                    </VButton>
+                    </button>
                   </div>
                 </div>
               ) : filteredRunsEmpty ? (
@@ -4175,13 +4077,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   <h3>{t("noRunMatches")}</h3>
                   <p>{t("runFilterEmptyHint")}</p>
                   <div className={styles.actionRow}>
-                    <VButton
+                    <button
                       type="button"
                       className={styles.inlineAction}
                       onClick={() => setRunFilter("all")}
                     >
                       {t("allRuns")}
-                    </VButton>
+                    </button>
                   </div>
                 </div>
               ) : (
@@ -4202,7 +4104,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     >
                       <div className={styles.selectionBar}>
                         <label className={styles.batchToggle}>
-                          <VNativeInput
+                          <input
                             type="checkbox"
                             checked={selectedRunIdSet.has(run.id)}
                             disabled={!run.canDelete}
@@ -4214,7 +4116,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           {run.canDelete ? t("deletionAllowed") : t("deletionBlocked")}
                         </span>
                       </div>
-                      <VButton
+                      <button
                         type="button"
                         className={styles.runCardButton}
                         onClick={() => setSelectedRunId(run.id)}
@@ -4241,7 +4143,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             {displaySupervisedTechnicalText(run.nextAction, run.decision, lang, decisionLabel) || "--"}
                           </span>
                         </div>
-                      </VButton>
+                      </button>
                       {!run.canDelete && run.deleteBlockReason ? (
                         <p className={styles.noticeText}>{run.deleteBlockReason}</p>
                       ) : null}
@@ -4364,16 +4266,16 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     {selectedRun.availableActions.length > 0 ? (
                       <div className={styles.actionRow}>
                         {selectedRun.availableActions.map((action) => (
-                          <VButton
+                          <button
                             key={action}
                             type="button"
                             className={styles.inlineAction}
-                            isDisabled={runLocked || actionMutation.isPending}
+                            disabled={runLocked || actionMutation.isPending}
                             onClick={() => triggerRunAction(selectedRun.id, action)}
                           >
                             <Sparkles size={15} />
                             {proposalActionLabel(action)}
-                          </VButton>
+                          </button>
                         ))}
                       </div>
                     ) : null}
@@ -4420,23 +4322,23 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             </div>
                             <p>{item.changeSummary || item.headline}</p>
                             <div className={styles.actionRow}>
-                              <VButton
+                              <button
                                 type="button"
                                 className={styles.inlineAction}
                                 onClick={() => openProposalFromRun(item, "items")}
                               >
                                 <ArrowUpRight size={15} />
                                 {t("openProposal")}
-                              </VButton>
-                              <VButton
+                              </button>
+                              <button
                                 type="button"
                                 className={styles.inlineAction}
-                                isDisabled={!item.canDelete || deleteProposalMutation.isPending}
+                                disabled={!item.canDelete || deleteProposalMutation.isPending}
                                 onClick={() => triggerProposalDelete(item.sourceRun)}
                               >
                                 <Trash2 size={15} />
                                 {t("deleteProposal")}
-                              </VButton>
+                              </button>
                             </div>
                             {!item.canDelete && item.deleteBlockReason ? (
                               <p>{item.deleteBlockReason}</p>
@@ -4451,23 +4353,23 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             </div>
                             <p>{item.changeSummary || item.headline}</p>
                             <div className={styles.actionRow}>
-                              <VButton
+                              <button
                                 type="button"
                                 className={styles.inlineAction}
                                 onClick={() => openProposalFromRun(item, "pending")}
                               >
                                 <ArrowUpRight size={15} />
                                 {t("openProposal")}
-                              </VButton>
-                              <VButton
+                              </button>
+                              <button
                                 type="button"
                                 className={styles.inlineAction}
-                                isDisabled={!item.canDelete || deleteProposalMutation.isPending}
+                                disabled={!item.canDelete || deleteProposalMutation.isPending}
                                 onClick={() => triggerProposalDelete(item.sourceRun)}
                               >
                                 <Trash2 size={15} />
                                 {t("deleteProposal")}
-                              </VButton>
+                              </button>
                             </div>
                             {!item.canDelete && item.deleteBlockReason ? (
                               <p>{item.deleteBlockReason}</p>
@@ -4494,15 +4396,15 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     </div>
                     <p>{t("runDeleteImpact")}</p>
                     <div className={styles.actionRow}>
-                      <VButton
+                      <button
                         type="button"
                         className={styles.inlineAction}
-                        isDisabled={!selectedRun.canDelete || deleteRunRecordMutation.isPending}
+                        disabled={!selectedRun.canDelete || deleteRunRecordMutation.isPending}
                         onClick={() => triggerRunRecordDelete(selectedRun.id)}
                       >
                         {deleteRunRecordMutation.isPending ? <LoaderCircle size={15} /> : <Trash2 size={15} />}
                         {t("deleteRunRecord")}
-                      </VButton>
+                      </button>
                     </div>
                   </div>
                 </>
@@ -4523,22 +4425,22 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   </div>
                   <div className={styles.actionRow}>
                     {!hasRuns ? (
-                      <VButton
+                      <button
                         type="button"
                         className={styles.inlineAction}
                         onClick={() => goToSupervisedView("live")}
                       >
                         <ArrowUpRight size={15} />
                         {t("returnToOverview")}
-                      </VButton>
+                      </button>
                     ) : (
-                      <VButton
+                      <button
                         type="button"
                         className={styles.inlineAction}
                         onClick={() => setRunFilter("all")}
                       >
                         {t("allRuns")}
-                      </VButton>
+                      </button>
                     )}
                   </div>
                 </div>
@@ -4559,7 +4461,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 </div>
                 <div className={styles.filterSegmented}>
                   {(["items", "pending"] as const).map((view) => (
-                    <VButton
+                    <button
                       key={view}
                       type="button"
                       className={
@@ -4570,7 +4472,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       onClick={() => setLibraryView(view)}
                     >
                       {view === "items" ? t("libraryItems") : t("pendingReview")}
-                    </VButton>
+                    </button>
                   ))}
                 </div>
               </div>
@@ -4626,13 +4528,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               </div>
               {hasLibraryFilters ? (
                 <div className={styles.actionRow}>
-                  <VButton
+                  <button
                     type="button"
                     className={styles.inlineAction}
                     onClick={clearLibraryFilters}
                   >
                     {t("clearFilters")}
-                  </VButton>
+                  </button>
                 </div>
               ) : null}
             </section>
@@ -4669,14 +4571,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               </div>
               {selectedProposalSummary && selectedProposalCanOpenSourceRun ? (
                 <div className={styles.actionRow}>
-                  <VButton
+                  <button
                     type="button"
                     className={styles.inlineAction}
                     onClick={() => openRun(selectedProposalSummary.sourceRun)}
                   >
                     <ArrowUpRight size={15} />
                     {t("openSourceRun")}
-                  </VButton>
+                  </button>
                 </div>
               ) : null}
             </section>
@@ -4698,30 +4600,30 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     <span>{selectedProposalRunIds.length}</span>
                   </div>
                   <div className={styles.actionRow}>
-                    <VButton
+                    <button
                       type="button"
                       className={styles.inlineAction}
-                      isDisabled={selectedProposalRunIds.length === 0}
+                      disabled={selectedProposalRunIds.length === 0}
                       onClick={() => setSelectedProposalRunIds([])}
                     >
                       {t("clearSelection")}
-                    </VButton>
-                    <VButton
+                    </button>
+                    <button
                       type="button"
                       className={styles.inlineAction}
-                      isDisabled={selectedProposalRunIds.length === 0 || bulkDeleteMutation.isPending}
+                      disabled={selectedProposalRunIds.length === 0 || bulkDeleteMutation.isPending}
                       onClick={triggerBulkDelete}
                     >
                       <Trash2 size={15} />
                       {t("deleteSelected")}
-                    </VButton>
+                    </button>
                   </div>
                 </div>
                 <div className={styles.libraryFilters}>
                   <div className={styles.filterRow}>
                     <label className={styles.filterField}>
                       <span>{t("proposalTarget")}</span>
-                      <VNativeInput
+                      <input
                         type="text"
                         className={styles.textInput}
                         value={librarySearchInput}
@@ -4731,7 +4633,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     </label>
                     <label className={styles.filterField}>
                       <span>{t("filterByStatus")}</span>
-                      <VNativeSelect
+                      <select
                         className={styles.selectInput}
                         value={libraryStatusFilter}
                         onChange={(event) => setLibraryStatusFilter(event.target.value as LibraryStatusFilter)}
@@ -4741,11 +4643,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             {status === "all" ? t("filterAll") : statusLabel(status)}
                           </option>
                         ))}
-                      </VNativeSelect>
+                      </select>
                     </label>
                     <label className={styles.filterField}>
                       <span>{t("filterByDeleteState")}</span>
-                      <VNativeSelect
+                      <select
                         className={styles.selectInput}
                         value={libraryDeleteFilter}
                         onChange={(event) => setLibraryDeleteFilter(event.target.value as LibraryDeleteFilter)}
@@ -4753,7 +4655,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         <option value="all">{t("filterAll")}</option>
                         <option value="deletable">{t("filterDeletableOnly")}</option>
                         <option value="blocked">{t("filterBlockedOnly")}</option>
-                      </VNativeSelect>
+                      </select>
                     </label>
                   </div>
                   <div className={styles.filterMeta}>
@@ -4762,13 +4664,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       <strong>{visibleLibraryEntries.length} / {currentLibraryEntries.length}</strong>
                     </div>
                     {hasLibraryFilters ? (
-                      <VButton
+                      <button
                         type="button"
                         className={styles.inlineAction}
                         onClick={clearLibraryFilters}
                       >
                         {t("clearFilters")}
-                      </VButton>
+                      </button>
                     ) : null}
                   </div>
                 </div>
@@ -4790,7 +4692,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       >
                         <div className={styles.selectionBar}>
                           <label className={styles.batchToggle}>
-                            <VNativeInput
+                            <input
                               type="checkbox"
                               disabled={!item.canDelete}
                               checked={proposalSelected(item.sourceRun)}
@@ -4802,7 +4704,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             {item.canDelete ? t("deletionAllowed") : t("deletionBlocked")}
                           </span>
                         </div>
-                        <VButton
+                        <button
                           type="button"
                           className={styles.proposalCardButton}
                           onClick={() => setSelectedLibraryItemId(item.id)}
@@ -4821,7 +4723,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             <span>{item.targetLabel || item.targetKey || "--"}</span>
                             <span>{compactTimestamp(item.updatedAt)}</span>
                           </div>
-                        </VButton>
+                        </button>
                       </article>
                     ))
                 : pendingItems.length === 0
@@ -4839,7 +4741,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       >
                         <div className={styles.selectionBar}>
                           <label className={styles.batchToggle}>
-                            <VNativeInput
+                            <input
                               type="checkbox"
                               disabled={!item.canDelete}
                               checked={proposalSelected(item.sourceRun)}
@@ -4851,7 +4753,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             {item.canDelete ? t("deletionAllowed") : t("deletionBlocked")}
                           </span>
                         </div>
-                        <VButton
+                        <button
                           type="button"
                           className={styles.proposalCardButton}
                           onClick={() => setSelectedPendingItemId(item.id)}
@@ -4870,7 +4772,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             <span>{item.targetLabel || item.targetKey || "--"}</span>
                             <span>{compactTimestamp(item.updatedAt)}</span>
                           </div>
-                        </VButton>
+                        </button>
                       </article>
                     ))}
               </>
@@ -4917,35 +4819,35 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         <h3>{t("editProposalTitle")}</h3>
                         {proposalEditOpen ? (
                           <div className={styles.actionRow}>
-                            <VButton
+                            <button
                               type="button"
                               className={styles.inlineAction}
-                              isDisabled={updateProposalMutation.isPending}
+                              disabled={updateProposalMutation.isPending}
                               onClick={() => cancelProposalEdit(proposalDetailQuery.data)}
                             >
                               <X size={15} />
                               {t("cancelEdit")}
-                            </VButton>
-                            <VButton
+                            </button>
+                            <button
                               type="button"
                               className={styles.inlineAction}
-                              isDisabled={!proposalDetailQuery.data.canEdit || updateProposalMutation.isPending}
+                              disabled={!proposalDetailQuery.data.canEdit || updateProposalMutation.isPending}
                               onClick={() => triggerProposalUpdate(proposalDetailQuery.data.sourceRun)}
                             >
                               <Save size={15} />
                               {updateProposalMutation.isPending ? t("saving") : t("saveProposalEdit")}
-                            </VButton>
+                            </button>
                           </div>
                         ) : (
-                          <VButton
+                          <button
                             type="button"
                             className={styles.inlineAction}
-                            isDisabled={!proposalDetailQuery.data.canEdit}
+                            disabled={!proposalDetailQuery.data.canEdit}
                             onClick={() => beginProposalEdit(proposalDetailQuery.data)}
                           >
                             <Pencil size={15} />
                             {t("editProposal")}
-                          </VButton>
+                          </button>
                         )}
                       </div>
                       {!proposalDetailQuery.data.canEdit ? (
@@ -4960,7 +4862,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         <div className={styles.proposalEditGrid}>
                           <label className={styles.formField}>
                             <span>{t("proposalImprovementType")}</span>
-                            <VNativeInput
+                            <input
                               className={styles.textInput}
                               value={proposalEditDraft.improvementType}
                               onChange={(event) => updateProposalEditDraft("improvementType", event.target.value)}
@@ -4968,7 +4870,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           </label>
                           <label className={styles.formField}>
                             <span>{t("proposalExpectedEffect")}</span>
-                            <VNativeTextarea
+                            <textarea
                               className={styles.textArea}
                               rows={3}
                               value={proposalEditDraft.expectedEffect}
@@ -4977,7 +4879,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           </label>
                           <label className={styles.formField}>
                             <span>{t("proposalDraftSummary")}</span>
-                            <VNativeTextarea
+                            <textarea
                               className={styles.textArea}
                               rows={3}
                               value={proposalEditDraft.summary}
@@ -4986,7 +4888,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           </label>
                           <label className={styles.formField}>
                             <span>{t("proposalCandidatePrompt")}</span>
-                            <VNativeTextarea
+                            <textarea
                               className={styles.textArea}
                               rows={6}
                               value={proposalEditDraft.candidatePrompt}
@@ -4995,7 +4897,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           </label>
                           <label className={styles.formField}>
                             <span>{t("proposalBaselinePrompt")}</span>
-                            <VNativeTextarea
+                            <textarea
                               className={styles.textArea}
                               rows={5}
                               value={proposalEditDraft.baselinePrompt}
@@ -5004,7 +4906,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           </label>
                           <label className={styles.formField}>
                             <span>{t("proposalEditNote")}</span>
-                            <VNativeInput
+                            <input
                               className={styles.textInput}
                               value={proposalEditDraft.editNote}
                               onChange={(event) => updateProposalEditDraft("editNote", event.target.value)}
@@ -5156,16 +5058,16 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       {proposalDetailQuery.data.availableActions.length > 0 ? (
                         <div className={styles.actionRow}>
                           {proposalDetailQuery.data.availableActions.map((action) => (
-                            <VButton
+                            <button
                               key={action}
                               type="button"
                               className={styles.inlineAction}
-                              isDisabled={runLocked || actionMutation.isPending}
+                              disabled={runLocked || actionMutation.isPending}
                               onClick={() => triggerRunAction(proposalDetailQuery.data.sourceRun, action)}
                             >
                               <Sparkles size={15} />
                               {proposalActionLabel(action)}
-                            </VButton>
+                            </button>
                           ))}
                         </div>
                       ) : null}
@@ -5190,15 +5092,15 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         ? renderReviewList(proposalDetailQuery.data.review.evidenceNotes)
                         : null}
                       <div className={styles.actionRow}>
-                        <VButton
+                        <button
                           type="button"
                           className={styles.inlineAction}
-                          isDisabled={!proposalDetailQuery.data.canDelete || deleteProposalMutation.isPending}
+                          disabled={!proposalDetailQuery.data.canDelete || deleteProposalMutation.isPending}
                           onClick={() => triggerProposalDelete(proposalDetailQuery.data.sourceRun)}
                         >
                           <Trash2 size={15} />
                           {t("deleteProposal")}
-                        </VButton>
+                        </button>
                       </div>
                       {deleteProposalMutation.error ? <p className={styles.errorText}>{deleteProposalMutation.error.message}</p> : null}
                     </div>
@@ -5219,14 +5121,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
 
                     <div className={styles.detailSection}>
                       <h3>{t("navEvolution")}</h3>
-                      <VButton
+                      <button
                         type="button"
                         className={styles.inlineAction}
                         onClick={() => openRun(proposalDetailQuery.data.sourceRun)}
                       >
                         <ArrowUpRight size={15} />
                         {t("openSourceRun")}
-                      </VButton>
+                      </button>
                     </div>
 
                     <div className={styles.detailSection}>
