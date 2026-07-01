@@ -53,6 +53,10 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("width: min(640px, calc(100vw - 40px))");
     expect(shellStyles).toContain("grid-template-columns: repeat(3, minmax(0, 1fr))");
     expect(shellStyles).toContain(".statusGuideListItem[data-current=\"true\"]");
+    expect(shellStyles).toContain(":where(.vui-app-appshell).statusGuideCard");
+    expect(shellStyles).toContain("width: 100%");
+    expect(shellStyles).toContain("max-width: none");
+    expect(shellStyles).toContain(".vui-app-appshell.statusGuidePanel");
     expect(shellStyles).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
     expect(shellStyles).toContain("flex-wrap: nowrap");
     expect(styles.topActions).toContain("flex-nowrap");
@@ -68,6 +72,15 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("width: 32px");
     expect(shellStyles).toContain("grid-template-columns: minmax(0, max-content) minmax(0, 1fr) max-content;");
     expect(shellStyles).toContain("max-width: 100%");
+    expect(shellStyles).toContain("width: min(520px, calc(100vw - 40px))");
+    expect(shellStyles).toContain("max-height: min(78vh, 760px)");
+    expect(shellStyles).toContain("grid-template-columns: repeat(4, minmax(0, 1fr))");
+    expect(shellStyles).toContain("grid-template-columns: 36px minmax(0, 1fr)");
+    expect(shellStyles).toContain("@media (max-width: 640px)");
+    expect(shellStyles).toContain("width: min(360px, calc(100vw - 20px))");
+    expect(shellStyles).toContain("left: 0");
+    expect(shellStyles).toContain("grid-template-columns: repeat(2, minmax(72px, max-content))");
+    expect(shellStyles).toContain("word-break: keep-all");
 
     const compactDesktopBlock = shellStyles.slice(
       shellStyles.indexOf("@media (max-width: 1420px)"),
@@ -83,6 +96,15 @@ describe("AppShell layout contract", () => {
     );
     expect(narrowDesktopBlock).toContain(":where(.vui-app-appshell).topClock span:last-child");
     expect(narrowDesktopBlock).not.toContain(":where(.vui-app-appshell).statusBadgeValue");
+
+    const wrappedTopBarBlock = shellStyles.slice(
+      shellStyles.indexOf("@media (max-width: 980px)"),
+      shellStyles.indexOf("@media (max-width: 520px)"),
+    );
+    expect(wrappedTopBarBlock).toContain(".vui-app-appshell.statusGuidePanel");
+    expect(wrappedTopBarBlock).toContain("position: fixed");
+    expect(wrappedTopBarBlock).toContain("top: 108px");
+    expect(wrappedTopBarBlock).toContain("max-height: calc(100dvh - 124px)");
   });
 
   it("keeps the light shell top bar on light surfaces with a stable brand stack", () => {
@@ -279,10 +301,12 @@ describe("AppShell layout contract", () => {
     expect(shellSource).not.toContain("shutdownFailed");
   });
 
-  it("routes direct workbench window close attempts through controlled shutdown", () => {
-    expect(shellSource).toContain("markControlledProjectLifecycleOperation(\"stop\")");
-    expect(shellSource).toContain("void beginShutdown()");
-    expect(shellSource).toContain("applyBeforeUnloadProjectCloseGuard(event, workbenchCloseGuardMessage)");
+  it("keeps browser unload guards from stopping the workbench backend", () => {
+    const beforeUnloadBody = shellSource.match(/function handleBeforeUnload\(event: BeforeUnloadEvent\) \{[\s\S]*?\n    \}/)?.[0] ?? "";
+
+    expect(beforeUnloadBody).toContain("applyBeforeUnloadProjectCloseGuard(event, workbenchCloseGuardMessage)");
+    expect(beforeUnloadBody).not.toContain("markControlledProjectLifecycleOperation(\"stop\")");
+    expect(beforeUnloadBody).not.toContain("beginShutdown");
   });
 
   it("turns the top refresh icon into a frontend refresh and routes lifecycle actions through Launcher", () => {
