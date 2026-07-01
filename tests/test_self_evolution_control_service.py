@@ -65,6 +65,9 @@ def reset_self_evolution_run_state(monkeypatch: pytest.MonkeyPatch):
         service._ACTIVE_RUN_ID = None
     with service._RUN_SUBSCRIBERS_LOCK:
         service._RUN_SUBSCRIBERS.clear()
+    with service._OBSERVATION_RUN_STATE_LOCK:
+        service._OBSERVATION_RUNS.clear()
+        service._ACTIVE_OBSERVATION_RUN_ID = ""
     yield
     with service._RUN_STATE_LOCK:
         service._RUN_STATES.clear()
@@ -72,6 +75,9 @@ def reset_self_evolution_run_state(monkeypatch: pytest.MonkeyPatch):
         service._ACTIVE_RUN_ID = None
     with service._RUN_SUBSCRIBERS_LOCK:
         service._RUN_SUBSCRIBERS.clear()
+    with service._OBSERVATION_RUN_STATE_LOCK:
+        service._OBSERVATION_RUNS.clear()
+        service._ACTIVE_OBSERVATION_RUN_ID = ""
 
 
 def _sha256(text: str) -> str:
@@ -1044,6 +1050,39 @@ def test_runtime_manager_start_self_evolution_blocks_write_chat_session(monkeypa
 
     with pytest.raises(service.SelfEvolutionRunBusyError):
         service.start_self_evolution_run({"goal": "managed"})
+
+
+def test_self_observation_prompt_is_no_tool_contract():
+    prompt = service.build_self_observation_prompt("观察自进化能力", duration_seconds=120)
+
+    assert "无工具观察沙盒" in prompt
+    assert "你没有任何工具" in prompt
+    assert "不能声称已经读取" in prompt
+    assert "不能请求工具授权" in prompt
+    assert "无法验证" in prompt
+    assert "未来需要的证据" in prompt
+
+
+def test_self_observation_boundary_violation_detects_fake_execution_claims():
+    assert service.detect_self_observation_boundary_violation("我已经读取了项目文件") == "claimed_file_read"
+    assert service.detect_self_observation_boundary_violation("I ran pytest and verified it") == "claimed_command_execution"
+    assert service.detect_self_observation_boundary_violation("当前理解：这是一个只能推理的问题") == ""
+
+
+def test_start_self_observation_run_has_no_tools_no_worktree(monkeypatch):
+    monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+    monkeypatch.setattr(service, "_run_self_observation_turn", lambda context: None)
+    service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
+
+    snapshot = service.start_self_observation_run({"goal": "观察规划能力", "durationSeconds": 90})
+
+    assert snapshot["runKind"] == "self_observation_run"
+    assert snapshot["selfMode"] == "observation"
+    assert snapshot["allowedTools"] == []
+    assert snapshot["writeLeases"] == []
+    assert snapshot["worktreeCreated"] is False
+    assert snapshot["durationSeconds"] == 90
+    assert service.get_active_self_observation_run()["runId"] == snapshot["runId"]
 
 
 @pytest.mark.parametrize("status", ["queued", "running", "stopping", "paused"])
