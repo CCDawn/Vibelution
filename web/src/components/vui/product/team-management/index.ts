@@ -10,6 +10,11 @@ export {
   type TeamStageStat,
 } from "./TeamStageCommandBar";
 export {
+  TeamSourceFilterBar,
+  type TeamSourceFilterBarProps,
+  type TeamSourceFilterOption,
+} from "./TeamSourceFilterBar";
+export {
   TeamStagePipeline,
   type TeamStagePipelineProps,
 } from "./TeamStagePipeline";
