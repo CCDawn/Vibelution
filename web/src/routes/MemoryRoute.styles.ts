@@ -284,6 +284,12 @@ const styles = createVuiStyleMap(styleKeys, {
     overviewGrid: "grid-cols-[repeat(2,minmax(0,1fr))] gap-2 max-[900px]:grid-cols-1",
     overviewPanel: "grid-rows-[auto_minmax(0,1fr)] overflow-auto",
     panelLead: "hidden",
+    pipelinePanel:
+      "!grid grid-cols-[minmax(116px,0.18fr)_minmax(0,1fr)] items-center gap-[5px] max-[760px]:grid-cols-[1fr]",
+    pipelineSteps:
+      "grid grid-cols-[repeat(5,minmax(0,1fr))] gap-[3px] min-w-0 max-[760px]:grid-cols-[repeat(2,minmax(0,1fr))]",
+    pipelineStep:
+      "grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-1 min-w-0 px-[5px] py-0.5 rounded-[7px] border border-[color:color-mix(in_srgb,var(--border-soft)_70%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-card)_74%,transparent)]",
     reviewQueueList: "overflow-auto",
     reviewQueuePanel: "max-h-[min(280px,34vh)] overflow-auto",
     reviewReasonList: "hidden",
