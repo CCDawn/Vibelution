@@ -1181,7 +1181,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const selfWorktreeRun =
     workspaceSnapshot?.selfWorktreeActiveRun
     ?? (isSelfEvolutionWorktreeRun(activeWorktreeRun) ? activeWorktreeRun : null)
-    ?? selfWorktreeRuns[0]
     ?? null;
   const reviewCandidateWorktree = activeWorktreeRun ?? worktreeRuns[0] ?? null;
   const reviewCandidateGate = reviewCandidateWorktree?.reviewGate ?? reviewCandidateWorktree?.mergeAnalysis?.reviewGate;
