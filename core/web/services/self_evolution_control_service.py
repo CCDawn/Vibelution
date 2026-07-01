@@ -2193,6 +2193,33 @@ def _self_observation_completion_status(completion_snapshot: dict[str, Any], det
     ).strip().lower()
 
 
+def _update_self_observation_progress(
+    run_id: str,
+    *,
+    conversation_session_id: str = "",
+    latest_message: str = "",
+    messages: list[str] | None = None,
+) -> dict[str, Any] | None:
+    global _ACTIVE_OBSERVATION_RUN_ID
+    timestamp = _now_timestamp()
+    with _OBSERVATION_RUN_STATE_LOCK:
+        snapshot = _OBSERVATION_RUNS.get(str(run_id or "").strip())
+        if not snapshot:
+            return None
+        if _self_observation_has_operator_terminal_state(snapshot):
+            if _ACTIVE_OBSERVATION_RUN_ID == snapshot.get("runId"):
+                _ACTIVE_OBSERVATION_RUN_ID = ""
+            return dict(snapshot)
+        if conversation_session_id:
+            snapshot["conversationSessionId"] = str(conversation_session_id or "").strip()
+        if messages is not None:
+            snapshot["messages"] = [str(item) for item in list(messages or []) if str(item or "").strip()]
+        if latest_message:
+            snapshot["latestMessage"] = str(latest_message or "").strip()
+        snapshot["updatedAt"] = timestamp
+        return dict(snapshot)
+
+
 def _run_observation_session(*, run_id: str, prompt: str, duration_seconds: int) -> dict[str, Any]:
     bindings = self_evolution_agent_bindings()
     executor_binding = bindings.get("executor") if isinstance(bindings, dict) else {}
@@ -2243,6 +2270,18 @@ def _run_observation_session(*, run_id: str, prompt: str, duration_seconds: int)
     while True:
         latest_detail = get_session_detail(session_id) or {}
         latest_completion_snapshot = get_session_turn_completion_snapshot(session_id, turn_id)
+        assistant_messages = _self_observation_assistant_messages(latest_detail)
+        assistant_text = str(latest_completion_snapshot.get("assistantText") or "").strip()
+        if assistant_text and (not assistant_messages or assistant_messages[-1] != assistant_text):
+            assistant_messages.append(assistant_text)
+        latest_message = assistant_text or (assistant_messages[-1] if assistant_messages else "")
+        if assistant_messages or latest_message:
+            _update_self_observation_progress(
+                run_id,
+                conversation_session_id=session_id,
+                latest_message=latest_message,
+                messages=assistant_messages,
+            )
         if bool(latest_completion_snapshot.get("terminal")):
             break
         last_status = _self_observation_completion_status(latest_completion_snapshot, latest_detail)
@@ -2307,8 +2346,8 @@ def _run_self_observation_turn(context: dict[str, Any]) -> None:
         snapshot["updatedAt"] = started_at
         snapshot["latestMessage"] = text_for(
             get_web_language(),
-            zh="自主观察正在生成最小观察报告。",
-            en="Observation run is generating a minimal report.",
+            zh="自主观察会话正在运行。",
+            en="Observation session is running.",
         )
         terminate_state = snapshot.get("actionStates")
         if isinstance(terminate_state, dict) and isinstance(terminate_state.get("terminate"), dict):
@@ -2327,7 +2366,7 @@ def _run_self_observation_turn(context: dict[str, Any]) -> None:
             violation = detect_self_observation_boundary_violation(item)
             if violation:
                 break
-        status = "failed" if violation else "done"
+        status = "boundary_violation" if violation else "done"
         latest_message = messages[-1] if messages else report
         if violation:
             latest_message = text_for(
