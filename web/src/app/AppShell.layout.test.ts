@@ -268,6 +268,12 @@ describe("AppShell layout contract", () => {
     expect(shellSource).not.toContain("className={styles.activeWorkSummary}");
 
     expect(styles.activeWorkDetailPanel).toBeTypeOf("string");
+    expect(styles.activeWorkChip).toContain("relative");
+    expect(styles.activeWorkChip).toContain("overflow-visible");
+    expect(styles.activeWorkChip).toContain("[&:hover_.activeWorkDetailPanel]:visible");
+    expect(styles.activeWorkDetailPanel).toContain("absolute");
+    expect(styles.activeWorkDetailPanel).toContain("invisible");
+    expect(styles.activeWorkDetailPanel).toContain("z-[80]");
     expect(styles.activeWorkDetailItem).toBeTypeOf("string");
   });
 

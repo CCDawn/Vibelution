@@ -122,6 +122,16 @@ const styles = createVuiStyleMap(styleKeys, {
       "inline-block h-2 w-2 shrink-0 rounded-full border border-[color-mix(in_srgb,currentColor_38%,transparent)] bg-current p-0 align-middle",
   },
   extensions: {
+    activeWorkChip:
+      "relative h-8 min-h-8 flex-nowrap overflow-visible gap-1.5 whitespace-nowrap [&:focus-within_.activeWorkDetailPanel]:visible [&:focus-within_.activeWorkDetailPanel]:pointer-events-auto [&:focus-within_.activeWorkDetailPanel]:translate-y-0 [&:focus-within_.activeWorkDetailPanel]:opacity-100 [&:hover_.activeWorkDetailPanel]:visible [&:hover_.activeWorkDetailPanel]:pointer-events-auto [&:hover_.activeWorkDetailPanel]:translate-y-0 [&:hover_.activeWorkDetailPanel]:opacity-100",
+    activeWorkDetailPanel:
+      "invisible pointer-events-none absolute left-0 top-[calc(100%+8px)] z-[80] w-[min(480px,calc(100vw-2rem))] translate-y-1 opacity-0 transition-[opacity,transform,visibility] duration-150",
+    activeWorkDetailList:
+      "max-h-[260px] overflow-y-auto",
+    activeWorkDetailItem:
+      "grid-cols-[max-content_minmax(0,1fr)] items-start",
+    activeWorkDetailTitle:
+      "grid-cols-[minmax(0,1fr)_max-content] items-center gap-2",
     statusBadgeLabel: "whitespace-nowrap",
     statusBadgeValue: "whitespace-nowrap",
     statusCluster: "shrink-0",
