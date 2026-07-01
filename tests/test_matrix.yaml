@@ -1,10 +1,14 @@
 version: 1
 
 always:
+  executionLayers:
+    - "hygiene"
   commands:
     - "git diff --check"
 
 default:
+  executionLayers:
+    - "focused"
   commands:
     - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_runner.py -q"
     - ".\\.venv\\Scripts\\python.exe -m pytest tests/ --collect-only -q"
@@ -14,21 +18,34 @@ default:
 rules:
   - id: test-tooling
     description: "Test runner, selector, pytest fixtures, and test documentation."
+    executionLayers:
+      - "focused"
+      - "local-parallel"
+      - "remote-distributed"
     paths:
       - "tests/test_matrix.yaml"
       - "tests/select_tests.py"
       - "tests/test_select_tests.py"
       - "tests/test_runner.py"
+      - "tests/test_remote_test_runner.py"
       - "tests/conftest.py"
       - "tests/README.md"
+      - "scripts/remote_test_runner.py"
+      - "docs/testing/remote-test-runner.md"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_select_tests.py tests/test_runner.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_remote_test_runner.py -q"
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/ --collect-only -q"
     notes:
       - "Pure test-tooling changes do not require Launcher refresh."
+      - "Remote distributed testing is a speed path for Python not-serial coverage; it is not a complete gate."
 
   - id: web-session-chat
     description: "Direct chat, session routes, room routes, and conversation UI."
+    executionLayers:
+      - "focused"
+      - "local-serial"
+      - "frontend"
     paths:
       - "core/web/services/session_service.py"
       - "core/web/services/chat_room_service.py"
@@ -52,6 +69,9 @@ rules:
 
   - id: web-runtime-launcher
     description: "Launcher, runtime manager, runtime scene, and runtime route behavior."
+    executionLayers:
+      - "focused"
+      - "local-serial"
     paths:
       - "core/runtime_manager/**"
       - "core/web/services/runtime_scene_service.py"
@@ -70,6 +90,9 @@ rules:
 
   - id: web-evolution
     description: "Supervised/self evolution web routes, harness, and control-plane services."
+    executionLayers:
+      - "focused"
+      - "local-serial"
     paths:
       - "core/evaluation/**"
       - "core/web/routes/evolution.py"
@@ -87,6 +110,9 @@ rules:
 
   - id: config-models
     description: "Operator config, public config panel, model library, prompt cache, and LLM client routing."
+    executionLayers:
+      - "focused"
+      - "local-serial"
     paths:
       - "config/**"
       - "core/llm/**"
@@ -105,6 +131,10 @@ rules:
 
   - id: agent-directory-config
     description: "Agent directory, mode binding, prompt templates, and model reference repair."
+    executionLayers:
+      - "focused"
+      - "local-parallel"
+      - "remote-distributed"
     paths:
       - "core/web/services/agent_directory_service.py"
       - "core/web/services/agent_mode_binding_service.py"
@@ -121,6 +151,10 @@ rules:
 
   - id: memory-cleanup
     description: "Memory overview, cleanup, reset, and memory route behavior."
+    executionLayers:
+      - "focused"
+      - "local-parallel"
+      - "remote-distributed"
     paths:
       - "core/web/services/memory_cleanup_service.py"
       - "core/web/services/memory_service.py"
@@ -135,6 +169,10 @@ rules:
 
   - id: tool-registry
     description: "Tool registry service, generated tool metadata, and tool route contracts."
+    executionLayers:
+      - "focused"
+      - "local-parallel"
+      - "remote-distributed"
     paths:
       - "core/web/services/tool_registry_service.py"
       - "core/web/routes/tools.py"
@@ -148,6 +186,9 @@ rules:
 
   - id: git-worktree
     description: "Git service, Git memory, worktree hygiene, and no-console Git process paths."
+    executionLayers:
+      - "focused"
+      - "local-serial"
     paths:
       - "core/infrastructure/git_process.py"
       - "core/infrastructure/git_memory.py"
@@ -163,6 +204,10 @@ rules:
 
   - id: teams-knowledge
     description: "Teams, Team Knowledge, Challenge Cup flow, and source collection workflow."
+    executionLayers:
+      - "focused"
+      - "local-serial"
+      - "frontend"
     paths:
       - "core/web/services/team_service.py"
       - "core/web/services/team_knowledge_service.py"
@@ -185,6 +230,9 @@ rules:
 
   - id: frontend-workbench
     description: "Workbench routes, shared frontend API types, and route-level layout tests."
+    executionLayers:
+      - "focused"
+      - "frontend"
     paths:
       - "web/src/routes/**"
       - "web/src/components/**"
@@ -199,6 +247,8 @@ rules:
 
   - id: docs-only
     description: "Documentation-only changes."
+    executionLayers:
+      - "hygiene"
     paths:
       - "*.md"
       - "docs/**"

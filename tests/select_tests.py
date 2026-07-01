@@ -18,6 +18,23 @@ from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MATRIX = Path(__file__).with_name("test_matrix.yaml")
+LOCAL_PARALLEL_COMMAND = (
+    '.\\.venv\\Scripts\\python.exe -m pytest tests/ -n 8 --dist loadfile -m "not serial" -q'
+)
+LOCAL_SERIAL_COMMAND = '.\\.venv\\Scripts\\python.exe -m pytest tests/ -m serial -q'
+REMOTE_DISTRIBUTED_COMMAND = (
+    ".\\.venv\\Scripts\\python.exe scripts/remote_test_runner.py --backend docker --distributed"
+)
+FRONTEND_BUILD_COMMAND = "npm --prefix web run build"
+
+VALIDATION_LAYER_DESCRIPTIONS = {
+    "hygiene": "Diff hygiene and cheap structural checks.",
+    "focused": "Focused commands selected by changed-file ownership.",
+    "local-parallel": "Local pytest-xdist lane for tests that are safe with not serial.",
+    "local-serial": "Local-only serial lane for Launcher, ports, processes, Git, config, or shared state.",
+    "remote-distributed": "Optional server/Docker acceleration for Python not-serial regression only.",
+    "frontend": "Frontend Vitest/build lane; never covered by Python remote testing.",
+}
 
 
 def _strip_inline_comment(line: str) -> str:
@@ -201,6 +218,46 @@ def _dedupe_commands(commands: list[str]) -> list[str]:
     return deduped
 
 
+def _execution_layers(source: dict[str, Any], fallback: list[str]) -> list[str]:
+    raw_layers = source.get("executionLayers", fallback)
+    if isinstance(raw_layers, list):
+        return [str(layer) for layer in raw_layers if str(layer).strip()]
+    if isinstance(raw_layers, str) and raw_layers.strip():
+        return [raw_layers.strip()]
+    return list(fallback)
+
+
+def build_execution_plan(layers: list[str]) -> dict[str, Any]:
+    return {
+        "layers": layers,
+        "descriptions": {
+            layer: VALIDATION_LAYER_DESCRIPTIONS.get(layer, "")
+            for layer in layers
+        },
+        "localParallel": {
+            "recommended": "local-parallel" in layers,
+            "command": LOCAL_PARALLEL_COMMAND,
+            "scope": "Python pytest not-serial tests only.",
+        },
+        "localSerial": {
+            "required": "local-serial" in layers,
+            "command": LOCAL_SERIAL_COMMAND,
+            "scope": "Required when tests touch real processes, ports, Launcher/runtime lifecycle, Git, config, or shared workspace state.",
+        },
+        "remoteDistributed": {
+            "recommended": "remote-distributed" in layers,
+            "command": REMOTE_DISTRIBUTED_COMMAND,
+            "isCompleteGate": False,
+            "scope": "Speed path for Python pytest not-serial only; it excludes serial pytest, frontend Vitest, and frontend build gates.",
+        },
+        "frontend": {
+            "required": "frontend" in layers,
+            "buildCommand": FRONTEND_BUILD_COMMAND,
+            "scope": "Run the selected Vitest/build commands from the focused command list.",
+        },
+    }
+
+
 def select_tests(
     changed_files: list[str],
     matrix: dict[str, Any],
@@ -211,12 +268,14 @@ def select_tests(
     matched_rules: list[dict[str, Any]] = []
     commands: list[str] = []
     notes: list[str] = []
+    validation_layers: list[str] = []
 
     if include_always:
         always = matrix.get("always", {})
         if isinstance(always, dict):
             commands.extend(str(command) for command in always.get("commands", []))
             notes.extend(str(note) for note in always.get("notes", []))
+            validation_layers.extend(_execution_layers(always, ["hygiene"]))
 
     for rule in matrix.get("rules", []):
         if not isinstance(rule, dict):
@@ -237,18 +296,24 @@ def select_tests(
         matched_rules.append(matched_rule)
         commands.extend(str(command) for command in rule.get("commands", []))
         notes.extend(str(note) for note in rule.get("notes", []))
+        validation_layers.extend(_execution_layers(rule, ["focused"]))
 
     if not matched_rules:
         default = matrix.get("default", {})
         if isinstance(default, dict):
             commands.extend(str(command) for command in default.get("commands", []))
             notes.extend(str(note) for note in default.get("notes", []))
+            validation_layers.extend(_execution_layers(default, ["focused"]))
+
+    validation_layers = _dedupe_commands(validation_layers)
 
     return {
         "changedFiles": normalized_files,
         "matchedRules": matched_rules,
         "commands": _dedupe_commands(commands),
         "notes": _dedupe_commands(notes),
+        "validationLayers": validation_layers,
+        "executionPlan": build_execution_plan(validation_layers),
     }
 
 
@@ -364,6 +429,11 @@ def main(argv: list[str] | None = None) -> int:
         print("Commands:")
         for command in result["commands"]:
             print(f"  - {command}")
+        if result["validationLayers"]:
+            print("Validation layers:")
+            for layer in result["validationLayers"]:
+                description = result["executionPlan"]["descriptions"].get(layer, "")
+                print(f"  - {layer}: {description}")
         if result["notes"]:
             print("Notes:")
             for note in result["notes"]:
