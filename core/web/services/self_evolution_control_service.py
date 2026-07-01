@@ -55,8 +55,12 @@ from .session_service import (
     SessionNotFoundError,
     active_session_has_write_leases,
     get_active_session_detail,
+    create_supervised_agent_session,
+    get_session_detail,
+    get_session_turn_completion_snapshot,
     has_running_sessions,
     list_active_session_work_runs,
+    request_stop_session_turn,
     submit_session_message,
 )
 from .supervised_control_service import get_active_supervised_run
@@ -1978,6 +1982,18 @@ def _normalize_observation_duration(value: Any) -> int:
     return max(SELF_OBSERVATION_MIN_DURATION_SECONDS, min(SELF_OBSERVATION_MAX_DURATION_SECONDS, duration))
 
 
+def _self_observation_tool_policy() -> dict[str, Any]:
+    return {
+        "policyId": "self-observation-no-tools",
+        "allowedTools": [],
+        "preferredTools": [],
+        "blockedTools": [],
+        "readScopes": [],
+        "writeScopes": [],
+        "mutationAccess": "none",
+    }
+
+
 def build_self_observation_prompt(goal: str, duration_seconds: int) -> str:
     normalized_goal = str(goal or "").strip() or DEFAULT_SELF_EVOLUTION_GOAL
     normalized_duration = _normalize_observation_duration(duration_seconds)
@@ -2039,15 +2055,7 @@ def _build_self_observation_snapshot(
         "goal": goal,
         "durationSeconds": duration_seconds,
         "allowedTools": [],
-        "toolPolicy": {
-            "policyId": "self-observation-no-tools",
-            "allowedTools": [],
-            "preferredTools": [],
-            "blockedTools": [],
-            "readScopes": [],
-            "writeScopes": [],
-            "mutationAccess": "none",
-        },
+        "toolPolicy": _self_observation_tool_policy(),
         "writeLeases": [],
         "worktreeCreated": False,
         "conversationSessionId": "",
@@ -2119,6 +2127,8 @@ def _set_self_observation_terminal_state(
     latest_message: str,
     report: str,
     boundary_violation: str = "",
+    conversation_session_id: str = "",
+    messages: list[str] | None = None,
 ) -> dict[str, Any] | None:
     global _ACTIVE_OBSERVATION_RUN_ID
     timestamp = _now_timestamp()
@@ -2136,6 +2146,10 @@ def _set_self_observation_terminal_state(
         snapshot["latestMessage"] = str(latest_message or "").strip()
         snapshot["report"] = str(report or "").strip()
         snapshot["boundaryViolation"] = str(boundary_violation or "").strip()
+        if conversation_session_id:
+            snapshot["conversationSessionId"] = str(conversation_session_id or "").strip()
+        if messages is not None:
+            snapshot["messages"] = [str(item) for item in list(messages or []) if str(item or "").strip()]
         snapshot["updatedAt"] = timestamp
         snapshot["finishedAt"] = timestamp
         action_states = snapshot.get("actionStates")
@@ -2147,19 +2161,128 @@ def _set_self_observation_terminal_state(
             terminate_state = {"label": "终止观察", "reason": ""}
             action_states["terminate"] = terminate_state
         terminate_state["enabled"] = False
-        messages = list(snapshot.get("messages") or [])
-        messages.append(
-            {
-                "id": f"{run_id}-message-{timestamp}-assistant-{uuid4().hex[:8]}",
-                "role": "assistant",
-                "content": str(report or "").strip(),
-                "timestamp": timestamp,
-            }
-        )
-        snapshot["messages"] = messages
         if _ACTIVE_OBSERVATION_RUN_ID == snapshot.get("runId"):
             _ACTIVE_OBSERVATION_RUN_ID = ""
         return dict(snapshot)
+
+
+def _self_observation_operator_terminated(run_id: str) -> bool:
+    snapshot = get_self_observation_run_snapshot(run_id)
+    return _self_observation_has_operator_terminal_state(snapshot)
+
+
+def _self_observation_assistant_messages(detail: dict[str, Any]) -> list[str]:
+    messages: list[str] = []
+    for item in list((detail or {}).get("messages") or []):
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip().lower()
+        content = str(item.get("content") or "").strip()
+        if role != "assistant" or not content:
+            continue
+        messages.append(content)
+    return messages
+
+
+def _self_observation_completion_status(completion_snapshot: dict[str, Any], detail: dict[str, Any]) -> str:
+    return str(
+        completion_snapshot.get("terminalStatus")
+        or completion_snapshot.get("lastTurnStatus")
+        or detail.get("lastTurnStatus")
+        or ""
+    ).strip().lower()
+
+
+def _run_observation_session(*, run_id: str, prompt: str, duration_seconds: int) -> dict[str, Any]:
+    bindings = self_evolution_agent_bindings()
+    executor_binding = bindings.get("executor") if isinstance(bindings, dict) else {}
+    agent_id = str((executor_binding or {}).get("agentId") or "").strip()
+    if not agent_id:
+        raise SelfEvolutionRunValidationError("Missing self observation executor agent binding.")
+
+    tool_policy = _self_observation_tool_policy()
+    session = create_supervised_agent_session(
+        agent_id=agent_id,
+        title=f"自进化观察 {run_id[:8]}",
+        metadata={
+            "role": "executor",
+            "mode": "self_observation",
+            "runKind": "self_observation_run",
+            "runId": run_id,
+            "toolPolicy": tool_policy,
+        },
+    )
+    session_id = str(session.get("id") or session.get("sessionId") or "").strip()
+    if not session_id:
+        raise SelfEvolutionRunValidationError("Observation session creation did not return a session id.")
+    with _OBSERVATION_RUN_STATE_LOCK:
+        snapshot = _OBSERVATION_RUNS.get(run_id)
+        if isinstance(snapshot, dict):
+            snapshot["conversationSessionId"] = session_id
+            snapshot["updatedAt"] = _now_timestamp()
+
+    accepted = submit_session_message(
+        session_id,
+        prompt,
+        mental_model_enabled=False,
+        message_metadata={
+            "runKind": "self_observation_run",
+            "runId": run_id,
+            "mode": "self_observation",
+            "toolPolicy": tool_policy,
+        },
+        message_source="self_observation",
+        include_started_turn_id=True,
+        lightweight_response=True,
+    )
+    turn_id = str(accepted.get("turnId") or accepted.get("startedTurnId") or "").strip()
+    deadline = time.monotonic() + max(5, int(duration_seconds or 0))
+    stop_requested = False
+    latest_detail: dict[str, Any] = {}
+    latest_completion_snapshot: dict[str, Any] = {}
+    while True:
+        latest_detail = get_session_detail(session_id) or {}
+        latest_completion_snapshot = get_session_turn_completion_snapshot(session_id, turn_id)
+        if bool(latest_completion_snapshot.get("terminal")):
+            break
+        last_status = _self_observation_completion_status(latest_completion_snapshot, latest_detail)
+        if last_status and last_status not in {"queued", "running"}:
+            break
+        if _self_observation_operator_terminated(run_id) and not stop_requested:
+            stop_requested = True
+            try:
+                request_stop_session_turn(session_id)
+            except Exception:
+                pass
+        if time.monotonic() >= deadline:
+            try:
+                request_stop_session_turn(session_id)
+            except Exception:
+                pass
+            raise TimeoutError("Observation session timed out.")
+        time.sleep(0.5)
+
+    latest_detail = get_session_detail(session_id) or latest_detail
+    latest_completion_snapshot = get_session_turn_completion_snapshot(session_id, turn_id)
+    assistant_messages = _self_observation_assistant_messages(latest_detail)
+    assistant_text = str(latest_completion_snapshot.get("assistantText") or "").strip()
+    if assistant_text and (not assistant_messages or assistant_messages[-1] != assistant_text):
+        assistant_messages.append(assistant_text)
+    report = assistant_text or (assistant_messages[-1] if assistant_messages else "")
+    if not report:
+        turn_error = latest_detail.get("lastTurnError") if isinstance(latest_detail.get("lastTurnError"), dict) else {}
+        error_text = str(turn_error.get("message") or _self_observation_completion_status(latest_completion_snapshot, latest_detail) or "").strip()
+        report = (
+            "当前理解：\n"
+            "- observation conversation 已结束，但未返回可见 assistant 输出。\n\n"
+            "无法验证：\n"
+            f"- {error_text or '未获得会话结果。'}"
+        )
+    return {
+        "conversationSessionId": session_id,
+        "messages": assistant_messages,
+        "report": report,
+    }
 
 
 def _run_self_observation_turn(context: dict[str, Any]) -> None:
@@ -2191,29 +2314,21 @@ def _run_self_observation_turn(context: dict[str, Any]) -> None:
         if isinstance(terminate_state, dict) and isinstance(terminate_state.get("terminate"), dict):
             terminate_state["terminate"]["enabled"] = True
     try:
-        report = (
-            "当前理解：\n"
-            f"- 本轮目标是“{goal}”。\n"
-            "- 当前处于无工具观察模式，只能基于已有约束做推理。\n\n"
-            "可观察推理：\n"
-            "- 可以先确认目标、风险和未来验证路径，避免把 observation run 永久停在 queued/running。\n"
-            f"- 当前最小生命周期已在 {duration_seconds} 秒上限内直接收口，不进入真实对话链路。\n\n"
-            "关键假设：\n"
-            "- 本轮只需要最小闭环，不要求接入 Task 5 的真实 observation conversation。\n\n"
-            "无法验证：\n"
-            "- 目前没有工具，因此无法读取代码、执行命令或验证外部状态。\n\n"
-            "如果未来允许工具，需要的证据：\n"
-            "- 真实代码/日志/测试输出。\n\n"
-            "下一段观察重点：\n"
-            "- 等待后续任务接入真正的 observation 对话与流式呈现。"
+        result = _run_observation_session(
+            run_id=run_id,
+            prompt=build_self_observation_prompt(goal, duration_seconds),
+            duration_seconds=duration_seconds,
         )
-        violation = detect_self_observation_boundary_violation(report)
+        conversation_session_id = str(result.get("conversationSessionId") or "").strip()
+        messages = [str(item) for item in list(result.get("messages") or []) if str(item or "").strip()]
+        report = str(result.get("report") or "").strip()
+        violation = ""
+        for item in [*messages, report]:
+            violation = detect_self_observation_boundary_violation(item)
+            if violation:
+                break
         status = "failed" if violation else "done"
-        latest_message = text_for(
-            get_web_language(),
-            zh="自主观察已完成最小闭环报告。",
-            en="Observation run completed the minimal lifecycle report.",
-        )
+        latest_message = messages[-1] if messages else report
         if violation:
             latest_message = text_for(
                 get_web_language(),
@@ -2226,6 +2341,8 @@ def _run_self_observation_turn(context: dict[str, Any]) -> None:
             latest_message=latest_message,
             report=report,
             boundary_violation=violation,
+            conversation_session_id=conversation_session_id,
+            messages=messages,
         )
     except Exception as exc:
         _set_self_observation_terminal_state(
@@ -2330,7 +2447,14 @@ def execute_self_observation_action(run_id: str, action: str) -> dict[str, Any]:
         }
         if _ACTIVE_OBSERVATION_RUN_ID == normalized_run_id:
             _ACTIVE_OBSERVATION_RUN_ID = ""
-        return dict(snapshot)
+        updated = dict(snapshot)
+    conversation_session_id = str(updated.get("conversationSessionId") or "").strip()
+    if conversation_session_id:
+        try:
+            request_stop_session_turn(conversation_session_id)
+        except Exception:
+            pass
+    return updated
 
 
 def stream_self_observation_run_events(run_id: str, initial_snapshot: dict[str, Any] | None = None):

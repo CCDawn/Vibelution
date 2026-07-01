@@ -1451,6 +1451,105 @@ def test_supervised_session_workspace_override_routes_tool_workspace_to_candidat
     assert Path(memory_workspace).resolve() != candidate_path.resolve()
 
 
+def test_self_observation_message_source_disables_tools(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, conversations=[])
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    cfg = runtime_service.get_config().model_copy(deep=True)
+    primary_profile = cfg.llm.get_profile(role="primary")
+    cfg.llm.model_library["model-a"] = {
+        "provider_id": primary_profile.provider_id,
+        "model": "model-a",
+        "label": "Observation test model",
+    }
+    monkeypatch.setattr(session_service, "get_config", lambda: cfg)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {
+                    "agentId": "agent-observation",
+                    "displayName": "Observation Agent",
+                    "status": "active",
+                    "directSessionId": "",
+                    "primaryMode": "self_evolution",
+                    "roleKey": "executor",
+                    "toolPolicyId": "tool-agent-observation",
+                    "metadata": {"selfEvolutionRole": "executor"},
+                    "llmBindings": {"dialogue": {"modelId": "model-a"}},
+                }
+            ],
+            "toolPolicies": {
+                "tool-agent-observation": {
+                    "policyId": "tool-agent-observation",
+                    "allowedTools": ["python_lint_tool"],
+                    "preferredTools": [],
+                    "blockedTools": [],
+                    "readScopes": [],
+                    "writeScopes": [],
+                    "allowedCommandKinds": [],
+                    "blockedCommandPatterns": [],
+                    "networkAccess": "none",
+                    "mutationAccess": "none",
+                    "maxCallsPerTurn": 4,
+                    "perToolRules": {},
+                }
+            },
+        }
+    )
+
+    scheduled_contexts: list[dict] = []
+    observed_turn_call: dict[str, object] = {}
+
+    class DummyAgent:
+        def set_mental_model_enabled_override(self, enabled):
+            self.override = enabled
+
+        def seed_chat_history(self, messages):
+            self.seeded_history = list(messages)
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **kwargs: DummyAgent())
+
+    def fake_run_existing_agent_single_turn(agent, initial_prompt=None, attachments=None, disable_tools=False):
+        observed_turn_call["initial_prompt"] = initial_prompt
+        observed_turn_call["disable_tools"] = disable_tools
+        observed_turn_call["attachment_count"] = len(list(attachments or []))
+        return {
+            "status": "completed",
+            "summary": f"seen: {initial_prompt}",
+            "raw_output": f"seen: {initial_prompt}",
+            "tool_call_count": 0,
+            "tool_trace": [],
+        }
+
+    monkeypatch.setattr(session_service, "run_existing_agent_single_turn", fake_run_existing_agent_single_turn)
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: scheduled_contexts.append(dict(context)) or session_service._run_session_turn(context),
+    )
+
+    created = session_service.create_supervised_agent_session(
+        agent_id="agent-observation",
+        title="hidden self observation case",
+        metadata={"role": "executor"},
+    )
+    prompt = "你没有任何工具。只能观察规划，并明确写出无法验证项。"
+    response = session_service.submit_session_message(
+        created["id"],
+        prompt,
+        mental_model_enabled=False,
+        message_source="self_observation",
+        message_metadata={"runKind": "self_observation_run", "mode": "self_observation"},
+    )
+
+    assert response["messages"][-1]["content"] == f"seen: {prompt}"
+    assert scheduled_contexts[-1]["user_message"] == prompt
+    assert scheduled_contexts[-1]["user_message_source"] == "self_observation"
+    assert observed_turn_call["initial_prompt"] == prompt
+    assert observed_turn_call["disable_tools"] is True
+    assert observed_turn_call["attachment_count"] == 0
+
+
 def test_session_query_keeps_active_session_on_default_first_page(tmp_path, monkeypatch):
     conversations = []
     for index in range(60):

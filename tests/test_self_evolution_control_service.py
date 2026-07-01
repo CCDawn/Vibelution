@@ -1112,8 +1112,51 @@ def test_start_self_observation_run_rejects_tool_and_authorization_fields(monkey
         service.start_self_observation_run(payload)
 
 
+def test_self_observation_turn_finishes_with_report(monkeypatch):
+    monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+    monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: None)
+    service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
+
+    emitted = [
+        "当前理解：目标是观察规划。",
+        "无法验证：没有工具，不能读取项目。",
+    ]
+
+    def fake_run_observation_session(*, run_id, prompt, duration_seconds):
+        assert run_id.startswith("self-observe-")
+        assert "你没有任何工具" in prompt
+        assert duration_seconds == 60
+        return {
+            "conversationSessionId": "session-observe-1",
+            "messages": emitted,
+            "report": "观察目标：观察规划\n无法验证清单：不能读取项目",
+        }
+
+    monkeypatch.setattr(service, "_run_observation_session", fake_run_observation_session)
+
+    started = service.start_self_observation_run({"goal": "观察规划", "durationSeconds": 60})
+    service._run_self_observation_turn({"runId": started["runId"], "goal": "观察规划", "durationSeconds": 60})
+
+    snapshot = service.get_self_observation_run_snapshot(started["runId"])
+    assert snapshot is not None
+    assert snapshot["status"] == "done"
+    assert snapshot["conversationSessionId"] == "session-observe-1"
+    assert snapshot["messages"] == emitted
+    assert "观察目标" in snapshot["report"]
+    assert snapshot["latestMessage"] == emitted[-1]
+
+
 def test_start_self_observation_run_completes_and_releases_active_slot(monkeypatch):
     monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+    monkeypatch.setattr(
+        service,
+        "_run_observation_session",
+        lambda **kwargs: {
+            "conversationSessionId": "session-observe-complete",
+            "messages": ["当前理解：观察规划能力。", "无法验证：没有工具。"],
+            "report": "观察目标：观察规划能力\n无法验证清单：没有工具。",
+        },
+    )
     monkeypatch.setattr(
         service._RUN_EXECUTOR,
         "submit",
@@ -1128,8 +1171,9 @@ def test_start_self_observation_run_completes_and_releases_active_slot(monkeypat
     assert final_snapshot["phase"] == "done"
     assert final_snapshot["runtimeStatus"] == "done"
     assert final_snapshot["finishedAt"]
+    assert final_snapshot["conversationSessionId"] == "session-observe-complete"
     assert "无法验证" in final_snapshot["report"]
-    assert final_snapshot["latestMessage"]
+    assert final_snapshot["latestMessage"] == "无法验证：没有工具。"
     assert final_snapshot["actionStates"]["terminate"]["enabled"] is False
     assert service.get_active_self_observation_run() is None
     assert service._ACTIVE_OBSERVATION_RUN_ID == ""
