@@ -1171,9 +1171,15 @@ describe("TeamsRoute layout contract", () => {
     );
     expect(routeStyles.sourceCollectionFocusedPanel).toContain("isolate");
     expect(routeStyles.sourceCollectionStageWorkspace).toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(routeStyles.sourceCollectionPageBody).toContain("!grid");
+    expect(routeStyles.sourceCollectionPageBody).toContain("p-2");
+    expect(routeStyles.sourceCollectionCommandBar).toContain("!grid");
     expect(routeStyles.sourceCollectionStageCard).toContain("border-l-[4px]");
+    expect(routeStyles.sourceCollectionStageCard).toContain("!grid");
+    expect(routeStyles.sourceCollectionStageCard).toContain("min-h-[132px]");
     expect(routeStyles.sourceCollectionStageCardHead).toContain("grid-cols-[max-content_1fr]");
     expect(routeStyles.sourceCollectionStageCardHead).not.toContain("sourceCollectionStageProjection");
+    expect(routeStyles.sourceCollectionStageCardActions).toContain("flex-nowrap");
     expect(routeStyles.canvasLayoutModeSwitch).toContain("grid-cols-[repeat(auto-fit,minmax(86px,max-content))]");
     expect(routeStyles.toolbarActions).toContain("flex-wrap");
     expect(routeStyles.sourceCollectionStageModules).toContain("grid-cols-[repeat(4,minmax(0,1fr))]");
@@ -1183,6 +1189,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionControlPanel).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageModules).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageCard).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionStageCardActions).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageCardSelected).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageCardHead).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageProjection).toBeTypeOf("string");
@@ -1397,6 +1404,10 @@ describe("TeamsRoute layout contract", () => {
     expect(stageCardSource).toContain("module.status");
     expect(stageCardSource).toContain("module.metric");
     expect(stageCardSource).toContain("module.nextLabel");
+    expect(stageCardSource).toContain("sourceCollectionStageCardActions");
+    expect(stageCardSource).toContain("module.onAction");
+    expect(stageCardSource).toContain("module.actionDisabled");
+    expect(stageCardSource).toContain("sourceCollectionActionDisabledTitle(cardActionReadiness, module.actionLabel)");
     expect(stageCardSource).not.toContain("module.summary");
     expect(stageCardSource).not.toContain("sourceCollectionStageProjectionTaskMetric");
     expect(stageCardSource).not.toContain("sourceCollectionStageTechnicalDetails");

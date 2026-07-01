@@ -11875,6 +11875,10 @@ export function TeamsRoute({
                   }}
                   onKeyDown={(event) => sourceCollectionStageCardKeyDown(event, module.onDetail)}
                 >
+                  {(() => {
+                    const cardActionReadiness = sourceCollectionStageActionReadinessFor(module.id);
+                    return (
+                      <>
                   <div className={styles.sourceCollectionStageCardHead}>
                     <strong>{String(index + 1).padStart(2, "0")}</strong>
                     <span>{module.status}</span>
@@ -11884,6 +11888,20 @@ export function TeamsRoute({
                     <em>{module.metric}</em>
                     <small>{lang === "zh" ? "下一步：" : "Next: "}{module.nextLabel}</small>
                   </span>
+                  <div className={styles.sourceCollectionStageCardActions}>
+                    <VNativeButton
+                      type="button"
+                      disabled={module.actionDisabled}
+                      onClick={module.onAction}
+                      title={sourceCollectionActionDisabledTitle(cardActionReadiness, module.actionLabel)}
+                    >
+                      {renderSourceCollectionStageActionIcon(module.actionIcon)}
+                      {module.actionLabel}
+                    </VNativeButton>
+                  </div>
+                      </>
+                    );
+                  })()}
                 </article>
               ))}
             </section>
