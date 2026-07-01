@@ -1159,7 +1159,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionCandidateListShell).toContain("self-start");
     expect(routeStyles.sourceCollectionCandidateListShell).toContain("min-h-0");
     expect(routeStylesSource).not.toContain("grid-template-rows: auto minmax(0, 1fr) auto auto");
-    expect(routeStyles.sourceCollectionFilterBar).toContain("grid-cols-[repeat(5,minmax(0,1fr))]");
+    expect(routeStyles.sourceCollectionFilterBar).toContain("[&_[data-vui=native-button]]:flex-none");
     expect(routeStylesSource).not.toContain("min-height: 122px");
     expect(routeStylesSource).not.toContain("min-height: 96px");
     expect(routeStyles.sourceCollectionTraceBody).toContain("grid-cols-[44px_minmax(0,1fr)]");

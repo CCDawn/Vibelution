@@ -453,7 +453,7 @@ const styles = createVuiStyleMap(styleKeys, {
     sourceCollectionPanelActions: "flex-wrap",
     sourceCollectionCandidateListShell:
       "min-h-0 content-start items-start self-start overflow-y-auto [scrollbar-gutter:stable]",
-    sourceCollectionFilterBar: "grid-cols-[repeat(5,minmax(0,1fr))]",
+    sourceCollectionFilterBar: "overflow-x-auto [&_[data-vui=native-button]]:flex-none [&_[data-vui=native-button]]:min-w-[76px]",
     sourceCollectionFocusedPanel:
       "grid-cols-[minmax(0,1fr)_minmax(320px,380px)] isolate",
     sourceCollectionPagination: "select-none whitespace-nowrap [writing-mode:horizontal-tb]",
