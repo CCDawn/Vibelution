@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
 import routeSource from "./TeamsRoute.tsx?raw";
+import teamStageCardSource from "../components/vui/product/team-management/TeamStageCard.tsx?raw";
 import routeStyles from "./TeamsRoute.styles";
 import routeStylesModuleSource from "./TeamsRoute.styles.ts?raw";
 import routerSource from "../app/router.tsx?raw";
@@ -479,7 +480,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionFocusedPanelId");
     expect(routeSource).toContain("sourceCollectionControlPanelRef");
     expect(routeSource).toContain("sourceCollectionPanelClassName");
-    expect(routeSource).toContain("sourceCollectionStageCardKeyDown");
+    expect(routeSource).toContain("TeamStagePipeline");
     expect(routeSource).toContain("container.scrollTo");
     expect(routeSource).toContain("HTMLDetailsElement");
     expect(routeSource).toContain("暂无候选");
@@ -500,7 +501,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("SOURCE_COLLECTION_RESULT_PREVIEW_LIMIT");
     expect(routeSource).toContain("sourceCollectionStageCard");
     expect(routeSource).toContain("detailLabel");
-    expect(routeSource).toContain("module.onDetail()");
+    expect(routeSource).toContain("onActivate={module.onDetail}");
     expect(routeSource).toContain("sourceCollectionStagePrimaryAction");
     expect(routeSource).toContain("sourceCollectionStageSecondaryAction");
     expect(routeSource).not.toContain("sourceCollectionStageActionRow");
@@ -624,9 +625,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("onClick={preventSourceCollectionPanelSummaryToggle}");
     expect(routeSource).not.toContain("sourceCollectionTraceMessagesForStage");
     expect(routeSource).not.toContain("renderSourceCollectionStageProcessPanel");
-    expect(routeSource).toContain("sourceCollectionStageCardSelected");
+    expect(routeSource).toContain("selected={module.id === selectedSourceCollectionStageId}");
     expect(routeSource).not.toContain("sourceCollectionStageOperationPanel");
-    expect(routeSource).toContain("aria-pressed");
     expect(routeSource).not.toContain("<small>{module.summary}</small>");
     expect(routeSource).not.toContain("sourceCollectionStageProjectionTaskMetric(module.projection");
     expect(routeSource).not.toContain("<summary>{lang === \"zh\" ? \"技术详情\" : \"Technical details\"}</summary>");
@@ -664,7 +664,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("SOURCE_COLLECTION_STAGE_AGENT_KEYS");
     expect(routeSource).toContain("sourceCollectionStageAgentBindings(stageId)");
     expect(routeSource).not.toContain("renderSourceCollectionStageAgentStrip");
-    expect(routeSource).toContain('event.target.closest("button, a")');
+    expect(teamStageCardSource).toContain('target.closest("button, a")');
     expect(routeSource).toContain("renderSourceCollectionStageAgents(activeModule.id)");
     expect(routeSource).toContain("当前步骤 Agent 配置");
     expect(routeSource).toContain("sourceCollectionStageAgentCardBody");
@@ -945,7 +945,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("历史任务 ${historicalTaskCount} 已忽略");
     const sourceCollectionCommandStatsSource = routeSource.slice(
       routeSource.indexOf("<div className={styles.sourceCollectionCommandStats}>"),
-      routeSource.indexOf("<section id=\"source-collection-stage-status\"")
+      routeSource.indexOf("id=\"source-collection-stage-status\"")
     );
     expect(sourceCollectionCommandStatsSource).toContain("sourceCollectionConsoleStatusText");
     expect(sourceCollectionCommandStatsSource).toContain("sourceCollectionBoardNextStepLabel");
@@ -1318,7 +1318,7 @@ describe("TeamsRoute layout contract", () => {
 
     const stageModuleSource = routeSource.slice(
       routeSource.indexOf("const sourceCollectionStageModules"),
-      routeSource.indexOf("const sourceCollectionStageCardKeyDown"),
+      routeSource.indexOf("const sourceCollectionBoardCurrentModule"),
     );
     const ingestionModuleSource = stageModuleSource.slice(
       stageModuleSource.indexOf('id: "ingestion"'),
@@ -1368,7 +1368,7 @@ describe("TeamsRoute layout contract", () => {
 
     const stageModuleSource = routeSource.slice(
       routeSource.indexOf("const sourceCollectionStageModules"),
-      routeSource.indexOf("const sourceCollectionStageCardKeyDown"),
+      routeSource.indexOf("const sourceCollectionBoardCurrentModule"),
     );
     expect(stageModuleSource).toContain('sourceCollectionStageActionReadinessFor("finding").disabled');
     expect(stageModuleSource).toContain('sourceCollectionStageActionReadinessFor("extraction").disabled');
@@ -1386,7 +1386,7 @@ describe("TeamsRoute layout contract", () => {
 
     const commandStatsSource = standaloneSource.slice(
       standaloneSource.indexOf("<div className={styles.sourceCollectionCommandStats}>"),
-      standaloneSource.indexOf("<section id=\"source-collection-stage-status\""),
+      standaloneSource.indexOf("id=\"source-collection-stage-status\""),
     );
     expect(commandStatsSource).toContain("sourceCollectionConsoleStatusText");
     expect(commandStatsSource).toContain("sourceCollectionBoardNextStepLabel");
@@ -1397,14 +1397,14 @@ describe("TeamsRoute layout contract", () => {
     expect(commandStatsSource).not.toContain("sourceCollectionPromptCacheStatusLabel");
 
     const stageCardSource = standaloneSource.slice(
-      standaloneSource.indexOf("<section id=\"source-collection-stage-status\""),
+      standaloneSource.indexOf("id=\"source-collection-stage-status\""),
       standaloneSource.indexOf("<div className={styles.sourceCollectionPageGrid}>"),
     );
-    expect(stageCardSource).toContain("sourceCollectionStepClassName(module.state)");
+    expect(stageCardSource).toContain("tone={module.state as TeamStageTone}");
     expect(stageCardSource).toContain("module.status");
     expect(stageCardSource).toContain("module.metric");
     expect(stageCardSource).toContain("module.nextLabel");
-    expect(stageCardSource).toContain("sourceCollectionStageCardActions");
+    expect(stageCardSource).toContain("TeamStageCard");
     expect(stageCardSource).toContain("module.onAction");
     expect(stageCardSource).toContain("module.actionDisabled");
     expect(stageCardSource).toContain("sourceCollectionActionDisabledTitle(cardActionReadiness, module.actionLabel)");
