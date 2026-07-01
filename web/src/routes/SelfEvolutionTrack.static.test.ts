@@ -162,6 +162,23 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).not.toContain("onHandoffRun");
   });
 
+  it("offers isolated development and pure observation modes", () => {
+    expect(selfEvolutionSource).toContain('type SelfEvolutionMode = "isolated_development" | "observation"');
+    expect(selfEvolutionSource).toContain('value="isolated_development"');
+    expect(selfEvolutionSource).toContain('value="observation"');
+    expect(selfEvolutionSource).toContain("自主观察");
+    expect(selfEvolutionSource).toContain("隔离开发");
+  });
+
+  it("keeps observation mode free of tool and merge actions", () => {
+    expect(selfEvolutionSource).toContain("observationRun");
+    expect(selfEvolutionSource).toContain("allowedTools.length === 0");
+    expect(selfEvolutionSource).toContain("onStartObservation");
+    expect(selfEvolutionSource).toContain("onTerminateObservation");
+    expect(selfEvolutionSource).not.toContain("onRequestObservationTool");
+    expect(selfEvolutionSource).not.toContain("observationToolRequest");
+  });
+
   it("keeps the pet companion read-only inside self-evolution", () => {
     expect(selfEvolutionSource).toContain("deriveSelfEvolutionPetCompanionState");
     expect(selfEvolutionSource).toContain("petSelfCompanion");
