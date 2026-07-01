@@ -70,7 +70,7 @@ import {
   type AgentFilterSectionView,
   type AgentSummaryMetric,
 } from "../components/vui/product/agent-management";
-import { VButton, VChip, VEmptyState, VHStack, VNativeSelect, VPanelHeader } from "../components/vui";
+import { VButton, VChip, VEmptyState, VFieldRow, VHStack, VNativeInput, VNativeSelect, VNativeTextarea, VPanelHeader } from "../components/vui";
 import { vuiFormLabelClass } from "../components/vui/forms/formClasses";
 import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
@@ -6342,19 +6342,17 @@ export function AgentsRoute() {
                   <p><strong>{copy.healthNextStep}</strong>{issueNextStep(selectedAgent.health, lang)}</p>
                 </section>
                 <div className={styles.editorGrid}>
-                  <label className={styles.field}>
-                    <span>Agent</span>
-                    <input
+                  <VFieldRow label="Agent">
+                    <VNativeInput
                       value={configDraft.displayName}
                       onChange={(event) => updateDraft({ displayName: event.target.value })}
                     />
-                  </label>
-                  <label className={styles.field}>
-                    <span>{copy.status}</span>
-                    <select value={configDraft.status} onChange={(event) => updateDraft({ status: event.target.value })}>
+                  </VFieldRow>
+                  <VFieldRow label={copy.status}>
+                    <VNativeSelect value={configDraft.status} onChange={(event) => updateDraft({ status: event.target.value })}>
                       <option value="active">{lang === "zh" ? "活跃" : "Active"}</option>
-                    </select>
-                  </label>
+                    </VNativeSelect>
+                  </VFieldRow>
                   <section className={styles.fieldWide} title={copy.llmSlotsHint}>
                     <span>{copy.llmSlots}</span>
                     <div className={styles.llmSlotGrid}>
@@ -6670,52 +6668,43 @@ export function AgentsRoute() {
                   </span>
                 </div>
                 <div className={styles.editorGrid}>
-                  <label className={styles.field}>
-                    <span>{copy.gender}</span>
-                    <input value={personaDraft.gender} onChange={(event) => updatePersonaDraft({ gender: event.target.value })} />
-                  </label>
-                  <label className={styles.field}>
-                    <span>{copy.age}</span>
-                    <input value={personaDraft.age} onChange={(event) => updatePersonaDraft({ age: event.target.value })} />
-                  </label>
-                  <label className={styles.field}>
-                    <span>{copy.pronouns}</span>
-                    <input value={personaDraft.pronouns} onChange={(event) => updatePersonaDraft({ pronouns: event.target.value })} />
-                  </label>
-                  <label className={styles.field}>
-                    <span>{copy.expertise}</span>
-                    <input
+                  <VFieldRow label={copy.gender}>
+                    <VNativeInput value={personaDraft.gender} onChange={(event) => updatePersonaDraft({ gender: event.target.value })} />
+                  </VFieldRow>
+                  <VFieldRow label={copy.age}>
+                    <VNativeInput value={personaDraft.age} onChange={(event) => updatePersonaDraft({ age: event.target.value })} />
+                  </VFieldRow>
+                  <VFieldRow label={copy.pronouns}>
+                    <VNativeInput value={personaDraft.pronouns} onChange={(event) => updatePersonaDraft({ pronouns: event.target.value })} />
+                  </VFieldRow>
+                  <VFieldRow label={copy.expertise}>
+                    <VNativeInput
                       value={personaDraft.expertise}
                       placeholder={copy.expertisePlaceholder}
                       onChange={(event) => updatePersonaDraft({ expertise: event.target.value })}
                     />
-                  </label>
-                  <label className={styles.fieldWide}>
-                    <span>{copy.personality}</span>
-                    <textarea value={personaDraft.personality} onChange={(event) => updatePersonaDraft({ personality: event.target.value })} />
-                  </label>
-                  <label className={styles.fieldWide}>
-                    <span>{copy.communicationStyle}</span>
-                    <textarea
+                  </VFieldRow>
+                  <VFieldRow label={copy.personality} className="col-span-full">
+                    <VNativeTextarea value={personaDraft.personality} onChange={(event) => updatePersonaDraft({ personality: event.target.value })} />
+                  </VFieldRow>
+                  <VFieldRow label={copy.communicationStyle} className="col-span-full">
+                    <VNativeTextarea
                       value={personaDraft.communicationStyle}
                       onChange={(event) => updatePersonaDraft({ communicationStyle: event.target.value })}
                     />
-                  </label>
-                  <label className={styles.fieldWide}>
-                    <span>{copy.background}</span>
-                    <textarea value={personaDraft.background} onChange={(event) => updatePersonaDraft({ background: event.target.value })} />
-                  </label>
-                  <label className={styles.fieldWide}>
-                    <span>{copy.collaborationPreference}</span>
-                    <textarea
+                  </VFieldRow>
+                  <VFieldRow label={copy.background} className="col-span-full">
+                    <VNativeTextarea value={personaDraft.background} onChange={(event) => updatePersonaDraft({ background: event.target.value })} />
+                  </VFieldRow>
+                  <VFieldRow label={copy.collaborationPreference} className="col-span-full">
+                    <VNativeTextarea
                       value={personaDraft.collaborationPreference}
                       onChange={(event) => updatePersonaDraft({ collaborationPreference: event.target.value })}
                     />
-                  </label>
-                  <label className={styles.fieldWide}>
-                    <span>{copy.identityNotes}</span>
-                    <textarea value={personaDraft.identityNotes} onChange={(event) => updatePersonaDraft({ identityNotes: event.target.value })} />
-                  </label>
+                  </VFieldRow>
+                  <VFieldRow label={copy.identityNotes} className="col-span-full">
+                    <VNativeTextarea value={personaDraft.identityNotes} onChange={(event) => updatePersonaDraft({ identityNotes: event.target.value })} />
+                  </VFieldRow>
                 </div>
                 <div className={styles.editorActions}>
                   <VButton
