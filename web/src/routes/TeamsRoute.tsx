@@ -12196,12 +12196,12 @@ export function TeamsRoute({
             {validation && !validation.valid ? <AlertTriangle size={16} /> : researchCanvasReadOnly ? <Eye size={16} /> : <Link2 size={16} />}
           </div>
           <div className={styles.inspectorBody}>
-            {selectedTeam ? renderTeamMemoryIndex() : null}
             {researchWorkflowTeamSelected && !researchCanvasVisible ? (
               <>
                 {renderResearchStageLauncher()}
               </>
             ) : null}
+            {selectedTeam ? renderTeamMemoryIndex() : null}
             {researchCanvasReadOnly ? renderResearchCanvasReadOnlyPanel() : null}
             {showNodeBindingPanel && !selectedTeam ? (
               <section className={`${styles.nodeBindingSection} ${styles.nodeBindingPlaceholder}`}>
