@@ -63,6 +63,7 @@ import {
   VStatusStrip,
 } from "../components/vui";
 import {
+  TeamSourceFilterBar,
   TeamStageCard,
   TeamStageCommandBar,
   TeamStagePipeline,
@@ -6636,23 +6637,16 @@ export function TeamsRoute({
   ) {
     const loadingValue = lang === "zh" ? "加载中" : "loading";
     return (
-      <div className={styles.sourceCollectionFilterBar} aria-label={label}>
-        {SOURCE_COLLECTION_SOURCE_FILTERS.map((filter) => {
-          const selected = sourceCollectionSourceFilter === filter;
-          return (
-            <VNativeButton
-              key={filter}
-              type="button"
-              className={selected ? styles.sourceCollectionFilterActive : ""}
-              onClick={() => setSourceCollectionSourceFilter(filter)}
-              aria-pressed={selected}
-            >
-              <span>{sourceCollectionSourceFilterLabel(filter, lang)}</span>
-              <strong>{loading ? loadingValue : counts[filter] ?? 0}</strong>
-            </VNativeButton>
-          );
-        })}
-      </div>
+      <TeamSourceFilterBar
+        ariaLabel={label}
+        onSelect={(key) => setSourceCollectionSourceFilter(key as SourceCollectionSourceFilter)}
+        options={SOURCE_COLLECTION_SOURCE_FILTERS.map((filter) => ({
+          key: filter,
+          label: sourceCollectionSourceFilterLabel(filter, lang),
+          count: loading ? loadingValue : counts[filter] ?? 0,
+          selected: sourceCollectionSourceFilter === filter,
+        }))}
+      />
     );
   }
 
