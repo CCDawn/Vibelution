@@ -1114,36 +1114,107 @@ def test_start_self_observation_run_rejects_tool_and_authorization_fields(monkey
 
 def test_self_observation_turn_finishes_with_report(monkeypatch):
     monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+    monkeypatch.setattr(service, "self_evolution_agent_bindings", lambda: {"executor": {"agentId": "agent-observe-1"}})
+    monkeypatch.setattr(service, "create_supervised_agent_session", lambda **kwargs: {"id": "session-observe-1"})
+    monkeypatch.setattr(service, "submit_session_message", lambda *args, **kwargs: {"turnId": "turn-observe-1"})
     monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: None)
     service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
 
-    emitted = [
-        "当前理解：目标是观察规划。",
-        "无法验证：没有工具，不能读取项目。",
-    ]
+    detail_calls = {"count": 0}
+    completion_calls = {"count": 0}
+    observed_latest_messages: list[str] = []
 
-    def fake_run_observation_session(*, run_id, prompt, duration_seconds):
-        assert run_id.startswith("self-observe-")
-        assert "你没有任何工具" in prompt
-        assert duration_seconds == 60
+    def fake_get_session_detail(session_id):
+        assert session_id == "session-observe-1"
+        detail_calls["count"] += 1
+        if detail_calls["count"] == 1:
+            return {
+                "messages": [
+                    {"role": "assistant", "content": "当前理解：目标是观察规划。"},
+                ],
+                "lastTurnError": {},
+            }
         return {
-            "conversationSessionId": "session-observe-1",
-            "messages": emitted,
-            "report": "观察目标：观察规划\n无法验证清单：不能读取项目",
+            "messages": [
+                {"role": "assistant", "content": "当前理解：目标是观察规划。"},
+                {"role": "assistant", "content": "观察目标：观察规划\n无法验证清单：不能读取项目。"},
+            ],
+            "lastTurnError": {},
         }
 
-    monkeypatch.setattr(service, "_run_observation_session", fake_run_observation_session)
+    def fake_get_session_turn_completion_snapshot(session_id, turn_id):
+        assert session_id == "session-observe-1"
+        assert turn_id == "turn-observe-1"
+        completion_calls["count"] += 1
+        if completion_calls["count"] == 1:
+            return {
+                "terminal": False,
+                "assistantText": "当前理解：目标是观察规划。",
+                "lastTurnStatus": "running",
+            }
+        return {
+            "terminal": True,
+            "assistantText": "观察目标：观察规划\n无法验证清单：不能读取项目。",
+            "lastTurnStatus": "done",
+        }
+
+    monkeypatch.setattr(service, "get_session_detail", fake_get_session_detail)
+    monkeypatch.setattr(service, "get_session_turn_completion_snapshot", fake_get_session_turn_completion_snapshot)
+    monkeypatch.setattr(service, "request_stop_session_turn", lambda session_id: None)
+    run_id_box = {"value": ""}
+
+    def fake_sleep(*_args, **_kwargs):
+        snapshot = service.get_self_observation_run_snapshot(run_id_box["value"]) or {}
+        observed_latest_messages.append(str(snapshot.get("latestMessage") or ""))
+
+    monkeypatch.setattr(service.time, "sleep", fake_sleep)
 
     started = service.start_self_observation_run({"goal": "观察规划", "durationSeconds": 60})
+    run_id_box["value"] = started["runId"]
     service._run_self_observation_turn({"runId": started["runId"], "goal": "观察规划", "durationSeconds": 60})
 
     snapshot = service.get_self_observation_run_snapshot(started["runId"])
     assert snapshot is not None
     assert snapshot["status"] == "done"
     assert snapshot["conversationSessionId"] == "session-observe-1"
-    assert snapshot["messages"] == emitted
+    assert snapshot["messages"] == [
+        "当前理解：目标是观察规划。",
+        "观察目标：观察规划\n无法验证清单：不能读取项目。",
+    ]
     assert "观察目标" in snapshot["report"]
-    assert snapshot["latestMessage"] == emitted[-1]
+    assert snapshot["latestMessage"] == "观察目标：观察规划\n无法验证清单：不能读取项目。"
+    assert "当前理解：目标是观察规划。" in observed_latest_messages
+
+
+def test_self_observation_turn_marks_boundary_violation(monkeypatch):
+    monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+    monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: None)
+    service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
+
+    monkeypatch.setattr(
+        service,
+        "_run_observation_session",
+        lambda **kwargs: {
+            "conversationSessionId": "session-observe-violated",
+            "messages": [
+                "当前理解：我已经读取了项目文件。",
+                "无法验证：我已经读取了项目文件，所以可以确认结果。",
+            ],
+            "report": "观察目标：观察规划\n我已经读取了项目文件。",
+        },
+    )
+
+    started = service.start_self_observation_run({"goal": "观察规划", "durationSeconds": 60})
+    service._run_self_observation_turn({"runId": started["runId"], "goal": "观察规划", "durationSeconds": 60})
+
+    snapshot = service.get_self_observation_run_snapshot(started["runId"])
+    assert snapshot is not None
+    assert snapshot["status"] == "boundary_violation"
+    assert snapshot["phase"] == "boundary_violation"
+    assert snapshot["runtimeStatus"] == "boundary_violation"
+    assert snapshot["boundaryViolation"] == "claimed_file_read"
+    assert snapshot["conversationSessionId"] == "session-observe-violated"
+    assert "我已经读取了项目文件" in snapshot["report"]
 
 
 def test_start_self_observation_run_completes_and_releases_active_slot(monkeypatch):
