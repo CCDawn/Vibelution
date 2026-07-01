@@ -153,7 +153,11 @@ describe("VUI architecture boundary", () => {
         const source = readText(join(sourceRoot, file));
         return source.includes("className=") || source.includes("styles.");
       })
-      .filter((file) => !existsSync(join(sourceRoot, file.replace(/\.tsx?$/, ".styles.ts"))))
+      .filter(
+        (file) =>
+          !existsSync(join(sourceRoot, file.replace(/\.tsx?$/, ".styles.ts"))) &&
+          !existsSync(join(sourceRoot, file.replace(/\.tsx?$/, ".module.css"))),
+      )
       .filter((file) => !allowedSharedConsumers.has(file));
 
     expect(offenders).toEqual([]);

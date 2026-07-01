@@ -66,7 +66,8 @@ import {
   AgentWorkspacePanel,
   type AgentSummaryMetric,
 } from "../components/vui/product/agent-management";
-import { VButton } from "../components/vui";
+import { VButton, VHStack, VNativeSelect } from "../components/vui";
+import { vuiFormLabelClass } from "../components/vui/forms/formClasses";
 import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
@@ -5530,10 +5531,12 @@ export function AgentsRoute() {
   );
 
   const bulkPromptPicker = (
-    <label className="inline-flex min-w-[180px] max-w-full items-center gap-1.5 text-[0.74rem] font-semibold text-vui-fg-secondary">
-      <span className="shrink-0 whitespace-nowrap">{copy.bulkPromptLabel}</span>
-      <select
-        className="min-h-[26px] min-w-0 flex-1 rounded-[var(--radius-control)] border border-vui-border-subtle bg-[var(--surface-input-strong)] px-2 text-vui-fg-primary"
+    <VHStack>
+      <label className={vuiFormLabelClass} htmlFor="agents-bulk-prompt">
+        {copy.bulkPromptLabel}
+      </label>
+      <VNativeSelect
+        id="agents-bulk-prompt"
         value={bulkPromptTemplateId}
         disabled={bulkAgentPending}
         onChange={(event) => setBulkPromptTemplateId(event.target.value)}
@@ -5544,8 +5547,8 @@ export function AgentsRoute() {
             {promptTemplateOptionLabel(template, lang)}
           </option>
         ))}
-      </select>
-    </label>
+      </VNativeSelect>
+    </VHStack>
   );
 
   const bulkMutationActions = (
