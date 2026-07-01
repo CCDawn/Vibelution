@@ -285,6 +285,8 @@ const styles = createVuiStyleMap(styleKeys, {
   extensions: {
     answerOnlyProcessStatic:
       "[&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:grid-cols-[14px_auto_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5",
+    answerOnlyProcessGroup:
+      "inline-grid w-fit max-w-[min(100%,920px)] gap-1 rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--surface-panel)_58%,transparent)] px-2 py-1 text-[var(--fg-secondary)] shadow-[var(--vui-shadow-hairline)]",
     answerOnlyProcessToggle:
       "border-0 bg-transparent p-0 text-[var(--fg-secondary)] hover:border-transparent hover:bg-transparent [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:inline-grid [&_[data-slot=vui-button-label]]:max-w-full [&_[data-slot=vui-button-label]]:grid-cols-[14px_auto_auto_minmax(0,1fr)_14px] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5",
     agentInboxTurn: "[&_.turnContent]:w-[min(100%,920px)] [&_.turnContent]:p-0 [&_.turnContent]:border-l-0",
@@ -310,6 +312,10 @@ const styles = createVuiStyleMap(styleKeys, {
     reActResultToggle: "border-0 bg-transparent",
     reActThoughtText: "border-l-0 bg-transparent",
     responseLabel: "text-[var(--vui-font-md)]",
+    responseBody:
+      "grid gap-2 rounded-[var(--radius-panel)] bg-[color-mix(in_srgb,var(--surface-panel)_66%,transparent)] px-3 py-2 text-[var(--fg-primary)] shadow-[var(--vui-shadow-hairline)]",
+    responseSection:
+      "grid w-[min(100%,920px)] max-w-full gap-1.5 border-l border-[color-mix(in_srgb,var(--accent-cool)_22%,var(--vui-border-subtle))] pl-3",
     responseSegment_answer: "[&_.markdownBody]:max-w-[min(100%,76ch)] [&_.responseSegmentHeader]:hidden",
     responseToggle:
       "border-0 bg-transparent p-0 text-[var(--fg-secondary)] hover:border-transparent hover:bg-transparent [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:inline-flex [&_[data-slot=vui-button-label]]:gap-[7px]",
@@ -323,6 +329,8 @@ const styles = createVuiStyleMap(styleKeys, {
     timelineCellPreview: "whitespace-normal break-words [overflow-wrap:anywhere] line-clamp-2",
     timelineThoughtText: "border-0 bg-transparent",
     turnSpeaker: "text-[var(--vui-font-md)]",
+    userMessageBody:
+      "w-fit max-w-[min(100%,76ch)] justify-self-end rounded-[var(--radius-panel)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--surface-panel))] px-3 py-2 text-left text-[var(--fg-primary)] shadow-[var(--vui-shadow-hairline)]",
     userCard: "bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel))]",
   },
   overrides: {
@@ -343,7 +351,7 @@ const styles = createVuiStyleMap(styleKeys, {
     assistantTurn:
       "grid w-full min-w-0 grid-cols-[34px_minmax(0,1fr)] gap-x-3 justify-self-stretch [&_.turnContent]:w-[min(100%,920px)] [&_.turnContent]:p-0 [&_.turnContent]:border-l-0",
     assistantTurnContinuation:
-      "grid w-full min-w-0 grid-cols-[34px_minmax(0,1fr)] gap-x-3 [&_.turnAvatar]:bg-transparent [&_.turnContent]:gap-1",
+      "grid w-full min-w-0 grid-cols-[34px_minmax(0,1fr)] gap-x-3 [&_.turnAvatar]:bg-transparent [&_.turnContent]:w-[min(100%,920px)] [&_.turnContent]:gap-1",
     groupTranscriptTurn:
       "grid w-full min-w-0 grid-cols-[34px_minmax(0,1fr)] gap-x-3 justify-self-stretch [&_.turnContent]:w-[min(100%,920px)] [&_.turnContent]:p-0 [&_.turnContent]:border-l-0",
     turnAvatar:
@@ -361,7 +369,7 @@ const styles = createVuiStyleMap(styleKeys, {
     turnSpeaker:
       "min-w-0 truncate text-[var(--vui-font-md)] font-semibold leading-tight text-[var(--fg-primary)]",
     userTurn:
-      "grid w-full min-w-0 grid-cols-[minmax(0,1fr)_34px] gap-x-3 justify-self-stretch [&_.turnAvatar]:col-start-2 [&_.turnAvatar]:row-start-1 [&_.turnContent]:col-start-1 [&_.turnContent]:row-start-1 [&_.turnContent]:justify-self-end [&_.turnContent]:w-[min(82%,860px)] [&_.turnMeta]:justify-self-end [&_.turnMeta]:justify-end [&_.turnMeta]:text-right [&_.turnMetaActions]:justify-end [&_.turnMetaIdentity]:justify-end [&_.turnSpeaker]:hidden",
+      "grid w-full min-w-0 grid-cols-[minmax(0,1fr)_34px] gap-x-3 justify-self-stretch [&_.turnAvatar]:col-start-2 [&_.turnAvatar]:row-start-1 [&_.turnContent]:col-start-1 [&_.turnContent]:row-start-1 [&_.turnContent]:w-fit [&_.turnContent]:max-w-[min(82%,860px)] [&_.turnContent]:justify-self-end [&_.turnMeta]:justify-self-end [&_.turnMeta]:justify-end [&_.turnMeta]:text-right [&_.turnMetaActions]:justify-end [&_.turnMetaIdentity]:justify-end [&_.turnSpeaker]:hidden",
   },
 });
 

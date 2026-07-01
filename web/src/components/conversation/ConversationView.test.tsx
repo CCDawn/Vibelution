@@ -267,11 +267,39 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(styles.assistantTurn).toContain("grid-cols-[34px_minmax(0,1fr)]");
     expect(styles.userTurn).toContain("grid-cols-[minmax(0,1fr)_34px]");
+    expect(styles.userTurn).toContain("[&_.turnContent]:w-fit");
+    expect(styles.userTurn).toContain("[&_.turnContent]:max-w-[min(82%,860px)]");
+    expect(styles.assistantTurnContinuation).toContain("[&_.turnContent]:w-[min(100%,920px)]");
     expect(styles.turnContent).toContain("gap-[5px]");
     expect(styles.turnMeta).toContain("inline-flex");
     expect(styles.turnSpeaker).toContain("truncate");
     expect(styles.turnAvatarImage).toContain("object-cover");
     expect(styles.responseSegment_answer).toContain("[&_.responseSegmentHeader]:hidden");
+  });
+
+  it("restores chat message affordances inside semantic message bodies", () => {
+    expect(styles.userMessageBody).toContain("justify-self-end");
+    expect(styles.userMessageBody).toContain("w-fit");
+    expect(styles.userMessageBody).toContain("max-w-[min(100%,76ch)]");
+    expect(styles.userMessageBody).toContain("rounded-[var(--radius-panel)]");
+    expect(styles.userMessageBody).toContain("bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--surface-panel))]");
+    expect(styles.userMessageBody).toContain("px-3");
+    expect(styles.userMessageBody).toContain("py-2");
+    expect(styles.userMessageBody).toContain("text-left");
+
+    expect(styles.responseSection).toContain("w-[min(100%,920px)]");
+    expect(styles.responseSection).toContain("border-l");
+    expect(styles.responseSection).toContain("pl-3");
+    expect(styles.responseBody).toContain("rounded-[var(--radius-panel)]");
+    expect(styles.responseBody).toContain("bg-[color-mix(in_srgb,var(--surface-panel)_66%,transparent)]");
+    expect(styles.responseBody).toContain("px-3");
+    expect(styles.responseBody).toContain("py-2");
+
+    expect(styles.answerOnlyProcessGroup).toContain("w-fit");
+    expect(styles.answerOnlyProcessGroup).toContain("max-w-[min(100%,920px)]");
+    expect(styles.answerOnlyProcessGroup).toContain("rounded-[var(--radius-control)]");
+    expect(styles.answerOnlyProcessGroup).toContain("px-2");
+    expect(styles.answerOnlyProcessGroup).toContain("py-1");
   });
 
   it("uses shared readable scale tokens for dense conversation text", () => {
