@@ -73,10 +73,30 @@ tests/
 
 ## 三、使用方法
 
-### 3.1 使用 pytest（推荐）
+### 3.1 推荐验证顺序
+
+日常开发优先从影响面选择器开始，不要默认直接跑整仓串行测试：
 
 ```bash
-# 运行所有测试
+# 根据当前分支相对 main 的变更给出分层验证建议
+python tests/select_tests.py --from-git main
+
+# 只输出可复制执行的聚焦命令
+python tests/select_tests.py --from-git main --commands-only
+```
+
+推荐顺序：
+
+1. 先跑 selector 输出的 focused 命令。
+2. 如果输出 `local-parallel`，再跑本地 `pytest-xdist` 的 `not serial` 并发层。
+3. 如果输出 `local-serial`，必须在本机串行补跑对应 Launcher、端口、真实进程、Git、config 或共享 workspace 测试。
+4. 如果输出 `remote-distributed`，可以用服务器/Docker 分片加速 Python `not serial` 回归，但它不是完整 gate。
+5. 如果输出 `frontend`，必须单独跑对应 Vitest/build；Python 本地或远端测试都不能替代前端验证。
+
+### 3.2 直接使用 pytest
+
+```bash
+# 广义串行全量，仅在发布前或定位复杂串行问题时使用
 pytest tests/ -v
 
 # 运行特定模块测试
@@ -92,7 +112,7 @@ python -c "from pathlib import Path; print(len(list(Path('tests').glob('test_*.p
 pytest tests/ -v -x
 ```
 
-### 3.2 使用 test_runner.py
+### 3.3 使用 test_runner.py
 
 ```bash
 # 批量串行运行完整测试（简洁模式）
@@ -117,7 +137,7 @@ python tests/test_runner.py --fast --parallel --workers 4
 python tests/test_runner.py --per-file
 ```
 
-### 3.3 进程级并行策略
+### 3.4 进程级并行策略
 
 Vibelution 支持通过 `pytest-xdist` 做进程级并行，但默认测试命令仍保持串行，避免全局状态、真实工作区、端口和后台进程类测试被误并发执行。
 
@@ -142,7 +162,7 @@ python tests/test_runner.py --hybrid --workers 4
 - 不把 `-n auto` 作为默认；本地开发建议先用 `--workers 2` 或 `--workers 4`，再根据耗时和稳定性调整。
 - 广义全量回归仍应保留串行兜底；并行适合日常快速反馈和已标注边界的稳定子集。
 
-### 3.4 使用影响面测试选择器
+### 3.5 使用影响面测试选择器
 
 `tests/test_matrix.yaml` 记录高频改动范围到验证命令的映射，`tests/select_tests.py` 根据变更文件输出建议测试命令。它只做选择和解释，不自动执行命令，也不改变默认 pytest 串行策略。
 
@@ -160,11 +180,27 @@ python tests/select_tests.py --from-git main --commands-only
 使用原则：
 
 - 先运行 selector 给出的聚焦命令，再按风险扩大到相关文件或全量回归。
+- `validationLayers` 是验证边界提示：`local-parallel` 可并发，`local-serial` 必须本地串行，`remote-distributed` 只是服务器加速，`frontend` 必须单独跑前端测试或构建。
 - selector 输出的是建议，不替代工程判断；涉及 Launcher、真实进程、外部 config、Git 副作用或共享 workspace 的测试仍按 `serial` 边界处理。
 - 没有规则命中时，默认输出轻量 runner smoke、collect-only 和 `git diff --check`，帮助 Agent 先判断测试集合是否可收集。
 - 新增高频模块或拆分测试文件后，同步补充 `tests/test_matrix.yaml` 和 `tests/test_select_tests.py`。
 
-### 3.5 使用 prompt_debugger.py（工具变更时必用）
+### 3.6 使用服务器分布式测试
+
+服务器分布式用于高吞吐 Python 回归：
+
+```bash
+python scripts/remote_test_runner.py --backend docker --distributed
+```
+
+边界：
+
+- 只覆盖 Python pytest 的 `not serial` 子集。
+- 模块级 `serial` 测试文件不会进入分布式目标清单。
+- 不覆盖前端 Vitest、前端 build、Launcher/runtime 本地生命周期、Windows-only、真实端口/进程、operator config、Git 副作用测试。
+- 远端失败时先看 `logs/remote_test_runs/<run-id>/remote-test.log` 和本地 `local-test.log`，定位首个失败分片后再聚焦复跑。
+
+### 3.7 使用 prompt_debugger.py（工具变更时必用）
 
 验证模型能够正确理解并调用工具。**每次添加或修改工具后必须运行**。
 

@@ -95,6 +95,27 @@ def test_split_targets_by_capacity_prefers_more_weight_on_remote(tmp_path):
     assert remote_weight > local_weight
 
 
+def test_discover_test_targets_excludes_module_level_serial_files(tmp_path):
+    project = tmp_path / "project"
+    tests_dir = project / "tests"
+    tests_dir.mkdir(parents=True)
+    (tests_dir / "test_parallel.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+    (tests_dir / "test_serial.py").write_text(
+        "import pytest\n\npytestmark = pytest.mark.serial\n\ndef test_local_only():\n    assert True\n",
+        encoding="utf-8",
+    )
+    (tests_dir / "test_slow_serial.py").write_text(
+        "import pytest\n\npytestmark = [pytest.mark.slow, pytest.mark.serial]\n\ndef test_local_only():\n    assert True\n",
+        encoding="utf-8",
+    )
+
+    targets = remote_test_runner.discover_test_targets(project)
+
+    assert Path("tests/test_parallel.py") in targets
+    assert Path("tests/test_serial.py") not in targets
+    assert Path("tests/test_slow_serial.py") not in targets
+
+
 def test_build_parallel_pytest_command_uses_xdist_marker_and_workers():
     command = remote_test_runner.build_parallel_pytest_command(
         [Path("tests/test_a.py"), "tests/test_b.py"],

@@ -9,6 +9,7 @@ requested test command, and copies the remote log back as an artifact.
 from __future__ import annotations
 
 import argparse
+import ast
 import io
 import os
 import shlex
@@ -132,7 +133,52 @@ def discover_test_targets(project_root: Path) -> list[Path]:
         path.relative_to(project_root)
         for path in sorted(test_dir.glob("test_*.py"))
         if path.name != "test_runner.py"
+        and not test_file_has_module_serial_marker(path)
     ]
+
+
+def test_file_has_module_serial_marker(path: Path) -> bool:
+    """Return whether a test file is explicitly module-level serial."""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return False
+
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+            value = node.value
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+            value = node.value
+        else:
+            continue
+        if value is None:
+            continue
+        if any(isinstance(target, ast.Name) and target.id == "pytestmark" for target in targets):
+            return pytestmark_value_contains_serial(value)
+    return False
+
+
+def pytestmark_value_contains_serial(node: ast.AST) -> bool:
+    if _is_pytest_mark_serial(node):
+        return True
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return any(pytestmark_value_contains_serial(item) for item in node.elts)
+    return False
+
+
+def _is_pytest_mark_serial(node: ast.AST) -> bool:
+    if isinstance(node, ast.Call):
+        return _is_pytest_mark_serial(node.func)
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == "serial"
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "mark"
+        and isinstance(node.value.value, ast.Name)
+        and node.value.value.id == "pytest"
+    )
 
 
 def _target_weight(project_root: Path, target: Path) -> int:

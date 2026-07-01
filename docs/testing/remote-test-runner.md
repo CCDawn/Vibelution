@@ -76,6 +76,29 @@ SSH host/root options.
 python scripts/remote_test_runner.py --suite hybrid --workers 8
 ```
 
+## Distributed Local + Remote Run
+
+```powershell
+python scripts/remote_test_runner.py --backend docker --distributed
+```
+
+Distributed mode splits Python test files between the local Windows machine and
+the remote Linux worker by approximate file weight. It runs both sides with:
+
+```bash
+python -m pytest ... -n <workers> --dist loadfile -m "not serial"
+```
+
+This is a speed path, not a release-complete gate:
+
+- module-level `serial` test files are excluded from the distributed target
+  manifest before pytest starts collecting them;
+- mixed files can still contain individual `serial` tests, which are deselected
+  by `-m "not serial"`;
+- frontend Vitest, frontend build, Launcher/runtime lifecycle, Windows-only,
+  real port/process, operator-config, and Git side-effect tests remain local
+  validation gates.
+
 ## Dry Run
 
 ```powershell
@@ -95,8 +118,18 @@ virtualenv is activated.
 
 ## Boundary
 
-Windows-only, Launcher lifecycle, real local port/process, and operator-config
-tests should remain local unless they are explicitly made remote-safe.
+Windows-only, Launcher lifecycle, real local port/process, operator-config,
+frontend, and Git side-effect tests should remain local unless they are
+explicitly made remote-safe.
+
+The distributed correctness summary intentionally reports:
+
+```text
+excluded:serial_pytest,frontend_vitest,frontend_build
+```
+
+Treat that as a reminder to run the matching local serial/frontend gates before
+release or before claiming full validation for changes that touch those layers.
 
 The default server target is the local SSH alias `bossai-server-b`. The public
 deployment-style target found in `bossai-shared` is not used by this runner

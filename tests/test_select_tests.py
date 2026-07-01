@@ -158,6 +158,9 @@ def test_selector_matches_web_runtime_routes_to_runtime_validation_commands():
     assert "tests/test_web_runtime_routes.py" in result["matchedRules"][0]["matchedFiles"]
     assert any("tests/test_web_runtime_routes.py" in command for command in result["commands"])
     assert not any("tests/test_web_app.py" in command for command in result["commands"])
+    assert "local-serial" in result["validationLayers"]
+    assert result["executionPlan"]["localSerial"]["required"] is True
+    assert result["executionPlan"]["remoteDistributed"]["recommended"] is False
 
 
 def test_selector_matches_current_evolution_service_layout():
@@ -185,6 +188,39 @@ def test_selector_matches_real_runtime_route_to_runtime_validation_commands():
     assert "core/web/routes/runtime.py" in result["matchedRules"][0]["matchedFiles"]
     assert any("tests/test_web_runtime_routes.py" in command for command in result["commands"])
     assert not any("tests/test_web_app.py" in command for command in result["commands"])
+    assert "local-serial" in result["validationLayers"]
+    assert result["executionPlan"]["localSerial"]["required"] is True
+    assert result["executionPlan"]["remoteDistributed"]["recommended"] is False
+
+
+def test_selector_recommends_remote_distributed_only_for_parallel_safe_python_rules():
+    result = select_tests.select_tests(
+        ["core/web/services/agent_directory_service.py"],
+        select_tests.load_matrix(),
+    )
+
+    assert result["matchedRules"][0]["id"] == "agent-directory-config"
+    assert "local-parallel" in result["validationLayers"]
+    assert "remote-distributed" in result["validationLayers"]
+    assert result["executionPlan"]["localParallel"]["recommended"] is True
+    assert result["executionPlan"]["remoteDistributed"]["recommended"] is True
+    assert result["executionPlan"]["remoteDistributed"]["isCompleteGate"] is False
+    assert "scripts/remote_test_runner.py --backend docker --distributed" in (
+        result["executionPlan"]["remoteDistributed"]["command"]
+    )
+    assert result["executionPlan"]["localSerial"]["required"] is False
+
+
+def test_selector_keeps_frontend_validation_separate_from_remote_distributed():
+    result = select_tests.select_tests(
+        ["web/src/app/router.tsx"],
+        select_tests.load_matrix(),
+    )
+
+    assert result["matchedRules"][0]["id"] == "frontend-workbench"
+    assert "frontend" in result["validationLayers"]
+    assert result["executionPlan"]["frontend"]["required"] is True
+    assert result["executionPlan"]["remoteDistributed"]["recommended"] is False
 
 
 def test_selector_uses_default_when_no_rule_matches():
@@ -196,6 +232,7 @@ def test_selector_uses_default_when_no_rule_matches():
         ".\\.venv\\Scripts\\python.exe -m pytest tests/test_runner.py -q",
         ".\\.venv\\Scripts\\python.exe -m pytest tests/ --collect-only -q",
     ]
+    assert result["validationLayers"] == ["hygiene", "focused"]
 
 
 def test_selector_deduplicates_commands_across_rules():
@@ -267,3 +304,5 @@ def test_cli_json_output(capsys: pytest.CaptureFixture[str]):
     payload = json.loads(capsys.readouterr().out)
     assert payload["matchedRules"][0]["id"] == "test-tooling"
     assert "git diff --check" in payload["commands"]
+    assert "local-parallel" in payload["validationLayers"]
+    assert payload["executionPlan"]["remoteDistributed"]["isCompleteGate"] is False
