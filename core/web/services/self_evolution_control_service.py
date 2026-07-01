@@ -89,6 +89,21 @@ _ACTIVE_OBSERVATION_RUN_ID: str = ""
 _MANAGER_CONTROL_KEY = "runtimeManagerControl"
 SELF_OBSERVATION_MIN_DURATION_SECONDS = 30
 SELF_OBSERVATION_MAX_DURATION_SECONDS = 3600
+_SELF_OBSERVATION_FORBIDDEN_REQUEST_FIELDS = (
+    "allowedTools",
+    "tools",
+    "toolRequests",
+    "requestedTools",
+    "dynamicTools",
+    "temporaryAuthorization",
+    "temporaryToolAuthorization",
+    "toolPolicy",
+    "permissions",
+    "writeLeases",
+    "readScopes",
+    "writeScopes",
+    "mutationAccess",
+)
 SELF_EVOLUTION_AGENT_ROLES: tuple[dict[str, str], ...] = (
     {
         "role": "executor",
@@ -2086,7 +2101,127 @@ def force_cancel_active_self_observation_runs_for_shutdown(reason: str = "") -> 
     return closed
 
 
+def _set_self_observation_terminal_state(
+    run_id: str,
+    *,
+    status: str,
+    latest_message: str,
+    report: str,
+    boundary_violation: str = "",
+) -> dict[str, Any] | None:
+    global _ACTIVE_OBSERVATION_RUN_ID
+    timestamp = _now_timestamp()
+    with _OBSERVATION_RUN_STATE_LOCK:
+        snapshot = _OBSERVATION_RUNS.get(str(run_id or "").strip())
+        if not snapshot:
+            return None
+        snapshot["status"] = status
+        snapshot["phase"] = status
+        snapshot["runtimeStatus"] = status
+        snapshot["latestMessage"] = str(latest_message or "").strip()
+        snapshot["report"] = str(report or "").strip()
+        snapshot["boundaryViolation"] = str(boundary_violation or "").strip()
+        snapshot["updatedAt"] = timestamp
+        snapshot["finishedAt"] = timestamp
+        action_states = snapshot.get("actionStates")
+        if not isinstance(action_states, dict):
+            action_states = {}
+            snapshot["actionStates"] = action_states
+        terminate_state = action_states.get("terminate")
+        if not isinstance(terminate_state, dict):
+            terminate_state = {"label": "终止观察", "reason": ""}
+            action_states["terminate"] = terminate_state
+        terminate_state["enabled"] = False
+        messages = list(snapshot.get("messages") or [])
+        messages.append(
+            {
+                "id": f"{run_id}-message-{timestamp}-assistant-{uuid4().hex[:8]}",
+                "role": "assistant",
+                "content": str(report or "").strip(),
+                "timestamp": timestamp,
+            }
+        )
+        snapshot["messages"] = messages
+        if _ACTIVE_OBSERVATION_RUN_ID == snapshot.get("runId"):
+            _ACTIVE_OBSERVATION_RUN_ID = ""
+        return dict(snapshot)
+
+
 def _run_self_observation_turn(context: dict[str, Any]) -> None:
+    run_id = str((context or {}).get("runId") or "").strip()
+    goal = str((context or {}).get("goal") or DEFAULT_SELF_EVOLUTION_GOAL).strip() or DEFAULT_SELF_EVOLUTION_GOAL
+    duration_seconds = _normalize_observation_duration((context or {}).get("durationSeconds"))
+    if not run_id:
+        return None
+    started_at = _now_timestamp()
+    with _OBSERVATION_RUN_STATE_LOCK:
+        snapshot = _OBSERVATION_RUNS.get(run_id)
+        if not snapshot:
+            return None
+        snapshot["status"] = "running"
+        snapshot["phase"] = "running"
+        snapshot["runtimeStatus"] = "running"
+        snapshot["updatedAt"] = started_at
+        snapshot["latestMessage"] = text_for(
+            get_web_language(),
+            zh="自主观察正在生成最小观察报告。",
+            en="Observation run is generating a minimal report.",
+        )
+        terminate_state = snapshot.get("actionStates")
+        if isinstance(terminate_state, dict) and isinstance(terminate_state.get("terminate"), dict):
+            terminate_state["terminate"]["enabled"] = True
+    try:
+        report = (
+            "当前理解：\n"
+            f"- 本轮目标是“{goal}”。\n"
+            "- 当前处于无工具观察模式，只能基于已有约束做推理。\n\n"
+            "可观察推理：\n"
+            "- 可以先确认目标、风险和未来验证路径，避免把 observation run 永久停在 queued/running。\n"
+            f"- 当前最小生命周期已在 {duration_seconds} 秒上限内直接收口，不进入真实对话链路。\n\n"
+            "关键假设：\n"
+            "- 本轮只需要最小闭环，不要求接入 Task 5 的真实 observation conversation。\n\n"
+            "无法验证：\n"
+            "- 目前没有工具，因此无法读取代码、执行命令或验证外部状态。\n\n"
+            "如果未来允许工具，需要的证据：\n"
+            "- 真实代码/日志/测试输出。\n\n"
+            "下一段观察重点：\n"
+            "- 等待后续任务接入真正的 observation 对话与流式呈现。"
+        )
+        violation = detect_self_observation_boundary_violation(report)
+        status = "failed" if violation else "done"
+        latest_message = text_for(
+            get_web_language(),
+            zh="自主观察已完成最小闭环报告。",
+            en="Observation run completed the minimal lifecycle report.",
+        )
+        if violation:
+            latest_message = text_for(
+                get_web_language(),
+                zh="自主观察检测到边界违规并已终止。",
+                en="Observation run detected a boundary violation and stopped.",
+            )
+        _set_self_observation_terminal_state(
+            run_id,
+            status=status,
+            latest_message=latest_message,
+            report=report,
+            boundary_violation=violation,
+        )
+    except Exception as exc:
+        _set_self_observation_terminal_state(
+            run_id,
+            status="failed",
+            latest_message=text_for(
+                get_web_language(),
+                zh="自主观察启动失败。",
+                en="Observation run failed to start.",
+            ),
+            report=text_for(
+                get_web_language(),
+                zh=f"当前理解：\n- observation run 在最小生命周期阶段失败。\n\n无法验证：\n- {exc}",
+                en=f"Current understanding:\n- observation run failed during the minimal lifecycle stage.\n\nCannot verify:\n- {exc}",
+            ),
+        )
     return None
 
 
@@ -2099,6 +2234,16 @@ def start_self_observation_run(payload: dict[str, Any]) -> dict[str, Any]:
             text_for(lang, zh="配置里没有启用 self_evolution，当前不能启动自主观察。", en="self_evolution is disabled.")
         )
     data = payload if isinstance(payload, dict) else {}
+    rejected_fields = [field for field in _SELF_OBSERVATION_FORBIDDEN_REQUEST_FIELDS if field in data]
+    if rejected_fields:
+        field_list = ", ".join(rejected_fields)
+        raise SelfEvolutionRunValidationError(
+            text_for(
+                lang,
+                zh=f"observation mode has zero tools，且不支持工具授权或策略覆盖字段：{field_list}",
+                en=f"Observation mode has zero tools and does not support tool authorization or policy override fields: {field_list}",
+            )
+        )
     goal = str(data.get("goal") or DEFAULT_SELF_EVOLUTION_GOAL).strip() or DEFAULT_SELF_EVOLUTION_GOAL
     duration_seconds = _normalize_observation_duration(data.get("durationSeconds"))
     now = _now_timestamp()

@@ -1085,6 +1085,74 @@ def test_start_self_observation_run_has_no_tools_no_worktree(monkeypatch):
     assert service.get_active_self_observation_run()["runId"] == snapshot["runId"]
 
 
+@pytest.mark.parametrize(
+    "field_name, field_value",
+    [
+        ("allowedTools", []),
+        ("tools", ["git_status"]),
+        ("toolRequests", [{"name": "read_file"}]),
+        ("requestedTools", ["read_file"]),
+        ("dynamicTools", True),
+        ("temporaryAuthorization", {"tools": ["read_file"]}),
+        ("temporaryToolAuthorization", {"tools": ["read_file"]}),
+        ("toolPolicy", {"allowedTools": ["read_file"]}),
+        ("permissions", {"filesystem": "write"}),
+        ("writeLeases", ["workspace"]),
+        ("readScopes", ["repo"]),
+        ("writeScopes", ["repo"]),
+        ("mutationAccess", "write"),
+    ],
+)
+def test_start_self_observation_run_rejects_tool_and_authorization_fields(monkeypatch, field_name, field_value):
+    monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+
+    payload = {"goal": "观察规划能力", field_name: field_value}
+
+    with pytest.raises(service.SelfEvolutionRunValidationError, match="zero tools|工具授权|tool"):
+        service.start_self_observation_run(payload)
+
+
+def test_start_self_observation_run_completes_and_releases_active_slot(monkeypatch):
+    monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+    monkeypatch.setattr(
+        service._RUN_EXECUTOR,
+        "submit",
+        lambda fn, context: fn(context),
+    )
+
+    snapshot = service.start_self_observation_run({"goal": "观察规划能力", "durationSeconds": 90})
+    final_snapshot = service.get_self_observation_run_snapshot(snapshot["runId"])
+
+    assert final_snapshot is not None
+    assert final_snapshot["status"] == "done"
+    assert final_snapshot["phase"] == "done"
+    assert final_snapshot["runtimeStatus"] == "done"
+    assert final_snapshot["finishedAt"]
+    assert "无法验证" in final_snapshot["report"]
+    assert final_snapshot["latestMessage"]
+    assert final_snapshot["actionStates"]["terminate"]["enabled"] is False
+    assert service.get_active_self_observation_run() is None
+    assert service._ACTIVE_OBSERVATION_RUN_ID == ""
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected_duration"),
+    [
+        (None, 300),
+        ("", 300),
+        ("15", service.SELF_OBSERVATION_MIN_DURATION_SECONDS),
+        (999999, service.SELF_OBSERVATION_MAX_DURATION_SECONDS),
+    ],
+)
+def test_start_self_observation_run_normalizes_duration(monkeypatch, raw_value, expected_duration):
+    monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+    monkeypatch.setattr(service, "_run_self_observation_turn", lambda context: None)
+
+    snapshot = service.start_self_observation_run({"goal": "观察规划能力", "durationSeconds": raw_value})
+
+    assert snapshot["durationSeconds"] == expected_duration
+
+
 @pytest.mark.parametrize("status", ["queued", "running", "stopping", "paused"])
 def test_supervised_run_blocks_self_evolution_for_locked_statuses(status):
     assert service._supervised_run_blocks_self_evolution({"status": status}) is True
