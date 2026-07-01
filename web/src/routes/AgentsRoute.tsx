@@ -6466,9 +6466,8 @@ export function AgentsRoute() {
                   <section className={styles.fieldWide} title={contextCompressionPolicyLine}>
                     <span>{copy.contextCompressionPolicy}</span>
                     <div className={styles.compressionPolicyGrid}>
-                      <label className={styles.field}>
-                        <span>{copy.contextCompressionPolicy}</span>
-                        <select
+                      <VFieldRow label={copy.contextCompressionPolicy}>
+                        <VNativeSelect
                           value={configDraft.contextCompressionPolicy.mode}
                           onChange={(event) => updateContextCompressionDraft({
                             mode: event.target.value === "custom" ? "custom" : "inherit",
@@ -6476,8 +6475,8 @@ export function AgentsRoute() {
                         >
                           <option value="inherit">{copy.contextCompressionInherit}</option>
                           <option value="custom">{copy.contextCompressionCustom}</option>
-                        </select>
-                      </label>
+                        </VNativeSelect>
+                      </VFieldRow>
                       <label className={`${styles.field} ${styles.compressionToggleField}`}>
                         <span>{copy.contextCompressionEnabled}</span>
                         <input
@@ -6487,31 +6486,28 @@ export function AgentsRoute() {
                           onChange={(event) => updateContextCompressionDraft({ enabled: event.target.checked })}
                         />
                       </label>
-                      <label className={styles.field}>
-                        <span>{copy.contextCompressionMaxTokenLimit}</span>
-                        <input
+                      <VFieldRow label={copy.contextCompressionMaxTokenLimit}>
+                        <VNativeInput
                           type="number"
                           min={1}
                           value={configDraft.contextCompressionPolicy.maxTokenLimit}
                           disabled={!contextCompressionCustom}
                           onChange={(event) => updateContextCompressionDraft({ maxTokenLimit: event.target.value })}
                         />
-                      </label>
-                      <label className={styles.field}>
-                        <span>{copy.contextCompressionMaxCount}</span>
-                        <input
+                      </VFieldRow>
+                      <VFieldRow label={copy.contextCompressionMaxCount}>
+                        <VNativeInput
                           type="number"
                           min={0}
                           value={configDraft.contextCompressionPolicy.maxCompressionsPerSession}
                           disabled={!contextCompressionCustom}
                           onChange={(event) => updateContextCompressionDraft({ maxCompressionsPerSession: event.target.value })}
                         />
-                      </label>
+                      </VFieldRow>
                     </div>
                     <div className={styles.compressionPolicySubgrid}>
-                      <label className={styles.field}>
-                        <span>{copy.contextCompressionThresholds} · {lang === "zh" ? "轻量" : "Light"}</span>
-                        <input
+                      <VFieldRow label={`${copy.contextCompressionThresholds} · ${lang === "zh" ? "轻量" : "Light"}`}>
+                        <VNativeInput
                           type="number"
                           min={1}
                           max={100}
@@ -6519,10 +6515,9 @@ export function AgentsRoute() {
                           disabled={!contextCompressionCustom}
                           onChange={(event) => updateContextCompressionDraft({ lightThreshold: event.target.value })}
                         />
-                      </label>
-                      <label className={styles.field}>
-                        <span>{copy.contextCompressionThresholds} · {lang === "zh" ? "标准" : "Standard"}</span>
-                        <input
+                      </VFieldRow>
+                      <VFieldRow label={`${copy.contextCompressionThresholds} · ${lang === "zh" ? "标准" : "Standard"}`}>
+                        <VNativeInput
                           type="number"
                           min={1}
                           max={100}
@@ -6530,10 +6525,9 @@ export function AgentsRoute() {
                           disabled={!contextCompressionCustom}
                           onChange={(event) => updateContextCompressionDraft({ standardThreshold: event.target.value })}
                         />
-                      </label>
-                      <label className={styles.field}>
-                        <span>{copy.contextCompressionThresholds} · {lang === "zh" ? "深度" : "Deep"}</span>
-                        <input
+                      </VFieldRow>
+                      <VFieldRow label={`${copy.contextCompressionThresholds} · ${lang === "zh" ? "深度" : "Deep"}`}>
+                        <VNativeInput
                           type="number"
                           min={1}
                           max={100}
@@ -6541,10 +6535,9 @@ export function AgentsRoute() {
                           disabled={!contextCompressionCustom}
                           onChange={(event) => updateContextCompressionDraft({ deepThreshold: event.target.value })}
                         />
-                      </label>
-                      <label className={styles.field}>
-                        <span>{copy.contextCompressionThresholds} · {lang === "zh" ? "紧急" : "Emergency"}</span>
-                        <input
+                      </VFieldRow>
+                      <VFieldRow label={`${copy.contextCompressionThresholds} · ${lang === "zh" ? "紧急" : "Emergency"}`}>
+                        <VNativeInput
                           type="number"
                           min={1}
                           max={100}
@@ -6552,59 +6545,54 @@ export function AgentsRoute() {
                           disabled={!contextCompressionCustom}
                           onChange={(event) => updateContextCompressionDraft({ emergencyThreshold: event.target.value })}
                         />
-                      </label>
-                      <label className={styles.field}>
-                        <span>{copy.contextCompressionSummaryChars} · {lang === "zh" ? "轻量" : "Light"}</span>
-                        <input
+                      </VFieldRow>
+                      <VFieldRow label={`${copy.contextCompressionSummaryChars} · ${lang === "zh" ? "轻量" : "Light"}`}>
+                        <VNativeInput
                           type="number"
                           min={1}
                           value={configDraft.contextCompressionPolicy.lightSummaryChars}
                           disabled={!contextCompressionCustom}
                           onChange={(event) => updateContextCompressionDraft({ lightSummaryChars: event.target.value })}
                         />
-                      </label>
-                      <label className={styles.field}>
-                        <span>{copy.contextCompressionSummaryChars} · {lang === "zh" ? "标准" : "Standard"}</span>
-                        <input
+                      </VFieldRow>
+                      <VFieldRow label={`${copy.contextCompressionSummaryChars} · ${lang === "zh" ? "标准" : "Standard"}`}>
+                        <VNativeInput
                           type="number"
                           min={1}
                           value={configDraft.contextCompressionPolicy.standardSummaryChars}
                           disabled={!contextCompressionCustom}
                           onChange={(event) => updateContextCompressionDraft({ standardSummaryChars: event.target.value })}
                         />
-                      </label>
-                      <label className={styles.field}>
-                        <span>{copy.contextCompressionSummaryChars} · {lang === "zh" ? "深度" : "Deep"}</span>
-                        <input
+                      </VFieldRow>
+                      <VFieldRow label={`${copy.contextCompressionSummaryChars} · ${lang === "zh" ? "深度" : "Deep"}`}>
+                        <VNativeInput
                           type="number"
                           min={1}
                           value={configDraft.contextCompressionPolicy.deepSummaryChars}
                           disabled={!contextCompressionCustom}
                           onChange={(event) => updateContextCompressionDraft({ deepSummaryChars: event.target.value })}
                         />
-                      </label>
-                      <label className={styles.field}>
-                        <span>{copy.contextCompressionSummaryChars} · {lang === "zh" ? "紧急" : "Emergency"}</span>
-                        <input
+                      </VFieldRow>
+                      <VFieldRow label={`${copy.contextCompressionSummaryChars} · ${lang === "zh" ? "紧急" : "Emergency"}`}>
+                        <VNativeInput
                           type="number"
                           min={1}
                           value={configDraft.contextCompressionPolicy.emergencySummaryChars}
                           disabled={!contextCompressionCustom}
                           onChange={(event) => updateContextCompressionDraft({ emergencySummaryChars: event.target.value })}
                         />
-                      </label>
+                      </VFieldRow>
                     </div>
                     <div className={styles.compressionPolicyFooter}>
-                      <label className={styles.field}>
-                        <span>{copy.contextCompressionKeepAi}</span>
-                        <input
+                      <VFieldRow label={copy.contextCompressionKeepAi}>
+                        <VNativeInput
                           type="number"
                           min={0}
                           value={configDraft.contextCompressionPolicy.keepAiMessages}
                           disabled={!contextCompressionCustom}
                           onChange={(event) => updateContextCompressionDraft({ keepAiMessages: event.target.value })}
                         />
-                      </label>
+                      </VFieldRow>
                       <label className={styles.compressionInlineCheck}>
                         <input
                           type="checkbox"
