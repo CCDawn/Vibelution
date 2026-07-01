@@ -84,6 +84,8 @@ type ConversationTaskSummary = {
 
 type SelfEvolutionPetCompanionTone = "idle" | "active" | "paused" | "caution" | "error";
 type SelfEvolutionMode = "isolated_development" | "observation";
+const OBSERVATION_MODE_TOOL_COUNT = "0";
+const OBSERVATION_MODE_WORKTREE_STATE = "no";
 export type SelfEvolutionTransactionFilter = "all" | "needs_review" | "open" | "changed";
 export type SelfEvolutionTransactionDateFilter = "all" | string;
 export type SelfEvolutionTransactionDateGroup = {
@@ -969,7 +971,7 @@ export function SelfEvolutionTrack({
         <div className={styles.observationMetricGrid}>
           <div className={styles.stripItem}>
             <span>{lang === "zh" ? "工具" : "Tools"}</span>
-            <strong>{observationRun?.allowedTools.length === 0 ? "0" : "--"}</strong>
+            <strong>{OBSERVATION_MODE_TOOL_COUNT}</strong>
           </div>
           <div className={styles.stripItem}>
             <span>{lang === "zh" ? "时长" : "Duration"}</span>
@@ -977,7 +979,7 @@ export function SelfEvolutionTrack({
           </div>
           <div className={styles.stripItem}>
             <span>{lang === "zh" ? "worktree" : "Worktree"}</span>
-            <strong>{observationRun?.worktreeCreated ? "yes" : "no"}</strong>
+            <strong>{OBSERVATION_MODE_WORKTREE_STATE}</strong>
           </div>
         </div>
 
@@ -1048,6 +1050,71 @@ export function SelfEvolutionTrack({
       value: worktreeRun?.mergeAnalysis?.reason || worktreeRun?.decision?.reason || approvalStep.summary || "--",
     },
   ];
+
+  function renderObservationStatusSurface() {
+    return (
+      <div className={styles.statusPage}>
+        <div className={styles.panelStack}>
+          <div className={styles.metricStrip}>
+            <article className={styles.stripItem}>
+              <span>{t("sceneStateTitle")}</span>
+              <strong>{statusLabel(observationRun?.status || "idle")}</strong>
+            </article>
+            <article className={styles.stripItem}>
+              <span>{lang === "zh" ? "时长" : "Duration"}</span>
+              <strong>{compactDuration(observationRun?.durationSeconds ?? normalizedObservationDuration, lang)}</strong>
+            </article>
+            <article className={styles.stripItem}>
+              <span>{lang === "zh" ? "工具" : "Tools"}</span>
+              <strong>{OBSERVATION_MODE_TOOL_COUNT}</strong>
+            </article>
+            <article className={styles.stripItem}>
+              <span>{lang === "zh" ? "worktree" : "Worktree"}</span>
+              <strong>{OBSERVATION_MODE_WORKTREE_STATE}</strong>
+            </article>
+          </div>
+
+          {actionFeedback || errorMessage ? (
+            <div className={styles.noticeBanner}>
+              {actionFeedback ? <p className={styles.feedbackText}>{actionFeedback}</p> : null}
+              {errorMessage ? <p className={styles.errorText}>{errorMessage}</p> : null}
+            </div>
+          ) : null}
+
+          {renderObservationPanel({ compact: true })}
+
+          <section className={styles.subsurface}>
+            <div className={styles.subsurfaceHeader}>
+              <div>
+                <p className={styles.eyebrow}>{lang === "zh" ? "观察运行" : "Observation run"}</p>
+                <h4 className={styles.subsurfaceTitle}>{observationRun?.runId || (lang === "zh" ? "等待观察运行" : "Waiting for observation run")}</h4>
+              </div>
+              <span className={styles.secondaryPill}>{statusLabel(observationRun?.runtimeStatus || observationRun?.status || "idle")}</span>
+            </div>
+
+            <div className={styles.detailStack}>
+              <div className={styles.detailRow}>
+                <span>{lang === "zh" ? "观察目标" : "Observation goal"}</span>
+                <strong>{observationRun?.goal || observationGoalValue || "--"}</strong>
+              </div>
+              <div className={styles.detailRow}>
+                <span>{lang === "zh" ? "阶段" : "Phase"}</span>
+                <strong>{statusLabel(observationRun?.phase || observationRun?.runtimeStatus || observationRun?.status || "idle")}</strong>
+              </div>
+              <div className={styles.detailRow}>
+                <span>{lang === "zh" ? "开始时间" : "Started"}</span>
+                <strong>{compactTimestamp(observationRun?.startedAt || observationRun?.updatedAt || "")}</strong>
+              </div>
+              <div className={styles.detailRow}>
+                <span>{t("lastUpdated")}</span>
+                <strong>{compactTimestamp(observationRun?.updatedAt || "")}</strong>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.pageStack}>
@@ -1390,6 +1457,8 @@ export function SelfEvolutionTrack({
             )}
           </main>
         </div>
+      ) : observationRunModeActive ? (
+        renderObservationStatusSurface()
       ) : (
         <div className={styles.statusPage}>
           <div className={styles.panelStack}>
@@ -1418,8 +1487,6 @@ export function SelfEvolutionTrack({
                 {errorMessage ? <p className={styles.errorText}>{errorMessage}</p> : null}
               </div>
             ) : null}
-
-            {observationRunModeActive ? renderObservationPanel({ compact: true }) : null}
 
             <div className={styles.supportColumns}>
               <section className={styles.subsurface}>

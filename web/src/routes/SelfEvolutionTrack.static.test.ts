@@ -38,6 +38,12 @@ function transaction(overrides: Partial<SelfEvolutionTransaction> & { txnId: str
 }
 
 describe("SelfEvolutionTrack static assets", () => {
+  const observationStatusStart = selfEvolutionSource.indexOf("function renderObservationStatusSurface()");
+  const observationStatusEnd = selfEvolutionSource.indexOf("\n\n  return (", observationStatusStart);
+  const observationStatusSurface = observationStatusStart >= 0 && observationStatusEnd > observationStatusStart
+    ? selfEvolutionSource.slice(observationStatusStart, observationStatusEnd)
+    : "";
+
   it("routes self-evolution controls through VUI primitives", () => {
     expect(selfEvolutionSource).toContain('from "../components/vui"');
     expect(selfEvolutionSource).toContain("<VButton");
@@ -172,11 +178,26 @@ describe("SelfEvolutionTrack static assets", () => {
 
   it("keeps observation mode free of tool and merge actions", () => {
     expect(selfEvolutionSource).toContain("observationRun");
-    expect(selfEvolutionSource).toContain("allowedTools.length === 0");
+    expect(selfEvolutionSource).toContain("renderObservationStatusSurface()");
+    expect(selfEvolutionSource).toContain("OBSERVATION_MODE_TOOL_COUNT");
+    expect(selfEvolutionSource).toContain("OBSERVATION_MODE_WORKTREE_STATE");
     expect(selfEvolutionSource).toContain("onStartObservation");
     expect(selfEvolutionSource).toContain("onTerminateObservation");
     expect(selfEvolutionSource).not.toContain("onRequestObservationTool");
     expect(selfEvolutionSource).not.toContain("observationToolRequest");
+  });
+
+  it("keeps the observation status surface isolated from worktree approval semantics", () => {
+    expect(observationStatusSurface).toContain("renderObservationPanel({ compact: true })");
+    expect(observationStatusSurface).toContain("OBSERVATION_MODE_TOOL_COUNT");
+    expect(observationStatusSurface).toContain("OBSERVATION_MODE_WORKTREE_STATE");
+    expect(observationStatusSurface).not.toContain("overview.worktree");
+    expect(observationStatusSurface).not.toContain("approvalEvidenceItems");
+    expect(observationStatusSurface).not.toContain("approve_review");
+    expect(observationStatusSurface).not.toContain('onWorktreeAction(worktreeRun.runId, "merge")');
+    expect(observationStatusSurface).not.toContain('onWorktreeAction(worktreeRun.runId, "discard")');
+    expect(observationStatusSurface).not.toContain("dirtyFlags");
+    expect(observationStatusSurface).not.toContain("changedFiles");
   });
 
   it("keeps the pet companion read-only inside self-evolution", () => {
