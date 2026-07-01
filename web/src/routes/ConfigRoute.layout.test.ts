@@ -1,13 +1,10 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import styles from "./ConfigRoute.styles";
-import stylesModuleSource from "./ConfigRoute.styles.ts?raw";
 import routeSource from "./ConfigRoute.tsx?raw";
 
-const stylesSource = [
-  stylesModuleSource,
-  ...Object.keys(styles).map((key) => `.${key}`),
-].join("\n");
+const stylesModuleSource = readFileSync(new URL("./ConfigRoute.module.css", import.meta.url), "utf-8");
+const stylesSource = stylesModuleSource;
 
 describe("ConfigRoute layout contract", () => {
   it("uses a full workspace placeholder for initial loading and load failure states", () => {
@@ -48,10 +45,33 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("styles.profileTableWrap");
     expect(routeSource).toContain("styles.profileTaskCell");
     expect(stylesSource).toContain(".configDiscoverySection");
-    expect(styles.contentModels).toContain("grid");
-    expect(styles.modelLibrarySection).toContain("rounded");
-    expect(styles.configEditorSection).toContain("rounded");
-    expect(styles.configDiscoverySection).toContain("grid");
+    expect(stylesModuleSource).toContain(".contentModels");
+    expect(stylesModuleSource).toContain(".modelLibrarySection");
+    expect(stylesModuleSource).toContain(".configEditorSection");
+    expect(stylesModuleSource).toContain(".configDiscoverySection");
+  });
+
+  it("keeps the tablet config sidebar compact instead of stretching every control full width", () => {
+    const tabletBlock = stylesSource.slice(
+      stylesSource.indexOf("@media (max-width: 1120px)"),
+      stylesSource.indexOf("@media (max-width: 720px)"),
+    );
+    const mobileBlock = stylesSource.slice(stylesSource.indexOf("@media (max-width: 720px)"));
+
+    expect(tabletBlock).toContain(".sidebarStatus {");
+    expect(tabletBlock).toContain("grid-template-columns: minmax(150px, 0.7fr) minmax(180px, 1fr) max-content;");
+    expect(tabletBlock).toContain(".sidebarStatus .buttonBlock");
+    expect(tabletBlock).toContain("width: auto");
+    expect(tabletBlock).toContain(".sidebarNavPanel:not(.sidebarNavPanelCollapsed)");
+    expect(tabletBlock).toContain("grid-template-columns: minmax(170px, 0.32fr) minmax(0, 1fr)");
+    expect(tabletBlock).toContain(".sectionNav {");
+    expect(tabletBlock).toContain("display: flex");
+    expect(tabletBlock).toContain("flex-wrap: wrap");
+
+    expect(mobileBlock).toContain(".sidebarStatus .buttonBlock");
+    expect(mobileBlock).toContain("width: 100%");
+    expect(mobileBlock).toContain(".sectionNav {");
+    expect(mobileBlock).toContain("display: grid");
   });
 
   it("supports Agent Center return links and section deep links", () => {
@@ -122,9 +142,10 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("themeBackgroundPresetButton");
     expect(routeSource).toContain("aria-pressed={active}");
     expect(routeSource).toContain("{active ? <em>{lang === \"zh\" ? \"当前\" : \"Current\"}</em> : null}");
-    expect(styles.themeBackgroundDropButton).toBeTypeOf("string");
-    expect(styles.themeBackgroundPresetGrid).toContain("grid");
-    expect(styles.themeBackgroundPresetButton).toBeTypeOf("string");
+    expect(stylesSource).toContain(".themeBackgroundDropButton");
+    expect(stylesModuleSource).toContain(".themeBackgroundPresetGrid");
+    expect(stylesModuleSource).toContain("display: grid");
+    expect(stylesSource).toContain(".themeBackgroundPresetButton");
   });
 
   it("renders the Web user avatar as a compact image control instead of a raw path field", () => {
@@ -139,8 +160,8 @@ describe("ConfigRoute layout contract", () => {
     expect(stylesSource).toContain(".avatarImageMeta");
     expect(stylesSource).toContain(".avatarImageDropButton");
     expect(stylesSource).toContain(".avatarImageUploadCue");
-    expect(styles.avatarImageDropButton).toBeTypeOf("string");
-    expect(styles.avatarImageMeta).toBeTypeOf("string");
+    expect(stylesSource).toContain(".avatarImageDropButton");
+    expect(stylesSource).toContain(".avatarImageMeta");
   });
 
   it("keeps empty string-list settings out of object-list layout blocks", () => {
@@ -166,9 +187,10 @@ describe("ConfigRoute layout contract", () => {
     expect(stylesSource).toContain(".userProfileLayout");
     expect(stylesSource).toContain(".userProfileIdentityFields");
     expect(stylesSource).toContain(".userProfileAvatarFields");
-    expect(styles.userProfileLayout).toContain("grid");
-    expect(styles.userProfileIdentityFields).toBeTypeOf("string");
-    expect(styles.userProfileAvatarFields).toBeTypeOf("string");
+    expect(stylesModuleSource).toContain(".userProfileLayout");
+    expect(stylesModuleSource).toContain("display: grid");
+    expect(stylesSource).toContain(".userProfileIdentityFields");
+    expect(stylesSource).toContain(".userProfileAvatarFields");
   });
 
   it("uses a compact layout for large config sections with many fields", () => {
@@ -183,8 +205,8 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("styles.treeFieldCardEdit");
     expect(routeSource).toContain("styles.treeObjectCell");
     expect(routeSource).toContain("styles.treeToggle");
-    expect(styles.configDenseSection).toContain("grid");
-    expect(styles.treeGrid).toContain("grid");
+    expect(stylesModuleSource).toContain(".configDenseSection > .treeGrid");
+    expect(stylesModuleSource).toContain(".treeGrid");
   });
 
   it("routes Config controls through VUI primitives", () => {

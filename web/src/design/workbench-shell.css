@@ -334,6 +334,7 @@
   top: calc(100% + 10px);
   right: 0;
   width: min(640px, calc(100vw - 40px));
+  max-width: none;
   display: grid;
   gap: 8px;
   padding: 10px;
@@ -365,6 +366,648 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 5px;
+}
+
+.vui-app-appshell.statusGuidePanel {
+  width: min(640px, calc(100vw - 40px));
+  max-width: none;
+}
+
+:where(.vui-app-appshell).utilityCluster,
+:where(.vui-app-appshell).lifecycleMenuCluster,
+:where(.vui-app-appshell).statusCluster {
+  position: relative;
+  outline: none;
+}
+
+:where(.vui-app-appshell).utilityCluster,
+:where(.vui-app-appshell).lifecycleMenuCluster {
+  display: flex;
+}
+
+:where(.vui-app-appshell).statusCluster {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+:where(.vui-app-appshell).utilityChevron {
+  color: var(--fg-tertiary);
+  transition: transform 150ms ease;
+}
+
+:where(.vui-app-appshell).utilityCluster:hover .utilityChevron,
+:where(.vui-app-appshell).utilityCluster:focus-within .utilityChevron,
+:where(.vui-app-appshell).utilityClusterOpen .utilityChevron {
+  transform: rotate(180deg);
+}
+
+:where(.vui-app-appshell).utilityPanel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: min(520px, calc(100vw - 40px));
+  max-height: min(78vh, 760px);
+  display: grid;
+  gap: 12px;
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-panel);
+  background:
+    var(--vui-gradient-route-soft),
+    var(--shell-panel);
+  box-shadow: var(--vui-shadow-soft);
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+:where(.vui-app-appshell).utilityPanel[hidden] {
+  display: none;
+}
+
+:where(.vui-app-appshell).utilityClusterOpen .utilityPanel {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+:where(.vui-app-appshell).utilityPanelHeader,
+:where(.vui-app-appshell).gitHeadline,
+:where(.vui-app-appshell).gitSection,
+:where(.vui-app-appshell).utilityFilePanel,
+:where(.vui-app-appshell).utilityFileTree,
+:where(.vui-app-appshell).utilityFileDir,
+:where(.vui-app-appshell).utilityFileChildren,
+:where(.vui-app-appshell).gitMiniPanel,
+:where(.vui-app-appshell).gitFileList,
+:where(.vui-app-appshell).gitCommitList,
+:where(.vui-app-appshell).gitWorktreeList {
+  display: grid;
+  min-width: 0;
+}
+
+:where(.vui-app-appshell).utilityPanelHeader {
+  gap: 4px;
+}
+
+:where(.vui-app-appshell).utilityPanelHeader strong,
+:where(.vui-app-appshell).statusGuideHeader strong {
+  color: var(--fg-primary);
+  font-size: var(--vui-font-chat);
+}
+
+:where(.vui-app-appshell).utilityPanelHeader span {
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-md);
+  line-height: 1.45;
+}
+
+:where(.vui-app-appshell).utilityButtonGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 8px;
+}
+
+:where(.vui-app-appshell).utilityButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 10px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).utilityButton span,
+:where(.vui-app-appshell).utilityFileButton span,
+:where(.vui-app-appshell).utilityFileButton small,
+:where(.vui-app-appshell).gitBranchName,
+:where(.vui-app-appshell).gitHeadline strong,
+:where(.vui-app-appshell).gitHeadline span,
+:where(.vui-app-appshell).gitMetaGrid strong,
+:where(.vui-app-appshell).gitFileItem span,
+:where(.vui-app-appshell).gitCommitItem span,
+:where(.vui-app-appshell).gitWorktreeItem strong,
+:where(.vui-app-appshell).gitWorktreeItem small,
+:where(.vui-app-appshell).statusBadgeValue,
+:where(.vui-app-appshell).statusGuideCardHeader strong,
+:where(.vui-app-appshell).lifecycleProofMeta strong,
+:where(.vui-app-appshell).lifecycleProofName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).utilityButton span {
+  font-size: var(--vui-font-md);
+  font-weight: 650;
+}
+
+:where(.vui-app-appshell).utilityButton [data-slot="vui-button-content"] {
+  max-width: 100%;
+}
+
+:where(.vui-app-appshell).utilityButton [data-slot="vui-button-label"] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).utilityFilePanel,
+:where(.vui-app-appshell).gitMiniPanel,
+:where(.vui-app-appshell).statusGuideCard,
+:where(.vui-app-appshell).lifecycleProofCard {
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--shell-card) 76%, transparent);
+}
+
+:where(.vui-app-appshell).utilityFileHeader,
+:where(.vui-app-appshell).gitSectionHeader,
+:where(.vui-app-appshell).statusGuideHeader,
+:where(.vui-app-appshell).statusGuideCardHeader,
+:where(.vui-app-appshell).lifecycleProofHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+:where(.vui-app-appshell).utilityFileHeader {
+  align-items: flex-start;
+}
+
+:where(.vui-app-appshell).utilityFileHeader div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+:where(.vui-app-appshell).utilityFileHeader strong,
+:where(.vui-app-appshell).gitSectionHeader strong,
+:where(.vui-app-appshell).lifecycleProofHeader strong {
+  color: var(--fg-primary);
+  font-size: var(--vui-font-md);
+}
+
+:where(.vui-app-appshell).utilityFileHeader span,
+:where(.vui-app-appshell).gitSectionHeader span,
+:where(.vui-app-appshell).statusGuideCardHeader span,
+:where(.vui-app-appshell).lifecycleProofHeader span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.35;
+}
+
+:where(.vui-app-appshell).utilityFileSearch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--shell-surface);
+  color: var(--fg-tertiary);
+}
+
+:where(.vui-app-appshell).utilityFileSearch input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--fg-primary);
+  font: inherit;
+  font-size: var(--vui-font-sm);
+}
+
+:where(.vui-app-appshell).utilityFileTree {
+  gap: 4px;
+  max-height: 260px;
+  overflow: auto;
+  padding-right: 3px;
+}
+
+:where(.vui-app-appshell).utilityFileDir,
+:where(.vui-app-appshell).utilityFileChildren {
+  gap: 4px;
+}
+
+:where(.vui-app-appshell).utilityFileDir summary {
+  display: flex;
+  align-items: center;
+  min-height: 26px;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  font-size: var(--vui-font-sm);
+  font-weight: 700;
+  list-style-position: inside;
+}
+
+:where(.vui-app-appshell).utilityFileChildren {
+  padding-left: 10px;
+  border-left: 1px solid color-mix(in srgb, var(--border-soft) 70%, transparent);
+}
+
+:where(.vui-app-appshell).utilityFileButton {
+  display: block;
+  min-height: 30px;
+  padding: 5px 7px;
+  text-align: left;
+}
+
+:where(.vui-app-appshell).utilityFileButton [data-slot="vui-button-content"] {
+  width: 100%;
+}
+
+:where(.vui-app-appshell).utilityFileButton [data-slot="vui-button-label"] {
+  display: grid;
+  grid-template-columns: minmax(0, 0.45fr) minmax(0, 0.55fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+:where(.vui-app-appshell).utilityFileState,
+:where(.vui-app-appshell).gitQuietState {
+  margin: 0;
+  padding: 8px;
+  border: 1px dashed var(--border-soft);
+  border-radius: var(--radius-control);
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-sm);
+  line-height: 1.35;
+}
+
+:where(.vui-app-appshell).gitMiniPanel {
+  gap: 11px;
+  padding: 11px;
+}
+
+:where(.vui-app-appshell).gitMiniHeader {
+  display: grid;
+  grid-template-columns: minmax(116px, auto) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+:where(.vui-app-appshell).gitChip,
+:where(.vui-app-appshell).statusBadge,
+:where(.vui-app-appshell).statusSummaryChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 32px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).gitChip {
+  max-width: 100%;
+  padding: 6px 9px;
+}
+
+:where(.vui-app-appshell).gitBranchName {
+  max-width: 96px;
+  color: var(--fg-primary);
+  font-weight: 600;
+}
+
+:where(.vui-app-appshell).gitCount,
+:where(.vui-app-appshell).gitSignalGrid strong,
+:where(.vui-app-appshell).gitCountGrid strong,
+:where(.vui-app-appshell).gitCommitItem code,
+:where(.vui-app-appshell).gitWorktreeItem span,
+:where(.vui-app-appshell).gitFileItem code {
+  color: var(--accent-warm-2);
+}
+
+:where(.vui-app-appshell).gitSignalGrid,
+:where(.vui-app-appshell).gitCountGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+:where(.vui-app-appshell).gitSignalGrid span,
+:where(.vui-app-appshell).gitCountGrid span,
+:where(.vui-app-appshell).lifecycleProofMeta span {
+  display: grid;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--shell-card) 82%, transparent);
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-app-appshell).gitSignalGrid span {
+  gap: 3px;
+  min-height: 54px;
+}
+
+:where(.vui-app-appshell).gitCountGrid span {
+  gap: 2px;
+}
+
+:where(.vui-app-appshell).gitMetaGrid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 7px 12px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--shell-card);
+}
+
+:where(.vui-app-appshell).gitMetaGrid span,
+:where(.vui-app-appshell).gitHeadline span,
+:where(.vui-app-appshell).gitFileList p,
+:where(.vui-app-appshell).gitFileItem {
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-sm);
+}
+
+:where(.vui-app-appshell).gitHeadline {
+  gap: 3px;
+}
+
+:where(.vui-app-appshell).gitHeadline strong {
+  color: var(--fg-primary);
+  font-size: var(--vui-font-md);
+}
+
+:where(.vui-app-appshell).gitFileList,
+:where(.vui-app-appshell).gitCommitList,
+:where(.vui-app-appshell).gitWorktreeList {
+  gap: 6px;
+  max-height: 138px;
+  overflow: auto;
+}
+
+:where(.vui-app-appshell).gitCommitList,
+:where(.vui-app-appshell).gitWorktreeList {
+  max-height: 126px;
+}
+
+:where(.vui-app-appshell).gitFileItem,
+:where(.vui-app-appshell).gitCommitItem,
+:where(.vui-app-appshell).gitWorktreeItem {
+  display: grid;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+:where(.vui-app-appshell).gitFileItem {
+  grid-template-columns: 36px minmax(0, 1fr);
+}
+
+:where(.vui-app-appshell).gitCommitItem {
+  grid-template-columns: 62px minmax(0, 1fr);
+}
+
+:where(.vui-app-appshell).gitWorktreeItem {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+:where(.vui-app-appshell).gitCommitItem,
+:where(.vui-app-appshell).gitWorktreeItem {
+  padding: 6px 7px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 76%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--shell-card) 70%, transparent);
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-app-appshell).gitWorktreeItem small {
+  grid-column: 1 / -1;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-app-appshell).gitFileList p {
+  margin: 0;
+  line-height: 1.4;
+}
+
+:where(.vui-app-appshell).statusChipRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+:where(.vui-app-appshell).statusBadge {
+  max-width: min(100%, 360px);
+  padding: 7px 11px;
+}
+
+:where(.vui-app-appshell).statusSummaryChip {
+  max-width: 210px;
+  padding: 6px 9px;
+}
+
+:where(.vui-app-appshell).statusBadgeLabel {
+  flex: 0 0 auto;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-app-appshell).statusBadgeValue,
+:where(.vui-app-appshell).statusGuideCardHeader strong,
+:where(.vui-app-appshell).lifecycleProofHeader strong,
+:where(.vui-app-appshell).lifecycleProofMeta strong {
+  color: var(--fg-primary);
+  font-size: var(--vui-font-md);
+  font-weight: 600;
+}
+
+:where(.vui-app-appshell).statusSummaryCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--fg-tertiary);
+  background: color-mix(in srgb, var(--shell-card) 74%, transparent);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-app-appshell).statusDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+:where(.vui-app-appshell).statusGuidePanel {
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+:where(.vui-app-appshell).statusCluster:hover .statusGuidePanel,
+:where(.vui-app-appshell).statusCluster:focus-within .statusGuidePanel {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+:where(.vui-app-appshell).statusGuideCard {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  padding: 8px;
+}
+
+:where(.vui-app-appshell).statusGuideList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  list-style: none;
+}
+
+:where(.vui-app-appshell).statusGuideListItem {
+  display: inline-grid;
+  grid-template-columns: auto max-content;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 23px;
+  padding: 3px 6px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 74%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--shell-card) 78%, transparent);
+}
+
+:where(.vui-app-appshell).statusGuideListItem[data-current="true"] {
+  background: color-mix(in srgb, var(--accent-cool) 10%, var(--shell-card));
+}
+
+:where(.vui-app-appshell).statusGuideStateLabel,
+:where(.vui-app-appshell).lifecycleProofName {
+  color: var(--fg-primary);
+  font-size: var(--vui-font-sm);
+  font-weight: 600;
+  word-break: keep-all;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).lifecycleProofCard {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px;
+}
+
+:where(.vui-app-appshell).lifecycleProofHeader strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+:where(.vui-app-appshell).lifecycleProofMeta span {
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px;
+}
+
+:where(.vui-app-appshell).lifecycleProofMeta strong {
+  font-size: var(--vui-font-sm);
+}
+
+:where(.vui-app-appshell).lifecycleProofList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+:where(.vui-app-appshell).lifecycleProofItem {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 25px;
+  padding: 4px 6px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 70%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--shell-card) 70%, transparent);
+}
+
+:where(.vui-app-appshell).lifecycleProofItem strong {
+  color: var(--accent-warm-2);
+  font-size: var(--vui-font-xs);
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).lifecycleMenuPanel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  display: grid;
+  gap: 5px;
+  min-width: 178px;
+  padding: 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-panel);
+  background: var(--shell-panel);
+  box-shadow: var(--vui-shadow-soft);
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+:where(.vui-app-appshell).lifecycleMenuPanel[hidden] {
+  display: none;
+}
+
+:where(.vui-app-appshell).lifecycleMenuClusterOpen .lifecycleMenuPanel {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+:where(.vui-app-appshell).lifecycleMenuItem,
+:where(.vui-app-appshell).lifecycleMenuDangerItem {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  justify-content: start;
+  text-align: left;
 }
 
 @media (max-width: 1420px) {
@@ -417,6 +1060,15 @@
   :where(.vui-app-appshell).topActions {
     grid-area: actions;
   }
+
+  .vui-app-appshell.statusGuidePanel {
+    position: fixed;
+    top: 108px;
+    right: 12px;
+    z-index: 35;
+    max-height: calc(100dvh - 124px);
+    overflow: auto;
+  }
 }
 
 @media (max-width: 520px) {
@@ -445,5 +1097,47 @@
     padding-inline: 4px;
     font-size: var(--vui-font-xs);
     text-overflow: ellipsis;
+  }
+}
+
+@media (max-width: 640px) {
+  .vui-app-appshell.statusGuidePanel {
+    right: auto;
+    left: 0;
+    width: min(360px, calc(100vw - 20px));
+    max-width: none;
+    max-height: min(76vh, 620px);
+    overflow: auto;
+    padding: 9px;
+  }
+
+  :where(.vui-app-appshell).statusGuideGrid,
+  :where(.vui-app-appshell).lifecycleProofMeta,
+  :where(.vui-app-appshell).lifecycleProofList {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :where(.vui-app-appshell).statusGuideCard {
+    gap: 5px;
+    padding: 7px;
+  }
+
+  :where(.vui-app-appshell).statusGuideList {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(72px, max-content));
+    justify-content: start;
+    gap: 5px;
+  }
+
+  :where(.vui-app-appshell).statusGuideListItem {
+    grid-template-columns: auto minmax(0, max-content);
+  }
+
+  :where(.vui-app-appshell).lifecycleProofMeta span {
+    grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  }
+
+  :where(.vui-app-appshell).lifecycleProofItem {
+    grid-template-columns: auto minmax(0, 1fr) max-content;
   }
 }

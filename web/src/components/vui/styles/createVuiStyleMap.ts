@@ -90,6 +90,20 @@ function toneFor(words: string[]): string {
   return "";
 }
 
+function lastWord(words: string[]): string {
+  return words[words.length - 1] ?? "";
+}
+
+function isExplicitButtonKey(words: string[]): boolean {
+  const last = lastWord(words);
+  return last === "button" || last === "trigger" || last === "tab";
+}
+
+function isExplicitPillKey(words: string[]): boolean {
+  const last = lastWord(words);
+  return last === "pill" || last === "badge" || last === "chip" || last === "tag";
+}
+
 function classesForKey(key: string): string {
   const words = splitKey(key);
   const classes = [BASE];
@@ -100,7 +114,7 @@ function classesForKey(key: string): string {
   if (includesAny(words, ["workspace", "canvas", "layout"])) {
     classes.push("grid min-h-0 min-w-0 gap-2 p-2");
   }
-  if (includesAny(words, ["panel", "card", "section", "surface", "box", "notice", "summary", "detail", "editor", "preview"])) {
+  if (includesAny(words, ["panel", "card", "surface", "box", "notice", "summary", "detail", "editor", "preview"])) {
     classes.push(PANEL);
   }
   if (includesAny(words, ["header", "toolbar", "actions", "action", "controls", "control", "footer", "meta", "bar", "strip"])) {
@@ -115,7 +129,7 @@ function classesForKey(key: string): string {
   if (includesAny(words, ["row", "item", "turn", "entry", "line"])) {
     classes.push(`${ROW} p-2`);
   }
-  if (includesAny(words, ["button", "trigger", "tab", "link"])) {
+  if (isExplicitButtonKey(words)) {
     classes.push(includesAny(words, ["icon", "round", "avatar"]) ? ICON_BUTTON : BUTTON);
   }
   if (includesAny(words, ["primary"])) {
@@ -124,7 +138,7 @@ function classesForKey(key: string): string {
   if (includesAny(words, ["danger", "delete", "remove", "error", "failed"])) {
     classes.push(toneClasses.danger);
   }
-  if (includesAny(words, ["pill", "badge", "chip", "tag", "state", "status", "role", "count"])) {
+  if (isExplicitPillKey(words)) {
     classes.push(PILL);
   }
   if (includesAny(words, ["dot"])) {
@@ -132,6 +146,9 @@ function classesForKey(key: string): string {
   }
   if (includesAny(words, ["avatar"])) {
     classes.push("inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]");
+  }
+  if (includesAny(words, ["identity"])) {
+    classes.push("grid min-w-0 gap-1");
   }
   if (includesAny(words, ["icon"])) {
     classes.push("shrink-0 text-[var(--fg-tertiary)]");
@@ -180,7 +197,10 @@ export function createVuiStyleMap<const TKeys extends readonly string[]>(
   const resolveClass = (key: string) => {
     const override = options.overrides?.[key];
     if (override !== undefined) {
-      return override;
+      const includeKeyClass = options.includeKeyClass ?? true;
+      return [options.baseClassName, includeKeyClass ? key : "", override]
+        .filter(Boolean)
+        .join(" ");
     }
     const cached = cache.get(key);
     if (cached !== undefined) {

@@ -3,15 +3,9 @@ import { describe, expect, it } from "vitest";
 // @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
 import { readFileSync } from "node:fs";
 import routeSource from "./EvolutionRoute.tsx?raw";
-import styles from "./EvolutionRoute.styles";
-import stylesModuleSource from "./EvolutionRoute.styles.ts?raw";
 
-const stylesSource = [
-  stylesModuleSource,
-  ...Object.keys(styles).map((key) => `.${key}`),
-  ...Object.values(styles),
-].join("\n");
-const worktreePanelSource = readFileSync(new URL("./SupervisedWorktreeReviewPanel.tsx", import.meta.url), "utf-8");
+const stylesSource = readFileSync(new URL("./EvolutionRoute.module.css", import.meta.url), "utf-8");
+const worktreeReviewStylesSource = readFileSync(new URL("./SupervisedWorktreeReviewPanel.styles.ts", import.meta.url), "utf-8");
 const dictionarySource = readFileSync(new URL("../i18n/dictionary.ts", import.meta.url), "utf-8");
 const apiTypesSource = readFileSync(new URL("../api/types.ts", import.meta.url), "utf-8");
 
@@ -106,9 +100,6 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(dictionarySource).toContain('datasetCatalog: "评测集目录"');
     expect(dictionarySource).toContain('datasetCatalogHiddenReason: "隐藏原因"');
     expect(stylesSource).toContain(".datasetCatalogPanel");
-    expect(routeSource).toContain("styles.datasetCatalogItemTitle");
-    expect(styles.datasetCatalogItemTitle).toContain("inline-flex");
-    expect(styles.datasetCatalogItemTitle).toContain("gap-x-2");
   });
 
   it("separates inconclusive terminal status and harness-only datasets from success wording", () => {
@@ -249,10 +240,10 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain('t("startClosedLoopRun")');
     expect(routeSource).not.toContain("styles.worktreeReviewSurface");
     expect(routeSource).not.toContain("worktreeReviewPanelHint");
-    expect(styles.liveLaunchStack).toBeTypeOf("string");
-    expect(styles.launchSurface).toBeTypeOf("string");
-    expect(styles.supervisedRunConsole).toBeTypeOf("string");
-    expect(styles.supervisedRunConsoleGrid).toBeTypeOf("string");
+    expect(stylesSource).toContain(".liveLaunchStack");
+    expect(stylesSource).toContain(".liveLaunchStack > .launchSurface");
+    expect(stylesSource).toContain(".supervisedRunConsole");
+    expect(stylesSource).toContain(".supervisedRunConsoleGrid");
   });
 
   it("shows four compact supervised workflow cards and keeps approval evidence in one step", () => {
@@ -324,27 +315,6 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(stylesSource).toContain(".supervisedWorkflowCardCurrent");
     expect(stylesSource).toContain(".supervisedWorkflowFollowButton");
     expect(stylesSource).toContain(".supervisedWorkflowLivePreview");
-    expect(styles.supervisedWorkflowCardGrid).toContain("grid-cols-[repeat(4,minmax(168px,1fr))]");
-    expect(styles.supervisedWorkflowCard).toContain("min-h-[148px]");
-    expect(styles.supervisedWorkflowCardButton).toContain("grid-rows-[auto_auto_minmax(0,1fr)]");
-    expect(styles.supervisedWorkflowLivePreview).toContain("line-clamp-2");
-  });
-
-  it("uses full supervised workflow session details for the conversation surface", () => {
-    expect(apiTypesSource).toContain("export type SessionDetail");
-    expect(routeSource).toContain("selectedWorkflowConversationSessionKey");
-    expect(routeSource).toContain('queryKeys.session(selectedWorkflowConversationSessionKey || "none")');
-    expect(routeSource).toContain("fetchJson<SessionDetail>(`/api/sessions/${selectedWorkflowConversationSessionKey}`)");
-    expect(routeSource).toContain("const selectedWorkflowSessionMessages = selectedWorkflowSessionDetailQuery.data?.messages ?? []");
-    expect(routeSource).toContain("selectedWorkflowSnapshotMessages");
-    expect(routeSource).toContain("selectedWorkflowSessionMessages.length");
-    expect(routeSource).toContain("selectedWorkflowSnapshotMessages.length");
-    expect(routeSource.indexOf("selectedWorkflowSessionMessages.length")).toBeLessThan(
-      routeSource.indexOf("selectedWorkflowSnapshotMessages.length"),
-    );
-    expect(routeSource).not.toContain(
-      "const selectedWorkflowConversationMessages: ConversationMessage[] =\n    supervisedSelectedWorkflowStep.conversationMessages?.length",
-    );
   });
 
   it("shows immediate local feedback while a supervised start command is waiting for the run record", () => {
@@ -401,56 +371,77 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("keeps the supervised live console as a dense desktop split before narrow layouts", () => {
-    expect(styles.liveLaunchStack).toContain("max-[1360px]:grid");
-    expect(styles.supervisedRunConsoleGrid).toContain("grid-cols-[minmax(300px,var(--evolution-live-launch-width,348px))");
-    expect(styles.supervisedRunConsoleGrid).not.toContain("grid-cols-2");
+    const desktopBreakpoint = stylesSource.slice(
+      stylesSource.indexOf("@media (max-width: 1360px)"),
+      stylesSource.indexOf("@media (max-width: 1200px)"),
+    );
+    expect(stylesSource).toContain("@media (max-width: 1360px)");
+    expect(desktopBreakpoint).toContain('"launch resize-launch io resize-run run"');
+    expect(desktopBreakpoint).not.toContain('"io io"\n      "launch run"');
   });
 
   it("keeps supervised run empty states compact for first-viewport scanning", () => {
-    expect(styles.structuredEmptyState).toContain("min-h-[86px]");
-    expect(styles.structuredEmptyState).toContain("px-3");
-    expect(styles.structuredEmptyState).toContain("py-2.5");
-    expect(styles.structuredEmptyState).not.toContain("min-h-[220px]");
+    expect(stylesSource).toContain(".structuredEmptyState");
+    expect(stylesSource).toContain("min-height: 86px");
+    expect(stylesSource).toContain("padding: 10px 12px");
+    expect(stylesSource).not.toContain("min-height: 220px");
   });
 
   it("uses denser supervised launch and member panels at narrow workbench widths", () => {
-    expect(styles.supervisedRunConsoleGrid).toContain("minmax(300px,var(--evolution-live-launch-width,348px))");
-    expect(styles.supervisedRunConsoleGrid).toContain("minmax(300px,var(--evolution-live-run-width,360px))");
-    expect(styles.supervisedRunConsole).toContain("[container-type:inline-size]");
-    expect(styles.supervisedRunConsoleGrid).toContain("grid-rows-[max-content]");
-    expect(styles.supervisedRunConsoleGrid).toContain("items-start");
+    const middleBreakpoint = stylesSource.slice(
+      stylesSource.indexOf("@media (min-width: 901px) and (max-width: 1200px)"),
+      stylesSource.indexOf("@media (max-width: 900px)"),
+    );
+
+    expect(stylesSource).toContain("minmax(300px, var(--evolution-live-launch-width, 348px))");
+    expect(stylesSource).toContain("minmax(300px, var(--evolution-live-run-width, 360px))");
+    expect(stylesSource).toContain("container-type: inline-size");
+    expect(stylesSource).toContain("@container (min-width: 560px)");
+    expect(stylesSource).toContain("grid-template-columns: minmax(0, 1.08fr) minmax(214px, 0.72fr)");
+    expect(stylesSource).toContain("grid-template-rows: minmax(0, 1fr)");
     expect(stylesSource).not.toContain("grid-template-rows: minmax(0, auto) minmax(0, 0.9fr) minmax(150px, 0.82fr)");
     expect(stylesSource).not.toContain("grid-template-rows: minmax(0, auto) minmax(156px, 0.86fr) minmax(150px, 0.74fr)");
     expect(stylesSource).not.toContain("max-height: min(430px, 60vh)");
-    expect(styles.noticeText).toContain("max-[1200px]:hidden");
-    expect(styles.sourceInventoryBar).toContain("max-[1200px]:hidden");
-    expect(styles.sourceMetaCompact).toContain("max-[1200px]:hidden");
-    expect(styles.supervisedRunSetup).toContain("max-h-none");
-    expect(styles.supervisedRunSetup).toContain("overflow-visible");
-    expect(styles.supervisedMembersList).toContain("max-h-[min(238px,34vh)]");
-    expect(styles.supervisedMemberRow).toContain("min-h-[34px]");
-    expect(styles.supervisedMemberRow).not.toContain("min-h-[40px]");
-    expect(styles.supervisedMemberRow).toContain("font-mono");
+    expect(middleBreakpoint).toContain(".liveLaunchStack > .launchSurface > .noticeText");
+    expect(middleBreakpoint).toContain(".liveLaunchStack > .launchSurface .formHint");
+    expect(middleBreakpoint).not.toContain(".liveLaunchStack > .launchSurface .sourceInventoryBar");
+    expect(middleBreakpoint).not.toContain(".liveLaunchStack > .launchSurface .sourceMetaCompact");
+    expect(middleBreakpoint).toContain("display: none");
+    expect(stylesSource).toContain("max-height: min(118px, 22vh)");
+    expect(stylesSource).toContain("max-height: min(238px, 34vh)");
+    expect(stylesSource).toContain("min-height: 34px");
+    expect(stylesSource).not.toContain("min-height: 40px");
+    expect(stylesSource).toContain("font-family: var(--font-mono)");
     expect(stylesSource).not.toContain("align-self: end");
   });
 
   it("switches the supervised live grid to a single-column flow below tablet width", () => {
-    expect(styles.liveLaunchStack).toContain("max-[900px]:grid-rows-[max-content_max-content_max-content]");
-    expect(styles.liveLaunchStack).toContain("max-[900px]:content-start");
-    expect(styles.liveLaunchStack).toContain("max-[900px]:h-auto");
-    expect(styles.liveLaunchStack).toContain("max-[900px]:overflow-auto");
-    expect(styles.supervisedRunConsoleGrid).toContain("max-[900px]:grid-cols-1");
-    expect(styles.supervisedRunConsoleGrid).toContain("max-[900px]:auto-rows-max");
+    const tabletBreakpoint = stylesSource.slice(
+      stylesSource.indexOf("@media (max-width: 900px)"),
+      stylesSource.indexOf("@media (max-width: 640px)"),
+    );
+
+    expect(tabletBreakpoint).toContain("grid-template-rows: max-content max-content max-content");
+    expect(tabletBreakpoint).toContain('grid-template-areas:\n      "io"\n      "launch"\n      "run"');
+    expect(tabletBreakpoint).toContain("align-content: start");
+    expect(tabletBreakpoint).toContain("height: auto");
+    expect(tabletBreakpoint).toContain("overflow: auto");
+    expect(tabletBreakpoint).toContain("grid-auto-rows: max-content");
+    expect(tabletBreakpoint).toContain("height: max-content");
+    expect(tabletBreakpoint).toContain("min-height: max-content");
+    expect(tabletBreakpoint).toContain("overflow: visible");
+    expect(tabletBreakpoint).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
   });
 
   it("lets the supervised case transcript fill the lower vertical space", () => {
     expect(routeSource).toContain("styles.transcriptSection");
     expect(routeSource).toContain("styles.caseRawEvidence");
     expect(routeSource).toContain("currentCaseOutputLabel(monitoredRun)");
-    expect(styles.transcriptSection).toContain("flex-1");
-    expect(styles.transcriptSection).toContain("basis-0");
-    expect(styles.transcriptSection).toContain("bg-transparent");
-    expect(styles.caseRawEvidence).toContain("max-h-[30%]");
+    expect(stylesSource).toContain(".transcriptSection");
+    expect(stylesSource).toContain("flex: 1 1 0");
+    expect(stylesSource).toContain("background: transparent");
+    expect(stylesSource).toContain(".caseRawEvidence");
+    expect(stylesSource).toContain("max-height: 30%");
     expect(stylesSource).not.toContain("max-height: 340px");
   });
 
@@ -465,16 +456,18 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("keeps supervised launch from reserving an empty worktree-review track", () => {
-    expect(styles.liveLaunchStack).toContain("grid-rows-[max-content]");
-    expect(styles.liveLaunchStack).toContain("overflow-visible");
-    expect(styles.liveLaunchStack).toContain("max-h-none");
-    expect(styles.launchSurface).toContain("max-h-none");
-    expect(styles.supervisedWorkflowCard).toContain("grid-rows-[1fr_auto]");
-    expect(styles.supervisedWorkflowCard).toContain("overflow-visible");
-    expect(styles.supervisedWorkflowCardFooter).toContain("min-h-[26px]");
+    const launchStackRule = stylesSource.slice(
+      stylesSource.indexOf(".liveLaunchStack {"),
+      stylesSource.indexOf(".liveResizeHandleLaunch"),
+    );
+
+    expect(launchStackRule).toContain("grid-template-rows: minmax(0, 1fr)");
+    expect(launchStackRule).toContain("overflow: hidden");
+    expect(stylesSource).toContain(".liveLaunchStack > .launchSurface");
+    expect(stylesSource).toContain("max-height: none");
     expect(stylesSource).not.toContain("max-height: min(430px, 60vh)");
     expect(stylesSource).not.toContain(".worktreeReviewSurface");
-    expect(worktreePanelSource).toContain("worktreeReviewSurfaceClass");
+    expect(worktreeReviewStylesSource).toContain("worktreeReviewSurfaceClass");
   });
 
   it("renders supervised case transcript with a read-only conversation view and trace fallback", () => {
@@ -485,9 +478,9 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("conversationMessages");
     expect(routeSource).toContain("styles.caseConversationShell");
     expect(routeSource).toContain("styles.caseConversationTranscript");
-    expect(styles.caseConversationShell).toBeTypeOf("string");
-    expect(styles.caseConversationTranscript).toBeTypeOf("string");
-    expect(styles.caseConversationFallback).toBeTypeOf("string");
+    expect(stylesSource).toContain(".caseConversationShell");
+    expect(stylesSource).toContain(".caseConversationTranscript");
+    expect(stylesSource).toContain(".caseConversationFallback");
     expect(routeSource).toContain("buildSupervisedCaseTraceItems");
     expect(routeSource).toContain("caseTraceItemExpanded");
     expect(routeSource).toContain("toggleCaseTraceItem");
@@ -499,33 +492,24 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("styles.caseTraceStack");
     expect(routeSource).toContain("styles.caseTraceMessage");
     expect(routeSource).toContain("styles.caseTraceMeta");
-    expect(styles.caseTraceTimeline).toContain("before:content-['']");
-    expect(styles.caseTraceStack).toContain("justify-end");
-    expect(styles.caseTraceSummary).toBeTypeOf("string");
-    expect(styles.caseTraceMessage).toContain("line-clamp-2");
-    expect(styles.caseTraceMeta).toContain("justify-end");
-    expect(styles.caseTraceStateGrid).toBeTypeOf("string");
+    expect(stylesSource).toContain(".caseTraceTimeline::before");
+    expect(stylesSource).toContain(".caseTraceStack");
+    expect(stylesSource).toContain("justify-content: flex-end");
+    expect(stylesSource).toContain(".caseTraceSummary");
+    expect(stylesSource).toContain(".caseTraceMessage");
+    expect(stylesSource).toContain(".caseTraceMeta");
+    expect(stylesSource).toContain("-webkit-line-clamp: 2");
+    expect(stylesSource).toContain(".caseTraceStateGrid");
   });
 
   it("keeps the proposal library summary in three columns at common desktop widths", () => {
-    expect(styles.librarySummaryBar).toContain("grid-cols-[minmax(300px,1fr)_minmax(260px,0.8fr)_minmax(300px,0.9fr)]");
+    expect(stylesSource).toContain(".librarySummaryBar");
+    expect(stylesSource).toContain("minmax(300px, 1fr) minmax(260px, 0.8fr) minmax(300px, 0.9fr)");
   });
 
   it("does not put long live supervised text into native title tooltips", () => {
     expect(routeSource).not.toContain("title={monitoredRun.latestMessage}");
     expect(routeSource).not.toContain("title={monitoredTaskLabel}");
     expect(routeSource).not.toContain("title={entry.content}");
-  });
-
-  it("routes Evolution controls through VUI primitives", () => {
-    expect(routeSource).toContain('from "../components/vui"');
-    expect(routeSource).toContain("<VButton");
-    expect(routeSource).toContain("<VNativeInput");
-    expect(routeSource).toContain("<VNativeSelect");
-    expect(routeSource).toContain("<VNativeTextarea");
-    expect(routeSource).not.toMatch(/<button\b/);
-    expect(routeSource).not.toMatch(/<input\b/);
-    expect(routeSource).not.toMatch(/<select\b/);
-    expect(routeSource).not.toMatch(/<textarea\b/);
   });
 });

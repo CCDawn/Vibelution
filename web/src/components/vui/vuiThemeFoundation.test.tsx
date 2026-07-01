@@ -14,6 +14,7 @@ import {
   VSection,
   VSurface,
 } from "./index";
+import { createVuiStyleMap } from "./styles/createVuiStyleMap";
 
 const designRoot = resolve(import.meta.dirname, "../../design");
 const routesRoot = resolve(import.meta.dirname, "../../routes");
@@ -149,6 +150,42 @@ describe("VUI dual-theme foundation", () => {
     expect(routeStyleMapSource.match(subReadableFontPattern) ?? []).toEqual([]);
     expect(routeStyleMapSource).not.toContain(".module.css");
     expect(routeStyleMapSource).not.toContain(".vui.css");
+  });
+
+  it("does not infer panel chrome for structural section labels", () => {
+    const styles = createVuiStyleMap(
+      ["sectionTitle", "sectionHeader", "sectionIdentity", "leftBlock", "tokenCompressionCard"] as const,
+      { baseClassName: "test-route" },
+    );
+
+    for (const structuralKey of ["sectionTitle", "sectionHeader", "sectionIdentity"] as const) {
+      expect(styles[structuralKey]).not.toContain("rounded-[var(--radius-panel)]");
+      expect(styles[structuralKey]).not.toContain("border border-[var(--vui-border-subtle)]");
+      expect(styles[structuralKey]).not.toContain("bg-[var(--vui-surface-glass)]");
+      expect(styles[structuralKey]).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+    }
+
+    expect(styles.sectionTitle).toContain("text-[var(--vui-font-title)]");
+    expect(styles.sectionHeader).toContain("flex");
+    expect(styles.leftBlock).toContain("min-w-0");
+    expect(styles.tokenCompressionCard).toContain("rounded-[var(--radius-panel)]");
+  });
+
+  it("keeps base and semantic key classes when a route supplies an override", () => {
+    const styles = createVuiStyleMap(
+      ["messageTurn"] as const,
+      {
+        baseClassName: "test-route",
+        overrides: {
+          messageTurn: "grid grid-cols-[34px_minmax(0,1fr)]",
+        },
+      },
+    );
+
+    expect(styles.messageTurn).toContain("test-route");
+    expect(styles.messageTurn).toContain("messageTurn");
+    expect(styles.messageTurn).toContain("grid-cols-[34px_minmax(0,1fr)]");
+    expect(styles.messageTurn).not.toContain("bg-[var(--vui-surface-row)]");
   });
 
   it("renders page, surface, section, metric strip, and action group primitives", () => {
