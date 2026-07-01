@@ -69,7 +69,7 @@ describe("createEvolutionWorkspaceCache", () => {
     ]);
   });
 
-  it("refreshes the full self-evolution workspace after a self run change", async () => {
+  it("refreshes the self-evolution worktree workspace after a self run change", async () => {
     const { cache, queryKeysFromCalls } = makeCache();
 
     await cache.afterSelfEvolutionChanged();
@@ -77,39 +77,11 @@ describe("createEvolutionWorkspaceCache", () => {
     expect(queryKeysFromCalls()).toEqual([
       queryKeys.evolutionWorkspaceSnapshot(),
       queryKeys.evolutionSelfOverview(),
-      queryKeys.evolutionSelfActiveRun(),
-      queryKeys.evolutionSelfLatestRun(),
+      queryKeys.evolutionWorktreeActiveRun(),
+      queryKeys.evolutionWorktreeRuns(),
       queryKeys.evolutionSelfTransactions(),
       queryKeys.evolutionSelfAudit(),
       queryKeys.runtimeSummary(),
-    ]);
-  });
-
-  it("refreshes the workspace snapshot with the latest self run", async () => {
-    const { cache, queryKeysFromCalls } = makeCache();
-
-    await cache.refreshSelfLatestRun();
-
-    expect(queryKeysFromCalls()).toEqual([
-      queryKeys.evolutionWorkspaceSnapshot(),
-      queryKeys.evolutionSelfLatestRun(),
-    ]);
-  });
-
-  it("extends self-evolution refresh to sessions after handoff", async () => {
-    const { cache, queryKeysFromCalls } = makeCache();
-
-    await cache.afterSelfHandoff();
-
-    expect(queryKeysFromCalls()).toEqual([
-      queryKeys.evolutionWorkspaceSnapshot(),
-      queryKeys.evolutionSelfOverview(),
-      queryKeys.evolutionSelfActiveRun(),
-      queryKeys.evolutionSelfLatestRun(),
-      queryKeys.evolutionSelfTransactions(),
-      queryKeys.evolutionSelfAudit(),
-      queryKeys.runtimeSummary(),
-      queryKeys.sessions(),
     ]);
   });
 

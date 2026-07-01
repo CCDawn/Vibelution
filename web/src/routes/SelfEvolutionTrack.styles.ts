@@ -6,8 +6,14 @@ export const selfEvolutionTrackStyles: Record<string, string> = {
   sideColumn: "grid min-w-0 gap-3",
   sideColumnScrollable: "h-full overflow-y-auto pr-1.5 max-[1180px]:h-auto max-[1180px]:overflow-visible",
   paneCollapsed: "overflow-hidden p-0 invisible",
-  centerColumn: "grid h-full min-h-0 min-w-0 overflow-hidden max-[1180px]:h-auto max-[1180px]:overflow-visible",
+  centerColumn: "grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2.5 overflow-hidden max-[1180px]:h-auto max-[1180px]:overflow-visible",
   conversationShell: "grid h-full min-h-0 overflow-hidden max-[1180px]:h-auto max-[1180px]:overflow-visible max-[760px]:h-[min(72vh,720px)] max-[760px]:min-h-[540px]",
+  workflowCardGrid: "grid grid-cols-2 gap-2 max-[760px]:grid-cols-1",
+  workflowCard:
+    "grid min-h-[88px] cursor-pointer content-start gap-1.5 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-card)] p-3 text-left text-[var(--fg-secondary)] [&_span]:text-[var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_strong]:text-[0.95rem] [&_strong]:text-[var(--fg-primary)] [&_small]:line-clamp-2 [&_small]:text-[var(--vui-font-xs)] [&_small]:leading-normal",
+  workflowCardActive:
+    "border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_9%,var(--surface-card))]",
+  approvalPanel: "grid min-h-0 content-start gap-3 overflow-auto rounded-lg border border-[var(--border-soft)] bg-[var(--surface-card)] p-3.5",
   statusPage: "grid h-full min-h-0 overflow-hidden max-[1180px]:h-auto max-[1180px]:overflow-visible",
   panelStack: "grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-4 overflow-hidden",
   sidebarResizer:

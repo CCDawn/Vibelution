@@ -6090,13 +6090,6 @@ export type SupervisedWorktreeRunStreamEvent = {
   terminal?: boolean;
 };
 
-export type SelfEvolutionRunStreamEvent = {
-  type: "self_evolution_run";
-  runId: string;
-  snapshot: SelfEvolutionActiveRun;
-  terminal?: boolean;
-};
-
 export type EvolutionWorkbench = {
   defaultBundleName: string;
   savedState: EvolutionOverview["workbench"];
@@ -6289,7 +6282,8 @@ export type EvolutionWorkspaceSnapshot = {
   worktreeActiveRun: SupervisedWorktreeRun | null;
   worktreeRuns: SupervisedWorktreeRun[];
   selfOverview: SelfEvolutionOverview;
-  selfLatestRun: SelfEvolutionActiveRun | null;
+  selfWorktreeActiveRun?: SupervisedWorktreeRun | null;
+  selfWorktreeRuns?: SupervisedWorktreeRun[];
   selfTransactions: SelfEvolutionTransaction[];
 };
 
@@ -6450,82 +6444,6 @@ export type SelfEvolutionAuditEvent = {
   passed: boolean | null;
   targetPaths: string[];
   summary: string;
-};
-
-export type SelfEvolutionRollbackTouchedFile = {
-  path: string;
-  changeType: string;
-  trackedBefore: boolean;
-  existedBefore: boolean;
-  statusAfter: string;
-  preHash: string;
-  postHash: string;
-  postExists: boolean;
-  conflict: boolean;
-  conflictReason: string;
-};
-
-export type SelfEvolutionRollbackConflictFile = {
-  path: string;
-  reason: string;
-  currentHash: string;
-  expectedHash: string;
-};
-
-export type SelfEvolutionRollbackState = {
-  status: string;
-  reason: string;
-  baseRev: string;
-  rolledBackAt: string;
-  entryCount: number;
-  touchedFiles: SelfEvolutionRollbackTouchedFile[];
-  conflictFiles: SelfEvolutionRollbackConflictFile[];
-  blockedHint: string;
-};
-
-export type SelfEvolutionRun = {
-  runId: string;
-  goal: string;
-  status: string;
-  phase: string;
-  startedAt: string;
-  updatedAt: string;
-  finishedAt: string;
-  latestMessage: string;
-  currentGoal: string;
-  currentTask: string;
-  lastToolName: string;
-  runtimeStatus: string;
-  toolCallCount: number;
-  summary: string;
-  error: string;
-  cancelRequested: boolean;
-  cancelRequestedAt: string;
-  stopReason: string;
-  controlAction: string;
-  controlRequestedAt: string;
-  messages: ConversationMessage[];
-  turnCount: number;
-  resumeCount: number;
-  readingTask: string;
-  readingHint: string;
-  readingSufficiency: string;
-  convergenceState: string;
-  nextToolIntent: string;
-  rollback: SelfEvolutionRollbackState;
-  runSemantics: SelfEvolutionRunSemantics;
-  actionStates: Record<string, EvolutionActionState>;
-};
-
-export type SelfEvolutionActiveRun = SelfEvolutionRun;
-export type SelfEvolutionLatestRun = SelfEvolutionRun;
-
-export type SelfEvolutionHandoffResponse = {
-  status: string;
-  message: string;
-  sessionId: string;
-  content: string;
-  run: SelfEvolutionRun | null;
 };
 
 export type SelfEvolutionOverview = {
