@@ -1153,6 +1153,42 @@ def test_start_self_observation_run_normalizes_duration(monkeypatch, raw_value, 
     assert snapshot["durationSeconds"] == expected_duration
 
 
+def test_execute_self_observation_action_terminates_active_run(monkeypatch):
+    monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+    monkeypatch.setattr(service, "_run_self_observation_turn", lambda context: None)
+    service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
+
+    snapshot = service.start_self_observation_run({"goal": "观察规划能力", "durationSeconds": 90})
+    updated = service.execute_self_observation_action(snapshot["runId"], "terminate")
+
+    assert updated["status"] == "terminated"
+    assert updated["phase"] == "terminated"
+    assert updated["runtimeStatus"] == "terminated"
+    assert updated["finishedAt"]
+    assert updated["actionStates"]["terminate"]["enabled"] is False
+    assert service.get_active_self_observation_run() is None
+
+
+def test_execute_self_observation_action_rejects_unsupported_action():
+    with pytest.raises(service.SelfEvolutionRunValidationError, match="Unsupported self observation action"):
+        service.execute_self_observation_action("self-observe-missing", "approve")
+
+
+def test_stream_self_observation_run_events_emits_snapshot_and_stops_for_terminal_run():
+    snapshot = {
+        "runId": "self-observe-stream",
+        "status": "done",
+        "phase": "done",
+        "runtimeStatus": "done",
+    }
+
+    events = list(service.stream_self_observation_run_events("self-observe-stream", initial_snapshot=snapshot))
+
+    assert len(events) == 1
+    assert "event: self_observation_run" in events[0]
+    assert '"runId": "self-observe-stream"' in events[0]
+
+
 @pytest.mark.parametrize("status", ["queued", "running", "stopping", "paused"])
 def test_supervised_run_blocks_self_evolution_for_locked_statuses(status):
     assert service._supervised_run_blocks_self_evolution({"status": status}) is True

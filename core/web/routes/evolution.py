@@ -46,8 +46,13 @@ from core.web.services.self_evolution_service import (
 )
 from core.web.services.self_evolution_control_service import (
     SelfEvolutionRunBusyError,
+    SelfEvolutionRunNotFoundError,
     SelfEvolutionRunValidationError,
+    execute_self_observation_action,
+    get_self_observation_run_snapshot,
     start_self_evolution_worktree_run,
+    start_self_observation_run,
+    stream_self_observation_run_events,
 )
 from core.web.services.supervised_control_service import (
     SupervisedRunDeleteError,
@@ -132,6 +137,16 @@ class SelfEvolutionWorktreeRunStartPayload(BaseModel):
     executionMode: str = "simulation"
     confirmRealLlmCost: bool = False
     uiRoute: str = "/evolution?track=self"
+
+
+class SelfObservationRunStartPayload(BaseModel):
+    goal: str = ""
+    durationSeconds: int = 300
+    uiRoute: str = "/evolution?track=self"
+
+
+class SelfObservationRunActionPayload(BaseModel):
+    action: str = ""
 
 
 class SupervisedWorktreeRunActionPayload(BaseModel):
@@ -478,6 +493,51 @@ def self_evolution_start_worktree_run(payload: SelfEvolutionWorktreeRunStartPayl
     except (SelfEvolutionRunBusyError, SupervisedWorktreeRunBusyError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (SelfEvolutionRunValidationError, SupervisedWorktreeRunValidationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/evolution/self/observation-runs", status_code=status.HTTP_202_ACCEPTED)
+def self_observation_start_run(payload: SelfObservationRunStartPayload) -> dict:
+    try:
+        return start_self_observation_run(payload.model_dump())
+    except SelfEvolutionRunBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SelfEvolutionRunValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/evolution/self/observation-runs/{run_id}")
+def self_observation_run(run_id: str) -> dict:
+    snapshot = get_self_observation_run_snapshot(run_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Self observation run not found")
+    return snapshot
+
+
+@router.get("/evolution/self/observation-runs/{run_id}/events")
+def self_observation_run_events(run_id: str) -> StreamingResponse:
+    snapshot = get_self_observation_run_snapshot(run_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Self observation run not found")
+    return StreamingResponse(
+        stream_self_observation_run_events(run_id, initial_snapshot=snapshot),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+@router.post("/evolution/self/observation-runs/{run_id}/actions")
+def self_observation_run_action(run_id: str, payload: SelfObservationRunActionPayload) -> dict:
+    try:
+        return execute_self_observation_action(run_id, payload.action)
+    except SelfEvolutionRunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SelfEvolutionRunBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SelfEvolutionRunValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
