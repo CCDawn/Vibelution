@@ -469,6 +469,8 @@ const styles = createVuiStyleMap(styleKeys, {
     sourceCollectionCommandStats:
       "grid-cols-[repeat(3,minmax(120px,1fr))] max-[860px]:grid-cols-[1fr] [&_span]:min-h-[30px]",
     sourceCollectionPageGrid: "grid-cols-[minmax(0,1fr)]",
+    sourceCollectionPageActions:
+      "!flex flex-wrap items-center justify-end gap-2 min-w-0 [&_a]:inline-flex [&_a]:min-h-[30px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[var(--border-soft)] [&_a]:bg-[color:var(--surface-panel-strong)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[760] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:min-h-[30px] [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[var(--border-soft)] [&_[data-vui=native-button]]:bg-[color:var(--surface-panel-strong)] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[760]",
     sourceCollectionPageBody:
       "!grid min-h-0 content-start gap-2 overflow-auto p-2",
     sourceCollectionCommandBar:
