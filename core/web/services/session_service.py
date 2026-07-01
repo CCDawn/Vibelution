@@ -7863,6 +7863,8 @@ def _lightweight_chat_payload_decision(
     user_message_source = str(context.get("user_message_source") or "").strip()
     if user_message_source == "agent_inbox":
         return False, "agent_inbox"
+    if user_message_source == "self_observation":
+        return True, "self_observation"
 
     raw_message = str(context.get("raw_user_message") or "").strip()
     effective_message = str(context.get("user_message") or "").strip()
