@@ -235,6 +235,7 @@ const styleKeys = [
   "sourceCollectionStageAgentList",
   "sourceCollectionStageAgentPanel",
   "sourceCollectionStageBlockers",
+  "sourceCollectionStageCardActions",
   "sourceCollectionStageCard",
   "sourceCollectionStageCardHead",
   "sourceCollectionStageCardSelected",
@@ -460,6 +461,10 @@ const styles = createVuiStyleMap(styleKeys, {
     sourceCollectionCommandStats:
       "grid-cols-[repeat(3,minmax(120px,1fr))] max-[860px]:grid-cols-[1fr] [&_span]:min-h-[30px]",
     sourceCollectionPageGrid: "grid-cols-[minmax(0,1fr)]",
+    sourceCollectionPageBody:
+      "!grid min-h-0 content-start gap-2 overflow-auto p-2",
+    sourceCollectionCommandBar:
+      "!grid grid-cols-[minmax(0,1fr)_minmax(320px,0.55fr)] items-center gap-2 px-2 py-2 max-[980px]:grid-cols-[1fr]",
     sourceCollectionResultItem:
       "grid-cols-[max-content_minmax(0,1fr)_max-content_minmax(120px,220px)] min-h-[36px] items-center gap-2 px-2 py-1 max-[820px]:grid-cols-[max-content_minmax(0,1fr)]",
     sourceCollectionResultContent:
@@ -470,9 +475,11 @@ const styles = createVuiStyleMap(styleKeys, {
       "grid grid-cols-[max-content_minmax(0,1fr)] items-center gap-1 overflow-hidden text-[var(--vui-font-xs)] [&_a]:truncate [&_code]:truncate max-[820px]:col-span-2",
     sourceCollectionResultStatus: "whitespace-nowrap justify-self-start",
     sourceCollectionStageCard:
-      "min-h-[112px] border-l-[4px] [border-left-color:var(--source-step-color,var(--vui-border-subtle))] px-2 py-2",
+      "!grid min-h-[132px] content-start gap-2 border-l-[4px] [border-left-color:var(--source-step-color,var(--vui-border-subtle))] px-2 py-2",
     sourceCollectionStageCardHead:
       "grid-cols-[max-content_1fr] items-center gap-2 [&_span]:justify-self-end [&_span]:whitespace-nowrap",
+    sourceCollectionStageCardActions:
+      "!flex flex-nowrap items-center gap-1.5 pt-1 [&_[data-vui=native-button]]:min-w-[92px] [&_[data-vui=native-button]]:justify-center",
     sourceCollectionStageModuleText:
       "[&_b]:text-[var(--vui-font-base)] [&_em]:text-[var(--vui-font-sm)] [&_small]:line-clamp-1",
     sourceCollectionStageModules:
