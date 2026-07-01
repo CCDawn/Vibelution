@@ -119,6 +119,16 @@ const styleKeys = [
   "workspaceScopePanel",
 ] as const;
 
-const styles = createVuiStyleMap(styleKeys);
+const styles = createVuiStyleMap(styleKeys, {
+  extensions: {
+    // Let the summary metrics fill the control strip and flow into columns
+    // instead of collapsing into a narrow stacked column beside the nav.
+    summaryGrid: "flex-1 grid-cols-[repeat(auto-fit,minmax(6.5rem,1fr))]",
+    // Real list | resize-handle | detail split; the generic workspace rule
+    // only emits a single-column grid.
+    workspace:
+      "!grid grid-cols-[var(--tools-left-panel-width)_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden",
+  },
+});
 
 export default styles;
