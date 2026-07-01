@@ -5228,7 +5228,10 @@ def submit_session_message(
     conversation_id = str(session_id or "").strip()
     message = _resolve_user_message_content(content, content_utf8_base64=content_utf8_base64)
     normalized_message_source = str(message_source or "").strip() or "raw"
-    recent_image_reference_routing_enabled = normalized_message_source != "supervised_evolution"
+    recent_image_reference_routing_enabled = normalized_message_source not in {
+        "supervised_evolution",
+        "self_observation",
+    }
     if not conversation_id:
         raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
     _validate_user_message_not_encoding_replacement(message, lang=lang)
