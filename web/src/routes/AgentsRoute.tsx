@@ -6443,26 +6443,27 @@ export function AgentsRoute() {
                       </VButton>
                     </div>
                   </section>
-                  <label className={styles.field} title={[toolPolicySourceLine, toolPolicySource?.description || copy.toolPolicyPickerHint].filter(Boolean).join("\n")}>
-                    <span>{copy.tools}</span>
-                    <select value={configDraft.toolPolicyId} onChange={(event) => updateDraft({ toolPolicyId: event.target.value })}>
+                  <VFieldRow
+                    label={copy.tools}
+                    tooltip={[toolPolicySourceLine, toolPolicySource?.description || copy.toolPolicyPickerHint].filter(Boolean).join("\n")}
+                  >
+                    <VNativeSelect value={configDraft.toolPolicyId} onChange={(event) => updateDraft({ toolPolicyId: event.target.value })}>
                       {workspace?.toolPolicies.map((policy) => (
                         <option key={policy.policyId} value={policy.policyId}>
                           {policy.policyId} · {policy.allowedToolCount}/{policy.blockedToolCount}
                         </option>
                       ))}
-                    </select>
-                  </label>
-                  <label className={styles.field} title={copy.memoryPolicyPickerHint}>
-                    <span>{copy.memory}</span>
-                    <select value={configDraft.memoryPolicyId} onChange={(event) => updateDraft({ memoryPolicyId: event.target.value })}>
+                    </VNativeSelect>
+                  </VFieldRow>
+                  <VFieldRow label={copy.memory} tooltip={copy.memoryPolicyPickerHint}>
+                    <VNativeSelect value={configDraft.memoryPolicyId} onChange={(event) => updateDraft({ memoryPolicyId: event.target.value })}>
                       {workspace?.memoryPolicies.map((policy) => (
                         <option key={policy.policyId} value={policy.policyId}>
                           {policy.policyId} · {policy.privateMemoryRoot || "-"}
                         </option>
                       ))}
-                    </select>
-                  </label>
+                    </VNativeSelect>
+                  </VFieldRow>
                   <section className={styles.fieldWide} title={contextCompressionPolicyLine}>
                     <span>{copy.contextCompressionPolicy}</span>
                     <div className={styles.compressionPolicyGrid}>
@@ -7655,22 +7656,18 @@ export function AgentsRoute() {
                   <section>
                     <span>{copy.delegationPolicyTitle}</span>
                     <div className={styles.toggleGrid}>
-                      <label className={styles.checkField}>
-                        <input
-                          type="checkbox"
-                          checked={delegationPolicyDraft.allowSubagents}
-                          onChange={(event) => updateDelegationPolicyDraft({ allowSubagents: event.target.checked })}
-                        />
-                        <span>{copy.allowSubagents}</span>
-                      </label>
-                      <label className={styles.checkField}>
-                        <input
-                          type="checkbox"
-                          checked={delegationPolicyDraft.allowWakeMessages}
-                          onChange={(event) => updateDelegationPolicyDraft({ allowWakeMessages: event.target.checked })}
-                        />
-                        <span>{copy.allowWakeMessages}</span>
-                      </label>
+                      <VCheckbox
+                        isSelected={delegationPolicyDraft.allowSubagents}
+                        onChange={(value) => updateDelegationPolicyDraft({ allowSubagents: value })}
+                      >
+                        {copy.allowSubagents}
+                      </VCheckbox>
+                      <VCheckbox
+                        isSelected={delegationPolicyDraft.allowWakeMessages}
+                        onChange={(value) => updateDelegationPolicyDraft({ allowWakeMessages: value })}
+                      >
+                        {copy.allowWakeMessages}
+                      </VCheckbox>
                     </div>
                     <div className={styles.editorGrid}>
                       <VFieldRow label={copy.maxConcurrent}>

@@ -435,7 +435,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("styles.configGuidePanel");
     expect(routeSource).not.toContain("这页先回答三个问题");
     expect(routeSource).toContain("title={copy.llmSlotsHint}");
-    expect(routeSource).toContain("title={copy.memoryPolicyPickerHint}");
+    expect(routeSource).toContain("tooltip={copy.memoryPolicyPickerHint}");
     expect(routeSource).toContain("displayName: payload.draft.displayName");
     expect(routeSource).toContain("llmBindings: normalizeAgentLlmBindings(payload.draft.llmBindings)");
     expect(routeSource).toContain("promptTemplateId: payload.draft.promptTemplateId");
@@ -462,7 +462,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("<small>{issueSummary(selectedAgent.health, lang)}</small>");
     expect(routeSource).toContain("title={`${slot.required ? copy.requiredSlot : copy.optionalSlot} · ${slot.description}`}");
     expect(routeSource).not.toContain("<small>{slot.required ? copy.requiredSlot : copy.optionalSlot}</small>");
-    expect(routeSource).toContain("title={[toolPolicySourceLine, toolPolicySource?.description || copy.toolPolicyPickerHint].filter(Boolean).join(\"\\n\")}");
+    expect(routeSource).toContain("tooltip={[toolPolicySourceLine, toolPolicySource?.description || copy.toolPolicyPickerHint].filter(Boolean).join(\"\\n\")}");
     expect(routeSource).not.toContain("<small>{toolPolicySourceLine}</small>");
     expect(routeSource).toContain("title={copy.createAgentHint}");
     expect(routeSource).toContain("title={copy.createAgentToolBundlesHint}");
