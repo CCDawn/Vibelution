@@ -20,6 +20,7 @@ export { VEmptyState, type VEmptyStateProps } from "./layout/VEmptyState";
 export { VEntityList, type VEntityListItem, type VEntityListProps } from "./layout/VEntityList";
 export { VHStack, type VHStackProps } from "./layout/VHStack";
 export { VPage, type VPageProps } from "./layout/VPage";
+export { VPanelHeader, type VPanelHeaderProps } from "./layout/VPanelHeader";
 export { VRouteHeader, type VRouteHeaderProps } from "./layout/VRouteHeader";
 export { VSection, type VSectionProps } from "./layout/VSection";
 export { VSplitWorkspace, type VSplitWorkspaceProps } from "./layout/VSplitWorkspace";

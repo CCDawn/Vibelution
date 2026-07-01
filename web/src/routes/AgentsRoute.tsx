@@ -68,7 +68,7 @@ import {
   type AgentFilterSectionView,
   type AgentSummaryMetric,
 } from "../components/vui/product/agent-management";
-import { VButton, VEmptyState, VHStack, VNativeSelect } from "../components/vui";
+import { VButton, VChip, VEmptyState, VHStack, VNativeSelect, VPanelHeader } from "../components/vui";
 import { vuiFormLabelClass } from "../components/vui/forms/formClasses";
 import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
@@ -5696,23 +5696,23 @@ export function AgentsRoute() {
           ariaLabel={activeGroupLabel}
           className={createOpen ? `${styles.agentPanel} ${styles.agentPanelCreating}` : styles.agentPanel}
         >
-          <div className={styles.panelHeader}>
-            <div>
-              <p className={styles.panelEyebrow}>{copy.agentFilters}</p>
-              <h2>{activeGroupLabel}</h2>
-            </div>
-            <div className={styles.panelHeaderActions}>
-              <VButton
-                type="button"
-                variant="secondary"
-                icon={<Plus size={15} />}
-                onPress={() => setCreateOpen((value) => !value)}
-              >
-                {copy.createAgent}
-              </VButton>
-              <span className={styles.countPill}>{visibleAgents.length}</span>
-            </div>
-          </div>
+          <VPanelHeader
+            eyebrow={copy.agentFilters}
+            title={activeGroupLabel}
+            actions={
+              <>
+                <VButton
+                  type="button"
+                  variant="secondary"
+                  icon={<Plus size={15} />}
+                  onPress={() => setCreateOpen((value) => !value)}
+                >
+                  {copy.createAgent}
+                </VButton>
+                <VChip tone="neutral">{visibleAgents.length}</VChip>
+              </>
+            }
+          />
           {createOpen ? (
             <section className={styles.createAgentPanel} title={copy.createAgentHint}>
               <div className={styles.panelHeader}>
