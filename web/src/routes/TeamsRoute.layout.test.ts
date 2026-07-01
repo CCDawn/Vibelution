@@ -239,7 +239,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStylesSource).toContain(".teamMemoryActionRail");
     expect(routeStyles.teamMemoryMemberHeading).toContain("hidden");
     expect(routeStyles.teamMemoryMemberActions).toContain("[&_a_span]:hidden");
-    expect(routeStyles.teamMemoryActionRail).toContain("min-h-[44px]");
+    expect(routeStyles.teamMemoryActionRail).toContain("[&_a]:inline-flex");
   });
 
   it("keeps only the fixed research and AI search teams in the picker", () => {

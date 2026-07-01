@@ -448,6 +448,8 @@ const styles = createVuiStyleMap(styleKeys, {
       "[--node-role-bg:color-mix(in_srgb,var(--state-warning)_11%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--state-warning)_42%,var(--vui-border-subtle))] [--node-role-fg:var(--state-warning)]",
     nodeStale: "border-[color-mix(in_srgb,var(--state-error)_48%,var(--vui-border-subtle))]",
     researchCanvasPanelHidden: "!hidden",
+    researchCanvasIndex:
+      "!flex min-w-0 items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,var(--border-soft))] bg-[image:var(--vui-gradient-route-soft)] bg-[color:color-mix(in_srgb,var(--surface-card)_82%,transparent)] [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&>div_span]:truncate [&>div_span]:text-[var(--fg-muted)] [&>div_span]:text-[0.66rem] [&>div_span]:font-[760] [&>div_small]:truncate [&>div_small]:text-[var(--fg-muted)] [&>div_small]:text-[0.66rem] [&>div_small]:font-[760] [&>div_strong]:truncate [&>div_strong]:text-[var(--fg-primary)] [&>div_strong]:text-[0.86rem] [&_a]:inline-flex [&_a]:shrink-0 [&_a]:min-h-[30px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-[5px] [&_a]:px-[9px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_34%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--surface-panel-strong)_82%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:text-[0.72rem] [&_a]:font-[820] [&_a]:no-underline [&_a]:whitespace-nowrap",
     sourceCollectionStagePrimaryAction: "w-fit max-w-full",
     sourceCollectionStageSecondaryAction: "w-fit max-w-full",
     sourceCollectionSourceDetailActions: "flex-wrap",
@@ -503,8 +505,11 @@ const styles = createVuiStyleMap(styleKeys, {
       "mx-2 !grid grid-cols-[repeat(4,max-content)] justify-start gap-1.5 overflow-x-auto p-0 [scrollbar-width:thin]",
     teamSelectField:
       "grid grid-cols-[max-content_minmax(180px,300px)] items-center gap-1.5 text-[var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)]",
-    teamMemoryActionRail: "min-h-[44px]",
+    teamMemoryActionRail:
+      "!flex min-w-0 items-center justify-end gap-[5px] [&_a]:inline-flex [&_a]:min-h-[24px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-1 [&_a]:px-[7px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_30%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--surface-panel)_88%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:text-[0.64rem] [&_a]:font-[820] [&_a]:no-underline [&_a]:whitespace-nowrap [&_a:hover]:border-[color:color-mix(in_srgb,var(--accent-cool)_46%,var(--border-soft))] [&_a:hover]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel))]",
     teamMemoryIndex: "grid gap-2 grid-cols-[minmax(0,1fr)]",
+    teamMemoryIndexHeader:
+      "!flex min-w-0 items-center justify-between gap-2 [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&>div_strong]:truncate [&>div_strong]:text-[var(--fg-primary)] [&>div_strong]:text-[0.78rem] [&>div_span]:truncate [&>div_span]:text-[var(--fg-muted)] [&>div_span]:text-[0.64rem] [&>div_span]:font-[760]",
     teamMemoryMemberTable: "!grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2",
     teamMemoryMemberActions: "[&_a_span]:hidden",
     teamMemoryMemberHeading: "hidden",
