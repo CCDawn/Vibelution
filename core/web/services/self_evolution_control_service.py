@@ -469,7 +469,7 @@ def _raise_if_self_evolution_requires_worktree_isolation(payload: dict[str, Any]
 
 
 def start_self_evolution_worktree_run(payload: dict[str, Any]) -> dict[str, Any]:
-    """Delegate a risky self-evolution write goal to the supervised worktree path."""
+    """Route every self-evolution goal through a reviewed candidate worktree."""
 
     lang = get_web_language()
     contract = get_workbench_contract()
@@ -485,15 +485,7 @@ def start_self_evolution_worktree_run(payload: dict[str, Any]) -> dict[str, Any]
 
     data = payload if isinstance(payload, dict) else {}
     goal = str(data.get("goal") or DEFAULT_SELF_EVOLUTION_GOAL).strip() or DEFAULT_SELF_EVOLUTION_GOAL
-    reason = _self_evolution_worktree_isolation_reason(data, goal)
-    if not reason:
-        raise SelfEvolutionRunValidationError(
-            text_for(
-                lang,
-                zh="这个入口只接收需要 worktree isolation 的 risky self-evolution 写入目标。",
-                en="This entry point only accepts risky self-evolution write goals that require worktree isolation.",
-            )
-        )
+    reason = _self_evolution_worktree_isolation_reason(data, goal) or "self_evolution_worktree_default"
 
     delegated_payload = {
         "sourceKind": str(data.get("sourceKind") or "bundle").strip() or "bundle",
@@ -511,7 +503,7 @@ def start_self_evolution_worktree_run(payload: dict[str, Any]) -> dict[str, Any]
         "selfEvolutionGoal": goal,
         "selfEvolutionRiskReason": reason,
         "requiresSupervisedReview": True,
-        "reviewReason": "Self-evolution risky write candidate must return to supervised review before merge.",
+        "reviewReason": "Self-evolution candidate must return to human review before merge.",
     }
     snapshot = start_supervised_worktree_run(delegated_payload)
     _record_self_scene_event(

@@ -2796,7 +2796,9 @@ export function ConfigRoute() {
         queryClient.invalidateQueries({ queryKey: queryKeys.evolutionRuns() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.evolutionLibrary() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.evolutionSelfOverview() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionSelfActiveRun() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorkspaceSnapshot() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorktreeActiveRun() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorktreeRuns() }),
       );
     }
     await Promise.all(invalidations);

@@ -423,7 +423,6 @@ def test_evolution_workspace_snapshot_combines_dashboard_payloads(tmp_path, monk
     monkeypatch.setattr(supervised_control_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(self_evolution_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(self_evolution_control_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(evolution_routes, "get_latest_self_evolution_run", lambda: pytest.fail("default snapshot should not load self latest run"))
     monkeypatch.setattr(evolution_routes, "list_self_evolution_transactions", lambda: [])
     monkeypatch.setattr(evolution_routes, "get_latest_supervised_run", lambda **kwargs: None)
     monkeypatch.setattr(
@@ -474,7 +473,9 @@ def test_evolution_workspace_snapshot_combines_dashboard_payloads(tmp_path, monk
     assert payload["worktreeActiveRun"] is None
     assert payload["worktreeRuns"] == []
     assert payload["selfOverview"]["enabled"] in {True, False}
-    assert payload["selfLatestRun"] is None
+    assert payload["selfWorktreeActiveRun"] is None
+    assert payload["selfWorktreeRuns"] == []
+    assert "selfLatestRun" not in payload
     assert payload["selfTransactions"] == []
 
 def test_evolution_workspace_snapshot_keeps_current_agent_bindings_separate_from_latest_run(monkeypatch):
@@ -522,7 +523,6 @@ def test_evolution_workspace_snapshot_keeps_current_agent_bindings_separate_from
     monkeypatch.setattr(evolution_routes, "get_active_supervised_worktree_run", lambda: None)
     monkeypatch.setattr(evolution_routes, "list_supervised_worktree_runs", lambda: [])
     monkeypatch.setattr(evolution_routes, "get_self_evolution_light_overview", lambda: {"enabled": True})
-    monkeypatch.setattr(evolution_routes, "get_latest_self_evolution_run", lambda: None)
     monkeypatch.setattr(evolution_routes, "list_self_evolution_transactions", lambda: [])
     monkeypatch.setattr(evolution_routes, "record_evolution_workspace_snapshot_perf", lambda **kwargs: None)
 
@@ -564,7 +564,6 @@ def test_evolution_workspace_snapshot_reuses_supervised_dashboard_scan(monkeypat
     monkeypatch.setattr(evolution_routes, "list_supervised_worktree_runs", lambda: [])
     monkeypatch.setattr(evolution_routes, "get_self_evolution_light_overview", lambda: {"enabled": True, "goal": "light"})
     monkeypatch.setattr(evolution_routes, "get_self_evolution_overview", lambda: pytest.fail("default snapshot should be light"))
-    monkeypatch.setattr(evolution_routes, "get_latest_self_evolution_run", lambda: None)
     monkeypatch.setattr(evolution_routes, "list_self_evolution_transactions", lambda: pytest.fail("default snapshot should not load transactions"))
     monkeypatch.setattr(
         evolution_routes,
@@ -595,11 +594,20 @@ def test_evolution_workspace_snapshot_can_include_full_self_payload(monkeypatch)
     monkeypatch.setattr(evolution_routes, "get_supervised_workbench", lambda **kwargs: {"activeRun": None})
     monkeypatch.setattr(evolution_routes, "get_active_supervised_run", lambda: None)
     monkeypatch.setattr(evolution_routes, "get_latest_supervised_run", lambda **kwargs: None)
-    monkeypatch.setattr(evolution_routes, "get_active_supervised_worktree_run", lambda: None)
-    monkeypatch.setattr(evolution_routes, "list_supervised_worktree_runs", lambda: [])
+    self_worktree = {
+        "runId": "swte-self-latest",
+        "status": "done",
+        "selfEvolutionOrigin": {"sourceTrack": "self_evolution"},
+    }
+    supervised_worktree = {
+        "runId": "swte-supervised-latest",
+        "status": "done",
+        "startRequest": {"requestSource": "api:evolution.worktree-runs"},
+    }
+    monkeypatch.setattr(evolution_routes, "get_active_supervised_worktree_run", lambda: self_worktree)
+    monkeypatch.setattr(evolution_routes, "list_supervised_worktree_runs", lambda: [supervised_worktree, self_worktree])
     monkeypatch.setattr(evolution_routes, "get_self_evolution_light_overview", lambda: pytest.fail("includeSelf should request full overview"))
     monkeypatch.setattr(evolution_routes, "get_self_evolution_overview", lambda: {"enabled": True, "goal": "full"})
-    monkeypatch.setattr(evolution_routes, "get_latest_self_evolution_run", lambda: {"runId": "self-latest"})
     monkeypatch.setattr(evolution_routes, "list_self_evolution_transactions", lambda: [{"txnId": "txn-1"}])
     monkeypatch.setattr(
         evolution_routes,
@@ -613,7 +621,9 @@ def test_evolution_workspace_snapshot_can_include_full_self_payload(monkeypatch)
     assert response.status_code == 200
     payload = response.json()
     assert payload["selfOverview"]["goal"] == "full"
-    assert payload["selfLatestRun"]["runId"] == "self-latest"
+    assert payload["selfWorktreeActiveRun"]["runId"] == "swte-self-latest"
+    assert payload["selfWorktreeRuns"] == [self_worktree]
+    assert "selfLatestRun" not in payload
     assert payload["selfTransactions"] == [{"txnId": "txn-1"}]
 
 def test_evolution_workspace_snapshot_slow_event_includes_stage_timings(monkeypatch):
@@ -3053,238 +3063,16 @@ def test_self_evolution_history_delete_invalidates_overview_cache(tmp_path, monk
     assert after.status_code == 200
     assert calls["snapshot"] == 2
 
-def test_start_self_evolution_run_from_web_exposes_active_snapshot(monkeypatch):
-    _reset_self_evolution_live_state()
-    _use_local_self_evolution_start(monkeypatch)
-    monkeypatch.setattr(
-        self_evolution_control_service,
-        "get_workbench_contract",
-        lambda: {
-            "defaultMode": "self_evolution",
-            "defaultRoute": "/evolution",
-            "intakeMode": "manual_review",
-            "modeAvailability": {
-                "chat": True,
-                "self_evolution": True,
-                "supervised_evolution": True,
-            },
-            "domainAvailability": {
-                "chat": True,
-                "evolution": True,
-                "config": True,
-            },
-        },
-    )
-    monkeypatch.setattr(self_evolution_control_service, "has_running_sessions", lambda: False)
-    monkeypatch.setattr(self_evolution_control_service, "get_active_supervised_run", lambda: None)
-    monkeypatch.setattr(
-        self_evolution_control_service._RUN_EXECUTOR,
-        "submit",
-        lambda fn, *args, **kwargs: object(),
-    )
-    monkeypatch.setattr(self_evolution_control_service, "_publish_run_snapshot", lambda run_id, terminal=False, **kwargs: None)
-
-    response = client.post("/api/evolution/self/runs", json={"goal": "网页触发一轮自进化"})
-    active_response = client.get("/api/evolution/self/active-run")
-
-    assert response.status_code == 202
-    payload = response.json()
-    assert payload["status"] == "queued"
-    assert payload["goal"] == "网页触发一轮自进化"
-    assert payload["runId"].startswith("web-self-")
-    assert payload["runSemantics"]["runStatus"] == "queued"
-    assert payload["actionStates"]["pause"]["enabled"] is True
-
-    assert active_response.status_code == 200
-    active_payload = active_response.json()
-    assert active_payload["runId"] == payload["runId"]
-    assert active_payload["status"] == "queued"
-    assert active_payload["actionStates"]["resume"]["enabled"] is False
-
-    _reset_self_evolution_live_state()
-
-def test_start_self_evolution_run_from_web_does_not_write_real_runtime_manager_store(monkeypatch):
-    _reset_self_evolution_live_state()
-    _use_local_self_evolution_start(monkeypatch)
-    monkeypatch.setattr(
-        self_evolution_control_service,
-        "get_workbench_contract",
-        lambda: {
-            "defaultMode": "self_evolution",
-            "defaultRoute": "/evolution",
-            "intakeMode": "manual_review",
-            "modeAvailability": {
-                "chat": True,
-                "self_evolution": True,
-                "supervised_evolution": True,
-            },
-            "domainAvailability": {
-                "chat": True,
-                "evolution": True,
-                "config": True,
-            },
-        },
-    )
-    monkeypatch.setattr(self_evolution_control_service, "has_running_sessions", lambda: False)
-    monkeypatch.setattr(self_evolution_control_service, "get_active_supervised_run", lambda: None)
-    monkeypatch.setattr(
-        self_evolution_control_service._RUN_EXECUTOR,
-        "submit",
-        lambda fn, *args, **kwargs: object(),
-    )
-    assert self_evolution_control_service._runtime_manager_live_control_enabled() is False
-    monkeypatch.setattr(
-        self_evolution_control_service,
-        "_submit_self_runtime_manager_command",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("runtime manager command should not be used in local-mode test")
-        ),
-    )
-    monkeypatch.setattr(
-        self_evolution_control_service,
-        "persist_manager_run_snapshot",
-        lambda kind, snapshot, *, active_run_id="": dict(snapshot),
-    )
-
-    response = client.post("/api/evolution/self/runs", json={"goal": "隔离真实 runtime store"})
-    assert response.status_code == 202
-    run_id = response.json()["runId"]
-    run_path, index_path = _real_runtime_manager_evolution_paths("self", run_id)
-    original_index_text = _read_optional_text(index_path)
-
-    try:
-        active_response = client.get("/api/evolution/self/active-run")
-
-        assert active_response.status_code == 200
-        assert active_response.json()["runId"] == run_id
-        assert not run_path.exists()
-        current_index_text = _read_optional_text(index_path)
-        assert current_index_text is None or run_id not in current_index_text
-    finally:
-        _restore_real_runtime_index_if_touched("self", run_id, original_index_text)
-        _reset_self_evolution_live_state()
-
-def test_start_self_evolution_run_allows_readonly_chat_but_blocks_write_chat(monkeypatch):
-    _reset_self_evolution_live_state()
-    _use_local_self_evolution_start(monkeypatch)
-    monkeypatch.setattr(
-        self_evolution_control_service,
-        "get_workbench_contract",
-        lambda: {
-            "defaultMode": "self_evolution",
-            "defaultRoute": "/evolution",
-            "intakeMode": "manual_review",
-            "modeAvailability": {
-                "chat": True,
-                "self_evolution": True,
-                "supervised_evolution": True,
-            },
-            "domainAvailability": {
-                "chat": True,
-                "evolution": True,
-                "config": True,
-            },
-        },
-    )
-    monkeypatch.setattr(self_evolution_control_service, "get_active_supervised_run", lambda: None)
-    monkeypatch.setattr(
-        self_evolution_control_service._RUN_EXECUTOR,
-        "submit",
-        lambda fn, *args, **kwargs: object(),
-    )
-
-    session_service._set_session_running("session-readonly", True, turn_id="chat-turn-readonly", leases=["readonly_chat"])
-    try:
-        response = client.post("/api/evolution/self/runs", json={"goal": "允许只读 chat 并行"})
-    finally:
-        session_service._set_session_running("session-readonly", False, turn_id="chat-turn-readonly")
-
-    assert response.status_code == 202
-    _reset_self_evolution_live_state()
-
-    session_service._set_session_running("session-write", True, turn_id="chat-turn-write", leases=["worktree_write"])
-    try:
-        blocked = client.post("/api/evolution/self/runs", json={"goal": "阻止写入型 chat 并行"})
-    finally:
-        session_service._set_session_running("session-write", False, turn_id="chat-turn-write")
-
-    assert blocked.status_code == 409
-    assert "写入" in blocked.json()["detail"] or "write" in blocked.json()["detail"].lower()
-
-    _reset_self_evolution_live_state()
-
-def test_start_self_evolution_run_rejects_when_supervised_run_active(monkeypatch):
-    _reset_self_evolution_live_state()
-    _use_local_self_evolution_start(monkeypatch)
-    monkeypatch.setattr(
-        self_evolution_control_service,
-        "get_workbench_contract",
-        lambda: {
-            "defaultMode": "self_evolution",
-            "defaultRoute": "/evolution",
-            "intakeMode": "manual_review",
-            "modeAvailability": {
-                "chat": True,
-                "self_evolution": True,
-                "supervised_evolution": True,
-            },
-            "domainAvailability": {
-                "chat": True,
-                "evolution": True,
-                "config": True,
-            },
-        },
-    )
-    monkeypatch.setattr(self_evolution_control_service, "has_running_sessions", lambda: False)
-    monkeypatch.setattr(
-        self_evolution_control_service,
-        "get_active_supervised_run",
-        lambda: {"runId": "supervised-1", "status": "running"},
-    )
-
-    response = client.post("/api/evolution/self/runs", json={"goal": "blocked"})
-
-    assert response.status_code == 409
-    assert "监督任务" in response.json()["detail"]
-
-    _reset_self_evolution_live_state()
-
-def test_start_self_evolution_run_rejects_when_supervised_run_paused(monkeypatch):
-    _reset_self_evolution_live_state()
-    _use_local_self_evolution_start(monkeypatch)
-    monkeypatch.setattr(
-        self_evolution_control_service,
-        "get_workbench_contract",
-        lambda: {
-            "defaultMode": "self_evolution",
-            "defaultRoute": "/evolution",
-            "intakeMode": "manual_review",
-            "modeAvailability": {
-                "chat": True,
-                "self_evolution": True,
-                "supervised_evolution": True,
-            },
-            "domainAvailability": {
-                "chat": True,
-                "evolution": True,
-                "config": True,
-            },
-        },
-    )
-    monkeypatch.setattr(self_evolution_control_service, "has_running_sessions", lambda: False)
-    monkeypatch.setattr(self_evolution_control_service, "list_active_session_work_runs", lambda: [])
-    monkeypatch.setattr(
-        self_evolution_control_service,
-        "get_active_supervised_run",
-        lambda: {"runId": "supervised-paused", "status": "paused"},
-    )
-
-    response = client.post("/api/evolution/self/runs", json={"goal": "blocked"})
-
-    assert response.status_code == 409
-    assert "监督任务" in response.json()["detail"]
-
-    _reset_self_evolution_live_state()
+def test_legacy_self_evolution_live_run_routes_are_not_exposed():
+    unavailable = {404, 405}
+    assert client.post("/api/evolution/self/runs", json={"goal": "legacy"}).status_code in unavailable
+    assert client.get("/api/evolution/self/active-run").status_code in unavailable
+    assert client.get("/api/evolution/self/latest-run").status_code in unavailable
+    assert client.post("/api/evolution/self/runs/web-self-legacy/terminate").status_code in unavailable
+    assert client.post("/api/evolution/self/runs/web-self-legacy/pause").status_code in unavailable
+    assert client.post("/api/evolution/self/runs/web-self-legacy/resume").status_code in unavailable
+    assert client.post("/api/evolution/self/runs/web-self-legacy/rollback").status_code in unavailable
+    assert client.post("/api/evolution/self/runs/web-self-legacy/handoff").status_code in unavailable
 
 def test_self_evolution_routes_hide_data_when_mode_disabled(monkeypatch):
     monkeypatch.setattr(

@@ -8,12 +8,8 @@ import {
   ChevronRight,
   ChevronUp,
   LoaderCircle,
-  Pause,
-  Play,
-  RotateCcw,
   ScrollText,
   ShieldCheck,
-  Square,
   TriangleAlert,
   X,
 } from "lucide-react";
@@ -23,11 +19,12 @@ import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import {
   ConversationMessage,
+  EvolutionWorkflowStep,
   PetSummary,
   RuntimeSummary,
-  SelfEvolutionActiveRun,
   SelfEvolutionOverview,
   SelfEvolutionTransaction,
+  SupervisedWorktreeRun,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { LazyConversationView } from "../components/conversation/LazyConversationView";
@@ -41,32 +38,17 @@ import { selfEvolutionTrackStyles as styles } from "./SelfEvolutionTrack.styles"
 
 type SelfEvolutionTrackProps = {
   overview?: SelfEvolutionOverview;
-  latestRun?: SelfEvolutionActiveRun | null;
+  worktreeRun?: SupervisedWorktreeRun | null;
   goalInput: string;
   onGoalInputChange: (value: string) => void;
   onStartRun: () => void;
-  onStartWorktreeRun: () => void;
-  onPauseRun: () => void;
-  onResumeRun: () => void;
-  onTerminateRun: () => void;
-  onRollbackRun: () => void;
-  onHandoffRun: () => void;
+  onWorktreeAction: (runId: string, action: string) => void;
   onDeleteHistoryGroups: (txnIds: string[]) => void;
   startPending: boolean;
-  startWorktreePending: boolean;
-  pausePending: boolean;
-  resumePending: boolean;
-  terminatePending: boolean;
-  rollbackPending: boolean;
-  handoffPending: boolean;
+  worktreeActionPending: boolean;
   deleteHistoryPending: boolean;
-  startError: string;
   startWorktreeError: string;
-  pauseError: string;
-  resumeError: string;
-  terminateError: string;
-  rollbackError: string;
-  handoffError: string;
+  worktreeActionError: string;
   deleteHistoryError: string;
   actionFeedback: string;
   runLocked: boolean;
@@ -116,6 +98,18 @@ export type SelfEvolutionPetCompanionState = {
   stateKey: TranslationKey;
   detailKey: TranslationKey;
 };
+
+type SelfEvolutionWorkflowStepId = "self_evolution" | "approval";
+type SelfEvolutionWorkflowDefinition = {
+  id: SelfEvolutionWorkflowStepId;
+  zh: string;
+  en: string;
+};
+
+export const SELF_EVOLUTION_WORKFLOW_STEPS: SelfEvolutionWorkflowDefinition[] = [
+  { id: "self_evolution", zh: "自进化", en: "Self-evolution" },
+  { id: "approval", zh: "审批", en: "Approval" },
+];
 
 const WORKTREE_PAGE_SIZE = 10;
 export const SELF_TRANSACTION_COLLAPSED_LIMIT = 8;
@@ -446,34 +440,52 @@ export function buildSelfEvolutionTransactionHistoryView({
   };
 }
 
+function buildSelfWorkflowSteps(run: SupervisedWorktreeRun | null | undefined, lang: "zh" | "en"): EvolutionWorkflowStep[] {
+  const steps = run?.workflowSteps ?? [];
+  const normalized = SELF_EVOLUTION_WORKFLOW_STEPS.map((definition) => {
+    const existing = steps.find((step) => step.id === definition.id);
+    if (existing) {
+      return existing;
+    }
+    const isApproval = definition.id === "approval";
+    const terminal = ["done", "failed", "cancelled"].includes(String(run?.status || "").trim().toLowerCase());
+    return {
+      id: definition.id,
+      label: lang === "zh" ? definition.zh : definition.en,
+      ownerKind: isApproval ? "human" : "agent",
+      role: isApproval ? null : "candidate",
+      status: isApproval ? (terminal ? "pending" : "pending") : (run ? String(run.status || "pending") : "pending"),
+      current: isApproval ? terminal : !terminal,
+      summary: isApproval
+        ? (lang === "zh" ? "等待自进化候选证据完成后进行人工审批。" : "Waiting for candidate evidence before human approval.")
+        : (run?.latestMessage || (lang === "zh" ? "等待自进化 Agent 会话。" : "Waiting for the self-evolution agent session.")),
+      livePreview: run?.latestMessage || "",
+      metrics: {},
+      conversationSessionId: "",
+      conversationTurnId: "",
+      chatRoute: "",
+      conversationMessages: [],
+    } satisfies EvolutionWorkflowStep;
+  });
+  if (!normalized.some((step) => step.current)) {
+    normalized[0] = { ...normalized[0], current: true };
+  }
+  return normalized;
+}
+
 export function SelfEvolutionTrack({
   overview,
-  latestRun,
+  worktreeRun,
   goalInput,
   onGoalInputChange,
   onStartRun,
-  onStartWorktreeRun,
-  onPauseRun,
-  onResumeRun,
-  onTerminateRun,
-  onRollbackRun,
-  onHandoffRun,
+  onWorktreeAction,
   onDeleteHistoryGroups,
   startPending,
-  startWorktreePending,
-  pausePending,
-  resumePending,
-  terminatePending,
-  rollbackPending,
-  handoffPending,
+  worktreeActionPending,
   deleteHistoryPending,
-  startError,
   startWorktreeError,
-  pauseError,
-  resumeError,
-  terminateError,
-  rollbackError,
-  handoffError,
+  worktreeActionError,
   deleteHistoryError,
   actionFeedback,
   runLocked,
@@ -579,40 +591,37 @@ export function SelfEvolutionTrack({
             .join(" · ")
           : t("worktreeClean");
   const transactionItems = transactions.length > 0 ? transactions : overview?.recentTransactions ?? [];
-  const runIsActive = latestRun ? isExecutingRunStatus(latestRun.status) : false;
-  const runIsPaused = latestRun ? isPausedRunStatus(latestRun.status) : false;
-  const rollback = latestRun?.rollback;
-  const rollbackFiles = rollback?.touchedFiles ?? [];
-  const rollbackConflicts = rollback?.conflictFiles ?? [];
-  const rollbackReady = rollback?.status === "available";
-  const rollbackBlocked = rollback?.status === "blocked";
+  const workflowSteps = useMemo<EvolutionWorkflowStep[]>(() => buildSelfWorkflowSteps(worktreeRun, lang), [lang, worktreeRun]);
+  const currentWorkflowStep = workflowSteps.find((step) => step.current) ?? workflowSteps[0];
+  const [selectedWorkflowStepId, setSelectedWorkflowStepId] = useState<SelfEvolutionWorkflowStepId | null>(null);
+  const selectedWorkflowStep =
+    workflowSteps.find((step) => step.id === selectedWorkflowStepId)
+    ?? currentWorkflowStep
+    ?? workflowSteps[0];
+  const selfEvolutionStep = workflowSteps.find((step) => step.id === "self_evolution") ?? workflowSteps[0];
+  const approvalStep = workflowSteps.find((step) => step.id === "approval") ?? workflowSteps[1] ?? workflowSteps[0];
+  const runIsActive = worktreeRun ? isExecutingRunStatus(worktreeRun.status) : false;
+  const changedFiles = worktreeRun?.mergeAnalysis?.changedFiles ?? [];
+  const approveReviewAction = worktreeRun?.actionStates?.approveReview;
+  const mergeAction = worktreeRun?.actionStates?.merge;
+  const discardAction = worktreeRun?.actionStates?.discard;
+  const terminateAction = worktreeRun?.actionStates?.terminate;
+  const reviewGate = worktreeRun?.reviewGate ?? worktreeRun?.mergeAnalysis?.reviewGate;
   const sceneSemantics = overview?.sceneSemantics;
-  const runSemantics = latestRun?.runSemantics ?? overview?.runSemantics;
+  const runSemantics = overview?.runSemantics;
   const startSelfAction = overview?.actionStates?.start;
-  const pauseSelfAction = latestRun?.actionStates?.pause;
-  const resumeSelfAction = latestRun?.actionStates?.resume;
-  const terminateSelfAction = latestRun?.actionStates?.terminate;
-  const rollbackSelfAction = latestRun?.actionStates?.rollback;
-  const handoffSelfAction = latestRun?.actionStates?.handoff;
-  const controlAction = String(latestRun?.controlAction || "").trim().toLowerCase();
-  const terminateRequested = controlAction === "terminate" || String(latestRun?.status || "").toLowerCase() === "stopping";
-  const pauseRequested = controlAction === "pause" || String(latestRun?.runtimeStatus || "").toLowerCase() === "pausing";
-  const worktreeIsolationStartError = isWorktreeIsolationStartError(startError);
+  const terminateRequested = String(worktreeRun?.status || "").toLowerCase() === "stopping";
+  const worktreeIsolationStartError = false;
   const petCompanionState = deriveSelfEvolutionPetCompanionState({
     petLoadFailed: petQuery.isError,
     worktreeIsolationStartError,
     terminateRequested,
-    pauseRequested,
-    runStatus: latestRun?.status || latestRun?.runtimeStatus || overview?.readiness.state || "",
+    pauseRequested: false,
+    runStatus: worktreeRun?.status || worktreeRun?.runtimeStatus || overview?.readiness.state || "",
   });
   const errorMessage = collectUniqueLines([
-    startError,
     startWorktreeError,
-    pauseError,
-    resumeError,
-    terminateError,
-    rollbackError,
-    handoffError,
+    worktreeActionError,
     deleteHistoryError,
   ]).join("\n");
   const transactionFilterOptions = useMemo(() => ([
@@ -686,89 +695,61 @@ export function SelfEvolutionTrack({
     return state.reason || "";
   }
   const conversationTask = useMemo<ConversationTaskSummary>(() => {
-    if (!overview) {
-      return {
-        title: t("launchSelfRun"),
-        goal: latestRun?.currentGoal || latestRun?.goal || goalInput || t("selfGoalPlaceholder"),
-        status: latestRun?.phase || latestRun?.status || "loading",
-        latestSummary: latestRun?.currentTask || latestRun?.latestMessage || latestRun?.summary || latestRun?.error || t("loading"),
-        nextAction: terminateRequested ? t("selfStopRequested") : pauseRequested ? t("selfPauseRequested") : t("loading"),
-        verificationStatus: rollback?.status || latestRun?.runtimeStatus || latestRun?.status || "loading",
-        verificationSummary: latestRun?.error || rollback?.reason || latestRun?.summary || t("loading"),
-        readFiles: [],
-        changedFiles: [],
-        toolNames: collectUniqueLines([latestRun?.lastToolName]),
-        turnCount: latestRun?.turnCount ?? 0,
-        resumeCount: latestRun?.resumeCount ?? 0,
-        updatedAt: latestRun?.updatedAt || "",
-      };
-    }
-    const readFiles = collectUniqueLines(overview.auditTail.flatMap((item) => item.targetPaths));
-    const changedFiles = collectUniqueLines([
-      ...overview.recentChanges.map((item) => item.path),
-      ...rollbackFiles.map((item) => item.path),
-      ...overview.worktree.files.filter((item) => item.staged || item.unstaged || item.untracked || item.deleted).map((item) => item.path),
-    ]);
-    const toolNames = collectUniqueLines([
-      latestRun?.lastToolName,
-      ...overview.auditTail.map((item) => item.toolName),
-    ]);
+    const readFiles = overview ? collectUniqueLines(overview.auditTail.flatMap((item) => item.targetPaths)) : [];
+    const localChangedFiles = overview
+      ? collectUniqueLines([
+          ...overview.recentChanges.map((item) => item.path),
+          ...overview.worktree.files
+            .filter((item) => item.staged || item.unstaged || item.untracked || item.deleted)
+            .map((item) => item.path),
+          ...changedFiles.map((item) => item.path),
+        ])
+      : changedFiles.map((item) => item.path);
+    const toolNames = overview ? collectUniqueLines(overview.auditTail.map((item) => item.toolName)) : [];
+    const goal = worktreeRun?.selfEvolutionOrigin?.goal || overview?.goal || goalInput || t("selfGoalPlaceholder");
+    const status = selectedWorkflowStep?.status || worktreeRun?.status || overview?.readiness.state || "pending";
+    const latestSummary =
+      selectedWorkflowStep?.livePreview
+      || selectedWorkflowStep?.summary
+      || worktreeRun?.latestMessage
+      || overview?.readiness.summary
+      || t("loading");
     return {
-      title: t("launchSelfRun"),
-      goal: latestRun?.currentGoal || latestRun?.goal || overview.goal || t("selfGoalPlaceholder"),
-      status: latestRun?.phase || latestRun?.status || overview.readiness.state,
-      latestSummary:
-        latestRun?.currentTask || latestRun?.latestMessage || latestRun?.summary || latestRun?.error || overview.readiness.summary,
+      title: selectedWorkflowStep?.label || t("launchSelfRun"),
+      goal,
+      status,
+      latestSummary,
       nextAction: terminateRequested
         ? t("selfStopRequested")
-        : pauseRequested
-          ? t("selfPauseRequested")
-        : latestRun?.nextToolIntent
-          ? latestRun.nextToolIntent
-        : rollbackBlocked && rollback?.blockedHint
-          ? rollback.blockedHint
-        : latestRun?.readingHint
-            ? latestRun.readingHint
-          : sceneSemantics?.nextAction || overview.readiness.nextAction || overview.readiness.summary,
-      verificationStatus: rollback?.status || latestRun?.runtimeStatus || latestRun?.status || overview.readiness.state,
+        : sceneSemantics?.nextAction || overview?.readiness.nextAction || selectedWorkflowStep?.summary || latestSummary,
+      verificationStatus: worktreeRun?.mergeAnalysis?.status || worktreeRun?.runtimeStatus || status,
       verificationSummary:
-        latestRun?.error || rollback?.reason || latestRun?.summary || overview.readiness.summary,
+        worktreeRun?.mergeAnalysis?.reason
+        || worktreeRun?.decision?.reason
+        || overview?.readiness.summary
+        || latestSummary,
       readFiles,
-      changedFiles,
+      changedFiles: localChangedFiles,
       toolNames,
-      turnCount: latestRun?.turnCount ?? transactionItems.length,
-      resumeCount: latestRun?.resumeCount ?? 0,
-      updatedAt: latestRun?.updatedAt || overview.worktree.createdAt || "",
+      turnCount: selectedWorkflowStep?.conversationMessages?.length ?? transactionItems.length,
+      resumeCount: 0,
+      updatedAt: worktreeRun?.updatedAt || overview?.worktree.createdAt || "",
     };
   }, [
+    changedFiles,
     goalInput,
-    latestRun?.currentGoal,
-    latestRun?.error,
-    latestRun?.goal,
-    latestRun?.lastToolName,
-    latestRun?.latestMessage,
-    latestRun?.phase,
-    latestRun?.resumeCount,
-    latestRun?.runtimeStatus,
-    latestRun?.status,
-    latestRun?.summary,
-    latestRun?.turnCount,
-    latestRun?.updatedAt,
     overview,
-    pauseRequested,
-    rollback?.blockedHint,
-    rollback?.reason,
-    rollback?.status,
-    rollbackBlocked,
-    rollbackFiles,
     sceneSemantics?.nextAction,
+    selectedWorkflowStep,
     t,
     terminateRequested,
     transactionItems.length,
+    worktreeRun,
   ]);
   const conversationMessages = useMemo<ConversationMessage[]>(() => {
-    if (latestRun?.messages?.length) {
-      return latestRun.messages;
+    const selectedMessages = selectedWorkflowStep?.conversationMessages ?? [];
+    if (selectedMessages.length) {
+      return selectedMessages;
     }
     if (!overview) {
       return [];
@@ -777,11 +758,11 @@ export function SelfEvolutionTrack({
       {
         id: "self-readiness",
         role: "assistant",
-        content: joinReadableLines([overview.readiness.summary, overview.readiness.nextAction]),
+        content: joinReadableLines([selectedWorkflowStep?.summary, overview.readiness.summary, overview.readiness.nextAction]),
         timestamp: "",
       },
     ];
-  }, [latestRun?.messages, overview]);
+  }, [overview, selectedWorkflowStep]);
 
   useEffect(() => {
     setSelectedHistoryTxnIds((current) => pruneSelectedHistoryTxnIds(current, visibleTransactionIds));
@@ -910,6 +891,28 @@ export function SelfEvolutionTrack({
     && visibleTransactionIds.every((txnId) => selectedHistoryTxnIds.includes(txnId));
   const selectedHistorySet = new Set(selectedHistoryTxnIds);
   const expandedHistorySet = new Set(expandedHistoryTxnIds);
+  const approvalEvidenceItems = [
+    {
+      label: lang === "zh" ? "最终结果" : "Final result",
+      value: worktreeRun?.outcome || worktreeRun?.status || "--",
+    },
+    {
+      label: lang === "zh" ? "分数变化" : "Score delta",
+      value: String(worktreeRun?.decision?.scoreDelta ?? approvalStep.metrics?.scoreDelta ?? "--"),
+    },
+    {
+      label: lang === "zh" ? "审批状态" : "Review gate",
+      value: reviewGate?.status || "--",
+    },
+    {
+      label: lang === "zh" ? "候选变更" : "Changed files",
+      value: String(changedFiles.length || approvalStep.metrics?.changedFileCount || 0),
+    },
+    {
+      label: lang === "zh" ? "风险摘要" : "Risk",
+      value: worktreeRun?.mergeAnalysis?.reason || worktreeRun?.decision?.reason || approvalStep.summary || "--",
+    },
+  ];
 
   return (
     <div className={styles.pageStack}>
@@ -963,7 +966,7 @@ export function SelfEvolutionTrack({
                   </div>
                   <div className={styles.detailRow}>
                     <span>{t("currentRunTitle")}</span>
-                    <strong>{runSemantics?.phaseLabel || statusLabel(latestRun?.runtimeStatus || latestRun?.status || overview.readiness.state)}</strong>
+                    <strong>{runSemantics?.phaseLabel || statusLabel(worktreeRun?.runtimeStatus || worktreeRun?.status || overview.readiness.state)}</strong>
                   </div>
                   <div className={styles.detailRow}>
                     <span>{t("rollbackStateTitle")}</span>
@@ -988,20 +991,15 @@ export function SelfEvolutionTrack({
                 {worktreeRunLocked ? <p className={styles.noticeText}>{t("selfWorktreeRunningLockHint")}</p> : null}
                 {actionFeedback ? <p className={styles.feedbackText}>{actionFeedback}</p> : null}
                 {errorMessage ? <p className={styles.errorText}>{errorMessage}</p> : null}
-                {worktreeIsolationStartError ? (
-                  <div className={styles.worktreeEscalation}>
-                    <p className={styles.noticeText}>{t("selfWorktreeEscalationHint")}</p>
-                    <VButton
-                      type="button"
-                      className={styles.secondaryAction}
-                      isDisabled={runLocked || worktreeRunLocked || startWorktreePending}
-                      onClick={onStartWorktreeRun}
-                    >
-                      {startWorktreePending ? <LoaderCircle size={15} className={styles.spinning} /> : <ArrowUpRight size={15} />}
-                      {t("startSelfWorktreeRun")}
-                    </VButton>
-                  </div>
-                ) : null}
+                <VButton
+                  type="button"
+                  className={styles.secondaryAction}
+                  isDisabled={runLocked || worktreeRunLocked || startPending}
+                  onClick={onStartRun}
+                >
+                  {startPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ArrowUpRight size={15} />}
+                  {t("startSelfWorktreeRun")}
+                </VButton>
               </div>
             </section>
 
@@ -1087,116 +1085,124 @@ export function SelfEvolutionTrack({
           />
 
           <main className={styles.centerColumn}>
+            <div className={styles.workflowCardGrid} aria-label={lang === "zh" ? "自进化步骤导航" : "Self-evolution workflow"}>
+              {workflowSteps.map((step) => {
+                const definition = SELF_EVOLUTION_WORKFLOW_STEPS.find((item) => item.id === step.id);
+                const selected = selectedWorkflowStep?.id === step.id;
+                return (
+                  <VButton
+                    key={step.id}
+                    type="button"
+                    className={selected ? `${styles.workflowCard} ${styles.workflowCardActive}` : styles.workflowCard}
+                    aria-pressed={selected}
+                    onClick={() => setSelectedWorkflowStepId(step.id as SelfEvolutionWorkflowStepId)}
+                  >
+                    <span>{definition ? (lang === "zh" ? definition.zh : definition.en) : step.label}</span>
+                    <strong>{statusLabel(step.status)}</strong>
+                    <small>{step.livePreview || step.summary || "--"}</small>
+                  </VButton>
+                );
+              })}
+            </div>
             <div className={styles.conversationShell}>
-              <LazyConversationView
-                sessionId={latestRun?.runId || "self-evolution"}
-                density="compact"
-                eyebrowLabel={t("selfEvolutionMode")}
-                title={t("selfWorkspacePage")}
-                phase={runSemantics?.phase || latestRun?.status || overview.readiness.state}
-                messages={conversationMessages}
-                assistantDisplayName={pet?.name}
-                assistantAvatarFallback={petAvatarFallback}
-                userDisplayName={runtime?.userName}
-                taskSummary={conversationTask.latestSummary}
-                defaultFileContext={conversationTask.changedFiles.at(-1) || conversationTask.readFiles.at(-1) || "workspace"}
-                summaryItems={[]}
-                stats={[
-                  { label: t("selfGoal"), value: conversationTask.goal },
-                  { label: t("selfTransactions"), value: transactionItems.length },
-                  { label: t("filesChanged"), value: overview.worktree.dirtyFileCount },
-                  { label: t("lastUpdated"), value: compactTimestamp(conversationTask.updatedAt) },
-                ]}
-                headerActions={(
+              {selectedWorkflowStep?.id === "approval" ? (
+                <section className={styles.approvalPanel}>
+                  <div className={styles.subsurfaceHeader}>
+                    <div>
+                      <p className={styles.eyebrow}>{approvalStep.label}</p>
+                      <h3 className={styles.sectionTitle}>{lang === "zh" ? "人工审批" : "Human approval"}</h3>
+                    </div>
+                    <span className={styles.statusPill}>{statusLabel(approvalStep.status)}</span>
+                  </div>
+                  <div className={styles.detailStack}>
+                    {approvalEvidenceItems.map((item) => (
+                      <div key={item.label} className={styles.detailRow}>
+                        <span>{item.label}</span>
+                        <strong>{item.value}</strong>
+                      </div>
+                    ))}
+                  </div>
                   <div className={styles.conversationActions}>
-                    {runIsActive && latestRun ? (
-                      <>
+                    <VButton
+                      type="button"
+                      className={styles.secondaryAction}
+                      isDisabled={!worktreeRun || worktreeActionPending || !approveReviewAction?.enabled}
+                      title={disabledReason(approveReviewAction) || undefined}
+                      onClick={() => worktreeRun && onWorktreeAction(worktreeRun.runId, "approve_review")}
+                    >
+                      {worktreeActionPending ? <LoaderCircle size={15} className={styles.spinning} /> : <CheckSquare size={15} />}
+                      {lang === "zh" ? "通过审批" : "Approve"}
+                    </VButton>
+                    <VButton
+                      type="button"
+                      className={styles.secondaryAction}
+                      isDisabled={!worktreeRun || worktreeActionPending || !mergeAction?.enabled}
+                      title={disabledReason(mergeAction) || undefined}
+                      onClick={() => worktreeRun && onWorktreeAction(worktreeRun.runId, "merge")}
+                    >
+                      {worktreeActionPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ShieldCheck size={15} />}
+                      {lang === "zh" ? "合并入库" : "Merge"}
+                    </VButton>
+                    <VButton
+                      type="button"
+                      className={styles.secondaryAction}
+                      isDisabled={!worktreeRun || worktreeActionPending || !discardAction?.enabled}
+                      title={disabledReason(discardAction) || undefined}
+                      onClick={() => worktreeRun && onWorktreeAction(worktreeRun.runId, "discard")}
+                    >
+                      {worktreeActionPending ? <LoaderCircle size={15} className={styles.spinning} /> : <X size={15} />}
+                      {lang === "zh" ? "丢弃候选" : "Discard"}
+                    </VButton>
+                  </div>
+                </section>
+              ) : (
+                <LazyConversationView
+                  sessionId={selectedWorkflowStep?.conversationSessionId || worktreeRun?.runId || "self-evolution"}
+                  density="compact"
+                  eyebrowLabel={selfEvolutionStep.label}
+                  title={selectedWorkflowStep?.label || t("selfWorkspacePage")}
+                  phase={selectedWorkflowStep?.status || worktreeRun?.status || overview.readiness.state}
+                  messages={conversationMessages}
+                  assistantDisplayName={pet?.name}
+                  assistantAvatarFallback={petAvatarFallback}
+                  userDisplayName={runtime?.userName}
+                  taskSummary={conversationTask.latestSummary}
+                  defaultFileContext={conversationTask.changedFiles.at(-1) || conversationTask.readFiles.at(-1) || "workspace"}
+                  summaryItems={[]}
+                  stats={[
+                    { label: t("selfGoal"), value: conversationTask.goal },
+                    { label: t("selfTransactions"), value: transactionItems.length },
+                    { label: t("filesChanged"), value: changedFiles.length || overview.worktree.dirtyFileCount },
+                    { label: t("lastUpdated"), value: compactTimestamp(conversationTask.updatedAt) },
+                  ]}
+                  headerActions={(
+                    <div className={styles.conversationActions}>
+                      {runIsActive && worktreeRun ? (
                         <VButton
                           type="button"
                           className={styles.secondaryAction}
-                          isDisabled={pausePending || !pauseSelfAction?.enabled}
-                          title={disabledReason(pauseSelfAction) || undefined}
-                          onClick={onPauseRun}
+                          isDisabled={worktreeActionPending || !terminateAction?.enabled}
+                          title={disabledReason(terminateAction) || undefined}
+                          onClick={() => onWorktreeAction(worktreeRun.runId, "terminate")}
                         >
-                          {pausePending ? <LoaderCircle size={15} className={styles.spinning} /> : <Pause size={15} />}
-                          {pauseRequested ? t("selfPauseRequested") : t("pauseSelfRun")}
-                        </VButton>
-                        <VButton
-                          type="button"
-                          className={styles.secondaryAction}
-                          isDisabled={terminatePending || !terminateSelfAction?.enabled}
-                          title={disabledReason(terminateSelfAction) || undefined}
-                          onClick={onTerminateRun}
-                        >
-                          {terminatePending ? <LoaderCircle size={15} className={styles.spinning} /> : <Square size={15} />}
+                          {worktreeActionPending ? <LoaderCircle size={15} className={styles.spinning} /> : <X size={15} />}
                           {terminateRequested ? t("selfStopRequested") : t("stopSelfRun")}
                         </VButton>
-                      </>
-                    ) : null}
-
-                    {runIsPaused && latestRun ? (
-                      <>
-                        <VButton
-                          type="button"
-                          className={styles.secondaryAction}
-                          isDisabled={resumePending || !resumeSelfAction?.enabled}
-                          title={disabledReason(resumeSelfAction) || undefined}
-                          onClick={onResumeRun}
-                        >
-                          {resumePending ? <LoaderCircle size={15} className={styles.spinning} /> : <Play size={15} />}
-                          {t("resumeSelfRun")}
-                        </VButton>
-                        <VButton
-                          type="button"
-                          className={styles.secondaryAction}
-                          isDisabled={terminatePending || !terminateSelfAction?.enabled}
-                          title={disabledReason(terminateSelfAction) || undefined}
-                          onClick={onTerminateRun}
-                        >
-                          {terminatePending ? <LoaderCircle size={15} className={styles.spinning} /> : <Square size={15} />}
-                          {t("stopSelfRun")}
-                        </VButton>
-                      </>
-                    ) : null}
-
-                    {!runIsActive && !runIsPaused && latestRun && rollbackReady ? (
-                      <VButton
-                        type="button"
-                        className={styles.secondaryAction}
-                        isDisabled={rollbackPending || !rollbackSelfAction?.enabled}
-                        title={disabledReason(rollbackSelfAction) || undefined}
-                        onClick={onRollbackRun}
-                      >
-                        {rollbackPending ? <LoaderCircle size={15} className={styles.spinning} /> : <RotateCcw size={15} />}
-                        {t("rollbackSelfRun")}
-                      </VButton>
-                    ) : null}
-
-                    {!runIsActive && !runIsPaused && latestRun && rollbackBlocked ? (
-                      <VButton
-                        type="button"
-                        className={styles.secondaryAction}
-                        isDisabled={handoffPending || !handoffSelfAction?.enabled}
-                        title={disabledReason(handoffSelfAction) || undefined}
-                        onClick={onHandoffRun}
-                      >
-                        {handoffPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ArrowUpRight size={15} />}
-                        {t("handoffSelfRollback")}
-                      </VButton>
-                    ) : null}
-                  </div>
-                )}
-                autoScrollToLatest={runIsActive}
-                composerValue={goalInput}
-                composerPlaceholder={t("selfGoalPlaceholder")}
-                composerDisabled={!startSelfAction?.enabled || runLocked || worktreeRunLocked || startPending}
-                composerPending={startPending}
-                submitLabel={t("startSelfRun")}
-                submitPendingLabel={t("loading")}
-                onComposerChange={onGoalInputChange}
-                onSubmit={onStartRun}
-                fallback={<div className={styles.loadingShell}>{t("loadingSession")}</div>}
-              />
+                      ) : null}
+                    </div>
+                  )}
+                  autoScrollToLatest={runIsActive}
+                  composerValue={goalInput}
+                  composerPlaceholder={t("selfGoalPlaceholder")}
+                  composerDisabled={!startSelfAction?.enabled || runLocked || worktreeRunLocked || startPending}
+                  composerPending={startPending}
+                  submitLabel={t("startSelfWorktreeRun")}
+                  submitPendingLabel={t("loading")}
+                  onComposerChange={onGoalInputChange}
+                  onSubmit={onStartRun}
+                  fallback={<div className={styles.loadingShell}>{t("loadingSession")}</div>}
+                />
+              )}
             </div>
           </main>
         </div>
@@ -1214,7 +1220,7 @@ export function SelfEvolutionTrack({
               </article>
               <article className={styles.stripItem}>
                 <span>{t("rollbackStateTitle")}</span>
-                <strong>{runSemantics?.rollbackStateLabel || statusLabel(rollback?.status || "unavailable")}</strong>
+                <strong>{statusLabel(reviewGate?.status || worktreeRun?.mergeAnalysis?.status || "pending")}</strong>
               </article>
               <article className={styles.stripItem}>
                 <span>{t("selfTransactions")}</span>
@@ -1252,7 +1258,7 @@ export function SelfEvolutionTrack({
                   </div>
                   <div className={styles.detailRow}>
                     <span>{t("rollbackStateTitle")}</span>
-                    <strong>{runSemantics?.rollbackStateLabel || statusLabel(rollback?.status || "unavailable")}</strong>
+                    <strong>{statusLabel(reviewGate?.status || worktreeRun?.mergeAnalysis?.status || "pending")}</strong>
                   </div>
                   <div className={styles.detailRow}>
                     <span>{t("dirtyFlags")}</span>
@@ -1332,45 +1338,35 @@ export function SelfEvolutionTrack({
               <section className={styles.subsurface}>
                 <div className={styles.subsurfaceHeader}>
                   <div>
-                    <p className={styles.eyebrow}>{t("selfRollback")}</p>
-                    <h4 className={styles.subsurfaceTitle}>{latestRun?.runId || t("selfRollbackWaiting")}</h4>
+                    <p className={styles.eyebrow}>{approvalStep.label}</p>
+                    <h4 className={styles.subsurfaceTitle}>{worktreeRun?.runId || (lang === "zh" ? "等待候选" : "Waiting for candidate")}</h4>
                   </div>
-                  <RotateCcw size={16} className={styles.headerIcon} />
+                  <ShieldCheck size={16} className={styles.headerIcon} />
                 </div>
 
-                {latestRun && rollback ? (
+                {worktreeRun ? (
                   <>
-                    <p className={styles.sectionSummary}>{rollback.reason || t("selfRollbackWaiting")}</p>
+                    <p className={styles.sectionSummary}>{worktreeRun.mergeAnalysis?.reason || worktreeRun.decision?.reason || approvalStep.summary}</p>
                     <div className={styles.detailStack}>
-                      <div className={styles.detailRow}>
-                        <span>{t("sourceRun")}</span>
-                        <strong>{compactRevision(rollback.baseRev)}</strong>
-                      </div>
-                      <div className={styles.detailRow}>
-                        <span>{t("filesChanged")}</span>
-                        <strong>{rollback.entryCount}</strong>
-                      </div>
-                      <div className={styles.detailRow}>
-                        <span>{t("selfConflictFiles")}</span>
-                        <strong>{rollbackConflicts.length}</strong>
-                      </div>
-                      <div className={styles.detailRow}>
-                        <span>{t("selfFinishedAt")}</span>
-                        <strong>{compactTimestamp(rollback.rolledBackAt)}</strong>
-                      </div>
+                      {approvalEvidenceItems.map((item) => (
+                        <div key={item.label} className={styles.detailRow}>
+                          <span>{item.label}</span>
+                          <strong>{item.value}</strong>
+                        </div>
+                      ))}
                     </div>
                     <div className={styles.listBlock}>
-                      {rollbackFiles.length === 0 ? (
-                        <div className={styles.listItem}>{t("selfRollbackNoFiles")}</div>
+                      {changedFiles.length === 0 ? (
+                        <div className={styles.listItem}>{lang === "zh" ? "暂无候选变更文件。" : "No candidate changed files yet."}</div>
                       ) : (
-                        rollbackFiles.slice(0, 8).map((item) => (
-                          <div key={`${item.path}-${item.changeType}`} className={styles.listItem}>
+                        changedFiles.slice(0, 8).map((item) => (
+                          <div key={`${item.path}-${item.changeType || item.status}`} className={styles.listItem}>
                             <div className={styles.itemTop}>
                               <strong>{item.path}</strong>
-                              <span className={styles.secondaryPill}>{item.changeType}</span>
+                              <span className={styles.secondaryPill}>{item.changeType || item.status}</span>
                             </div>
                             <span className={styles.mutedText}>
-                              {item.conflict ? item.conflictReason || t("status_blocked") : item.statusAfter || "--"}
+                              {item.highRisk ? (lang === "zh" ? "高风险路径" : "High risk path") : item.status || "--"}
                             </span>
                           </div>
                         ))
@@ -1378,7 +1374,7 @@ export function SelfEvolutionTrack({
                     </div>
                   </>
                 ) : (
-                  <div className={styles.emptyState}>{t("selfRollbackWaiting")}</div>
+                  <div className={styles.emptyState}>{lang === "zh" ? "启动一轮自进化后，这里会显示审批证据。" : "Start a self-evolution run to show approval evidence here."}</div>
                 )}
               </section>
             </div>
