@@ -83,7 +83,12 @@ _RUN_SUBSCRIBERS: dict[str, set[queue.Queue[dict[str, Any]]]] = {}
 _RUN_EXECUTING_STATUSES = {"queued", "running", "stopping"}
 _RUN_LOCKED_STATUSES = {"queued", "running", "stopping", "paused"}
 _RUN_FINAL_STATUSES = {"done", "failed", "cancelled"}
+_OBSERVATION_RUN_STATE_LOCK = threading.RLock()
+_OBSERVATION_RUNS: dict[str, dict[str, Any]] = {}
+_ACTIVE_OBSERVATION_RUN_ID: str = ""
 _MANAGER_CONTROL_KEY = "runtimeManagerControl"
+SELF_OBSERVATION_MIN_DURATION_SECONDS = 30
+SELF_OBSERVATION_MAX_DURATION_SECONDS = 3600
 SELF_EVOLUTION_AGENT_ROLES: tuple[dict[str, str], ...] = (
     {
         "role": "executor",
@@ -1947,6 +1952,175 @@ def _build_web_run_prompt(goal: str) -> str:
         "2. 如果共享现场风险很高，可以先总结风险并停止，不必为了修改而强行修改。\n"
         "3. 不要等待额外人工交互；直接完成这一轮并给出可见结论。"
     )
+
+
+def _normalize_observation_duration(value: Any) -> int:
+    try:
+        duration = int(value)
+    except (TypeError, ValueError):
+        duration = 300
+    return max(SELF_OBSERVATION_MIN_DURATION_SECONDS, min(SELF_OBSERVATION_MAX_DURATION_SECONDS, duration))
+
+
+def build_self_observation_prompt(goal: str, duration_seconds: int) -> str:
+    normalized_goal = str(goal or "").strip() or DEFAULT_SELF_EVOLUTION_GOAL
+    normalized_duration = _normalize_observation_duration(duration_seconds)
+    return (
+        "你是 Vibelution 的自进化观察 Agent，处在无工具观察沙盒中。\n"
+        f"观察目标：{normalized_goal}\n"
+        f"运行时长上限：{normalized_duration} 秒。\n\n"
+        "硬性规则：\n"
+        "1. 你没有任何工具。\n"
+        "2. 你不能声称已经读取、搜索、运行、验证、修改、提交、合并或调用外部能力。\n"
+        "3. 你不能请求工具授权，因为本模式本阶段不支持工具申请。\n"
+        "4. 你只能理解目标、提出假设、分解可能路径、识别风险、描述未来需要的证据。\n"
+        "5. 需要证据时必须写入“无法验证”，不能编造结果。\n\n"
+        "每段输出使用以下结构：\n"
+        "当前理解：\n"
+        "可观察推理：\n"
+        "关键假设：\n"
+        "无法验证：\n"
+        "如果未来允许工具，需要的证据：\n"
+        "下一段观察重点：\n"
+    )
+
+
+def detect_self_observation_boundary_violation(text: str) -> str:
+    normalized = str(text or "").strip().lower()
+    if not normalized:
+        return ""
+    file_read_markers = ("已经读取", "读取了项目", "read the file", "read files", "opened the file")
+    command_markers = ("运行了", "执行了命令", "ran pytest", "ran npm", "executed the command", "i ran")
+    mutation_markers = ("修改了", "写入了", "提交了", "合并了", "modified the file", "committed", "merged")
+    search_markers = ("搜索了", "查到了网页", "searched the web", "web search")
+    if any(marker in normalized for marker in file_read_markers):
+        return "claimed_file_read"
+    if any(marker in normalized for marker in command_markers):
+        return "claimed_command_execution"
+    if any(marker in normalized for marker in mutation_markers):
+        return "claimed_mutation"
+    if any(marker in normalized for marker in search_markers):
+        return "claimed_search"
+    return ""
+
+
+def _build_self_observation_snapshot(
+    *,
+    run_id: str,
+    goal: str,
+    duration_seconds: int,
+    status: str,
+    latest_message: str,
+    started_at: str,
+) -> dict[str, Any]:
+    return {
+        "runId": run_id,
+        "runKind": "self_observation_run",
+        "selfMode": "observation",
+        "status": status,
+        "phase": status,
+        "runtimeStatus": status,
+        "goal": goal,
+        "durationSeconds": duration_seconds,
+        "allowedTools": [],
+        "toolPolicy": {
+            "policyId": "self-observation-no-tools",
+            "allowedTools": [],
+            "preferredTools": [],
+            "blockedTools": [],
+            "readScopes": [],
+            "writeScopes": [],
+            "mutationAccess": "none",
+        },
+        "writeLeases": [],
+        "worktreeCreated": False,
+        "conversationSessionId": "",
+        "startedAt": started_at,
+        "updatedAt": started_at,
+        "finishedAt": "",
+        "latestMessage": latest_message,
+        "messages": [],
+        "report": "",
+        "boundaryViolation": "",
+        "actionStates": {
+            "terminate": {"enabled": status in {"queued", "running"}, "label": "终止观察", "reason": ""},
+        },
+    }
+
+
+def get_active_self_observation_run() -> dict[str, Any] | None:
+    with _OBSERVATION_RUN_STATE_LOCK:
+        snapshot = _OBSERVATION_RUNS.get(_ACTIVE_OBSERVATION_RUN_ID)
+        if not snapshot:
+            return None
+        if str(snapshot.get("status") or "").lower() in {"queued", "running"}:
+            return dict(snapshot)
+        return None
+
+
+def get_self_observation_run_snapshot(run_id: str) -> dict[str, Any] | None:
+    normalized = str(run_id or "").strip()
+    with _OBSERVATION_RUN_STATE_LOCK:
+        snapshot = _OBSERVATION_RUNS.get(normalized)
+        return dict(snapshot) if snapshot else None
+
+
+def force_cancel_active_self_observation_runs_for_shutdown(reason: str = "") -> list[dict[str, Any]]:
+    global _ACTIVE_OBSERVATION_RUN_ID
+    closed: list[dict[str, Any]] = []
+    now = _now_timestamp()
+    with _OBSERVATION_RUN_STATE_LOCK:
+        for snapshot in _OBSERVATION_RUNS.values():
+            if str(snapshot.get("status") or "").lower() in {"queued", "running"}:
+                snapshot["status"] = "terminated"
+                snapshot["phase"] = "terminated"
+                snapshot["runtimeStatus"] = "terminated"
+                snapshot["finishedAt"] = now
+                snapshot["updatedAt"] = now
+                snapshot["latestMessage"] = reason or "Observation run terminated."
+                terminate_state = snapshot.get("actionStates") if isinstance(snapshot.get("actionStates"), dict) else {}
+                if isinstance(terminate_state.get("terminate"), dict):
+                    terminate_state["terminate"]["enabled"] = False
+                closed.append(dict(snapshot))
+        _ACTIVE_OBSERVATION_RUN_ID = ""
+    return closed
+
+
+def _run_self_observation_turn(context: dict[str, Any]) -> None:
+    return None
+
+
+def start_self_observation_run(payload: dict[str, Any]) -> dict[str, Any]:
+    global _ACTIVE_OBSERVATION_RUN_ID
+    lang = get_web_language()
+    contract = get_workbench_contract()
+    if not bool(contract.get("modeAvailability", {}).get("self_evolution")):
+        raise SelfEvolutionRunValidationError(
+            text_for(lang, zh="配置里没有启用 self_evolution，当前不能启动自主观察。", en="self_evolution is disabled.")
+        )
+    data = payload if isinstance(payload, dict) else {}
+    goal = str(data.get("goal") or DEFAULT_SELF_EVOLUTION_GOAL).strip() or DEFAULT_SELF_EVOLUTION_GOAL
+    duration_seconds = _normalize_observation_duration(data.get("durationSeconds"))
+    now = _now_timestamp()
+    with _OBSERVATION_RUN_STATE_LOCK:
+        active = get_active_self_observation_run()
+        if active is not None:
+            raise SelfEvolutionRunBusyError(
+                text_for(lang, zh="当前已有自主观察正在运行，请先终止或等待结束。", en="An observation run is already active.")
+            )
+        run_id = f"self-observe-{uuid4().hex[:12]}"
+        snapshot = _build_self_observation_snapshot(
+            run_id=run_id,
+            goal=goal,
+            duration_seconds=duration_seconds,
+            status="queued",
+            latest_message=text_for(lang, zh="自主观察已排队，等待无工具会话启动。", en="Observation run queued."),
+            started_at=now,
+        )
+        _OBSERVATION_RUNS[run_id] = snapshot
+        _ACTIVE_OBSERVATION_RUN_ID = run_id
+    _RUN_EXECUTOR.submit(_run_self_observation_turn, {"runId": run_id, "goal": goal, "durationSeconds": duration_seconds})
+    return get_self_observation_run_snapshot(run_id) or snapshot
 
 
 def _mark_run_paused(
