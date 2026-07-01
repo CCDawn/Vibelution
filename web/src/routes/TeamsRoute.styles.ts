@@ -497,7 +497,8 @@ const styles = createVuiStyleMap(styleKeys, {
     teamSelectField:
       "grid grid-cols-[max-content_minmax(180px,300px)] items-center gap-1.5 text-[var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)]",
     teamMemoryActionRail: "min-h-[44px]",
-    teamMemoryIndex: "grid-cols-[repeat(auto-fit,minmax(300px,1fr))]",
+    teamMemoryIndex: "grid gap-2 grid-cols-[minmax(0,1fr)]",
+    teamMemoryMemberTable: "!grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2",
     teamMemoryMemberActions: "[&_a_span]:hidden",
     teamMemoryMemberHeading: "hidden",
     teamUnavailableActions:
