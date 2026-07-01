@@ -70,7 +70,7 @@ import {
   type AgentFilterSectionView,
   type AgentSummaryMetric,
 } from "../components/vui/product/agent-management";
-import { VButton, VChip, VEmptyState, VFieldRow, VHStack, VNativeInput, VNativeSelect, VNativeTextarea, VPanelHeader } from "../components/vui";
+import { VButton, VCheckbox, VChip, VEmptyState, VFieldRow, VHStack, VNativeInput, VNativeSelect, VNativeTextarea, VPanelHeader } from "../components/vui";
 import { vuiFormLabelClass } from "../components/vui/forms/formClasses";
 import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
@@ -6477,15 +6477,13 @@ export function AgentsRoute() {
                           <option value="custom">{copy.contextCompressionCustom}</option>
                         </VNativeSelect>
                       </VFieldRow>
-                      <label className={`${styles.field} ${styles.compressionToggleField}`}>
-                        <span>{copy.contextCompressionEnabled}</span>
-                        <input
-                          type="checkbox"
-                          checked={configDraft.contextCompressionPolicy.enabled}
-                          disabled={!contextCompressionCustom}
-                          onChange={(event) => updateContextCompressionDraft({ enabled: event.target.checked })}
-                        />
-                      </label>
+                      <VCheckbox
+                        isSelected={configDraft.contextCompressionPolicy.enabled}
+                        isDisabled={!contextCompressionCustom}
+                        onChange={(value) => updateContextCompressionDraft({ enabled: value })}
+                      >
+                        {copy.contextCompressionEnabled}
+                      </VCheckbox>
                       <VFieldRow label={copy.contextCompressionMaxTokenLimit}>
                         <VNativeInput
                           type="number"
@@ -6593,24 +6591,20 @@ export function AgentsRoute() {
                           onChange={(event) => updateContextCompressionDraft({ keepAiMessages: event.target.value })}
                         />
                       </VFieldRow>
-                      <label className={styles.compressionInlineCheck}>
-                        <input
-                          type="checkbox"
-                          checked={configDraft.contextCompressionPolicy.preserveErrors}
-                          disabled={!contextCompressionCustom}
-                          onChange={(event) => updateContextCompressionDraft({ preserveErrors: event.target.checked })}
-                        />
-                        <span>{copy.contextCompressionPreserveErrors}</span>
-                      </label>
-                      <label className={styles.compressionInlineCheck}>
-                        <input
-                          type="checkbox"
-                          checked={configDraft.contextCompressionPolicy.extractKeyDecisions}
-                          disabled={!contextCompressionCustom}
-                          onChange={(event) => updateContextCompressionDraft({ extractKeyDecisions: event.target.checked })}
-                        />
-                        <span>{copy.contextCompressionExtractDecisions}</span>
-                      </label>
+                      <VCheckbox
+                        isSelected={configDraft.contextCompressionPolicy.preserveErrors}
+                        isDisabled={!contextCompressionCustom}
+                        onChange={(value) => updateContextCompressionDraft({ preserveErrors: value })}
+                      >
+                        {copy.contextCompressionPreserveErrors}
+                      </VCheckbox>
+                      <VCheckbox
+                        isSelected={configDraft.contextCompressionPolicy.extractKeyDecisions}
+                        isDisabled={!contextCompressionCustom}
+                        onChange={(value) => updateContextCompressionDraft({ extractKeyDecisions: value })}
+                      >
+                        {copy.contextCompressionExtractDecisions}
+                      </VCheckbox>
                     </div>
                     <div className={styles.configDeepLinkRow}>
                       <VButton
@@ -7300,30 +7294,24 @@ export function AgentsRoute() {
                   </span>
                 </div>
                 <div className={styles.toggleGrid}>
-                  <label className={styles.checkField}>
-                    <input
-                      type="checkbox"
-                      checked={membershipDraft.chatDefault}
-                      onChange={(event) => updateMembershipDraft({ chatDefault: event.target.checked, chatAvailable: event.target.checked ? true : membershipDraft.chatAvailable })}
-                    />
-                    <span>{copy.chatDefault}</span>
-                  </label>
-                  <label className={styles.checkField}>
-                    <input
-                      type="checkbox"
-                      checked={membershipDraft.chatAvailable}
-                      onChange={(event) => updateMembershipDraft({ chatAvailable: event.target.checked, chatDefault: event.target.checked ? membershipDraft.chatDefault : false })}
-                    />
-                    <span>{copy.chatAvailable}</span>
-                  </label>
-                  <label className={styles.checkField}>
-                    <input
-                      type="checkbox"
-                      checked={membershipDraft.researchPool}
-                      onChange={(event) => updateMembershipDraft({ researchPool: event.target.checked })}
-                    />
-                    <span>{copy.researchPool}</span>
-                  </label>
+                  <VCheckbox
+                    isSelected={membershipDraft.chatDefault}
+                    onChange={(value) => updateMembershipDraft({ chatDefault: value, chatAvailable: value ? true : membershipDraft.chatAvailable })}
+                  >
+                    {copy.chatDefault}
+                  </VCheckbox>
+                  <VCheckbox
+                    isSelected={membershipDraft.chatAvailable}
+                    onChange={(value) => updateMembershipDraft({ chatAvailable: value, chatDefault: value ? membershipDraft.chatDefault : false })}
+                  >
+                    {copy.chatAvailable}
+                  </VCheckbox>
+                  <VCheckbox
+                    isSelected={membershipDraft.researchPool}
+                    onChange={(value) => updateMembershipDraft({ researchPool: value })}
+                  >
+                    {copy.researchPool}
+                  </VCheckbox>
                 </div>
                 <div className={styles.editorGrid}>
                   <VFieldRow label={copy.supervisedSlot}>
@@ -7705,44 +7693,36 @@ export function AgentsRoute() {
                       </VFieldRow>
                     </div>
                     <div className={styles.contextModeGrid}>
-                      <label className={styles.checkField}>
-                        <input
-                          type="checkbox"
-                          checked={delegationPolicyDraft.allowedContextModes.includes("isolated")}
-                          onChange={(event) => toggleDelegationContextMode("isolated", event.target.checked)}
-                        />
-                        <span>{copy.allowedContextModes}: isolated</span>
-                      </label>
-                      <label className={styles.checkField}>
-                        <input
-                          type="checkbox"
-                          checked={delegationPolicyDraft.allowedContextModes.includes("fork")}
-                          onChange={(event) => toggleDelegationContextMode("fork", event.target.checked)}
-                        />
-                        <span>{copy.allowedContextModes}: fork</span>
-                      </label>
+                      <VCheckbox
+                        isSelected={delegationPolicyDraft.allowedContextModes.includes("isolated")}
+                        onChange={(value) => toggleDelegationContextMode("isolated", value)}
+                      >
+                        {copy.allowedContextModes}: isolated
+                      </VCheckbox>
+                      <VCheckbox
+                        isSelected={delegationPolicyDraft.allowedContextModes.includes("fork")}
+                        onChange={(value) => toggleDelegationContextMode("fork", value)}
+                      >
+                        {copy.allowedContextModes}: fork
+                      </VCheckbox>
                     </div>
                   </section>
                   <section>
                     <span>{copy.supervisionPolicyTitle}</span>
                     <div className={styles.toggleGrid}>
-                      <label className={styles.checkField}>
-                        <input
-                          type="checkbox"
-                          checked={supervisionPolicyDraft.supervisionEnabled}
-                          onChange={(event) => updateSupervisionPolicyDraft({ supervisionEnabled: event.target.checked })}
-                        />
-                        <span>{copy.supervisionEnabled}</span>
-                      </label>
-                      <label className={styles.checkField}>
-                        <input
-                          type="checkbox"
-                          checked={supervisionPolicyDraft.requiresReview}
-                          disabled={supervisionPolicyDraft.reviewMode === "required" || supervisionPolicyDraft.reviewMode === "disabled"}
-                          onChange={(event) => updateSupervisionPolicyDraft({ requiresReview: event.target.checked })}
-                        />
-                        <span>{copy.requiresReview}</span>
-                      </label>
+                      <VCheckbox
+                        isSelected={supervisionPolicyDraft.supervisionEnabled}
+                        onChange={(value) => updateSupervisionPolicyDraft({ supervisionEnabled: value })}
+                      >
+                        {copy.supervisionEnabled}
+                      </VCheckbox>
+                      <VCheckbox
+                        isSelected={supervisionPolicyDraft.requiresReview}
+                        isDisabled={supervisionPolicyDraft.reviewMode === "required" || supervisionPolicyDraft.reviewMode === "disabled"}
+                        onChange={(value) => updateSupervisionPolicyDraft({ requiresReview: value })}
+                      >
+                        {copy.requiresReview}
+                      </VCheckbox>
                     </div>
                     <div className={styles.editorGrid}>
                       <VFieldRow label={copy.reviewMode}>
