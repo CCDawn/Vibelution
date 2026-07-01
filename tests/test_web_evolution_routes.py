@@ -632,6 +632,21 @@ def test_evolution_workspace_snapshot_can_include_full_self_payload(monkeypatch)
     assert "selfLatestRun" not in payload
     assert payload["selfTransactions"] == [{"txnId": "txn-1"}]
 
+def test_workspace_snapshot_include_self_projects_observation_active_run(monkeypatch):
+    from core.web.services import self_evolution_control_service as service
+
+    monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+    monkeypatch.setattr(service, "_run_self_observation_turn", lambda context: None)
+    service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
+    started = service.start_self_observation_run({"goal": "观察投影", "durationSeconds": 60})
+
+    response = client.get("/api/evolution/workspace-snapshot?includeSelf=true")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["selfObservationActiveRun"]["runId"] == started["runId"]
+    assert payload["selfObservationActiveRun"]["allowedTools"] == []
+
 def test_evolution_workspace_snapshot_slow_event_includes_stage_timings(monkeypatch):
     recorded_events: list[dict] = []
 
