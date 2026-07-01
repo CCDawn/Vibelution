@@ -15,6 +15,11 @@ export {
   type TeamSourceFilterOption,
 } from "./TeamSourceFilterBar";
 export {
+  TeamSourceResultStats,
+  type TeamSourceResultStat,
+  type TeamSourceResultStatsProps,
+} from "./TeamSourceResultStats";
+export {
   TeamStagePipeline,
   type TeamStagePipelineProps,
 } from "./TeamStagePipeline";

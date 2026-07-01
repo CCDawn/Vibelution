@@ -64,6 +64,7 @@ import {
 } from "../components/vui";
 import {
   TeamSourceFilterBar,
+  TeamSourceResultStats,
   TeamStageCard,
   TeamStageCommandBar,
   TeamStagePipeline,
@@ -7456,12 +7457,15 @@ export function TeamsRoute({
             <span>{rawRecordHeaderText}</span>
           </div>
           {renderSourceCollectionFilterBar(sourceCollectionRecordFilterCounts, lang === "zh" ? "资料来源过滤" : "Source filters", sourceCollectionRecordsDataLoading)}
-          <div className={styles.sourceCollectionResultStats}>
-            <span>{lang === "zh" ? "原始记录" : "raw records"} <strong>{sourceCollectionCollectedCountText}</strong></span>
-            <span>{lang === "zh" ? "已入候选" : "imported to candidates"} <strong>{sourceCollectionDisplayedCandidateCountText}</strong></span>
-            <span>{lang === "zh" ? "可点击来源" : "clickable sources"} <strong>{sourceCollectionRecordClickableSourceCountText}</strong></span>
-            <span>{lang === "zh" ? "本地文件" : "local files"} <strong>{sourceCollectionRecordLocalFileCountText}</strong></span>
-          </div>
+          <TeamSourceResultStats
+            ariaLabel={lang === "zh" ? "资料统计" : "Source stats"}
+            stats={[
+              { key: "raw", label: lang === "zh" ? "原始记录" : "raw records", value: sourceCollectionCollectedCountText },
+              { key: "imported", label: lang === "zh" ? "已入候选" : "imported to candidates", value: sourceCollectionDisplayedCandidateCountText },
+              { key: "clickable", label: lang === "zh" ? "可点击来源" : "clickable sources", value: sourceCollectionRecordClickableSourceCountText },
+              { key: "local", label: lang === "zh" ? "本地文件" : "local files", value: sourceCollectionRecordLocalFileCountText },
+            ]}
+          />
           {sourceCollectionPendingCandidateImportCount > 0 ? (
             <div className={styles.sourceCollectionResultWarning}>
               {lang === "zh"
