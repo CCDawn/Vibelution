@@ -3,6 +3,12 @@ export {
   type AgentBulkActionBarProps,
 } from "./AgentBulkActionBar";
 export {
+  AgentFilterRail,
+  type AgentFilterGroupView,
+  type AgentFilterRailProps,
+  type AgentFilterSectionView,
+} from "./AgentFilterRail";
+export {
   AgentPageHeader,
   type AgentPageHeaderAction,
   type AgentPageHeaderProps,

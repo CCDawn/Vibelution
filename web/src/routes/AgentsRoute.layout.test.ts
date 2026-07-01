@@ -14,6 +14,10 @@ const bulkActionBarSource = readFileSync(
   new URL("../components/vui/product/agent-management/AgentBulkActionBar.tsx", import.meta.url),
   "utf-8",
 );
+const filterRailSource = readFileSync(
+  new URL("../components/vui/product/agent-management/AgentFilterRail.tsx", import.meta.url),
+  "utf-8",
+);
 
 function sourceBlocksForStyle(styleName: string): string[] {
   const marker = `className={styles.${styleName}}`;
@@ -85,7 +89,9 @@ describe("AgentsRoute layout contract", () => {
 
   it("uses the VUI product panel surface for the Agent workspace columns", () => {
     expect(routeSource).toContain("AgentWorkspacePanel");
-    expect(routeSource).toContain('as="aside" ariaLabel={copy.agentFilters}');
+    expect(routeSource).toContain("<AgentFilterRail");
+    expect(routeSource).toContain("ariaLabel={copy.agentFilters}");
+    expect(filterRailSource).toContain('as="aside"');
     expect(routeSource).toContain('as="main"');
     expect(routeSource).toContain("ariaLabel={activeGroupLabel}");
     expect(routeSource).toContain("ariaLabel={selectedAgent ? agentLabel(selectedAgent) : copy.title}");
@@ -129,7 +135,7 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("uses filter, table, and detail panels instead of a card wall", () => {
-    expect(routeSource).toContain("styles.filterPanel");
+    expect(routeSource).toContain("<AgentFilterRail");
     expect(routeSource).toContain("styles.agentPanel");
     expect(routeSource).toContain("styles.detailPanel");
     expect(routeSource).toContain("styles.agentTable");
@@ -164,17 +170,11 @@ describe("AgentsRoute layout contract", () => {
     expect(agentWorkspaceCacheSource).toContain("teamIndexesWithoutAgentIds");
     expect(routeSource).toContain('section === "boundary"');
     expect(routeSource).toContain("managementSection,");
-    expect(routeSource).toContain("styles.advancedFilterSection");
-    expect(routeSource).toContain("styles.advancedFilterSummary");
-    expect(routeSource).toContain("styles.advancedFilterBody");
-    expect(routeSource).toContain("styles.groupSection");
-    expect(routeSource).toContain("styles.groupSectionTitle");
+    expect(routeSource).toContain("sections={filterSections}");
+    expect(routeSource).toContain("advancedSections={advancedFilterSections}");
     expect(routeSource).toContain("groupDisplayLabel(group, copy)");
-    expect(styles.advancedFilterSection).toBeTruthy();
-    expect(styles.advancedFilterSummary).toBeTruthy();
-    expect(styles.advancedFilterBody).toBeTruthy();
-    expect(styles.groupSection).toBeTruthy();
-    expect(styles.groupSectionTitle).toBeTruthy();
+    expect(filterRailSource).toContain("<details");
+    expect(filterRailSource).toContain("agent-filter-advanced");
   });
 
   it("keeps archived Agents out of lightweight mode filter counts", () => {
@@ -187,7 +187,7 @@ describe("AgentsRoute layout contract", () => {
 
   it("labels Agent filter health counts instead of concatenating bare numbers", () => {
     expect(routeSource).toContain("function groupAriaLabel");
-    expect(routeSource).toContain("aria-label={groupAriaLabel(displayLabel, group, copy, lang)}");
+    expect(routeSource).toContain("groupAriaLabel(displayLabel, group, copy, lang)");
     expect(routeSource).toContain('group.id === "setup:inbox" ? copy.statusReminderShort : copy.healthIssueShort');
     expect(routeSource).not.toContain("{group.healthCount ? <em>{group.healthCount}</em> : null}");
   });
