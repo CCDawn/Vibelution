@@ -35,15 +35,18 @@ function gitShow(path) {
 /** Extract { key: "class string" } from the createVuiStyleMap extensions object. */
 function parseStyleExtensions(src) {
   const map = {};
-  // Match `    keyName:` then a run of string literals (possibly concatenated / multi-line).
-  const re = /\n {4}([A-Za-z0-9_]+):\s*((?:"(?:[^"\\]|\\.)*"\s*\+?\s*)+),?(?=\n)/g;
+  // Match `    keyName:` then either a backtick template literal (may interpolate
+  // shared fragments like ${RAIL}) or a run of concatenated double-quoted strings.
+  const re = /\n {4}([A-Za-z0-9_]+):\s*(`[^`]*`|(?:"(?:[^"\\]|\\.)*"\s*\+?\s*)+),?(?=\n)/g;
   let m;
   while ((m = re.exec(src))) {
     const key = m[1];
-    const value = m[2]
-      .split(/"\s*\+\s*"/).join("") // join concatenations
-      .replace(/^"|"$/g, "")
-      .replace(/\\"/g, '"');
+    let value = m[2].trim();
+    if (value.startsWith("`")) {
+      value = value.replace(/^`|`$/g, ""); // keep ${RAIL} etc. as literal markers
+    } else {
+      value = value.split(/"\s*\+\s*"/).join("").replace(/^"|"$/g, "").replace(/\\"/g, '"');
+    }
     map[key] = value;
   }
   return map;
@@ -135,7 +138,8 @@ for (const route of ROUTES) {
 
     // 1. icon-stacking: original styled descendant a/native-button inline-flex, ext lacks it
     if (descendantInlineFlex[key] && isUsed(key)) {
-      const hasFix = value && (/\[&_a\]/.test(value) || /\[&_\[data-vui/.test(value));
+      // A shared RAIL/ACTION fragment supplies the inline-flex anchor rules too.
+      const hasFix = value && (/\[&_a\]/.test(value) || /\[&_\[data-vui/.test(value) || /\bRAIL\b/.test(value));
       if (!hasFix) findings.iconStacking.push(key);
     }
     // 2. grid-collapse: original grid+cols, ext has no grid-cols/grid-template/!grid
