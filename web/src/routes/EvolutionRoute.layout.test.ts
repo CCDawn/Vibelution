@@ -216,6 +216,15 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("`/api/evolution/runs/${runId}/retry`");
   });
 
+  it("routes active supervised worktree termination through worktree actions", () => {
+    expect(routeSource).toContain("const supervisedWorktreeLiveRun = activeWorktreeRun && !isSelfEvolutionWorktreeRun(activeWorktreeRun)");
+    expect(routeSource).toContain("const terminateWorktreeAction = supervisedWorktreeLiveRun?.actionStates?.terminate;");
+    expect(routeSource).toContain('approvalWorktreeActionMutation.mutate({ runId: supervisedWorktreeLiveRun.runId, action: "terminate" });');
+    expect(routeSource).toContain("const terminateSupervisedPending = supervisedWorktreeLiveRun");
+    expect(routeSource).toContain("disabled={!canTerminateSupervisedRun || terminateSupervisedPending}");
+    expect(routeSource).toContain("terminateRunMutation.mutate(monitoredRun.runId);");
+  });
+
   it("keeps the supervised launch panel compact", () => {
     expect(routeSource).toContain("styles.supervisedRunConsole");
     expect(routeSource).toContain("styles.supervisedRunConsoleGrid");
