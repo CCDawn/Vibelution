@@ -19,7 +19,7 @@ NOISE_SIGNAL_PATTERNS = (
     re.compile(r'(?i)\b(GET|HEAD)\s+/(?:favicon\.ico|apple-touch-icon[^"\s]*)\b.*\b404\b'),
     re.compile(r'(?i)\b(GET|HEAD)\s+/api/health\b.*\b(?:200|204)\b'),
     re.compile(r'(?i)\b(GET|HEAD)\s+/api/(?:runtime/summary|runtime/events)\b.*\b(?:200|204)\b'),
-    re.compile(r'(?i)\b(GET|HEAD)\s+/api/(?:evolution/(?:active-run|self/latest-run)|sessions(?:/[^"\s]+)?/events)\b.*\b(?:200|204)\b'),
+    re.compile(r'(?i)\b(GET|HEAD)\s+/api/(?:evolution/active-run|sessions(?:/[^"\s]+)?/events)\b.*\b(?:200|204)\b'),
 )
 
 

@@ -267,38 +267,16 @@ def test_rollback_self_evolution_run_blocks_when_file_changed_after_run(tmp_path
     assert snapshot["rollback"]["conflictFiles"][0]["path"] == "web/src/demo.txt"
 
 
-def test_self_evolution_latest_run_route(monkeypatch):
-    monkeypatch.setattr(
-        evolution_routes,
-        "get_latest_self_evolution_run",
-        lambda: {"runId": "web-self-latest", "status": "done"},
-    )
-
+def test_self_evolution_latest_run_route_is_not_exposed():
     response = client.get("/api/evolution/self/latest-run")
 
-    assert response.status_code == 200
-    assert response.json()["runId"] == "web-self-latest"
+    assert response.status_code in {404, 405}
 
 
-def test_self_evolution_run_events_route(monkeypatch):
-    monkeypatch.setattr(
-        evolution_routes,
-        "get_self_evolution_run_snapshot",
-        lambda run_id: {"runId": run_id, "status": "running"},
-    )
-    monkeypatch.setattr(
-        evolution_routes,
-        "stream_self_evolution_run_events",
-        lambda run_id, initial_snapshot=None: iter(
-            [f'event: self_evolution_run\ndata: {{"runId": "{run_id}", "status": "running"}}\n\n']
-        ),
-    )
-
+def test_self_evolution_run_events_route_is_not_exposed():
     response = client.get("/api/evolution/self/runs/web-self-stream/events")
 
-    assert response.status_code == 200
-    assert "self_evolution_run" in response.text
-    assert "web-self-stream" in response.text
+    assert response.status_code in {404, 405}
 
 
 def test_runtime_manager_latest_self_evolution_run_reads_store(monkeypatch):
@@ -909,27 +887,13 @@ def test_runtime_manager_start_self_evolution_rejects_risky_write_goal_before_su
     assert calls == []
 
 
-def test_start_self_evolution_run_route_rejects_explicit_write_intent(monkeypatch):
-    monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: False)
-    monkeypatch.setattr(
-        service,
-        "get_workbench_contract",
-        lambda: {"modeAvailability": {"self_evolution": True}},
-    )
-    monkeypatch.setattr(service, "active_session_has_write_leases", lambda: False)
-    monkeypatch.setattr(service, "list_active_session_work_runs", lambda: [])
-    monkeypatch.setattr(service, "get_active_supervised_run", lambda: None)
-    monkeypatch.setattr(service, "get_active_supervised_worktree_run", lambda: None)
-
+def test_legacy_self_evolution_start_route_is_not_exposed():
     response = client.post(
         "/api/evolution/self/runs",
         json={"goal": "分析候选池回流", "writeIntent": True},
     )
 
-    assert response.status_code == 422
-    detail = response.json()["detail"]
-    assert "worktree" in detail.lower()
-    assert "候选" in detail or "candidate" in detail.lower()
+    assert response.status_code in {404, 405}
 
 
 def test_self_evolution_worktree_isolation_ignores_false_string_flags():
@@ -976,7 +940,10 @@ def test_start_self_evolution_worktree_run_delegates_risky_goal_to_supervised_re
     assert calls[0]["requiresSupervisedReview"] is True
 
 
-def test_start_self_evolution_worktree_run_rejects_readonly_goal(monkeypatch):
+def test_start_self_evolution_worktree_run_routes_any_goal_to_reviewed_worktree(monkeypatch):
+    calls: list[dict] = []
+    snapshot = {"runId": "swte-self-default", "status": "queued"}
+
     monkeypatch.setattr(
         service,
         "get_workbench_contract",
@@ -985,13 +952,19 @@ def test_start_self_evolution_worktree_run_rejects_readonly_goal(monkeypatch):
     monkeypatch.setattr(
         service,
         "start_supervised_worktree_run",
-        lambda payload: pytest.fail("readonly goals should not start a worktree run"),
+        lambda payload: calls.append(copy.deepcopy(payload)) or snapshot,
     )
 
-    with pytest.raises(service.SelfEvolutionRunValidationError, match="worktree isolation"):
-        service.start_self_evolution_worktree_run(
-            {"goal": "分析候选池回流", "bundleName": "closed_loop_v1"}
-        )
+    result = service.start_self_evolution_worktree_run(
+        {"goal": "分析候选池回流", "bundleName": "closed_loop_v1"}
+    )
+
+    assert result == snapshot
+    assert calls[0]["requestSource"] == "api:evolution.self.worktree-runs"
+    assert calls[0]["initiator"] == "self_evolution_risky_write"
+    assert calls[0]["selfEvolutionGoal"] == "分析候选池回流"
+    assert calls[0]["selfEvolutionRiskReason"] == "self_evolution_worktree_default"
+    assert calls[0]["requiresSupervisedReview"] is True
 
 
 def test_self_evolution_worktree_run_route_forwards_to_service(monkeypatch):
@@ -1212,17 +1185,10 @@ def test_runtime_manager_live_control_requires_matching_project_root(monkeypatch
     assert service._runtime_manager_live_control_enabled() is False
 
 
-def test_self_evolution_terminate_route(monkeypatch):
-    monkeypatch.setattr(
-        evolution_routes,
-        "request_stop_self_evolution_run",
-        lambda run_id: {"runId": run_id, "status": "stopping"},
-    )
-
+def test_self_evolution_terminate_route_is_not_exposed():
     response = client.post("/api/evolution/self/runs/web-self-stop/terminate")
 
-    assert response.status_code == 200
-    assert response.json()["status"] == "stopping"
+    assert response.status_code in {404, 405}
 
 
 def test_request_pause_self_evolution_run_marks_queued_run_paused():
@@ -1562,47 +1528,19 @@ def test_fulfill_self_evolution_restart_intent_requeues_run(monkeypatch):
     assert any(item["event"] == "self_evolution_run.restart_queued" for item in events)
 
 
-def test_self_evolution_pause_route(monkeypatch):
-    monkeypatch.setattr(
-        evolution_routes,
-        "request_pause_self_evolution_run",
-        lambda run_id: {"runId": run_id, "status": "paused"},
-    )
-
+def test_self_evolution_pause_route_is_not_exposed():
     response = client.post("/api/evolution/self/runs/web-self-pause/pause")
 
-    assert response.status_code == 200
-    assert response.json()["status"] == "paused"
+    assert response.status_code in {404, 405}
 
 
-def test_self_evolution_resume_route(monkeypatch):
-    monkeypatch.setattr(
-        evolution_routes,
-        "resume_self_evolution_run",
-        lambda run_id: {"runId": run_id, "status": "queued", "resumeCount": 1},
-    )
-
+def test_self_evolution_resume_route_is_not_exposed():
     response = client.post("/api/evolution/self/runs/web-self-resume/resume")
 
-    assert response.status_code == 200
-    assert response.json()["resumeCount"] == 1
+    assert response.status_code in {404, 405}
 
 
-def test_self_evolution_handoff_route(monkeypatch):
-    monkeypatch.setattr(
-        evolution_routes,
-        "handoff_self_evolution_run_to_session",
-        lambda run_id: {
-            "status": "ready",
-            "message": "ready",
-            "sessionId": "session-live",
-            "content": f"handoff {run_id}",
-            "run": {"runId": run_id, "status": "blocked"},
-        },
-    )
-
+def test_self_evolution_handoff_route_is_not_exposed():
     response = client.post("/api/evolution/self/runs/web-self-handoff/handoff")
 
-    assert response.status_code == 200
-    assert response.json()["status"] == "ready"
-    assert response.json()["sessionId"] == "session-live"
+    assert response.status_code in {404, 405}

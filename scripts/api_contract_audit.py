@@ -269,7 +269,7 @@ def _classify_backend_without_frontend(endpoint: ApiEndpoint) -> str:
         return "optional_runtime_sse"
     if path == "/api/config/language":
         return "legacy_or_external_config_action"
-    if path in {"/api/evolution/self/active-run", "/api/evolution/self/audit", "/api/evolution/self/candidates"}:
+    if path in {"/api/evolution/self/audit", "/api/evolution/self/candidates"}:
         return "self_evolution_auxiliary_api"
     if path == "/api/research/knowledge-base":
         return "agent_memory_source_api"

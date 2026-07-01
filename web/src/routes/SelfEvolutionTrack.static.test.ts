@@ -146,12 +146,20 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("selfTransactionDateAll");
   });
 
-  it("shows a supervised worktree escalation action for risky write start errors", () => {
-    expect(selfEvolutionSource).toContain("isWorktreeIsolationStartError");
-    expect(selfEvolutionSource).toContain("worktreeIsolationStartError");
-    expect(selfEvolutionSource).toContain("selfWorktreeEscalationHint");
-    expect(selfEvolutionSource).toContain("startSelfWorktreeRun");
-    expect(selfEvolutionSource).toContain("onStartWorktreeRun");
+  it("uses the two-stage self-evolution worktree flow instead of legacy live-run controls", () => {
+    expect(selfEvolutionSource).toContain("SELF_EVOLUTION_WORKFLOW_STEPS");
+    expect(selfEvolutionSource).toContain('{ id: "self_evolution", zh: "自进化", en: "Self-evolution" }');
+    expect(selfEvolutionSource).toContain('{ id: "approval", zh: "审批", en: "Approval" }');
+    expect(selfEvolutionSource).toContain("worktreeRun?: SupervisedWorktreeRun | null");
+    expect(selfEvolutionSource).toContain("selectedWorkflowStepId");
+    expect(selfEvolutionSource).toContain("selectedWorkflowStep?.conversationMessages");
+    expect(selfEvolutionSource).toContain("approvalEvidenceItems");
+    expect(selfEvolutionSource).toContain("onWorktreeAction");
+    expect(selfEvolutionSource).not.toContain("SelfEvolutionActiveRun");
+    expect(selfEvolutionSource).not.toContain("onPauseRun");
+    expect(selfEvolutionSource).not.toContain("onResumeRun");
+    expect(selfEvolutionSource).not.toContain("onRollbackRun");
+    expect(selfEvolutionSource).not.toContain("onHandoffRun");
   });
 
   it("keeps the pet companion read-only inside self-evolution", () => {

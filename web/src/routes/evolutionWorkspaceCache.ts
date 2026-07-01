@@ -67,29 +67,11 @@ export function createEvolutionWorkspaceCache(queryClient: QueryClientLike) {
       return invalidateAll(queryClient, [
         queryKeys.evolutionWorkspaceSnapshot(),
         queryKeys.evolutionSelfOverview(),
-        queryKeys.evolutionSelfActiveRun(),
-        queryKeys.evolutionSelfLatestRun(),
+        queryKeys.evolutionWorktreeActiveRun(),
+        queryKeys.evolutionWorktreeRuns(),
         queryKeys.evolutionSelfTransactions(),
         queryKeys.evolutionSelfAudit(),
         queryKeys.runtimeSummary(),
-      ]);
-    },
-    refreshSelfLatestRun() {
-      return invalidateAll(queryClient, [
-        queryKeys.evolutionWorkspaceSnapshot(),
-        queryKeys.evolutionSelfLatestRun(),
-      ]);
-    },
-    afterSelfHandoff() {
-      return invalidateAll(queryClient, [
-        queryKeys.evolutionWorkspaceSnapshot(),
-        queryKeys.evolutionSelfOverview(),
-        queryKeys.evolutionSelfActiveRun(),
-        queryKeys.evolutionSelfLatestRun(),
-        queryKeys.evolutionSelfTransactions(),
-        queryKeys.evolutionSelfAudit(),
-        queryKeys.runtimeSummary(),
-        queryKeys.sessions(),
       ]);
     },
     afterProposalChanged(sessionId: string) {

@@ -1691,7 +1691,103 @@ def _candidate_conversation_session_id(snapshot: dict[str, Any]) -> str:
     return str(camel_backend.get("sessionId") or camel_backend.get("session_id") or "").strip()
 
 
+def _is_self_evolution_worktree_snapshot(snapshot: dict[str, Any]) -> bool:
+    self_origin = snapshot.get("selfEvolutionOrigin") if isinstance(snapshot.get("selfEvolutionOrigin"), dict) else {}
+    if str(self_origin.get("sourceTrack") or "").strip() == "self_evolution":
+        return True
+    start_request = snapshot.get("startRequest") if isinstance(snapshot.get("startRequest"), dict) else {}
+    request_source = str(start_request.get("requestSource") or "").strip()
+    initiator = str(start_request.get("initiator") or "").strip()
+    return request_source == SELF_EVOLUTION_WORKTREE_ROUTE or initiator == SELF_EVOLUTION_RISKY_WRITE_INITIATOR
+
+
+def _build_self_evolution_workflow_steps(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    progress = snapshot.get("workflowProgress") if isinstance(snapshot.get("workflowProgress"), dict) else {}
+    action_states = snapshot.get("actionStates") if isinstance(snapshot.get("actionStates"), dict) else {}
+    baseline = snapshot.get("baseline") if isinstance(snapshot.get("baseline"), dict) else {}
+    candidate = snapshot.get("candidate") if isinstance(snapshot.get("candidate"), dict) else {}
+    modification = snapshot.get("candidateModification") if isinstance(snapshot.get("candidateModification"), dict) else {}
+    decision = snapshot.get("decision") if isinstance(snapshot.get("decision"), dict) else {}
+    merge_analysis = snapshot.get("mergeAnalysis") if isinstance(snapshot.get("mergeAnalysis"), dict) else {}
+    worktree = snapshot.get("candidateWorktree") if isinstance(snapshot.get("candidateWorktree"), dict) else {}
+    changed_files = list(worktree.get("changedFiles") or [])
+    status = str(snapshot.get("status") or "").strip().lower()
+    phase = str(snapshot.get("phase") or "").strip().lower()
+    candidate_session_id = _candidate_conversation_session_id(snapshot)
+
+    def _progress_item(step_id: str) -> dict[str, Any]:
+        return progress.get(step_id) if isinstance(progress.get(step_id), dict) else {}
+
+    conversation_progress = _progress_item("improve") or _progress_item("rerun_score") or _progress_item("baseline_eval")
+    conversation_turn_id = str(conversation_progress.get("conversationTurnId") or "").strip()
+    conversation_messages = list(conversation_progress.get("conversationMessages") or [])
+    self_running = status in _ACTIVE_STATUSES and phase not in {"complete", "failed", "baseline_unavailable", "shutdown"}
+    self_terminal_status = "failed" if status == "failed" else ("cancelled" if status == "cancelled" else "done")
+    self_status = "running" if self_running else (self_terminal_status if status in _TERMINAL_STATUSES else "pending")
+    approval_status = "pending" if status == "done" else ("failed" if status == "failed" else ("cancelled" if status == "cancelled" else "pending"))
+    self_summary = (
+        modification.get("summary")
+        or (snapshot.get("reflection") if isinstance(snapshot.get("reflection"), dict) else {}).get("summary")
+        or decision.get("reason")
+        or candidate.get("summary")
+        or baseline.get("summary")
+        or "等待自进化 Agent 在候选 worktree 中完成分析、改良和复跑。"
+    )
+    self_preview = (
+        _workflow_live_preview(snapshot, "improve")
+        or _workflow_live_preview(snapshot, "rerun_score")
+        or _workflow_live_preview(snapshot, "baseline_eval")
+        or self_summary
+    )
+
+    return [
+        {
+            "id": "self_evolution",
+            "label": "自进化",
+            "ownerKind": "agent",
+            "role": "candidate",
+            "status": self_status,
+            "current": self_running or status not in _TERMINAL_STATUSES,
+            "summary": _bounded_text(self_summary),
+            "livePreview": _bounded_text(self_preview),
+            "metrics": {
+                "baselineScore": decision.get("baselineScore", baseline.get("score")),
+                "candidateScore": decision.get("candidateScore", candidate.get("score")),
+                "scoreDelta": decision.get("scoreDelta"),
+                "changedFileCount": len(changed_files),
+            },
+            "conversationSessionId": candidate_session_id,
+            "conversationTurnId": conversation_turn_id,
+            "chatRoute": _workflow_chat_route(candidate_session_id),
+            "conversationMessages": conversation_messages,
+        },
+        {
+            "id": "approval",
+            "label": "审批",
+            "ownerKind": "human",
+            "role": None,
+            "status": approval_status,
+            "current": status in _TERMINAL_STATUSES,
+            "summary": _bounded_text(_approval_summary(snapshot, decision, merge_analysis, action_states)),
+            "livePreview": _bounded_text(str(snapshot.get("latestMessage") or decision.get("reason") or "")),
+            "metrics": {
+                "baselineScore": decision.get("baselineScore", baseline.get("score")),
+                "candidateScore": decision.get("candidateScore", candidate.get("score")),
+                "scoreDelta": decision.get("scoreDelta"),
+                "changedFileCount": len(changed_files),
+            },
+            "conversationSessionId": "",
+            "conversationTurnId": "",
+            "chatRoute": "",
+            "conversationMessages": [],
+        },
+    ]
+
+
 def _build_workflow_steps(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    if _is_self_evolution_worktree_snapshot(snapshot):
+        return _build_self_evolution_workflow_steps(snapshot)
+
     progress = snapshot.get("workflowProgress") if isinstance(snapshot.get("workflowProgress"), dict) else {}
     action_states = snapshot.get("actionStates") if isinstance(snapshot.get("actionStates"), dict) else {}
     baseline = snapshot.get("baseline") if isinstance(snapshot.get("baseline"), dict) else {}
