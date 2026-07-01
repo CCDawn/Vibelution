@@ -11,7 +11,7 @@ const BASE = "min-w-0";
 // which collapses every card/metric strip into a single vertical column. Auto-fit
 // keeps a single item at one column and flows the rest into responsive columns.
 // Stripped automatically when a route supplies its own grid-cols extension.
-const AUTO_FIT_COLS = "grid-cols-[repeat(auto-fit,minmax(min(9rem,100%),1fr))]";
+const AUTO_FIT_COLS = "grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]";
 const SURFACE =
   "min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)]";
 const PANEL = `${SURFACE} p-2`;

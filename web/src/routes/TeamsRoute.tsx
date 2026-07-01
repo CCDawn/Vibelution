@@ -11756,7 +11756,7 @@ export function TeamsRoute({
   const teamUnavailableDetail = teamsQuery.error instanceof Error ? teamsQuery.error.message : "";
   const workspaceClassName = [
     styles.workspace,
-    researchWorkflowTeamSelected ? styles.workspaceResearch : "",
+    researchWorkflowTeamSelected && !researchCanvasVisible ? styles.workspaceResearch : "",
     researchCanvasVisible ? styles.workspaceResearchCanvas : "",
   ].filter(Boolean).join(" ");
   const canvasPanelClassName = [
@@ -12196,12 +12196,12 @@ export function TeamsRoute({
             {validation && !validation.valid ? <AlertTriangle size={16} /> : researchCanvasReadOnly ? <Eye size={16} /> : <Link2 size={16} />}
           </div>
           <div className={styles.inspectorBody}>
-            {selectedTeam ? renderTeamMemoryIndex() : null}
             {researchWorkflowTeamSelected && !researchCanvasVisible ? (
               <>
                 {renderResearchStageLauncher()}
               </>
             ) : null}
+            {selectedTeam ? renderTeamMemoryIndex() : null}
             {researchCanvasReadOnly ? renderResearchCanvasReadOnlyPanel() : null}
             {showNodeBindingPanel && !selectedTeam ? (
               <section className={`${styles.nodeBindingSection} ${styles.nodeBindingPlaceholder}`}>
