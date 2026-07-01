@@ -68,7 +68,7 @@ import {
   type AgentFilterSectionView,
   type AgentSummaryMetric,
 } from "../components/vui/product/agent-management";
-import { VButton, VHStack, VNativeSelect } from "../components/vui";
+import { VButton, VEmptyState, VHStack, VNativeSelect } from "../components/vui";
 import { vuiFormLabelClass } from "../components/vui/forms/formClasses";
 import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
@@ -5892,21 +5892,13 @@ export function AgentsRoute() {
             />
           ) : null}
           {workspaceQuery.isError ? (
-            <section className={styles.emptyState}>
-              <AlertTriangle size={22} />
-              <strong>{copy.loadFailed}</strong>
-              <p>{workspaceQuery.error instanceof Error ? workspaceQuery.error.message : String(workspaceQuery.error)}</p>
-            </section>
+            <VEmptyState icon={<AlertTriangle size={22} />} title={copy.loadFailed}>
+              {workspaceQuery.error instanceof Error ? workspaceQuery.error.message : String(workspaceQuery.error)}
+            </VEmptyState>
           ) : workspaceQuery.isPending && !workspace ? (
-            <section className={styles.emptyState}>
-              <RefreshCw size={22} />
-              <strong>{copy.loading}</strong>
-            </section>
+            <VEmptyState icon={<RefreshCw size={22} />} title={copy.loading} />
           ) : visibleAgents.length === 0 ? (
-            <section className={styles.emptyState}>
-              <Bot size={22} />
-              <strong>{copy.noAgents}</strong>
-            </section>
+            <VEmptyState icon={<Bot size={22} />} title={copy.noAgents} />
           ) : (
             <div className={styles.agentColumnGrid}>
               {visibleAgentColumns.map((column) => (
