@@ -456,6 +456,8 @@ const styles = createVuiStyleMap(styleKeys, {
       "!flex min-w-0 items-center justify-between gap-2 [&_a]:inline-flex [&_a]:shrink-0 [&_a]:min-h-[28px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-[5px] [&_a]:px-[9px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_28%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--surface-card)_74%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap",
     sourceCollectionStagePrimaryAction: "w-fit max-w-full",
     sourceCollectionStageSecondaryAction: "w-fit max-w-full",
+    sourceCollectionStageChatActions:
+      "!grid grid-cols-[repeat(3,max-content)] items-center justify-end gap-1.5 min-w-0 max-[720px]:grid-cols-[1fr] [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[30px] [&_a]:w-max [&_a]:max-w-full [&_a]:px-3 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_42%,var(--border-soft))] [&_a]:bg-[image:var(--vui-gradient-route-soft)] [&_a]:bg-[color:var(--source-workbench-card)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[840] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:min-h-[30px]",
     sourceCollectionSourceDetailActions: "flex-wrap",
     sourceCollectionPanelActions: "flex-wrap",
     sourceCollectionCandidateListShell:
