@@ -18,8 +18,6 @@ const styles: Record<string, string> = {
     "agentMemoryWorkspace min-w-0 grid min-h-0 gap-2 p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   bulkActionBar:
     "bulkActionBar min-w-0 flex flex-wrap items-center gap-1.5",
-  buttonRow:
-    "buttonRow min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
   channelPill:
     "channelPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   cleanupConfirmField:
