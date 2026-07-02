@@ -30,7 +30,7 @@ import {
   SessionTurnError,
 } from "../../api/types";
 import { conversationMessagesToAgentThread } from "../../agent-thread/adapters";
-import type { AgentAttachmentPart, AgentReferencePart, AgentTextPart } from "../../agent-thread/types";
+import type { AgentAttachmentPart, AgentMentalPart, AgentReferencePart, AgentTextPart } from "../../agent-thread/types";
 import { fetchJson } from "../../api/client";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
@@ -41,7 +41,6 @@ import {
 } from "./conversationInternalStatus";
 import {
   buildAgentMessageOperationGroups,
-  buildConversationOperationGroups,
   buildConversationReActOperationGroups,
   type ConversationOperation,
   type ConversationOperationKind,
@@ -49,7 +48,6 @@ import {
 } from "./conversationOperations";
 import {
   buildAgentMessageTimelineItems,
-  buildConversationTimelineItems,
   type ConversationTimelineItem,
 } from "./conversationTimeline";
 import {
@@ -65,8 +63,6 @@ import {
   hasResponseBlock,
   hasThoughtBlock,
   hasMentalBlock,
-  hasToolBlock,
-  hasUserContent,
   imageArtifactForMessage,
   isAgentInboxMessage,
   isGroupRoomTranscriptMessage,
@@ -3013,109 +3009,82 @@ export function ConversationView({
     return { label: `${t("mentalFeeling")} / ${t("mentalSummary")}`, value: `${feeling}\n${summary}` };
   }
 
-  function renderAuxiliaryToggle(
+  function latestAgentMentalPart(sections: AgentMessageProcessSection[]) {
+    return sections
+      .flatMap((section) => section.parts)
+      .filter((part): part is AgentMentalPart => part.type === "mental")
+      .at(-1);
+  }
+
+  function renderAgentMentalPanel(
     messageId: string,
-    section: "thought" | "mental",
-    title: string,
-    preview: string,
-    defaultExpanded: boolean,
+    part: AgentMentalPart | undefined,
+    defaultExpandedOverride: boolean | undefined,
     isRunning: boolean,
-    children: ReactNode,
   ) {
-    const expanded = getExpansionState(messageId, section, defaultExpanded);
-    const toggleTitle = expanded
-      ? section === "thought" ? t("thoughtProcessVisible") : t("mentalProcessVisible")
-      : section === "thought" ? t("thoughtProcessHidden") : t("mentalProcessHidden");
+    if (!showMentalSnapshots || !part || !part.snapshot) {
+      return null;
+    }
+    const snapshot = part.snapshot;
+    const expanded = getExpansionState(messageId, "mental", defaultExpandedOverride ?? true);
+    const toggleTitle = expanded ? t("mentalProcessVisible") : t("mentalProcessHidden");
+    const metaRows = [
+      snapshot.mood ? { label: t("mentalMood"), value: snapshot.mood } : null,
+      snapshot.cognitiveState ? { label: t("mentalCognitiveState"), value: cognitiveStateLabel(snapshot) } : null,
+      snapshot.source ? { label: t("mentalSource"), value: mentalSourceLabel(snapshot.source) } : null,
+      Number.isFinite(snapshot.confidence) && Number(snapshot.confidence) > 0
+        ? { label: t("mentalConfidence"), value: `${Math.round(Number(snapshot.confidence) * 100)}%` }
+        : null,
+      Number(snapshot.sampleSize) > 0 ? { label: t("mentalSamples"), value: String(snapshot.sampleSize) } : null,
+      snapshot.updatedAt ? { label: t("mentalLastUpdated"), value: formatTimestamp(snapshot.updatedAt) } : null,
+    ].filter(Boolean) as Array<{ label: string; value: string }>;
+    const bodyRows = [
+      mentalFeelingSummaryRow(snapshot),
+      snapshot.whisper ? { label: t("mentalWhisper"), value: snapshot.whisper } : null,
+      snapshot.intervention ? { label: t("mentalIntervention"), value: snapshot.intervention } : null,
+    ].filter(Boolean) as Array<{ label: string; value: string }>;
     return (
-      <section className={`${styles.auxiliaryBlock} ${styles[`auxiliaryBlock_${section}`]}`}>
+      <section className={`${styles.auxiliaryBlock} ${styles.auxiliaryBlock_mental}`}>
         <VButton
           type="button"
           className={styles.operationSummary}
           aria-expanded={expanded}
-          onClick={() => toggleSection(messageId, section, defaultExpanded)}
+          onClick={() => toggleSection(messageId, "mental", defaultExpandedOverride ?? true)}
           title={toggleTitle}
         >
-          {section === "thought" ? <Sparkles size={17} /> : <BrainCircuit size={17} />}
-          <span>{title}</span>
-          {!expanded && preview ? (
-            <span className={styles.operationSummaryPreview}>{preview}</span>
+          <BrainCircuit size={17} />
+          <span>{t("mentalProcess")}</span>
+          {!expanded && mentalSnapshotPreview(snapshot) ? (
+            <span className={styles.operationSummaryPreview}>{mentalSnapshotPreview(snapshot)}</span>
           ) : null}
           {isRunning ? <LoaderCircle className={styles.statusSpinner} size={14} /> : null}
           {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </VButton>
-        {expanded ? children : null}
+        {expanded ? (
+          <div className={`${styles.auxiliaryPanel} ${styles.auxiliaryPanel_mental}`}>
+            {metaRows.length ? (
+              <div className={styles.mentalMetaGrid}>
+                {metaRows.map((row) => (
+                  <span key={row.label} className={styles.mentalMetaItem}>
+                    <small>{row.label}</small>
+                    <strong>{row.value}</strong>
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {bodyRows.length ? (
+              <div className={styles.mentalBodyList}>
+                {bodyRows.map((row) => (
+                  <p key={row.label} className={styles.mentalBodyRow}>
+                    <span>{row.label}</span>
+                    {row.value}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </section>
-    );
-  }
-
-  function renderThoughtPanel(message: ConversationMessage, defaultExpandedOverride?: boolean) {
-    if (!hasThoughtBlock(message)) {
-      return null;
-    }
-    const thought = message.thought?.trim() ?? "";
-    const hasLaterActiveSection = (showMentalSnapshots && hasMentalBlock(message)) || hasToolBlock(message) || hasResponseBlock(message);
-    return renderAuxiliaryToggle(
-      message.id,
-      "thought",
-      t("thoughtProcess"),
-      compactPreview(thought),
-      defaultExpandedOverride ?? Boolean(message.streaming),
-      Boolean(message.streaming) && !hasLaterActiveSection,
-      <div className={`${styles.auxiliaryPanel} ${styles.auxiliaryPanel_thought}`}>
-        <p className={styles.thoughtText}>{thought}</p>
-      </div>,
-    );
-  }
-
-  function renderMentalPanel(message: ConversationMessage, defaultExpandedOverride?: boolean) {
-    if (!showMentalSnapshots || !hasMentalBlock(message)) {
-      return null;
-    }
-    const snapshot = message.mentalSnapshot;
-    const metaRows = [
-      snapshot?.mood ? { label: t("mentalMood"), value: snapshot.mood } : null,
-      snapshot?.cognitiveState ? { label: t("mentalCognitiveState"), value: cognitiveStateLabel(snapshot) } : null,
-      snapshot?.source ? { label: t("mentalSource"), value: mentalSourceLabel(snapshot.source) } : null,
-      Number.isFinite(snapshot?.confidence) && Number(snapshot?.confidence) > 0
-        ? { label: t("mentalConfidence"), value: `${Math.round(Number(snapshot?.confidence) * 100)}%` }
-        : null,
-      Number(snapshot?.sampleSize) > 0 ? { label: t("mentalSamples"), value: String(snapshot?.sampleSize) } : null,
-      snapshot?.updatedAt ? { label: t("mentalLastUpdated"), value: formatTimestamp(snapshot.updatedAt) } : null,
-    ].filter(Boolean) as Array<{ label: string; value: string }>;
-    const bodyRows = [
-      mentalFeelingSummaryRow(snapshot),
-      snapshot?.whisper ? { label: t("mentalWhisper"), value: snapshot.whisper } : null,
-      snapshot?.intervention ? { label: t("mentalIntervention"), value: snapshot.intervention } : null,
-    ].filter(Boolean) as Array<{ label: string; value: string }>;
-    return renderAuxiliaryToggle(
-      message.id,
-      "mental",
-      t("mentalProcess"),
-      mentalSnapshotPreview(snapshot),
-      defaultExpandedOverride ?? true,
-      Boolean(message.streaming) && !hasToolBlock(message) && !hasResponseBlock(message),
-      <div className={`${styles.auxiliaryPanel} ${styles.auxiliaryPanel_mental}`}>
-        {metaRows.length ? (
-          <div className={styles.mentalMetaGrid}>
-            {metaRows.map((row) => (
-              <span key={row.label} className={styles.mentalMetaItem}>
-                <small>{row.label}</small>
-                <strong>{row.value}</strong>
-              </span>
-            ))}
-          </div>
-        ) : null}
-        {bodyRows.length ? (
-          <div className={styles.mentalBodyList}>
-            {bodyRows.map((row) => (
-              <p key={row.label} className={styles.mentalBodyRow}>
-                <span>{row.label}</span>
-                {row.value}
-              </p>
-            ))}
-          </div>
-        ) : null}
-      </div>,
     );
   }
 
@@ -3164,20 +3133,6 @@ export function ConversationView({
         )}
       </section>
     );
-  }
-
-  function shouldShowResponseBlock(message: ConversationMessage, hasFeedbackTimeline: boolean) {
-    if (!hasResponseBlock(message)) {
-      return false;
-    }
-    if (!hasFeedbackTimeline) {
-      return true;
-    }
-    if (message.streaming) {
-      return true;
-    }
-    const segments = getCachedResponseSegments(message.content);
-    return segments.some((segment) => segment.kind !== "status");
   }
 
   function shouldShowAgentResponseBlock(
@@ -3556,42 +3511,6 @@ export function ConversationView({
     return sections.map((section) => section.id).join(" ") || undefined;
   }
 
-  function renderLegacyUserAttachments(message: ConversationMessage) {
-    const attachments = message.attachments ?? [];
-    if (!attachments.length) {
-      return null;
-    }
-    const downloadLabel = lang === "zh" ? "下载图片" : "Download image";
-    return (
-      <div className={styles.userAttachmentGrid}>
-        {attachments.map((attachment) => {
-          const imageUrl = attachment.imageUrl || attachment.url;
-          if (!imageUrl) {
-            return null;
-          }
-          const filename = attachment.filename || attachment.artifactId || (lang === "zh" ? "图片" : "Image");
-          return (
-            <figure key={attachment.artifactId || imageUrl} className={styles.userAttachment}>
-              <img className={styles.userAttachmentImage} src={imageUrl} alt={filename} loading="lazy" />
-              <figcaption className={styles.userAttachmentMeta}>
-                <span>{filename}</span>
-                <a
-                  className={styles.imageDownloadButton}
-                  href={attachment.downloadUrl || imageUrl}
-                  download={attachment.artifactId || true}
-                  title={downloadLabel}
-                  aria-label={downloadLabel}
-                >
-                  <Download size={14} />
-                </a>
-              </figcaption>
-            </figure>
-          );
-        })}
-      </div>
-    );
-  }
-
   function isNonNullNode<T>(node: T | null): node is T {
     return node !== null;
   }
@@ -3893,23 +3812,19 @@ export function ConversationView({
               );
             }
             const agentMessage = agentThread.messages[index];
-            const operationGroups = agentMessage
-              ? buildAgentMessageOperationGroups(agentMessage, operationLabels)
-              : buildConversationOperationGroups(message, operationLabels);
-            const agentSections = agentMessage ? buildAgentMessageSectionState(agentMessage) : null;
-            const contentSections = agentMessage ? agentMessageContentSections(agentMessage) : [];
-            const processSections = agentMessage ? agentMessageProcessSections(agentMessage) : [];
-            const agentMessageSectionKinds = agentSections?.sectionKinds.join(" ") ?? "";
-            const responseText = agentSections?.answerText ?? message.content;
-            const userContentText = agentSections?.userText ?? message.content;
+            const operationGroups = buildAgentMessageOperationGroups(agentMessage, operationLabels);
+            const agentSections = buildAgentMessageSectionState(agentMessage);
+            const contentSections = agentMessageContentSections(agentMessage);
+            const processSections = agentMessageProcessSections(agentMessage);
+            const agentMessageSectionKinds = agentSections.sectionKinds.join(" ");
+            const responseText = agentSections.answerText;
+            const userContentText = agentSections.userText;
             const userContentSectionIds = contentSectionIdsForChannel(contentSections, "user");
             const answerContentSectionIds = contentSectionIdsForChannel(contentSections, "answer");
             const processSectionIds = processSectionIdsForSections(processSections);
             const hasActiveProcess = operationGroups.timeline.some((operation) => isRunningOperationStatus(operation.status));
-            const hasFeedbackTimeline = agentSections?.hasFeedbackTimeline ?? ((message.feedbackEvents?.length ?? 0) > 0);
-            const showResponseBlock = agentSections
-              ? shouldShowAgentResponseBlock(message, agentSections, hasFeedbackTimeline)
-              : shouldShowResponseBlock(message, hasFeedbackTimeline);
+            const hasFeedbackTimeline = agentSections.hasFeedbackTimeline;
+            const showResponseBlock = shouldShowAgentResponseBlock(message, agentSections, hasFeedbackTimeline);
             const turnErrorMessage = isTurnErrorMessage(message);
             const agentInboxMessage = isAgentInboxMessage(message);
             const groupTranscriptMessage = isGroupRoomTranscriptMessage(message);
@@ -3918,9 +3833,12 @@ export function ConversationView({
               lang,
               includeAssistantText: false,
             };
-            const conversationTimelineItems = agentMessage
-              ? buildAgentMessageTimelineItems(agentMessage, operationGroups.timeline, timelineOptions, message.timelineItems)
-              : buildConversationTimelineItems(message, operationGroups.timeline, timelineOptions);
+            const conversationTimelineItems = buildAgentMessageTimelineItems(
+              agentMessage,
+              operationGroups.timeline,
+              timelineOptions,
+              message.timelineItems,
+            );
             const hasConversationTimeline =
               message.role === "assistant"
               && hasFeedbackTimeline
@@ -3928,7 +3846,7 @@ export function ConversationView({
               && !agentInboxMessage
               && !groupTranscriptMessage
               && conversationTimelineItems.length > 0;
-            const showUserContent = agentSections ? agentSections.hasUserContent : hasUserContent(message);
+            const showUserContent = agentSections.hasUserContent;
             const userAuthoredMessage = message.role === "user" && !agentInboxMessage;
             const isStreamingStatusPlaceholder = Boolean(message.streaming)
               && showResponseBlock
@@ -3946,9 +3864,7 @@ export function ConversationView({
             const agentInboxExpanded = getExpansionState(message.id, "agentInbox", false);
             const agentInboxPreview = agentInboxMessage ? compactPreview(agentInboxSummary(message), 140) : "";
             const researchOrgChips = researchOrgMessageChips(message);
-            const contextNode = agentMessage
-              ? renderAgentContextSections(agentMessageContextSections(agentMessage))
-              : renderLegacyUserAttachments(message);
+            const contextNode = renderAgentContextSections(agentMessageContextSections(agentMessage));
             const turnClassName = [
               groupTranscriptMessage
                 ? styles.groupTranscriptTurn
@@ -3971,10 +3887,20 @@ export function ConversationView({
             const editDisabled = Boolean(editUserMessageDisabled);
             const processTone = operationCollectionTone(operationGroups.timeline);
             const processDefaultExpanded = processTone === "running";
-            const renderLegacyProcessDetails = (defaultExpandedOverride?: boolean) => (
+            const renderAgentProcessDetails = (defaultExpandedOverride?: boolean) => (
               <>
-                {renderThoughtPanel(message, defaultExpandedOverride)}
-                {renderMentalPanel(message, defaultExpandedOverride)}
+                {renderOperationGroup(
+                  message.id,
+                  "thought",
+                  operationGroups.thoughts,
+                  defaultExpandedOverride ?? Boolean(message.streaming),
+                )}
+                {renderAgentMentalPanel(
+                  message.id,
+                  latestAgentMentalPart(processSections),
+                  defaultExpandedOverride,
+                  Boolean(message.streaming) && operationGroups.tools.length === 0 && !agentSections.hasResponseBlock,
+                )}
                 {renderOperationGroup(
                   message.id,
                   "tools",
@@ -3995,7 +3921,7 @@ export function ConversationView({
                   processSectionIds,
                 );
               }
-              return renderLegacyProcessDetails(true);
+              return renderAgentProcessDetails(true);
             };
             const responseSectionNode = showResponseBlock && !isStreamingStatusPlaceholder ? (
               <section
@@ -4044,15 +3970,15 @@ export function ConversationView({
                 false,
                 processSectionIds,
               )
-            ) : renderLegacyProcessDetails();
+            ) : renderAgentProcessDetails();
             return (
               <article
                 key={rowIdentity.rowKey}
                 className={turnClassName}
                 data-conversation-row-key={rowIdentity.rowKey}
                 data-conversation-message-key={rowIdentity.messageKey}
-                data-agent-message-id={agentMessage?.id}
-                data-agent-section-count={agentSections?.sectionCount}
+                data-agent-message-id={agentMessage.id}
+                data-agent-section-count={agentSections.sectionCount}
                 data-agent-section-kinds={agentMessageSectionKinds || undefined}
               >
                 <div className={styles.turnAvatar} aria-hidden="true">
