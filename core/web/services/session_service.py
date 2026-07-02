@@ -3051,6 +3051,32 @@ _SESSION_QUERY_MAX_LIMIT = 100
 _SESSION_QUERY_DEFAULT_LIMIT = 50
 
 
+def _get_cached_session_query_sessions(*, now: float) -> list[dict[str, Any]] | None:
+    _sync_agent_directory_project_root()
+    signature = (_session_list_source_signature(), False)
+    if _repair_agent_direct_session_collisions(source_signature=signature):
+        signature = (_session_list_source_signature(), False)
+    cached = _get_session_list_cache(
+        now=now,
+        signature=signature,
+        allow_stale_matching_signature=True,
+    )
+    if cached is None:
+        return None
+    sessions, cache_age_ms, conversation_count, agent_count = cached
+    _record_session_list_loaded_event(
+        session_count=len(sessions),
+        conversation_count=conversation_count,
+        agent_count=agent_count,
+        elapsed_ms=_elapsed_ms(now),
+        cache_hit=True,
+        cache_age_ms=cache_age_ms,
+        cache_ttl_ms=int(round(_SESSION_LIST_CACHE_TTL_SECONDS * 1000)),
+        waited_for_inflight=False,
+    )
+    return sessions
+
+
 def query_sessions(
     *,
     limit: int = _SESSION_QUERY_DEFAULT_LIMIT,
@@ -3064,7 +3090,9 @@ def query_sessions(
     """Return a paginated, filtered session summary payload."""
 
     started_at = _perf_counter()
-    sessions = list_sessions()
+    sessions = _get_cached_session_query_sessions(now=started_at)
+    if sessions is None:
+        sessions = list_sessions()
     normalized_limit = _coerce_session_query_limit(limit)
     normalized_cursor = _coerce_nonnegative_int(cursor)
     normalized_query = str(q or "").strip().lower()
