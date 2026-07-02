@@ -1,6 +1,6 @@
 import { type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 
-import { VNativeButton } from "../../index";
+import { VButton } from "../../index";
 
 export type TeamSourcePaginationProps = {
   ariaLabel: string;
@@ -21,10 +21,10 @@ const BAR =
   "bg-[color:var(--source-workbench-card)] text-[0.64rem] font-[800] text-[var(--fg-muted)]";
 
 const BUTTON =
-  "inline-flex min-h-[24px] items-center justify-center px-2 rounded-[7px] border " +
+  "min-h-[24px] items-center justify-center rounded-[7px] border px-2 " +
   "border-[color:color-mix(in_srgb,var(--accent-cool)_26%,var(--border-soft))] " +
   "bg-[color:var(--source-workbench-card)] text-[0.62rem] font-[820] text-[var(--fg-primary)] " +
-  "cursor-pointer disabled:cursor-not-allowed disabled:opacity-55";
+  "cursor-pointer data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-55";
 
 /**
  * Faithful reproduction of `.sourceCollectionPagination`: a bordered pager bar
@@ -51,15 +51,15 @@ export function TeamSourcePagination({
     >
       <span className="min-w-0 truncate">{rangeLabel}</span>
       <div className="inline-flex items-center gap-1.5">
-        <VNativeButton type="button" className={BUTTON} disabled={page <= 1} onClick={onPrevious}>
+        <VButton density="compact" type="button" className={BUTTON} isDisabled={page <= 1} onClick={onPrevious}>
           {previousLabel}
-        </VNativeButton>
+        </VButton>
         <strong className="text-[var(--fg-primary)]">
           {page}/{pageCount}
         </strong>
-        <VNativeButton type="button" className={BUTTON} disabled={page >= pageCount} onClick={onNext}>
+        <VButton density="compact" type="button" className={BUTTON} isDisabled={page >= pageCount} onClick={onNext}>
           {nextLabel}
-        </VNativeButton>
+        </VButton>
       </div>
     </div>
   );

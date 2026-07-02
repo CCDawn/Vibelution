@@ -443,9 +443,9 @@ const styles: Record<string, string> = {
   sourceCollectionPageActions:
     "sourceCollectionPageActions min-w-0 flex flex-wrap items-center gap-1.5 !flex flex-wrap items-center justify-end gap-2 min-w-0 [&_a]:inline-flex [&_a]:min-h-[30px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[var(--border-soft)] [&_a]:bg-[color:var(--surface-panel-strong)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[760] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:min-h-[30px] [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[var(--border-soft)] [&_[data-vui=native-button]]:bg-[color:var(--surface-panel-strong)] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[760]",
   sourceCollectionPageBody:
-    "sourceCollectionPageBody min-w-0 w-full max-w-none flex-1 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] !grid min-h-0 content-start gap-2 overflow-auto p-2",
+    "sourceCollectionPageBody min-w-0 w-full max-w-none flex-1 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] !grid min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] content-stretch gap-2 overflow-auto p-2",
   sourceCollectionPageGrid:
-    "sourceCollectionPageGrid min-w-0 grid max-w-full content-start gap-2 grid-cols-[minmax(0,1fr)]",
+    "sourceCollectionPageGrid min-w-0 grid min-h-0 max-w-full content-stretch gap-2 grid-cols-[minmax(0,1fr)]",
   sourceCollectionPageHeader:
     "sourceCollectionPageHeader min-w-0 w-full max-w-none !grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 px-2 py-1 max-[760px]:grid-cols-[1fr]",
   sourceCollectionPageTitleBlock:
@@ -463,7 +463,7 @@ const styles: Record<string, string> = {
   sourceCollectionResultItemSelected:
     "sourceCollectionResultItemSelected min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
   sourceCollectionResultList:
-    "sourceCollectionResultList min-w-0 grid max-h-[44vh] min-h-0 content-start gap-1.5 overflow-auto [scrollbar-gutter:stable]",
+    "sourceCollectionResultList min-w-0 grid max-h-[44vh] min-h-[180px] content-start gap-1.5 overflow-auto [scrollbar-gutter:stable]",
   sourceCollectionResultMeta:
     "sourceCollectionResultMeta min-w-0 flex flex-wrap items-center gap-1.5 flex min-w-[76px] flex-nowrap items-center gap-1 whitespace-nowrap text-[var(--vui-font-xs)] text-[var(--fg-tertiary)] [&_span:first-child]:text-[var(--fg-secondary)] max-[980px]:hidden",
   sourceCollectionResultSource:
@@ -479,7 +479,7 @@ const styles: Record<string, string> = {
   sourceCollectionResultsHeader:
     "sourceCollectionResultsHeader min-w-0 flex flex-wrap items-center gap-1.5",
   sourceCollectionResultsPanel:
-    "sourceCollectionResultsPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid content-start gap-2",
+    "sourceCollectionResultsPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid min-h-[260px] content-start gap-2",
   sourceCollectionRunBadge:
     "sourceCollectionRunBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   sourceCollectionRunSwitcher:
@@ -549,7 +549,7 @@ const styles: Record<string, string> = {
   sourceCollectionStageTaskSummary:
     "sourceCollectionStageTaskSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   sourceCollectionStageWorkspace:
-    "sourceCollectionStageWorkspace min-w-0 grid min-h-0 max-w-full gap-2 p-2 grid-rows-[auto_minmax(0,1fr)]",
+    "sourceCollectionStageWorkspace min-w-0 grid h-full min-h-[360px] max-w-full content-stretch gap-2 p-2 grid-rows-[auto_minmax(0,1fr)] overflow-hidden",
   sourceCollectionStageWorkspaceHeader:
     "sourceCollectionStageWorkspaceHeader min-w-0 !grid grid-cols-[minmax(0,1fr)_minmax(260px,0.7fr)_max-content] items-start gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color:var(--source-workbench-card)] p-2 max-[1180px]:grid-cols-[minmax(0,1fr)_auto] max-[760px]:grid-cols-[1fr] [&>div]:min-w-0",
   sourceCollectionStepActive:
