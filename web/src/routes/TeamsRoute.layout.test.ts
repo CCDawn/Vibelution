@@ -1537,6 +1537,48 @@ describe("TeamsRoute layout contract", () => {
     expect(stageModuleSource).toContain('"ingestion", sourceCollectionMemoryActionLabel');
   });
 
+  it("keeps source collection stage status stable while the selected run is still loading", () => {
+    const stageRoundSource = routeSource.slice(
+      routeSource.indexOf("const sourceCollectionSummaryStageRound = useMemo<ResearchStageRound | null>(() => {"),
+      routeSource.indexOf("const experimentPlanningStatus = experimentPlanningStatusQuery.data ?? null;"),
+    );
+    expect(stageRoundSource).toContain("summaryRunId");
+    expect(stageRoundSource).toContain("selectedSourceCollectionRunEffectiveId && summaryRunId && summaryRunId !== selectedSourceCollectionRunEffectiveId");
+    expect(stageRoundSource).toContain("const matchingRound = rounds.find((round) => (round.sourceRunIds ?? []).includes(selectedSourceCollectionRunEffectiveId))");
+    expect(stageRoundSource).toContain("return matchingRound ?? null");
+    expect(stageRoundSource).not.toContain("?? rounds[0] ?? null");
+
+    const candidateListLoadingSource = routeSource.slice(
+      routeSource.indexOf("const sourceCollectionCandidateListDataLoading = Boolean("),
+      routeSource.indexOf("const sourceCollectionPrimaryDataLoading = Boolean("),
+    );
+    expect(candidateListLoadingSource).toContain("teamWorkflowCandidateListEnabled");
+    expect(candidateListLoadingSource).toContain("sourceCollectionNeedsCandidateList");
+    expect(candidateListLoadingSource).toContain("!teamWorkflowCandidatesQuery.data");
+
+    const sourceCollectionPrimaryLoadingSource = routeSource.slice(
+      routeSource.indexOf("const sourceCollectionPrimaryDataLoading = Boolean("),
+      routeSource.indexOf("const sourceCollectionSourceQualityLoading = Boolean("),
+    );
+    expect(sourceCollectionPrimaryLoadingSource).toContain("sourceCollectionCandidateListDataLoading");
+
+    const stageModuleSource = routeSource.slice(
+      routeSource.indexOf("const sourceCollectionStageModules"),
+      routeSource.indexOf("const sourceCollectionBoardCurrentModule"),
+    );
+    const extractionModuleSource = stageModuleSource.slice(
+      stageModuleSource.indexOf('id: "extraction"'),
+      stageModuleSource.indexOf('id: "relations"'),
+    );
+    expect(extractionModuleSource).toContain("sourceCollectionExtractionDisplayLoading");
+    expect(extractionModuleSource).toContain("summary: sourceCollectionExtractionDisplayLoading");
+    expect(extractionModuleSource.indexOf("summary: sourceCollectionExtractionDisplayLoading")).toBeLessThan(
+      extractionModuleSource.indexOf("sourceCollectionStageUserSummary(sourceCollectionExtractionProjection, lang)"),
+    );
+    expect(extractionModuleSource).toContain("state: sourceCollectionExtractionDisplayState");
+    expect(extractionModuleSource).toContain("status: sourceCollectionExtractionDisplayLoading ? sourceCollectionLoadingText");
+  });
+
   it("keeps the source collection workspace in a simple status-board mode", () => {
     const standaloneSource = routeSource.slice(
       routeSource.indexOf("if (sourceCollectionStandalone)"),
