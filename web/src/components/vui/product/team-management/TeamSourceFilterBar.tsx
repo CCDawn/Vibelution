@@ -1,6 +1,6 @@
 import { type ReactNode } from "react";
 
-import { VNativeButton } from "../../index";
+import { VButton } from "../../index";
 
 export type TeamSourceFilterOption = {
   key: string;
@@ -18,7 +18,7 @@ export type TeamSourceFilterBarProps = {
 const BAR = "flex min-w-0 gap-[5px] overflow-x-auto pb-px";
 
 const CHIP_BASE =
-  "inline-flex min-w-[76px] min-h-[28px] flex-none items-center justify-between gap-2 px-2 rounded-[7px] border cursor-pointer " +
+  "min-w-[76px] min-h-[28px] flex-none justify-between gap-2 rounded-[7px] border px-2 " +
   "text-[0.64rem] font-[820] bg-[color:var(--source-workbench-card)] " +
   "border-[var(--border-soft)] text-[var(--fg-muted)] " +
   "hover:border-[color:color-mix(in_srgb,var(--accent-primary)_48%,var(--border-soft))] hover:bg-[color:color-mix(in_srgb,var(--accent-primary)_9%,var(--surface-card))] hover:text-[var(--fg-primary)] " +
@@ -38,16 +38,17 @@ export function TeamSourceFilterBar({ ariaLabel, options, onSelect }: TeamSource
   return (
     <div data-vui-product="team-source-filter-bar" className={BAR} aria-label={ariaLabel}>
       {options.map((option) => (
-        <VNativeButton
+        <VButton
           key={option.key}
+          density="compact"
           type="button"
+          trailingIcon={<strong className={CHIP_COUNT}>{option.count}</strong>}
           className={[CHIP_BASE, option.selected ? CHIP_ACTIVE : ""].filter(Boolean).join(" ")}
           onClick={() => onSelect(option.key)}
           aria-pressed={option.selected}
         >
-          <span>{option.label}</span>
-          <strong className={CHIP_COUNT}>{option.count}</strong>
-        </VNativeButton>
+          {option.label}
+        </VButton>
       ))}
     </div>
   );
