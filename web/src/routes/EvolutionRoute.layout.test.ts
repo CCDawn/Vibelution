@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 // @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
 import { readFileSync } from "node:fs";
 import routeSource from "./EvolutionRoute.tsx?raw";
+import routeStyles from "./EvolutionRoute.styles";
 
 const stylesSource = readFileSync(new URL("./EvolutionRoute.module.css", import.meta.url), "utf-8");
 const worktreeReviewStylesSource = readFileSync(new URL("./SupervisedWorktreeReviewPanel.styles.ts", import.meta.url), "utf-8");
@@ -554,6 +555,25 @@ describe("EvolutionRoute library user flow contract", () => {
   it("keeps the proposal library summary in three columns at common desktop widths", () => {
     expect(stylesSource).toContain(".librarySummaryBar");
     expect(stylesSource).toContain("minmax(300px, 1fr) minmax(260px, 0.8fr) minmax(300px, 0.9fr)");
+  });
+
+  it("keeps restored EvolutionRoute grids from the CSS module migration", () => {
+    const restoredGridExpectations: Array<[string, string]> = [
+      [routeStyles.sourceMetaCompact, "grid-cols-[minmax(0,1fr)_minmax(96px,auto)]"],
+      [routeStyles.supervisedRunOptions, "grid-cols-[minmax(0,0.95fr)_minmax(126px,1.05fr)]"],
+      [routeStyles.datasetCatalogItem, "grid-cols-[minmax(0,1fr)_auto]"],
+      [routeStyles.caseTraceSummary, "grid-cols-[26px_minmax(0,1fr)_auto_18px]"],
+      [routeStyles.closedLoopLedgerEvidenceGrid, "grid-cols-[repeat(2,minmax(0,1fr))]"],
+    ];
+
+    for (const [className, gridTemplate] of restoredGridExpectations) {
+      expect(className).toContain("!grid");
+      expect(className).toContain(gridTemplate);
+    }
+
+    expect(routeStyles.toolbar).toContain("!flex");
+    expect(routeStyles.toolbar).toContain("max-[900px]:!grid");
+    expect(routeStyles.toolbar).toContain("max-[900px]:grid-cols-[1fr]");
   });
 
   it("does not put long live supervised text into native title tooltips", () => {
