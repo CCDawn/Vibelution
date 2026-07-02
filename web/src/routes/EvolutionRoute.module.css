@@ -9,6 +9,11 @@
   overflow: hidden;
 }
 
+.selfPage {
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0;
+}
+
 .toolbar {
   display: flex;
   align-items: center;
@@ -3372,6 +3377,11 @@
 @media (max-width: 900px) {
   .page {
     gap: 6px;
+  }
+
+  .selfPage {
+    grid-template-rows: minmax(0, 1fr);
+    gap: 0;
   }
 
   .selfModeStack {

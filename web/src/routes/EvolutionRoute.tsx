@@ -1090,6 +1090,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const routeSubtitle =
     activeTrack === "self" ? t("selfEvolutionSubtitle") : t("supervisedEvolutionSubtitle");
   const hideSupervisedToolbarIntro = activeTrack === "supervised";
+  const showRouteToolbar = activeTrack !== "self";
   const currentIntakeMode =
     overview?.intakeMode === "auto"
       ? "auto"
@@ -2714,62 +2715,64 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   }
 
   return (
-    <div className={styles.page}>
-      <section className={hideSupervisedToolbarIntro ? `${styles.toolbar} ${styles.toolbarSupervisedFocus}` : styles.toolbar}>
-        {!hideSupervisedToolbarIntro ? (
-          <div className={styles.toolbarIntro}>
-            <p className={styles.eyebrow}>{routeEyebrow}</p>
-            <h1 className={styles.title}>{routeTitle}</h1>
-            <p className={styles.subtitle}>{routeSubtitle}</p>
-          </div>
-        ) : null}
-
-        <div className={styles.toolbarControls}>
-          {showTrackToggle ? (
-            <div className={styles.segmented}>
-              {([
-                { key: "supervised", label: t("supervisedEvolutionMode") },
-                { key: "self", label: t("selfEvolutionMode") },
-              ] as const).map((track) => (
-                <button
-                  key={track.key}
-                  type="button"
-                  className={
-                    activeTrack === track.key
-                      ? `${styles.segmentButton} ${styles.segmentButtonActive}`
-                      : styles.segmentButton
-                  }
-                  onClick={() => setEvolutionTrack(track.key)}
-                >
-                  {track.label}
-                </button>
-              ))}
+    <div className={activeTrack === "self" ? `${styles.page} ${styles.selfPage}` : styles.page}>
+      {showRouteToolbar ? (
+        <section className={hideSupervisedToolbarIntro ? `${styles.toolbar} ${styles.toolbarSupervisedFocus}` : styles.toolbar}>
+          {!hideSupervisedToolbarIntro ? (
+            <div className={styles.toolbarIntro}>
+              <p className={styles.eyebrow}>{routeEyebrow}</p>
+              <h1 className={styles.title}>{routeTitle}</h1>
+              <p className={styles.subtitle}>{routeSubtitle}</p>
             </div>
           ) : null}
 
-          {activeTrack === "supervised" ? (
-            <SupervisedWorkspaceControls
-              activeView={evolutionView}
-              activeWorkflowStepId={supervisedSelectedWorkflowStepId}
-              onWorkflowStepSelect={handleSupervisedWorkflowStepSelect}
-              overviewIntakeMode={overview?.intakeMode}
-              configIntakeMode={configQuery.data?.intakeMode}
-              tabSummaries={supervisedTabSummaries}
-            />
-          ) : null}
-        </div>
-      </section>
+          <div className={styles.toolbarControls}>
+            {showTrackToggle ? (
+              <div className={styles.segmented}>
+                {([
+                  { key: "supervised", label: t("supervisedEvolutionMode") },
+                  { key: "self", label: t("selfEvolutionMode") },
+                ] as const).map((track) => (
+                  <button
+                    key={track.key}
+                    type="button"
+                    className={
+                      activeTrack === track.key
+                        ? `${styles.segmentButton} ${styles.segmentButtonActive}`
+                        : styles.segmentButton
+                    }
+                    onClick={() => setEvolutionTrack(track.key)}
+                  >
+                    {track.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            {activeTrack === "supervised" ? (
+              <SupervisedWorkspaceControls
+                activeView={evolutionView}
+                activeWorkflowStepId={supervisedSelectedWorkflowStepId}
+                onWorkflowStepSelect={handleSupervisedWorkflowStepSelect}
+                overviewIntakeMode={overview?.intakeMode}
+                configIntakeMode={configQuery.data?.intakeMode}
+                tabSummaries={supervisedTabSummaries}
+              />
+            ) : null}
+          </div>
+        </section>
+      ) : null}
 
       {activeTrack === "self" ? (
         <div className={styles.selfModeStack}>
           <Suspense fallback={(
-          <section className={`${styles.surface} ${styles.structuredEmptyState}`}>
-            <LoaderCircle size={18} className={styles.spinIcon} aria-hidden="true" />
-            <div>
-              <h3>{lang === "zh" ? "正在加载自进化工作台" : "Loading self-evolution workspace"}</h3>
-              <p>{lang === "zh" ? "监督进化工作台已先保持可用，自进化面板正在按需载入。" : "The supervised workspace stays available while the self-evolution panel loads on demand."}</p>
-            </div>
-          </section>
+            <section className={`${styles.surface} ${styles.structuredEmptyState}`}>
+              <LoaderCircle size={18} className={styles.spinIcon} aria-hidden="true" />
+              <div>
+                <h3>{lang === "zh" ? "正在加载自进化工作台" : "Loading self-evolution workspace"}</h3>
+                <p>{lang === "zh" ? "监督进化工作台已先保持可用，自进化面板正在按需载入。" : "The supervised workspace stays available while the self-evolution panel loads on demand."}</p>
+              </div>
+            </section>
         )}>
           <LazySelfEvolutionTrack
             overview={selfOverview}
