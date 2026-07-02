@@ -175,7 +175,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("setVisibleContent");
     expect(conversationViewSource).toContain("const isResponseStreaming = Boolean(message.streaming) && showResponseBlock");
     expect(conversationViewSource).toContain("showResponseBlock && !isStreamingStatusPlaceholder && responseExpanded && !isResponseStreaming");
-    expect(conversationViewSource).toContain("? renderStreamingResponseText(message.content)");
+    expect(conversationViewSource).toContain("? renderStreamingResponseText(responseText)");
     expect(conversationViewStylesSource).toContain(".streamingResponseText");
   });
 
@@ -353,7 +353,7 @@ describe("ConversationView edit resend affordance", () => {
   it("folds streaming request placeholders into the process strip", () => {
     expect(conversationViewSource).toContain("function isStreamingStatusPlaceholderContent(content: string)");
     expect(conversationViewSource).toContain("const isStreamingStatusPlaceholder = Boolean(message.streaming)");
-    expect(conversationViewSource).toContain("compactStreamingStatusPlaceholder(message.content)");
+    expect(conversationViewSource).toContain("compactStreamingStatusPlaceholder(responseText)");
     expect(conversationViewSource).toContain("showResponseBlock && !isStreamingStatusPlaceholder");
     expect(styles.answerOnlyProcessToggle).toContain("grid-cols-[14px_auto_auto_minmax(0,1fr)_14px]");
   });
@@ -366,7 +366,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("trimOldestCacheEntries(responseSegmentCacheRef.current, RESPONSE_PARSE_CACHE_LIMIT)");
     expect(conversationViewSource).toContain("trimOldestCacheEntries(markdownBlockCacheRef.current, MARKDOWN_PARSE_CACHE_LIMIT)");
     expect(conversationViewSource).toContain("const responseSegments = showResponseBlock && !isStreamingStatusPlaceholder && responseExpanded && !isResponseStreaming");
-    expect(conversationViewSource).toContain("? getCachedResponseSegments(message.content)");
+    expect(conversationViewSource).toContain("? getCachedResponseSegments(responseText)");
     expect(conversationViewSource).toContain("const blocks = getCachedMarkdownBlocks(content)");
     expect(conversationViewSource).toContain("const prewarmMessages = timelineMessages");
     expect(conversationViewSource).toContain("window.setTimeout(prewarmNext, 48)");
