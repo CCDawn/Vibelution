@@ -1,250 +1,423 @@
-import { createVuiStyleMap } from "../components/vui/styles/createVuiStyleMap";
-
-const styleKeys = [
-  "activityTimelineItem",
-  "activityTimelineItem_context",
-  "activityTimelineItem_inbox",
-  "activityTimelineItem_run",
-  "activityTimelineItem_sub_run",
-  "activityTimelineList",
-  "advancedFilterBody",
-  "advancedFilterSection",
-  "advancedFilterSummary",
-  "agentAvatar",
-  "agentAvatarImage",
-  "agentColumn",
-  "agentColumnGrid",
-  "agentColumnHeader",
-  "agentIdentity",
-  "agentIdentityCopy",
-  "agentPanel",
-  "agentPanelCreating",
-  "agentRoleTag",
-  "agentRoleTag_chat",
-  "agentRoleTag_general",
-  "agentRoleTag_memory",
-  "agentRoleTag_research",
-  "agentRoleTag_self",
-  "agentRoleTag_supervised",
-  "agentRoleTag_tool",
-  "agentRow",
-  "agentRowActive",
-  "agentRowBulkSelected",
-  "agentRowShell",
-  "agentTable",
-  "agentTableHead",
-  "avatarEditorActions",
-  "avatarEditorAnchor",
-  "avatarEditorHeader",
-  "avatarEditorPanel",
-  "avatarLibraryHeader",
-  "avatarOption",
-  "avatarOptionGrid",
-  "avatarOptionSelected",
-  "boundarySummaryGrid",
-  "bulkFieldHeader",
-  "bulkPromptPicker",
-  "bulkPromptSelect",
-  "bulkSelectionList",
-  "capabilityPreviewPanel",
-  "checkField",
-  "cleanPill",
-  "compressionInlineCheck",
-  "compressionPolicyFooter",
-  "compressionPolicyGrid",
-  "compressionPolicySubgrid",
-  "compressionToggleField",
-  "configDeepLinkRow",
-  "configEditor",
-  "contextModeGrid",
-  "controlStrip",
-  "countPill",
-  "createAgentGrid",
-  "createAgentPanel",
-  "createToolBundleGrid",
-  "createToolBundleOption",
-  "createToolBundlePreview",
-  "createToolBundleSelected",
-  "dangerButton",
-  "dangerZone",
-  "detailAvatar",
-  "detailAvatarButton",
-  "detailHeader",
-  "detailHeaderActions",
-  "detailHealthStatus",
-  "detailPanel",
-  "detailSection",
-  "detailTab",
-  "detailTabActive",
-  "detailTabs",
-  "dirtyPill",
-  "editorActions",
-  "editorGrid",
-  "emptyState",
-  "emptyText",
-  "errorText",
-  "eyebrow",
-  "factGrid",
-  "field",
-  "fieldWide",
-  "filterPanel",
-  "governanceActions",
-  "governanceEditorGrid",
-  "groupButton",
-  "groupButtonActive",
-  "groupList",
-  "groupSection",
-  "groupSectionItems",
-  "groupSectionTitle",
-  "health_blocked",
-  "health_ok",
-  "health_warning",
-  "healthCell",
-  "healthGuide_blocking",
-  "healthGuide_info",
-  "healthGuide_ok",
-  "healthGuide_warning",
-  "healthGuidePanel",
-  "healthPill",
-  "iconButton",
-  "inboxMessageItem",
-  "inboxMessageItemFocused",
-  "inboxMessageList",
-  "inboxMessageTop",
-  "inlineAdd",
-  "issue_blocking",
-  "issue_info",
-  "issue_ok",
-  "issue_warning",
-  "issueItem",
-  "issueItem_blocking",
-  "issueItem_warning",
-  "issueList",
-  "issuePill",
-  "llmSlotField",
-  "llmSlotGrid",
-  "maintenanceIntro",
-  "managementBriefHeader",
-  "managementBriefPanel",
-  "managementChecklist",
-  "managementChecklistDone",
-  "managementChecklistMissing",
-  "managementNav",
-  "memoryPolicyGrid",
-  "modeList",
-  "nextActionList",
-  "panelEyebrow",
-  "panelHeader",
-  "panelHeaderActions",
-  "pathList",
-  "pillList",
-  "policyGrid",
-  "policyHint",
-  "policySummaryGrid",
-  "primaryButton",
-  "promptConfigField",
-  "promptConfigRow",
-  "protectedZone",
-  "referenceHeader",
-  "referenceItem",
-  "referenceList",
-  "referenceMetaRow",
-  "referenceStatusActive",
-  "referenceStatusStale",
-  "resetOptionField",
-  "resetOptionGrid",
-  "resetZone",
-  "returnBanner",
-  "returnBannerButton",
-  "returnBannerCopy",
-  "roomCheckField",
-  "roomMembershipList",
-  "route",
-  "rowSelect",
-  "runHistoryItem",
-  "runHistoryList",
-  "runtime_archived",
-  "runtime_blocked",
-  "runtime_failed",
-  "runtime_idle",
-  "runtime_running",
-  "runtime_stopped",
-  "runtime_unknown",
-  "runtimeEvidenceHint",
-  "runtimeFocusHeader",
-  "runtimeFocusMeta",
-  "runtimeFocusPanel",
-  "runtimeNextStep",
-  "runtimePill",
-  "runtimePolicyGrid",
-  "searchBox",
-  "secondaryButton",
-  "segmentActive",
-  "segmentActiveDanger",
-  "segmentButton",
-  "segmentedControl",
-  "storagePanel",
-  "successText",
-  "tagList",
-  "timelineActions",
-  "title",
-  "toggleGrid",
-  "toolBundleActions",
-  "toolBundleItem",
-  "toolBundleList",
-  "toolBundlePanel",
-  "toolBundlePanelHeader",
-  "toolGovernanceItem",
-  "toolGovernanceList",
-  "toolPermissionGroup",
-  "toolPermissionGroupHeader",
-  "toolPermissionGroupList",
-  "toolPermissionList",
-  "toolPermissionMeta",
-  "toolPermissionRow",
-  "workspace",
-  "workspaceCreating",
-  "workspaceScopePanel",
-] as const;
-
-const styles = createVuiStyleMap(styleKeys, {
-  extensions: {
-    agentColumn: "content-start gap-1.5",
-    agentColumnGrid: "min-h-0 content-start gap-2 overflow-auto pr-1 [scrollbar-width:thin]",
-    agentColumnHeader:
-      "!grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5 px-1 text-[var(--vui-font-xs)] [&_em]:not-italic",
-    agentIdentity: "grid-cols-[30px_minmax(0,1fr)] items-center gap-1.5",
-    agentIdentityCopy: "content-center gap-0.5 [&_span]:truncate [&_strong]:truncate",
-    agentPanel: "min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden",
-    agentPanelCreating: "grid-rows-[auto_minmax(360px,1.4fr)_minmax(120px,0.6fr)]",
-    agentRow:
-      "!grid min-h-[44px] w-full grid-cols-[minmax(180px,1.3fr)_minmax(120px,0.86fr)_minmax(110px,0.82fr)_minmax(88px,0.48fr)_minmax(104px,0.72fr)_minmax(128px,0.68fr)] items-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-2 py-1 text-left text-[var(--vui-font-xs)]",
-    agentRowShell: "grid-cols-[28px_minmax(0,1fr)] items-start gap-1",
-    agentTable: "grid min-w-0 content-start gap-1 overflow-x-auto [scrollbar-width:thin]",
-    agentTableHead:
-      "sticky top-0 z-10 grid-cols-[minmax(180px,1.3fr)_minmax(120px,0.86fr)_minmax(110px,0.82fr)_minmax(88px,0.48fr)_minmax(104px,0.72fr)_minmax(128px,0.68fr)] bg-[var(--vui-surface-glass)] text-[var(--vui-font-xs)]",
-    controlStrip:
-      "!grid grid-cols-[auto_minmax(0,1fr)] items-start gap-1.5 px-3 pt-1 max-[1120px]:grid-cols-[1fr]",
-    detailPanel: "min-h-0 overflow-auto",
-    emptyState: "place-items-start min-h-[72px] text-left",
-    filterPanel: "min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden",
-    groupButton:
-      "!grid w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-1.5 rounded-[var(--radius-control)] px-2 py-1 text-left [&_em]:not-italic [&_span]:min-w-0 [&_span]:truncate",
-    groupList: "content-start gap-1.5 overflow-auto pr-1 [scrollbar-width:thin]",
-    groupSection: "content-start gap-1.5",
-    groupSectionItems: "content-start gap-1",
-    managementNav: "m-0 self-start justify-self-start",
-    panelHeader:
-      "!flex flex-nowrap items-start justify-between gap-2 [&_h2]:m-0 [&_h3]:m-0",
-    panelHeaderActions: "!flex flex-nowrap items-center justify-end gap-1.5",
-    route: "grid-rows-[auto_auto_minmax(0,1fr)] gap-1.5 overflow-hidden bg-transparent",
-    searchBox:
-      "!flex h-[var(--vui-control-height-md)] items-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-2",
-    storagePanel: "content-start gap-1.5 overflow-hidden [&_code]:truncate",
-    workspace:
-      "!grid min-h-0 grid-cols-[minmax(214px,268px)_minmax(430px,1.08fr)_minmax(330px,0.86fr)] grid-rows-[minmax(0,1fr)] gap-[var(--agent-density-gap)] overflow-hidden px-2.5 pb-2 pt-1 max-[1040px]:grid-cols-[minmax(220px,270px)_minmax(0,1fr)] max-[1040px]:auto-rows-[minmax(180px,auto)] max-[1040px]:content-start max-[860px]:grid-cols-[1fr] max-[860px]:auto-rows-auto",
-    workspaceCreating: "grid-rows-[minmax(0,1fr)]",
-  },
-});
+// Explicit style baseline (Phase 0, 2026-07-02 spec) — generated by
+// web/scripts/bake-style-maps.ts from the previous createVuiStyleMap output;
+// classes are byte-identical to what the inference produced. Every key is an
+// explicit Tailwind class string; there are no name-based defaults. Edit
+// values directly. This file is transitional: it is deleted in the wave that
+// componentizes AgentsRoute.
+// Includes phantom keys (accessed by consumers but never declared in the old
+// styleKeys — the Proxy synthesized them on demand) and prefix×tone-vocabulary
+// coverage for dynamic `styles[`prefix_${tone}`]` lookups. Typed loosely as
+// Record<string, string> because those dynamic template indexes cannot index a
+// literal-keyed map; tightening is a follow-up, not Phase 0.
+const styles: Record<string, string> = {
+  activityTimelineItem:
+    "activityTimelineItem min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  activityTimelineItem_context:
+    "activityTimelineItem_context min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+  activityTimelineItem_inbox:
+    "activityTimelineItem_inbox min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  activityTimelineItem_run:
+    "activityTimelineItem_run min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  activityTimelineItem_sub_run:
+    "activityTimelineItem_sub_run min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  activityTimelineList:
+    "activityTimelineList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  advancedFilterBody:
+    "advancedFilterBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  advancedFilterSection:
+    "advancedFilterSection min-w-0",
+  advancedFilterSummary:
+    "advancedFilterSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  agentAvatar:
+    "agentAvatar min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  agentAvatarImage:
+    "agentAvatarImage min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  agentColumn:
+    "agentColumn min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] content-start gap-1.5",
+  agentColumnGrid:
+    "agentColumnGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] min-h-0 content-start gap-2 overflow-auto pr-1 [scrollbar-width:thin]",
+  agentColumnHeader:
+    "agentColumnHeader min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5 px-1 text-[var(--vui-font-xs)] [&_em]:not-italic",
+  agentIdentity:
+    "agentIdentity min-w-0 grid gap-1 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] grid-cols-[30px_minmax(0,1fr)] items-center gap-1.5",
+  agentIdentityCopy:
+    "agentIdentityCopy min-w-0 grid gap-1 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] content-center gap-0.5 [&_span]:truncate [&_strong]:truncate",
+  agentPanel:
+    "agentPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden",
+  agentPanelCreating:
+    "agentPanelCreating min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] grid grid-rows-[auto_minmax(360px,1.4fr)_minmax(120px,0.6fr)]",
+  agentRoleTag:
+    "agentRoleTag min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  agentRoleTag_chat:
+    "agentRoleTag_chat min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  agentRoleTag_general:
+    "agentRoleTag_general min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  agentRoleTag_memory:
+    "agentRoleTag_memory min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  agentRoleTag_research:
+    "agentRoleTag_research min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  agentRoleTag_self:
+    "agentRoleTag_self min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  agentRoleTag_supervised:
+    "agentRoleTag_supervised min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  agentRoleTag_tool:
+    "agentRoleTag_tool min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  agentRow:
+    "agentRow min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] !grid min-h-[44px] w-full grid-cols-[minmax(180px,1.3fr)_minmax(120px,0.86fr)_minmax(110px,0.82fr)_minmax(88px,0.48fr)_minmax(104px,0.72fr)_minmax(128px,0.68fr)] items-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-2 py-1 text-left text-[var(--vui-font-xs)]",
+  agentRowActive:
+    "agentRowActive min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  agentRowBulkSelected:
+    "agentRowBulkSelected min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)]",
+  agentRowShell:
+    "agentRowShell min-w-0 grid h-full min-h-0 content-start overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)] rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] grid-cols-[28px_minmax(0,1fr)] items-start gap-1",
+  agentTable:
+    "agentTable min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] grid min-w-0 content-start gap-1 overflow-x-auto [scrollbar-width:thin]",
+  agentTableHead:
+    "agentTableHead min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] grid sticky top-0 z-10 grid-cols-[minmax(180px,1.3fr)_minmax(120px,0.86fr)_minmax(110px,0.82fr)_minmax(88px,0.48fr)_minmax(104px,0.72fr)_minmax(128px,0.68fr)] bg-[var(--vui-surface-glass)] text-[var(--vui-font-xs)]",
+  avatarEditorActions:
+    "avatarEditorActions min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--vui-control-muted)]",
+  avatarEditorAnchor:
+    "avatarEditorAnchor min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--vui-control-muted)]",
+  avatarEditorHeader:
+    "avatarEditorHeader min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--vui-control-muted)]",
+  avatarEditorPanel:
+    "avatarEditorPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--vui-control-muted)]",
+  avatarLibraryHeader:
+    "avatarLibraryHeader min-w-0 flex flex-wrap items-center gap-1.5 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
+  avatarOption:
+    "avatarOption min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
+  avatarOptionGrid:
+    "avatarOptionGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
+  avatarOptionSelected:
+    "avatarOptionSelected min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
+  boundarySummaryGrid:
+    "boundarySummaryGrid min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  bulkFieldHeader:
+    "bulkFieldHeader min-w-0 flex flex-wrap items-center gap-1.5 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+  bulkPromptPicker:
+    "bulkPromptPicker min-w-0",
+  bulkPromptSelect:
+    "bulkPromptSelect min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+  bulkSelectionList:
+    "bulkSelectionList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  capabilityPreviewPanel:
+    "capabilityPreviewPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  checkField:
+    "checkField min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+  cleanPill:
+    "cleanPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+  compressionInlineCheck:
+    "compressionInlineCheck min-w-0",
+  compressionPolicyFooter:
+    "compressionPolicyFooter min-w-0 flex flex-wrap items-center gap-1.5",
+  compressionPolicyGrid:
+    "compressionPolicyGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  compressionPolicySubgrid:
+    "compressionPolicySubgrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  compressionToggleField:
+    "compressionToggleField min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+  configDeepLinkRow:
+    "configDeepLinkRow min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  configEditor:
+    "configEditor min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  contextModeGrid:
+    "contextModeGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+  controlStrip:
+    "controlStrip min-w-0 flex flex-wrap items-center gap-1.5 !grid grid-cols-[auto_minmax(0,1fr)] items-start gap-1.5 px-3 pt-1 max-[1120px]:grid-cols-[1fr]",
+  countPill:
+    "countPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+  createAgentGrid:
+    "createAgentGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  createAgentPanel:
+    "createAgentPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  createToolBundleGrid:
+    "createToolBundleGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+  createToolBundleOption:
+    "createToolBundleOption min-w-0 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+  createToolBundlePreview:
+    "createToolBundlePreview min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+  createToolBundleSelected:
+    "createToolBundleSelected min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
+  dangerButton:
+    "dangerButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+  dangerZone:
+    "dangerZone min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+  detailAvatar:
+    "detailAvatar min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--vui-control-muted)]",
+  detailAvatarButton:
+    "detailAvatarButton min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 inline-grid h-[var(--vui-control-height-sm)] min-h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] place-items-center rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] p-0 text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] h-8 w-8 shrink-0 overflow-hidden rounded-full",
+  detailHeader:
+    "detailHeader min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
+  detailHeaderActions:
+    "detailHeaderActions min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
+  detailHealthStatus:
+    "detailHealthStatus min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  detailPanel:
+    "detailPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 min-h-0 overflow-auto",
+  detailSection:
+    "detailSection min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  detailTab:
+    "detailTab min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+  detailTabActive:
+    "detailTabActive min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  detailTabs:
+    "detailTabs min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  dirtyPill:
+    "dirtyPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+  editorActions:
+    "editorActions min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
+  editorGrid:
+    "editorGrid min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  emptyState:
+    "emptyState min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] place-items-start min-h-[72px] text-left",
+  emptyText:
+    "emptyText min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+  errorText:
+    "errorText min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  eyebrow:
+    "eyebrow min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+  factGrid:
+    "factGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  field:
+    "field min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+  fieldWide:
+    "fieldWide min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+  filterPanel:
+    "filterPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden",
+  governanceActions:
+    "governanceActions min-w-0 flex flex-wrap items-center gap-1.5",
+  governanceEditorGrid:
+    "governanceEditorGrid min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  groupButton:
+    "groupButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 !grid w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-1.5 rounded-[var(--radius-control)] px-2 py-1 text-left [&_em]:not-italic [&_span]:min-w-0 [&_span]:truncate",
+  groupButtonActive:
+    "groupButtonActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  groupList:
+    "groupList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto content-start gap-1.5 overflow-auto pr-1 [scrollbar-width:thin]",
+  groupSection:
+    "groupSection min-w-0 content-start gap-1.5",
+  groupSectionItems:
+    "groupSectionItems min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto content-start gap-1",
+  groupSectionTitle:
+    "groupSectionTitle min-w-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
+  healthCell:
+    "healthCell min-w-0",
+  healthGuidePanel:
+    "healthGuidePanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  healthGuide_blocking:
+    "healthGuide_blocking min-w-0",
+  healthGuide_info:
+    "healthGuide_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  healthGuide_ok:
+    "healthGuide_ok min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+  healthGuide_warning:
+    "healthGuide_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+  healthPill:
+    "healthPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+  health_blocked:
+    "health_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+  health_ok:
+    "health_ok min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+  health_warning:
+    "health_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+  iconButton:
+    "iconButton min-w-0 inline-grid h-[var(--vui-control-height-sm)] min-h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] place-items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-0 text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] shrink-0 text-[var(--fg-tertiary)]",
+  inboxMessageItem:
+    "inboxMessageItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  inboxMessageItemFocused:
+    "inboxMessageItemFocused min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  inboxMessageList:
+    "inboxMessageList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  inboxMessageTop:
+    "inboxMessageTop min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  inlineAdd:
+    "inlineAdd min-w-0",
+  issueItem:
+    "issueItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  issueItem_blocking:
+    "issueItem_blocking min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  issueItem_warning:
+    "issueItem_warning min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+  issueList:
+    "issueList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  issuePill:
+    "issuePill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+  issue_blocking:
+    "issue_blocking min-w-0",
+  issue_info:
+    "issue_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  issue_ok:
+    "issue_ok min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+  issue_warning:
+    "issue_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+  llmSlotField:
+    "llmSlotField min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+  llmSlotGrid:
+    "llmSlotGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  maintenanceIntro:
+    "maintenanceIntro min-w-0",
+  managementBriefHeader:
+    "managementBriefHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  managementBriefPanel:
+    "managementBriefPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  managementChecklist:
+    "managementChecklist min-w-0",
+  managementChecklistDone:
+    "managementChecklistDone min-w-0",
+  managementChecklistMissing:
+    "managementChecklistMissing min-w-0",
+  managementNav:
+    "managementNav min-w-0 m-0 self-start justify-self-start",
+  memoryPolicyGrid:
+    "memoryPolicyGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  modeList:
+    "modeList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  nextActionList:
+    "nextActionList min-w-0 flex flex-wrap items-center gap-1.5 grid min-h-0 content-start overflow-auto",
+  panelEyebrow:
+    "panelEyebrow min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+  panelHeader:
+    "panelHeader min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5 !flex flex-nowrap items-start justify-between gap-2 [&_h2]:m-0 [&_h3]:m-0",
+  panelHeaderActions:
+    "panelHeaderActions min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5 !flex flex-nowrap items-center justify-end gap-1.5",
+  pathList:
+    "pathList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto font-mono text-[var(--vui-font-xs)]",
+  pillList:
+    "pillList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  policyGrid:
+    "policyGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  policyHint:
+    "policyHint min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+  policySummaryGrid:
+    "policySummaryGrid min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  primaryButton:
+    "primaryButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]",
+  promptConfigField:
+    "promptConfigField min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+  promptConfigRow:
+    "promptConfigRow min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  protectedZone:
+    "protectedZone min-w-0",
+  referenceHeader:
+    "referenceHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  referenceItem:
+    "referenceItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  referenceList:
+    "referenceList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  referenceMetaRow:
+    "referenceMetaRow min-w-0 flex flex-wrap items-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  referenceStatusActive:
+    "referenceStatusActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  referenceStatusStale:
+    "referenceStatusStale min-w-0",
+  resetOptionField:
+    "resetOptionField min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+  resetOptionGrid:
+    "resetOptionGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  resetZone:
+    "resetZone min-w-0",
+  returnBanner:
+    "returnBanner min-w-0",
+  returnBannerButton:
+    "returnBannerButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+  returnBannerCopy:
+    "returnBannerCopy min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  roomCheckField:
+    "roomCheckField min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+  roomMembershipList:
+    "roomMembershipList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  route:
+    "route min-w-0 grid h-full min-h-0 content-start overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)] grid-rows-[auto_auto_minmax(0,1fr)] gap-1.5 overflow-hidden bg-transparent",
+  rowSelect:
+    "rowSelect min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+  runHistoryItem:
+    "runHistoryItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  runHistoryList:
+    "runHistoryList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  runtimeEvidenceHint:
+    "runtimeEvidenceHint min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+  runtimeFocusHeader:
+    "runtimeFocusHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  runtimeFocusMeta:
+    "runtimeFocusMeta min-w-0 flex flex-wrap items-center gap-1.5",
+  runtimeFocusPanel:
+    "runtimeFocusPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  runtimeNextStep:
+    "runtimeNextStep min-w-0",
+  runtimePill:
+    "runtimePill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+  runtimePolicyGrid:
+    "runtimePolicyGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  runtime_archived:
+    "runtime_archived min-w-0",
+  runtime_blocked:
+    "runtime_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+  runtime_failed:
+    "runtime_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+  runtime_idle:
+    "runtime_idle min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)]",
+  runtime_running:
+    "runtime_running min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+  runtime_stopped:
+    "runtime_stopped min-w-0",
+  runtime_unknown:
+    "runtime_unknown min-w-0",
+  searchBox:
+    "searchBox min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 !flex h-[var(--vui-control-height-md)] items-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-2",
+  secondaryButton:
+    "secondaryButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+  segmentActive:
+    "segmentActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  segmentActiveDanger:
+    "segmentActiveDanger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  segmentButton:
+    "segmentButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+  segmentedControl:
+    "segmentedControl min-w-0 flex flex-wrap items-center gap-1.5",
+  storagePanel:
+    "storagePanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 content-start gap-1.5 overflow-hidden [&_code]:truncate",
+  successText:
+    "successText min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+  tagList:
+    "tagList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  timelineActions:
+    "timelineActions min-w-0 flex flex-wrap items-center gap-1.5 grid min-h-0 content-start overflow-auto",
+  title:
+    "title min-w-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
+  toggleGrid:
+    "toggleGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  toolBundleActions:
+    "toolBundleActions min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+  toolBundleItem:
+    "toolBundleItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+  toolBundleList:
+    "toolBundleList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+  toolBundlePanel:
+    "toolBundlePanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+  toolBundlePanelHeader:
+    "toolBundlePanelHeader min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+  toolGovernanceItem:
+    "toolGovernanceItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+  toolGovernanceList:
+    "toolGovernanceList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+  toolPermissionGroup:
+    "toolPermissionGroup min-w-0 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+  toolPermissionGroupHeader:
+    "toolPermissionGroupHeader min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+  toolPermissionGroupList:
+    "toolPermissionGroupList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+  toolPermissionList:
+    "toolPermissionList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+  toolPermissionMeta:
+    "toolPermissionMeta min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+  toolPermissionRow:
+    "toolPermissionRow min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+  workspace:
+    "workspace min-w-0 grid min-h-0 gap-2 p-2 !grid min-h-0 grid-cols-[minmax(214px,268px)_minmax(430px,1.08fr)_minmax(330px,0.86fr)] grid-rows-[minmax(0,1fr)] gap-[var(--agent-density-gap)] overflow-hidden px-2.5 pb-2 pt-1 max-[1040px]:grid-cols-[minmax(220px,270px)_minmax(0,1fr)] max-[1040px]:auto-rows-[minmax(180px,auto)] max-[1040px]:content-start max-[860px]:grid-cols-[1fr] max-[860px]:auto-rows-auto",
+  workspaceCreating:
+    "workspaceCreating min-w-0 grid min-h-0 gap-2 p-2 grid-rows-[minmax(0,1fr)]",
+  workspaceScopePanel:
+    "workspaceScopePanel min-w-0 grid min-h-0 gap-2 p-2 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)]",
+};
 
 export default styles;
