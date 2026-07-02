@@ -625,41 +625,66 @@ def self_evolution_agent_bindings() -> dict[str, dict[str, Any]]:
             )
     ensure_self_evolution_agent_instances()
     payload = agent_mode_binding_service.get_mode_bindings_payload()
-    mode = (payload.get("modes") or {}).get("self_evolution")
-    slots = mode.get("slots") if isinstance(mode, dict) else {}
     bindings: dict[str, dict[str, Any]] = {}
     for role in [item["role"] for item in SELF_EVOLUTION_AGENT_ROLES]:
-        stale_warning = _self_evolution_slot_warning(payload, role)
-        if stale_warning:
-            agent_id = str(stale_warning.get("agentId") or "").strip()
-            _record_self_evolution_binding_failure(role, agent_id=agent_id, reason="missing_or_archived_slot_agent")
-            raise SelfEvolutionRunValidationError(
-                f"Self-evolution role slot points to an archived or missing Agent: {role} ({agent_id or 'unknown'})"
-            )
-        agent_id = str((slots or {}).get(role) or "").strip()
-        if not agent_id:
-            _record_self_evolution_binding_failure(role, agent_id="", reason="missing_slot_agent")
-            raise SelfEvolutionRunValidationError(f"Self-evolution role slot is not configured: {role}")
-        agent = agent_directory_service.get_agent(agent_id, include_archived=False)
-        if not agent:
-            _record_self_evolution_binding_failure(role, agent_id=agent_id, reason="missing_or_archived_slot_agent")
-            raise SelfEvolutionRunValidationError(f"Self-evolution role slot points to an archived or missing Agent: {role}")
-        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-        llm_bindings = agent_directory_service.normalize_agent_llm_bindings(agent.get("llmBindings"))
-        dialogue_model_id = agent_directory_service.agent_dialogue_model_id({"llmBindings": llm_bindings})
-        bindings[role] = {
-            "agentId": str(agent.get("agentId") or "").strip(),
-            "displayName": str(agent.get("displayName") or "").strip(),
-            "profileId": str(agent.get("profileId") or "").strip(),
-            "llmBindings": llm_bindings,
-            "dialogueModelId": dialogue_model_id,
-            "promptTemplateId": str(agent.get("promptTemplateId") or "").strip(),
-            "directSessionId": str(agent.get("directSessionId") or "").strip(),
-            "workspacePath": str(agent.get("workspacePath") or "").strip(),
-            "role": role,
-            "roleLabel": str(metadata.get("selfEvolutionRoleLabel") or role).strip(),
-        }
+        bindings[role] = _self_evolution_binding_from_payload(payload, role)
     return bindings
+
+
+def self_observation_agent_binding() -> dict[str, Any]:
+    """Resolve only the observer Agent needed by no-tool self-observation runs."""
+
+    role = "observer"
+    raw_slots = _raw_self_evolution_mode_slots()
+    raw_agent_id = str(raw_slots.get(role) or "").strip()
+    if raw_agent_id and not agent_directory_service.get_agent(raw_agent_id, include_archived=False):
+        _record_self_evolution_binding_failure(role, agent_id=raw_agent_id, reason="missing_or_archived_slot_agent")
+        raise SelfEvolutionRunValidationError(
+            f"Self-evolution role slot points to an archived or missing Agent: {role} ({raw_agent_id})"
+        )
+    ensure_self_evolution_agent_instances()
+    payload = agent_mode_binding_service.get_mode_bindings_payload()
+    return _self_evolution_binding_from_payload(payload, role)
+
+
+def _self_evolution_binding_from_payload(mode_payload: dict[str, Any], role: str) -> dict[str, Any]:
+    normalized_role = str(role or "").strip()
+    if normalized_role not in SELF_EVOLUTION_ROLE_KEYS:
+        raise SelfEvolutionRunValidationError(f"Unknown self-evolution role: {normalized_role or 'unknown'}")
+    mode = (mode_payload.get("modes") or {}).get("self_evolution")
+    slots = mode.get("slots") if isinstance(mode, dict) else {}
+    stale_warning = _self_evolution_slot_warning(mode_payload, normalized_role)
+    if stale_warning:
+        agent_id = str(stale_warning.get("agentId") or "").strip()
+        _record_self_evolution_binding_failure(normalized_role, agent_id=agent_id, reason="missing_or_archived_slot_agent")
+        raise SelfEvolutionRunValidationError(
+            f"Self-evolution role slot points to an archived or missing Agent: {normalized_role} ({agent_id or 'unknown'})"
+        )
+    agent_id = str((slots or {}).get(normalized_role) or "").strip()
+    if not agent_id:
+        _record_self_evolution_binding_failure(normalized_role, agent_id="", reason="missing_slot_agent")
+        raise SelfEvolutionRunValidationError(f"Self-evolution role slot is not configured: {normalized_role}")
+    agent = agent_directory_service.get_agent(agent_id, include_archived=False)
+    if not agent:
+        _record_self_evolution_binding_failure(normalized_role, agent_id=agent_id, reason="missing_or_archived_slot_agent")
+        raise SelfEvolutionRunValidationError(
+            f"Self-evolution role slot points to an archived or missing Agent: {normalized_role}"
+        )
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    llm_bindings = agent_directory_service.normalize_agent_llm_bindings(agent.get("llmBindings"))
+    dialogue_model_id = agent_directory_service.agent_dialogue_model_id({"llmBindings": llm_bindings})
+    return {
+        "agentId": str(agent.get("agentId") or "").strip(),
+        "displayName": str(agent.get("displayName") or "").strip(),
+        "profileId": str(agent.get("profileId") or "").strip(),
+        "llmBindings": llm_bindings,
+        "dialogueModelId": dialogue_model_id,
+        "promptTemplateId": str(agent.get("promptTemplateId") or "").strip(),
+        "directSessionId": str(agent.get("directSessionId") or "").strip(),
+        "workspacePath": str(agent.get("workspacePath") or "").strip(),
+        "role": normalized_role,
+        "roleLabel": str(metadata.get("selfEvolutionRoleLabel") or normalized_role).strip(),
+    }
 
 
 def _raw_self_evolution_mode_slots() -> dict[str, str]:
@@ -2468,8 +2493,7 @@ def _update_self_observation_progress(
 
 
 def _run_observation_session(*, run_id: str, prompt: str, duration_seconds: int) -> dict[str, Any]:
-    bindings = self_evolution_agent_bindings()
-    observer_binding = bindings.get("observer") if isinstance(bindings, dict) else {}
+    observer_binding = self_observation_agent_binding()
     agent_id = str((observer_binding or {}).get("agentId") or "").strip()
     if not agent_id:
         raise SelfEvolutionRunValidationError("Missing self observation observer agent binding.")
