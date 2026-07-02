@@ -497,7 +497,7 @@ const styles: Record<string, string> = {
   kernelTraceLink:
     "vui-routes-chatcodingroute kernelTraceLink min-w-0",
   layout:
-    "vui-routes-chatcodingroute layout min-w-0 !gap-0 !p-0 h-[calc(100dvh_-_var(--shell-topbar-height))] max-h-[calc(100dvh_-_var(--shell-topbar-height))] overflow-hidden grid-cols-[var(--chat-left-pane-width,220px)_0px_minmax(0,1fr)_0px_var(--chat-right-pane-width,284px)] max-[1100px]:grid-cols-[var(--chat-left-pane-width,220px)_0px_minmax(0,1fr)_0px_var(--chat-right-pane-width,284px)]",
+    "vui-routes-chatcodingroute layout min-w-0 grid !gap-0 !p-0 h-[calc(100dvh_-_var(--shell-topbar-height))] max-h-[calc(100dvh_-_var(--shell-topbar-height))] overflow-hidden grid-cols-[var(--chat-left-pane-width,220px)_0px_minmax(0,1fr)_0px_var(--chat-right-pane-width,284px)] max-[1100px]:grid-cols-[var(--chat-left-pane-width,220px)_0px_minmax(0,1fr)_0px_var(--chat-right-pane-width,284px)]",
   layoutCenterFirst:
     "vui-routes-chatcodingroute layoutCenterFirst min-w-0 !gap-0 !p-0 !grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_0px_minmax(520px,1fr)_0px_minmax(0,var(--chat-right-pane-width,0px))] max-[980px]:!grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_0px_minmax(420px,1fr)_0px_minmax(0,var(--chat-right-pane-width,0px))] max-[640px]:!grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_0px_minmax(280px,1fr)_0px_minmax(0,var(--chat-right-pane-width,0px))]",
   leftBlock:

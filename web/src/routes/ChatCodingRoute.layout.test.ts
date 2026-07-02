@@ -242,6 +242,7 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps side panes flush while preserving overlay resize handles", () => {
+    expect(routeStyles.layout.split(/\s+/)).toContain("grid");
     expect(routeStyles.layout).toContain("!gap-0");
     expect(routeStyles.layout).toContain("!p-0");
     expect(routeStyles.layout).toContain(
