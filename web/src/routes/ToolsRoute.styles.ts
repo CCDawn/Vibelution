@@ -138,6 +138,8 @@ const styles = createVuiStyleMap(styleKeys, {
       "!grid grid-cols-[auto_minmax(0,1fr)] items-center gap-[7px] min-w-0 text-[var(--fg-secondary)]",
     workspaceScopePanel:
       "!grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[7px] p-2 rounded-[7px] border border-[var(--border-soft)] bg-[var(--surface-card)] max-[900px]:grid-cols-[repeat(2,minmax(0,1fr))]",
+    policyDraftSummary:
+      "!grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[7px] p-2 rounded-[7px] border border-[var(--border-soft)] bg-[var(--surface-card)] max-[900px]:grid-cols-[repeat(2,minmax(0,1fr))]",
     summaryCard:
       "!grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-[5px] min-w-0 min-h-[26px] px-2 py-[3px] border-r border-r-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)]",
   },
