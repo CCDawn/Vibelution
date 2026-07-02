@@ -302,6 +302,37 @@ describe("conversationIndexModel", () => {
     });
   });
 
+  it("preserves backend Agent projection edit contracts in conversation summaries", () => {
+    const summary = agentToConversationSummary(agent({
+      agentId: "agent-source",
+      directSessionId: "session-source-agent",
+      sourceRef: {
+        kind: "agent",
+        id: "agent-source",
+        owner: "AgentDirectory",
+        factAuthority: true,
+        canonicalEditRoute: "/agents?agent=agent-source&pane=config",
+        canonicalMutationApi: "/api/agents/agent-source",
+        projectionCanWrite: false,
+        allowedProjectionActions: ["view", "link", "refresh", "repair"],
+        sourceAuthorityVersion: 1,
+      },
+      projectionEdit: {
+        canWrite: false,
+        mode: "deep_link_to_source",
+        reason: "backend_agent_directory_contract",
+        sourceOwner: "AgentDirectory",
+        canonicalEditRoute: "/agents?agent=agent-source&pane=memory",
+        canonicalMutationApi: "/api/agents/agent-source",
+        sourceAuthorityVersion: 1,
+      },
+    }));
+
+    expect(summary.sourceRef?.canonicalEditRoute).toBe("/agents?agent=agent-source&pane=config");
+    expect(summary.projectionEdit?.reason).toBe("backend_agent_directory_contract");
+    expect(summary.projectionEdit?.canonicalEditRoute).toBe("/agents?agent=agent-source&pane=memory");
+  });
+
   it("only adds clickable, non-archived persistent Agents that are not already represented by sessions", () => {
     const existing = conversation({ conversationId: "session-existing", directSessionId: "session-existing", agentId: "agent-existing" });
     const merged = mergeVisibleAgentsIntoConversations(

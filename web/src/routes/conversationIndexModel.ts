@@ -440,7 +440,7 @@ export function isVisibleConversationAgent(agent: AgentInstance | undefined | nu
 export function agentToConversationSummary(agent: AgentInstance): ConversationSummary {
   const directSessionId = String(agent.directSessionId ?? "").trim();
   const sourceRef = agent.sourceRef ?? makeSourceAuthorityRef("agent", agent.agentId);
-  const projectionEdit = makeProjectionEditContract(sourceRef);
+  const projectionEdit = agent.projectionEdit ?? makeProjectionEditContract(sourceRef);
   const agentSourceRef = agent.sourceRef ?? makeSourceAuthorityRef("agent", agent.agentId);
   const classification = agentConversationIndexClassification(agent);
   const teamIdentity = metadataTeamIdentity(agent);
