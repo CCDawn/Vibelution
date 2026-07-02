@@ -1419,6 +1419,9 @@ function agentCenterReturnLabel(value: string | null | undefined, lang: "zh" | "
   if (normalized === "supervised_evolution") {
     return lang === "zh" ? "返回监督进化" : "Back to supervised evolution";
   }
+  if (normalized === "self_evolution") {
+    return lang === "zh" ? "返回自进化" : "Back to self evolution";
+  }
   if (normalized === "tools") {
     return lang === "zh" ? "返回工具配置" : "Back to tools";
   }

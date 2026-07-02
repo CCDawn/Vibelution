@@ -3481,7 +3481,7 @@ export type AgentModeBindings = {
       excludedSlots?: string[];
     };
     self_evolution: {
-      slots: Record<"executor" | "reviewer" | "summarizer" | string, string>;
+      slots: Record<"executor" | "reviewer" | "observer" | "summarizer" | string, string>;
       excludedAgentIds?: string[];
       excludedSlots?: string[];
     };

@@ -117,6 +117,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('setActiveFilter(targetAgent.status === "archived" ? "archived" : "active")');
     expect(routeSource).toContain('normalized === "supervised_evolution"');
     expect(routeSource).toContain("返回监督进化");
+    expect(routeSource).toContain('normalized === "self_evolution"');
+    expect(routeSource).toContain("返回自进化");
     expect(routeSource).toContain('normalized === "tools"');
     expect(routeSource).toContain("返回工具配置");
     expect(routeSource).toContain('normalized === "teams"');

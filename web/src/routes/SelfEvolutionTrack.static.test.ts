@@ -44,6 +44,11 @@ describe("SelfEvolutionTrack static assets", () => {
   const observationStatusSurface = observationStatusStart >= 0 && observationStatusEnd > observationStatusStart
     ? selfEvolutionSource.slice(observationStatusStart, observationStatusEnd)
     : "";
+  const observationEvidenceStart = selfEvolutionSource.indexOf("function renderObservationEvidenceRail()");
+  const observationEvidenceEnd = selfEvolutionSource.indexOf("\n  return (", observationEvidenceStart);
+  const observationEvidenceSurface = observationEvidenceStart >= 0 && observationEvidenceEnd > observationEvidenceStart
+    ? selfEvolutionSource.slice(observationEvidenceStart, observationEvidenceEnd)
+    : "";
   const workspaceStart = selfEvolutionSource.indexOf('{activePage === "workspace" ? (');
   const workspaceEnd = selfEvolutionSource.indexOf(") : observationRunModeActive ? (", workspaceStart);
   const workspaceSurface = workspaceStart >= 0 && workspaceEnd > workspaceStart
@@ -247,10 +252,36 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("styles.observationEvidenceRail");
     expect(selfEvolutionSource).toContain("styles.observationEventTimeline");
     expect(selfEvolutionSource).toContain("observationEventTail.map");
-    expect(selfEvolutionSource).toContain("event.message || event.event");
+    expect(selfEvolutionSource).toContain("selfObservationEventTitle(event.event, lang)");
+    expect(selfEvolutionSource).not.toContain("event.message || event.event");
     expect(selfEvolutionStylesSource).toContain("observationWorkspace:");
     expect(selfEvolutionStylesSource).toContain("grid-cols-[minmax(0,1fr)_minmax(280px,360px)]");
     expect(selfEvolutionStylesSource).toContain("observationEvidenceRail:");
+  });
+
+  it("renders self-evolution Agent cards that deep-link to config and activity logs", () => {
+    expect(selfEvolutionSource).toContain("AgentConfigWorkspace");
+    expect(selfEvolutionSource).toContain("AgentConfigWorkspaceAgent");
+    expect(selfEvolutionSource).toContain("queryKeys.agentConfigWorkspace()");
+    expect(selfEvolutionSource).toContain('fetchJson<AgentConfigWorkspace>("/api/agents/config-workspace?includeRuntime=false")');
+    expect(selfEvolutionSource).toContain("SELF_EVOLUTION_AGENT_ROLE_ORDER");
+    expect(selfEvolutionSource).toContain("renderSelfEvolutionAgentCards()");
+    expect(selfEvolutionSource).toContain('returnLabel: "self_evolution"');
+    expect(selfEvolutionSource).toContain('pane: "config"');
+    expect(selfEvolutionSource).toContain('pane: "activity"');
+    expect(selfEvolutionStylesSource).toContain("agentCardList:");
+    expect(selfEvolutionStylesSource).toContain("agentCardAction:");
+  });
+
+  it("keeps observation side rails compact and leaves full transcripts in the conversation view", () => {
+    expect(selfEvolutionSource).toContain("compactObservationPreview");
+    expect(observationEvidenceSurface).toContain("compactObservationPreview(event.message, 120)");
+    expect(observationEvidenceSurface).toContain("compactObservationPreview(observationRun?.latestMessage, 140)");
+    expect(observationEvidenceSurface).not.toContain("<strong>{event.message || event.event}</strong>");
+    expect(observationEvidenceSurface).not.toContain("<p className={styles.previewText}>{observationRun.latestMessage}</p>");
+    expect(observationEvidenceSurface).not.toContain("<pre className={styles.rawBlock}>{observationRun.report}</pre>");
+    expect(selfEvolutionStylesSource).toContain("compactPreviewText:");
+    expect(selfEvolutionStylesSource).toContain("line-clamp-2");
   });
 
   it("keeps the observation status surface isolated from worktree approval semantics", () => {
