@@ -1620,6 +1620,43 @@ def test_session_detail_recovers_interrupted_live_output_from_checkpoint(tmp_pat
     )
 
 
+def test_session_detail_recovers_live_checkpoint_without_open_turn_started_event(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    session_service._set_session_running("session-live", True, turn_id="turn-checkpoint-only")
+    session_service._set_session_live_output(
+        "session-live",
+        turn_id="turn-checkpoint-only",
+        content="全部候选已读完，尚未执行阶段回写。",
+        thought="正在整理最终回写。",
+        feedback_events=[{"kind": "status", "name": "model_response"}],
+    )
+    session_service._set_session_running("session-live", False, turn_id="turn-checkpoint-only")
+
+    response = client.get("/api/sessions/session-live")
+
+    assert response.status_code == 200
+    events = load_conversation_events(tmp_path, "session-live")
+    event_types = [event.event_type for event in events]
+    assert event_types[-2:] == [EVENT_ASSISTANT_MESSAGE, EVENT_TURN_INTERRUPTED]
+    assert events[-1].turn_id == "turn-checkpoint-only"
+    assert events[-1].payload["reason"] == "detail_loaded_after_restart"
+    assert not session_service._session_live_output_checkpoint_path("session-live").exists()
+    messages = response.json()["messages"]
+    assert any(
+        message["role"] == "assistant"
+        and message["content"] == "全部候选已读完，尚未执行阶段回写。"
+        and message.get("metadata", {}).get("interrupted") is True
+        for message in messages
+    )
+    assert not any(
+        message.get("metadata", {}).get("kind") == "session_live_overlay"
+        or message.get("streaming") is True
+        for message in messages
+    )
+
+
 def test_session_detail_snapshot_publish_throttles_busy_snapshots(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -6856,6 +6893,7 @@ def test_stale_turn_live_output_clear_does_not_remove_new_turn(tmp_path, monkeyp
     )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
 
+    session_service._set_session_running("session-live", True, turn_id="turn-new")
     session_service._set_session_live_output(
         "session-live",
         turn_id="turn-new",
@@ -6870,6 +6908,7 @@ def test_stale_turn_live_output_clear_does_not_remove_new_turn(tmp_path, monkeyp
     assert payload["messages"][-1]["content"] == "新轮正在输出。"
 
     session_service._clear_session_live_output("session-live", turn_id="turn-new")
+    session_service._set_session_running("session-live", False, turn_id="turn-new")
     response_after_clear = client.get("/api/sessions/session-live")
     assert response_after_clear.status_code == 200
     assert not response_after_clear.json()["messages"][-1].get("streaming")

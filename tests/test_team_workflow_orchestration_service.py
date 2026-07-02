@@ -3283,7 +3283,7 @@ def test_source_collection_stage_card_projection_marks_stale_success_as_partial_
     assert card["currentCoverageSummary"]["processed"] == 15
     assert card["currentCoverageSummary"]["total"] == 21
     assert card["currentCoverageSummary"]["missing"] == 6
-    assert any("Current stage coverage is partial" in reason for reason in card["blockingReasons"])
+    assert any("当前阶段覆盖不足" in reason for reason in card["blockingReasons"])
 
 
 def test_source_collection_stage_card_projection_counts_approved_sources_pending_ingestion(tmp_path, monkeypatch):
@@ -3458,7 +3458,7 @@ def test_research_stage_status_reconciles_interrupted_stage_task_turn_journal(tm
     collection_card = next(card for card in latest_round["sourceCollectionStageCards"] if card["stageId"] == "finding")
     assert collection_card["agentTaskStatus"] == "interrupted"
     assert collection_card["status"] == "agent_interrupted"
-    assert collection_card["userStatusLabel"] == "已中断"
+    assert collection_card["userStatusLabel"] == "已中断，需要继续"
     assert collection_card["actionReadiness"]["canStart"] is True
     assert collection_card["actionReadiness"]["recommendedAction"] == "continue"
     assert collection_card["actionReadiness"]["actionLabel"] == "继续这次任务"
@@ -3467,6 +3467,9 @@ def test_research_stage_status_reconciles_interrupted_stage_task_turn_journal(tm
     assert stored_task["status"] == "interrupted"
     assert stored_task["turn"]["status"] == "interrupted"
     assert stored_task["reconciledFromTurn"]["resultEventId"] == interrupted_event.event_id
+    assert stored_task["result"]["closureSummary"]["userStatus"] == "interrupted"
+    assert "尚未完成阶段写回" in stored_task["result"]["closureSummary"]["message"]
+    assert "继续时请先查看上一轮" in stored_task["result"]["closureSummary"]["retryInstruction"]
 
 
 def test_research_stage_status_reconciles_terminal_stage_task_snapshot_as_interrupted(tmp_path, monkeypatch):
@@ -3530,7 +3533,7 @@ def test_research_stage_status_reconciles_terminal_stage_task_snapshot_as_interr
     assert reconciled["status"] == "interrupted"
     extraction_card = next(card for card in latest_round["sourceCollectionStageCards"] if card["stageId"] == "extraction")
     assert extraction_card["status"] == "agent_interrupted"
-    assert extraction_card["userStatusLabel"] == "已中断"
+    assert extraction_card["userStatusLabel"] == "已中断，需要继续"
     assert "继续这次任务" in extraction_card["userSummary"]
 
 
@@ -7492,12 +7495,12 @@ def test_source_collection_stage_card_projection_exposes_user_action_contract():
     )
 
     assert interrupted_card["status"] == "agent_interrupted"
-    assert interrupted_card["userStatusLabel"] == "已中断"
+    assert interrupted_card["userStatusLabel"] == "已中断，需要继续"
     assert "尚未回写" in interrupted_card["userSummary"]
     assert interrupted_card["actionReadiness"]["canStart"] is True
     assert interrupted_card["actionReadiness"]["recommendedAction"] == "continue"
     assert interrupted_card["actionReadiness"]["actionLabel"] == "继续这次任务"
-    assert "Latest Agent turn was interrupted before stage writeback." in interrupted_card["blockingReasons"]
+    assert "最近一次 Agent 会话在阶段写回前中断，需要继续这次任务或重试。" in interrupted_card["blockingReasons"]
 
     partial_card = team_workflow_orchestration_service._source_collection_stage_card_projection(
         "extraction",

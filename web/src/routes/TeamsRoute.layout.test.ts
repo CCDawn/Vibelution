@@ -557,7 +557,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("Agent 返回的候选 ID 没有匹配到本轮资料");
     expect(routeSource).not.toContain("技术详情");
     expect(routeSource).toContain("待补提炼");
-    expect(routeSource).toContain("已中断");
+    expect(routeSource).toContain("已中断，需要继续");
     expect(routeSource).toContain("继续这次任务");
     expect(routeSource).toContain("待 Agent 复核");
     expect(routeSource).toContain("继续补全提炼");

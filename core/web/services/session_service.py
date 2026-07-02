@@ -800,6 +800,21 @@ def _delete_session_live_output_checkpoint(session_id: str) -> None:
         return
 
 
+def _discard_session_live_output_state(session_id: str, *, turn_id: str = "") -> None:
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return
+    normalized_turn_id = str(turn_id or "").strip()
+    with _SESSION_LIVE_OUTPUTS_LOCK:
+        if normalized_turn_id:
+            current = _SESSION_LIVE_OUTPUTS.get(normalized_session_id)
+            current_turn_id = str(getattr(current, "turn_id", "") or "").strip()
+            if current is not None and current_turn_id and current_turn_id != normalized_turn_id:
+                return
+        _SESSION_LIVE_OUTPUTS.pop(normalized_session_id, None)
+    _delete_session_live_output_checkpoint(normalized_session_id)
+
+
 def _load_session_live_output_checkpoint(session_id: str) -> "SessionLiveOutputState | None":
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
@@ -928,15 +943,21 @@ def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = ""
         return
     if _is_session_running(normalized_session_id):
         return
+    recovered_from_checkpoint_only = False
+    event_turn_id = ""
     try:
         events = load_conversation_events(PROJECT_ROOT, normalized_session_id)
+        checkpoint = _load_session_live_output_checkpoint(normalized_session_id)
         turn_id = latest_open_turn_id(events)
+        checkpoint_turn_id = str(getattr(checkpoint, "turn_id", "") or "").strip() if checkpoint is not None else ""
+        if not turn_id and checkpoint_turn_id:
+            turn_id = checkpoint_turn_id
+            recovered_from_checkpoint_only = True
         if not turn_id:
-            _delete_session_live_output_checkpoint(normalized_session_id)
+            _discard_session_live_output_state(normalized_session_id)
             return
         if active_turn_id and turn_id == str(active_turn_id or "").strip():
             return
-        checkpoint = _load_session_live_output_checkpoint(normalized_session_id)
         if checkpoint is not None and (not checkpoint.turn_id or checkpoint.turn_id == turn_id):
             payload = _live_output_checkpoint_payload(checkpoint)
             _persist_recovered_live_output_to_chat_state(normalized_session_id, turn_id, checkpoint)
@@ -950,6 +971,10 @@ def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = ""
                     "thought": str(payload.get("thought") or ""),
                     "toolCalls": list(payload.get("toolCalls") or []),
                     "feedbackEvents": list(payload.get("feedbackEvents") or []),
+                    "metadata": {
+                        "interrupted": True,
+                        "recoveredFromLiveOutputCheckpoint": True,
+                    },
                 },
                 source="recover_live_output_checkpoint",
             )
@@ -965,8 +990,9 @@ def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = ""
             },
             source="session_service",
         )
+        event_turn_id = str(event.turn_id or turn_id)
         _invalidate_session_conversation_events_cache(normalized_session_id)
-        _delete_session_live_output_checkpoint(normalized_session_id)
+        _discard_session_live_output_state(normalized_session_id, turn_id=turn_id)
     except Exception:
         return
     try:
@@ -979,8 +1005,9 @@ def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = ""
             message="Reconciled an open chat ledger turn as interrupted.",
             fields={
                 "sessionId": normalized_session_id,
-                "turnId": event.turn_id,
+                "turnId": event_turn_id,
                 "reason": reason,
+                "recoveredFromCheckpointOnly": recovered_from_checkpoint_only,
             },
             lifecycle=True,
         )
