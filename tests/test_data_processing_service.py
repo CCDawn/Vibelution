@@ -116,6 +116,27 @@ def test_processing_run_list_filters_before_limit(tmp_path, monkeypatch):
     assert runs["runs"][0]["runId"] == target["runId"]
 
 
+def test_processing_run_list_hydrates_status_after_limit(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    for index in range(5):
+        data_processing_service.create_processing_run(title=f"Historical run {index}")
+
+    real_get_processing_status = data_processing_service.get_processing_status
+    status_calls: list[str] = []
+
+    def counted_get_processing_status(run_id):
+        status_calls.append(run_id)
+        return real_get_processing_status(run_id)
+
+    monkeypatch.setattr(data_processing_service, "get_processing_status", counted_get_processing_status)
+
+    runs = data_processing_service.list_processing_runs(limit=2)
+
+    assert runs["summary"]["runCount"] == 5
+    assert runs["summary"]["returnedCount"] == 2
+    assert status_calls == [run["runId"] for run in runs["runs"]]
+
+
 def test_collection_assignment_records_agent_output_without_publishing(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     run = data_processing_service.create_processing_run(title="Agent collection")

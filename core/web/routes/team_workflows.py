@@ -992,6 +992,7 @@ def team_workflow_candidate_list(
     qualityStatus: str = "",
     limit: int = 100,
     includeValidation: bool = False,
+    includeStore: bool = False,
 ) -> dict:
     try:
         return list_candidate_store(
@@ -1001,6 +1002,7 @@ def team_workflow_candidate_list(
             quality_status=qualityStatus,
             limit=limit,
             include_validation=includeValidation,
+            include_store=includeStore,
         )
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

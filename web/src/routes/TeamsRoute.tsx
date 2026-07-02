@@ -4714,7 +4714,7 @@ export function TeamsRoute({
     queryKey: queryKeys.teamWorkflowCandidates(effectiveTeamId || "none", TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT),
     queryFn: () =>
       fetchJson<TeamWorkflowCandidateListPayload>(
-        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?limit=${TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT}&includeValidation=false`,
+        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?limit=${TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT}&includeValidation=false&includeStore=false`,
       ),
     enabled: teamWorkflowCandidateListEnabled,
     refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(
@@ -4728,7 +4728,7 @@ export function TeamsRoute({
     queryKey: queryKeys.teamWorkflowCandidateGraph(effectiveTeamId || "none"),
     queryFn: () =>
       fetchJson<TeamWorkflowCandidateListPayload>(
-        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?candidateType=candidate_graph&limit=${TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT}`,
+        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/candidates?candidateType=candidate_graph&limit=${TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT}&includeStore=false`,
       ),
     enabled: teamWorkflowGraphEnabled,
   });
@@ -4954,10 +4954,14 @@ export function TeamsRoute({
         : sourceCollectionStageWritebackRefetchInterval(pageVisible, payload, sourceCollectionStageWritebackSyncActive);
     },
   });
-  const sourceCollectionDetailQueriesEnabled = Boolean(
-    researchWorkflowTeamSelected
-    && selectedSourceCollectionRunEffectiveId,
+  const sourceCollectionFindingDetailsVisible = Boolean(
+    sourceCollectionWorkspaceSelected
+    && selectedSourceCollectionRunEffectiveId
+    && selectedSourceCollectionStageId === "finding",
   );
+  const sourceCollectionRecordsQueryEnabled = sourceCollectionFindingDetailsVisible;
+  const sourceCollectionAssignmentsQueryEnabled = sourceCollectionFindingDetailsVisible;
+  const sourceCollectionRunStatusQueryEnabled = sourceCollectionRecordsQueryEnabled || sourceCollectionAssignmentsQueryEnabled;
   const runtimeSummaryQuery = useQuery({
     queryKey: queryKeys.runtimeSummary(),
     queryFn: () => fetchJson<RuntimeSummary>("/api/runtime/summary"),
@@ -4971,7 +4975,7 @@ export function TeamsRoute({
   const sourceCollectionRunStatusQuery = useQuery({
     queryKey: queryKeys.dataProcessingRunStatus(selectedSourceCollectionRunEffectiveId || "none"),
     queryFn: () => fetchJson<DataProcessingStatus>(`/api/data-processing/runs/${encodeURIComponent(selectedSourceCollectionRunEffectiveId)}/status`),
-    enabled: sourceCollectionDetailQueriesEnabled,
+    enabled: sourceCollectionRunStatusQueryEnabled,
     refetchInterval: (query) => {
       const status = query.state.data as DataProcessingStatus | undefined;
       return sourceCollectionRunRefetchInterval(pageVisible, status?.runStatus || "");
@@ -4983,8 +4987,11 @@ export function TeamsRoute({
       fetchJson<DataProcessingRecordListPayload>(
         `/api/data-processing/runs/${encodeURIComponent(selectedSourceCollectionRunEffectiveId)}/records`,
       ),
-    enabled: sourceCollectionDetailQueriesEnabled,
-    refetchInterval: () => sourceCollectionRunRefetchInterval(pageVisible, sourceCollectionRunStatusQuery.data?.runStatus || ""),
+    enabled: sourceCollectionRecordsQueryEnabled,
+    refetchInterval: () => sourceCollectionRunRefetchInterval(
+      pageVisible,
+      sourceCollectionRunStatusQuery.data?.runStatus || sourceCollectionSummaryQuery.data?.runStatus?.runStatus || selectedSourceCollectionRun?.status || "",
+    ),
   });
   const sourceCollectionAssignmentsQuery = useQuery({
     queryKey: queryKeys.dataProcessingCollectionAssignments(selectedSourceCollectionRunEffectiveId || "none"),
@@ -4992,8 +4999,11 @@ export function TeamsRoute({
       fetchJson<DataProcessingCollectionAssignmentListPayload>(
         `/api/data-processing/runs/${encodeURIComponent(selectedSourceCollectionRunEffectiveId)}/collection-assignments`,
       ),
-    enabled: sourceCollectionDetailQueriesEnabled,
-    refetchInterval: () => sourceCollectionRunRefetchInterval(pageVisible, sourceCollectionRunStatusQuery.data?.runStatus || ""),
+    enabled: sourceCollectionAssignmentsQueryEnabled,
+    refetchInterval: () => sourceCollectionRunRefetchInterval(
+      pageVisible,
+      sourceCollectionRunStatusQuery.data?.runStatus || sourceCollectionSummaryQuery.data?.runStatus?.runStatus || selectedSourceCollectionRun?.status || "",
+    ),
   });
   const autoCanvasViewportStyle = useMemo(() => canvasViewStyle(displayCanvasNodes, canvasFrameSize), [canvasFrameSize, displayCanvasNodes]);
   const canvasViewportStyle = lockedCanvasViewportStyle ?? autoCanvasViewportStyle;
@@ -10817,8 +10827,7 @@ export function TeamsRoute({
     sourceCollectionRunSummary?.downstreamOpenAssignmentCount,
   ].some((value) => typeof value === "number");
   const sourceCollectionRecordsDataLoading = Boolean(
-    researchWorkflowTeamSelected
-    && selectedSourceCollectionRunEffectiveId
+    sourceCollectionRecordsQueryEnabled
     && !sourceCollectionRecordsQuery.data
     && !sourceCollectionSummaryHasRecordCount
     && !sourceCollectionRunSummaryHasRecordCount
@@ -10828,8 +10837,7 @@ export function TeamsRoute({
     ),
   );
   const sourceCollectionAssignmentsDataLoading = Boolean(
-    researchWorkflowTeamSelected
-    && selectedSourceCollectionRunEffectiveId
+    sourceCollectionAssignmentsQueryEnabled
     && !sourceCollectionAssignmentsQuery.data
     && !sourceCollectionRunSummaryHasAssignmentCounts
     && (sourceCollectionAssignmentsQuery.isPending || sourceCollectionRunStatusQuery.isPending),
