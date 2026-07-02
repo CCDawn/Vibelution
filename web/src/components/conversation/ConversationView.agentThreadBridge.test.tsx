@@ -108,4 +108,35 @@ describe("ConversationView agent thread bridge", () => {
     expect(html).toContain("推理片段来自 thought 字段");
     expect(html).toContain("正在形成回答");
   });
+
+  it("exposes AgentMessage section metadata on conversation turns", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-sections",
+        role: "assistant",
+        content: "最终回答",
+        timestamp: "2026-07-02T09:20:00Z",
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "tool",
+            status: "done",
+            name: "read_file_tool",
+            summary: "读取 ConversationView",
+          },
+        ],
+        references: [
+          {
+            kind: "session",
+            sessionId: "session-ref",
+            title: "历史会话",
+          },
+        ],
+      },
+    ]);
+
+    expect(html).toContain('data-agent-message-id="assistant-sections"');
+    expect(html).toContain('data-agent-section-kinds="process content context"');
+    expect(html).toContain('data-agent-section-count="3"');
+  });
 });

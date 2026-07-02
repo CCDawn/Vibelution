@@ -1,5 +1,14 @@
 import { ConversationMessage, MentalStateSnapshot } from "../../api/types";
-import type { AgentMessage, AgentMessagePart, AgentMentalPart, AgentTextPart, AgentThoughtPart } from "../../agent-thread/types";
+import { agentMessageToSections } from "../../agent-thread/sections";
+import type {
+  AgentMessage,
+  AgentMessagePart,
+  AgentMessageSection,
+  AgentMessageSectionKind,
+  AgentMentalPart,
+  AgentTextPart,
+  AgentThoughtPart,
+} from "../../agent-thread/types";
 
 export function hasMentalSnapshot(snapshot: MentalStateSnapshot | undefined) {
   if (!snapshot) {
@@ -27,6 +36,11 @@ export function hasToolBlock(message: ConversationMessage) {
 }
 
 export type AgentMessageSectionState = {
+  sectionCount: number;
+  sectionKinds: AgentMessageSectionKind[];
+  hasProcessSection: boolean;
+  hasContentSection: boolean;
+  hasContextSection: boolean;
   answerText: string;
   userText: string;
   hasThoughtBlock: boolean;
@@ -38,22 +52,37 @@ export type AgentMessageSectionState = {
 };
 
 export function buildAgentMessageSectionState(message: AgentMessage): AgentMessageSectionState {
-  const answerText = agentMessageText(message, "answer");
-  const userText = agentMessageText(message, "user");
+  const sections = agentMessageToSections(message);
+  const processParts = sectionParts(sections, "process");
+  const contentParts = sectionParts(sections, "content");
+  const answerText = agentMessageText(contentParts, "answer");
+  const userText = agentMessageText(contentParts, "user");
+  const sectionKinds = sections.map((section) => section.kind);
   return {
+    sectionCount: sections.length,
+    sectionKinds,
+    hasProcessSection: sectionKinds.includes("process"),
+    hasContentSection: sectionKinds.includes("content"),
+    hasContextSection: sectionKinds.includes("context"),
     answerText,
     userText,
-    hasThoughtBlock: message.role === "assistant" && message.parts.some(isVisibleAgentThoughtPart),
-    hasMentalBlock: message.role === "assistant" && message.parts.some(isVisibleAgentMentalPart),
-    hasToolBlock: message.role === "assistant" && message.parts.some((part) => part.type === "tool-call"),
+    hasThoughtBlock: message.role === "assistant" && processParts.some(isVisibleAgentThoughtPart),
+    hasMentalBlock: message.role === "assistant" && processParts.some(isVisibleAgentMentalPart),
+    hasToolBlock: message.role === "assistant" && processParts.some((part) => part.type === "tool-call"),
     hasResponseBlock: hasAgentResponseBlock(message, answerText),
-    hasFeedbackTimeline: message.role === "assistant" && message.parts.some(isAgentFeedbackTimelinePart),
+    hasFeedbackTimeline: message.role === "assistant" && processParts.some(isAgentFeedbackTimelinePart),
     hasUserContent: message.role !== "assistant" && Boolean(userText),
   };
 }
 
-function agentMessageText(message: AgentMessage, channel: AgentTextPart["channel"]) {
-  return message.parts
+function sectionParts(sections: AgentMessageSection[], kind: AgentMessageSectionKind) {
+  return sections
+    .filter((section) => section.kind === kind)
+    .flatMap((section) => section.parts);
+}
+
+function agentMessageText(parts: AgentMessagePart[], channel: AgentTextPart["channel"]) {
+  return parts
     .filter((part): part is AgentTextPart => part.type === "text" && part.channel === channel)
     .map((part) => part.text.trim())
     .filter(Boolean)
