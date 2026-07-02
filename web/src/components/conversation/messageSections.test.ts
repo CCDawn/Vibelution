@@ -4,6 +4,7 @@ import { ConversationMessage } from "../../api/types";
 import { conversationMessageToAgentMessage } from "../../agent-thread";
 import {
   agentMessageContextSections,
+  agentMessageContentSections,
   buildAgentMessageSectionState,
   hasMentalBlock,
   hasResponseBlock,
@@ -133,6 +134,34 @@ describe("messageSections", () => {
       kind: "context",
     });
     expect(sections[0].parts.map((part) => part.type)).toEqual(["attachment", "reference"]);
+  });
+
+  it("selects AgentMessage content sections without mixing in context parts", () => {
+    const userMessage = message({
+      id: "user-content",
+      role: "user",
+      content: "继续看这个正文",
+      attachments: [
+        {
+          artifactId: "content-image.png",
+          filename: "content.png",
+          imageUrl: "/api/sessions/session-1/artifacts/content-image.png",
+          contentType: "image/png",
+          kind: "user_image",
+          status: "ready",
+        },
+      ],
+    });
+
+    const sections = agentMessageContentSections(conversationMessageToAgentMessage(userMessage));
+
+    expect(sections).toHaveLength(1);
+    expect(sections[0]).toMatchObject({
+      id: "user-content-section-content-0",
+      kind: "content",
+    });
+    expect(sections[0].parts.map((part) => part.type)).toEqual(["text"]);
+    expect(sections[0].parts.map((part) => part.channel)).toEqual(["user"]);
   });
 
   it("builds AgentMessage section state without exposing runtime status placeholders as answers", () => {

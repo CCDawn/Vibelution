@@ -183,4 +183,39 @@ describe("ConversationView agent thread bridge", () => {
     expect(html).toContain("旧会话摘录");
     expect(html).toContain("前端代理");
   });
+
+  it("renders user and assistant text from AgentMessage content sections", () => {
+    const html = renderConversation([
+      {
+        id: "user-content",
+        role: "user",
+        content: "用户正文来自 content section",
+        timestamp: "2026-07-02T09:40:00Z",
+      },
+      {
+        id: "assistant-content",
+        role: "assistant",
+        content: "助手回答来自 content section",
+        timestamp: "2026-07-02T09:40:03Z",
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "tool",
+            status: "done",
+            name: "read_file_tool",
+            summary: "读取正文渲染",
+          },
+        ],
+      },
+    ]);
+
+    expect(html).toContain('data-agent-message-id="user-content"');
+    expect(html).toContain('data-agent-message-id="assistant-content"');
+    expect(html).toContain('data-agent-content-section-ids="user-content-section-content-0"');
+    expect(html).toContain('data-agent-content-section-ids="assistant-content-section-content-1"');
+    expect(html).toContain('data-agent-content-channel="user"');
+    expect(html).toContain('data-agent-content-channel="answer"');
+    expect(html).toContain("用户正文来自 content section");
+    expect(html).toContain("助手回答来自 content section");
+  });
 });
