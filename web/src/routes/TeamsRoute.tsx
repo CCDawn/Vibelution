@@ -6838,18 +6838,6 @@ export function TeamsRoute({
     event.stopPropagation();
   }
 
-  function preventSourceCollectionPanelSummaryToggle(event: ReactMouseEvent<HTMLElement>) {
-    event.preventDefault();
-    event.stopPropagation();
-  }
-
-  function preventSourceCollectionPanelSummaryKeyToggle(event: ReactKeyboardEvent<HTMLElement>) {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      event.stopPropagation();
-    }
-  }
-
   function renderSourceCollectionPagination(stageId: SourceCollectionStageModuleId, total: number) {
     const pageCount = Math.max(1, Math.ceil(total / SOURCE_COLLECTION_RESULT_PAGE_SIZE));
     if (pageCount <= 1) {
@@ -7975,7 +7963,11 @@ export function TeamsRoute({
         id="source-collection-screening-panel"
         className={sourceCollectionPanelClassName("source-collection-screening-panel")}
         open={
-          selectedSourceCollectionStageId === "extraction"
+          (
+            selectedSourceCollectionStageId === "extraction"
+            && !sourceCollectionExpandedPanelId
+            && sourceCollectionExtractionDefaultPanelId === "source-collection-screening-panel"
+          )
           || sourceCollectionExpandedPanelId === "source-collection-screening-panel"
           || sourceCollectionScreeningStepState === "active"
           || sourceCollectionScreeningStepState === "pending"
@@ -7987,10 +7979,7 @@ export function TeamsRoute({
         }}
         tabIndex={-1}
       >
-        <summary
-          onClick={preventSourceCollectionPanelSummaryToggle}
-          onKeyDown={preventSourceCollectionPanelSummaryKeyToggle}
-        >
+        <summary>
           <span>{lang === "zh" ? "资料提炼复核" : "Source review"}</span>
           <small>{screeningPanelRange}</small>
         </summary>
@@ -8202,7 +8191,11 @@ export function TeamsRoute({
         id="source-collection-candidates-panel"
         className={sourceCollectionPanelClassName("source-collection-candidates-panel")}
         open={
-          selectedSourceCollectionStageId === "extraction"
+          (
+            selectedSourceCollectionStageId === "extraction"
+            && !sourceCollectionExpandedPanelId
+            && sourceCollectionExtractionDefaultPanelId === "source-collection-candidates-panel"
+          )
           || sourceCollectionExpandedPanelId === "source-collection-candidates-panel"
           || sourceCollectionCandidateStepState === "active"
         }
@@ -8213,10 +8206,7 @@ export function TeamsRoute({
         }}
         tabIndex={-1}
       >
-        <summary
-          onClick={preventSourceCollectionPanelSummaryToggle}
-          onKeyDown={preventSourceCollectionPanelSummaryKeyToggle}
-        >
+        <summary>
           <span>{lang === "zh" ? "资料提炼结果" : "Extracted sources"}</span>
           <small>{candidatePanelRange}</small>
         </summary>
@@ -8357,10 +8347,7 @@ export function TeamsRoute({
         }}
         tabIndex={-1}
       >
-        <summary
-          onClick={preventSourceCollectionPanelSummaryToggle}
-          onKeyDown={preventSourceCollectionPanelSummaryKeyToggle}
-        >
+        <summary>
           <span>{lang === "zh" ? "入库关系图" : "Ingestion relationship map"}</span>
           <small>{visibleGraph ? `${pagedGraphNodes.start}-${pagedGraphNodes.end}/${visibleGraph.nodes.length}` : `${sourceCollectionProjectedGraphNodeCount} / ${sourceCollectionProjectedGraphEdgeCount}`}</small>
         </summary>
@@ -8509,10 +8496,7 @@ export function TeamsRoute({
         }}
         tabIndex={-1}
       >
-        <summary
-          onClick={preventSourceCollectionPanelSummaryToggle}
-          onKeyDown={preventSourceCollectionPanelSummaryKeyToggle}
-        >
+        <summary>
           <span>{lang === "zh" ? "入库审核" : "Knowledge ingestion review"}</span>
           <small>{pagedMemoryCandidates.start}-{pagedMemoryCandidates.end}/{visibleMemoryCandidates.length}</small>
         </summary>
@@ -9032,10 +9016,10 @@ export function TeamsRoute({
       : (lang === "zh" ? "绑定 Agent" : "Bind Agent");
     const resultPanel = selectedSourceCollectionStageId === "extraction"
       ? (
-          <>
+          <div className={styles.sourceCollectionExtractionPanels}>
             {renderSourceCollectionCandidatePanel()}
             {renderSourceCollectionScreeningPanel()}
-          </>
+          </div>
         )
       : selectedSourceCollectionStageId === "relations"
         ? renderSourceCollectionGraphPanel()
@@ -11431,7 +11415,7 @@ export function TeamsRoute({
     if (!selectedTeam?.teamId || sourceCollectionScreeningDisabled) {
       return;
     }
-    openSourceCollectionStage("extraction");
+    scrollSourceCollectionPanelIntoView("source-collection-screening-panel");
   };
   const runSourceCollectionScreeningAction = () => {
     openSourceCollectionStage("extraction");
@@ -11454,7 +11438,7 @@ export function TeamsRoute({
     if (!selectedTeam?.teamId) {
       return;
     }
-    openSourceCollectionStage("extraction");
+    scrollSourceCollectionPanelIntoView("source-collection-candidates-panel");
   };
   const runSourceCollectionCandidateExtractionAction = () => {
     openSourceCollectionStage("extraction");
@@ -11623,6 +11607,12 @@ export function TeamsRoute({
     sourceCollectionCandidateProjection,
     sourceCollectionCandidateFallbackStepState,
   );
+  const sourceCollectionExtractionDefaultPanelId =
+    sourceCollectionRunPendingScreeningCount > 0
+    || sourceCollectionScreeningStepState === "active"
+    || sourceCollectionScreeningStepState === "pending"
+      ? "source-collection-screening-panel"
+      : "source-collection-candidates-panel";
   const sourceCollectionGraphFallbackStepState: SourceCollectionStepState = selectedTeamBuildCandidateGraphError || teamWorkflowCandidateGraphQuery.error
     ? "failed"
       : selectedTeamBuildCandidateGraphPending

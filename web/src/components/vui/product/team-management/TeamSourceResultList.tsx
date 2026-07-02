@@ -33,14 +33,14 @@ export type TeamSourceResultItemProps = {
 };
 
 /**
- * Faithful reproduction of `.sourceCollectionResultItem` as verified against
- * live data: status chip | title | meta | provenance in a dense 4-column row,
- * with the accent-tinted selected/hover states from the original design.
+ * Dense source row for the source-collection workbench. The provenance column
+ * is bounded so long file paths remain inspectable by title without stretching
+ * the whole page.
  */
 const ROW_BASE =
-  "grid grid-cols-[max-content_minmax(0,1fr)_max-content_minmax(120px,220px)] min-h-[36px] items-center gap-2 px-2 py-1 min-w-0 " +
+  "grid grid-cols-[max-content_minmax(0,1fr)_minmax(70px,max-content)_minmax(8rem,16rem)] min-h-[36px] items-center gap-2 px-2 py-1 min-w-0 " +
   "rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] " +
-  "max-[820px]:grid-cols-[max-content_minmax(0,1fr)]";
+  "max-[980px]:grid-cols-[max-content_minmax(0,1fr)]";
 
 const ROW_INTERACTIVE =
   "cursor-pointer transition-[border-color,box-shadow,background] duration-150 ease-[var(--vui-ease)] " +
@@ -113,7 +113,7 @@ export function TeamSourceResultItem({
       </div>
       <div
         data-missing={source.missing ? "true" : undefined}
-        className="grid grid-cols-[max-content_minmax(0,1fr)] items-center gap-1 overflow-hidden text-[var(--vui-font-xs)] [&_a]:truncate [&_code]:truncate [&_a]:text-[var(--accent-cool)] [&_code]:text-[var(--fg-tertiary)] max-[820px]:col-span-2 data-[missing=true]:text-[var(--state-warning)]"
+        className="grid min-w-0 max-w-full grid-cols-[max-content_minmax(0,1fr)] items-center gap-1 overflow-hidden text-[var(--vui-font-xs)] [&_a]:truncate [&_code]:truncate [&_a]:text-[var(--accent-cool)] [&_code]:text-[var(--fg-tertiary)] max-[980px]:col-span-2 data-[missing=true]:text-[var(--state-warning)]"
       >
         <span className="text-[var(--fg-tertiary)]">{source.label}</span>
         {source.href ? (
@@ -139,13 +139,13 @@ export type TeamSourceResultListProps = {
   children: ReactNode;
 };
 
-/** Faithful reproduction of `.sourceCollectionResultList`: a dense scrollable row stack. */
+/** Dense bounded row stack for raw source records. */
 export function TeamSourceResultList({ ariaLabel, children }: TeamSourceResultListProps) {
   return (
     <div
       data-vui-product="team-source-result-list"
       aria-label={ariaLabel}
-      className="grid min-h-0 min-w-0 content-start gap-1.5 overflow-auto"
+      className="grid max-h-[44vh] min-h-0 min-w-0 content-start gap-1.5 overflow-auto pr-1 [scrollbar-gutter:stable]"
     >
       {children}
     </div>

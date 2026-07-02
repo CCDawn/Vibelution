@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
 import routeSource from "./TeamsRoute.tsx?raw";
+import teamCandidateCardSource from "../components/vui/product/team-management/TeamCandidateCard.tsx?raw";
 import teamStageCardSource from "../components/vui/product/team-management/TeamStageCard.tsx?raw";
 import teamStagePipelineSource from "../components/vui/product/team-management/TeamStagePipeline.tsx?raw";
+import teamSourceResultListSource from "../components/vui/product/team-management/TeamSourceResultList.tsx?raw";
 import routeStyles from "./TeamsRoute.styles";
 import routeStylesModuleSource from "./TeamsRoute.styles.ts?raw";
 import routerSource from "../app/router.tsx?raw";
@@ -643,9 +645,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionPageItems");
     expect(routeSource).toContain("renderSourceCollectionPagination");
     expect(routeSource).toContain("stopSourceCollectionPaginationEvent");
-    expect(routeSource).toContain("preventSourceCollectionPanelSummaryToggle");
     expect(routeSource).toContain("onContain={stopSourceCollectionPaginationEvent}");
-    expect(routeSource).toContain("onClick={preventSourceCollectionPanelSummaryToggle}");
+    expect(routeSource).toContain("sourceCollectionExtractionDefaultPanelId");
+    expect(routeSource).toContain("sourceCollectionExpandedPanelId === \"source-collection-screening-panel\"");
+    expect(routeSource).toContain("sourceCollectionExpandedPanelId === \"source-collection-candidates-panel\"");
+    expect(routeSource).not.toContain("preventSourceCollectionPanelSummaryToggle");
+    expect(routeSource).not.toContain("onClick={preventSourceCollectionPanelSummaryToggle}");
     expect(routeSource).not.toContain("sourceCollectionTraceMessagesForStage");
     expect(routeSource).not.toContain("renderSourceCollectionStageProcessPanel");
     expect(routeSource).toContain("selected={module.id === selectedSourceCollectionStageId}");
@@ -1145,6 +1150,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.workflowError).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionPage).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionPageGrid).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionExtractionPanels).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionRunBadge).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionConversationPanel).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionTraceMessage).toBeTypeOf("string");
@@ -1182,8 +1188,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStylesSource).toContain(".sourceCollectionFilterBar");
     expect(routeStylesSource).toContain(".sourceCollectionFilterActive");
     expect(routeStyles.sourceCollectionResultItem).toContain(
-      "grid-cols-[max-content_minmax(0,1fr)_max-content_minmax(120px,220px)]",
+      "grid-cols-[max-content_minmax(0,1fr)_minmax(70px,max-content)_minmax(8rem,16rem)]",
     );
+    expect(routeStyles.sourceCollectionResultItem).not.toContain("minmax(120px,220px)");
     expect(routeStyles.sourceCollectionRunSwitcher).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(routeStyles.sourceCollectionRunSwitcherMain).toContain("grid-cols-[max-content_minmax(220px,360px)_minmax(0,1fr)]");
     expect(routeStyles.sourceCollectionRunSwitcherStats).toContain("flex flex-wrap items-center justify-end");
@@ -1192,12 +1199,15 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionResultStatus).toContain("whitespace-nowrap");
     expect(routeStyles.sourceCollectionResultStatus).not.toContain("grid-rows-[auto_auto_auto]");
     expect(routeStylesSource).toContain(".sourceCollectionCandidateListShell");
-    expect(routeStyles.sourceCollectionCandidateListShell).toContain("overflow-y-auto");
+    expect(routeStyles.sourceCollectionCandidateListShell).toContain("overflow-auto");
     expect(routeStyles.sourceCollectionCandidateListShell).toContain("[scrollbar-gutter:stable]");
     expect(routeStyles.sourceCollectionCandidateListShell).toContain("items-start");
     expect(routeStyles.sourceCollectionCandidateListShell).toContain("content-start");
     expect(routeStyles.sourceCollectionCandidateListShell).toContain("self-start");
-    expect(routeStyles.sourceCollectionCandidateListShell).toContain("min-h-0");
+    expect(routeStyles.sourceCollectionCandidateListShell).toContain("max-h-[44vh]");
+    expect(routeStyles.sourceCollectionCandidateListShell).toContain("min-h-[220px]");
+    expect(routeStyles.sourceCollectionScreeningListShell).toContain("max-h-[44vh]");
+    expect(routeStyles.sourceCollectionScreeningListShell).toContain("[scrollbar-gutter:stable]");
     expect(routeStylesSource).not.toContain("grid-template-rows: auto minmax(0, 1fr) auto auto");
     expect(routeStyles.sourceCollectionFilterBar).toContain("[&_[data-vui=native-button]]:flex-none");
     expect(routeStylesSource).not.toContain("min-height: 122px");
@@ -1210,9 +1220,14 @@ describe("TeamsRoute layout contract", () => {
       "grid-cols-[minmax(0,1fr)_minmax(320px,380px)]",
     );
     expect(routeStyles.sourceCollectionFocusedPanel).toContain("isolate");
+    expect(routeStyles.sourceCollectionPageHeader).toContain("max-w-[1480px]");
+    expect(routeStyles.sourceCollectionPageHeader).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(routeStyles.sourceCollectionStageWorkspace).toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(routeStyles.sourceCollectionStageWorkspaceHeader).toContain("grid-cols-[minmax(0,1fr)_minmax(260px,0.7fr)_max-content]");
     expect(routeStyles.sourceCollectionPageBody).toContain("!grid");
+    expect(routeStyles.sourceCollectionPageBody).toContain("max-w-[1480px]");
     expect(routeStyles.sourceCollectionPageBody).toContain("p-2");
+    expect(routeStyles.sourceCollectionExtractionPanels).toContain("grid-cols-[minmax(0,1fr)]");
     expect(routeStyles.sourceCollectionCommandBar).toContain("!grid");
     expect(routeStyles.sourceCollectionStageCard).toContain("border-l-[4px]");
     expect(routeStyles.sourceCollectionStageCard).toContain("!grid");
@@ -1225,9 +1240,15 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionStageCardActions).not.toContain("[&_[data-vui=native-button]]:min-w-[92px]");
     expect(routeStyles.canvasLayoutModeSwitch).toContain("grid-cols-[repeat(auto-fit,minmax(86px,max-content))]");
     expect(routeStyles.toolbarActions).toContain("flex-wrap");
-    expect(routeStyles.sourceCollectionStageModules).toContain("grid-cols-[repeat(4,minmax(0,1fr))]");
+    expect(routeStyles.sourceCollectionStageModules).toContain("grid-cols-[repeat(auto-fit,minmax(220px,1fr))]");
+    expect(routeStyles.sourceCollectionStageModules).not.toContain("repeat(4");
     expect(teamStagePipelineSource).toContain("repeat(auto-fit,minmax(220px,1fr))");
     expect(teamStagePipelineSource).not.toContain("repeat(5");
+    expect(teamSourceResultListSource).toContain("minmax(8rem,16rem)");
+    expect(teamSourceResultListSource).toContain("max-h-[44vh]");
+    expect(teamSourceResultListSource).not.toContain("minmax(120px,220px)");
+    expect(teamCandidateCardSource).toContain("minmax(9rem,16rem)");
+    expect(teamCandidateCardSource).toContain("row-span-3");
     expect(teamStageCardSource).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(teamStageCardSource).toContain("ACTION_ROW");
     expect(teamStageCardSource).toContain("ACTION_BUTTON");
@@ -1235,6 +1256,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionPagination).toContain("select-none");
     expect(routeStyles.sourceCollectionPagination).toContain("whitespace-nowrap");
     expect(routeStyles.sourceCollectionPagination).toContain("[writing-mode:horizontal-tb]");
+    expect(routeStyles.workflowSourceCollectionStorageActions).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(routeStyles.workflowSourceCollectionStorageButtons).toContain("justify-end");
+    expect(routeStyles.workflowSourceCollectionStorageDetails).toContain("col-span-2");
     expect(routeStyles.sourceCollectionControlPanel).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageModules).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageCard).toBeTypeOf("string");
@@ -1358,7 +1382,7 @@ describe("TeamsRoute layout contract", () => {
       [routeStyles.researchStageAgentGrid, "grid-cols-[repeat(auto-fit,minmax(210px,1fr))]"],
       [routeStyles.sourceCollectionStageAgentCard, "grid-cols-[minmax(0,1fr)_auto]"],
       [routeStyles.sourceCollectionStageAgentCardBody, "grid-cols-[repeat(3,minmax(0,1fr))]"],
-      [routeStyles.sourceCollectionSourceDetailFacts, "grid-cols-[repeat(auto-fit,minmax(130px,1fr))]"],
+      [routeStyles.sourceCollectionSourceDetailFacts, "grid-cols-[repeat(auto-fit,minmax(180px,1fr))]"],
       [routeStyles.researchStageHeroStats, "grid-cols-[repeat(3,minmax(0,1fr))]"],
       [routeStyles.workflowStats, "grid-cols-[repeat(3,minmax(0,1fr))]"],
       [routeStyles.workflowModelEvidenceStats, "grid-cols-[repeat(auto-fit,minmax(118px,1fr))]"],

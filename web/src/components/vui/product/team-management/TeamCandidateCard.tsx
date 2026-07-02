@@ -25,13 +25,12 @@ export type TeamCandidateCardProps = {
 };
 
 /**
- * Candidate card shared by the screening / graph / ingestion candidate lists —
- * classes reproduce the verified `workflowCandidateItem` baseline (dense
- * bordered row, accent selected state) with the standard chip and action-rail
- * grammar from the sibling team-management components.
+ * Candidate card shared by the screening / graph / ingestion candidate lists.
+ * Source/provenance is kept in a bounded right rail on desktop so DOI and file
+ * paths do not stretch the operational workbench.
  */
 const CARD_BASE =
-  "grid grid-cols-[minmax(0,1fr)_minmax(120px,220px)] min-h-[40px] items-center gap-2 px-2 py-1 min-w-0 " +
+  "grid grid-cols-[minmax(0,1fr)_minmax(9rem,16rem)] auto-rows-min min-h-[40px] items-center gap-1.5 px-2 py-1 min-w-0 " +
   "rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] " +
   "max-[820px]:grid-cols-[minmax(0,1fr)]";
 
@@ -58,7 +57,7 @@ const CHIP_TONE: Record<TeamSourceResultTone, string> = {
 };
 
 const ACTIONS =
-  "flex flex-wrap items-center gap-1.5 min-w-0 " +
+  "col-span-2 flex flex-wrap items-center justify-end gap-1.5 min-w-0 max-[820px]:col-span-1 max-[820px]:justify-start " +
   "[&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center " +
   "[&_[data-vui=native-button]]:gap-1 [&_[data-vui=native-button]]:min-h-[26px] [&_[data-vui=native-button]]:px-2 " +
   "[&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border " +
@@ -116,17 +115,17 @@ export function TeamCandidateCard({
       onClick={handleClick}
       onKeyDown={handleKeyDown}
     >
-      <div className="flex flex-wrap items-center gap-1.5 min-w-0 [&>strong]:min-w-0 [&>strong]:truncate [&>strong]:text-[var(--fg-primary)]">
+      <div className="col-start-1 flex flex-wrap items-center gap-1.5 min-w-0 [&>strong]:min-w-0 [&>strong]:truncate [&>strong]:text-[var(--fg-primary)]">
         <strong>{title}</strong>
         <span className={`${CHIP_BASE} ${CHIP_TONE[tone]}`} title={statusTitle}>
           {statusLabel}
         </span>
       </div>
       {summary ? (
-        <p className="m-0 min-w-0 truncate text-[var(--vui-font-xs)] text-[var(--fg-tertiary)]">{summary}</p>
+        <p className="col-start-1 m-0 min-w-0 truncate text-[var(--vui-font-xs)] text-[var(--fg-tertiary)]">{summary}</p>
       ) : null}
       {meta && meta.length ? (
-        <div className="flex flex-wrap items-center gap-1.5 min-w-0 text-[var(--vui-font-xs)] text-[var(--fg-tertiary)] [&_span:first-child]:text-[var(--fg-secondary)]">
+        <div className="col-start-1 flex flex-wrap items-center gap-1.5 min-w-0 text-[var(--vui-font-xs)] text-[var(--fg-tertiary)] [&_span:first-child]:text-[var(--fg-secondary)]">
           {meta.map((entry) => (
             <span key={entry.key}>{entry.label}</span>
           ))}
@@ -135,7 +134,7 @@ export function TeamCandidateCard({
       {source ? (
         <div
           data-missing={source.missing ? "true" : undefined}
-          className="grid grid-cols-[max-content_minmax(0,1fr)] items-center gap-1 overflow-hidden min-w-0 text-[var(--vui-font-xs)] [&_a]:truncate [&_code]:truncate [&_a]:text-[var(--accent-cool)] [&_code]:text-[var(--fg-tertiary)] data-[missing=true]:text-[var(--state-warning)]"
+          className="col-start-2 row-start-1 row-span-3 grid min-w-0 max-w-full grid-cols-[max-content_minmax(0,1fr)] items-center self-center gap-1 overflow-hidden text-[var(--vui-font-xs)] [&_a]:truncate [&_code]:truncate [&_a]:text-[var(--accent-cool)] [&_code]:text-[var(--fg-tertiary)] max-[820px]:col-start-1 max-[820px]:row-start-auto max-[820px]:row-span-1 data-[missing=true]:text-[var(--state-warning)]"
         >
           <span className="text-[var(--fg-tertiary)]">{source.label}</span>
           {source.href ? (
