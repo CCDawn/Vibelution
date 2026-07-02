@@ -9,6 +9,7 @@ export type AgentCenterReturnLabel =
   | "chat"
   | "memory"
   | "research_flow"
+  | "self_evolution"
   | "supervised_evolution";
 
 type AgentCenterConfigRouteOptions = {

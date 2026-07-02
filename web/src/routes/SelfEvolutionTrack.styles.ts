@@ -28,6 +28,20 @@ export const selfEvolutionTrackStyles: Record<string, string> = {
   observationEventTimeline: "grid gap-2 rounded-lg border border-[var(--border-hairline)] bg-[color-mix(in_srgb,var(--surface-panel-strong)_72%,transparent)] p-2.5",
   observationEventItem:
     "grid gap-1.5 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-card)] px-2.5 py-2 [&_strong]:overflow-wrap-anywhere [&_strong]:text-[var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)]",
+  agentCardList: "grid gap-2",
+  agentCard:
+    "grid min-w-0 gap-2 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-card)] p-2.5",
+  agentCardActive:
+    "border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-card))]",
+  agentCardMain:
+    "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2.5 text-inherit no-underline",
+  agentCardText:
+    "grid min-w-0 gap-0.5 [&_strong]:truncate [&_strong]:text-[0.94rem] [&_strong]:text-[var(--fg-primary)] [&_small]:truncate [&_small]:font-mono [&_small]:text-[var(--vui-font-xs)] [&_small]:text-[var(--fg-tertiary)]",
+  agentRoleBadge:
+    "inline-flex w-fit min-w-0 max-w-full items-center truncate text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)]",
+  agentCardActions: "flex flex-wrap items-center justify-end gap-1.5",
+  agentCardAction:
+    "inline-flex min-h-7 w-fit items-center justify-center gap-1.5 rounded-md border border-[color-mix(in_srgb,var(--accent-warm)_18%,transparent)] bg-[var(--surface-panel-strong)] px-2 text-[var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)] no-underline hover:text-[var(--fg-primary)]",
   workflowCardGrid: "grid grid-cols-2 gap-2 max-[760px]:grid-cols-1",
   workflowCard:
     "grid min-h-[88px] cursor-pointer content-start gap-1.5 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-card)] p-3 text-left text-[var(--fg-secondary)] [&_span]:text-[var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_strong]:text-[0.95rem] [&_strong]:text-[var(--fg-primary)] [&_small]:line-clamp-2 [&_small]:text-[var(--vui-font-xs)] [&_small]:leading-normal",
@@ -165,6 +179,7 @@ export const selfEvolutionTrackStyles: Record<string, string> = {
     "grid grid-cols-4 gap-1.5 max-[1180px]:grid-cols-2 [&_span]:min-w-0 [&_span]:overflow-wrap-anywhere [&_span]:rounded-[7px] [&_span]:border [&_span]:border-[var(--border-hairline)] [&_span]:bg-[color-mix(in_srgb,var(--surface-panel-strong)_72%,transparent)] [&_span]:px-2 [&_span]:py-1.5 [&_span]:text-[var(--vui-font-xs)] [&_span]:leading-tight [&_span]:text-[var(--fg-secondary)]",
   transactionGoalPreview: "m-0 overflow-wrap-anywhere text-[var(--vui-font-xs)] leading-normal text-[var(--fg-secondary)]",
   previewText: "m-0 overflow-wrap-anywhere text-[0.92rem] leading-normal text-[var(--fg-primary)]",
+  compactPreviewText: "m-0 line-clamp-2 overflow-wrap-anywhere text-[var(--vui-font-xs)] leading-normal text-[var(--fg-secondary)]",
   rawBlock:
     "overflow-auto rounded-lg border border-[var(--border-hairline)] bg-[color-mix(in_srgb,var(--surface-panel-strong)_72%,transparent)] p-3 font-mono text-[var(--vui-font-xs)] leading-relaxed text-[var(--fg-secondary)]",
   transactionDetailsPanel:

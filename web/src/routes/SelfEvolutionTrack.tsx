@@ -7,17 +7,22 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
+  Bot,
   LoaderCircle,
   ScrollText,
+  Settings,
   ShieldCheck,
   TriangleAlert,
   X,
 } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import {
+  AgentConfigWorkspace,
+  AgentConfigWorkspaceAgent,
   ConversationMessage,
   EvolutionWorkflowStep,
   PetSummary,
@@ -37,6 +42,7 @@ import { TranslationKey } from "../i18n/dictionary";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { getPetAvatarSymbol } from "./chatCompactPanel";
+import { agentCenterConfigRoute } from "./agentCenterRoutes";
 import { selfEvolutionTrackStyles as styles } from "./SelfEvolutionTrack.styles";
 
 type SelfEvolutionTrackProps = {
@@ -126,6 +132,9 @@ export const SELF_EVOLUTION_WORKFLOW_STEPS: SelfEvolutionWorkflowDefinition[] = 
 
 const WORKTREE_PAGE_SIZE = 10;
 export const SELF_TRANSACTION_COLLAPSED_LIMIT = 8;
+const SELF_EVOLUTION_RETURN_TO = "/self-evolution";
+const SELF_EVOLUTION_AGENT_ROLE_ORDER = ["executor", "reviewer", "observer"] as const;
+const SELF_EVOLUTION_AGENT_ROLE_SET = new Set<string>(SELF_EVOLUTION_AGENT_ROLE_ORDER);
 const SELF_SIDEBAR_WIDTH_STORAGE_KEY = "vibelution.self.sidebar.width";
 const DEFAULT_OBSERVATION_DURATION_SECONDS = 300;
 const MIN_OBSERVATION_DURATION_SECONDS = 30;
@@ -296,6 +305,96 @@ function compactDuration(seconds: number | null | undefined, lang: string) {
   const hours = Math.floor(minutes / 60);
   const minuteRest = minutes % 60;
   return lang === "zh" ? `${hours}小时${minuteRest ? `${minuteRest}分` : ""}` : `${hours}h${minuteRest ? ` ${minuteRest}m` : ""}`;
+}
+
+function compactObservationPreview(value: string | null | undefined, maxLength = 160) {
+  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "";
+  }
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+}
+
+function selfObservationEventTitle(eventName: string | null | undefined, lang: string) {
+  const normalized = String(eventName || "").trim().toLowerCase();
+  if (!normalized) {
+    return lang === "zh" ? "观察事件" : "Observation event";
+  }
+  if (normalized.includes("start")) {
+    return lang === "zh" ? "观察启动" : "Observation started";
+  }
+  if (normalized.includes("terminate") || normalized.includes("stop")) {
+    return lang === "zh" ? "观察终止" : "Observation stopped";
+  }
+  if (normalized.includes("complete") || normalized.includes("done")) {
+    return lang === "zh" ? "观察完成" : "Observation completed";
+  }
+  if (normalized.includes("fail") || normalized.includes("error")) {
+    return lang === "zh" ? "观察异常" : "Observation issue";
+  }
+  if (normalized.includes("message") || normalized.includes("turn")) {
+    return lang === "zh" ? "会话更新" : "Session update";
+  }
+  return eventName || (lang === "zh" ? "观察事件" : "Observation event");
+}
+
+function selfEvolutionAgentRoleLabel(role: string | null | undefined, lang: string) {
+  const normalized = String(role || "").trim().toLowerCase();
+  if (normalized === "executor") {
+    return lang === "zh" ? "隔离开发 Agent" : "Isolated development agent";
+  }
+  if (normalized === "reviewer") {
+    return lang === "zh" ? "审查 Agent" : "Review agent";
+  }
+  if (normalized === "observer") {
+    return lang === "zh" ? "观察 Agent" : "Observation agent";
+  }
+  if (normalized === "summarizer") {
+    return lang === "zh" ? "历史总结 Agent" : "Legacy summarizer";
+  }
+  return role || (lang === "zh" ? "自进化 Agent" : "Self-evolution agent");
+}
+
+function selfEvolutionAgentRoleSummary(role: string | null | undefined, lang: string) {
+  const normalized = String(role || "").trim().toLowerCase();
+  if (normalized === "executor") {
+    return lang === "zh" ? "开隔离 worktree，完成候选改良。" : "Creates an isolated worktree and prepares candidate changes.";
+  }
+  if (normalized === "reviewer") {
+    return lang === "zh" ? "复盘候选证据，辅助人工审批。" : "Reviews candidate evidence before human approval.";
+  }
+  if (normalized === "observer") {
+    return lang === "zh" ? "0 工具只读观察，不修改代码。" : "No-tool read-only observer; does not modify code.";
+  }
+  return lang === "zh" ? "自进化固定角色。" : "Fixed self-evolution role.";
+}
+
+function agentBindingModelLabel(agent: AgentConfigWorkspaceAgent | undefined) {
+  return agent?.llmBindings?.dialogue?.modelId
+    || agent?.llmBindings?.mentalModel?.modelId
+    || agent?.llmBindings?.summary?.modelId
+    || "--";
+}
+
+function buildSelfEvolutionAgentCards(workspace: AgentConfigWorkspace | undefined) {
+  const slots = workspace?.modeBindings?.self_evolution?.slots ?? {};
+  const agentsById = new Map((workspace?.agents ?? []).map((agent) => [agent.agentId, agent]));
+  const roles = [
+    ...SELF_EVOLUTION_AGENT_ROLE_ORDER,
+    ...Object.keys(slots)
+      .filter((role) => !SELF_EVOLUTION_AGENT_ROLE_SET.has(role))
+      .sort((left, right) => left.localeCompare(right)),
+  ];
+  return roles
+    .map((role) => {
+      const agentId = String(slots[role] || "").trim();
+      const agent = agentId ? agentsById.get(agentId) : undefined;
+      return { role, agentId, agent };
+    })
+    .filter((item) => item.agentId || item.agent);
 }
 
 function looksLikeStructuredPayload(value: string) {
@@ -585,6 +684,12 @@ export function SelfEvolutionTrack({
     refetchInterval: resolvePollingInterval(pageVisible, 5_000),
     refetchIntervalInBackground: false,
   });
+  const agentConfigWorkspaceQuery = useQuery({
+    queryKey: queryKeys.agentConfigWorkspace(),
+    queryFn: () => fetchJson<AgentConfigWorkspace>("/api/agents/config-workspace?includeRuntime=false"),
+    refetchInterval: resolvePollingInterval(pageVisible, 30_000),
+    refetchIntervalInBackground: false,
+  });
   const pet = petQuery.data;
   const runtime = runtimeQuery.data;
 
@@ -663,6 +768,10 @@ export function SelfEvolutionTrack({
     ?? workflowSteps[0];
   const selfEvolutionStep = workflowSteps.find((step) => step.id === "self_evolution") ?? workflowSteps[0];
   const approvalStep = workflowSteps.find((step) => step.id === "approval") ?? workflowSteps[1] ?? workflowSteps[0];
+  const selfEvolutionAgentCards = useMemo(
+    () => buildSelfEvolutionAgentCards(agentConfigWorkspaceQuery.data),
+    [agentConfigWorkspaceQuery.data],
+  );
   const runIsActive = worktreeRun ? isExecutingRunStatus(worktreeRun.status) : false;
   const changedFiles = worktreeRun?.mergeAnalysis?.changedFiles ?? [];
   const approveReviewAction = worktreeRun?.actionStates?.approveReview;
@@ -892,7 +1001,7 @@ export function SelfEvolutionTrack({
     ? statusLabel(observationRun?.status || "idle")
     : statusLabel(conversationTask.status);
   const activeSummary = observationRunModeActive
-    ? (observationRun?.latestMessage || (lang === "zh" ? "设置观察目标和时长后启动。" : "Set the observation goal and duration, then start."))
+    ? (compactObservationPreview(observationRun?.latestMessage, 180) || (lang === "zh" ? "设置观察目标和时长后启动。" : "Set the observation goal and duration, then start."))
     : conversationTask.latestSummary;
   const activeNextAction = observationRunModeActive
     ? (observationRunActive
@@ -1031,6 +1140,8 @@ export function SelfEvolutionTrack({
   }
 
   function renderObservationSetupPanel() {
+    const latestPreview = compactObservationPreview(observationRun?.latestMessage, 160);
+    const reportPreview = compactObservationPreview(observationRun?.report, 180);
     return (
       <section className={styles.observationPanel}>
         <div className={styles.sectionHeader}>
@@ -1111,8 +1222,8 @@ export function SelfEvolutionTrack({
           ) : null}
         </div>
 
-        {observationRun?.latestMessage ? <p className={styles.previewText}>{observationRun.latestMessage}</p> : null}
-        {observationRun?.report ? <pre className={styles.rawBlock}>{observationRun.report}</pre> : null}
+        {latestPreview ? <p className={styles.compactPreviewText}>{latestPreview}</p> : null}
+        {reportPreview ? <p className={styles.compactPreviewText}>{reportPreview}</p> : null}
         {observationRun?.boundaryViolation ? <p className={styles.errorText}>{observationRun.boundaryViolation}</p> : null}
       </section>
     );
@@ -1153,7 +1264,89 @@ export function SelfEvolutionTrack({
     },
   ];
 
+  function renderSelfEvolutionAgentCards() {
+    const activeRole = observationRunModeActive
+      ? "observer"
+      : selectedWorkflowStep?.id === "approval"
+        ? "reviewer"
+        : "executor";
+    return (
+      <section className={styles.surface}>
+        <div className={styles.sectionHeader}>
+          <div>
+            <p className={styles.eyebrow}>{lang === "zh" ? "自进化成员" : "Self-evolution agents"}</p>
+            <h3 className={styles.sectionTitle}>{lang === "zh" ? "Agent 卡片" : "Agent cards"}</h3>
+          </div>
+          <span className={styles.counter}>{selfEvolutionAgentCards.length}</span>
+        </div>
+
+        <div className={styles.agentCardList}>
+          {selfEvolutionAgentCards.length ? (
+            selfEvolutionAgentCards.map((card) => {
+              const agent = card.agent;
+              const agentId = agent?.agentId || card.agentId;
+              const roleLabel = selfEvolutionAgentRoleLabel(card.role, lang);
+              const roleSummary = selfEvolutionAgentRoleSummary(card.role, lang);
+              const modelLabel = agentBindingModelLabel(agent);
+              const configRoute = agentCenterConfigRoute({
+                agentId,
+                pane: "config",
+                returnLabel: "self_evolution",
+                returnTo: SELF_EVOLUTION_RETURN_TO,
+              });
+              const activityRoute = agentCenterConfigRoute({
+                agentId,
+                pane: "activity",
+                returnLabel: "self_evolution",
+                returnTo: SELF_EVOLUTION_RETURN_TO,
+              });
+              const active = String(card.role).trim().toLowerCase() === activeRole;
+              return (
+                <article
+                  key={`${card.role}-${agentId}`}
+                  className={active ? `${styles.agentCard} ${styles.agentCardActive}` : styles.agentCard}
+                >
+                  <Link
+                    className={styles.agentCardMain}
+                    to={configRoute}
+                    aria-label={lang === "zh" ? `配置 ${roleLabel}` : `Configure ${roleLabel}`}
+                  >
+                    <span className={styles.statusIcon}><Bot size={15} /></span>
+                    <span className={styles.agentCardText}>
+                      <span className={styles.agentRoleBadge}>{roleLabel}</span>
+                      <strong>{agent?.displayName || agentId || "--"}</strong>
+                      <small>{modelLabel}</small>
+                    </span>
+                  </Link>
+                  <p className={styles.compactPreviewText}>{roleSummary}</p>
+                  <div className={styles.agentCardActions}>
+                    <Link className={styles.agentCardAction} to={configRoute}>
+                      <Settings size={13} />
+                      {lang === "zh" ? "配置" : "Config"}
+                    </Link>
+                    <Link className={styles.agentCardAction} to={activityRoute}>
+                      <ScrollText size={13} />
+                      {lang === "zh" ? "日志" : "Logs"}
+                    </Link>
+                  </div>
+                </article>
+              );
+            })
+          ) : (
+            <div className={styles.emptyState}>
+              {agentConfigWorkspaceQuery.isLoading
+                ? (lang === "zh" ? "正在加载 Agent 绑定。" : "Loading Agent bindings.")
+                : (lang === "zh" ? "还没有可展示的自进化 Agent 绑定。" : "No self-evolution Agent binding is available.")}
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  }
+
   function renderObservationStatusSurface() {
+    const latestPreview = compactObservationPreview(observationRun?.latestMessage, 220);
+    const reportPreview = compactObservationPreview(observationRun?.report, 220);
     return (
       <div className={styles.statusPage}>
         <div className={styles.panelStack}>
@@ -1212,18 +1405,18 @@ export function SelfEvolutionTrack({
               </div>
 
               <div className={styles.listBlock}>
-                {observationRun?.latestMessage ? (
+                {latestPreview ? (
                   <div className={styles.listItem}>
                     <div className={styles.itemTop}>
                       <strong>{lang === "zh" ? "最新输出" : "Latest output"}</strong>
                       <span className={styles.secondaryPill}>{statusLabel(observationRun?.runtimeStatus || observationRun?.status || "idle")}</span>
                     </div>
-                    <span className={styles.mutedText}>{observationRun.latestMessage}</span>
+                    <span className={styles.compactPreviewText}>{latestPreview}</span>
                   </div>
                 ) : (
                   <div className={styles.emptyState}>{lang === "zh" ? "还没有观察输出。" : "No observation output yet."}</div>
                 )}
-                {observationRun?.report ? <pre className={styles.rawBlock}>{observationRun.report}</pre> : null}
+                {reportPreview ? <p className={styles.compactPreviewText}>{reportPreview}</p> : null}
                 {observationRun?.boundaryViolation ? <p className={styles.errorText}>{observationRun.boundaryViolation}</p> : null}
               </div>
             </section>
@@ -1234,6 +1427,8 @@ export function SelfEvolutionTrack({
 
   function renderObservationEvidenceRail() {
     const runtimeNotices = observationSessionDetail?.runtimeNotices ?? [];
+    const latestPreview = compactObservationPreview(observationRun?.latestMessage, 140);
+    const reportPreview = compactObservationPreview(observationRun?.report, 180);
     return (
       <aside className={styles.observationEvidenceRail} aria-label={lang === "zh" ? "自主观察运行证据" : "Observation run evidence"}>
         <div className={styles.subsurfaceHeader}>
@@ -1269,16 +1464,20 @@ export function SelfEvolutionTrack({
             <span className={styles.secondaryPill}>{observationEventTail.length}</span>
           </div>
           {observationEventTail.length ? (
-            observationEventTail.map((event, index) => (
-              <div key={`${event.timestamp}-${event.event}-${index}`} className={styles.observationEventItem}>
-                <div className={styles.itemTop}>
-                  <strong>{event.message || event.event}</strong>
-                  <span className={styles.secondaryPill}>{statusLabel(event.status || observationRun?.status || "idle")}</span>
+            observationEventTail.map((event, index) => {
+              const eventPreview = compactObservationPreview(event.message, 120);
+              return (
+                <div key={`${event.timestamp}-${event.event}-${index}`} className={styles.observationEventItem}>
+                  <div className={styles.itemTop}>
+                    <strong>{selfObservationEventTitle(event.event, lang)}</strong>
+                    <span className={styles.secondaryPill}>{statusLabel(event.status || observationRun?.status || "idle")}</span>
+                  </div>
+                  {eventPreview ? <span className={styles.compactPreviewText}>{eventPreview}</span> : null}
+                  <span className={styles.mutedText}>{compactTimestamp(event.timestamp)}</span>
+                  {event.turnId ? <span className={styles.mutedText}>{event.turnId}</span> : null}
                 </div>
-                <span className={styles.mutedText}>{compactTimestamp(event.timestamp)}</span>
-                {event.turnId ? <span className={styles.mutedText}>{event.turnId}</span> : null}
-              </div>
-            ))
+              );
+            })
           ) : (
             <div className={styles.emptyState}>{lang === "zh" ? "还没有运行事件。" : "No run events yet."}</div>
           )}
@@ -1289,14 +1488,14 @@ export function SelfEvolutionTrack({
           <div className={styles.listBlock}>
             {runtimeNotices.slice(-3).map((notice) => (
               <div key={notice.id} className={styles.listItem}>
-                <strong>{notice.message}</strong>
+                <strong>{compactObservationPreview(notice.message, 120)}</strong>
                 <span className={styles.mutedText}>{compactTimestamp(notice.timestamp)}</span>
               </div>
             ))}
           </div>
         ) : null}
-        {observationRun?.latestMessage ? <p className={styles.previewText}>{observationRun.latestMessage}</p> : null}
-        {observationRun?.report ? <pre className={styles.rawBlock}>{observationRun.report}</pre> : null}
+        {latestPreview ? <p className={styles.compactPreviewText}>{latestPreview}</p> : null}
+        {reportPreview ? <p className={styles.compactPreviewText}>{reportPreview}</p> : null}
         {observationRun?.boundaryViolation ? <p className={styles.errorText}>{observationRun.boundaryViolation}</p> : null}
       </aside>
     );
@@ -1425,8 +1624,13 @@ export function SelfEvolutionTrack({
                   </p>
                   <div className={styles.noticeStack}>
                     <p className={styles.noticeText}>
-                      {observationRun?.latestMessage || (lang === "zh" ? "准备启动一轮纯观察沙盒。" : "Ready to start a no-tool observation sandbox.")}
+                      {observationRunActive
+                        ? (lang === "zh" ? "观察会话正在运行，完整输出在中间会话区。" : "Observation is running; full output stays in the center conversation.")
+                        : (lang === "zh" ? "准备启动一轮纯观察沙盒。" : "Ready to start a no-tool observation sandbox.")}
                     </p>
+                    {compactObservationPreview(observationRun?.latestMessage, 110) ? (
+                      <p className={styles.compactPreviewText}>{compactObservationPreview(observationRun?.latestMessage, 110)}</p>
+                    ) : null}
                     {actionFeedback ? <p className={styles.feedbackText}>{actionFeedback}</p> : null}
                     {errorMessage ? <p className={styles.errorText}>{errorMessage}</p> : null}
                   </div>
@@ -1471,6 +1675,8 @@ export function SelfEvolutionTrack({
                 </>
               )}
             </section>
+
+            {renderSelfEvolutionAgentCards()}
 
             <section className={`${styles.petCompanionSurface} ${styles[`petCompanionTone_${petCompanionState.tone}`]}`}>
               <div className={styles.sectionHeader}>
