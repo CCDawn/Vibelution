@@ -69,7 +69,7 @@ const styles: Record<string, string> = {
   answerOnlyProcessGroup_ready:
     "vui-components-conversationview answerOnlyProcessGroup_ready min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
   answerOnlyProcessGroup_running:
-    "vui-components-conversationview answerOnlyProcessGroup_running min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    "vui-components-conversationview answerOnlyProcessGroup_running min-w-0 border-0 bg-transparent text-[var(--fg-secondary)] shadow-none",
   answerOnlyProcessGroup_status:
     "vui-components-conversationview answerOnlyProcessGroup_status min-w-0",
   answerOnlyProcessGroup_success:
@@ -91,7 +91,7 @@ const styles: Record<string, string> = {
   answerOnlyProcessMeta:
     "vui-components-conversationview answerOnlyProcessMeta min-w-0 flex flex-wrap items-center gap-1.5",
   answerOnlyProcessPreview:
-    "vui-components-conversationview answerOnlyProcessPreview min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "vui-components-conversationview answerOnlyProcessPreview min-w-0 border-0 bg-transparent p-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] shadow-none line-clamp-1 whitespace-normal [overflow-wrap:anywhere]",
   answerOnlyProcessStatic:
     "vui-components-conversationview answerOnlyProcessStatic min-w-0 grid [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:grid-cols-[14px_auto_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5",
   answerOnlyProcessTitle:
@@ -509,13 +509,13 @@ const styles: Record<string, string> = {
   operationIcon_warning:
     "vui-components-conversationview operationIcon_warning min-w-0 shrink-0 text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   operationItem:
-    "vui-components-conversationview operationItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 w-[min(100%,72ch)] grid grid-cols-[22px_minmax(0,1fr)_auto_auto_16px] items-start gap-1.5 !rounded-none !border-x-0 !border-t-0 border-b border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] !bg-transparent !p-0 !pb-1 !shadow-none",
+    "vui-components-conversationview operationItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 w-[min(100%,72ch)] grid grid-cols-[22px_minmax(0,1fr)_auto_auto_16px] items-start gap-1.5 !rounded-none !border-x-0 !border-t-0 border-b border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] !bg-transparent !p-0 !pb-1 !text-[var(--fg-secondary)] !shadow-none",
   operationItemActive:
     "vui-components-conversationview operationItemActive min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   operationItemTool:
     "vui-components-conversationview operationItemTool min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)] max-w-full",
   operationItemWrap:
-    "vui-components-conversationview operationItemWrap min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+    "vui-components-conversationview operationItemWrap min-w-0 border-0 bg-transparent p-0 shadow-none",
   operationItem_active:
     "vui-components-conversationview operationItem_active min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   operationItem_answer:
@@ -593,9 +593,9 @@ const styles: Record<string, string> = {
   operationSummaryCount:
     "vui-components-conversationview operationSummaryCount min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   operationSummaryPreview:
-    "vui-components-conversationview operationSummaryPreview min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "vui-components-conversationview operationSummaryPreview min-w-0 border-0 bg-transparent p-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] shadow-none line-clamp-1 whitespace-normal [overflow-wrap:anywhere]",
   operationSummaryText:
-    "vui-components-conversationview operationSummaryText min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    "vui-components-conversationview operationSummaryText min-w-0 border-0 bg-transparent p-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] shadow-none line-clamp-1 whitespace-normal [overflow-wrap:anywhere]",
   operationText:
     "vui-components-conversationview operationText min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-w-full",
   operationTimeline:
@@ -923,7 +923,7 @@ const styles: Record<string, string> = {
   timelineCellMeta:
     "vui-components-conversationview timelineCellMeta min-w-0 flex flex-wrap items-center gap-1.5 grid min-h-0 content-start overflow-auto",
   timelineCellPreview:
-    "vui-components-conversationview timelineCellPreview min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid min-h-0 content-start gap-1.5 overflow-auto whitespace-normal break-words [overflow-wrap:anywhere] line-clamp-2",
+    "vui-components-conversationview timelineCellPreview min-w-0 border-0 bg-transparent p-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] shadow-none grid min-h-0 content-start gap-1.5 overflow-hidden whitespace-normal break-words [overflow-wrap:anywhere] line-clamp-1",
   timelineCommandError:
     "vui-components-conversationview timelineCommandError min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   timelineCommandList:
