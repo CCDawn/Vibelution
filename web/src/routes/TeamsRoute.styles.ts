@@ -573,9 +573,9 @@ const styles: Record<string, string> = {
   sourceCollectionUnavailable:
     "sourceCollectionUnavailable min-w-0 !grid gap-2 content-center justify-items-start p-[18px] rounded-lg border border-[var(--border-soft)] bg-[image:var(--vui-gradient-route-soft)] bg-[color:var(--source-workbench-panel)] [&_strong]:text-[var(--fg-primary)] [&_span]:text-[var(--fg-muted)] [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]",
   teamContextActions:
-    "teamContextActions min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)] !flex flex-nowrap items-center justify-end gap-1.5",
+    "teamContextActions min-w-0 !flex flex-nowrap items-center justify-end gap-1.5",
   teamContextBar:
-    "teamContextBar min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)] mx-2 mt-1 !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-2 py-1",
+    "teamContextBar min-w-0 mx-2 mt-1 !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-2 py-1",
   teamContextChips:
     "teamContextChips min-w-0 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)] mx-2 !grid grid-cols-[repeat(4,max-content)] justify-start gap-1.5 overflow-x-auto p-0 [scrollbar-width:thin]",
   teamHistoryHeader:
@@ -621,7 +621,13 @@ const styles: Record<string, string> = {
   teamRoundPanel:
     "teamRoundPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   teamSelectField:
-    "teamSelectField min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full grid grid-cols-[max-content_minmax(180px,300px)] items-center gap-1.5 text-[var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)]",
+    "teamSelectField min-w-0 grid grid-cols-[max-content_minmax(210px,300px)] items-center gap-1.5 text-[var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)] [&_[data-vui=select]]:min-w-0 [&_[data-vui=select-trigger]]:!inline-flex [&_[data-vui=select-trigger]]:!h-8 [&_[data-vui=select-trigger]]:!min-h-8 [&_[data-vui=select-trigger]]:items-center [&_[data-vui=select-trigger]]:justify-between [&_[data-vui=select-trigger]]:gap-2 [&_[data-vui=select-trigger]]:rounded-[7px] [&_[data-vui=select-trigger]]:px-2.5 [&_[data-vui=select-trigger]]:text-left [&_[data-vui=select-trigger]]:shadow-none",
+  teamSelectControl:
+    "teamSelectControl min-w-0",
+  teamSelectPrefix:
+    "teamSelectPrefix inline-flex h-8 shrink-0 items-center rounded-[6px] px-1 text-[var(--vui-font-sm)] font-[760] leading-none text-[var(--fg-tertiary)] whitespace-nowrap",
+  teamRefreshButton:
+    "teamRefreshButton !h-8 !w-8 !min-w-8 rounded-[7px] px-0 text-[var(--fg-secondary)]",
   teamTaskForm:
     "teamTaskForm min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   teamTitleBlock:
