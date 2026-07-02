@@ -528,6 +528,52 @@ def test_session_query_default_page_skips_per_item_filtering(tmp_path, monkeypat
     assert payload["totalEstimate"] == 2
 
 
+def test_session_query_reuses_warm_session_list_cache(tmp_path, monkeypatch):
+    conversations = [
+        {
+            "conversation_id": "session-alpha",
+            "title": "Alpha",
+            "agent_id": "agent-a",
+            "updated_at": "2026-05-18T12:00:00",
+            "messages": [{"role": "user", "content": "alpha", "timestamp": "2026-05-18T12:00:00"}],
+        },
+        {
+            "conversation_id": "session-beta",
+            "title": "Beta",
+            "agent_id": "agent-b",
+            "updated_at": "2026-05-18T11:00:00",
+            "messages": [{"role": "user", "content": "beta", "timestamp": "2026-05-18T11:00:00"}],
+        },
+    ]
+    _seed_chat_state(tmp_path, conversations=conversations)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {"agentId": "agent-a", "displayName": "Agent Alpha", "status": "active", "directSessionId": "session-alpha"},
+                {"agentId": "agent-b", "displayName": "Agent Beta", "status": "active", "directSessionId": "session-beta"},
+            ]
+        }
+    )
+
+    warmed = session_service.list_sessions()
+    assert [item["id"] for item in warmed] == ["session-alpha", "session-beta"]
+
+    def fail_list_sessions(*args, **kwargs):
+        raise AssertionError("warm default session query should reuse the session list cache")
+
+    monkeypatch.setattr(session_service, "list_sessions", fail_list_sessions)
+
+    response = client.get("/api/sessions/query?limit=1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["id"] for item in payload["items"]] == ["session-alpha"]
+    assert payload["nextCursor"] == "1"
+    assert payload["totalEstimate"] == 2
+
+
 def test_agent_directory_internal_direct_session_stub_hidden_from_user_index(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, conversations=[])
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
