@@ -4216,6 +4216,14 @@ def _source_collection_stage_writeback_closure_summary(
         user_status = "partial"
         artifact_status = "source_manifest_filtered"
         message = f"已移出 {excluded_source_count} 条无有效内容来源，等待 Agent 完成检查清单打勾。"
+    elif task_status in {"interrupted", "stopped"}:
+        user_status = "interrupted"
+        artifact_status = "interrupted_before_writeback"
+        message = f"Agent 私聊已中断，尚未完成阶段写回，因此还没有生成{target_label}。请继续这次任务或重新启动本阶段。"
+        retry_instruction = (
+            "继续时请先查看上一轮已完成的 checklist 和分页读取结果，只补未完成的写回步骤；"
+            "如果无法继续，请调用 source_collection_stage_writeback_tool 写入 blocked/failed 和原因。"
+        )
     elif coverage and total > 0:
         user_status = "failed"
         message = f"Agent 已回写，但没有生成{target_label}；已{action_label} {processed}/{total}，{missing} 条待补，{invalid} 个 ID 未匹配。"
@@ -17268,19 +17276,19 @@ def _source_collection_stage_card_blocking_reasons(
     current_coverage = current_coverage_summary if isinstance(current_coverage_summary, dict) else {}
     if card_status == "partial_current_inputs" and bool(current_coverage.get("applicable")):
         reasons.append(
-            "Current stage coverage is partial: "
-            f"{_source_collection_count(current_coverage.get('processed'))}/{_source_collection_count(current_coverage.get('total'))} processed, "
-            f"{_source_collection_count(current_coverage.get('missing'))} pending."
+            "当前阶段覆盖不足："
+            f"已处理 {_source_collection_count(current_coverage.get('processed'))}/{_source_collection_count(current_coverage.get('total'))}，"
+            f"{_source_collection_count(current_coverage.get('missing'))} 条待补。"
         )
     if bool(coverage.get("applicable")) and not bool(coverage.get("complete")):
         reasons.append(
-            "Agent writeback has partial candidate coverage: "
-            f"{_source_collection_count(coverage.get('processed'))}/{_source_collection_count(coverage.get('total'))} processed, "
-            f"{_source_collection_count(coverage.get('missing'))} missing, "
-            f"{_source_collection_count(coverage.get('invalid'))} invalid candidate ids."
+            "Agent 回写覆盖不完整："
+            f"已处理 {_source_collection_count(coverage.get('processed'))}/{_source_collection_count(coverage.get('total'))}，"
+            f"{_source_collection_count(coverage.get('missing'))} 条待补，"
+            f"{_source_collection_count(coverage.get('invalid'))} 个 ID 未匹配。"
         )
     if card_status == "agent_interrupted":
-        reasons.append("Latest Agent turn was interrupted before stage writeback.")
+        reasons.append("最近一次 Agent 会话在阶段写回前中断，需要继续这次任务或重试。")
     if card_status == "agent_done_artifact_pending":
         reasons.append("Agent task wrote back a structured result, but the expected stage artifact has not been created yet.")
     if card_status == "artifact_ready_agent_blocked":
@@ -17392,13 +17400,13 @@ def _source_collection_stage_user_status_label(
     if card_status == "agent_running":
         return "Agent 正在处理"
     if card_status == "agent_interrupted":
-        return "已中断"
+        return "已中断，需要继续"
     current_coverage = current_coverage_summary if isinstance(current_coverage_summary, dict) else {}
     if bool(current_coverage.get("applicable")) and current_coverage.get("complete") is False:
         return _source_collection_stage_recovery_status_label(stage_id)
     labels = {
         "agent_running": "Agent 正在处理",
-        "agent_interrupted": "已中断",
+        "agent_interrupted": "已中断，需要继续",
         "closed_loop": "本阶段已完成",
         "artifact_ready_no_latest_agent_task": "产物已就绪",
         "artifact_ready_agent_blocked": "产物已生成，任务需排查",

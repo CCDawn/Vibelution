@@ -637,7 +637,7 @@ function sourceCollectionStageTaskStatusLabel(status: string | null | undefined,
     blocked: "受阻",
     failed: "失败",
     cancelled: "已取消",
-    interrupted: "已中断",
+    interrupted: "已中断，需要继续",
   };
   return labels[normalized] ?? (normalized || "任务");
 }
@@ -734,6 +734,8 @@ function sourceCollectionStageBlockingReasonLabel(reason: string, lang: "zh" | "
     return "Agent 只处理了部分候选，需要继续分页读取并补齐逐候选结果。";
   }
   const labels: Record<string, string> = {
+    "Latest Agent turn was interrupted before stage writeback.":
+      "最近一次 Agent 会话在阶段写回前中断，需要继续这次任务或重试。",
     "Agent task wrote back a structured result, but the expected stage artifact has not been created yet.":
       "已收到 Agent 结果，但还没有生成本阶段可用资料。",
     "Latest Agent task is blocked or failed.":
@@ -821,14 +823,16 @@ function sourceCollectionStageUserStatusLabel(
   if (!projection?.status) {
     return "";
   }
+  if (projection.status === "agent_interrupted") {
+    return lang === "zh"
+      ? (projection.userStatusLabel || "已中断，需要继续")
+      : "Interrupted; continue needed";
+  }
   if (syncing) {
     return lang === "zh" ? "正在同步 Agent 结果" : "Syncing Agent result";
   }
   if (lang === "zh" && projection.userStatusLabel) {
     return projection.userStatusLabel;
-  }
-  if (projection.status === "agent_interrupted") {
-    return lang === "zh" ? "已中断" : "Interrupted";
   }
   const currentCoverage = projection.currentCoverageSummary;
   if (currentCoverage?.applicable && currentCoverage.complete === false) {
@@ -874,7 +878,7 @@ function sourceCollectionStageUserStatusLabel(
   const labels: Record<string, string> = lang === "zh"
     ? {
         agent_running: "Agent 正在处理",
-        agent_interrupted: "已中断",
+        agent_interrupted: "已中断，需要继续",
         closed_loop: "本阶段已完成",
         artifact_ready_no_latest_agent_task: "资料已生成",
         agent_blocked: "Agent 任务受阻",
@@ -883,7 +887,7 @@ function sourceCollectionStageUserStatusLabel(
       }
     : {
         agent_running: "Agent running",
-        agent_interrupted: "Interrupted",
+        agent_interrupted: "Interrupted; continue needed",
         closed_loop: "Stage complete",
         artifact_ready_no_latest_agent_task: "Output ready",
         agent_blocked: "Agent blocked",
