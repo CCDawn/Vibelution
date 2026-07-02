@@ -497,9 +497,9 @@ const styles: Record<string, string> = {
   kernelTraceLink:
     "vui-routes-chatcodingroute kernelTraceLink min-w-0",
   layout:
-    "vui-routes-chatcodingroute layout min-w-0 grid min-h-0 gap-2 p-2 h-[calc(100dvh_-_var(--shell-topbar-height))] max-h-[calc(100dvh_-_var(--shell-topbar-height))] overflow-hidden grid-cols-[var(--chat-left-pane-width,220px)_8px_minmax(0,1fr)_8px_var(--chat-right-pane-width,284px)] max-[1100px]:grid-cols-[var(--chat-left-pane-width,220px)_8px_minmax(0,1fr)_8px_var(--chat-right-pane-width,284px)]",
+    "vui-routes-chatcodingroute layout min-w-0 !gap-0 !p-0 h-[calc(100dvh_-_var(--shell-topbar-height))] max-h-[calc(100dvh_-_var(--shell-topbar-height))] overflow-hidden grid-cols-[var(--chat-left-pane-width,220px)_0px_minmax(0,1fr)_0px_var(--chat-right-pane-width,284px)] max-[1100px]:grid-cols-[var(--chat-left-pane-width,220px)_0px_minmax(0,1fr)_0px_var(--chat-right-pane-width,284px)]",
   layoutCenterFirst:
-    "vui-routes-chatcodingroute layoutCenterFirst min-w-0 grid min-h-0 gap-2 p-2 !grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_8px_minmax(520px,1fr)_8px_minmax(0,var(--chat-right-pane-width,0px))] max-[980px]:!grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_8px_minmax(420px,1fr)_8px_minmax(0,var(--chat-right-pane-width,0px))] max-[640px]:!grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_6px_minmax(280px,1fr)_6px_minmax(0,var(--chat-right-pane-width,0px))]",
+    "vui-routes-chatcodingroute layoutCenterFirst min-w-0 !gap-0 !p-0 !grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_0px_minmax(520px,1fr)_0px_minmax(0,var(--chat-right-pane-width,0px))] max-[980px]:!grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_0px_minmax(420px,1fr)_0px_minmax(0,var(--chat-right-pane-width,0px))] max-[640px]:!grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_0px_minmax(280px,1fr)_0px_minmax(0,var(--chat-right-pane-width,0px))]",
   leftBlock:
     "vui-routes-chatcodingroute leftBlock min-w-0 grid gap-1.5 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-glass)_82%,transparent)] p-1.5 shadow-[var(--vui-shadow-hairline)]",
   leftRail:
@@ -817,9 +817,9 @@ const styles: Record<string, string> = {
   projectBusInterruptToggle:
     "vui-routes-chatcodingroute projectBusInterruptToggle min-w-0",
   resizeHandle:
-    "vui-routes-chatcodingroute resizeHandle min-w-0",
+    "vui-routes-chatcodingroute resizeHandle relative z-10 h-full w-3 -mx-1.5 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none before:absolute before:inset-y-2 before:left-1/2 before:w-px before:-translate-x-1/2 before:rounded-full before:bg-[color-mix(in_srgb,var(--surface-card)_18%,transparent)] before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] hover:before:shadow-[var(--vui-shadow-soft)] focus-visible:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] focus-visible:before:shadow-[var(--vui-shadow-soft)]",
   resizeHandleActive:
-    "vui-routes-chatcodingroute resizeHandleActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    "vui-routes-chatcodingroute resizeHandleActive before:bg-[color-mix(in_srgb,var(--accent-warm)_62%,transparent)] before:shadow-[var(--vui-shadow-accent)]",
   resourceMetric:
     "vui-routes-chatcodingroute resourceMetric min-w-0",
   resourceSplit:

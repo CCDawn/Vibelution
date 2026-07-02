@@ -241,16 +241,31 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.layoutCenterFirst).toContain("var(--chat-right-pane-width,0px)");
   });
 
-  it("keeps collapse handles in dedicated grid tracks so the conversation stays in the center column", () => {
+  it("keeps side panes flush while preserving overlay resize handles", () => {
+    expect(routeStyles.layout).toContain("!gap-0");
+    expect(routeStyles.layout).toContain("!p-0");
     expect(routeStyles.layout).toContain(
-      "grid-cols-[var(--chat-left-pane-width,220px)_8px_minmax(0,1fr)_8px_var(--chat-right-pane-width,284px)]",
+      "grid-cols-[var(--chat-left-pane-width,220px)_0px_minmax(0,1fr)_0px_var(--chat-right-pane-width,284px)]",
     );
     expect(routeStyles.layout).toContain(
-      "max-[1100px]:grid-cols-[var(--chat-left-pane-width,220px)_8px_minmax(0,1fr)_8px_var(--chat-right-pane-width,284px)]",
+      "max-[1100px]:grid-cols-[var(--chat-left-pane-width,220px)_0px_minmax(0,1fr)_0px_var(--chat-right-pane-width,284px)]",
     );
     expect(routeStyles.layoutCenterFirst).toContain(
-      "!grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_8px_minmax(520px,1fr)_8px_minmax(0,var(--chat-right-pane-width,0px))]",
+      "!grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_0px_minmax(520px,1fr)_0px_minmax(0,var(--chat-right-pane-width,0px))]",
     );
+    expect(routeStyles.layout).not.toContain("_8px_");
+    expect(routeStyles.layoutCenterFirst).not.toContain("_8px_");
+    expect(routeStyles.resizeHandle).toContain("h-full");
+    expect(routeStyles.resizeHandle).toContain("w-3");
+    expect(routeStyles.resizeHandle).toContain("-mx-1.5");
+    expect(routeStyles.resizeHandle).toContain("cursor-col-resize");
+    expect(routeStyles.resizeHandle).toContain("touch-none");
+    expect(routeStyles.resizeHandle).toContain("before:absolute");
+    expect(routeStyles.resizeHandle).toContain("before:w-px");
+    expect(routeStyles.resizeHandle).toContain("hover:before:bg");
+    expect(routeStyles.resizeHandle).toContain("focus-visible:before:bg");
+    expect(routeStyles.resizeHandleActive).toContain("before:bg");
+    expect(routeStyles.resizeHandleActive).toContain("before:shadow");
   });
 
   it("centers the direct conversation reading track when both side panes are collapsed", () => {
