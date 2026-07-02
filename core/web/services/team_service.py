@@ -68,7 +68,7 @@ EVOLUTION_SYSTEM_TEAM_SPECS = (
         "teamId": "self-evolution-team",
         "name": "自进化团队",
         "description": "由自进化固定角色自动同步的系统团队。",
-        "purpose": "承接自进化执行、评审与总结角色的团队通讯。",
+        "purpose": "承接自进化执行、评审与旁路观察角色的团队通讯。",
         "source": "self_evolution",
         "teamKind": "self_evolution",
         "teamCategory": "自进化系统团队",
@@ -4073,6 +4073,8 @@ def _team_chat_room_needs_sync(
     ]
     if participant_agent_ids != active_member_agent_ids:
         return True
+    if _team_chat_room_participant_contexts_need_sync(team, linked_room, agent_refs=agent_refs):
+        return True
     historical_room_ids = [
         room_id
         for room_id in _historical_team_chat_room_ids(str(team.get("teamId") or "").strip())
@@ -4103,6 +4105,36 @@ def _team_chat_room_needs_sync(
     if any(str(config.get(key) or "").strip() != value for key, value in expected_pairs.items() if value):
         return True
     return str(linked_room.get("purpose") or "").strip() != _team_chat_room_purpose_for_update(team, linked_room.get("purpose"))
+
+
+def _team_chat_room_participant_contexts_need_sync(
+    team: dict[str, Any],
+    linked_room: dict[str, Any],
+    *,
+    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
+) -> bool:
+    expected_contexts = _team_participant_contexts_by_agent_id(team, agent_refs=agent_refs)
+    for participant in list(linked_room.get("participants") or []):
+        if not isinstance(participant, dict):
+            continue
+        agent_id = str(participant.get("agentId") or "").strip()
+        expected = expected_contexts.get(agent_id)
+        if not isinstance(expected, dict):
+            continue
+        for field, expected_value in expected.items():
+            if _normalized_participant_context_value(participant.get(field)) != _normalized_participant_context_value(expected_value):
+                return True
+    return False
+
+
+def _normalized_participant_context_value(value: Any) -> Any:
+    if isinstance(value, list):
+        return [
+            trim_lines(str(item or ""), max_lines=1).strip()
+            for item in value[:8]
+            if trim_lines(str(item or ""), max_lines=1).strip()
+        ]
+    return trim_lines(str(value or ""), max_lines=4).strip()
 
 
 def _historical_team_chat_room_needs_sync(

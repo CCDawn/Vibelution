@@ -249,6 +249,37 @@ def test_repair_adds_explicit_no_tools_policy_to_fixed_evolution_agent(tmp_path,
     assert not any(item["code"] == "default_empty_tool_policy_for_fixed_role" for item in workspace_agent["health"])
 
 
+def test_repair_archives_retired_self_evolution_summarizer_agent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="自进化总结 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="self_evolution",
+        role_key="summarizer",
+        prompt_template_id="prompt-self-summarizer",
+        metadata={
+            "fixedRole": True,
+            "agentMode": "self_evolution",
+            "selfEvolutionRole": "summarizer",
+            "selfEvolutionRoleLabel": "自进化总结 Agent",
+        },
+    )
+
+    repaired = agent_directory_service.repair_agent_directory()
+    repaired_agent = next(item for item in repaired["agents"] if item["agentId"] == agent["agentId"])
+    active_retired = [
+        item
+        for item in agent_directory_service.list_agents()
+        if item["agentId"] == agent["agentId"]
+    ]
+
+    assert repaired_agent["status"] == "archived"
+    assert active_retired == []
+    assert repaired_agent["metadata"]["retiredRole"] == "summarizer"
+    assert repaired_agent["metadata"]["retiredReason"] == "self_evolution_role_retired"
+
+
 def test_repair_tightens_ai_search_source_role_tool_policy(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
