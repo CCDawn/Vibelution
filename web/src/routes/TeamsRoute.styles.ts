@@ -544,7 +544,7 @@ const styles = createVuiStyleMap(styleKeys, {
     teamUnavailableMeta:
       "grid grid-cols-[repeat(3,minmax(0,1fr))] gap-1.5 text-[var(--vui-font-xs)] max-[760px]:grid-cols-[1fr]",
     teamUnavailableSurface:
-      "grid min-h-0 flex-1 grid-cols-[minmax(0,720px)] justify-center place-items-center overflow-auto px-3 py-6",
+      "grid min-h-0 flex-1 grid-cols-[minmax(0,720px)] content-start justify-items-center overflow-auto px-3 py-4",
     toolbarActions:
       "!flex min-w-[220px] max-w-[min(100%,560px)] flex-wrap items-center justify-end gap-1.5 overflow-visible [&_a]:min-w-[72px] [&_a]:whitespace-nowrap [&_button]:min-w-[72px] [&_button]:whitespace-nowrap",
     workflowGraphFrame: "h-full overflow-hidden",
