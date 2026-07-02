@@ -53,6 +53,39 @@ describe("projectConversationTimelineMessages", () => {
     expect(projection.streamingMessages.map((message) => message.id)).toEqual(["active-turn"]);
   });
 
+  it("keeps arbitrary same-turn live overlay content out of the active answer", () => {
+    const liveOverlay = assistantMessage("live-overlay", {
+      content: "过程提示：已经准备好上下文，正在等待模型响应。",
+      streaming: true,
+      streamStage: "model_request",
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "status",
+          status: "running",
+          name: "model_request",
+          summary: "正在等待模型响应",
+        },
+      ],
+      metadata: { kind: "session_live_overlay", turnId: "live:turn-1" },
+    });
+    const activeTurn = assistantMessage("active-turn", {
+      content: "这是用户应该看到的回答。",
+      streaming: true,
+      metadata: { kind: "session_active_turn_layer", turnId: "turn-1" },
+    });
+
+    const projection = projectConversationTimelineMessages({
+      timelineMessages: [liveOverlay],
+      activeTurnMessage: activeTurn,
+    });
+
+    expect(projection.messages).toHaveLength(1);
+    expect(projection.messages[0].content).toBe("这是用户应该看到的回答。");
+    expect(projection.messages[0].content).not.toContain("过程提示");
+    expect(projection.messages[0].feedbackEvents?.map((event) => event.summary)).toEqual(["正在等待模型响应"]);
+  });
+
   it("does not append an active layer after a committed same-turn answer already exists", () => {
     const committed = assistantMessage("committed-answer", {
       content: "最终回答已经落库。",

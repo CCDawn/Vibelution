@@ -101,7 +101,7 @@ function mergeLiveOverlayIntoActiveTurnMessage(
   return {
     ...liveOverlayMessage,
     ...activeTurnMessage,
-    content: mergeConversationText(answerProjectionContent(liveOverlayMessage), activeTurnMessage.content),
+    content: activeTurnMessage.content,
     thought: mergeConversationText(liveOverlayMessage.thought, activeTurnMessage.thought) || undefined,
     streamStage: activeTurnMessage.streamStage || liveOverlayMessage.streamStage,
     streaming: activeTurnMessage.streaming ?? liveOverlayMessage.streaming,
