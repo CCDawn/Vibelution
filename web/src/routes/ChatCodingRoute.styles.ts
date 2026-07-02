@@ -267,7 +267,7 @@ const styles: Record<string, string> = {
   compactDetailsOpenLabel:
     "vui-routes-chatcodingroute compactDetailsOpenLabel min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
   companionBlock:
-    "vui-routes-chatcodingroute companionBlock min-w-0",
+    "vui-routes-chatcodingroute companionBlock min-w-0 flex-1 overflow-auto min-h-0",
   companionCompact:
     "vui-routes-chatcodingroute companionCompact min-w-0",
   companionCopy:
@@ -497,13 +497,13 @@ const styles: Record<string, string> = {
   kernelTraceLink:
     "vui-routes-chatcodingroute kernelTraceLink min-w-0",
   layout:
-    "vui-routes-chatcodingroute layout min-w-0 grid !gap-0 !p-0 h-[calc(100dvh_-_var(--shell-topbar-height))] max-h-[calc(100dvh_-_var(--shell-topbar-height))] overflow-hidden grid-cols-[var(--chat-left-pane-width,220px)_0px_minmax(0,1fr)_0px_var(--chat-right-pane-width,284px)] max-[1100px]:grid-cols-[var(--chat-left-pane-width,220px)_0px_minmax(0,1fr)_0px_var(--chat-right-pane-width,284px)]",
+    "vui-routes-chatcodingroute layout min-w-0 grid !gap-0 !p-0 [--chat-workbench-gap:4px] h-[calc(100dvh_-_var(--shell-topbar-height))] max-h-[calc(100dvh_-_var(--shell-topbar-height))] overflow-hidden grid-cols-[var(--chat-left-pane-width,220px)_0px_minmax(0,1fr)_0px_var(--chat-right-pane-width,284px)] max-[1100px]:grid-cols-[var(--chat-left-pane-width,220px)_0px_minmax(0,1fr)_0px_var(--chat-right-pane-width,284px)]",
   layoutCenterFirst:
     "vui-routes-chatcodingroute layoutCenterFirst min-w-0 !gap-0 !p-0 !grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_0px_minmax(520px,1fr)_0px_minmax(0,var(--chat-right-pane-width,0px))] max-[980px]:!grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_0px_minmax(420px,1fr)_0px_minmax(0,var(--chat-right-pane-width,0px))] max-[640px]:!grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_0px_minmax(280px,1fr)_0px_minmax(0,var(--chat-right-pane-width,0px))]",
   leftBlock:
-    "vui-routes-chatcodingroute leftBlock min-w-0 grid gap-1.5 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-glass)_82%,transparent)] p-1.5 shadow-[var(--vui-shadow-hairline)]",
+    "vui-routes-chatcodingroute leftBlock min-w-0 grid shrink-0 gap-1.5 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-glass)_82%,transparent)] p-1.5 shadow-[var(--vui-shadow-hairline)]",
   leftRail:
-    "vui-routes-chatcodingroute leftRail min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto !flex h-full min-h-0 !flex-col gap-[5px] overflow-auto p-1.5 [scrollbar-gutter:stable]",
+    "vui-routes-chatcodingroute leftRail min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto !flex h-full min-h-0 !flex-col gap-[var(--chat-workbench-gap)] overflow-auto p-[var(--chat-workbench-gap)] [scrollbar-gutter:stable]",
   memberIndexSummary:
     "vui-routes-chatcodingroute memberIndexSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 !grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5",
   mentalStateBadge:
@@ -641,7 +641,7 @@ const styles: Record<string, string> = {
   paneCollapsed:
     "vui-routes-chatcodingroute paneCollapsed min-w-0 hidden invisible pointer-events-none !overflow-hidden opacity-0",
   panelBody:
-    "vui-routes-chatcodingroute panelBody min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] min-h-0 overflow-auto [scrollbar-gutter:stable]",
+    "vui-routes-chatcodingroute panelBody min-w-0 h-full rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] min-h-0 overflow-auto [scrollbar-gutter:stable]",
   panelNotice:
     "vui-routes-chatcodingroute panelNotice grid min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_22%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_5%,var(--vui-surface-row))] px-2 py-1.5 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)]",
   panelSearch:
@@ -831,7 +831,11 @@ const styles: Record<string, string> = {
   rightIndexTabs:
     "vui-routes-chatcodingroute rightIndexTabs min-w-0 !grid grid-cols-[repeat(2,minmax(0,1fr))] gap-1",
   rightPane:
-    "vui-routes-chatcodingroute rightPane min-w-0 grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden p-1.5",
+    "vui-routes-chatcodingroute rightPane min-w-0 grid h-full min-h-0 gap-[var(--chat-workbench-gap)] overflow-hidden p-[var(--chat-workbench-gap)]",
+  rightPaneWithTabs:
+    "vui-routes-chatcodingroute rightPaneWithTabs grid-rows-[auto_auto_minmax(0,1fr)]",
+  rightPaneWithoutTabs:
+    "vui-routes-chatcodingroute rightPaneWithoutTabs grid-rows-[auto_minmax(0,1fr)]",
   runModeBlock:
     "vui-routes-chatcodingroute runModeBlock min-w-0",
   runtimeNotice:
