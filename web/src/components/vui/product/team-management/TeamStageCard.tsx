@@ -42,15 +42,15 @@ export const TEAM_STAGE_TONE_STYLE: Record<TeamStageTone, CSSProperties> = {
 };
 
 const CARD_BASE =
-  "grid grid-rows-[auto_minmax(0,1fr)_auto] content-start self-start min-w-0 min-h-[118px] gap-2 p-2 rounded-[8px] border cursor-pointer overflow-hidden text-[0.72rem] font-[740] " +
+  "grid grid-rows-[auto_minmax(0,1fr)_auto] content-start self-start min-w-0 min-h-[118px] gap-2 p-2 rounded-[var(--vui-radius-soft)] border cursor-pointer overflow-hidden text-[0.72rem] font-[740] " +
   "border-[color:var(--source-step-border,var(--border-soft))] text-[color:var(--source-step-fg,var(--fg-muted))] " +
-  "bg-[image:var(--vui-gradient-route-soft)] bg-[color:var(--source-workbench-card)] " +
-  "transition-[border-color,box-shadow] duration-150 " +
-  "hover:border-[color:color-mix(in_srgb,var(--accent-cool)_56%,var(--source-step-border,var(--border-soft)))] hover:shadow-[var(--vui-shadow-accent)] " +
-  "focus-visible:outline-none focus-visible:shadow-[var(--vui-shadow-accent)] focus-visible:border-[color:color-mix(in_srgb,var(--accent-cool)_56%,var(--source-step-border,var(--border-soft)))]";
+  "bg-[image:var(--vui-gradient-route-soft)] bg-[color:var(--source-workbench-card)] shadow-[var(--vui-elevation-1-sheen)] " +
+  "transition-[transform,border-color,box-shadow] duration-150 ease-[var(--vui-ease)] will-change-transform " +
+  "hover:-translate-y-px hover:border-[color:color-mix(in_srgb,var(--accent-cool)_56%,var(--source-step-border,var(--border-soft)))] hover:shadow-[var(--vui-elevation-2-sheen)] " +
+  "focus-visible:outline-none focus-visible:-translate-y-px focus-visible:shadow-[var(--vui-elevation-2-sheen)] focus-visible:border-[color:color-mix(in_srgb,var(--accent-cool)_56%,var(--source-step-border,var(--border-soft)))]";
 
 const CARD_SELECTED =
-  "border-[color:color-mix(in_srgb,var(--accent-cool)_72%,var(--border-strong))] shadow-[var(--vui-shadow-inset-accent)]";
+  "border-[color:color-mix(in_srgb,var(--accent-cool)_72%,var(--border-strong))] shadow-[var(--vui-shadow-inset-accent),var(--vui-elevation-2)]";
 
 const HEADER = "flex min-w-0 items-center justify-between gap-2";
 const STEP_INDEX =

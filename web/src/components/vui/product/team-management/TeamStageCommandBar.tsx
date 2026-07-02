@@ -17,9 +17,9 @@ export type TeamStageCommandBarProps = {
 };
 
 const BAR_BASE =
-  "grid grid-cols-[minmax(260px,0.55fr)_minmax(0,1.45fr)] items-center gap-2 px-2.5 py-2 rounded-lg border " +
+  "grid grid-cols-[minmax(260px,0.55fr)_minmax(0,1.45fr)] items-center gap-2 px-2.5 py-2 rounded-[var(--vui-radius-soft)] border " +
   "border-[color:var(--source-step-border,color-mix(in_srgb,var(--accent-success)_24%,var(--border-soft)))] " +
-  "bg-[image:var(--vui-gradient-route-soft)] bg-[color:var(--source-workbench-panel)] " +
+  "bg-[image:var(--vui-gradient-route-soft)] bg-[color:var(--source-workbench-panel)] shadow-[var(--vui-elevation-1-sheen)] " +
   "max-[760px]:grid-cols-[1fr]";
 
 const TITLE_STRONG =

@@ -51,6 +51,22 @@
   --vui-shadow-hairline: 0 1px 0 color-mix(in srgb, var(--border-hairline) 68%, transparent);
   --vui-shadow-accent: 0 0 0 1px color-mix(in srgb, var(--accent-cool) 18%, transparent);
   --vui-shadow-inset-accent: inset 2px 0 0 var(--accent-cool);
+
+  /* Restrained elevation scale (2026-07-02 "moderate elevation" visual pass).
+     Additive — only applied where components opt in, so density is preserved. */
+  --vui-elevation-1:
+    0 1px 2px rgba(0, 0, 0, 0.28),
+    0 1px 1px rgba(0, 0, 0, 0.16);
+  --vui-elevation-2:
+    0 2px 6px rgba(0, 0, 0, 0.30),
+    0 6px 18px rgba(0, 0, 0, 0.22);
+  --vui-sheen: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --vui-elevation-1-sheen: var(--vui-sheen), var(--vui-elevation-1);
+  --vui-elevation-2-sheen: var(--vui-sheen), var(--vui-elevation-2);
+  --vui-ease: cubic-bezier(0.2, 0, 0, 1);
+  --vui-transition: 150ms var(--vui-ease);
+  --vui-radius-soft: 10px;
+
   --vui-gradient-route-soft: linear-gradient(
     180deg,
     color-mix(in srgb, var(--surface-panel) 92%, transparent),
@@ -196,6 +212,18 @@
   --vui-shadow-hairline: 0 1px 0 color-mix(in srgb, var(--border-hairline) 68%, transparent);
   --vui-shadow-accent: 0 0 0 1px color-mix(in srgb, var(--accent-cool) 16%, transparent);
   --vui-shadow-inset-accent: inset 2px 0 0 var(--accent-cool);
+
+  /* Light-theme elevation scale (softer, cool-tinted shadows). */
+  --vui-elevation-1:
+    0 1px 2px rgba(15, 23, 42, 0.07),
+    0 1px 3px rgba(15, 23, 42, 0.05);
+  --vui-elevation-2:
+    0 2px 8px rgba(15, 23, 42, 0.09),
+    0 8px 24px rgba(15, 23, 42, 0.07);
+  --vui-sheen: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  --vui-elevation-1-sheen: var(--vui-sheen), var(--vui-elevation-1);
+  --vui-elevation-2-sheen: var(--vui-sheen), var(--vui-elevation-2);
+
   --vui-gradient-route-soft: linear-gradient(
     180deg,
     color-mix(in srgb, var(--surface-panel) 96%, transparent),

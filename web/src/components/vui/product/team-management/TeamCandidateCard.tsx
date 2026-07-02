@@ -36,9 +36,9 @@ const CARD_BASE =
   "max-[820px]:grid-cols-[minmax(0,1fr)]";
 
 const CARD_INTERACTIVE =
-  "cursor-pointer transition-[border-color,box-shadow] duration-150 " +
-  "hover:border-[color:color-mix(in_srgb,var(--accent-cool)_54%,var(--border-strong))] " +
-  "focus-visible:outline-none focus-visible:border-[color:color-mix(in_srgb,var(--accent-cool)_54%,var(--border-strong))]";
+  "cursor-pointer transition-[border-color,box-shadow,background] duration-150 ease-[var(--vui-ease)] " +
+  "hover:border-[color:color-mix(in_srgb,var(--accent-cool)_54%,var(--border-strong))] hover:bg-[color:color-mix(in_srgb,var(--accent-cool)_5%,var(--vui-surface-row))] hover:shadow-[var(--vui-elevation-1)] " +
+  "focus-visible:outline-none focus-visible:border-[color:color-mix(in_srgb,var(--accent-cool)_54%,var(--border-strong))] focus-visible:shadow-[var(--vui-elevation-1)]";
 
 const CARD_SELECTED =
   "border-[color:color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_11%,transparent)]";
