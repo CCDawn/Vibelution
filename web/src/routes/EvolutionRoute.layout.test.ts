@@ -540,6 +540,16 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(worktreeReviewStylesSource).toContain("worktreeReviewSurfaceClass");
   });
 
+  it("hides the supervised toolbar intro so workflow cards own the top row", () => {
+    expect(routeSource).toContain('const hideSupervisedToolbarIntro = activeTrack === "supervised"');
+    expect(routeSource).toContain("hideSupervisedToolbarIntro ? `${styles.toolbar} ${styles.toolbarSupervisedFocus}` : styles.toolbar");
+    expect(routeSource).toContain("{!hideSupervisedToolbarIntro ? (");
+    expect(stylesSource).toContain(".toolbarSupervisedFocus");
+    expect(stylesSource).toContain(".toolbarSupervisedFocus .toolbarControls");
+    expect(stylesSource).toContain("flex: 1 1 100%");
+    expect(stylesSource).toContain("width: 100%");
+  });
+
   it("keeps the supervised center pane as a read-only embedded conversation surface", () => {
     expect(routeSource).toContain("LazyConversationView");
     expect(routeSource).toContain("monitoredCaseConversationMessages");

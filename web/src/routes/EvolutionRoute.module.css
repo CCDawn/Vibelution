@@ -63,6 +63,17 @@
   overflow: hidden;
 }
 
+.toolbarSupervisedFocus {
+  justify-content: flex-end;
+}
+
+.toolbarSupervisedFocus .toolbarControls {
+  flex: 1 1 100%;
+  min-width: 0;
+  width: 100%;
+  justify-content: flex-end;
+}
+
 .segmented,
 .intakeControl,
 .filterSegmented {
