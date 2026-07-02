@@ -2,7 +2,8 @@
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 8px;
-  height: 100%;
+  height: calc(100dvh - var(--shell-topbar-height));
+  max-height: calc(100dvh - var(--shell-topbar-height));
   min-height: 0;
   padding: 8px 12px 12px;
   overflow: hidden;
@@ -113,11 +114,11 @@
 
 .selfModeStack {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 8px;
   min-height: 0;
   height: 100%;
-  overflow: auto;
+  overflow: hidden;
   padding-right: 4px;
 }
 
@@ -3329,6 +3330,12 @@
 @media (max-width: 900px) {
   .page {
     gap: 6px;
+  }
+
+  .selfModeStack {
+    grid-template-rows: minmax(0, 1fr);
+    height: 100%;
+    overflow: auto;
   }
 
   .toolbar {

@@ -194,6 +194,27 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("正在加载自进化工作台");
   });
 
+  it("lets the self-evolution workspace fill the remaining viewport height", () => {
+    const pageRule = stylesSource.slice(stylesSource.indexOf(".page {"), stylesSource.indexOf(".toolbar {"));
+    const selfModeRule = stylesSource.slice(stylesSource.indexOf(".selfModeStack {"), stylesSource.indexOf(".overviewGrid {"));
+    const tabletRuleStart = stylesSource.indexOf("@media (max-width: 900px)");
+    const tabletRuleEnd = stylesSource.indexOf("@media (max-width: 640px)");
+    const tabletRules = stylesSource.slice(tabletRuleStart, tabletRuleEnd);
+    const tabletPageRule = tabletRules.slice(tabletRules.indexOf("  .page {"), tabletRules.indexOf("  .selfModeStack {"));
+    const tabletSelfModeRule = tabletRules.slice(tabletRules.indexOf("  .selfModeStack {"), tabletRules.indexOf("  .toolbar {"));
+
+    expect(pageRule).toContain("height: calc(100dvh - var(--shell-topbar-height));");
+    expect(pageRule).toContain("max-height: calc(100dvh - var(--shell-topbar-height));");
+    expect(selfModeRule).toContain("grid-template-rows: minmax(0, 1fr);");
+    expect(selfModeRule).toContain("overflow: hidden;");
+    expect(selfModeRule).not.toContain("grid-template-rows: auto minmax(0, 1fr);");
+    expect(tabletPageRule).not.toContain("height: auto;");
+    expect(tabletPageRule).not.toContain("overflow: visible;");
+    expect(tabletSelfModeRule).toContain("grid-template-rows: minmax(0, 1fr);");
+    expect(tabletSelfModeRule).toContain("height: 100%;");
+    expect(tabletSelfModeRule).toContain("overflow: auto;");
+  });
+
   it("keeps evolution tracks from duplicating their fixed agents as system Team canvases", () => {
     expect(routeSource).not.toContain("SELF_EVOLUTION_SYSTEM_TEAM_ID");
     expect(routeSource).not.toContain("SUPERVISED_EVOLUTION_SYSTEM_TEAM_ID");
