@@ -218,4 +218,38 @@ describe("ConversationView agent thread bridge", () => {
     expect(html).toContain("用户正文来自 content section");
     expect(html).toContain("助手回答来自 content section");
   });
+
+  it("renders assistant process controls from AgentMessage process sections", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-process",
+        role: "assistant",
+        content: "过程完成后的回答",
+        timestamp: "2026-07-02T09:45:00Z",
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "thought",
+            status: "done",
+            summary: "先确认 process section",
+            resultPreview: "先确认 process section",
+          },
+          {
+            sequence: 2,
+            kind: "tool",
+            status: "done",
+            name: "read_file_tool",
+            summary: "读取过程渲染",
+          },
+        ],
+      },
+    ]);
+
+    expect(html).toContain('data-agent-message-id="assistant-process"');
+    expect(html).toContain('data-agent-section-kinds="process content"');
+    expect(html).toContain('data-agent-process-section-ids="assistant-process-section-process-0"');
+    expect(html).toContain('data-agent-process-kind="answer-only"');
+    expect(html).toContain("工具调用 1");
+    expect(html).toContain("过程完成后的回答");
+  });
 });

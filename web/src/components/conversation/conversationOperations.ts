@@ -8,7 +8,7 @@ import type {
   AgentToolCallPart,
 } from "../../agent-thread/types";
 import { mergeConversationFeedbackEvents } from "./conversationFeedbackEvents";
-import { hasMentalBlock, hasThoughtBlock, hasToolBlock } from "./messageSections";
+import { agentMessageProcessSections, hasMentalBlock, hasThoughtBlock, hasToolBlock } from "./messageSections";
 
 export type ConversationOperationKind = "thought" | "mental" | "tool" | "status";
 
@@ -198,7 +198,8 @@ export function buildAgentMessageOperations(
   if (message.role !== "assistant") {
     return [];
   }
-  const operations = message.parts
+  const processParts = agentMessageProcessSections(message).flatMap((section) => section.parts);
+  const operations = processParts
     .map((part, index) => agentMessagePartToOperation(message, part, index, labels))
     .filter((operation): operation is ConversationOperation => operation !== null);
   return normalizeTimelineOperations(operations, message.streaming);

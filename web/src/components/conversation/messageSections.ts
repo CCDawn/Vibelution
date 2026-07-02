@@ -8,8 +8,10 @@ import type {
   AgentMessageSectionKind,
   AgentMentalPart,
   AgentReferencePart,
+  AgentRuntimeEventPart,
   AgentTextPart,
   AgentThoughtPart,
+  AgentToolCallPart,
 } from "../../agent-thread/types";
 
 export function hasMentalSnapshot(snapshot: MentalStateSnapshot | undefined) {
@@ -63,6 +65,17 @@ export type AgentMessageContentSection = Omit<AgentMessageSection, "kind" | "par
   parts: AgentTextPart[];
 };
 
+export type AgentMessageProcessPart =
+  | AgentThoughtPart
+  | AgentMentalPart
+  | AgentRuntimeEventPart
+  | AgentToolCallPart;
+
+export type AgentMessageProcessSection = Omit<AgentMessageSection, "kind" | "parts"> & {
+  kind: "process";
+  parts: AgentMessageProcessPart[];
+};
+
 export function buildAgentMessageSectionState(message: AgentMessage): AgentMessageSectionState {
   const sections = agentMessageToSections(message);
   const processParts = sectionParts(sections, "process");
@@ -95,6 +108,11 @@ export function agentMessageContextSections(message: AgentMessage): AgentMessage
 export function agentMessageContentSections(message: AgentMessage): AgentMessageContentSection[] {
   return agentMessageToSections(message)
     .filter((section): section is AgentMessageContentSection => section.kind === "content");
+}
+
+export function agentMessageProcessSections(message: AgentMessage): AgentMessageProcessSection[] {
+  return agentMessageToSections(message)
+    .filter((section): section is AgentMessageProcessSection => section.kind === "process");
 }
 
 function sectionParts(sections: AgentMessageSection[], kind: AgentMessageSectionKind) {
