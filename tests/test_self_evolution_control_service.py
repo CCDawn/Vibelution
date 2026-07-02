@@ -586,6 +586,30 @@ def test_self_evolution_agent_bindings_create_fixed_role_slots(tmp_path, monkeyp
     assert payload["modes"]["self_evolution"]["slots"]["observer"] == bindings["observer"]["agentId"]
 
 
+def test_self_observation_agent_binding_ignores_stale_non_observer_and_retired_slots(tmp_path, monkeypatch):
+    monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(service, "ROLLBACK_ROOT", tmp_path / "workspace" / "web_self_evolution")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+
+    bindings = service.self_evolution_agent_bindings()
+    observer_id = bindings["observer"]["agentId"]
+    path = agent_mode_binding_service.mode_binding_path()
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    for record in payload.get("bindings") or []:
+        if record.get("mode") == "self_evolution":
+            record.setdefault("slots", {})["executor"] = "agent-missing-executor"
+            record.setdefault("slots", {})["summarizer"] = ""
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    observer_binding = service.self_observation_agent_binding()
+
+    assert observer_binding["agentId"] == observer_id
+    repaired = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["self_evolution"]
+    assert "summarizer" not in repaired["slots"]
+
+
 def test_self_evolution_agent_repair_preserves_all_fixed_roles(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(service, "ROLLBACK_ROOT", tmp_path / "workspace" / "web_self_evolution")
@@ -1173,7 +1197,7 @@ def test_start_self_observation_run_rejects_tool_and_authorization_fields(monkey
 
 def test_self_observation_turn_finishes_with_report(monkeypatch):
     monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
-    monkeypatch.setattr(service, "self_evolution_agent_bindings", lambda: {"observer": {"agentId": "agent-observe-1"}})
+    monkeypatch.setattr(service, "self_observation_agent_binding", lambda: {"agentId": "agent-observe-1"})
     monkeypatch.setattr(service, "create_supervised_agent_session", lambda **kwargs: {"id": "session-observe-1"})
     monkeypatch.setattr(service, "submit_session_message", lambda *args, **kwargs: {"turnId": "turn-observe-1"})
     monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: None)
@@ -1245,6 +1269,59 @@ def test_self_observation_turn_finishes_with_report(monkeypatch):
     assert "当前理解：目标是观察规划。" in observed_latest_messages
 
 
+def test_self_observation_session_uses_observer_binding_without_full_role_validation(monkeypatch):
+    monkeypatch.setattr(
+        service,
+        "self_evolution_agent_bindings",
+        lambda: (_ for _ in ()).throw(
+            service.SelfEvolutionRunValidationError("Self-evolution role slot is not configured: summarizer")
+        ),
+    )
+    monkeypatch.setattr(service, "self_observation_agent_binding", lambda: {"agentId": "agent-observer-only"})
+    observed: dict[str, object] = {}
+
+    def fake_create_supervised_agent_session(**kwargs):
+        observed["session_kwargs"] = kwargs
+        return {"id": "session-observer-only"}
+
+    def fake_submit_session_message(*args, **kwargs):
+        observed["submit_args"] = args
+        observed["submit_kwargs"] = kwargs
+        return {"turnId": "turn-observer-only"}
+
+    monkeypatch.setattr(service, "create_supervised_agent_session", fake_create_supervised_agent_session)
+    monkeypatch.setattr(service, "submit_session_message", fake_submit_session_message)
+    monkeypatch.setattr(
+        service,
+        "get_session_detail",
+        lambda session_id: {
+            "id": session_id,
+            "messages": [{"role": "assistant", "content": "观察完成。"}],
+            "lastTurnStatus": "done",
+        },
+    )
+    monkeypatch.setattr(
+        service,
+        "get_session_turn_completion_snapshot",
+        lambda session_id, turn_id: {
+            "terminal": True,
+            "terminalStatus": "done",
+            "assistantText": "观察完成。",
+        },
+    )
+
+    result = service._run_observation_session(
+        run_id="self-observe-observer-only",
+        prompt="观察目标",
+        duration_seconds=5,
+    )
+
+    assert result["conversationSessionId"] == "session-observer-only"
+    assert result["messages"] == ["观察完成。"]
+    assert observed["session_kwargs"]["agent_id"] == "agent-observer-only"
+    assert observed["submit_kwargs"]["message_source"] == "self_observation"
+
+
 def test_self_observation_turn_marks_boundary_violation(monkeypatch):
     monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
     monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: None)
@@ -1314,8 +1391,8 @@ def test_run_self_observation_turn_records_session_progress_events(monkeypatch):
     monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
     monkeypatch.setattr(
         service,
-        "self_evolution_agent_bindings",
-        lambda: {"observer": {"agentId": "agent-observer"}},
+        "self_observation_agent_binding",
+        lambda: {"agentId": "agent-observer"},
     )
     monkeypatch.setattr(service, "create_supervised_agent_session", lambda **kwargs: {"id": "session-observe-live"})
     monkeypatch.setattr(
