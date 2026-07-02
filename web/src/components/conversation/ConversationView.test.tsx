@@ -835,7 +835,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("工具调用 1");
   });
 
-  it("does not repeat the tool-call label inside an expanded tool-only process packet", () => {
+  it("keeps failed tool-only packets summarized by default without exposing raw tool names", () => {
     const html = renderConversation(
       [
         {
@@ -859,8 +859,9 @@ describe("ConversationView edit resend affordance", () => {
     );
 
     expect(html.match(/工具调用/g)?.length ?? 0).toBe(1);
-    expect(html).toContain("apply_diff_edit_tool");
+    expect(html).not.toContain("apply_diff_edit_tool");
     expect(html).toContain("[编辑] 修改 config/public_config.py 失败");
+    expect(html).not.toContain("patch context not found");
   });
 
   it("keeps active streaming scroll signals on a small streaming-only tail", () => {
@@ -1474,6 +1475,55 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("[超时] cli_tool 执行超时");
     expect(html).not.toContain("第 1 轮");
     expect(html).not.toContain("已折叠更早");
+  });
+
+  it("keeps repeated failed tool attempts collapsed behind one compact process summary", () => {
+    const feedbackEvents = [
+      {
+        sequence: 1,
+        kind: "thought" as const,
+        status: "done",
+        summary: "正在根据上一轮资料继续处理",
+        resultPreview: "正在根据上一轮资料继续处理",
+      },
+      ...Array.from({ length: 6 }, (_, index) => ({
+        sequence: index + 2,
+        kind: "tool" as const,
+        status: index === 5 ? "failed" : "done",
+        name: "source_collection_stage_writeback_tool",
+        summary: index === 5
+          ? "[超时] source_collection_stage_writeback_tool 执行超时 (30秒)"
+          : "写回尝试完成",
+        error: index === 5 ? "[超时] source_collection_stage_writeback_tool 执行超时 (30秒)" : undefined,
+        arguments: {
+          agentId: "agent-20260629-201552-158796",
+          resultJson: "{ huge payload omitted }",
+        },
+        resultPreview: index === 5 ? "result_json was too large" : "accepted",
+        relatedThoughtSequence: 1,
+      })),
+    ];
+    const html = renderConversation(
+      [
+        {
+          id: "assistant-repeated-writeback-failures",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-07-03T00:00:00Z",
+          feedbackEvents,
+        },
+      ],
+      { useDefaultProcessDisplayMode: true },
+    );
+
+    expect(html).toContain("过程失败");
+    expect(html).toContain("思考过程 1");
+    expect(html).toContain("工具调用 6");
+    expect(html).toContain("[超时] source_collection_stage_writeback_tool 执行超时 (30秒)");
+    expect(html.match(/source_collection_stage_writeback_tool/g)?.length ?? 0).toBe(1);
+    expect(html).not.toContain("agent-20260629-201552-158796");
+    expect(html).not.toContain("result_json was too large");
+    expect(html).not.toContain("写回尝试完成");
   });
 
   it("renders group-room transcripts as sync records instead of assistant answers", () => {
