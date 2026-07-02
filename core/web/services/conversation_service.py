@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.agent_kernel.source_authority import projection_edit_contract, source_ref
+
 from . import chat_room_service, session_service, team_service
 from .runtime_scene_service import record_runtime_scene_event
 
@@ -57,6 +59,8 @@ def list_conversations() -> list[dict[str, Any]]:
         if room_id in archived_team_room_ids:
             filtered_archived_team_room_count += 1
             continue
+        room_source_ref = source_ref("chat_room", room_id, {"roomId": room_id})
+        room_projection_edit = projection_edit_contract("chat_room", room_id, {"roomId": room_id})
         items.append(
             {
                 "conversationId": room_id,
@@ -71,6 +75,9 @@ def list_conversations() -> list[dict[str, Any]]:
                 "workspacePath": f"workspace/chat_rooms/{room.get('roomId') or ''}",
                 "participantCount": len(list(room.get("participants") or [])),
                 "mode": str(room.get("mode") or "").strip(),
+                "sourceRef": room_source_ref,
+                "projectionEdit": room_projection_edit,
+                "agentSourceRef": None,
             }
         )
     items.sort(key=lambda item: str(item.get("updatedAt") or ""), reverse=True)

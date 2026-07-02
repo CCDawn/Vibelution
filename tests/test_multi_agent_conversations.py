@@ -525,6 +525,10 @@ def test_conversation_index_returns_direct_agents_and_group_rooms(tmp_path, monk
     group = next(item for item in conversations if item["type"] == "group_room")
     assert group["roomId"] == room["roomId"]
     assert group["participantCount"] == 2
+    assert group["sourceRef"]["owner"] == "ChatRoomService"
+    assert group["sourceRef"]["canonicalEditRoute"] == f"/chat?room={room['roomId']}"
+    assert group["projectionEdit"]["canWrite"] is False
+    assert group["projectionEdit"]["mode"] == "deep_link_to_source"
     assert list_session_calls == 1
 
 
