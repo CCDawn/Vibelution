@@ -379,7 +379,7 @@ const styles: Record<string, string> = {
   researchStageBoundaryPanel:
     "researchStageBoundaryPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   researchStageCard:
-    "researchStageCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "researchStageCard min-w-0 rounded-[var(--vui-radius-soft)] border border-[var(--vui-border-subtle)] bg-[image:var(--vui-gradient-route-soft)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-elevation-1-sheen)] p-2 transition-[transform,box-shadow,border-color] duration-150 ease-[var(--vui-ease)] hover:-translate-y-px hover:shadow-[var(--vui-elevation-2-sheen)] hover:border-[color:color-mix(in_srgb,var(--accent-cool)_30%,var(--vui-border-subtle))]",
   researchStageCardActive:
     "researchStageCardActive min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   researchStageCardHead:
@@ -389,7 +389,7 @@ const styles: Record<string, string> = {
   researchStageGrid:
     "researchStageGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   researchStageHeroPanel:
-    "researchStageHeroPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "researchStageHeroPanel min-w-0 rounded-[var(--vui-radius-soft)] border border-[var(--vui-border-subtle)] bg-[image:var(--vui-gradient-route-soft)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-elevation-1-sheen)] p-2",
   researchStageHeroStats:
     "researchStageHeroStats min-w-0 grid gap-2 !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-2",
   researchStageLauncher:
