@@ -76,6 +76,24 @@ describe("VUI foundation primitives", () => {
     );
   });
 
+  it("keeps button geometry content-sized unless a caller opts into full width", () => {
+    const compactMarkup = renderToStaticMarkup(
+      <VToolbar ariaLabel="Button fit">
+        <VButton icon={<Search size={14} />}>Search</VButton>
+        <VIconButton label="Refresh" icon={<Search size={14} />} />
+      </VToolbar>,
+    );
+    const fullWidthMarkup = renderToStaticMarkup(<VButton className="w-full">Expand row</VButton>);
+
+    expect(compactMarkup).toContain("w-fit");
+    expect(compactMarkup).toContain("justify-self-start");
+    expect(compactMarkup).toContain("shrink-0");
+    expect(compactMarkup).toContain("aspect-square");
+    expect(compactMarkup).toContain("min-w-[var(--vui-control-height-sm)]");
+    expect(fullWidthMarkup).not.toContain("w-fit");
+    expect(fullWidthMarkup).toContain("w-full");
+  });
+
   it("keeps native-only controls behind a VUI marker", () => {
     const markup = renderToStaticMarkup(
       <VNativeButton className="compact-native">Open</VNativeButton>,
@@ -83,7 +101,15 @@ describe("VUI foundation primitives", () => {
 
     expect(markup).toContain('data-vui="native-button"');
     expect(markup).toContain('type="button"');
-    expect(markup).toContain('class="compact-native"');
+    expect(markup).toContain("compact-native");
+  });
+
+  it("keeps native VUI buttons content-sized by default", () => {
+    const markup = renderToStaticMarkup(<VNativeButton>Open</VNativeButton>);
+
+    expect(markup).toContain("inline-flex");
+    expect(markup).toContain("justify-self-start");
+    expect(markup).toContain("whitespace-nowrap");
   });
 
   it("renders panels as background-integrated native surfaces", () => {

@@ -39,6 +39,28 @@ function variantClass(variant: VuiButtonVariant | undefined): string {
   return vuiButtonBaseClass;
 }
 
+function classNameTokens(className: VButtonProps["className"]): string[] {
+  return typeof className === "string" ? className.trim().split(/\s+/).filter(Boolean) : [];
+}
+
+function hasExplicitRootWidth(className: VButtonProps["className"]): boolean {
+  return classNameTokens(className).some((token) => {
+    if (token.startsWith("[&")) {
+      return false;
+    }
+    return /(?:^|:)!?w-(?:auto|fit|full|max|min|\[|[0-9])/.test(token);
+  });
+}
+
+function buttonGeometryClass(className: VButtonProps["className"]): string {
+  return [
+    "inline-flex max-w-full shrink-0 justify-self-start whitespace-nowrap",
+    hasExplicitRootWidth(className) ? null : "w-fit",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 export function VButton({
   variant = "secondary",
   density = "compact",
@@ -59,7 +81,12 @@ export function VButton({
       {...titleProps}
       data-vui={dataVui ?? "button"}
       size={vuiControlHeight(density)}
-      className={[variantClass(variant), "min-w-0 px-2 text-[var(--vui-font-sm)] font-semibold", className]
+      className={[
+        variantClass(variant),
+        buttonGeometryClass(className),
+        "min-w-0 px-2 text-[var(--vui-font-sm)] font-semibold",
+        className,
+      ]
         .filter(Boolean)
         .join(" ")}
     >

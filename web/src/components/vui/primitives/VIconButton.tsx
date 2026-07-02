@@ -20,7 +20,7 @@ export function VIconButton({ label, icon, title, ...props }: VIconButtonProps) 
       aria-label={label}
       title={title ?? label}
       className={[
-        "h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-0 px-0",
+        "h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] aspect-square flex-none shrink-0 px-0",
         props.className,
       ]
         .filter(Boolean)
