@@ -1010,6 +1010,24 @@
   text-align: left;
 }
 
+:where(.vui-app-appshell).lifecycleMenuItem [data-slot="vui-button-content"],
+:where(.vui-app-appshell).lifecycleMenuDangerItem [data-slot="vui-button-content"] {
+  display: contents;
+}
+
+:where(.vui-app-appshell).lifecycleMenuItem [data-slot="vui-button-icon"],
+:where(.vui-app-appshell).lifecycleMenuDangerItem [data-slot="vui-button-icon"] {
+  justify-self: center;
+}
+
+:where(.vui-app-appshell).lifecycleMenuItem [data-slot="vui-button-label"],
+:where(.vui-app-appshell).lifecycleMenuDangerItem [data-slot="vui-button-label"] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 1420px) {
   :where(.vui-app-appshell).topClock span:last-child,
   :where(.vui-app-appshell).utilityTriggerLabel,
