@@ -302,7 +302,8 @@ const styles = createVuiStyleMap(styleKeys, {
     markdownTable: "table-fixed",
     messageBody: "whitespace-pre-wrap [overflow-wrap:anywhere] max-w-[min(100%,76ch)]",
     operationDetails: "border-0 bg-transparent",
-    operationItem: "w-[min(100%,72ch)] grid grid-cols-[22px_minmax(0,1fr)_auto_auto_16px] items-start gap-1.5",
+    operationItem:
+      "w-[min(100%,72ch)] grid grid-cols-[22px_minmax(0,1fr)_auto_auto_16px] items-start gap-1.5 !rounded-none !border-x-0 !border-t-0 border-b border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] !bg-transparent !p-0 !pb-1 !shadow-none",
     operationItemTool: "max-w-full",
     operationStatus: "justify-self-start",
     operationText: "max-w-full",
@@ -313,12 +314,12 @@ const styles = createVuiStyleMap(styleKeys, {
     reActThoughtText: "border-l-0 bg-transparent",
     responseLabel: "text-[var(--vui-font-md)]",
     responseBody:
-      "grid gap-2 rounded-[var(--radius-panel)] bg-[color-mix(in_srgb,var(--surface-panel)_66%,transparent)] px-3 py-2 text-[var(--fg-primary)] shadow-[var(--vui-shadow-hairline)]",
+      "grid gap-1.5 border-t border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] bg-transparent px-0 py-1.5 text-[var(--fg-primary)] shadow-none",
     responseSection:
-      "grid w-[min(100%,920px)] max-w-full gap-1.5 border-l border-[color-mix(in_srgb,var(--accent-cool)_22%,var(--vui-border-subtle))] pl-3",
+      "grid w-[min(100%,920px)] max-w-full gap-1 border-l border-[color-mix(in_srgb,var(--accent-cool)_22%,var(--vui-border-subtle))] pl-2.5",
     responseSegment_answer: "[&_.markdownBody]:max-w-[min(100%,76ch)] [&_.responseSegmentHeader]:hidden",
     responseToggle:
-      "border-0 bg-transparent p-0 text-[var(--fg-secondary)] hover:border-transparent hover:bg-transparent [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:inline-flex [&_[data-slot=vui-button-label]]:gap-[7px]",
+      "!grid !w-full grid-cols-[auto_auto_minmax(0,1fr)] !items-center !justify-start gap-x-1.5 !border-0 !bg-transparent !p-0 !text-left text-[var(--fg-secondary)] !shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
     sendButton: "bg-[color-mix(in_srgb,var(--accent-cool)_14%,var(--surface-card))] shadow-none hover:translate-y-0",
     streamingResponseText: "text-[var(--vui-font-chat)] leading-[var(--vui-line-readable)]",
     surfaceCompact: "bg-[color-mix(in_srgb,var(--surface-panel)_72%,transparent)] [&_.timeline]:bg-[color-mix(in_srgb,var(--surface-page)_14%,transparent)] [&_.timeline]:px-3 [&_.timeline]:pt-[9px] [&_.timeline]:pb-[11px] [&_.composer]:gap-[7px] [&_.composer]:px-2.5 [&_.composer]:pt-1.5 [&_.composer]:pb-2",
