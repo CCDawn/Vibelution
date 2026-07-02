@@ -202,9 +202,12 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.answerOnlyProcessToggle).toContain("grid-cols-[14px_auto_auto_minmax(0,1fr)_14px]");
     expect(styles.answerOnlyProcessToggle).toContain("max-w-full");
     expect(styles.answerOnlyProcessStatic).toContain("grid-cols-[14px_auto_auto]");
+    expect(styles.responseToggle).toContain("!grid");
+    expect(styles.responseToggle).toContain("!w-full");
+    expect(styles.responseToggle).toContain("!justify-start");
+    expect(styles.responseToggle).toContain("!text-left");
     expect(styles.responseToggle).toContain("[&_[data-slot=vui-button-content]]:contents");
-    expect(styles.responseToggle).toContain("[&_[data-slot=vui-button-label]]:inline-flex");
-    expect(styles.responseToggle).toContain("gap-[7px]");
+    expect(styles.responseToggle).toContain("[&_[data-slot=vui-button-label]]:contents");
   });
 
   it("keeps conversation timeline previews wrapped and button slots flat", () => {
@@ -225,6 +228,13 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.timelineCellPreview).toContain("line-clamp-2");
     expect(styles.operationItem).not.toContain("860px");
     expect(styles.operationItem).toContain("w-[min(100%,72ch)]");
+    expect(styles.operationItem).toContain("!rounded-none");
+    expect(styles.operationItem).toContain("!border-x-0");
+    expect(styles.operationItem).toContain("!border-t-0");
+    expect(styles.operationItem).toContain("border-b");
+    expect(styles.operationItem).toContain("!bg-transparent");
+    expect(styles.operationItem).toContain("!p-0");
+    expect(styles.operationItem).toContain("pb-1");
     expect(styles.operationStatus).toContain("justify-self-start");
   });
 
@@ -316,11 +326,14 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(styles.responseSection).toContain("w-[min(100%,920px)]");
     expect(styles.responseSection).toContain("border-l");
-    expect(styles.responseSection).toContain("pl-3");
-    expect(styles.responseBody).toContain("rounded-[var(--radius-panel)]");
-    expect(styles.responseBody).toContain("bg-[color-mix(in_srgb,var(--surface-panel)_66%,transparent)]");
-    expect(styles.responseBody).toContain("px-3");
-    expect(styles.responseBody).toContain("py-2");
+    expect(styles.responseSection).toContain("pl-2.5");
+    expect(styles.responseBody).toContain("border-t");
+    expect(styles.responseBody).toContain("bg-transparent");
+    expect(styles.responseBody).toContain("px-0");
+    expect(styles.responseBody).toContain("py-1.5");
+    expect(styles.responseBody).toContain("shadow-none");
+    expect(styles.responseBody).not.toContain("rounded-[var(--radius-panel)]");
+    expect(styles.responseBody).not.toContain("bg-[color-mix(in_srgb,var(--surface-panel)_66%,transparent)]");
 
     expect(styles.answerOnlyProcessGroup).toContain("w-[min(100%,920px)]");
     expect(styles.answerOnlyProcessGroup).toContain("max-w-full");
