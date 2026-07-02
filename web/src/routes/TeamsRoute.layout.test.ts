@@ -544,6 +544,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("正在读取资料提炼结果");
     expect(routeSource).toContain("列表正在同步");
     expect(routeSource).toContain("sourceCollectionStageProjectionState");
+    expect(routeSource).toContain("agent_interrupted");
     expect(routeSource).toContain("agent_done_artifact_pending");
     expect(routeSource).toContain("latestTask");
     expect(routeSource).toContain("blockingReasons");
@@ -556,6 +557,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("Agent 返回的候选 ID 没有匹配到本轮资料");
     expect(routeSource).not.toContain("技术详情");
     expect(routeSource).toContain("待补提炼");
+    expect(routeSource).toContain("已中断");
+    expect(routeSource).toContain("继续这次任务");
     expect(routeSource).toContain("待 Agent 复核");
     expect(routeSource).toContain("继续补全提炼");
     expect(routeSource).not.toContain("sourceCollectionStageBlockingReasonLabel(module.projection.blockingReasons[0], lang)");
@@ -585,6 +588,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("completionGatePassed");
     expect(routeSource).toContain("sourceCollectionTaskToolProgressMetric");
     expect(routeSource).toContain("检查项");
+    expect(routeSource).toContain('sourceCollectionStageModules.find((module) => module.state === "failed")');
     expect(routeSource).not.toContain("仍需完成检查项或生成本阶段产物");
     expect(routeSource).toContain("invalidRecordIds");
     expect(routeSource).toContain("本轮未生成候选资料");

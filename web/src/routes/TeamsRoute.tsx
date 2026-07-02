@@ -539,6 +539,9 @@ function sourceCollectionStageProjectionState(
   if (projection.status === "agent_running") {
     return "active";
   }
+  if (projection.status === "agent_interrupted") {
+    return "failed";
+  }
   if (projection.status === "closed_loop" || projection.status === "artifact_ready_no_latest_agent_task") {
     return "done";
   }
@@ -634,6 +637,7 @@ function sourceCollectionStageTaskStatusLabel(status: string | null | undefined,
     blocked: "受阻",
     failed: "失败",
     cancelled: "已取消",
+    interrupted: "已中断",
   };
   return labels[normalized] ?? (normalized || "任务");
 }
@@ -823,6 +827,9 @@ function sourceCollectionStageUserStatusLabel(
   if (lang === "zh" && projection.userStatusLabel) {
     return projection.userStatusLabel;
   }
+  if (projection.status === "agent_interrupted") {
+    return lang === "zh" ? "已中断" : "Interrupted";
+  }
   const currentCoverage = projection.currentCoverageSummary;
   if (currentCoverage?.applicable && currentCoverage.complete === false) {
     return sourceCollectionStageRecoveryStatusLabel(projection.stageId, lang);
@@ -867,6 +874,7 @@ function sourceCollectionStageUserStatusLabel(
   const labels: Record<string, string> = lang === "zh"
     ? {
         agent_running: "Agent 正在处理",
+        agent_interrupted: "已中断",
         closed_loop: "本阶段已完成",
         artifact_ready_no_latest_agent_task: "资料已生成",
         agent_blocked: "Agent 任务受阻",
@@ -875,6 +883,7 @@ function sourceCollectionStageUserStatusLabel(
       }
     : {
         agent_running: "Agent running",
+        agent_interrupted: "Interrupted",
         closed_loop: "Stage complete",
         artifact_ready_no_latest_agent_task: "Output ready",
         agent_blocked: "Agent blocked",
@@ -897,6 +906,13 @@ function sourceCollectionStageUserSummary(
   const artifact = typeof projection.counts?.artifact === "number" ? projection.counts.artifact : 0;
   if (lang === "zh" && projection.userSummary) {
     return projection.userSummary;
+  }
+  if (projection.status === "agent_interrupted") {
+    if (lang === "zh") {
+      const summary = projection.latestTask?.summary || "Agent 会话已中断，尚未完成阶段写回。";
+      return `${summary} 建议：继续这次任务。`;
+    }
+    return "The Agent turn was interrupted before stage writeback. Continue this task or restart the stage.";
   }
   const currentCoverage = projection.currentCoverageSummary;
   const currentTotal = typeof currentCoverage?.total === "number" ? currentCoverage.total : 0;
@@ -11854,6 +11870,7 @@ export function TeamsRoute({
   ];
   const sourceCollectionBoardCurrentModule =
     sourceCollectionStageModules.find((module) => module.state === "active")
+    ?? sourceCollectionStageModules.find((module) => module.state === "failed")
     ?? sourceCollectionStageModules.find((module) => module.state === "pending")
     ?? sourceCollectionStageModules.find((module) => module.state === "idle")
     ?? sourceCollectionStageModules[sourceCollectionStageModules.length - 1];
