@@ -111,8 +111,35 @@ export function sessionSummaryFromDetail(detail: SessionDetail): SessionSummary 
   if (detail.agentDisplayName !== undefined) {
     summary.agentDisplayName = detail.agentDisplayName;
   }
+  if (detail.agentAvatarImagePath !== undefined) {
+    summary.agentAvatarImagePath = detail.agentAvatarImagePath;
+  }
+  if (detail.agentAvatarImageUrl !== undefined) {
+    summary.agentAvatarImageUrl = detail.agentAvatarImageUrl;
+  }
+  if (detail.agentPrimaryMode !== undefined) {
+    summary.agentPrimaryMode = detail.agentPrimaryMode;
+  }
+  if (detail.agentRoleKey !== undefined) {
+    summary.agentRoleKey = detail.agentRoleKey;
+  }
+  if (detail.agentPromptTemplateId !== undefined) {
+    summary.agentPromptTemplateId = detail.agentPromptTemplateId;
+  }
+  if (detail.agentPromptSnapshot !== undefined) {
+    summary.agentPromptSnapshot = detail.agentPromptSnapshot;
+  }
+  if (detail.dialogueModelId !== undefined) {
+    summary.dialogueModelId = detail.dialogueModelId;
+  }
+  if (detail.agentInboxPendingCount !== undefined) {
+    summary.agentInboxPendingCount = detail.agentInboxPendingCount;
+  }
   if (detail.agentWorkspacePath !== undefined) {
     summary.agentWorkspacePath = detail.agentWorkspacePath;
+  }
+  if (detail.agentMissingId !== undefined) {
+    summary.agentMissingId = detail.agentMissingId;
   }
   if (detail.agentPrimaryDirectSessionId !== undefined) {
     summary.agentPrimaryDirectSessionId = detail.agentPrimaryDirectSessionId;
@@ -137,6 +164,15 @@ export function sessionSummaryFromDetail(detail: SessionDetail): SessionSummary 
   }
   if (detail.agentSourceRef !== undefined) {
     summary.agentSourceRef = detail.agentSourceRef;
+  }
+  if (detail.conversationIndexVisibility !== undefined) {
+    summary.conversationIndexVisibility = detail.conversationIndexVisibility;
+  }
+  if (detail.conversationIndexKind !== undefined) {
+    summary.conversationIndexKind = detail.conversationIndexKind;
+  }
+  if (detail.conversationIndexErrors !== undefined) {
+    summary.conversationIndexErrors = detail.conversationIndexErrors;
   }
   return summary;
 }
