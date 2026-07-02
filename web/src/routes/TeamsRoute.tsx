@@ -64,6 +64,7 @@ import {
 } from "../components/vui";
 import {
   TeamSourceFilterBar,
+  TeamSourcePagination,
   TeamSourceResultStats,
   TeamStageCard,
   TeamStageCommandBar,
@@ -6809,23 +6810,17 @@ export function TeamsRoute({
     const start = (page - 1) * SOURCE_COLLECTION_RESULT_PAGE_SIZE + 1;
     const end = Math.min(total, page * SOURCE_COLLECTION_RESULT_PAGE_SIZE);
     return (
-      <div
-        className={styles.sourceCollectionPagination}
-        aria-label={lang === "zh" ? "结果分页" : "Result pagination"}
-        onClick={stopSourceCollectionPaginationEvent}
-        onMouseDown={stopSourceCollectionPaginationEvent}
-      >
-        <span>{lang === "zh" ? `第 ${start}-${end} 条 / 共 ${total} 条` : `${start}-${end} of ${total}`}</span>
-        <div>
-          <VNativeButton type="button" disabled={page <= 1} onClick={() => setSourceCollectionResultPage(stageId, page - 1)}>
-            {lang === "zh" ? "上一页" : "Previous"}
-          </VNativeButton>
-          <strong>{page}/{pageCount}</strong>
-          <VNativeButton type="button" disabled={page >= pageCount} onClick={() => setSourceCollectionResultPage(stageId, page + 1)}>
-            {lang === "zh" ? "下一页" : "Next"}
-          </VNativeButton>
-        </div>
-      </div>
+      <TeamSourcePagination
+        ariaLabel={lang === "zh" ? "结果分页" : "Result pagination"}
+        rangeLabel={lang === "zh" ? `第 ${start}-${end} 条 / 共 ${total} 条` : `${start}-${end} of ${total}`}
+        page={page}
+        pageCount={pageCount}
+        previousLabel={lang === "zh" ? "上一页" : "Previous"}
+        nextLabel={lang === "zh" ? "下一页" : "Next"}
+        onPrevious={() => setSourceCollectionResultPage(stageId, page - 1)}
+        onNext={() => setSourceCollectionResultPage(stageId, page + 1)}
+        onContain={stopSourceCollectionPaginationEvent}
+      />
     );
   }
 

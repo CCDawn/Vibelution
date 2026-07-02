@@ -640,7 +640,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("renderSourceCollectionPagination");
     expect(routeSource).toContain("stopSourceCollectionPaginationEvent");
     expect(routeSource).toContain("preventSourceCollectionPanelSummaryToggle");
-    expect(routeSource).toContain("onMouseDown={stopSourceCollectionPaginationEvent}");
+    expect(routeSource).toContain("onContain={stopSourceCollectionPaginationEvent}");
     expect(routeSource).toContain("onClick={preventSourceCollectionPanelSummaryToggle}");
     expect(routeSource).not.toContain("sourceCollectionTraceMessagesForStage");
     expect(routeSource).not.toContain("renderSourceCollectionStageProcessPanel");
