@@ -9,9 +9,7 @@ import {
   Gauge,
   LibraryBig,
   LoaderCircle,
-  Pause,
   Play,
-  RefreshCw,
   Save,
   Sparkles,
   Square,
@@ -33,10 +31,6 @@ import {
   EvolutionActionState,
   ConfigSummary,
   EvolutionRunActionResponse,
-  EvolutionRunStartResponse,
-  EvolutionRunCommandAccepted,
-  EvolutionRunCommandStatus,
-  EvolutionRunDeleteResponse,
   EvolutionWorkbench,
   EvolutionProposalBulkDeleteResponse,
   EvolutionProposalDeleteResponse,
@@ -65,12 +59,8 @@ import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
 import { type SupervisedWorkspaceWorkflowStep } from "./SupervisedWorkspaceTabs";
 import { isSelfEvolutionWorktreeRun } from "./supervisedWorktreeReview";
 import {
-  isCompletedEvolutionRunCommandFailure,
-  isCompletedEvolutionRunCommandSuccess,
   isLiveSupervisedRunStatus,
-  isEvolutionRunCommandAccepted,
   parseRunStreamSnapshot,
-  requireEvolutionRunSnapshot,
   selectRunSnapshotWithRunId,
   selectSupervisedRunStreamTarget,
   shouldIgnoreActiveRunSnapshot,
@@ -707,7 +697,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [supervisedMentalModelMode, setSupervisedMentalModelMode] = useState<SupervisedMentalModelMode>("follow");
   const [selectedSupervisedWorkflowStepId, setSelectedSupervisedWorkflowStepId] = useState<SupervisedWorkflowStepId | null>(null);
   const [liveActiveRun, setLiveActiveRun] = useState<EvolutionActiveRun | null>(null);
-  const [supervisedStartCommand, setSupervisedStartCommand] = useState<EvolutionRunCommandAccepted | null>(null);
   const [selfGoalInput, setSelfGoalInput] = useState("");
   const [selfGoalInitialized, setSelfGoalInitialized] = useState(false);
   const [selectedSelfObservationRunId, setSelectedSelfObservationRunId] = useState("");
@@ -834,20 +823,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     refetchIntervalInBackground: false,
     enabled: Boolean(selfTrackQueriesEnabled && selectedSelfObservationRunId),
   });
-  const supervisedStartCommandId = supervisedStartCommand?.commandId ?? "";
-  const supervisedStartCommandStatusQuery = useQuery({
-    queryKey: queryKeys.evolutionRunCommand(supervisedStartCommandId || "__none__"),
-    queryFn: () =>
-      fetchJson<EvolutionRunCommandStatus>(`/api/evolution/runs/commands/${encodeURIComponent(supervisedStartCommandId)}`),
-    refetchInterval: resolvePollingInterval(pageVisible, 1_500),
-    refetchIntervalInBackground: false,
-    enabled: Boolean(
-      supervisedTrackQueriesEnabled
-        && pageVisible
-        && supervisedStartCommandId
-        && isLocalSupervisedStartPlaceholder(liveActiveRun),
-    ),
-  });
   const selectedDatasetLimit = useMemo(
     () => (
       sourceKind === "dataset" && datasetLimitInput.trim()
@@ -856,12 +831,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     ),
     [datasetLimitInput, sourceKind],
   );
-  const startRunMutation = useMutation({
+  const startWorktreeRunMutation = useMutation({
     onMutate: () => {
       const placeholderAgentBindings = activeRunSnapshot?.agentBindings
         ?? workspaceSnapshot?.currentAgentBindings
         ?? EMPTY_AGENT_BINDINGS;
-      setSupervisedStartCommand(null);
       setActionFeedback(lang === "zh" ? "启动请求已提交，正在等待运行记录刷新。" : "Start request submitted; waiting for the run record to refresh.");
       setLiveActiveRun(buildSupervisedStartPlaceholder({
         sourceKind,
@@ -873,44 +847,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         agentBindings: placeholderAgentBindings,
         lang,
       }));
-    },
-    mutationFn: () =>
-      fetchJson<EvolutionRunStartResponse>("/api/evolution/runs", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          sourceKind,
-          datasetName: sourceKind === "dataset" ? datasetName : "",
-          datasetLimit: selectedDatasetLimit,
-          bundleName: sourceKind === "bundle" ? bundleNameInput : "",
-          keepWorktree,
-          mentalModelMode: supervisedMentalModelMode,
-        }),
-      }),
-    onSuccess: async (payload) => {
-      if (isEvolutionRunCommandAccepted(payload)) {
-        setSupervisedStartCommand(payload);
-        setActionFeedback(payload.summary || (lang === "zh" ? "启动命令已排队，等待运行记录刷新。" : "Start command queued; waiting for the run record to refresh."));
-        await evolutionWorkspaceCache.refreshSupervisedActiveRun();
-        return;
-      }
-      const snapshot = requireEvolutionRunSnapshot(payload, "supervised evolution start");
-      setSupervisedStartCommand(null);
-      setActionFeedback("");
-      setLiveActiveRun(snapshot);
-      await evolutionWorkspaceCache.afterSupervisedWorkspaceChanged();
-    },
-    onError: () => {
-      setSupervisedStartCommand(null);
-      setLiveActiveRun((current) => (isLocalSupervisedStartPlaceholder(current) ? null : current));
-      void evolutionWorkspaceCache.refreshSupervisedActiveRun();
-    },
-  });
-  const startWorktreeRunMutation = useMutation({
-    onMutate: () => {
-      setActionFeedback("");
     },
     mutationFn: () =>
       fetchJson<SupervisedWorktreeRun>("/api/evolution/worktree-runs", {
@@ -937,7 +873,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       }),
     onSuccess: async (snapshot) => {
       setActionFeedback(snapshot.latestMessage || t("startClosedLoopQueued"));
+      setLiveActiveRun((current) => (isLocalSupervisedStartPlaceholder(current) ? null : current));
       await evolutionWorkspaceCache.afterWorktreeRunChanged();
+    },
+    onError: () => {
+      setLiveActiveRun((current) => (isLocalSupervisedStartPlaceholder(current) ? null : current));
+      void evolutionWorkspaceCache.afterWorktreeRunChanged();
     },
   });
   const startSimulationWorktreeRunMutation = useMutation({
@@ -970,81 +911,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     onSuccess: async (snapshot) => {
       setActionFeedback(snapshot.latestMessage || t("startClosedLoopQueued"));
       await evolutionWorkspaceCache.afterWorktreeRunChanged();
-    },
-  });
-  const invalidateSupervisedEvolution = async () => {
-    await evolutionWorkspaceCache.afterSupervisedWorkspaceChanged();
-  };
-  const pauseRunMutation = useMutation({
-    onMutate: () => {
-      setActionFeedback("");
-    },
-    mutationFn: (runId: string) =>
-      fetchJson<EvolutionActiveRun>(`/api/evolution/runs/${runId}/pause`, {
-        method: "POST",
-      }).then((snapshot) => requireEvolutionRunSnapshot(snapshot, "supervised pause")),
-    onSuccess: async (snapshot) => {
-      setActionFeedback(snapshot.latestMessage || "");
-      setLiveActiveRun(snapshot);
-      await invalidateSupervisedEvolution();
-    },
-  });
-  const resumeRunMutation = useMutation({
-    onMutate: () => {
-      setActionFeedback("");
-    },
-    mutationFn: (runId: string) =>
-      fetchJson<EvolutionActiveRun>(`/api/evolution/runs/${runId}/resume`, {
-        method: "POST",
-      }).then((snapshot) => requireEvolutionRunSnapshot(snapshot, "supervised resume")),
-    onSuccess: async (snapshot) => {
-      setActionFeedback(snapshot.latestMessage || "");
-      setLiveActiveRun(snapshot);
-      await invalidateSupervisedEvolution();
-    },
-  });
-  const retryRunMutation = useMutation({
-    onMutate: () => {
-      setActionFeedback("");
-    },
-    mutationFn: (runId: string) =>
-      fetchJson<EvolutionActiveRun>(`/api/evolution/runs/${runId}/retry`, {
-        method: "POST",
-      }).then((snapshot) => requireEvolutionRunSnapshot(snapshot, "supervised retry")),
-    onSuccess: async (snapshot) => {
-      setActionFeedback(snapshot.latestMessage || "");
-      setLiveActiveRun(snapshot);
-      await invalidateSupervisedEvolution();
-    },
-  });
-  const terminateRunMutation = useMutation({
-    onMutate: () => {
-      setActionFeedback("");
-    },
-    mutationFn: (runId: string) =>
-      fetchJson<EvolutionActiveRun>(`/api/evolution/runs/${runId}/terminate`, {
-        method: "POST",
-      }).then((snapshot) => requireEvolutionRunSnapshot(snapshot, "supervised terminate")),
-    onSuccess: async (snapshot) => {
-      setActionFeedback(snapshot.latestMessage || snapshot.reason || "");
-      setLiveActiveRun(snapshot);
-      await invalidateSupervisedEvolution();
-    },
-  });
-  const deleteRunMutation = useMutation({
-    onMutate: () => {
-      setActionFeedback("");
-    },
-    mutationFn: (runId: string) =>
-      fetchJson<EvolutionRunDeleteResponse>(`/api/evolution/runs/${runId}`, {
-        method: "DELETE",
-      }),
-    onSuccess: async (payload) => {
-      setActionFeedback(payload.summary || "");
-      if (!isEvolutionRunCommandAccepted(payload)) {
-        setLiveActiveRun(null);
-      }
-      await invalidateSupervisedEvolution();
     },
   });
   const invalidateSelfEvolution = async () => {
@@ -1266,7 +1132,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     : supervisedPrimaryRunning
       ? (lang === "zh" ? "监督运行中" : "Supervised running")
       : t("startSupervisedRun");
-  const monitoredRunStatus = String(monitoredRun?.status || "").toLowerCase();
   const monitoredCaseTranscript = monitoredRun?.currentCaseIo?.transcript ?? [];
   const monitoredCaseConversationMessages = monitoredRun?.currentCaseIo?.conversationMessages ?? [];
   const monitoredCaseHasConversationMessages = monitoredCaseConversationMessages.length > 0;
@@ -1304,9 +1169,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const monitoredCaseHasVisibleIo = Boolean(
     monitoredRun?.currentCasePrompt || monitoredRun?.currentCaseIo?.latestInput || monitoredCaseHasOutput || monitoredPreflightIssue,
   );
-  const runPauseRequested = Boolean(monitoredRun?.pauseRequested) && monitoredRunStatus !== "paused";
-  const runPaused = monitoredRunStatus === "paused";
-  const runStopping = monitoredRunStatus === "stopping" || Boolean(monitoredRun?.stopRequested);
+  const worktreeRunStopping = String(supervisedWorktreeLiveRun?.status || "").trim().toLowerCase() === "stopping";
   const monitoredRunIdentity = monitoredRun?.sessionId || monitoredRun?.runId || "";
   const monitoredCaseLabel = monitoredRun?.currentCaseId
     ? `${monitoredRun.currentCaseIndex ?? "--"}/${monitoredRun.caseTotal ?? "--"} ${monitoredRun.currentCaseId}`
@@ -1595,42 +1458,17 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       goToSupervisedView("live");
     }
   }, [evolutionView]);
-  const pauseSupervisedAction = monitoredRun?.actionStates?.pause;
-  const resumeSupervisedAction = monitoredRun?.actionStates?.resume;
-  const retrySupervisedAction = monitoredRun?.actionStates?.retry;
-  const legacyTerminateSupervisedAction = monitoredRun?.actionStates?.terminate;
   const terminateWorktreeAction = supervisedWorktreeLiveRun?.actionStates?.terminate;
-  const terminateSupervisedAction = terminateWorktreeAction ?? legacyTerminateSupervisedAction;
-  const deleteSupervisedAction = monitoredRun?.actionStates?.delete;
-  const canPauseSupervisedRun = Boolean(monitoredRun && pauseSupervisedAction?.enabled);
-  const canResumeSupervisedRun = Boolean(monitoredRun && resumeSupervisedAction?.enabled);
-  const canRetrySupervisedRun = Boolean(monitoredRun && retrySupervisedAction?.enabled);
-  const canTerminateSupervisedRun = Boolean(
-    supervisedWorktreeLiveRun
-      ? terminateWorktreeAction?.enabled
-      : monitoredRun && legacyTerminateSupervisedAction?.enabled,
-  );
-  const canDeleteSupervisedRun = Boolean(monitoredRun && deleteSupervisedAction?.enabled);
-  const terminateSupervisedPending = supervisedWorktreeLiveRun
-    ? approvalWorktreeActionMutation.isPending
-    : terminateRunMutation.isPending;
+  const terminateSupervisedAction = terminateWorktreeAction;
+  const canTerminateSupervisedRun = Boolean(supervisedWorktreeLiveRun && terminateWorktreeAction?.enabled);
+  const terminateSupervisedPending = approvalWorktreeActionMutation.isPending;
   const handleTerminateSupervisedRun = () => {
     if (supervisedWorktreeLiveRun) {
       approvalWorktreeActionMutation.mutate({ runId: supervisedWorktreeLiveRun.runId, action: "terminate" });
-      return;
-    }
-    if (monitoredRun) {
-      terminateRunMutation.mutate(monitoredRun.runId);
     }
   };
   const supervisedControlError =
-    pauseRunMutation.error?.message
-    ?? resumeRunMutation.error?.message
-    ?? retryRunMutation.error?.message
-    ?? approvalWorktreeActionMutation.error?.message
-    ?? terminateRunMutation.error?.message
-    ?? deleteRunMutation.error?.message
-    ?? startRunMutation.error?.message
+    approvalWorktreeActionMutation.error?.message
     ?? startWorktreeRunMutation.error?.message
     ?? startSimulationWorktreeRunMutation.error?.message
     ?? "";
@@ -1976,7 +1814,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   useEffect(() => {
     if (activeRunSnapshot) {
       setLiveActiveRun(activeRunSnapshot);
-      setSupervisedStartCommand(null);
       return;
     }
     setLiveActiveRun((current) => {
@@ -1986,78 +1823,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       return null;
     });
   }, [activeRunSnapshot]);
-
-  useEffect(() => {
-    const commandStatus = supervisedStartCommandStatusQuery.data;
-    if (!supervisedStartCommand || !commandStatus?.completed) {
-      return;
-    }
-    if (isCompletedEvolutionRunCommandSuccess(commandStatus)) {
-      setSupervisedStartCommand(null);
-      if (commandStatus.snapshot) {
-        setActionFeedback("");
-        setLiveActiveRun(commandStatus.snapshot);
-      }
-      void evolutionWorkspaceCache.afterSupervisedWorkspaceChanged();
-      return;
-    }
-    if (!isCompletedEvolutionRunCommandFailure(commandStatus)) {
-      return;
-    }
-
-    const isZh = lang === "zh";
-    const timestamp = new Date().toISOString();
-    const errorType = commandStatus.errorType || (isZh ? "启动失败" : "Start failed");
-    const message = commandStatus.message || (isZh ? "监督运行启动失败。" : "Supervised run start failed.");
-    setSupervisedStartCommand(null);
-    setActionFeedback(message);
-    setLiveActiveRun((current) => {
-      if (!isLocalSupervisedStartPlaceholder(current)) {
-        return current;
-      }
-      return {
-        ...current,
-        agentBindings: hasSupervisedAgentBindings(current.agentBindings)
-          ? current.agentBindings
-          : currentSupervisedAgentBindings,
-        status: "failed",
-        currentPhase: "failed",
-        runtimeStatus: "failed",
-        updatedAt: timestamp,
-        finishedAt: timestamp,
-        currentTask: message,
-        reason: message,
-        latestMessage: message,
-        eventTail: [
-          ...(current.eventTail ?? []),
-          {
-            timestamp,
-            event: "start_failed",
-            title: isZh ? "启动失败" : "Start failed",
-            summary: message,
-            status: "failed",
-            commandId: commandStatus.commandId,
-            errorType,
-          },
-        ].slice(-12),
-        actionStates: {
-          ...current.actionStates,
-          pause: { enabled: false, reason: message },
-          resume: { enabled: false, reason: message },
-          retry: { enabled: false, reason: message },
-          terminate: { enabled: false, reason: message },
-          delete: { enabled: false, reason: isZh ? "本地启动占位没有写入运行记录。" : "This local placeholder was not persisted." },
-        },
-      };
-    });
-    void evolutionWorkspaceCache.refreshSupervisedActiveRun();
-  }, [
-    evolutionWorkspaceCache,
-    currentSupervisedAgentBindings,
-    lang,
-    supervisedStartCommand,
-    supervisedStartCommandStatusQuery.data,
-  ]);
 
   useEffect(() => {
     if (!forcedTrack || evolutionTrack === forcedTrack) {
@@ -3457,36 +3222,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       <button
                         type="button"
                         className={styles.compactIconAction}
-                        disabled={!canPauseSupervisedRun || pauseRunMutation.isPending}
-                        title={disabledReason(pauseSupervisedAction) || t("pauseSupervisedRun")}
-                        onClick={() => monitoredRun && pauseRunMutation.mutate(monitoredRun.runId)}
-                        aria-label={t("pauseSupervisedRun")}
-                      >
-                        {pauseRunMutation.isPending ? <LoaderCircle size={15} /> : <Pause size={15} />}
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.compactIconAction}
-                        disabled={!canResumeSupervisedRun || resumeRunMutation.isPending}
-                        title={disabledReason(resumeSupervisedAction) || t("resumeSupervisedRun")}
-                        onClick={() => monitoredRun && resumeRunMutation.mutate(monitoredRun.runId)}
-                        aria-label={t("resumeSupervisedRun")}
-                      >
-                        {resumeRunMutation.isPending ? <LoaderCircle size={15} /> : <Play size={15} />}
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.compactIconAction}
-                        disabled={!canRetrySupervisedRun || retryRunMutation.isPending}
-                        title={disabledReason(retrySupervisedAction) || t("retrySupervisedRun")}
-                        onClick={() => monitoredRun && retryRunMutation.mutate(monitoredRun.runId)}
-                        aria-label={t("retrySupervisedRun")}
-                      >
-                        {retryRunMutation.isPending ? <LoaderCircle size={15} /> : <RefreshCw size={15} />}
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.compactIconAction}
                         disabled={!canTerminateSupervisedRun || terminateSupervisedPending}
                         title={disabledReason(terminateSupervisedAction) || t("terminateSupervisedRun")}
                         onClick={handleTerminateSupervisedRun}
@@ -3506,32 +3241,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           {t("openLatestRuns")}
                         </button>
                       ) : null}
-                      <button
-                        type="button"
-                        className={`${styles.compactIconAction} ${styles.dangerIconAction}`}
-                        disabled={!canDeleteSupervisedRun || deleteRunMutation.isPending}
-                        title={disabledReason(deleteSupervisedAction) || t("deleteSupervisedRun")}
-                        onClick={() => monitoredRun && deleteRunMutation.mutate(monitoredRun.runId)}
-                        aria-label={t("deleteSupervisedRun")}
-                      >
-                        {deleteRunMutation.isPending ? <LoaderCircle size={15} /> : <Trash2 size={15} />}
-                      </button>
                     </div>
                   </div>
 
                   {actionFeedback ? <p className={styles.feedbackTextCompact}>{actionFeedback}</p> : null}
                   {supervisedControlError ? <p className={styles.errorTextCompact}>{supervisedControlError}</p> : null}
-                  {!canPauseSupervisedRun && disabledReason(pauseSupervisedAction) ? (
-                    <p className={styles.noticeTextCompact}>{disabledReason(pauseSupervisedAction)}</p>
-                  ) : null}
-                  {!canResumeSupervisedRun && disabledReason(resumeSupervisedAction) && (runPaused || runPauseRequested) ? (
-                    <p className={styles.noticeTextCompact}>{disabledReason(resumeSupervisedAction)}</p>
-                  ) : null}
-                  {!canTerminateSupervisedRun && disabledReason(terminateSupervisedAction) && runStopping ? (
+                  {!canTerminateSupervisedRun && disabledReason(terminateSupervisedAction) && worktreeRunStopping ? (
                     <p className={styles.noticeTextCompact}>{disabledReason(terminateSupervisedAction)}</p>
-                  ) : null}
-                  {!canDeleteSupervisedRun && disabledReason(deleteSupervisedAction) ? (
-                    <p className={styles.noticeTextCompact}>{disabledReason(deleteSupervisedAction)}</p>
                   ) : null}
 
                   <div className={styles.monitorSummary}>

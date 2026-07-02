@@ -70,20 +70,32 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).not.toContain('t("worktreeReviewPanelTitle")');
   });
 
-  it("prefers worktree run authority for current supervised live termination", () => {
+  it("routes current supervised live controls through worktree run authority", () => {
     const terminateHandler = routeSource.slice(
       routeSource.indexOf("const handleTerminateSupervisedRun"),
       routeSource.indexOf("const supervisedControlError"),
     );
-    const worktreeActionIndex = terminateHandler.indexOf("approvalWorktreeActionMutation.mutate");
-    const legacyFallbackIndex = terminateHandler.indexOf("terminateRunMutation.mutate");
 
     expect(routeSource).toContain("startWorktreeRunMutation");
     expect(routeSource).toContain('"/api/evolution/worktree-runs"');
+    expect(routeSource).toContain("approvalWorktreeActionMutation");
     expect(terminateHandler).toContain("if (supervisedWorktreeLiveRun)");
     expect(terminateHandler).toContain('action: "terminate"');
-    expect(worktreeActionIndex).toBeGreaterThanOrEqual(0);
-    expect(legacyFallbackIndex).toBeGreaterThan(worktreeActionIndex);
+    expect(terminateHandler).toContain("approvalWorktreeActionMutation.mutate");
+    expect(terminateHandler).not.toContain("terminateRunMutation.mutate");
+    expect(routeSource).not.toContain("startRunMutation");
+    expect(routeSource).not.toContain("supervisedStartCommand");
+    expect(routeSource).not.toContain("pauseRunMutation");
+    expect(routeSource).not.toContain("resumeRunMutation");
+    expect(routeSource).not.toContain("retryRunMutation");
+    expect(routeSource).not.toContain("terminateRunMutation");
+    expect(routeSource).not.toContain("deleteRunMutation");
+    expect(routeSource).not.toContain('fetchJson<EvolutionRunStartResponse>("/api/evolution/runs"');
+    expect(routeSource).not.toContain("`/api/evolution/runs/${runId}/pause`");
+    expect(routeSource).not.toContain("`/api/evolution/runs/${runId}/resume`");
+    expect(routeSource).not.toContain("`/api/evolution/runs/${runId}/retry`");
+    expect(routeSource).not.toContain("`/api/evolution/runs/${runId}/terminate`");
+    expect(routeSource).not.toContain("`/api/evolution/runs/${runId}`");
   });
 
   it("merges supervised datasets and bundles into one source picker", () => {
@@ -260,18 +272,20 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).not.toContain("监督进化系统团队");
   });
 
-  it("labels supervised retry as rerunning failed items", () => {
-    expect(routeSource).toContain("retryRunMutation");
-    expect(routeSource).toContain("`/api/evolution/runs/${runId}/retry`");
+  it("keeps legacy supervised retry out of the current live controls", () => {
+    expect(routeSource).not.toContain("retryRunMutation");
+    expect(routeSource).not.toContain("`/api/evolution/runs/${runId}/retry`");
+    expect(routeSource).not.toContain('t("retrySupervisedRun")');
   });
 
   it("routes active supervised worktree termination through worktree actions", () => {
     expect(routeSource).toContain("const supervisedWorktreeLiveRun = activeWorktreeRun && !isSelfEvolutionWorktreeRun(activeWorktreeRun)");
     expect(routeSource).toContain("const terminateWorktreeAction = supervisedWorktreeLiveRun?.actionStates?.terminate;");
     expect(routeSource).toContain('approvalWorktreeActionMutation.mutate({ runId: supervisedWorktreeLiveRun.runId, action: "terminate" });');
-    expect(routeSource).toContain("const terminateSupervisedPending = supervisedWorktreeLiveRun");
+    expect(routeSource).toContain("const terminateSupervisedPending = approvalWorktreeActionMutation.isPending;");
     expect(routeSource).toContain("disabled={!canTerminateSupervisedRun || terminateSupervisedPending}");
-    expect(routeSource).toContain("terminateRunMutation.mutate(monitoredRun.runId);");
+    expect(routeSource).not.toContain("terminateRunMutation.mutate(monitoredRun.runId);");
+    expect(routeSource).not.toContain("legacyTerminateSupervisedAction");
   });
 
   it("keeps the supervised launch panel compact", () => {
@@ -383,21 +397,21 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(stylesSource).toContain(".supervisedWorkflowLivePreview");
   });
 
-  it("shows immediate local feedback while a supervised start command is waiting for the run record", () => {
+  it("shows immediate local feedback while a supervised worktree run is waiting for the run record", () => {
     expect(routeSource).toContain("LOCAL_SUPERVISED_RUN_PREFIX");
     expect(routeSource).toContain("buildSupervisedStartPlaceholder");
     expect(routeSource).toContain("isLocalSupervisedStartPlaceholder");
-    expect(routeSource).toContain("isEvolutionRunCommandAccepted");
     expect(routeSource).toContain("onMutate: () =>");
     expect(routeSource).toContain("启动请求已提交，正在等待运行记录刷新。");
-    expect(routeSource).toContain("启动命令已排队，等待运行记录刷新。");
     expect(routeSource).toContain("setLiveActiveRun(buildSupervisedStartPlaceholder");
     expect(routeSource).toContain("const placeholderAgentBindings = activeRunSnapshot?.agentBindings");
     expect(routeSource).toContain("?? workspaceSnapshot?.currentAgentBindings");
     expect(routeSource).toContain("?? EMPTY_AGENT_BINDINGS");
     expect(routeSource).toContain("agentBindings: placeholderAgentBindings");
     expect(routeSource).not.toContain("latestSupervisedRunSnapshot?.agentBindings ?? {}");
-    expect(routeSource).toContain("evolutionWorkspaceCache.refreshSupervisedActiveRun()");
+    expect(routeSource).toContain("await evolutionWorkspaceCache.afterWorktreeRunChanged()");
+    expect(routeSource).toContain("void evolutionWorkspaceCache.afterWorktreeRunChanged()");
+    expect(routeSource).not.toContain("isEvolutionRunCommandAccepted");
     expect(routeSource).toContain("visibleLiveRunSnapshot");
     expect(routeSource).toContain("const streamLiveRun = isLocalSupervisedStartPlaceholder(liveActiveRun) ? null : liveActiveRun");
     expect(routeSource).toContain("setLiveActiveRun((current) => (isLocalSupervisedStartPlaceholder(current) ? null : current))");
