@@ -3453,15 +3453,84 @@ def test_research_stage_status_reconciles_interrupted_stage_task_turn_journal(tm
     latest_round = status_payload["latestRound"]
     stage_tasks = latest_round.get("sourceCollectionStageSessionTasks", [])
     reconciled = next(item for item in stage_tasks if item["taskId"] == task["taskId"])
-    assert reconciled["status"] == "cancelled"
+    assert reconciled["status"] == "interrupted"
     collection_card = next(card for card in latest_round["sourceCollectionStageCards"] if card["stageId"] == "finding")
-    assert collection_card["agentTaskStatus"] == "cancelled"
-    assert collection_card["status"] != "agent_running"
+    assert collection_card["agentTaskStatus"] == "interrupted"
+    assert collection_card["status"] == "agent_interrupted"
+    assert collection_card["userStatusLabel"] == "已中断"
+    assert collection_card["actionReadiness"]["canStart"] is True
+    assert collection_card["actionReadiness"]["recommendedAction"] == "continue"
+    assert collection_card["actionReadiness"]["actionLabel"] == "继续这次任务"
     task_store = team_workflow_orchestration_service._load_source_collection_stage_session_task_store(team["teamId"], run_id)
     stored_task = next(item for item in task_store["tasks"] if item["taskId"] == task["taskId"])
-    assert stored_task["status"] == "cancelled"
-    assert stored_task["turn"]["status"] == "cancelled"
+    assert stored_task["status"] == "interrupted"
+    assert stored_task["turn"]["status"] == "interrupted"
     assert stored_task["reconciledFromTurn"]["resultEventId"] == interrupted_event.event_id
+
+
+def test_research_stage_status_reconciles_terminal_stage_task_snapshot_as_interrupted(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
+    extraction = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    session_service.ensure_agent_direct_session(agent_id=extraction["agentId"], title="资料提炼")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": extraction["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
+    )
+    stage_response = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {
+            "stageType": "knowledge_collection",
+            "topic": "脑启发路由",
+            "goal": "提炼神经机制启发算法资料",
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": extraction["agentId"]},
+            "querySeeds": ["brain-inspired routing"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = stage_response["run"]["runId"]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": "turn-stage-task-terminal-ready",
+            "status": "running",
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "get_session_turn_completion_snapshot",
+        lambda session_id, turn_id="": {
+            "sessionId": session_id,
+            "turnId": turn_id,
+            "terminal": True,
+            "terminalStatus": "ready",
+            "completionSource": "last_turn_status",
+            "assistantText": "已读取全部候选，但没有完成阶段写回。",
+            "lastTurnStatus": "ready",
+            "isRunning": False,
+        },
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "extraction", "agentId": extraction["agentId"], "agentRole": "source_extractor"},
+    )
+
+    status_payload = team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
+
+    latest_round = status_payload["latestRound"]
+    stage_tasks = latest_round.get("sourceCollectionStageSessionTasks", [])
+    reconciled = next(item for item in stage_tasks if item["taskId"] == task["taskId"])
+    assert reconciled["status"] == "interrupted"
+    extraction_card = next(card for card in latest_round["sourceCollectionStageCards"] if card["stageId"] == "extraction")
+    assert extraction_card["status"] == "agent_interrupted"
+    assert extraction_card["userStatusLabel"] == "已中断"
+    assert "继续这次任务" in extraction_card["userSummary"]
 
 
 def test_research_stage_status_does_not_reconcile_nonterminal_failed_tool_event(tmp_path, monkeypatch):
@@ -7317,6 +7386,33 @@ def test_source_collection_stage_card_projection_exposes_user_action_contract():
     assert running_card["actionReadiness"]["canStart"] is False
     assert running_card["actionReadiness"]["recommendedAction"] == "wait"
     assert running_card["actionReadiness"]["disabledReason"] == "已有 Agent 正在执行"
+
+    interrupted_card = team_workflow_orchestration_service._source_collection_stage_card_projection(
+        "extraction",
+        [
+            {
+                "taskId": "task-extraction-interrupted",
+                "stageId": "extraction",
+                "status": "interrupted",
+                "summary": "完成分页读取后被中断，尚未回写资料提炼结果。",
+                "updatedAt": "2026-06-27T09:10:30Z",
+            }
+        ],
+        artifact_count=0,
+        input_count=10,
+        output_count=0,
+        pending_count=10,
+        artifact_status="empty",
+        artifact_summary="0 source_manifest candidates; 10 records need extraction.",
+    )
+
+    assert interrupted_card["status"] == "agent_interrupted"
+    assert interrupted_card["userStatusLabel"] == "已中断"
+    assert "尚未回写" in interrupted_card["userSummary"]
+    assert interrupted_card["actionReadiness"]["canStart"] is True
+    assert interrupted_card["actionReadiness"]["recommendedAction"] == "continue"
+    assert interrupted_card["actionReadiness"]["actionLabel"] == "继续这次任务"
+    assert "Latest Agent turn was interrupted before stage writeback." in interrupted_card["blockingReasons"]
 
     partial_card = team_workflow_orchestration_service._source_collection_stage_card_projection(
         "extraction",

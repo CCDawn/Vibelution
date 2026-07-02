@@ -183,7 +183,16 @@ SOURCE_COLLECTION_SEARCH_REQUIRED_TOOLS = (
     "batch_web_search_tool",
     "paper_search_tool",
 )
-SOURCE_COLLECTION_STAGE_SESSION_TASK_STATUSES = {"queued", "running", "completed", "needs_review", "blocked", "failed", "cancelled"}
+SOURCE_COLLECTION_STAGE_SESSION_TASK_STATUSES = {
+    "queued",
+    "running",
+    "completed",
+    "needs_review",
+    "blocked",
+    "failed",
+    "cancelled",
+    "interrupted",
+}
 SOURCE_COLLECTION_STAGE_SESSION_TASK_ACTIVE_STATUSES = {"queued", "running"}
 SOURCE_COLLECTION_STAGE_WRITEBACK_MATERIALIZED_STATUSES = {"completed", "needs_review"}
 SOURCE_COLLECTION_STORAGE_OPEN_TARGETS = {
@@ -16997,12 +17006,15 @@ def _source_collection_stage_card_projection(
         else {}
     )
     task_completed = agent_status == "completed"
+    task_interrupted = agent_status == "interrupted"
     task_settled = agent_status in {"completed", "needs_review"}
     task_blocked = agent_status in {"blocked", "failed"}
     artifact_ready = artifact_status == "ready" and artifact_count > 0
     artifact_complete = artifact_ready and effective_pending_count <= 0 and not coverage_incomplete
     if agent_status in {"running", "queued"}:
         card_status = "agent_running"
+    elif task_interrupted:
+        card_status = "agent_interrupted"
     elif task_blocked and artifact_ready:
         card_status = "artifact_ready_agent_blocked"
     elif task_blocked:
@@ -17263,6 +17275,8 @@ def _source_collection_stage_card_blocking_reasons(
             f"{_source_collection_count(coverage.get('missing'))} missing, "
             f"{_source_collection_count(coverage.get('invalid'))} invalid candidate ids."
         )
+    if card_status == "agent_interrupted":
+        reasons.append("Latest Agent turn was interrupted before stage writeback.")
     if card_status == "agent_done_artifact_pending":
         reasons.append("Agent task wrote back a structured result, but the expected stage artifact has not been created yet.")
     if card_status == "artifact_ready_agent_blocked":
@@ -17297,6 +17311,8 @@ def _source_collection_stage_recovery_status_label(stage_id: str) -> str:
 def _source_collection_stage_action_label(stage_id: str, recommended_action: str = "") -> str:
     if recommended_action == "wait":
         return "等待 Agent 完成"
+    if recommended_action == "continue_interrupted":
+        return "继续这次任务"
     if stage_id == "finding":
         return "搜索下一批" if recommended_action in {"continue", "retry"} else "开始找资料"
     if stage_id == "extraction":
@@ -17325,6 +17341,14 @@ def _source_collection_stage_action_readiness(
             "disabledReason": "已有 Agent 正在执行",
             "recommendedAction": "wait",
             "actionLabel": _source_collection_stage_action_label(stage_id, "wait"),
+        }
+    if card_status == "agent_interrupted":
+        return {
+            "canStart": True,
+            "reasonCode": "agent_interrupted",
+            "disabledReason": "",
+            "recommendedAction": "continue",
+            "actionLabel": _source_collection_stage_action_label(stage_id, "continue_interrupted"),
         }
     has_input = any(
         _source_collection_count(value) > 0
@@ -17363,11 +17387,14 @@ def _source_collection_stage_user_status_label(
 ) -> str:
     if card_status == "agent_running":
         return "Agent 正在处理"
+    if card_status == "agent_interrupted":
+        return "已中断"
     current_coverage = current_coverage_summary if isinstance(current_coverage_summary, dict) else {}
     if bool(current_coverage.get("applicable")) and current_coverage.get("complete") is False:
         return _source_collection_stage_recovery_status_label(stage_id)
     labels = {
         "agent_running": "Agent 正在处理",
+        "agent_interrupted": "已中断",
         "closed_loop": "本阶段已完成",
         "artifact_ready_no_latest_agent_task": "产物已就绪",
         "artifact_ready_agent_blocked": "产物已生成，任务需排查",
@@ -17394,6 +17421,11 @@ def _source_collection_stage_user_summary(
     action = action_readiness if isinstance(action_readiness, dict) else {}
     if card_status == "agent_running":
         return "Agent 正在处理本阶段，请等待结果同步。"
+    if card_status == "agent_interrupted":
+        latest_summary = _trim_text(latest_task.get("summary"), max_length=240) if isinstance(latest_task, dict) else ""
+        next_action = _trim_text(action.get("actionLabel"), max_length=120) or "继续这次任务"
+        detail = latest_summary or "Agent 会话已停止，尚未调用阶段写回工具。"
+        return f"{detail} 本阶段已中断，尚未回写最终产物。建议：{next_action}。"
     if bool(current_coverage.get("applicable")) and current_coverage.get("complete") is False:
         processed = _source_collection_count(current_coverage.get("processed"))
         total = _source_collection_count(current_coverage.get("total"))
@@ -17778,6 +17810,9 @@ def _source_collection_stage_session_task_turn_result(agent_id: str, session_id:
     ledger_result = _source_collection_stage_session_task_turn_journal_result(session_id, turn_id)
     if ledger_result:
         return ledger_result
+    snapshot_result = _source_collection_stage_session_task_completion_snapshot_result(session_id, turn_id)
+    if snapshot_result:
+        return snapshot_result
     return {}
 
 
@@ -17801,10 +17836,13 @@ def _source_collection_stage_session_task_turn_journal_result(session_id: str, t
         next_status = ""
         fallback_summary = ""
         if event_type == "turn_interrupted" or (
-            event_type == "assistant_message" and status in {"cancelled", "canceled", "stopped", "superseded"}
+            event_type == "assistant_message" and status in {"interrupted", "stopped"}
         ):
-            next_status = "stopped"
-            fallback_summary = "Agent 私聊已停止。"
+            next_status = "interrupted"
+            fallback_summary = "Agent 私聊已中断，尚未完成阶段写回。"
+        elif event_type == "assistant_message" and status in {"cancelled", "canceled", "superseded"}:
+            next_status = "cancelled"
+            fallback_summary = "Agent 私聊已取消。"
         elif event_type == "turn_failed" or (event_type == "assistant_message" and status in {"failed", "error"}):
             next_status = "failed"
             fallback_summary = "Agent 私聊执行失败。"
@@ -17828,12 +17866,47 @@ def _source_collection_stage_session_task_turn_journal_result(session_id: str, t
     return {}
 
 
+def _source_collection_stage_session_task_completion_snapshot_result(session_id: str, turn_id: str) -> dict[str, Any]:
+    try:
+        snapshot = session_service.get_session_turn_completion_snapshot(session_id, turn_id)
+    except Exception:
+        return {}
+    if not isinstance(snapshot, dict) or not bool(snapshot.get("terminal")):
+        return {}
+    terminal_status = _trim_text(snapshot.get("terminalStatus") or snapshot.get("lastTurnStatus"), max_length=80).lower()
+    if not terminal_status:
+        return {}
+    if terminal_status in {"running", "queued"} or bool(snapshot.get("isRunning")):
+        return {}
+    if terminal_status in {"failed", "failed_provider", "failed_runtime", "error"}:
+        next_status = "failed"
+        fallback_summary = "Agent 私聊执行失败。"
+    elif terminal_status in {"cancelled", "canceled", "superseded"}:
+        next_status = "cancelled"
+        fallback_summary = "Agent 私聊已取消。"
+    else:
+        next_status = "interrupted"
+        fallback_summary = "Agent 私聊已结束，但尚未完成阶段写回。"
+    assistant_text = _trim_text(snapshot.get("assistantText"), max_length=500)
+    return {
+        "eventId": _trim_text(snapshot.get("completionSource"), max_length=160) or "session_completion_snapshot",
+        "runId": _trim_text(turn_id, max_length=200),
+        "sessionId": _trim_text(session_id, max_length=160),
+        "status": next_status,
+        "summary": assistant_text or fallback_summary,
+        "createdAt": "",
+        "source": "session_completion_snapshot",
+    }
+
+
 def _source_collection_stage_task_status_from_turn_result(turn_result: dict[str, Any]) -> str:
     status = _trim_text(turn_result.get("status"), max_length=80).lower()
     summary = _trim_text(turn_result.get("summary"), max_length=2000).lower()
     if status in {"failed", "error"}:
         return "failed"
-    if status in {"cancelled", "canceled", "stopped", "superseded"}:
+    if status in {"interrupted", "stopped", "needs_continue"}:
+        return "interrupted"
+    if status in {"cancelled", "canceled", "superseded"}:
         return "cancelled"
     if status in {"completed", "done", "succeeded", "success"}:
         blocked_markers = (
@@ -18762,7 +18835,7 @@ def _source_collection_stage_previous_attempt_lines(previous_task: dict[str, Any
     user_status = _trim_text(closure.get("userStatus"), max_length=80)
     if user_status == "success" or (task_status in {"completed", "closed_loop"} and not closure):
         return []
-    if not closure and task_status not in {"needs_review", "blocked", "failed"}:
+    if not closure and task_status not in {"interrupted", "needs_review", "blocked", "failed"}:
         return []
     coverage = (
         closure.get("coverageSummary")
@@ -18782,14 +18855,16 @@ def _source_collection_stage_previous_attempt_lines(previous_task: dict[str, Any
         progress = f"{action} {_source_collection_count(coverage.get('processed'))}/{_source_collection_count(coverage.get('total'))}"
     message = _trim_text(closure.get("message"), max_length=700) or _trim_text(previous_task.get("summary"), max_length=700)
     retry_instruction = _trim_text(closure.get("retryInstruction") or closure.get("nextAction"), max_length=1000)
+    status_label = "已中断，需要继续" if task_status == "interrupted" else (task_status or user_status or "unknown")
     lines = [
         "## 上一轮结果",
-        f"- 上一轮任务：{_trim_text(previous_task.get('taskId'), max_length=160)}；状态：{task_status or user_status or 'unknown'}。",
+        f"- 上一轮任务：{_trim_text(previous_task.get('taskId'), max_length=160)}；状态：{status_label}。",
     ]
     if progress:
         lines.append(f"- 覆盖进度：{progress}。")
     if message:
-        lines.append(f"- 失败/待补原因：{message}")
+        reason_label = "中断/待补原因" if task_status == "interrupted" else "失败/待补原因"
+        lines.append(f"- {reason_label}：{message}")
     normalized_invalid_ids = [_trim_text(item, max_length=160) for item in invalid_ids[:8] if _trim_text(item, max_length=160)]
     if normalized_invalid_ids:
         lines.append("- 未匹配 ID：" + "、".join(normalized_invalid_ids))
