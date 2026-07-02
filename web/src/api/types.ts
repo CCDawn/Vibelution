@@ -6441,6 +6441,7 @@ export type SelfObservationRun = {
   updatedAt: string;
   finishedAt: string;
   latestMessage: string;
+  messages?: string[];
   report: string;
   boundaryViolation: string;
   actionStates: Record<string, EvolutionActionState>;

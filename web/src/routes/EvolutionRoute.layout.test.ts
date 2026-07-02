@@ -179,6 +179,16 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).not.toContain("workspaceSnapshot?.selfLatestRun");
   });
 
+  it("keeps the latest self-observation run visible after it leaves the active slot", () => {
+    expect(routeSource).toContain("selectedSelfObservationRunId");
+    expect(routeSource).toContain("setSelectedSelfObservationRunId(snapshot.runId)");
+    expect(routeSource).toContain("queryKeys.evolutionSelfObservationRun(selectedSelfObservationRunId || \"__none__\")");
+    expect(routeSource).toContain("`/api/evolution/self/observation-runs/${encodeURIComponent(selectedSelfObservationRunId)}`");
+    expect(routeSource).toContain("const selfObservationRun = workspaceSnapshot?.selfObservationActiveRun");
+    expect(routeSource).toContain("?? selectedSelfObservationRunQuery.data");
+    expect(routeSource).toContain("observationRun={selfObservationRun ?? null}");
+  });
+
   it("does not poll self-evolution detail endpoints while the supervised track is active", () => {
     expect(routeSource).toContain('const selfTrackQueriesEnabled = activeTrack === "self"');
     expect(routeSource).toContain('const supervisedTrackQueriesEnabled = activeTrack === "supervised"');
