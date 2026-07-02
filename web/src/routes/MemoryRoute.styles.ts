@@ -252,8 +252,10 @@ const styles = createVuiStyleMap(styleKeys, {
   },
   extensions: {
     cleanupPathList: "[&_span]:truncate",
-    collapsedFormButton: "max-h-[92px]",
+    cleanupTargetRow: "!grid grid-cols-[18px_minmax(0,1fr)] items-start gap-2",
+    collapsedFormButton: "!grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-[7px] min-h-[42px] max-h-[92px]",
     compactMemoryList: "max-h-[148px]",
+    contractDomainRow: "!grid grid-cols-[minmax(116px,1fr)_minmax(96px,0.8fr)_auto] items-center gap-[3px] px-[5px] py-[3px]",
     contractForbiddenList: "hidden",
     contractStateGrid: "hidden",
     effectiveGrid: "[&_.overviewPanel]:max-h-[min(260px,36vh)] [&_.overviewPanel]:overflow-auto [&_.panelLead]:line-clamp-2",
@@ -271,11 +273,14 @@ const styles = createVuiStyleMap(styleKeys, {
       "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1 min-w-0 min-h-[28px] px-1.5 rounded-[7px] border border-[var(--border-soft)] bg-[color:color-mix(in_srgb,var(--surface-panel)_88%,transparent)] text-[var(--fg-secondary)] text-left cursor-pointer [&_span]:min-w-0 [&_span]:truncate",
     knowledgeModeTabActive:
       "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1 min-w-0 min-h-[28px] px-1.5 rounded-[7px] border border-[color:color-mix(in_srgb,var(--accent-cool)_42%,var(--border-soft))] bg-[color:color-mix(in_srgb,var(--accent-cool)_12%,var(--surface-panel))] text-[var(--fg-primary)] text-left cursor-pointer [&_span]:min-w-0 [&_span]:truncate",
-    knowledgeViewStack: "flex [&>.summaryGrid]:grid-cols-[repeat(4,minmax(0,1fr))] [&>.knowledgeWorkspace]:flex-1 [&>.knowledgeGovernanceDeck]:hidden",
+    knowledgeViewStack:
+      "!flex flex-col min-h-0 overflow-hidden [&>.summaryGrid]:[grid-template-columns:repeat(4,minmax(0,1fr))] [&>.knowledgeWorkspace]:flex-1 [&>.knowledgeGovernanceDeck]:hidden",
     knowledgeWorkspace:
       "grid-cols-[minmax(170px,205px)_minmax(0,1.24fr)_minmax(260px,0.62fr)]",
     manageFormPanel: "[&>p]:hidden",
     manageItemBadges: "grid-cols-[repeat(auto-fit,minmax(82px,1fr))] max-h-[74px] [&>span]:truncate",
+    manageSourceFilters: "!grid grid-cols-[repeat(auto-fit,minmax(82px,1fr))] items-center gap-1 max-h-[74px] overflow-auto",
+    matrixCard: "!grid grid-cols-[minmax(0,1fr)_auto] gap-2.5",
     graphNodeBadge:
       "data-[detail=true]:z-10 data-[agent-category=session_agent]:border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] data-[agent-category=team_member_agent]:border-[color-mix(in_srgb,var(--accent-warm)_34%,transparent)] data-[node-type=knowledge_base]:border-[color-mix(in_srgb,var(--state-success)_32%,transparent)]",
     graphTypeList: "[&_button]:w-full [&_[data-active=true]]:border-[var(--accent-cool)]",
@@ -290,10 +295,16 @@ const styles = createVuiStyleMap(styleKeys, {
       "grid grid-cols-[repeat(5,minmax(0,1fr))] gap-[3px] min-w-0 max-[760px]:grid-cols-[repeat(2,minmax(0,1fr))]",
     pipelineStep:
       "grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-1 min-w-0 px-[5px] py-0.5 rounded-[7px] border border-[color:color-mix(in_srgb,var(--border-soft)_70%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-card)_74%,transparent)]",
+    projectMemoryProposalTitleLine: "!grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5",
+    queueToolbar: "!grid grid-cols-[repeat(2,minmax(0,1fr))] gap-2",
+    ragHealthStrip: "!grid grid-cols-[repeat(auto-fit,minmax(108px,1fr))] gap-1.5",
+    reviewQueueTitleLine: "!grid grid-cols-[minmax(0,0.62fr)_minmax(82px,0.38fr)] items-baseline gap-2",
     reviewQueueList: "overflow-auto",
     reviewQueuePanel: "max-h-[min(280px,34vh)] overflow-auto",
     reviewReasonList: "hidden",
+    sourceButton: "!grid grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-2 min-h-10 px-[7px] py-[5px]",
     sourceGovernanceColumn: "[&_.sourceGovernanceControls]:grid-cols-[minmax(240px,0.92fr)_minmax(250px,1.08fr)]",
+    sourceRecordHeader: "!grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2",
     subnav:
       "inline-flex items-center justify-self-start gap-[3px] min-w-0 p-[3px] rounded-[7px] border border-[var(--border-soft)] bg-[color:var(--surface-panel-muted)]",
     subnavLink:
@@ -308,6 +319,7 @@ const styles = createVuiStyleMap(styleKeys, {
       "grid min-h-[54px] grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-2 py-1.5 [&>span]:text-[var(--vui-font-xs)] [&>strong]:text-[var(--vui-font-title)]",
     summaryGrid:
       "grid-cols-[repeat(6,minmax(118px,1fr))] gap-1.5 max-[1180px]:grid-cols-3 max-[720px]:grid-cols-2",
+    visibilityHeader: "!grid grid-cols-[22px_minmax(0,1fr)] items-start gap-2",
     workspace: "grid-rows-[minmax(0,1fr)] overflow-auto",
   },
 });

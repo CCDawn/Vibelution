@@ -170,6 +170,32 @@ describe("MemoryRoute layout contract", () => {
     expect(styles.reviewReasonList).toContain("hidden");
   });
 
+  it("keeps restored MemoryRoute grids from the CSS module migration", () => {
+    const restoredGridExpectations: Array<[string, string]> = [
+      [styles.matrixCard, "grid-cols-[minmax(0,1fr)_auto]"],
+      [styles.projectMemoryProposalTitleLine, "grid-cols-[minmax(0,1fr)_auto]"],
+      [styles.reviewQueueTitleLine, "grid-cols-[minmax(0,0.62fr)_minmax(82px,0.38fr)]"],
+      [styles.manageSourceFilters, "grid-cols-[repeat(auto-fit,minmax(82px,1fr))]"],
+      [styles.sourceButton, "grid-cols-[24px_minmax(0,1fr)_auto]"],
+      [styles.contractDomainRow, "grid-cols-[minmax(116px,1fr)_minmax(96px,0.8fr)_auto]"],
+      [styles.collapsedFormButton, "grid-cols-[auto_minmax(0,1fr)_auto]"],
+      [styles.sourceRecordHeader, "grid-cols-[minmax(0,1fr)_auto]"],
+      [styles.queueToolbar, "grid-cols-[repeat(2,minmax(0,1fr))]"],
+      [styles.ragHealthStrip, "grid-cols-[repeat(auto-fit,minmax(108px,1fr))]"],
+      [styles.cleanupTargetRow, "grid-cols-[18px_minmax(0,1fr)]"],
+      [styles.visibilityHeader, "grid-cols-[22px_minmax(0,1fr)]"],
+    ];
+
+    for (const [className, gridTemplate] of restoredGridExpectations) {
+      expect(className).toContain("!grid");
+      expect(className).toContain(gridTemplate);
+    }
+
+    expect(styles.knowledgeViewStack).toContain("!flex");
+    expect(styles.knowledgeViewStack).toContain("[&>.summaryGrid]:[grid-template-columns:repeat(4,minmax(0,1fr))]");
+    expect(styles.knowledgeViewStack).not.toContain("[&>.summaryGrid]:grid-cols-");
+  });
+
   it("wires the read-only 3D memory knowledge graph API and canvas shell", () => {
     expect(routeSource).toContain('queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, "officialResearchGraph", requestedTeamId)');
     expect(routeSource).toContain('appendAgentParam(new URLSearchParams({ include: "officialResearchGraph" }), fallbackKnowledgeActorAgentId)');
@@ -729,7 +755,7 @@ describe("MemoryRoute layout contract", () => {
 
     expect(styles.knowledgeGovernanceDeck).toContain("hidden");
     expect(styles.knowledgeViewStack).toContain("flex");
-    expect(styles.knowledgeViewStack).toContain("[&>.summaryGrid]:grid-cols-[repeat(4,minmax(0,1fr))]");
+    expect(styles.knowledgeViewStack).toContain("[&>.summaryGrid]:[grid-template-columns:repeat(4,minmax(0,1fr))]");
     expect(styles.knowledgeViewStack).toContain("[&>.knowledgeWorkspace]:flex-1");
     expect(styles.knowledgeViewStack).toContain("[&>.knowledgeGovernanceDeck]:hidden");
     expect(styles.knowledgeMain).toContain("[&_.managementPanel]:content-start");
