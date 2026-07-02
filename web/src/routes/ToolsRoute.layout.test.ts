@@ -298,4 +298,14 @@ describe("ToolsRoute layout contract", () => {
     expect(styles.detailPanel).toContain("panel");
     expect(styles.toolDetailPanel).toContain("panel");
   });
+
+  it("keeps the Agent policy draft summary in a four-column grid", () => {
+    expect(routeSource).toContain("styles.policyDraftSummary");
+    expect(styles.policyDraftSummary).toContain("grid-cols-[repeat(4,minmax(0,1fr))]");
+    expect(styles.policyDraftSummary).toContain("gap-[7px]");
+    expect(styles.policyDraftSummary).toContain("p-2");
+    expect(styles.policyDraftSummary).toContain("border");
+    expect(styles.policyDraftSummary).toContain("bg-[var(--surface-card)]");
+    expect(styles.policyDraftSummary).toContain("max-[900px]:grid-cols-[repeat(2,minmax(0,1fr))]");
+  });
 });
