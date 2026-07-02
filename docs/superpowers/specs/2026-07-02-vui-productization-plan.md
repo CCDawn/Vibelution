@@ -122,9 +122,65 @@ branches. Consequences, learned the hard way:
 - This spec file is the coordination mechanism: automation and future sessions
   should treat it — not 6/29 — as the current plan.
 
+## 6a. Refined end-state (2026-07-02 PM, supersedes literal §2 "delete every styles.ts")
+
+After Phase 0 landed and a full-site verification confirmed **zero visible bugs
+across all three styling systems** (baked styles.ts routes AND the three
+`.module.css` routes Agents/Config/Evolution), the remaining literal-C work was
+measured: `TeamsRoute.styles.ts` alone is 330 keys / 15 surfaces, and the three
+`.module.css` files are ~1,500 classes / 9,466 lines — dozens of sessions of
+pure-architecture refactoring with **no user-visible change**. The user chose a
+**refined end-state** over literal full deletion:
+
+1. **One styling system.** Convert the 3 remaining `.module.css` files to the
+   same explicit Tailwind class-map form every other route now uses (kill the
+   last scoped-CSS system, so the whole app is one Tailwind mental model).
+2. **Extract genuinely-reusable grammar** — repeated panels, stat strips,
+   forms, action rails, cards — into VUI primitives / product components.
+   Do NOT wrap one-off route-specific layout in throwaway components.
+3. **Route-specific layout stays** as the clean, explicit, magic-free baked
+   maps (that IS an acceptable Layer-1 concern per the 6/26 spec — local
+   grid/flex/column widths).
+
+`createVuiStyleMap` deletion (Phase 0) already removed the fragility root cause;
+this refined target captures the real remaining value (uniform system, reusable
+grammar) without the low-value grind of componentizing already-correct surfaces.
+
+### 6a.1 Finding — module.css → Tailwind conversion is FRAGILE (2026-07-02 PM)
+
+Built a mechanical converter (`web/scripts/convert-css-module.mjs`, experimental)
+that turns each CSS declaration into a byte-identical Tailwind arbitrary property.
+It gets ~90% mechanically, but the residual 10% each risk **silent visual
+regression** on pages that currently render perfectly:
+
+- **Descendant flattening.** `.a .b {…}` has no Tailwind equivalent (utilities
+  aren't class-name targets), so `.b`'s declarations get flattened onto the `b`
+  key — dropping one level of specificity. ConfigRoute alone had **11 keys
+  flattened from >1 ancestor** with potentially-differing bodies (needs manual
+  merge review per key).
+- **Cascade order.** Two same-specificity arbitrary properties (`[margin-top:6px]`
+  + `[margin:7px 9px 0]`) are re-sorted by Tailwind's own utility order, which
+  can flip the winner vs. source order — shorthand/longhand box conflicts break
+  silently.
+
+Verdict: **the three `.module.css` routes (Agents/Config/Evolution) render
+correctly and are a standard, stable, well-understood system.** The system that
+actually caused bugs (createVuiStyleMap magic inference) is already gone.
+Tailwind + CSS-Modules coexisting is a normal React setup, so the "one styling
+system" benefit is marginal and does NOT justify the regression risk on working
+pages. **Recommendation: leave the 3 module.css routes as stable legacy;** if
+converted later, do it by hand per-route with rigorous before/after screenshot
+diffing, not the mechanical tool alone. Refined-target energy is better spent on
+workstream ② (adopt existing VUI primitives where routes duplicate their chrome)
+only where it adds real reuse.
+
 ## 7. Decision log
 
 - 2026-07-02: user selected end-state **C** (full componentization, retire
   styles.ts/createVuiStyleMap), **one-shot bake** for Phase 0, and writing
   this spec to replace 6/29.
 - Damage-repair track (pre-Phase-0) closed at 0 audit findings the same day.
+- 2026-07-02 PM: Phase 0 shipped; full-site verify = 0 visible bugs on all
+  styling systems. User refined end-state (§6a): unify styling system + extract
+  reusable grammar, rather than delete every styles.ts. Candidate lists fully
+  componentized; 118 dead style keys pruned.
