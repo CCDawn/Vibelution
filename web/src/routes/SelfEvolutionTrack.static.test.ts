@@ -80,6 +80,14 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain('density="compact"');
   });
 
+  it("propagates full-height constraints from the parent route into the conversation workspace", () => {
+    expect(selfEvolutionStylesSource).toContain("pageStack:");
+    expect(selfEvolutionStylesSource).toContain("workspaceLayout:");
+    expect(selfEvolutionStylesSource).toContain("conversationShell:");
+    expect(selfEvolutionStylesSource).toContain("max-h-full");
+    expect(selfEvolutionStylesSource).toContain("grid-rows-[auto_minmax(0,1fr)]");
+  });
+
   it("surfaces the active run controls before the workspace columns", () => {
     expect(selfEvolutionSource).toContain("styles.runActionBar");
     expect(selfEvolutionSource).toContain("styles.runActionCluster");
