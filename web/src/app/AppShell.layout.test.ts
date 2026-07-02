@@ -265,6 +265,7 @@ describe("AppShell layout contract", () => {
   it("keeps active work details out of the primary top bar chip", () => {
     expect(shellSource).toContain("activeWorkDetailPanel");
     expect(shellSource).toContain("activeWorkIndicator.items.map");
+    expect(shellSource).toContain("<Link className={styles.activeWorkDetailLink} to={item.href}");
     expect(shellSource).not.toContain("className={styles.activeWorkSummary}");
 
     expect(styles.activeWorkDetailPanel).toBeTypeOf("string");
@@ -275,6 +276,8 @@ describe("AppShell layout contract", () => {
     expect(styles.activeWorkDetailPanel).toContain("invisible");
     expect(styles.activeWorkDetailPanel).toContain("z-[80]");
     expect(styles.activeWorkDetailItem).toBeTypeOf("string");
+    expect(styles.activeWorkDetailLink).toContain("block");
+    expect(styles.activeWorkDetailLink).toContain("focus-visible:ring-2");
   });
 
   it("uses one shared page instance id and stops periodic memory sampling while hidden", () => {
