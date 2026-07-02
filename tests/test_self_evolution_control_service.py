@@ -1315,7 +1315,7 @@ def test_run_self_observation_turn_records_session_progress_events(monkeypatch):
     monkeypatch.setattr(
         service,
         "self_evolution_agent_bindings",
-        lambda: {"executor": {"agentId": "agent-observer"}},
+        lambda: {"observer": {"agentId": "agent-observer"}},
     )
     monkeypatch.setattr(service, "create_supervised_agent_session", lambda **kwargs: {"id": "session-observe-live"})
     monkeypatch.setattr(
