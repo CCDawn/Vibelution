@@ -9,6 +9,7 @@ import {
   deriveSelfEvolutionPetCompanionState,
   filterSelfEvolutionTransactions,
   groupTransactionsByDate,
+  parseObservationDurationInput,
   pruneSelectedHistoryTxnIds,
   SELF_TRANSACTION_COLLAPSED_LIMIT,
 } from "./SelfEvolutionTrack";
@@ -219,6 +220,14 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).not.toContain("worktreeCreated");
   });
 
+  it("renders the pure observation session through the shared conversation view", () => {
+    expect(selfEvolutionSource).toContain("observationConversationSessionId");
+    expect(selfEvolutionSource).toContain("observationConversationReady");
+    expect(selfEvolutionSource).toContain("sessionId={observationConversationSessionId}");
+    expect(selfEvolutionSource).toContain("renderObservationSetupPanel()");
+    expect(selfEvolutionSource).not.toContain("{renderObservationPanel()}");
+  });
+
   it("keeps the observation status surface isolated from worktree approval semantics", () => {
     expect(observationStatusSurface).toContain("OBSERVATION_MODE_TOOL_COUNT");
     expect(observationStatusSurface).toContain("OBSERVATION_MODE_WORKTREE_STATE");
@@ -255,6 +264,31 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(workspaceSurface).not.toContain("styles.compactMetricGrid");
     expect(statusPageSurface).toContain("petVitals.map");
     expect(statusPageSurface).toContain("t(\"petSpace\")");
+  });
+});
+
+describe("self-observation duration input", () => {
+  it("allows draft edits while parsing only bounded numeric durations for submission", () => {
+    expect(parseObservationDurationInput("")).toMatchObject({
+      durationSeconds: 300,
+      isValid: false,
+    });
+    expect(parseObservationDurationInput(" 45 ")).toMatchObject({
+      durationSeconds: 45,
+      isValid: true,
+    });
+    expect(parseObservationDurationInput("12")).toMatchObject({
+      durationSeconds: 30,
+      isValid: false,
+    });
+    expect(parseObservationDurationInput("7200")).toMatchObject({
+      durationSeconds: 3600,
+      isValid: false,
+    });
+    expect(parseObservationDurationInput("abc")).toMatchObject({
+      durationSeconds: 300,
+      isValid: false,
+    });
   });
 });
 

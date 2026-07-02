@@ -126,6 +126,40 @@ export const SELF_EVOLUTION_WORKFLOW_STEPS: SelfEvolutionWorkflowDefinition[] = 
 const WORKTREE_PAGE_SIZE = 10;
 export const SELF_TRANSACTION_COLLAPSED_LIMIT = 8;
 const SELF_SIDEBAR_WIDTH_STORAGE_KEY = "vibelution.self.sidebar.width";
+const DEFAULT_OBSERVATION_DURATION_SECONDS = 300;
+const MIN_OBSERVATION_DURATION_SECONDS = 30;
+const MAX_OBSERVATION_DURATION_SECONDS = 3600;
+
+export type ObservationDurationParseResult = {
+  durationSeconds: number;
+  isValid: boolean;
+};
+
+export function parseObservationDurationInput(
+  value: string,
+  fallbackSeconds = DEFAULT_OBSERVATION_DURATION_SECONDS,
+): ObservationDurationParseResult {
+  const fallback = Number.isFinite(fallbackSeconds) && fallbackSeconds > 0
+    ? Math.trunc(fallbackSeconds)
+    : DEFAULT_OBSERVATION_DURATION_SECONDS;
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    return { durationSeconds: fallback, isValid: false };
+  }
+  const numeric = Number(trimmed);
+  if (!Number.isFinite(numeric)) {
+    return { durationSeconds: fallback, isValid: false };
+  }
+  const rounded = Math.trunc(numeric);
+  const durationSeconds = Math.max(
+    MIN_OBSERVATION_DURATION_SECONDS,
+    Math.min(MAX_OBSERVATION_DURATION_SECONDS, rounded),
+  );
+  return {
+    durationSeconds,
+    isValid: rounded >= MIN_OBSERVATION_DURATION_SECONDS && rounded <= MAX_OBSERVATION_DURATION_SECONDS,
+  };
+}
 
 export function matchesTransactionFilter(item: SelfEvolutionTransaction, filter: SelfEvolutionTransactionFilter) {
   if (filter === "needs_review") {
@@ -521,7 +555,7 @@ export function SelfEvolutionTrack({
     isObservationQueuedOrRunning(observationRun?.status || "") ? "observation" : "isolated_development",
   );
   const [observationGoalInput, setObservationGoalInput] = useState("");
-  const [observationDurationSeconds, setObservationDurationSeconds] = useState(300);
+  const [observationDurationInput, setObservationDurationInput] = useState(String(DEFAULT_OBSERVATION_DURATION_SECONDS));
   const [worktreePage, setWorktreePage] = useState(1);
   const [activePage, setActivePage] = useState<"workspace" | "status">("workspace");
   const [selectedHistoryTxnIds, setSelectedHistoryTxnIds] = useState<string[]>([]);
@@ -658,9 +692,39 @@ export function SelfEvolutionTrack({
   const observationRunActive = isObservationQueuedOrRunning(observationRun?.status || "");
   const observationRunModeActive = selfEvolutionMode === "observation";
   const observationGoalValue = observationGoalInput.trim();
-  const normalizedObservationDuration = Number.isFinite(observationDurationSeconds) && observationDurationSeconds > 0
-    ? observationDurationSeconds
-    : 300;
+  const parsedObservationDuration = useMemo(
+    () => parseObservationDurationInput(observationDurationInput),
+    [observationDurationInput],
+  );
+  const normalizedObservationDuration = parsedObservationDuration.durationSeconds;
+  const observationDurationValid = parsedObservationDuration.isValid;
+  const observationDurationError = observationDurationInput.trim() && !observationDurationValid
+    ? (lang === "zh" ? "请输入 30 到 3600 秒之间的时长。" : "Enter a duration between 30 and 3600 seconds.")
+    : "";
+  const observationConversationSessionId = String(observationRun?.conversationSessionId || "").trim();
+  const observationConversationReady = observationRunModeActive && Boolean(observationConversationSessionId);
+  const observationConversationMessages = useMemo<ConversationMessage[]>(() => {
+    if (!observationRun) {
+      return [];
+    }
+    const messageTexts = (observationRun.messages && observationRun.messages.length > 0)
+      ? observationRun.messages
+      : collectUniqueLines([observationRun.latestMessage, observationRun.report]);
+    const messages: ConversationMessage[] = [];
+    messageTexts.forEach((content, index) => {
+      const text = String(content || "").trim();
+      if (!text) {
+        return;
+      }
+      messages.push({
+        id: `${observationRun.runId}-observation-${index}`,
+        role: "assistant",
+        content: text,
+        timestamp: observationRun.updatedAt || observationRun.startedAt || "",
+      });
+    });
+    return messages;
+  }, [observationRun]);
   const transactionFilterOptions = useMemo(() => ([
     { id: "all" as const, label: t("filterAll"), count: countTransactionsByFilter(transactionItems, "all") },
     { id: "needs_review" as const, label: t("selfTransactionFilterNeedsReview"), count: countTransactionsByFilter(transactionItems, "needs_review") },
@@ -945,7 +1009,7 @@ export function SelfEvolutionTrack({
     );
   }
 
-  function renderObservationPanel() {
+  function renderObservationSetupPanel() {
     return (
       <section className={styles.observationPanel}>
         <div className={styles.sectionHeader}>
@@ -972,11 +1036,13 @@ export function SelfEvolutionTrack({
           <VNativeInput
             className={styles.textInput}
             type="number"
-            min={30}
-            max={3600}
-            value={String(normalizedObservationDuration)}
-            onChange={(event) => setObservationDurationSeconds(Number(event.target.value || 300))}
+            min={MIN_OBSERVATION_DURATION_SECONDS}
+            max={MAX_OBSERVATION_DURATION_SECONDS}
+            value={observationDurationInput}
+            onBlur={() => setObservationDurationInput(String(normalizedObservationDuration))}
+            onChange={(event) => setObservationDurationInput(event.target.value)}
           />
+          {observationDurationError ? <p className={styles.errorText}>{observationDurationError}</p> : null}
         </div>
 
         <p className={styles.noticeText}>
@@ -1004,7 +1070,7 @@ export function SelfEvolutionTrack({
           <VButton
             type="button"
             className={styles.secondaryAction}
-            isDisabled={observationStartPending || observationRunActive || !observationGoalValue}
+            isDisabled={observationStartPending || observationRunActive || !observationGoalValue || !observationDurationValid}
             onClick={() => onStartObservation({ goal: observationGoalValue, durationSeconds: normalizedObservationDuration })}
           >
             {observationStartPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ArrowUpRight size={15} />}
@@ -1347,7 +1413,39 @@ export function SelfEvolutionTrack({
           <main className={styles.centerColumn}>
             {observationRunModeActive ? (
               <div className={styles.conversationShell}>
-                {renderObservationPanel()}
+                {observationConversationReady ? (
+                  <LazyConversationView
+                    sessionId={observationConversationSessionId}
+                    density="compact"
+                    eyebrowLabel={lang === "zh" ? "自主观察" : "Self observation"}
+                    title={lang === "zh" ? "自主观察会话" : "Observation session"}
+                    phase={observationRun?.status || "idle"}
+                    messages={observationConversationMessages}
+                    assistantDisplayName={pet?.name}
+                    assistantAvatarFallback={petAvatarFallback}
+                    userDisplayName={runtime?.userName}
+                    taskSummary={observationRun?.latestMessage || observationRun?.report || ""}
+                    defaultFileContext="self_observation"
+                    summaryItems={[]}
+                    stats={[
+                      { label: lang === "zh" ? "观察目标" : "Goal", value: observationRun?.goal || observationGoalValue || "--" },
+                      { label: lang === "zh" ? "时长" : "Duration", value: observationRun?.durationSeconds ?? normalizedObservationDuration },
+                      { label: lang === "zh" ? "工具" : "Tools", value: OBSERVATION_MODE_TOOL_COUNT },
+                      { label: "worktree", value: OBSERVATION_MODE_WORKTREE_STATE },
+                    ]}
+                    autoScrollToLatest={observationRunActive}
+                    showComposer={false}
+                    composerValue=""
+                    composerPlaceholder=""
+                    composerDisabled
+                    composerPending={false}
+                    onComposerChange={() => undefined}
+                    onSubmit={() => undefined}
+                    fallback={<div className={styles.loadingShell}>{t("loadingSession")}</div>}
+                  />
+                ) : (
+                  renderObservationSetupPanel()
+                )}
               </div>
             ) : (
               <>

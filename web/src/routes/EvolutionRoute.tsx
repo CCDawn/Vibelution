@@ -710,6 +710,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [supervisedStartCommand, setSupervisedStartCommand] = useState<EvolutionRunCommandAccepted | null>(null);
   const [selfGoalInput, setSelfGoalInput] = useState("");
   const [selfGoalInitialized, setSelfGoalInitialized] = useState(false);
+  const [selectedSelfObservationRunId, setSelectedSelfObservationRunId] = useState("");
   const [actionFeedback, setActionFeedback] = useState("");
   const [selfActionFeedback, setSelfActionFeedback] = useState("");
   const [runRecordsFeedback, setRunRecordsFeedback] = useState("");
@@ -824,6 +825,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     refetchInterval: resolvePollingInterval(pageVisible, 8_000),
     refetchIntervalInBackground: false,
     enabled: selfTrackQueriesEnabled,
+  });
+  const selectedSelfObservationRunQuery = useQuery({
+    queryKey: queryKeys.evolutionSelfObservationRun(selectedSelfObservationRunId || "__none__"),
+    queryFn: () =>
+      fetchJson<SelfObservationRun>(`/api/evolution/self/observation-runs/${encodeURIComponent(selectedSelfObservationRunId)}`),
+    refetchInterval: resolvePollingInterval(pageVisible, 2_000),
+    refetchIntervalInBackground: false,
+    enabled: Boolean(selfTrackQueriesEnabled && selectedSelfObservationRunId),
   });
   const supervisedStartCommandId = supervisedStartCommand?.commandId ?? "";
   const supervisedStartCommandStatusQuery = useQuery({
@@ -1087,6 +1096,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         body: JSON.stringify({ ...payload, uiRoute: "/evolution?track=self" }),
       }),
     onSuccess: async (snapshot) => {
+      setSelectedSelfObservationRunId(snapshot.runId);
       setSelfActionFeedback(snapshot.latestMessage || "");
       await evolutionWorkspaceCache.afterSelfEvolutionChanged();
     },
@@ -1104,6 +1114,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         body: JSON.stringify({ action }),
       }),
     onSuccess: async (snapshot) => {
+      setSelectedSelfObservationRunId(snapshot.runId);
       setSelfActionFeedback(snapshot.latestMessage || "");
       await evolutionWorkspaceCache.afterSelfEvolutionChanged();
     },
@@ -1163,6 +1174,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     },
   });
   const workspaceSnapshot = workspaceSnapshotQuery.data;
+  const activeSelfObservationRunId = workspaceSnapshot?.selfObservationActiveRun?.runId ?? "";
+  useEffect(() => {
+    if (activeSelfObservationRunId) {
+      setSelectedSelfObservationRunId(activeSelfObservationRunId);
+    }
+  }, [activeSelfObservationRunId]);
   const runs = workspaceSnapshot?.runs ?? EMPTY_RUNS;
   const libraryItems = workspaceSnapshot?.library?.items ?? EMPTY_LIBRARY_ENTRIES;
   const pendingItems = workspaceSnapshot?.library?.pending ?? EMPTY_LIBRARY_ENTRIES;
@@ -1189,6 +1206,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     && String(reviewCandidateGate?.status || "").trim().toLowerCase() !== "approved";
   const selfOverview = selfOverviewQuery.data ?? workspaceSnapshot?.selfOverview;
   const selfTransactions = selfTransactionsQuery.data ?? workspaceSnapshot?.selfTransactions ?? [];
+  const selfObservationRun = workspaceSnapshot?.selfObservationActiveRun
+    ?? selectedSelfObservationRunQuery.data
+    ?? null;
   const selfTrackLoading = selfTrackQueriesEnabled
     && !selfOverview
     && (selfOverviewQuery.isLoading || workspaceSnapshotQuery.isLoading);
@@ -2906,7 +2926,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           <LazySelfEvolutionTrack
             overview={selfOverview}
             worktreeRun={selfWorktreeRun}
-            observationRun={workspaceSnapshot?.selfObservationActiveRun ?? null}
+            observationRun={selfObservationRun ?? null}
             goalInput={selfGoalInput}
             onGoalInputChange={setSelfGoalInput}
             onStartRun={() => startSelfWorktreeRunMutation.mutate()}
