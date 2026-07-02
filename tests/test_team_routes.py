@@ -73,7 +73,7 @@ def test_team_routes_repair_knowledge_expansion_team_agents(tmp_path, monkeypatc
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["teamId"] == "knowledge-expansion-team"
-    assert payload["memberCount"] == 5
+    assert payload["memberCount"] == len(team_service.KNOWLEDGE_EXPANSION_TEAM_ROLES)
     assert payload["team"]["teamKind"] == "knowledge_expansion"
     assert payload["team"]["linkedChatRoom"]["purpose"] == "knowledge_expansion"
 
