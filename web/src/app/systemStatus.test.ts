@@ -822,12 +822,14 @@ describe("systemStatus", () => {
                 runId: "chat-alpha",
                 runKind: "chat_turn",
                 status: "running",
+                sessionId: "session-alpha",
                 userMessage: "alpha 并行任务",
               },
               {
                 runId: "chat-beta",
                 runKind: "chat_turn",
                 status: "queued",
+                sessionId: "session beta",
                 userMessage: "beta 排队任务",
               },
             ],
@@ -846,17 +848,39 @@ describe("systemStatus", () => {
       {
         kind: "chat",
         runId: "chat-alpha",
+        href: "/chat?session=session-alpha",
         status: "running",
         summary: "alpha 并行任务",
       },
       {
         kind: "chat",
         runId: "chat-beta",
+        href: "/chat?session=session%20beta",
         status: "queued",
         summary: "beta 排队任务",
         tone: "caution",
       },
     ]);
+  });
+
+  it("does not fabricate chat deep links when a running turn has no session id", () => {
+    const indicator = deriveActiveWorkIndicator(
+      runtimeWithActiveWork({
+        chat_turn: {
+          runId: "chat-missing-session",
+          runKind: "chat_turn",
+          status: "running",
+          userMessage: "missing session id",
+        },
+      }),
+    );
+
+    expect(indicator).toMatchObject({
+      kind: "chat",
+      href: "",
+      runId: "chat-missing-session",
+      summary: "missing session id",
+    });
   });
 
   it("uses activeItems to show multiple parallel chat room rounds", () => {
@@ -877,12 +901,14 @@ describe("systemStatus", () => {
                 runId: "room-alpha",
                 runKind: "chat_room_round",
                 status: "running",
+                roomId: "room-alpha-id",
                 topic: "科研群聊 A",
               },
               {
                 runId: "room-beta",
                 runKind: "chat_room_round",
                 status: "queued",
+                roomId: "room beta id",
                 topic: "科研群聊 B",
               },
             ],
@@ -901,12 +927,14 @@ describe("systemStatus", () => {
       {
         kind: "chat_room",
         runId: "room-alpha",
+        href: "/chat?room=room-alpha-id",
         status: "running",
         summary: "科研群聊 A",
       },
       {
         kind: "chat_room",
         runId: "room-beta",
+        href: "/chat?room=room%20beta%20id",
         status: "queued",
         summary: "科研群聊 B",
         tone: "caution",
