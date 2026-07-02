@@ -6284,6 +6284,7 @@ export type EvolutionWorkspaceSnapshot = {
   selfOverview: SelfEvolutionOverview;
   selfWorktreeActiveRun?: SupervisedWorktreeRun | null;
   selfWorktreeRuns?: SupervisedWorktreeRun[];
+  selfObservationActiveRun?: SelfObservationRun | null;
   selfTransactions: SelfEvolutionTransaction[];
 };
 
@@ -6421,6 +6422,38 @@ export type SelfEvolutionTransaction = {
   mutationsBlocked: number;
   auditEventCount: number;
   lastAuditEvent: string;
+};
+
+export type SelfObservationRun = {
+  runId: string;
+  runKind: "self_observation_run" | string;
+  selfMode: "observation" | string;
+  status: string;
+  phase: string;
+  runtimeStatus: string;
+  goal: string;
+  durationSeconds: number;
+  allowedTools: string[];
+  writeLeases: string[];
+  worktreeCreated: boolean;
+  conversationSessionId: string;
+  startedAt: string;
+  updatedAt: string;
+  finishedAt: string;
+  latestMessage: string;
+  report: string;
+  boundaryViolation: string;
+  actionStates: Record<string, EvolutionActionState>;
+};
+
+export type SelfObservationRunStartRequest = {
+  goal: string;
+  durationSeconds: number;
+  uiRoute?: string;
+};
+
+export type SelfObservationRunActionRequest = {
+  action: "terminate" | "stop" | "cancel" | string;
 };
 
 export type SelfEvolutionHistoryDeleteResponse = {
