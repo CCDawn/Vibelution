@@ -8215,45 +8215,30 @@ export function TeamsRoute({
                   : (lang === "zh" ? "待审" : "review");
                 const selected = selectedSourceCollectionCandidateId === candidate.candidateId;
                 return (
-                  <article
+                  <TeamCandidateCard
                     key={candidate.candidateId}
-                    className={`${styles.workflowCandidateItem} ${selected ? styles.workflowCandidateItemSelected : ""}`}
-                    role="button"
-                    tabIndex={0}
-                    aria-pressed={selected}
-                    title={lang === "zh" ? "点击查看来源详情" : "Open source detail"}
-                    onClick={() => selectSourceCollectionCandidate(candidate)}
-                    onKeyDown={(event) => sourceCollectionCandidateCardKeyDown(event, candidate)}
-                  >
-                    <div className={styles.workflowCandidateHeader}>
-                      <strong title={[candidate.title || candidate.candidateId, candidate.summary || ""].filter(Boolean).join("\n")}>
+                    tone={sourceCollectionResultTone(candidate.qualityStatus)}
+                    statusLabel={qualityText}
+                    title={
+                      <span title={[candidate.title || candidate.candidateId, candidate.summary || ""].filter(Boolean).join("\n")}>
                         {candidate.title || candidate.candidateId}
-                      </strong>
-                      <span className={`${styles.workflowTag} ${workflowQualityTone(candidate.qualityStatus)}`}>
-                        {qualityText}
                       </span>
-                    </div>
-                    <div className={styles.workflowCandidateMeta}>
-                      <span>{sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang)}</span>
-                      <span>{scoreText}</span>
-                    </div>
-                    <div className={`${styles.sourceCollectionResultSource} ${provenance.kind === "missing" ? styles.sourceCollectionResultSourceMissing : ""}`}>
-                      <span>{provenance.label}</span>
-                      {provenance.href ? (
-                        <a
-                          href={provenance.href}
-                          target="_blank"
-                          rel="noreferrer"
-                          title={provenance.href}
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          {provenance.value}
-                        </a>
-                      ) : (
-                        <code title={provenance.value}>{provenance.value}</code>
-                      )}
-                    </div>
-                  </article>
+                    }
+                    meta={[
+                      { key: "category", label: sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang) },
+                      { key: "score", label: scoreText },
+                    ]}
+                    source={{
+                      label: provenance.label,
+                      value: provenance.value,
+                      href: provenance.href,
+                      title: provenance.href || provenance.value,
+                      missing: provenance.kind === "missing",
+                    }}
+                    selected={selected}
+                    onActivate={() => selectSourceCollectionCandidate(candidate)}
+                    activateTitle={lang === "zh" ? "点击查看来源详情" : "Open source detail"}
+                  />
                 );
               })}
             </div>
@@ -8413,46 +8398,29 @@ export function TeamsRoute({
                   const provenance = candidate ? sourceCollectionCandidateProvenance(candidate, lang) : null;
                   const selected = candidate ? selectedSourceCollectionCandidateId === candidate.candidateId : false;
                   return (
-                    <article
+                    <TeamCandidateCard
                       key={`graph-node-${node.candidateId}`}
-                      className={`${styles.workflowCandidateItem} ${selected ? styles.workflowCandidateItemSelected : ""}`}
-                      role={candidate ? "button" : undefined}
-                      tabIndex={candidate ? 0 : -1}
-                      aria-pressed={candidate ? selected : undefined}
-                      onClick={candidate ? () => selectSourceCollectionCandidate(candidate) : undefined}
-                      onKeyDown={candidate ? (event) => sourceCollectionCandidateCardKeyDown(event, candidate) : undefined}
-                    >
-                      <div className={styles.workflowCandidateHeader}>
-                        <strong>{node.title || node.candidateId}</strong>
-                        <span className={`${styles.workflowTag} ${workflowQualityTone(node.qualityStatus || node.currentState)}`}>{workflowStateLabel(node.currentState, lang)}</span>
-                      </div>
-                      <p>{node.candidateId}</p>
-                      <div className={styles.workflowCandidateMeta}>
-                        <span>{sourceCollectionSourceTypeLabel(node.candidateType, lang)}</span>
-                        <span>{node.currentWorkflowNode}</span>
-                        {candidate ? (
-                          <span>{sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang)}</span>
-                        ) : null}
-                      </div>
-                      {provenance ? (
-                        <div className={`${styles.sourceCollectionResultSource} ${provenance.kind === "missing" ? styles.sourceCollectionResultSourceMissing : ""}`}>
-                          <span>{provenance.label}</span>
-                          {provenance.href ? (
-                            <a
-                              href={provenance.href}
-                              target="_blank"
-                              rel="noreferrer"
-                              title={provenance.href}
-                              onClick={(event) => event.stopPropagation()}
-                            >
-                              {provenance.value}
-                            </a>
-                          ) : (
-                            <code title={provenance.value}>{provenance.value}</code>
-                          )}
-                        </div>
-                      ) : null}
-                    </article>
+                      tone={sourceCollectionResultTone(node.qualityStatus || node.currentState)}
+                      statusLabel={workflowStateLabel(node.currentState, lang)}
+                      title={node.title || node.candidateId}
+                      summary={node.candidateId}
+                      meta={[
+                        { key: "type", label: sourceCollectionSourceTypeLabel(node.candidateType, lang) },
+                        { key: "node", label: node.currentWorkflowNode },
+                        ...(candidate
+                          ? [{ key: "category", label: sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang) }]
+                          : []),
+                      ]}
+                      source={provenance ? {
+                        label: provenance.label,
+                        value: provenance.value,
+                        href: provenance.href,
+                        title: provenance.href || provenance.value,
+                        missing: provenance.kind === "missing",
+                      } : undefined}
+                      selected={selected}
+                      onActivate={candidate ? () => selectSourceCollectionCandidate(candidate) : undefined}
+                    />
                   );
                 })}
               </div>
@@ -8533,48 +8501,33 @@ export function TeamsRoute({
               const candidateActionItems = actionItemsByCandidateId.get(candidate.candidateId) ?? [];
               const selected = selectedSourceCollectionCandidateId === candidate.candidateId;
               return (
-                <article
+                <TeamCandidateCard
                   key={`memory-${candidate.candidateId}`}
-                  className={`${styles.workflowCandidateItem} ${selected ? styles.workflowCandidateItemSelected : ""}`}
-                  role="button"
-                  tabIndex={0}
-                  aria-pressed={selected}
-                  onClick={() => selectSourceCollectionCandidate(candidate)}
-                  onKeyDown={(event) => sourceCollectionCandidateCardKeyDown(event, candidate)}
-                >
-                  <div className={styles.workflowCandidateHeader}>
-                    <strong>{candidate.title || candidate.candidateId}</strong>
-                    <span className={`${styles.workflowTag} ${workflowQualityTone(candidate.qualityStatus)}`}>
-                      {sourceQualitySummary
-                        ? workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)
-                        : workflowStateLabel(candidate.currentState, lang)}
-                    </span>
-                  </div>
-                  <p>{candidate.summary || candidate.candidateId}</p>
-                  <div className={styles.workflowCandidateMeta}>
-                    <span>{sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang)}</span>
-                    {sourceQualitySummary ? (
-                      <span>{lang === "zh" ? "评分" : "score"} {sourceQualitySummary.overallScore}/100</span>
-                    ) : null}
-                    <span>{formatTime(candidate.updatedAt, lang)}</span>
-                  </div>
-                  <div className={`${styles.sourceCollectionResultSource} ${provenance.kind === "missing" ? styles.sourceCollectionResultSourceMissing : ""}`}>
-                    <span>{provenance.label}</span>
-                    {provenance.href ? (
-                      <a
-                        href={provenance.href}
-                        target="_blank"
-                        rel="noreferrer"
-                        title={provenance.href}
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        {provenance.value}
-                      </a>
-                    ) : (
-                      <code title={provenance.value}>{provenance.value}</code>
-                    )}
-                  </div>
-                  {candidateActionItems.length ? (
+                  tone={sourceCollectionResultTone(candidate.qualityStatus)}
+                  statusLabel={
+                    sourceQualitySummary
+                      ? workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)
+                      : workflowStateLabel(candidate.currentState, lang)
+                  }
+                  title={candidate.title || candidate.candidateId}
+                  summary={candidate.summary || candidate.candidateId}
+                  meta={[
+                    { key: "category", label: sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang) },
+                    ...(sourceQualitySummary
+                      ? [{ key: "score", label: `${lang === "zh" ? "评分" : "score"} ${sourceQualitySummary.overallScore}/100` }]
+                      : []),
+                    { key: "updated", label: formatTime(candidate.updatedAt, lang) },
+                  ]}
+                  source={{
+                    label: provenance.label,
+                    value: provenance.value,
+                    href: provenance.href,
+                    title: provenance.href || provenance.value,
+                    missing: provenance.kind === "missing",
+                  }}
+                  selected={selected}
+                  onActivate={() => selectSourceCollectionCandidate(candidate)}
+                  actions={candidateActionItems.length ? (
                     <div className={styles.workflowIngestionActions}>
                       {candidateActionItems.map((item) => (
                         <span key={`${item.code}-${item.message}`} className={workflowIngestionTone(item.severity)}>
@@ -8582,8 +8535,8 @@ export function TeamsRoute({
                         </span>
                       ))}
                     </div>
-                  ) : null}
-                </article>
+                  ) : undefined}
+                />
               );
             })}
           </div>
@@ -13434,35 +13387,29 @@ export function TeamsRoute({
                               selectedTeamPlanPaperNoteChunksPending
                               && planPaperNoteChunksMutation.variables?.candidateId === candidate.candidateId;
                             return (
-                              <article key={candidate.candidateId} className={styles.workflowCandidateItem}>
-                                <div className={styles.workflowCandidateHeader}>
-                                  <strong>{candidate.title || candidate.candidateId}</strong>
-                                  <span className={`${styles.workflowTag} ${workflowQualityTone(candidate.qualityStatus)}`}>
-                                    {workflowStateLabel(candidate.currentState, lang)}
-                                  </span>
-                                </div>
-                                <p>{candidate.summary || candidate.candidateType}</p>
-                                <div className={styles.workflowCandidateMeta}>
-                                  <span>{candidate.candidateType}</span>
-                                  <span>{candidate.qualityStatus}</span>
-                                  <span>{formatTime(candidate.updatedAt, lang)}</span>
-                                  {sourceQualitySummary ? (
-                                    <span>
-                                      {lang === "zh" ? "质量判断" : "source quality"} {workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)} · {sourceQualitySummary.overallScore}/100
-                                    </span>
-                                  ) : candidate.candidateType === "source_manifest" ? (
-                                    <span>{lang === "zh" ? "待提炼复核" : "pending extraction review"}</span>
-                                  ) : null}
-                                  {chunkPlanSummary ? (
-                                    <span>
-                                      paper_note chunks {chunkPlanSummary.completedChunkCount}/{chunkPlanSummary.chunkCount}
-                                    </span>
-                                  ) : canPlanPaperNoteChunks ? (
-                                    <span>{lang === "zh" ? "可生成 paper_note 分块" : "ready for paper_note chunks"}</span>
-                                  ) : null}
-                                </div>
-                                {candidate.candidateType === "source_manifest" ? (
-                                  <div className={styles.workflowCandidateActions}>
+                              <TeamCandidateCard
+                                key={candidate.candidateId}
+                                tone={sourceCollectionResultTone(candidate.qualityStatus)}
+                                statusLabel={workflowStateLabel(candidate.currentState, lang)}
+                                title={candidate.title || candidate.candidateId}
+                                summary={candidate.summary || candidate.candidateType}
+                                meta={[
+                                  { key: "type", label: candidate.candidateType },
+                                  { key: "quality", label: candidate.qualityStatus },
+                                  { key: "updated", label: formatTime(candidate.updatedAt, lang) },
+                                  ...(sourceQualitySummary
+                                    ? [{ key: "decision", label: `${lang === "zh" ? "质量判断" : "source quality"} ${workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)} · ${sourceQualitySummary.overallScore}/100` }]
+                                    : candidate.candidateType === "source_manifest"
+                                      ? [{ key: "decision", label: lang === "zh" ? "待提炼复核" : "pending extraction review" }]
+                                      : []),
+                                  ...(chunkPlanSummary
+                                    ? [{ key: "chunks", label: `paper_note chunks ${chunkPlanSummary.completedChunkCount}/${chunkPlanSummary.chunkCount}` }]
+                                    : canPlanPaperNoteChunks
+                                      ? [{ key: "chunks", label: lang === "zh" ? "可生成 paper_note 分块" : "ready for paper_note chunks" }]
+                                      : []),
+                                ]}
+                                actions={candidate.candidateType === "source_manifest" ? (
+                                  <>
                                     <VNativeButton
                                       type="button"
                                       onClick={() => {
@@ -13528,9 +13475,9 @@ export function TeamsRoute({
                                         ? (lang === "zh" ? "重建分块计划" : "Rebuild chunk plan")
                                         : (lang === "zh" ? "生成分块计划" : "Generate chunk plan")}
                                     </VNativeButton>
-                                  </div>
-                                ) : null}
-                              </article>
+                                  </>
+                                ) : undefined}
+                              />
                             );
                           })}
                             </div>
