@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
 import routeSource from "./TeamsRoute.tsx?raw";
 import teamStageCardSource from "../components/vui/product/team-management/TeamStageCard.tsx?raw";
+import teamStagePipelineSource from "../components/vui/product/team-management/TeamStagePipeline.tsx?raw";
 import routeStyles from "./TeamsRoute.styles";
 import routeStylesModuleSource from "./TeamsRoute.styles.ts?raw";
 import routerSource from "../app/router.tsx?raw";
@@ -1188,13 +1189,23 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionCommandBar).toContain("!grid");
     expect(routeStyles.sourceCollectionStageCard).toContain("border-l-[4px]");
     expect(routeStyles.sourceCollectionStageCard).toContain("!grid");
-    expect(routeStyles.sourceCollectionStageCard).toContain("min-h-[132px]");
+    expect(routeStyles.sourceCollectionStageCard).toContain("min-h-[118px]");
     expect(routeStyles.sourceCollectionStageCardHead).toContain("grid-cols-[max-content_1fr]");
     expect(routeStyles.sourceCollectionStageCardHead).not.toContain("sourceCollectionStageProjection");
     expect(routeStyles.sourceCollectionStageCardActions).toContain("flex-nowrap");
+    expect(routeStyles.sourceCollectionStageCardActions).toContain("justify-between");
+    expect(routeStyles.sourceCollectionStageCardActions).toContain("[&_[data-vui=native-button]]:w-fit");
+    expect(routeStyles.sourceCollectionStageCardActions).not.toContain("[&_[data-vui=native-button]]:min-w-[92px]");
     expect(routeStyles.canvasLayoutModeSwitch).toContain("grid-cols-[repeat(auto-fit,minmax(86px,max-content))]");
     expect(routeStyles.toolbarActions).toContain("flex-wrap");
     expect(routeStyles.sourceCollectionStageModules).toContain("grid-cols-[repeat(4,minmax(0,1fr))]");
+    expect(teamStagePipelineSource).toContain("repeat(auto-fit,minmax(220px,1fr))");
+    expect(teamStagePipelineSource).not.toContain("repeat(5");
+    expect(teamStageCardSource).toContain("grid-rows-[auto_minmax(0,1fr)_auto]");
+    expect(teamStageCardSource).toContain("ACTION_ROW");
+    expect(teamStageCardSource).toContain("ACTION_BUTTON");
+    expect(teamStageCardSource).toContain("text-[0.72rem]");
+    expect(teamStageCardSource).not.toContain("grid-rows-[auto_auto_auto]");
     expect(routeStyles.sourceCollectionPagination).toContain("select-none");
     expect(routeStyles.sourceCollectionPagination).toContain("whitespace-nowrap");
     expect(routeStyles.sourceCollectionPagination).toContain("[writing-mode:horizontal-tb]");
@@ -1402,6 +1413,9 @@ describe("TeamsRoute layout contract", () => {
     );
     expect(standaloneSource).toContain("sourceCollectionBoardNextStepLabel");
     expect(standaloneSource).not.toContain("{renderSourceCollectionControlsPanel()}");
+    expect(routeSource).toContain("sourceCollectionFilterLoadingCount");
+    expect(routeSource).toContain('filter === "all" ? sourceCollectionLoadingText : "..."');
+    expect(routeSource).not.toContain("count: loading ? loadingValue");
 
     const commandStatsSource = standaloneSource.slice(
       standaloneSource.indexOf("<TeamStageCommandBar"),
