@@ -225,7 +225,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.timelineCellHeader).toContain("[&_[data-slot=vui-button-label]]:contents");
     expect(styles.timelineCellPreview).toContain("whitespace-normal");
     expect(styles.timelineCellPreview).toContain("[overflow-wrap:anywhere]");
-    expect(styles.timelineCellPreview).toContain("line-clamp-2");
+    expect(styles.timelineCellPreview).toContain("line-clamp-1");
     expect(styles.operationItem).not.toContain("860px");
     expect(styles.operationItem).toContain("w-[min(100%,72ch)]");
     expect(styles.operationItem).toContain("!rounded-none");
@@ -233,6 +233,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.operationItem).toContain("!border-t-0");
     expect(styles.operationItem).toContain("border-b");
     expect(styles.operationItem).toContain("!bg-transparent");
+    expect(styles.operationItem).toContain("!text-[var(--fg-secondary)]");
     expect(styles.operationItem).toContain("!p-0");
     expect(styles.operationItem).toContain("pb-1");
     expect(styles.operationStatus).toContain("justify-self-start");
@@ -254,6 +255,30 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.answerOnlyProcessGroup).toContain("shadow-none");
     expect(styles.answerOnlyProcessGroup).not.toContain("rounded-[var(--radius-control)]");
     expect(styles.answerOnlyProcessGroup).not.toContain("bg-[color-mix(in_srgb,var(--surface-panel)_58%,transparent)]");
+  });
+
+  it("renders live process previews as inline log text instead of white nested cards", () => {
+    const inlinePreviewRules = [
+      styles.answerOnlyProcessPreview,
+      styles.operationItemWrap,
+      styles.operationSummaryPreview,
+      styles.operationSummaryText,
+      styles.timelineCellPreview,
+    ];
+
+    for (const className of inlinePreviewRules) {
+      expect(className).toContain("bg-transparent");
+      expect(className).toContain("border-0");
+      expect(className).toContain("shadow-none");
+      expect(className).not.toContain("bg-[var(--vui-surface-glass)]");
+      expect(className).not.toContain("bg-[var(--vui-surface-row)]");
+      expect(className).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+    }
+
+    expect(styles.answerOnlyProcessGroup_running).toContain("text-[var(--fg-secondary)]");
+    expect(styles.answerOnlyProcessGroup_running).not.toContain("text-[var(--state-success)]");
+    expect(styles.timelineCellPreview).toContain("line-clamp-1");
+    expect(styles.operationSummaryText).toContain("line-clamp-1");
   });
 
   it("uses readable contrast for compact conversation metadata and toggles", () => {
