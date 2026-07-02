@@ -387,7 +387,7 @@ const styles: Record<string, string> = {
   researchStageCardMetrics:
     "researchStageCardMetrics min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid gap-2 !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[5px]",
   researchStageGrid:
-    "researchStageGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+    "researchStageGrid min-w-0 grid items-start gap-2 grid-cols-[repeat(auto-fit,minmax(280px,1fr))]",
   researchStageHeroPanel:
     "researchStageHeroPanel min-w-0 rounded-[var(--vui-radius-soft)] border border-[var(--vui-border-subtle)] bg-[image:var(--vui-gradient-route-soft)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-elevation-1-sheen)] p-2",
   researchStageHeroStats:
