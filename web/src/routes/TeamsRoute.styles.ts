@@ -400,6 +400,7 @@ const styleKeys = [
 
 const styles = createVuiStyleMap(styleKeys, {
   extensions: {
+    aiSearchRunCards: "!grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-[7px]",
     canvas:
       `relative flex-1 overflow-auto ${canvasMeshBackgroundClass}`,
     canvasLayoutModeSwitch: "grid-cols-[repeat(auto-fit,minmax(86px,max-content))]",
@@ -462,11 +463,17 @@ const styles = createVuiStyleMap(styleKeys, {
       "!flex min-w-0 items-center justify-between gap-2.5 [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&>div_strong]:truncate [&>div_strong]:text-[var(--fg-primary)] [&>div_span]:truncate [&>div_span]:text-[var(--fg-muted)] [&>div_span]:font-[760] [&_a]:inline-flex [&_a]:shrink-0 [&_a]:min-h-[28px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-[5px] [&_a]:px-[9px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_28%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--surface-card)_74%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap",
     researchStageAgentActions:
       "!flex min-w-0 items-center justify-between gap-2 [&_a]:inline-flex [&_a]:shrink-0 [&_a]:min-h-[28px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-[5px] [&_a]:px-[9px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_28%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--surface-card)_74%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap",
+    researchStageAgentGrid: "!grid grid-cols-[repeat(auto-fit,minmax(210px,1fr))] gap-2",
+    researchStageCardHead: "!grid grid-cols-[auto_1fr] items-start gap-2.5",
+    researchStageCardMetrics: "!grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[5px]",
+    researchStageHeroStats: "!grid grid-cols-[repeat(3,minmax(0,1fr))] gap-2",
     sourceCollectionStagePrimaryAction: "w-fit max-w-full",
     sourceCollectionStageSecondaryAction: "w-fit max-w-full",
+    sourceCollectionSourceDetailFacts: "!grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-[5px]",
     sourceCollectionSourceDetailActions: `!flex flex-wrap gap-1.5 min-w-0 ${RAIL}`,
     sourceCollectionStageAgentHeader: `!flex items-center justify-between gap-2 min-w-0 [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&>div_strong]:truncate [&>div_strong]:text-[var(--fg-primary)] [&>div_span]:truncate [&>div_span]:text-[var(--fg-muted)] ${RAIL}`,
-    sourceCollectionStageAgentCard: `${RAIL}`,
+    sourceCollectionStageAgentCard: `!grid grid-cols-[minmax(0,1fr)_auto] items-stretch gap-2 ${RAIL}`,
+    sourceCollectionStageAgentCardBody: "!grid grid-cols-[repeat(3,minmax(0,1fr))] gap-1.5",
     sourceCollectionSearchEvidenceBody: `!grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-[5px] min-w-0 [&>span]:grid [&>span]:gap-0.5 [&>span]:min-w-0 ${RAIL}`,
     nodeSourceAuthority: `!grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 p-2 rounded-lg border border-[color:color-mix(in_srgb,var(--accent-cool)_26%,var(--border-soft))] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,var(--surface-panel-strong))] [&>div]:grid [&>div]:gap-0.5 [&>div]:min-w-0 ${RAIL}`,
     sourceCollectionUnavailable: `!grid gap-2 content-center justify-items-start p-[18px] rounded-lg border border-[var(--border-soft)] bg-[image:var(--vui-gradient-route-soft)] bg-[color:var(--source-workbench-panel)] [&_strong]:text-[var(--fg-primary)] [&_span]:text-[var(--fg-muted)] ${RAIL}`,
@@ -547,9 +554,19 @@ const styles = createVuiStyleMap(styleKeys, {
       "grid min-h-0 flex-1 grid-cols-[minmax(0,720px)] content-start justify-items-center overflow-auto px-3 py-4",
     toolbarActions:
       "!flex min-w-[220px] max-w-[min(100%,560px)] flex-wrap items-center justify-end gap-1.5 overflow-visible [&_a]:min-w-[72px] [&_a]:whitespace-nowrap [&_button]:min-w-[72px] [&_button]:whitespace-nowrap",
-    workflowGraphFrame: "h-full overflow-hidden",
     workflowCandidateItem:
       "grid grid-cols-[minmax(0,1fr)_minmax(120px,220px)] min-h-[40px] items-center gap-2 px-2 py-1 max-[820px]:grid-cols-[minmax(0,1fr)]",
+    workflowGraphFrame: "h-full overflow-hidden",
+    workflowIngestionStages: "!grid grid-cols-[repeat(5,minmax(58px,1fr))] gap-1",
+    workflowModelEvidenceCoverage: "!grid grid-cols-[repeat(auto-fit,minmax(118px,1fr))] gap-1.5",
+    workflowModelEvidenceStats: "!grid grid-cols-[repeat(auto-fit,minmax(118px,1fr))] gap-1.5",
+    workflowPaperNoteChunkPlans: "!grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[5px]",
+    workflowPaperNoteChunkStats: "!grid grid-cols-[repeat(4,minmax(86px,1fr))] gap-[5px]",
+    workflowSourceCollectionForm: "!grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[5px]",
+    workflowSourceCollectionOutputForm: "!grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[5px]",
+    workflowSourceQualityQueue: "!grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[5px]",
+    workflowSourceQualityStats: "!grid grid-cols-[repeat(5,minmax(72px,1fr))] gap-[5px]",
+    workflowStats: "!grid grid-cols-[repeat(3,minmax(0,1fr))] gap-1.5",
     workspace:
       "!grid min-h-0 grid-cols-[minmax(520px,1fr)_minmax(300px,380px)] gap-2 overflow-hidden px-2 pb-2 pt-1",
     workspaceResearch: "!grid-cols-[minmax(0,1fr)]",

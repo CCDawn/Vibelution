@@ -1324,6 +1324,37 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStylesSource).toContain(".canvasLayoutModeSwitch");
   });
 
+  it("keeps restored TeamsRoute grids from the CSS module migration", () => {
+    const restoredGridExpectations: Array<[string, string]> = [
+      [routeStyles.aiSearchRunCards, "grid-cols-[repeat(auto-fit,minmax(220px,1fr))]"],
+      [routeStyles.researchStageCardHead, "grid-cols-[auto_1fr]"],
+      [routeStyles.researchStageCardMetrics, "grid-cols-[repeat(4,minmax(0,1fr))]"],
+      [routeStyles.researchStageAgentGrid, "grid-cols-[repeat(auto-fit,minmax(210px,1fr))]"],
+      [routeStyles.sourceCollectionStageAgentCard, "grid-cols-[minmax(0,1fr)_auto]"],
+      [routeStyles.sourceCollectionStageAgentCardBody, "grid-cols-[repeat(3,minmax(0,1fr))]"],
+      [routeStyles.sourceCollectionSourceDetailFacts, "grid-cols-[repeat(auto-fit,minmax(130px,1fr))]"],
+      [routeStyles.researchStageHeroStats, "grid-cols-[repeat(3,minmax(0,1fr))]"],
+      [routeStyles.workflowStats, "grid-cols-[repeat(3,minmax(0,1fr))]"],
+      [routeStyles.workflowModelEvidenceStats, "grid-cols-[repeat(auto-fit,minmax(118px,1fr))]"],
+      [routeStyles.workflowModelEvidenceCoverage, "grid-cols-[repeat(auto-fit,minmax(118px,1fr))]"],
+      [routeStyles.workflowSourceCollectionForm, "grid-cols-[repeat(2,minmax(0,1fr))]"],
+      [routeStyles.workflowSourceCollectionOutputForm, "grid-cols-[repeat(2,minmax(0,1fr))]"],
+      [routeStyles.workflowIngestionStages, "grid-cols-[repeat(5,minmax(58px,1fr))]"],
+      [routeStyles.workflowSourceQualityStats, "grid-cols-[repeat(5,minmax(72px,1fr))]"],
+      [routeStyles.workflowSourceQualityQueue, "grid-cols-[repeat(3,minmax(0,1fr))]"],
+      [routeStyles.workflowPaperNoteChunkStats, "grid-cols-[repeat(4,minmax(86px,1fr))]"],
+      [routeStyles.workflowPaperNoteChunkPlans, "grid-cols-[repeat(2,minmax(0,1fr))]"],
+    ];
+
+    for (const [className, gridTemplate] of restoredGridExpectations) {
+      expect(className).toContain("!grid");
+      expect(className).toContain(gridTemplate);
+    }
+
+    expect(routeStyles.sourceCollectionStageAgentCard).toContain("[&_a]:inline-flex");
+    expect(routeStyles.sourceCollectionStageAgentCard).toContain("[&_[data-vui=native-button]]:inline-flex");
+  });
+
   it("uses a subtle mesh canvas background instead of repeated horizontal route stripes", () => {
     for (const className of [routeStyles.canvas, routeStyles.emptyCanvasPanel]) {
       expect(className).toContain("[background-image:linear-gradient(to_right");
