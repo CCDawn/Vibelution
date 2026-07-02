@@ -166,6 +166,19 @@ const styleKeys = [
   "zoomControl",
 ] as const;
 
-const styles = createVuiStyleMap(styleKeys);
+const styles = createVuiStyleMap(styleKeys, {
+  extensions: {
+    inspectorBody: "!grid grid-cols-[76px_minmax(0,1fr)] min-h-0 overflow-hidden",
+    organizationSummaryGrid: "!grid grid-cols-[repeat(3,minmax(0,1fr))] gap-2",
+    organizationMetric:
+      "!grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1 p-2.5 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-page)]",
+    issueSummary: "!grid grid-cols-[repeat(2,minmax(0,1fr))] gap-2.5",
+    readonlySpecGrid:
+      "!grid grid-cols-[auto_minmax(0,1fr)] gap-x-2.5 gap-y-[7px] p-2.5 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-page)]",
+    twoColumns: "!grid grid-cols-[repeat(2,minmax(0,1fr))] gap-2.5",
+    edgePair:
+      "!grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 p-2.5 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-page)]",
+  },
+});
 
 export default styles;

@@ -212,4 +212,32 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
     expect(styles.editorStack).toBeTypeOf("string");
     expect(styles.status_blocked).toBeTypeOf("string");
   });
+
+  it("keeps restored canvas inspector grids from the CSS module migration", () => {
+    expect(routeSource).toContain("styles.inspectorBody");
+    expect(styles.inspectorBody).toContain("grid-cols-[76px_minmax(0,1fr)]");
+    expect(styles.inspectorBody).toContain("overflow-hidden");
+
+    expect(routeSource).toContain("styles.organizationSummaryGrid");
+    expect(styles.organizationSummaryGrid).toContain("grid-cols-[repeat(3,minmax(0,1fr))]");
+    expect(styles.organizationSummaryGrid).toContain("gap-2");
+
+    expect(routeSource).toContain("styles.organizationMetric");
+    expect(styles.organizationMetric).toContain("grid-cols-[auto_minmax(0,1fr)]");
+    expect(styles.organizationMetric).toContain("gap-x-2");
+
+    expect(routeSource).toContain("styles.issueSummary");
+    expect(styles.issueSummary).toContain("grid-cols-[repeat(2,minmax(0,1fr))]");
+
+    expect(routeSource).toContain("styles.readonlySpecGrid");
+    expect(styles.readonlySpecGrid).toContain("grid-cols-[auto_minmax(0,1fr)]");
+    expect(styles.readonlySpecGrid).toContain("gap-y-[7px]");
+
+    expect(routeSource).toContain("styles.twoColumns");
+    expect(styles.twoColumns).toContain("grid-cols-[repeat(2,minmax(0,1fr))]");
+
+    expect(routeSource).toContain("styles.edgePair");
+    expect(styles.edgePair).toContain("grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]");
+    expect(styles.edgePair).toContain("items-center");
+  });
 });
