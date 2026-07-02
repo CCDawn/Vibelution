@@ -94,7 +94,7 @@ CHAT_ROOM_PURPOSES = [
     {
         "id": "self_evolution",
         "label": "Self evolution",
-        "description": "Self-evolution role coordination across execution, review, and summary responsibilities.",
+        "description": "Self-evolution role coordination across execution, review, and observation responsibilities.",
     },
     {
         "id": "supervised_evolution",

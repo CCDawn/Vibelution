@@ -1186,6 +1186,60 @@ def test_ensure_evolution_system_teams_preserves_existing_team_member_status(tmp
     assert reloaded["members"][0]["agentStatus"] == "active"
 
 
+def test_ensure_evolution_system_teams_refreshes_stale_chat_room_participant_context(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    def create_self_agent(role: str, label: str) -> dict:
+        prompt_id = "" if role == "observer" else f"prompt-self-{role}"
+        return agent_directory_service.create_agent_instance(
+            display_name=label,
+            direct_session_id=f"session-self-{role}",
+            primary_mode="self_evolution",
+            role_key=role,
+            prompt_template_id=prompt_id,
+            metadata={
+                "fixedRole": True,
+                "protected": True,
+                "agentMode": "self_evolution",
+                "selfEvolutionRole": role,
+                "selfEvolutionRoleLabel": label,
+                "functionalDisplayName": label,
+            },
+        )
+
+    agents = [
+        create_self_agent("executor", "自进化执行 Agent"),
+        create_self_agent("reviewer", "自进化评审 Agent"),
+        create_self_agent("observer", "自进化观察 Agent"),
+    ]
+    monkeypatch.setattr(
+        team_service,
+        "_ensure_evolution_system_agents",
+        lambda: {"self_evolution": agents, "supervised_evolution": []},
+    )
+    initial = team_service.ensure_evolution_system_teams()
+    team = next(item for item in initial["teams"] if item["teamId"] == "self-evolution-team")
+    room_id = team["linkedChatRoomId"]
+
+    state = chat_room_service._store().load()
+    room = next(item for item in state["rooms"] if item["roomId"] == room_id)
+    observer_agent_id = agents[2]["agentId"]
+    observer_participant = next(item for item in room["participants"] if item["agentId"] == observer_agent_id)
+    observer_participant["teamPurpose"] = "承接自进化执行、评审与总结角色的团队通讯。"
+    observer_participant["teamRole"] = "summarizer"
+    observer_participant["teamMemberPurpose"] = "自进化总结 Agent"
+    chat_room_service._store().save(state)
+
+    team_service.ensure_evolution_system_teams()
+    repaired_room = chat_room_service.get_chat_room_detail(room_id)
+    repaired_observer = next(item for item in repaired_room["participants"] if item["agentId"] == observer_agent_id)
+
+    assert repaired_observer["teamRole"] == "observer"
+    assert repaired_observer["teamMemberPurpose"] == "自进化观察 Agent"
+    assert "观察" in repaired_observer["teamPurpose"]
+    assert "总结" not in repaired_observer["teamPurpose"]
+
+
 def test_compact_team_list_repairs_legacy_team_contract_without_full_hydration(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     room = chat_room_service.create_chat_room(
