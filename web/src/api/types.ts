@@ -6424,6 +6424,15 @@ export type SelfEvolutionTransaction = {
   lastAuditEvent: string;
 };
 
+export type SelfObservationRunEvent = {
+  timestamp: string;
+  event: string;
+  status: string;
+  message: string;
+  conversationSessionId?: string;
+  turnId?: string;
+};
+
 export type SelfObservationRun = {
   runId: string;
   runKind: "self_observation_run" | string;
@@ -6444,6 +6453,7 @@ export type SelfObservationRun = {
   messages?: string[];
   report: string;
   boundaryViolation: string;
+  eventTail?: SelfObservationRunEvent[];
   actionStates: Record<string, EvolutionActionState>;
 };
 

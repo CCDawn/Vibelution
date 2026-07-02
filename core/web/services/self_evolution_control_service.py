@@ -91,6 +91,7 @@ _OBSERVATION_OPERATOR_TERMINAL_STATUSES = {"terminated", "cancelled", "stopped"}
 _OBSERVATION_RUN_STATE_LOCK = threading.RLock()
 _OBSERVATION_RUNS: dict[str, dict[str, Any]] = {}
 _ACTIVE_OBSERVATION_RUN_ID: str = ""
+_SELF_OBSERVATION_EVENT_TAIL_LIMIT = 12
 _MANAGER_CONTROL_KEY = "runtimeManagerControl"
 SELF_OBSERVATION_MIN_DURATION_SECONDS = 30
 SELF_OBSERVATION_MAX_DURATION_SECONDS = 3600
@@ -2045,6 +2046,14 @@ def _build_self_observation_snapshot(
     latest_message: str,
     started_at: str,
 ) -> dict[str, Any]:
+    queued_event = {
+        "timestamp": started_at,
+        "event": "queued",
+        "status": status,
+        "message": latest_message,
+        "conversationSessionId": "",
+        "turnId": "",
+    }
     return {
         "runId": run_id,
         "runKind": "self_observation_run",
@@ -2066,10 +2075,84 @@ def _build_self_observation_snapshot(
         "messages": [],
         "report": "",
         "boundaryViolation": "",
+        "eventTail": [queued_event],
         "actionStates": {
             "terminate": {"enabled": status in {"queued", "running"}, "label": "终止观察", "reason": ""},
         },
     }
+
+
+def _append_self_observation_event_to_snapshot(
+    snapshot: dict[str, Any],
+    *,
+    event: str,
+    message: str,
+    status: str = "",
+    timestamp: str = "",
+    conversation_session_id: str = "",
+    turn_id: str = "",
+    update_latest_message: bool = True,
+) -> None:
+    recorded_at = timestamp or _now_timestamp()
+    normalized_event = str(event or "").strip() or "status"
+    normalized_status = str(status or snapshot.get("status") or "").strip()
+    normalized_message = str(message or "").strip()
+    session_id = str(conversation_session_id or snapshot.get("conversationSessionId") or "").strip()
+    normalized_turn_id = str(turn_id or "").strip()
+    item = {
+        "timestamp": recorded_at,
+        "event": normalized_event,
+        "status": normalized_status,
+        "message": normalized_message,
+        "conversationSessionId": session_id,
+        "turnId": normalized_turn_id,
+    }
+    event_tail = snapshot.get("eventTail")
+    if not isinstance(event_tail, list):
+        event_tail = []
+    last_item = event_tail[-1] if event_tail and isinstance(event_tail[-1], dict) else {}
+    if (
+        last_item.get("event") == item["event"]
+        and last_item.get("status") == item["status"]
+        and last_item.get("message") == item["message"]
+        and last_item.get("conversationSessionId") == item["conversationSessionId"]
+        and last_item.get("turnId") == item["turnId"]
+    ):
+        last_item["timestamp"] = recorded_at
+    else:
+        event_tail.append(item)
+    snapshot["eventTail"] = event_tail[-_SELF_OBSERVATION_EVENT_TAIL_LIMIT:]
+    if session_id:
+        snapshot["conversationSessionId"] = session_id
+    if update_latest_message and normalized_message:
+        snapshot["latestMessage"] = normalized_message
+    snapshot["updatedAt"] = recorded_at
+
+
+def _append_self_observation_event(
+    run_id: str,
+    *,
+    event: str,
+    message: str,
+    status: str = "",
+    conversation_session_id: str = "",
+    turn_id: str = "",
+    update_latest_message: bool = True,
+) -> dict[str, Any] | None:
+    with _OBSERVATION_RUN_STATE_LOCK:
+        snapshot = _OBSERVATION_RUNS.get(str(run_id or "").strip())
+        if not snapshot:
+            return None
+        _append_self_observation_event_to_snapshot(
+            snapshot,
+            event=event,
+            message=message,
+            status=status,
+            conversation_session_id=conversation_session_id,
+            turn_id=turn_id,
+            update_latest_message=update_latest_message,
+        )
+        return dict(snapshot)
 
 
 def get_active_self_observation_run() -> dict[str, Any] | None:
@@ -2102,6 +2185,13 @@ def force_cancel_active_self_observation_runs_for_shutdown(reason: str = "") -> 
                 snapshot["finishedAt"] = now
                 snapshot["updatedAt"] = now
                 snapshot["latestMessage"] = reason or "Observation run terminated."
+                _append_self_observation_event_to_snapshot(
+                    snapshot,
+                    event="terminated",
+                    status="terminated",
+                    message=snapshot["latestMessage"],
+                    timestamp=now,
+                )
                 terminate_state = snapshot.get("actionStates") if isinstance(snapshot.get("actionStates"), dict) else {}
                 if isinstance(terminate_state.get("terminate"), dict):
                     terminate_state["terminate"]["enabled"] = False
@@ -2152,6 +2242,14 @@ def _set_self_observation_terminal_state(
             snapshot["messages"] = [str(item) for item in list(messages or []) if str(item or "").strip()]
         snapshot["updatedAt"] = timestamp
         snapshot["finishedAt"] = timestamp
+        _append_self_observation_event_to_snapshot(
+            snapshot,
+            event=status,
+            status=status,
+            message=snapshot["latestMessage"],
+            timestamp=timestamp,
+            conversation_session_id=conversation_session_id,
+        )
         action_states = snapshot.get("actionStates")
         if not isinstance(action_states, dict):
             action_states = {}
@@ -2216,6 +2314,14 @@ def _update_self_observation_progress(
             snapshot["messages"] = [str(item) for item in list(messages or []) if str(item or "").strip()]
         if latest_message:
             snapshot["latestMessage"] = str(latest_message or "").strip()
+            _append_self_observation_event_to_snapshot(
+                snapshot,
+                event="assistant_output",
+                status=snapshot.get("status") or "running",
+                message=snapshot["latestMessage"],
+                timestamp=timestamp,
+                conversation_session_id=conversation_session_id,
+            )
         snapshot["updatedAt"] = timestamp
         return dict(snapshot)
 
@@ -2247,6 +2353,17 @@ def _run_observation_session(*, run_id: str, prompt: str, duration_seconds: int)
         if isinstance(snapshot, dict):
             snapshot["conversationSessionId"] = session_id
             snapshot["updatedAt"] = _now_timestamp()
+    _append_self_observation_event(
+        run_id,
+        event="session_created",
+        status="running",
+        message=text_for(
+            get_web_language(),
+            zh="自主观察 Agent 会话已创建。",
+            en="Observation agent session created.",
+        ),
+        conversation_session_id=session_id,
+    )
 
     accepted = submit_session_message(
         session_id,
@@ -2263,6 +2380,18 @@ def _run_observation_session(*, run_id: str, prompt: str, duration_seconds: int)
         lightweight_response=True,
     )
     turn_id = str(accepted.get("turnId") or accepted.get("startedTurnId") or "").strip()
+    _append_self_observation_event(
+        run_id,
+        event="prompt_submitted",
+        status="running",
+        message=text_for(
+            get_web_language(),
+            zh="观察 prompt 已提交，等待模型输出。",
+            en="Observation prompt submitted; waiting for model output.",
+        ),
+        conversation_session_id=session_id,
+        turn_id=turn_id,
+    )
     deadline = time.monotonic() + max(5, int(duration_seconds or 0))
     stop_requested = False
     latest_detail: dict[str, Any] = {}
@@ -2289,6 +2418,18 @@ def _run_observation_session(*, run_id: str, prompt: str, duration_seconds: int)
             break
         if _self_observation_operator_terminated(run_id) and not stop_requested:
             stop_requested = True
+            _append_self_observation_event(
+                run_id,
+                event="stop_requested",
+                status="terminated",
+                message=text_for(
+                    get_web_language(),
+                    zh="用户已请求终止观察会话。",
+                    en="User requested observation session stop.",
+                ),
+                conversation_session_id=session_id,
+                turn_id=turn_id,
+            )
             try:
                 request_stop_session_turn(session_id)
             except Exception:
@@ -2348,6 +2489,13 @@ def _run_self_observation_turn(context: dict[str, Any]) -> None:
             get_web_language(),
             zh="自主观察会话正在运行。",
             en="Observation session is running.",
+        )
+        _append_self_observation_event_to_snapshot(
+            snapshot,
+            event="running",
+            status="running",
+            message=snapshot["latestMessage"],
+            timestamp=started_at,
         )
         terminate_state = snapshot.get("actionStates")
         if isinstance(terminate_state, dict) and isinstance(terminate_state.get("terminate"), dict):
@@ -2469,6 +2617,13 @@ def execute_self_observation_action(run_id: str, action: str) -> dict[str, Any]:
             get_web_language(),
             zh="自主观察已由用户终止。",
             en="Observation run terminated by user.",
+        )
+        _append_self_observation_event_to_snapshot(
+            snapshot,
+            event="terminated",
+            status="terminated",
+            message=snapshot["latestMessage"],
+            timestamp=now,
         )
         snapshot["report"] = snapshot.get("report") or text_for(
             get_web_language(),

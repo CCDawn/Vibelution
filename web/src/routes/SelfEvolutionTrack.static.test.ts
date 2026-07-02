@@ -85,8 +85,10 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionStylesSource).toContain("pageStack:");
     expect(selfEvolutionStylesSource).toContain("workspaceLayout:");
     expect(selfEvolutionStylesSource).toContain("conversationShell:");
+    expect(selfEvolutionStylesSource).toContain("centerColumnObservation:");
     expect(selfEvolutionStylesSource).toContain("max-h-full");
     expect(selfEvolutionStylesSource).toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(selfEvolutionStylesSource).toContain("grid-rows-[minmax(0,1fr)]");
   });
 
   it("surfaces the active run controls before the workspace columns", () => {
@@ -226,6 +228,29 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("sessionId={observationConversationSessionId}");
     expect(selfEvolutionSource).toContain("renderObservationSetupPanel()");
     expect(selfEvolutionSource).not.toContain("{renderObservationPanel()}");
+  });
+
+  it("loads real observation session detail instead of rendering only snapshot text", () => {
+    expect(selfEvolutionSource).toContain("SessionDetail");
+    expect(selfEvolutionSource).toContain("observationSessionDetailQuery");
+    expect(selfEvolutionSource).toContain("queryKeys.session(observationConversationSessionId || \"__none__\")");
+    expect(selfEvolutionSource).toContain("fetchJson<SessionDetail>(`/api/sessions/${encodeURIComponent(observationConversationSessionId)}`)");
+    expect(selfEvolutionSource).toContain("observationSessionMessages");
+    expect(selfEvolutionSource).toContain("messages={observationSessionMessages}");
+    expect(selfEvolutionSource).not.toContain("messages={observationConversationMessages}");
+  });
+
+  it("uses the observation workspace to fill the main area with conversation and evidence", () => {
+    expect(selfEvolutionSource).toContain("styles.observationWorkspace");
+    expect(selfEvolutionSource).toContain("styles.centerColumnObservation");
+    expect(selfEvolutionSource).toContain("styles.observationConversationPane");
+    expect(selfEvolutionSource).toContain("styles.observationEvidenceRail");
+    expect(selfEvolutionSource).toContain("styles.observationEventTimeline");
+    expect(selfEvolutionSource).toContain("observationEventTail.map");
+    expect(selfEvolutionSource).toContain("event.message || event.event");
+    expect(selfEvolutionStylesSource).toContain("observationWorkspace:");
+    expect(selfEvolutionStylesSource).toContain("grid-cols-[minmax(0,1fr)_minmax(280px,360px)]");
+    expect(selfEvolutionStylesSource).toContain("observationEvidenceRail:");
   });
 
   it("keeps the observation status surface isolated from worktree approval semantics", () => {
