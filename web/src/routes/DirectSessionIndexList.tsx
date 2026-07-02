@@ -46,19 +46,43 @@ export function conversationToSessionSummary(
   const sessionId = conversation.directSessionId || conversation.conversationId;
   const existingSession = sessionsById.get(sessionId);
   if (existingSession) {
+    let nextSession = existingSession;
+    function patchExistingSession(patch: Partial<SessionSummary>) {
+      const baseSession = nextSession === existingSession ? existingSession : nextSession;
+      nextSession = { ...baseSession, ...patch };
+    }
+
     const agentAvatarImagePath = existingSession.agentAvatarImagePath || conversation.agentAvatarImagePath;
     const agentAvatarImageUrl = existingSession.agentAvatarImageUrl || conversation.agentAvatarImageUrl;
-    if (
-      agentAvatarImagePath !== existingSession.agentAvatarImagePath
-      || agentAvatarImageUrl !== existingSession.agentAvatarImageUrl
-    ) {
-      return {
-        ...existingSession,
+    if (agentAvatarImagePath !== existingSession.agentAvatarImagePath) {
+      patchExistingSession({
         agentAvatarImagePath,
-        agentAvatarImageUrl,
-      };
+      });
     }
-    return existingSession;
+    if (agentAvatarImageUrl !== existingSession.agentAvatarImageUrl) {
+      patchExistingSession({
+        agentAvatarImageUrl,
+      });
+    }
+    if (existingSession.sourceRef === undefined && conversation.sourceRef !== undefined) {
+      patchExistingSession({ sourceRef: conversation.sourceRef });
+    }
+    if (existingSession.projectionEdit === undefined && conversation.projectionEdit !== undefined) {
+      patchExistingSession({ projectionEdit: conversation.projectionEdit });
+    }
+    if (existingSession.agentSourceRef === undefined && conversation.agentSourceRef !== undefined) {
+      patchExistingSession({ agentSourceRef: conversation.agentSourceRef });
+    }
+    if (existingSession.conversationIndexVisibility === undefined && conversation.conversationIndexVisibility !== undefined) {
+      patchExistingSession({ conversationIndexVisibility: conversation.conversationIndexVisibility });
+    }
+    if (existingSession.conversationIndexKind === undefined && conversation.conversationIndexKind !== undefined) {
+      patchExistingSession({ conversationIndexKind: conversation.conversationIndexKind });
+    }
+    if (existingSession.conversationIndexErrors === undefined && conversation.conversationIndexErrors !== undefined) {
+      patchExistingSession({ conversationIndexErrors: conversation.conversationIndexErrors });
+    }
+    return nextSession;
   }
   return {
     id: sessionId,
@@ -82,6 +106,12 @@ export function conversationToSessionSummary(
     agentMissing: conversation.agentMissing,
     agentStatusCode: conversation.agentStatusCode,
     agentStatusMessage: conversation.agentStatusMessage,
+    sourceRef: conversation.sourceRef,
+    projectionEdit: conversation.projectionEdit,
+    agentSourceRef: conversation.agentSourceRef,
+    conversationIndexVisibility: conversation.conversationIndexVisibility,
+    conversationIndexKind: conversation.conversationIndexKind,
+    conversationIndexErrors: conversation.conversationIndexErrors,
   };
 }
 

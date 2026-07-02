@@ -62,6 +62,60 @@ describe("DirectSessionIndexList helpers", () => {
     });
   });
 
+  it("fills missing cached session source authority from the conversation index", () => {
+    const cached = session({ id: "session-2", title: "用户改名", dialogueModelId: "gpt-5.5" });
+    const result = conversationToSessionSummary(
+      conversation({
+        directSessionId: "session-2",
+        sourceRef: {
+          kind: "session",
+          id: "session-2",
+          owner: "ConversationLedger",
+          factAuthority: true,
+          canonicalEditRoute: "/chat?session=session-2",
+          canonicalMutationApi: "/api/sessions/session-2",
+          projectionCanWrite: false,
+          allowedProjectionActions: ["view", "link", "refresh", "repair"],
+          sourceAuthorityVersion: 1,
+        },
+        projectionEdit: {
+          canWrite: false,
+          mode: "deep_link_to_source",
+          reason: "conversation_index_contract",
+          sourceOwner: "ConversationLedger",
+          canonicalEditRoute: "/chat?session=session-2",
+          canonicalMutationApi: "/api/sessions/session-2",
+          sourceAuthorityVersion: 1,
+        },
+        agentSourceRef: {
+          kind: "agent",
+          id: "agent-1",
+          owner: "AgentDirectory",
+          factAuthority: true,
+          canonicalEditRoute: "/agents?agent=agent-1&pane=config",
+          canonicalMutationApi: "/api/agents/agent-1",
+          projectionCanWrite: false,
+          allowedProjectionActions: ["view", "link", "refresh", "repair"],
+          sourceAuthorityVersion: 1,
+        },
+        conversationIndexVisibility: "team_private",
+        conversationIndexKind: "team_agent",
+        conversationIndexErrors: ["missing_source_authority"],
+      }),
+      new Map([[cached.id, cached]]),
+    );
+
+    expect(result).not.toBe(cached);
+    expect(result.title).toBe("用户改名");
+    expect(result.dialogueModelId).toBe("gpt-5.5");
+    expect(result.sourceRef?.owner).toBe("ConversationLedger");
+    expect(result.projectionEdit?.mode).toBe("deep_link_to_source");
+    expect(result.agentSourceRef?.canonicalEditRoute).toBe("/agents?agent=agent-1&pane=config");
+    expect(result.conversationIndexVisibility).toBe("team_private");
+    expect(result.conversationIndexKind).toBe("team_agent");
+    expect(result.conversationIndexErrors).toEqual(["missing_source_authority"]);
+  });
+
   it("preserves direct conversation metadata in the fallback session summary", () => {
     const result = conversationToSessionSummary(
       conversation({
@@ -96,5 +150,55 @@ describe("DirectSessionIndexList helpers", () => {
       taskSummary: "摘要",
       currentPhase: "idle",
     });
+  });
+
+  it("preserves source authority metadata in the fallback session summary", () => {
+    const result = conversationToSessionSummary(
+      conversation({
+        directSessionId: "session-3",
+        sourceRef: {
+          kind: "session",
+          id: "session-3",
+          owner: "ConversationLedger",
+          factAuthority: true,
+          canonicalEditRoute: "/chat?session=session-3",
+          canonicalMutationApi: "/api/sessions/session-3",
+          projectionCanWrite: false,
+          allowedProjectionActions: ["view", "link", "refresh", "repair"],
+          sourceAuthorityVersion: 1,
+        },
+        projectionEdit: {
+          canWrite: false,
+          mode: "deep_link_to_source",
+          reason: "conversation_index_contract",
+          sourceOwner: "ConversationLedger",
+          canonicalEditRoute: "/chat?session=session-3",
+          canonicalMutationApi: "/api/sessions/session-3",
+          sourceAuthorityVersion: 1,
+        },
+        agentSourceRef: {
+          kind: "agent",
+          id: "agent-1",
+          owner: "AgentDirectory",
+          factAuthority: true,
+          canonicalEditRoute: "/agents?agent=agent-1&pane=config",
+          canonicalMutationApi: "/api/agents/agent-1",
+          projectionCanWrite: false,
+          allowedProjectionActions: ["view", "link", "refresh", "repair"],
+          sourceAuthorityVersion: 1,
+        },
+        conversationIndexVisibility: "team_private",
+        conversationIndexKind: "team_agent",
+        conversationIndexErrors: ["missing_source_authority"],
+      }),
+      new Map(),
+    );
+
+    expect(result.sourceRef?.owner).toBe("ConversationLedger");
+    expect(result.projectionEdit?.reason).toBe("conversation_index_contract");
+    expect(result.agentSourceRef?.canonicalEditRoute).toBe("/agents?agent=agent-1&pane=config");
+    expect(result.conversationIndexVisibility).toBe("team_private");
+    expect(result.conversationIndexKind).toBe("team_agent");
+    expect(result.conversationIndexErrors).toEqual(["missing_source_authority"]);
   });
 });
