@@ -92,6 +92,78 @@ def test_source_collection_summary_reuses_processing_status_for_projection(tmp_p
     assert status_calls == [run_id]
 
 
+def test_source_collection_summary_defaults_to_latest_run_with_records(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    first_run = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding",
+            "agentRoles": ["source_finder"],
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    first_run_id = first_run["run"]["runId"]
+    data_processing_service.add_record(
+        first_run_id,
+        {
+            "sourceType": "paper",
+            "sourceRef": "10.1000/example",
+            "title": "Useful predictive coding source",
+        },
+    )
+    empty_run = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding retry",
+            "agentRoles": ["source_finder"],
+            "querySeeds": ["already excluded source"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+
+    payload = team_workflow_orchestration_service.get_source_collection_summary(team["teamId"])
+
+    assert empty_run["run"]["runId"] != first_run_id
+    assert payload["runId"] == first_run_id
+    assert payload["summary"]["recordCount"] == 1
+
+
+def test_source_collection_summary_status_ignores_legacy_collecting_after_stage_round():
+    assert (
+        team_workflow_orchestration_service._source_collection_summary_payload_status(
+            "run-with-stage-round",
+            run_status={"runStatus": "collecting"},
+            active_work_run={},
+            stage_round_ref={"stageRoundId": "stage-1"},
+            projection={"latestTasks": {}},
+        )
+        == "ready"
+    )
+    assert (
+        team_workflow_orchestration_service._source_collection_summary_payload_status(
+            "run-with-active-agent-task",
+            run_status={"runStatus": "reviewing"},
+            active_work_run={},
+            stage_round_ref={"stageRoundId": "stage-1"},
+            projection={"latestTasks": {"finding": {"status": "running"}}},
+        )
+        == "active"
+    )
+    assert (
+        team_workflow_orchestration_service._source_collection_summary_payload_status(
+            "run-with-background-search",
+            run_status={"runStatus": "collecting"},
+            active_work_run={"runId": "work-1"},
+            stage_round_ref={"stageRoundId": "stage-1"},
+            projection={"latestTasks": {}},
+        )
+        == "active"
+    )
+
+
 class _FakeLocalResearchMessage:
     def __init__(self, content, *, reasoning_content=""):
         self.content = content
