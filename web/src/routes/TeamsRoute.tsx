@@ -2277,6 +2277,52 @@ function sourceCollectionRunsForTeam(payload: DataProcessingRunListPayload | und
   );
 }
 
+type SourceCollectionRunSummaryValue = DataProcessingRunListPayload["runs"][number] | null | undefined;
+
+function sourceCollectionRunMetric(run: SourceCollectionRunSummaryValue, keys: string[]) {
+  if (!run) {
+    return 0;
+  }
+  const scopes = [
+    run.summary,
+    (run.scope as Record<string, unknown> | undefined)?.sourceCollectionSummary,
+    (run.metadata as Record<string, unknown> | undefined)?.sourceCollectionSummary,
+    run.scope,
+    run.metadata,
+  ].filter((value): value is Record<string, unknown> => Boolean(value && typeof value === "object"));
+  for (const scope of scopes) {
+    for (const key of keys) {
+      const value = Number(scope[key]);
+      if (Number.isFinite(value) && value > 0) {
+        return value;
+      }
+    }
+  }
+  return 0;
+}
+
+function sourceCollectionRunRecordCount(run: SourceCollectionRunSummaryValue) {
+  return sourceCollectionRunMetric(run, ["recordCount", "rawRecordCount", "createdUniqueRecordCount"]);
+}
+
+function sourceCollectionRunCandidateMetric(run: SourceCollectionRunSummaryValue) {
+  return sourceCollectionRunMetric(run, ["sourceCandidateCount", "candidateCount", "importedCount"]);
+}
+
+function sourceCollectionRunHasUsableRecords(run: SourceCollectionRunSummaryValue) {
+  return sourceCollectionRunRecordCount(run) > 0 || sourceCollectionRunCandidateMetric(run) > 0;
+}
+
+function selectDefaultSourceCollectionRun(
+  runs: DataProcessingRunListPayload["runs"],
+  requestedRunId: string,
+) {
+  return runs.find((run) => run.runId === requestedRunId)
+    ?? runs.find(sourceCollectionRunHasUsableRecords)
+    ?? runs[0]
+    ?? null;
+}
+
 function sourceCollectionRunLabel(runId: string) {
   return runId ? `${runId.slice(0, 10)}...` : "-";
 }
@@ -2300,6 +2346,15 @@ function translateResearchPhrase(value: string | undefined | null, lang: "zh" | 
 
 function sourceCollectionRunTitleLabel(title: string | undefined | null, lang: "zh" | "en") {
   return translateResearchPhrase(title, lang) || (lang === "zh" ? "资料搜索批次" : "Source collection run");
+}
+
+function sourceCollectionRunOptionLabel(run: DataProcessingRunListPayload["runs"][number], lang: "zh" | "en") {
+  const recordCount = sourceCollectionRunRecordCount(run);
+  const candidateCount = sourceCollectionRunCandidateMetric(run);
+  const title = sourceCollectionRunTitleLabel(run.title, lang);
+  return lang === "zh"
+    ? `${sourceCollectionRunLabel(run.runId)} · ${title} · ${recordCount} 条资料 / ${candidateCount} 候选`
+    : `${sourceCollectionRunLabel(run.runId)} · ${title} · ${recordCount} records / ${candidateCount} candidates`;
 }
 
 function sourceCollectionStatusLabel(value: string | undefined | null, lang: "zh" | "en") {
@@ -4829,8 +4884,20 @@ export function TeamsRoute({
       bindingSource: string;
     }>>;
   }, [activeAgentsById, canvas, knowledgeExpansionWorkflowTeamSelected, selectedTeam?.members]);
-  const selectedSourceCollectionRun =
-    sourceCollectionRuns.find((run) => run.runId === selectedSourceCollectionRunId) ?? sourceCollectionRuns[0] ?? null;
+  const sourceCollectionLatestRun = sourceCollectionRuns[0] ?? null;
+  const sourceCollectionHistoricalRunWithRecords = sourceCollectionRuns.find(sourceCollectionRunHasUsableRecords) ?? null;
+  const selectedSourceCollectionRun = selectDefaultSourceCollectionRun(sourceCollectionRuns, selectedSourceCollectionRunId);
+  const sourceCollectionLatestRunIsEmpty = Boolean(
+    sourceCollectionLatestRun
+    && !sourceCollectionRunHasUsableRecords(sourceCollectionLatestRun),
+  );
+  const sourceCollectionShowingHistoricalRunByDefault = Boolean(
+    !selectedSourceCollectionRunId
+    && sourceCollectionLatestRunIsEmpty
+    && sourceCollectionHistoricalRunWithRecords
+    && selectedSourceCollectionRun?.runId === sourceCollectionHistoricalRunWithRecords.runId
+    && sourceCollectionLatestRun?.runId !== sourceCollectionHistoricalRunWithRecords.runId,
+  );
   const selectedSourceCollectionRunEffectiveId = selectedSourceCollectionRun?.runId ?? "";
   const sourceCollectionSummaryQuery = useQuery({
     queryKey: sourceCollectionSummaryQueryKey(effectiveTeamId || "none", selectedSourceCollectionRunEffectiveId || "latest"),
@@ -7472,9 +7539,73 @@ export function TeamsRoute({
     );
   }
 
+  function renderSourceCollectionRunSwitcher() {
+    if (!sourceCollectionRuns.length) {
+      return null;
+    }
+    const selectedRecordCount = sourceCollectionRunRecordCount(selectedSourceCollectionRun);
+    const selectedCandidateCount = sourceCollectionRunCandidateMetric(selectedSourceCollectionRun);
+    const selectedRunIsEmpty = Boolean(
+      selectedSourceCollectionRun
+      && !sourceCollectionRunHasUsableRecords(selectedSourceCollectionRun),
+    );
+    const canSwitchToHistoricalRun = Boolean(
+      sourceCollectionHistoricalRunWithRecords
+      && sourceCollectionHistoricalRunWithRecords.runId !== selectedSourceCollectionRun?.runId,
+    );
+    const hint = sourceCollectionRecordsDataLoading
+      ? (lang === "zh" ? "正在读取当前批次资料。" : "Loading the selected run.")
+      : sourceCollectionShowingHistoricalRunByDefault
+        ? (lang === "zh" ? "最新批次暂无资料，已显示上一轮有资料的批次。" : "The latest run is empty, so the latest run with records is shown.")
+      : selectedRunIsEmpty && canSwitchToHistoricalRun
+        ? (lang === "zh" ? "当前批次暂无资料，上一轮有资料；可切换查看。" : "This run is empty; another run has records.")
+      : (lang === "zh" ? "可切换批次查看历史搜索结果。" : "Switch runs to inspect previous search results.");
+    return (
+      <section className={styles.sourceCollectionRunSwitcher} aria-label={lang === "zh" ? "资料批次选择" : "Source collection run selector"}>
+        <label className={styles.sourceCollectionRunSwitcherMain}>
+          <span>{lang === "zh" ? "当前批次" : "Run"}</span>
+          <VNativeSelect
+            value={selectedSourceCollectionRunEffectiveId}
+            onChange={(event) => setSelectedSourceCollectionRunId(event.target.value)}
+            disabled={!sourceCollectionRuns.length}
+          >
+            {sourceCollectionRuns.map((run) => (
+              <option key={run.runId} value={run.runId}>
+                {sourceCollectionRunOptionLabel(run, lang)}
+              </option>
+            ))}
+          </VNativeSelect>
+          <small>{hint}</small>
+        </label>
+        <div className={styles.sourceCollectionRunSwitcherStats}>
+          <span>{lang === "zh" ? "资料" : "records"} <strong>{sourceCollectionRecordsDataLoading ? sourceCollectionLoadingText : selectedRecordCount}</strong></span>
+          <span>{lang === "zh" ? "候选" : "candidates"} <strong>{sourceCollectionRecordsDataLoading ? sourceCollectionLoadingText : selectedCandidateCount}</strong></span>
+          <span>{lang === "zh" ? "状态" : "status"} <strong>{sourceCollectionStatusLabel(sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status, lang)}</strong></span>
+        </div>
+        {selectedRunIsEmpty && canSwitchToHistoricalRun && sourceCollectionHistoricalRunWithRecords ? (
+          <VNativeButton
+            type="button"
+            onClick={() => setSelectedSourceCollectionRunId(sourceCollectionHistoricalRunWithRecords.runId)}
+          >
+            <Search size={13} />
+            {lang === "zh" ? "切换到有资料批次" : "Show run with records"}
+          </VNativeButton>
+        ) : null}
+      </section>
+    );
+  }
+
   function renderSourceCollectionConversation() {
     const pagedResults = sourceCollectionPageItems("finding", sourceCollectionFilteredRecords);
     const visibleResults = pagedResults.items;
+    const selectedRunEmptyWithHistorical = Boolean(
+      !sourceCollectionRecordsDataLoading
+      && !sourceCollectionRecords.length
+      && selectedSourceCollectionRun
+      && !sourceCollectionRunHasUsableRecords(selectedSourceCollectionRun)
+      && sourceCollectionHistoricalRunWithRecords
+      && sourceCollectionHistoricalRunWithRecords.runId !== selectedSourceCollectionRun.runId,
+    );
     const rawRecordRangeText = sourceCollectionRecordsDataLoading
       ? sourceCollectionLoadingText
       : `${pagedResults.start}-${pagedResults.end} / ${sourceCollectionFilteredRecords.length}`;
@@ -7581,6 +7712,24 @@ export function TeamsRoute({
                   </article>
                 );
               })}
+            </div>
+          ) : selectedRunEmptyWithHistorical && sourceCollectionHistoricalRunWithRecords ? (
+            <div className={styles.sourceCollectionEmptyRunNotice}>
+              <div>
+                <strong>{lang === "zh" ? "当前批次暂无资料" : "This run has no records"}</strong>
+                <span>
+                  {lang === "zh"
+                    ? `上一轮有资料：${sourceCollectionRunRecordCount(sourceCollectionHistoricalRunWithRecords)} 条资料 / ${sourceCollectionRunCandidateMetric(sourceCollectionHistoricalRunWithRecords)} 个候选。`
+                    : `Another run has records: ${sourceCollectionRunRecordCount(sourceCollectionHistoricalRunWithRecords)} records / ${sourceCollectionRunCandidateMetric(sourceCollectionHistoricalRunWithRecords)} candidates.`}
+                </span>
+              </div>
+              <VNativeButton
+                type="button"
+                onClick={() => setSelectedSourceCollectionRunId(sourceCollectionHistoricalRunWithRecords.runId)}
+              >
+                <Search size={13} />
+                {lang === "zh" ? "切换到有资料批次" : "Show run with records"}
+              </VNativeButton>
             </div>
           ) : (
             <div className={styles.empty}>
@@ -11948,6 +12097,7 @@ export function TeamsRoute({
                 { key: "sources", label: lang === "zh" ? "资料" : "sources", value: sourceCollectionCollectedCountLabel },
               ]}
             />
+            {renderSourceCollectionRunSwitcher()}
             <TeamStagePipeline
               id="source-collection-stage-status"
               ariaLabel={lang === "zh" ? "知识搜集内部模块" : "Knowledge collection modules"}
