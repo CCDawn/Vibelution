@@ -125,6 +125,11 @@ import {
   useSessionIndexQuery,
 } from "./chatSessionIndexQuery";
 import {
+  ACTIVE_BACKGROUND_SYNC_POLL_MS,
+  ACTIVE_INDEX_POLL_MS,
+  resolveChatLiveQueryPolicy,
+} from "./chatLiveQueryPolicy";
+import {
   latestUserMessageId as deriveLatestUserMessageId,
   resolveComposerDraftValue,
   resolveLatestEditTarget,
@@ -1399,8 +1404,6 @@ const KEYBOARD_RESIZE_STEP = 24;
 const MENTAL_MODEL_TOGGLE_STORAGE_KEY = "vibelution.chat.mentalModelEnabled";
 const MAX_COMPOSER_IMAGE_ATTACHMENTS = 4;
 const MAX_COMPOSER_IMAGE_BYTES = 8 * 1024 * 1024;
-const ACTIVE_INDEX_POLL_MS = 3_000;
-const ACTIVE_BACKGROUND_SYNC_POLL_MS = 5_000;
 const SESSION_STREAM_MIN_APPLY_INTERVAL_MS = 350;
 const SESSION_STREAM_ROUTE_SWITCH_GRACE_MS = 4_000;
 const CHAT_CENTER_FIRST_MEDIA_QUERY = "(max-width: 980px)";
@@ -2300,16 +2303,21 @@ export function ChatCodingRoute() {
     && (chatPollingVisible || groupBackgroundSyncActive),
   );
   const sessionStreamAvailable = typeof EventSource !== "undefined";
-  const directSessionStreamOwnsLiveQueries = Boolean(
-    sessionStreamAvailable
-    && sessionStreamShouldConnect
-    && directSessionPanelActive,
-  );
-  const groupStreamOwnsLiveQueries = Boolean(
-    sessionStreamAvailable
-    && groupStreamShouldConnect
-    && legacyGroupRoomActive,
-  );
+  const chatLiveQueryPolicyInput = {
+    chatPollingVisible,
+    chatStartupWarmupActive,
+    directSessionBackgroundSyncActive,
+    groupBackgroundSyncActive,
+    directSessionPanelActive,
+    legacyGroupRoomActive,
+    sessionStreamAvailable,
+    sessionStreamShouldConnect,
+    groupStreamShouldConnect,
+    activeSessionId: activeSessionId || "",
+    activeRootSessionId: "",
+  };
+  const chatLiveQueryPolicy = resolveChatLiveQueryPolicy(chatLiveQueryPolicyInput);
+  const { directSessionStreamOwnsLiveQueries, groupStreamOwnsLiveQueries } = chatLiveQueryPolicy;
   useEffect(() => {
     if (!legacyGroupRoomActive && rightIndexPanel === "members") {
       setRightIndexPanel("conversations");
@@ -2350,12 +2358,8 @@ export function ChatCodingRoute() {
   const rawSessionsQuery = useSessionIndexQuery({
     queryClient,
     queryText: sessionQueryText,
-    refetchInterval: resolvePollingInterval(
-      chatPollingVisible,
-      directSessionStreamOwnsLiveQueries ? false : ACTIVE_INDEX_POLL_MS,
-      { backgroundMs: directSessionBackgroundSyncActive && !directSessionStreamOwnsLiveQueries ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false },
-    ),
-    refetchIntervalInBackground: chatStartupWarmupActive || directSessionBackgroundSyncActive,
+    refetchInterval: chatLiveQueryPolicy.sessionsRefetchInterval,
+    refetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground,
   });
   const visibleSessionsData = useMemo(
     () => rawSessionsQuery.data?.filter(isVisibleDirectSession),
@@ -2372,20 +2376,8 @@ export function ChatCodingRoute() {
     queryKey: queryKeys.conversations(),
     queryFn: () => fetchJson<ConversationSummary[]>("/api/conversations"),
     enabled: secondaryChatDataEnabled,
-    refetchInterval: resolvePollingInterval(
-      chatPollingVisible,
-      directSessionStreamOwnsLiveQueries || groupStreamOwnsLiveQueries
-        ? false
-        : ACTIVE_INDEX_POLL_MS,
-      {
-        backgroundMs:
-          (directSessionBackgroundSyncActive && !directSessionStreamOwnsLiveQueries)
-          || (groupBackgroundSyncActive && !groupStreamOwnsLiveQueries)
-            ? ACTIVE_BACKGROUND_SYNC_POLL_MS
-            : false,
-      },
-    ),
-    refetchIntervalInBackground: chatStartupWarmupActive || directSessionBackgroundSyncActive || groupBackgroundSyncActive,
+    refetchInterval: chatLiveQueryPolicy.conversationsRefetchInterval,
+    refetchIntervalInBackground: chatLiveQueryPolicy.sharedRefetchIntervalInBackground,
   });
   const teamsQuery = useQuery({
     queryKey: queryKeys.teams(),
@@ -2614,14 +2606,8 @@ export function ChatCodingRoute() {
     queryKey: queryKeys.session(activeSessionId ?? "none"),
     enabled: Boolean(activeSessionId),
     queryFn: () => fetchJson<SessionDetail>(`/api/sessions/${activeSessionId}`),
-    refetchInterval: activeSessionId
-      ? resolvePollingInterval(
-          chatPollingVisible,
-          directSessionStreamOwnsLiveQueries ? false : 3_000,
-          { backgroundMs: directSessionBackgroundSyncActive && !directSessionStreamOwnsLiveQueries ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false },
-        )
-      : false,
-    refetchIntervalInBackground: chatStartupWarmupActive || directSessionBackgroundSyncActive,
+    refetchInterval: chatLiveQueryPolicy.sessionDetailRefetchInterval,
+    refetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground,
   });
   useEffect(() => {
     if (
@@ -2682,18 +2668,16 @@ export function ChatCodingRoute() {
     setActiveSession,
   ]);
   const activeRootSessionId = rootSessionIdFor(sessionDetailQuery.data ?? directSessionActiveSummary);
+  const childSessionLiveQueryPolicy = resolveChatLiveQueryPolicy({
+    ...chatLiveQueryPolicyInput,
+    activeRootSessionId: activeRootSessionId || "",
+  });
   const childSessionsQuery = useQuery({
     queryKey: queryKeys.sessionChildSessions(activeRootSessionId || "none"),
     queryFn: () => fetchJson<SessionSummary[]>(`/api/sessions/${activeRootSessionId}/child-sessions`),
     enabled: Boolean(activeRootSessionId) && directSessionPanelActive,
-    refetchInterval: activeRootSessionId
-      ? resolvePollingInterval(
-          chatPollingVisible,
-          directSessionStreamOwnsLiveQueries ? false : ACTIVE_INDEX_POLL_MS,
-          { backgroundMs: directSessionBackgroundSyncActive && !directSessionStreamOwnsLiveQueries ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false },
-        )
-      : false,
-    refetchIntervalInBackground: chatStartupWarmupActive || directSessionBackgroundSyncActive,
+    refetchInterval: childSessionLiveQueryPolicy.childSessionsRefetchInterval,
+    refetchIntervalInBackground: childSessionLiveQueryPolicy.directRefetchIntervalInBackground,
   });
   useEffect(() => {
     const directReady = Boolean(activeSessionId ? sessionDetailQuery.data : sessionsQuery.data);

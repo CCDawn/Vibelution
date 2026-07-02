@@ -1180,17 +1180,20 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("backs off index polling when detail streams own live queries", () => {
-    expect(routeSource).toContain("const ACTIVE_INDEX_POLL_MS = 3_000");
     expect(routeSource).toContain("const directSessionPanelActive = Boolean(activeSessionId) && !groupPanelActive");
     expect(routeSource).toContain("const sessionStreamAvailable = typeof EventSource !== \"undefined\"");
-    expect(routeSource).toContain("const directSessionStreamOwnsLiveQueries = Boolean(");
-    expect(routeSource).toContain("&& sessionStreamShouldConnect");
-    expect(routeSource).toContain("&& directSessionPanelActive");
-    expect(routeSource).toContain("const groupStreamOwnsLiveQueries = Boolean(");
-    expect(routeSource).toContain("&& groupStreamShouldConnect");
-    expect(routeSource).toContain("&& legacyGroupRoomActive");
-    expect(routeSource).toContain("directSessionStreamOwnsLiveQueries ? false : ACTIVE_INDEX_POLL_MS");
-    expect(routeSource).toContain("directSessionStreamOwnsLiveQueries ? false : 3_000");
+    expect(routeSource).toContain("resolveChatLiveQueryPolicy");
+    expect(routeSource).toContain("const chatLiveQueryPolicyInput = {");
+    expect(routeSource).toContain("sessionStreamShouldConnect,");
+    expect(routeSource).toContain("directSessionPanelActive,");
+    expect(routeSource).toContain("groupStreamShouldConnect,");
+    expect(routeSource).toContain("legacyGroupRoomActive,");
+    expect(routeSource).toContain("const chatLiveQueryPolicy = resolveChatLiveQueryPolicy(chatLiveQueryPolicyInput)");
+    expect(routeSource).toContain("const { directSessionStreamOwnsLiveQueries, groupStreamOwnsLiveQueries } = chatLiveQueryPolicy");
+    expect(routeSource).toContain("refetchInterval: chatLiveQueryPolicy.sessionsRefetchInterval");
+    expect(routeSource).toContain("refetchInterval: chatLiveQueryPolicy.conversationsRefetchInterval");
+    expect(routeSource).toContain("refetchInterval: chatLiveQueryPolicy.sessionDetailRefetchInterval");
+    expect(routeSource).toContain("refetchInterval: childSessionLiveQueryPolicy.childSessionsRefetchInterval");
     expect(routeSource).toContain("mergeSessionDetailIntoConversations(conversations, detail)");
   });
 
@@ -1200,7 +1203,6 @@ describe("ChatCodingRoute layout contract", () => {
       routeSource.indexOf("useEffect(() => {\n    if (!groupStreamShouldConnect"),
     );
 
-    expect(routeSource).toContain("const ACTIVE_BACKGROUND_SYNC_POLL_MS = 5_000");
     expect(routeSource).toContain("const SESSION_STREAM_ROUTE_SWITCH_GRACE_MS = 4_000");
     expect(routeSource).toContain("directSessionBackgroundSyncActive");
     expect(routeSource).toContain("groupBackgroundSyncActive");
@@ -1221,10 +1223,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(sessionStreamEffectSource).not.toContain("directSessionBackgroundSyncActive,");
     expect(sessionStreamEffectSource).not.toContain("pageVisible,");
     expect(routeSource).toContain("if (!groupStreamShouldConnect || typeof EventSource === \"undefined\")");
-    expect(routeSource).toContain("backgroundMs: directSessionBackgroundSyncActive && !directSessionStreamOwnsLiveQueries ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false");
-    expect(routeSource).toContain("groupBackgroundSyncActive && !groupStreamOwnsLiveQueries");
-    expect(routeSource).toContain("refetchIntervalInBackground: chatStartupWarmupActive || directSessionBackgroundSyncActive");
-    expect(routeSource).toContain("refetchIntervalInBackground: chatStartupWarmupActive || groupBackgroundSyncActive");
+    expect(routeSource).toContain("refetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground");
+    expect(routeSource).toContain("refetchIntervalInBackground: chatLiveQueryPolicy.sharedRefetchIntervalInBackground");
+    expect(routeSource).toContain("refetchIntervalInBackground: childSessionLiveQueryPolicy.directRefetchIntervalInBackground");
   });
 
   it("updates active direct session before pushing the route", () => {
