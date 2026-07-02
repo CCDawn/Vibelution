@@ -1102,7 +1102,7 @@ describe("ChatCodingRoute layout contract", () => {
       [routeStyles.inlineMetaList, "grid-cols-[minmax(0,1fr)]"],
       [routeStyles.sessionBindingNotice, "grid-cols-[minmax(0,1fr)_auto]"],
       [routeStyles.activeSkillStatus, "grid-cols-[minmax(0,1fr)_auto]"],
-      [routeStyles.agentIndexHeader, "grid-cols-[18px_minmax(0,1fr)_auto]"],
+      [routeStyles.agentIndexHeader, "grid-cols-[18px_minmax(0,1fr)_fit-content(72px)]"],
       [routeStyles.agentIndexOpenButton, "grid-cols-[30px_minmax(0,1fr)]"],
       [routeStyles.resourceSplit, "grid-cols-[repeat(auto-fit,minmax(118px,1fr))]"],
       [routeStyles.inlineStatGrid, "grid-cols-[1fr]"],
@@ -1118,7 +1118,7 @@ describe("ChatCodingRoute layout contract", () => {
       [routeStyles.conversationTreeRootHeader, "grid-cols-[minmax(0,1fr)_auto]"],
       [routeStyles.groupManagementActions, "grid-cols-[repeat(2,minmax(0,1fr))]"],
       [routeStyles.groupManagementControls, "grid-cols-[minmax(0,1fr)_auto]"],
-      [routeStyles.groupMemberChip, "grid-cols-[auto_26px_minmax(0,1fr)_auto]"],
+      [routeStyles.groupMemberChip, "grid-cols-[18px_26px_minmax(0,1fr)_auto]"],
       [routeStyles.groupBubbleRow, "grid-cols-[30px_minmax(0,1fr)]"],
       [routeStyles.groupComposerBar, "grid-cols-[minmax(0,1fr)_auto_auto]"],
     ];
@@ -1130,6 +1130,46 @@ describe("ChatCodingRoute layout contract", () => {
 
     expect(routeStyles.systemEntryTitleRow).toContain("!flex");
     expect(routeStyles.systemEntryTitleRow).not.toContain("grid-cols-");
+  });
+
+  it("keeps team group chat panels readable after the style-map bake", () => {
+    expect(routeStyles.groupConversationFrame).toContain("grid");
+    expect(routeStyles.groupConversationFrame).toContain("grid-rows-[auto_minmax(0,1fr)_auto]");
+    expect(routeStyles.groupConversationFrame).toContain("h-full");
+    expect(routeStyles.groupConversationFrame).toContain("overflow-hidden");
+    expect(routeStyles.groupConversationFrame).toContain("rounded-[var(--radius-panel)]");
+
+    expect(routeStyles.groupConversationHeader).toContain("!grid");
+    expect(routeStyles.groupConversationHeader).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(routeStyles.groupConversationHeader).toContain("[&_h2]:truncate");
+
+    expect(routeStyles.groupMessageTimeline).toContain("min-h-0");
+    expect(routeStyles.groupMessageTimeline).toContain("overflow-auto");
+    expect(routeStyles.groupMessageTimeline).toContain("p-2");
+    expect(routeStyles.groupEmptyState).toContain("grid");
+    expect(routeStyles.groupEmptyState).toContain("place-items-center");
+    expect(routeStyles.groupEmptyState).toContain("min-h-[min(420px,calc(100dvh_-_220px))]");
+
+    expect(routeStyles.groupMemberPicker).toContain("grid");
+    expect(routeStyles.groupMemberPicker).toContain("gap-1.5");
+    expect(routeStyles.groupMemberChip).toContain("!w-full");
+    expect(routeStyles.groupMemberChip).not.toContain("w-fit");
+    expect(routeStyles.groupMemberCopy).toContain("grid");
+    expect(routeStyles.groupMemberCopy).toContain("overflow-hidden");
+    expect(routeStyles.groupMemberCopy).toContain("[&_strong]:truncate");
+    expect(routeStyles.groupMemberCopy).toContain("[&_small]:truncate");
+
+    expect(routeStyles.agentIndexHeader).toContain("grid-cols-[18px_minmax(0,1fr)_fit-content(72px)]");
+    expect(routeStyles.agentIndexOpenButton).toContain("!w-full");
+    expect(routeStyles.agentIndexOpenButton).not.toContain("w-fit");
+    expect(routeStyles.agentIndexOpenButton).toContain("[&_[data-slot=vui-button-content]]:contents");
+    expect(routeStyles.agentIndexOpenButton).toContain("[&_[data-slot=vui-button-label]]:contents");
+    expect(routeStyles.agentIndexCopy).toContain("grid");
+    expect(routeStyles.agentIndexCopy).toContain("overflow-hidden");
+    expect(routeStyles.agentIndexNameLine).toContain("!flex");
+    expect(routeStyles.agentIndexNameLine).toContain("[&_span]:truncate");
+    expect(routeStyles.agentModelLine).toContain("truncate");
+    expect(routeStyles.agentIndexStatus).toContain("whitespace-nowrap");
   });
 
   it("uses the group surface as a project Agent bus observation and @ guidance entry", () => {
