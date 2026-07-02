@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import styles from "./LogsRoute.styles";
 import routeSource from "./LogsRoute.tsx?raw";
 
 describe("LogsRoute layout contract", () => {
@@ -48,5 +49,11 @@ describe("LogsRoute layout contract", () => {
     expect(routeSource).toContain('title={t("logsSubtitle")}');
     expect(routeSource).toContain("title={root.summary.userGuide || root.path}");
     expect(routeSource).not.toContain("rootButtonGuide");
+  });
+
+  it("keeps the resizable logs workspace as a three-column grid", () => {
+    expect(styles.workspace).toContain("grid-cols-[minmax(0,1fr)_10px_var(--logs-right-rail-width,250px)]");
+    expect(styles.workspace).toContain("grid-rows-[minmax(0,1fr)]");
+    expect(styles.workspace).toContain("overflow-hidden");
   });
 });
