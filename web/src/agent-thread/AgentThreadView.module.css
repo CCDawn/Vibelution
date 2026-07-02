@@ -54,6 +54,23 @@
   gap: 6px;
 }
 
+.section {
+  min-width: 0;
+}
+
+.processSection,
+.contentSection {
+  display: grid;
+  gap: 6px;
+}
+
+.contextSection {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .part {
   min-width: 0;
   overflow-wrap: anywhere;

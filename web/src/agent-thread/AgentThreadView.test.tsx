@@ -125,4 +125,59 @@ describe("AgentThreadView", () => {
     expect(html).toContain("历史会话");
     expect(html).toContain("分析 Agent");
   });
+
+  it("renders message parts through stable process, content, and context sections", () => {
+    const html = renderThread({
+      id: "thread-sections",
+      source: { kind: "session", id: "session-3" },
+      status: "streaming",
+      messages: [
+        {
+          id: "assistant-sections",
+          role: "assistant",
+          createdAt: "2026-07-02T08:10:00Z",
+          streaming: true,
+          source: { kind: "conversation-message", id: "assistant-sections" },
+          parts: [
+            {
+              id: "assistant-sections-status",
+              type: "runtime-event",
+              kind: "status",
+              name: "model_request",
+              status: "running",
+              summary: "正在请求模型",
+            },
+            {
+              id: "assistant-sections-tool",
+              type: "tool-call",
+              name: "read_file_tool",
+              status: "done",
+              summary: "读取 agent-thread",
+            },
+            {
+              id: "assistant-sections-text",
+              type: "text",
+              channel: "answer",
+              text: "section 渲染完成",
+            },
+            {
+              id: "assistant-sections-reference",
+              type: "reference",
+              reference: {
+                kind: "session",
+                sessionId: "session-ref",
+                title: "历史会话",
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(html).toContain('data-agent-section-kind="process"');
+    expect(html).toContain('data-agent-section-kind="content"');
+    expect(html).toContain('data-agent-section-kind="context"');
+    expect(html.indexOf('data-agent-section-kind="process"')).toBeLessThan(html.indexOf("section 渲染完成"));
+    expect(html.indexOf("section 渲染完成")).toBeLessThan(html.indexOf("历史会话"));
+  });
 });
