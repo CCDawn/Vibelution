@@ -1148,7 +1148,6 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("function isStaleLedgerUpdate(currentSeq: unknown, incomingSeq: unknown)");
     expect(routeSource).not.toContain("function mergeLiveAssistantMessagesIntoSessionDetail(");
     expect(routeSource).not.toContain("kind: \"session_live_overlay\"");
-    expect(routeSource).toContain("const projectedLayer = mergeAssistantDeltaIntoActiveTurnLayer(committedAssistantDeltaLayer, payload)");
     expect(routeSource).toContain("committedAssistantDeltaLayer = pendingLayer");
     expect(routeSource).toContain("pendingTextLength: activeTurnLayerTextLength(pendingLayer)");
     expect(routeSource).toContain("let pendingAssistantDeltaPayloads: Array<{");
@@ -1177,6 +1176,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("pendingTextLength");
     expect(routeSource).toContain("batchSize");
     expect(routeSource).not.toContain("pendingTextLength: String(projectedLayer?.content ?? \"\").length + String(projectedLayer?.thought ?? \"\").length");
+    const queueAssistantDeltaStart = routeSource.indexOf("function queueAssistantDelta(");
+    const handleSessionInitialStart = routeSource.indexOf("function handleSessionInitial", queueAssistantDeltaStart);
+    const queueAssistantDeltaBody = routeSource.slice(queueAssistantDeltaStart, handleSessionInitialStart);
+    expect(queueAssistantDeltaBody).not.toContain("mergeAssistantDeltaIntoActiveTurnLayer");
+    expect(queueAssistantDeltaBody).not.toContain("activeTurnLayerTextLength");
   });
 
   it("backs off index polling when detail streams own live queries", () => {
