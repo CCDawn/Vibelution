@@ -1,4 +1,12 @@
 import { ConversationFeedbackEvent, ConversationMessage, ToolCall } from "../../api/types";
+import type {
+  AgentMentalPart,
+  AgentMessage,
+  AgentMessagePart,
+  AgentRuntimeEventPart,
+  AgentThoughtPart,
+  AgentToolCallPart,
+} from "../../agent-thread/types";
 import { mergeConversationFeedbackEvents } from "./conversationFeedbackEvents";
 import { hasMentalBlock, hasThoughtBlock, hasToolBlock } from "./messageSections";
 
@@ -9,6 +17,7 @@ export type ConversationOperation = {
   kind: ConversationOperationKind;
   label: string;
   rawLabel?: string;
+  preserveToolLabel?: boolean;
   status: string;
   rawStatus?: string;
   summary: string;
@@ -52,6 +61,10 @@ const FEEDBACK_OPERATION_CACHE_LIMIT = 200;
 const feedbackOperationCache = new Map<string, ConversationOperation[]>();
 const operationGroupsCache = new WeakMap<
   ConversationMessage,
+  { labels: ConversationOperationLabels; groups: ConversationOperationGroups }
+>();
+const agentOperationGroupsCache = new WeakMap<
+  AgentMessage,
   { labels: ConversationOperationLabels; groups: ConversationOperationGroups }
 >();
 
@@ -176,6 +189,164 @@ export function buildConversationOperationGroups(
   };
   operationGroupsCache.set(message, { labels, groups });
   return groups;
+}
+
+export function buildAgentMessageOperations(
+  message: AgentMessage,
+  labels: ConversationOperationLabels,
+): ConversationOperation[] {
+  if (message.role !== "assistant") {
+    return [];
+  }
+  const operations = message.parts
+    .map((part, index) => agentMessagePartToOperation(message, part, index, labels))
+    .filter((operation): operation is ConversationOperation => operation !== null);
+  return normalizeTimelineOperations(operations, message.streaming);
+}
+
+export function buildAgentMessageOperationGroups(
+  message: AgentMessage,
+  labels: ConversationOperationLabels,
+): ConversationOperationGroups {
+  const cached = agentOperationGroupsCache.get(message);
+  if (cached && cached.labels === labels) {
+    return cached.groups;
+  }
+  const operations = buildAgentMessageOperations(message, labels);
+  const groups = {
+    timeline: operations,
+    thoughts: operations.filter((operation) => operation.kind === "thought"),
+    mental: operations.filter((operation) => operation.kind === "mental"),
+    status: operations.filter((operation) => operation.kind === "status"),
+    tools: operations.filter((operation) => operation.kind === "tool"),
+  };
+  agentOperationGroupsCache.set(message, { labels, groups });
+  return groups;
+}
+
+function agentMessagePartToOperation(
+  message: AgentMessage,
+  part: AgentMessagePart,
+  index: number,
+  labels: ConversationOperationLabels,
+): ConversationOperation | null {
+  if (part.type === "thought") {
+    return agentThoughtPartToOperation(message, part, labels);
+  }
+  if (part.type === "mental") {
+    return agentMentalPartToOperation(message, part, labels);
+  }
+  if (part.type === "tool-call") {
+    return agentToolCallPartToOperation(part, index);
+  }
+  if (part.type === "runtime-event") {
+    return agentRuntimeEventPartToOperation(part, index, labels);
+  }
+  return null;
+}
+
+function agentThoughtPartToOperation(
+  message: AgentMessage,
+  part: AgentThoughtPart,
+  labels: ConversationOperationLabels,
+): ConversationOperation | null {
+  const text = part.text || part.summary || "";
+  if (!text.trim()) {
+    return null;
+  }
+  return {
+    id: part.id,
+    kind: "thought",
+    label: labels.thought,
+    status: part.status || (message.streaming ? "running" : "done"),
+    summary: compactPreview(part.summary || text),
+    durationSeconds: null,
+    resultPreview: text,
+    sequence: numberOrNull(part.sequence) ?? undefined,
+    timestamp: part.timestamp,
+  };
+}
+
+function agentMentalPartToOperation(
+  message: AgentMessage,
+  part: AgentMentalPart,
+  labels: ConversationOperationLabels,
+): ConversationOperation | null {
+  const summary = part.summary.trim();
+  if (!summary) {
+    return null;
+  }
+  return {
+    id: part.id,
+    kind: "mental",
+    label: labels.mental,
+    status: part.status || (message.streaming ? "running" : "done"),
+    summary: compactPreview(summary),
+    durationSeconds: null,
+    sequence: numberOrNull(part.sequence) ?? undefined,
+    timestamp: part.timestamp,
+  };
+}
+
+function agentToolCallPartToOperation(
+  part: AgentToolCallPart,
+  index: number,
+): ConversationOperation {
+  const rawLabel = part.name?.trim() || "tool";
+  return {
+    id: part.id || `agent-tool-${index}`,
+    kind: "tool",
+    label: rawLabel,
+    rawLabel,
+    preserveToolLabel: part.source === "legacy-tool-call",
+    status: part.status || "done",
+    summary: compactPreview(part.summary || part.resultPreview || ""),
+    durationSeconds: coerceAgentToolDurationSeconds(part),
+    arguments: part.arguments,
+    resultPreview: part.resultPreview,
+    resultType: part.resultType,
+    resultLength: numberOrNull(part.resultLength) ?? undefined,
+    error: part.error,
+    timeoutSeconds: numberOrNull(part.timeoutSeconds) ?? undefined,
+    tracePath: part.tracePath,
+    sequence: numberOrNull(part.sequence) ?? undefined,
+    timestamp: part.timestamp,
+    relatedThoughtSequence: numberOrNull(part.relatedThoughtSequence) ?? undefined,
+  };
+}
+
+function agentRuntimeEventPartToOperation(
+  part: AgentRuntimeEventPart,
+  index: number,
+  labels: ConversationOperationLabels,
+): ConversationOperation {
+  const event: ConversationFeedbackEvent = {
+    sequence: numberOrNull(part.sequence) ?? index + 1,
+    kind: "status",
+    status: part.status,
+    name: part.name,
+    summary: part.summary,
+    resultPreview: part.resultPreview,
+    error: part.error,
+    timestamp: part.timestamp,
+    tracePath: part.tracePath,
+  };
+  const statusDisplay = statusOperationDisplay(event, labels.status);
+  return {
+    id: part.id || `agent-runtime-${index}`,
+    kind: "status",
+    label: statusDisplay.label,
+    rawLabel: part.name,
+    status: part.status || "running",
+    rawStatus: part.status,
+    summary: compactPreview(statusDisplay.summary || part.summary || part.resultPreview || ""),
+    durationSeconds: null,
+    resultPreview: statusDisplay.detail || part.resultPreview,
+    error: part.error,
+    tracePath: part.tracePath,
+    sequence: numberOrNull(part.sequence) ?? undefined,
+    timestamp: part.timestamp,
+  };
 }
 
 export function buildConversationReActOperationGroups(
@@ -460,7 +631,9 @@ function normalizeOperationDisplay(operation: ConversationOperation): Conversati
     ...operation,
     rawStatus,
     status: normalizeDisplayStatus(operation.status),
-    label: operation.kind === "tool" ? displayToolLabel(operation.rawLabel ?? operation.label) : operation.label,
+    label: operation.kind === "tool" && !operation.preserveToolLabel
+      ? displayToolLabel(operation.rawLabel ?? operation.label)
+      : operation.label,
   };
 }
 
@@ -603,6 +776,15 @@ function coerceToolDurationSeconds(toolCall: ToolCall) {
     return seconds;
   }
   const durationMs = numberOrNull(value.durationMs);
+  return durationMs === null ? null : durationMs / 1000;
+}
+
+function coerceAgentToolDurationSeconds(toolCall: AgentToolCallPart) {
+  const seconds = numberOrNull(toolCall.durationSeconds);
+  if (seconds !== null) {
+    return seconds;
+  }
+  const durationMs = numberOrNull(toolCall.durationMs);
   return durationMs === null ? null : durationMs / 1000;
 }
 

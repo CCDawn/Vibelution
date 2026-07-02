@@ -1,4 +1,5 @@
 import { ConversationMessage, MentalStateSnapshot } from "../../api/types";
+import type { AgentMessage, AgentMessagePart, AgentMentalPart, AgentTextPart, AgentThoughtPart } from "../../agent-thread/types";
 
 export function hasMentalSnapshot(snapshot: MentalStateSnapshot | undefined) {
   if (!snapshot) {
@@ -23,6 +24,64 @@ export function hasMentalBlock(message: ConversationMessage) {
 
 export function hasToolBlock(message: ConversationMessage) {
   return message.role === "assistant" && (message.toolCalls?.length ?? 0) > 0;
+}
+
+export type AgentMessageSectionState = {
+  answerText: string;
+  userText: string;
+  hasThoughtBlock: boolean;
+  hasMentalBlock: boolean;
+  hasToolBlock: boolean;
+  hasResponseBlock: boolean;
+  hasFeedbackTimeline: boolean;
+  hasUserContent: boolean;
+};
+
+export function buildAgentMessageSectionState(message: AgentMessage): AgentMessageSectionState {
+  const answerText = agentMessageText(message, "answer");
+  const userText = agentMessageText(message, "user");
+  return {
+    answerText,
+    userText,
+    hasThoughtBlock: message.role === "assistant" && message.parts.some(isVisibleAgentThoughtPart),
+    hasMentalBlock: message.role === "assistant" && message.parts.some(isVisibleAgentMentalPart),
+    hasToolBlock: message.role === "assistant" && message.parts.some((part) => part.type === "tool-call"),
+    hasResponseBlock: hasAgentResponseBlock(message, answerText),
+    hasFeedbackTimeline: message.role === "assistant" && message.parts.some(isAgentFeedbackTimelinePart),
+    hasUserContent: message.role !== "assistant" && Boolean(userText),
+  };
+}
+
+function agentMessageText(message: AgentMessage, channel: AgentTextPart["channel"]) {
+  return message.parts
+    .filter((part): part is AgentTextPart => part.type === "text" && part.channel === channel)
+    .map((part) => part.text.trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function isVisibleAgentThoughtPart(part: AgentMessagePart): part is AgentThoughtPart {
+  return part.type === "thought" && Boolean((part.text || part.summary || "").trim());
+}
+
+function isVisibleAgentMentalPart(part: AgentMessagePart): part is AgentMentalPart {
+  if (part.type !== "mental") {
+    return false;
+  }
+  return hasMentalSnapshot(part.snapshot) || Boolean(part.summary.trim());
+}
+
+function isAgentFeedbackTimelinePart(part: AgentMessagePart) {
+  if (part.type === "runtime-event") {
+    return true;
+  }
+  if (part.type === "tool-call") {
+    return part.source === "feedback-event";
+  }
+  if (part.type === "thought" || part.type === "mental") {
+    return part.sequence !== undefined || Boolean(part.timestamp);
+  }
+  return false;
 }
 
 function metadataString(message: ConversationMessage, key: string) {
@@ -114,6 +173,59 @@ export function isRuntimeStatusContent(message: ConversationMessage) {
     return true;
   }
   return isStreamingRuntimeStatusCarrier(message) && isTransientReasoningStatusText(content);
+}
+
+function agentMetadataString(message: AgentMessage, key: string) {
+  const value = message.metadata?.[key] ?? message.source.metadata?.[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function hasAgentResponseBlock(message: AgentMessage, answerText: string) {
+  if (message.role !== "assistant") {
+    return false;
+  }
+  if (!answerText.trim()) {
+    return false;
+  }
+  if (isProviderFailureSummaryText(answerText)) {
+    return false;
+  }
+  const kind = agentMetadataString(message, "kind");
+  if (kind === "turn_error" || kind === "group_room_transcript") {
+    return false;
+  }
+  if (kind === "image2_generation" && agentMetadataString(message, "status") === "failed") {
+    return false;
+  }
+  if (isAgentRuntimeNoticeText(answerText)) {
+    return false;
+  }
+  if (isAgentRuntimeStatusText(message, answerText)) {
+    return false;
+  }
+  return true;
+}
+
+function isAgentRuntimeNoticeText(text: string) {
+  const content = text.trim().toLowerCase();
+  return [
+    "上一轮运行已被中断，当前会话已恢复为可继续状态",
+    "the previous turn was interrupted. this session is ready to continue",
+  ].some((notice) => content.includes(notice));
+}
+
+function isAgentRuntimeStatusText(message: AgentMessage, text: string) {
+  const content = text.trim();
+  if (!content) {
+    return false;
+  }
+  if (
+    /^(状态|status)\s+.+/i.test(content)
+    && /(正在|running|thinking|reasoning|tooling|模型|model|上下文|context)/i.test(content)
+  ) {
+    return true;
+  }
+  return Boolean(message.streaming) && isTransientReasoningStatusText(content);
 }
 
 export function isAgentInboxMessage(message: ConversationMessage) {
