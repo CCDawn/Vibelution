@@ -402,6 +402,14 @@ type SourceCollectionStageCompletionGate = {
   passed?: boolean;
 };
 
+type SourceCollectionStageActionReadinessProjection = {
+  canStart?: boolean;
+  reasonCode?: string;
+  disabledReason?: string;
+  recommendedAction?: "start" | "continue" | "retry" | "wait" | "inspect" | string;
+  actionLabel?: string;
+};
+
 type SourceCollectionStageClosureSummary = {
   userStatus?: "success" | "partial" | "failed" | string;
   artifactStatus?: string;
@@ -427,6 +435,9 @@ type SourceCollectionStageCardProjection = {
   stageId: SourceCollectionStageModuleId;
   status: string;
   isClosedLoop?: boolean;
+  userStatusLabel?: string;
+  userSummary?: string;
+  actionReadiness?: SourceCollectionStageActionReadinessProjection;
   agentTaskStatus?: string;
   artifactStatus?: string;
   artifactSummary?: string;
@@ -804,6 +815,9 @@ function sourceCollectionStageUserStatusLabel(
   if (syncing) {
     return lang === "zh" ? "正在同步 Agent 结果" : "Syncing Agent result";
   }
+  if (lang === "zh" && projection.userStatusLabel) {
+    return projection.userStatusLabel;
+  }
   const currentCoverage = projection.currentCoverageSummary;
   if (currentCoverage?.applicable && currentCoverage.complete === false) {
     return sourceCollectionStageRecoveryStatusLabel(projection.stageId, lang);
@@ -876,6 +890,9 @@ function sourceCollectionStageUserSummary(
   const closure = projection.latestTask?.closureSummary;
   const excluded = typeof projection.counts?.excluded === "number" ? projection.counts.excluded : 0;
   const artifact = typeof projection.counts?.artifact === "number" ? projection.counts.artifact : 0;
+  if (lang === "zh" && projection.userSummary) {
+    return projection.userSummary;
+  }
   const currentCoverage = projection.currentCoverageSummary;
   const currentTotal = typeof currentCoverage?.total === "number" ? currentCoverage.total : 0;
   const currentProcessed = typeof currentCoverage?.processed === "number" ? currentCoverage.processed : 0;
@@ -11542,9 +11559,33 @@ export function TeamsRoute({
           sourceCollectionActionBusyReason,
           selectedTeamStartSourceCollectionStageTaskPending,
         );
+  const sourceCollectionStageBackendActionReadiness = (
+    stageId: SourceCollectionStageModuleId,
+    fallback: SourceCollectionActionReadiness,
+  ): SourceCollectionActionReadiness => {
+    const backendReadiness = sourceCollectionStageCardById.get(stageId)?.actionReadiness;
+    if (!backendReadiness || typeof backendReadiness.canStart !== "boolean") {
+      return fallback;
+    }
+    if (backendReadiness.canStart) {
+      return sourceCollectionActionReady;
+    }
+    return sourceCollectionActionReadiness(
+      true,
+      backendReadiness.disabledReason || fallback.reason || sourceCollectionActionNoInputReason,
+      false,
+    );
+  };
+  const sourceCollectionStageActionLabelFor = (stageId: SourceCollectionStageModuleId, fallback: string) =>
+    sourceCollectionStageTaskActionLabel(
+      stageId,
+      sourceCollectionStageCardById.get(stageId)?.actionReadiness?.actionLabel || fallback,
+    );
   const sourceCollectionStageActionReadinessFor = (stageId: SourceCollectionStageModuleId): SourceCollectionActionReadiness => {
     if (stageId === "finding") {
-      return sourceCollectionCollectionActionReadiness;
+      return sourceCollectionStageTaskActionReadiness(
+        sourceCollectionStageBackendActionReadiness("finding", sourceCollectionCollectionActionReadiness),
+      );
     }
     if (stageId === "extraction") {
       const extractionDisabled = sourceCollectionCandidateExtractionActionReadiness.disabled && sourceCollectionScreeningActionReadiness.disabled;
@@ -11553,13 +11594,20 @@ export function TeamsRoute({
         ? sourceCollectionCandidateExtractionActionReadiness.reason
         : sourceCollectionScreeningActionReadiness.reason || sourceCollectionCandidateExtractionActionReadiness.reason;
       return sourceCollectionStageTaskActionReadiness(
-        sourceCollectionActionReadiness(extractionDisabled, extractionReason || sourceCollectionActionNoInputReason, extractionLoading),
+        sourceCollectionStageBackendActionReadiness(
+          "extraction",
+          sourceCollectionActionReadiness(extractionDisabled, extractionReason || sourceCollectionActionNoInputReason, extractionLoading),
+        ),
       );
     }
     if (stageId === "relations") {
-      return sourceCollectionStageTaskActionReadiness(sourceCollectionGraphActionReadiness);
+      return sourceCollectionStageTaskActionReadiness(
+        sourceCollectionStageBackendActionReadiness("relations", sourceCollectionGraphActionReadiness),
+      );
     }
-    return sourceCollectionStageTaskActionReadiness(sourceCollectionMemoryActionReadiness);
+    return sourceCollectionStageTaskActionReadiness(
+      sourceCollectionStageBackendActionReadiness("ingestion", sourceCollectionMemoryActionReadiness),
+    );
   };
   const sourceCollectionStageModules: SourceCollectionStageModule[] = [
     {
@@ -11581,7 +11629,7 @@ export function TeamsRoute({
       state: sourceCollectionSearchStepState,
       status: sourceCollectionStepStatusText(sourceCollectionSearchStepState),
       detailLabel: lang === "zh" ? "查看资料记录" : "View source records",
-      actionLabel: sourceCollectionStageTaskActionLabel("finding", sourceCollectionCollectionActionLabel),
+      actionLabel: sourceCollectionStageActionLabelFor("finding", sourceCollectionCollectionActionLabel),
       actionDisabled: sourceCollectionStageActionReadinessFor("finding").disabled,
       actionTone: "primary",
       actionIcon: selectedSourceCollectionRun && sourceCollectionSearchOpenAssignmentCount > 0 ? "search" : "play",
@@ -11612,7 +11660,7 @@ export function TeamsRoute({
       state: sourceCollectionExtractionStepState,
       status: sourceCollectionStepStatusText(sourceCollectionExtractionStepState),
       detailLabel: lang === "zh" ? "查看提炼结果" : "View extraction details",
-      actionLabel: sourceCollectionStageTaskActionLabel(
+      actionLabel: sourceCollectionStageActionLabelFor(
         "extraction",
         sourceCollectionDisplayedCandidateCount > 0
           ? (lang === "zh" ? "Agent 提炼资料" : "Agent extract sources")
@@ -11644,7 +11692,7 @@ export function TeamsRoute({
       state: sourceCollectionGraphStepState,
       status: sourceCollectionStepStatusText(sourceCollectionGraphStepState),
       detailLabel: lang === "zh" ? "查看资料关系" : "View relations",
-      actionLabel: sourceCollectionStageTaskActionLabel("relations", sourceCollectionGraphActionLabel),
+      actionLabel: sourceCollectionStageActionLabelFor("relations", sourceCollectionGraphActionLabel),
       actionDisabled: sourceCollectionStageActionReadinessFor("relations").disabled,
       actionTone: "primary",
       actionIcon: "refresh",
@@ -11681,7 +11729,7 @@ export function TeamsRoute({
       state: sourceCollectionMemoryStepState,
       status: sourceCollectionStepStatusText(sourceCollectionMemoryStepState),
       detailLabel: lang === "zh" ? "查看入库详情" : "View ingestion details",
-      actionLabel: sourceCollectionStageTaskActionLabel("ingestion", sourceCollectionMemoryActionLabel),
+      actionLabel: sourceCollectionStageActionLabelFor("ingestion", sourceCollectionMemoryActionLabel),
       actionDisabled: sourceCollectionStageActionReadinessFor("ingestion").disabled,
       actionTone: "primary",
       actionIcon: "check",

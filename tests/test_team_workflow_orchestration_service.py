@@ -7220,6 +7220,75 @@ def test_source_collection_summary_records_slow_runtime_event(tmp_path, monkeypa
     assert slow_events[0]["fields"]["stageCardCount"] == 4
 
 
+def test_source_collection_stage_card_projection_exposes_user_action_contract():
+    running_card = team_workflow_orchestration_service._source_collection_stage_card_projection(
+        "extraction",
+        [
+            {
+                "taskId": "task-extraction-running",
+                "stageId": "extraction",
+                "status": "running",
+                "summary": "正在分页提炼候选资料。",
+                "updatedAt": "2026-06-27T09:10:00Z",
+            }
+        ],
+        artifact_count=4,
+        input_count=10,
+        output_count=4,
+        pending_count=6,
+        artifact_status="partial",
+        artifact_summary="4 source_manifest candidates; 4/10 assessed.",
+    )
+
+    assert running_card["userStatusLabel"] == "Agent 正在处理"
+    assert running_card["userSummary"] == "Agent 正在处理本阶段，请等待结果同步。"
+    assert running_card["actionReadiness"]["canStart"] is False
+    assert running_card["actionReadiness"]["recommendedAction"] == "wait"
+    assert running_card["actionReadiness"]["disabledReason"] == "已有 Agent 正在执行"
+
+    partial_card = team_workflow_orchestration_service._source_collection_stage_card_projection(
+        "extraction",
+        [
+            {
+                "taskId": "task-extraction-partial",
+                "stageId": "extraction",
+                "status": "needs_review",
+                "summary": "已提炼部分资料，需要继续补齐。",
+                "updatedAt": "2026-06-27T09:11:00Z",
+            }
+        ],
+        artifact_count=4,
+        input_count=10,
+        output_count=4,
+        pending_count=6,
+        artifact_status="partial",
+        artifact_summary="4 source_manifest candidates; 4/10 assessed.",
+    )
+
+    assert partial_card["status"] == "partial_current_inputs"
+    assert partial_card["userStatusLabel"] == "待补提炼"
+    assert "已处理 4/10" in partial_card["userSummary"]
+    assert partial_card["actionReadiness"]["canStart"] is True
+    assert partial_card["actionReadiness"]["recommendedAction"] == "continue"
+    assert partial_card["actionReadiness"]["actionLabel"] == "Agent 继续提炼"
+
+    idle_relation_card = team_workflow_orchestration_service._source_collection_stage_card_projection(
+        "relations",
+        [],
+        artifact_count=0,
+        input_count=0,
+        output_count=0,
+        pending_count=0,
+        artifact_status="empty",
+        artifact_summary="0 graph nodes; 0 graph edges.",
+    )
+
+    assert idle_relation_card["userStatusLabel"] == "未开始"
+    assert idle_relation_card["actionReadiness"]["canStart"] is False
+    assert idle_relation_card["actionReadiness"]["recommendedAction"] == "wait"
+    assert idle_relation_card["actionReadiness"]["disabledReason"] == "当前阶段还没有可执行输入"
+
+
 def test_source_collection_stage_card_projection_keeps_ready_artifact_when_latest_task_blocked():
     card = team_workflow_orchestration_service._source_collection_stage_card_projection(
         "finding",
