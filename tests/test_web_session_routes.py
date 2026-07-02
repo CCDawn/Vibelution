@@ -366,6 +366,12 @@ def test_conversation_index_exposes_direct_agent_classification_fields(tmp_path,
     assert direct["conversationIndexKind"] == "personal_agent"
     assert direct["conversationIndexVisibility"] == "user_visible"
     assert direct["conversationIndexErrors"] == []
+    assert direct["sourceRef"]["owner"] == "ConversationLedger"
+    assert direct["sourceRef"]["canonicalEditRoute"] == "/chat?session=session-direct"
+    assert direct["projectionEdit"]["canWrite"] is False
+    assert direct["projectionEdit"]["mode"] == "deep_link_to_source"
+    assert direct["agentSourceRef"]["owner"] == "AgentDirectory"
+    assert direct["agentSourceRef"]["canonicalEditRoute"] == "/agents?agent=agent-direct&pane=config"
 
 
 def test_team_agent_session_summary_exposes_agent_owned_team_identity(tmp_path, monkeypatch):

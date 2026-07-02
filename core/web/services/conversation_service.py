@@ -46,6 +46,9 @@ def list_conversations() -> list[dict[str, Any]]:
                 "conversationIndexErrors": _conversation_index_errors(session),
                 "teamId": str(session.get("teamId") or "").strip(),
                 "teamName": str(session.get("teamName") or "").strip(),
+                "sourceRef": _dict_payload(session.get("sourceRef")),
+                "projectionEdit": _dict_payload(session.get("projectionEdit")),
+                "agentSourceRef": _optional_dict_payload(session.get("agentSourceRef")),
             }
         )
     filtered_archived_team_room_count = 0
@@ -88,6 +91,14 @@ def _conversation_index_errors(session: dict[str, Any]) -> list[str]:
     if isinstance(raw_errors, list):
         return [str(item).strip() for item in raw_errors if str(item).strip()]
     return [str(raw_errors).strip()] if str(raw_errors).strip() else []
+
+
+def _dict_payload(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _optional_dict_payload(value: Any) -> dict[str, Any] | None:
+    return dict(value) if isinstance(value, dict) else None
 
 
 def _record_conversation_index_loaded(
