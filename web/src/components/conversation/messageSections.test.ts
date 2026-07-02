@@ -5,6 +5,7 @@ import { conversationMessageToAgentMessage } from "../../agent-thread";
 import {
   agentMessageContextSections,
   agentMessageContentSections,
+  agentMessageProcessSections,
   buildAgentMessageSectionState,
   hasMentalBlock,
   hasResponseBlock,
@@ -162,6 +163,47 @@ describe("messageSections", () => {
     });
     expect(sections[0].parts.map((part) => part.type)).toEqual(["text"]);
     expect(sections[0].parts.map((part) => part.channel)).toEqual(["user"]);
+  });
+
+  it("selects AgentMessage process sections without mixing in content or context parts", () => {
+    const assistantMessage = message({
+      id: "assistant-process",
+      role: "assistant",
+      content: "最终回答",
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "thought",
+          status: "done",
+          summary: "先检查 process section",
+          resultPreview: "先检查 process section",
+        },
+        {
+          sequence: 2,
+          kind: "tool",
+          status: "done",
+          name: "read_file_tool",
+          summary: "读取 ConversationView",
+        },
+      ],
+      references: [
+        {
+          kind: "session",
+          referenceId: "session:process-ref",
+          sessionId: "process-ref",
+          title: "过程引用",
+        },
+      ],
+    });
+
+    const sections = agentMessageProcessSections(conversationMessageToAgentMessage(assistantMessage));
+
+    expect(sections).toHaveLength(1);
+    expect(sections[0]).toMatchObject({
+      id: "assistant-process-section-process-0",
+      kind: "process",
+    });
+    expect(sections[0].parts.map((part) => part.type)).toEqual(["thought", "tool-call"]);
   });
 
   it("builds AgentMessage section state without exposing runtime status placeholders as answers", () => {

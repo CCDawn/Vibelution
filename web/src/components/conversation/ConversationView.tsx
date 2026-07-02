@@ -60,6 +60,7 @@ import { projectConversationTimelineMessages } from "./useConversationTimelinePr
 import {
   agentMessageContentSections,
   agentMessageContextSections,
+  agentMessageProcessSections,
   buildAgentMessageSectionState,
   hasResponseBlock,
   hasThoughtBlock,
@@ -74,6 +75,7 @@ import {
   researchOrgMessageChips,
   type AgentMessageContentSection,
   type AgentMessageContextSection,
+  type AgentMessageProcessSection,
   type AgentMessageSectionState,
 } from "./messageSections";
 import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
@@ -2423,13 +2425,19 @@ export function ConversationView({
     message: ConversationMessage,
     items: ConversationTimelineItem[],
     rowIdentity: ConversationTimelineRowIdentity,
+    processSectionIds?: string,
   ) {
     if (items.length === 0) {
       return null;
     }
     const activeItemId = activeTimelineItemId(message, items);
     return (
-      <div className={styles.conversationCellTimeline} data-conversation-part-key={rowIdentity.processKey}>
+      <div
+        className={styles.conversationCellTimeline}
+        data-conversation-part-key={rowIdentity.processKey}
+        data-agent-process-section-ids={processSectionIds}
+        data-agent-process-kind={processSectionIds ? "timeline" : undefined}
+      >
         {items.map((item) => renderConversationTimelineItem(message, item, rowIdentity, item.id === activeItemId))}
       </div>
     );
@@ -2854,6 +2862,7 @@ export function ConversationView({
     messageId: string,
     operations: ConversationOperation[],
     defaultExpanded: boolean,
+    processSectionIds?: string,
   ) {
     if (operations.length === 0) {
       return null;
@@ -2874,7 +2883,11 @@ export function ConversationView({
       ? compactRequestStateLabel(collectionTone)
       : operationStateLabel(operationCollectionTone(visibleOperations));
     return (
-      <section className={`${styles.operationGroup} ${styles.executionTraceGroup}`}>
+      <section
+        className={`${styles.operationGroup} ${styles.executionTraceGroup}`}
+        data-agent-process-section-ids={processSectionIds}
+        data-agent-process-kind={processSectionIds ? "feedback" : undefined}
+      >
         <VButton
           type="button"
           className={styles.operationSummary}
@@ -2906,6 +2919,7 @@ export function ConversationView({
     defaultExpanded: boolean,
     renderDetails: () => ReactNode,
     inlinePreview?: string,
+    processSectionIds?: string,
   ) {
     if (operations.length === 0) {
       return null;
@@ -2927,7 +2941,11 @@ export function ConversationView({
     );
     if (!hasExpandableDetails) {
       return (
-        <section className={[styles.answerOnlyProcessGroup, toneStyle].filter(Boolean).join(" ")}>
+        <section
+          className={[styles.answerOnlyProcessGroup, toneStyle].filter(Boolean).join(" ")}
+          data-agent-process-section-ids={processSectionIds}
+          data-agent-process-kind={processSectionIds ? "answer-only" : undefined}
+        >
           <div
             className={[styles.answerOnlyProcessToggle, styles.answerOnlyProcessStatic].filter(Boolean).join(" ")}
             role={tone === "running" ? "status" : undefined}
@@ -2939,7 +2957,11 @@ export function ConversationView({
       );
     }
     return (
-      <section className={[styles.answerOnlyProcessGroup, toneStyle].filter(Boolean).join(" ")}>
+      <section
+        className={[styles.answerOnlyProcessGroup, toneStyle].filter(Boolean).join(" ")}
+        data-agent-process-section-ids={processSectionIds}
+        data-agent-process-kind={processSectionIds ? "answer-only" : undefined}
+      >
         <VButton
           type="button"
           className={styles.answerOnlyProcessToggle}
@@ -3530,6 +3552,10 @@ export function ConversationView({
       .join(" ") || undefined;
   }
 
+  function processSectionIdsForSections(sections: AgentMessageProcessSection[]) {
+    return sections.map((section) => section.id).join(" ") || undefined;
+  }
+
   function renderLegacyUserAttachments(message: ConversationMessage) {
     const attachments = message.attachments ?? [];
     if (!attachments.length) {
@@ -3872,11 +3898,13 @@ export function ConversationView({
               : buildConversationOperationGroups(message, operationLabels);
             const agentSections = agentMessage ? buildAgentMessageSectionState(agentMessage) : null;
             const contentSections = agentMessage ? agentMessageContentSections(agentMessage) : [];
+            const processSections = agentMessage ? agentMessageProcessSections(agentMessage) : [];
             const agentMessageSectionKinds = agentSections?.sectionKinds.join(" ") ?? "";
             const responseText = agentSections?.answerText ?? message.content;
             const userContentText = agentSections?.userText ?? message.content;
             const userContentSectionIds = contentSectionIdsForChannel(contentSections, "user");
             const answerContentSectionIds = contentSectionIdsForChannel(contentSections, "answer");
+            const processSectionIds = processSectionIdsForSections(processSections);
             const hasActiveProcess = operationGroups.timeline.some((operation) => isRunningOperationStatus(operation.status));
             const hasFeedbackTimeline = agentSections?.hasFeedbackTimeline ?? ((message.feedbackEvents?.length ?? 0) > 0);
             const showResponseBlock = agentSections
@@ -3957,13 +3985,14 @@ export function ConversationView({
             );
             const renderProcessDetails = () => {
               if (hasConversationTimeline) {
-                return renderConversationTimeline(message, conversationTimelineItems, rowIdentity);
+                return renderConversationTimeline(message, conversationTimelineItems, rowIdentity, processSectionIds);
               }
               if (hasFeedbackTimeline) {
                 return renderFeedbackTimelineGroup(
                   message.id,
                   operationGroups.timeline,
                   true,
+                  processSectionIds,
                 );
               }
               return renderLegacyProcessDetails(true);
@@ -4004,14 +4033,16 @@ export function ConversationView({
                 processDefaultExpanded,
                 renderProcessDetails,
                 isStreamingStatusPlaceholder ? compactStreamingStatusPlaceholder(responseText) : undefined,
+                processSectionIds,
               )
             ) : hasConversationTimeline ? (
-              renderConversationTimeline(message, conversationTimelineItems, rowIdentity)
+              renderConversationTimeline(message, conversationTimelineItems, rowIdentity, processSectionIds)
             ) : hasFeedbackTimeline ? (
               renderFeedbackTimelineGroup(
                 message.id,
                 operationGroups.timeline,
                 false,
+                processSectionIds,
               )
             ) : renderLegacyProcessDetails();
             return (
