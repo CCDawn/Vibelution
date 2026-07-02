@@ -131,3 +131,11 @@ export type AgentMessagePart =
   | AgentToolCallPart
   | AgentAttachmentPart
   | AgentReferencePart;
+
+export type AgentMessageSectionKind = "process" | "content" | "context";
+
+export type AgentMessageSection = {
+  id: string;
+  kind: AgentMessageSectionKind;
+  parts: AgentMessagePart[];
+};

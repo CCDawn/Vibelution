@@ -4,12 +4,14 @@ import type {
   AgentAttachmentPart,
   AgentMessage,
   AgentMessagePart,
+  AgentMessageSection,
   AgentReferencePart,
   AgentRuntimeEventPart,
   AgentThread,
   AgentThoughtPart,
   AgentToolCallPart,
-} from ".";
+} from "./types";
+import { agentMessageToSections } from "./sections";
 import styles from "./AgentThreadView.module.css";
 
 export type AgentThreadViewProps = {
@@ -53,11 +55,29 @@ export function AgentMessageView({ message }: AgentMessageViewProps) {
         </time>
       </header>
       <div className={styles.parts}>
-        {message.parts.map((part) => (
-          <AgentMessagePartView key={part.id} part={part} />
+        {agentMessageToSections(message).map((section) => (
+          <AgentMessageSectionView key={section.id} section={section} />
         ))}
       </div>
     </article>
+  );
+}
+
+export type AgentMessageSectionViewProps = {
+  section: AgentMessageSection;
+};
+
+export function AgentMessageSectionView({ section }: AgentMessageSectionViewProps) {
+  return (
+    <div
+      className={classNames(styles.section, sectionClassName(section.kind))}
+      data-agent-section-id={section.id}
+      data-agent-section-kind={section.kind}
+    >
+      {section.parts.map((part) => (
+        <AgentMessagePartView key={part.id} part={part} />
+      ))}
+    </div>
   );
 }
 
@@ -160,6 +180,16 @@ function formatTimestamp(value: string) {
     return "";
   }
   return value.replace("T", " ").replace(/\.\d+Z$/, "Z");
+}
+
+function sectionClassName(kind: AgentMessageSection["kind"]) {
+  if (kind === "process") {
+    return styles.processSection;
+  }
+  if (kind === "context") {
+    return styles.contextSection;
+  }
+  return styles.contentSection;
 }
 
 function classNames(...values: Array<string | undefined>) {
