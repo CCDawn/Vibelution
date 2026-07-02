@@ -209,6 +209,15 @@ describe("ConversationView edit resend affordance", () => {
 
   it("keeps conversation timeline previews wrapped and button slots flat", () => {
     expect(styles.timelineCellHeader).toContain("items-start");
+    expect(styles.timelineCellHeader).toContain("!grid");
+    expect(styles.timelineCellHeader).toContain("!w-full");
+    expect(styles.timelineCellHeader).toContain("border-0");
+    expect(styles.timelineCellHeader).toContain("bg-transparent");
+    expect(styles.timelineCellHeader).toContain("p-0");
+    expect(styles.timelineCellHeader).toContain("justify-start");
+    expect(styles.timelineCellHeader).toContain("text-left");
+    expect(styles.timelineCellHeader).toContain("shadow-none");
+    expect(styles.timelineCellHeader).toContain("hover:!bg-transparent");
     expect(styles.timelineCellHeader).toContain("[&_[data-slot=vui-button-content]]:contents");
     expect(styles.timelineCellHeader).toContain("[&_[data-slot=vui-button-label]]:contents");
     expect(styles.timelineCellPreview).toContain("whitespace-normal");
@@ -217,6 +226,24 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.operationItem).not.toContain("860px");
     expect(styles.operationItem).toContain("w-[min(100%,72ch)]");
     expect(styles.operationStatus).toContain("justify-self-start");
+  });
+
+  it("keeps expanded thought timeline text as a left-aligned reading block", () => {
+    expect(styles.timelineThoughtText).toContain("!block");
+    expect(styles.timelineThoughtText).toContain("text-left");
+    expect(styles.timelineThoughtText).toContain("whitespace-pre-wrap");
+    expect(styles.timelineThoughtText).toContain("overflow-visible");
+    expect(styles.timelineThoughtText).toContain("max-w-[min(100%,76ch)]");
+    expect(styles.timelineThoughtText).not.toContain("text-center");
+    expect(styles.timelineThoughtText).not.toContain("place-items-center");
+  });
+
+  it("keeps expanded process details out of nested card chrome", () => {
+    expect(styles.answerOnlyProcessGroup).toContain("w-[min(100%,920px)]");
+    expect(styles.answerOnlyProcessGroup).toContain("bg-transparent");
+    expect(styles.answerOnlyProcessGroup).toContain("shadow-none");
+    expect(styles.answerOnlyProcessGroup).not.toContain("rounded-[var(--radius-control)]");
+    expect(styles.answerOnlyProcessGroup).not.toContain("bg-[color-mix(in_srgb,var(--surface-panel)_58%,transparent)]");
   });
 
   it("uses readable contrast for compact conversation metadata and toggles", () => {
@@ -295,11 +322,11 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.responseBody).toContain("px-3");
     expect(styles.responseBody).toContain("py-2");
 
-    expect(styles.answerOnlyProcessGroup).toContain("w-fit");
-    expect(styles.answerOnlyProcessGroup).toContain("max-w-[min(100%,920px)]");
-    expect(styles.answerOnlyProcessGroup).toContain("rounded-[var(--radius-control)]");
-    expect(styles.answerOnlyProcessGroup).toContain("px-2");
-    expect(styles.answerOnlyProcessGroup).toContain("py-1");
+    expect(styles.answerOnlyProcessGroup).toContain("w-[min(100%,920px)]");
+    expect(styles.answerOnlyProcessGroup).toContain("max-w-full");
+    expect(styles.answerOnlyProcessGroup).toContain("bg-transparent");
+    expect(styles.answerOnlyProcessGroup).toContain("shadow-none");
+    expect(styles.answerOnlyProcessGroup).toContain("p-0");
   });
 
   it("uses shared readable scale tokens for dense conversation text", () => {
