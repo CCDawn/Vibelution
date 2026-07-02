@@ -167,6 +167,43 @@ describe("agent thread adapters", () => {
     });
   });
 
+  it("maps legacy mental snapshots to mental parts with the snapshot summary as the primary text", () => {
+    const message: ConversationMessage = {
+      id: "assistant-mental",
+      role: "assistant",
+      content: "心智状态已更新",
+      timestamp: "2026-07-02T08:02:30Z",
+      mentalSnapshot: {
+        mood: "steady",
+        feeling: "谨慎",
+        whisper: "继续收敛结构",
+        summary: "心智模型摘要",
+        cognitiveState: "focused",
+        confidence: 0.82,
+        sampleSize: 5,
+        interventionCount: 1,
+        updatedAt: "2026-07-02T08:02:20Z",
+        source: "agent",
+      },
+    };
+
+    const agentMessage = conversationMessageToAgentMessage(message);
+    const mentalPart = agentMessage.parts.find((part) => part.type === "mental");
+
+    expect(agentMessage.parts.map((part) => part.type)).toEqual(["mental", "text"]);
+    expect(mentalPart).toMatchObject({
+      id: "assistant-mental-mental",
+      type: "mental",
+      status: "done",
+      summary: "心智模型摘要",
+      snapshot: {
+        feeling: "谨慎",
+        summary: "心智模型摘要",
+        cognitiveState: "focused",
+      },
+    });
+  });
+
   it("wraps conversation messages into a stable agent thread", () => {
     const thread = conversationMessagesToAgentThread(
       "session-1",

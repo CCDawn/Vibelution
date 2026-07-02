@@ -296,8 +296,8 @@ function mentalSnapshotSummary(snapshot: MentalStateSnapshot | undefined) {
     return "";
   }
   return [
-    snapshot.feeling,
     snapshot.summary,
+    snapshot.feeling,
     snapshot.whisper,
     snapshot.intervention,
     snapshot.cognitiveState ? `state: ${snapshot.cognitiveState}` : "",
