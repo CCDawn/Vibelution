@@ -15,6 +15,10 @@ export {
   type TeamSourceFilterOption,
 } from "./TeamSourceFilterBar";
 export {
+  TeamSourcePagination,
+  type TeamSourcePaginationProps,
+} from "./TeamSourcePagination";
+export {
   TeamSourceResultStats,
   type TeamSourceResultStat,
   type TeamSourceResultStatsProps,
