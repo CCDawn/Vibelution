@@ -77,6 +77,9 @@ SELF_EVOLUTION_EXECUTABLE_AGENT_ALLOWED_TOOLS = tuple(DEFAULT_SESSION_AGENT_ALLO
 SELF_EVOLUTION_EXECUTABLE_AGENT_PREFERRED_TOOLS = tuple(DEFAULT_SESSION_AGENT_PREFERRED_TOOLS)
 SELF_EVOLUTION_EXECUTABLE_ROLES = {"executor", "reviewer"}
 SELF_EVOLUTION_OBSERVER_ROLES = {"observer"}
+SELF_EVOLUTION_ACTIVE_ROLES = SELF_EVOLUTION_EXECUTABLE_ROLES | SELF_EVOLUTION_OBSERVER_ROLES
+SELF_EVOLUTION_RETIRED_ROLES = {"summarizer"}
+SELF_EVOLUTION_RETIRED_PROMPT_TEMPLATE_IDS = {"prompt-self-summarizer"}
 SUBAGENT_DELEGATION_TOOL_NAMES = {
     "cli_agent_run_tool",
     "create_child_session_tool",
@@ -1726,6 +1729,7 @@ def repair_agent_directory() -> dict[str, Any]:
         llm_binding_migrated_agents: list[dict[str, Any]] = []
         profile_repaired_agents: list[dict[str, Any]] = []
         tool_policy_repaired_agents: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        retired_self_evolution_agents: list[dict[str, Any]] = []
         model_library_ids = _configured_model_library_ids()
         used_agent_codes: set[str] = set()
         policies = _memory_policies(state)
@@ -1795,6 +1799,10 @@ def repair_agent_directory() -> dict[str, Any]:
                 if agent.get("promptTemplateId") != normalized_prompt_template_id:
                     agent["promptTemplateId"] = normalized_prompt_template_id
                     changed = True
+            retired_self_evolution_role = _retired_self_evolution_role(agent)
+            if retired_self_evolution_role and _archive_retired_self_evolution_agent(agent, retired_self_evolution_role):
+                retired_self_evolution_agents.append(dict(agent))
+                changed = True
             metadata = dict(agent.get("metadata") or {})
             display_name = str(agent.get("displayName") or "").strip()
             if display_name and _display_name_is_functional_or_machine(display_name, agent):
@@ -1892,6 +1900,8 @@ def repair_agent_directory() -> dict[str, Any]:
                 _record_agent_tool_policy_event(repaired_agent, repaired_policy)
             for repaired_agent in territory_repaired_agents:
                 _record_agent_territory_event("agent_territory.resolved", repaired_agent, outcome="repaired")
+            for retired_agent in retired_self_evolution_agents:
+                _record_agent_event("agent.self_evolution_retired_role.archived", retired_agent, lifecycle=True)
         return state
 
 
@@ -3391,6 +3401,45 @@ def _fixed_role_tool_policy_kind(agent: dict[str, Any]) -> str:
     if agent_role_tool_profile_service.role_has_explicit_tool_profile(role_key, primary_mode=primary_mode, metadata=metadata):
         return "role_profile"
     return ""
+
+
+def _retired_self_evolution_role(agent: dict[str, Any]) -> str:
+    primary_mode = _normalize_primary_mode(agent.get("primaryMode") or _infer_agent_primary_mode(agent))
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    self_role = _normalize_role_key(metadata.get("selfEvolutionRole") or agent.get("roleKey") or "")
+    prompt_template_id = _normalize_prompt_template_id(agent.get("promptTemplateId"))
+    if primary_mode != "self_evolution" and not self_role:
+        return ""
+    if self_role in SELF_EVOLUTION_RETIRED_ROLES:
+        return self_role
+    if primary_mode == "self_evolution" and prompt_template_id in SELF_EVOLUTION_RETIRED_PROMPT_TEMPLATE_IDS:
+        return self_role or "summarizer"
+    return ""
+
+
+def _archive_retired_self_evolution_agent(agent: dict[str, Any], retired_role: str) -> bool:
+    changed = False
+    now = utc_now_iso()
+    if str(agent.get("status") or "active").strip() != "archived":
+        agent["status"] = "archived"
+        changed = True
+    metadata = dict(agent.get("metadata") or {})
+    updates = {
+        "retiredRole": _normalize_role_key(retired_role),
+        "retiredReason": "self_evolution_role_retired",
+    }
+    if not str(metadata.get("retiredAt") or "").strip():
+        updates["retiredAt"] = now
+    for key, value in updates.items():
+        if metadata.get(key) != value:
+            metadata[key] = value
+            changed = True
+    if agent.get("metadata") != metadata:
+        agent["metadata"] = metadata
+        changed = True
+    if changed:
+        agent["updatedAt"] = now
+    return changed
 
 
 def normalize_persona_profile(profile: dict[str, Any] | None) -> dict[str, Any]:
