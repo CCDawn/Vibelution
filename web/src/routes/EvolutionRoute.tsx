@@ -1223,6 +1223,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     activeTrack === "self" ? t("selfEvolutionMode") : t("supervisedEvolutionMode");
   const routeSubtitle =
     activeTrack === "self" ? t("selfEvolutionSubtitle") : t("supervisedEvolutionSubtitle");
+  const showRouteToolbar = activeTrack !== "self";
   const currentIntakeMode =
     overview?.intakeMode === "auto"
       ? "auto"
@@ -2868,49 +2869,51 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   }
 
   return (
-    <div className={styles.page}>
-      <section className={styles.toolbar}>
-        <div className={styles.toolbarIntro}>
-          <p className={styles.eyebrow}>{routeEyebrow}</p>
-          <h1 className={styles.title}>{routeTitle}</h1>
-          <p className={styles.subtitle}>{routeSubtitle}</p>
-        </div>
+    <div className={activeTrack === "self" ? `${styles.page} ${styles.selfPage}` : styles.page}>
+      {showRouteToolbar ? (
+        <section className={styles.toolbar}>
+          <div className={styles.toolbarIntro}>
+            <p className={styles.eyebrow}>{routeEyebrow}</p>
+            <h1 className={styles.title}>{routeTitle}</h1>
+            <p className={styles.subtitle}>{routeSubtitle}</p>
+          </div>
 
-        <div className={styles.toolbarControls}>
-          {showTrackToggle ? (
-            <div className={styles.segmented}>
-              {([
-                { key: "supervised", label: t("supervisedEvolutionMode") },
-                { key: "self", label: t("selfEvolutionMode") },
-              ] as const).map((track) => (
-                <button
-                  key={track.key}
-                  type="button"
-                  className={
-                    activeTrack === track.key
-                      ? `${styles.segmentButton} ${styles.segmentButtonActive}`
-                      : styles.segmentButton
-                  }
-                  onClick={() => setEvolutionTrack(track.key)}
-                >
-                  {track.label}
-                </button>
-              ))}
-            </div>
-          ) : null}
+          <div className={styles.toolbarControls}>
+            {showTrackToggle ? (
+              <div className={styles.segmented}>
+                {([
+                  { key: "supervised", label: t("supervisedEvolutionMode") },
+                  { key: "self", label: t("selfEvolutionMode") },
+                ] as const).map((track) => (
+                  <button
+                    key={track.key}
+                    type="button"
+                    className={
+                      activeTrack === track.key
+                        ? `${styles.segmentButton} ${styles.segmentButtonActive}`
+                        : styles.segmentButton
+                    }
+                    onClick={() => setEvolutionTrack(track.key)}
+                  >
+                    {track.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
 
-          {activeTrack === "supervised" ? (
-            <SupervisedWorkspaceControls
-              activeView={evolutionView}
-              activeWorkflowStepId={supervisedSelectedWorkflowStepId}
-              onWorkflowStepSelect={handleSupervisedWorkflowStepSelect}
-              overviewIntakeMode={overview?.intakeMode}
-              configIntakeMode={configQuery.data?.intakeMode}
-              tabSummaries={supervisedTabSummaries}
-            />
-          ) : null}
-        </div>
-      </section>
+            {activeTrack === "supervised" ? (
+              <SupervisedWorkspaceControls
+                activeView={evolutionView}
+                activeWorkflowStepId={supervisedSelectedWorkflowStepId}
+                onWorkflowStepSelect={handleSupervisedWorkflowStepSelect}
+                overviewIntakeMode={overview?.intakeMode}
+                configIntakeMode={configQuery.data?.intakeMode}
+                tabSummaries={supervisedTabSummaries}
+              />
+            ) : null}
+          </div>
+        </section>
+      ) : null}
 
       {activeTrack === "self" ? (
         <div className={styles.selfModeStack}>
