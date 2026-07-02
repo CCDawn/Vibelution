@@ -184,8 +184,6 @@ const styles: Record<string, string> = {
     "experimentSmokeWide min-w-0",
   header:
     "header min-w-0 flex flex-wrap items-center gap-1.5",
-  iconButton:
-    "iconButton min-w-0 inline-grid h-[var(--vui-control-height-sm)] min-h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] place-items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-0 text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] shrink-0 text-[var(--fg-tertiary)]",
   inlineToggle:
     "inlineToggle min-w-0",
   inspector:
@@ -222,8 +220,6 @@ const styles: Record<string, string> = {
     "layerButtonActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   linkedRoomLine:
     "linkedRoomLine min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 block truncate text-[var(--vui-font-xs)] font-semibold text-[var(--accent-cool)]",
-  managementNav:
-    "managementNav min-w-0",
   messageError:
     "messageError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   messageResult:
@@ -426,10 +422,6 @@ const styles: Record<string, string> = {
     "sourceCollectionCandidateListShell min-w-0 grid h-full min-h-0 content-start overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)] gap-1.5 overflow-auto min-h-0 content-start items-start self-start overflow-y-auto [scrollbar-gutter:stable]",
   sourceCollectionCommandBar:
     "sourceCollectionCommandBar min-w-0 flex flex-wrap items-center gap-1.5 !grid grid-cols-[minmax(0,1fr)_minmax(320px,0.55fr)] items-center gap-2 px-2 py-2 max-[980px]:grid-cols-[1fr]",
-  sourceCollectionCommandStats:
-    "sourceCollectionCommandStats min-w-0 grid gap-2 grid-cols-[repeat(3,minmax(120px,1fr))] max-[860px]:grid-cols-[1fr] [&_span]:min-h-[30px]",
-  sourceCollectionCommandTitle:
-    "sourceCollectionCommandTitle min-w-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   sourceCollectionControlPanel:
     "sourceCollectionControlPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
   sourceCollectionConversationHeader:
@@ -544,8 +536,6 @@ const styles: Record<string, string> = {
     "sourceCollectionStageHandoffNext min-w-0",
   sourceCollectionStageMiniFlow:
     "sourceCollectionStageMiniFlow min-w-0",
-  sourceCollectionStageModuleText:
-    "sourceCollectionStageModuleText min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [&_b]:text-[var(--vui-font-base)] [&_em]:text-[var(--vui-font-sm)] [&_small]:line-clamp-1",
   sourceCollectionStageModules:
     "sourceCollectionStageModules min-w-0 grid grid-cols-[repeat(4,minmax(0,1fr))] max-[1220px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[720px]:grid-cols-[1fr]",
   sourceCollectionStagePrimaryAction:
@@ -556,8 +546,6 @@ const styles: Record<string, string> = {
     "sourceCollectionStageSecondaryAction min-w-0 flex flex-wrap items-center gap-1.5 w-fit max-w-full",
   sourceCollectionStageTaskSummary:
     "sourceCollectionStageTaskSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
-  sourceCollectionStageTechnicalDetails:
-    "sourceCollectionStageTechnicalDetails min-w-0",
   sourceCollectionStageWorkspace:
     "sourceCollectionStageWorkspace min-w-0 grid min-h-0 gap-2 p-2 grid-rows-[auto_minmax(0,1fr)]",
   sourceCollectionStageWorkspaceHeader:
@@ -572,42 +560,16 @@ const styles: Record<string, string> = {
     "sourceCollectionStepIdle min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)] [--source-step-color:var(--fg-tertiary)] border-[color-mix(in_srgb,var(--fg-tertiary)_26%,var(--vui-border-subtle))] bg-[var(--vui-surface-base)]",
   sourceCollectionStepPending:
     "sourceCollectionStepPending min-w-0 [--source-step-color:var(--state-warning)] border-[color-mix(in_srgb,var(--state-warning)_48%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_8%,var(--vui-surface-base))]",
-  sourceCollectionTraceAvatar:
-    "sourceCollectionTraceAvatar min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
   sourceCollectionTraceBody:
     "sourceCollectionTraceBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] grid grid-cols-[44px_minmax(0,1fr)] [&_p]:line-clamp-2",
-  sourceCollectionTraceDetails:
-    "sourceCollectionTraceDetails min-w-0",
   sourceCollectionTraceHandoff:
     "sourceCollectionTraceHandoff min-w-0",
-  sourceCollectionTraceList:
-    "sourceCollectionTraceList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   sourceCollectionTraceMessage:
     "sourceCollectionTraceMessage min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
-  sourceCollectionTraceMeta:
-    "sourceCollectionTraceMeta min-w-0 flex flex-wrap items-center gap-1.5",
-  sourceCollectionTraceOwner:
-    "sourceCollectionTraceOwner min-w-0",
-  sourceCollectionTraceRefs:
-    "sourceCollectionTraceRefs min-w-0",
   sourceCollectionTraceStorage:
     "sourceCollectionTraceStorage min-w-0",
-  sourceCollectionTrace_acquire:
-    "sourceCollectionTrace_acquire min-w-0",
-  sourceCollectionTrace_blocked:
-    "sourceCollectionTrace_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   sourceCollectionTrace_cache:
     "sourceCollectionTrace_cache min-w-0",
-  sourceCollectionTrace_extract:
-    "sourceCollectionTrace_extract min-w-0",
-  sourceCollectionTrace_plan:
-    "sourceCollectionTrace_plan min-w-0",
-  sourceCollectionTrace_quality:
-    "sourceCollectionTrace_quality min-w-0",
-  sourceCollectionTrace_search:
-    "sourceCollectionTrace_search min-w-0",
-  sourceCollectionTrace_storage:
-    "sourceCollectionTrace_storage min-w-0",
   sourceCollectionUnavailable:
     "sourceCollectionUnavailable min-w-0 !grid gap-2 content-center justify-items-start p-[18px] rounded-lg border border-[var(--border-soft)] bg-[image:var(--vui-gradient-route-soft)] bg-[color:var(--source-workbench-panel)] [&_strong]:text-[var(--fg-primary)] [&_span]:text-[var(--fg-muted)] [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]",
   teamContextActions:
@@ -678,10 +640,6 @@ const styles: Record<string, string> = {
     "toolbarLink min-w-0 flex flex-wrap items-center gap-1.5",
   workflowCandidateActions:
     "workflowCandidateActions min-w-0 flex flex-wrap items-center gap-1.5",
-  workflowCandidateHeader:
-    "workflowCandidateHeader min-w-0 flex flex-wrap items-center gap-1.5",
-  workflowCandidateItem:
-    "workflowCandidateItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 grid grid-cols-[minmax(0,1fr)_minmax(120px,220px)] min-h-[40px] items-center gap-2 px-2 py-1 max-[820px]:grid-cols-[minmax(0,1fr)]",
   workflowCandidateItemSelected:
     "workflowCandidateItemSelected min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
   workflowCandidateList:
@@ -694,8 +652,6 @@ const styles: Record<string, string> = {
     "workflowCandidateListScroll min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   workflowCandidateListScrollHint:
     "workflowCandidateListScrollHint min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
-  workflowCandidateMeta:
-    "workflowCandidateMeta min-w-0 flex flex-wrap items-center gap-1.5",
   workflowCoordinationBriefSummary:
     "workflowCoordinationBriefSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   workflowCoordinationPanel:
@@ -786,8 +742,6 @@ const styles: Record<string, string> = {
     "workflowSourceCollectionQueries min-w-0",
   workflowSourceCollectionRuns:
     "workflowSourceCollectionRuns min-w-0",
-  workflowSourceCollectionSearchAction:
-    "workflowSourceCollectionSearchAction min-w-0 flex flex-wrap items-center gap-1.5",
   workflowSourceCollectionStats:
     "workflowSourceCollectionStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   workflowSourceCollectionStorageActions:
@@ -828,8 +782,6 @@ const styles: Record<string, string> = {
     "workflowValidation min-w-0",
   workspace:
     "workspace min-w-0 grid min-h-0 gap-2 p-2 !grid min-h-0 grid-cols-[minmax(520px,1fr)_minmax(300px,380px)] gap-2 overflow-hidden px-2 pb-2 pt-1",
-  workspaceEmpty:
-    "workspaceEmpty min-w-0 grid min-h-0 gap-2 p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   workspaceResearch:
     "workspaceResearch min-w-0 grid min-h-0 gap-2 p-2 !grid-cols-[minmax(0,1fr)]",
   workspaceResearchCanvas:
