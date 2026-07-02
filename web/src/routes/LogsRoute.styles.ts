@@ -188,6 +188,12 @@ const styles = createVuiStyleMap(styleKeys, {
     // which stacks/overlaps the panes.
     resizableLayout:
       "!grid grid-cols-[var(--logs-sidebar-width)_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] min-h-0 overflow-hidden",
+    stateFactRow:
+      "!grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[5px] w-full mt-0.5",
+    previewStateFlow:
+      "!grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[5px] min-w-0",
+    packageFileRow:
+      "!grid grid-cols-[auto_minmax(0,1fr)] items-stretch gap-1.5 min-w-0",
   },
 });
 

@@ -353,6 +353,13 @@ const styles = createVuiStyleMap(styleKeys, {
     supervisedWorkflowSessionLink:
       "min-h-[24px] w-full justify-center px-1.5 text-[var(--vui-font-xs)] leading-none",
     transcriptSection: "flex-1 basis-0 bg-transparent",
+    toolbar: "!flex items-center justify-between gap-x-3 gap-y-2 flex-wrap min-w-0",
+    runNextActionStrip:
+      "!grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2 px-2.5 py-2 rounded-[7px] border border-[var(--border-hairline)] bg-[var(--surface-card-subtle)] text-[var(--fg-secondary)] min-w-0",
+    liveSummaryRow:
+      "!grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2.5 px-3 py-2.5 rounded-lg border border-[var(--border-hairline)] bg-[var(--surface-card-subtle)] min-w-0",
+    closedLoopLaunchBlock:
+      "!grid grid-cols-[minmax(0,1fr)_minmax(92px,auto)] items-center gap-2 px-[9px] py-[7px] rounded-[7px] border border-[color:color-mix(in_srgb,var(--accent-warm)_30%,var(--border-hairline))] bg-[color:color-mix(in_srgb,var(--accent-warm)_8%,var(--surface-card-subtle))] min-w-0",
   },
 });
 

@@ -128,6 +128,18 @@ const styles = createVuiStyleMap(styleKeys, {
     // only emits a single-column grid.
     workspace:
       "!grid grid-cols-[var(--tools-left-panel-width)_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden",
+    bulkActionBar:
+      "!grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-[5px] p-[5px] rounded-lg border border-[var(--border-soft)] bg-[color:color-mix(in_srgb,var(--surface-panel)_86%,var(--surface-card))]",
+    selectableToolRow:
+      "!grid grid-cols-[28px_minmax(0,1fr)] items-center gap-[5px] min-w-0",
+    toolPermissionRow:
+      "!grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 px-[7px] py-[7px] rounded-[7px] border border-[color:color-mix(in_srgb,var(--border-soft)_70%,transparent)] bg-[var(--surface-card)]",
+    toolBundleSelect:
+      "!grid grid-cols-[auto_minmax(0,1fr)] items-center gap-[7px] min-w-0 text-[var(--fg-secondary)]",
+    workspaceScopePanel:
+      "!grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[7px] p-2 rounded-[7px] border border-[var(--border-soft)] bg-[var(--surface-card)] max-[900px]:grid-cols-[repeat(2,minmax(0,1fr))]",
+    summaryCard:
+      "!grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-[5px] min-w-0 min-h-[26px] px-2 py-[3px] border-r border-r-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)]",
   },
 });
 
