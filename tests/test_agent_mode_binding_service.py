@@ -470,6 +470,37 @@ def test_repair_mode_bindings_drops_retired_self_evolution_summarizer_slot(tmp_p
     assert "summarizer" not in payload["modes"]["self_evolution"]["slots"]
 
 
+def test_repair_mode_bindings_drops_blank_retired_self_evolution_summarizer_slot(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    path = agent_mode_binding_service.mode_binding_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "bindings": [
+                    {
+                        "mode": "self_evolution",
+                        "slots": {
+                            "executor": "",
+                            "reviewer": "",
+                            "summarizer": "",
+                            "observer": "agent-observer",
+                        },
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = agent_mode_binding_service.get_mode_bindings_payload(agent_options=[])
+
+    assert set(payload["modes"]["self_evolution"]["slots"]) == {"executor", "reviewer", "observer"}
+    assert "summarizer" not in payload["modes"]["self_evolution"]["slots"]
+
+
 def test_mode_binding_repair_persists_flow_binding_normalization(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     active_agent = agent_directory_service.create_agent_instance(
