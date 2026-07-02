@@ -13,6 +13,7 @@ export type ActiveWorkIndicatorItem = {
   summary: string;
   status: string;
   runId: string;
+  href: string;
   detail: string;
   tone: SystemStatusTone;
 };
@@ -469,6 +470,7 @@ function buildActiveWorkCandidate(
   const label = activeWorkKindLabel(kind, lang);
   const summary = activeWorkSummary(kind, run, runtime, lang);
   const runId = textValue(run.runId);
+  const href = activeWorkHref(kind, run);
   const detailParts = [
     label,
     summary,
@@ -482,6 +484,7 @@ function buildActiveWorkCandidate(
     summary,
     status: status || "running",
     runId,
+    href,
     detail: detailParts.join(" · "),
     tone: activeWorkTone(status),
   };
@@ -530,6 +533,18 @@ function activeWorkKindLabel(kind: ActiveWorkKind, lang: "zh" | "en"): string {
     chat_room: "Agent 群聊",
     chat: "对话",
   }[kind];
+}
+
+function activeWorkHref(kind: ActiveWorkKind, run: ActiveWorkRunSnapshot): string {
+  if (kind === "chat") {
+    const sessionId = firstTextValue(run, ["sessionId", "sourceSessionId", "conversationId", "directSessionId"]);
+    return sessionId ? `/chat?session=${encodeURIComponent(sessionId)}` : "";
+  }
+  if (kind === "chat_room") {
+    const roomId = firstTextValue(run, ["roomId", "sourceRoomId"]);
+    return roomId ? `/chat?room=${encodeURIComponent(roomId)}` : "";
+  }
+  return "";
 }
 
 function activeWorkSummary(
