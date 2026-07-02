@@ -419,7 +419,7 @@ const styles: Record<string, string> = {
   sectionTitle:
     "sectionTitle min-w-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   sourceCollectionCandidateListShell:
-    "sourceCollectionCandidateListShell min-w-0 grid h-full min-h-0 content-start overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)] gap-1.5 overflow-auto min-h-0 content-start items-start self-start overflow-y-auto [scrollbar-gutter:stable]",
+    "sourceCollectionCandidateListShell min-w-0 grid max-h-[44vh] min-h-[220px] content-start gap-1.5 overflow-auto rounded-[var(--radius-control)] border border-[color:var(--border-soft)] bg-[color:var(--source-workbench-card)] p-1.5 text-[var(--fg-primary)] items-start self-start [scrollbar-gutter:stable] max-[860px]:max-h-none",
   sourceCollectionCommandBar:
     "sourceCollectionCommandBar min-w-0 flex flex-wrap items-center gap-1.5 !grid grid-cols-[minmax(0,1fr)_minmax(320px,0.55fr)] items-center gap-2 px-2 py-2 max-[980px]:grid-cols-[1fr]",
   sourceCollectionControlPanel:
@@ -427,7 +427,7 @@ const styles: Record<string, string> = {
   sourceCollectionConversationHeader:
     "sourceCollectionConversationHeader min-w-0 flex flex-wrap items-center gap-1.5",
   sourceCollectionConversationPanel:
-    "sourceCollectionConversationPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "sourceCollectionConversationPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid content-start gap-2",
   sourceCollectionEmptyRunNotice:
     "sourceCollectionEmptyRunNotice min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-[7px] border border-[color:color-mix(in_srgb,var(--state-warning)_34%,var(--border-soft))] bg-[color:color-mix(in_srgb,var(--state-warning)_8%,var(--source-workbench-card))] px-3 py-2 text-[var(--vui-font-sm)] max-[760px]:grid-cols-[1fr] [&_div]:grid [&_div]:min-w-0 [&_div]:gap-0.5 [&_strong]:text-[var(--fg-primary)] [&_span]:text-[var(--fg-secondary)]",
   sourceCollectionFilterActive:
@@ -436,16 +436,18 @@ const styles: Record<string, string> = {
     "sourceCollectionFilterBar min-w-0 flex flex-wrap items-center gap-1.5 overflow-x-auto [&_[data-vui=native-button]]:flex-none [&_[data-vui=native-button]]:min-w-[76px]",
   sourceCollectionFocusedPanel:
     "sourceCollectionFocusedPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid grid-cols-[minmax(0,1fr)_minmax(320px,380px)] isolate",
+  sourceCollectionExtractionPanels:
+    "sourceCollectionExtractionPanels min-w-0 grid content-start gap-2 grid-cols-[minmax(0,1fr)]",
   sourceCollectionPage:
     "sourceCollectionPage min-w-0",
   sourceCollectionPageActions:
     "sourceCollectionPageActions min-w-0 flex flex-wrap items-center gap-1.5 !flex flex-wrap items-center justify-end gap-2 min-w-0 [&_a]:inline-flex [&_a]:min-h-[30px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[var(--border-soft)] [&_a]:bg-[color:var(--surface-panel-strong)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[760] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:min-h-[30px] [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[var(--border-soft)] [&_[data-vui=native-button]]:bg-[color:var(--surface-panel-strong)] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[760]",
   sourceCollectionPageBody:
-    "sourceCollectionPageBody min-w-0 flex-1 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] !grid min-h-0 content-start gap-2 overflow-auto p-2",
+    "sourceCollectionPageBody min-w-0 mx-auto w-full max-w-[1480px] flex-1 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] !grid min-h-0 content-start gap-2 overflow-auto p-2",
   sourceCollectionPageGrid:
-    "sourceCollectionPageGrid min-w-0 grid gap-2 grid-cols-[minmax(0,1fr)]",
+    "sourceCollectionPageGrid min-w-0 grid max-w-full content-start gap-2 grid-cols-[minmax(0,1fr)]",
   sourceCollectionPageHeader:
-    "sourceCollectionPageHeader min-w-0 flex flex-wrap items-center gap-1.5",
+    "sourceCollectionPageHeader min-w-0 mx-auto w-full max-w-[1480px] !grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 px-2 py-1 max-[760px]:grid-cols-[1fr]",
   sourceCollectionPageTitleBlock:
     "sourceCollectionPageTitleBlock min-w-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   sourceCollectionPageTitleLine:
@@ -453,19 +455,19 @@ const styles: Record<string, string> = {
   sourceCollectionPagination:
     "sourceCollectionPagination min-w-0 select-none whitespace-nowrap [writing-mode:horizontal-tb]",
   sourceCollectionPanelActions:
-    "sourceCollectionPanelActions min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5 flex-wrap",
+    "sourceCollectionPanelActions min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color:var(--source-workbench-card)] p-1.5 !flex flex-wrap items-center justify-start gap-1.5 [&_[data-vui=native-button]]:w-fit [&_[data-vui=native-button]]:max-w-full",
   sourceCollectionResultContent:
     "sourceCollectionResultContent min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] min-w-0 [&_strong]:block [&_strong]:truncate",
   sourceCollectionResultItem:
-    "sourceCollectionResultItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 grid grid-cols-[max-content_minmax(0,1fr)_max-content_minmax(120px,220px)] min-h-[36px] items-center gap-2 px-2 py-1 max-[820px]:grid-cols-[max-content_minmax(0,1fr)]",
+    "sourceCollectionResultItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 grid grid-cols-[max-content_minmax(0,1fr)_minmax(70px,max-content)_minmax(8rem,16rem)] min-h-[36px] items-center gap-2 px-2 py-1 max-[980px]:grid-cols-[max-content_minmax(0,1fr)]",
   sourceCollectionResultItemSelected:
     "sourceCollectionResultItemSelected min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
   sourceCollectionResultList:
-    "sourceCollectionResultList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+    "sourceCollectionResultList min-w-0 grid max-h-[44vh] min-h-0 content-start gap-1.5 overflow-auto [scrollbar-gutter:stable]",
   sourceCollectionResultMeta:
-    "sourceCollectionResultMeta min-w-0 flex flex-wrap items-center gap-1.5 flex min-w-[76px] flex-nowrap items-center gap-1 whitespace-nowrap text-[var(--vui-font-xs)] text-[var(--fg-tertiary)] [&_span:first-child]:text-[var(--fg-secondary)] max-[820px]:hidden",
+    "sourceCollectionResultMeta min-w-0 flex flex-wrap items-center gap-1.5 flex min-w-[76px] flex-nowrap items-center gap-1 whitespace-nowrap text-[var(--vui-font-xs)] text-[var(--fg-tertiary)] [&_span:first-child]:text-[var(--fg-secondary)] max-[980px]:hidden",
   sourceCollectionResultSource:
-    "sourceCollectionResultSource min-w-0 grid grid-cols-[max-content_minmax(0,1fr)] items-center gap-1 overflow-hidden text-[var(--vui-font-xs)] [&_a]:truncate [&_code]:truncate max-[820px]:col-span-2",
+    "sourceCollectionResultSource min-w-0 max-w-full grid grid-cols-[max-content_minmax(0,1fr)] items-center gap-1 overflow-hidden text-[var(--vui-font-xs)] [&_a]:truncate [&_code]:truncate max-[980px]:col-span-2",
   sourceCollectionResultSourceMissing:
     "sourceCollectionResultSourceMissing min-w-0",
   sourceCollectionResultStats:
@@ -477,7 +479,7 @@ const styles: Record<string, string> = {
   sourceCollectionResultsHeader:
     "sourceCollectionResultsHeader min-w-0 flex flex-wrap items-center gap-1.5",
   sourceCollectionResultsPanel:
-    "sourceCollectionResultsPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "sourceCollectionResultsPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid content-start gap-2",
   sourceCollectionRunBadge:
     "sourceCollectionRunBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   sourceCollectionRunSwitcher:
@@ -489,7 +491,7 @@ const styles: Record<string, string> = {
   sourceCollectionScreeningList:
     "sourceCollectionScreeningList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   sourceCollectionScreeningListShell:
-    "sourceCollectionScreeningListShell min-w-0 grid h-full min-h-0 content-start overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)] gap-1.5 overflow-auto",
+    "sourceCollectionScreeningListShell min-w-0 grid max-h-[44vh] min-h-[220px] content-start gap-1.5 overflow-auto rounded-[var(--radius-control)] border border-[color:var(--border-soft)] bg-[color:var(--source-workbench-card)] p-1.5 text-[var(--fg-primary)] items-start self-start [scrollbar-gutter:stable] max-[860px]:max-h-none",
   sourceCollectionScreeningScrollHint:
     "sourceCollectionScreeningScrollHint min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   sourceCollectionSearchEvidence:
@@ -497,15 +499,15 @@ const styles: Record<string, string> = {
   sourceCollectionSearchEvidenceBody:
     "sourceCollectionSearchEvidenceBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] !grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-[5px] min-w-0 [&>span]:grid [&>span]:gap-0.5 [&>span]:min-w-0 [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]",
   sourceCollectionSourceDetailActions:
-    "sourceCollectionSourceDetailActions min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5 !flex flex-wrap gap-1.5 min-w-0 [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]",
+    "sourceCollectionSourceDetailActions min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color:var(--source-workbench-card)] p-1.5 !flex flex-wrap items-center gap-1.5 [&_a]:inline-flex [&_a]:w-fit [&_a]:max-w-full [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:w-fit [&_[data-vui=native-button]]:max-w-full",
   sourceCollectionSourceDetailFacts:
-    "sourceCollectionSourceDetailFacts min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 !grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-[5px]",
+    "sourceCollectionSourceDetailFacts min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color:var(--source-workbench-card)] p-1.5 !grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-[5px] [&_span]:min-w-0 [&_code]:truncate",
   sourceCollectionSourceDetailHeader:
-    "sourceCollectionSourceDetailHeader min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
+    "sourceCollectionSourceDetailHeader min-w-0 !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color:var(--source-workbench-card)] p-1.5 max-[720px]:grid-cols-[1fr] [&_div]:min-w-0 [&_strong]:block [&_strong]:truncate [&_span]:truncate",
   sourceCollectionSourceDetailNotice:
     "sourceCollectionSourceDetailNotice min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   sourceCollectionSourceDetailPanel:
-    "sourceCollectionSourceDetailPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "sourceCollectionSourceDetailPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 !grid content-start gap-2",
   sourceCollectionStageAgentCard:
     "sourceCollectionStageAgentCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] !grid grid-cols-[minmax(0,1fr)_auto] items-stretch gap-2 [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]",
   sourceCollectionStageAgentCardActions:
@@ -537,7 +539,7 @@ const styles: Record<string, string> = {
   sourceCollectionStageMiniFlow:
     "sourceCollectionStageMiniFlow min-w-0",
   sourceCollectionStageModules:
-    "sourceCollectionStageModules min-w-0 grid grid-cols-[repeat(4,minmax(0,1fr))] max-[1220px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[720px]:grid-cols-[1fr]",
+    "sourceCollectionStageModules min-w-0 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] max-[560px]:grid-cols-[1fr]",
   sourceCollectionStagePrimaryAction:
     "sourceCollectionStagePrimaryAction min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)] w-fit max-w-full",
   sourceCollectionStageProjection:
@@ -547,9 +549,9 @@ const styles: Record<string, string> = {
   sourceCollectionStageTaskSummary:
     "sourceCollectionStageTaskSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   sourceCollectionStageWorkspace:
-    "sourceCollectionStageWorkspace min-w-0 grid min-h-0 gap-2 p-2 grid-rows-[auto_minmax(0,1fr)]",
+    "sourceCollectionStageWorkspace min-w-0 grid min-h-0 max-w-full gap-2 p-2 grid-rows-[auto_minmax(0,1fr)]",
   sourceCollectionStageWorkspaceHeader:
-    "sourceCollectionStageWorkspaceHeader min-w-0 grid min-h-0 gap-2 p-2 flex flex-wrap items-center gap-1.5",
+    "sourceCollectionStageWorkspaceHeader min-w-0 !grid grid-cols-[minmax(0,1fr)_minmax(260px,0.7fr)_max-content] items-start gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color:var(--source-workbench-card)] p-2 max-[1180px]:grid-cols-[minmax(0,1fr)_auto] max-[760px]:grid-cols-[1fr] [&>div]:min-w-0",
   sourceCollectionStepActive:
     "sourceCollectionStepActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] [--source-step-color:var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_52%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-base))]",
   sourceCollectionStepDone:
@@ -745,11 +747,11 @@ const styles: Record<string, string> = {
   workflowSourceCollectionStats:
     "workflowSourceCollectionStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   workflowSourceCollectionStorageActions:
-    "workflowSourceCollectionStorageActions min-w-0 flex flex-wrap items-center gap-1.5",
+    "workflowSourceCollectionStorageActions min-w-0 !grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color:var(--source-workbench-card)] p-1.5 text-[var(--vui-font-xs)] max-[760px]:grid-cols-[1fr] [&>div:first-child]:min-w-0 [&>div:first-child_strong]:text-[var(--fg-primary)]",
   workflowSourceCollectionStorageButtons:
-    "workflowSourceCollectionStorageButtons min-w-0",
+    "workflowSourceCollectionStorageButtons min-w-0 flex flex-wrap items-center justify-end gap-1.5 max-[760px]:justify-start [&_[data-vui=native-button]]:w-fit [&_[data-vui=native-button]]:max-w-full [&_[data-vui=native-button]]:min-h-[26px] [&_[data-vui=native-button]]:px-2",
   workflowSourceCollectionStorageDetails:
-    "workflowSourceCollectionStorageDetails min-w-0",
+    "workflowSourceCollectionStorageDetails min-w-0 col-span-2 grid gap-1 max-[760px]:col-span-1 [&_summary]:inline-flex [&_summary]:w-fit [&_summary]:cursor-pointer [&_summary]:items-center [&_summary]:gap-1.5 [&_summary]:font-[780] [&_small]:block [&_small]:min-w-0 [&_small]:truncate [&_small]:text-[var(--fg-muted)]",
   workflowSourceCollectionStorageError:
     "workflowSourceCollectionStorageError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   workflowSourceCollectionWide:
