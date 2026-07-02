@@ -143,6 +143,48 @@ describe("chatSessionState", () => {
     expect(summary).not.toHaveProperty("agentTemplateLabel");
   });
 
+  it("preserves optional session summary projection fields when deriving a sidebar summary", () => {
+    const agentPromptSnapshot = {
+      schemaVersion: 1,
+      promptTemplateId: "prompt-research",
+      name: "Researcher",
+      contentHash: "hash-001",
+      capturedAt: "2026-05-22T10:00:30Z",
+    };
+
+    const summary = sessionSummaryFromDetail(
+      makeDetail({
+        agentAvatarImagePath: "workspace/agents/agent-001/avatar.png",
+        agentAvatarImageUrl: "/api/agents/avatar-image/agent-001.png?v=mtime-size",
+        agentPrimaryMode: "chat",
+        agentRoleKey: "researcher",
+        agentPromptTemplateId: "prompt-research",
+        agentPromptSnapshot,
+        dialogueModelId: "model-dialogue",
+        agentInboxPendingCount: 4,
+        agentMissingId: "agent-missing",
+        conversationIndexVisibility: "team_private",
+        conversationIndexKind: "team_agent",
+        conversationIndexErrors: ["missing_source_authority"],
+      }),
+    );
+
+    expect(summary).toMatchObject({
+      agentAvatarImagePath: "workspace/agents/agent-001/avatar.png",
+      agentAvatarImageUrl: "/api/agents/avatar-image/agent-001.png?v=mtime-size",
+      agentPrimaryMode: "chat",
+      agentRoleKey: "researcher",
+      agentPromptTemplateId: "prompt-research",
+      dialogueModelId: "model-dialogue",
+      agentInboxPendingCount: 4,
+      agentMissingId: "agent-missing",
+      conversationIndexVisibility: "team_private",
+      conversationIndexKind: "team_agent",
+      conversationIndexErrors: ["missing_source_authority"],
+    });
+    expect(summary.agentPromptSnapshot).toEqual(agentPromptSnapshot);
+  });
+
   it("preserves source authority metadata when deriving a sidebar summary", () => {
     const summary = sessionSummaryFromDetail(
       makeDetail({
