@@ -405,7 +405,7 @@ const styles: Record<string, string> = {
   researchStagePageActions:
     "researchStagePageActions min-w-0 flex flex-wrap items-center gap-1.5",
   researchStagePageBody:
-    "researchStagePageBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    "researchStagePageBody min-w-0 flex-1 min-h-0 overflow-auto text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   researchStagePageHeader:
     "researchStagePageHeader min-w-0 flex flex-wrap items-center gap-1.5",
   researchStageTopicInput:
@@ -413,7 +413,7 @@ const styles: Record<string, string> = {
   revokeButton:
     "revokeButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
   route:
-    "route min-w-0 grid h-full min-h-0 content-start overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)]",
+    "route min-w-0 flex flex-col h-full min-h-0 overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)]",
   saveState:
     "saveState min-w-0",
   sectionTitle:
@@ -441,7 +441,7 @@ const styles: Record<string, string> = {
   sourceCollectionPageActions:
     "sourceCollectionPageActions min-w-0 flex flex-wrap items-center gap-1.5 !flex flex-wrap items-center justify-end gap-2 min-w-0 [&_a]:inline-flex [&_a]:min-h-[30px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[var(--border-soft)] [&_a]:bg-[color:var(--surface-panel-strong)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[760] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:min-h-[30px] [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[var(--border-soft)] [&_[data-vui=native-button]]:bg-[color:var(--surface-panel-strong)] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[760]",
   sourceCollectionPageBody:
-    "sourceCollectionPageBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] !grid min-h-0 content-start gap-2 overflow-auto p-2",
+    "sourceCollectionPageBody min-w-0 flex-1 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] !grid min-h-0 content-start gap-2 overflow-auto p-2",
   sourceCollectionPageGrid:
     "sourceCollectionPageGrid min-w-0 grid gap-2 grid-cols-[minmax(0,1fr)]",
   sourceCollectionPageHeader:
@@ -781,7 +781,7 @@ const styles: Record<string, string> = {
   workflowValidation:
     "workflowValidation min-w-0",
   workspace:
-    "workspace min-w-0 grid min-h-0 gap-2 p-2 !grid min-h-0 grid-cols-[minmax(520px,1fr)_minmax(300px,380px)] gap-2 overflow-hidden px-2 pb-2 pt-1",
+    "workspace min-w-0 flex-1 grid min-h-0 gap-2 p-2 !grid min-h-0 grid-cols-[minmax(520px,1fr)_minmax(300px,380px)] gap-2 overflow-hidden px-2 pb-2 pt-1",
   workspaceResearch:
     "workspaceResearch min-w-0 grid min-h-0 gap-2 p-2 !grid-cols-[minmax(0,1fr)]",
   workspaceResearchCanvas:
