@@ -1220,12 +1220,18 @@ describe("TeamsRoute layout contract", () => {
       "grid-cols-[minmax(0,1fr)_minmax(320px,380px)]",
     );
     expect(routeStyles.sourceCollectionFocusedPanel).toContain("isolate");
-    expect(routeStyles.sourceCollectionPageHeader).toContain("max-w-[1480px]");
+    expect(routeStyles.sourceCollectionPageHeader).toContain("w-full");
+    expect(routeStyles.sourceCollectionPageHeader).toContain("max-w-none");
+    expect(routeStyles.sourceCollectionPageHeader).not.toContain("mx-auto");
+    expect(routeStyles.sourceCollectionPageHeader).not.toContain("max-w-[1480px]");
     expect(routeStyles.sourceCollectionPageHeader).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(routeStyles.sourceCollectionStageWorkspace).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(routeStyles.sourceCollectionStageWorkspaceHeader).toContain("grid-cols-[minmax(0,1fr)_minmax(260px,0.7fr)_max-content]");
     expect(routeStyles.sourceCollectionPageBody).toContain("!grid");
-    expect(routeStyles.sourceCollectionPageBody).toContain("max-w-[1480px]");
+    expect(routeStyles.sourceCollectionPageBody).toContain("w-full");
+    expect(routeStyles.sourceCollectionPageBody).toContain("max-w-none");
+    expect(routeStyles.sourceCollectionPageBody).not.toContain("mx-auto");
+    expect(routeStyles.sourceCollectionPageBody).not.toContain("max-w-[1480px]");
     expect(routeStyles.sourceCollectionPageBody).toContain("p-2");
     expect(routeStyles.sourceCollectionExtractionPanels).toContain("grid-cols-[minmax(0,1fr)]");
     expect(routeStyles.sourceCollectionCommandBar).toContain("!grid");
