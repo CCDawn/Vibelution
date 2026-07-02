@@ -13,7 +13,7 @@ export function TeamStagePipeline({ id, ariaLabel, children }: TeamStagePipeline
       id={id}
       data-vui-product="team-stage-pipeline"
       aria-label={ariaLabel}
-      className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] items-stretch gap-2 min-w-0 max-[560px]:grid-cols-[1fr]"
+      className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] items-start gap-2 min-w-0 max-[560px]:grid-cols-[1fr]"
     >
       {children}
     </section>

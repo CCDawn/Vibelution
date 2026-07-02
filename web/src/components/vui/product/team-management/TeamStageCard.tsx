@@ -42,7 +42,7 @@ export const TEAM_STAGE_TONE_STYLE: Record<TeamStageTone, CSSProperties> = {
 };
 
 const CARD_BASE =
-  "grid grid-rows-[auto_minmax(0,1fr)_auto] content-start self-start min-w-0 min-h-[118px] gap-2 p-2 rounded-[var(--vui-radius-soft)] border cursor-pointer overflow-hidden text-[0.72rem] font-[740] " +
+  "grid grid-cols-[minmax(0,1fr)_auto] items-center content-center min-w-0 gap-3 p-2.5 rounded-[var(--vui-radius-soft)] border cursor-pointer overflow-hidden text-[0.72rem] font-[740] " +
   "border-[color:var(--source-step-border,var(--border-soft))] text-[color:var(--source-step-fg,var(--fg-muted))] " +
   "bg-[image:var(--vui-gradient-route-soft)] bg-[color:var(--source-workbench-card)] shadow-[var(--vui-elevation-1-sheen)] " +
   "transition-[transform,border-color,box-shadow] duration-150 ease-[var(--vui-ease)] will-change-transform " +
@@ -52,7 +52,7 @@ const CARD_BASE =
 const CARD_SELECTED =
   "border-[color:color-mix(in_srgb,var(--accent-cool)_72%,var(--border-strong))] shadow-[var(--vui-shadow-inset-accent),var(--vui-elevation-2)]";
 
-const HEADER = "flex min-w-0 items-center justify-between gap-2";
+const HEADER = "flex min-w-0 items-center gap-2";
 const STEP_INDEX =
   "flex h-[22px] min-w-[26px] items-center justify-center rounded-[6px] border border-[color:color-mix(in_srgb,var(--accent-cool)_26%,var(--border-soft))] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,var(--surface-card))] text-[0.62rem] font-[860] text-[color:color-mix(in_srgb,var(--accent-cool)_78%,var(--fg-primary))]";
 const STATUS_BADGE =
@@ -61,7 +61,7 @@ const BODY = "grid min-w-0 content-start gap-1";
 const ACTION_BUTTON =
   "[&_[data-vui=native-button]]:w-fit [&_[data-vui=native-button]]:max-w-full [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:text-[0.66rem] [&_[data-vui=native-button]]:font-[840] [&_[data-vui=native-button]]:whitespace-nowrap";
 const ACTION_ROW =
-  `flex min-w-0 items-center justify-end gap-1.5 border-t border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] pt-1.5 ${ACTION_BUTTON}`;
+  `flex flex-none items-center justify-end gap-1.5 ${ACTION_BUTTON}`;
 const TEXT_TRUNCATE = "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap";
 
 export type TeamStageCardProps = {
@@ -125,18 +125,16 @@ export function TeamStageCard({
       onClick={handleClick}
       onKeyDown={handleKeyDown}
     >
-      <div className={HEADER}>
-        <strong className={STEP_INDEX}>
-          {String(index + 1).padStart(2, "0")}
-        </strong>
-        <span
-          className={`${STATUS_BADGE} ${TEXT_TRUNCATE}`}
-        >
-          {status}
-        </span>
-      </div>
-      <span className={BODY}>
-        <b className={`text-[0.86rem] text-[var(--fg-primary)] ${TEXT_TRUNCATE}`}>{label}</b>
+      <div className={BODY}>
+        <div className={HEADER}>
+          <strong className={STEP_INDEX}>
+            {String(index + 1).padStart(2, "0")}
+          </strong>
+          <b className={`text-[0.86rem] text-[var(--fg-primary)] ${TEXT_TRUNCATE}`}>{label}</b>
+          <span className={`${STATUS_BADGE} ${TEXT_TRUNCATE} ml-auto`}>
+            {status}
+          </span>
+        </div>
         <em className={`not-italic text-[0.66rem] font-[760] text-[var(--fg-muted)] ${TEXT_TRUNCATE}`}>
           {metric}
         </em>
@@ -145,7 +143,7 @@ export function TeamStageCard({
         >
           {nextLabel}
         </small>
-      </span>
+      </div>
       {actions ? <div className={ACTION_ROW}>{actions}</div> : null}
     </article>
   );
