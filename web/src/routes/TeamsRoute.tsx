@@ -63,6 +63,7 @@ import {
   VStatusStrip,
 } from "../components/vui";
 import {
+  TeamCandidateCard,
   TeamSourceFilterBar,
   TeamSourcePagination,
   TeamSourceResultItem,
@@ -8014,56 +8015,39 @@ export function TeamsRoute({
                   && planPaperNoteChunksMutation.variables?.candidateId === candidate.candidateId;
                 const selected = selectedSourceCollectionCandidateId === candidate.candidateId;
                 return (
-                  <article
+                  <TeamCandidateCard
                     key={candidate.candidateId}
-                    className={`${styles.workflowCandidateItem} ${selected ? styles.workflowCandidateItemSelected : ""}`}
-                    role="button"
-                    tabIndex={0}
-                    aria-pressed={selected}
-                    title={lang === "zh" ? "点击查看来源详情" : "Open source detail"}
-                    onClick={() => selectSourceCollectionCandidate(candidate)}
-                    onKeyDown={(event) => sourceCollectionCandidateCardKeyDown(event, candidate)}
-                  >
-                    <div className={styles.workflowCandidateHeader}>
-                      <strong>{candidate.title || candidate.candidateId}</strong>
-                      <span className={`${styles.workflowTag} ${workflowQualityTone(candidate.qualityStatus)}`}>
-                        {sourceQualitySummary
-                          ? workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)
-                          : (lang === "zh" ? "待 Agent 复核" : "pending agent review")}
-                      </span>
-                    </div>
-                    <p>{candidate.summary || candidate.candidateType}</p>
-                    <div className={styles.workflowCandidateMeta}>
-                      <span>{sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang)}</span>
-                      <span>{formatTime(candidate.updatedAt, lang)}</span>
-                      {sourceQualitySummary ? (
-                        <span>{lang === "zh" ? "评分" : "score"} {sourceQualitySummary.overallScore}/100</span>
-                      ) : null}
-                      {chunkPlanSummary ? (
-                        <span>
-                          paper_note {chunkPlanSummary.completedChunkCount}/{chunkPlanSummary.chunkCount}
-                        </span>
-                      ) : canPlanPaperNoteChunks ? (
-                        <span>{lang === "zh" ? "可分块" : "chunk ready"}</span>
-                      ) : null}
-                    </div>
-                    <div className={`${styles.sourceCollectionResultSource} ${provenance.kind === "missing" ? styles.sourceCollectionResultSourceMissing : ""}`}>
-                      <span>{provenance.label}</span>
-                      {provenance.href ? (
-                        <a
-                          href={provenance.href}
-                          target="_blank"
-                          rel="noreferrer"
-                          title={provenance.href}
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          {provenance.value}
-                        </a>
-                      ) : (
-                        <code title={provenance.value}>{provenance.value}</code>
-                      )}
-                    </div>
-                    <div className={styles.workflowCandidateActions}>
+                    tone={sourceCollectionResultTone(candidate.qualityStatus)}
+                    statusLabel={
+                      sourceQualitySummary
+                        ? workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)
+                        : (lang === "zh" ? "待 Agent 复核" : "pending agent review")
+                    }
+                    title={candidate.title || candidate.candidateId}
+                    summary={candidate.summary || candidate.candidateType}
+                    meta={[
+                      { key: "category", label: sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang) },
+                      { key: "updated", label: formatTime(candidate.updatedAt, lang) },
+                      ...(sourceQualitySummary
+                        ? [{ key: "score", label: `${lang === "zh" ? "评分" : "score"} ${sourceQualitySummary.overallScore}/100` }]
+                        : []),
+                      ...(chunkPlanSummary
+                        ? [{ key: "chunks", label: `paper_note ${chunkPlanSummary.completedChunkCount}/${chunkPlanSummary.chunkCount}` }]
+                        : canPlanPaperNoteChunks
+                          ? [{ key: "chunks", label: lang === "zh" ? "可分块" : "chunk ready" }]
+                          : []),
+                    ]}
+                    source={{
+                      label: provenance.label,
+                      value: provenance.value,
+                      href: provenance.href,
+                      title: provenance.href || provenance.value,
+                      missing: provenance.kind === "missing",
+                    }}
+                    selected={selected}
+                    onActivate={() => selectSourceCollectionCandidate(candidate)}
+                    activateTitle={lang === "zh" ? "点击查看来源详情" : "Open source detail"}
+                    actions={<>
                       <VNativeButton
                         type="button"
                         onClick={(event) => {
@@ -8125,8 +8109,8 @@ export function TeamsRoute({
                             ? (lang === "zh" ? "重建分块" : "Rebuild chunks")
                             : (lang === "zh" ? "生成分块" : "Plan chunks")}
                       </VNativeButton>
-                    </div>
-                  </article>
+                    </>}
+                  />
                 );
               })}
             </div>
