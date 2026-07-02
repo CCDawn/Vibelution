@@ -39,6 +39,7 @@ import {
   messageHasInternalStreamingStatusContent,
 } from "./conversationInternalStatus";
 import {
+  buildAgentMessageOperationGroups,
   buildConversationOperationGroups,
   buildConversationReActOperationGroups,
   type ConversationOperation,
@@ -2127,6 +2128,10 @@ export function ConversationView({
   function operationDetailRows(operation: ConversationOperation): OperationDetailRow[] {
     const rows: OperationDetailRow[] = [];
     const args = operation.arguments ?? {};
+    const rawLabel = operation.kind === "tool" ? String(operation.rawLabel ?? "").trim() : "";
+    if (rawLabel && rawLabel !== operation.label) {
+      rows.push({ label: lang === "zh" ? "原始名称" : "Raw name", value: rawLabel });
+    }
     if (operation.kind === "status" && operation.resultPreview) {
       rows.push({ label: lang === "zh" ? "完整状态" : "Full status", value: operation.resultPreview });
     }
@@ -3725,7 +3730,10 @@ export function ConversationView({
                 </article>
               );
             }
-            const operationGroups = buildConversationOperationGroups(message, operationLabels);
+            const agentMessage = agentThread.messages[index];
+            const operationGroups = agentMessage
+              ? buildAgentMessageOperationGroups(agentMessage, operationLabels)
+              : buildConversationOperationGroups(message, operationLabels);
             const hasActiveProcess = operationGroups.timeline.some((operation) => isRunningOperationStatus(operation.status));
             const hasFeedbackTimeline = (message.feedbackEvents?.length ?? 0) > 0;
             const showResponseBlock = shouldShowResponseBlock(message, hasFeedbackTimeline);
