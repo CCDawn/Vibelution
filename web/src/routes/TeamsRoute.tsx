@@ -10480,19 +10480,23 @@ export function TeamsRoute({
     if (!sourceCollectionSummary?.runId && !sourceCollectionSummary?.stageCards?.length) {
       return null;
     }
+    const summaryRunId = String(sourceCollectionSummary.runId || sourceCollectionSummaryRunId || "");
+    if (selectedSourceCollectionRunEffectiveId && summaryRunId && summaryRunId !== selectedSourceCollectionRunEffectiveId) {
+      return null;
+    }
     const roundRef = sourceCollectionSummary.stageRound ?? {};
     return {
-      stageRoundId: String(roundRef.stageRoundId || `source-summary-${sourceCollectionSummary.runId || "latest"}`),
+      stageRoundId: String(roundRef.stageRoundId || `source-summary-${summaryRunId || "latest"}`),
       stageType: "knowledge_collection",
       roundNumber: Number(roundRef.roundNumber || 0),
       status: String(roundRef.status || sourceCollectionSummary.status || "ready"),
       topic: "",
       goal: "",
-      sourceRunIds: sourceCollectionSummary.runId ? [sourceCollectionSummary.runId] : [],
+      sourceRunIds: summaryRunId ? [summaryRunId] : [],
       sourceCollectionStageCards: sourceCollectionSummary.stageCards ?? [],
       sourceCollectionStageCardSummary: sourceCollectionSummary.stageCardSummary ?? sourceCollectionSummary.summary ?? {},
     };
-  }, [sourceCollectionSummary]);
+  }, [selectedSourceCollectionRunEffectiveId, sourceCollectionSummary, sourceCollectionSummaryRunId]);
   const sourceCollectionStageRound = useMemo(() => {
     const knowledgePhase = researchStagePhases.find((phase) => phase.stageType === "knowledge_collection");
     const candidateRounds = [
@@ -10509,7 +10513,8 @@ export function TeamsRoute({
     if (!selectedSourceCollectionRunEffectiveId) {
       return rounds[0] ?? null;
     }
-    return rounds.find((round) => (round.sourceRunIds ?? []).includes(selectedSourceCollectionRunEffectiveId)) ?? rounds[0] ?? null;
+    const matchingRound = rounds.find((round) => (round.sourceRunIds ?? []).includes(selectedSourceCollectionRunEffectiveId));
+    return matchingRound ?? null;
   }, [
     researchStagePhases,
     researchStageRoundStatus?.activeRounds,
@@ -10891,6 +10896,14 @@ export function TeamsRoute({
     sourceCollectionRunSummary?.searchOpenAssignmentCount,
     sourceCollectionRunSummary?.downstreamOpenAssignmentCount,
   ].some((value) => typeof value === "number");
+  const sourceCollectionCandidateListDataLoading = Boolean(
+    researchWorkflowTeamSelected
+    && selectedSourceCollectionRunEffectiveId
+    && teamWorkflowCandidateListEnabled
+    && sourceCollectionNeedsCandidateList
+    && !teamWorkflowCandidatesQuery.data
+    && (teamWorkflowCandidatesQuery.isPending || teamWorkflowCandidatesQuery.isFetching)
+  );
   const sourceCollectionRecordsDataLoading = Boolean(
     sourceCollectionRecordsQueryEnabled
     && !sourceCollectionRecordsQuery.data
@@ -10947,12 +10960,17 @@ export function TeamsRoute({
     ?? sourceCollectionAssignments.reduce((total, assignment) => total + (assignment.scope.queryCount ?? assignment.scope.assignedQueries?.length ?? 0), 0);
   const sourceCollectionPrimaryDataLoading = Boolean(
     researchWorkflowTeamSelected
-    && sourceCollectionDisplayedCandidateCount <= 0
     && (
-      sourceCollectionRecordsDataLoading
-      || sourceCollectionAssignmentsDataLoading
-      || (sourceCollectionRunsQuery.isPending && !sourceCollectionRunsQuery.data)
-      || (sourceCollectionSummaryQuery.isPending && sourceCollectionWorkspaceSelected && !sourceCollectionSummaryQuery.data)
+      sourceCollectionCandidateListDataLoading
+      || (
+        sourceCollectionDisplayedCandidateCount <= 0
+        && (
+          sourceCollectionRecordsDataLoading
+          || sourceCollectionAssignmentsDataLoading
+          || (sourceCollectionRunsQuery.isPending && !sourceCollectionRunsQuery.data)
+          || (sourceCollectionSummaryQuery.isPending && sourceCollectionWorkspaceSelected && !sourceCollectionSummaryQuery.data)
+        )
+      )
     ),
   );
   const sourceCollectionSourceQualityLoading = Boolean(
@@ -11818,12 +11836,30 @@ export function TeamsRoute({
       sourceCollectionStageBackendActionReadiness("ingestion", sourceCollectionMemoryActionReadiness),
     );
   };
+  const sourceCollectionFindingDisplayLoading = sourceCollectionRecordsDataLoading || sourceCollectionAssignmentsDataLoading;
+  const sourceCollectionFindingDisplayState: SourceCollectionStepState = sourceCollectionFindingDisplayLoading
+    ? "pending"
+    : sourceCollectionSearchStepState;
+  const sourceCollectionExtractionDisplayLoading = sourceCollectionPrimaryDataLoading || sourceCollectionScreeningDataLoading;
+  const sourceCollectionExtractionDisplayState: SourceCollectionStepState = sourceCollectionExtractionDisplayLoading
+    ? "pending"
+    : sourceCollectionExtractionStepState;
+  const sourceCollectionRelationsDisplayLoading = sourceCollectionPrimaryDataLoading || sourceCollectionGraphDataLoading;
+  const sourceCollectionRelationsDisplayState: SourceCollectionStepState = sourceCollectionRelationsDisplayLoading
+    ? "pending"
+    : sourceCollectionGraphStepState;
+  const sourceCollectionIngestionDisplayLoading = sourceCollectionPrimaryDataLoading || sourceCollectionSourceQualityLoading || sourceCollectionKnowledgeIngestionDataLoading;
+  const sourceCollectionIngestionDisplayState: SourceCollectionStepState = sourceCollectionIngestionDisplayLoading
+    ? "pending"
+    : sourceCollectionMemoryStepState;
   const sourceCollectionStageModules: SourceCollectionStageModule[] = [
     {
       id: "finding",
       label: lang === "zh" ? "找资料" : "Find",
       metric: lang === "zh" ? `原始资料 ${sourceCollectionProjectedCollectedCountLabel}` : sourceCollectionProjectedCollectedCountLabel,
-      summary: sourceCollectionStageUserSummary(sourceCollectionCollectionProjection, lang) || (!selectedSourceCollectionRun
+      summary: sourceCollectionFindingDisplayLoading
+        ? (lang === "zh" ? "正在读取资料结果" : "Loading source results")
+        : sourceCollectionStageUserSummary(sourceCollectionCollectionProjection, lang) || (!selectedSourceCollectionRun
         ? (lang === "zh" ? "点击开始生成本轮任务" : "Start to create this run")
         : sourceCollectionSearchOpenAssignmentCount > 0
           ? (lang === "zh" ? `${sourceCollectionSearchOpenAssignmentCount} 个搜索任务待执行` : `${sourceCollectionSearchOpenAssignmentCount} search tasks remain`)
@@ -11835,8 +11871,8 @@ export function TeamsRoute({
       nextLabel: sourceCollectionSearchOpenAssignmentCount > 0
         ? (lang === "zh" ? "继续寻找资料" : "Continue finding")
         : (lang === "zh" ? "进入资料提炼" : "Move to extraction"),
-      state: sourceCollectionSearchStepState,
-      status: sourceCollectionStepStatusText(sourceCollectionSearchStepState),
+      state: sourceCollectionFindingDisplayState,
+      status: sourceCollectionFindingDisplayLoading ? sourceCollectionLoadingText : sourceCollectionStepStatusText(sourceCollectionSearchStepState),
       detailLabel: lang === "zh" ? "查看资料记录" : "View source records",
       actionLabel: sourceCollectionStageActionLabelFor("finding", sourceCollectionCollectionActionLabel),
       actionDisabled: sourceCollectionStageActionReadinessFor("finding").disabled,
@@ -11852,7 +11888,9 @@ export function TeamsRoute({
       metric: sourceCollectionScreeningDataLoading || sourceCollectionPrimaryDataLoading
         ? (lang === "zh" ? "提炼进度 加载中" : "extraction loading")
         : (lang === "zh" ? `已处理 ${sourceCollectionProjectedAssessedCountText}/${sourceCollectionProjectedCandidateCountText}` : `${sourceCollectionProjectedAssessedCountText}/${sourceCollectionProjectedCandidateCountText} processed`),
-      summary: sourceCollectionStageUserSummary(sourceCollectionExtractionProjection, lang) || (sourceCollectionPrimaryDataLoading
+      summary: sourceCollectionExtractionDisplayLoading
+        ? sourceCollectionLoadingSummary
+        : sourceCollectionStageUserSummary(sourceCollectionExtractionProjection, lang) || (sourceCollectionPrimaryDataLoading
         ? sourceCollectionLoadingSummary
         : sourceCollectionDisplayedCandidateCount <= 0
           ? (lang === "zh" ? "等待资料寻找结果" : "Waiting for found sources")
@@ -11866,8 +11904,8 @@ export function TeamsRoute({
       nextLabel: sourceCollectionRunPendingScreeningCount > 0
         ? (lang === "zh" ? "Agent 继续提炼" : "Agent continues extraction")
         : (lang === "zh" ? "进入资料关系整理" : "Move to relation mapping"),
-      state: sourceCollectionExtractionStepState,
-      status: sourceCollectionStepStatusText(sourceCollectionExtractionStepState),
+      state: sourceCollectionExtractionDisplayState,
+      status: sourceCollectionExtractionDisplayLoading ? sourceCollectionLoadingText : sourceCollectionStepStatusText(sourceCollectionExtractionStepState),
       detailLabel: lang === "zh" ? "查看提炼结果" : "View extraction details",
       actionLabel: sourceCollectionStageActionLabelFor(
         "extraction",
@@ -11886,7 +11924,9 @@ export function TeamsRoute({
       id: "relations",
       label: lang === "zh" ? "整理关系" : "Map",
       metric: lang === "zh" ? `节点 ${sourceCollectionProjectedGraphNodeCount} / 关系 ${sourceCollectionProjectedGraphEdgeCount}` : `${sourceCollectionProjectedGraphNodeCount} nodes / ${sourceCollectionProjectedGraphEdgeCount} edges`,
-      summary: sourceCollectionStageUserSummary(sourceCollectionGraphProjection, lang) || (sourceCollectionProjectedGraphNodeCount > 0
+      summary: sourceCollectionRelationsDisplayLoading
+        ? (lang === "zh" ? "正在读取候选和关系数据" : "Loading candidates and relations")
+        : sourceCollectionStageUserSummary(sourceCollectionGraphProjection, lang) || (sourceCollectionProjectedGraphNodeCount > 0
         ? (lang === "zh" ? "资料关系已整理" : "Source relations are ready")
         : sourceCollectionDisplayedCandidateCount > 0
           ? (lang === "zh" ? "可由 Agent 整理资料关系" : "Agent can map source relationships")
@@ -11898,8 +11938,8 @@ export function TeamsRoute({
       nextLabel: sourceCollectionProjectedGraphNodeCount > 0
         ? (lang === "zh" ? "进入资料入库" : "Move to ingestion")
         : (lang === "zh" ? "生成资料关系" : "Build source relations"),
-      state: sourceCollectionGraphStepState,
-      status: sourceCollectionStepStatusText(sourceCollectionGraphStepState),
+      state: sourceCollectionRelationsDisplayState,
+      status: sourceCollectionRelationsDisplayLoading ? sourceCollectionLoadingText : sourceCollectionStepStatusText(sourceCollectionGraphStepState),
       detailLabel: lang === "zh" ? "查看资料关系" : "View relations",
       actionLabel: sourceCollectionStageActionLabelFor("relations", sourceCollectionGraphActionLabel),
       actionDisabled: sourceCollectionStageActionReadinessFor("relations").disabled,
@@ -11913,7 +11953,9 @@ export function TeamsRoute({
       id: "ingestion",
       label: lang === "zh" ? "入库" : "Ingest",
       metric: lang === "zh" ? `正式知识 ${sourceCollectionProjectedFormalKnowledgeCount}` : `${sourceCollectionProjectedFormalKnowledgeCount} formal items`,
-      summary: sourceCollectionStageUserSummary(sourceCollectionMemoryProjection, lang) || (sourceCollectionProjectedFormalKnowledgeCount > 0
+      summary: sourceCollectionIngestionDisplayLoading
+        ? (lang === "zh" ? "正在读取候选和入库数据" : "Loading candidates and ingestion data")
+        : sourceCollectionStageUserSummary(sourceCollectionMemoryProjection, lang) || (sourceCollectionProjectedFormalKnowledgeCount > 0
         ? (lang === "zh" ? "已进入团队知识库" : "Synced into Team Knowledge")
         : sourceCollectionProjectedStewardPackCount > 0
           ? (lang === "zh" ? "已生成入库待审包" : "Ingestion review pack ready")
@@ -11935,8 +11977,8 @@ export function TeamsRoute({
         : sourceCollectionProjectedStewardPackCount > 0
           ? (lang === "zh" ? "等待入库完成" : "Wait for ingestion")
           : (lang === "zh" ? "Agent 入库资料" : "Agent ingest sources"),
-      state: sourceCollectionMemoryStepState,
-      status: sourceCollectionStepStatusText(sourceCollectionMemoryStepState),
+      state: sourceCollectionIngestionDisplayState,
+      status: sourceCollectionIngestionDisplayLoading ? sourceCollectionLoadingText : sourceCollectionStepStatusText(sourceCollectionMemoryStepState),
       detailLabel: lang === "zh" ? "查看入库详情" : "View ingestion details",
       actionLabel: sourceCollectionStageActionLabelFor("ingestion", sourceCollectionMemoryActionLabel),
       actionDisabled: sourceCollectionStageActionReadinessFor("ingestion").disabled,
