@@ -53,9 +53,14 @@ export type AgentMessageSectionState = {
   hasUserContent: boolean;
 };
 
-export type AgentMessageContextSection = AgentMessageSection & {
+export type AgentMessageContextSection = Omit<AgentMessageSection, "kind" | "parts"> & {
   kind: "context";
   parts: Array<AgentAttachmentPart | AgentReferencePart>;
+};
+
+export type AgentMessageContentSection = Omit<AgentMessageSection, "kind" | "parts"> & {
+  kind: "content";
+  parts: AgentTextPart[];
 };
 
 export function buildAgentMessageSectionState(message: AgentMessage): AgentMessageSectionState {
@@ -85,6 +90,11 @@ export function buildAgentMessageSectionState(message: AgentMessage): AgentMessa
 export function agentMessageContextSections(message: AgentMessage): AgentMessageContextSection[] {
   return agentMessageToSections(message)
     .filter((section): section is AgentMessageContextSection => section.kind === "context");
+}
+
+export function agentMessageContentSections(message: AgentMessage): AgentMessageContentSection[] {
+  return agentMessageToSections(message)
+    .filter((section): section is AgentMessageContentSection => section.kind === "content");
 }
 
 function sectionParts(sections: AgentMessageSection[], kind: AgentMessageSectionKind) {

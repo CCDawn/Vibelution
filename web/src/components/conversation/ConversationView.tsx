@@ -30,7 +30,7 @@ import {
   SessionTurnError,
 } from "../../api/types";
 import { conversationMessagesToAgentThread } from "../../agent-thread/adapters";
-import type { AgentAttachmentPart, AgentReferencePart } from "../../agent-thread/types";
+import type { AgentAttachmentPart, AgentReferencePart, AgentTextPart } from "../../agent-thread/types";
 import { fetchJson } from "../../api/client";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
@@ -58,6 +58,7 @@ import {
 } from "./conversationTimelineRows";
 import { projectConversationTimelineMessages } from "./useConversationTimelineProjection";
 import {
+  agentMessageContentSections,
   agentMessageContextSections,
   buildAgentMessageSectionState,
   hasResponseBlock,
@@ -71,6 +72,7 @@ import {
   isRuntimeNoticeMessage,
   isTurnErrorMessage,
   researchOrgMessageChips,
+  type AgentMessageContentSection,
   type AgentMessageContextSection,
   type AgentMessageSectionState,
 } from "./messageSections";
@@ -3518,6 +3520,16 @@ export function ConversationView({
     );
   }
 
+  function contentSectionIdsForChannel(
+    sections: AgentMessageContentSection[],
+    channel: AgentTextPart["channel"],
+  ) {
+    return sections
+      .filter((section) => section.parts.some((part) => part.channel === channel))
+      .map((section) => section.id)
+      .join(" ") || undefined;
+  }
+
   function renderLegacyUserAttachments(message: ConversationMessage) {
     const attachments = message.attachments ?? [];
     if (!attachments.length) {
@@ -3859,8 +3871,12 @@ export function ConversationView({
               ? buildAgentMessageOperationGroups(agentMessage, operationLabels)
               : buildConversationOperationGroups(message, operationLabels);
             const agentSections = agentMessage ? buildAgentMessageSectionState(agentMessage) : null;
+            const contentSections = agentMessage ? agentMessageContentSections(agentMessage) : [];
             const agentMessageSectionKinds = agentSections?.sectionKinds.join(" ") ?? "";
             const responseText = agentSections?.answerText ?? message.content;
+            const userContentText = agentSections?.userText ?? message.content;
+            const userContentSectionIds = contentSectionIdsForChannel(contentSections, "user");
+            const answerContentSectionIds = contentSectionIdsForChannel(contentSections, "answer");
             const hasActiveProcess = operationGroups.timeline.some((operation) => isRunningOperationStatus(operation.status));
             const hasFeedbackTimeline = agentSections?.hasFeedbackTimeline ?? ((message.feedbackEvents?.length ?? 0) > 0);
             const showResponseBlock = agentSections
@@ -3884,6 +3900,7 @@ export function ConversationView({
               && !agentInboxMessage
               && !groupTranscriptMessage
               && conversationTimelineItems.length > 0;
+            const showUserContent = agentSections ? agentSections.hasUserContent : hasUserContent(message);
             const userAuthoredMessage = message.role === "user" && !agentInboxMessage;
             const isStreamingStatusPlaceholder = Boolean(message.streaming)
               && showResponseBlock
@@ -3952,7 +3969,12 @@ export function ConversationView({
               return renderLegacyProcessDetails(true);
             };
             const responseSectionNode = showResponseBlock && !isStreamingStatusPlaceholder ? (
-              <section className={styles.responseSection} data-conversation-part-key={rowIdentity.answerKey}>
+              <section
+                className={styles.responseSection}
+                data-conversation-part-key={rowIdentity.answerKey}
+                data-agent-content-section-ids={answerContentSectionIds}
+                data-agent-content-channel={answerContentSectionIds ? "answer" : undefined}
+              >
                 <VButton
                   type="button"
                   className={styles.responseToggle}
@@ -4081,9 +4103,13 @@ export function ConversationView({
                         </div>
                       ) : null}
                     </section>
-                  ) : hasUserContent(message) ? (
-                    <div className={styles.userMessageBody}>
-                      {renderResponseText(message.content)}
+                  ) : showUserContent ? (
+                    <div
+                      className={styles.userMessageBody}
+                      data-agent-content-section-ids={userContentSectionIds}
+                      data-agent-content-channel={userContentSectionIds ? "user" : undefined}
+                    >
+                      {renderResponseText(userContentText)}
                     </div>
                   ) : null}
                   {groupTranscriptMessage ? (
