@@ -350,6 +350,14 @@ describe("AppShell layout contract", () => {
     expect(styles.lifecycleMenuPanel).toBeTypeOf("string");
     expect(styles.lifecycleMenuItem).toBeTypeOf("string");
     expect(styles.lifecycleMenuDangerItem).toBeTypeOf("string");
+    const lifecycleMenuBlock = shellStyles.slice(
+      shellStyles.indexOf(":where(.vui-app-appshell).lifecycleMenuItem,"),
+      shellStyles.indexOf("@media (max-width: 1420px)"),
+    );
+    expect(lifecycleMenuBlock).toContain('[data-slot="vui-button-content"]');
+    expect(lifecycleMenuBlock).toContain("display: contents");
+    expect(lifecycleMenuBlock).toContain('[data-slot="vui-button-label"]');
+    expect(lifecycleMenuBlock).toContain("text-overflow: ellipsis");
   });
 
   it("lets lifecycle wait overlays be cancelled without stopping active work", () => {
