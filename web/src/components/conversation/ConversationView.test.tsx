@@ -368,6 +368,16 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).not.toContain("activeTimelineMessages.map((message, index) => {");
   });
 
+  it("scopes row memo invalidation to the current message state", () => {
+    expect(conversationViewSource).toContain("sectionExpansionForMessage");
+    expect(conversationViewSource).toContain("computerUseStateForMessage");
+    expect(conversationViewSource).toContain("previous.sectionExpansionForMessage === next.sectionExpansionForMessage");
+    expect(conversationViewSource).toContain("previous.computerUseStateForMessage === next.computerUseStateForMessage");
+    expect(conversationViewSource).not.toContain("sectionExpansion={sectionExpansion}");
+    expect(conversationViewSource).not.toContain("computerUseSessionResults={computerUseSessionResults}");
+    expect(conversationViewSource).not.toContain("computerUseSessionPending={computerUseSessionPending}");
+  });
+
   it("defaults to answer-only process display while keeping details expandable", () => {
     const html = renderConversation(
       [

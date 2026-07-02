@@ -3687,14 +3687,13 @@ export function ChatCodingRoute() {
       pendingAssistantDeltaPayloads.push({ payload, payloadLength });
       const contentDeltaLength = (payload.contentDelta ?? payload.content ?? "").length;
       const thoughtDeltaLength = (payload.thoughtDelta ?? payload.thought ?? "").length;
-      const projectedLayer = mergeAssistantDeltaIntoActiveTurnLayer(committedAssistantDeltaLayer, payload);
       const telemetry = {
         payloadLength,
         turnId: payload.turnId,
         stage: payload.stage,
         contentDeltaLength,
         thoughtDeltaLength,
-        pendingTextLength: activeTurnLayerTextLength(projectedLayer),
+        pendingTextLength: 0,
         batchSize: pendingAssistantDeltaPayloads.length,
         done: payload.done,
       };

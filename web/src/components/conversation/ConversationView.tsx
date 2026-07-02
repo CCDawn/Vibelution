@@ -93,6 +93,7 @@ const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
 const COMPUTER_USE_TOOL_NAME = "computer_use_task_tool";
 const TIMELINE_BOTTOM_THRESHOLD_PX = 32;
 const TIMELINE_UPWARD_SCROLL_THRESHOLD_PX = 2;
+const EMPTY_SECTION_EXPANSION: Record<string, boolean> = {};
 export type ConversationProcessDisplayMode = "answer" | "trace";
 
 type OperationDetailKind = "thought" | "status" | "tool";
@@ -203,6 +204,70 @@ type ComputerUseResult = {
   needsConfirmation: boolean;
   error: string;
 };
+
+function computerUseSessionIdFromPreview(preview: unknown) {
+  const value = String(preview ?? "").trim();
+  if (!value || !value.startsWith("{")) {
+    return "";
+  }
+  try {
+    const payload = JSON.parse(value) as { sessionId?: unknown };
+    return String(payload.sessionId ?? "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function computerUseSessionIdsForMessage(message: ConversationMessage) {
+  if (message.role !== "assistant") {
+    return [];
+  }
+  const sessionIds = new Set<string>();
+  for (const toolCall of message.toolCalls ?? []) {
+    if (toolCall.name !== COMPUTER_USE_TOOL_NAME) {
+      continue;
+    }
+    const sessionId = computerUseSessionIdFromPreview(toolCall.resultPreview);
+    if (sessionId) {
+      sessionIds.add(sessionId);
+    }
+  }
+  for (const event of message.feedbackEvents ?? []) {
+    if (event.kind !== "tool" || event.name !== COMPUTER_USE_TOOL_NAME) {
+      continue;
+    }
+    const sessionId = computerUseSessionIdFromPreview(event.resultPreview);
+    if (sessionId) {
+      sessionIds.add(sessionId);
+    }
+  }
+  return Array.from(sessionIds).sort();
+}
+
+function computerUseStateForMessage(
+  message: ConversationMessage,
+  results: Record<string, ComputerUseResult>,
+  pending: Record<string, "confirm" | "cancel" | undefined>,
+) {
+  const sessionIds = computerUseSessionIdsForMessage(message);
+  if (sessionIds.length === 0) {
+    return "";
+  }
+  return sessionIds
+    .map((sessionId) => {
+      const result = results[sessionId];
+      return [
+        sessionId,
+        pending[sessionId] ?? "",
+        result?.status ?? "",
+        result?.summary ?? "",
+        result?.error ?? "",
+        result?.screenshotUrl ?? "",
+        result?.needsConfirmation ? "1" : "0",
+      ].join("\u001f");
+    })
+    .join("\u001e");
+}
 
 function projectedConversationMessageIds(message: ConversationMessage) {
   const rawIds = message.metadata?.projectedMessageIds;
@@ -867,9 +932,8 @@ type ConversationTurnRowProps = {
   };
   resolveTurnAvatar?: (message: ConversationMessage) => TurnAvatarResolution | undefined;
   onEditUserMessage?: (message: ConversationMessage) => void;
-  sectionExpansion: Record<string, Record<string, boolean>>;
-  computerUseSessionResults: Record<string, ComputerUseResult>;
-  computerUseSessionPending: Record<string, "confirm" | "cancel" | undefined>;
+  sectionExpansionForMessage: Record<string, boolean>;
+  computerUseStateForMessage: string;
   imageArtifactUrlsBeforeMessage?: Set<string>;
   renderTurn: () => ReactNode;
 };
@@ -910,9 +974,8 @@ function conversationTurnRowPropsAreEqual(
     && previous.operationLabels === next.operationLabels
     && previous.resolveTurnAvatar === next.resolveTurnAvatar
     && previous.onEditUserMessage === next.onEditUserMessage
-    && previous.sectionExpansion === next.sectionExpansion
-    && previous.computerUseSessionResults === next.computerUseSessionResults
-    && previous.computerUseSessionPending === next.computerUseSessionPending
+    && previous.sectionExpansionForMessage === next.sectionExpansionForMessage
+    && previous.computerUseStateForMessage === next.computerUseStateForMessage
     && previous.imageArtifactUrlsBeforeMessage === next.imageArtifactUrlsBeforeMessage;
 }
 
@@ -3619,9 +3682,12 @@ export function ConversationView({
                 operationLabels={operationLabels}
                 resolveTurnAvatar={resolveTurnAvatar}
                 onEditUserMessage={onEditUserMessage}
-                sectionExpansion={sectionExpansion}
-                computerUseSessionResults={computerUseSessionResults}
-                computerUseSessionPending={computerUseSessionPending}
+                sectionExpansionForMessage={sectionExpansion[message.id] ?? EMPTY_SECTION_EXPANSION}
+                computerUseStateForMessage={computerUseStateForMessage(
+                  message,
+                  computerUseSessionResults,
+                  computerUseSessionPending,
+                )}
                 imageArtifactUrlsBeforeMessage={imageArtifactUrlsBeforeMessage.get(message.id)}
                 renderTurn={() => {
             const rowIdentity = activeTimelineRowIdentities[index];
