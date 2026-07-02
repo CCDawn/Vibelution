@@ -46,6 +46,8 @@ import {
   EvolutionWorkspaceSnapshot,
   SupervisedWorktreeRun,
   SelfEvolutionOverview,
+  SelfObservationRun,
+  SelfObservationRunStartRequest,
   SelfEvolutionTransaction,
   SelfEvolutionHistoryDeleteResponse,
   EvolutionRun,
@@ -791,8 +793,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const supervisedTrackQueriesEnabled = activeTrack === "supervised";
 
   const workspaceSnapshotQuery = useQuery({
-    queryKey: queryKeys.evolutionWorkspaceSnapshot(),
-    queryFn: () => fetchJson<EvolutionWorkspaceSnapshot>("/api/evolution/workspace-snapshot"),
+    queryKey: [...queryKeys.evolutionWorkspaceSnapshot(), selfTrackQueriesEnabled ? "include-self" : "default"] as const,
+    queryFn: () => fetchJson<EvolutionWorkspaceSnapshot>(
+      selfTrackQueriesEnabled
+        ? "/api/evolution/workspace-snapshot?includeSelf=true"
+        : "/api/evolution/workspace-snapshot",
+    ),
     refetchInterval: resolvePollingInterval(pageVisible, 4_000),
     refetchIntervalInBackground: false,
     enabled: supervisedTrackQueriesEnabled || selfTrackQueriesEnabled,
@@ -1068,6 +1074,40 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       await evolutionWorkspaceCache.afterWorktreeRunChanged();
     },
   });
+  const startSelfObservationMutation = useMutation({
+    onMutate: () => {
+      setSelfActionFeedback("");
+    },
+    mutationFn: (payload: SelfObservationRunStartRequest) =>
+      fetchJson<SelfObservationRun>("/api/evolution/self/observation-runs", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ...payload, uiRoute: "/evolution?track=self" }),
+      }),
+    onSuccess: async (snapshot) => {
+      setSelfActionFeedback(snapshot.latestMessage || "");
+      await evolutionWorkspaceCache.afterSelfEvolutionChanged();
+    },
+  });
+  const selfObservationActionMutation = useMutation({
+    onMutate: () => {
+      setSelfActionFeedback("");
+    },
+    mutationFn: ({ runId, action }: { runId: string; action: string }) =>
+      fetchJson<SelfObservationRun>(`/api/evolution/self/observation-runs/${encodeURIComponent(runId)}/actions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ action }),
+      }),
+    onSuccess: async (snapshot) => {
+      setSelfActionFeedback(snapshot.latestMessage || "");
+      await evolutionWorkspaceCache.afterSelfEvolutionChanged();
+    },
+  });
   const deleteSelfHistoryMutation = useMutation({
     onMutate: () => {
       setSelfActionFeedback("");
@@ -1141,7 +1181,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const selfWorktreeRun =
     workspaceSnapshot?.selfWorktreeActiveRun
     ?? (isSelfEvolutionWorktreeRun(activeWorktreeRun) ? activeWorktreeRun : null)
-    ?? selfWorktreeRuns[0]
     ?? null;
   const reviewCandidateWorktree = activeWorktreeRun ?? worktreeRuns[0] ?? null;
   const reviewCandidateGate = reviewCandidateWorktree?.reviewGate ?? reviewCandidateWorktree?.mergeAnalysis?.reviewGate;
@@ -2867,15 +2906,22 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           <LazySelfEvolutionTrack
             overview={selfOverview}
             worktreeRun={selfWorktreeRun}
+            observationRun={workspaceSnapshot?.selfObservationActiveRun ?? null}
             goalInput={selfGoalInput}
             onGoalInputChange={setSelfGoalInput}
             onStartRun={() => startSelfWorktreeRunMutation.mutate()}
+            onStartObservation={(payload) => startSelfObservationMutation.mutate(payload)}
+            onTerminateObservation={(runId) => selfObservationActionMutation.mutate({ runId, action: "terminate" })}
             onWorktreeAction={(runId, action) => approvalWorktreeActionMutation.mutate({ runId, action })}
             onDeleteHistoryGroups={(txnIds) => deleteSelfHistoryMutation.mutate(txnIds)}
             startPending={startSelfWorktreeRunMutation.isPending}
+            observationStartPending={startSelfObservationMutation.isPending}
+            observationActionPending={selfObservationActionMutation.isPending}
             worktreeActionPending={approvalWorktreeActionMutation.isPending}
             deleteHistoryPending={deleteSelfHistoryMutation.isPending}
             startWorktreeError={startSelfWorktreeRunMutation.error?.message ?? ""}
+            observationStartError={startSelfObservationMutation.error?.message ?? ""}
+            observationActionError={selfObservationActionMutation.error?.message ?? ""}
             worktreeActionError={approvalWorktreeActionMutation.error?.message ?? ""}
             deleteHistoryError={deleteSelfHistoryMutation.error?.message ?? ""}
             actionFeedback={selfActionFeedback}

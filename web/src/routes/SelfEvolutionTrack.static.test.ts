@@ -38,6 +38,12 @@ function transaction(overrides: Partial<SelfEvolutionTransaction> & { txnId: str
 }
 
 describe("SelfEvolutionTrack static assets", () => {
+  const observationStatusStart = selfEvolutionSource.indexOf("function renderObservationStatusSurface()");
+  const observationStatusEnd = selfEvolutionSource.indexOf("\n\n  return (", observationStatusStart);
+  const observationStatusSurface = observationStatusStart >= 0 && observationStatusEnd > observationStatusStart
+    ? selfEvolutionSource.slice(observationStatusStart, observationStatusEnd)
+    : "";
+
   it("routes self-evolution controls through VUI primitives", () => {
     expect(selfEvolutionSource).toContain('from "../components/vui"');
     expect(selfEvolutionSource).toContain("<VButton");
@@ -160,6 +166,51 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).not.toContain("onResumeRun");
     expect(selfEvolutionSource).not.toContain("onRollbackRun");
     expect(selfEvolutionSource).not.toContain("onHandoffRun");
+  });
+
+  it("offers isolated development and pure observation modes", () => {
+    expect(selfEvolutionSource).toContain('type SelfEvolutionMode = "isolated_development" | "observation"');
+    expect(selfEvolutionSource).toContain('value="isolated_development"');
+    expect(selfEvolutionSource).toContain('value="observation"');
+    expect(selfEvolutionSource).toContain("自主观察");
+    expect(selfEvolutionSource).toContain("隔离开发");
+  });
+
+  it("keeps observation mode free of tool and merge actions", () => {
+    expect(selfEvolutionSource).toContain("observationRun");
+    expect(selfEvolutionSource).toContain("renderObservationStatusSurface()");
+    expect(selfEvolutionSource).toContain("OBSERVATION_MODE_TOOL_COUNT");
+    expect(selfEvolutionSource).toContain("OBSERVATION_MODE_WORKTREE_STATE");
+    expect(selfEvolutionSource).toContain('const OBSERVATION_MODE_TOOL_COUNT = "0";');
+    expect(selfEvolutionSource).toContain('const OBSERVATION_MODE_WORKTREE_STATE = "no";');
+    expect(selfEvolutionSource).toContain("onStartObservation");
+    expect(selfEvolutionSource).toContain("onTerminateObservation");
+    expect(selfEvolutionSource).not.toContain("onRequestObservationTool");
+    expect(selfEvolutionSource).not.toContain("observationToolRequest");
+    expect(selfEvolutionSource).not.toContain("allowedTools.length");
+    expect(selfEvolutionSource).not.toContain("worktreeCreated");
+  });
+
+  it("keeps the observation status surface isolated from worktree approval semantics", () => {
+    expect(observationStatusSurface).toContain("OBSERVATION_MODE_TOOL_COUNT");
+    expect(observationStatusSurface).toContain("OBSERVATION_MODE_WORKTREE_STATE");
+    expect(observationStatusSurface).toContain("statusLabel(observationRun?.status || \"idle\")");
+    expect(observationStatusSurface).toContain("observationRun?.goal || \"--\"");
+    expect(observationStatusSurface).toContain("observationRun?.durationSeconds != null");
+    expect(observationStatusSurface).toContain("observationRun?.latestMessage");
+    expect(observationStatusSurface).not.toContain("renderObservationPanel(");
+    expect(observationStatusSurface).not.toContain("overview.worktree");
+    expect(observationStatusSurface).not.toContain("worktreeRun");
+    expect(observationStatusSurface).not.toContain("approvalEvidenceItems");
+    expect(observationStatusSurface).not.toContain("approve_review");
+    expect(observationStatusSurface).not.toContain("merge");
+    expect(observationStatusSurface).not.toContain("discard");
+    expect(observationStatusSurface).not.toContain("tool request");
+    expect(observationStatusSurface).not.toContain('onWorktreeAction(worktreeRun.runId, "merge")');
+    expect(observationStatusSurface).not.toContain('onWorktreeAction(worktreeRun.runId, "discard")');
+    expect(observationStatusSurface).not.toContain("dirtyFlags");
+    expect(observationStatusSurface).not.toContain("changedFiles");
+    expect(observationStatusSurface).not.toContain("terminateAction");
   });
 
   it("keeps the pet companion read-only inside self-evolution", () => {

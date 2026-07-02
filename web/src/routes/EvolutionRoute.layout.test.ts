@@ -165,6 +165,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("const selfOverview = selfOverviewQuery.data ?? workspaceSnapshot?.selfOverview");
     expect(routeSource).toContain("workspaceSnapshot?.selfWorktreeActiveRun");
     expect(routeSource).toContain("workspaceSnapshot?.selfWorktreeRuns");
+    expect(routeSource).not.toContain("?? selfWorktreeRuns[0]");
     expect(routeSource).toContain("const selfTransactions = selfTransactionsQuery.data ?? workspaceSnapshot?.selfTransactions ?? []");
     expect(routeSource).toContain("const selfTrackLoading = selfTrackQueriesEnabled");
     expect(routeSource).toContain("overview={selfOverview}");

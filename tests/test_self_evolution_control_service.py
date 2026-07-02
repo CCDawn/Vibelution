@@ -65,6 +65,9 @@ def reset_self_evolution_run_state(monkeypatch: pytest.MonkeyPatch):
         service._ACTIVE_RUN_ID = None
     with service._RUN_SUBSCRIBERS_LOCK:
         service._RUN_SUBSCRIBERS.clear()
+    with service._OBSERVATION_RUN_STATE_LOCK:
+        service._OBSERVATION_RUNS.clear()
+        service._ACTIVE_OBSERVATION_RUN_ID = ""
     yield
     with service._RUN_STATE_LOCK:
         service._RUN_STATES.clear()
@@ -72,6 +75,9 @@ def reset_self_evolution_run_state(monkeypatch: pytest.MonkeyPatch):
         service._ACTIVE_RUN_ID = None
     with service._RUN_SUBSCRIBERS_LOCK:
         service._RUN_SUBSCRIBERS.clear()
+    with service._OBSERVATION_RUN_STATE_LOCK:
+        service._OBSERVATION_RUNS.clear()
+        service._ACTIVE_OBSERVATION_RUN_ID = ""
 
 
 def _sha256(text: str) -> str:
@@ -1044,6 +1050,300 @@ def test_runtime_manager_start_self_evolution_blocks_write_chat_session(monkeypa
 
     with pytest.raises(service.SelfEvolutionRunBusyError):
         service.start_self_evolution_run({"goal": "managed"})
+
+
+def test_self_observation_prompt_is_no_tool_contract():
+    prompt = service.build_self_observation_prompt("观察自进化能力", duration_seconds=120)
+
+    assert "无工具观察沙盒" in prompt
+    assert "你没有任何工具" in prompt
+    assert "不能声称已经读取" in prompt
+    assert "不能请求工具授权" in prompt
+    assert "无法验证" in prompt
+    assert "未来需要的证据" in prompt
+
+
+def test_self_observation_boundary_violation_detects_fake_execution_claims():
+    assert service.detect_self_observation_boundary_violation("我已经读取了项目文件") == "claimed_file_read"
+    assert service.detect_self_observation_boundary_violation("I ran pytest and verified it") == "claimed_command_execution"
+    assert service.detect_self_observation_boundary_violation("当前理解：这是一个只能推理的问题") == ""
+
+
+def test_start_self_observation_run_has_no_tools_no_worktree(monkeypatch):
+    monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+    monkeypatch.setattr(service, "_run_self_observation_turn", lambda context: None)
+    service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
+
+    snapshot = service.start_self_observation_run({"goal": "观察规划能力", "durationSeconds": 90})
+
+    assert snapshot["runKind"] == "self_observation_run"
+    assert snapshot["selfMode"] == "observation"
+    assert snapshot["allowedTools"] == []
+    assert snapshot["writeLeases"] == []
+    assert snapshot["worktreeCreated"] is False
+    assert snapshot["durationSeconds"] == 90
+    assert service.get_active_self_observation_run()["runId"] == snapshot["runId"]
+
+
+@pytest.mark.parametrize(
+    "field_name, field_value",
+    [
+        ("allowedTools", []),
+        ("tools", ["git_status"]),
+        ("toolRequests", [{"name": "read_file"}]),
+        ("requestedTools", ["read_file"]),
+        ("dynamicTools", True),
+        ("temporaryAuthorization", {"tools": ["read_file"]}),
+        ("temporaryToolAuthorization", {"tools": ["read_file"]}),
+        ("toolPolicy", {"allowedTools": ["read_file"]}),
+        ("permissions", {"filesystem": "write"}),
+        ("writeLeases", ["workspace"]),
+        ("readScopes", ["repo"]),
+        ("writeScopes", ["repo"]),
+        ("mutationAccess", "write"),
+    ],
+)
+def test_start_self_observation_run_rejects_tool_and_authorization_fields(monkeypatch, field_name, field_value):
+    monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+
+    payload = {"goal": "观察规划能力", field_name: field_value}
+
+    with pytest.raises(service.SelfEvolutionRunValidationError, match="zero tools|工具授权|tool"):
+        service.start_self_observation_run(payload)
+
+
+def test_self_observation_turn_finishes_with_report(monkeypatch):
+    monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+    monkeypatch.setattr(service, "self_evolution_agent_bindings", lambda: {"executor": {"agentId": "agent-observe-1"}})
+    monkeypatch.setattr(service, "create_supervised_agent_session", lambda **kwargs: {"id": "session-observe-1"})
+    monkeypatch.setattr(service, "submit_session_message", lambda *args, **kwargs: {"turnId": "turn-observe-1"})
+    monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: None)
+    service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
+
+    detail_calls = {"count": 0}
+    completion_calls = {"count": 0}
+    observed_latest_messages: list[str] = []
+
+    def fake_get_session_detail(session_id):
+        assert session_id == "session-observe-1"
+        detail_calls["count"] += 1
+        if detail_calls["count"] == 1:
+            return {
+                "messages": [
+                    {"role": "assistant", "content": "当前理解：目标是观察规划。"},
+                ],
+                "lastTurnError": {},
+            }
+        return {
+            "messages": [
+                {"role": "assistant", "content": "当前理解：目标是观察规划。"},
+                {"role": "assistant", "content": "观察目标：观察规划\n无法验证清单：不能读取项目。"},
+            ],
+            "lastTurnError": {},
+        }
+
+    def fake_get_session_turn_completion_snapshot(session_id, turn_id):
+        assert session_id == "session-observe-1"
+        assert turn_id == "turn-observe-1"
+        completion_calls["count"] += 1
+        if completion_calls["count"] == 1:
+            return {
+                "terminal": False,
+                "assistantText": "当前理解：目标是观察规划。",
+                "lastTurnStatus": "running",
+            }
+        return {
+            "terminal": True,
+            "assistantText": "观察目标：观察规划\n无法验证清单：不能读取项目。",
+            "lastTurnStatus": "done",
+        }
+
+    monkeypatch.setattr(service, "get_session_detail", fake_get_session_detail)
+    monkeypatch.setattr(service, "get_session_turn_completion_snapshot", fake_get_session_turn_completion_snapshot)
+    monkeypatch.setattr(service, "request_stop_session_turn", lambda session_id: None)
+    run_id_box = {"value": ""}
+
+    def fake_sleep(*_args, **_kwargs):
+        snapshot = service.get_self_observation_run_snapshot(run_id_box["value"]) or {}
+        observed_latest_messages.append(str(snapshot.get("latestMessage") or ""))
+
+    monkeypatch.setattr(service.time, "sleep", fake_sleep)
+
+    started = service.start_self_observation_run({"goal": "观察规划", "durationSeconds": 60})
+    run_id_box["value"] = started["runId"]
+    service._run_self_observation_turn({"runId": started["runId"], "goal": "观察规划", "durationSeconds": 60})
+
+    snapshot = service.get_self_observation_run_snapshot(started["runId"])
+    assert snapshot is not None
+    assert snapshot["status"] == "done"
+    assert snapshot["conversationSessionId"] == "session-observe-1"
+    assert snapshot["messages"] == [
+        "当前理解：目标是观察规划。",
+        "观察目标：观察规划\n无法验证清单：不能读取项目。",
+    ]
+    assert "观察目标" in snapshot["report"]
+    assert snapshot["latestMessage"] == "观察目标：观察规划\n无法验证清单：不能读取项目。"
+    assert "当前理解：目标是观察规划。" in observed_latest_messages
+
+
+def test_self_observation_turn_marks_boundary_violation(monkeypatch):
+    monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+    monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: None)
+    service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
+
+    monkeypatch.setattr(
+        service,
+        "_run_observation_session",
+        lambda **kwargs: {
+            "conversationSessionId": "session-observe-violated",
+            "messages": [
+                "当前理解：我已经读取了项目文件。",
+                "无法验证：我已经读取了项目文件，所以可以确认结果。",
+            ],
+            "report": "观察目标：观察规划\n我已经读取了项目文件。",
+        },
+    )
+
+    started = service.start_self_observation_run({"goal": "观察规划", "durationSeconds": 60})
+    service._run_self_observation_turn({"runId": started["runId"], "goal": "观察规划", "durationSeconds": 60})
+
+    snapshot = service.get_self_observation_run_snapshot(started["runId"])
+    assert snapshot is not None
+    assert snapshot["status"] == "boundary_violation"
+    assert snapshot["phase"] == "boundary_violation"
+    assert snapshot["runtimeStatus"] == "boundary_violation"
+    assert snapshot["boundaryViolation"] == "claimed_file_read"
+    assert snapshot["conversationSessionId"] == "session-observe-violated"
+    assert "我已经读取了项目文件" in snapshot["report"]
+
+
+def test_start_self_observation_run_completes_and_releases_active_slot(monkeypatch):
+    monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+    monkeypatch.setattr(
+        service,
+        "_run_observation_session",
+        lambda **kwargs: {
+            "conversationSessionId": "session-observe-complete",
+            "messages": ["当前理解：观察规划能力。", "无法验证：没有工具。"],
+            "report": "观察目标：观察规划能力\n无法验证清单：没有工具。",
+        },
+    )
+    monkeypatch.setattr(
+        service._RUN_EXECUTOR,
+        "submit",
+        lambda fn, context: fn(context),
+    )
+
+    snapshot = service.start_self_observation_run({"goal": "观察规划能力", "durationSeconds": 90})
+    final_snapshot = service.get_self_observation_run_snapshot(snapshot["runId"])
+
+    assert final_snapshot is not None
+    assert final_snapshot["status"] == "done"
+    assert final_snapshot["phase"] == "done"
+    assert final_snapshot["runtimeStatus"] == "done"
+    assert final_snapshot["finishedAt"]
+    assert final_snapshot["conversationSessionId"] == "session-observe-complete"
+    assert "无法验证" in final_snapshot["report"]
+    assert final_snapshot["latestMessage"] == "无法验证：没有工具。"
+    assert final_snapshot["actionStates"]["terminate"]["enabled"] is False
+    assert service.get_active_self_observation_run() is None
+    assert service._ACTIVE_OBSERVATION_RUN_ID == ""
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected_duration"),
+    [
+        (None, 300),
+        ("", 300),
+        ("15", service.SELF_OBSERVATION_MIN_DURATION_SECONDS),
+        (999999, service.SELF_OBSERVATION_MAX_DURATION_SECONDS),
+    ],
+)
+def test_start_self_observation_run_normalizes_duration(monkeypatch, raw_value, expected_duration):
+    monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+    monkeypatch.setattr(service, "_run_self_observation_turn", lambda context: None)
+
+    snapshot = service.start_self_observation_run({"goal": "观察规划能力", "durationSeconds": raw_value})
+
+    assert snapshot["durationSeconds"] == expected_duration
+
+
+def test_execute_self_observation_action_terminates_active_run(monkeypatch):
+    monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+    monkeypatch.setattr(service, "_run_self_observation_turn", lambda context: None)
+    service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
+
+    snapshot = service.start_self_observation_run({"goal": "观察规划能力", "durationSeconds": 90})
+    updated = service.execute_self_observation_action(snapshot["runId"], "terminate")
+
+    assert updated["status"] == "terminated"
+    assert updated["phase"] == "terminated"
+    assert updated["runtimeStatus"] == "terminated"
+    assert updated["finishedAt"]
+    assert updated["actionStates"]["terminate"]["enabled"] is False
+    assert service.get_active_self_observation_run() is None
+
+
+def test_execute_self_observation_action_rejects_unsupported_action():
+    with pytest.raises(service.SelfEvolutionRunValidationError, match="Unsupported self observation action"):
+        service.execute_self_observation_action("self-observe-missing", "approve")
+
+
+def test_set_self_observation_terminal_state_preserves_operator_termination(monkeypatch):
+    monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+    monkeypatch.setattr(service, "_run_self_observation_turn", lambda context: None)
+    service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
+
+    snapshot = service.start_self_observation_run({"goal": "观察规划能力", "durationSeconds": 90})
+    service.execute_self_observation_action(snapshot["runId"], "terminate")
+
+    service._set_self_observation_terminal_state(
+        snapshot["runId"],
+        status="done",
+        latest_message="worker finished",
+        report="worker report",
+    )
+
+    persisted = service.get_self_observation_run_snapshot(snapshot["runId"])
+    assert persisted is not None
+    assert persisted["status"] == "terminated"
+    assert persisted["phase"] == "terminated"
+    assert persisted["runtimeStatus"] == "terminated"
+    assert persisted["latestMessage"] == "自主观察已由用户终止。"
+
+
+def test_run_self_observation_turn_preserves_operator_termination(monkeypatch):
+    monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+    monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: None)
+    service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
+
+    snapshot = service.start_self_observation_run({"goal": "观察规划能力", "durationSeconds": 90})
+    service.execute_self_observation_action(snapshot["runId"], "terminate")
+    service._run_self_observation_turn(
+        {"runId": snapshot["runId"], "goal": "观察规划能力", "durationSeconds": 90}
+    )
+
+    persisted = service.get_self_observation_run_snapshot(snapshot["runId"])
+    assert persisted is not None
+    assert persisted["status"] == "terminated"
+    assert persisted["phase"] == "terminated"
+    assert persisted["runtimeStatus"] == "terminated"
+    assert persisted["latestMessage"] == "自主观察已由用户终止。"
+
+
+def test_stream_self_observation_run_events_emits_snapshot_and_stops_for_terminal_run():
+    snapshot = {
+        "runId": "self-observe-stream",
+        "status": "done",
+        "phase": "done",
+        "runtimeStatus": "done",
+    }
+
+    events = list(service.stream_self_observation_run_events("self-observe-stream", initial_snapshot=snapshot))
+
+    assert len(events) == 1
+    assert "event: self_observation_run" in events[0]
+    assert '"runId": "self-observe-stream"' in events[0]
 
 
 @pytest.mark.parametrize("status", ["queued", "running", "stopping", "paused"])

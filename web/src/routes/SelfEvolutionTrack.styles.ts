@@ -21,7 +21,14 @@ export const selfEvolutionTrackStyles: Record<string, string> = {
   segmentedTabs: "inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-panel-strong)] p-1",
   tabButton: "min-h-9 cursor-pointer rounded-md border-0 bg-transparent px-4 text-[var(--fg-secondary)]",
   tabButtonActive: "bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] text-[var(--accent-warm-2)]",
+  modeSwitch: "inline-flex w-fit flex-wrap items-center gap-1 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-panel-strong)] p-1",
+  modeTab:
+    "inline-flex min-h-8 w-fit cursor-pointer items-center justify-center rounded-md border border-transparent px-3 py-1 text-[var(--vui-font-sm)] text-[var(--fg-secondary)]",
+  modeTabActive:
+    "inline-flex min-h-8 w-fit cursor-pointer items-center justify-center rounded-md border border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_12%,transparent)] px-3 py-1 text-[var(--vui-font-sm)] font-semibold text-[var(--accent-warm-2)]",
   surface: "rounded-lg border border-[var(--border-soft)] bg-[var(--surface-panel)] p-3.5 max-[760px]:p-4",
+  observationPanel:
+    "grid min-h-0 content-start gap-3 overflow-auto rounded-lg border border-[var(--border-soft)] bg-[var(--surface-panel)] p-3.5",
   loadingShell:
     "grid min-h-[148px] max-h-[180px] content-start self-start overflow-hidden grid-cols-[minmax(240px,300px)_minmax(0,1fr)] gap-2 max-[1180px]:min-h-[172px] max-[1180px]:max-h-[210px] max-[1180px]:grid-cols-1",
   loadingRail: "grid min-h-0 content-start gap-2.5 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-card)] p-3",
@@ -79,6 +86,10 @@ export const selfEvolutionTrackStyles: Record<string, string> = {
   worktreeFiles: "grid gap-2",
   subsection: "mt-1 grid gap-2",
   noticeBanner: "grid gap-2 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-card)] px-3.5 py-3",
+  formField:
+    "grid gap-1.5 [&>span]:text-[var(--vui-font-xs)] [&>span]:uppercase [&>span]:tracking-[0.06em] [&>span]:text-[var(--fg-tertiary)]",
+  textInput: "w-full max-w-[180px]",
+  textArea: "w-full",
   worktreeEscalation:
     "flex items-center justify-between gap-3 rounded-lg border border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--border-soft))] bg-[color-mix(in_srgb,var(--accent-cool)_9%,var(--surface-card))] px-3.5 py-3 [&_p]:flex-[1_1_220px]",
   supportGrid: "grid gap-4",
@@ -107,6 +118,7 @@ export const selfEvolutionTrackStyles: Record<string, string> = {
   stripItem:
     "grid min-h-[58px] gap-1 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-card)] px-2.5 py-[9px] [&_span]:text-[var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)] [&_strong]:overflow-wrap-anywhere [&_strong]:text-[0.92rem] [&_strong]:text-[var(--fg-primary)]",
   compactMetricGrid: "grid grid-cols-2 gap-2 max-[760px]:grid-cols-1",
+  observationMetricGrid: "grid grid-cols-3 gap-2 max-[900px]:grid-cols-1",
   historyToolbar: "flex flex-wrap items-center justify-between gap-3",
   transactionFilterBar: "flex flex-wrap gap-2",
   transactionDateFilterBar:
@@ -132,6 +144,9 @@ export const selfEvolutionTrackStyles: Record<string, string> = {
   transactionMetaGrid:
     "grid grid-cols-4 gap-1.5 max-[1180px]:grid-cols-2 [&_span]:min-w-0 [&_span]:overflow-wrap-anywhere [&_span]:rounded-[7px] [&_span]:border [&_span]:border-[var(--border-hairline)] [&_span]:bg-[color-mix(in_srgb,var(--surface-panel-strong)_72%,transparent)] [&_span]:px-2 [&_span]:py-1.5 [&_span]:text-[var(--vui-font-xs)] [&_span]:leading-tight [&_span]:text-[var(--fg-secondary)]",
   transactionGoalPreview: "m-0 overflow-wrap-anywhere text-[var(--vui-font-xs)] leading-normal text-[var(--fg-secondary)]",
+  previewText: "m-0 overflow-wrap-anywhere text-[0.92rem] leading-normal text-[var(--fg-primary)]",
+  rawBlock:
+    "overflow-auto rounded-lg border border-[var(--border-hairline)] bg-[color-mix(in_srgb,var(--surface-panel-strong)_72%,transparent)] p-3 font-mono text-[var(--vui-font-xs)] leading-relaxed text-[var(--fg-secondary)]",
   transactionDetailsPanel:
     "grid grid-cols-2 gap-2 rounded-lg border border-[var(--border-hairline)] bg-[color-mix(in_srgb,var(--surface-panel-strong)_54%,transparent)] p-[9px] max-[1180px]:grid-cols-1",
   transactionDetailRow:

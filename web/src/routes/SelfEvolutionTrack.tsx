@@ -23,13 +23,15 @@ import {
   PetSummary,
   RuntimeSummary,
   SelfEvolutionOverview,
+  SelfObservationRun,
+  SelfObservationRunStartRequest,
   SelfEvolutionTransaction,
   SupervisedWorktreeRun,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { LazyConversationView } from "../components/conversation/LazyConversationView";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { VButton, VNativeInput } from "../components/vui";
+import { VButton, VNativeInput, VNativeTextarea } from "../components/vui";
 import { TranslationKey } from "../i18n/dictionary";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
 import { useAppI18n } from "../i18n/useAppI18n";
@@ -39,15 +41,22 @@ import { selfEvolutionTrackStyles as styles } from "./SelfEvolutionTrack.styles"
 type SelfEvolutionTrackProps = {
   overview?: SelfEvolutionOverview;
   worktreeRun?: SupervisedWorktreeRun | null;
+  observationRun?: SelfObservationRun | null;
   goalInput: string;
   onGoalInputChange: (value: string) => void;
   onStartRun: () => void;
+  onStartObservation: (payload: SelfObservationRunStartRequest) => void;
+  onTerminateObservation: (runId: string) => void;
   onWorktreeAction: (runId: string, action: string) => void;
   onDeleteHistoryGroups: (txnIds: string[]) => void;
   startPending: boolean;
+  observationStartPending: boolean;
+  observationActionPending: boolean;
   worktreeActionPending: boolean;
   deleteHistoryPending: boolean;
   startWorktreeError: string;
+  observationStartError: string;
+  observationActionError: string;
   worktreeActionError: string;
   deleteHistoryError: string;
   actionFeedback: string;
@@ -74,6 +83,9 @@ type ConversationTaskSummary = {
 };
 
 type SelfEvolutionPetCompanionTone = "idle" | "active" | "paused" | "caution" | "error";
+type SelfEvolutionMode = "isolated_development" | "observation";
+const OBSERVATION_MODE_TOOL_COUNT = "0";
+const OBSERVATION_MODE_WORKTREE_STATE = "no";
 export type SelfEvolutionTransactionFilter = "all" | "needs_review" | "open" | "changed";
 export type SelfEvolutionTransactionDateFilter = "all" | string;
 export type SelfEvolutionTransactionDateGroup = {
@@ -262,6 +274,10 @@ function isExecutingRunStatus(status: string) {
 
 function isPausedRunStatus(status: string) {
   return String(status || "").trim().toLowerCase() === "paused";
+}
+
+function isObservationQueuedOrRunning(status: string) {
+  return ["queued", "running"].includes(String(status || "").trim().toLowerCase());
 }
 
 function isWorktreeIsolationStartError(message: string) {
@@ -476,15 +492,22 @@ function buildSelfWorkflowSteps(run: SupervisedWorktreeRun | null | undefined, l
 export function SelfEvolutionTrack({
   overview,
   worktreeRun,
+  observationRun,
   goalInput,
   onGoalInputChange,
   onStartRun,
+  onStartObservation,
+  onTerminateObservation,
   onWorktreeAction,
   onDeleteHistoryGroups,
   startPending,
+  observationStartPending,
+  observationActionPending,
   worktreeActionPending,
   deleteHistoryPending,
   startWorktreeError,
+  observationStartError,
+  observationActionError,
   worktreeActionError,
   deleteHistoryError,
   actionFeedback,
@@ -494,6 +517,11 @@ export function SelfEvolutionTrack({
   loading,
 }: SelfEvolutionTrackProps) {
   const { lang, t, statusLabel } = useAppI18n();
+  const [selfEvolutionMode, setSelfEvolutionMode] = useState<SelfEvolutionMode>(
+    isObservationQueuedOrRunning(observationRun?.status || "") ? "observation" : "isolated_development",
+  );
+  const [observationGoalInput, setObservationGoalInput] = useState("");
+  const [observationDurationSeconds, setObservationDurationSeconds] = useState(300);
   const [worktreePage, setWorktreePage] = useState(1);
   const [activePage, setActivePage] = useState<"workspace" | "status">("workspace");
   const [selectedHistoryTxnIds, setSelectedHistoryTxnIds] = useState<string[]>([]);
@@ -606,6 +634,7 @@ export function SelfEvolutionTrack({
   const mergeAction = worktreeRun?.actionStates?.merge;
   const discardAction = worktreeRun?.actionStates?.discard;
   const terminateAction = worktreeRun?.actionStates?.terminate;
+  const observationTerminateAction = observationRun?.actionStates?.terminate;
   const reviewGate = worktreeRun?.reviewGate ?? worktreeRun?.mergeAnalysis?.reviewGate;
   const sceneSemantics = overview?.sceneSemantics;
   const runSemantics = overview?.runSemantics;
@@ -621,9 +650,17 @@ export function SelfEvolutionTrack({
   });
   const errorMessage = collectUniqueLines([
     startWorktreeError,
+    observationStartError,
+    observationActionError,
     worktreeActionError,
     deleteHistoryError,
   ]).join("\n");
+  const observationRunActive = isObservationQueuedOrRunning(observationRun?.status || "");
+  const observationRunModeActive = selfEvolutionMode === "observation";
+  const observationGoalValue = observationGoalInput.trim();
+  const normalizedObservationDuration = Number.isFinite(observationDurationSeconds) && observationDurationSeconds > 0
+    ? observationDurationSeconds
+    : 300;
   const transactionFilterOptions = useMemo(() => ([
     { id: "all" as const, label: t("filterAll"), count: countTransactionsByFilter(transactionItems, "all") },
     { id: "needs_review" as const, label: t("selfTransactionFilterNeedsReview"), count: countTransactionsByFilter(transactionItems, "needs_review") },
@@ -770,6 +807,12 @@ export function SelfEvolutionTrack({
   }, [visibleTransactionIds]);
 
   useEffect(() => {
+    if (observationRunActive) {
+      setSelfEvolutionMode("observation");
+    }
+  }, [observationRunActive]);
+
+  useEffect(() => {
     if (transactionDateFilter === "all") {
       return;
     }
@@ -879,6 +922,92 @@ export function SelfEvolutionTrack({
     );
   }
 
+  function renderObservationPanel() {
+    return (
+      <section className={styles.observationPanel}>
+        <div className={styles.sectionHeader}>
+          <div>
+            <p className={styles.eyebrow}>{lang === "zh" ? "纯观察沙盒" : "No-tool sandbox"}</p>
+            <h3 className={styles.sectionTitle}>{lang === "zh" ? "自主观察" : "Observation"}</h3>
+          </div>
+          <span className={styles.statusPill}>{statusLabel(observationRun?.status || "idle")}</span>
+        </div>
+
+        <div className={styles.formField}>
+          <span>{lang === "zh" ? "观察目标" : "Observation goal"}</span>
+          <VNativeTextarea
+            className={styles.textArea}
+            rows={3}
+            value={observationGoalInput}
+            onChange={(event) => setObservationGoalInput(event.target.value)}
+            placeholder={lang === "zh" ? "描述要观察 Agent 如何思考的问题" : "Describe what you want to observe"}
+          />
+        </div>
+
+        <div className={styles.formField}>
+          <span>{lang === "zh" ? "运行时长（秒）" : "Duration seconds"}</span>
+          <VNativeInput
+            className={styles.textInput}
+            type="number"
+            min={30}
+            max={3600}
+            value={String(normalizedObservationDuration)}
+            onChange={(event) => setObservationDurationSeconds(Number(event.target.value || 300))}
+          />
+        </div>
+
+        <p className={styles.noticeText}>
+          {lang === "zh"
+            ? "自主观察模式固定 0 工具，不会申请工具、创建 worktree 或修改代码。"
+            : "Observation mode stays at 0 tools, cannot request tools, create worktrees, or modify code."}
+        </p>
+
+        <div className={styles.observationMetricGrid}>
+          <div className={styles.stripItem}>
+            <span>{lang === "zh" ? "工具" : "Tools"}</span>
+            <strong>{OBSERVATION_MODE_TOOL_COUNT}</strong>
+          </div>
+          <div className={styles.stripItem}>
+            <span>{lang === "zh" ? "时长" : "Duration"}</span>
+            <strong>{observationRun?.durationSeconds ?? normalizedObservationDuration}</strong>
+          </div>
+          <div className={styles.stripItem}>
+            <span>{lang === "zh" ? "worktree" : "Worktree"}</span>
+            <strong>{OBSERVATION_MODE_WORKTREE_STATE}</strong>
+          </div>
+        </div>
+
+        <div className={styles.conversationActions}>
+          <VButton
+            type="button"
+            className={styles.secondaryAction}
+            isDisabled={observationStartPending || observationRunActive || !observationGoalValue}
+            onClick={() => onStartObservation({ goal: observationGoalValue, durationSeconds: normalizedObservationDuration })}
+          >
+            {observationStartPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ArrowUpRight size={15} />}
+            {observationStartPending ? (lang === "zh" ? "启动中" : "Starting") : (lang === "zh" ? "开始自主观察" : "Start observation")}
+          </VButton>
+          {observationRun && observationRunActive ? (
+            <VButton
+              type="button"
+              className={styles.secondaryAction}
+              isDisabled={observationActionPending || !observationTerminateAction?.enabled}
+              title={disabledReason(observationTerminateAction) || undefined}
+              onClick={() => onTerminateObservation(observationRun.runId)}
+            >
+              {observationActionPending ? <LoaderCircle size={15} className={styles.spinning} /> : <X size={15} />}
+              {lang === "zh" ? "终止观察" : "Terminate"}
+            </VButton>
+          ) : null}
+        </div>
+
+        {observationRun?.latestMessage ? <p className={styles.previewText}>{observationRun.latestMessage}</p> : null}
+        {observationRun?.report ? <pre className={styles.rawBlock}>{observationRun.report}</pre> : null}
+        {observationRun?.boundaryViolation ? <p className={styles.errorText}>{observationRun.boundaryViolation}</p> : null}
+      </section>
+    );
+  }
+
   if (loading && !overview) {
     return renderLoadingShell(t("loading"));
   }
@@ -913,6 +1042,85 @@ export function SelfEvolutionTrack({
       value: worktreeRun?.mergeAnalysis?.reason || worktreeRun?.decision?.reason || approvalStep.summary || "--",
     },
   ];
+
+  function renderObservationStatusSurface() {
+    return (
+      <div className={styles.statusPage}>
+        <div className={styles.panelStack}>
+          <div className={styles.metricStrip}>
+            <article className={styles.stripItem}>
+              <span>{t("sceneStateTitle")}</span>
+              <strong>{statusLabel(observationRun?.status || "idle")}</strong>
+            </article>
+            <article className={styles.stripItem}>
+              <span>{lang === "zh" ? "时长" : "Duration"}</span>
+              <strong>{observationRun?.durationSeconds != null ? compactDuration(observationRun.durationSeconds, lang) : "--"}</strong>
+            </article>
+            <article className={styles.stripItem}>
+              <span>{lang === "zh" ? "工具" : "Tools"}</span>
+              <strong>{OBSERVATION_MODE_TOOL_COUNT}</strong>
+            </article>
+            <article className={styles.stripItem}>
+              <span>{lang === "zh" ? "worktree" : "Worktree"}</span>
+              <strong>{OBSERVATION_MODE_WORKTREE_STATE}</strong>
+            </article>
+          </div>
+
+          {actionFeedback || errorMessage ? (
+            <div className={styles.noticeBanner}>
+              {actionFeedback ? <p className={styles.feedbackText}>{actionFeedback}</p> : null}
+              {errorMessage ? <p className={styles.errorText}>{errorMessage}</p> : null}
+            </div>
+          ) : null}
+
+          <section className={styles.subsurface}>
+            <div className={styles.subsurfaceHeader}>
+              <div>
+                <p className={styles.eyebrow}>{lang === "zh" ? "观察运行" : "Observation run"}</p>
+                <h4 className={styles.subsurfaceTitle}>{observationRun?.runId || (lang === "zh" ? "等待观察运行" : "Waiting for observation run")}</h4>
+              </div>
+              <span className={styles.secondaryPill}>{statusLabel(observationRun?.runtimeStatus || observationRun?.status || "idle")}</span>
+            </div>
+
+              <div className={styles.detailStack}>
+                <div className={styles.detailRow}>
+                  <span>{lang === "zh" ? "观察目标" : "Observation goal"}</span>
+                  <strong>{observationRun?.goal || "--"}</strong>
+                </div>
+                <div className={styles.detailRow}>
+                  <span>{lang === "zh" ? "阶段" : "Phase"}</span>
+                  <strong>{statusLabel(observationRun?.phase || observationRun?.runtimeStatus || observationRun?.status || "idle")}</strong>
+                </div>
+                <div className={styles.detailRow}>
+                  <span>{lang === "zh" ? "开始时间" : "Started"}</span>
+                  <strong>{compactTimestamp(observationRun?.startedAt || observationRun?.updatedAt || "")}</strong>
+                </div>
+                <div className={styles.detailRow}>
+                  <span>{t("lastUpdated")}</span>
+                  <strong>{compactTimestamp(observationRun?.updatedAt || "")}</strong>
+                </div>
+              </div>
+
+              <div className={styles.listBlock}>
+                {observationRun?.latestMessage ? (
+                  <div className={styles.listItem}>
+                    <div className={styles.itemTop}>
+                      <strong>{lang === "zh" ? "最新输出" : "Latest output"}</strong>
+                      <span className={styles.secondaryPill}>{statusLabel(observationRun?.runtimeStatus || observationRun?.status || "idle")}</span>
+                    </div>
+                    <span className={styles.mutedText}>{observationRun.latestMessage}</span>
+                  </div>
+                ) : (
+                  <div className={styles.emptyState}>{lang === "zh" ? "还没有观察输出。" : "No observation output yet."}</div>
+                )}
+                {observationRun?.report ? <pre className={styles.rawBlock}>{observationRun.report}</pre> : null}
+                {observationRun?.boundaryViolation ? <p className={styles.errorText}>{observationRun.boundaryViolation}</p> : null}
+              </div>
+            </section>
+          </div>
+        </div>
+      );
+  }
 
   return (
     <div className={styles.pageStack}>
@@ -954,53 +1162,94 @@ export function SelfEvolutionTrack({
                   <p className={styles.eyebrow}>{t("selfEvolutionMode")}</p>
                   <h3 className={styles.sectionTitle}>{t("selfWorkspacePage")}</h3>
                 </div>
-                <span className={styles.statusPill}>{statusLabel(conversationTask.status)}</span>
+                <span className={styles.statusPill}>
+                  {statusLabel(observationRunModeActive ? (observationRun?.status || "idle") : conversationTask.status)}
+                </span>
               </div>
-
-              <p className={styles.sectionSummary}>{conversationTask.goal}</p>
-
-                <div className={styles.detailStack}>
-                  <div className={styles.detailRow}>
-                    <span>{t("sceneStateTitle")}</span>
-                    <strong>{sceneSemantics?.sceneTitle || statusLabel(overview.readiness.state)}</strong>
-                  </div>
-                  <div className={styles.detailRow}>
-                    <span>{t("currentRunTitle")}</span>
-                    <strong>{runSemantics?.phaseLabel || statusLabel(worktreeRun?.runtimeStatus || worktreeRun?.status || overview.readiness.state)}</strong>
-                  </div>
-                  <div className={styles.detailRow}>
-                    <span>{t("rollbackStateTitle")}</span>
-                    <strong>{runSemantics?.rollbackStateLabel || statusLabel(conversationTask.verificationStatus)}</strong>
-                  </div>
-                  <div className={styles.detailRow}>
-                    <span>{t("lastUpdated")}</span>
-                    <strong>{compactTimestamp(conversationTask.updatedAt)}</strong>
-                  </div>
-                </div>
-
-              <div className={styles.noticeStack}>
-                <p className={styles.noticeText}>{sceneSemantics?.sceneSummary || conversationTask.latestSummary}</p>
-                <p className={styles.noticeText}>
-                  {runSemantics?.rollbackSummary || conversationTask.nextAction}
-                </p>
-                {sceneSemantics?.nextAction ? <p className={styles.noticeText}>{sceneSemantics.nextAction}</p> : null}
-                {!startSelfAction?.enabled && disabledReason(startSelfAction) ? (
-                  <p className={styles.noticeText}>{disabledReason(startSelfAction)}</p>
-                ) : null}
-                {runLocked ? <p className={styles.noticeText}>{t("selfRunningLockHint")}</p> : null}
-                {worktreeRunLocked ? <p className={styles.noticeText}>{t("selfWorktreeRunningLockHint")}</p> : null}
-                {actionFeedback ? <p className={styles.feedbackText}>{actionFeedback}</p> : null}
-                {errorMessage ? <p className={styles.errorText}>{errorMessage}</p> : null}
+              <div className={styles.modeSwitch} role="tablist" aria-label={lang === "zh" ? "自进化模式" : "Self-evolution mode"}>
                 <VButton
                   type="button"
-                  className={styles.secondaryAction}
-                  isDisabled={runLocked || worktreeRunLocked || startPending}
-                  onClick={onStartRun}
+                  role="tab"
+                  aria-selected={selfEvolutionMode === "isolated_development"}
+                  value="isolated_development"
+                  className={selfEvolutionMode === "isolated_development" ? styles.modeTabActive : styles.modeTab}
+                  onClick={() => setSelfEvolutionMode("isolated_development")}
                 >
-                  {startPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ArrowUpRight size={15} />}
-                  {t("startSelfWorktreeRun")}
+                  {lang === "zh" ? "隔离开发" : "Isolated development"}
+                </VButton>
+                <VButton
+                  type="button"
+                  role="tab"
+                  aria-selected={selfEvolutionMode === "observation"}
+                  value="observation"
+                  className={selfEvolutionMode === "observation" ? styles.modeTabActive : styles.modeTab}
+                  onClick={() => setSelfEvolutionMode("observation")}
+                >
+                  {lang === "zh" ? "自主观察" : "Observation"}
                 </VButton>
               </div>
+
+              {observationRunModeActive ? (
+                <>
+                  <p className={styles.sectionSummary}>
+                    {lang === "zh" ? "只读观察 Agent 的思考与输出，不申请工具、不创建 worktree。 " : "Read-only observation with no tools and no worktree."}
+                  </p>
+                  <div className={styles.noticeStack}>
+                    <p className={styles.noticeText}>
+                      {observationRun?.latestMessage || (lang === "zh" ? "准备启动一轮纯观察沙盒。" : "Ready to start a no-tool observation sandbox.")}
+                    </p>
+                    {actionFeedback ? <p className={styles.feedbackText}>{actionFeedback}</p> : null}
+                    {errorMessage ? <p className={styles.errorText}>{errorMessage}</p> : null}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className={styles.sectionSummary}>{conversationTask.goal}</p>
+
+                  <div className={styles.detailStack}>
+                    <div className={styles.detailRow}>
+                      <span>{t("sceneStateTitle")}</span>
+                      <strong>{sceneSemantics?.sceneTitle || statusLabel(overview.readiness.state)}</strong>
+                    </div>
+                    <div className={styles.detailRow}>
+                      <span>{t("currentRunTitle")}</span>
+                      <strong>{runSemantics?.phaseLabel || statusLabel(worktreeRun?.runtimeStatus || worktreeRun?.status || overview.readiness.state)}</strong>
+                    </div>
+                    <div className={styles.detailRow}>
+                      <span>{t("rollbackStateTitle")}</span>
+                      <strong>{runSemantics?.rollbackStateLabel || statusLabel(conversationTask.verificationStatus)}</strong>
+                    </div>
+                    <div className={styles.detailRow}>
+                      <span>{t("lastUpdated")}</span>
+                      <strong>{compactTimestamp(conversationTask.updatedAt)}</strong>
+                    </div>
+                  </div>
+
+                  <div className={styles.noticeStack}>
+                    <p className={styles.noticeText}>{sceneSemantics?.sceneSummary || conversationTask.latestSummary}</p>
+                    <p className={styles.noticeText}>
+                      {runSemantics?.rollbackSummary || conversationTask.nextAction}
+                    </p>
+                    {sceneSemantics?.nextAction ? <p className={styles.noticeText}>{sceneSemantics.nextAction}</p> : null}
+                    {!startSelfAction?.enabled && disabledReason(startSelfAction) ? (
+                      <p className={styles.noticeText}>{disabledReason(startSelfAction)}</p>
+                    ) : null}
+                    {runLocked ? <p className={styles.noticeText}>{t("selfRunningLockHint")}</p> : null}
+                    {worktreeRunLocked ? <p className={styles.noticeText}>{t("selfWorktreeRunningLockHint")}</p> : null}
+                    {actionFeedback ? <p className={styles.feedbackText}>{actionFeedback}</p> : null}
+                    {errorMessage ? <p className={styles.errorText}>{errorMessage}</p> : null}
+                    <VButton
+                      type="button"
+                      className={styles.secondaryAction}
+                      isDisabled={runLocked || worktreeRunLocked || startPending}
+                      onClick={onStartRun}
+                    >
+                      {startPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ArrowUpRight size={15} />}
+                      {t("startSelfWorktreeRun")}
+                    </VButton>
+                  </div>
+                </>
+              )}
             </section>
 
             <section className={`${styles.petCompanionSurface} ${styles[`petCompanionTone_${petCompanionState.tone}`]}`}>
@@ -1085,127 +1334,137 @@ export function SelfEvolutionTrack({
           />
 
           <main className={styles.centerColumn}>
-            <div className={styles.workflowCardGrid} aria-label={lang === "zh" ? "自进化步骤导航" : "Self-evolution workflow"}>
-              {workflowSteps.map((step) => {
-                const definition = SELF_EVOLUTION_WORKFLOW_STEPS.find((item) => item.id === step.id);
-                const selected = selectedWorkflowStep?.id === step.id;
-                return (
-                  <VButton
-                    key={step.id}
-                    type="button"
-                    className={selected ? `${styles.workflowCard} ${styles.workflowCardActive}` : styles.workflowCard}
-                    aria-pressed={selected}
-                    onClick={() => setSelectedWorkflowStepId(step.id as SelfEvolutionWorkflowStepId)}
-                  >
-                    <span>{definition ? (lang === "zh" ? definition.zh : definition.en) : step.label}</span>
-                    <strong>{statusLabel(step.status)}</strong>
-                    <small>{step.livePreview || step.summary || "--"}</small>
-                  </VButton>
-                );
-              })}
-            </div>
-            <div className={styles.conversationShell}>
-              {selectedWorkflowStep?.id === "approval" ? (
-                <section className={styles.approvalPanel}>
-                  <div className={styles.subsurfaceHeader}>
-                    <div>
-                      <p className={styles.eyebrow}>{approvalStep.label}</p>
-                      <h3 className={styles.sectionTitle}>{lang === "zh" ? "人工审批" : "Human approval"}</h3>
-                    </div>
-                    <span className={styles.statusPill}>{statusLabel(approvalStep.status)}</span>
-                  </div>
-                  <div className={styles.detailStack}>
-                    {approvalEvidenceItems.map((item) => (
-                      <div key={item.label} className={styles.detailRow}>
-                        <span>{item.label}</span>
-                        <strong>{item.value}</strong>
+            {observationRunModeActive ? (
+              <div className={styles.conversationShell}>
+                {renderObservationPanel()}
+              </div>
+            ) : (
+              <>
+                <div className={styles.workflowCardGrid} aria-label={lang === "zh" ? "自进化步骤导航" : "Self-evolution workflow"}>
+                  {workflowSteps.map((step) => {
+                    const definition = SELF_EVOLUTION_WORKFLOW_STEPS.find((item) => item.id === step.id);
+                    const selected = selectedWorkflowStep?.id === step.id;
+                    return (
+                      <VButton
+                        key={step.id}
+                        type="button"
+                        className={selected ? `${styles.workflowCard} ${styles.workflowCardActive}` : styles.workflowCard}
+                        aria-pressed={selected}
+                        onClick={() => setSelectedWorkflowStepId(step.id as SelfEvolutionWorkflowStepId)}
+                      >
+                        <span>{definition ? (lang === "zh" ? definition.zh : definition.en) : step.label}</span>
+                        <strong>{statusLabel(step.status)}</strong>
+                        <small>{step.livePreview || step.summary || "--"}</small>
+                      </VButton>
+                    );
+                  })}
+                </div>
+                <div className={styles.conversationShell}>
+                  {selectedWorkflowStep?.id === "approval" ? (
+                    <section className={styles.approvalPanel}>
+                      <div className={styles.subsurfaceHeader}>
+                        <div>
+                          <p className={styles.eyebrow}>{approvalStep.label}</p>
+                          <h3 className={styles.sectionTitle}>{lang === "zh" ? "人工审批" : "Human approval"}</h3>
+                        </div>
+                        <span className={styles.statusPill}>{statusLabel(approvalStep.status)}</span>
                       </div>
-                    ))}
-                  </div>
-                  <div className={styles.conversationActions}>
-                    <VButton
-                      type="button"
-                      className={styles.secondaryAction}
-                      isDisabled={!worktreeRun || worktreeActionPending || !approveReviewAction?.enabled}
-                      title={disabledReason(approveReviewAction) || undefined}
-                      onClick={() => worktreeRun && onWorktreeAction(worktreeRun.runId, "approve_review")}
-                    >
-                      {worktreeActionPending ? <LoaderCircle size={15} className={styles.spinning} /> : <CheckSquare size={15} />}
-                      {lang === "zh" ? "通过审批" : "Approve"}
-                    </VButton>
-                    <VButton
-                      type="button"
-                      className={styles.secondaryAction}
-                      isDisabled={!worktreeRun || worktreeActionPending || !mergeAction?.enabled}
-                      title={disabledReason(mergeAction) || undefined}
-                      onClick={() => worktreeRun && onWorktreeAction(worktreeRun.runId, "merge")}
-                    >
-                      {worktreeActionPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ShieldCheck size={15} />}
-                      {lang === "zh" ? "合并入库" : "Merge"}
-                    </VButton>
-                    <VButton
-                      type="button"
-                      className={styles.secondaryAction}
-                      isDisabled={!worktreeRun || worktreeActionPending || !discardAction?.enabled}
-                      title={disabledReason(discardAction) || undefined}
-                      onClick={() => worktreeRun && onWorktreeAction(worktreeRun.runId, "discard")}
-                    >
-                      {worktreeActionPending ? <LoaderCircle size={15} className={styles.spinning} /> : <X size={15} />}
-                      {lang === "zh" ? "丢弃候选" : "Discard"}
-                    </VButton>
-                  </div>
-                </section>
-              ) : (
-                <LazyConversationView
-                  sessionId={selectedWorkflowStep?.conversationSessionId || worktreeRun?.runId || "self-evolution"}
-                  density="compact"
-                  eyebrowLabel={selfEvolutionStep.label}
-                  title={selectedWorkflowStep?.label || t("selfWorkspacePage")}
-                  phase={selectedWorkflowStep?.status || worktreeRun?.status || overview.readiness.state}
-                  messages={conversationMessages}
-                  assistantDisplayName={pet?.name}
-                  assistantAvatarFallback={petAvatarFallback}
-                  userDisplayName={runtime?.userName}
-                  taskSummary={conversationTask.latestSummary}
-                  defaultFileContext={conversationTask.changedFiles.at(-1) || conversationTask.readFiles.at(-1) || "workspace"}
-                  summaryItems={[]}
-                  stats={[
-                    { label: t("selfGoal"), value: conversationTask.goal },
-                    { label: t("selfTransactions"), value: transactionItems.length },
-                    { label: t("filesChanged"), value: changedFiles.length || overview.worktree.dirtyFileCount },
-                    { label: t("lastUpdated"), value: compactTimestamp(conversationTask.updatedAt) },
-                  ]}
-                  headerActions={(
-                    <div className={styles.conversationActions}>
-                      {runIsActive && worktreeRun ? (
+                      <div className={styles.detailStack}>
+                        {approvalEvidenceItems.map((item) => (
+                          <div key={item.label} className={styles.detailRow}>
+                            <span>{item.label}</span>
+                            <strong>{item.value}</strong>
+                          </div>
+                        ))}
+                      </div>
+                      <div className={styles.conversationActions}>
                         <VButton
                           type="button"
                           className={styles.secondaryAction}
-                          isDisabled={worktreeActionPending || !terminateAction?.enabled}
-                          title={disabledReason(terminateAction) || undefined}
-                          onClick={() => onWorktreeAction(worktreeRun.runId, "terminate")}
+                          isDisabled={!worktreeRun || worktreeActionPending || !approveReviewAction?.enabled}
+                          title={disabledReason(approveReviewAction) || undefined}
+                          onClick={() => worktreeRun && onWorktreeAction(worktreeRun.runId, "approve_review")}
+                        >
+                          {worktreeActionPending ? <LoaderCircle size={15} className={styles.spinning} /> : <CheckSquare size={15} />}
+                          {lang === "zh" ? "通过审批" : "Approve"}
+                        </VButton>
+                        <VButton
+                          type="button"
+                          className={styles.secondaryAction}
+                          isDisabled={!worktreeRun || worktreeActionPending || !mergeAction?.enabled}
+                          title={disabledReason(mergeAction) || undefined}
+                          onClick={() => worktreeRun && onWorktreeAction(worktreeRun.runId, "merge")}
+                        >
+                          {worktreeActionPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ShieldCheck size={15} />}
+                          {lang === "zh" ? "合并入库" : "Merge"}
+                        </VButton>
+                        <VButton
+                          type="button"
+                          className={styles.secondaryAction}
+                          isDisabled={!worktreeRun || worktreeActionPending || !discardAction?.enabled}
+                          title={disabledReason(discardAction) || undefined}
+                          onClick={() => worktreeRun && onWorktreeAction(worktreeRun.runId, "discard")}
                         >
                           {worktreeActionPending ? <LoaderCircle size={15} className={styles.spinning} /> : <X size={15} />}
-                          {terminateRequested ? t("selfStopRequested") : t("stopSelfRun")}
+                          {lang === "zh" ? "丢弃候选" : "Discard"}
                         </VButton>
-                      ) : null}
-                    </div>
+                      </div>
+                    </section>
+                  ) : (
+                    <LazyConversationView
+                      sessionId={selectedWorkflowStep?.conversationSessionId || worktreeRun?.runId || "self-evolution"}
+                      density="compact"
+                      eyebrowLabel={selfEvolutionStep.label}
+                      title={selectedWorkflowStep?.label || t("selfWorkspacePage")}
+                      phase={selectedWorkflowStep?.status || worktreeRun?.status || overview.readiness.state}
+                      messages={conversationMessages}
+                      assistantDisplayName={pet?.name}
+                      assistantAvatarFallback={petAvatarFallback}
+                      userDisplayName={runtime?.userName}
+                      taskSummary={conversationTask.latestSummary}
+                      defaultFileContext={conversationTask.changedFiles.at(-1) || conversationTask.readFiles.at(-1) || "workspace"}
+                      summaryItems={[]}
+                      stats={[
+                        { label: t("selfGoal"), value: conversationTask.goal },
+                        { label: t("selfTransactions"), value: transactionItems.length },
+                        { label: t("filesChanged"), value: changedFiles.length || overview.worktree.dirtyFileCount },
+                        { label: t("lastUpdated"), value: compactTimestamp(conversationTask.updatedAt) },
+                      ]}
+                      headerActions={(
+                        <div className={styles.conversationActions}>
+                          {runIsActive && worktreeRun ? (
+                            <VButton
+                              type="button"
+                              className={styles.secondaryAction}
+                              isDisabled={worktreeActionPending || !terminateAction?.enabled}
+                              title={disabledReason(terminateAction) || undefined}
+                              onClick={() => onWorktreeAction(worktreeRun.runId, "terminate")}
+                            >
+                              {worktreeActionPending ? <LoaderCircle size={15} className={styles.spinning} /> : <X size={15} />}
+                              {terminateRequested ? t("selfStopRequested") : t("stopSelfRun")}
+                            </VButton>
+                          ) : null}
+                        </div>
+                      )}
+                      autoScrollToLatest={runIsActive}
+                      composerValue={goalInput}
+                      composerPlaceholder={t("selfGoalPlaceholder")}
+                      composerDisabled={!startSelfAction?.enabled || runLocked || worktreeRunLocked || startPending}
+                      composerPending={startPending}
+                      submitLabel={t("startSelfWorktreeRun")}
+                      submitPendingLabel={t("loading")}
+                      onComposerChange={onGoalInputChange}
+                      onSubmit={onStartRun}
+                      fallback={<div className={styles.loadingShell}>{t("loadingSession")}</div>}
+                    />
                   )}
-                  autoScrollToLatest={runIsActive}
-                  composerValue={goalInput}
-                  composerPlaceholder={t("selfGoalPlaceholder")}
-                  composerDisabled={!startSelfAction?.enabled || runLocked || worktreeRunLocked || startPending}
-                  composerPending={startPending}
-                  submitLabel={t("startSelfWorktreeRun")}
-                  submitPendingLabel={t("loading")}
-                  onComposerChange={onGoalInputChange}
-                  onSubmit={onStartRun}
-                  fallback={<div className={styles.loadingShell}>{t("loadingSession")}</div>}
-                />
-              )}
-            </div>
+                </div>
+              </>
+            )}
           </main>
         </div>
+      ) : observationRunModeActive ? (
+        renderObservationStatusSurface()
       ) : (
         <div className={styles.statusPage}>
           <div className={styles.panelStack}>
