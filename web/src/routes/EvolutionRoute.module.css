@@ -2081,15 +2081,46 @@
   display: flex;
   flex: 1 1 0;
   min-height: 0;
+  height: 100%;
 }
 
 .caseConversationTranscript {
   flex: 1 1 0;
+  height: 100%;
   min-height: 0;
   padding: 0 !important;
   border: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
+}
+
+.supervisedConversationEvidence {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.supervisedConversationEvidence .noticeTextCompact {
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-card-subtle);
+}
+
+.supervisedConversationTrace {
+  min-width: 0;
+  min-height: 0;
+  max-height: min(260px, 30vh);
+  overflow: hidden;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--surface-card-muted);
+}
+
+.supervisedConversationTrace .caseTraceTimeline {
+  min-height: 112px;
+  max-height: min(260px, 30vh);
+  padding-top: 8px;
+  padding-bottom: 8px;
 }
 
 .caseConversationFallback {
