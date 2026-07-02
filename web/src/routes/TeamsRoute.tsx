@@ -11805,9 +11805,10 @@ export function TeamsRoute({
   };
   const activeWorkflowItemCount = teamWorkflow?.activeWorkflowItems.length ?? 0;
   const researchCanvasVisible = researchCanvasReadOnly;
+  const teamListInitialLoading = teamsQuery.isPending && !teamsQuery.data;
   const teamListUnavailable = teamsQuery.isError && !teamsQuery.data;
-  const teamListLoading = teamsQuery.isPending && !teamsQuery.data;
-  const showTeamUnavailableSurface = !hasTeams;
+  const teamListLoading = teamListInitialLoading;
+  const showTeamUnavailableSurface = !teamListInitialLoading && !hasTeams;
   const teamUnavailableTitle = teamListUnavailable
     ? (lang === "zh" ? "团队数据不可用" : "Team data unavailable")
     : teamListLoading
@@ -11821,6 +11822,29 @@ export function TeamsRoute({
       ? (lang === "zh" ? "正在连接团队索引，页面会在数据返回后切换到工作区。" : "Connecting to the team index. The workspace opens once data is available.")
       : (lang === "zh" ? "暂时没有可展示团队。请确认 AI 搜索范围团队、知识库扩充团队和挑战杯ai科研团队已初始化。" : "No visible teams are available. Confirm the AI search, knowledge expansion, and research teams are initialized.");
   const teamUnavailableDetail = teamsQuery.error instanceof Error ? teamsQuery.error.message : "";
+  const teamContextMeta = selectedTeam?.name
+    ?? (teamListInitialLoading
+      ? (lang === "zh" ? "正在读取团队" : "Loading teams")
+      : (lang === "zh" ? "暂无团队" : "No team"));
+  const teamSummaryLoadingText = lang === "zh" ? "读取中" : "loading";
+  const teamSummaryStatusItems = [
+    {
+      label: lang === "zh" ? "团队" : "Teams",
+      value: teamListInitialLoading ? teamSummaryLoadingText : visibleTeamSummary.activeTeamCount,
+      tone: "info" as const,
+    },
+    {
+      label: lang === "zh" ? "成员" : "Members",
+      value: teamListInitialLoading ? teamSummaryLoadingText : visibleTeamSummary.memberCount,
+      tone: "success" as const,
+    },
+    {
+      label: lang === "zh" ? "失效" : "Stale",
+      value: teamListInitialLoading ? teamSummaryLoadingText : visibleTeamSummary.staleMemberCount,
+      tone: visibleTeamSummary.staleMemberCount > 0 ? "warning" as const : "neutral" as const,
+    },
+    { label: lang === "zh" ? "来源" : "Source", value: "Agent Center" },
+  ];
   const workspaceClassName = [
     styles.workspace,
     researchWorkflowTeamSelected && !researchCanvasVisible ? styles.workspaceResearch : "",
@@ -11855,7 +11879,9 @@ export function TeamsRoute({
       `${lang === "zh" ? "更新" : "Updated"} ${formatTime(selectedTeam.updatedAt, lang)}`,
       `${lang === "zh" ? "成员源" : "Member source"} Agent Center`,
     ].filter(Boolean).join("\n")
-    : (lang === "zh" ? "仅显示 AI 搜索、知识库扩充和挑战杯科研团队。" : "Only AI search, knowledge expansion, and research teams are shown.");
+    : teamListInitialLoading
+      ? (lang === "zh" ? "正在读取团队索引。" : "Loading the team index.")
+      : (lang === "zh" ? "仅显示 AI 搜索、知识库扩充和挑战杯科研团队。" : "Only AI search, knowledge expansion, and research teams are shown.");
   const visibleTeamOptions = visibleTeams.length
     ? visibleTeams.map((team) => ({
       id: team.teamId,
@@ -11989,7 +12015,7 @@ export function TeamsRoute({
         aria-label={selectedTeamContextTitle}
         eyebrow={lang === "zh" ? "团队工作台 / 组织画布" : "Team Workspace / Canvas"}
         title={lang === "zh" ? "团队组织画布" : "Team Organization Canvas"}
-        meta={selectedTeam?.name ?? (lang === "zh" ? "暂无团队" : "No team")}
+        meta={teamContextMeta}
         actions={(
           <div className={styles.teamContextActions}>
             <div className={styles.teamSelectField}>
@@ -12019,16 +12045,7 @@ export function TeamsRoute({
       <VStatusStrip
         className={styles.teamContextChips}
         aria-label={lang === "zh" ? "团队概况" : "Team summary"}
-        items={[
-          { label: lang === "zh" ? "团队" : "Teams", value: visibleTeamSummary.activeTeamCount, tone: "info" },
-          { label: lang === "zh" ? "成员" : "Members", value: visibleTeamSummary.memberCount, tone: "success" },
-          {
-            label: lang === "zh" ? "失效" : "Stale",
-            value: visibleTeamSummary.staleMemberCount,
-            tone: visibleTeamSummary.staleMemberCount > 0 ? "warning" : "neutral",
-          },
-          { label: lang === "zh" ? "来源" : "Source", value: "Agent Center" },
-        ]}
+        items={teamSummaryStatusItems}
       />
       {showTeamUnavailableSurface ? (
         <main className={styles.teamUnavailableSurface} aria-label={teamUnavailableTitle}>
