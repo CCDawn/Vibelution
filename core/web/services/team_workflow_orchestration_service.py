@@ -98,6 +98,7 @@ SOURCE_COLLECTION_SEARCH_EXECUTION_MAX_QUERIES = 12
 SOURCE_COLLECTION_SEARCH_EXECUTION_DEFAULT_RESULTS_PER_QUERY = 2
 SOURCE_COLLECTION_SEARCH_EXECUTION_MAX_RESULTS_PER_QUERY = 5
 SOURCE_COLLECTION_SUMMARY_SLOW_EVENT_MS = 1000
+SOURCE_COLLECTION_SUMMARY_DEFAULT_RUN_LOOKUP_LIMIT = 20
 SOURCE_COLLECTION_EXCLUSION_REASONS = {
     "no_effective_content",
     "unreadable",
@@ -8286,17 +8287,18 @@ def get_source_collection_summary(team_id: str, *, run_id: str = "") -> dict[str
     else:
         try:
             runs_payload = data_processing_service.list_processing_runs(
-                limit=1,
+                limit=SOURCE_COLLECTION_SUMMARY_DEFAULT_RUN_LOOKUP_LIMIT,
                 metadata_filters={"startedFrom": "team_workflow_source_collection", "teamId": normalized_team_id},
             )
         except data_processing_service.DataProcessingError as exc:
             raise TeamWorkflowOrchestrationError(str(exc)) from exc
+        team_runs = [
+            item for item in list(runs_payload.get("runs") or [])
+            if isinstance(item, dict) and _source_collection_run_belongs_to_team(item, normalized_team_id)
+        ]
         selected_run = next(
-            (
-                item for item in list(runs_payload.get("runs") or [])
-                if isinstance(item, dict) and _source_collection_run_belongs_to_team(item, normalized_team_id)
-            ),
-            None,
+            (item for item in team_runs if _source_collection_run_has_usable_outputs(item)),
+            team_runs[0] if team_runs else None,
         )
         normalized_run_id = _trim_text((selected_run or {}).get("runId"), max_length=160)
     run_status: dict[str, Any] = {}
@@ -8349,7 +8351,13 @@ def get_source_collection_summary(team_id: str, *, run_id: str = "") -> dict[str
         "schemaVersion": SCHEMA_VERSION,
         "teamId": normalized_team_id,
         "runId": normalized_run_id,
-        "status": "active" if normalized_run_id and str(run_status.get("runStatus") or "").lower() in {"collecting", "processing"} else ("ready" if normalized_run_id else "idle"),
+        "status": _source_collection_summary_payload_status(
+            normalized_run_id,
+            run_status=run_status,
+            active_work_run=active_work_run,
+            stage_round_ref=stage_round_ref,
+            projection=projection,
+        ),
         "run": selected_run or {},
         "runStatus": run_status,
         "summary": {
@@ -8401,6 +8409,31 @@ def _record_source_collection_summary_timing(
             "activeWorkRun": bool(payload.get("activeWorkRun")),
         },
     )
+
+
+def _source_collection_summary_payload_status(
+    run_id: str,
+    *,
+    run_status: dict[str, Any],
+    active_work_run: dict[str, Any],
+    stage_round_ref: dict[str, Any],
+    projection: dict[str, Any],
+) -> str:
+    if not _trim_text(run_id, max_length=160):
+        return "idle"
+    if active_work_run:
+        return "active"
+    latest_tasks = projection.get("latestTasks") if isinstance(projection.get("latestTasks"), dict) else {}
+    for task in latest_tasks.values():
+        if not isinstance(task, dict):
+            continue
+        task_status = _trim_text(task.get("status"), max_length=80).lower()
+        if task_status in {"queued", "running", "accepted"}:
+            return "active"
+    lifecycle_status = _trim_text(run_status.get("runStatus"), max_length=80).lower()
+    if lifecycle_status in {"collecting", "processing"} and not stage_round_ref:
+        return "active"
+    return "ready"
 
 
 def list_candidate_store(
@@ -16690,6 +16723,23 @@ def _source_collection_run_belongs_to_team(run: dict[str, Any], team_id: str) ->
         started_from == "team_workflow_source_collection"
         or workflow_stage == "knowledge_collection"
     )
+
+
+def _source_collection_run_has_usable_outputs(run: dict[str, Any]) -> bool:
+    summary = run.get("summary") if isinstance(run.get("summary"), dict) else {}
+    processing_status = run.get("processingStatus") if isinstance(run.get("processingStatus"), dict) else {}
+    processing_summary = processing_status.get("summary") if isinstance(processing_status.get("summary"), dict) else {}
+    scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
+    for source in (summary, processing_summary, scope.get("sourceCollectionSummary"), metadata.get("sourceCollectionSummary"), scope, metadata):
+        if not isinstance(source, dict):
+            continue
+        if any(
+            _source_collection_count(source.get(key)) > 0
+            for key in ("recordCount", "rawRecordCount", "createdUniqueRecordCount", "sourceCandidateCount", "candidateCount", "importedCount")
+        ):
+            return True
+    return False
 
 
 def _source_collection_stage_round_ref_for_run(team_id: str, run_id: str) -> dict[str, Any]:
