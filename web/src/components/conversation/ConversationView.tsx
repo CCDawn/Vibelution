@@ -29,6 +29,7 @@ import {
   SessionReferenceAttachment,
   SessionTurnError,
 } from "../../api/types";
+import { conversationMessagesToAgentThread } from "../../agent-thread/adapters";
 import { fetchJson } from "../../api/client";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
@@ -1240,6 +1241,14 @@ export function ConversationView({
   const activeTimelineMessages = activeTimelineProjection.messages;
   const streamingTimelineMessages = activeTimelineProjection.streamingMessages;
   const activeTimelineRowIdentities = activeTimelineProjection.rowIdentities;
+  const agentThread = useMemo(
+    () => conversationMessagesToAgentThread(
+      sessionId,
+      activeTimelineMessages,
+      { source: { kind: "conversation-view", id: sessionId } },
+    ),
+    [activeTimelineMessages, sessionId],
+  );
   const imageArtifactUrlsBeforeMessage = useMemo(() => {
     const urlsByMessageId = new Map<string, Set<string>>();
     const seenImageUrls = new Set<string>();
@@ -3573,6 +3582,10 @@ export function ConversationView({
         density === "compact" ? styles.surfaceCompact : "",
         className ?? "",
       ].filter(Boolean).join(" ")}
+      data-agent-thread-id={agentThread.id}
+      data-agent-thread-message-count={agentThread.messages.length}
+      data-agent-thread-source-kind={agentThread.source.kind}
+      data-agent-thread-status={agentThread.status}
     >
       {showHeader ? (
         <div className={styles.header}>
