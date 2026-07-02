@@ -26,6 +26,10 @@ MODE_BINDING_VERSION = 1
 MODE_BINDING_PATH = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "agent_config", "mode_bindings.json")
 _DEFAULT_MODE_BINDING_PATH = MODE_BINDING_PATH
 MODE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,63}$")
+MODE_SLOT_KEYS = {
+    "supervised_evolution": {"baseline", "candidate", "reviewer", "auditor", "judge"},
+    "self_evolution": {"executor", "reviewer", "observer"},
+}
 
 
 class AgentModeBindingError(ValueError):
@@ -51,7 +55,7 @@ DEFAULT_MODE_BINDINGS: tuple[dict[str, Any], ...] = (
         "availableAgentIds": [],
         "pool": [],
         "flowBindings": {},
-        "slots": {"executor": "", "reviewer": "", "summarizer": ""},
+        "slots": {"executor": "", "reviewer": "", "observer": ""},
         "excludedAgentIds": [],
         "excludedSlots": [],
     },
@@ -109,7 +113,7 @@ def update_mode_binding(
     if flow_bindings is not None:
         record["flowBindings"] = _normalize_agent_map(flow_bindings)
     if slots is not None:
-        record["slots"] = _normalize_agent_map(slots)
+        record["slots"] = _filter_slots_for_mode(normalized_mode, _normalize_agent_map(slots))
     if excluded_agent_ids is not None:
         record["excludedAgentIds"] = _normalize_agent_list(excluded_agent_ids)
     if excluded_slots is not None:
@@ -413,7 +417,10 @@ def repair_mode_bindings(*, agent_options: list[dict[str, Any]] | None = None) -
         existing = bindings_by_mode.get(record["mode"], {})
         merged = copy.deepcopy(existing)
         merged.update(record)
-        merged["slots"] = {**dict(existing.get("slots") or {}), **dict(record.get("slots") or {})}
+        merged["slots"] = _filter_slots_for_mode(
+            record["mode"],
+            {**dict(existing.get("slots") or {}), **dict(record.get("slots") or {})},
+        )
         merged["flowBindings"] = {
             **dict(existing.get("flowBindings") or {}),
             **dict(record.get("flowBindings") or {}),
@@ -603,13 +610,16 @@ def _seed_binding(
         excluded_slots = set(_safe_key_list(binding.get("excludedSlots") or []))
         existing_slots = dict(binding.get("slots") or {})
         for key, value in slots.items():
-            if _safe_key(key) in excluded_slots:
+            safe_key = _safe_key(key)
+            if safe_key not in _allowed_slot_keys(mode):
+                continue
+            if safe_key in excluded_slots:
                 continue
             if value in excluded:
                 continue
             if not str(existing_slots.get(key) or "").strip():
-                existing_slots[key] = value
-        binding["slots"] = existing_slots
+                existing_slots[safe_key] = value
+        binding["slots"] = _filter_slots_for_mode(mode, existing_slots)
 
 
 def _repair_agent_references(
@@ -648,10 +658,13 @@ def _repair_agent_references(
         )
         if kept
     }
-    next_binding["slots"] = {
-        key: keep(value, f"slots.{key}")
-        for key, value in dict(next_binding.get("slots") or {}).items()
-    }
+    next_binding["slots"] = _filter_slots_for_mode(
+        str(next_binding.get("mode") or ""),
+        {
+            key: keep(value, f"slots.{key}")
+            for key, value in dict(next_binding.get("slots") or {}).items()
+        },
+    )
     next_binding["excludedAgentIds"] = _dedupe(next_binding.get("excludedAgentIds") or [])
     next_binding["excludedSlots"] = _safe_key_list(next_binding.get("excludedSlots") or [])
     if warnings:
@@ -772,7 +785,7 @@ def _normalize_binding(raw: dict[str, Any]) -> dict[str, Any]:
         "availableAgentIds": _dedupe(raw.get("availableAgentIds") or []),
         "pool": _dedupe(raw.get("pool") or []),
         "flowBindings": _safe_agent_map(raw.get("flowBindings") or {}),
-        "slots": _safe_agent_map(raw.get("slots") or {}),
+        "slots": _filter_slots_for_mode(mode, _safe_agent_map(raw.get("slots") or {})),
         "excludedAgentIds": _dedupe(raw.get("excludedAgentIds") or []),
         "excludedSlots": _safe_key_list(raw.get("excludedSlots") or []),
         "createdAt": str(raw.get("createdAt") or now).strip(),
@@ -801,6 +814,18 @@ def _normalize_agent_map(values: dict[str, str]) -> dict[str, str]:
         for key, value in values.items()
         if _safe_key(key)
     }
+
+
+def _allowed_slot_keys(mode: str) -> set[str]:
+    return set(MODE_SLOT_KEYS.get(str(mode or "").strip(), set()))
+
+
+def _filter_slots_for_mode(mode: str, slots: dict[str, Any]) -> dict[str, str]:
+    safe_slots = _safe_agent_map(slots)
+    allowed = _allowed_slot_keys(mode)
+    if not allowed:
+        return safe_slots
+    return {key: value for key, value in safe_slots.items() if key in allowed}
 
 
 def _assign_agent_slot(slots: dict[str, Any], agent_id: str, slot: str) -> dict[str, str]:

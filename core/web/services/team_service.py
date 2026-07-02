@@ -5376,7 +5376,7 @@ def _default_edges_for_team(team: dict[str, Any], nodes: list[dict[str, Any]]) -
             nodes_by_role,
             [
                 ("executor", "reviewer", "执行交付评审"),
-                ("reviewer", "summarizer", "评审结果总结"),
+                ("reviewer", "observer", "旁路观察记录"),
             ],
         )
     if _infer_team_kind(team) == "supervised_evolution":

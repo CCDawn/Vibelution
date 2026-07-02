@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import re
 
 from core.web.services import prompt_template_service
@@ -117,6 +118,14 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     assert "rg" in operation_chat["content"]
     assert _contains_tool_name(operation_chat["content"], "apply_patch_tool")
     assert _contains_tool_name(operation_chat["content"], "run_test_for_tool")
+    self_evolution_template_ids = {
+        item["promptTemplateId"]
+        for item in payload["templates"]
+        if item["category"] == "self_evolution"
+    }
+    assert "prompt-self-executor" in self_evolution_template_ids
+    assert "prompt-self-reviewer" in self_evolution_template_ids
+    assert "prompt-self-summarizer" not in self_evolution_template_ids
     search_scope = prompt_template_service.get_prompt_template("prompt-ai-search-scope-lead")
     assert search_scope is not None
     assert search_scope["metadata"]["roleKey"] == "ai_search_scope_lead"
@@ -138,6 +147,34 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     assert (tmp_path / "workspace" / "prompts" / "research" / "source_finder.md").exists()
     assert (tmp_path / "workspace" / "prompts" / "research" / "source_extractor.md").exists()
     assert (tmp_path / "workspace" / "prompts" / "research" / "source_relation_mapper.md").exists()
+
+
+def test_prompt_template_repair_drops_retired_self_evolution_summarizer(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    path = prompt_template_service.prompt_template_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "templates": [
+                    {
+                        "templateId": "prompt-self-summarizer",
+                        "name": "Self-evolution summarizer",
+                        "category": "self_evolution",
+                        "content": "retired",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = prompt_template_service.repair_prompt_templates()
+
+    template_ids = {item["templateId"] for item in payload["templates"]}
+    assert "prompt-self-summarizer" not in template_ids
     assert (tmp_path / "workspace" / "prompts" / "research" / "source_ingestor.md").exists()
     supervised_baseline = prompt_template_service.get_prompt_template("prompt-supervised-baseline")
     assert supervised_baseline is not None

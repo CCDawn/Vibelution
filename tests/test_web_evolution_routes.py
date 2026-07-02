@@ -3571,12 +3571,12 @@ def _use_local_self_evolution_start(monkeypatch) -> None:
                 "agentId": f"test-self-{role}",
                 "displayName": f"Test self {role}",
                 "profileId": "primary",
-                "promptTemplateId": f"prompt-self-{role}",
+                "promptTemplateId": "" if role == "observer" else f"prompt-self-{role}",
                 "directSessionId": f"session-self-{role}",
                 "workspacePath": f"workspace/agents/test-self-{role}",
                 "role": role,
                 "roleLabel": role,
             }
-            for role in ("executor", "reviewer", "summarizer")
+            for role in ("executor", "reviewer", "observer")
         },
     )

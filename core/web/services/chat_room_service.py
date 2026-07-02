@@ -2076,7 +2076,7 @@ def _purpose_prompt_lines(purpose: str) -> list[str]:
         ]
     if normalized == "self_evolution":
         return [
-            "- 按自进化系统团队职责发言：executor 说执行进展，reviewer 说质量风险，summarizer 说收口摘要。",
+            "- 按自进化系统团队职责发言：executor 说执行进展，reviewer 说质量风险，observer 只报告旁路观察信号。",
             "- 聚焦本轮演化目标、验证证据、阻塞点和下一步，不要把系统团队说成普通闲聊群。",
             "- 不要擅自承诺已部署、已提交或已验证；只报告上下文中真实可见的状态。",
         ]
