@@ -182,7 +182,7 @@ const styleKeys = [
 const styles = createVuiStyleMap(styleKeys, {
   extensions: {
     // Let the single workspace child fill and bound the available height.
-    workspace: "grid-rows-[minmax(0,1fr)] overflow-hidden",
+    workspace: "grid-cols-[minmax(0,1fr)_10px_var(--logs-right-rail-width,250px)] grid-rows-[minmax(0,1fr)] overflow-hidden",
     // Real sidebar | resize-handle | detail split shared by LogsRoute and
     // RuntimeScenesPane; the generic layout rule only emits a single column,
     // which stacks/overlaps the panes.
