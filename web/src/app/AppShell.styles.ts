@@ -1,152 +1,269 @@
-import { createVuiStyleMap } from "../components/vui/styles/createVuiStyleMap";
-
-const styleKeys = [
-  "actionButton",
-  "actionIconButton",
-  "activeWorkChip",
-  "activeWorkDetailCopy",
-  "activeWorkDetailHeader",
-  "activeWorkDetailItem",
-  "activeWorkDetailList",
-  "activeWorkDetailPanel",
-  "activeWorkDetailTitle",
-  "activeWorkKicker",
-  "activeWorkMore",
-  "activeWorkStatus",
-  "brand",
-  "brandBlock",
-  "brandCopy",
-  "brandSubtle",
-  "gitBranchName",
-  "gitChip",
-  "gitCommitItem",
-  "gitCommitList",
-  "gitCount",
-  "gitCountGrid",
-  "gitFileItem",
-  "gitFileList",
-  "gitHeadline",
-  "gitMetaGrid",
-  "gitMiniHeader",
-  "gitMiniPanel",
-  "gitQuietState",
-  "gitSection",
-  "gitSectionHeader",
-  "gitSignalGrid",
-  "gitWorktreeItem",
-  "gitWorktreeList",
-  "lifecycleMenuCluster",
-  "lifecycleMenuClusterOpen",
-  "lifecycleMenuDangerItem",
-  "lifecycleMenuItem",
-  "lifecycleMenuPanel",
-  "lifecycleProofCard",
-  "lifecycleProofHeader",
-  "lifecycleProofItem",
-  "lifecycleProofList",
-  "lifecycleProofMeta",
-  "lifecycleProofName",
-  "mainArea",
-  "nav",
-  "navLink",
-  "navLinkActive",
-  "navLinkDisabled",
-  "returnButton",
-  "shell",
-  "shutdownCancelButton",
-  "shutdownCopy",
-  "shutdownIconSpin",
-  "shutdownIconStill",
-  "shutdownOverlay",
-  "shutdownPanel",
-  "startupCopy",
-  "startupKicker",
-  "startupOverlay",
-  "startupPanel",
-  "startupSpinner",
-  "status_caution",
-  "status_failed",
-  "status_idle",
-  "status_running",
-  "statusBadge",
-  "statusBadgeLabel",
-  "statusBadgeValue",
-  "statusChipRow",
-  "statusCluster",
-  "statusDot",
-  "statusGuideCard",
-  "statusGuideCardHeader",
-  "statusGuideGrid",
-  "statusGuideHeader",
-  "statusGuideList",
-  "statusGuideListItem",
-  "statusGuidePanel",
-  "statusGuideStateLabel",
-  "statusSummaryChip",
-  "statusSummaryCount",
-  "topActions",
-  "topBar",
-  "topBarRestoreButton",
-  "topClock",
-  "utilityButton",
-  "utilityButtonActive",
-  "utilityButtonGrid",
-  "utilityChevron",
-  "utilityCluster",
-  "utilityClusterOpen",
-  "utilityFileButton",
-  "utilityFileButtonActive",
-  "utilityFileChildren",
-  "utilityFileDir",
-  "utilityFileHeader",
-  "utilityFilePanel",
-  "utilityFileSearch",
-  "utilityFileState",
-  "utilityFileTree",
-  "utilityPanel",
-  "utilityPanelHeader",
-  "utilityTrigger",
-  "utilityTriggerLabel",
-  "versionPill",
-] as const;
-
-const styles = createVuiStyleMap(styleKeys, {
-  baseClassName: "vui-app-appshell",
-  includeKeyClass: true,
-  overrides: {
-    status_caution: "text-[var(--state-warning)]",
-    status_failed: "text-[var(--state-error)]",
-    status_idle: "text-[color-mix(in_srgb,var(--fg-tertiary)_74%,transparent)]",
-    status_running: "text-[var(--state-success)]",
-    statusDot:
-      "inline-block h-2 w-2 shrink-0 rounded-full border border-[color-mix(in_srgb,currentColor_38%,transparent)] bg-current p-0 align-middle",
-  },
-  extensions: {
-    activeWorkChip:
-      "relative h-8 min-h-8 flex-nowrap overflow-visible gap-1.5 whitespace-nowrap [&:focus-within_.activeWorkDetailPanel]:visible [&:focus-within_.activeWorkDetailPanel]:pointer-events-auto [&:focus-within_.activeWorkDetailPanel]:translate-y-0 [&:focus-within_.activeWorkDetailPanel]:opacity-100 [&:hover_.activeWorkDetailPanel]:visible [&:hover_.activeWorkDetailPanel]:pointer-events-auto [&:hover_.activeWorkDetailPanel]:translate-y-0 [&:hover_.activeWorkDetailPanel]:opacity-100",
-    activeWorkDetailPanel:
-      "invisible pointer-events-none absolute left-0 top-[calc(100%+8px)] z-[80] w-[min(480px,calc(100vw-2rem))] translate-y-1 opacity-0 transition-[opacity,transform,visibility] duration-150",
-    activeWorkDetailList:
-      "max-h-[260px] overflow-y-auto",
-    activeWorkDetailItem:
-      "grid-cols-[max-content_minmax(0,1fr)] items-start",
-    activeWorkDetailTitle:
-      "grid-cols-[minmax(0,1fr)_max-content] items-center gap-2",
-    statusBadgeLabel: "whitespace-nowrap",
-    statusBadgeValue: "whitespace-nowrap",
-    statusCluster: "shrink-0",
-    statusSummaryChip: "h-8 min-h-8 flex-nowrap gap-1.5 whitespace-nowrap",
-    topClock: "flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[var(--vui-font-xs)] leading-none text-[var(--fg-secondary)]",
-    topActions: "min-w-0 flex-nowrap",
-    utilityCluster: "shrink-0",
-    utilityFileButton:
-      "[&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-2",
-    utilityFileButtonActive:
-      "[&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-2",
-    utilityTrigger:
-      "h-8 min-h-8 flex-nowrap [&_[data-slot=vui-button-content]]:flex-nowrap [&_[data-slot=vui-button-content]]:whitespace-nowrap [&_[data-slot=vui-button-icon]]:shrink-0 [&_[data-slot=vui-button-label]]:inline-flex [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5 [&_[data-slot=vui-button-label]]:whitespace-nowrap [&_[data-slot=vui-button-trailing-icon]]:shrink-0",
-    utilityTriggerLabel: "whitespace-nowrap",
-  },
-});
+// Explicit style baseline (Phase 0, 2026-07-02 spec) — generated by
+// web/scripts/bake-style-maps.ts from the previous createVuiStyleMap output;
+// classes are byte-identical to what the inference produced. Every key is an
+// explicit Tailwind class string; there are no name-based defaults. Edit
+// values directly. This file is transitional: it is deleted in the wave that
+// componentizes AppShell.
+// Includes phantom keys (accessed by consumers but never declared in the old
+// styleKeys — the Proxy synthesized them on demand) and prefix×tone-vocabulary
+// coverage for dynamic `styles[`prefix_${tone}`]` lookups. Typed loosely as
+// Record<string, string> because those dynamic template indexes cannot index a
+// literal-keyed map; tightening is a follow-up, not Phase 0.
+const styles: Record<string, string> = {
+  actionButton:
+    "vui-app-appshell actionButton min-w-0 flex flex-wrap items-center gap-1.5 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full justify-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+  actionIconButton:
+    "vui-app-appshell actionIconButton min-w-0 flex flex-wrap items-center gap-1.5 inline-grid h-[var(--vui-control-height-sm)] min-h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] place-items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-0 text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] shrink-0 text-[var(--fg-tertiary)]",
+  activeWorkChip:
+    "vui-app-appshell activeWorkChip min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] relative h-8 min-h-8 flex-nowrap overflow-visible gap-1.5 whitespace-nowrap [&:focus-within_.activeWorkDetailPanel]:visible [&:focus-within_.activeWorkDetailPanel]:pointer-events-auto [&:focus-within_.activeWorkDetailPanel]:translate-y-0 [&:focus-within_.activeWorkDetailPanel]:opacity-100 [&:hover_.activeWorkDetailPanel]:visible [&:hover_.activeWorkDetailPanel]:pointer-events-auto [&:hover_.activeWorkDetailPanel]:translate-y-0 [&:hover_.activeWorkDetailPanel]:opacity-100",
+  activeWorkDetailCopy:
+    "vui-app-appshell activeWorkDetailCopy min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  activeWorkDetailHeader:
+    "vui-app-appshell activeWorkDetailHeader min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  activeWorkDetailItem:
+    "vui-app-appshell activeWorkDetailItem min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 rounded-[var(--radius-control)] bg-[var(--vui-surface-row)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] grid grid-cols-[max-content_minmax(0,1fr)] items-start",
+  activeWorkDetailList:
+    "vui-app-appshell activeWorkDetailList min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid min-h-0 content-start gap-1.5 overflow-auto border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] max-h-[260px] overflow-y-auto",
+  activeWorkDetailPanel:
+    "vui-app-appshell activeWorkDetailPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] invisible pointer-events-none absolute left-0 top-[calc(100%+8px)] z-[80] w-[min(480px,calc(100vw-2rem))] translate-y-1 opacity-0 transition-[opacity,transform,visibility] duration-150",
+  activeWorkDetailTitle:
+    "vui-app-appshell activeWorkDetailTitle min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] grid grid-cols-[minmax(0,1fr)_max-content] items-center gap-2",
+  activeWorkKicker:
+    "vui-app-appshell activeWorkKicker min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  activeWorkMore:
+    "vui-app-appshell activeWorkMore min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  activeWorkStatus:
+    "vui-app-appshell activeWorkStatus min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  activeWorkSummary:
+    "vui-app-appshell activeWorkSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  brand:
+    "vui-app-appshell brand min-w-0",
+  brandBlock:
+    "vui-app-appshell brandBlock min-w-0",
+  brandCopy:
+    "vui-app-appshell brandCopy min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  brandGate:
+    "vui-app-appshell brandGate min-w-0",
+  brandSubtle:
+    "vui-app-appshell brandSubtle min-w-0",
+  gitBranchName:
+    "vui-app-appshell gitBranchName min-w-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
+  gitChip:
+    "vui-app-appshell gitChip min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+  gitCommitItem:
+    "vui-app-appshell gitCommitItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  gitCommitList:
+    "vui-app-appshell gitCommitList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  gitCount:
+    "vui-app-appshell gitCount min-w-0",
+  gitCountGrid:
+    "vui-app-appshell gitCountGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  gitFileItem:
+    "vui-app-appshell gitFileItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  gitFileList:
+    "vui-app-appshell gitFileList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  gitHeadline:
+    "vui-app-appshell gitHeadline min-w-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
+  gitMetaGrid:
+    "vui-app-appshell gitMetaGrid min-w-0 flex flex-wrap items-center gap-1.5 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  gitMiniHeader:
+    "vui-app-appshell gitMiniHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  gitMiniPanel:
+    "vui-app-appshell gitMiniPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  gitQuietState:
+    "vui-app-appshell gitQuietState min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+  gitSection:
+    "vui-app-appshell gitSection min-w-0",
+  gitSectionHeader:
+    "vui-app-appshell gitSectionHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  gitSignalGrid:
+    "vui-app-appshell gitSignalGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  gitWorktreeItem:
+    "vui-app-appshell gitWorktreeItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  gitWorktreeList:
+    "vui-app-appshell gitWorktreeList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  lifecycleMenuCluster:
+    "vui-app-appshell lifecycleMenuCluster min-w-0",
+  lifecycleMenuClusterOpen:
+    "vui-app-appshell lifecycleMenuClusterOpen min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
+  lifecycleMenuDangerItem:
+    "vui-app-appshell lifecycleMenuDangerItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+  lifecycleMenuItem:
+    "vui-app-appshell lifecycleMenuItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  lifecycleMenuPanel:
+    "vui-app-appshell lifecycleMenuPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  lifecycleProofCard:
+    "vui-app-appshell lifecycleProofCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  lifecycleProofHeader:
+    "vui-app-appshell lifecycleProofHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  lifecycleProofItem:
+    "vui-app-appshell lifecycleProofItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  lifecycleProofList:
+    "vui-app-appshell lifecycleProofList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  lifecycleProofMeta:
+    "vui-app-appshell lifecycleProofMeta min-w-0 flex flex-wrap items-center gap-1.5",
+  lifecycleProofName:
+    "vui-app-appshell lifecycleProofName min-w-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
+  mainArea:
+    "vui-app-appshell mainArea min-w-0",
+  nav:
+    "vui-app-appshell nav min-w-0",
+  navLink:
+    "vui-app-appshell navLink min-w-0",
+  navLinkActive:
+    "vui-app-appshell navLinkActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  navLinkDisabled:
+    "vui-app-appshell navLinkDisabled min-w-0",
+  returnButton:
+    "vui-app-appshell returnButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+  shell:
+    "vui-app-appshell shell min-w-0 grid h-full min-h-0 content-start overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)]",
+  shutdownCancelButton:
+    "vui-app-appshell shutdownCancelButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+  shutdownCopy:
+    "vui-app-appshell shutdownCopy min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  shutdownIconSpin:
+    "vui-app-appshell shutdownIconSpin min-w-0 shrink-0 text-[var(--fg-tertiary)] animate-spin",
+  shutdownIconStill:
+    "vui-app-appshell shutdownIconStill min-w-0 shrink-0 text-[var(--fg-tertiary)]",
+  shutdownOverlay:
+    "vui-app-appshell shutdownOverlay min-w-0",
+  shutdownPanel:
+    "vui-app-appshell shutdownPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  startupCopy:
+    "vui-app-appshell startupCopy min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  startupKicker:
+    "vui-app-appshell startupKicker min-w-0",
+  startupOverlay:
+    "vui-app-appshell startupOverlay min-w-0",
+  startupPanel:
+    "vui-app-appshell startupPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  startupSpinner:
+    "vui-app-appshell startupSpinner min-w-0 animate-spin",
+  statusBadge:
+    "vui-app-appshell statusBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+  statusBadgeLabel:
+    "vui-app-appshell statusBadgeLabel min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] whitespace-nowrap",
+  statusBadgeValue:
+    "vui-app-appshell statusBadgeValue min-w-0 whitespace-nowrap",
+  statusChipRow:
+    "vui-app-appshell statusChipRow min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  statusCluster:
+    "vui-app-appshell statusCluster min-w-0 shrink-0",
+  statusDot:
+    "vui-app-appshell statusDot inline-block h-2 w-2 shrink-0 rounded-full border border-[color-mix(in_srgb,currentColor_38%,transparent)] bg-current p-0 align-middle",
+  statusGuideCard:
+    "vui-app-appshell statusGuideCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  statusGuideCardHeader:
+    "vui-app-appshell statusGuideCardHeader min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
+  statusGuideGrid:
+    "vui-app-appshell statusGuideGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  statusGuideHeader:
+    "vui-app-appshell statusGuideHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  statusGuideList:
+    "vui-app-appshell statusGuideList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  statusGuideListItem:
+    "vui-app-appshell statusGuideListItem min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  statusGuidePanel:
+    "vui-app-appshell statusGuidePanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  statusGuideStateLabel:
+    "vui-app-appshell statusGuideStateLabel min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+  statusSummaryChip:
+    "vui-app-appshell statusSummaryChip min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] h-8 min-h-8 flex-nowrap gap-1.5 whitespace-nowrap",
+  statusSummaryCount:
+    "vui-app-appshell statusSummaryCount min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  status_active:
+    "vui-app-appshell status_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  status_blocked:
+    "vui-app-appshell status_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+  status_caution:
+    "vui-app-appshell status_caution text-[var(--state-warning)]",
+  status_danger:
+    "vui-app-appshell status_danger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+  status_done:
+    "vui-app-appshell status_done min-w-0",
+  status_error:
+    "vui-app-appshell status_error min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+  status_failed:
+    "vui-app-appshell status_failed text-[var(--state-error)]",
+  status_idle:
+    "vui-app-appshell status_idle text-[color-mix(in_srgb,var(--fg-tertiary)_74%,transparent)]",
+  status_info:
+    "vui-app-appshell status_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  status_mental:
+    "vui-app-appshell status_mental min-w-0",
+  status_missing:
+    "vui-app-appshell status_missing min-w-0",
+  status_muted:
+    "vui-app-appshell status_muted min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+  status_neutral:
+    "vui-app-appshell status_neutral min-w-0",
+  status_ok:
+    "vui-app-appshell status_ok min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+  status_pending:
+    "vui-app-appshell status_pending min-w-0",
+  status_ready:
+    "vui-app-appshell status_ready min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+  status_running:
+    "vui-app-appshell status_running text-[var(--state-success)]",
+  status_status:
+    "vui-app-appshell status_status min-w-0",
+  status_success:
+    "vui-app-appshell status_success min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+  status_thought:
+    "vui-app-appshell status_thought min-w-0",
+  status_warn:
+    "vui-app-appshell status_warn min-w-0",
+  status_warning:
+    "vui-app-appshell status_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+  topActions:
+    "vui-app-appshell topActions min-w-0 flex flex-wrap items-center gap-1.5 min-w-0 flex-nowrap",
+  topBar:
+    "vui-app-appshell topBar min-w-0 flex flex-wrap items-center gap-1.5",
+  topBarRestoreButton:
+    "vui-app-appshell topBarRestoreButton min-w-0 flex flex-wrap items-center gap-1.5 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full justify-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+  topClock:
+    "vui-app-appshell topClock min-w-0 flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[var(--vui-font-xs)] leading-none text-[var(--fg-secondary)]",
+  utilityButton:
+    "vui-app-appshell utilityButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+  utilityButtonActive:
+    "vui-app-appshell utilityButtonActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  utilityButtonGrid:
+    "vui-app-appshell utilityButtonGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  utilityChevron:
+    "vui-app-appshell utilityChevron min-w-0",
+  utilityCluster:
+    "vui-app-appshell utilityCluster min-w-0 shrink-0",
+  utilityClusterOpen:
+    "vui-app-appshell utilityClusterOpen min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
+  utilityFileButton:
+    "vui-app-appshell utilityFileButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 grid [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-2",
+  utilityFileButtonActive:
+    "vui-app-appshell utilityFileButtonActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] grid [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-2",
+  utilityFileChildren:
+    "vui-app-appshell utilityFileChildren min-w-0",
+  utilityFileDir:
+    "vui-app-appshell utilityFileDir min-w-0",
+  utilityFileHeader:
+    "vui-app-appshell utilityFileHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  utilityFilePanel:
+    "vui-app-appshell utilityFilePanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  utilityFileSearch:
+    "vui-app-appshell utilityFileSearch min-w-0",
+  utilityFileState:
+    "vui-app-appshell utilityFileState min-w-0",
+  utilityFileTree:
+    "vui-app-appshell utilityFileTree min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  utilityPanel:
+    "vui-app-appshell utilityPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  utilityPanelHeader:
+    "vui-app-appshell utilityPanelHeader min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
+  utilityTrigger:
+    "vui-app-appshell utilityTrigger min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 h-8 min-h-8 flex-nowrap [&_[data-slot=vui-button-content]]:flex-nowrap [&_[data-slot=vui-button-content]]:whitespace-nowrap [&_[data-slot=vui-button-icon]]:shrink-0 [&_[data-slot=vui-button-label]]:inline-flex [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5 [&_[data-slot=vui-button-label]]:whitespace-nowrap [&_[data-slot=vui-button-trailing-icon]]:shrink-0",
+  utilityTriggerLabel:
+    "vui-app-appshell utilityTriggerLabel min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] whitespace-nowrap",
+  versionPill:
+    "vui-app-appshell versionPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+};
 
 export default styles;

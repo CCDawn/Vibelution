@@ -1,590 +1,839 @@
-import { createVuiStyleMap } from "../components/vui/styles/createVuiStyleMap";
-
-const canvasMeshBackgroundClass =
-  "bg-[color-mix(in_srgb,var(--vui-surface-glass)_94%,white_6%)] [background-image:linear-gradient(to_right,color-mix(in_srgb,var(--vui-border-subtle)_45%,transparent)_1px,transparent_1px),linear-gradient(to_bottom,color-mix(in_srgb,var(--vui-border-subtle)_32%,transparent)_1px,transparent_1px)] [background-size:32px_32px]";
-
-// Single bordered inline-flex action-link grammar for `<a>` / bare <VNativeButton>
-// inside Teams action rails. The lossy migration dropped the original
-// `.rail a { display:inline-flex }` descendant rules, so icon+text links
-// collapsed into stacked icon-over-text. One shared fragment keeps the button
-// grammar consistent (per the 6/29 spec) instead of per-rail variants.
-const RAIL = "[&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap"
-  + " [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]";
-
-const styleKeys = [
-  "actionRow",
-  "aiSearchRunCard",
-  "aiSearchRunCardDegraded",
-  "aiSearchRunCardDetails",
-  "aiSearchRunCardFailed",
-  "aiSearchRunCardHeader",
-  "aiSearchRunCardReview",
-  "aiSearchRunCards",
-  "aiSearchRunFallbackReason",
-  "aiSearchRunHeader",
-  "aiSearchRunInsight",
-  "aiSearchRunLatest",
-  "aiSearchRunPanel",
-  "aiSearchRunQuery",
-  "aiSearchRunRefs",
-  "aiSearchRunResultHeader",
-  "aiSearchRunStats",
-  "aiSearchRunStatus",
-  "aiSearchRunStatusCompleted",
-  "aiSearchRunStatusFailed",
-  "aiSearchRunStatusPartial",
-  "aiSearchRunStatusRunning",
-  "aiSearchRunStorage",
-  "aiSearchRunSummary",
-  "aiSearchRunTopic",
-  "aiSearchScopeBadge",
-  "aiSearchScopeDescription",
-  "aiSearchScopeDetails",
-  "aiSearchScopeEnabled",
-  "aiSearchScopeHeader",
-  "aiSearchScopePanel",
-  "aiSearchScopePolicy",
-  "aiSearchScopeSignal",
-  "aiSearchScopeStats",
-  "aiSearchSourceGroup",
-  "aiSearchSourceGroupHeader",
-  "aiSearchSourceGroups",
-  "aiSearchSourceItem",
-  "aiSearchSourceList",
-  "aiSearchWorkflowSummary",
-  "canvas",
-  "canvasLayoutModeSwitch",
-  "canvasPanel",
-  "canvasReadOnlyBadge",
-  "canvasReadOnlyNode",
-  "canvasReadOnlyNodeWide",
-  "canvasReadOnlyNotice",
-  "canvasReadOnlyPanel",
-  "canvasToolbar",
-  "canvasViewport",
-  "dangerButton",
-  "deliveryList",
-  "edgeCommunication",
-  "edgeLayerLine",
-  "edgeOrganization",
-  "edges",
-  "empty",
-  "emptyCanvasContent",
-  "emptyCanvasKicker",
-  "emptyCanvasPanel",
-  "emptyCanvasSteps",
-  "experimentBaselineArtifact",
-  "experimentBaselineForm",
-  "experimentChecklist",
-  "experimentChecklistPass",
-  "experimentChecklistWarn",
-  "experimentEvidenceGrid",
-  "experimentGapList",
-  "experimentHypothesisList",
-  "experimentKnowledgeForm",
-  "experimentKnowledgePanel",
-  "experimentKnowledgeToggle",
-  "experimentKnowledgeWide",
-  "experimentLedgerEmpty",
-  "experimentLedgerHeader",
-  "experimentLedgerPanel",
-  "experimentLedgerStats",
-  "experimentPlanFields",
-  "experimentPlanGrid",
-  "experimentPlanSummary",
-  "experimentSmokeForm",
-  "experimentSmokeMeta",
-  "experimentSmokeResult",
-  "experimentSmokeResultPass",
-  "experimentSmokeResultWarn",
-  "experimentSmokeWide",
-  "header",
-  "iconButton",
-  "inlineToggle",
-  "inspector",
-  "inspectorBody",
-  "inspectorHeader",
-  "issue",
-  "issueList",
-  "kernelTraceLink",
-  "knowledgeCompletionFlowActions",
-  "knowledgeCompletionFlowError",
-  "knowledgeCompletionFlowHeader",
-  "knowledgeCompletionFlowNode",
-  "knowledgeCompletionFlowNodeBody",
-  "knowledgeCompletionFlowNodeCurrent",
-  "knowledgeCompletionFlowNodeHeader",
-  "knowledgeCompletionFlowNodes",
-  "knowledgeCompletionFlowPanel",
-  "layerButtonActive",
-  "linkedRoomLine",
-  "managementNav",
-  "messageError",
-  "messageResult",
-  "node",
-  "nodeActive",
-  "nodeBindingPlaceholder",
-  "nodeBindingSection",
-  "nodeBound",
-  "nodeIcon",
-  "nodeOpen",
-  "nodeReadOnly",
-  "nodeRoleBadge",
-  "nodeRoleBadgeAdvisor",
-  "nodeRoleBadgeGeneral",
-  "nodeRoleBadgeLead",
-  "nodeRoleBadgeOpen",
-  "nodeRoleBadgeResearch",
-  "nodeRoleBadgeSelf",
-  "nodeRoleBadgeStale",
-  "nodeRoleBadgeSteward",
-  "nodeSourceAuthority",
-  "nodeStale",
-  "researchCanvasIndex",
-  "researchCanvasPanelHidden",
-  "researchDiscussionPanel",
-  "researchInspector",
-  "researchLoopActive",
-  "researchLoopDecisionForm",
-  "researchLoopEvidenceForm",
-  "researchLoopHeader",
-  "researchLoopOutcomeGrid",
-  "researchLoopPanel",
-  "researchLoopStats",
-  "researchLoopStatusPills",
-  "researchLoopTemplateBar",
-  "researchLoopTemplateSummary",
-  "researchLoopWide",
-  "researchStageActionPanel",
-  "researchStageActions",
-  "researchStageAgentActions",
-  "researchStageAgentCard",
-  "researchStageAgentCard_blocked",
-  "researchStageAgentCard_missing",
-  "researchStageAgentCard_ready",
-  "researchStageAgentCard_warning",
-  "researchStageAgentGrid",
-  "researchStageAgentMeta",
-  "researchStageAgentPanel",
-  "researchStageAgentPanelCompact",
-  "researchStageAgentPanelHeader",
-  "researchStageAgentRole",
-  "researchStageAgentSummary",
-  "researchStageAgentSummaryBlocked",
-  "researchStageAgentSummaryMissing",
-  "researchStageAgentSummaryReady",
-  "researchStageBoundaryPanel",
-  "researchStageCard",
-  "researchStageCardActive",
-  "researchStageCardHead",
-  "researchStageCardMetrics",
-  "researchStageGrid",
-  "researchStageHeroPanel",
-  "researchStageHeroStats",
-  "researchStageLauncher",
-  "researchStageLauncherHeader",
-  "researchStageModuleCard",
-  "researchStageModuleGrid",
-  "researchStagePage",
-  "researchStagePageActions",
-  "researchStagePageBody",
-  "researchStagePageHeader",
-  "researchStageTopicInput",
-  "revokeButton",
-  "route",
-  "saveState",
-  "sectionTitle",
-  "sourceCollectionCandidateListShell",
-  "sourceCollectionCommandBar",
-  "sourceCollectionCommandStats",
-  "sourceCollectionCommandTitle",
-  "sourceCollectionControlPanel",
-  "sourceCollectionConversationHeader",
-  "sourceCollectionConversationPanel",
-  "sourceCollectionFilterActive",
-  "sourceCollectionFilterBar",
-  "sourceCollectionFocusedPanel",
-  "sourceCollectionPage",
-  "sourceCollectionPageActions",
-  "sourceCollectionPageBody",
-  "sourceCollectionPageGrid",
-  "sourceCollectionPageHeader",
-  "sourceCollectionPageTitleBlock",
-  "sourceCollectionPageTitleLine",
-  "sourceCollectionPagination",
-  "sourceCollectionPanelActions",
-  "sourceCollectionResultContent",
-  "sourceCollectionResultItem",
-  "sourceCollectionResultItemSelected",
-  "sourceCollectionResultList",
-  "sourceCollectionResultMeta",
-  "sourceCollectionResultsHeader",
-  "sourceCollectionResultSource",
-  "sourceCollectionResultSourceMissing",
-  "sourceCollectionResultsPanel",
-  "sourceCollectionResultStats",
-  "sourceCollectionResultStatus",
-  "sourceCollectionResultWarning",
-  "sourceCollectionRunBadge",
-  "sourceCollectionRunSwitcher",
-  "sourceCollectionRunSwitcherMain",
-  "sourceCollectionRunSwitcherStats",
-  "sourceCollectionScreeningList",
-  "sourceCollectionScreeningListShell",
-  "sourceCollectionScreeningScrollHint",
-  "sourceCollectionSearchEvidence",
-  "sourceCollectionSearchEvidenceBody",
-  "sourceCollectionSourceDetailActions",
-  "sourceCollectionSourceDetailFacts",
-  "sourceCollectionSourceDetailHeader",
-  "sourceCollectionSourceDetailNotice",
-  "sourceCollectionSourceDetailPanel",
-  "sourceCollectionStageAgentCard",
-  "sourceCollectionStageAgentCardActions",
-  "sourceCollectionStageAgentCardBody",
-  "sourceCollectionStageAgentHeader",
-  "sourceCollectionStageAgentList",
-  "sourceCollectionStageAgentPanel",
-  "sourceCollectionStageBlockers",
-  "sourceCollectionStageCardActions",
-  "sourceCollectionStageCard",
-  "sourceCollectionStageCardHead",
-  "sourceCollectionStageCardSelected",
-  "sourceCollectionStageChatActions",
-  "sourceCollectionStageHandoff",
-  "sourceCollectionStageHandoffNext",
-  "sourceCollectionStageMiniFlow",
-  "sourceCollectionStageModules",
-  "sourceCollectionStageModuleText",
-  "sourceCollectionStagePrimaryAction",
-  "sourceCollectionStageProjection",
-  "sourceCollectionStageSecondaryAction",
-  "sourceCollectionStageTaskSummary",
-  "sourceCollectionStageTechnicalDetails",
-  "sourceCollectionStageWorkspace",
-  "sourceCollectionStageWorkspaceHeader",
-  "sourceCollectionStepActive",
-  "sourceCollectionStepDone",
-  "sourceCollectionEmptyRunNotice",
-  "sourceCollectionStepFailed",
-  "sourceCollectionStepIdle",
-  "sourceCollectionStepPending",
-  "sourceCollectionTrace_acquire",
-  "sourceCollectionTrace_blocked",
-  "sourceCollectionTrace_cache",
-  "sourceCollectionTrace_extract",
-  "sourceCollectionTrace_plan",
-  "sourceCollectionTrace_quality",
-  "sourceCollectionTrace_search",
-  "sourceCollectionTrace_storage",
-  "sourceCollectionTraceAvatar",
-  "sourceCollectionTraceBody",
-  "sourceCollectionTraceDetails",
-  "sourceCollectionTraceHandoff",
-  "sourceCollectionTraceList",
-  "sourceCollectionTraceMessage",
-  "sourceCollectionTraceMeta",
-  "sourceCollectionTraceOwner",
-  "sourceCollectionTraceRefs",
-  "sourceCollectionTraceStorage",
-  "sourceCollectionUnavailable",
-  "teamContextActions",
-  "teamContextBar",
-  "teamContextChips",
-  "teamHistoryHeader",
-  "teamHistoryItem",
-  "teamHistoryItemRevoked",
-  "teamHistoryList",
-  "teamHistoryMeta",
-  "teamHistoryPanel",
-  "teamMemoryActionRail",
-  "teamMemoryIndex",
-  "teamMemoryIndexHeader",
-  "teamMemoryMemberActions",
-  "teamMemoryMemberCard",
-  "teamMemoryMemberHeading",
-  "teamMemoryMemberIdentity",
-  "teamMemoryMemberTable",
-  "teamMemoryRole",
-  "teamMemoryStatusBadge",
-  "teamMessageForm",
-  "teamRoundCard",
-  "teamRoundHeader",
-  "teamRoundMeta",
-  "teamRoundPanel",
-  "teamSelectField",
-  "teamTaskForm",
-  "teamTitleBlock",
-  "teamUnavailableActions",
-  "teamUnavailableCard",
-  "teamUnavailableMeta",
-  "teamUnavailableSurface",
-  "toolbarActions",
-  "toolbarLink",
-  "workflowCandidateActions",
-  "workflowCandidateHeader",
-  "workflowCandidateItem",
-  "workflowCandidateItemSelected",
-  "workflowCandidateList",
-  "workflowCandidateListHeader",
-  "workflowCandidateListPanel",
-  "workflowCandidateListScroll",
-  "workflowCandidateListScrollHint",
-  "workflowCandidateMeta",
-  "workflowCoordinationBriefSummary",
-  "workflowCoordinationPanel",
-  "workflowCoordinationQueue",
-  "workflowCoordinationQueues",
-  "workflowCoordinationStats",
-  "workflowError",
-  "workflowGraphBoundary",
-  "workflowGraphCanvas",
-  "workflowGraphEdge",
-  "workflowGraphFrame",
-  "workflowGraphHeader",
-  "workflowGraphIssues",
-  "workflowGraphNode",
-  "workflowGraphNodeDanger",
-  "workflowGraphNodeNeutral",
-  "workflowGraphNodeReady",
-  "workflowGraphNodeWarning",
-  "workflowGraphPanel",
-  "workflowGraphStats",
-  "workflowGraphSvg",
-  "workflowIngestionActions",
-  "workflowIngestionBoundary",
-  "workflowIngestionHeader",
-  "workflowIngestionPanel",
-  "workflowIngestionStage",
-  "workflowIngestionStages",
-  "workflowIngestionStats",
-  "workflowMeta",
-  "workflowModelEvidenceCoverage",
-  "workflowModelEvidencePanel",
-  "workflowModelEvidenceStats",
-  "workflowPanel",
-  "workflowPaperNoteChunkPanel",
-  "workflowPaperNoteChunkPlans",
-  "workflowPaperNoteChunkStats",
-  "workflowSourceCollectionAssignmentActive",
-  "workflowSourceCollectionAssignments",
-  "workflowSourceCollectionDetails",
-  "workflowSourceCollectionForm",
-  "workflowSourceCollectionOutputForm",
-  "workflowSourceCollectionOutputHeader",
-  "workflowSourceCollectionPanel",
-  "workflowSourceCollectionPlan",
-  "workflowSourceCollectionQueries",
-  "workflowSourceCollectionRuns",
-  "workflowSourceCollectionSearchAction",
-  "workflowSourceCollectionStats",
-  "workflowSourceCollectionStorageActions",
-  "workflowSourceCollectionStorageButtons",
-  "workflowSourceCollectionStorageDetails",
-  "workflowSourceCollectionStorageError",
-  "workflowSourceCollectionWide",
-  "workflowSourceQualityPanel",
-  "workflowSourceQualityQueue",
-  "workflowSourceQualityStats",
-  "workflowStageActive",
-  "workflowStageList",
-  "workflowStats",
-  "workflowSuccess",
-  "workflowTag",
-  "workflowTagDanger",
-  "workflowTagNeutral",
-  "workflowTagReady",
-  "workflowTagWarning",
-  "workflowValidation",
-  "workspace",
-  "workspaceEmpty",
-  "workspaceResearch",
-  "workspaceResearchCanvas",
-] as const;
-
-const styles = createVuiStyleMap(styleKeys, {
-  extensions: {
-    aiSearchRunCards: "!grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-[7px]",
-    canvas:
-      `relative flex-1 overflow-auto ${canvasMeshBackgroundClass}`,
-    canvasLayoutModeSwitch: "grid-cols-[repeat(auto-fit,minmax(86px,max-content))]",
-    canvasPanel: "!flex min-h-0 flex-col overflow-hidden p-0",
-    canvasReadOnlyBadge:
-      "min-h-[26px] border-[color-mix(in_srgb,var(--accent-cool)_36%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] px-2 text-[var(--accent-cool)]",
-    canvasReadOnlyNode: "grid-cols-[repeat(2,minmax(0,1fr))]",
-    canvasReadOnlyNodeWide: "col-span-full",
-    canvasReadOnlyNotice: "grid-cols-[auto_minmax(0,1fr)] items-start",
-    canvasReadOnlyPanel: "content-start",
-    canvasToolbar:
-      "!flex min-h-[38px] flex-wrap items-start justify-between gap-2 border-b border-[var(--vui-border-subtle)] px-2 py-1 [&>div:first-child]:grid [&>div:first-child]:min-w-[220px] [&>div:first-child]:flex-1 [&_small]:truncate [&_strong]:text-[var(--vui-font-xs)] [&_span]:truncate [&_span]:text-[var(--vui-font-xs)]",
-    canvasViewport:
-      "relative box-content h-[760px] w-[1180px] origin-top-left pl-[var(--canvas-offset-x,0px)] pt-[var(--canvas-offset-y,0px)] [transform:scale(var(--canvas-scale,1))]",
-    edgeCommunication: "text-[var(--fg-tertiary)] [stroke-dasharray:4_8] [stroke-width:1px] opacity-60",
-    edgeLayerLine: "block truncate text-[var(--vui-font-xs)] font-semibold text-[var(--fg-tertiary)]",
-    edgeOrganization: "text-[var(--accent-cool)] [stroke-width:1.75px] opacity-90",
-    edges:
-      "absolute inset-0 z-0 h-[760px] w-[1180px] overflow-visible text-[var(--accent-cool)] pointer-events-none [transform:translate(var(--canvas-offset-x,0px),var(--canvas-offset-y,0px))] [&>path]:fill-none [&>path]:stroke-current [&>path]:[stroke-linecap:butt] [&>path]:[stroke-linejoin:round] [&>path]:[stroke-width:1.5px] [&>path]:opacity-80",
-    emptyCanvasContent: "max-w-[520px] content-start gap-1.5 p-2 text-left",
-    emptyCanvasPanel: `flex-1 content-start overflow-auto p-2 ${canvasMeshBackgroundClass}`,
-    emptyCanvasSteps: "!flex flex-wrap gap-1.5",
-    inspector: "!flex min-h-0 flex-col overflow-hidden p-0",
-    inspectorBody: "grid min-h-0 content-start gap-2 overflow-auto p-2",
-    inspectorHeader:
-      "!flex min-h-[36px] items-center justify-between border-b border-[var(--vui-border-subtle)] px-2 py-1",
-    linkedRoomLine: "block truncate text-[var(--vui-font-xs)] font-semibold text-[var(--accent-cool)]",
-    node:
-      "!absolute left-[calc(var(--canvas-offset-x,0px)+var(--node-x,0px))] top-[calc(var(--canvas-offset-y,0px)+var(--node-y,0px))] z-[1] !grid h-[92px] w-[172px] cursor-grab select-none grid-cols-[20px_1fr] grid-rows-[auto_auto_auto] items-center gap-x-1.5 gap-y-0.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 text-left text-[var(--fg-primary)] shadow-[var(--vui-shadow-hairline)] touch-none [&_small]:truncate [&_span]:truncate [&_strong]:truncate",
-    nodeActive: "shadow-[var(--vui-shadow-inset-accent)]",
-    nodeBindingSection: "content-start gap-2",
-    nodeBound: "border-[color-mix(in_srgb,var(--state-success)_42%,var(--vui-border-subtle))]",
-    nodeIcon:
-      "row-span-3 inline-flex h-5 w-5 items-center justify-center text-[var(--fg-tertiary)]",
-    nodeOpen: "border-dashed",
-    nodeReadOnly: "cursor-pointer touch-manipulation",
-    nodeRoleBadge:
-      "min-h-[18px] justify-self-start rounded-full border border-[var(--node-role-border,var(--vui-border-subtle))] bg-[var(--node-role-bg,var(--vui-control-muted))] px-1.5 py-0 text-[var(--node-role-fg,var(--fg-secondary))] text-[var(--vui-font-xs)] font-semibold leading-none",
-    nodeRoleBadgeAdvisor:
-      "[--node-role-bg:color-mix(in_srgb,var(--accent-cool)_12%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] [--node-role-fg:var(--accent-cool)]",
-    nodeRoleBadgeGeneral:
-      "[--node-role-bg:var(--vui-control-muted)] [--node-role-border:var(--vui-border-subtle)] [--node-role-fg:var(--fg-secondary)]",
-    nodeRoleBadgeLead:
-      "[--node-role-bg:color-mix(in_srgb,var(--state-success)_11%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--state-success)_38%,var(--vui-border-subtle))] [--node-role-fg:var(--state-success)]",
-    nodeRoleBadgeOpen:
-      "[--node-role-bg:var(--vui-control-muted)] [--node-role-border:var(--vui-border-subtle)] [--node-role-fg:var(--fg-tertiary)]",
-    nodeRoleBadgeResearch:
-      "[--node-role-bg:color-mix(in_srgb,var(--accent-warm)_10%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--accent-warm)_34%,var(--vui-border-subtle))] [--node-role-fg:var(--fg-secondary)]",
-    nodeRoleBadgeSelf:
-      "[--node-role-bg:color-mix(in_srgb,var(--state-error)_9%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--state-error)_34%,var(--vui-border-subtle))] [--node-role-fg:var(--state-error)]",
-    nodeRoleBadgeStale:
-      "[--node-role-bg:color-mix(in_srgb,var(--state-error)_9%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--state-error)_40%,var(--vui-border-subtle))] [--node-role-fg:var(--state-error)]",
-    nodeRoleBadgeSteward:
-      "[--node-role-bg:color-mix(in_srgb,var(--state-warning)_11%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--state-warning)_42%,var(--vui-border-subtle))] [--node-role-fg:var(--state-warning)]",
-    nodeStale: "border-[color-mix(in_srgb,var(--state-error)_48%,var(--vui-border-subtle))]",
-    researchCanvasPanelHidden: "!hidden",
-    researchCanvasIndex:
-      "!flex min-w-0 items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,var(--border-soft))] bg-[image:var(--vui-gradient-route-soft)] bg-[color:color-mix(in_srgb,var(--surface-card)_82%,transparent)] [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&>div_span]:truncate [&>div_span]:text-[var(--fg-muted)] [&>div_span]:font-[760] [&>div_small]:truncate [&>div_small]:text-[var(--fg-muted)] [&>div_small]:font-[760] [&>div_strong]:truncate [&>div_strong]:text-[var(--fg-primary)] [&_a]:inline-flex [&_a]:shrink-0 [&_a]:min-h-[30px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-[5px] [&_a]:px-[9px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_34%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--surface-panel-strong)_82%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[820] [&_a]:no-underline [&_a]:whitespace-nowrap",
-    researchStageAgentPanelHeader:
-      "!flex min-w-0 items-center justify-between gap-2.5 [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&>div_strong]:truncate [&>div_strong]:text-[var(--fg-primary)] [&>div_span]:truncate [&>div_span]:text-[var(--fg-muted)] [&>div_span]:font-[760] [&_a]:inline-flex [&_a]:shrink-0 [&_a]:min-h-[28px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-[5px] [&_a]:px-[9px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_28%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--surface-card)_74%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap",
-    researchStageAgentActions:
-      "!flex min-w-0 items-center justify-between gap-2 [&_a]:inline-flex [&_a]:shrink-0 [&_a]:min-h-[28px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-[5px] [&_a]:px-[9px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_28%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--surface-card)_74%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap",
-    researchStageAgentGrid: "!grid grid-cols-[repeat(auto-fit,minmax(210px,1fr))] gap-2",
-    researchStageCardHead: "!grid grid-cols-[auto_1fr] items-start gap-2.5",
-    researchStageCardMetrics: "!grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[5px]",
-    researchStageHeroStats: "!grid grid-cols-[repeat(3,minmax(0,1fr))] gap-2",
-    sourceCollectionStagePrimaryAction: "w-fit max-w-full",
-    sourceCollectionStageSecondaryAction: "w-fit max-w-full",
-    sourceCollectionSourceDetailFacts: "!grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-[5px]",
-    sourceCollectionSourceDetailActions: `!flex flex-wrap gap-1.5 min-w-0 ${RAIL}`,
-    sourceCollectionStageAgentHeader: `!flex items-center justify-between gap-2 min-w-0 [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&>div_strong]:truncate [&>div_strong]:text-[var(--fg-primary)] [&>div_span]:truncate [&>div_span]:text-[var(--fg-muted)] ${RAIL}`,
-    sourceCollectionStageAgentCard: `!grid grid-cols-[minmax(0,1fr)_auto] items-stretch gap-2 ${RAIL}`,
-    sourceCollectionStageAgentCardBody: "!grid grid-cols-[repeat(3,minmax(0,1fr))] gap-1.5",
-    sourceCollectionSearchEvidenceBody: `!grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-[5px] min-w-0 [&>span]:grid [&>span]:gap-0.5 [&>span]:min-w-0 ${RAIL}`,
-    nodeSourceAuthority: `!grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 p-2 rounded-lg border border-[color:color-mix(in_srgb,var(--accent-cool)_26%,var(--border-soft))] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,var(--surface-panel-strong))] [&>div]:grid [&>div]:gap-0.5 [&>div]:min-w-0 ${RAIL}`,
-    sourceCollectionUnavailable: `!grid gap-2 content-center justify-items-start p-[18px] rounded-lg border border-[var(--border-soft)] bg-[image:var(--vui-gradient-route-soft)] bg-[color:var(--source-workbench-panel)] [&_strong]:text-[var(--fg-primary)] [&_span]:text-[var(--fg-muted)] ${RAIL}`,
-    knowledgeCompletionFlowActions: `!flex flex-wrap gap-1.5 min-w-0 mt-auto ${RAIL}`,
-    researchStageActions: `!flex flex-wrap items-center gap-[7px] ${RAIL} [&_a]:min-w-[104px] [&_[data-vui=native-button]]:min-w-[104px]`,
-    sourceCollectionStageChatActions:
-      "!grid grid-cols-[repeat(3,max-content)] items-center justify-end gap-1.5 min-w-0 max-[720px]:grid-cols-[1fr] [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[30px] [&_a]:w-max [&_a]:max-w-full [&_a]:px-3 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_42%,var(--border-soft))] [&_a]:bg-[image:var(--vui-gradient-route-soft)] [&_a]:bg-[color:var(--source-workbench-card)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[840] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:min-h-[30px]",
-    sourceCollectionPanelActions: "flex-wrap",
-    sourceCollectionCandidateListShell:
-      "min-h-0 content-start items-start self-start overflow-y-auto [scrollbar-gutter:stable]",
-    sourceCollectionFilterBar: "overflow-x-auto [&_[data-vui=native-button]]:flex-none [&_[data-vui=native-button]]:min-w-[76px]",
-    sourceCollectionFocusedPanel:
-      "grid-cols-[minmax(0,1fr)_minmax(320px,380px)] isolate",
-    sourceCollectionPagination: "select-none whitespace-nowrap [writing-mode:horizontal-tb]",
-    sourceCollectionCommandStats:
-      "grid-cols-[repeat(3,minmax(120px,1fr))] max-[860px]:grid-cols-[1fr] [&_span]:min-h-[30px]",
-    sourceCollectionPageGrid: "grid-cols-[minmax(0,1fr)]",
-    sourceCollectionPageActions:
-      "!flex flex-wrap items-center justify-end gap-2 min-w-0 [&_a]:inline-flex [&_a]:min-h-[30px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[var(--border-soft)] [&_a]:bg-[color:var(--surface-panel-strong)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[760] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:min-h-[30px] [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[var(--border-soft)] [&_[data-vui=native-button]]:bg-[color:var(--surface-panel-strong)] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[760]",
-    sourceCollectionPageBody:
-      "!grid min-h-0 content-start gap-2 overflow-auto p-2",
-    sourceCollectionRunSwitcher:
-      "!grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-[7px] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,var(--border-soft))] bg-[color:var(--source-workbench-panel)] px-2 py-1.5 max-[980px]:grid-cols-[1fr]",
-    sourceCollectionRunSwitcherMain:
-      "grid min-w-0 grid-cols-[max-content_minmax(220px,360px)_minmax(0,1fr)] items-center gap-2 text-[var(--vui-font-xs)] font-[760] text-[var(--fg-secondary)] max-[900px]:grid-cols-[1fr] [&_small]:min-w-0 [&_small]:truncate [&_small]:text-[var(--fg-muted)]",
-    sourceCollectionRunSwitcherStats:
-      "grid min-w-[300px] grid-cols-[repeat(3,minmax(90px,1fr))] gap-1.5 text-[var(--vui-font-xs)] max-[980px]:min-w-0 [&_span]:flex [&_span]:min-h-[26px] [&_span]:items-center [&_span]:justify-between [&_span]:gap-1.5 [&_span]:rounded-[7px] [&_span]:border [&_span]:border-[color:var(--border-soft)] [&_span]:bg-[color:var(--source-workbench-card)] [&_span]:px-2 [&_span]:font-[720] [&_strong]:text-[var(--fg-primary)]",
-    sourceCollectionCommandBar:
-      "!grid grid-cols-[minmax(0,1fr)_minmax(320px,0.55fr)] items-center gap-2 px-2 py-2 max-[980px]:grid-cols-[1fr]",
-    sourceCollectionResultItem:
-      "grid-cols-[max-content_minmax(0,1fr)_max-content_minmax(120px,220px)] min-h-[36px] items-center gap-2 px-2 py-1 max-[820px]:grid-cols-[max-content_minmax(0,1fr)]",
-    sourceCollectionResultContent:
-      "min-w-0 [&_strong]:block [&_strong]:truncate",
-    sourceCollectionResultMeta:
-      "flex min-w-[76px] flex-nowrap items-center gap-1 whitespace-nowrap text-[var(--vui-font-xs)] text-[var(--fg-tertiary)] [&_span:first-child]:text-[var(--fg-secondary)] max-[820px]:hidden",
-    sourceCollectionResultSource:
-      "grid grid-cols-[max-content_minmax(0,1fr)] items-center gap-1 overflow-hidden text-[var(--vui-font-xs)] [&_a]:truncate [&_code]:truncate max-[820px]:col-span-2",
-    sourceCollectionResultStatus: "whitespace-nowrap justify-self-start",
-    sourceCollectionEmptyRunNotice:
-      "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-[7px] border border-[color:color-mix(in_srgb,var(--state-warning)_34%,var(--border-soft))] bg-[color:color-mix(in_srgb,var(--state-warning)_8%,var(--source-workbench-card))] px-3 py-2 text-[var(--vui-font-sm)] max-[760px]:grid-cols-[1fr] [&_div]:grid [&_div]:min-w-0 [&_div]:gap-0.5 [&_strong]:text-[var(--fg-primary)] [&_span]:text-[var(--fg-secondary)]",
-    sourceCollectionStageCard:
-      "!grid min-h-[118px] content-start gap-2 border-l-[4px] [border-left-color:var(--source-step-color,var(--vui-border-subtle))] px-2 py-2",
-    sourceCollectionStageCardHead:
-      "grid-cols-[max-content_1fr] items-center gap-2 [&_span]:justify-self-end [&_span]:whitespace-nowrap",
-    sourceCollectionStageCardActions:
-      "!flex flex-nowrap items-center justify-between gap-1.5 pt-1 [&_[data-vui=native-button]]:w-fit [&_[data-vui=native-button]]:max-w-full [&_[data-vui=native-button]]:justify-center",
-    sourceCollectionStageModuleText:
-      "[&_b]:text-[var(--vui-font-base)] [&_em]:text-[var(--vui-font-sm)] [&_small]:line-clamp-1",
-    sourceCollectionStageModules:
-      "grid-cols-[repeat(4,minmax(0,1fr))] max-[1220px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[720px]:grid-cols-[1fr]",
-    sourceCollectionStageWorkspace: "grid-rows-[auto_minmax(0,1fr)]",
-    sourceCollectionStepActive:
-      "[--source-step-color:var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_52%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-base))]",
-    sourceCollectionStepDone:
-      "[--source-step-color:var(--state-success)] border-[color-mix(in_srgb,var(--state-success)_48%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-success)_8%,var(--vui-surface-base))]",
-    sourceCollectionStepFailed:
-      "[--source-step-color:var(--state-error)] border-[color-mix(in_srgb,var(--state-error)_50%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_8%,var(--vui-surface-base))]",
-    sourceCollectionStepIdle:
-      "[--source-step-color:var(--fg-tertiary)] border-[color-mix(in_srgb,var(--fg-tertiary)_26%,var(--vui-border-subtle))] bg-[var(--vui-surface-base)]",
-    sourceCollectionStepPending:
-      "[--source-step-color:var(--state-warning)] border-[color-mix(in_srgb,var(--state-warning)_48%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_8%,var(--vui-surface-base))]",
-    sourceCollectionTraceBody: "grid-cols-[44px_minmax(0,1fr)] [&_p]:line-clamp-2",
-    teamContextActions: "!flex flex-nowrap items-center justify-end gap-1.5",
-    teamContextBar:
-      "mx-2 mt-1 !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-2 py-1",
-    teamContextChips:
-      "mx-2 !grid grid-cols-[repeat(4,max-content)] justify-start gap-1.5 overflow-x-auto p-0 [scrollbar-width:thin]",
-    teamSelectField:
-      "grid grid-cols-[max-content_minmax(180px,300px)] items-center gap-1.5 text-[var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)]",
-    teamMemoryActionRail:
-      "!flex min-w-0 items-center justify-end gap-[5px] [&_a]:inline-flex [&_a]:min-h-[24px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-1 [&_a]:px-[7px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_30%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--surface-panel)_88%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[820] [&_a]:no-underline [&_a]:whitespace-nowrap [&_a:hover]:border-[color:color-mix(in_srgb,var(--accent-cool)_46%,var(--border-soft))] [&_a:hover]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel))]",
-    teamMemoryIndex: "grid gap-2 grid-cols-[minmax(0,1fr)]",
-    teamMemoryIndexHeader:
-      "!flex min-w-0 items-center justify-between gap-2 [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&>div_strong]:truncate [&>div_strong]:text-[var(--fg-primary)] [&>div_span]:truncate [&>div_span]:text-[var(--fg-muted)] [&>div_span]:font-[760]",
-    teamMemoryMemberTable: "!grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2",
-    teamMemoryMemberActions:
-      "!flex items-center justify-end gap-[5px] min-w-0 [&_a_span]:hidden [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:w-[26px] [&_a]:min-w-[26px] [&_a]:min-h-[24px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_30%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--surface-panel)_88%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:no-underline",
-    teamMemoryMemberHeading: "hidden",
-    teamUnavailableActions:
-      "!flex min-w-0 justify-end gap-1.5 [&_button]:min-w-[78px]",
-    teamUnavailableCard:
-      "grid w-full max-w-[720px] content-start gap-3 p-4 text-left",
-    teamUnavailableMeta:
-      "grid grid-cols-[repeat(3,minmax(0,1fr))] gap-1.5 text-[var(--vui-font-xs)] max-[760px]:grid-cols-[1fr]",
-    teamUnavailableSurface:
-      "grid min-h-0 flex-1 grid-cols-[minmax(0,720px)] content-start justify-items-center overflow-auto px-3 py-4",
-    toolbarActions:
-      "!flex min-w-[220px] max-w-[min(100%,560px)] flex-wrap items-center justify-end gap-1.5 overflow-visible [&_a]:min-w-[72px] [&_a]:whitespace-nowrap [&_button]:min-w-[72px] [&_button]:whitespace-nowrap",
-    workflowCandidateItem:
-      "grid grid-cols-[minmax(0,1fr)_minmax(120px,220px)] min-h-[40px] items-center gap-2 px-2 py-1 max-[820px]:grid-cols-[minmax(0,1fr)]",
-    workflowGraphFrame: "h-full overflow-hidden",
-    workflowIngestionStages: "!grid grid-cols-[repeat(5,minmax(58px,1fr))] gap-1",
-    workflowModelEvidenceCoverage: "!grid grid-cols-[repeat(auto-fit,minmax(118px,1fr))] gap-1.5",
-    workflowModelEvidenceStats: "!grid grid-cols-[repeat(auto-fit,minmax(118px,1fr))] gap-1.5",
-    workflowPaperNoteChunkPlans: "!grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[5px]",
-    workflowPaperNoteChunkStats: "!grid grid-cols-[repeat(4,minmax(86px,1fr))] gap-[5px]",
-    workflowSourceCollectionForm: "!grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[5px]",
-    workflowSourceCollectionOutputForm: "!grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[5px]",
-    workflowSourceQualityQueue: "!grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[5px]",
-    workflowSourceQualityStats: "!grid grid-cols-[repeat(5,minmax(72px,1fr))] gap-[5px]",
-    workflowStats: "!grid grid-cols-[repeat(3,minmax(0,1fr))] gap-1.5",
-    workspace:
-      "!grid min-h-0 grid-cols-[minmax(520px,1fr)_minmax(300px,380px)] gap-2 overflow-hidden px-2 pb-2 pt-1",
-    workspaceResearch: "!grid-cols-[minmax(0,1fr)]",
-    workspaceResearchCanvas:
-      "!grid h-full grid-cols-[minmax(520px,1fr)_minmax(300px,380px)] overflow-hidden",
-  },
-});
+// Explicit style baseline (Phase 0, 2026-07-02 spec) — generated by
+// web/scripts/bake-style-maps.ts from the previous createVuiStyleMap output;
+// classes are byte-identical to what the inference produced. Every key is an
+// explicit Tailwind class string; there are no name-based defaults. Edit
+// values directly. This file is transitional: it is deleted in the wave that
+// componentizes TeamsRoute.
+// Includes phantom keys (accessed by consumers but never declared in the old
+// styleKeys — the Proxy synthesized them on demand) and prefix×tone-vocabulary
+// coverage for dynamic `styles[`prefix_${tone}`]` lookups. Typed loosely as
+// Record<string, string> because those dynamic template indexes cannot index a
+// literal-keyed map; tightening is a follow-up, not Phase 0.
+const styles: Record<string, string> = {
+  actionRow:
+    "actionRow min-w-0 flex flex-wrap items-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  aiSearchRunCard:
+    "aiSearchRunCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  aiSearchRunCardDegraded:
+    "aiSearchRunCardDegraded min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  aiSearchRunCardDetails:
+    "aiSearchRunCardDetails min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  aiSearchRunCardFailed:
+    "aiSearchRunCardFailed min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+  aiSearchRunCardHeader:
+    "aiSearchRunCardHeader min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
+  aiSearchRunCardReview:
+    "aiSearchRunCardReview min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  aiSearchRunCards:
+    "aiSearchRunCards min-w-0 grid gap-2 !grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-[7px]",
+  aiSearchRunFallbackReason:
+    "aiSearchRunFallbackReason min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  aiSearchRunHeader:
+    "aiSearchRunHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  aiSearchRunInsight:
+    "aiSearchRunInsight min-w-0",
+  aiSearchRunLatest:
+    "aiSearchRunLatest min-w-0",
+  aiSearchRunPanel:
+    "aiSearchRunPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  aiSearchRunQuery:
+    "aiSearchRunQuery min-w-0",
+  aiSearchRunRefs:
+    "aiSearchRunRefs min-w-0",
+  aiSearchRunResultHeader:
+    "aiSearchRunResultHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  aiSearchRunStats:
+    "aiSearchRunStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  aiSearchRunStatus:
+    "aiSearchRunStatus min-w-0",
+  aiSearchRunStatusCompleted:
+    "aiSearchRunStatusCompleted min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+  aiSearchRunStatusFailed:
+    "aiSearchRunStatusFailed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+  aiSearchRunStatusPartial:
+    "aiSearchRunStatusPartial min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+  aiSearchRunStatusRunning:
+    "aiSearchRunStatusRunning min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+  aiSearchRunStorage:
+    "aiSearchRunStorage min-w-0",
+  aiSearchRunSummary:
+    "aiSearchRunSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  aiSearchRunTopic:
+    "aiSearchRunTopic min-w-0",
+  aiSearchScopeBadge:
+    "aiSearchScopeBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+  aiSearchScopeDescription:
+    "aiSearchScopeDescription min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  aiSearchScopeDetails:
+    "aiSearchScopeDetails min-w-0",
+  aiSearchScopeEnabled:
+    "aiSearchScopeEnabled min-w-0",
+  aiSearchScopeHeader:
+    "aiSearchScopeHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  aiSearchScopePanel:
+    "aiSearchScopePanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  aiSearchScopePolicy:
+    "aiSearchScopePolicy min-w-0",
+  aiSearchScopeSignal:
+    "aiSearchScopeSignal min-w-0",
+  aiSearchScopeStats:
+    "aiSearchScopeStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  aiSearchSourceGroup:
+    "aiSearchSourceGroup min-w-0",
+  aiSearchSourceGroupHeader:
+    "aiSearchSourceGroupHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  aiSearchSourceGroups:
+    "aiSearchSourceGroups min-w-0",
+  aiSearchSourceItem:
+    "aiSearchSourceItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  aiSearchSourceList:
+    "aiSearchSourceList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  aiSearchWorkflowSummary:
+    "aiSearchWorkflowSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  canvas:
+    "canvas min-w-0 grid min-h-0 gap-2 p-2 relative flex-1 overflow-auto bg-[color-mix(in_srgb,var(--vui-surface-glass)_94%,white_6%)] [background-image:linear-gradient(to_right,color-mix(in_srgb,var(--vui-border-subtle)_45%,transparent)_1px,transparent_1px),linear-gradient(to_bottom,color-mix(in_srgb,var(--vui-border-subtle)_32%,transparent)_1px,transparent_1px)] [background-size:32px_32px]",
+  canvasLayoutModeSwitch:
+    "canvasLayoutModeSwitch min-w-0 grid min-h-0 gap-2 p-2 grid-cols-[repeat(auto-fit,minmax(86px,max-content))]",
+  canvasPanel:
+    "canvasPanel min-w-0 grid min-h-0 gap-2 p-2 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] !flex min-h-0 flex-col overflow-hidden p-0",
+  canvasReadOnlyBadge:
+    "canvasReadOnlyBadge min-w-0 grid min-h-0 gap-2 p-2 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] min-h-[26px] border-[color-mix(in_srgb,var(--accent-cool)_36%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] px-2 text-[var(--accent-cool)]",
+  canvasReadOnlyNode:
+    "canvasReadOnlyNode min-w-0 grid min-h-0 gap-2 p-2 grid-cols-[repeat(2,minmax(0,1fr))]",
+  canvasReadOnlyNodeWide:
+    "canvasReadOnlyNodeWide min-w-0 grid min-h-0 gap-2 p-2 col-span-full",
+  canvasReadOnlyNotice:
+    "canvasReadOnlyNotice min-w-0 grid min-h-0 gap-2 p-2 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] grid-cols-[auto_minmax(0,1fr)] items-start",
+  canvasReadOnlyPanel:
+    "canvasReadOnlyPanel min-w-0 grid min-h-0 gap-2 p-2 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] content-start",
+  canvasToolbar:
+    "canvasToolbar min-w-0 grid min-h-0 gap-2 p-2 flex flex-wrap items-center gap-1.5 !flex min-h-[38px] flex-wrap items-start justify-between gap-2 border-b border-[var(--vui-border-subtle)] px-2 py-1 [&>div:first-child]:grid [&>div:first-child]:min-w-[220px] [&>div:first-child]:flex-1 [&_small]:truncate [&_strong]:text-[var(--vui-font-xs)] [&_span]:truncate [&_span]:text-[var(--vui-font-xs)]",
+  canvasViewport:
+    "canvasViewport min-w-0 grid min-h-0 gap-2 p-2 relative box-content h-[760px] w-[1180px] origin-top-left pl-[var(--canvas-offset-x,0px)] pt-[var(--canvas-offset-y,0px)] [transform:scale(var(--canvas-scale,1))]",
+  dangerButton:
+    "dangerButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+  deliveryList:
+    "deliveryList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  edgeCommunication:
+    "edgeCommunication min-w-0 text-[var(--fg-tertiary)] [stroke-dasharray:4_8] [stroke-width:1px] opacity-60",
+  edgeLayerLine:
+    "edgeLayerLine min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 block truncate text-[var(--vui-font-xs)] font-semibold text-[var(--fg-tertiary)]",
+  edgeOrganization:
+    "edgeOrganization min-w-0 text-[var(--accent-cool)] [stroke-width:1.75px] opacity-90",
+  edges:
+    "edges min-w-0 absolute inset-0 z-0 h-[760px] w-[1180px] overflow-visible text-[var(--accent-cool)] pointer-events-none [transform:translate(var(--canvas-offset-x,0px),var(--canvas-offset-y,0px))] [&>path]:fill-none [&>path]:stroke-current [&>path]:[stroke-linecap:butt] [&>path]:[stroke-linejoin:round] [&>path]:[stroke-width:1.5px] [&>path]:opacity-80",
+  empty:
+    "empty min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+  emptyCanvasContent:
+    "emptyCanvasContent min-w-0 grid min-h-0 gap-2 p-2 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] max-w-[520px] content-start gap-1.5 p-2 text-left",
+  emptyCanvasKicker:
+    "emptyCanvasKicker min-w-0 grid min-h-0 gap-2 p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+  emptyCanvasPanel:
+    "emptyCanvasPanel min-w-0 grid min-h-0 gap-2 p-2 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] flex-1 content-start overflow-auto p-2 bg-[color-mix(in_srgb,var(--vui-surface-glass)_94%,white_6%)] [background-image:linear-gradient(to_right,color-mix(in_srgb,var(--vui-border-subtle)_45%,transparent)_1px,transparent_1px),linear-gradient(to_bottom,color-mix(in_srgb,var(--vui-border-subtle)_32%,transparent)_1px,transparent_1px)] [background-size:32px_32px]",
+  emptyCanvasSteps:
+    "emptyCanvasSteps min-w-0 grid min-h-0 gap-2 p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] !flex flex-wrap gap-1.5",
+  experimentBaselineArtifact:
+    "experimentBaselineArtifact min-w-0",
+  experimentBaselineForm:
+    "experimentBaselineForm min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+  experimentChecklist:
+    "experimentChecklist min-w-0",
+  experimentChecklistPass:
+    "experimentChecklistPass min-w-0",
+  experimentChecklistWarn:
+    "experimentChecklistWarn min-w-0",
+  experimentEvidenceGrid:
+    "experimentEvidenceGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  experimentGapList:
+    "experimentGapList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  experimentHypothesisList:
+    "experimentHypothesisList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  experimentKnowledgeForm:
+    "experimentKnowledgeForm min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+  experimentKnowledgePanel:
+    "experimentKnowledgePanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  experimentKnowledgeToggle:
+    "experimentKnowledgeToggle min-w-0",
+  experimentKnowledgeWide:
+    "experimentKnowledgeWide min-w-0",
+  experimentLedgerEmpty:
+    "experimentLedgerEmpty min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+  experimentLedgerHeader:
+    "experimentLedgerHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  experimentLedgerPanel:
+    "experimentLedgerPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  experimentLedgerStats:
+    "experimentLedgerStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  experimentPlanFields:
+    "experimentPlanFields min-w-0",
+  experimentPlanGrid:
+    "experimentPlanGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  experimentPlanSummary:
+    "experimentPlanSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  experimentSmokeForm:
+    "experimentSmokeForm min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+  experimentSmokeMeta:
+    "experimentSmokeMeta min-w-0 flex flex-wrap items-center gap-1.5",
+  experimentSmokeResult:
+    "experimentSmokeResult min-w-0",
+  experimentSmokeResultPass:
+    "experimentSmokeResultPass min-w-0",
+  experimentSmokeResultWarn:
+    "experimentSmokeResultWarn min-w-0",
+  experimentSmokeWide:
+    "experimentSmokeWide min-w-0",
+  header:
+    "header min-w-0 flex flex-wrap items-center gap-1.5",
+  iconButton:
+    "iconButton min-w-0 inline-grid h-[var(--vui-control-height-sm)] min-h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] place-items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-0 text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] shrink-0 text-[var(--fg-tertiary)]",
+  inlineToggle:
+    "inlineToggle min-w-0",
+  inspector:
+    "inspector min-w-0 !flex min-h-0 flex-col overflow-hidden p-0",
+  inspectorBody:
+    "inspectorBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] grid min-h-0 content-start gap-2 overflow-auto p-2",
+  inspectorHeader:
+    "inspectorHeader min-w-0 flex flex-wrap items-center gap-1.5 !flex min-h-[36px] items-center justify-between border-b border-[var(--vui-border-subtle)] px-2 py-1",
+  issue:
+    "issue min-w-0",
+  issueList:
+    "issueList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  kernelTraceLink:
+    "kernelTraceLink min-w-0",
+  knowledgeCompletionFlowActions:
+    "knowledgeCompletionFlowActions min-w-0 flex flex-wrap items-center gap-1.5 !flex flex-wrap gap-1.5 min-w-0 mt-auto [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]",
+  knowledgeCompletionFlowError:
+    "knowledgeCompletionFlowError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+  knowledgeCompletionFlowHeader:
+    "knowledgeCompletionFlowHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  knowledgeCompletionFlowNode:
+    "knowledgeCompletionFlowNode min-w-0",
+  knowledgeCompletionFlowNodeBody:
+    "knowledgeCompletionFlowNodeBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  knowledgeCompletionFlowNodeCurrent:
+    "knowledgeCompletionFlowNodeCurrent min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
+  knowledgeCompletionFlowNodeHeader:
+    "knowledgeCompletionFlowNodeHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  knowledgeCompletionFlowNodes:
+    "knowledgeCompletionFlowNodes min-w-0",
+  knowledgeCompletionFlowPanel:
+    "knowledgeCompletionFlowPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  layerButtonActive:
+    "layerButtonActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  linkedRoomLine:
+    "linkedRoomLine min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 block truncate text-[var(--vui-font-xs)] font-semibold text-[var(--accent-cool)]",
+  managementNav:
+    "managementNav min-w-0",
+  messageError:
+    "messageError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  messageResult:
+    "messageResult min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  node:
+    "node min-w-0 !absolute left-[calc(var(--canvas-offset-x,0px)+var(--node-x,0px))] top-[calc(var(--canvas-offset-y,0px)+var(--node-y,0px))] z-[1] !grid h-[92px] w-[172px] cursor-grab select-none grid-cols-[20px_1fr] grid-rows-[auto_auto_auto] items-center gap-x-1.5 gap-y-0.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 text-left text-[var(--fg-primary)] shadow-[var(--vui-shadow-hairline)] touch-none [&_small]:truncate [&_span]:truncate [&_strong]:truncate",
+  nodeActive:
+    "nodeActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] shadow-[var(--vui-shadow-inset-accent)]",
+  nodeBindingPlaceholder:
+    "nodeBindingPlaceholder min-w-0",
+  nodeBindingSection:
+    "nodeBindingSection min-w-0 content-start gap-2",
+  nodeBound:
+    "nodeBound min-w-0 border-[color-mix(in_srgb,var(--state-success)_42%,var(--vui-border-subtle))]",
+  nodeIcon:
+    "nodeIcon min-w-0 shrink-0 text-[var(--fg-tertiary)] row-span-3 inline-flex h-5 w-5 items-center justify-center text-[var(--fg-tertiary)]",
+  nodeOpen:
+    "nodeOpen min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-dashed",
+  nodeReadOnly:
+    "nodeReadOnly min-w-0 cursor-pointer touch-manipulation",
+  nodeRoleBadge:
+    "nodeRoleBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] min-h-[18px] justify-self-start rounded-full border border-[var(--node-role-border,var(--vui-border-subtle))] bg-[var(--node-role-bg,var(--vui-control-muted))] px-1.5 py-0 text-[var(--node-role-fg,var(--fg-secondary))] text-[var(--vui-font-xs)] font-semibold leading-none",
+  nodeRoleBadgeAdvisor:
+    "nodeRoleBadgeAdvisor min-w-0 [--node-role-bg:color-mix(in_srgb,var(--accent-cool)_12%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] [--node-role-fg:var(--accent-cool)]",
+  nodeRoleBadgeGeneral:
+    "nodeRoleBadgeGeneral min-w-0 [--node-role-bg:var(--vui-control-muted)] [--node-role-border:var(--vui-border-subtle)] [--node-role-fg:var(--fg-secondary)]",
+  nodeRoleBadgeLead:
+    "nodeRoleBadgeLead min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [--node-role-bg:color-mix(in_srgb,var(--state-success)_11%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--state-success)_38%,var(--vui-border-subtle))] [--node-role-fg:var(--state-success)]",
+  nodeRoleBadgeOpen:
+    "nodeRoleBadgeOpen min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] [--node-role-bg:var(--vui-control-muted)] [--node-role-border:var(--vui-border-subtle)] [--node-role-fg:var(--fg-tertiary)]",
+  nodeRoleBadgeResearch:
+    "nodeRoleBadgeResearch min-w-0 [--node-role-bg:color-mix(in_srgb,var(--accent-warm)_10%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--accent-warm)_34%,var(--vui-border-subtle))] [--node-role-fg:var(--fg-secondary)]",
+  nodeRoleBadgeSelf:
+    "nodeRoleBadgeSelf min-w-0 [--node-role-bg:color-mix(in_srgb,var(--state-error)_9%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--state-error)_34%,var(--vui-border-subtle))] [--node-role-fg:var(--state-error)]",
+  nodeRoleBadgeStale:
+    "nodeRoleBadgeStale min-w-0 [--node-role-bg:color-mix(in_srgb,var(--state-error)_9%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--state-error)_40%,var(--vui-border-subtle))] [--node-role-fg:var(--state-error)]",
+  nodeRoleBadgeSteward:
+    "nodeRoleBadgeSteward min-w-0 [--node-role-bg:color-mix(in_srgb,var(--state-warning)_11%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--state-warning)_42%,var(--vui-border-subtle))] [--node-role-fg:var(--state-warning)]",
+  nodeSourceAuthority:
+    "nodeSourceAuthority min-w-0 !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 p-2 rounded-lg border border-[color:color-mix(in_srgb,var(--accent-cool)_26%,var(--border-soft))] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,var(--surface-panel-strong))] [&>div]:grid [&>div]:gap-0.5 [&>div]:min-w-0 [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]",
+  nodeStale:
+    "nodeStale min-w-0 border-[color-mix(in_srgb,var(--state-error)_48%,var(--vui-border-subtle))]",
+  researchCanvasIndex:
+    "researchCanvasIndex min-w-0 grid min-h-0 gap-2 p-2 !flex min-w-0 items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,var(--border-soft))] bg-[image:var(--vui-gradient-route-soft)] bg-[color:color-mix(in_srgb,var(--surface-card)_82%,transparent)] [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&>div_span]:truncate [&>div_span]:text-[var(--fg-muted)] [&>div_span]:font-[760] [&>div_small]:truncate [&>div_small]:text-[var(--fg-muted)] [&>div_small]:font-[760] [&>div_strong]:truncate [&>div_strong]:text-[var(--fg-primary)] [&_a]:inline-flex [&_a]:shrink-0 [&_a]:min-h-[30px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-[5px] [&_a]:px-[9px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_34%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--surface-panel-strong)_82%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[820] [&_a]:no-underline [&_a]:whitespace-nowrap",
+  researchCanvasPanelHidden:
+    "researchCanvasPanelHidden min-w-0 grid min-h-0 gap-2 p-2 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] hidden !hidden",
+  researchDiscussionPanel:
+    "researchDiscussionPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  researchInspector:
+    "researchInspector min-w-0",
+  researchLoopActive:
+    "researchLoopActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  researchLoopDecisionForm:
+    "researchLoopDecisionForm min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+  researchLoopEvidenceForm:
+    "researchLoopEvidenceForm min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+  researchLoopHeader:
+    "researchLoopHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  researchLoopOutcomeGrid:
+    "researchLoopOutcomeGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  researchLoopPanel:
+    "researchLoopPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  researchLoopStats:
+    "researchLoopStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  researchLoopStatusPills:
+    "researchLoopStatusPills min-w-0",
+  researchLoopTemplateBar:
+    "researchLoopTemplateBar min-w-0 flex flex-wrap items-center gap-1.5",
+  researchLoopTemplateSummary:
+    "researchLoopTemplateSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  researchLoopWide:
+    "researchLoopWide min-w-0",
+  researchStageActionPanel:
+    "researchStageActionPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
+  researchStageActions:
+    "researchStageActions min-w-0 flex flex-wrap items-center gap-1.5 !flex flex-wrap items-center gap-[7px] [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780] [&_a]:min-w-[104px] [&_[data-vui=native-button]]:min-w-[104px]",
+  researchStageAgentActions:
+    "researchStageAgentActions min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] !flex min-w-0 items-center justify-between gap-2 [&_a]:inline-flex [&_a]:shrink-0 [&_a]:min-h-[28px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-[5px] [&_a]:px-[9px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_28%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--surface-card)_74%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap",
+  researchStageAgentCard:
+    "researchStageAgentCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_acquire:
+    "researchStageAgentCard_acquire min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_active:
+    "researchStageAgentCard_active min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  researchStageAgentCard_blocked:
+    "researchStageAgentCard_blocked min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_cache:
+    "researchStageAgentCard_cache min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_danger:
+    "researchStageAgentCard_danger min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_done:
+    "researchStageAgentCard_done min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_error:
+    "researchStageAgentCard_error min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_extract:
+    "researchStageAgentCard_extract min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_failed:
+    "researchStageAgentCard_failed min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_idle:
+    "researchStageAgentCard_idle min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_info:
+    "researchStageAgentCard_info min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_mental:
+    "researchStageAgentCard_mental min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_missing:
+    "researchStageAgentCard_missing min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_muted:
+    "researchStageAgentCard_muted min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_neutral:
+    "researchStageAgentCard_neutral min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_ok:
+    "researchStageAgentCard_ok min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_pending:
+    "researchStageAgentCard_pending min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_plan:
+    "researchStageAgentCard_plan min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_quality:
+    "researchStageAgentCard_quality min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_ready:
+    "researchStageAgentCard_ready min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_running:
+    "researchStageAgentCard_running min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_search:
+    "researchStageAgentCard_search min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_status:
+    "researchStageAgentCard_status min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_storage:
+    "researchStageAgentCard_storage min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_success:
+    "researchStageAgentCard_success min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_thought:
+    "researchStageAgentCard_thought min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_warn:
+    "researchStageAgentCard_warn min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentCard_warning:
+    "researchStageAgentCard_warning min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentGrid:
+    "researchStageAgentGrid min-w-0 grid gap-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] !grid grid-cols-[repeat(auto-fit,minmax(210px,1fr))] gap-2",
+  researchStageAgentMeta:
+    "researchStageAgentMeta min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentPanel:
+    "researchStageAgentPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentPanelCompact:
+    "researchStageAgentPanelCompact min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentPanelHeader:
+    "researchStageAgentPanelHeader min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] !flex min-w-0 items-center justify-between gap-2.5 [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&>div_strong]:truncate [&>div_strong]:text-[var(--fg-primary)] [&>div_span]:truncate [&>div_span]:text-[var(--fg-muted)] [&>div_span]:font-[760] [&_a]:inline-flex [&_a]:shrink-0 [&_a]:min-h-[28px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-[5px] [&_a]:px-[9px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_28%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--surface-card)_74%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap",
+  researchStageAgentRole:
+    "researchStageAgentRole min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentSummary:
+    "researchStageAgentSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentSummaryBlocked:
+    "researchStageAgentSummaryBlocked min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentSummaryMissing:
+    "researchStageAgentSummaryMissing min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageAgentSummaryReady:
+    "researchStageAgentSummaryReady min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  researchStageBoundaryPanel:
+    "researchStageBoundaryPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  researchStageCard:
+    "researchStageCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  researchStageCardActive:
+    "researchStageCardActive min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  researchStageCardHead:
+    "researchStageCardHead min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 !grid grid-cols-[auto_1fr] items-start gap-2.5",
+  researchStageCardMetrics:
+    "researchStageCardMetrics min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid gap-2 !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[5px]",
+  researchStageGrid:
+    "researchStageGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  researchStageHeroPanel:
+    "researchStageHeroPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  researchStageHeroStats:
+    "researchStageHeroStats min-w-0 grid gap-2 !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-2",
+  researchStageLauncher:
+    "researchStageLauncher min-w-0",
+  researchStageLauncherHeader:
+    "researchStageLauncherHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  researchStageModuleCard:
+    "researchStageModuleCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  researchStageModuleGrid:
+    "researchStageModuleGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  researchStagePage:
+    "researchStagePage min-w-0",
+  researchStagePageActions:
+    "researchStagePageActions min-w-0 flex flex-wrap items-center gap-1.5",
+  researchStagePageBody:
+    "researchStagePageBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  researchStagePageHeader:
+    "researchStagePageHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  researchStageTopicInput:
+    "researchStageTopicInput min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+  revokeButton:
+    "revokeButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+  route:
+    "route min-w-0 grid h-full min-h-0 content-start overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)]",
+  saveState:
+    "saveState min-w-0",
+  sectionTitle:
+    "sectionTitle min-w-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
+  sourceCollectionCandidateListShell:
+    "sourceCollectionCandidateListShell min-w-0 grid h-full min-h-0 content-start overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)] gap-1.5 overflow-auto min-h-0 content-start items-start self-start overflow-y-auto [scrollbar-gutter:stable]",
+  sourceCollectionCommandBar:
+    "sourceCollectionCommandBar min-w-0 flex flex-wrap items-center gap-1.5 !grid grid-cols-[minmax(0,1fr)_minmax(320px,0.55fr)] items-center gap-2 px-2 py-2 max-[980px]:grid-cols-[1fr]",
+  sourceCollectionCommandStats:
+    "sourceCollectionCommandStats min-w-0 grid gap-2 grid-cols-[repeat(3,minmax(120px,1fr))] max-[860px]:grid-cols-[1fr] [&_span]:min-h-[30px]",
+  sourceCollectionCommandTitle:
+    "sourceCollectionCommandTitle min-w-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
+  sourceCollectionControlPanel:
+    "sourceCollectionControlPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
+  sourceCollectionConversationHeader:
+    "sourceCollectionConversationHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  sourceCollectionConversationPanel:
+    "sourceCollectionConversationPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  sourceCollectionEmptyRunNotice:
+    "sourceCollectionEmptyRunNotice min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-[7px] border border-[color:color-mix(in_srgb,var(--state-warning)_34%,var(--border-soft))] bg-[color:color-mix(in_srgb,var(--state-warning)_8%,var(--source-workbench-card))] px-3 py-2 text-[var(--vui-font-sm)] max-[760px]:grid-cols-[1fr] [&_div]:grid [&_div]:min-w-0 [&_div]:gap-0.5 [&_strong]:text-[var(--fg-primary)] [&_span]:text-[var(--fg-secondary)]",
+  sourceCollectionFilterActive:
+    "sourceCollectionFilterActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  sourceCollectionFilterBar:
+    "sourceCollectionFilterBar min-w-0 flex flex-wrap items-center gap-1.5 overflow-x-auto [&_[data-vui=native-button]]:flex-none [&_[data-vui=native-button]]:min-w-[76px]",
+  sourceCollectionFocusedPanel:
+    "sourceCollectionFocusedPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid grid-cols-[minmax(0,1fr)_minmax(320px,380px)] isolate",
+  sourceCollectionPage:
+    "sourceCollectionPage min-w-0",
+  sourceCollectionPageActions:
+    "sourceCollectionPageActions min-w-0 flex flex-wrap items-center gap-1.5 !flex flex-wrap items-center justify-end gap-2 min-w-0 [&_a]:inline-flex [&_a]:min-h-[30px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[var(--border-soft)] [&_a]:bg-[color:var(--surface-panel-strong)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[760] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:min-h-[30px] [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[var(--border-soft)] [&_[data-vui=native-button]]:bg-[color:var(--surface-panel-strong)] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[760]",
+  sourceCollectionPageBody:
+    "sourceCollectionPageBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] !grid min-h-0 content-start gap-2 overflow-auto p-2",
+  sourceCollectionPageGrid:
+    "sourceCollectionPageGrid min-w-0 grid gap-2 grid-cols-[minmax(0,1fr)]",
+  sourceCollectionPageHeader:
+    "sourceCollectionPageHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  sourceCollectionPageTitleBlock:
+    "sourceCollectionPageTitleBlock min-w-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
+  sourceCollectionPageTitleLine:
+    "sourceCollectionPageTitleLine min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
+  sourceCollectionPagination:
+    "sourceCollectionPagination min-w-0 select-none whitespace-nowrap [writing-mode:horizontal-tb]",
+  sourceCollectionPanelActions:
+    "sourceCollectionPanelActions min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5 flex-wrap",
+  sourceCollectionResultContent:
+    "sourceCollectionResultContent min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] min-w-0 [&_strong]:block [&_strong]:truncate",
+  sourceCollectionResultItem:
+    "sourceCollectionResultItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 grid grid-cols-[max-content_minmax(0,1fr)_max-content_minmax(120px,220px)] min-h-[36px] items-center gap-2 px-2 py-1 max-[820px]:grid-cols-[max-content_minmax(0,1fr)]",
+  sourceCollectionResultItemSelected:
+    "sourceCollectionResultItemSelected min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
+  sourceCollectionResultList:
+    "sourceCollectionResultList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  sourceCollectionResultMeta:
+    "sourceCollectionResultMeta min-w-0 flex flex-wrap items-center gap-1.5 flex min-w-[76px] flex-nowrap items-center gap-1 whitespace-nowrap text-[var(--vui-font-xs)] text-[var(--fg-tertiary)] [&_span:first-child]:text-[var(--fg-secondary)] max-[820px]:hidden",
+  sourceCollectionResultSource:
+    "sourceCollectionResultSource min-w-0 grid grid-cols-[max-content_minmax(0,1fr)] items-center gap-1 overflow-hidden text-[var(--vui-font-xs)] [&_a]:truncate [&_code]:truncate max-[820px]:col-span-2",
+  sourceCollectionResultSourceMissing:
+    "sourceCollectionResultSourceMissing min-w-0",
+  sourceCollectionResultStats:
+    "sourceCollectionResultStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  sourceCollectionResultStatus:
+    "sourceCollectionResultStatus min-w-0 whitespace-nowrap justify-self-start",
+  sourceCollectionResultWarning:
+    "sourceCollectionResultWarning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+  sourceCollectionResultsHeader:
+    "sourceCollectionResultsHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  sourceCollectionResultsPanel:
+    "sourceCollectionResultsPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  sourceCollectionRunBadge:
+    "sourceCollectionRunBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+  sourceCollectionRunSwitcher:
+    "sourceCollectionRunSwitcher min-w-0 !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-[7px] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,var(--border-soft))] bg-[color:var(--source-workbench-panel)] px-2 py-1.5 max-[980px]:grid-cols-[1fr]",
+  sourceCollectionRunSwitcherMain:
+    "sourceCollectionRunSwitcherMain min-w-0 grid min-w-0 grid-cols-[max-content_minmax(220px,360px)_minmax(0,1fr)] items-center gap-2 text-[var(--vui-font-xs)] font-[760] text-[var(--fg-secondary)] max-[900px]:grid-cols-[1fr] [&_small]:min-w-0 [&_small]:truncate [&_small]:text-[var(--fg-muted)]",
+  sourceCollectionRunSwitcherStats:
+    "sourceCollectionRunSwitcherStats min-w-0 grid gap-2 grid min-w-[300px] grid-cols-[repeat(3,minmax(90px,1fr))] gap-1.5 text-[var(--vui-font-xs)] max-[980px]:min-w-0 [&_span]:flex [&_span]:min-h-[26px] [&_span]:items-center [&_span]:justify-between [&_span]:gap-1.5 [&_span]:rounded-[7px] [&_span]:border [&_span]:border-[color:var(--border-soft)] [&_span]:bg-[color:var(--source-workbench-card)] [&_span]:px-2 [&_span]:font-[720] [&_strong]:text-[var(--fg-primary)]",
+  sourceCollectionScreeningList:
+    "sourceCollectionScreeningList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  sourceCollectionScreeningListShell:
+    "sourceCollectionScreeningListShell min-w-0 grid h-full min-h-0 content-start overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)] gap-1.5 overflow-auto",
+  sourceCollectionScreeningScrollHint:
+    "sourceCollectionScreeningScrollHint min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+  sourceCollectionSearchEvidence:
+    "sourceCollectionSearchEvidence min-w-0",
+  sourceCollectionSearchEvidenceBody:
+    "sourceCollectionSearchEvidenceBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] !grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-[5px] min-w-0 [&>span]:grid [&>span]:gap-0.5 [&>span]:min-w-0 [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]",
+  sourceCollectionSourceDetailActions:
+    "sourceCollectionSourceDetailActions min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5 !flex flex-wrap gap-1.5 min-w-0 [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]",
+  sourceCollectionSourceDetailFacts:
+    "sourceCollectionSourceDetailFacts min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 !grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-[5px]",
+  sourceCollectionSourceDetailHeader:
+    "sourceCollectionSourceDetailHeader min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
+  sourceCollectionSourceDetailNotice:
+    "sourceCollectionSourceDetailNotice min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  sourceCollectionSourceDetailPanel:
+    "sourceCollectionSourceDetailPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  sourceCollectionStageAgentCard:
+    "sourceCollectionStageAgentCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] !grid grid-cols-[minmax(0,1fr)_auto] items-stretch gap-2 [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]",
+  sourceCollectionStageAgentCardActions:
+    "sourceCollectionStageAgentCardActions min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  sourceCollectionStageAgentCardBody:
+    "sourceCollectionStageAgentCardBody min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-1.5",
+  sourceCollectionStageAgentHeader:
+    "sourceCollectionStageAgentHeader min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] !flex items-center justify-between gap-2 min-w-0 [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&>div_strong]:truncate [&>div_strong]:text-[var(--fg-primary)] [&>div_span]:truncate [&>div_span]:text-[var(--fg-muted)] [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]",
+  sourceCollectionStageAgentList:
+    "sourceCollectionStageAgentList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  sourceCollectionStageAgentPanel:
+    "sourceCollectionStageAgentPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  sourceCollectionStageBlockers:
+    "sourceCollectionStageBlockers min-w-0",
+  sourceCollectionStageCard:
+    "sourceCollectionStageCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 !grid min-h-[118px] content-start gap-2 border-l-[4px] [border-left-color:var(--source-step-color,var(--vui-border-subtle))] px-2 py-2",
+  sourceCollectionStageCardActions:
+    "sourceCollectionStageCardActions min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5 !flex flex-nowrap items-center justify-between gap-1.5 pt-1 [&_[data-vui=native-button]]:w-fit [&_[data-vui=native-button]]:max-w-full [&_[data-vui=native-button]]:justify-center",
+  sourceCollectionStageCardHead:
+    "sourceCollectionStageCardHead min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid grid-cols-[max-content_1fr] items-center gap-2 [&_span]:justify-self-end [&_span]:whitespace-nowrap",
+  sourceCollectionStageCardSelected:
+    "sourceCollectionStageCardSelected min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
+  sourceCollectionStageChatActions:
+    "sourceCollectionStageChatActions min-w-0 flex flex-wrap items-center gap-1.5 !grid grid-cols-[repeat(3,max-content)] items-center justify-end gap-1.5 min-w-0 max-[720px]:grid-cols-[1fr] [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[30px] [&_a]:w-max [&_a]:max-w-full [&_a]:px-3 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_42%,var(--border-soft))] [&_a]:bg-[image:var(--vui-gradient-route-soft)] [&_a]:bg-[color:var(--source-workbench-card)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[840] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:min-h-[30px]",
+  sourceCollectionStageHandoff:
+    "sourceCollectionStageHandoff min-w-0",
+  sourceCollectionStageHandoffNext:
+    "sourceCollectionStageHandoffNext min-w-0",
+  sourceCollectionStageMiniFlow:
+    "sourceCollectionStageMiniFlow min-w-0",
+  sourceCollectionStageModuleText:
+    "sourceCollectionStageModuleText min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [&_b]:text-[var(--vui-font-base)] [&_em]:text-[var(--vui-font-sm)] [&_small]:line-clamp-1",
+  sourceCollectionStageModules:
+    "sourceCollectionStageModules min-w-0 grid grid-cols-[repeat(4,minmax(0,1fr))] max-[1220px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[720px]:grid-cols-[1fr]",
+  sourceCollectionStagePrimaryAction:
+    "sourceCollectionStagePrimaryAction min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)] w-fit max-w-full",
+  sourceCollectionStageProjection:
+    "sourceCollectionStageProjection min-w-0",
+  sourceCollectionStageSecondaryAction:
+    "sourceCollectionStageSecondaryAction min-w-0 flex flex-wrap items-center gap-1.5 w-fit max-w-full",
+  sourceCollectionStageTaskSummary:
+    "sourceCollectionStageTaskSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  sourceCollectionStageTechnicalDetails:
+    "sourceCollectionStageTechnicalDetails min-w-0",
+  sourceCollectionStageWorkspace:
+    "sourceCollectionStageWorkspace min-w-0 grid min-h-0 gap-2 p-2 grid-rows-[auto_minmax(0,1fr)]",
+  sourceCollectionStageWorkspaceHeader:
+    "sourceCollectionStageWorkspaceHeader min-w-0 grid min-h-0 gap-2 p-2 flex flex-wrap items-center gap-1.5",
+  sourceCollectionStepActive:
+    "sourceCollectionStepActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] [--source-step-color:var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_52%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-base))]",
+  sourceCollectionStepDone:
+    "sourceCollectionStepDone min-w-0 [--source-step-color:var(--state-success)] border-[color-mix(in_srgb,var(--state-success)_48%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-success)_8%,var(--vui-surface-base))]",
+  sourceCollectionStepFailed:
+    "sourceCollectionStepFailed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] [--source-step-color:var(--state-error)] border-[color-mix(in_srgb,var(--state-error)_50%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_8%,var(--vui-surface-base))]",
+  sourceCollectionStepIdle:
+    "sourceCollectionStepIdle min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)] [--source-step-color:var(--fg-tertiary)] border-[color-mix(in_srgb,var(--fg-tertiary)_26%,var(--vui-border-subtle))] bg-[var(--vui-surface-base)]",
+  sourceCollectionStepPending:
+    "sourceCollectionStepPending min-w-0 [--source-step-color:var(--state-warning)] border-[color-mix(in_srgb,var(--state-warning)_48%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_8%,var(--vui-surface-base))]",
+  sourceCollectionTraceAvatar:
+    "sourceCollectionTraceAvatar min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
+  sourceCollectionTraceBody:
+    "sourceCollectionTraceBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] grid grid-cols-[44px_minmax(0,1fr)] [&_p]:line-clamp-2",
+  sourceCollectionTraceDetails:
+    "sourceCollectionTraceDetails min-w-0",
+  sourceCollectionTraceHandoff:
+    "sourceCollectionTraceHandoff min-w-0",
+  sourceCollectionTraceList:
+    "sourceCollectionTraceList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  sourceCollectionTraceMessage:
+    "sourceCollectionTraceMessage min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  sourceCollectionTraceMeta:
+    "sourceCollectionTraceMeta min-w-0 flex flex-wrap items-center gap-1.5",
+  sourceCollectionTraceOwner:
+    "sourceCollectionTraceOwner min-w-0",
+  sourceCollectionTraceRefs:
+    "sourceCollectionTraceRefs min-w-0",
+  sourceCollectionTraceStorage:
+    "sourceCollectionTraceStorage min-w-0",
+  sourceCollectionTrace_acquire:
+    "sourceCollectionTrace_acquire min-w-0",
+  sourceCollectionTrace_blocked:
+    "sourceCollectionTrace_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+  sourceCollectionTrace_cache:
+    "sourceCollectionTrace_cache min-w-0",
+  sourceCollectionTrace_extract:
+    "sourceCollectionTrace_extract min-w-0",
+  sourceCollectionTrace_plan:
+    "sourceCollectionTrace_plan min-w-0",
+  sourceCollectionTrace_quality:
+    "sourceCollectionTrace_quality min-w-0",
+  sourceCollectionTrace_search:
+    "sourceCollectionTrace_search min-w-0",
+  sourceCollectionTrace_storage:
+    "sourceCollectionTrace_storage min-w-0",
+  sourceCollectionUnavailable:
+    "sourceCollectionUnavailable min-w-0 !grid gap-2 content-center justify-items-start p-[18px] rounded-lg border border-[var(--border-soft)] bg-[image:var(--vui-gradient-route-soft)] bg-[color:var(--source-workbench-panel)] [&_strong]:text-[var(--fg-primary)] [&_span]:text-[var(--fg-muted)] [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[28px] [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_a]:text-[var(--fg-primary)] [&_a]:font-[780] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_32%,var(--border-soft))] [&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel-strong))] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[780]",
+  teamContextActions:
+    "teamContextActions min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)] !flex flex-nowrap items-center justify-end gap-1.5",
+  teamContextBar:
+    "teamContextBar min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)] mx-2 mt-1 !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-2 py-1",
+  teamContextChips:
+    "teamContextChips min-w-0 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)] mx-2 !grid grid-cols-[repeat(4,max-content)] justify-start gap-1.5 overflow-x-auto p-0 [scrollbar-width:thin]",
+  teamHistoryHeader:
+    "teamHistoryHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  teamHistoryItem:
+    "teamHistoryItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  teamHistoryItemRevoked:
+    "teamHistoryItemRevoked min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  teamHistoryList:
+    "teamHistoryList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  teamHistoryMeta:
+    "teamHistoryMeta min-w-0 flex flex-wrap items-center gap-1.5",
+  teamHistoryPanel:
+    "teamHistoryPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  teamMemoryActionRail:
+    "teamMemoryActionRail min-w-0 flex flex-wrap items-center gap-1.5 grid min-h-0 content-start overflow-auto !flex min-w-0 items-center justify-end gap-[5px] [&_a]:inline-flex [&_a]:min-h-[24px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-1 [&_a]:px-[7px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_30%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--surface-panel)_88%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[820] [&_a]:no-underline [&_a]:whitespace-nowrap [&_a:hover]:border-[color:color-mix(in_srgb,var(--accent-cool)_46%,var(--border-soft))] [&_a:hover]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel))]",
+  teamMemoryIndex:
+    "teamMemoryIndex min-w-0 grid gap-2 grid-cols-[minmax(0,1fr)]",
+  teamMemoryIndexHeader:
+    "teamMemoryIndexHeader min-w-0 flex flex-wrap items-center gap-1.5 !flex min-w-0 items-center justify-between gap-2 [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&>div_strong]:truncate [&>div_strong]:text-[var(--fg-primary)] [&>div_span]:truncate [&>div_span]:text-[var(--fg-muted)] [&>div_span]:font-[760]",
+  teamMemoryMemberActions:
+    "teamMemoryMemberActions min-w-0 flex flex-wrap items-center gap-1.5 !flex items-center justify-end gap-[5px] min-w-0 [&_a_span]:hidden [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:w-[26px] [&_a]:min-w-[26px] [&_a]:min-h-[24px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_30%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--surface-panel)_88%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:no-underline",
+  teamMemoryMemberCard:
+    "teamMemoryMemberCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  teamMemoryMemberHeading:
+    "teamMemoryMemberHeading min-w-0 hidden",
+  teamMemoryMemberIdentity:
+    "teamMemoryMemberIdentity min-w-0 grid gap-1",
+  teamMemoryMemberTable:
+    "teamMemoryMemberTable min-w-0 !grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2",
+  teamMemoryRole:
+    "teamMemoryRole min-w-0",
+  teamMemoryStatusBadge:
+    "teamMemoryStatusBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+  teamMessageForm:
+    "teamMessageForm min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)]",
+  teamRoundCard:
+    "teamRoundCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  teamRoundHeader:
+    "teamRoundHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  teamRoundMeta:
+    "teamRoundMeta min-w-0 flex flex-wrap items-center gap-1.5",
+  teamRoundPanel:
+    "teamRoundPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  teamSelectField:
+    "teamSelectField min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full grid grid-cols-[max-content_minmax(180px,300px)] items-center gap-1.5 text-[var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)]",
+  teamTaskForm:
+    "teamTaskForm min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+  teamTitleBlock:
+    "teamTitleBlock min-w-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
+  teamUnavailableActions:
+    "teamUnavailableActions min-w-0 flex flex-wrap items-center gap-1.5 !flex min-w-0 justify-end gap-1.5 [&_button]:min-w-[78px]",
+  teamUnavailableCard:
+    "teamUnavailableCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid w-full max-w-[720px] content-start gap-3 p-4 text-left",
+  teamUnavailableMeta:
+    "teamUnavailableMeta min-w-0 flex flex-wrap items-center gap-1.5 grid grid-cols-[repeat(3,minmax(0,1fr))] gap-1.5 text-[var(--vui-font-xs)] max-[760px]:grid-cols-[1fr]",
+  teamUnavailableSurface:
+    "teamUnavailableSurface min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid min-h-0 flex-1 grid-cols-[minmax(0,720px)] content-start justify-items-center overflow-auto px-3 py-4",
+  toolbarActions:
+    "toolbarActions min-w-0 flex flex-wrap items-center gap-1.5 !flex min-w-[220px] max-w-[min(100%,560px)] flex-wrap items-center justify-end gap-1.5 overflow-visible [&_a]:min-w-[72px] [&_a]:whitespace-nowrap [&_button]:min-w-[72px] [&_button]:whitespace-nowrap",
+  toolbarLink:
+    "toolbarLink min-w-0 flex flex-wrap items-center gap-1.5",
+  workflowCandidateActions:
+    "workflowCandidateActions min-w-0 flex flex-wrap items-center gap-1.5",
+  workflowCandidateHeader:
+    "workflowCandidateHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  workflowCandidateItem:
+    "workflowCandidateItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 grid grid-cols-[minmax(0,1fr)_minmax(120px,220px)] min-h-[40px] items-center gap-2 px-2 py-1 max-[820px]:grid-cols-[minmax(0,1fr)]",
+  workflowCandidateItemSelected:
+    "workflowCandidateItemSelected min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
+  workflowCandidateList:
+    "workflowCandidateList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  workflowCandidateListHeader:
+    "workflowCandidateListHeader min-w-0 flex flex-wrap items-center gap-1.5 grid min-h-0 content-start overflow-auto",
+  workflowCandidateListPanel:
+    "workflowCandidateListPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid min-h-0 content-start gap-1.5 overflow-auto",
+  workflowCandidateListScroll:
+    "workflowCandidateListScroll min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  workflowCandidateListScrollHint:
+    "workflowCandidateListScrollHint min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+  workflowCandidateMeta:
+    "workflowCandidateMeta min-w-0 flex flex-wrap items-center gap-1.5",
+  workflowCoordinationBriefSummary:
+    "workflowCoordinationBriefSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  workflowCoordinationPanel:
+    "workflowCoordinationPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  workflowCoordinationQueue:
+    "workflowCoordinationQueue min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  workflowCoordinationQueues:
+    "workflowCoordinationQueues min-w-0",
+  workflowCoordinationStats:
+    "workflowCoordinationStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  workflowError:
+    "workflowError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+  workflowGraphBoundary:
+    "workflowGraphBoundary min-w-0",
+  workflowGraphCanvas:
+    "workflowGraphCanvas min-w-0 grid min-h-0 gap-2 p-2",
+  workflowGraphEdge:
+    "workflowGraphEdge min-w-0",
+  workflowGraphFrame:
+    "workflowGraphFrame min-w-0 h-full overflow-hidden",
+  workflowGraphHeader:
+    "workflowGraphHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  workflowGraphIssues:
+    "workflowGraphIssues min-w-0",
+  workflowGraphNode:
+    "workflowGraphNode min-w-0",
+  workflowGraphNodeDanger:
+    "workflowGraphNodeDanger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+  workflowGraphNodeNeutral:
+    "workflowGraphNodeNeutral min-w-0",
+  workflowGraphNodeReady:
+    "workflowGraphNodeReady min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+  workflowGraphNodeWarning:
+    "workflowGraphNodeWarning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+  workflowGraphPanel:
+    "workflowGraphPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  workflowGraphStats:
+    "workflowGraphStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  workflowGraphSvg:
+    "workflowGraphSvg min-w-0",
+  workflowIngestionActions:
+    "workflowIngestionActions min-w-0 flex flex-wrap items-center gap-1.5",
+  workflowIngestionBoundary:
+    "workflowIngestionBoundary min-w-0",
+  workflowIngestionHeader:
+    "workflowIngestionHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  workflowIngestionPanel:
+    "workflowIngestionPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  workflowIngestionStage:
+    "workflowIngestionStage min-w-0",
+  workflowIngestionStages:
+    "workflowIngestionStages min-w-0 !grid grid-cols-[repeat(5,minmax(58px,1fr))] gap-1",
+  workflowIngestionStats:
+    "workflowIngestionStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  workflowMeta:
+    "workflowMeta min-w-0 flex flex-wrap items-center gap-1.5",
+  workflowModelEvidenceCoverage:
+    "workflowModelEvidenceCoverage min-w-0 !grid grid-cols-[repeat(auto-fit,minmax(118px,1fr))] gap-1.5",
+  workflowModelEvidencePanel:
+    "workflowModelEvidencePanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  workflowModelEvidenceStats:
+    "workflowModelEvidenceStats min-w-0 grid gap-2 !grid grid-cols-[repeat(auto-fit,minmax(118px,1fr))] gap-1.5",
+  workflowPanel:
+    "workflowPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  workflowPaperNoteChunkPanel:
+    "workflowPaperNoteChunkPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  workflowPaperNoteChunkPlans:
+    "workflowPaperNoteChunkPlans min-w-0 !grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[5px]",
+  workflowPaperNoteChunkStats:
+    "workflowPaperNoteChunkStats min-w-0 grid gap-2 !grid grid-cols-[repeat(4,minmax(86px,1fr))] gap-[5px]",
+  workflowSourceCollectionAssignmentActive:
+    "workflowSourceCollectionAssignmentActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  workflowSourceCollectionAssignments:
+    "workflowSourceCollectionAssignments min-w-0",
+  workflowSourceCollectionDetails:
+    "workflowSourceCollectionDetails min-w-0",
+  workflowSourceCollectionForm:
+    "workflowSourceCollectionForm min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full !grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[5px]",
+  workflowSourceCollectionOutputForm:
+    "workflowSourceCollectionOutputForm min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full !grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[5px]",
+  workflowSourceCollectionOutputHeader:
+    "workflowSourceCollectionOutputHeader min-w-0 flex flex-wrap items-center gap-1.5",
+  workflowSourceCollectionPanel:
+    "workflowSourceCollectionPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  workflowSourceCollectionPlan:
+    "workflowSourceCollectionPlan min-w-0",
+  workflowSourceCollectionQueries:
+    "workflowSourceCollectionQueries min-w-0",
+  workflowSourceCollectionRuns:
+    "workflowSourceCollectionRuns min-w-0",
+  workflowSourceCollectionSearchAction:
+    "workflowSourceCollectionSearchAction min-w-0 flex flex-wrap items-center gap-1.5",
+  workflowSourceCollectionStats:
+    "workflowSourceCollectionStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  workflowSourceCollectionStorageActions:
+    "workflowSourceCollectionStorageActions min-w-0 flex flex-wrap items-center gap-1.5",
+  workflowSourceCollectionStorageButtons:
+    "workflowSourceCollectionStorageButtons min-w-0",
+  workflowSourceCollectionStorageDetails:
+    "workflowSourceCollectionStorageDetails min-w-0",
+  workflowSourceCollectionStorageError:
+    "workflowSourceCollectionStorageError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+  workflowSourceCollectionWide:
+    "workflowSourceCollectionWide min-w-0",
+  workflowSourceQualityPanel:
+    "workflowSourceQualityPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  workflowSourceQualityQueue:
+    "workflowSourceQualityQueue min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[5px]",
+  workflowSourceQualityStats:
+    "workflowSourceQualityStats min-w-0 grid gap-2 !grid grid-cols-[repeat(5,minmax(72px,1fr))] gap-[5px]",
+  workflowStageActive:
+    "workflowStageActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  workflowStageList:
+    "workflowStageList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  workflowStats:
+    "workflowStats min-w-0 grid gap-2 !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-1.5",
+  workflowSuccess:
+    "workflowSuccess min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+  workflowTag:
+    "workflowTag min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+  workflowTagDanger:
+    "workflowTagDanger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+  workflowTagNeutral:
+    "workflowTagNeutral min-w-0",
+  workflowTagReady:
+    "workflowTagReady min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+  workflowTagWarning:
+    "workflowTagWarning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+  workflowValidation:
+    "workflowValidation min-w-0",
+  workspace:
+    "workspace min-w-0 grid min-h-0 gap-2 p-2 !grid min-h-0 grid-cols-[minmax(520px,1fr)_minmax(300px,380px)] gap-2 overflow-hidden px-2 pb-2 pt-1",
+  workspaceEmpty:
+    "workspaceEmpty min-w-0 grid min-h-0 gap-2 p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+  workspaceResearch:
+    "workspaceResearch min-w-0 grid min-h-0 gap-2 p-2 !grid-cols-[minmax(0,1fr)]",
+  workspaceResearchCanvas:
+    "workspaceResearchCanvas min-w-0 grid min-h-0 gap-2 p-2 !grid h-full grid-cols-[minmax(520px,1fr)_minmax(300px,380px)] overflow-hidden",
+};
 
 export default styles;
