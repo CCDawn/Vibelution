@@ -1014,6 +1014,10 @@ const styles: Record<string, string> = {
     "vui-components-conversationview userAttachmentImage min-w-0",
   userAttachmentMeta:
     "vui-components-conversationview userAttachmentMeta min-w-0 flex flex-wrap items-center gap-1.5",
+  userContextReferences:
+    "vui-components-conversationview userContextReferences min-w-0 flex flex-wrap justify-end gap-1.5",
+  userContextSection:
+    "vui-components-conversationview userContextSection min-w-0 grid gap-2",
   userCard:
     "vui-components-conversationview userCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel))]",
   userMessageBody:

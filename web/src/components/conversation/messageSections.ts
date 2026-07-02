@@ -1,11 +1,13 @@
 import { ConversationMessage, MentalStateSnapshot } from "../../api/types";
 import { agentMessageToSections } from "../../agent-thread/sections";
 import type {
+  AgentAttachmentPart,
   AgentMessage,
   AgentMessagePart,
   AgentMessageSection,
   AgentMessageSectionKind,
   AgentMentalPart,
+  AgentReferencePart,
   AgentTextPart,
   AgentThoughtPart,
 } from "../../agent-thread/types";
@@ -51,6 +53,11 @@ export type AgentMessageSectionState = {
   hasUserContent: boolean;
 };
 
+export type AgentMessageContextSection = AgentMessageSection & {
+  kind: "context";
+  parts: Array<AgentAttachmentPart | AgentReferencePart>;
+};
+
 export function buildAgentMessageSectionState(message: AgentMessage): AgentMessageSectionState {
   const sections = agentMessageToSections(message);
   const processParts = sectionParts(sections, "process");
@@ -73,6 +80,11 @@ export function buildAgentMessageSectionState(message: AgentMessage): AgentMessa
     hasFeedbackTimeline: message.role === "assistant" && processParts.some(isAgentFeedbackTimelinePart),
     hasUserContent: message.role !== "assistant" && Boolean(userText),
   };
+}
+
+export function agentMessageContextSections(message: AgentMessage): AgentMessageContextSection[] {
+  return agentMessageToSections(message)
+    .filter((section): section is AgentMessageContextSection => section.kind === "context");
 }
 
 function sectionParts(sections: AgentMessageSection[], kind: AgentMessageSectionKind) {
