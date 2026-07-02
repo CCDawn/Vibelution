@@ -329,7 +329,7 @@ const styles = createVuiStyleMap(styleKeys, {
       "grid-rows-[max-content] overflow-visible max-h-none max-[1360px]:grid max-[900px]:h-auto max-[900px]:overflow-auto max-[900px]:content-start max-[900px]:grid-rows-[max-content_max-content_max-content]",
     noticeText: "max-[1200px]:hidden",
     sourceInventoryBar: "max-[1200px]:hidden",
-    sourceMetaCompact: "max-[1200px]:hidden",
+    sourceMetaCompact: "!grid grid-cols-[minmax(0,1fr)_minmax(96px,auto)] items-center gap-2 max-[1200px]:hidden",
     structuredEmptyState: "min-h-[86px] px-3 py-2.5",
     supervisedMemberRow: "min-h-[34px] font-mono",
     supervisedMembersList: "max-h-[min(238px,34vh)]",
@@ -353,7 +353,12 @@ const styles = createVuiStyleMap(styleKeys, {
     supervisedWorkflowSessionLink:
       "min-h-[24px] w-full justify-center px-1.5 text-[var(--vui-font-xs)] leading-none",
     transcriptSection: "flex-1 basis-0 bg-transparent",
-    toolbar: "!flex items-center justify-between gap-x-3 gap-y-2 flex-wrap min-w-0",
+    supervisedRunOptions: "!grid grid-cols-[minmax(0,0.95fr)_minmax(126px,1.05fr)] items-end gap-1.5",
+    datasetCatalogItem: "!grid grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-1",
+    caseTraceSummary: "!grid grid-cols-[26px_minmax(0,1fr)_auto_18px] items-start gap-2.5",
+    closedLoopLedgerEvidenceGrid: "!grid grid-cols-[repeat(2,minmax(0,1fr))] gap-1.5",
+    toolbar:
+      "!flex items-center justify-between gap-x-3 gap-y-2 flex-wrap min-w-0 max-[900px]:!grid max-[900px]:grid-cols-[1fr] max-[900px]:gap-1.5",
     runNextActionStrip:
       "!grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2 px-2.5 py-2 rounded-[7px] border border-[var(--border-hairline)] bg-[var(--surface-card-subtle)] text-[var(--fg-secondary)] min-w-0",
     liveSummaryRow:
