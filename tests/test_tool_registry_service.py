@@ -93,7 +93,16 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     assert {
         "source_collection_context_tool",
         "source_collection_stage_writeback_tool",
+        "task_list_tool",
+        "task_create_tool",
+        "task_update_tool",
     }.issubset(set(bundles["source_collection_stage"]["toolNames"]))
+    assert bundles["source_collection_stage"]["preferredToolNames"][:4] == [
+        "task_list_tool",
+        "task_create_tool",
+        "task_update_tool",
+        "source_collection_context_tool",
+    ]
     assert {
         "knowledge_proposal_tool",
         "knowledge_ingestion_tool",

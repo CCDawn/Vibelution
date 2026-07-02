@@ -239,9 +239,9 @@ def _capture_workflow_events(monkeypatch):
     return events
 
 
-def _append_stage_task_tool_trace(project_root: Path, task: dict, *, complete: bool = True) -> None:
+def _append_stage_task_tool_trace(project_root: Path, task: dict, *, complete: bool = True, turn_id: str = "") -> None:
     session_id = task["sessionId"]
-    turn_id = task["turn"]["turnId"]
+    turn_id = turn_id or task["turn"]["turnId"]
     checklist = list(task.get("taskChecklist") or [])
     append_conversation_event(
         project_root,
@@ -1668,7 +1668,8 @@ def test_start_source_collection_stage_session_task_submits_direct_session_task(
     assert submitted[0]["sessionId"] == direct_session["id"]
     assert "资料搜集阶段任务" in submitted[0]["content"]
     assert "会立即要求当前 Agent 在本会话执行" in submitted[0]["content"]
-    assert "第一步必须调用 `task_create_tool`" in submitted[0]["content"]
+    assert "第一步必须调用 `task_list_tool`" in submitted[0]["content"]
+    assert "调用 `task_create_tool` 创建或绑定本阶段 checklist" in submitted[0]["content"]
     assert "完成每个检查项后调用 `task_update_tool`" in submitted[0]["content"]
     assert "candidateLeads[]" in submitted[0]["content"]
     assert "先用一句简短状态回应已接收任务" in submitted[0]["content"]
@@ -4301,6 +4302,90 @@ def test_source_collection_context_reconciles_checklist_updates_after_writeback(
     )
     assert stored_task["status"] == "completed"
     assert stored_task["completionGate"]["passed"] is True
+
+
+def test_source_collection_stage_task_progress_counts_later_turn_tool_updates(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
+    discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
+    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
+    )
+    stage_response = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {
+            "stageType": "knowledge_collection",
+            "topic": "预测编码",
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": discovery["agentId"]},
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = stage_response["run"]["runId"]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": "turn-stage-task-start",
+            "status": "running",
+        },
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "finding", "agentId": discovery["agentId"], "agentRole": "source_finder"},
+    )
+    append_conversation_event(
+        tmp_path,
+        task["sessionId"],
+        task["turn"]["turnId"],
+        "turn_started",
+        status="running",
+        payload={
+            "metadata": {
+                "kind": "source_collection_stage_session_task",
+                "sourceCollectionStageTaskId": task["taskId"],
+            }
+        },
+    )
+    response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "已发现 1 条核心论文。",
+            "result": {
+                "candidateLeads": [
+                    {
+                        "title": "Predictive coding in the visual cortex",
+                        "doi": "10.1038/4580",
+                        "summary": "预测编码奠基论文。",
+                    }
+                ]
+            },
+        },
+    )
+    assert response["task"]["status"] == "needs_review"
+
+    _append_stage_task_tool_trace(tmp_path, response["task"], turn_id="turn-stage-task-followup")
+    context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
+        team["teamId"],
+        run_id=run_id,
+        stage_id="finding",
+        task_id=task["taskId"],
+        context_mode="compact",
+    )
+
+    assert context["task"]["status"] == "completed"
+    assert context["task"]["taskToolProgress"]["taskCreateObserved"] is True
+    assert context["task"]["taskToolProgress"]["completed"] == len(response["task"]["taskChecklist"])
+    assert context["task"]["completionGate"]["passed"] is True
 
 
 def test_source_collection_writeback_recovers_fenced_structured_result_text(tmp_path, monkeypatch):

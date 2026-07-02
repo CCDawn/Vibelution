@@ -162,6 +162,7 @@ SOURCE_COLLECTION_LOCAL_SCAN_HARD_MAX_FILES = 100
 SOURCE_COLLECTION_LOCAL_SCAN_MAX_BYTES = 256_000
 SOURCE_COLLECTION_STAGE_SESSION_TASK_KIND = "source_collection_stage_session_task"
 SOURCE_COLLECTION_STAGE_REQUIRED_TOOLS = (
+    "task_list_tool",
     "task_create_tool",
     "task_update_tool",
     "source_collection_context_tool",
@@ -18283,7 +18284,17 @@ def _compact_source_collection_context_task(task: dict[str, Any]) -> dict[str, A
         progress = task["taskToolProgress"]
         compact["taskToolProgress"] = {
             key: progress.get(key)
-            for key in ("complete", "completed", "total", "pendingIds", "pendingReason")
+            for key in (
+                "complete",
+                "completed",
+                "total",
+                "pendingIds",
+                "pendingReason",
+                "traceAvailable",
+                "taskCreateObserved",
+                "toolCallCount",
+                "completedByTrace",
+            )
             if key in progress
         }
     if should_show_gate and isinstance(task.get("completionGate"), dict):
@@ -18545,11 +18556,20 @@ def _source_collection_stage_task_tool_progress_from_trace(
             }
         )
         return progress
+    start_sequence = _source_collection_stage_task_trace_start_sequence(events, task)
+    end_sequence = _source_collection_stage_task_trace_end_sequence(events, task, start_sequence)
     tool_calls: list[dict[str, Any]] = []
     for event in events:
-        event_turn_id = _trim_text(getattr(event, "turn_id", ""), max_length=200)
-        if turn_id and event_turn_id and event_turn_id != turn_id:
-            continue
+        sequence = _normalize_int(getattr(event, "sequence", 0), default=0, minimum=0, maximum=10_000_000)
+        if start_sequence:
+            if sequence and sequence < start_sequence:
+                continue
+            if end_sequence and sequence and sequence >= end_sequence:
+                continue
+        else:
+            event_turn_id = _trim_text(getattr(event, "turn_id", ""), max_length=200)
+            if turn_id and event_turn_id and event_turn_id != turn_id:
+                continue
         tool_calls.extend(_source_collection_stage_tool_calls_from_event(event))
 
     task_create_observed = False
@@ -18594,6 +18614,60 @@ def _source_collection_stage_task_tool_progress_from_trace(
     elif not progress["complete"]:
         progress["pendingReason"] = "task_update_tool_items_pending"
     return progress
+
+
+def _source_collection_stage_task_trace_start_sequence(events: list[Any], task: dict[str, Any]) -> int:
+    if not isinstance(task, dict):
+        return 0
+    task_id = _trim_text(task.get("taskId"), max_length=160)
+    turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
+    turn_id = _trim_text(turn.get("turnId"), max_length=200)
+    fallback_sequence = 0
+    for event in events:
+        sequence = _normalize_int(getattr(event, "sequence", 0), default=0, minimum=0, maximum=10_000_000)
+        metadata = _source_collection_stage_event_metadata(event)
+        event_task_id = _trim_text(metadata.get("sourceCollectionStageTaskId"), max_length=160)
+        if task_id and event_task_id == task_id:
+            return sequence
+        event_turn_id = _trim_text(getattr(event, "turn_id", ""), max_length=200)
+        if not fallback_sequence and turn_id and event_turn_id == turn_id:
+            fallback_sequence = sequence
+    return fallback_sequence
+
+
+def _source_collection_stage_task_trace_end_sequence(
+    events: list[Any],
+    task: dict[str, Any],
+    start_sequence: int,
+) -> int:
+    if not start_sequence or not isinstance(task, dict):
+        return 0
+    task_id = _trim_text(task.get("taskId"), max_length=160)
+    for event in events:
+        sequence = _normalize_int(getattr(event, "sequence", 0), default=0, minimum=0, maximum=10_000_000)
+        if sequence <= start_sequence:
+            continue
+        metadata = _source_collection_stage_event_metadata(event)
+        if _trim_text(metadata.get("kind"), max_length=120) != SOURCE_COLLECTION_STAGE_SESSION_TASK_KIND:
+            continue
+        event_task_id = _trim_text(metadata.get("sourceCollectionStageTaskId"), max_length=160)
+        if event_task_id and event_task_id != task_id:
+            return sequence
+    return 0
+
+
+def _source_collection_stage_event_metadata(event: Any) -> dict[str, Any]:
+    payload = getattr(event, "payload", {}) if event is not None else {}
+    if not isinstance(payload, dict):
+        return {}
+    for raw in (
+        payload.get("metadata"),
+        (payload.get("message") if isinstance(payload.get("message"), dict) else {}).get("metadata"),
+        (payload.get("content") if isinstance(payload.get("content"), dict) else {}).get("metadata"),
+    ):
+        if isinstance(raw, dict):
+            return dict(raw)
+    return {}
 
 
 def _source_collection_stage_tool_calls_from_event(event: Any) -> list[dict[str, Any]]:
@@ -18962,7 +19036,7 @@ def _source_collection_stage_session_task_message(
             "",
             *previous_attempt_block,
             "## Task 工具检查清单",
-            "- 第一步必须调用 `task_create_tool` 创建本阶段 checklist；`task_list` 必须使用下方 JSON 的 id 和 description，不要自行改顺序或合并项。",
+            "- 第一步必须调用 `task_list_tool` 查看当前清单状态，然后调用 `task_create_tool` 创建或绑定本阶段 checklist。清单必须使用下方 JSON 的 id 和 description，不要自行改顺序或合并项。",
             f"- 固定 checklist JSON：`{task_tool_json}`。",
             *task_checklist_lines,
             "- 完成每个检查项后调用 `task_update_tool` 打勾，参数为 task_id=<对应编号或工具返回编号>, is_completed=true, result_summary=...。",
