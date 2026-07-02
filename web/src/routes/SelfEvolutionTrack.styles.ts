@@ -1,5 +1,5 @@
 export const selfEvolutionTrackStyles: Record<string, string> = {
-  pageStack: "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-2.5 overflow-hidden max-[1180px]:overflow-visible",
+  pageStack: "grid h-full max-h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-2.5 overflow-hidden max-[1180px]:overflow-visible",
   pageTabsRow: "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2.5 max-[1180px]:grid-cols-1",
   runActionBar:
     "grid min-h-[64px] min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-[var(--border-soft)] bg-[color-mix(in_srgb,var(--surface-panel)_90%,transparent)] px-3.5 py-2.5 shadow-[0_12px_30px_color-mix(in_srgb,var(--fg-primary)_6%,transparent)] max-[900px]:grid-cols-1",
@@ -12,12 +12,12 @@ export const selfEvolutionTrackStyles: Record<string, string> = {
   dangerAction:
     "inline-flex min-h-[38px] cursor-pointer items-center justify-center gap-2 rounded-lg border border-[color-mix(in_srgb,var(--state-error)_28%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,var(--surface-panel-strong))] px-3.5 font-semibold text-[var(--state-error)] disabled:cursor-default disabled:opacity-50",
   workspaceLayout:
-    "grid h-full min-h-0 grid-cols-[var(--self-sidebar-width,304px)_10px_minmax(0,1fr)] items-stretch overflow-hidden max-[1180px]:h-auto max-[1180px]:grid-cols-1 max-[1180px]:overflow-visible",
+    "grid h-full max-h-full min-h-0 grid-cols-[var(--self-sidebar-width,304px)_10px_minmax(0,1fr)] items-stretch overflow-hidden max-[1180px]:h-auto max-[1180px]:grid-cols-1 max-[1180px]:overflow-visible",
   sideColumn: "grid min-w-0 gap-3",
   sideColumnScrollable: "h-full overflow-y-auto pr-1.5 max-[1180px]:h-auto max-[1180px]:overflow-visible",
   paneCollapsed: "overflow-hidden p-0 invisible",
   centerColumn: "grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2.5 overflow-hidden max-[1180px]:h-auto max-[1180px]:overflow-visible",
-  conversationShell: "grid h-full min-h-0 overflow-hidden max-[1180px]:h-auto max-[1180px]:overflow-visible max-[760px]:h-[min(72vh,720px)] max-[760px]:min-h-[540px]",
+  conversationShell: "grid h-full max-h-full min-h-0 overflow-hidden max-[1180px]:h-auto max-[1180px]:overflow-visible max-[760px]:h-[min(72vh,720px)] max-[760px]:min-h-[540px]",
   workflowCardGrid: "grid grid-cols-2 gap-2 max-[760px]:grid-cols-1",
   workflowCard:
     "grid min-h-[88px] cursor-pointer content-start gap-1.5 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-card)] p-3 text-left text-[var(--fg-secondary)] [&_span]:text-[var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_strong]:text-[0.95rem] [&_strong]:text-[var(--fg-primary)] [&_small]:line-clamp-2 [&_small]:text-[var(--vui-font-xs)] [&_small]:leading-normal",
