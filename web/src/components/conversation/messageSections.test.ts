@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { ConversationMessage } from "../../api/types";
 import { conversationMessageToAgentMessage } from "../../agent-thread";
 import {
+  agentMessageContextSections,
   buildAgentMessageSectionState,
   hasMentalBlock,
   hasResponseBlock,
@@ -97,6 +98,41 @@ describe("messageSections", () => {
       hasFeedbackTimeline: true,
       hasToolBlock: true,
     });
+  });
+
+  it("selects AgentMessage context sections without flattening attachments or references", () => {
+    const userMessage = message({
+      id: "user-context",
+      role: "user",
+      content: "继续看这个上下文",
+      attachments: [
+        {
+          artifactId: "context-image.png",
+          filename: "context.png",
+          imageUrl: "/api/sessions/session-1/artifacts/context-image.png",
+          contentType: "image/png",
+          kind: "user_image",
+          status: "ready",
+        },
+      ],
+      references: [
+        {
+          kind: "session",
+          referenceId: "session:context-ref",
+          sessionId: "context-ref",
+          title: "旧会话摘录",
+        },
+      ],
+    });
+
+    const sections = agentMessageContextSections(conversationMessageToAgentMessage(userMessage));
+
+    expect(sections).toHaveLength(1);
+    expect(sections[0]).toMatchObject({
+      id: "user-context-section-context-1",
+      kind: "context",
+    });
+    expect(sections[0].parts.map((part) => part.type)).toEqual(["attachment", "reference"]);
   });
 
   it("builds AgentMessage section state without exposing runtime status placeholders as answers", () => {
