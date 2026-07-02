@@ -286,7 +286,7 @@ const styles = createVuiStyleMap(styleKeys, {
     answerOnlyProcessStatic:
       "[&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:grid-cols-[14px_auto_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5",
     answerOnlyProcessGroup:
-      "inline-grid w-fit max-w-[min(100%,920px)] gap-1 rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--surface-panel)_58%,transparent)] px-2 py-1 text-[var(--fg-secondary)] shadow-[var(--vui-shadow-hairline)]",
+      "grid w-[min(100%,920px)] max-w-full gap-1 bg-transparent p-0 text-[var(--fg-secondary)] shadow-none",
     answerOnlyProcessToggle:
       "border-0 bg-transparent p-0 text-[var(--fg-secondary)] hover:border-transparent hover:bg-transparent [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:inline-grid [&_[data-slot=vui-button-label]]:max-w-full [&_[data-slot=vui-button-label]]:grid-cols-[14px_auto_auto_minmax(0,1fr)_14px] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5",
     agentInboxTurn: "[&_.turnContent]:w-[min(100%,920px)] [&_.turnContent]:p-0 [&_.turnContent]:border-l-0",
@@ -325,9 +325,10 @@ const styles = createVuiStyleMap(styleKeys, {
     timeline: "bg-[color-mix(in_srgb,var(--surface-page)_18%,transparent)]",
     timelineAssistantTextCell: "max-w-[min(100%,920px)]",
     timelineCellHeader:
-      "items-start [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+      "!grid !w-full grid-cols-[auto_auto_minmax(0,1fr)_auto_auto_auto] !items-start !justify-start gap-x-1.5 !border-0 !bg-transparent !p-0 !text-left !shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
     timelineCellPreview: "whitespace-normal break-words [overflow-wrap:anywhere] line-clamp-2",
-    timelineThoughtText: "border-0 bg-transparent",
+    timelineThoughtText:
+      "!block max-w-[min(100%,76ch)] whitespace-pre-wrap overflow-visible text-left border-0 bg-transparent",
     turnSpeaker: "text-[var(--vui-font-md)]",
     userMessageBody:
       "w-fit max-w-[min(100%,76ch)] justify-self-end rounded-[var(--radius-panel)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--surface-panel))] px-3 py-2 text-left text-[var(--fg-primary)] shadow-[var(--vui-shadow-hairline)]",
