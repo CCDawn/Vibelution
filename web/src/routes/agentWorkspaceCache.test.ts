@@ -58,6 +58,7 @@ function agent(agentId: string, overrides: Partial<AgentConfigWorkspaceAgent> = 
 
 function workspace(): AgentConfigWorkspaceWithTeamIndexes {
   const alpha = agent("agent-alpha", {
+    directSessionId: "alpha-session",
     references: [
       {
         kind: "direct_session",
@@ -67,6 +68,27 @@ function workspace(): AgentConfigWorkspaceWithTeamIndexes {
         field: "directSessionId",
         route: "/chat",
         status: "active",
+        sourceRef: {
+          kind: "session",
+          id: "alpha-session",
+          owner: "ConversationLedger",
+          factAuthority: true,
+          canonicalEditRoute: "/chat?session=alpha-session",
+          canonicalMutationApi: "/api/sessions/alpha-session",
+          projectionCanWrite: false,
+          allowedProjectionActions: ["view", "link", "refresh", "repair"],
+          sourceAuthorityVersion: 1,
+        },
+        projectionEdit: {
+          canWrite: false,
+          mode: "deep_link_to_source",
+          reason: "projection_read_model",
+          sourceOwner: "ConversationLedger",
+          canonicalEditRoute: "/chat?session=alpha-session",
+          canonicalMutationApi: "/api/sessions/alpha-session",
+          sourceAuthorityVersion: 1,
+        },
+        projectionCanWrite: false,
       },
       {
         kind: "mode_default",
@@ -264,6 +286,18 @@ describe("agent workspace cache patching", () => {
     expect(alpha?.references.find((reference) => reference.kind === "team")?.status).toBe("stale");
     expect(alpha?.health.map((issue) => issue.code)).toEqual(["stale_team_member"]);
     expect(next?.health.status).toBe("warning");
+  });
+
+  it("preserves source authority metadata when rebuilding archived direct-session references", () => {
+    const next = archivedWorkspaceCache(workspace(), archiveResponse({ removedFromTeamIds: ["team-a"] }));
+
+    const alpha = next?.agents.find((item) => item.agentId === "agent-alpha");
+    const directSession = alpha?.references.find((reference) => reference.kind === "direct_session");
+
+    expect(directSession?.sourceRef?.owner).toBe("ConversationLedger");
+    expect(directSession?.sourceRef?.canonicalEditRoute).toBe("/chat?session=alpha-session");
+    expect(directSession?.projectionEdit?.mode).toBe("deep_link_to_source");
+    expect(directSession?.projectionCanWrite).toBe(false);
   });
 
   it("treats a PATCH status archive response like the archive mutation cache patch", () => {
