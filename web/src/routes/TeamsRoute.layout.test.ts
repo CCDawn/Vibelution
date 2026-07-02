@@ -298,6 +298,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("inspector");
     expect(routeSource).toContain("hasTeams");
     expect(routeSource).toContain("showTeamUnavailableSurface");
+    expect(routeSource).toContain("teamListInitialLoading");
+    expect(routeSource).toContain("const showTeamUnavailableSurface = !teamListInitialLoading && !hasTeams");
+    expect(routeSource).toContain("teamContextMeta");
+    expect(routeSource).toContain("teamSummaryStatusItems");
     expect(routeSource).toContain("styles.teamUnavailableSurface");
     expect(routeSource).toContain("teamListUnavailable");
     expect(routeSource).toContain("团队数据不可用");
@@ -1292,8 +1296,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.aiSearchRunStats).toBeTypeOf("string");
     expect(routeStyles.aiSearchRunCard).toBeTypeOf("string");
     expect(routeStyles.aiSearchRunRefs).toBeTypeOf("string");
-    expect(routeStyles.teamUnavailableSurface).toContain("place-items-center");
-    expect(routeStyles.teamUnavailableSurface).toContain("justify-center");
+    expect(routeStyles.teamUnavailableSurface).not.toContain("place-items-center");
+    expect(routeStyles.teamUnavailableSurface).not.toContain("justify-center");
+    expect(routeStyles.teamUnavailableSurface).toContain("content-start");
+    expect(routeStyles.teamUnavailableSurface).toContain("justify-items-center");
     expect(routeStyles.teamUnavailableSurface).toContain("grid-cols-[minmax(0,720px)]");
     expect(routeStyles.teamUnavailableCard).toContain("max-w-[720px]");
     expect(routeStyles.teamUnavailableActions).toContain("justify-end");
