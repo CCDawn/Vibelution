@@ -4,6 +4,8 @@ import {
   isInternalStreamingStatusContent,
   isInternalStreamingStatusStage,
 } from "../components/conversation/conversationInternalStatus";
+import { conversationMessageToAgentMessage } from "../agent-thread/adapters";
+import type { AgentMessage } from "../agent-thread/types";
 import type { ConversationMessage, SessionDetail, SessionStreamEvent } from "../api/types";
 
 export type AssistantDeltaEvent = Extract<SessionStreamEvent, { type: "assistant_delta" }>;
@@ -109,6 +111,13 @@ export function activeTurnLayerToConversationMessage(
       ledgerSeq: layer.ledgerSeq,
     },
   };
+}
+
+export function activeTurnLayerToAgentMessage(
+  layer: ActiveTurnLayerState | undefined,
+): AgentMessage | undefined {
+  const message = activeTurnLayerToConversationMessage(layer);
+  return message ? conversationMessageToAgentMessage(message) : undefined;
 }
 
 export function activeTurnLayerTextLength(layer: ActiveTurnLayerState | undefined): number {
