@@ -19,6 +19,15 @@ export {
   type TeamSourcePaginationProps,
 } from "./TeamSourcePagination";
 export {
+  TeamSourceResultItem,
+  TeamSourceResultList,
+  type TeamSourceResultItemProps,
+  type TeamSourceResultListProps,
+  type TeamSourceResultMetaEntry,
+  type TeamSourceResultProvenance,
+  type TeamSourceResultTone,
+} from "./TeamSourceResultList";
+export {
   TeamSourceResultStats,
   type TeamSourceResultStat,
   type TeamSourceResultStatsProps,

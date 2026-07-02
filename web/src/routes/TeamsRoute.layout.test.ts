@@ -773,8 +773,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("过程</button>");
     expect(routeSource).toContain("sourceCollectionResultsPanel");
     expect(routeSource).toContain("source-collection-results");
-    expect(routeSource).toContain("sourceCollectionResultList");
-    expect(routeSource).toContain("sourceCollectionResultStatus");
+    expect(routeSource).toContain("TeamSourceResultList");
+    expect(routeSource).toContain("TeamSourceResultItem");
+    expect(routeSource).toContain("sourceCollectionResultTone");
     expect(routeSource).toContain("resultStatusLabel");
     expect(routeSource).toContain("当前过滤条件下没有候选资料");
     expect(routeSource).toContain("当前过滤条件下没有入库关系节点");
