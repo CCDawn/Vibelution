@@ -26,6 +26,7 @@ import {
   SelfObservationRun,
   SelfObservationRunStartRequest,
   SelfEvolutionTransaction,
+  SessionDetail,
   SupervisedWorktreeRun,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
@@ -703,7 +704,17 @@ export function SelfEvolutionTrack({
     : "";
   const observationConversationSessionId = String(observationRun?.conversationSessionId || "").trim();
   const observationConversationReady = observationRunModeActive && Boolean(observationConversationSessionId);
-  const observationConversationMessages = useMemo<ConversationMessage[]>(() => {
+  const observationSessionDetailQuery = useQuery({
+    queryKey: queryKeys.session(observationConversationSessionId || "__none__"),
+    queryFn: () => fetchJson<SessionDetail>(`/api/sessions/${encodeURIComponent(observationConversationSessionId)}`),
+    refetchInterval: resolvePollingInterval(pageVisible, observationRunActive ? 1_000 : 4_000),
+    refetchIntervalInBackground: false,
+    enabled: observationConversationReady,
+  });
+  const observationSessionDetail = observationSessionDetailQuery.data?.id === observationConversationSessionId
+    ? observationSessionDetailQuery.data
+    : undefined;
+  const observationSnapshotMessages = useMemo<ConversationMessage[]>(() => {
     if (!observationRun) {
       return [];
     }
@@ -725,6 +736,16 @@ export function SelfEvolutionTrack({
     });
     return messages;
   }, [observationRun]);
+  const observationSessionMessages = observationSessionDetail?.messages?.length
+    ? observationSessionDetail.messages
+    : observationSnapshotMessages;
+  const observationEventTail = useMemo(
+    () => (observationRun?.eventTail ?? []).slice(-8).reverse(),
+    [observationRun?.eventTail],
+  );
+  const observationDetailError = observationSessionDetailQuery.isError
+    ? (lang === "zh" ? "观察会话详情暂时无法加载，已保留运行快照。" : "Observation session detail is temporarily unavailable; showing run snapshot.")
+    : "";
   const transactionFilterOptions = useMemo(() => ([
     { id: "all" as const, label: t("filterAll"), count: countTransactionsByFilter(transactionItems, "all") },
     { id: "needs_review" as const, label: t("selfTransactionFilterNeedsReview"), count: countTransactionsByFilter(transactionItems, "needs_review") },
@@ -1211,6 +1232,76 @@ export function SelfEvolutionTrack({
       );
   }
 
+  function renderObservationEvidenceRail() {
+    const runtimeNotices = observationSessionDetail?.runtimeNotices ?? [];
+    return (
+      <aside className={styles.observationEvidenceRail} aria-label={lang === "zh" ? "自主观察运行证据" : "Observation run evidence"}>
+        <div className={styles.subsurfaceHeader}>
+          <div>
+            <p className={styles.eyebrow}>{lang === "zh" ? "运行证据" : "Run evidence"}</p>
+            <h4 className={styles.subsurfaceTitle}>{observationRun?.runId || (lang === "zh" ? "等待观察运行" : "Waiting for observation")}</h4>
+          </div>
+          <span className={styles.secondaryPill}>{statusLabel(observationRun?.runtimeStatus || observationRun?.status || "idle")}</span>
+        </div>
+
+        <div className={styles.detailStack}>
+          <div className={styles.detailRow}>
+            <span>{lang === "zh" ? "会话" : "Session"}</span>
+            <strong>{observationConversationSessionId || "--"}</strong>
+          </div>
+          <div className={styles.detailRow}>
+            <span>{lang === "zh" ? "阶段" : "Phase"}</span>
+            <strong>{statusLabel(observationRun?.phase || observationRun?.runtimeStatus || observationRun?.status || "idle")}</strong>
+          </div>
+          <div className={styles.detailRow}>
+            <span>{lang === "zh" ? "时长" : "Duration"}</span>
+            <strong>{observationRun?.durationSeconds != null ? compactDuration(observationRun.durationSeconds, lang) : compactDuration(normalizedObservationDuration, lang)}</strong>
+          </div>
+          <div className={styles.detailRow}>
+            <span>{t("lastUpdated")}</span>
+            <strong>{compactTimestamp(observationRun?.updatedAt || observationSessionDetail?.updatedAt || "")}</strong>
+          </div>
+        </div>
+
+        <div className={styles.observationEventTimeline}>
+          <div className={styles.itemTop}>
+            <strong>{lang === "zh" ? "事件时间线" : "Event timeline"}</strong>
+            <span className={styles.secondaryPill}>{observationEventTail.length}</span>
+          </div>
+          {observationEventTail.length ? (
+            observationEventTail.map((event, index) => (
+              <div key={`${event.timestamp}-${event.event}-${index}`} className={styles.observationEventItem}>
+                <div className={styles.itemTop}>
+                  <strong>{event.message || event.event}</strong>
+                  <span className={styles.secondaryPill}>{statusLabel(event.status || observationRun?.status || "idle")}</span>
+                </div>
+                <span className={styles.mutedText}>{compactTimestamp(event.timestamp)}</span>
+                {event.turnId ? <span className={styles.mutedText}>{event.turnId}</span> : null}
+              </div>
+            ))
+          ) : (
+            <div className={styles.emptyState}>{lang === "zh" ? "还没有运行事件。" : "No run events yet."}</div>
+          )}
+        </div>
+
+        {observationDetailError ? <p className={styles.errorText}>{observationDetailError}</p> : null}
+        {runtimeNotices.length ? (
+          <div className={styles.listBlock}>
+            {runtimeNotices.slice(-3).map((notice) => (
+              <div key={notice.id} className={styles.listItem}>
+                <strong>{notice.message}</strong>
+                <span className={styles.mutedText}>{compactTimestamp(notice.timestamp)}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {observationRun?.latestMessage ? <p className={styles.previewText}>{observationRun.latestMessage}</p> : null}
+        {observationRun?.report ? <pre className={styles.rawBlock}>{observationRun.report}</pre> : null}
+        {observationRun?.boundaryViolation ? <p className={styles.errorText}>{observationRun.boundaryViolation}</p> : null}
+      </aside>
+    );
+  }
+
   return (
     <div className={styles.pageStack}>
       <div className={styles.pageTabsRow}>
@@ -1410,42 +1501,45 @@ export function SelfEvolutionTrack({
             onPointerDown={beginSidebarResize}
           />
 
-          <main className={styles.centerColumn}>
+          <main className={observationRunModeActive ? `${styles.centerColumn} ${styles.centerColumnObservation}` : styles.centerColumn}>
             {observationRunModeActive ? (
-              <div className={styles.conversationShell}>
-                {observationConversationReady ? (
-                  <LazyConversationView
-                    sessionId={observationConversationSessionId}
-                    density="compact"
-                    eyebrowLabel={lang === "zh" ? "自主观察" : "Self observation"}
-                    title={lang === "zh" ? "自主观察会话" : "Observation session"}
-                    phase={observationRun?.status || "idle"}
-                    messages={observationConversationMessages}
-                    assistantDisplayName={pet?.name}
-                    assistantAvatarFallback={petAvatarFallback}
-                    userDisplayName={runtime?.userName}
-                    taskSummary={observationRun?.latestMessage || observationRun?.report || ""}
-                    defaultFileContext="self_observation"
-                    summaryItems={[]}
-                    stats={[
-                      { label: lang === "zh" ? "观察目标" : "Goal", value: observationRun?.goal || observationGoalValue || "--" },
-                      { label: lang === "zh" ? "时长" : "Duration", value: observationRun?.durationSeconds ?? normalizedObservationDuration },
-                      { label: lang === "zh" ? "工具" : "Tools", value: OBSERVATION_MODE_TOOL_COUNT },
-                      { label: "worktree", value: OBSERVATION_MODE_WORKTREE_STATE },
-                    ]}
-                    autoScrollToLatest={observationRunActive}
-                    showComposer={false}
-                    composerValue=""
-                    composerPlaceholder=""
-                    composerDisabled
-                    composerPending={false}
-                    onComposerChange={() => undefined}
-                    onSubmit={() => undefined}
-                    fallback={<div className={styles.loadingShell}>{t("loadingSession")}</div>}
-                  />
-                ) : (
-                  renderObservationSetupPanel()
-                )}
+              <div className={styles.observationWorkspace}>
+                <div className={styles.observationConversationPane}>
+                  {observationConversationReady ? (
+                    <LazyConversationView
+                      sessionId={observationConversationSessionId}
+                      density="compact"
+                      eyebrowLabel={lang === "zh" ? "自主观察" : "Self observation"}
+                      title={lang === "zh" ? "自主观察会话" : "Observation session"}
+                      phase={observationSessionDetail?.currentPhase || observationRun?.status || "idle"}
+                      messages={observationSessionMessages}
+                      assistantDisplayName={pet?.name}
+                      assistantAvatarFallback={petAvatarFallback}
+                      userDisplayName={runtime?.userName}
+                      taskSummary={observationSessionDetail?.taskSummary || observationRun?.latestMessage || observationRun?.report || ""}
+                      defaultFileContext={observationSessionDetail?.defaultFileContext || "self_observation"}
+                      summaryItems={[]}
+                      stats={[
+                        { label: lang === "zh" ? "观察目标" : "Goal", value: observationRun?.goal || observationGoalValue || "--" },
+                        { label: lang === "zh" ? "时长" : "Duration", value: observationRun?.durationSeconds ?? normalizedObservationDuration },
+                        { label: lang === "zh" ? "工具" : "Tools", value: OBSERVATION_MODE_TOOL_COUNT },
+                        { label: "worktree", value: OBSERVATION_MODE_WORKTREE_STATE },
+                      ]}
+                      autoScrollToLatest={observationRunActive}
+                      showComposer={false}
+                      composerValue=""
+                      composerPlaceholder=""
+                      composerDisabled
+                      composerPending={false}
+                      onComposerChange={() => undefined}
+                      onSubmit={() => undefined}
+                      fallback={<div className={styles.loadingShell}>{t("loadingSession")}</div>}
+                    />
+                  ) : (
+                    renderObservationSetupPanel()
+                  )}
+                </div>
+                {renderObservationEvidenceRail()}
               </div>
             ) : (
               <>

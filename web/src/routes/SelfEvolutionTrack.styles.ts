@@ -17,7 +17,17 @@ export const selfEvolutionTrackStyles: Record<string, string> = {
   sideColumnScrollable: "h-full overflow-y-auto pr-1.5 max-[1180px]:h-auto max-[1180px]:overflow-visible",
   paneCollapsed: "overflow-hidden p-0 invisible",
   centerColumn: "grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2.5 overflow-hidden max-[1180px]:h-auto max-[1180px]:overflow-visible",
+  centerColumnObservation: "grid-rows-[minmax(0,1fr)]",
   conversationShell: "grid h-full max-h-full min-h-0 overflow-hidden max-[1180px]:h-auto max-[1180px]:overflow-visible max-[760px]:h-[min(72vh,720px)] max-[760px]:min-h-[540px]",
+  observationWorkspace:
+    "grid h-full max-h-full min-h-0 grid-cols-[minmax(0,1fr)_minmax(280px,360px)] gap-2.5 overflow-hidden max-[1180px]:h-auto max-[1180px]:grid-cols-1 max-[1180px]:overflow-visible",
+  observationConversationPane:
+    "grid h-full max-h-full min-h-0 overflow-hidden max-[1180px]:h-[min(72vh,720px)] max-[1180px]:min-h-[520px]",
+  observationEvidenceRail:
+    "grid h-full max-h-full min-h-0 content-start gap-3 overflow-auto rounded-lg border border-[var(--border-soft)] bg-[var(--surface-panel)] p-3.5 max-[1180px]:h-auto max-[1180px]:max-h-none",
+  observationEventTimeline: "grid gap-2 rounded-lg border border-[var(--border-hairline)] bg-[color-mix(in_srgb,var(--surface-panel-strong)_72%,transparent)] p-2.5",
+  observationEventItem:
+    "grid gap-1.5 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-card)] px-2.5 py-2 [&_strong]:overflow-wrap-anywhere [&_strong]:text-[var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)]",
   workflowCardGrid: "grid grid-cols-2 gap-2 max-[760px]:grid-cols-1",
   workflowCard:
     "grid min-h-[88px] cursor-pointer content-start gap-1.5 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-card)] p-3 text-left text-[var(--fg-secondary)] [&_span]:text-[var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_strong]:text-[0.95rem] [&_strong]:text-[var(--fg-primary)] [&_small]:line-clamp-2 [&_small]:text-[var(--vui-font-xs)] [&_small]:leading-normal",

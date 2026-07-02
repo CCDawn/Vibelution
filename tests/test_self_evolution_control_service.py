@@ -1248,6 +1248,66 @@ def test_start_self_observation_run_completes_and_releases_active_slot(monkeypat
     assert final_snapshot["actionStates"]["terminate"]["enabled"] is False
     assert service.get_active_self_observation_run() is None
     assert service._ACTIVE_OBSERVATION_RUN_ID == ""
+    assert [item["event"] for item in final_snapshot["eventTail"]][-2:] == ["running", "done"]
+
+
+def test_run_self_observation_turn_records_session_progress_events(monkeypatch):
+    monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+    monkeypatch.setattr(
+        service,
+        "self_evolution_agent_bindings",
+        lambda: {"executor": {"agentId": "agent-observer"}},
+    )
+    monkeypatch.setattr(service, "create_supervised_agent_session", lambda **kwargs: {"id": "session-observe-live"})
+    monkeypatch.setattr(
+        service,
+        "submit_session_message",
+        lambda *args, **kwargs: {"turnId": "turn-observe-live", "startedTurnId": "turn-observe-live"},
+    )
+    monkeypatch.setattr(
+        service,
+        "get_session_detail",
+        lambda session_id: {
+            "id": session_id,
+            "messages": [
+                {"role": "user", "content": "观察 prompt"},
+                {"role": "assistant", "content": "最终观察报告"},
+            ],
+            "lastTurnStatus": "done",
+        },
+    )
+    monkeypatch.setattr(
+        service,
+        "get_session_turn_completion_snapshot",
+        lambda session_id, turn_id: {
+            "terminal": True,
+            "terminalStatus": "done",
+            "assistantText": "最终观察报告",
+        },
+    )
+    monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: None)
+
+    queued = service.start_self_observation_run({"goal": "观察规划能力", "durationSeconds": 90})
+    service._run_self_observation_turn(
+        {"runId": queued["runId"], "goal": "观察规划能力", "durationSeconds": 90}
+    )
+
+    final_snapshot = service.get_self_observation_run_snapshot(queued["runId"])
+    assert final_snapshot is not None
+    assert final_snapshot["status"] == "done"
+    assert final_snapshot["conversationSessionId"] == "session-observe-live"
+    assert final_snapshot["messages"] == ["最终观察报告"]
+    assert final_snapshot["latestMessage"] == "最终观察报告"
+    assert [item["event"] for item in final_snapshot["eventTail"]] == [
+        "queued",
+        "running",
+        "session_created",
+        "prompt_submitted",
+        "assistant_output",
+        "done",
+    ]
+    assert final_snapshot["eventTail"][2]["conversationSessionId"] == "session-observe-live"
+    assert final_snapshot["eventTail"][3]["turnId"] == "turn-observe-live"
 
 
 @pytest.mark.parametrize(
