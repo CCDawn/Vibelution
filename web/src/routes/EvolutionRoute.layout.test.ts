@@ -235,20 +235,29 @@ describe("EvolutionRoute library user flow contract", () => {
 
   it("lets the self-evolution workspace fill the remaining viewport height", () => {
     const pageRule = stylesSource.slice(stylesSource.indexOf(".page {"), stylesSource.indexOf(".toolbar {"));
+    const selfPageRule = stylesSource.slice(stylesSource.indexOf(".selfPage {"), stylesSource.indexOf(".toolbar {"));
     const selfModeRule = stylesSource.slice(stylesSource.indexOf(".selfModeStack {"), stylesSource.indexOf(".overviewGrid {"));
     const tabletRuleStart = stylesSource.indexOf("@media (max-width: 900px)");
     const tabletRuleEnd = stylesSource.indexOf("@media (max-width: 640px)");
     const tabletRules = stylesSource.slice(tabletRuleStart, tabletRuleEnd);
     const tabletPageRule = tabletRules.slice(tabletRules.indexOf("  .page {"), tabletRules.indexOf("  .selfModeStack {"));
+    const tabletSelfPageRule = tabletRules.slice(tabletRules.indexOf("  .selfPage {"), tabletRules.indexOf("  .selfModeStack {"));
     const tabletSelfModeRule = tabletRules.slice(tabletRules.indexOf("  .selfModeStack {"), tabletRules.indexOf("  .toolbar {"));
 
+    expect(routeSource).toContain('const showRouteToolbar = activeTrack !== "self";');
+    expect(routeSource).toContain('activeTrack === "self" ? `${styles.page} ${styles.selfPage}` : styles.page');
+    expect(routeSource).toContain("{showRouteToolbar ? (");
     expect(pageRule).toContain("height: calc(100dvh - var(--shell-topbar-height));");
     expect(pageRule).toContain("max-height: calc(100dvh - var(--shell-topbar-height));");
+    expect(selfPageRule).toContain("grid-template-rows: minmax(0, 1fr);");
+    expect(selfPageRule).toContain("gap: 0;");
     expect(selfModeRule).toContain("grid-template-rows: minmax(0, 1fr);");
     expect(selfModeRule).toContain("overflow: hidden;");
     expect(selfModeRule).not.toContain("grid-template-rows: auto minmax(0, 1fr);");
     expect(tabletPageRule).not.toContain("height: auto;");
     expect(tabletPageRule).not.toContain("overflow: visible;");
+    expect(tabletSelfPageRule).toContain("grid-template-rows: minmax(0, 1fr);");
+    expect(tabletSelfPageRule).toContain("gap: 0;");
     expect(tabletSelfModeRule).toContain("grid-template-rows: minmax(0, 1fr);");
     expect(tabletSelfModeRule).toContain("height: 100%;");
     expect(tabletSelfModeRule).toContain("overflow: auto;");
