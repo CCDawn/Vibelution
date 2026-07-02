@@ -41,7 +41,7 @@ describe("createChatWorkspaceCache", () => {
 
     expect(queryKeysFromCalls()).toEqual([
       queryKeys.teams(),
-      queryKeys.team("team-a"),
+      queryKeys.teamDetails("team-a"),
       queryKeys.chatRooms(),
       queryKeys.chatRoom("room-a"),
       queryKeys.conversations(),
@@ -92,7 +92,7 @@ describe("createChatWorkspaceCache", () => {
 
     expect(queryKeysFromCalls()).toEqual([
       queryKeys.teams(),
-      queryKeys.team("team-a"),
+      queryKeys.teamDetails("team-a"),
       queryKeys.agents(),
       queryKeys.agentModeBindings(),
       queryKeys.chatRooms(),

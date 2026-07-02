@@ -46,7 +46,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("instantiateTeamTemplateMutation");
     expect(routeSource).toContain("TEAM_PICKER_TEAM_IDS");
     expect(routeSource).toContain("const TEAM_PICKER_TEAM_IDS = [AI_SEARCH_TEAM_ID, KNOWLEDGE_EXPANSION_TEAM_ID, RESEARCH_TEAM_ID] as const");
-    expect(routeSource).toContain("fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}`)");
+    expect(routeSource).toContain("fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`)");
     expect(routeSource).toContain("queryKeys.agentSummary(true)");
     expect(routeSource).toContain('fetchJson<AgentConfigWorkspaceAgent[]>("/api/agents?includeArchived=true&detail=summary")');
     expect(routeSource).not.toContain('fetchJson<AgentConfigWorkspace>("/api/agents/config-workspace")');
@@ -828,7 +828,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("showNodeBindingPanel");
     expect(routeSource).toContain("showWorkflowPanel");
     expect(routeSource).toContain("showResearchSourceCollection");
-    expect(routeSource).toContain("sourceCollectionAgentIdsFromCanvas");
+    expect(routeSource).toContain('const teamDetailLoadMode = sourceCollectionStandalone ? "light" : "full"');
+    expect(routeSource).toContain("queryKeys.team(effectiveTeamId, teamDetailLoadMode)");
+    expect(routeSource).toContain("detail=${teamDetailLoadMode}");
+    expect(routeSource).toContain("sourceCollectionAgentIdsFromTeam(selectedTeam, canvas)");
+    expect(routeSource).toContain("sourceCollectionOwnerAgentIdFromTeam(selectedTeam, canvas)");
     expect(routeSource).toContain("researchSourceCollectionRoute");
     expect(routeSource).toContain("teamWorkspaceRoute");
     expect(routeSource).toContain("researchCanvasRoute");

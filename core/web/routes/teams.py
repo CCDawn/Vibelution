@@ -16,6 +16,7 @@ from core.web.services.team_service import (
     ensure_knowledge_expansion_team_agents,
     get_team,
     get_team_canvas,
+    get_team_light,
     list_ai_search_source_scope_runs,
     list_teams_compact,
     request_system_team_bootstrap,
@@ -96,8 +97,13 @@ def team_create(payload: TeamCreatePayload) -> dict:
 
 
 @router.get("/teams/{team_id}")
-def team_detail(team_id: str) -> dict:
+def team_detail(team_id: str, detail: str = "full") -> dict:
     try:
+        detail_mode = str(detail or "full").strip().lower()
+        if detail_mode in {"light", "compact", "summary"}:
+            return get_team_light(team_id)
+        if detail_mode != "full":
+            raise TeamServiceError("Unsupported Team detail mode.")
         return get_team(team_id)
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

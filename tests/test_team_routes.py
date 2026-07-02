@@ -41,6 +41,29 @@ def test_team_routes_create_detail_and_canvas(tmp_path, monkeypatch):
     assert canvas_response.json()["canvasKind"] == "team_organization_canvas"
 
 
+def test_team_detail_light_route_skips_full_canvas_hydration(tmp_path, monkeypatch):
+    _isolate_team_route_state(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    client = _client()
+
+    create_response = client.post(
+        "/api/teams",
+        json={"name": "首屏团队", "members": [{"agentId": agent["agentId"], "role": "source_finder"}]},
+    )
+
+    assert create_response.status_code == 201, create_response.text
+    team = create_response.json()
+    response = client.get(f"/api/teams/{team['teamId']}?detail=light")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["teamId"] == team["teamId"]
+    assert payload["members"][0]["agentId"] == agent["agentId"]
+    assert payload["canvas"]["path"]
+    assert payload["canvas"]["nodeCount"] == 0
+    assert "nodes" not in payload["canvas"]
+
+
 def test_team_routes_repair_knowledge_expansion_team_agents(tmp_path, monkeypatch):
     _isolate_team_route_state(tmp_path, monkeypatch)
     client = _client()
