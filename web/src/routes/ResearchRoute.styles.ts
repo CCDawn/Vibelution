@@ -124,6 +124,20 @@ const styleKeys = [
   "workspace",
 ] as const;
 
-const styles = createVuiStyleMap(styleKeys);
+const styles = createVuiStyleMap(styleKeys, {
+  extensions: {
+    summaryCard: "!grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-2 p-[var(--route-summary-padding)]",
+    sessionRow:
+      "!grid grid-cols-[minmax(0,1fr)_42px] items-stretch gap-0 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-card)]",
+    stageRail: "!grid grid-cols-[1fr] gap-1.5 min-w-0 overflow-visible pb-0",
+    stageOutputHeader:
+      "!grid grid-cols-[24px_minmax(0,1fr)] items-start gap-1.5 min-w-0 px-[7px] py-[5px] rounded-[7px] border border-[var(--border-soft)] bg-[color:color-mix(in_srgb,var(--surface-panel)_58%,transparent)]",
+    agentTraceTurn: "!grid grid-cols-[30px_minmax(0,1fr)] gap-2.5 min-w-0",
+    agentTraceDetailItem:
+      "!grid grid-cols-[26px_minmax(0,1fr)] items-start gap-2 min-w-0 p-2 rounded-lg border border-[var(--border-soft)] bg-[color:color-mix(in_srgb,var(--surface-card)_72%,transparent)]",
+    themeCompareHeader: "!grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 min-w-0",
+    themeHeader: "!grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2.5 min-w-0",
+  },
+});
 
 export default styles;

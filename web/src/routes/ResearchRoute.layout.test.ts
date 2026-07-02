@@ -142,4 +142,33 @@ describe("ResearchRoute layout contract", () => {
     expect(routeSource).not.toContain("恢复默认提示词");
     expect(routeSource).not.toContain("Restore default prompt");
   });
+
+  it("keeps restored research workbench grids from the CSS module migration", () => {
+    expect(routeSource).toContain("styles.summaryCard");
+    expect(styles.summaryCard).toContain("grid-cols-[auto_minmax(0,1fr)]");
+    expect(styles.summaryCard).toContain("items-baseline");
+
+    expect(routeSource).toContain("styles.sessionRow");
+    expect(styles.sessionRow).toContain("grid-cols-[minmax(0,1fr)_42px]");
+
+    expect(routeSource).toContain("styles.stageRail");
+    expect(styles.stageRail).toContain("grid-cols-[1fr]");
+    expect(styles.stageRail).toContain("overflow-visible");
+
+    expect(routeSource).toContain("styles.stageOutputHeader");
+    expect(styles.stageOutputHeader).toContain("grid-cols-[24px_minmax(0,1fr)]");
+
+    expect(routeSource).toContain("styles.agentTraceTurn");
+    expect(styles.agentTraceTurn).toContain("grid-cols-[30px_minmax(0,1fr)]");
+
+    expect(routeSource).toContain("styles.agentTraceDetailItem");
+    expect(styles.agentTraceDetailItem).toContain("grid-cols-[26px_minmax(0,1fr)]");
+
+    expect(routeSource).toContain("styles.themeCompareHeader");
+    expect(styles.themeCompareHeader).toContain("grid-cols-[minmax(0,1fr)_auto]");
+
+    expect(routeSource).toContain("styles.themeHeader");
+    expect(styles.themeHeader).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(styles.themeHeader).toContain("gap-2.5");
+  });
 });
