@@ -160,6 +160,16 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("/collection-assignments/${encodeURIComponent(payload.draft.assignmentId)}/outputs");
     expect(routeSource).toContain("/source-candidate");
     expect(routeSource).toContain("sourceCollectionRunsForTeam");
+    expect(routeSource).toContain("sourceCollectionRunHasUsableRecords");
+    expect(routeSource).toContain("selectDefaultSourceCollectionRun");
+    expect(routeSource).toContain("sourceCollectionHistoricalRunWithRecords");
+    expect(routeSource).toContain("sourceCollectionLatestRunIsEmpty");
+    expect(routeSource).toContain("renderSourceCollectionRunSwitcher");
+    expect(routeSource).toContain("sourceCollectionRunSwitcher");
+    expect(routeSource).toContain("sourceCollectionEmptyRunNotice");
+    expect(routeSource).toContain("当前批次暂无资料");
+    expect(routeSource).toContain("上一轮有资料");
+    expect(routeSource).toContain("切换到有资料批次");
     expect(routeSource).toContain("SOURCE_COLLECTION_DEFAULT_ROLES");
     expect(routeSource).toContain("candidateType=candidate_graph");
     expect(routeSource).toContain("/workflow-orchestration/candidate-graph");
@@ -1146,6 +1156,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionResultSourceMissing).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionResultStatus).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionResultItemSelected).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionRunSwitcher).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionRunSwitcherMain).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionRunSwitcherStats).toBeTypeOf("string");
+    expect(routeStyles.sourceCollectionEmptyRunNotice).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionSourceDetailPanel).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionSourceDetailActions).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionSourceDetailFacts).toBeTypeOf("string");
@@ -1161,6 +1175,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionResultItem).toContain(
       "grid-cols-[max-content_minmax(0,1fr)_max-content_minmax(120px,220px)]",
     );
+    expect(routeStyles.sourceCollectionRunSwitcher).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(routeStyles.sourceCollectionRunSwitcherMain).toContain("grid-cols-[max-content_minmax(220px,360px)_minmax(0,1fr)]");
+    expect(routeStyles.sourceCollectionRunSwitcherStats).toContain("grid-cols-[repeat(3,minmax(90px,1fr))]");
+    expect(routeStyles.sourceCollectionEmptyRunNotice).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(routeStyles.sourceCollectionResultItem).toContain("min-h-[36px]");
     expect(routeStyles.sourceCollectionResultStatus).toContain("whitespace-nowrap");
     expect(routeStyles.sourceCollectionResultStatus).not.toContain("grid-rows-[auto_auto_auto]");

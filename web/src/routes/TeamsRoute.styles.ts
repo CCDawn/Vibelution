@@ -226,6 +226,9 @@ const styleKeys = [
   "sourceCollectionResultStatus",
   "sourceCollectionResultWarning",
   "sourceCollectionRunBadge",
+  "sourceCollectionRunSwitcher",
+  "sourceCollectionRunSwitcherMain",
+  "sourceCollectionRunSwitcherStats",
   "sourceCollectionScreeningList",
   "sourceCollectionScreeningListShell",
   "sourceCollectionScreeningScrollHint",
@@ -262,6 +265,7 @@ const styleKeys = [
   "sourceCollectionStageWorkspaceHeader",
   "sourceCollectionStepActive",
   "sourceCollectionStepDone",
+  "sourceCollectionEmptyRunNotice",
   "sourceCollectionStepFailed",
   "sourceCollectionStepIdle",
   "sourceCollectionStepPending",
@@ -495,6 +499,12 @@ const styles = createVuiStyleMap(styleKeys, {
       "!flex flex-wrap items-center justify-end gap-2 min-w-0 [&_a]:inline-flex [&_a]:min-h-[30px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:px-2.5 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[var(--border-soft)] [&_a]:bg-[color:var(--surface-panel-strong)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[760] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:min-h-[30px] [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border [&_[data-vui=native-button]]:border-[var(--border-soft)] [&_[data-vui=native-button]]:bg-[color:var(--surface-panel-strong)] [&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:font-[760]",
     sourceCollectionPageBody:
       "!grid min-h-0 content-start gap-2 overflow-auto p-2",
+    sourceCollectionRunSwitcher:
+      "!grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-[7px] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,var(--border-soft))] bg-[color:var(--source-workbench-panel)] px-2 py-1.5 max-[980px]:grid-cols-[1fr]",
+    sourceCollectionRunSwitcherMain:
+      "grid min-w-0 grid-cols-[max-content_minmax(220px,360px)_minmax(0,1fr)] items-center gap-2 text-[var(--vui-font-xs)] font-[760] text-[var(--fg-secondary)] max-[900px]:grid-cols-[1fr] [&_small]:min-w-0 [&_small]:truncate [&_small]:text-[var(--fg-muted)]",
+    sourceCollectionRunSwitcherStats:
+      "grid min-w-[300px] grid-cols-[repeat(3,minmax(90px,1fr))] gap-1.5 text-[var(--vui-font-xs)] max-[980px]:min-w-0 [&_span]:flex [&_span]:min-h-[26px] [&_span]:items-center [&_span]:justify-between [&_span]:gap-1.5 [&_span]:rounded-[7px] [&_span]:border [&_span]:border-[color:var(--border-soft)] [&_span]:bg-[color:var(--source-workbench-card)] [&_span]:px-2 [&_span]:font-[720] [&_strong]:text-[var(--fg-primary)]",
     sourceCollectionCommandBar:
       "!grid grid-cols-[minmax(0,1fr)_minmax(320px,0.55fr)] items-center gap-2 px-2 py-2 max-[980px]:grid-cols-[1fr]",
     sourceCollectionResultItem:
@@ -506,6 +516,8 @@ const styles = createVuiStyleMap(styleKeys, {
     sourceCollectionResultSource:
       "grid grid-cols-[max-content_minmax(0,1fr)] items-center gap-1 overflow-hidden text-[var(--vui-font-xs)] [&_a]:truncate [&_code]:truncate max-[820px]:col-span-2",
     sourceCollectionResultStatus: "whitespace-nowrap justify-self-start",
+    sourceCollectionEmptyRunNotice:
+      "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-[7px] border border-[color:color-mix(in_srgb,var(--state-warning)_34%,var(--border-soft))] bg-[color:color-mix(in_srgb,var(--state-warning)_8%,var(--source-workbench-card))] px-3 py-2 text-[var(--vui-font-sm)] max-[760px]:grid-cols-[1fr] [&_div]:grid [&_div]:min-w-0 [&_div]:gap-0.5 [&_strong]:text-[var(--fg-primary)] [&_span]:text-[var(--fg-secondary)]",
     sourceCollectionStageCard:
       "!grid min-h-[118px] content-start gap-2 border-l-[4px] [border-left-color:var(--source-step-color,var(--vui-border-subtle))] px-2 py-2",
     sourceCollectionStageCardHead:
