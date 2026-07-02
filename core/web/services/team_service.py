@@ -1528,6 +1528,30 @@ def get_team(team_id: str) -> dict[str, Any]:
     return detail
 
 
+def get_team_light(team_id: str) -> dict[str, Any]:
+    """Return Team detail for first paint without hydrating the full canvas."""
+
+    started_at = _perf_counter()
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    _sync_chat_room_root()
+    compact_rooms_by_id = {
+        str(room.get("roomId") or "").strip(): room
+        for room in chat_room_service.list_chat_rooms_compact()
+        if isinstance(room, dict) and str(room.get("roomId") or "").strip()
+    }
+    with _TEAM_LOCK:
+        state = _load_index()
+        team = _find_team(state, normalized_team_id)
+        if team is None:
+            raise TeamNotFoundError("Team not found.")
+    detail = {
+        **_team_to_compact_reference(team, compact_rooms_by_id=compact_rooms_by_id),
+        "canvas": _canvas_path_summary(team, team_id=normalized_team_id),
+    }
+    _record_team_detail_loaded(detail, started_at)
+    return detail
+
+
 def assert_team_exists(team_id: str) -> str:
     """Validate that a Team exists without hydrating or repairing its full detail."""
 

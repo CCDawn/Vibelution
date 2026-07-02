@@ -82,7 +82,7 @@ export function createChatWorkspaceCache(queryClient: QueryClientLike) {
         queryKeys.chatRooms(),
         queryKeys.chatRoom(roomId),
         queryKeys.conversations(),
-        ...(options.teamId ? [queryKeys.teams(), queryKeys.team(options.teamId)] : []),
+        ...(options.teamId ? [queryKeys.teams(), queryKeys.teamDetails(options.teamId)] : []),
       ]);
     },
     afterGroupRoundStarted(roomId: string) {
@@ -153,13 +153,13 @@ export function createChatWorkspaceCache(queryClient: QueryClientLike) {
         queryKeys.teams(),
         queryKeys.agentConfigWorkspace(),
         queryKeys.projectAgentBus(),
-        ...(teamId ? [queryKeys.team(teamId)] : []),
+        ...(teamId ? [queryKeys.teamDetails(teamId)] : []),
       ]);
     },
     afterTeamArchived(teamId: string, roomId?: string) {
       return invalidateAll(queryClient, [
         queryKeys.teams(),
-        queryKeys.team(teamId),
+        queryKeys.teamDetails(teamId),
         queryKeys.agents(),
         queryKeys.agentModeBindings(),
         queryKeys.chatRooms(),
@@ -173,7 +173,7 @@ export function createChatWorkspaceCache(queryClient: QueryClientLike) {
     afterTeamRoomMembershipChanged(teamId: string, roomId: string) {
       return invalidateAll(queryClient, [
         queryKeys.teams(),
-        queryKeys.team(teamId),
+        queryKeys.teamDetails(teamId),
         queryKeys.chatRooms(),
         queryKeys.chatRoom(roomId),
         queryKeys.conversations(),

@@ -2919,12 +2919,39 @@ function sourceCollectionAgentIdsFromCanvas(canvas: TeamOrganizationCanvas | nul
   return agentIds;
 }
 
+function sourceCollectionAgentIdsFromTeam(team: Team | null | undefined, canvas: TeamOrganizationCanvas | null) {
+  const agentIds = sourceCollectionAgentIdsFromCanvas(canvas);
+  const roleSet = new Set(SOURCE_COLLECTION_TEAM_AGENT_ROLES);
+  for (const member of team?.members ?? []) {
+    const role = normalizeAgentRoleKey(member.role);
+    if (roleSet.has(role) && member.agentId && !agentIds[role]) {
+      agentIds[role] = member.agentId;
+    }
+  }
+  return agentIds;
+}
+
 function sourceCollectionOwnerAgentIdFromCanvas(canvas: TeamOrganizationCanvas | null) {
   const preferredRoles = ["research_coordination", "data_intake_coordinator", "source_finder", "source_ingestor", "ceo", "organization_coordinator"];
   for (const role of preferredRoles) {
     const node = canvas?.nodes.find((item) => normalizeAgentRoleKey(item.role) === role && item.agentId);
     if (node?.agentId) {
       return node.agentId;
+    }
+  }
+  return "";
+}
+
+function sourceCollectionOwnerAgentIdFromTeam(team: Team | null | undefined, canvas: TeamOrganizationCanvas | null) {
+  const canvasOwnerAgentId = sourceCollectionOwnerAgentIdFromCanvas(canvas);
+  if (canvasOwnerAgentId) {
+    return canvasOwnerAgentId;
+  }
+  const preferredRoles = ["research_coordination", "data_intake_coordinator", "source_finder", "source_ingestor", "ceo", "organization_coordinator"];
+  for (const role of preferredRoles) {
+    const member = (team?.members ?? []).find((item) => normalizeAgentRoleKey(item.role) === role && item.agentId);
+    if (member?.agentId) {
+      return member.agentId;
     }
   }
   return "";
@@ -4495,9 +4522,10 @@ export function TeamsRoute({
   const selectedVisibleTeamId = selectedTeamId && visibleTeamIds.has(selectedTeamId) ? selectedTeamId : "";
   const fallbackVisibleTeamId = visibleTeams[0]?.teamId ?? "";
   const effectiveTeamId = forcedTeamId || selectedVisibleTeamId || requestedVisibleTeamId || requestedVisibleAgentTeamId || fallbackVisibleTeamId;
+  const teamDetailLoadMode = sourceCollectionStandalone ? "light" : "full";
   const teamDetailQuery = useQuery({
-    queryKey: queryKeys.team(effectiveTeamId),
-    queryFn: () => fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}`),
+    queryKey: queryKeys.team(effectiveTeamId, teamDetailLoadMode),
+    queryFn: () => fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`),
     enabled: Boolean(effectiveTeamId),
   });
   const selectedTeam = teamDetailQuery.data ?? visibleTeams.find((team) => team.teamId === effectiveTeamId) ?? null;
@@ -4750,8 +4778,8 @@ export function TeamsRoute({
     () => sourceCollectionRunsForTeam(sourceCollectionRunsQuery.data, effectiveTeamId),
     [effectiveTeamId, sourceCollectionRunsQuery.data],
   );
-  const sourceCollectionAgentIds = useMemo(() => sourceCollectionAgentIdsFromCanvas(canvas), [canvas]);
-  const sourceCollectionOwnerAgentId = useMemo(() => sourceCollectionOwnerAgentIdFromCanvas(canvas), [canvas]);
+  const sourceCollectionAgentIds = useMemo(() => sourceCollectionAgentIdsFromTeam(selectedTeam, canvas), [canvas, selectedTeam]);
+  const sourceCollectionOwnerAgentId = useMemo(() => sourceCollectionOwnerAgentIdFromTeam(selectedTeam, canvas), [canvas, selectedTeam]);
   const sourceCollectionFinderAgentId = sourceCollectionAgentIds.source_finder || "Source Finder Agent";
   const sourceCollectionExtractorAgentId = sourceCollectionAgentIds.source_extractor || "Source Extractor Agent";
   const sourceCollectionRelationMapperAgentId = sourceCollectionAgentIds.source_relation_mapper || "Source Relation Mapper Agent";
