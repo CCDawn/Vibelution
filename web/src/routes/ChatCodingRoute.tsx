@@ -6296,6 +6296,8 @@ export function ChatCodingRoute() {
   const conversationFrameClassName = bothSidePanesCollapsed
     ? `${styles.conversationFrame} ${styles.conversationFrameFocus}`
     : styles.conversationFrame;
+  const rightPaneLayoutClassName = legacyGroupRoomActive ? styles.rightPaneWithTabs : styles.rightPaneWithoutTabs;
+  const rightPaneClassName = `${styles.rightPane} ${rightPaneLayoutClassName}`;
 
   const contextMenuSessionIsBusy = contextMenuSession
     ? isBusyPhase(contextMenuSession.currentPhase || contextMenuSession.status)
@@ -7656,7 +7658,7 @@ export function ChatCodingRoute() {
         onKeyDown={(event) => handleResizeKeyDown("right", event)}
       />
 
-      <aside className={rightPaneCollapsed ? `${styles.rightPane} ${styles.paneCollapsed}` : styles.rightPane} aria-hidden={rightPaneCollapsed}>
+      <aside className={rightPaneCollapsed ? `${rightPaneClassName} ${styles.paneCollapsed}` : rightPaneClassName} aria-hidden={rightPaneCollapsed}>
         {legacyGroupRoomActive ? (
           <div
             className={styles.rightIndexTabs}

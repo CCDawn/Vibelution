@@ -66,6 +66,7 @@ describe("ChatCodingRoute layout contract", () => {
   it("keeps empty chat states centered inside the full-height conversation workspace", () => {
     expect(routeStyles.layout).toContain("h-[calc(100dvh_-_var(--shell-topbar-height))]");
     expect(routeStyles.layout).toContain("overflow-hidden");
+    expect(routeStyles.layout).toContain("[--chat-workbench-gap:4px]");
     expect(routeStyles.leftRail).toContain("h-full");
     expect(routeStyles.leftRail).toContain("min-h-0");
     expect(routeStyles.leftRail).toContain("overflow-auto");
@@ -93,9 +94,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.emptySurface).toContain("place-items-center");
     expect(routeStyles.emptySurface).toContain("text-center");
     expect(routeStyles.rightPane).toContain("h-full");
-    expect(routeStyles.rightPane).toContain("grid-rows-[auto_auto_minmax(0,1fr)]");
     expect(routeStyles.rightPane).toContain("overflow-hidden");
+    expect(routeStyles.rightPaneWithTabs).toContain("grid-rows-[auto_auto_minmax(0,1fr)]");
+    expect(routeStyles.rightPaneWithoutTabs).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(routeStyles.panelBody).toContain("min-h-0");
+    expect(routeStyles.panelBody).toContain("h-full");
     expect(routeStyles.panelBody).toContain("overflow-auto");
   });
 
@@ -290,11 +293,17 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain('"--chat-right-pane-width": rightPaneCollapsed ? "0px" : `${rightPanelWidth}px`');
     expect(routeStyles.leftRail).toContain("flex");
     expect(routeStyles.leftRail).toContain("flex-col");
-    expect(routeStyles.leftRail).toContain("gap-[5px]");
-    expect(routeStyles.leftRail).toContain("p-1.5");
+    expect(routeStyles.leftRail).toContain("gap-[var(--chat-workbench-gap)]");
+    expect(routeStyles.leftRail).toContain("p-[var(--chat-workbench-gap)]");
+    expect(routeStyles.leftBlock).toContain("shrink-0");
+    expect(routeStyles.companionBlock).toContain("flex-1");
+    expect(routeStyles.companionBlock).toContain("min-h-0");
+    expect(routeStyles.companionBlock).toContain("overflow-auto");
     expect(routeStyles.rightPane).toContain("grid");
-    expect(routeStyles.rightPane).toContain("grid-rows-[auto_auto_minmax(0,1fr)]");
-    expect(routeStyles.rightPane).toContain("p-1.5");
+    expect(routeStyles.rightPane).toContain("gap-[var(--chat-workbench-gap)]");
+    expect(routeStyles.rightPane).toContain("p-[var(--chat-workbench-gap)]");
+    expect(routeSource).toContain("styles.rightPaneWithTabs");
+    expect(routeSource).toContain("styles.rightPaneWithoutTabs");
     expect(routeCssSource).not.toContain(".sessionAgentStatusControl");
   });
 
