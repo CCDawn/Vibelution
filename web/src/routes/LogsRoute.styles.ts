@@ -92,8 +92,6 @@ const styles: Record<string, string> = {
     "packageClusterRefs min-w-0",
   packageDiagnosisDetails:
     "packageDiagnosisDetails min-w-0",
-  packageDiagnosisEntries:
-    "packageDiagnosisEntries min-w-0",
   packageDiagnosisExpandLabel:
     "packageDiagnosisExpandLabel min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   packageDiagnosisFoldout:
@@ -262,8 +260,6 @@ const styles: Record<string, string> = {
     "sceneCardSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   sceneCardTop:
     "sceneCardTop min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
-  sceneDetailHeader:
-    "sceneDetailHeader min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
   sceneDetailHeaderCompact:
     "sceneDetailHeaderCompact min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
   sceneDetailSummary:
@@ -290,10 +286,6 @@ const styles: Record<string, string> = {
     "sceneIssueBadgeError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   sceneIssueBadgeWarning:
     "sceneIssueBadgeWarning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
-  sceneMetricCard:
-    "sceneMetricCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
-  sceneMetricGrid:
-    "sceneMetricGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   scenePillRow:
     "scenePillRow min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
   sceneQuickFacts:
@@ -338,10 +330,6 @@ const styles: Record<string, string> = {
     "stateKicker min-w-0",
   stateSkeletonStack:
     "stateSkeletonStack min-w-0",
-  staticLayout:
-    "staticLayout min-w-0 grid min-h-0 gap-2 p-2",
-  subtitle:
-    "subtitle min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   timelineCode:
     "timelineCode min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto font-mono text-[var(--vui-font-xs)]",
   timelineField:
@@ -362,8 +350,6 @@ const styles: Record<string, string> = {
     "timelineMessage min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   timelineRawRefs:
     "timelineRawRefs min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
-  title:
-    "title min-w-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   toolbarButton:
     "toolbarButton min-w-0 flex flex-wrap items-center gap-1.5 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full justify-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
   workspace:
