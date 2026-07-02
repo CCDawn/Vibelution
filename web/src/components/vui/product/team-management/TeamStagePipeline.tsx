@@ -6,18 +6,14 @@ export type TeamStagePipelineProps = {
   children: ReactNode;
 };
 
-/**
- * Faithful reproduction of `.sourceCollectionStageModules`:
- * a five-column stage pipeline (repeat(5, minmax(0, 1fr))) that collapses to
- * two columns on narrow viewports.
- */
+/** A responsive stage pipeline sized for the current four-stage source flow. */
 export function TeamStagePipeline({ id, ariaLabel, children }: TeamStagePipelineProps) {
   return (
     <section
       id={id}
       data-vui-product="team-stage-pipeline"
       aria-label={ariaLabel}
-      className="grid grid-cols-[repeat(5,minmax(0,1fr))] items-start gap-[5px] min-w-0 max-[1080px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[560px]:grid-cols-[1fr]"
+      className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] items-stretch gap-2 min-w-0 max-[560px]:grid-cols-[1fr]"
     >
       {children}
     </section>

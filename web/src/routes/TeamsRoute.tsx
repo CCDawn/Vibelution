@@ -6681,7 +6681,8 @@ export function TeamsRoute({
     label: string,
     loading = false,
   ) {
-    const loadingValue = lang === "zh" ? "加载中" : "loading";
+    const sourceCollectionFilterLoadingCount = (filter: SourceCollectionSourceFilter) =>
+      filter === "all" ? sourceCollectionLoadingText : "...";
     return (
       <TeamSourceFilterBar
         ariaLabel={label}
@@ -6689,7 +6690,7 @@ export function TeamsRoute({
         options={SOURCE_COLLECTION_SOURCE_FILTERS.map((filter) => ({
           key: filter,
           label: sourceCollectionSourceFilterLabel(filter, lang),
-          count: loading ? loadingValue : counts[filter] ?? 0,
+          count: loading ? sourceCollectionFilterLoadingCount(filter) : counts[filter] ?? 0,
           selected: sourceCollectionSourceFilter === filter,
         }))}
       />

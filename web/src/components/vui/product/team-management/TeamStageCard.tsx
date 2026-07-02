@@ -7,12 +7,7 @@ import {
 
 export type TeamStageTone = "active" | "done" | "failed" | "idle" | "pending";
 
-/**
- * Faithful reproduction of the original `.sourceCollectionStageCard` design
- * (recovered from TeamsRoute.module.css @ ccf0cb5a~1). The stage state drives
- * the `--source-step-border` / `--source-step-fg` custom properties the card
- * cascades into its border + text colours.
- */
+/** Stage state drives the border/text custom properties used by the card. */
 export const TEAM_STAGE_TONE_STYLE: Record<TeamStageTone, CSSProperties> = {
   active: {
     ["--source-step-border" as string]:
@@ -47,7 +42,7 @@ export const TEAM_STAGE_TONE_STYLE: Record<TeamStageTone, CSSProperties> = {
 };
 
 const CARD_BASE =
-  "grid grid-rows-[auto_auto_auto] content-start self-start min-w-0 min-h-0 gap-1 p-1.5 rounded-[7px] border cursor-pointer overflow-hidden text-[0.66rem] font-[740] " +
+  "grid grid-rows-[auto_minmax(0,1fr)_auto] content-start self-start min-w-0 min-h-[118px] gap-2 p-2 rounded-[8px] border cursor-pointer overflow-hidden text-[0.72rem] font-[740] " +
   "border-[color:var(--source-step-border,var(--border-soft))] text-[color:var(--source-step-fg,var(--fg-muted))] " +
   "bg-[image:var(--vui-gradient-route-soft)] bg-[color:var(--source-workbench-card)] " +
   "transition-[border-color,box-shadow] duration-150 " +
@@ -57,6 +52,16 @@ const CARD_BASE =
 const CARD_SELECTED =
   "border-[color:color-mix(in_srgb,var(--accent-cool)_72%,var(--border-strong))] shadow-[var(--vui-shadow-inset-accent)]";
 
+const HEADER = "flex min-w-0 items-center justify-between gap-2";
+const STEP_INDEX =
+  "flex h-[22px] min-w-[26px] items-center justify-center rounded-[6px] border border-[color:color-mix(in_srgb,var(--accent-cool)_26%,var(--border-soft))] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,var(--surface-card))] text-[0.62rem] font-[860] text-[color:color-mix(in_srgb,var(--accent-cool)_78%,var(--fg-primary))]";
+const STATUS_BADGE =
+  "max-w-[58%] rounded-full border border-[color:color-mix(in_srgb,var(--source-step-fg,var(--fg-muted))_28%,var(--border-soft))] bg-[color:color-mix(in_srgb,var(--source-step-fg,var(--fg-muted))_8%,transparent)] px-2 py-[2px] text-[0.58rem] font-[840] text-[color:var(--source-step-fg,var(--fg-muted))]";
+const BODY = "grid min-w-0 content-start gap-1";
+const ACTION_BUTTON =
+  "[&_[data-vui=native-button]]:w-fit [&_[data-vui=native-button]]:max-w-full [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:text-[0.66rem] [&_[data-vui=native-button]]:font-[840] [&_[data-vui=native-button]]:whitespace-nowrap";
+const ACTION_ROW =
+  `flex min-w-0 items-center justify-end gap-1.5 border-t border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] pt-1.5 ${ACTION_BUTTON}`;
 const TEXT_TRUNCATE = "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap";
 
 export type TeamStageCardProps = {
@@ -120,28 +125,28 @@ export function TeamStageCard({
       onClick={handleClick}
       onKeyDown={handleKeyDown}
     >
-      <div className="flex min-w-0 items-center justify-between gap-1.5">
-        <strong className="flex-none text-[0.62rem] text-[color:color-mix(in_srgb,var(--accent-cool)_74%,var(--fg-primary))]">
+      <div className={HEADER}>
+        <strong className={STEP_INDEX}>
           {String(index + 1).padStart(2, "0")}
         </strong>
         <span
-          className={`text-[0.58rem] font-[820] text-[color:var(--source-step-fg,var(--fg-muted))] ${TEXT_TRUNCATE}`}
+          className={`${STATUS_BADGE} ${TEXT_TRUNCATE}`}
         >
           {status}
         </span>
       </div>
-      <span className="grid content-start gap-0.5 min-w-0">
-        <b className={`text-[0.74rem] text-[var(--fg-primary)] ${TEXT_TRUNCATE}`}>{label}</b>
-        <em className={`not-italic text-[0.6rem] font-[760] text-[var(--fg-muted)] ${TEXT_TRUNCATE}`}>
+      <span className={BODY}>
+        <b className={`text-[0.86rem] text-[var(--fg-primary)] ${TEXT_TRUNCATE}`}>{label}</b>
+        <em className={`not-italic text-[0.66rem] font-[760] text-[var(--fg-muted)] ${TEXT_TRUNCATE}`}>
           {metric}
         </em>
         <small
-          className={`text-[0.58rem] font-[820] text-[color:var(--source-step-fg,var(--fg-muted))] ${TEXT_TRUNCATE}`}
+          className={`text-[0.64rem] font-[820] text-[color:var(--source-step-fg,var(--fg-muted))] ${TEXT_TRUNCATE}`}
         >
           {nextLabel}
         </small>
       </span>
-      {actions ? <div className="min-w-0">{actions}</div> : null}
+      {actions ? <div className={ACTION_ROW}>{actions}</div> : null}
     </article>
   );
 }
