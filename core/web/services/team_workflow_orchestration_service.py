@@ -17811,6 +17811,8 @@ def _source_collection_stage_session_task_turn_result(agent_id: str, session_id:
         if _trim_text(item.get("sessionId"), max_length=160) != session_id:
             continue
         return item
+    if _source_collection_stage_session_task_turn_had_failing_tool_result(session_id, turn_id):
+        return {}
     ledger_result = _source_collection_stage_session_task_turn_journal_result(session_id, turn_id)
     if ledger_result:
         return ledger_result
@@ -17818,6 +17820,59 @@ def _source_collection_stage_session_task_turn_result(agent_id: str, session_id:
     if snapshot_result:
         return snapshot_result
     return {}
+
+
+def _source_collection_stage_session_task_turn_had_failing_tool_result(session_id: str, turn_id: str) -> bool:
+    normalized_session_id = _trim_text(session_id, max_length=160)
+    normalized_turn_id = _trim_text(turn_id, max_length=200)
+    if not normalized_session_id or not normalized_turn_id:
+        return False
+    try:
+        events = load_conversation_events(_project_root(), normalized_session_id)
+    except Exception:
+        return False
+    failing_statuses = {
+        "failed",
+        "failure",
+        "error",
+        "timeout",
+        "timed_out",
+        "blocked",
+        "interrupted",
+        "stopped",
+        "cancelled",
+        "canceled",
+    }
+    for item in reversed(events):
+        event_turn_id = _trim_text(getattr(item, "turn_id", ""), max_length=200)
+        event_type = _trim_text(getattr(item, "event_type", ""), max_length=80)
+        if event_turn_id != normalized_turn_id or event_type != "tool_result":
+            continue
+        status = _trim_text(getattr(item, "status", ""), max_length=80).lower()
+        if status and status in failing_statuses:
+            return True
+        payload = getattr(item, "payload", {})
+        if isinstance(payload, dict):
+            tool_call_status = _trim_text(
+                payload.get("toolCall", {}).get("status")
+                or payload.get("tool_call", {}).get("status"),
+                max_length=80,
+            ).lower()
+            if tool_call_status and tool_call_status in failing_statuses:
+                return True
+        for tool_call in _source_collection_stage_tool_calls_from_event(item):
+            if not isinstance(tool_call, dict):
+                continue
+            call_status = _trim_text(
+                tool_call.get("status")
+                or tool_call.get("semanticStatus")
+                or tool_call.get("transportStatus")
+                or tool_call.get("transport_status"),
+                max_length=80,
+            ).lower()
+            if call_status and call_status in failing_statuses:
+                return True
+    return False
 
 
 def _source_collection_stage_session_task_turn_journal_result(session_id: str, turn_id: str) -> dict[str, Any]:
