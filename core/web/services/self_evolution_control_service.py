@@ -123,12 +123,14 @@ SELF_EVOLUTION_AGENT_ROLES: tuple[dict[str, str], ...] = (
         "promptTemplateId": "prompt-self-reviewer",
     },
     {
-        "role": "summarizer",
-        "label": "自进化总结 Agent",
+        "role": "observer",
+        "label": "自进化观察 Agent",
         "profileId": "primary",
-        "promptTemplateId": "prompt-self-summarizer",
+        "promptTemplateId": "",
     },
 )
+SELF_EVOLUTION_ROLE_KEYS = frozenset(str(item["role"]) for item in SELF_EVOLUTION_AGENT_ROLES)
+SELF_EVOLUTION_RETIRED_ROLE_KEYS = frozenset({"summarizer"})
 _SELF_EVOLUTION_RISKY_WRITE_TEXT_MARKERS = (
     "修改",
     "修复",
@@ -602,6 +604,7 @@ def ensure_self_evolution_agent_instances() -> list[dict[str, Any]]:
             agent = _ensure_self_evolution_role(role)
             if agent:
                 ensured.append(agent)
+        _retire_stale_self_evolution_roles()
         _sync_self_evolution_mode_binding(ensured, preserve_existing_slots=True)
         return ensured
     finally:
@@ -818,13 +821,42 @@ def _find_agent_by_self_evolution_role(role: str) -> dict[str, Any] | None:
     normalized = str(role or "").strip()
     if not normalized:
         return None
+    retired_role = "summarizer" if normalized == "observer" else ""
     for agent in agent_directory_service.list_agents(include_archived=True):
         metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-        if str(metadata.get("selfEvolutionRole") or "").strip() == normalized:
+        role_value = str(metadata.get("selfEvolutionRole") or "").strip()
+        agent_role_key = str(agent.get("roleKey") or "").strip()
+        if role_value == normalized:
             return agent
-        if str(agent.get("primaryMode") or "").strip() == "self_evolution" and str(agent.get("roleKey") or "").strip() == normalized:
+        if str(agent.get("primaryMode") or "").strip() == "self_evolution" and agent_role_key == normalized:
             return agent
+    if retired_role:
+        for agent in agent_directory_service.list_agents(include_archived=True):
+            metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+            role_value = str(metadata.get("selfEvolutionRole") or "").strip()
+            agent_role_key = str(agent.get("roleKey") or "").strip()
+            if role_value == retired_role:
+                return agent
+            if str(agent.get("primaryMode") or "").strip() == "self_evolution" and agent_role_key == retired_role:
+                return agent
     return None
+
+
+def _retire_stale_self_evolution_roles() -> None:
+    for agent in agent_directory_service.list_agents(include_archived=True):
+        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        role = str(metadata.get("selfEvolutionRole") or agent.get("roleKey") or "").strip()
+        if role not in SELF_EVOLUTION_RETIRED_ROLE_KEYS:
+            continue
+        if str(agent.get("status") or "active").strip() == "archived":
+            continue
+        try:
+            agent_directory_service.archive_agent_instance(
+                str(agent.get("agentId") or ""),
+                repair_mode_bindings=False,
+            )
+        except Exception:
+            continue
 
 
 def _sync_self_evolution_mode_binding(agents: list[dict[str, Any]], *, preserve_existing_slots: bool = False) -> None:
@@ -841,14 +873,20 @@ def _sync_self_evolution_mode_binding(agents: list[dict[str, Any]], *, preserve_
             payload = agent_mode_binding_service.get_mode_bindings_payload()
             existing = ((payload.get("modes") or {}).get("self_evolution") or {}).get("slots")
             if isinstance(existing, dict):
-                slots.update({str(key): str(value or "").strip() for key, value in existing.items()})
+                slots.update(
+                    {
+                        str(key): str(value or "").strip()
+                        for key, value in existing.items()
+                        if str(key or "").strip() in SELF_EVOLUTION_ROLE_KEYS
+                    }
+                )
         except Exception:
             slots = {}
     for agent in active_agents:
         metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
         role = str(metadata.get("selfEvolutionRole") or agent.get("roleKey") or "").strip()
         agent_id = str(agent.get("agentId") or "").strip()
-        if role and agent_id and not slots.get(role):
+        if role in SELF_EVOLUTION_ROLE_KEYS and agent_id and not slots.get(role):
             slots[role] = agent_id
     if not active_agent_ids:
         return
@@ -890,6 +928,122 @@ def _self_evolution_agent_config(binding: dict[str, Any]) -> Any | None:
         return session_service._session_agent_config_for_llm_slot(agent, "dialogue")
     except Exception:
         return None
+
+
+def _run_self_evolution_agent_role_turn(
+    *,
+    role: str,
+    binding: dict[str, Any],
+    run_id: str,
+    prompt: str,
+    carryover: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    role_key = str(role or "").strip()
+    agent_id = str((binding or {}).get("agentId") or "").strip()
+    session_id = str((binding or {}).get("directSessionId") or "").strip()
+    agent_context = build_agent_context(
+        agent_id,
+        session_id=session_id,
+        run_id=run_id,
+    )
+    runtime_context = agent_directory_service.active_agent_runtime(
+        agent_id,
+        session_id=session_id,
+        turn_id=run_id,
+    )
+    turn_runtime_request = AgentTurnRuntimeRequest(
+        mode="self_evolution",
+        run_kind="self_evolution",
+        run_id=run_id,
+        session_id=session_id,
+        agent_id=agent_id,
+        llm_slot="dialogue",
+        model_id=str((binding or {}).get("dialogueModelId") or ""),
+        cache_scope=role_key,
+        workspace_path=str((binding or {}).get("workspacePath") or ""),
+    )
+    with runtime_context:
+        turn_result = run_agent_single_turn(
+            AgentSingleTurnRequest(
+                mode="self_evolution",
+                workspace_path=str((binding or {}).get("workspacePath") or "") or None,
+                config=_self_evolution_agent_config(binding),
+                initial_prompt=prompt,
+                carryover=carryover if isinstance(carryover, dict) else None,
+                runtime_context=agent_context.context_block,
+                static_runtime_context=agent_context.static_context_block,
+                dynamic_runtime_context=agent_context.dynamic_context_block,
+                interrupt_checker=lambda: _current_run_control_reason(run_id),
+                runtime=turn_runtime_request,
+            )
+        )
+    result = turn_result.result if isinstance(turn_result.result, dict) else {}
+    if agent_context.agent_id:
+        record_agent_turn_result(
+            agent_context.agent_id,
+            agent_context.session_id,
+            result,
+            run_id=run_id,
+        )
+    return {
+        "result": result,
+        "carryover": turn_result.carryover if isinstance(turn_result.carryover, dict) else {},
+        "runtime": turn_result.runtime,
+        "context": agent_context,
+    }
+
+
+def _bounded_review_text(value: Any, *, max_chars: int = 4000) -> str:
+    text = str(value or "").strip()
+    if len(text) <= max_chars:
+        return text
+    return f"{text[:max_chars]}\n...[truncated]"
+
+
+def _build_self_review_prompt(goal: str, executor_result: dict[str, Any]) -> str:
+    executor_summary = _build_result_message(executor_result, fallback=str(executor_result.get("summary") or ""))
+    status = str(executor_result.get("status") or "").strip() or "unknown"
+    tool_call_count = str(executor_result.get("tool_call_count") or 0)
+    return (
+        "请对本轮自进化执行结果进行独立评审。\n\n"
+        f"原始目标：{str(goal or '').strip()}\n"
+        f"执行状态：{status}\n"
+        f"工具调用数：{tool_call_count}\n\n"
+        "执行输出：\n"
+        f"{_bounded_review_text(executor_summary)}\n\n"
+        "评审要求：\n"
+        "1. 判断执行结果是否满足目标，证据不足时明确退回或标记 INCONCLUSIVE。\n"
+        "2. 优先指出回归风险、权限越界、测试不足和回滚条件不清。\n"
+        "3. 不扩大目标范围；如需补充验证，只做与当前目标直接相关的检查。\n"
+        "4. 输出评审结论、阻塞问题、证据引用、剩余风险和通过条件。"
+    )
+
+
+def _combine_self_evolution_review_result(
+    executor_result: dict[str, Any],
+    reviewer_result: dict[str, Any],
+) -> dict[str, Any]:
+    combined = dict(executor_result or {})
+    executor_message = _build_result_message(executor_result, fallback=str(executor_result.get("summary") or ""))
+    reviewer_message = _build_result_message(reviewer_result, fallback=str(reviewer_result.get("summary") or ""))
+    if reviewer_message:
+        combined_summary = (
+            f"{executor_message}\n\n评审结果：\n{reviewer_message}"
+            if executor_message
+            else reviewer_message
+        )
+        combined["summary"] = combined_summary
+        combined["raw_output"] = combined_summary
+    combined["reviewResult"] = dict(reviewer_result or {})
+    combined["tool_trace"] = [
+        *list(executor_result.get("tool_trace") or []),
+        *list(reviewer_result.get("tool_trace") or []),
+    ]
+    reviewer_status = str(reviewer_result.get("status") or "").strip().lower()
+    if reviewer_status == "failed":
+        combined["status"] = "failed"
+        combined["error"] = str(reviewer_result.get("error") or reviewer_message or "自进化评审失败。").strip()
+    return combined
 
 
 def _optional_scene_int(value: Any) -> int | None:
@@ -1704,59 +1858,45 @@ def _run_self_evolution_turn(context: dict[str, Any]) -> None:
     tool_call_count = 0
     try:
         executor_binding = _self_role_binding(agent_bindings, "executor")
-        executor_context = build_agent_context(
-            str(executor_binding.get("agentId") or ""),
-            session_id=str(executor_binding.get("directSessionId") or ""),
-            run_id=run_id,
-        )
-        runtime_context = agent_directory_service.active_agent_runtime(
-            str(executor_binding.get("agentId") or ""),
-            session_id=str(executor_binding.get("directSessionId") or ""),
-            turn_id=run_id,
-        )
         prompt = goal if carryover else _build_web_run_prompt(goal)
-        turn_runtime_request = AgentTurnRuntimeRequest(
-            mode="self_evolution",
-            run_kind="self_evolution",
+        executor_turn = _run_self_evolution_agent_role_turn(
+            role="executor",
+            binding=executor_binding,
             run_id=run_id,
-            session_id=str(executor_binding.get("directSessionId") or ""),
-            agent_id=str(executor_binding.get("agentId") or ""),
-            llm_slot="dialogue",
-            model_id=str(executor_binding.get("dialogueModelId") or ""),
-            cache_scope="executor",
-            workspace_path=str(executor_binding.get("workspacePath") or ""),
+            prompt=prompt,
+            carryover=carryover if isinstance(carryover, dict) else None,
         )
-        with runtime_context:
-            turn_result = run_agent_single_turn(
-                AgentSingleTurnRequest(
-                    mode="self_evolution",
-                    workspace_path=str(executor_binding.get("workspacePath") or "") or None,
-                    config=_self_evolution_agent_config(executor_binding),
-                    initial_prompt=prompt,
-                    carryover=carryover if isinstance(carryover, dict) else None,
-                    runtime_context=executor_context.context_block,
-                    static_runtime_context=executor_context.static_context_block,
-                    dynamic_runtime_context=executor_context.dynamic_context_block,
-                    interrupt_checker=lambda: _current_run_control_reason(run_id),
-                    runtime=turn_runtime_request,
-                )
-            )
-        result = turn_result.result
-        if executor_context.agent_id:
-            record_agent_turn_result(
-                executor_context.agent_id,
-                executor_context.session_id,
-                result if isinstance(result, dict) else {},
-                run_id=run_id,
-            )
+        result = dict(executor_turn.get("result") or {})
         result_status = str(result.get("status") or "").strip().lower()
         summary = str(result.get("summary") or "").strip()
-        tool_call_count = max(0, int(result.get("tool_call_count") or 0))
+        executor_tool_call_count = max(0, int(result.get("tool_call_count") or 0))
+        tool_call_count = executor_tool_call_count
         total_tool_call_count += tool_call_count
-        carryover_payload: dict[str, Any] = turn_result.carryover if isinstance(turn_result.carryover, dict) else {}
+        carryover_payload: dict[str, Any] = dict(executor_turn.get("carryover") or {})
         run_snapshot = get_self_evolution_run_snapshot(run_id) or {}
         control_action = str(run_snapshot.get("controlAction") or "").strip().lower()
         cancel_requested = bool(run_snapshot.get("cancelRequested"))
+        if result_status not in {"failed", "stopped"} and not control_action and not cancel_requested:
+            reviewer_binding = _self_role_binding(agent_bindings, "reviewer")
+            reviewer_turn = _run_self_evolution_agent_role_turn(
+                role="reviewer",
+                binding=reviewer_binding,
+                run_id=run_id,
+                prompt=_build_self_review_prompt(goal, result),
+            )
+            reviewer_result = dict(reviewer_turn.get("result") or {})
+            reviewer_tool_call_count = max(0, int(reviewer_result.get("tool_call_count") or 0))
+            tool_call_count += reviewer_tool_call_count
+            total_tool_call_count += reviewer_tool_call_count
+            reviewer_carryover = reviewer_turn.get("carryover") if isinstance(reviewer_turn.get("carryover"), dict) else {}
+            if reviewer_carryover:
+                carryover_payload["reviewer"] = reviewer_carryover
+            result = _combine_self_evolution_review_result(result, reviewer_result)
+            result_status = str(result.get("status") or "").strip().lower()
+            summary = str(result.get("summary") or "").strip()
+            run_snapshot = get_self_evolution_run_snapshot(run_id) or {}
+            control_action = str(run_snapshot.get("controlAction") or "").strip().lower()
+            cancel_requested = bool(run_snapshot.get("cancelRequested"))
         assistant_message = _build_result_message(
             result=result,
             fallback=summary
@@ -1768,7 +1908,8 @@ def _run_self_evolution_turn(context: dict[str, Any]) -> None:
         )
         transcript_tool_calls = _tool_calls_from_result(result)
         last_tool_name = _last_tool_name_from_result(result)
-        turn_runtime_metadata = dict(turn_result.runtime.metadata) if turn_result.runtime is not None else {}
+        turn_runtime = executor_turn.get("runtime")
+        turn_runtime_metadata = dict(turn_runtime.metadata) if turn_runtime is not None else {}
         _record_self_scene_event(
             "turn",
             "self_evolution_run.turn.completed",
@@ -2222,17 +2363,17 @@ def _update_self_observation_progress(
 
 def _run_observation_session(*, run_id: str, prompt: str, duration_seconds: int) -> dict[str, Any]:
     bindings = self_evolution_agent_bindings()
-    executor_binding = bindings.get("executor") if isinstance(bindings, dict) else {}
-    agent_id = str((executor_binding or {}).get("agentId") or "").strip()
+    observer_binding = bindings.get("observer") if isinstance(bindings, dict) else {}
+    agent_id = str((observer_binding or {}).get("agentId") or "").strip()
     if not agent_id:
-        raise SelfEvolutionRunValidationError("Missing self observation executor agent binding.")
+        raise SelfEvolutionRunValidationError("Missing self observation observer agent binding.")
 
     tool_policy = _self_observation_tool_policy()
     session = create_supervised_agent_session(
         agent_id=agent_id,
         title=f"自进化观察 {run_id[:8]}",
         metadata={
-            "role": "executor",
+            "role": "observer",
             "mode": "self_observation",
             "runKind": "self_observation_run",
             "runId": run_id,
