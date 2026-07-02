@@ -577,11 +577,13 @@ def test_self_evolution_agent_bindings_create_fixed_role_slots(tmp_path, monkeyp
 
     bindings = service.self_evolution_agent_bindings()
 
-    assert set(bindings) == {"executor", "reviewer", "summarizer"}
+    assert set(bindings) == {"executor", "reviewer", "observer"}
     assert bindings["executor"]["promptTemplateId"] == "prompt-self-executor"
     assert bindings["reviewer"]["promptTemplateId"] == "prompt-self-reviewer"
+    assert bindings["observer"]["promptTemplateId"] == ""
     payload = agent_mode_binding_service.get_mode_bindings_payload()
     assert payload["modes"]["self_evolution"]["slots"]["executor"] == bindings["executor"]["agentId"]
+    assert payload["modes"]["self_evolution"]["slots"]["observer"] == bindings["observer"]["agentId"]
 
 
 def test_self_evolution_agent_repair_preserves_all_fixed_roles(tmp_path, monkeypatch):
@@ -599,12 +601,39 @@ def test_self_evolution_agent_repair_preserves_all_fixed_roles(tmp_path, monkeyp
         if agent["primaryMode"] == "self_evolution"
     ]
 
-    assert {agent["roleKey"] for agent in agents} == {"executor", "reviewer", "summarizer"}
-    assert {agent["promptTemplateId"] for agent in agents} == {
-        "prompt-self-executor",
-        "prompt-self-reviewer",
-        "prompt-self-summarizer",
+    assert {agent["roleKey"] for agent in agents} == {"executor", "reviewer", "observer"}
+    by_role = {agent["roleKey"]: agent for agent in agents}
+    assert by_role["executor"]["promptTemplateId"] == "prompt-self-executor"
+    assert by_role["reviewer"]["promptTemplateId"] == "prompt-self-reviewer"
+    assert by_role["observer"]["promptTemplateId"] == ""
+
+
+def test_self_evolution_fixed_roles_get_executable_and_observer_tool_policies(tmp_path, monkeypatch):
+    monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(service, "ROLLBACK_ROOT", tmp_path / "workspace" / "web_self_evolution")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+
+    service.ensure_self_evolution_agent_instances()
+    state = agent_directory_service.load_state()
+    agents = {
+        agent["roleKey"]: agent
+        for agent in state["agents"]
+        if agent.get("primaryMode") == "self_evolution"
     }
+
+    for role in ("executor", "reviewer"):
+        policy = state["toolPolicies"][agents[role]["toolPolicyId"]]
+        assert {"cli_tool", "apply_patch_tool", "run_test_for_tool"}.issubset(policy["allowedTools"])
+        assert "cli_agent_run_tool" not in policy["allowedTools"]
+        assert policy["mutationAccess"] == "restricted"
+
+    observer_policy = state["toolPolicies"][agents["observer"]["toolPolicyId"]]
+    assert observer_policy["allowedTools"] == []
+    assert observer_policy["preferredTools"] == []
+    assert observer_policy["networkAccess"] == "none"
+    assert observer_policy["mutationAccess"] == "none"
 
 
 def test_self_evolution_agent_repair_does_not_reactivate_archived_fixed_role(tmp_path, monkeypatch):
@@ -694,9 +723,11 @@ def test_start_self_evolution_run_snapshot_includes_agent_bindings(tmp_path, mon
 
     assert snapshot["agentBindings"]["executor"]["agentId"]
     assert snapshot["agentBindings"]["reviewer"]["role"] == "reviewer"
+    assert snapshot["agentBindings"]["observer"]["role"] == "observer"
+    assert snapshot["agentBindings"]["observer"]["promptTemplateId"] == ""
 
 
-def test_self_evolution_turn_uses_executor_context_engine_packet(tmp_path, monkeypatch):
+def test_self_evolution_turn_runs_executor_then_reviewer_with_context_packets(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(service, "ROLLBACK_ROOT", tmp_path / "workspace" / "web_self_evolution")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -727,29 +758,35 @@ def test_self_evolution_turn_uses_executor_context_engine_packet(tmp_path, monke
         content="你是自进化执行 Agent，只根据当前有界目标行动。",
     )
     captured: dict[str, object] = {}
+    turn_calls: list[dict[str, object]] = []
     scene_events: list[dict[str, object]] = []
 
     class FakeSelfEvolvingAgent:
         def __init__(self, *, mode=None, workspace_path=None, config=None):
-            captured["mode"] = str(mode or "")
-            captured["workspace_path"] = str(workspace_path or "")
-            captured["profile_id"] = config.llm.get_profile(role="primary").profile_id if config else ""
-            captured["primary_model"] = config.llm.get_profile(role="primary").model if config else ""
+            if captured.get("_active_cache_scope") == "executor":
+                captured["mode"] = str(mode or "")
+                captured["workspace_path"] = str(workspace_path or "")
+                captured["profile_id"] = config.llm.get_profile(role="primary").profile_id if config else ""
+                captured["primary_model"] = config.llm.get_profile(role="primary").model if config else ""
 
         def seed_static_runtime_context(self, content):
-            captured["static_runtime_context"] = str(content or "")
+            if captured.get("_active_cache_scope") == "executor":
+                captured["static_runtime_context"] = str(content or "")
 
         def seed_runtime_context(self, content):
-            captured.setdefault("runtime_contexts", []).append(str(content or ""))
+            if captured.get("_active_cache_scope") == "executor":
+                captured.setdefault("runtime_contexts", []).append(str(content or ""))
 
         def mark_runtime_context_seeded_by_host(self):
-            captured["runtime_context_seeded_by_host"] = True
+            if captured.get("_active_cache_scope") == "executor":
+                captured["runtime_context_seeded_by_host"] = True
 
         def set_turn_interrupt_checker(self, checker):
             self.checker = checker
 
         def run_single_turn(self, initial_prompt=None):
-            captured["initial_prompt"] = str(initial_prompt or "")
+            if captured.get("_active_cache_scope") == "executor":
+                captured["initial_prompt"] = str(initial_prompt or "")
             return {
                 "status": "completed",
                 "summary": "self done",
@@ -762,14 +799,25 @@ def test_self_evolution_turn_uses_executor_context_engine_packet(tmp_path, monke
             return {}
 
     def fake_run_agent_single_turn(request):
-        captured["runtime_mode"] = request.runtime.mode if request.runtime else ""
-        captured["runtime_run_kind"] = request.runtime.run_kind if request.runtime else ""
-        captured["runtime_cache_scope"] = request.runtime.cache_scope if request.runtime else ""
-        captured["runtime_model_id"] = request.runtime.model_id if request.runtime else ""
-        captured["request_runtime_context"] = request.runtime_context
-        captured["request_static_runtime_context"] = request.static_runtime_context
-        captured["request_dynamic_runtime_context"] = request.dynamic_runtime_context
+        cache_scope = request.runtime.cache_scope if request.runtime else ""
+        turn_calls.append(
+            {
+                "cache_scope": cache_scope,
+                "agent_id": request.runtime.agent_id if request.runtime else "",
+                "model_id": request.runtime.model_id if request.runtime else "",
+                "prompt": request.initial_prompt,
+            }
+        )
+        if cache_scope == "executor":
+            captured["runtime_mode"] = request.runtime.mode if request.runtime else ""
+            captured["runtime_run_kind"] = request.runtime.run_kind if request.runtime else ""
+            captured["runtime_cache_scope"] = cache_scope
+            captured["runtime_model_id"] = request.runtime.model_id if request.runtime else ""
+            captured["request_runtime_context"] = request.runtime_context
+            captured["request_static_runtime_context"] = request.static_runtime_context
+            captured["request_dynamic_runtime_context"] = request.dynamic_runtime_context
         runtime = prepare_agent_turn_runtime(request.runtime) if request.runtime else None
+        captured["_active_cache_scope"] = cache_scope
         agent = FakeSelfEvolvingAgent(
             mode=request.mode,
             workspace_path=request.workspace_path,
@@ -790,6 +838,13 @@ def test_self_evolution_turn_uses_executor_context_engine_packet(tmp_path, monke
         if request.interrupt_checker:
             agent.set_turn_interrupt_checker(request.interrupt_checker)
         result = agent.run_single_turn(initial_prompt=request.initial_prompt)
+        if cache_scope == "reviewer":
+            result = {
+                **result,
+                "summary": "review done",
+                "raw_output": "review done",
+                "tool_call_count": 0,
+            }
         if runtime is not None:
             result = {**result, "turn_runtime": dict(runtime.metadata)}
         return SimpleNamespace(result=result, carryover=agent.export_turn_carryover(), runtime=runtime)
@@ -819,6 +874,10 @@ def test_self_evolution_turn_uses_executor_context_engine_packet(tmp_path, monke
     ]
 
     assert snapshot["status"] == "done"
+    assert [item["cache_scope"] for item in turn_calls] == ["executor", "reviewer"]
+    assert turn_calls[0]["agent_id"] == executor["agentId"]
+    assert "只读观察" in str(turn_calls[0]["prompt"])
+    assert "self done" in str(turn_calls[1]["prompt"])
     assert captured["mode"] == "self_evolution"
     assert captured["workspace_path"] == executor["workspacePath"]
     assert captured["profile_id"] == "primary"
@@ -1114,7 +1173,7 @@ def test_start_self_observation_run_rejects_tool_and_authorization_fields(monkey
 
 def test_self_observation_turn_finishes_with_report(monkeypatch):
     monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
-    monkeypatch.setattr(service, "self_evolution_agent_bindings", lambda: {"executor": {"agentId": "agent-observe-1"}})
+    monkeypatch.setattr(service, "self_evolution_agent_bindings", lambda: {"observer": {"agentId": "agent-observe-1"}})
     monkeypatch.setattr(service, "create_supervised_agent_session", lambda **kwargs: {"id": "session-observe-1"})
     monkeypatch.setattr(service, "submit_session_message", lambda *args, **kwargs: {"turnId": "turn-observe-1"})
     monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: None)
