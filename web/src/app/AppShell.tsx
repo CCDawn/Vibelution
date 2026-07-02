@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigate, useNavigationType } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation, useNavigate, useNavigationType } from "react-router-dom";
 import {
   ArrowLeft,
   ChevronDown,
@@ -2164,9 +2164,8 @@ export function AppShell() {
                   </span>
                 </div>
                 <ul className={styles.activeWorkDetailList}>
-                  {activeWorkIndicator.items.map((item) => (
-                    <li key={`${item.kind}-${item.runId || item.status}`} className={styles.activeWorkDetailItem}>
-                      <span className={`${styles.statusDot} ${styles[`status_${item.tone}`]}`} />
+                  {activeWorkIndicator.items.map((item) => {
+                    const detailCopy = (
                       <div className={styles.activeWorkDetailCopy}>
                         <div className={styles.activeWorkDetailTitle}>
                           <strong>{item.label}</strong>
@@ -2175,8 +2174,18 @@ export function AppShell() {
                         <p>{item.summary}</p>
                         {item.runId ? <code>{item.runId}</code> : null}
                       </div>
-                    </li>
-                  ))}
+                    );
+                    return (
+                      <li key={`${item.kind}-${item.runId || item.status}`} className={styles.activeWorkDetailItem}>
+                        <span className={`${styles.statusDot} ${styles[`status_${item.tone}`]}`} />
+                        {item.href ? (
+                          <Link className={styles.activeWorkDetailLink} to={item.href} aria-label={item.detail}>
+                            {detailCopy}
+                          </Link>
+                        ) : detailCopy}
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             </div>
