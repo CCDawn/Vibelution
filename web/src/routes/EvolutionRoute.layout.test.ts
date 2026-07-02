@@ -70,6 +70,22 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).not.toContain('t("worktreeReviewPanelTitle")');
   });
 
+  it("prefers worktree run authority for current supervised live termination", () => {
+    const terminateHandler = routeSource.slice(
+      routeSource.indexOf("const handleTerminateSupervisedRun"),
+      routeSource.indexOf("const supervisedControlError"),
+    );
+    const worktreeActionIndex = terminateHandler.indexOf("approvalWorktreeActionMutation.mutate");
+    const legacyFallbackIndex = terminateHandler.indexOf("terminateRunMutation.mutate");
+
+    expect(routeSource).toContain("startWorktreeRunMutation");
+    expect(routeSource).toContain('"/api/evolution/worktree-runs"');
+    expect(terminateHandler).toContain("if (supervisedWorktreeLiveRun)");
+    expect(terminateHandler).toContain('action: "terminate"');
+    expect(worktreeActionIndex).toBeGreaterThanOrEqual(0);
+    expect(legacyFallbackIndex).toBeGreaterThan(worktreeActionIndex);
+  });
+
   it("merges supervised datasets and bundles into one source picker", () => {
     expect(routeSource).toContain("workbenchCatalogQuery");
     expect(routeSource).toContain("queryKeys.evolutionWorkbench()");
@@ -483,15 +499,19 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(tabletBreakpoint).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
   });
 
-  it("lets the supervised case transcript fill the lower vertical space", () => {
-    expect(routeSource).toContain("styles.transcriptSection");
+  it("lets the embedded supervised conversation fill the lower vertical space", () => {
+    expect(routeSource).toContain("styles.caseConversationShell");
+    expect(routeSource).toContain("styles.caseConversationTranscript");
     expect(routeSource).toContain("styles.caseRawEvidence");
     expect(routeSource).toContain("currentCaseOutputLabel(monitoredRun)");
-    expect(stylesSource).toContain(".transcriptSection");
+    expect(stylesSource).toContain(".caseConversationShell");
+    expect(stylesSource).toContain(".caseConversationTranscript");
     expect(stylesSource).toContain("flex: 1 1 0");
+    expect(stylesSource).toContain("height: 100%");
     expect(stylesSource).toContain("background: transparent");
     expect(stylesSource).toContain(".caseRawEvidence");
-    expect(stylesSource).toContain("max-height: 30%");
+    expect(stylesSource).toContain(".supervisedConversationTrace");
+    expect(stylesSource).toContain("max-height: min(260px, 30vh)");
     expect(stylesSource).not.toContain("max-height: 340px");
   });
 
@@ -520,17 +540,24 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(worktreeReviewStylesSource).toContain("worktreeReviewSurfaceClass");
   });
 
-  it("renders supervised case transcript with a read-only conversation view and trace fallback", () => {
+  it("keeps the supervised center pane as a read-only embedded conversation surface", () => {
     expect(routeSource).toContain("LazyConversationView");
     expect(routeSource).toContain("monitoredCaseConversationMessages");
-    expect(routeSource).toContain("monitoredCaseHasConversationMessages");
+    expect(routeSource).toContain("selectedWorkflowConversationMessages");
+    expect(routeSource).toContain("selectedWorkflowIsRuntimeStep");
+    expect(routeSource).toContain("selectedWorkflowConversationNotice");
+    expect(routeSource).toContain("supervisedLiveConversationSupplement");
     expect(routeSource).toContain("showComposer={false}");
-    expect(routeSource).toContain("conversationMessages");
+    expect(routeSource).toContain("showSessionOverview={Boolean(supervisedLiveConversationSupplement)}");
+    expect(routeSource).toContain("supplementalContent={supervisedLiveConversationSupplement}");
     expect(routeSource).toContain("styles.caseConversationShell");
     expect(routeSource).toContain("styles.caseConversationTranscript");
     expect(stylesSource).toContain(".caseConversationShell");
     expect(stylesSource).toContain(".caseConversationTranscript");
     expect(stylesSource).toContain(".caseConversationFallback");
+    expect(stylesSource).toContain(".supervisedConversationEvidence");
+    expect(stylesSource).toContain(".supervisedConversationTrace");
+    expect(routeSource).not.toContain("styles.ioWaitingState");
     expect(routeSource).toContain("buildSupervisedCaseTraceItems");
     expect(routeSource).toContain("caseTraceItemExpanded");
     expect(routeSource).toContain("toggleCaseTraceItem");
