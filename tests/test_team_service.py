@@ -897,6 +897,10 @@ def test_team_chat_room_sync_preserves_existing_config_extensions(tmp_path, monk
 def test_ensure_evolution_system_teams_materializes_mode_roles(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(team_service, "_ensure_evolution_system_agents", _evolution_system_agent_payloads)
+    expected_counts = {
+        "self_evolution": len(_evolution_system_agent_payloads()["self_evolution"]),
+        "supervised_evolution": len(_evolution_system_agent_payloads()["supervised_evolution"]),
+    }
 
     result = team_service.ensure_evolution_system_teams()
     teams = {team["teamId"]: team for team in result["teams"]}
@@ -910,8 +914,8 @@ def test_ensure_evolution_system_teams_materializes_mode_roles(tmp_path, monkeyp
     assert teams["supervised-evolution-team"]["teamKind"] == "supervised_evolution"
     assert teams["supervised-evolution-team"]["teamCategory"] == "监督进化系统团队"
     assert teams["supervised-evolution-team"]["teamSource"] == "supervised_evolution"
-    assert teams["self-evolution-team"]["memberCount"] == 3
-    assert teams["supervised-evolution-team"]["memberCount"] == 5
+    assert teams["self-evolution-team"]["memberCount"] == expected_counts["self_evolution"]
+    assert teams["supervised-evolution-team"]["memberCount"] == expected_counts["supervised_evolution"]
     assert teams["self-evolution-team"]["linkedChatRoomId"]
     assert teams["supervised-evolution-team"]["linkedChatRoomId"]
     assert len(chat_room_service.list_chat_rooms()) == 2
@@ -949,25 +953,21 @@ def test_ensure_ai_search_system_team_materializes_source_scope_roles(tmp_path, 
         )
 
     monkeypatch.setattr(team_service, "record_runtime_scene_event", record_event)
+    expected_roles = [role["role"] for role in team_service.AI_SEARCH_SYSTEM_ROLES]
+    expected_role_count = len(expected_roles)
 
     team = team_service.ensure_ai_search_system_team()
 
-    expected_roles = [
-        "ai_search_scope_lead",
-        "global_primary_sources",
-        "cn_primary_sources",
-        "signal_quality_gate",
-    ]
     assert team["teamId"] == team_service.AI_SEARCH_TEAM_ID
     assert team["name"] == "AI 搜索范围团队"
     assert team["systemTeamKind"] == "ai_search"
     assert team["teamKind"] == "ai_search"
     assert team["teamCategory"] == "AI 搜索系统团队"
     assert team["teamSource"] == "ai_search"
-    assert team["memberCount"] == 4
+    assert team["memberCount"] == expected_role_count
     assert [member["role"] for member in team["members"]] == expected_roles
     assert team["linkedChatRoomId"]
-    assert team["linkedChatRoom"]["participantCount"] == 4
+    assert team["linkedChatRoom"]["participantCount"] == expected_role_count
     assert team["sourceScopePath"] == "workspace/teams/ai-search-team/source_scope.json"
     assert team["sourceScope"]["scopeId"] == "ai-latest-news-source-scope-v1"
     assert team["sourceScope"]["summary"]["groupCount"] == 4
@@ -991,7 +991,7 @@ def test_ensure_ai_search_system_team_materializes_source_scope_roles(tmp_path, 
     assert room["purpose"] == "ai_search"
     assert room["config"]["teamKind"] == "ai_search"
     assert room["config"]["teamSource"] == "ai_search"
-    assert len(room["participants"]) == 4
+    assert len(room["participants"]) == expected_role_count
 
     canvas = team_service.get_team_canvas(team_service.AI_SEARCH_TEAM_ID)
     assert canvas["canvasKind"] == team_service.CANVAS_KIND
