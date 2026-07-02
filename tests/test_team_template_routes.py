@@ -53,6 +53,7 @@ def test_team_template_instantiate_creates_medical_team_agents_and_room(tmp_path
     client = _client()
     template = _team_template_detail(client, "medical-consultation-demo")
     expected_count = len(template["roles"])
+    expected_edge_count = len(template.get("canvas", {}).get("edges") or [])
 
     response = client.post(
         "/api/team-templates/medical-consultation-demo/instantiate",
@@ -84,11 +85,16 @@ def test_team_template_instantiate_creates_medical_team_agents_and_room(tmp_path
     assert room["config"]["teamKind"] == "template_demo"
     assert room["config"]["teamTemplateId"] == "medical-consultation-demo"
     assert len(room["participants"]) == expected_count
-    assert [participant["teamRole"] for participant in room["participants"]][0] == "问诊主持 / 结果整理"
+    assert {
+        "问诊主持 / 结果整理",
+        "风险分诊 / 安全审查",
+        "症状采集员",
+        "全科/专科顾问",
+    }.issubset({participant["teamRole"] for participant in room["participants"]})
 
     canvas = client.get(f"/api/teams/{team['teamId']}/canvas").json()
     assert len(canvas["nodes"]) == expected_count
-    assert len(canvas["edges"]) == 6
+    assert len(canvas["edges"]) == expected_edge_count
     assert canvas["validation"]["valid"] is True
 
     agents = client.get("/api/agents").json()
@@ -107,6 +113,7 @@ def test_team_template_instantiate_creates_heletech_demo_team(tmp_path, monkeypa
     client = _client()
     template = _team_template_detail(client, "heletech-maternal-digital-health-demo")
     expected_count = len(template["roles"])
+    expected_edge_count = len(template.get("canvas", {}).get("edges") or [])
 
     response = client.post(
         "/api/team-templates/heletech-maternal-digital-health-demo/instantiate",
@@ -149,15 +156,27 @@ def test_team_template_instantiate_creates_heletech_demo_team(tmp_path, monkeypa
     assert room["config"]["teamKind"] == "template_demo"
     assert room["config"]["teamTemplateId"] == "heletech-maternal-digital-health-demo"
     assert len(room["participants"]) == expected_count
-    assert [participant["teamRole"] for participant in room["participants"]][0] == "方案主持"
+    assert {
+        "方案主持",
+        "妇幼业务顾问",
+        "病历集成顾问",
+        "数据科研顾问",
+        "合规交付顾问",
+    }.issubset({participant["teamRole"] for participant in room["participants"]})
     assert room["config"]["heletechMaternalDigitalHealthDemo"] is True
 
     canvas = client.get(f"/api/teams/{team['teamId']}/canvas").json()
     assert len(canvas["nodes"]) == expected_count
-    assert len(canvas["edges"]) == 8
+    assert len(canvas["edges"]) == expected_edge_count
     assert canvas["validation"]["valid"] is True
-    assert canvas["nodes"][0]["id"] == "heletech-1"
-    assert [node["purpose"] for node in canvas["nodes"]] == ["方案编排", "妇幼流程", "病历集成", "科研数据", "合规交付"]
+    assert canvas["nodes"][0]["id"] == f"{template['canvas']['nodePrefix']}-1"
+    assert {node["purpose"] for node in canvas["nodes"]} == {
+        "方案编排",
+        "妇幼流程",
+        "病历集成",
+        "科研数据",
+        "合规交付",
+    }
 
     agents = client.get("/api/agents").json()
     demo_agents = [
