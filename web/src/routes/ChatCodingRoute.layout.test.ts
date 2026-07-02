@@ -1080,6 +1080,42 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.groupComposerBar).toBeTypeOf("string");
   });
 
+  it("keeps restored ChatCodingRoute grids from the CSS module migration", () => {
+    const restoredGridExpectations: Array<[string, string]> = [
+      [routeStyles.inlineMetaPill, "grid-cols-[minmax(58px,0.42fr)_minmax(0,1fr)]"],
+      [routeStyles.inlineMetaList, "grid-cols-[minmax(0,1fr)]"],
+      [routeStyles.sessionBindingNotice, "grid-cols-[minmax(0,1fr)_auto]"],
+      [routeStyles.activeSkillStatus, "grid-cols-[minmax(0,1fr)_auto]"],
+      [routeStyles.agentIndexHeader, "grid-cols-[18px_minmax(0,1fr)_auto]"],
+      [routeStyles.agentIndexOpenButton, "grid-cols-[30px_minmax(0,1fr)]"],
+      [routeStyles.resourceSplit, "grid-cols-[repeat(auto-fit,minmax(118px,1fr))]"],
+      [routeStyles.inlineStatGrid, "grid-cols-[1fr]"],
+      [routeStyles.inlineStat, "grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]"],
+      [routeStyles.petShowcaseActions, "grid-cols-[repeat(3,minmax(0,1fr))]"],
+      [routeStyles.cliAgentTerminalCommand, "grid-cols-[auto_minmax(0,1fr)_auto]"],
+      [routeStyles.runtimeNotice, "grid-cols-[16px_minmax(0,1fr)]"],
+      [routeStyles.toolApprovalDialog, "grid-cols-[34px_minmax(0,1fr)_auto]"],
+      [routeStyles.cacheDetailCalibrationNote, "grid-cols-[auto_minmax(0,1fr)_auto]"],
+      [routeStyles.rightIndexTabs, "grid-cols-[repeat(2,minmax(0,1fr))]"],
+      [routeStyles.memberIndexSummary, "grid-cols-[auto_minmax(0,1fr)_auto]"],
+      [routeStyles.groupAgentOption, "grid-cols-[auto_28px_minmax(0,1fr)]"],
+      [routeStyles.conversationTreeRootHeader, "grid-cols-[minmax(0,1fr)_auto]"],
+      [routeStyles.groupManagementActions, "grid-cols-[repeat(2,minmax(0,1fr))]"],
+      [routeStyles.groupManagementControls, "grid-cols-[minmax(0,1fr)_auto]"],
+      [routeStyles.groupMemberChip, "grid-cols-[auto_26px_minmax(0,1fr)_auto]"],
+      [routeStyles.groupBubbleRow, "grid-cols-[30px_minmax(0,1fr)]"],
+      [routeStyles.groupComposerBar, "grid-cols-[minmax(0,1fr)_auto_auto]"],
+    ];
+
+    for (const [className, gridTemplate] of restoredGridExpectations) {
+      expect(className).toContain("!grid");
+      expect(className).toContain(gridTemplate);
+    }
+
+    expect(routeStyles.systemEntryTitleRow).toContain("!flex");
+    expect(routeStyles.systemEntryTitleRow).not.toContain("grid-cols-");
+  });
+
   it("uses the group surface as a project Agent bus observation and @ guidance entry", () => {
     expect(routeSource).toContain("handleOpenProjectAgentBus");
     expect(routeSource).toContain("setActiveGroupRoomId(\"__project_agent_bus__\")");

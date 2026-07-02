@@ -462,22 +462,28 @@ const styleKeys = [
 const styles = createVuiStyleMap(styleKeys, {
   baseClassName: "vui-routes-chatcodingroute",
   extensions: {
+    activeSkillStatus: "!grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2",
+    agentIndexHeader: "!grid grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-[7px]",
+    agentIndexOpenButton: "!grid grid-cols-[30px_minmax(0,1fr)] items-center gap-[7px]",
     centerPane:
       "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[color-mix(in_srgb,var(--surface-page)_10%,transparent)]",
     centerSurface:
       "grid h-full min-h-0 overflow-hidden bg-[color-mix(in_srgb,var(--surface-panel-strong)_6%,transparent)]",
     cacheDetailBody: "max-h-[min(620px,calc(100dvh_-_238px))] overflow-auto [scrollbar-gutter:stable]",
     cacheDetailBoundaryTrack: "[&_span+span]:border-l [&_span+span]:border-[var(--vui-border-subtle)]",
+    cacheDetailCalibrationNote: "!grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-[7px]",
     cacheDetailDialog: "w-[min(1120px,calc(100vw_-_44px))] max-h-[min(860px,calc(100dvh_-_52px))]",
     cacheDonutSegmentToolDescriptions: "stroke-[var(--accent-warm)]",
     cacheDonutSegmentToolSchema: "stroke-[var(--accent-warm)]",
     chatReturnLink: "[&_span]:truncate",
     cliAgentRunPanelHidden: "hidden",
+    cliAgentTerminalCommand: "!grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2",
     cliAgentTerminalOutputShell: "bg-[var(--bg-canvas)]",
     conversationFrameFocus: "justify-self-center w-[min(calc(100%_-_48px),1480px)] max-w-full max-[980px]:w-full",
     conversationMetaRow: "grid grid-cols-[minmax(0,1fr)_max-content] [&_time]:flex-none [&_time]:overflow-visible [&_time]:text-clip",
     conversationMetaTime: "max-w-[min(164px,68%)] [&_time]:flex-none [&_time]:overflow-visible [&_time]:text-clip",
     conversationTitleRow: "grid grid-cols-[minmax(0,1fr)_fit-content(92px)] max-w-full",
+    conversationTreeRootHeader: "!grid grid-cols-[minmax(0,1fr)_auto] items-center gap-[7px]",
     emptyConversationSurface:
       "grid min-h-[74px] w-[min(360px,calc(100%_-_32px))] place-self-center place-items-center rounded-[var(--radius-panel)] border border-dashed border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-row)_58%,transparent)] px-4 py-3 text-center text-[var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-secondary)] shadow-[var(--vui-shadow-hairline)]",
     emptySurface:
@@ -489,7 +495,17 @@ const styles = createVuiStyleMap(styleKeys, {
     featureChipPrimary:
       "border-[color-mix(in_srgb,var(--accent-warm)_32%,var(--vui-border-subtle))] before:bg-[var(--accent-warm-2)]",
     featureChipRow: "!grid grid-cols-2 gap-1.5 overflow-visible rounded-none border-0 bg-transparent p-0",
-    inlineMetaPill: "[&_strong]:truncate [&_strong]:whitespace-nowrap",
+    groupAgentOption: "!grid grid-cols-[auto_28px_minmax(0,1fr)] items-center gap-1.5",
+    groupBubbleRow: "!grid grid-cols-[30px_minmax(0,1fr)] items-start gap-[7px]",
+    groupComposerBar: "!grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2.5",
+    groupManagementActions: "!grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[7px]",
+    groupManagementControls: "!grid grid-cols-[minmax(0,1fr)_auto] items-start gap-[9px]",
+    groupMemberChip: "!grid grid-cols-[auto_26px_minmax(0,1fr)_auto] items-center gap-1.5",
+    inlineMetaList: "!grid grid-cols-[minmax(0,1fr)] gap-[3px]",
+    inlineMetaPill:
+      "!grid grid-cols-[minmax(58px,0.42fr)_minmax(0,1fr)] items-baseline gap-1.5 [&_strong]:truncate [&_strong]:whitespace-nowrap",
+    inlineStat: "!grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] items-baseline gap-0.5",
+    inlineStatGrid: "!grid grid-cols-[1fr] gap-[5px]",
     layout:
       "h-[calc(100dvh_-_var(--shell-topbar-height))] max-h-[calc(100dvh_-_var(--shell-topbar-height))] overflow-hidden grid-cols-[var(--chat-left-pane-width,220px)_8px_minmax(0,1fr)_8px_var(--chat-right-pane-width,284px)] max-[1100px]:grid-cols-[var(--chat-left-pane-width,220px)_8px_minmax(0,1fr)_8px_var(--chat-right-pane-width,284px)]",
     layoutCenterFirst:
@@ -497,12 +513,18 @@ const styles = createVuiStyleMap(styleKeys, {
     leftBlock:
       "grid gap-1.5 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-glass)_82%,transparent)] p-1.5 shadow-[var(--vui-shadow-hairline)]",
     leftRail: "!flex h-full min-h-0 !flex-col gap-[5px] overflow-auto p-1.5 [scrollbar-gutter:stable]",
+    memberIndexSummary: "!grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5",
     panelBody: "min-h-0 overflow-auto [scrollbar-gutter:stable]",
     paneCollapsed: "invisible pointer-events-none !overflow-hidden opacity-0",
+    petShowcaseActions: "!grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[5px]",
+    resourceSplit: "!grid grid-cols-[repeat(auto-fit,minmax(118px,1fr))] gap-[5px]",
+    rightIndexTabs: "!grid grid-cols-[repeat(2,minmax(0,1fr))] gap-1",
     rightPane: "grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden p-1.5",
+    runtimeNotice: "!grid grid-cols-[16px_minmax(0,1fr)] items-start gap-[7px]",
     sectionHeader: "flex items-center justify-between gap-1.5",
     sectionIdentity: "grid min-w-0 gap-0.5",
     sectionTitle: "m-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
+    sessionBindingNotice: "!grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5",
     sessionContextMenuItem:
       "[&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents [&_[data-slot=vui-button-label]]:col-span-full",
     sessionItemActive: "shadow-[var(--vui-shadow-inset-accent)]",
@@ -517,6 +539,7 @@ const styles = createVuiStyleMap(styleKeys, {
     tokenStatusRingCore: "max-w-[32px] truncate text-[10px] leading-none",
     tokenStatusVisualGrid: "!grid !w-full grid-cols-1 justify-stretch gap-1.5 rounded-[var(--radius-control)]",
     tokenStatusBar: "[&>span]:w-[calc(var(--token-status-value)*1%)]",
+    toolApprovalDialog: "!grid grid-cols-[34px_minmax(0,1fr)_auto] gap-2.5",
   },
   overrides: {
     centerSurface:
@@ -595,7 +618,7 @@ const styles = createVuiStyleMap(styleKeys, {
     systemEntryTitle:
       "block min-w-0 truncate text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-primary)]",
     systemEntryTitleRow:
-      "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-1",
+      "!flex min-w-0 items-center gap-1.5",
     tokenStatusBar:
       "relative mt-1 block h-1 overflow-hidden rounded-full bg-[var(--vui-border-subtle)] [&>span]:block [&>span]:h-full [&>span]:rounded-full [&>span]:bg-[var(--accent-cool)] [&>span]:w-[calc(var(--token-status-value)*1%)]",
     tokenStatusCopy: "grid min-w-0 gap-0.5 overflow-visible [overflow-wrap:anywhere]",
