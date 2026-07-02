@@ -36,6 +36,7 @@ from core.web.services.evolution_service import (
     bulk_delete_proposals,
     update_proposal,
 )
+from core.web.services.evolution_runtime_projection_service import build_workspace_runtime_projection
 from core.web.services.self_evolution_service import (
     SelfEvolutionHistoryDeleteError,
     delete_self_evolution_history_groups,
@@ -256,6 +257,16 @@ def evolution_workspace_snapshot(includeSelf: bool = False) -> dict:
         "self_observation_active_run",
         get_active_self_observation_run if includeSelf else (lambda: None),
     )
+    supervised_runtime_active_run = (
+        worktree_active_run
+        if isinstance(worktree_active_run, dict) and not _is_self_evolution_worktree_run(worktree_active_run)
+        else active_run
+    )
+    evolution_runtime = build_workspace_runtime_projection(
+        supervised_active_run=supervised_runtime_active_run,
+        self_worktree_active_run=self_worktree_active_run,
+        self_observation_active_run=self_observation_active_run,
+    )
     payload = {
         "overview": dashboard["overview"],
         "runs": dashboard["runs"],
@@ -270,6 +281,7 @@ def evolution_workspace_snapshot(includeSelf: bool = False) -> dict:
         "currentAgentBindingIssues": current_agent_binding_issues,
         "worktreeActiveRun": worktree_active_run,
         "worktreeRuns": worktree_runs,
+        "evolutionRuntime": evolution_runtime,
         "selfOverview": self_overview,
         "selfWorktreeActiveRun": self_worktree_active_run,
         "selfWorktreeRuns": self_worktree_runs if includeSelf else [],

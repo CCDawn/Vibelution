@@ -478,6 +478,7 @@ def test_evolution_workspace_snapshot_combines_dashboard_payloads(tmp_path, monk
     assert payload["currentAgentBindingIssues"] == []
     assert payload["worktreeActiveRun"] is None
     assert payload["worktreeRuns"] == []
+    assert payload["evolutionRuntime"] == {"active": None, "activeRuns": [], "byKind": {}}
     assert payload["selfOverview"]["enabled"] in {True, False}
     assert payload["selfWorktreeActiveRun"] is None
     assert payload["selfWorktreeRuns"] == []
@@ -561,7 +562,28 @@ def test_evolution_workspace_snapshot_reuses_supervised_dashboard_scan(monkeypat
             "include_catalog": False,
             "saved_state": None,
         }
-        return {"bundles": [], "datasets": [], "activeRun": {"runId": "active-1", "status": "running"}}
+        return {
+            "bundles": [],
+            "datasets": [],
+            "activeRun": {
+                "runId": "active-1",
+                "status": "running",
+                "phase": "baseline",
+                "workflowSteps": [
+                    {
+                        "id": "baseline_eval",
+                        "label": "基线评测",
+                        "status": "running",
+                        "current": True,
+                        "summary": "baseline running",
+                        "livePreview": "baseline running",
+                        "conversationSessionId": "session-baseline-active",
+                        "chatRoute": "/chat?session=session-baseline-active",
+                        "metrics": {"score": None},
+                    }
+                ],
+            },
+        }
 
     monkeypatch.setattr(evolution_routes, "get_supervised_workbench", fake_get_supervised_workbench)
     monkeypatch.setattr(evolution_routes, "get_active_supervised_run", lambda: calls.append("active") or None)
@@ -585,6 +607,9 @@ def test_evolution_workspace_snapshot_reuses_supervised_dashboard_scan(monkeypat
     assert payload["activeRun"]["runId"] == "active-1"
     assert payload["latestRun"]["runId"] == "active-1"
     assert payload["latestClosedLoopRecord"]["runId"] == "active-1"
+    assert payload["evolutionRuntime"]["byKind"]["supervised"]["runId"] == "active-1"
+    assert payload["evolutionRuntime"]["byKind"]["supervised"]["currentStepId"] == "baseline_eval"
+    assert payload["evolutionRuntime"]["byKind"]["supervised"]["primaryConversationSessionId"] == "session-baseline-active"
     assert calls == ["dashboard", "active"]
 
 def test_evolution_workspace_snapshot_can_include_full_self_payload(monkeypatch):
@@ -603,7 +628,32 @@ def test_evolution_workspace_snapshot_can_include_full_self_payload(monkeypatch)
     self_worktree = {
         "runId": "swte-self-latest",
         "status": "done",
+        "phase": "complete",
         "selfEvolutionOrigin": {"sourceTrack": "self_evolution"},
+        "workflowSteps": [
+            {
+                "id": "self_evolution",
+                "label": "自进化",
+                "status": "done",
+                "current": False,
+                "summary": "candidate finished",
+                "livePreview": "candidate finished",
+                "conversationSessionId": "session-self",
+                "chatRoute": "/chat?session=session-self",
+                "metrics": {"changedFileCount": 1},
+            },
+            {
+                "id": "approval",
+                "label": "审批",
+                "status": "pending",
+                "current": True,
+                "summary": "waiting review",
+                "livePreview": "waiting review",
+                "conversationSessionId": "",
+                "chatRoute": "",
+                "metrics": {"changedFileCount": 1},
+            },
+        ],
     }
     supervised_worktree = {
         "runId": "swte-supervised-latest",
@@ -629,6 +679,9 @@ def test_evolution_workspace_snapshot_can_include_full_self_payload(monkeypatch)
     assert payload["selfOverview"]["goal"] == "full"
     assert payload["selfWorktreeActiveRun"]["runId"] == "swte-self-latest"
     assert payload["selfWorktreeRuns"] == [self_worktree]
+    assert payload["evolutionRuntime"]["byKind"]["self_worktree"]["runId"] == "swte-self-latest"
+    assert payload["evolutionRuntime"]["byKind"]["self_worktree"]["currentStepId"] == "approval"
+    assert payload["evolutionRuntime"]["byKind"]["self_worktree"]["primaryConversationSessionId"] == "session-self"
     assert "selfLatestRun" not in payload
     assert payload["selfTransactions"] == [{"txnId": "txn-1"}]
 
@@ -646,6 +699,9 @@ def test_workspace_snapshot_include_self_projects_observation_active_run(monkeyp
     payload = response.json()
     assert payload["selfObservationActiveRun"]["runId"] == started["runId"]
     assert payload["selfObservationActiveRun"]["allowedTools"] == []
+    assert payload["evolutionRuntime"]["byKind"]["self_observation"]["runId"] == started["runId"]
+    assert payload["evolutionRuntime"]["byKind"]["self_observation"]["workflowSteps"][0]["id"] == "self_observation"
+    assert payload["evolutionRuntime"]["byKind"]["self_observation"]["governanceActions"][0]["id"] == "terminate"
 
 def test_evolution_workspace_snapshot_slow_event_includes_stage_timings(monkeypatch):
     recorded_events: list[dict] = []
