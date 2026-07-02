@@ -57,6 +57,7 @@ import {
 } from "./conversationTimelineRows";
 import { projectConversationTimelineMessages } from "./useConversationTimelineProjection";
 import {
+  buildAgentMessageSectionState,
   hasResponseBlock,
   hasThoughtBlock,
   hasMentalBlock,
@@ -68,6 +69,7 @@ import {
   isRuntimeNoticeMessage,
   isTurnErrorMessage,
   researchOrgMessageChips,
+  type AgentMessageSectionState,
 } from "./messageSections";
 import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
 import { projectStreamingMarkdownBlocks, type MarkdownBlock } from "./streamingMarkdown";
@@ -3151,6 +3153,24 @@ export function ConversationView({
     return segments.some((segment) => segment.kind !== "status");
   }
 
+  function shouldShowAgentResponseBlock(
+    message: ConversationMessage,
+    sectionState: AgentMessageSectionState,
+    hasFeedbackTimeline: boolean,
+  ) {
+    if (!sectionState.hasResponseBlock) {
+      return false;
+    }
+    if (!hasFeedbackTimeline) {
+      return true;
+    }
+    if (message.streaming) {
+      return true;
+    }
+    const segments = getCachedResponseSegments(sectionState.answerText);
+    return segments.some((segment) => segment.kind !== "status");
+  }
+
   function renderResponseText(content: string, duplicateImageUrls?: Set<string>) {
     const blocks = getCachedMarkdownBlocks(content);
     if (blocks.length === 0) {
@@ -3735,9 +3755,13 @@ export function ConversationView({
             const operationGroups = agentMessage
               ? buildAgentMessageOperationGroups(agentMessage, operationLabels)
               : buildConversationOperationGroups(message, operationLabels);
+            const agentSections = agentMessage ? buildAgentMessageSectionState(agentMessage) : null;
+            const responseText = agentSections?.answerText ?? message.content;
             const hasActiveProcess = operationGroups.timeline.some((operation) => isRunningOperationStatus(operation.status));
-            const hasFeedbackTimeline = (message.feedbackEvents?.length ?? 0) > 0;
-            const showResponseBlock = shouldShowResponseBlock(message, hasFeedbackTimeline);
+            const hasFeedbackTimeline = agentSections?.hasFeedbackTimeline ?? ((message.feedbackEvents?.length ?? 0) > 0);
+            const showResponseBlock = agentSections
+              ? shouldShowAgentResponseBlock(message, agentSections, hasFeedbackTimeline)
+              : shouldShowResponseBlock(message, hasFeedbackTimeline);
             const turnErrorMessage = isTurnErrorMessage(message);
             const agentInboxMessage = isAgentInboxMessage(message);
             const groupTranscriptMessage = isGroupRoomTranscriptMessage(message);
@@ -3761,13 +3785,13 @@ export function ConversationView({
               && showResponseBlock
               && answerOnlyProcessMode
               && hasFeedbackTimeline
-              && isStreamingStatusPlaceholderContent(message.content);
+              && isStreamingStatusPlaceholderContent(responseText);
             const isResponseStreaming = Boolean(message.streaming) && showResponseBlock && !isStreamingStatusPlaceholder;
             const showResponseSpinner = isResponseStreaming && !hasActiveProcess;
             const defaultResponseExpanded = Boolean(message.streaming) || defaultExpandedResponseIds.has(message.id);
             const responseExpanded = getExpansionState(message.id, "response", defaultResponseExpanded);
             const responseSegments = showResponseBlock && !isStreamingStatusPlaceholder && responseExpanded && !isResponseStreaming
-              ? getCachedResponseSegments(message.content)
+              ? getCachedResponseSegments(responseText)
               : [];
             const isEditingMessage = userAuthoredMessage && message.id === editingMessageId;
             const agentInboxExpanded = getExpansionState(message.id, "agentInbox", false);
@@ -3836,7 +3860,7 @@ export function ConversationView({
                 {responseExpanded ? (
                   <div className={styles.responseBody}>
                     {isResponseStreaming
-                      ? renderStreamingResponseText(message.content)
+                      ? renderStreamingResponseText(responseText)
                       : responseSegments.map((segment) =>
                         renderResponseSegment(segment, imageArtifactUrlsBeforeMessage.get(message.id)),
                       )}
@@ -3850,7 +3874,7 @@ export function ConversationView({
                 operationGroups.timeline,
                 processDefaultExpanded,
                 renderProcessDetails,
-                isStreamingStatusPlaceholder ? compactStreamingStatusPlaceholder(message.content) : undefined,
+                isStreamingStatusPlaceholder ? compactStreamingStatusPlaceholder(responseText) : undefined,
               )
             ) : hasConversationTimeline ? (
               renderConversationTimeline(message, conversationTimelineItems, rowIdentity)

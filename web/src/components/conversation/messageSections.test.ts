@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { ConversationMessage } from "../../api/types";
+import { conversationMessageToAgentMessage } from "../../agent-thread";
 import {
+  buildAgentMessageSectionState,
   hasMentalBlock,
   hasResponseBlock,
   hasThoughtBlock,
@@ -28,6 +30,91 @@ function message(overrides: Partial<ConversationMessage>): ConversationMessage {
 }
 
 describe("messageSections", () => {
+  it("builds AgentMessage section state from legacy assistant fields", () => {
+    const assistantMessage = message({
+      role: "assistant",
+      content: "我会整理下一步。",
+      thought: "先确认 section selector",
+      mentalSnapshot: {
+        mood: "focused",
+        feeling: "",
+        whisper: "",
+        summary: "",
+        cognitiveState: "productive",
+        confidence: 0.8,
+        sampleSize: 1,
+        interventionCount: 0,
+        updatedAt: "2026-07-02T10:20:00Z",
+        source: "test",
+      },
+      toolCalls: [{ name: "read_file_tool", status: "done", summary: "读取 messageSections" }],
+    });
+
+    const state = buildAgentMessageSectionState(conversationMessageToAgentMessage(assistantMessage));
+
+    expect(state).toMatchObject({
+      answerText: "我会整理下一步。",
+      hasResponseBlock: true,
+      hasThoughtBlock: true,
+      hasMentalBlock: true,
+      hasToolBlock: true,
+      hasFeedbackTimeline: false,
+      hasUserContent: false,
+    });
+  });
+
+  it("builds AgentMessage section state without exposing runtime status placeholders as answers", () => {
+    const statusMessage = message({
+      role: "assistant",
+      content: "正在思考，已收到思考片段...\n模型已经开始返回 reasoning，正文可能稍后出现。",
+      streaming: true,
+      streamStage: "model_thinking",
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "status",
+          status: "running",
+          name: "model_request",
+          summary: "正在请求模型",
+        },
+      ],
+    });
+
+    const state = buildAgentMessageSectionState(conversationMessageToAgentMessage(statusMessage));
+
+    expect(state).toMatchObject({
+      hasResponseBlock: false,
+      hasFeedbackTimeline: true,
+      hasThoughtBlock: false,
+      hasToolBlock: false,
+    });
+  });
+
+  it("builds AgentMessage section state for feedback tool timelines with answers", () => {
+    const feedbackMessage = message({
+      role: "assistant",
+      content: "已完成搜索。",
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "tool",
+          status: "done",
+          name: "grep_search_tool",
+          summary: "搜索 selector",
+        },
+      ],
+    });
+
+    const state = buildAgentMessageSectionState(conversationMessageToAgentMessage(feedbackMessage));
+
+    expect(state).toMatchObject({
+      answerText: "已完成搜索。",
+      hasResponseBlock: true,
+      hasFeedbackTimeline: true,
+      hasToolBlock: true,
+    });
+  });
+
   it("shows operator text as direct message content", () => {
     const userMessage = message({
       role: "user",
