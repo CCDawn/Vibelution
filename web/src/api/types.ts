@@ -4623,7 +4623,7 @@ export type TeamWorkflowCandidateListPayload = {
   };
   candidates: TeamWorkflowCandidate[];
   candidateCount: number;
-  store: TeamWorkflowCandidateStoreSummary;
+  store?: TeamWorkflowCandidateStoreSummary;
   validationSummary: TeamWorkflowValidationSummary;
 };
 

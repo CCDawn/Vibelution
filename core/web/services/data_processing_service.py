@@ -111,11 +111,16 @@ def list_processing_runs(
                 metadata_filters=normalized_metadata_filters,
                 scope_filters=normalized_scope_filters,
             ):
-                runs.append({**run, "summary": get_processing_status(str(run.get("runId") or ""))["summary"]})
+                runs.append(run)
     runs.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
+    returned_runs = runs[:normalized_limit]
+    hydrated_runs = [
+        {**run, "summary": get_processing_status(str(run.get("runId") or ""))["summary"]}
+        for run in returned_runs
+    ]
     return {
         "schemaVersion": SCHEMA_VERSION,
-        "runs": runs[:normalized_limit],
+        "runs": hydrated_runs,
         "summary": {
             "runCount": len(runs),
             "returnedCount": min(len(runs), normalized_limit),

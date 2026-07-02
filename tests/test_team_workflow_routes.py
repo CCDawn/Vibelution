@@ -1357,9 +1357,42 @@ def test_team_workflow_routes_list_and_validate_candidate_store(tmp_path, monkey
     assert list_response.status_code == 200, list_response.text
     assert list_response.json()["candidateCount"] == 1
     assert list_response.json()["candidates"][0]["currentState"] == "source_needs_confirmation"
+    assert "store" not in list_response.json()
     assert validation_response.status_code == 200, validation_response.text
     assert validation_response.json()["summary"]["invalidCandidateCount"] == 1
     assert validation_response.json()["summary"]["errorCount"] >= 2
+
+
+def test_team_workflow_candidate_list_store_payload_is_opt_in(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+
+    candidate_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/candidates/source",
+        json={
+            "title": "Candidate Store PDF",
+            "sourcePath": "C:/papers/store.pdf",
+            "sourceKind": "pdf",
+            "sha256": "c" * 64,
+            "allowedForAnalysis": True,
+            "createdByAgent": "Source Intake Agent",
+        },
+    )
+    default_response = client.get(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/candidates",
+        params={"candidateType": "source_manifest"},
+    )
+    store_response = client.get(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/candidates",
+        params={"candidateType": "source_manifest", "includeStore": True},
+    )
+
+    assert candidate_response.status_code == 201, candidate_response.text
+    assert default_response.status_code == 200, default_response.text
+    assert "store" not in default_response.json()
+    assert store_response.status_code == 200, store_response.text
+    assert store_response.json()["store"]["candidateCount"] == 1
 
 
 def test_team_workflow_route_returns_knowledge_ingestion_status(tmp_path, monkeypatch):

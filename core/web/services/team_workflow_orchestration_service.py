@@ -8453,6 +8453,7 @@ def list_candidate_store(
     quality_status: str = "",
     limit: int = 100,
     include_validation: bool = False,
+    include_store: bool = False,
 ) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     team_service.assert_team_exists(normalized_team_id)
@@ -8484,7 +8485,7 @@ def list_candidate_store(
             "skipped": True,
             "reason": "not_requested",
         }
-    return {
+    response = {
         "teamId": normalized_team_id,
         "workflowId": workflow["workflowId"],
         "filters": {
@@ -8495,9 +8496,11 @@ def list_candidate_store(
         },
         "candidates": candidates,
         "candidateCount": len(candidates),
-        "store": _workflow_to_api(normalized_team_id, workflow, candidate_store)["candidateStore"],
         "validationSummary": validation_summary,
     }
+    if include_store:
+        response["store"] = _workflow_to_api(normalized_team_id, workflow, candidate_store)["candidateStore"]
+    return response
 
 
 def validate_candidate_store(team_id: str) -> dict[str, Any]:

@@ -911,7 +911,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionSummaryQueryKey");
     expect(routeSource).toContain("/workflow-orchestration/source-collection/summary");
     expect(routeSource).toContain("sourceCollectionSummaryQueryPrefix");
-    expect(routeSource).toContain("includeValidation=false");
+    expect(routeSource).toContain("includeValidation=false&includeStore=false");
     expect(routeSource).toContain("const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 80;");
     expect(routeSource).not.toContain("const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 500;");
     expect(routeSource).toContain("sourceCollectionWorkspaceSelected");
@@ -924,15 +924,19 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionSummaryCounts");
     expect(routeSource).toContain("summarySourceCollectionActiveWorkRun");
     expect(routeSource).toContain("enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected)");
-    expect(routeSource).toContain("const sourceCollectionDetailQueriesEnabled = Boolean(");
-    const sourceCollectionDetailQueriesEnabledSource = routeSource.slice(
-      routeSource.indexOf("const sourceCollectionDetailQueriesEnabled = Boolean("),
+    expect(routeSource).toContain("const sourceCollectionFindingDetailsVisible = Boolean(");
+    const sourceCollectionFindingDetailsVisibleSource = routeSource.slice(
+      routeSource.indexOf("const sourceCollectionFindingDetailsVisible = Boolean("),
       routeSource.indexOf("const runtimeSummaryQuery = useQuery({"),
     );
-    expect(sourceCollectionDetailQueriesEnabledSource).toContain("researchWorkflowTeamSelected");
-    expect(sourceCollectionDetailQueriesEnabledSource).toContain("selectedSourceCollectionRunEffectiveId");
-    expect(sourceCollectionDetailQueriesEnabledSource).not.toContain("sourceCollectionSummaryQuery.isSuccess");
-    expect(sourceCollectionDetailQueriesEnabledSource).not.toContain("sourceCollectionSummaryQuery.isError");
+    expect(sourceCollectionFindingDetailsVisibleSource).toContain("sourceCollectionWorkspaceSelected");
+    expect(sourceCollectionFindingDetailsVisibleSource).toContain("selectedSourceCollectionRunEffectiveId");
+    expect(sourceCollectionFindingDetailsVisibleSource).toContain('selectedSourceCollectionStageId === "finding"');
+    expect(sourceCollectionFindingDetailsVisibleSource).toContain("sourceCollectionRecordsQueryEnabled");
+    expect(sourceCollectionFindingDetailsVisibleSource).toContain("sourceCollectionAssignmentsQueryEnabled");
+    expect(sourceCollectionFindingDetailsVisibleSource).toContain("sourceCollectionRunStatusQueryEnabled");
+    expect(sourceCollectionFindingDetailsVisibleSource).not.toContain("sourceCollectionSummaryQuery.isSuccess");
+    expect(sourceCollectionFindingDetailsVisibleSource).not.toContain("sourceCollectionSummaryQuery.isError");
     const sourceCollectionRunStatusQuerySource = routeSource.slice(
       routeSource.indexOf("const sourceCollectionRunStatusQuery = useQuery({"),
       routeSource.indexOf("const sourceCollectionRecordsQuery = useQuery({"),
@@ -945,9 +949,9 @@ describe("TeamsRoute layout contract", () => {
       routeSource.indexOf("const sourceCollectionAssignmentsQuery = useQuery({"),
       routeSource.indexOf("const autoCanvasViewportStyle"),
     );
-    expect(sourceCollectionRunStatusQuerySource).toContain("enabled: sourceCollectionDetailQueriesEnabled");
-    expect(sourceCollectionRecordsQuerySource).toContain("enabled: sourceCollectionDetailQueriesEnabled");
-    expect(sourceCollectionAssignmentsQuerySource).toContain("enabled: sourceCollectionDetailQueriesEnabled");
+    expect(sourceCollectionRunStatusQuerySource).toContain("enabled: sourceCollectionRunStatusQueryEnabled");
+    expect(sourceCollectionRecordsQuerySource).toContain("enabled: sourceCollectionRecordsQueryEnabled");
+    expect(sourceCollectionAssignmentsQuerySource).toContain("enabled: sourceCollectionAssignmentsQueryEnabled");
     const sourceCollectionRecordsDataLoadingSource = routeSource.slice(
       routeSource.indexOf("const sourceCollectionRecordsDataLoading = Boolean("),
       routeSource.indexOf("const sourceCollectionAssignmentsDataLoading = Boolean("),
