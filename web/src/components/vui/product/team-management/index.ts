@@ -15,6 +15,10 @@ export {
   type TeamSourceFilterOption,
 } from "./TeamSourceFilterBar";
 export {
+  TeamCandidateCard,
+  type TeamCandidateCardProps,
+} from "./TeamCandidateCard";
+export {
   TeamSourcePagination,
   type TeamSourcePaginationProps,
 } from "./TeamSourcePagination";
