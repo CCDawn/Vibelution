@@ -18,9 +18,17 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(team_template_service, "PROJECT_ROOT", tmp_path)
 
 
+def _team_template_detail(client: TestClient, template_id: str) -> dict:
+    response = client.get(f"/api/team-templates/{template_id}")
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
 def test_team_template_routes_list_medical_demo_template(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
+    medical_template = _team_template_detail(client, "medical-consultation-demo")
+    heletech_template = _team_template_detail(client, "heletech-maternal-digital-health-demo")
 
     response = client.get("/api/team-templates")
 
@@ -28,13 +36,13 @@ def test_team_template_routes_list_medical_demo_template(tmp_path, monkeypatch):
     templates = response.json()["templates"]
     medical = next(item for item in templates if item["templateId"] == "medical-consultation-demo")
     assert medical["defaultTeamName"] == "医疗问诊 Demo 团队"
-    assert medical["roleCount"] == 4
+    assert medical["roleCount"] == len(medical_template["roles"])
     assert medical["chatRoom"]["mode"] == "medical_consultation_panel"
     assert medical["chatRoom"]["purpose"] == "medical_triage"
 
     heletech = next(item for item in templates if item["templateId"] == "heletech-maternal-digital-health-demo")
     assert heletech["defaultTeamName"] == "和乐妇幼数字健康 Demo 团队"
-    assert heletech["roleCount"] == 5
+    assert heletech["roleCount"] == len(heletech_template["roles"])
     assert heletech["chatRoom"]["mode"] == "round_robin"
     assert heletech["chatRoom"]["purpose"] == "meeting"
 
@@ -43,6 +51,8 @@ def test_team_template_instantiate_creates_medical_team_agents_and_room(tmp_path
     _use_tmp_project_root(tmp_path, monkeypatch)
     _mark_config_agent_instances_present()
     client = _client()
+    template = _team_template_detail(client, "medical-consultation-demo")
+    expected_count = len(template["roles"])
 
     response = client.post(
         "/api/team-templates/medical-consultation-demo/instantiate",
@@ -57,8 +67,8 @@ def test_team_template_instantiate_creates_medical_team_agents_and_room(tmp_path
     assert team["teamCategory"] == "演示业务团队"
     assert team["teamSource"] == "team_template"
     assert team["teamTemplateId"] == "medical-consultation-demo"
-    assert team["memberCount"] == 4
-    assert len(payload["createdAgents"]) == 4
+    assert team["memberCount"] == expected_count
+    assert len(payload["createdAgents"]) == expected_count
     assert team["linkedChatRoom"]["mode"] == "medical_consultation_panel"
     assert team["linkedChatRoom"]["purpose"] == "medical_triage"
     assert {member["role"] for member in team["members"]} == {
@@ -73,11 +83,11 @@ def test_team_template_instantiate_creates_medical_team_agents_and_room(tmp_path
     assert room["purpose"] == "medical_triage"
     assert room["config"]["teamKind"] == "template_demo"
     assert room["config"]["teamTemplateId"] == "medical-consultation-demo"
-    assert len(room["participants"]) == 4
+    assert len(room["participants"]) == expected_count
     assert [participant["teamRole"] for participant in room["participants"]][0] == "问诊主持 / 结果整理"
 
     canvas = client.get(f"/api/teams/{team['teamId']}/canvas").json()
-    assert len(canvas["nodes"]) == 4
+    assert len(canvas["nodes"]) == expected_count
     assert len(canvas["edges"]) == 6
     assert canvas["validation"]["valid"] is True
 
@@ -86,7 +96,7 @@ def test_team_template_instantiate_creates_medical_team_agents_and_room(tmp_path
         agent for agent in agents
         if agent.get("metadata", {}).get("teamTemplateId") == "medical-consultation-demo"
     ]
-    assert len(demo_agents) == 4
+    assert len(demo_agents) == expected_count
     assert all("agent_message_tool" in agent["toolPolicy"]["allowedTools"] for agent in demo_agents)
     assert all("research_knowledge_query_tool" not in agent["toolPolicy"]["allowedTools"] for agent in demo_agents)
 
@@ -95,6 +105,8 @@ def test_team_template_instantiate_creates_heletech_demo_team(tmp_path, monkeypa
     _use_tmp_project_root(tmp_path, monkeypatch)
     _mark_config_agent_instances_present()
     client = _client()
+    template = _team_template_detail(client, "heletech-maternal-digital-health-demo")
+    expected_count = len(template["roles"])
 
     response = client.post(
         "/api/team-templates/heletech-maternal-digital-health-demo/instantiate",
@@ -109,8 +121,8 @@ def test_team_template_instantiate_creates_heletech_demo_team(tmp_path, monkeypa
     assert team["teamCategory"] == "演示业务团队"
     assert team["teamSource"] == "team_template"
     assert team["teamTemplateId"] == "heletech-maternal-digital-health-demo"
-    assert team["memberCount"] == 5
-    assert len(payload["createdAgents"]) == 5
+    assert team["memberCount"] == expected_count
+    assert len(payload["createdAgents"]) == expected_count
     assert team["linkedChatRoom"]["mode"] == "round_robin"
     assert team["linkedChatRoom"]["purpose"] == "meeting"
     assert {member["role"] for member in team["members"]} == {
@@ -136,12 +148,12 @@ def test_team_template_instantiate_creates_heletech_demo_team(tmp_path, monkeypa
     assert room["purpose"] == "meeting"
     assert room["config"]["teamKind"] == "template_demo"
     assert room["config"]["teamTemplateId"] == "heletech-maternal-digital-health-demo"
-    assert len(room["participants"]) == 5
+    assert len(room["participants"]) == expected_count
     assert [participant["teamRole"] for participant in room["participants"]][0] == "方案主持"
     assert room["config"]["heletechMaternalDigitalHealthDemo"] is True
 
     canvas = client.get(f"/api/teams/{team['teamId']}/canvas").json()
-    assert len(canvas["nodes"]) == 5
+    assert len(canvas["nodes"]) == expected_count
     assert len(canvas["edges"]) == 8
     assert canvas["validation"]["valid"] is True
     assert canvas["nodes"][0]["id"] == "heletech-1"
@@ -152,7 +164,7 @@ def test_team_template_instantiate_creates_heletech_demo_team(tmp_path, monkeypa
         agent for agent in agents
         if agent.get("metadata", {}).get("teamTemplateId") == "heletech-maternal-digital-health-demo"
     ]
-    assert len(demo_agents) == 5
+    assert len(demo_agents) == expected_count
     assert all("agent_message_tool" in agent["toolPolicy"]["allowedTools"] for agent in demo_agents)
     assert all("research_knowledge_query_tool" not in agent["toolPolicy"]["allowedTools"] for agent in demo_agents)
     assert all(agent.get("metadata", {}).get("heletechMaternalDigitalHealthDemo") is True for agent in demo_agents)
