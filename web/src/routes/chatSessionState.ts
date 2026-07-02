@@ -129,6 +129,15 @@ export function sessionSummaryFromDetail(detail: SessionDetail): SessionSummary 
   if (detail.agentStatusMessage !== undefined) {
     summary.agentStatusMessage = detail.agentStatusMessage;
   }
+  if (detail.sourceRef !== undefined) {
+    summary.sourceRef = detail.sourceRef;
+  }
+  if (detail.projectionEdit !== undefined) {
+    summary.projectionEdit = detail.projectionEdit;
+  }
+  if (detail.agentSourceRef !== undefined) {
+    summary.agentSourceRef = detail.agentSourceRef;
+  }
   return summary;
 }
 

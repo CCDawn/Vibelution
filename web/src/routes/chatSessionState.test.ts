@@ -143,6 +143,48 @@ describe("chatSessionState", () => {
     expect(summary).not.toHaveProperty("agentTemplateLabel");
   });
 
+  it("preserves source authority metadata when deriving a sidebar summary", () => {
+    const summary = sessionSummaryFromDetail(
+      makeDetail({
+        sourceRef: {
+          kind: "session",
+          id: "session-live",
+          owner: "ConversationLedger",
+          factAuthority: true,
+          canonicalEditRoute: "/chat?session=session-live",
+          canonicalMutationApi: "/api/sessions/session-live",
+          projectionCanWrite: false,
+          allowedProjectionActions: ["view", "link", "refresh", "repair"],
+          sourceAuthorityVersion: 1,
+        },
+        projectionEdit: {
+          canWrite: false,
+          mode: "deep_link_to_source",
+          reason: "backend_conversation_ledger_contract",
+          sourceOwner: "ConversationLedger",
+          canonicalEditRoute: "/chat?session=session-live",
+          canonicalMutationApi: "/api/sessions/session-live",
+          sourceAuthorityVersion: 1,
+        },
+        agentSourceRef: {
+          kind: "agent",
+          id: "agent-001",
+          owner: "AgentDirectory",
+          factAuthority: true,
+          canonicalEditRoute: "/agents?agent=agent-001&pane=config",
+          canonicalMutationApi: "/api/agents/agent-001",
+          projectionCanWrite: false,
+          allowedProjectionActions: ["view", "link", "refresh", "repair"],
+          sourceAuthorityVersion: 1,
+        },
+      }),
+    );
+
+    expect(summary.sourceRef?.owner).toBe("ConversationLedger");
+    expect(summary.projectionEdit?.reason).toBe("backend_conversation_ledger_contract");
+    expect(summary.agentSourceRef?.canonicalEditRoute).toBe("/agents?agent=agent-001&pane=config");
+  });
+
   it("lets active detail override a stale failed session summary", () => {
     const merged = mergeSessionDetailIntoSummaries(
       [
