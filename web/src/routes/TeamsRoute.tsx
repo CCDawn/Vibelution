@@ -53,6 +53,7 @@ import {
 import { useShellI18n } from "../i18n/useShellI18n";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import {
+  VButton,
   VIconButton,
   VNativeButton,
   VNativeInput,
@@ -64,11 +65,13 @@ import {
 } from "../components/vui";
 import {
   TeamCandidateCard,
+  TeamSourceEmptyState,
   TeamSourceFilterBar,
   TeamSourcePagination,
   TeamSourceResultItem,
   TeamSourceResultList,
   TeamSourceResultStats,
+  type TeamSourceEmptyStateFact,
   TeamStageCard,
   TeamStageCommandBar,
   TeamStagePipeline,
@@ -7652,6 +7655,77 @@ export function TeamsRoute({
     const sourceCollectionRecordLocalFileCountText = sourceCollectionRecordsDataLoading
       ? sourceCollectionLoadingText
       : String(sourceCollectionRecordLocalFileCount);
+    const findingStageModule = sourceCollectionStageModules.find((module) => module.id === "finding");
+    const findingStageReadiness = sourceCollectionStageActionReadinessFor("finding");
+    const findingStageActionLabel = findingStageModule?.actionLabel ?? (lang === "zh" ? "开始搜索" : "Start search");
+    const rawRecordEmptyFacts: TeamSourceEmptyStateFact[] = [
+      {
+        key: "run",
+        label: lang === "zh" ? "当前批次" : "Run",
+        value: sourceCollectionRecordsDataLoading
+          ? sourceCollectionLoadingText
+          : sourceCollectionRunTitleLabel(selectedSourceCollectionRun?.title || sourceCollectionDraft.title, lang),
+      },
+      {
+        key: "records",
+        label: lang === "zh" ? "原始资料" : "Raw records",
+        value: sourceCollectionRecordsDataLoading ? sourceCollectionLoadingText : sourceCollectionCollectedCountLabel,
+      },
+      {
+        key: "files",
+        label: lang === "zh" ? "文件产物" : "Files",
+        value: selectedSourceCollectionStorageArtifacts
+          ? (lang === "zh" ? "已连接本轮产物" : "Artifacts linked")
+          : (lang === "zh" ? "搜索完成后生成" : "Created after search"),
+      },
+      {
+        key: "next",
+        label: lang === "zh" ? "下一步" : "Next",
+        value: sourceCollectionBoardNextStepLabel,
+      },
+    ];
+    const rawRecordEmptyTitle = sourceCollectionRecordsDataLoading
+      ? (lang === "zh" ? "正在读取当前批次资料" : "Loading run records")
+      : sourceCollectionRecords.length
+        ? (lang === "zh" ? "当前筛选没有资料" : "No records match this filter")
+        : selectedSourceCollectionRun
+          ? (lang === "zh" ? "当前批次还没有原始资料" : "This run has no raw records yet")
+          : (lang === "zh" ? "还没有开始资料搜集" : "Source collection has not started");
+    const rawRecordEmptyDescription = sourceCollectionRecordsDataLoading
+      ? (lang === "zh" ? "正在读取记录、候选和文件产物，完成后会在这里进入列表视图。" : "Records, candidates, and artifacts are loading.")
+      : sourceCollectionRecords.length
+        ? (lang === "zh" ? "资料已经读取完成，但当前来源过滤没有命中；切回全部即可继续查看。" : "Records are loaded, but the selected source filter has no matches.")
+        : (lang === "zh"
+            ? "点击开始搜索后，原始资料、候选资料和文件产物会按同一批次写入这里。"
+            : "Start a search to write raw records, candidates, and file artifacts into this run.");
+    const rawRecordEmptyActions = sourceCollectionRecordsDataLoading
+      ? null
+      : sourceCollectionRecords.length
+        ? (
+            <VButton
+              type="button"
+              density="compact"
+              variant="secondary"
+              icon={<RefreshCw size={13} />}
+              isDisabled={sourceCollectionSourceFilter === "all"}
+              onPress={() => setSourceCollectionSourceFilter("all")}
+            >
+              {lang === "zh" ? "查看全部来源" : "Show all sources"}
+            </VButton>
+          )
+        : (
+            <VButton
+              type="button"
+              density="compact"
+              variant="primary"
+              icon={<Play size={13} />}
+              isDisabled={findingStageModule?.actionDisabled ?? true}
+              onPress={findingStageModule?.onAction}
+              title={sourceCollectionActionDisabledTitle(findingStageReadiness, findingStageActionLabel)}
+            >
+              {findingStageActionLabel}
+            </VButton>
+          );
     return (
       <section id="source-collection-process" className={styles.sourceCollectionConversationPanel} aria-label={lang === "zh" ? "搜集对话流" : "Collection conversation"}>
         <div className={styles.sourceCollectionConversationHeader}>
@@ -7732,31 +7806,34 @@ export function TeamsRoute({
               })}
             </TeamSourceResultList>
           ) : selectedRunEmptyWithHistorical && sourceCollectionHistoricalRunWithRecords ? (
-            <div className={styles.sourceCollectionEmptyRunNotice}>
-              <div>
-                <strong>{lang === "zh" ? "当前批次暂无资料" : "This run has no records"}</strong>
-                <span>
-                  {lang === "zh"
-                    ? `上一轮有资料：${sourceCollectionRunRecordCount(sourceCollectionHistoricalRunWithRecords)} 条资料 / ${sourceCollectionRunCandidateMetric(sourceCollectionHistoricalRunWithRecords)} 个候选。`
-                    : `Another run has records: ${sourceCollectionRunRecordCount(sourceCollectionHistoricalRunWithRecords)} records / ${sourceCollectionRunCandidateMetric(sourceCollectionHistoricalRunWithRecords)} candidates.`}
-                </span>
-              </div>
-              <VNativeButton
-                type="button"
-                onClick={() => setSelectedSourceCollectionRunId(sourceCollectionHistoricalRunWithRecords.runId)}
-              >
-                <Search size={13} />
-                {lang === "zh" ? "切换到有资料批次" : "Show run with records"}
-              </VNativeButton>
-            </div>
+            <TeamSourceEmptyState
+              title={lang === "zh" ? "当前批次暂无资料" : "This run has no records"}
+              description={lang === "zh"
+                ? `上一轮有资料：${sourceCollectionRunRecordCount(sourceCollectionHistoricalRunWithRecords)} 条资料 / ${sourceCollectionRunCandidateMetric(sourceCollectionHistoricalRunWithRecords)} 个候选。`
+                : `Another run has records: ${sourceCollectionRunRecordCount(sourceCollectionHistoricalRunWithRecords)} records / ${sourceCollectionRunCandidateMetric(sourceCollectionHistoricalRunWithRecords)} candidates.`}
+              facts={rawRecordEmptyFacts}
+              actions={(
+                <VButton
+                  type="button"
+                  density="compact"
+                  variant="secondary"
+                  icon={<Search size={13} />}
+                  onPress={() => setSelectedSourceCollectionRunId(sourceCollectionHistoricalRunWithRecords.runId)}
+                >
+                  {lang === "zh" ? "切换到有资料批次" : "Show run with records"}
+                </VButton>
+              )}
+            />
           ) : (
-            <div className={styles.empty}>
-              {sourceCollectionRecordsDataLoading
-                ? (lang === "zh" ? "正在加载原始资料记录..." : "Loading raw records...")
-              : sourceCollectionRecords.length
-                ? (lang === "zh" ? "当前过滤条件下没有原始资料记录。" : "No raw records match this filter.")
-              : (lang === "zh" ? "暂无原始资料记录。点击搜索资料卡的开始按钮后，搜索结果会先写到这里。" : "No raw records yet.")}
-            </div>
+            <TeamSourceEmptyState
+              title={rawRecordEmptyTitle}
+              description={rawRecordEmptyDescription}
+              facts={rawRecordEmptyFacts}
+              actions={rawRecordEmptyActions}
+              footer={lang === "zh"
+                ? "资料列表只展示真实写入的记录；没有记录时不再撑出空白列表。"
+                : "The source list only renders real records; empty runs stay compact."}
+            />
           )}
           {sourceCollectionRecordsDataLoading ? null : renderSourceCollectionPagination("finding", sourceCollectionFilteredRecords.length)}
         </section>
