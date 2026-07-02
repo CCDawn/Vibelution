@@ -1178,7 +1178,7 @@ describe("TeamsRoute layout contract", () => {
     );
     expect(routeStyles.sourceCollectionRunSwitcher).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(routeStyles.sourceCollectionRunSwitcherMain).toContain("grid-cols-[max-content_minmax(220px,360px)_minmax(0,1fr)]");
-    expect(routeStyles.sourceCollectionRunSwitcherStats).toContain("grid-cols-[repeat(3,minmax(90px,1fr))]");
+    expect(routeStyles.sourceCollectionRunSwitcherStats).toContain("flex flex-wrap items-center justify-end");
     expect(routeStyles.sourceCollectionEmptyRunNotice).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(routeStyles.sourceCollectionResultItem).toContain("min-h-[36px]");
     expect(routeStyles.sourceCollectionResultStatus).toContain("whitespace-nowrap");
@@ -1220,11 +1220,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionStageModules).toContain("grid-cols-[repeat(4,minmax(0,1fr))]");
     expect(teamStagePipelineSource).toContain("repeat(auto-fit,minmax(220px,1fr))");
     expect(teamStagePipelineSource).not.toContain("repeat(5");
-    expect(teamStageCardSource).toContain("grid-rows-[auto_minmax(0,1fr)_auto]");
+    expect(teamStageCardSource).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(teamStageCardSource).toContain("ACTION_ROW");
     expect(teamStageCardSource).toContain("ACTION_BUTTON");
     expect(teamStageCardSource).toContain("text-[0.72rem]");
-    expect(teamStageCardSource).not.toContain("grid-rows-[auto_auto_auto]");
     expect(routeStyles.sourceCollectionPagination).toContain("select-none");
     expect(routeStyles.sourceCollectionPagination).toContain("whitespace-nowrap");
     expect(routeStyles.sourceCollectionPagination).toContain("[writing-mode:horizontal-tb]");

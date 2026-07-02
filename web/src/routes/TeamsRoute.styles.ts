@@ -485,7 +485,7 @@ const styles: Record<string, string> = {
   sourceCollectionRunSwitcherMain:
     "sourceCollectionRunSwitcherMain min-w-0 grid min-w-0 grid-cols-[max-content_minmax(220px,360px)_minmax(0,1fr)] items-center gap-2 text-[var(--vui-font-xs)] font-[760] text-[var(--fg-secondary)] max-[900px]:grid-cols-[1fr] [&_small]:min-w-0 [&_small]:truncate [&_small]:text-[var(--fg-muted)]",
   sourceCollectionRunSwitcherStats:
-    "sourceCollectionRunSwitcherStats min-w-0 grid gap-2 grid min-w-[300px] grid-cols-[repeat(3,minmax(90px,1fr))] gap-1.5 text-[var(--vui-font-xs)] max-[980px]:min-w-0 [&_span]:flex [&_span]:min-h-[26px] [&_span]:items-center [&_span]:justify-between [&_span]:gap-1.5 [&_span]:rounded-[7px] [&_span]:border [&_span]:border-[color:var(--border-soft)] [&_span]:bg-[color:var(--source-workbench-card)] [&_span]:px-2 [&_span]:font-[720] [&_strong]:text-[var(--fg-primary)]",
+    "sourceCollectionRunSwitcherStats min-w-0 flex flex-wrap items-center justify-end gap-1.5 text-[var(--vui-font-xs)] [&_span]:inline-flex [&_span]:min-h-[26px] [&_span]:items-center [&_span]:gap-1.5 [&_span]:whitespace-nowrap [&_span]:rounded-[7px] [&_span]:border [&_span]:border-[color:var(--border-soft)] [&_span]:bg-[color:var(--source-workbench-card)] [&_span]:px-2 [&_span]:font-[720] [&_strong]:text-[var(--fg-primary)]",
   sourceCollectionScreeningList:
     "sourceCollectionScreeningList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   sourceCollectionScreeningListShell:
