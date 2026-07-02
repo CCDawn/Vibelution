@@ -2301,11 +2301,11 @@ function sourceCollectionRunMetric(run: SourceCollectionRunSummaryValue, keys: s
   return 0;
 }
 
-function sourceCollectionRunRecordCount(run: SourceCollectionRunSummaryValue) {
+export function sourceCollectionRunRecordCount(run: SourceCollectionRunSummaryValue) {
   return sourceCollectionRunMetric(run, ["recordCount", "rawRecordCount", "createdUniqueRecordCount"]);
 }
 
-function sourceCollectionRunCandidateMetric(run: SourceCollectionRunSummaryValue) {
+export function sourceCollectionRunCandidateMetric(run: SourceCollectionRunSummaryValue) {
   return sourceCollectionRunMetric(run, ["sourceCandidateCount", "candidateCount", "importedCount"]);
 }
 
@@ -2313,7 +2313,7 @@ function sourceCollectionRunHasUsableRecords(run: SourceCollectionRunSummaryValu
   return sourceCollectionRunRecordCount(run) > 0 || sourceCollectionRunCandidateMetric(run) > 0;
 }
 
-function selectDefaultSourceCollectionRun(
+export function selectDefaultSourceCollectionRun(
   runs: DataProcessingRunListPayload["runs"],
   requestedRunId: string,
 ) {
