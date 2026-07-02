@@ -608,6 +608,9 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "description": "适合挑战杯资料搜集阶段私聊任务：读取阶段上下文并回写阶段任务结果，不等同正式知识入库。",
         "category": "research",
         "toolNames": [
+            "task_list_tool",
+            "task_create_tool",
+            "task_update_tool",
             "source_collection_context_tool",
             "source_collection_stage_writeback_tool",
             "research_knowledge_query_tool",
@@ -620,6 +623,9 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "agent_message_tool",
         ],
         "preferredToolNames": [
+            "task_list_tool",
+            "task_create_tool",
+            "task_update_tool",
             "source_collection_context_tool",
             "source_collection_stage_writeback_tool",
             "batch_web_search_tool",

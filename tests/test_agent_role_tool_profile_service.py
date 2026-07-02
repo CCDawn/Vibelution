@@ -46,6 +46,7 @@ def test_four_stage_source_roles_have_expected_tool_boundaries():
             "required": {
                 "task_create_tool",
                 "task_update_tool",
+                "task_list_tool",
                 "source_collection_context_tool",
                 "source_collection_stage_writeback_tool",
                 "batch_web_search_tool",
@@ -62,6 +63,7 @@ def test_four_stage_source_roles_have_expected_tool_boundaries():
             "required": {
                 "task_create_tool",
                 "task_update_tool",
+                "task_list_tool",
                 "source_collection_context_tool",
                 "source_collection_stage_writeback_tool",
                 "web_fetch_tool",
@@ -83,6 +85,7 @@ def test_four_stage_source_roles_have_expected_tool_boundaries():
             "required": {
                 "task_create_tool",
                 "task_update_tool",
+                "task_list_tool",
                 "source_collection_context_tool",
                 "source_collection_stage_writeback_tool",
                 "research_knowledge_query_tool",
@@ -104,6 +107,7 @@ def test_four_stage_source_roles_have_expected_tool_boundaries():
             "required": {
                 "task_create_tool",
                 "task_update_tool",
+                "task_list_tool",
                 "source_collection_context_tool",
                 "source_collection_stage_writeback_tool",
                 "knowledge_proposal_tool",
