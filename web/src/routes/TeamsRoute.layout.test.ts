@@ -563,6 +563,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("SourceCollectionStageTaskToolProgress");
     expect(routeSource).toContain("taskToolProgress");
     expect(routeSource).toContain("SourceCollectionStageCompletionGate");
+    expect(routeSource).toContain("SourceCollectionStageActionReadinessProjection");
+    expect(routeSource).toContain("actionReadiness?: SourceCollectionStageActionReadinessProjection");
+    expect(routeSource).toContain("sourceCollectionStageBackendActionReadiness");
+    expect(routeSource).toContain("sourceCollectionStageActionLabelFor");
     expect(routeSource).toContain("completionGatePassed");
     expect(routeSource).toContain("sourceCollectionTaskToolProgressMetric");
     expect(routeSource).toContain("检查项");
@@ -1374,6 +1378,11 @@ describe("TeamsRoute layout contract", () => {
     expect(stageModuleSource).toContain('sourceCollectionStageActionReadinessFor("extraction").disabled');
     expect(stageModuleSource).toContain('sourceCollectionStageActionReadinessFor("relations").disabled');
     expect(stageModuleSource).toContain('sourceCollectionStageActionReadinessFor("ingestion").disabled');
+    expect(stageModuleSource.match(/sourceCollectionStageActionLabelFor/g) ?? []).toHaveLength(4);
+    expect(stageModuleSource).toContain('"finding", sourceCollectionCollectionActionLabel');
+    expect(stageModuleSource).toContain('"extraction",');
+    expect(stageModuleSource).toContain('"relations", sourceCollectionGraphActionLabel');
+    expect(stageModuleSource).toContain('"ingestion", sourceCollectionMemoryActionLabel');
   });
 
   it("keeps the source collection workspace in a simple status-board mode", () => {

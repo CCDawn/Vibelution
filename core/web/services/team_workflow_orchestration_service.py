@@ -16979,10 +16979,33 @@ def _source_collection_stage_card_projection(
         for key, value in dict(extra_counts or {}).items()
         if _trim_text(key, max_length=80)
     }
+    action_readiness = _source_collection_stage_action_readiness(
+        stage_id,
+        card_status,
+        agent_status,
+        artifact_count=artifact_count,
+        input_count=input_count,
+        output_count=output_count,
+        pending_count=effective_pending_count,
+    )
     return {
         "stageId": stage_id,
         "status": card_status,
         "isClosedLoop": card_status == "closed_loop",
+        "userStatusLabel": _source_collection_stage_user_status_label(
+            stage_id,
+            card_status,
+            current_coverage_summary=current_coverage_summary,
+        ),
+        "userSummary": _source_collection_stage_user_summary(
+            stage_id,
+            card_status,
+            artifact_summary,
+            latest_task=latest_task,
+            current_coverage_summary=current_coverage_summary,
+            action_readiness=action_readiness,
+        ),
+        "actionReadiness": action_readiness,
         "agentTaskStatus": agent_status,
         "artifactStatus": artifact_status,
         "artifactSummary": artifact_summary,
@@ -17199,6 +17222,162 @@ def _source_collection_stage_card_blocking_reasons(
     if artifact_status == "empty" and artifact_count <= 0 and pending_count > 0:
         reasons.append("Inputs exist, but this stage has not produced its expected artifact yet.")
     return reasons
+
+
+def _source_collection_stage_readable_object_label(stage_id: str) -> str:
+    labels = {
+        "finding": "原始资料",
+        "extraction": "候选资料",
+        "relations": "资料关系",
+        "ingestion": "入库结果",
+    }
+    return labels.get(stage_id, "可用资料")
+
+
+def _source_collection_stage_recovery_status_label(stage_id: str) -> str:
+    labels = {
+        "finding": "待继续寻找",
+        "extraction": "待补提炼",
+        "relations": "待补关系",
+        "ingestion": "待补入库",
+    }
+    return labels.get(stage_id, "待补齐")
+
+
+def _source_collection_stage_action_label(stage_id: str, recommended_action: str = "") -> str:
+    if recommended_action == "wait":
+        return "等待 Agent 完成"
+    if stage_id == "finding":
+        return "搜索下一批" if recommended_action in {"continue", "retry"} else "开始找资料"
+    if stage_id == "extraction":
+        return "Agent 继续提炼" if recommended_action in {"continue", "retry"} else "Agent 提炼资料"
+    if stage_id == "relations":
+        return "Agent 重新整理关系" if recommended_action == "retry" else "Agent 整理关系"
+    if stage_id == "ingestion":
+        return "Agent 继续入库" if recommended_action in {"continue", "retry"} else "Agent 入库资料"
+    return "启动 Agent"
+
+
+def _source_collection_stage_action_readiness(
+    stage_id: str,
+    card_status: str,
+    agent_status: str,
+    *,
+    artifact_count: int,
+    input_count: int,
+    output_count: int,
+    pending_count: int,
+) -> dict[str, Any]:
+    if agent_status in SOURCE_COLLECTION_STAGE_SESSION_TASK_ACTIVE_STATUSES or card_status == "agent_running":
+        return {
+            "canStart": False,
+            "reasonCode": "agent_running",
+            "disabledReason": "已有 Agent 正在执行",
+            "recommendedAction": "wait",
+            "actionLabel": _source_collection_stage_action_label(stage_id, "wait"),
+        }
+    has_input = any(
+        _source_collection_count(value) > 0
+        for value in (artifact_count, input_count, output_count, pending_count)
+    )
+    if not has_input:
+        return {
+            "canStart": False,
+            "reasonCode": "no_stage_input",
+            "disabledReason": "当前阶段还没有可执行输入",
+            "recommendedAction": "wait",
+            "actionLabel": _source_collection_stage_action_label(stage_id, "wait"),
+        }
+    if card_status in {"agent_blocked", "artifact_ready_agent_blocked"}:
+        recommended_action = "retry"
+    elif card_status in {"partial_current_inputs", "agent_done_artifact_pending", "artifact_ready_agent_needs_review", "pending"}:
+        recommended_action = "continue"
+    elif card_status in {"closed_loop", "artifact_ready_no_latest_agent_task"}:
+        recommended_action = "retry"
+    else:
+        recommended_action = "start"
+    return {
+        "canStart": True,
+        "reasonCode": "ready",
+        "disabledReason": "",
+        "recommendedAction": recommended_action,
+        "actionLabel": _source_collection_stage_action_label(stage_id, recommended_action),
+    }
+
+
+def _source_collection_stage_user_status_label(
+    stage_id: str,
+    card_status: str,
+    *,
+    current_coverage_summary: dict[str, Any] | None = None,
+) -> str:
+    if card_status == "agent_running":
+        return "Agent 正在处理"
+    current_coverage = current_coverage_summary if isinstance(current_coverage_summary, dict) else {}
+    if bool(current_coverage.get("applicable")) and current_coverage.get("complete") is False:
+        return _source_collection_stage_recovery_status_label(stage_id)
+    labels = {
+        "agent_running": "Agent 正在处理",
+        "closed_loop": "本阶段已完成",
+        "artifact_ready_no_latest_agent_task": "产物已就绪",
+        "artifact_ready_agent_blocked": "产物已生成，任务需排查",
+        "agent_blocked": "Agent 任务受阻",
+        "partial_current_inputs": _source_collection_stage_recovery_status_label(stage_id),
+        "artifact_ready_agent_needs_review": "产物待复核",
+        "agent_done_artifact_pending": "Agent 已回写，仍待产物",
+        "pending": "等待本阶段产出",
+        "idle": "未开始",
+    }
+    return labels.get(card_status, "需要处理")
+
+
+def _source_collection_stage_user_summary(
+    stage_id: str,
+    card_status: str,
+    artifact_summary: str,
+    *,
+    latest_task: dict[str, Any] | None = None,
+    current_coverage_summary: dict[str, Any] | None = None,
+    action_readiness: dict[str, Any] | None = None,
+) -> str:
+    current_coverage = current_coverage_summary if isinstance(current_coverage_summary, dict) else {}
+    action = action_readiness if isinstance(action_readiness, dict) else {}
+    if card_status == "agent_running":
+        return "Agent 正在处理本阶段，请等待结果同步。"
+    if bool(current_coverage.get("applicable")) and current_coverage.get("complete") is False:
+        processed = _source_collection_count(current_coverage.get("processed"))
+        total = _source_collection_count(current_coverage.get("total"))
+        missing = _source_collection_count(current_coverage.get("missing"))
+        invalid = _source_collection_count(current_coverage.get("invalid"))
+        invalid_text = f"无效 ID {invalid} 条。" if invalid > 0 else ""
+        next_action = _trim_text(action.get("actionLabel"), max_length=120) or _source_collection_stage_action_label(stage_id, "continue")
+        return f"{_source_collection_stage_readable_object_label(stage_id)}已处理 {processed}/{total}，还有 {missing} 条需要补齐。{invalid_text}建议：{next_action}。"
+    closure = {}
+    if isinstance(latest_task, dict):
+        writeback = latest_task.get("writeback") if isinstance(latest_task.get("writeback"), dict) else {}
+        result = latest_task.get("result") if isinstance(latest_task.get("result"), dict) else {}
+        closure = (
+            writeback.get("closureSummary")
+            if isinstance(writeback.get("closureSummary"), dict)
+            else result.get("closureSummary")
+            if isinstance(result.get("closureSummary"), dict)
+            else {}
+        )
+    if _trim_text(closure.get("message"), max_length=500):
+        retry_instruction = _trim_text(closure.get("retryInstruction") or closure.get("nextAction"), max_length=500)
+        return (
+            _trim_text(closure.get("message"), max_length=500)
+            if not retry_instruction
+            else f"{_trim_text(closure.get('message'), max_length=500)}建议：{retry_instruction}"
+        )
+    if card_status == "artifact_ready_agent_blocked":
+        return f"{_source_collection_stage_readable_object_label(stage_id)}已经可用，但最近一次 Agent 任务受阻；可以先查看结果，再决定是否重试。"
+    if card_status == "agent_blocked":
+        return "最近一次 Agent 任务没有完成。建议进入 Agent 私聊查看原因，或重新启动本阶段。"
+    if card_status == "agent_done_artifact_pending":
+        next_action = _trim_text(action.get("actionLabel"), max_length=120) or _source_collection_stage_action_label(stage_id, "continue")
+        return f"已收到 Agent 结果，但还没有生成可用{_source_collection_stage_readable_object_label(stage_id)}。建议：{next_action}。"
+    return artifact_summary
 
 
 def _source_collection_candidate_trace_run_id(candidate: dict[str, Any]) -> str:
