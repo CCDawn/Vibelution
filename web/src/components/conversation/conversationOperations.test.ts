@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { ConversationMessage } from "../../api/types";
+import type { AgentMessage } from "../../agent-thread";
 import {
+  buildAgentMessageOperationGroups,
+  buildAgentMessageOperations,
   buildConversationOperationGroups,
   buildConversationOperations,
   buildConversationReActOperationGroups,
@@ -14,6 +17,104 @@ const labels = {
 };
 
 describe("conversationOperations", () => {
+  it("builds operation groups from AgentMessage parts", () => {
+    const message: AgentMessage = {
+      id: "agent-message-parts",
+      role: "assistant",
+      createdAt: "2026-07-02T09:10:00Z",
+      streaming: true,
+      source: { kind: "conversation-message", id: "agent-message-parts" },
+      parts: [
+        {
+          id: "agent-message-parts-status",
+          type: "runtime-event",
+          kind: "status",
+          name: "model_request",
+          status: "running",
+          summary: "正在请求模型",
+        },
+        {
+          id: "agent-message-parts-thought",
+          type: "thought",
+          status: "running",
+          text: "检查 AgentMessage parts",
+          sequence: 2,
+        },
+        {
+          id: "agent-message-parts-tool",
+          type: "tool-call",
+          name: "read_file_tool",
+          status: "done",
+          summary: "读取 ConversationView",
+          resultPreview: "export function ConversationView",
+          arguments: { path: "ConversationView.tsx" },
+          durationMs: 1200,
+          relatedThoughtSequence: 2,
+        },
+        {
+          id: "agent-message-parts-text",
+          type: "text",
+          channel: "answer",
+          text: "回答正文不应进入 operation timeline",
+        },
+      ],
+    };
+
+    const operations = buildAgentMessageOperations(message, labels);
+    const grouped = buildAgentMessageOperationGroups(message, labels);
+
+    expect(operations.map((operation) => `${operation.kind}:${operation.label}:${operation.summary}`)).toEqual([
+      "status:请求模型:首个响应片段等待中",
+      "thought:Deep thinking:检查 AgentMessage parts",
+      "tool:读取文件:读取 ConversationView",
+    ]);
+    expect(grouped.status).toHaveLength(1);
+    expect(grouped.thoughts).toHaveLength(1);
+    expect(grouped.tools[0]).toMatchObject({
+      id: "agent-message-parts-tool",
+      rawLabel: "read_file_tool",
+      arguments: { path: "ConversationView.tsx" },
+      durationSeconds: 1.2,
+      relatedThoughtSequence: 2,
+      resultPreview: "export function ConversationView",
+    });
+  });
+
+  it("preserves legacy tool-call raw labels while display-labeling event tool calls", () => {
+    const message: AgentMessage = {
+      id: "agent-tool-labels",
+      role: "assistant",
+      createdAt: "2026-07-02T09:20:00Z",
+      streaming: true,
+      source: { kind: "conversation-message", id: "agent-tool-labels" },
+      parts: [
+        {
+          id: "agent-tool-labels-legacy",
+          type: "tool-call",
+          source: "legacy-tool-call",
+          name: "image2_generate_tool",
+          status: "failed",
+          summary: "Read timed out.",
+        },
+        {
+          id: "agent-tool-labels-feedback",
+          type: "tool-call",
+          source: "feedback-event",
+          name: "grep_search_tool",
+          status: "done",
+          summary: "搜索缓存统计代码",
+        },
+      ],
+    };
+
+    const operations = buildAgentMessageOperations(message, labels);
+
+    expect(operations.map((operation) => `${operation.label}:${operation.rawLabel}`)).toEqual([
+      "image2_generate_tool:image2_generate_tool",
+      "搜索:grep_search_tool",
+    ]);
+  });
+
   it("prefers ordered feedback events over legacy thought and tool buckets", () => {
     const message: ConversationMessage = {
       id: "message-feedback",

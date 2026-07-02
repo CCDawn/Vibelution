@@ -78,4 +78,34 @@ describe("ConversationView agent thread bridge", () => {
     expect(html).toContain("继续前端重构");
     expect(html).toContain("正在接入统一消息模型");
   });
+
+  it("keeps active thought visible when feedback status events are the only process events", () => {
+    const html = renderConversation(
+      [],
+      {
+        id: "assistant-active-thought",
+        role: "assistant",
+        content: "正在形成回答",
+        thought: "推理片段来自 thought 字段",
+        timestamp: "2026-07-02T09:12:00Z",
+        streaming: true,
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "status",
+            status: "running",
+            name: "model_request",
+            summary: "正在请求模型",
+          },
+        ],
+        metadata: {
+          kind: "session_active_turn_layer",
+          turnId: "turn-2",
+        },
+      },
+    );
+
+    expect(html).toContain("推理片段来自 thought 字段");
+    expect(html).toContain("正在形成回答");
+  });
 });
