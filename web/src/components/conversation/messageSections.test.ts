@@ -63,6 +63,42 @@ describe("messageSections", () => {
     });
   });
 
+  it("derives AgentMessage section state from process, content, and context sections", () => {
+    const assistantMessage = message({
+      role: "assistant",
+      content: "我会整理下一步。",
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "tool",
+          status: "done",
+          name: "read_file_tool",
+          summary: "读取 ConversationView",
+        },
+      ],
+      references: [
+        {
+          kind: "session",
+          sessionId: "session-ref",
+          title: "历史会话",
+        },
+      ],
+    });
+
+    const state = buildAgentMessageSectionState(conversationMessageToAgentMessage(assistantMessage));
+
+    expect(state).toMatchObject({
+      sectionCount: 3,
+      sectionKinds: ["process", "content", "context"],
+      hasProcessSection: true,
+      hasContentSection: true,
+      hasContextSection: true,
+      hasResponseBlock: true,
+      hasFeedbackTimeline: true,
+      hasToolBlock: true,
+    });
+  });
+
   it("builds AgentMessage section state without exposing runtime status placeholders as answers", () => {
     const statusMessage = message({
       role: "assistant",

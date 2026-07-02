@@ -3756,6 +3756,7 @@ export function ConversationView({
               ? buildAgentMessageOperationGroups(agentMessage, operationLabels)
               : buildConversationOperationGroups(message, operationLabels);
             const agentSections = agentMessage ? buildAgentMessageSectionState(agentMessage) : null;
+            const agentMessageSectionKinds = agentSections?.sectionKinds.join(" ") ?? "";
             const responseText = agentSections?.answerText ?? message.content;
             const hasActiveProcess = operationGroups.timeline.some((operation) => isRunningOperationStatus(operation.status));
             const hasFeedbackTimeline = agentSections?.hasFeedbackTimeline ?? ((message.feedbackEvents?.length ?? 0) > 0);
@@ -3891,6 +3892,9 @@ export function ConversationView({
                 className={turnClassName}
                 data-conversation-row-key={rowIdentity.rowKey}
                 data-conversation-message-key={rowIdentity.messageKey}
+                data-agent-message-id={agentMessage?.id}
+                data-agent-section-count={agentSections?.sectionCount}
+                data-agent-section-kinds={agentMessageSectionKinds || undefined}
               >
                 <div className={styles.turnAvatar} aria-hidden="true">
                   {compactTurnHeader
