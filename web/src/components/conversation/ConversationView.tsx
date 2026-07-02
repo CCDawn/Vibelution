@@ -1855,8 +1855,8 @@ export function ConversationView({
       ? running?.summary.trim()
         || running?.resultPreview?.trim()
         || (running ? operationLabel(running).trim() : "")
-      : failed?.error?.trim()
-        || failed?.summary.trim()
+      : failed?.summary.trim()
+        || failed?.error?.trim()
         || readable?.summary.trim()
         || fallback?.error?.trim()
         || fallback?.summary.trim()
@@ -3819,7 +3819,7 @@ export function ConversationView({
                   : userLabel;
             const editDisabled = Boolean(editUserMessageDisabled);
             const processTone = operationCollectionTone(operationGroups.timeline);
-            const processDefaultExpanded = processTone === "failed" || processTone === "running";
+            const processDefaultExpanded = processTone === "running";
             const renderLegacyProcessDetails = (defaultExpandedOverride?: boolean) => (
               <>
                 {renderThoughtPanel(message, defaultExpandedOverride)}
