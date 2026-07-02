@@ -43,6 +43,15 @@ describe("SelfEvolutionTrack static assets", () => {
   const observationStatusSurface = observationStatusStart >= 0 && observationStatusEnd > observationStatusStart
     ? selfEvolutionSource.slice(observationStatusStart, observationStatusEnd)
     : "";
+  const workspaceStart = selfEvolutionSource.indexOf('{activePage === "workspace" ? (');
+  const workspaceEnd = selfEvolutionSource.indexOf(") : observationRunModeActive ? (", workspaceStart);
+  const workspaceSurface = workspaceStart >= 0 && workspaceEnd > workspaceStart
+    ? selfEvolutionSource.slice(workspaceStart, workspaceEnd)
+    : "";
+  const statusPageStart = selfEvolutionSource.indexOf('<div className={styles.statusPage}>');
+  const statusPageSurface = statusPageStart >= 0
+    ? selfEvolutionSource.slice(statusPageStart)
+    : "";
 
   it("routes self-evolution controls through VUI primitives", () => {
     expect(selfEvolutionSource).toContain('from "../components/vui"');
@@ -69,6 +78,17 @@ describe("SelfEvolutionTrack static assets", () => {
 
   it("uses the compact workbench conversation density on the self-evolution workspace", () => {
     expect(selfEvolutionSource).toContain('density="compact"');
+  });
+
+  it("surfaces the active run controls before the workspace columns", () => {
+    expect(selfEvolutionSource).toContain("styles.runActionBar");
+    expect(selfEvolutionSource).toContain("styles.runActionCluster");
+    expect(selfEvolutionSource).toContain("showTopTerminateAction");
+    expect(selfEvolutionSource).toContain("styles.dangerAction");
+    expect(selfEvolutionSource).toContain("styles.primaryAction");
+    expect(selfEvolutionSource).toContain('onWorktreeAction(worktreeRun.runId, "terminate")');
+    expect(selfEvolutionSource).toContain("onTerminateObservation(observationRun.runId)");
+    expect(selfEvolutionSource).toContain("showComposer={!runIsActive && !worktreeRunLocked && !runLocked}");
   });
 
   it("loads the heavy conversation renderer through the shared lazy bridge", () => {
@@ -219,6 +239,14 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("petCompanionSurface");
     expect(selfEvolutionSource).toContain('fetchJson<PetSummary>("/api/pet/summary")');
     expect(selfEvolutionSource).not.toContain("/api/pet/actions");
+  });
+
+  it("keeps pet metrics out of the workspace first screen and moves them to status", () => {
+    expect(workspaceSurface).toContain("petCompanionSurface");
+    expect(workspaceSurface).not.toContain("petVitals.map");
+    expect(workspaceSurface).not.toContain("styles.compactMetricGrid");
+    expect(statusPageSurface).toContain("petVitals.map");
+    expect(statusPageSurface).toContain("t(\"petSpace\")");
   });
 });
 
