@@ -164,19 +164,26 @@ function removeAgentFromChatRooms(
   });
 }
 
-function directSessionReference(agent: AgentConfigWorkspaceAgent | AgentArchiveResponse): AgentConfigReference[] {
+function directSessionReference(
+  agent: AgentConfigWorkspaceAgent | AgentArchiveResponse,
+  cachedReferences: AgentConfigReference[] = [],
+): AgentConfigReference[] {
   const directSessionId = String(agent.directSessionId || "").trim();
   if (!directSessionId) {
     return [];
   }
+  const existingReference = cachedReferences.find(
+    (reference) => reference.kind === "direct_session" && reference.sourceId === directSessionId,
+  );
   return [
     {
+      ...existingReference,
       kind: "direct_session",
       sourceId: directSessionId,
       sourceLabel: String(agent.displayName || directSessionId).trim(),
       mode: "",
       field: "directSessionId",
-      route: "/chat",
+      route: existingReference?.route || "/chat",
       status: "active",
     },
   ];
@@ -195,7 +202,7 @@ function archivedReferences(
       ...reference,
       status: "stale",
     }));
-  const directSession = directSessionReference({ ...cachedAgent, ...archivedAgent });
+  const directSession = directSessionReference({ ...cachedAgent, ...archivedAgent }, cachedAgent.references);
   return [...directSession, ...preserved];
 }
 
