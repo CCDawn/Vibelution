@@ -2,7 +2,9 @@
 
 > Date: 2026-06-29
 > Scope: project-level frontend architecture, style unification, and first-wave Agent Management migration
-> Status: draft for user review
+> Status: SUPERSEDED — replaced by `2026-07-02-vui-productization-plan.md` (2026-07-02 alignment).
+>         The layer model and import boundaries live on there; the migration
+>         premise (CSS-module starting point) no longer matches the codebase.
 > Replaces: `2026-06-29-heroui-agent-management-refactor-plan.md`
 
 ## 1. Confirmed Direction
