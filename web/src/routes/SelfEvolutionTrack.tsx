@@ -800,6 +800,29 @@ export function SelfEvolutionTrack({
       },
     ];
   }, [overview, selectedWorkflowStep]);
+  const activeModeLabel = observationRunModeActive
+    ? (lang === "zh" ? "自主观察" : "Observation")
+    : (lang === "zh" ? "隔离开发" : "Isolated development");
+  const activeStatusLabel = observationRunModeActive
+    ? statusLabel(observationRun?.status || "idle")
+    : statusLabel(conversationTask.status);
+  const activeSummary = observationRunModeActive
+    ? (observationRun?.latestMessage || (lang === "zh" ? "设置观察目标和时长后启动。" : "Set the observation goal and duration, then start."))
+    : conversationTask.latestSummary;
+  const activeNextAction = observationRunModeActive
+    ? (observationRunActive
+      ? (lang === "zh" ? "观察运行中，可随时终止。" : "Observation is running and can be stopped.")
+      : (lang === "zh" ? "中央面板保留观察参数和启动入口。" : "Use the center panel for observation settings."))
+    : conversationTask.nextAction;
+  const worktreeTerminateVisible = runIsActive && Boolean(worktreeRun);
+  const observationTerminateVisible = observationRunModeActive && observationRunActive && Boolean(observationRun?.runId);
+  const showTopTerminateAction = worktreeTerminateVisible || observationTerminateVisible;
+  const topTerminateDisabled = observationTerminateVisible
+    ? observationActionPending || !observationTerminateAction?.enabled
+    : worktreeActionPending || !terminateAction?.enabled;
+  const topTerminateReason = observationTerminateVisible
+    ? disabledReason(observationTerminateAction)
+    : disabledReason(terminateAction);
 
   useEffect(() => {
     setSelectedHistoryTxnIds((current) => pruneSelectedHistoryTxnIds(current, visibleTransactionIds));
@@ -1125,6 +1148,55 @@ export function SelfEvolutionTrack({
   return (
     <div className={styles.pageStack}>
       <div className={styles.pageTabsRow}>
+        <section className={styles.runActionBar} aria-label={lang === "zh" ? "自进化当前运行" : "Current self-evolution run"}>
+          <div className={styles.runActionMain}>
+            <span className={styles.statusIcon}><Activity size={17} /></span>
+            <div className={styles.runActionText}>
+              <div className={styles.runActionMeta}>
+                <span className={styles.secondaryPill}>{activeModeLabel}</span>
+                <span className={styles.statusPill}>{activeStatusLabel}</span>
+                <span className={styles.secondaryPill}>
+                  {lang === "zh" ? `事务 ${transactionItems.length}` : `Transactions ${transactionItems.length}`}
+                </span>
+              </div>
+              <strong>{activeSummary}</strong>
+              <span>{activeNextAction}</span>
+            </div>
+          </div>
+          <div className={styles.runActionCluster}>
+            {showTopTerminateAction ? (
+              <VButton
+                type="button"
+                className={styles.dangerAction}
+                isDisabled={topTerminateDisabled}
+                title={topTerminateReason || undefined}
+                onClick={() => {
+                  if (observationTerminateVisible && observationRun?.runId) {
+                    onTerminateObservation(observationRun.runId);
+                    return;
+                  }
+                  if (worktreeRun) {
+                    onWorktreeAction(worktreeRun.runId, "terminate");
+                  }
+                }}
+              >
+                {(observationActionPending || worktreeActionPending) ? <LoaderCircle size={15} className={styles.spinning} /> : <X size={15} />}
+                {terminateRequested ? t("selfStopRequested") : t("stopSelfRun")}
+              </VButton>
+            ) : !observationRunModeActive ? (
+              <VButton
+                type="button"
+                className={styles.primaryAction}
+                isDisabled={runLocked || worktreeRunLocked || startPending || !startSelfAction?.enabled}
+                title={disabledReason(startSelfAction) || undefined}
+                onClick={onStartRun}
+              >
+                {startPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ArrowUpRight size={15} />}
+                {t("startSelfWorktreeRun")}
+              </VButton>
+            ) : null}
+          </div>
+        </section>
         <div className={styles.segmentedTabs}>
           <VButton
             type="button"
@@ -1238,15 +1310,6 @@ export function SelfEvolutionTrack({
                     {worktreeRunLocked ? <p className={styles.noticeText}>{t("selfWorktreeRunningLockHint")}</p> : null}
                     {actionFeedback ? <p className={styles.feedbackText}>{actionFeedback}</p> : null}
                     {errorMessage ? <p className={styles.errorText}>{errorMessage}</p> : null}
-                    <VButton
-                      type="button"
-                      className={styles.secondaryAction}
-                      isDisabled={runLocked || worktreeRunLocked || startPending}
-                      onClick={onStartRun}
-                    >
-                      {startPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ArrowUpRight size={15} />}
-                      {t("startSelfWorktreeRun")}
-                    </VButton>
                   </div>
                 </>
               )}
@@ -1261,63 +1324,11 @@ export function SelfEvolutionTrack({
                 <span className={styles.statusPill}>{t(petCompanionState.stateKey)}</span>
               </div>
 
-              <div className={styles.petAvatarStage}>
-                <div className={styles.petAvatarHalo} />
-                <div className={styles.petAvatarMark} aria-label={pet?.name ?? "pet"} role="img">
-                  <span className={styles.petAvatarClaw} />
-                  <span className={styles.petAvatarBody} />
-                  <span className={styles.petAvatarClaw} />
-                </div>
-                <div className={styles.petAvatarBadge}>{petPresetLabel} {t("preset")}</div>
-              </div>
-
               <div className={styles.petCompanionCopy}>
                 <p>{t(petCompanionState.detailKey)}</p>
                 <span>{pet?.statusLine ?? t("readingCompanionState")}</span>
                 <span>{petCompanionLine}</span>
-              </div>
-            </section>
-
-            <section className={styles.surface}>
-              <div className={styles.sectionHeader}>
-                <div>
-                  <p className={styles.eyebrow}>{t("petSpace")}</p>
-                  <h3 className={styles.sectionTitle}>{t("mood")} / {t("heart")}</h3>
-                </div>
-                <span className={styles.secondaryPill}>{pet?.mood ?? 0}</span>
-              </div>
-
-              <div className={styles.compactMetricGrid}>
-                <article className={styles.stripItem}>
-                  <span>{t("tokens")}</span>
-                  <strong>{pet?.totalTokens ?? 0}</strong>
-                </article>
-                <article className={styles.stripItem}>
-                  <span>{t("dailyTokens")}</span>
-                  <strong>{pet?.dailyTokens ?? 0}</strong>
-                </article>
-                <article className={styles.stripItem}>
-                  <span>{t("heart")}</span>
-                  <strong>{pet?.heartActive ? t("heartActive") : t("heartIdle")}</strong>
-                </article>
-                <article className={styles.stripItem}>
-                  <span>{t("dream")}</span>
-                  <strong>{pet?.inDream ? t("dreamSleeping") : t("dreamAwake")}</strong>
-                </article>
-              </div>
-
-              <div className={styles.vitalList}>
-                {petVitals.map((vital) => (
-                  <div key={vital.key} className={styles.vitalItem}>
-                    <div className={styles.itemTop}>
-                      <strong>{vital.label}</strong>
-                      <span className={styles.secondaryPill}>{vital.value}</span>
-                    </div>
-                    <div className={styles.vitalTrack}>
-                      <div className={styles.vitalFill} style={{ width: `${vital.value}%` }} />
-                    </div>
-                  </div>
-                ))}
+                <span>{petPresetLabel} {t("preset")}</span>
               </div>
             </section>
           </aside>
@@ -1430,23 +1441,8 @@ export function SelfEvolutionTrack({
                         { label: t("filesChanged"), value: changedFiles.length || overview.worktree.dirtyFileCount },
                         { label: t("lastUpdated"), value: compactTimestamp(conversationTask.updatedAt) },
                       ]}
-                      headerActions={(
-                        <div className={styles.conversationActions}>
-                          {runIsActive && worktreeRun ? (
-                            <VButton
-                              type="button"
-                              className={styles.secondaryAction}
-                              isDisabled={worktreeActionPending || !terminateAction?.enabled}
-                              title={disabledReason(terminateAction) || undefined}
-                              onClick={() => onWorktreeAction(worktreeRun.runId, "terminate")}
-                            >
-                              {worktreeActionPending ? <LoaderCircle size={15} className={styles.spinning} /> : <X size={15} />}
-                              {terminateRequested ? t("selfStopRequested") : t("stopSelfRun")}
-                            </VButton>
-                          ) : null}
-                        </div>
-                      )}
                       autoScrollToLatest={runIsActive}
+                      showComposer={!runIsActive && !worktreeRunLocked && !runLocked}
                       composerValue={goalInput}
                       composerPlaceholder={t("selfGoalPlaceholder")}
                       composerDisabled={!startSelfAction?.enabled || runLocked || worktreeRunLocked || startPending}
@@ -1635,6 +1631,51 @@ export function SelfEvolutionTrack({
                 ) : (
                   <div className={styles.emptyState}>{lang === "zh" ? "启动一轮自进化后，这里会显示审批证据。" : "Start a self-evolution run to show approval evidence here."}</div>
                 )}
+              </section>
+
+              <section className={styles.subsurface}>
+                <div className={styles.subsurfaceHeader}>
+                  <div>
+                    <p className={styles.eyebrow}>{t("petSpace")}</p>
+                    <h4 className={styles.subsurfaceTitle}>{pet?.name ?? t("loadingPetState")}</h4>
+                  </div>
+                  <span className={styles.secondaryPill}>{t(petCompanionState.stateKey)}</span>
+                </div>
+
+                <p className={styles.sectionSummary}>{petCompanionLine}</p>
+
+                <div className={styles.compactMetricGrid}>
+                  <article className={styles.stripItem}>
+                    <span>{t("tokens")}</span>
+                    <strong>{pet?.totalTokens ?? 0}</strong>
+                  </article>
+                  <article className={styles.stripItem}>
+                    <span>{t("dailyTokens")}</span>
+                    <strong>{pet?.dailyTokens ?? 0}</strong>
+                  </article>
+                  <article className={styles.stripItem}>
+                    <span>{t("heart")}</span>
+                    <strong>{pet?.heartActive ? t("heartActive") : t("heartIdle")}</strong>
+                  </article>
+                  <article className={styles.stripItem}>
+                    <span>{t("dream")}</span>
+                    <strong>{pet?.inDream ? t("dreamSleeping") : t("dreamAwake")}</strong>
+                  </article>
+                </div>
+
+                <div className={styles.vitalList}>
+                  {petVitals.map((vital) => (
+                    <div key={vital.key} className={styles.vitalItem}>
+                      <div className={styles.itemTop}>
+                        <strong>{vital.label}</strong>
+                        <span className={styles.secondaryPill}>{vital.value}</span>
+                      </div>
+                      <div className={styles.vitalTrack}>
+                        <div className={styles.vitalFill} style={{ width: `${vital.value}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </section>
             </div>
 

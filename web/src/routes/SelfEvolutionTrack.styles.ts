@@ -1,6 +1,16 @@
 export const selfEvolutionTrackStyles: Record<string, string> = {
   pageStack: "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-2.5 overflow-hidden max-[1180px]:overflow-visible",
-  pageTabsRow: "flex justify-end",
+  pageTabsRow: "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2.5 max-[1180px]:grid-cols-1",
+  runActionBar:
+    "grid min-h-[64px] min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-[var(--border-soft)] bg-[color-mix(in_srgb,var(--surface-panel)_90%,transparent)] px-3.5 py-2.5 shadow-[0_12px_30px_color-mix(in_srgb,var(--fg-primary)_6%,transparent)] max-[900px]:grid-cols-1",
+  runActionMain: "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2.5",
+  runActionText: "grid min-w-0 gap-1 [&_strong]:truncate [&_strong]:text-[0.98rem] [&_strong]:text-[var(--fg-primary)] [&_span]:line-clamp-1 [&_span]:text-[var(--vui-font-xs)] [&_span]:leading-normal [&_span]:text-[var(--fg-secondary)]",
+  runActionMeta: "flex min-w-0 flex-wrap items-center gap-1.5",
+  runActionCluster: "flex flex-wrap items-center justify-end gap-2 max-[900px]:justify-start",
+  primaryAction:
+    "inline-flex min-h-[38px] cursor-pointer items-center justify-center gap-2 rounded-lg border border-[color-mix(in_srgb,var(--accent-cool)_26%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_12%,var(--surface-panel-strong))] px-3.5 font-semibold text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-50",
+  dangerAction:
+    "inline-flex min-h-[38px] cursor-pointer items-center justify-center gap-2 rounded-lg border border-[color-mix(in_srgb,var(--state-error)_28%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,var(--surface-panel-strong))] px-3.5 font-semibold text-[var(--state-error)] disabled:cursor-default disabled:opacity-50",
   workspaceLayout:
     "grid h-full min-h-0 grid-cols-[var(--self-sidebar-width,304px)_10px_minmax(0,1fr)] items-stretch overflow-hidden max-[1180px]:h-auto max-[1180px]:grid-cols-1 max-[1180px]:overflow-visible",
   sideColumn: "grid min-w-0 gap-3",
@@ -18,7 +28,7 @@ export const selfEvolutionTrackStyles: Record<string, string> = {
   panelStack: "grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-4 overflow-hidden",
   sidebarResizer:
     "relative h-full w-2.5 cursor-col-resize rounded-[var(--radius-control)] border-0 bg-transparent p-0 before:absolute before:bottom-[18px] before:left-1 before:top-[18px] before:w-0.5 before:rounded-full before:bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] before:content-[''] max-[1180px]:hidden",
-  segmentedTabs: "inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-panel-strong)] p-1",
+  segmentedTabs: "inline-flex self-start items-center gap-1.5 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-panel-strong)] p-1",
   tabButton: "min-h-9 cursor-pointer rounded-md border-0 bg-transparent px-4 text-[var(--fg-secondary)]",
   tabButtonActive: "bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] text-[var(--accent-warm-2)]",
   modeSwitch: "inline-flex w-fit flex-wrap items-center gap-1 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-panel-strong)] p-1",
@@ -41,7 +51,7 @@ export const selfEvolutionTrackStyles: Record<string, string> = {
   skeletonLine: "block h-2 w-[min(72%,460px)] animate-pulse rounded-full bg-[var(--vui-gradient-route-soft)]",
   skeletonLineShort: "block h-2 w-[min(42%,260px)] animate-pulse rounded-full bg-[var(--vui-gradient-route-soft)]",
   petCompanionSurface:
-    "grid gap-3 rounded-lg border border-[color-mix(in_srgb,var(--accent-cool)_16%,var(--border-soft))] bg-[var(--surface-panel)] p-3.5",
+    "grid gap-2.5 rounded-lg border border-[color-mix(in_srgb,var(--accent-cool)_16%,var(--border-soft))] bg-[var(--surface-panel)] p-3.5",
   petCompanionTone_idle: "",
   petCompanionTone_active: "border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--border-soft))]",
   petCompanionTone_paused: "border-[color-mix(in_srgb,var(--accent-warm)_24%,var(--border-soft))]",
