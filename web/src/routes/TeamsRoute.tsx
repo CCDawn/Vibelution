@@ -65,10 +65,13 @@ import {
 import {
   TeamSourceFilterBar,
   TeamSourcePagination,
+  TeamSourceResultItem,
+  TeamSourceResultList,
   TeamSourceResultStats,
   TeamStageCard,
   TeamStageCommandBar,
   TeamStagePipeline,
+  type TeamSourceResultTone,
   type TeamStageTone,
 } from "../components/vui/product/team-management";
 import { agentCenterMemoryRoute, teamMemoryRoute } from "./agentCenterRoutes";
@@ -4082,6 +4085,21 @@ function workflowQualityTone(value: string) {
   return styles.workflowTagNeutral;
 }
 
+/** Same quality classification as workflowQualityTone, expressed as a product-component tone. */
+function sourceCollectionResultTone(value: string): TeamSourceResultTone {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized.includes("approved") || normalized.includes("ready") || normalized.includes("prefiltered")) {
+    return "ready";
+  }
+  if (normalized.includes("invalid") || normalized.includes("broken") || normalized.includes("rejected")) {
+    return "danger";
+  }
+  if (normalized.includes("revision") || normalized.includes("pending")) {
+    return "warning";
+  }
+  return "neutral";
+}
+
 function workflowIngestionStatusLabel(value: string, lang: "zh" | "en") {
   const normalized = String(value || "").trim();
   const zh: Record<string, string> = {
@@ -7653,7 +7671,7 @@ export function TeamsRoute({
             </div>
           ) : null}
           {visibleResults.length ? (
-            <div className={styles.sourceCollectionResultList}>
+            <TeamSourceResultList ariaLabel={lang === "zh" ? "原始资料记录" : "Raw source records"}>
               {visibleResults.map((record) => {
                 const linkedCandidate = sourceCollectionCandidatesByRecordId.get(record.recordId) ?? null;
                 const sourceQualitySummary = linkedCandidate ? candidateSourceQualityAssessmentSummary(linkedCandidate) : null;
@@ -7669,45 +7687,31 @@ export function TeamsRoute({
                     ? (lang === "zh" ? "已提炼" : "extracted")
                     : (lang === "zh" ? "待提炼" : "extract");
                 return (
-                  <article
+                  <TeamSourceResultItem
                     key={record.recordId}
-                    className={`${styles.sourceCollectionResultItem} ${selected ? styles.sourceCollectionResultItemSelected : ""}`}
-                    role={linkedCandidate ? "button" : undefined}
-                    tabIndex={linkedCandidate ? 0 : -1}
-                    aria-pressed={linkedCandidate ? selected : undefined}
-                    title={linkedCandidate ? (lang === "zh" ? "点击查看候选详情" : "Open candidate detail") : undefined}
-                    onClick={linkedCandidate ? () => selectSourceCollectionCandidate(linkedCandidate) : undefined}
-                    onKeyDown={linkedCandidate ? (event) => sourceCollectionCandidateCardKeyDown(event, linkedCandidate) : undefined}
-                  >
-                    <span
-                      className={`${styles.workflowTag} ${styles.sourceCollectionResultStatus} ${linkedCandidate ? workflowQualityTone(linkedCandidate.qualityStatus) : styles.workflowTagWarning}`}
-                      title={resultStatusRaw}
-                    >
-                      {resultStatusLabel}
-                    </span>
-                    <div className={styles.sourceCollectionResultContent}>
-                      <strong title={[record.title || record.recordId, record.summary || ""].filter(Boolean).join("\n")}>
-                        {record.title || record.recordId}
-                      </strong>
-                    </div>
-                    <div className={styles.sourceCollectionResultMeta}>
-                      <span>{sourceCollectionSourceTypeLabel(record.sourceType, lang)}</span>
-                      <span>{resultScoreLabel}</span>
-                    </div>
-                    <div className={`${styles.sourceCollectionResultSource} ${provenance.kind === "missing" ? styles.sourceCollectionResultSourceMissing : ""}`}>
-                      <span>{provenance.label}</span>
-                      {provenance.href ? (
-                        <a href={provenance.href} target="_blank" rel="noreferrer" title={provenance.href}>
-                          {provenance.value}
-                        </a>
-                      ) : (
-                        <code title={provenance.value}>{provenance.value}</code>
-                      )}
-                    </div>
-                  </article>
+                    tone={linkedCandidate ? sourceCollectionResultTone(linkedCandidate.qualityStatus) : "warning"}
+                    statusLabel={resultStatusLabel}
+                    statusTitle={resultStatusRaw}
+                    title={record.title || record.recordId}
+                    titleTooltip={[record.title || record.recordId, record.summary || ""].filter(Boolean).join("\n")}
+                    meta={[
+                      { key: "type", label: sourceCollectionSourceTypeLabel(record.sourceType, lang) },
+                      { key: "score", label: resultScoreLabel },
+                    ]}
+                    source={{
+                      label: provenance.label,
+                      value: provenance.value,
+                      href: provenance.href,
+                      title: provenance.href || provenance.value,
+                      missing: provenance.kind === "missing",
+                    }}
+                    selected={selected}
+                    onActivate={linkedCandidate ? () => selectSourceCollectionCandidate(linkedCandidate) : undefined}
+                    activateTitle={linkedCandidate ? (lang === "zh" ? "点击查看候选详情" : "Open candidate detail") : undefined}
+                  />
                 );
               })}
-            </div>
+            </TeamSourceResultList>
           ) : selectedRunEmptyWithHistorical && sourceCollectionHistoricalRunWithRecords ? (
             <div className={styles.sourceCollectionEmptyRunNotice}>
               <div>
