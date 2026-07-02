@@ -303,6 +303,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toMatch(/<textarea\b/);
     expect(routeSource).toContain("teamContextBar");
     expect(routeSource).toContain("teamSelectField");
+    expect(routeSource).toContain("teamSelectPrefix");
+    expect(routeSource).toContain("teamSelectControl");
+    expect(routeSource).toContain("teamRefreshButton");
     expect(routeSource).toContain("teamContextChips");
     expect(routeSource).toContain("selectedTeamContextTitle");
     expect(routeSource).toContain("成员源");
@@ -1126,8 +1129,17 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.teamContextBar).toBeTypeOf("string");
     expect(routeStyles.teamTitleBlock).toBeTypeOf("string");
     expect(routeStyles.teamSelectField).toBeTypeOf("string");
+    expect(routeStyles.teamSelectPrefix).toBeTypeOf("string");
+    expect(routeStyles.teamSelectControl).toBeTypeOf("string");
+    expect(routeStyles.teamRefreshButton).toBeTypeOf("string");
     expect(routeStyles.teamContextChips).toBeTypeOf("string");
     expect(routeStyles.teamContextActions).toBeTypeOf("string");
+    expect(routeStyles.teamContextActions).not.toContain("accent-warm");
+    expect(routeStyles.teamContextBar).not.toContain("accent-warm");
+    expect(routeStyles.teamSelectField).toContain("[&_[data-vui=select-trigger]]:!inline-flex");
+    expect(routeStyles.teamSelectField).toContain("[&_[data-vui=select-trigger]]:justify-between");
+    expect(routeStyles.teamRefreshButton).toContain("!h-8");
+    expect(routeStyles.teamRefreshButton).toContain("!w-8");
     expect(routeStylesSource).not.toContain(".summaryBar");
     expect(routeStylesSource).not.toContain(".teamPickerPanel");
     expect(routeStylesSource).not.toContain(".teamPickerSummary");

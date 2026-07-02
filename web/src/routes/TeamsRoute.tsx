@@ -12202,9 +12202,10 @@ export function TeamsRoute({
         actions={(
           <div className={styles.teamContextActions}>
             <div className={styles.teamSelectField}>
-              <span>{lang === "zh" ? "团队" : "Team"}</span>
+              <span className={styles.teamSelectPrefix}>{lang === "zh" ? "团队" : "Team"}</span>
               <VSelect
                 aria-label={lang === "zh" ? "选择团队" : "Select team"}
+                className={styles.teamSelectControl}
                 selectedKey={selectedTeam?.teamId ?? effectiveTeamId}
                 options={visibleTeamOptions}
                 placeholder={selectedTeam?.name ?? (lang === "zh" ? "选择团队" : "Select team")}
@@ -12218,6 +12219,7 @@ export function TeamsRoute({
               />
             </div>
             <VIconButton
+              className={styles.teamRefreshButton}
               label={lang === "zh" ? "刷新团队" : "Refresh teams"}
               icon={<RefreshCw size={15} />}
               onPress={() => void teamsQuery.refetch()}
