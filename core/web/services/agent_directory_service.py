@@ -73,6 +73,10 @@ DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = (
     "get_core_context_tool",
     "conversation_log_inspect_tool",
 )
+SELF_EVOLUTION_EXECUTABLE_AGENT_ALLOWED_TOOLS = tuple(DEFAULT_SESSION_AGENT_ALLOWED_TOOLS)
+SELF_EVOLUTION_EXECUTABLE_AGENT_PREFERRED_TOOLS = tuple(DEFAULT_SESSION_AGENT_PREFERRED_TOOLS)
+SELF_EVOLUTION_EXECUTABLE_ROLES = {"executor", "reviewer"}
+SELF_EVOLUTION_OBSERVER_ROLES = {"observer"}
 SUBAGENT_DELEGATION_TOOL_NAMES = {
     "cli_agent_run_tool",
     "create_child_session_tool",
@@ -136,7 +140,7 @@ MUTATING_AGENT_TOOL_NAMES = {
 }
 SYSTEM_NO_TOOL_MODES = {"self_evolution", "supervised_evolution"}
 SYSTEM_NO_TOOL_ROLES = {
-    "self_evolution": {"executor", "reviewer", "summarizer"},
+    "self_evolution": SELF_EVOLUTION_OBSERVER_ROLES,
     "supervised_evolution": {"baseline", "candidate", "reviewer", "auditor", "judge"},
 }
 RESEARCH_SOURCE_ROLE_KEYS = set(agent_role_tool_profile_service.RESEARCH_SOURCE_ROLE_KEYS)
@@ -3218,6 +3222,18 @@ def default_system_no_tool_policy(policy_id: str) -> dict[str, Any]:
     return payload
 
 
+def default_self_evolution_executable_tool_policy(policy_id: str) -> dict[str, Any]:
+    payload = default_tool_policy(policy_id)
+    payload["allowedTools"] = list(SELF_EVOLUTION_EXECUTABLE_AGENT_ALLOWED_TOOLS)
+    payload["preferredTools"] = list(SELF_EVOLUTION_EXECUTABLE_AGENT_PREFERRED_TOOLS)
+    payload["readScopes"] = ["private", "shared", "repo"]
+    payload["writeScopes"] = ["repo"]
+    payload["networkAccess"] = "none"
+    payload["mutationAccess"] = "restricted"
+    payload["maxCallsPerTurn"] = 12
+    return payload
+
+
 def default_research_source_tool_policy(policy_id: str, *, role_key: str = "") -> dict[str, Any]:
     payload = default_tool_policy(policy_id)
     resolved = agent_role_tool_profile_service.resolve_role_tool_policy(
@@ -3325,6 +3341,8 @@ def _ensure_fixed_role_tool_policy(state: dict[str, Any], agent: dict[str, Any])
         desired_policy = default_research_source_tool_policy(policy_id, role_key=str(agent.get("roleKey") or ""))
     elif desired_kind == "research_role":
         desired_policy = default_research_role_tool_policy(policy_id, role_key=str(agent.get("roleKey") or ""))
+    elif desired_kind == "self_evolution_executable":
+        desired_policy = default_self_evolution_executable_tool_policy(policy_id)
     elif desired_kind == "role_profile":
         metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
         desired_policy = agent_role_tool_profile_service.resolve_role_tool_policy(
@@ -3366,6 +3384,8 @@ def _fixed_role_tool_policy_kind(agent: dict[str, Any]) -> str:
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
     if primary_mode in SYSTEM_NO_TOOL_MODES:
         system_role = _normalize_role_key(metadata.get("selfEvolutionRole") or metadata.get("supervisedRole") or role_key)
+        if primary_mode == "self_evolution" and system_role in SELF_EVOLUTION_EXECUTABLE_ROLES:
+            return "self_evolution_executable"
         if system_role in SYSTEM_NO_TOOL_ROLES.get(primary_mode, set()):
             return "no_tools"
     if agent_role_tool_profile_service.role_has_explicit_tool_profile(role_key, primary_mode=primary_mode, metadata=metadata):
@@ -4874,7 +4894,7 @@ def _self_evolution_profile_defaults(role: str, functional_name: str) -> dict[st
     labels = {
         "executor": ("执行候选改进", "实现、验证和记录自进化候选变更。", "实现、测试、回滚准备"),
         "reviewer": ("评审候选变更", "从证据、风险和可回滚性角度审查自进化候选。", "代码评审、风险评估、证据复核"),
-        "summarizer": ("总结进化证据", "压缩自进化运行证据，输出可追踪摘要和后续建议。", "运行摘要、证据整理、结论归档"),
+        "observer": ("旁路观察自进化", "不携带角色提示词，不调用工具，只记录自进化运行的风险信号。", "过程观察、风险信号、证据完整性"),
     }
     mission, responsibilities, expertise = labels.get(
         role,

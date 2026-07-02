@@ -20,6 +20,7 @@ PROMPT_TEMPLATE_INDEX_VERSION = 1
 CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION = 11
 PROMPT_TEMPLATE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,95}$")
 PROMPT_TEMPLATE_PATH = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "agent_config", "prompt_templates.json")
+RETIRED_PROMPT_TEMPLATE_IDS = frozenset({"prompt-self-summarizer"})
 
 
 class PromptTemplateError(ValueError):
@@ -693,23 +694,6 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
         ),
         "metadata": {"builtin": True, "roleKey": "reviewer"},
     },
-    {
-        "templateId": "prompt-self-summarizer",
-        "name": "Self-evolution summarizer",
-        "category": "self_evolution",
-        "sourcePath": "",
-        "content": (
-            "# 自进化总结 Agent\n\n"
-            "你是自进化链路中的总结 Agent。你的职责是把执行和评审过程压缩成可追踪、可复用的记录。\n\n"
-            "## 行为边界\n"
-            "- 只记录已发生、已验证或明确标注为推断的内容。\n"
-            "- 不扩写不存在的结果，不替评审下结论。\n"
-            "- 保留目标、决策、证据、风险和后续动作。\n\n"
-            "## 输出要求\n"
-            "输出简洁总结、关键决策、验证结果、开放问题和记忆更新建议。"
-        ),
-        "metadata": {"builtin": True, "roleKey": "summarizer"},
-    },
 )
 
 
@@ -948,6 +932,9 @@ def repair_prompt_templates() -> dict[str, Any]:
         try:
             record = _normalize_template_record(raw)
         except PromptTemplateError:
+            changed = True
+            continue
+        if record["templateId"] in RETIRED_PROMPT_TEMPLATE_IDS:
             changed = True
             continue
         existing = templates_by_id.get(record["templateId"])

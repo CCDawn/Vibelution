@@ -1034,12 +1034,11 @@ def test_agent_configuration_api_exposes_self_evolution_role_agents(tmp_path, mo
         for item in agents_response.json()
         if item.get("primaryMode") == "self_evolution"
     ]
-    assert {item["roleKey"] for item in self_agents} == {"executor", "reviewer", "summarizer"}
-    assert {item["promptTemplateId"] for item in self_agents} == {
-        "prompt-self-executor",
-        "prompt-self-reviewer",
-        "prompt-self-summarizer",
-    }
+    assert {item["roleKey"] for item in self_agents} == {"executor", "reviewer", "observer"}
+    by_role = {item["roleKey"]: item for item in self_agents}
+    assert by_role["executor"]["promptTemplateId"] == "prompt-self-executor"
+    assert by_role["reviewer"]["promptTemplateId"] == "prompt-self-reviewer"
+    assert by_role["observer"]["promptTemplateId"] == ""
 
     monkeypatch.setattr(agents_route, "_ensure_config_agent_instances", lambda: None)
     bindings_response = client.get("/api/agent-mode-bindings")
@@ -1050,7 +1049,7 @@ def test_agent_configuration_api_exposes_self_evolution_role_agents(tmp_path, mo
     assert slots == {
         "executor": role_to_agent_id["executor"],
         "reviewer": role_to_agent_id["reviewer"],
-        "summarizer": role_to_agent_id["summarizer"],
+        "observer": role_to_agent_id["observer"],
     }
 
 
