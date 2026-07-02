@@ -1,7 +1,7 @@
 const flowTabsClass = [
-  "grid flex-[1_1_680px] grid-cols-[repeat(4,minmax(108px,1fr))] gap-1 rounded-lg border border-vui-border-soft",
-  "min-w-[min(560px,100%)] max-w-[780px] bg-[var(--surface-panel-muted)] p-[3px]",
-  "max-[1120px]:min-w-[min(500px,100%)] max-[1120px]:max-w-[660px] max-[1120px]:grid-cols-[repeat(4,minmax(96px,1fr))]",
+  "grid flex-[1_1_860px] grid-cols-[repeat(4,minmax(132px,1fr))] gap-1 rounded-lg border border-vui-border-soft",
+  "min-w-[min(720px,100%)] max-w-[920px] bg-[var(--surface-panel-muted)] p-[3px]",
+  "max-[1120px]:min-w-[min(560px,100%)] max-[1120px]:max-w-[760px] max-[1120px]:grid-cols-[repeat(4,minmax(110px,1fr))]",
   "max-[760px]:min-w-0 max-[760px]:flex-[1_1_1px] max-[760px]:grid-cols-[repeat(4,minmax(74px,1fr))]",
 ].join(" ");
 const flowTabClass = [

@@ -1223,6 +1223,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     activeTrack === "self" ? t("selfEvolutionMode") : t("supervisedEvolutionMode");
   const routeSubtitle =
     activeTrack === "self" ? t("selfEvolutionSubtitle") : t("supervisedEvolutionSubtitle");
+  const hideSupervisedToolbarIntro = activeTrack === "supervised";
   const currentIntakeMode =
     overview?.intakeMode === "auto"
       ? "auto"
@@ -2949,12 +2950,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
 
   return (
     <div className={styles.page}>
-      <section className={styles.toolbar}>
-        <div className={styles.toolbarIntro}>
-          <p className={styles.eyebrow}>{routeEyebrow}</p>
-          <h1 className={styles.title}>{routeTitle}</h1>
-          <p className={styles.subtitle}>{routeSubtitle}</p>
-        </div>
+      <section className={hideSupervisedToolbarIntro ? `${styles.toolbar} ${styles.toolbarSupervisedFocus}` : styles.toolbar}>
+        {!hideSupervisedToolbarIntro ? (
+          <div className={styles.toolbarIntro}>
+            <p className={styles.eyebrow}>{routeEyebrow}</p>
+            <h1 className={styles.title}>{routeTitle}</h1>
+            <p className={styles.subtitle}>{routeSubtitle}</p>
+          </div>
+        ) : null}
 
         <div className={styles.toolbarControls}>
           {showTrackToggle ? (
