@@ -1,4 +1,5 @@
 import { ConversationMessage, type ConversationTimelineItem as ApiConversationTimelineItem } from "../../api/types";
+import type { AgentMessage, AgentMessagePart, AgentTextPart } from "../../agent-thread/types";
 import { ConversationOperation } from "./conversationOperations";
 
 export type ConversationTimelineItemStatus = "pending" | "running" | "completed" | "failed";
@@ -58,6 +59,16 @@ const timelineItemsCache = new WeakMap<
     items: ConversationTimelineItem[];
   }
 >();
+const agentTimelineItemsCache = new WeakMap<
+  AgentMessage,
+  {
+    operations: ConversationOperation[];
+    serverItems: ApiConversationTimelineItem[] | undefined;
+    lang: string;
+    includeAssistantText: boolean | undefined;
+    items: ConversationTimelineItem[];
+  }
+>();
 
 export function buildConversationTimelineItems(
   message: ConversationMessage,
@@ -86,6 +97,36 @@ export function buildConversationTimelineItems(
   return items;
 }
 
+export function buildAgentMessageTimelineItems(
+  message: AgentMessage,
+  operations: ConversationOperation[],
+  options: ConversationTimelineOptions,
+  serverItems?: ApiConversationTimelineItem[],
+): ConversationTimelineItem[] {
+  if (message.role !== "assistant") {
+    return [];
+  }
+  const cached = agentTimelineItemsCache.get(message);
+  if (
+    cached
+    && cached.operations === operations
+    && cached.serverItems === serverItems
+    && cached.lang === options.lang
+    && cached.includeAssistantText === options.includeAssistantText
+  ) {
+    return cached.items;
+  }
+  const items = buildAgentMessageTimelineItemsUncached(message, operations, options, serverItems);
+  agentTimelineItemsCache.set(message, {
+    operations,
+    serverItems,
+    lang: options.lang,
+    includeAssistantText: options.includeAssistantText,
+    items,
+  });
+  return items;
+}
+
 function buildConversationTimelineItemsUncached(
   message: ConversationMessage,
   operations: ConversationOperation[],
@@ -94,6 +135,40 @@ function buildConversationTimelineItemsUncached(
   if ((message.timelineItems?.length ?? 0) > 0) {
     return timelineItemsFromServer(message.timelineItems ?? [], operations, options);
   }
+  return timelineItemsFromOperations(
+    message.id,
+    Boolean(message.streaming),
+    String(message.content ?? "").trim(),
+    operations,
+    options,
+  );
+}
+
+function buildAgentMessageTimelineItemsUncached(
+  message: AgentMessage,
+  operations: ConversationOperation[],
+  options: ConversationTimelineOptions,
+  serverItems?: ApiConversationTimelineItem[],
+): ConversationTimelineItem[] {
+  if ((serverItems?.length ?? 0) > 0) {
+    return timelineItemsFromServer(serverItems ?? [], operations, options);
+  }
+  return timelineItemsFromOperations(
+    message.id,
+    Boolean(message.streaming),
+    agentMessageAnswerText(message),
+    operations,
+    options,
+  );
+}
+
+function timelineItemsFromOperations(
+  messageId: string,
+  messageStreaming: boolean,
+  assistantText: string,
+  operations: ConversationOperation[],
+  options: ConversationTimelineOptions,
+): ConversationTimelineItem[] {
   const items: ConversationTimelineItem[] = [];
   const sortedOperations = [...operations].sort((left, right) => (left.sequence ?? 0) - (right.sequence ?? 0));
   const commandBuffer: ConversationOperation[] = [];
@@ -106,7 +181,7 @@ function buildConversationTimelineItemsUncached(
       const operation = commandBuffer[0];
       items.push(operationTimelineItem(operation));
     } else {
-      items.push(commandGroupTimelineItem(message.id, commandBuffer, options.lang));
+      items.push(commandGroupTimelineItem(messageId, commandBuffer, options.lang));
     }
     commandBuffer.length = 0;
   };
@@ -144,18 +219,30 @@ function buildConversationTimelineItemsUncached(
   flushCommandBuffer();
 
   if (options.includeAssistantText !== false) {
-    const text = String(message.content ?? "").trim();
+    const text = assistantText.trim();
     if (text) {
       items.push({
-        id: `${message.id}-timeline-response`,
+        id: `${messageId}-timeline-response`,
         kind: "assistant_text",
-        status: message.streaming ? "running" : "completed",
+        status: messageStreaming ? "running" : "completed",
         text,
       });
     }
   }
 
   return mergeAdjacentThoughtItems(items);
+}
+
+function agentMessageAnswerText(message: AgentMessage) {
+  return message.parts
+    .filter(isAgentAnswerTextPart)
+    .map((part) => part.text.trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function isAgentAnswerTextPart(part: AgentMessagePart): part is AgentTextPart {
+  return part.type === "text" && part.channel === "answer";
 }
 
 function timelineItemsFromServer(

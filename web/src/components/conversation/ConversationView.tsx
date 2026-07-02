@@ -47,6 +47,7 @@ import {
   type ConversationReActOperationGroup,
 } from "./conversationOperations";
 import {
+  buildAgentMessageTimelineItems,
   buildConversationTimelineItems,
   type ConversationTimelineItem,
 } from "./conversationTimeline";
@@ -3741,10 +3742,13 @@ export function ConversationView({
             const agentInboxMessage = isAgentInboxMessage(message);
             const groupTranscriptMessage = isGroupRoomTranscriptMessage(message);
             const compactTurnHeader = shouldCompactConversationTurnHeader(activeTimelineMessages[index - 1], message);
-            const conversationTimelineItems = buildConversationTimelineItems(message, operationGroups.timeline, {
+            const timelineOptions = {
               lang,
               includeAssistantText: false,
-            });
+            };
+            const conversationTimelineItems = agentMessage
+              ? buildAgentMessageTimelineItems(agentMessage, operationGroups.timeline, timelineOptions, message.timelineItems)
+              : buildConversationTimelineItems(message, operationGroups.timeline, timelineOptions);
             const hasConversationTimeline =
               message.role === "assistant"
               && hasFeedbackTimeline
