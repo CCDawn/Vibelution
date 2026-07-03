@@ -3750,8 +3750,12 @@ def test_source_collection_stage_tools_read_context_and_writeback(tmp_path, monk
             recorded_by_agent=agent["agentId"],
         )
     )
-    assert writeback_payload["writeback"]["status"] == "completed"
-    assert writeback_payload["task"]["result"]["coverageSummary"]["processed"] == 1
+    assert writeback_payload["status"] == "completed"
+    assert writeback_payload["coverageSummary"]["processed"] == 1
+    assert "task" not in writeback_payload
+    assert "writeback" not in writeback_payload
+    assert "recordExtractions" not in json.dumps(writeback_payload, ensure_ascii=False)
+    assert len(json.dumps(writeback_payload, ensure_ascii=False)) < 3000
     tool_event_codes = [args[2] for args, _kwargs in tool_events]
     assert "tool.source_collection_context.completed" in tool_event_codes
     assert "tool.source_collection_stage_writeback.completed" in tool_event_codes
@@ -4219,6 +4223,111 @@ def test_content_extraction_writeback_requires_candidate_coverage_and_materializ
     assert complete["writeback"]["status"] == "completed"
     assert complete["writeback"]["coverageSummary"]["processed"] == 3
     assert complete["writeback"]["coverageSummary"]["missing"] == 0
+
+
+def test_content_extraction_writeback_accumulates_partial_candidate_batches(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经预测编码资料提炼",
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": agent["agentId"]},
+            "querySeeds": ["predictive coding neural algorithm"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    candidates = [
+        team_workflow_orchestration_service.register_candidate_source(
+            team["teamId"],
+            {
+                "title": f"Predictive coding batched candidate {index}",
+                "sourceUrl": f"https://doi.org/10.0000/extraction-batch-{index}",
+                "sourceKind": "paper",
+                "summary": "Predictive coding evidence for batched writeback.",
+                "allowedForAnalysis": True,
+                "metadata": {"sourceCollectionRunId": run_id, "doi": f"10.0000/extraction-batch-{index}"},
+                "createdByAgent": "content-extraction-agent",
+            },
+        )["candidate"]
+        for index in range(4)
+    ]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-content-batch", "status": "running"},
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
+    )
+
+    first = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "needs_review",
+            "summary": "先回写前 2 条候选提炼。",
+            "result": {
+                "candidateExtractions": [
+                    {
+                        "candidateId": item["candidateId"],
+                        "status": "extracted",
+                        "decision": "keep",
+                        "summary": f"{item['title']} 第一批已提炼。",
+                    }
+                    for item in candidates[:2]
+                ]
+            },
+            "recordedByAgent": agent["agentId"],
+        },
+    )
+    assert first["writeback"]["coverageSummary"]["processed"] == 2
+    assert first["writeback"]["coverageSummary"]["missing"] == 2
+
+    _append_stage_task_tool_trace(tmp_path, task["task"])
+    complete = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "再回写后 2 条候选提炼，应与上一批合并为 4/4。",
+            "result": {
+                "candidateExtractions": [
+                    {
+                        "candidateId": item["candidateId"],
+                        "status": "extracted",
+                        "decision": "keep",
+                        "summary": f"{item['title']} 第二批已提炼。",
+                    }
+                    for item in candidates[2:]
+                ]
+            },
+            "recordedByAgent": agent["agentId"],
+        },
+    )
+
+    assert complete["writeback"]["status"] == "completed"
+    assert complete["writeback"]["coverageSummary"]["processed"] == 4
+    assert complete["writeback"]["coverageSummary"]["missing"] == 0
+    assert len(complete["task"]["result"]["candidateExtractions"]) == 4
+    refreshed_candidates = {
+        item["candidateId"]: item
+        for item in team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")["candidates"]
+    }
+    assert all(
+        refreshed_candidates[item["candidateId"]]["metadata"]["contentExtraction"]["summary"]
+        for item in candidates
+    )
 
 
 def test_source_collection_context_reconciles_checklist_updates_after_writeback(tmp_path, monkeypatch):

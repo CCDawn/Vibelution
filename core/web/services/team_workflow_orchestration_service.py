@@ -1324,6 +1324,7 @@ def writeback_source_collection_stage_session_task(
         raise TeamWorkflowOrchestrationError(f"Stage session task not found: {normalized_task_id}")
     status = _normalize_source_collection_stage_session_task_status(request_payload.get("status") or request_payload.get("resultStatus"))
     result_payload = _normalize_source_collection_stage_writeback_result_payload(request_payload.get("result"))
+    result_payload = _merge_source_collection_stage_writeback_result_payload(normalized_team_id, run_id, task, result_payload)
     writeback = {
         "status": status,
         "agentRequestedStatus": status,
@@ -16382,6 +16383,178 @@ def _normalize_source_collection_stage_session_task_status(value: Any) -> str:
     return normalized if normalized in SOURCE_COLLECTION_STAGE_SESSION_TASK_STATUSES else "needs_review"
 
 
+def _merge_source_collection_stage_writeback_result_payload(
+    team_id: str,
+    run_id: str,
+    task: dict[str, Any],
+    incoming: dict[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(incoming, dict) or not incoming:
+        return {}
+    previous_writeback = task.get("writeback") if isinstance(task.get("writeback"), dict) else {}
+    previous_result = previous_writeback.get("result") if isinstance(previous_writeback.get("result"), dict) else {}
+    if not previous_result and isinstance(task.get("result"), dict):
+        previous_result = task["result"]
+    if not previous_result:
+        return incoming
+
+    merged = dict(previous_result)
+    merged.update(incoming)
+    valid_candidate_ids = {
+        _trim_text(item.get("candidateId"), max_length=160)
+        for item in _source_collection_candidates_for_run(team_id, run_id)
+        if _trim_text(item.get("candidateId"), max_length=160)
+    }
+    valid_record_ids = {
+        _trim_text(item.get("recordId"), max_length=160)
+        for item in _source_collection_stage_records_for_run(run_id)
+        if _trim_text(item.get("recordId"), max_length=160)
+    }
+    _merge_source_collection_stage_writeback_array_group(
+        merged,
+        previous_result,
+        incoming,
+        canonical_key="candidateExtractions",
+        aliases=(
+            "candidateExtractions",
+            "candidate_extractions",
+            "extractions",
+            "candidateFindings",
+            "candidate_findings",
+            "extractedCandidates",
+            "extracted_candidates",
+        ),
+        containers=("contentExtraction", "content_extraction", "extractionSummary", "outputs", "summary"),
+        item_id=_source_collection_stage_writeback_candidate_id,
+        valid_existing_ids=valid_candidate_ids,
+        max_items=300,
+    )
+    _merge_source_collection_stage_writeback_array_group(
+        merged,
+        previous_result,
+        incoming,
+        canonical_key="candidateDecisions",
+        aliases=(
+            "candidateDecisions",
+            "candidate_decisions",
+            "decisions",
+            "candidateReviews",
+            "candidate_reviews",
+            "reviewedCandidates",
+            "reviewed_candidates",
+        ),
+        containers=("reviewSummary", "sourceQuality", "qualityReview", "handoff", "outputs", "summary"),
+        item_id=_source_collection_stage_writeback_candidate_id,
+        valid_existing_ids=valid_candidate_ids,
+        max_items=200,
+    )
+    _merge_source_collection_stage_writeback_array_group(
+        merged,
+        previous_result,
+        incoming,
+        canonical_key="recordExtractions",
+        aliases=(
+            "recordExtractions",
+            "record_extractions",
+            "dataRecordExtractions",
+            "data_record_extractions",
+            "sourceRecordExtractions",
+            "source_record_extractions",
+        ),
+        containers=("contentExtraction", "content_extraction", "extractionSummary", "outputs", "summary"),
+        item_id=lambda item: (
+            _source_collection_stage_writeback_record_id(item)
+            or _source_collection_stage_writeback_candidate_id(item)
+        ),
+        valid_existing_ids=valid_record_ids,
+        max_items=300,
+    )
+    return merged
+
+
+def _merge_source_collection_stage_writeback_array_group(
+    target: dict[str, Any],
+    previous: dict[str, Any],
+    incoming: dict[str, Any],
+    *,
+    canonical_key: str,
+    aliases: tuple[str, ...],
+    containers: tuple[str, ...],
+    item_id: Any,
+    valid_existing_ids: set[str],
+    max_items: int,
+) -> None:
+    incoming_items = _source_collection_stage_writeback_array_items(incoming, aliases=aliases, containers=containers)
+    if not incoming_items:
+        return
+    previous_items = _source_collection_stage_writeback_array_items(previous, aliases=aliases, containers=containers)
+    merged_items = _merge_source_collection_stage_writeback_array_items(
+        previous_items,
+        incoming_items,
+        item_id=item_id,
+        valid_existing_ids=valid_existing_ids,
+        max_items=max_items,
+    )
+    for key in aliases:
+        target.pop(key, None)
+    for container_key in containers:
+        container = target.get(container_key)
+        if not isinstance(container, dict):
+            continue
+        next_container = dict(container)
+        for key in aliases:
+            next_container.pop(key, None)
+        target[container_key] = next_container
+    target[canonical_key] = merged_items
+
+
+def _source_collection_stage_writeback_array_items(
+    payload: dict[str, Any],
+    *,
+    aliases: tuple[str, ...],
+    containers: tuple[str, ...],
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for key in aliases:
+        value = payload.get(key)
+        if isinstance(value, list):
+            items.extend(item for item in value if isinstance(item, dict))
+    for container_key in containers:
+        container = payload.get(container_key)
+        if not isinstance(container, dict):
+            continue
+        for key in aliases:
+            value = container.get(key)
+            if isinstance(value, list):
+                items.extend(item for item in value if isinstance(item, dict))
+    return items
+
+
+def _merge_source_collection_stage_writeback_array_items(
+    previous: list[dict[str, Any]],
+    incoming: list[dict[str, Any]],
+    *,
+    item_id: Any,
+    valid_existing_ids: set[str],
+    max_items: int,
+) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for source, item in (
+        [("previous", item) for item in previous]
+        + [("incoming", item) for item in incoming]
+    ):
+        key = _trim_text(item_id(item), max_length=160) if isinstance(item, dict) else ""
+        if source == "previous" and valid_existing_ids and key and key not in valid_existing_ids:
+            continue
+        if not key:
+            key = f"__unkeyed_{len(order)}"
+        if key not in merged:
+            order.append(key)
+        merged[key] = dict(item)
+    return [merged[key] for key in order[:max_items]]
+
+
 def _normalize_source_collection_stage_writeback_result_payload(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
@@ -18197,7 +18370,6 @@ def _compact_source_collection_stage_task_context(context: dict[str, Any]) -> di
         "readTool": "source_collection_context_tool",
         "writebackTool": "source_collection_stage_writeback_tool",
         "doNotUse": usage.get("doNotUse") if isinstance(usage.get("doNotUse"), list) else [],
-        "fallback": _trim_text(usage.get("fallback"), max_length=300),
         "continuationHint": _source_collection_context_continuation_hint(candidate_page, context_mode="compact"),
     }
     records = [
@@ -18230,19 +18402,9 @@ def _compact_source_collection_stage_task_context(context: dict[str, Any]) -> di
         "counts": _normalize_metadata(context.get("counts")),
         "run": _compact_source_collection_context_run(context.get("run") if isinstance(context.get("run"), dict) else {}),
         "task": _compact_source_collection_context_task(context.get("task") if isinstance(context.get("task"), dict) else {}),
-        "assignments": [
-            _compact_source_collection_context_assignment(item)
-            for item in list(context.get("assignments") or [])[:6]
-            if isinstance(item, dict)
-        ],
         "records": records,
         "candidates": candidates,
         "candidatePage": _normalize_metadata(candidate_page),
-        "candidateIds": [
-            _trim_text(item.get("candidateId"), max_length=160)
-            for item in candidates
-            if _trim_text(item.get("candidateId"), max_length=160)
-        ],
         "unassessedCandidateIds": _normalize_text_list(context.get("unassessedCandidateIds"), max_items=80, max_length=160),
         "allUnassessedCandidateCount": _source_collection_count(context.get("allUnassessedCandidateCount")),
         "writebackContract": _compact_source_collection_writeback_contract(
@@ -18327,8 +18489,6 @@ def _compact_source_collection_context_run(run: dict[str, Any]) -> dict[str, Any
     return {
         "runId": _trim_text(run.get("runId"), max_length=128),
         "status": _trim_text(run.get("status"), max_length=80),
-        "title": _trim_text(run.get("title"), max_length=180),
-        "topic": _trim_text(run.get("topic"), max_length=240),
     }
 
 
@@ -18368,16 +18528,6 @@ def _compact_source_collection_context_task(task: dict[str, Any]) -> dict[str, A
             if key in gate
         }
     return compact
-
-
-def _compact_source_collection_context_assignment(assignment: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "assignmentId": _trim_text(assignment.get("assignmentId"), max_length=128),
-        "agentId": _trim_text(assignment.get("agentId"), max_length=160),
-        "agentRole": _trim_text(assignment.get("agentRole"), max_length=80),
-        "status": _trim_text(assignment.get("status"), max_length=80),
-        "purpose": _trim_text(assignment.get("purpose"), max_length=200),
-    }
 
 
 def _compact_source_collection_writeback_contract(contract: dict[str, Any]) -> dict[str, Any]:
@@ -18534,7 +18684,7 @@ def _source_collection_stage_task_checklist(stage_id: str, agent_role: str = "")
             ("read_candidates", "读取候选或原始资料上下文", "source_collection_context_tool"),
             ("page_candidate_inputs", "分页覆盖本阶段输入", "source_collection_context_tool"),
             ("extract_and_review_each_source", "逐候选提炼并审查保留/待补/无效", ""),
-            ("write_extractions_and_decisions", "回写 candidateExtractions[] / candidateDecisions[] 或 recordExtractions[]", "source_collection_stage_writeback_tool"),
+            ("write_extractions", "回写 candidateExtractions[] 或 recordExtractions[]", "source_collection_stage_writeback_tool"),
             ("confirm_coverage", "确认 coverageSummary 覆盖率和待补原因", "source_collection_stage_writeback_tool"),
         ),
         "relations": (
@@ -19114,7 +19264,9 @@ def _source_collection_stage_session_task_message(
             "- 在本会话里完成当前阶段任务，并把可审查的结论、证据引用和下一步写清楚。",
             "- 如果返回的 `recordPage.hasMore=true`，必须继续按 `record_offset=recordPage.nextOffset` 分页读取，直到本阶段应处理原始资料都有真实 recordId 的结论。",
             "- 如果返回的 `candidatePage.hasMore=true`，必须继续按 `candidate_offset=candidatePage.nextOffset` 分页读取，直到本阶段应处理候选都有真实 candidateId 的结论。",
-            "- 资料提炼阶段如果 `candidatePage.total=0`，输入就是原始 DataRecord：请用 `recordExtractions[]` 回写，并绑定完整 `recordId`；已有候选后用 `candidateExtractions[]` 和 `candidateDecisions[]` 绑定完整 `candidateId`。",
+            "- 资料提炼阶段如果 `candidatePage.total=0`，输入就是原始 DataRecord：请用 `recordExtractions[]` 回写，并绑定完整 `recordId`；已有候选后优先用 `candidateExtractions[]` 绑定完整 `candidateId`，可直接在每项里写 `decision=keep/needs_more_info/exclude`。",
+            "- 资料提炼阶段不需要额外提交一份 `candidateDecisions[]`；只有专门做资料审查/质检时才单独回写 `candidateDecisions[]`。",
+            "- 可以分批调用 `source_collection_stage_writeback_tool`，系统会按真实 `candidateId` / `recordId` 累计上一批结果；不要因为 compact 返回未展开完整数组而重复提交同一大包。",
             "- 资料提炼采用宽松保留：只要有可用内容或有价值线索，就写 `decision=keep` 或 `needs_more_info`，并填写 `valueSummary`、`defects`、`followUpSuggestion`；不要因为缺 DOI/缺全文直接丢弃。",
             "- 只有确认没有摘要、正文、可验证内容或明显跑题时，才写 `decision=exclude` 和 `excludeReason=no_effective_content/out_of_scope/unobtainable`；这些来源会被移出后续流程并记录，避免下次重复搜到。",
             "- 如果上下文返回 `excludedSourceSummary.excludedCount>0`，表示这些资料已从本轮活跃流程移出，不要再次处理或把它们算作待补资料。",

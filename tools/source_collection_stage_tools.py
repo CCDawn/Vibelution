@@ -141,6 +141,7 @@ def source_collection_stage_writeback_tool(
             metadata.setdefault("toolResolution", resolution)
             payload["metadata"] = metadata
         response = workflow_service.writeback_source_collection_stage_session_task(resolved_team_id, task_id, payload)
+        compact_response = _compact_source_collection_stage_writeback_response(response, payload)
         _record_stage_tool_event(
             "tool.source_collection_stage_writeback.completed",
             outcome="completed",
@@ -153,6 +154,7 @@ def source_collection_stage_writeback_tool(
                 "recordedByAgent": _text(recorded_by_agent),
                 "evidenceRefCount": len(payload["evidenceRefs"]),
                 "nextActionCount": len(payload["nextActions"]),
+                "responseBytes": len(json.dumps(compact_response, ensure_ascii=False)),
                 "teamIdSource": _text(resolution.get("teamIdSource")) if resolution else "",
             },
         )
@@ -184,7 +186,57 @@ def source_collection_stage_writeback_tool(
             ensure_ascii=False,
             indent=2,
         )
-    return json.dumps(response, ensure_ascii=False, indent=2, sort_keys=True)
+    return json.dumps(compact_response, ensure_ascii=False, indent=2, sort_keys=True)
+
+
+def _compact_source_collection_stage_writeback_response(response: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    writeback = response.get("writeback") if isinstance(response.get("writeback"), dict) else {}
+    task = response.get("task") if isinstance(response.get("task"), dict) else {}
+    result = writeback.get("result") if isinstance(writeback.get("result"), dict) else {}
+    closure_summary = writeback.get("closureSummary") if isinstance(writeback.get("closureSummary"), dict) else {}
+    return {
+        "schemaVersion": response.get("schemaVersion", 1),
+        "status": _text(writeback.get("status") or task.get("status") or payload.get("status")),
+        "requestedStatus": _text(writeback.get("agentRequestedStatus") or payload.get("status")),
+        "teamId": _text(response.get("teamId")),
+        "runId": _text(response.get("runId")),
+        "taskId": _text(response.get("taskId") or task.get("taskId")),
+        "stageId": _text(response.get("stageId") or task.get("stageId")),
+        "agentId": _text(response.get("agentId") or task.get("agentId")),
+        "agentRole": _text(response.get("agentRole") or task.get("agentRole")),
+        "summary": _text(writeback.get("summary") or payload.get("summary"))[:600],
+        "coverageSummary": _compact_count_summary(writeback.get("coverageSummary") or result.get("coverageSummary")),
+        "materializedSources": _compact_count_summary(writeback.get("materializedSources") or result.get("materializedSources")),
+        "materializedContentExtraction": _compact_count_summary(
+            writeback.get("materializedContentExtraction") or result.get("materializedContentExtraction")
+        ),
+        "materializedSourceQuality": _compact_count_summary(writeback.get("materializedSourceQuality") or result.get("materializedSourceQuality")),
+        "materializedCandidateGraph": _compact_count_summary(
+            writeback.get("materializedCandidateGraph") or result.get("materializedCandidateGraph")
+        ),
+        "materializedKnowledgeIngestion": _compact_count_summary(
+            writeback.get("materializedKnowledgeIngestion") or result.get("materializedKnowledgeIngestion")
+        ),
+        "closureSummary": _compact_count_summary(closure_summary),
+        "completionGate": closure_summary.get("completionGate") if isinstance(closure_summary.get("completionGate"), dict) else {},
+        "evidenceRefCount": len(payload.get("evidenceRefs") or []),
+        "nextActionCount": len(payload.get("nextActions") or []),
+        "nextStep": "Use source_collection_context_tool for details if another page or retry is needed.",
+    }
+
+
+def _compact_count_summary(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    compact: dict[str, Any] = {}
+    for key, item in value.items():
+        if key in {"message", "nextAction", "retryInstruction", "instructions", "guidance"}:
+            continue
+        if isinstance(item, str) and len(item) > 240:
+            continue
+        if isinstance(item, (str, int, float, bool)) or item is None:
+            compact[key] = item
+    return compact
 
 
 def _resolve_source_collection_team_id(

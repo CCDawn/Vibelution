@@ -250,7 +250,9 @@ def test_source_extractor_prompt_requires_candidate_paging_and_structured_decisi
     assert "candidateExtractions" in detail["content"]
     assert "candidateDecisions" in detail["content"]
     assert "candidateId" in detail["content"]
-    assert "待补读、待补审" in detail["content"]
+    assert "不需要另交一份 candidateDecisions" in detail["content"]
+    assert "可以分批回写" in detail["content"]
+    assert "系统会按真实 candidateId/recordId 累计上一批结果" in detail["content"]
     assert "资料入库/知识库管理员" not in detail["content"]
     assert "无有效内容" in detail["content"]
 
