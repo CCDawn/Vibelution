@@ -5977,6 +5977,53 @@ def test_capture_session_ui_stream_surfaces_live_thought_as_model_thinking(tmp_p
     assert any(item["phase"] == "llm_status_reasoning" for item in lifecycle_events)
 
 
+def test_session_continuation_marks_server_side_model_wait_as_thinking(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+
+    observed_stages: list[str] = []
+
+    def fake_run_existing_agent_single_turn(agent, **kwargs):
+        live_state = session_service._snapshot_session_live_output("session-server-thinking")
+        observed_stages.append(str(live_state.stage if live_state is not None else ""))
+        return {
+            "status": "completed",
+            "summary": "完成",
+            "raw_output": "完成",
+            "tool_call_count": 0,
+            "tool_trace": [],
+        }
+
+    monkeypatch.setattr(session_service, "run_existing_agent_single_turn", fake_run_existing_agent_single_turn)
+
+    turn_control = session_service._create_session_turn_control("session-server-thinking")
+    try:
+        result = session_service._run_session_continuation_loop(
+            object(),
+            session_id="session-server-thinking",
+            turn_control=turn_control,
+            initial_prompt="你好",
+            history_messages=[],
+        )
+    finally:
+        session_service._clear_session_turn_control("session-server-thinking", turn_id=turn_control.turn_id)
+
+    assert isinstance(result, dict)
+    assert result["status"] == "completed"
+    assert observed_stages == ["model_thinking"]
+    live_state = session_service._snapshot_session_live_output("session-server-thinking")
+    assert live_state is not None
+    assert live_state.stage == "model_thinking"
+    assert live_state.content == ""
+    assert live_state.thought == ""
+    assert any(
+        item.get("kind") == "status"
+        and item.get("name") == "model_thinking"
+        and "正在思考" in str(item.get("resultPreview") or "")
+        for item in live_state.feedback_events
+    )
+
+
 def test_capture_session_ui_stream_merges_incremental_thought_updates(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
