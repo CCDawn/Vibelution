@@ -16,7 +16,6 @@ import {
   Trash2,
   UserRound,
   Users,
-  X,
 } from "lucide-react";
 import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -79,6 +78,7 @@ import {
   type AgentBulkConfigField,
 } from "./AgentBulkConfigPanel";
 import { AgentDebugResetPanel, type AgentResetOptions } from "./AgentDebugResetPanel";
+import { AgentMemoryPolicyPanel, type AgentMemoryPolicyDraft } from "./AgentMemoryPolicyPanel";
 import { AgentModeMembershipPanel, type AgentModeMembershipDraft } from "./AgentModeMembershipPanel";
 import { AgentManagementNav } from "./AgentManagementNav";
 import { AgentManagementBriefPanel } from "./AgentManagementBriefPanel";
@@ -177,21 +177,6 @@ type AgentToolGovernanceDraft = {
   proposedByAgentId: string;
   reason: string;
   applyMode: "auto" | "review";
-};
-
-type AgentMemoryPolicyDraft = {
-  readSharedGroups: string[];
-  writeSharedGroups: string[];
-  readKnowledgeBaseIds: string[];
-  proposeKnowledgeBaseIds: string[];
-  reviewKnowledgeBaseIds: string[];
-  rateKnowledgeBaseIds: string[];
-  newReadGroup: string;
-  newWriteGroup: string;
-  newReadKnowledgeBaseId: string;
-  newProposeKnowledgeBaseId: string;
-  newReviewKnowledgeBaseId: string;
-  newRateKnowledgeBaseId: string;
 };
 
 type AgentResetSummary = {
@@ -6540,215 +6525,25 @@ export function AgentsRoute() {
                 onConfigure={() => navigate(selectedAgentToolConfigRoute)}
               />
 
-              <section className={styles.configEditor}>
-                <div className={styles.panelHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{copy.memoryPolicyTitle}</p>
-                    <h3>{selectedAgent.memoryPolicyId || "-"}</h3>
-                  </div>
-                  <span className={memoryPolicyDirty ? styles.dirtyPill : styles.cleanPill}>
-                    {memoryPolicyDirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}
-                  </span>
-                </div>
-                <div className={styles.pathList}>
-                  <code>{selectedAgent.memoryPolicy?.privateMemoryRoot || selectedAgent.workspacePath || "-"}</code>
-                </div>
-                <div className={styles.memoryPolicyGrid}>
-                  <section>
-                    <span>{copy.readSharedGroups}</span>
-                    <div className={styles.tagList}>
-                      {memoryPolicyDraft.readSharedGroups.length ? memoryPolicyDraft.readSharedGroups.map((group) => (
-                        <VButton
-                          key={`read:${group}`}
-                          type="button"
-                          variant="ghost"
-                          trailingIcon={<X size={12} />}
-                          title={lang === "zh" ? `移除 ${group}` : `Remove ${group}`}
-                          onPress={() => removeMemoryGroup("readSharedGroups", group)}
-                        >
-                          {group}
-                        </VButton>
-                      )) : <small>{copy.noSharedGroups}</small>}
-                    </div>
-                    <div className={styles.inlineAdd}>
-                      <VNativeInput
-                        list="agent-memory-groups"
-                        value={memoryPolicyDraft.newReadGroup}
-                        placeholder={copy.sharedGroupPlaceholder}
-                        onChange={(event) => updateMemoryDraftField({ newReadGroup: event.target.value })}
-                      />
-                      <VButton type="button" variant="secondary" onPress={() => addMemoryGroup("readSharedGroups", memoryPolicyDraft.newReadGroup)}>
-                        {copy.addSharedGroup}
-                      </VButton>
-                    </div>
-                  </section>
-                  <section>
-                    <span>{copy.writeSharedGroups}</span>
-                    <div className={styles.tagList}>
-                      {memoryPolicyDraft.writeSharedGroups.length ? memoryPolicyDraft.writeSharedGroups.map((group) => (
-                        <VButton
-                          key={`write:${group}`}
-                          type="button"
-                          variant="ghost"
-                          trailingIcon={<X size={12} />}
-                          title={lang === "zh" ? `移除 ${group}` : `Remove ${group}`}
-                          onPress={() => removeMemoryGroup("writeSharedGroups", group)}
-                        >
-                          {group}
-                        </VButton>
-                      )) : <small>{copy.noSharedGroups}</small>}
-                    </div>
-                    <div className={styles.inlineAdd}>
-                      <VNativeInput
-                        list="agent-memory-groups"
-                        value={memoryPolicyDraft.newWriteGroup}
-                        placeholder={copy.sharedGroupPlaceholder}
-                        onChange={(event) => updateMemoryDraftField({ newWriteGroup: event.target.value })}
-                      />
-                      <VButton type="button" variant="secondary" onPress={() => addMemoryGroup("writeSharedGroups", memoryPolicyDraft.newWriteGroup)}>
-                        {copy.addSharedGroup}
-                      </VButton>
-                    </div>
-                  </section>
-                  <section>
-                    <span>{copy.readKnowledgeBaseIds}</span>
-                    <div className={styles.tagList}>
-                      {memoryPolicyDraft.readKnowledgeBaseIds.length ? memoryPolicyDraft.readKnowledgeBaseIds.map((knowledgeBaseId) => (
-                        <VButton
-                          key={`kb-read:${knowledgeBaseId}`}
-                          type="button"
-                          variant="ghost"
-                          trailingIcon={<X size={12} />}
-                          title={lang === "zh" ? `移除 ${knowledgeBaseId}` : `Remove ${knowledgeBaseId}`}
-                          onPress={() => removeKnowledgeBaseId("readKnowledgeBaseIds", knowledgeBaseId)}
-                        >
-                          {knowledgeBaseId}
-                        </VButton>
-                      )) : <small>{copy.noKnowledgeBaseIds}</small>}
-                    </div>
-                    <div className={styles.inlineAdd}>
-                      <VNativeInput
-                        value={memoryPolicyDraft.newReadKnowledgeBaseId}
-                        placeholder={copy.knowledgeBasePlaceholder}
-                        onChange={(event) => updateMemoryDraftField({ newReadKnowledgeBaseId: event.target.value })}
-                      />
-                      <VButton type="button" variant="secondary" onPress={() => addKnowledgeBaseId("readKnowledgeBaseIds", memoryPolicyDraft.newReadKnowledgeBaseId)}>
-                        {copy.addSharedGroup}
-                      </VButton>
-                    </div>
-                  </section>
-                  <section>
-                    <span>{copy.proposeKnowledgeBaseIds}</span>
-                    <div className={styles.tagList}>
-                      {memoryPolicyDraft.proposeKnowledgeBaseIds.length ? memoryPolicyDraft.proposeKnowledgeBaseIds.map((knowledgeBaseId) => (
-                        <VButton
-                          key={`kb-propose:${knowledgeBaseId}`}
-                          type="button"
-                          variant="ghost"
-                          trailingIcon={<X size={12} />}
-                          title={lang === "zh" ? `移除 ${knowledgeBaseId}` : `Remove ${knowledgeBaseId}`}
-                          onPress={() => removeKnowledgeBaseId("proposeKnowledgeBaseIds", knowledgeBaseId)}
-                        >
-                          {knowledgeBaseId}
-                        </VButton>
-                      )) : <small>{copy.noKnowledgeBaseIds}</small>}
-                    </div>
-                    <div className={styles.inlineAdd}>
-                      <VNativeInput
-                        value={memoryPolicyDraft.newProposeKnowledgeBaseId}
-                        placeholder={copy.knowledgeBasePlaceholder}
-                        onChange={(event) => updateMemoryDraftField({ newProposeKnowledgeBaseId: event.target.value })}
-                      />
-                      <VButton type="button" variant="secondary" onPress={() => addKnowledgeBaseId("proposeKnowledgeBaseIds", memoryPolicyDraft.newProposeKnowledgeBaseId)}>
-                        {copy.addSharedGroup}
-                      </VButton>
-                    </div>
-                  </section>
-                  <section>
-                    <span>{copy.reviewKnowledgeBaseIds}</span>
-                    <div className={styles.tagList}>
-                      {memoryPolicyDraft.reviewKnowledgeBaseIds.length ? memoryPolicyDraft.reviewKnowledgeBaseIds.map((knowledgeBaseId) => (
-                        <VButton
-                          key={`kb-review:${knowledgeBaseId}`}
-                          type="button"
-                          variant="ghost"
-                          trailingIcon={<X size={12} />}
-                          title={lang === "zh" ? `移除 ${knowledgeBaseId}` : `Remove ${knowledgeBaseId}`}
-                          onPress={() => removeKnowledgeBaseId("reviewKnowledgeBaseIds", knowledgeBaseId)}
-                        >
-                          {knowledgeBaseId}
-                        </VButton>
-                      )) : <small>{copy.noKnowledgeBaseIds}</small>}
-                    </div>
-                    <div className={styles.inlineAdd}>
-                      <VNativeInput
-                        value={memoryPolicyDraft.newReviewKnowledgeBaseId}
-                        placeholder={copy.knowledgeBasePlaceholder}
-                        onChange={(event) => updateMemoryDraftField({ newReviewKnowledgeBaseId: event.target.value })}
-                      />
-                      <VButton type="button" variant="secondary" onPress={() => addKnowledgeBaseId("reviewKnowledgeBaseIds", memoryPolicyDraft.newReviewKnowledgeBaseId)}>
-                        {copy.addSharedGroup}
-                      </VButton>
-                    </div>
-                  </section>
-                  <section>
-                    <span>{copy.rateKnowledgeBaseIds}</span>
-                    <div className={styles.tagList}>
-                      {memoryPolicyDraft.rateKnowledgeBaseIds.length ? memoryPolicyDraft.rateKnowledgeBaseIds.map((knowledgeBaseId) => (
-                        <VButton
-                          key={`kb-rate:${knowledgeBaseId}`}
-                          type="button"
-                          variant="ghost"
-                          trailingIcon={<X size={12} />}
-                          title={lang === "zh" ? `移除 ${knowledgeBaseId}` : `Remove ${knowledgeBaseId}`}
-                          onPress={() => removeKnowledgeBaseId("rateKnowledgeBaseIds", knowledgeBaseId)}
-                        >
-                          {knowledgeBaseId}
-                        </VButton>
-                      )) : <small>{copy.noKnowledgeBaseIds}</small>}
-                    </div>
-                    <div className={styles.inlineAdd}>
-                      <VNativeInput
-                        value={memoryPolicyDraft.newRateKnowledgeBaseId}
-                        placeholder={copy.knowledgeBasePlaceholder}
-                        onChange={(event) => updateMemoryDraftField({ newRateKnowledgeBaseId: event.target.value })}
-                      />
-                      <VButton type="button" variant="secondary" onPress={() => addKnowledgeBaseId("rateKnowledgeBaseIds", memoryPolicyDraft.newRateKnowledgeBaseId)}>
-                        {copy.addSharedGroup}
-                      </VButton>
-                    </div>
-                  </section>
-                </div>
-                <datalist id="agent-memory-groups">
-                  {memoryGroupOptions.map((group) => <option key={group} value={group} />)}
-                </datalist>
-                <div className={styles.editorActions}>
-                  <VButton
-                    type="button"
-                    variant="secondary"
-                    icon={<ExternalLink size={15} />}
-                    onPress={() => navigate(selectedAgentMemoryConfigRoute)}
-                  >
-                    {lang === "zh" ? "去记忆页配置" : "Open memory page"}
-                  </VButton>
-                  <VButton
-                    type="button"
-                    variant="secondary"
-                    isDisabled={!memoryPolicyDirty || selectedAgentMemoryPolicyPending}
-                    onPress={() => setMemoryPolicyDraft(memoryPolicyDraftFromAgent(selectedAgent))}
-                  >
-                    {copy.resetConfig}
-                  </VButton>
-                  <VButton
-                    type="button"
-                    variant="primary"
-                    isDisabled={!canSaveMemoryPolicy || selectedAgentMemoryPolicyPending}
-                    onPress={saveMemoryPolicy}
-                  >
-                    {selectedAgentMemoryPolicyPending ? copy.savingMemoryPolicy : copy.saveMemoryPolicy}
-                  </VButton>
-                </div>
-              </section>
+              <AgentMemoryPolicyPanel
+                copy={copy}
+                lang={lang}
+                policyId={selectedAgent.memoryPolicyId || "-"}
+                rootPath={selectedAgent.memoryPolicy?.privateMemoryRoot || selectedAgent.workspacePath || "-"}
+                draft={memoryPolicyDraft}
+                memoryGroupOptions={memoryGroupOptions}
+                dirty={memoryPolicyDirty}
+                pending={selectedAgentMemoryPolicyPending}
+                canSave={canSaveMemoryPolicy}
+                onDraftChange={updateMemoryDraftField}
+                onAddMemoryGroup={addMemoryGroup}
+                onRemoveMemoryGroup={removeMemoryGroup}
+                onAddKnowledgeBaseId={addKnowledgeBaseId}
+                onRemoveKnowledgeBaseId={removeKnowledgeBaseId}
+                onOpenMemoryPage={() => navigate(selectedAgentMemoryConfigRoute)}
+                onReset={() => setMemoryPolicyDraft(memoryPolicyDraftFromAgent(selectedAgent))}
+                onSave={saveMemoryPolicy}
+              />
                 </>
               ) : null}
 
