@@ -49,6 +49,11 @@ describe("conversationOperations", () => {
     expect(conversationOperationsSource).not.toContain("export type ConversationOperationGroups");
   });
 
+  it("keeps the AgentMessage operation model decoupled from the conversation DTO", () => {
+    expect(conversationOperationsSource).not.toContain("../../api/types");
+    expect(conversationOperationsSource).not.toContain("ConversationFeedbackEvent");
+  });
+
   it("builds operation groups from AgentMessage parts", () => {
     const message: AgentMessage = {
       id: "agent-message-parts",
