@@ -81,6 +81,7 @@ import { agentCenterMemoryRoute, teamMemoryRoute } from "./agentCenterRoutes";
 import { agentDisplayInfo } from "./agentDisplay";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import { TeamMemoryIndexPanel, type TeamMemoryIndexMember } from "./TeamMemoryIndexPanel";
+import { TeamSourceCollectionRunSwitcherPanel, type TeamSourceCollectionRunSwitcherRun } from "./TeamSourceCollectionRunSwitcherPanel";
 import { TeamWorkflowGraphView, workflowGraphLayout } from "./TeamWorkflowGraphView";
 import styles from "./TeamsRoute.styles";
 
@@ -7427,6 +7428,10 @@ export function TeamsRoute({
       sourceCollectionHistoricalRunWithRecords
       && sourceCollectionHistoricalRunWithRecords.runId !== selectedSourceCollectionRun?.runId,
     );
+    const runOptions: TeamSourceCollectionRunSwitcherRun[] = sourceCollectionRuns.map((run) => ({
+      runId: run.runId,
+      label: sourceCollectionRunOptionLabel(run, lang),
+    }));
     const hint = sourceCollectionRecordsDataLoading
       ? (lang === "zh" ? "正在读取当前批次资料。" : "Loading the selected run.")
       : sourceCollectionShowingHistoricalRunByDefault
@@ -7435,37 +7440,22 @@ export function TeamsRoute({
         ? (lang === "zh" ? "当前批次暂无资料，上一轮有资料；可切换查看。" : "This run is empty; another run has records.")
       : (lang === "zh" ? "可切换批次查看历史搜索结果。" : "Switch runs to inspect previous search results.");
     return (
-      <section className={styles.sourceCollectionRunSwitcher} aria-label={lang === "zh" ? "资料批次选择" : "Source collection run selector"}>
-        <label className={styles.sourceCollectionRunSwitcherMain}>
-          <span>{lang === "zh" ? "当前批次" : "Run"}</span>
-          <VNativeSelect
-            value={selectedSourceCollectionRunEffectiveId}
-            onChange={(event) => setSelectedSourceCollectionRunId(event.target.value)}
-            disabled={!sourceCollectionRuns.length}
-          >
-            {sourceCollectionRuns.map((run) => (
-              <option key={run.runId} value={run.runId}>
-                {sourceCollectionRunOptionLabel(run, lang)}
-              </option>
-            ))}
-          </VNativeSelect>
-          <small>{hint}</small>
-        </label>
-        <div className={styles.sourceCollectionRunSwitcherStats}>
-          <span>{lang === "zh" ? "资料" : "records"} <strong>{sourceCollectionRecordsDataLoading ? sourceCollectionLoadingText : selectedRecordCount}</strong></span>
-          <span>{lang === "zh" ? "候选" : "candidates"} <strong>{sourceCollectionRecordsDataLoading ? sourceCollectionLoadingText : selectedCandidateCount}</strong></span>
-          <span>{lang === "zh" ? "状态" : "status"} <strong>{sourceCollectionStatusLabel(sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status, lang)}</strong></span>
-        </div>
-        {selectedRunIsEmpty && canSwitchToHistoricalRun && sourceCollectionHistoricalRunWithRecords ? (
-          <VNativeButton
-            type="button"
-            onClick={() => setSelectedSourceCollectionRunId(sourceCollectionHistoricalRunWithRecords.runId)}
-          >
-            <Search size={13} />
-            {lang === "zh" ? "切换到有资料批次" : "Show run with records"}
-          </VNativeButton>
-        ) : null}
-      </section>
+      <TeamSourceCollectionRunSwitcherPanel
+        lang={lang}
+        runs={runOptions}
+        selectedRunId={selectedSourceCollectionRunEffectiveId}
+        hint={hint}
+        recordMetric={sourceCollectionRecordsDataLoading ? sourceCollectionLoadingText : selectedRecordCount}
+        candidateMetric={sourceCollectionRecordsDataLoading ? sourceCollectionLoadingText : selectedCandidateCount}
+        statusLabel={sourceCollectionStatusLabel(sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status, lang)}
+        canSwitchToHistoricalRun={selectedRunIsEmpty && canSwitchToHistoricalRun && Boolean(sourceCollectionHistoricalRunWithRecords)}
+        onRunChange={setSelectedSourceCollectionRunId}
+        onSwitchToHistoricalRun={() => {
+          if (sourceCollectionHistoricalRunWithRecords) {
+            setSelectedSourceCollectionRunId(sourceCollectionHistoricalRunWithRecords.runId);
+          }
+        }}
+      />
     );
   }
 
