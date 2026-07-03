@@ -1,4 +1,4 @@
-import type { ConversationMessage } from "../../api/types";
+import type { AgentMessage } from "../../agent-thread/types";
 import type { AgentMessageTimelineItem } from "./agentMessageTimeline";
 
 export type AgentMessageTimelineRowIdentity = {
@@ -25,22 +25,25 @@ function metadataText(metadata: Record<string, unknown> | undefined, key: string
   return "";
 }
 
-function normalizedMessageTurnId(message: ConversationMessage) {
-  return metadataText(message.metadata, "turnId").replace(/^live:/, "");
+function normalizedMessageTurnId(message: AgentMessage) {
+  const turnId = message.turnId
+    || metadataText(message.metadata, "turnId")
+    || metadataText(message.source.metadata, "turnId");
+  return turnId.replace(/^live:/, "");
 }
 
-function projectedMessageAnchor(message: ConversationMessage) {
-  const projectedMessageIds = message.metadata?.projectedMessageIds;
+function projectedMessageAnchor(message: AgentMessage) {
+  const projectedMessageIds = (message.source.metadata ?? message.metadata)?.projectedMessageIds;
   if (Array.isArray(projectedMessageIds)) {
     const firstId = projectedMessageIds.map((item) => String(item).trim()).find(Boolean);
     if (firstId) {
       return firstId;
     }
   }
-  return message.id;
+  return message.source.id || message.id;
 }
 
-function baseTimelineRowKey(message: ConversationMessage) {
+function baseTimelineRowKey(message: AgentMessage) {
   const turnId = normalizedMessageTurnId(message);
   if (message.role === "assistant" && turnId) {
     return `assistant-turn:${turnId}`;
@@ -48,7 +51,7 @@ function baseTimelineRowKey(message: ConversationMessage) {
   return `${message.role}-message:${message.id}`;
 }
 
-function timelineRowIdentity(message: ConversationMessage, rowKey: string): AgentMessageTimelineRowIdentity {
+function timelineRowIdentity(message: AgentMessage, rowKey: string): AgentMessageTimelineRowIdentity {
   return {
     messageId: message.id,
     rowKey,
@@ -59,7 +62,7 @@ function timelineRowIdentity(message: ConversationMessage, rowKey: string): Agen
 }
 
 export function buildAgentMessageTimelineRowIdentities(
-  messages: ConversationMessage[],
+  messages: AgentMessage[],
 ): AgentMessageTimelineRowIdentity[] {
   const baseKeys = messages.map(baseTimelineRowKey);
   const counts = new Map<string, number>();

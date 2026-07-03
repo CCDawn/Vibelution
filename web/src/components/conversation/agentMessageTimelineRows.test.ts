@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 
-import type { ConversationMessage } from "../../api/types";
+import type { AgentMessage } from "../../agent-thread";
 import {
   agentMessageTimelineItemRowKey,
   buildAgentMessageTimelineRowIdentities,
@@ -11,15 +11,28 @@ const timelineRowsSource = readFileSync(new URL("./agentMessageTimelineRows.ts",
 
 function assistantMessage(
   id: string,
-  patch: Partial<ConversationMessage> = {},
-): ConversationMessage {
+  patch: Partial<AgentMessage> = {},
+): AgentMessage {
   return {
     id,
     role: "assistant",
-    content: "回答正文",
-    timestamp: "2026-06-29T10:00:00Z",
-    metadata: { turnId: "turn-1" },
+    createdAt: "2026-06-29T10:00:00Z",
+    streaming: false,
+    turnId: "turn-1",
+    source: { kind: "conversation-message", id },
+    parts: [{ id: `${id}-text`, type: "text", channel: "answer", text: "回答正文" }],
     ...patch,
+  };
+}
+
+function userMessage(id: string): AgentMessage {
+  return {
+    id,
+    role: "user",
+    createdAt: "2026-06-29T10:00:01Z",
+    streaming: false,
+    source: { kind: "conversation-message", id },
+    parts: [{ id: `${id}-text`, type: "text", channel: "user", text: "继续" }],
   };
 }
 
@@ -38,21 +51,26 @@ describe("AgentMessage timeline rows", () => {
     expect(timelineRowsSource).not.toContain("conversationTimelineItemRowKey");
   });
 
+  it("derives row identities from AgentMessage projections instead of ConversationMessage DTOs", () => {
+    expect(timelineRowsSource).not.toContain("../../api/types");
+    expect(timelineRowsSource).not.toContain("ConversationMessage");
+  });
+
   it("keeps same-turn live, active, and committed assistant packets on one stable row", () => {
     const liveOverlay = assistantMessage("live-overlay", {
-      content: "",
       streaming: true,
-      metadata: { kind: "session_live_overlay", turnId: "live:turn-1" },
+      turnId: "turn-1",
+      source: { kind: "conversation-message", id: "live-overlay", metadata: { kind: "session_live_overlay" } },
+      parts: [],
     });
     const activeLayer = assistantMessage("active-layer", {
-      content: "流式回答",
       streaming: true,
-      metadata: { kind: "session_active_turn_layer", turnId: "turn-1" },
+      turnId: "turn-1",
+      source: { kind: "conversation-message", id: "active-layer", metadata: { kind: "session_active_turn_layer" } },
     });
     const committed = assistantMessage("committed-answer", {
-      content: "最终回答",
       streaming: false,
-      metadata: { turnId: "turn-1" },
+      turnId: "turn-1",
     });
 
     const [liveRow] = buildAgentMessageTimelineRowIdentities([liveOverlay]);
@@ -69,14 +87,9 @@ describe("AgentMessage timeline rows", () => {
 
   it("keeps duplicate same-turn rows unique when a user boundary prevents projection merging", () => {
     const rows = buildAgentMessageTimelineRowIdentities([
-      assistantMessage("tool-before-user", { content: "", metadata: { turnId: "turn-shared" } }),
-      {
-        id: "user-message",
-        role: "user",
-        content: "继续",
-        timestamp: "2026-06-29T10:00:01Z",
-      },
-      assistantMessage("answer-after-user", { metadata: { turnId: "turn-shared" } }),
+      assistantMessage("tool-before-user", { turnId: "turn-shared" }),
+      userMessage("user-message"),
+      assistantMessage("answer-after-user", { turnId: "turn-shared" }),
     ]);
 
     expect(rows.map((row) => row.rowKey)).toEqual([
@@ -88,7 +101,7 @@ describe("AgentMessage timeline rows", () => {
 
   it("derives stable child keys for timeline items under the process part", () => {
     const [row] = buildAgentMessageTimelineRowIdentities([
-      assistantMessage("message-with-timeline", { metadata: { turnId: "turn-timeline" } }),
+      assistantMessage("message-with-timeline", { turnId: "turn-timeline" }),
     ]);
 
     expect(agentMessageTimelineItemRowKey(row, { id: "tool-1", kind: "operation" })).toBe(
