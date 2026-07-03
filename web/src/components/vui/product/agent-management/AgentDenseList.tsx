@@ -1,6 +1,8 @@
 import { CheckSquare, Square } from "lucide-react";
 import { type ReactNode } from "react";
 
+import { VNativeButton, VNativeInput } from "../../index";
+
 export type AgentDenseRow = {
   id: string;
   name: string;
@@ -133,11 +135,11 @@ function AgentRow({
         className="relative grid place-items-center w-[28px] h-[36px] border border-[var(--border-soft)] rounded-lg bg-[var(--surface-card)] text-[var(--fg-secondary)] cursor-pointer hover:border-[var(--border-strong)] hover:text-[var(--accent-warm-2)]"
         title={row.selectLabel}
       >
-        <input
+        <VNativeInput
           type="checkbox"
           checked={row.bulkSelected}
           aria-label={row.selectLabel}
-          className="absolute w-px h-px opacity-0 pointer-events-none"
+          className="absolute !w-px !h-px opacity-0 pointer-events-none"
           onChange={(event) =>
             onToggleBulk(
               row.id,
@@ -148,7 +150,7 @@ function AgentRow({
         />
         {row.bulkSelected ? <CheckSquare size={15} /> : <Square size={15} />}
       </label>
-      <button type="button" data-vui="agent-row" className={rowClass} onClick={(event) => onSelectRow(row.id, event)}>
+      <VNativeButton type="button" data-vui="agent-row" className={rowClass} onClick={(event) => onSelectRow(row.id, event)}>
         <span className="grid grid-cols-[30px_minmax(0,1fr)] items-center gap-2 min-w-0 overflow-hidden text-ellipsis">
           <span className={AVATAR} aria-hidden="true">
             {row.avatarUrl ? (
@@ -179,7 +181,7 @@ function AgentRow({
         <span className="flex items-center justify-items-start min-w-0" title={row.issueSummary}>
           <span className={[PILL_BASE, issueToneClass(row.issueTone)].join(" ")}>{row.issueLabel}</span>
         </span>
-      </button>
+      </VNativeButton>
     </div>
   );
 }
