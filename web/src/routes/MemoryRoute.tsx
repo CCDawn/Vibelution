@@ -75,6 +75,7 @@ import { MemoryOverviewPanel } from "./MemoryOverviewPanel";
 import { MemoryProjectMemoryQueuePanel } from "./MemoryProjectMemoryQueuePanel";
 import { MemoryReviewQueuePanel } from "./MemoryReviewQueuePanel";
 import { MemorySelectedConfigPanel } from "./MemorySelectedConfigPanel";
+import { MemorySourceAndItemPanels } from "./MemorySourceAndItemPanels";
 import { MemoryWarningStrip } from "./MemoryWarningStrip";
 import styles from "./MemoryRoute.styles";
 
@@ -4212,109 +4213,45 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     />
   );
 
-  const renderSourceAndItemPanels = (title: string) => (
-    <>
-      <aside className={styles.sourcePanel}>
-        <div className={styles.panelHeader}>
-          <div>
-            <p className={styles.panelEyebrow}>{copy.sections}</p>
-            <h2>{selectedSection?.title ?? copy.allSections}</h2>
-          </div>
-          <span className={styles.countPill}>{selectedSectionVisibleCount}</span>
-        </div>
-
-        <label className={styles.searchBox}>
-          <Search size={15} />
-          <VNativeInput value={searchText} placeholder={copy.searchPlaceholder} onChange={(event) => setSearchText(event.target.value)} />
-        </label>
-
-        <div className={styles.filterGroup} aria-label={copy.filters}>
-          {filterOptions.map((option) => (
-            <VButton
-              key={option.id}
-              type="button"
-              className={option.id === activeFilter ? `${styles.filterButton} ${styles.filterButtonActive}` : styles.filterButton}
-              onClick={() => setActiveFilter(option.id)}
-              aria-pressed={option.id === activeFilter}
-            >
-              <span>{option.label}</span>
-              <strong>{option.count}</strong>
-            </VButton>
-          ))}
-        </div>
-
-        <VButton
-          type="button"
-          className={!activeSectionId ? `${styles.sourceButton} ${styles.sourceButtonActive}` : styles.sourceButton}
-          onClick={() => {
-            setActiveItemId("");
-            setActiveSectionId("");
-          }}
-        >
-          <span className={styles.sourceIcon}>
-            <Database size={15} />
-          </span>
-          <span className={styles.sourceCopy}>
-            <strong>{copy.allSections}</strong>
-            <span>
-              {copy.items}: {flatVisibleItems.length}
-              {selectedSectionPromptCount ? ` / ${selectedSectionPromptCount}` : ""}
-            </span>
-          </span>
-        </VButton>
-
-        <nav className={styles.sourceList} aria-label={copy.sections}>
-          {sections.map((section) => {
-            const active = section.id === activeSectionId;
-            const metrics = sourceSectionMetrics.get(section.id);
-            return (
-              <VButton
-                key={section.id}
-                type="button"
-                className={active ? `${styles.sourceButton} ${styles.sourceButtonActive}` : styles.sourceButton}
-                onClick={() => {
-                  setActiveItemId("");
-                  setActiveSectionId(section.id);
-                }}
-                aria-pressed={active}
-              >
-                <span className={styles.sourceIcon}>
-                  <Brain size={15} />
-                </span>
-                <span className={styles.sourceCopy}>
-                  <strong>{section.title}</strong>
-                  <span>{[section.sourcePath, section.sourceApi].filter(Boolean).join(" · ") || section.sourceKind}</span>
-                </span>
-                <span className={styles.sourceStats}>
-                  {metrics?.itemCount ?? 0}
-                  {metrics?.promptCount ? ` / ${metrics.promptCount}` : ""}
-                </span>
-              </VButton>
-            );
-          })}
-        </nav>
-      </aside>
-
-      <main className={styles.itemPanel}>
-        <div className={styles.panelHeader}>
-          <div>
-            <p className={styles.panelEyebrow}>{copy.items}</p>
-            <h2>{selectedSection?.title ?? title}</h2>
-          </div>
-          <span className={styles.countPill}>{flatVisibleItems.length}</span>
-        </div>
-
-        {showRefreshNotice ? (
-          <section className={styles.panelNotice} aria-label={copy.refreshFailed}>
-            <TriangleAlert size={16} />
-            <strong>{copy.refreshFailed}</strong>
-            <span>{overviewQuery.error instanceof Error ? overviewQuery.error.message : String(overviewQuery.error)}</span>
-          </section>
-        ) : null}
-
-        {renderMemoryList(flatVisibleItems, copy.noMatches, true)}
-      </main>
-    </>
+  const createSourceAndItemPanels = (title: string) => (
+    <MemorySourceAndItemPanels
+      copy={copy}
+      sourceTitle={selectedSection?.title ?? copy.allSections}
+      itemTitle={selectedSection?.title ?? title}
+      selectedSectionVisibleCount={selectedSectionVisibleCount}
+      searchText={searchText}
+      onSearchTextChange={setSearchText}
+      filterOptions={filterOptions}
+      activeFilterId={activeFilter}
+      onFilterChange={(filterId) => setActiveFilter(filterId as FilterMode)}
+      allSectionsActive={!activeSectionId}
+      flatVisibleItemCount={flatVisibleItems.length}
+      selectedSectionPromptCount={selectedSectionPromptCount}
+      onSelectAllSections={() => {
+        setActiveItemId("");
+        setActiveSectionId("");
+      }}
+      sections={sections.map((section) => {
+        const metrics = sourceSectionMetrics.get(section.id);
+        return {
+          id: section.id,
+          title: section.title,
+          sourcePath: section.sourcePath,
+          sourceApi: section.sourceApi,
+          sourceKind: section.sourceKind,
+          itemCount: metrics?.itemCount ?? 0,
+          promptCount: metrics?.promptCount ?? 0,
+          active: section.id === activeSectionId,
+        };
+      })}
+      onSelectSection={(sectionId) => {
+        setActiveItemId("");
+        setActiveSectionId(sectionId);
+      }}
+      showRefreshNotice={showRefreshNotice}
+      refreshErrorText={overviewQuery.error instanceof Error ? overviewQuery.error.message : String(overviewQuery.error)}
+      memoryList={renderMemoryList(flatVisibleItems, copy.noMatches, true)}
+    />
   );
 
   const renderManageView = () => (
@@ -4658,7 +4595,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       {createMatrixPanel(copy.sourceAudit)}
       {createWarningStrip()}
       <div className={styles.workspace}>
-        {renderSourceAndItemPanels(copy.sourceAudit)}
+        {createSourceAndItemPanels(copy.sourceAudit)}
         {createDetailPanel()}
       </div>
     </>

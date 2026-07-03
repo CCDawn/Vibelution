@@ -11,6 +11,7 @@ import overviewPanelSource from "./MemoryOverviewPanel.tsx?raw";
 import projectMemoryQueuePanelSource from "./MemoryProjectMemoryQueuePanel.tsx?raw";
 import reviewQueuePanelSource from "./MemoryReviewQueuePanel.tsx?raw";
 import selectedConfigPanelSource from "./MemorySelectedConfigPanel.tsx?raw";
+import sourceAndItemPanelsSource from "./MemorySourceAndItemPanels.tsx?raw";
 import warningStripSource from "./MemoryWarningStrip.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
 import appShellSource from "../app/AppShell.tsx?raw";
@@ -104,18 +105,16 @@ describe("MemoryRoute layout contract", () => {
   });
 
   it("keeps source, item, and detail panels available in the source audit view", () => {
-    const sourceAndItemRendererIndex = routeSource.indexOf("const renderSourceAndItemPanels");
-    const sourcePanelIndex = routeSource.indexOf("styles.sourcePanel", sourceAndItemRendererIndex);
-    const itemPanelIndex = routeSource.indexOf("styles.itemPanel", sourcePanelIndex);
+    const sourcePanelIndex = sourceAndItemPanelsSource.indexOf("styles.sourcePanel");
+    const itemPanelIndex = sourceAndItemPanelsSource.indexOf("styles.itemPanel", sourcePanelIndex);
     const sourcesViewIndex = routeSource.indexOf("const renderSourcesView");
     const sourcesWorkspaceIndex = routeSource.indexOf("styles.workspace", sourcesViewIndex);
-    const sourcesPanelsIndex = routeSource.indexOf("renderSourceAndItemPanels(copy.sourceAudit)", sourcesWorkspaceIndex);
+    const sourcesPanelsIndex = routeSource.indexOf("createSourceAndItemPanels(copy.sourceAudit)", sourcesWorkspaceIndex);
     const detailPanelIndex = routeSource.indexOf("createDetailPanel()", sourcesPanelsIndex);
 
-    expect(sourceAndItemRendererIndex).toBeGreaterThan(0);
     expect(sourcePanelIndex).toBeGreaterThan(0);
     expect(itemPanelIndex).toBeGreaterThan(sourcePanelIndex);
-    expect(sourcesViewIndex).toBeGreaterThan(itemPanelIndex);
+    expect(sourcesViewIndex).toBeGreaterThan(0);
     expect(sourcesPanelsIndex).toBeGreaterThan(sourcesWorkspaceIndex);
     expect(detailPanelIndex).toBeGreaterThan(sourcesPanelsIndex);
   });
@@ -124,11 +123,25 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("const activePair =\n    activeItemId\n      ? flatVisibleItems.find(({ item }) => item.id === activeItemId) ?? null\n      : null;");
     expect(routeSource).toContain('const activePairKey = activePair ? pairSelectionKey(activePair.section.id, activePair.item.id) : "";');
     expect(routeSource).toContain("const active = itemKey === activePairKey;");
-    expect(routeSource).toContain("setActiveItemId(\"\");\n            setActiveSectionId(\"\");");
-    expect(routeSource).toContain("setActiveItemId(\"\");\n                  setActiveSectionId(section.id);");
-    expect(routeSource).toContain("<h2>{selectedSection?.title ?? title}</h2>");
+    expect(routeSource).toContain("onSelectAllSections={() => {\n        setActiveItemId(\"\");\n        setActiveSectionId(\"\");\n      }}");
+    expect(routeSource).toContain("onSelectSection={(sectionId) => {\n        setActiveItemId(\"\");\n        setActiveSectionId(sectionId);\n      }}");
+    expect(routeSource).toContain("itemTitle={selectedSection?.title ?? title}");
     expect(routeSource).not.toContain("flatVisibleItems.find(({ item }) => item.id === activeItemId) ?? flatVisibleItems[0]");
     expect(routeSource).not.toContain("setActiveItemId(flatVisibleItems[0]?.item.id ?? \"\")");
+  });
+
+  it("delegates source and item audit panels to a dedicated view component", () => {
+    expect(routeSource).toContain('from "./MemorySourceAndItemPanels"');
+    expect(routeSource).toContain("<MemorySourceAndItemPanels");
+    expect(routeSource).not.toContain("const renderSourceAndItemPanels = (title: string) => (");
+
+    expect(sourceAndItemPanelsSource).toContain("export function MemorySourceAndItemPanels");
+    expect(sourceAndItemPanelsSource).toContain("styles.sourcePanel");
+    expect(sourceAndItemPanelsSource).toContain("styles.itemPanel");
+    expect(sourceAndItemPanelsSource).toContain("styles.filterGroup");
+    expect(sourceAndItemPanelsSource).not.toContain("useQuery");
+    expect(sourceAndItemPanelsSource).not.toContain("useMutation");
+    expect(sourceAndItemPanelsSource).not.toContain("fetchJson");
   });
 
   it("splits memory into overview, effective scope, Agent memory, source management, source audit, team knowledge, graph, and cleanup views", () => {
