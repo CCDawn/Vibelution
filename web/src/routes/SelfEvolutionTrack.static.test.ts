@@ -80,6 +80,8 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("sidebarCollapsed");
     expect(selfEvolutionSource).toContain("setSidebarCollapsed");
     expect(selfEvolutionSource).toContain("--self-sidebar-width");
+    expect(selfEvolutionSource).toContain("workspaceLayoutStyle(sidebarCollapsed, sidebarWidth)");
+    expect(selfEvolutionSource).not.toContain('style={{ ["--self-sidebar-width" as string]');
   });
 
   it("uses the compact workbench conversation density on the self-evolution workspace", () => {
@@ -324,8 +326,17 @@ describe("SelfEvolutionTrack static assets", () => {
 
   it("keeps pet vital bars on Tailwind CSS variable widths", () => {
     expect(selfEvolutionSource).toContain("--self-vital-progress");
+    expect(selfEvolutionSource).toContain("petVitalFillStyle(vital.value)");
     expect(selfEvolutionSource).not.toContain("style={{ width: `${vital.value}%` }}");
+    expect(selfEvolutionSource).not.toContain('style={{ "--self-vital-progress": `${vital.value}%` } as PetVitalFillStyle}');
     expect(selfEvolutionStylesSource).toContain("w-[var(--self-vital-progress)]");
+  });
+
+  it("keeps dynamic layout variables out of raw inline JSX objects", () => {
+    expect(selfEvolutionSource).toContain("type SelfEvolutionDynamicStyle");
+    expect(selfEvolutionSource).toContain("workspaceLayoutStyle");
+    expect(selfEvolutionSource).toContain("petVitalFillStyle");
+    expect(selfEvolutionSource).not.toContain("style={{");
   });
 });
 

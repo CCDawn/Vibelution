@@ -45,9 +45,23 @@ import { getPetAvatarSymbol } from "./chatCompactPanel";
 import { agentCenterConfigRoute } from "./agentCenterRoutes";
 import { selfEvolutionTrackStyles as styles } from "./SelfEvolutionTrack.styles";
 
-type PetVitalFillStyle = CSSProperties & {
-  "--self-vital-progress": string;
-};
+type SelfEvolutionDynamicVariable =
+  | "--self-sidebar-width"
+  | "--self-vital-progress";
+
+type SelfEvolutionDynamicStyle = CSSProperties & Partial<Record<SelfEvolutionDynamicVariable, string>>;
+
+function workspaceLayoutStyle(sidebarCollapsed: boolean, sidebarWidth: number): SelfEvolutionDynamicStyle {
+  return {
+    "--self-sidebar-width": sidebarCollapsed ? "0px" : `${sidebarWidth}px`,
+  };
+}
+
+function petVitalFillStyle(value: number): SelfEvolutionDynamicStyle {
+  return {
+    "--self-vital-progress": `${value}%`,
+  };
+}
 
 type SelfEvolutionTrackProps = {
   overview?: SelfEvolutionOverview;
@@ -1578,7 +1592,7 @@ export function SelfEvolutionTrack({
       {activePage === "workspace" ? (
         <div
           className={styles.workspaceLayout}
-          style={{ ["--self-sidebar-width" as string]: sidebarCollapsed ? "0px" : `${sidebarWidth}px` }}
+          style={workspaceLayoutStyle(sidebarCollapsed, sidebarWidth)}
         >
           <aside
             className={
@@ -2075,7 +2089,7 @@ export function SelfEvolutionTrack({
                       <div className={styles.vitalTrack}>
                         <div
                           className={styles.vitalFill}
-                          style={{ "--self-vital-progress": `${vital.value}%` } as PetVitalFillStyle}
+                          style={petVitalFillStyle(vital.value)}
                         />
                       </div>
                     </div>
