@@ -181,7 +181,7 @@ const styles: Record<string, string> = {
   previewActions:
     "previewActions min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
   previewPane:
-    "previewPane min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "previewPane min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid min-h-0 content-start gap-1.5 overflow-auto",
   previewStateCard:
     "previewStateCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   previewStateFlow:
@@ -205,7 +205,7 @@ const styles: Record<string, string> = {
   rawFileTabs:
     "rawFileTabs min-w-0",
   resizableLayout:
-    "resizableLayout min-w-0 grid min-h-0 gap-2 p-2 !grid grid-cols-[var(--logs-sidebar-width)_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] min-h-0 overflow-hidden",
+    "resizableLayout min-w-0 grid h-full min-h-0 gap-2 p-2 !grid grid-cols-[var(--logs-sidebar-width)_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] min-h-0 overflow-hidden",
   resizeHandle:
     "resizeHandle min-w-0",
   resizeHandleActive:
@@ -239,7 +239,7 @@ const styles: Record<string, string> = {
   rootStateMissing:
     "rootStateMissing min-w-0",
   route:
-    "route min-w-0 grid h-full min-h-0 content-start overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)]",
+    "route min-w-0 grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] content-start overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)]",
   sceneCard:
     "sceneCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   sceneCardActive:
@@ -353,7 +353,7 @@ const styles: Record<string, string> = {
   toolbarButton:
     "toolbarButton min-w-0 flex flex-wrap items-center gap-1.5 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full justify-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
   workspace:
-    "workspace min-w-0 grid min-h-0 gap-2 p-2 grid-cols-[minmax(0,1fr)_10px_var(--logs-right-rail-width,250px)] grid-rows-[minmax(0,1fr)] overflow-hidden",
+    "workspace min-w-0 grid h-full min-h-0 gap-2 p-2 grid-cols-[minmax(0,1fr)_10px_var(--logs-right-rail-width,250px)] grid-rows-[minmax(0,1fr)] overflow-hidden",
 };
 
 export default styles;
