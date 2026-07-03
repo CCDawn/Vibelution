@@ -50,7 +50,6 @@ export function generatedTokenTextForMessage(message: ConversationMessage | null
   const parts = [
     String(message.thought ?? "").trim(),
     looksLikeAnswerOutput(message.content) ? String(message.content ?? "").trim() : "",
-    ...(message.toolCalls ?? []).map((toolCall) => stableToolArgumentsText(toolCall.arguments)),
   ].filter(Boolean);
 
   return parts.join("\n");
@@ -88,17 +87,6 @@ export function tokenSpeedSampleFromMessages(
     tokenCount,
     timestampMs,
   };
-}
-
-function stableToolArgumentsText(value: Record<string, unknown> | undefined): string {
-  if (!value || Object.keys(value).length === 0) {
-    return "";
-  }
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
 }
 
 function looksLikeAnswerOutput(content: string): boolean {

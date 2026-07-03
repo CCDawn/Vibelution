@@ -1768,6 +1768,13 @@ function isBusyPhase(value: string | null | undefined) {
   return isRunningPhase(phase) || phase === "stopping";
 }
 
+function formatTokenSpeedValue(tokensPerSecond: number | null | undefined) {
+  if (typeof tokensPerSecond !== "number" || !Number.isFinite(tokensPerSecond) || tokensPerSecond <= 0) {
+    return "";
+  }
+  return tokensPerSecond < 1 ? "<1 t/s" : `${Math.round(tokensPerSecond)} t/s`;
+}
+
 function readStoredMentalModelToggle(): boolean | null {
   if (typeof window === "undefined") {
     return null;
@@ -5129,14 +5136,40 @@ export function ChatCodingRoute() {
     lastCompressionLine,
     compressionUpdatedLine ? `${lang === "zh" ? "更新" : "updated"} ${compressionUpdatedLine}` : "",
   ].filter(Boolean).join("\n");
+  const conversationChainTokenSpeedActive = Boolean(activeSessionId)
+    && !groupPanelActive
+    && isBusyPhase(sessionStateValue);
+  const tokenSpeedRateValue = formatTokenSpeedValue(tokenSpeedTracker?.tokensPerSecond);
+  const tokenSpeedValue = tokenSpeedRateValue
+    || (conversationChainTokenSpeedActive ? t("tokenSpeedSampling") : "--");
+  const tokenSpeedMeta = tokenSpeedRateValue
+    ? t("tokenSpeedEstimated")
+    : conversationChainTokenSpeedActive
+      ? sessionStateLabel
+      : t("tokenSpeedEstimated");
+  const tokenSpeedTitle = [
+    t("tokenSpeedEstimated"),
+    sessionStateLabel,
+    sessionStateLine,
+    tokenSpeedTracker
+      ? `${lang === "zh" ? "已估算输出" : "estimated output"} ${numberFormatter.format(tokenSpeedTracker.tokenCount)} tokens`
+      : "",
+  ].filter(Boolean).join("\n");
+  const tokenSpeedPercent = clampPercent(
+    tokenSpeedTracker?.tokensPerSecond
+      ? Math.min(100, Math.round(tokenSpeedTracker.tokensPerSecond))
+      : conversationChainTokenSpeedActive
+        ? 8
+        : 0,
+  );
   const tokenStatusMetrics: Array<{
-    key: "cache" | "modelInput" | "compression";
+    key: "cache" | "modelInput" | "compression" | "speed";
     label: string;
     value: string;
     meta: string;
     title: string;
     percent: number;
-    tone: "cache" | "modelInput" | "compression";
+    tone: "cache" | "modelInput" | "compression" | "speed";
   }> = [
     {
       key: "cache",
@@ -5166,6 +5199,15 @@ export function ChatCodingRoute() {
       title: tokenStatusCompressionTitle,
       percent: clampPercent(compression ? compressionCurrentPercent : 0),
       tone: "compression",
+    },
+    {
+      key: "speed",
+      label: t("tokenSpeed"),
+      value: tokenSpeedValue,
+      meta: tokenSpeedMeta,
+      title: tokenSpeedTitle,
+      percent: tokenSpeedPercent,
+      tone: "speed",
     },
   ];
   const mental = runtime?.mentalState;

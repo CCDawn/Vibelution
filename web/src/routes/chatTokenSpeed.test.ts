@@ -62,7 +62,7 @@ describe("chatTokenSpeed", () => {
     expect(tokenSpeedSampleFromMessages("session-1", queuedMessages, "queued", 1000)).toBeNull();
   });
 
-  it("counts streaming thought and tool arguments when visible content is only progress text", () => {
+  it("counts streaming thought but excludes tool arguments from generated output", () => {
     const messages: ConversationMessage[] = [
       {
         ...assistantMessage("live", "正在请求模型，等待首个响应片段...\n上下文已组装完成，正在进入 LLM 调用。"),
@@ -80,13 +80,34 @@ describe("chatTokenSpeed", () => {
     ];
 
     expect(generatedTokenTextForMessage(messages[0])).toContain("中文试卷需求");
-    expect(generatedTokenTextForMessage(messages[0])).toContain("A3 landscape");
+    expect(generatedTokenTextForMessage(messages[0])).not.toContain("A3 landscape");
     expect(latestStreamingAssistantMessage(messages)?.id).toBe("live");
     expect(tokenSpeedSampleFromMessages("session-1", messages, "tooling", 1000)).toMatchObject({
       sessionId: "session-1",
       messageId: "live",
       timestampMs: 1000,
     });
+  });
+
+  it("does not treat tool arguments alone as token speed output", () => {
+    const messages: ConversationMessage[] = [
+      {
+        ...assistantMessage("live", "正在请求模型，等待首个响应片段...\n上下文已组装完成，正在进入 LLM 调用。"),
+        toolCalls: [
+          {
+            name: "image2_generate_tool",
+            status: "running",
+            arguments: {
+              prompt: "A3 landscape Chinese math exam paper with geometry labels.",
+            },
+          },
+        ],
+      },
+    ];
+
+    expect(generatedTokenTextForMessage(messages[0])).toBe("");
+    expect(latestStreamingAssistantMessage(messages)).toBeNull();
+    expect(tokenSpeedSampleFromMessages("session-1", messages, "tooling", 1000)).toBeNull();
   });
 
   it("computes token speed from positive streaming deltas and resets on new messages", () => {

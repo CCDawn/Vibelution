@@ -445,6 +445,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.tokenStatusMetric_cache).toBeTypeOf("string");
     expect(routeStyles.tokenStatusMetric_modelInput).toBeTypeOf("string");
     expect(routeStyles.tokenStatusMetric_compression).toBeTypeOf("string");
+    expect(routeStyles.tokenStatusMetric_speed).toBeTypeOf("string");
     expect(routeStyles.tokenStatusRing).toBeTypeOf("string");
     expect(routeStyles.tokenStatusRingCore).toBeTypeOf("string");
     expect(routeStyles.tokenStatusCopy).toBeTypeOf("string");
@@ -521,6 +522,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.tokenStatusMetric_cache).not.toContain("inline-flex");
     expect(routeStyles.tokenStatusMetric_modelInput).not.toContain("inline-flex");
     expect(routeStyles.tokenStatusMetric_compression).not.toContain("inline-flex");
+    expect(routeStyles.tokenStatusMetric_speed).not.toContain("inline-flex");
     expect(routeStyles.featureChipRow).toContain("grid-cols-2");
     expect(routeStyles.featureChip).toContain("[&_[data-slot=vui-button-content]]:min-w-0");
     expect(routeStyles.featureChip).toContain("[&_[data-slot=vui-button-content]]:max-w-full");
@@ -631,6 +633,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("key: \"cache\"");
     expect(routeSource).toContain("key: \"modelInput\"");
     expect(routeSource).toContain("key: \"compression\"");
+    expect(routeSource).toContain("key: \"speed\"");
     expect(routeSource).not.toContain("key: \"strategy\"");
     expect(routeSource).toContain("t(\"previousCacheHit\")");
     expect(routeSource).toContain("label: lang === \"zh\" ? \"模型输入\" : \"Model input\"");
@@ -933,13 +936,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.inlineMetaPill).toContain("[&_strong]:whitespace-nowrap");
   });
 
-  it("keeps live token speed sampling internal instead of adding another core token row", () => {
+  it("binds live token speed to the core token status metrics", () => {
     expect(routeSource).toContain("tokenSpeedSampleFromMessages");
     expect(routeSource).toContain("updateTokenSpeedTracker");
-    expect(routeSource).not.toContain("key: \"speed\"");
-    expect(routeSource).not.toContain("label: lang === \"zh\" ? \"速度\" : \"Speed\"");
-    expect(routeSource).not.toContain("const tokenSpeedValue");
-    expect(routeSource).not.toContain("const tokenSpeedTitle");
+    expect(routeSource).toContain("key: \"speed\"");
+    expect(routeSource).toContain("label: t(\"tokenSpeed\")");
+    expect(routeSource).toContain("const tokenSpeedValue");
+    expect(routeSource).toContain("const tokenSpeedTitle");
+    expect(routeSource).toContain("const conversationChainTokenSpeedActive");
     expect(routeSource).not.toContain("label: t(\"currentTask\")");
   });
 
