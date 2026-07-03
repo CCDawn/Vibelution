@@ -71,6 +71,7 @@ import { vuiFormLabelClass } from "../components/vui/forms/formClasses";
 import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
+import { AgentArchiveZonePanel } from "./AgentArchiveZonePanel";
 import { AgentActivityHistoryPanel, type AgentActivityTimelineItem } from "./AgentActivityHistoryPanel";
 import { AgentAvatarEditorPanel } from "./AgentAvatarEditorPanel";
 import {
@@ -6735,62 +6736,17 @@ export function AgentsRoute() {
                 </div>
               </section>
 
-              <section
-                className={selectedAgentProtected ? styles.protectedZone : styles.dangerZone}
-                title={
-                  selectedAgentProtected
-                    ? copy.archiveProtectionHint
-                    : selectedAgent.status === "archived"
-                      ? copy.purgeAgentHint
-                      : copy.archiveAgentHint
-                }
-              >
-                <div className={styles.panelHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>
-                      {selectedAgentProtected
-                        ? copy.archiveProtectionTitle
-                        : selectedAgent.status === "archived"
-                          ? copy.purgeAgentTitle
-                          : copy.archiveAgentTitle}
-                    </p>
-                    <h3>
-                      {selectedAgentProtected
-                        ? copy.archiveProtection
-                        : selectedAgent.status === "archived"
-                          ? copy.purgeAgent
-                          : copy.archiveAgent}
-                    </h3>
-                  </div>
-                  {selectedAgentProtected ? <ShieldCheck size={16} /> : <Trash2 size={16} />}
-                </div>
-                {selectedAgentProtected ? (
-                  <span className={styles.cleanPill}>{copy.protectedAgent}</span>
-                ) : (
-                  <div className={styles.editorActions}>
-                    {selectedAgent.status !== "archived" ? (
-                      <VButton
-                        type="button"
-                        variant="secondary"
-                        icon={<Archive size={15} />}
-                        isDisabled={!canArchiveAgent || selectedAgentArchivePending}
-                        onPress={archiveSelectedAgent}
-                      >
-                        {selectedAgentArchivePending ? copy.archivingAgent : copy.archiveAgent}
-                      </VButton>
-                    ) : null}
-                    <VButton
-                      type="button"
-                      variant="danger"
-                      icon={<Trash2 size={15} />}
-                      isDisabled={!canPurgeAgent || selectedAgentPurgePending}
-                      onPress={purgeSelectedAgent}
-                    >
-                      {selectedAgentPurgePending ? copy.purgingAgent : copy.purgeAgent}
-                    </VButton>
-                  </div>
-                )}
-              </section>
+              <AgentArchiveZonePanel
+                copy={copy}
+                status={selectedAgent.status}
+                isProtected={selectedAgentProtected}
+                canArchive={canArchiveAgent}
+                canPurge={canPurgeAgent}
+                isArchivePending={selectedAgentArchivePending}
+                isPurgePending={selectedAgentPurgePending}
+                onArchive={archiveSelectedAgent}
+                onPurge={purgeSelectedAgent}
+              />
               {selectedAgent.status !== "archived" ? (
                 <section className={styles.resetZone} title={copy.resetAgentHint}>
                   <div className={styles.panelHeader}>
