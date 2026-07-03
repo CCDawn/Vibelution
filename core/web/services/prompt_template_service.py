@@ -17,7 +17,7 @@ from .runtime_scene_service import record_runtime_scene_event
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROMPT_TEMPLATE_INDEX_VERSION = 1
-CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION = 11
+CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION = 12
 PROMPT_TEMPLATE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,95}$")
 PROMPT_TEMPLATE_PATH = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "agent_config", "prompt_templates.json")
 RETIRED_PROMPT_TEMPLATE_IDS = frozenset({"prompt-self-summarizer"})
@@ -133,8 +133,9 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "- 先调用 source_collection_context_tool，默认使用 context_mode=compact, candidate_limit=5, candidate_offset=0。\n"
             "- 必须按 candidatePage.hasMore / nextOffset 分页读完本阶段输入，不能根据截断上下文猜结果。\n"
             "- 完成、阻塞或失败都必须调用 source_collection_stage_writeback_tool 回写结构化状态。\n"
-            "- 回写 result 时使用 candidateExtractions[] 和 candidateDecisions[]，每项必须绑定真实 candidateId；没有 candidateId 时绑定真实 recordId。\n"
-            "- 覆盖不足时不要写完成口吻；回写待补读、待补审、无效来源和下一轮建议。\n\n"
+            "- 已有候选时优先回写 candidateExtractions[]，每项绑定真实 candidateId；可直接在 candidateExtractions[] 内写 decision=keep/needs_more_info/exclude，不需要另交一份 candidateDecisions[]。\n"
+            "- 没有 candidateId 时用 recordExtractions[] 绑定完整 recordId；只有专门做资料审查/质检时才单独回写 candidateDecisions[]。\n"
+            "- 覆盖不足时不要写完成口吻；可以分批回写，系统会按真实 candidateId/recordId 累计上一批结果；工具超时后不要盲目重复同一大包，改用更小批次或写 blocked/needs_review。\n\n"
             "## 输出要求\n"
             "1. Coverage：已处理 X/Y、待补读、无效 ID 或无法读取数量。\n"
             "2. Kept Sources：保留资料、价值说明、缺口说明和证据锚点。\n"
