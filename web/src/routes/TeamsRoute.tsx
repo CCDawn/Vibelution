@@ -81,6 +81,7 @@ import { TeamSourceCollectionRunSwitcherPanel, type TeamSourceCollectionRunSwitc
 import { TeamSourceCollectionFindingDetailsPanel } from "./TeamSourceCollectionFindingDetailsPanel";
 import { TeamSourceCollectionCandidatePanel } from "./TeamSourceCollectionCandidatePanel";
 import { TeamSourceCollectionConversationPanel } from "./TeamSourceCollectionConversationPanel";
+import { TeamSourceCollectionControlsPanel } from "./TeamSourceCollectionControlsPanel";
 import { TeamSourceCollectionGraphPanel } from "./TeamSourceCollectionGraphPanel";
 import { TeamSourceCollectionMemoryPanel } from "./TeamSourceCollectionMemoryPanel";
 import { TeamSourceCollectionScreeningPanel } from "./TeamSourceCollectionScreeningPanel";
@@ -8500,26 +8501,18 @@ export function TeamsRoute({
       meta: `${query.queryId} · ${sourceCollectionSourceTypeLabel(query.sourceType, lang)} · ${sourceCollectionLanguageLabel(query.language, lang)}`,
     }));
     return (
-      <section
-        id="source-collection-actions"
+      <TeamSourceCollectionControlsPanel
         ref={sourceCollectionControlPanelRef}
-        className={styles.sourceCollectionControlPanel}
-        aria-label={lang === "zh" ? "搜索资料控制台" : "Source collection controls"}
+        lang={lang}
+        activeRunText={
+          selectedSourceCollectionRun
+            ? `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} · ${sourceCollectionStageFocusLabel}`
+            : lang === "zh" ? "等待启动搜集批次" : "Waiting for a collection run"
+        }
+        statusClassName={workflowIngestionTone(sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status || "")}
+        statusLabel={sourceCollectionStatusLabel(sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status || "pending", lang)}
+        selectedSourcePanel={renderSourceCollectionSelectedSourcePanel()}
       >
-        <div className={styles.workflowIngestionHeader}>
-          <div>
-            <strong>{lang === "zh" ? "步骤侧栏" : "Step side panel"}</strong>
-            <span>
-              {selectedSourceCollectionRun
-                ? `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} · ${sourceCollectionStageFocusLabel}`
-                : lang === "zh" ? "等待启动搜集批次" : "Waiting for a collection run"}
-            </span>
-          </div>
-          <span className={`${styles.workflowTag} ${workflowIngestionTone(sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status || "")}`}>
-            {sourceCollectionStatusLabel(sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status || "pending", lang)}
-          </span>
-        </div>
-        {renderSourceCollectionSelectedSourcePanel()}
         {selectedSourceCollectionStageId === "finding" ? (
         <>
         <TeamSourceCollectionRunSettingsPanel
@@ -8737,7 +8730,7 @@ export function TeamsRoute({
           </>
         ) : null}
         {renderSourceCollectionStageAgents(activeModule.id)}
-      </section>
+      </TeamSourceCollectionControlsPanel>
     );
   }
 
