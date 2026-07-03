@@ -70,6 +70,7 @@ import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { MemoryDetailPanel } from "./MemoryDetailPanel";
 import { MemoryEffectivePanel } from "./MemoryEffectivePanel";
 import { MemoryManagementEditor, type MemoryManagementEditorDraft } from "./MemoryManagementEditor";
+import { MemoryManagePanel } from "./MemoryManagePanel";
 import { MemoryMatrixPanel } from "./MemoryMatrixPanel";
 import { MemoryOverviewPanel } from "./MemoryOverviewPanel";
 import { MemoryProjectMemoryQueuePanel } from "./MemoryProjectMemoryQueuePanel";
@@ -4254,139 +4255,59 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     />
   );
 
-  const renderManageView = () => (
-    <>
-      {createWarningStrip()}
-      <div className={`${styles.workspace} ${styles.manageWorkspace}`}>
-        <main className={styles.manageListPanel}>
-          <div className={styles.panelHeader}>
-            <div>
-              <p className={styles.panelEyebrow}>{copy.management}</p>
-              <h2 title={copy.manageListHint}>{copy.manageAllMemory}</h2>
-            </div>
-            <span className={styles.countPill}>{manageablePairs.length}</span>
-          </div>
-          <label className={styles.searchBox}>
-            <Search size={15} />
-            <VNativeInput value={searchText} placeholder={copy.searchPlaceholder} onChange={(event) => setSearchText(event.target.value)} />
-          </label>
-          <section className={styles.manageFilterPanel} aria-label={copy.manageFilters}>
-            <div className={styles.manageFilterHeader}>
-              <span>{copy.manageFilters}</span>
-              <strong>{flatVisibleItems.length}</strong>
-            </div>
-            <div className={styles.filterGroup}>
-              {manageFilterOptions.map((option) => (
-                <VButton
-                  key={option.id}
-                  type="button"
-                  className={option.id === activeManageFilter ? `${styles.filterButton} ${styles.filterButtonActive}` : styles.filterButton}
-                  onClick={() => {
-                    setActiveItemId("");
-                    setActiveManageFilter(option.id);
-                  }}
-                  aria-pressed={option.id === activeManageFilter}
-                >
-                  <span>{option.label}</span>
-                  <strong>{option.count}</strong>
-                </VButton>
-              ))}
-            </div>
-          </section>
-          <section className={styles.manageSourceFilters} aria-label={copy.sourceFilters}>
-            <VButton
-              type="button"
-              className={!activeSectionId ? `${styles.sourceChip} ${styles.sourceChipActive}` : styles.sourceChip}
-              onClick={() => {
-                setActiveItemId("");
-                setActiveSectionId("");
-              }}
-              aria-pressed={!activeSectionId}
-            >
-              <span>{copy.allSections}</span>
-              <strong>{manageablePairs.length}</strong>
-            </VButton>
-            {sections
-              .filter((section) => (manageableSectionMetrics.get(section.id) ?? 0) > 0)
-              .map((section) => {
-                const active = section.id === activeSectionId;
-                return (
-                  <VButton
-                    key={section.id}
-                    type="button"
-                    className={active ? `${styles.sourceChip} ${styles.sourceChipActive}` : styles.sourceChip}
-                    onClick={() => {
-                      setActiveItemId("");
-                      setActiveSectionId(section.id);
-                    }}
-                    aria-pressed={active}
-                    title={section.title}
-                  >
-                    <span>{section.title}</span>
-                    <strong>{manageableSectionMetrics.get(section.id) ?? 0}</strong>
-                  </VButton>
-                );
-              })}
-          </section>
-          <section className={styles.bulkActionBar}>
-            <VButton type="button" className={styles.detailActionButton} onClick={toggleVisibleMemorySelection} isDisabled={mutationBusy}>
-              {allVisibleSelected ? <SquareCheckBig size={14} /> : <Square size={14} />}
-              <span>{allVisibleSelected ? copy.clearSelection : copy.selectAllVisible}</span>
-            </VButton>
-            <span className={styles.countPill}>
-              {copy.selectedCount}: {selectedMemoryPairs.length}
-            </span>
-            <VButton
-              type="button"
-              className={styles.detailActionButton}
-              onClick={() => {
-                void runBulkMemoryAction("disable");
-              }}
-              isDisabled={mutationBusy || selectedDisablePairs.length === 0}
-            >
-              <Trash2 size={14} />
-              <span>{bulkActionPending === "disable" ? copy.loading : copy.bulkDisable}</span>
-            </VButton>
-            <VButton
-              type="button"
-              className={styles.detailActionButton}
-              onClick={() => {
-                void runBulkMemoryAction("restore");
-              }}
-              isDisabled={mutationBusy || selectedRestorePairs.length === 0}
-            >
-              <Undo2 size={14} />
-              <span>{bulkActionPending === "restore" ? copy.loading : copy.bulkRestore}</span>
-            </VButton>
-          </section>
-          {renderMemoryList(flatVisibleItems, copy.noMatches, false, true)}
-        </main>
-
-        <section className={styles.manageFormPanel}>
-          <div className={styles.managementHeader}>
-            <div>
-              <p className={styles.panelEyebrow}>{copy.management}</p>
-              <h2>{editDraft ? (editDraft.mode === "create" ? copy.addMemory : copy.editMemory) : copy.manageConfigPanel}</h2>
-            </div>
-            <VButton type="button" className={styles.primaryActionButton} onClick={startCreate} isDisabled={mutationBusy}>
-              <Pencil size={15} />
-              <span>{copy.addMemory}</span>
-            </VButton>
-          </div>
-          {createManagementEditor()}
-          {createSelectedMemoryConfig()}
-          {!editDraft && !activeItem ? (
-            <section className={styles.emptyDetail}>
-              <Brain size={24} />
-              <strong>{copy.selectedMemory}</strong>
-              <p>{copy.noMatches}</p>
-            </section>
-          ) : null}
-        </section>
-
-        {createDetailPanel(false)}
-      </div>
-    </>
+  const createManagePanel = () => (
+    <MemoryManagePanel
+      copy={copy}
+      warningStrip={createWarningStrip()}
+      manageableCount={manageablePairs.length}
+      visibleItemCount={flatVisibleItems.length}
+      searchText={searchText}
+      onSearchTextChange={setSearchText}
+      manageFilterOptions={manageFilterOptions}
+      activeManageFilterId={activeManageFilter}
+      onManageFilterChange={(filterId) => {
+        setActiveItemId("");
+        setActiveManageFilter(filterId as ManageFilterMode);
+      }}
+      sourceFilters={sections
+        .filter((section) => (manageableSectionMetrics.get(section.id) ?? 0) > 0)
+        .map((section) => ({
+          id: section.id,
+          title: section.title,
+          count: manageableSectionMetrics.get(section.id) ?? 0,
+          active: section.id === activeSectionId,
+        }))}
+      allSectionsActive={!activeSectionId}
+      onSelectAllSections={() => {
+        setActiveItemId("");
+        setActiveSectionId("");
+      }}
+      onSelectSourceFilter={(sectionId) => {
+        setActiveItemId("");
+        setActiveSectionId(sectionId);
+      }}
+      mutationBusy={mutationBusy}
+      allVisibleSelected={allVisibleSelected}
+      onToggleVisibleSelection={toggleVisibleMemorySelection}
+      selectedMemoryCount={selectedMemoryPairs.length}
+      onBulkDisable={() => {
+        void runBulkMemoryAction("disable");
+      }}
+      onBulkRestore={() => {
+        void runBulkMemoryAction("restore");
+      }}
+      disableBulkDisabled={mutationBusy || selectedDisablePairs.length === 0}
+      restoreBulkDisabled={mutationBusy || selectedRestorePairs.length === 0}
+      disableBulkPending={bulkActionPending === "disable"}
+      restoreBulkPending={bulkActionPending === "restore"}
+      memoryList={renderMemoryList(flatVisibleItems, copy.noMatches, false, true)}
+      editMode={editDraft?.mode ?? null}
+      onStartCreate={startCreate}
+      managementEditor={createManagementEditor()}
+      selectedConfig={createSelectedMemoryConfig()}
+      showEmptySelection={!editDraft && !activeItem}
+      detailPanel={createDetailPanel(false)}
+    />
   );
 
   const renderAgentMemoryView = () => {
@@ -6207,12 +6128,12 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               reviewMemoryList={renderMemoryList(reviewPairs, copy.noIssues, true)}
             />
           )
-          : forcedView === "effective"
-            ? createEffectivePanel()
-            : forcedView === "agents"
+           : forcedView === "effective"
+             ? createEffectivePanel()
+             : forcedView === "agents"
               ? renderAgentMemoryView()
               : forcedView === "manage"
-                ? renderManageView()
+                ? createManagePanel()
                 : forcedView === "knowledge"
                   ? renderKnowledgeView()
                   : forcedView === "graph"
