@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ConversationMessage } from "../../api/types";
+import { conversationMessageToAgentMessage } from "../../agent-thread/adapters";
 import type { AgentMessage } from "../../agent-thread";
 import {
   buildAgentMessageOperationGroups,
@@ -169,41 +170,30 @@ describe("conversationOperations", () => {
     expect(operations[3].relatedThoughtSequence).toBe(3);
   });
 
-  it("reuses feedback operation groups until the event fingerprint changes", () => {
+  it("keeps ConversationMessage operation compatibility aligned with AgentMessage projection", () => {
     const message: ConversationMessage = {
-      id: "message-feedback-cache",
+      id: "message-feedback-compat",
       role: "assistant",
       content: "Done",
       timestamp: "2026-06-05T00:00:00Z",
+      thought: "fallback thought from historical payload",
+      toolCalls: [{ name: "legacy_tool", status: "done", summary: "legacy tool result" }],
       feedbackEvents: [
         {
           sequence: 1,
-          kind: "thought",
-          status: "done",
-          summary: "先看日志",
-          resultPreview: "先看日志",
+          kind: "status",
+          status: "running",
+          name: "model_request",
+          summary: "正在请求模型",
         },
       ],
     };
 
-    const first = buildConversationOperations(message, labels);
-    const second = buildConversationOperations({ ...message }, labels);
-    const changed = buildConversationOperations({
-      ...message,
-      feedbackEvents: [
-        {
-          sequence: 1,
-          kind: "thought",
-          status: "done",
-          summary: "先看最新日志",
-          resultPreview: "先看最新日志",
-        },
-      ],
-    }, labels);
+    const compatibilityOperations = buildConversationOperations(message, labels);
+    const agentOperations = buildAgentMessageOperations(conversationMessageToAgentMessage(message), labels);
 
-    expect(second).toBe(first);
-    expect(changed).not.toBe(first);
-    expect(changed[0].summary).toBe("先看最新日志");
+    expect(compatibilityOperations).toEqual(agentOperations);
+    expect(compatibilityOperations.map((operation) => operation.kind)).toEqual(["status", "thought", "tool"]);
   });
 
   it("keeps only the latest feedback update for the same unsequenced tool event", () => {
@@ -242,7 +232,7 @@ describe("conversationOperations", () => {
     });
   });
 
-  it("builds ordered assistant operations from thought, mental snapshot, and tools", () => {
+  it("normalizes completed historical operations through AgentMessage projection", () => {
     const message: ConversationMessage = {
       id: "message-1",
       role: "assistant",
@@ -267,41 +257,44 @@ describe("conversationOperations", () => {
       ],
     };
 
-    expect(buildConversationOperations(message, labels)).toEqual([
-      {
-        id: "message-1-thought",
-        kind: "thought",
-        label: "Deep thinking",
-        status: "done",
-        summary: "Check plan",
-        durationSeconds: null,
-        resultPreview: "Check plan",
-      },
-      {
-        id: "message-1-mental",
-        kind: "mental",
-        label: "Mental model",
-        status: "done",
-        summary: "Need a narrow pass",
-        durationSeconds: null,
-      },
-      {
-        id: "message-1-tool-0",
-        kind: "tool",
-        label: "rg",
-        status: "done",
-        summary: "searched files",
-        durationSeconds: null,
-      },
-      {
-        id: "message-1-tool-1",
-        kind: "tool",
-        label: "npm run test",
-        status: "running",
-        summary: "",
-        durationSeconds: null,
-      },
-    ]);
+    const operations = buildConversationOperations(message, labels);
+
+    expect(operations).toEqual(buildAgentMessageOperations(conversationMessageToAgentMessage(message), labels));
+    expect(operations).toHaveLength(4);
+    expect(operations[0]).toMatchObject({
+      id: "message-1-thought",
+      kind: "thought",
+      label: "Deep thinking",
+      status: "done",
+      summary: "Check plan",
+      durationSeconds: null,
+      resultPreview: "Check plan",
+    });
+    expect(operations[1]).toMatchObject({
+      id: "message-1-mental",
+      kind: "mental",
+      label: "Mental model",
+      status: "done",
+      summary: "Need a narrow pass",
+      durationSeconds: null,
+    });
+    expect(operations[2]).toMatchObject({
+      id: "message-1-tool-0",
+      kind: "tool",
+      label: "rg",
+      status: "done",
+      summary: "searched files",
+      durationSeconds: null,
+    });
+    expect(operations[3]).toMatchObject({
+      id: "message-1-tool-1",
+      kind: "tool",
+      label: "npm run test",
+      rawStatus: "running",
+      status: "done",
+      summary: "",
+      durationSeconds: null,
+    });
   });
 
   it("keeps runtime status feedback as a first-class timeline operation", () => {
@@ -689,7 +682,7 @@ describe("conversationOperations", () => {
     expect(buildConversationOperations(message, labels)).toEqual([]);
   });
 
-  it("marks streaming thought and mental operations as running while normalizing tool details", () => {
+  it("keeps the latest streaming historical operation running while normalizing tool details", () => {
     const message: ConversationMessage = {
       id: "message-3",
       role: "assistant",
@@ -715,41 +708,46 @@ describe("conversationOperations", () => {
       ] as unknown as ConversationMessage["toolCalls"],
     };
 
-    expect(buildConversationOperations(message, labels)).toEqual([
-      {
-        id: "message-3-thought",
-        kind: "thought",
-        label: "Deep thinking",
-        status: "running",
-        summary: "Reading files",
-        durationSeconds: null,
-        resultPreview: "Reading files",
-      },
-      {
-        id: "message-3-mental",
-        kind: "mental",
-        label: "Mental model",
-        status: "running",
-        summary: "Still working",
-        durationSeconds: null,
-      },
-      {
-        id: "message-3-tool-0",
-        kind: "tool",
-        label: "read_file",
-        status: "done",
-        summary: "opened session_service.py",
-        durationSeconds: 1.25,
-      },
-      {
-        id: "message-3-tool-1",
-        kind: "tool",
-        label: "pytest",
-        status: "running",
-        summary: "focused test",
-        durationSeconds: 2.5,
-      },
-    ]);
+    const operations = buildConversationOperations(message, labels);
+
+    expect(operations).toEqual(buildAgentMessageOperations(conversationMessageToAgentMessage(message), labels));
+    expect(operations).toHaveLength(4);
+    expect(operations[0]).toMatchObject({
+      id: "message-3-thought",
+      kind: "thought",
+      label: "Deep thinking",
+      rawStatus: "running",
+      status: "done",
+      summary: "Reading files",
+      durationSeconds: null,
+      resultPreview: "Reading files",
+    });
+    expect(operations[1]).toMatchObject({
+      id: "message-3-mental",
+      kind: "mental",
+      label: "Mental model",
+      rawStatus: "running",
+      status: "done",
+      summary: "Still working",
+      durationSeconds: null,
+    });
+    expect(operations[2]).toMatchObject({
+      id: "message-3-tool-0",
+      kind: "tool",
+      label: "read_file",
+      status: "done",
+      summary: "opened session_service.py",
+      durationSeconds: 1.25,
+    });
+    expect(operations[3]).toMatchObject({
+      id: "message-3-tool-1",
+      kind: "tool",
+      label: "pytest",
+      rawStatus: "running",
+      status: "running",
+      summary: "focused test",
+      durationSeconds: 2.5,
+    });
   });
 
   it("groups thought, mental model, and tool calls separately", () => {
