@@ -1078,6 +1078,21 @@ def test_prompt_template_routes_include_inactive_and_invalidate_agent_workspace_
     assert "# 缓存刷新提示词" in refreshed_template["contentPreview"]
 
 
+def test_prompt_template_reset_route_rejects_templates_without_default_content(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(agents_route, "_ensure_config_agent_instances", lambda: None)
+    agents_route.invalidate_agent_config_workspace_cache()
+    dynamic_path = tmp_path / "workspace" / "prompts" / "DYNAMIC.md"
+    dynamic_path.parent.mkdir(parents=True, exist_ok=True)
+    dynamic_path.write_text("KEEP_DYNAMIC_PROMPT", encoding="utf-8")
+
+    response = client.post("/api/prompt-templates/prompt-chat-default/reset")
+
+    assert response.status_code == 422, response.text
+    assert "built-in default content" in response.json()["detail"]
+    assert dynamic_path.read_text(encoding="utf-8") == "KEEP_DYNAMIC_PROMPT"
+
+
 def test_prompt_template_route_rejects_deactivating_template_used_by_active_agent(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(agents_route, "_ensure_config_agent_instances", lambda: None)

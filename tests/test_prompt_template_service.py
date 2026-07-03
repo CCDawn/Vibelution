@@ -484,3 +484,20 @@ def test_prompt_template_rejects_unsafe_source_path(tmp_path, monkeypatch):
         assert "source" in str(exc)
     else:
         raise AssertionError("Expected unsafe prompt template source path to fail")
+
+
+def test_prompt_template_reset_rejects_default_records_without_builtin_content(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    prompt_template_service.repair_prompt_templates()
+    dynamic_path = tmp_path / "workspace" / "prompts" / "DYNAMIC.md"
+    dynamic_path.parent.mkdir(parents=True, exist_ok=True)
+    dynamic_path.write_text("KEEP_DYNAMIC_PROMPT", encoding="utf-8")
+
+    try:
+        prompt_template_service.reset_prompt_template("prompt-chat-default")
+    except prompt_template_service.PromptTemplateError as exc:
+        assert "built-in default content" in str(exc)
+    else:
+        raise AssertionError("Expected reset without built-in content to fail")
+
+    assert dynamic_path.read_text(encoding="utf-8") == "KEEP_DYNAMIC_PROMPT"
