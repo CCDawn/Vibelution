@@ -2150,6 +2150,13 @@ export function AppShell() {
               <span className={styles.activeWorkKicker}>{t("activeWorkNow")}</span>
               <strong>{activeWorkIndicator.label}</strong>
               <span className={styles.activeWorkStatus}>{statusLabel(activeWorkIndicator.status)}</span>
+              <span className={styles.activeWorkInlineDetails} aria-hidden="true">
+                {activeWorkIndicator.items.slice(0, 2).map((item) => (
+                  <span key={`${item.kind}-${item.runId || item.status}-inline`} className={styles.activeWorkInlineItem}>
+                    <span>{item.summary}</span>
+                  </span>
+                ))}
+              </span>
               {activeWorkIndicator.overflowCount > 0 ? (
                 <span className={styles.activeWorkMore}>
                   {t("activeWorkMorePrefix")}
