@@ -473,11 +473,11 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).not.toContain("activeTimelineMessages.map((message, index) => {");
   });
 
-  it("reuses converted AgentMessage objects while only the active turn is streaming", () => {
-    expect(conversationViewSource).toContain("function useAgentThreadForTimelineMessages");
-    expect(conversationViewSource).toContain("agentMessageCacheRef");
-    expect(conversationViewSource).toContain("previousMessages[index] === message");
-    expect(conversationViewSource).toContain("conversationMessageToAgentMessage(message)");
+  it("keeps AgentThread projection behind a focused hook", () => {
+    expect(conversationViewSource).toContain("useAgentThreadProjection");
+    expect(conversationViewSource).toContain("const agentThread = useAgentThreadProjection(sessionId, activeTimelineMessages)");
+    expect(conversationViewSource).not.toContain("function useAgentThreadForTimelineMessages");
+    expect(conversationViewSource).not.toContain("agentMessageCacheRef");
     expect(conversationViewSource).not.toContain("conversationMessagesToAgentThread(");
   });
 
