@@ -38,6 +38,10 @@ const debugResetPanelSource = readFileSync(
   new URL("./AgentDebugResetPanel.tsx", import.meta.url),
   "utf-8",
 );
+const healthMaintenancePanelSource = readFileSync(
+  new URL("./AgentHealthMaintenancePanel.tsx", import.meta.url),
+  "utf-8",
+);
 const modeMembershipPanelSource = readFileSync(
   new URL("./AgentModeMembershipPanel.tsx", import.meta.url),
   "utf-8",
@@ -567,7 +571,7 @@ describe("AgentsRoute layout contract", () => {
     expect(managementBriefPanelSource).toContain("title={copy.managementBriefHint}");
     expect(routeSource).toContain("title={copy.personaHint}");
     expect(taskProfilePanelSource).toContain("title={copy.taskHint}");
-    expect(routeSource).toContain("title={copy.maintenanceHint}");
+    expect(healthMaintenancePanelSource).toContain("title={copy.maintenanceHint}");
     expect(debugResetPanelSource).toContain("title={copy.resetAgentHint}");
     expect(routeSource).not.toContain("<p>{copy.createAgentHint}</p>");
     expect(routeSource).not.toContain("<span>{copy.returnBannerHint}</span>");
@@ -598,6 +602,9 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.statusReminders");
     expect(routeSource).toContain("issueSummary(agent.health, lang)");
     expect(routeSource).toContain("issueNextStep(selectedAgent.health, lang)");
+    expect(routeSource).toContain("<AgentHealthMaintenancePanel");
+    expect(healthMaintenancePanelSource).toContain("styles.issueList");
+    expect(healthMaintenancePanelSource).toContain("issue.showInboxAction");
     expect(styles.healthCell).toBeTruthy();
     expect(styles.detailHealthStatus).toBeTruthy();
   });
@@ -926,6 +933,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.inboxTitle");
     expect(routeSource).toContain("const selectedAgentInboxPendingCount = selectedAgent?.agentInboxPendingCount ?? agentMessagesQuery.data?.length ?? 0");
     expect(routeSource).toContain("AgentActivityHistoryPanel");
+    expect(routeSource).toContain("showInboxAction: issue.code === \"pending_inbox_messages\"");
+    expect(healthMaintenancePanelSource).toContain("copy.handleInboxNow");
     expect(routeSource).not.toContain("<h3>{copy.inboxTitle}: {selectedAgentInboxPendingCount}</h3>");
     expect(activityHistoryPanelSource).toContain("<h3>{copy.inboxTitle}: {inboxPendingCount}</h3>");
     expect(activityHistoryPanelSource).toContain("styles.inboxMessageList");
@@ -1004,7 +1013,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("/purge");
     expect(archiveZonePanelSource).toContain("copy.purgeAgent");
     expect(routeSource).toContain("copy.maintenanceTitle");
-    expect(routeSource).toContain("styles.maintenanceIntro");
+    expect(healthMaintenancePanelSource).toContain("styles.maintenanceIntro");
     expect(routeSource).toContain("selectedAgent.status === \"archived\"");
     expect(routeSource).toContain("<AgentArchiveZonePanel");
     expect(archiveZonePanelSource).toContain("styles.dangerZone");
@@ -1283,10 +1292,10 @@ describe("AgentsRoute layout contract", () => {
     const inboxMessageActionBlocks = sourceBlocksForStyle("inboxMessageTop");
     const panelHeaderActionBlocks = sourceBlocksForStyle("panelHeaderActions")
       .filter((block) => block.includes("copy.createAgent") || block.includes("copy.consumeAllMessages"));
-    const pendingInboxIssueStart = routeSource.indexOf('issue.code === "pending_inbox_messages" ? (');
-    const pendingInboxIssueBlock = routeSource.slice(
+    const pendingInboxIssueStart = healthMaintenancePanelSource.indexOf("issue.showInboxAction ? (");
+    const pendingInboxIssueBlock = healthMaintenancePanelSource.slice(
       pendingInboxIssueStart,
-      routeSource.indexOf("</article>", pendingInboxIssueStart),
+      healthMaintenancePanelSource.indexOf("</article>", pendingInboxIssueStart),
     );
     const actionBlocks = [
       ...editorActionBlocks,
