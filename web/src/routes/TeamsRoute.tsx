@@ -80,6 +80,7 @@ import { TeamSourceCollectionStageAgentsPanel, type TeamSourceCollectionStageAge
 import { TeamSourceCollectionRunSwitcherPanel, type TeamSourceCollectionRunSwitcherRun } from "./TeamSourceCollectionRunSwitcherPanel";
 import { TeamSourceCollectionFindingDetailsPanel } from "./TeamSourceCollectionFindingDetailsPanel";
 import { TeamSourceCollectionConversationPanel } from "./TeamSourceCollectionConversationPanel";
+import { TeamSourceCollectionScreeningPanel } from "./TeamSourceCollectionScreeningPanel";
 import {
   TeamSourceCollectionSourceDetailPanel,
   type TeamSourceCollectionSourceDetailAction,
@@ -7775,8 +7776,8 @@ export function TeamsRoute({
       ? `${pagedScreeningCandidates.start}-${pagedScreeningCandidates.end}/${filteredScreeningCandidates.length}`
       : `0/${screeningPanelFilteredCount}`;
     return (
-      <details
-        id="source-collection-screening-panel"
+      <TeamSourceCollectionScreeningPanel
+        lang={lang}
         className={sourceCollectionPanelClassName("source-collection-screening-panel")}
         open={
           (
@@ -7793,21 +7794,16 @@ export function TeamsRoute({
             setSourceCollectionExpandedPanelId("");
           }
         }}
-        tabIndex={-1}
-      >
-        <summary>
-          <span>{lang === "zh" ? "资料提炼复核" : "Source review"}</span>
-          <small>{screeningPanelRange}</small>
-        </summary>
-        {renderSourceCollectionFilterBar(sourceCollectionDisplayedCandidateFilterCounts, lang === "zh" ? "审查资料过滤" : "Review source filters", sourceCollectionPrimaryDataLoading)}
-        <div id="source-collection-screening-stats" className={styles.workflowSourceQualityStats}>
-          <span>{lang === "zh" ? "本轮候选" : "run candidates"} <strong>{sourceCollectionDisplayedCandidateCountText}</strong></span>
-          <span>{lang === "zh" ? "当前过滤" : "filtered"} <strong>{screeningPanelFilteredCountText}</strong></span>
-          <span>{lang === "zh" ? "已审查" : "reviewed"} <strong>{sourceCollectionProjectedAssessedCountText}</strong></span>
-          <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionProjectedApprovedCountText}</strong></span>
-          <span>{lang === "zh" ? "待 Agent 复核" : "pending agent review"} <strong>{sourceCollectionRunPendingScreeningCountText}</strong></span>
-        </div>
-        <div className={styles.sourceCollectionPanelActions}>
+        rangeText={screeningPanelRange}
+        filterBar={renderSourceCollectionFilterBar(sourceCollectionDisplayedCandidateFilterCounts, lang === "zh" ? "审查资料过滤" : "Review source filters", sourceCollectionPrimaryDataLoading)}
+        stats={[
+          { key: "candidate", label: lang === "zh" ? "本轮候选" : "run candidates", value: sourceCollectionDisplayedCandidateCountText },
+          { key: "filtered", label: lang === "zh" ? "当前过滤" : "filtered", value: screeningPanelFilteredCountText },
+          { key: "reviewed", label: lang === "zh" ? "已审查" : "reviewed", value: sourceCollectionProjectedAssessedCountText },
+          { key: "approved", label: lang === "zh" ? "通过" : "approved", value: sourceCollectionProjectedApprovedCountText },
+          { key: "pending", label: lang === "zh" ? "待 Agent 复核" : "pending agent review", value: sourceCollectionRunPendingScreeningCountText },
+        ]}
+        actions={<>
           <VButton
             type="button"
             density="compact"
@@ -7830,16 +7826,34 @@ export function TeamsRoute({
           >
             {lang === "zh" ? "查看筛选结果" : "View results"}
           </VButton>
-        </div>
-        {screeningCandidates.length ? (
-          <div
-            className={styles.sourceCollectionScreeningListShell}
-            role="region"
-            tabIndex={0}
-            aria-label={lang === "zh" ? "资料提炼复核候选列表，可向下滚动查看更多" : "Source review candidate list, scroll for more"}
-          >
-            <div className={`${styles.workflowCandidateList} ${styles.sourceCollectionScreeningList}`}>
-              {screeningCandidates.map((candidate) => {
+        </>}
+        hasCandidates={Boolean(screeningCandidates.length)}
+        listNeedsScrollHint={screeningListNeedsScrollHint}
+        emptyMessage={
+          sourceCollectionPrimaryDataLoading
+            ? (lang === "zh" ? "正在加载资料提炼复核候选..." : "Loading review candidates...")
+            : sourceCollectionDisplayedCandidateCount
+              ? (lang === "zh" ? "当前过滤条件下没有候选资料。" : "No candidates match this filter.")
+              : (lang === "zh" ? "本轮还没有候选资料。先完成搜索资料并导入候选。" : "No candidates from this run yet.")
+        }
+        pagination={renderSourceCollectionPagination("extraction", filteredScreeningCandidates.length)}
+        statusItems={teamWorkflowSourceQualityStatus?.actionItems.length
+          ? teamWorkflowSourceQualityStatus.actionItems.slice(0, 3).map((item) => (
+            <span key={`${item.code}-${item.candidateId}`} className={workflowIngestionTone(item.severity)}>
+              {workflowIngestionStatusLabel(item.severity, lang)} · {item.message}
+            </span>
+          ))
+          : null}
+        errors={<>
+          {teamWorkflowSourceQualityStatusQuery.error instanceof Error ? (
+            <div className={styles.messageError}>{teamWorkflowSourceQualityStatusQuery.error.message}</div>
+          ) : null}
+          {selectedTeamSourceQualityError ? (
+            <div className={styles.messageError}>{selectedTeamSourceQualityError.message}</div>
+          ) : null}
+        </>}
+      >
+        {screeningCandidates.map((candidate) => {
                 const chunkPlanSummary = candidatePaperNoteChunkPlanSummary(candidate);
                 const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
                 const provenance = sourceCollectionCandidateProvenance(candidate, lang);
@@ -7950,39 +7964,7 @@ export function TeamsRoute({
                   />
                 );
               })}
-            </div>
-            {screeningListNeedsScrollHint ? (
-              <div className={styles.sourceCollectionScreeningScrollHint} aria-hidden="true">
-                <span>{lang === "zh" ? "向下滚动查看更多本页候选" : "Scroll down for more candidates on this page"}</span>
-              </div>
-            ) : null}
-          </div>
-        ) : (
-          <div className={styles.empty}>
-            {sourceCollectionPrimaryDataLoading
-              ? (lang === "zh" ? "正在加载资料提炼复核候选..." : "Loading review candidates...")
-            : sourceCollectionDisplayedCandidateCount
-              ? (lang === "zh" ? "当前过滤条件下没有候选资料。" : "No candidates match this filter.")
-            : (lang === "zh" ? "本轮还没有候选资料。先完成搜索资料并导入候选。" : "No candidates from this run yet.")}
-          </div>
-        )}
-        {renderSourceCollectionPagination("extraction", filteredScreeningCandidates.length)}
-        {teamWorkflowSourceQualityStatus?.actionItems.length ? (
-          <div className={styles.workflowIngestionActions}>
-            {teamWorkflowSourceQualityStatus.actionItems.slice(0, 3).map((item) => (
-              <span key={`${item.code}-${item.candidateId}`} className={workflowIngestionTone(item.severity)}>
-                {workflowIngestionStatusLabel(item.severity, lang)} · {item.message}
-              </span>
-            ))}
-          </div>
-        ) : null}
-        {teamWorkflowSourceQualityStatusQuery.error instanceof Error ? (
-          <div className={styles.messageError}>{teamWorkflowSourceQualityStatusQuery.error.message}</div>
-        ) : null}
-        {selectedTeamSourceQualityError ? (
-          <div className={styles.messageError}>{selectedTeamSourceQualityError.message}</div>
-        ) : null}
-      </details>
+      </TeamSourceCollectionScreeningPanel>
     );
   }
 
