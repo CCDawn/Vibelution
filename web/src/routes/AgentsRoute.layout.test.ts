@@ -862,8 +862,9 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.supervisionPolicyTitle");
     expect(routeSource).toContain("copy.saveRuntimePolicy");
     expect(routeSource).toContain("updateRuntimePolicyMutation");
-    expect(routeSource).toContain("styles.runtimePolicyGrid");
-    expect(routeSource).toContain("styles.contextModeGrid");
+    expect(routeSource).toContain("AgentRuntimePolicyPanel");
+    expect(routeSource).not.toContain("className={styles.runtimePolicyGrid}");
+    expect(routeSource).not.toContain("className={styles.contextModeGrid}");
   });
 
   it("creates and safely archives Agents from the unified Agent card", () => {
