@@ -18,6 +18,10 @@ const bulkConfigPanelSource = readFileSync(
   new URL("./AgentBulkConfigPanel.tsx", import.meta.url),
   "utf-8",
 );
+const createPanelSource = readFileSync(
+  new URL("./AgentCreatePanel.tsx", import.meta.url),
+  "utf-8",
+);
 const archiveZonePanelSource = readFileSync(
   new URL("./AgentArchiveZonePanel.tsx", import.meta.url),
   "utf-8",
@@ -340,15 +344,16 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("当前槽位不可选");
     expect(routeSource).toContain("当前绑定，模型库未注册");
     expect(routeSource).toContain("current binding, unavailable for this slot");
-    expect(routeSource).toContain("agentModelChoices.map((model)");
-    expect(routeSource).toContain("value={agentLlmSlotModelId(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0])}");
+    expect(createPanelSource).toContain("modelChoices.map((model)");
+    expect(routeSource).toContain("selectedModelId={agentLlmSlotModelId(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0])}");
+    expect(createPanelSource).toContain("value={selectedModelId}");
     expect(routeSource).toContain("value={selectedSlotModelId}");
     expect(routeSource).toContain("styles.llmSlotGrid");
     expect(routeSource).toContain("llmSlotsHint");
     expect(routeSource).toContain("按 Agent 自己配置对话、心智模型、摘要、子 Agent 和视觉等 LLM 槽位");
     expect(routeSource).toContain("设置页只维护模型库资产");
-    expect(routeSource).toContain("title={model.modelLabel || model.modelId}");
-    expect(routeSource).toContain("{model.label}");
+    expect(createPanelSource).toContain("title={model.modelLabel || model.modelId}");
+    expect(createPanelSource).toContain("{model.label}");
     expect(routeSource).not.toContain("buildModelProfileChoices(workspace?.modelProfiles ?? [])");
     expect(routeSource).not.toContain("modelProfileChoices.map((profile)");
     expect(routeSource).not.toContain("value={createDraft.profileId}");
@@ -431,7 +436,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("const sessionDefaultAllowedTools = workSession ? DEFAULT_SESSION_AGENT_ALLOWED_TOOLS : []");
     expect(routeSource).not.toContain("const sessionDefaultPreferredTools = workSession ? DEFAULT_SESSION_AGENT_PREFERRED_TOOLS : []");
     expect(routeSource).not.toContain("const allowedTools = sortedIds([...sessionDefaultAllowedTools, ...selectedAllowedTools])");
-    expect(routeSource).toContain("selectedToolBundleIds: string[]");
+    expect(createPanelSource).toContain("selectedToolBundleIds: string[]");
     expect(routeSource).toContain("function defaultCreateToolBundleIds");
     expect(routeSource).toContain('const preferred = workSession ? ["core"] : ["core", "research", "collaboration"]');
     expect(routeSource).toContain("return bundles[0]?.bundleId ? [bundles[0].bundleId] : []");
@@ -443,8 +448,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("function toolBundleSelectionToPolicy");
     expect(routeSource).toContain("function createToolBundleSummary");
     expect(routeSource).toContain("createToolBundleSummaryValue");
-    expect(routeSource).toContain("copy.createAgentToolBundles");
-    expect(routeSource).toContain("copy.createAgentToolBundlePreview");
+    expect(createPanelSource).toContain("copy.createAgentToolBundles");
+    expect(createPanelSource).toContain("copy.createAgentToolBundlePreview");
     expect(routeSource).toContain("creationToolBundleIds: sortedIds(draft.selectedToolBundleIds)");
     expect(routeSource).toContain("toolPolicy: {");
     expect(routeSource).toContain("styles.workspaceCreating");
@@ -526,7 +531,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("<small>{issueSummary(agent.health, lang)}</small>");
     expect(denseListSource).toContain("title={column.description}");
     expect(routeSource).not.toContain("<span>{column.description}</span>");
-    expect(routeSource).toContain("title={createToolBundleSummaryValue.meta || copy.createAgentToolBundleEmpty}");
+    expect(createPanelSource).toContain("title={toolBundleSummary.meta || copy.createAgentToolBundleEmpty}");
     expect(routeSource).not.toContain("<small>{createToolBundleSummaryValue.meta || copy.createAgentToolBundleEmpty}</small>");
     expect(routeSource).not.toContain("<small>{toolBundleMeta(bundle, lang)}</small>");
     expect(routeSource).toContain("<span className={styles.detailHealthStatus} title={issueSummary(selectedAgent.health, lang)}>");
@@ -535,8 +540,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("<small>{slot.required ? copy.requiredSlot : copy.optionalSlot}</small>");
     expect(routeSource).toContain("tooltip={[toolPolicySourceLine, toolPolicySource?.description || copy.toolPolicyPickerHint].filter(Boolean).join(\"\\n\")}");
     expect(routeSource).not.toContain("<small>{toolPolicySourceLine}</small>");
-    expect(routeSource).toContain("title={copy.createAgentHint}");
-    expect(routeSource).toContain("title={copy.createAgentToolBundlesHint}");
+    expect(createPanelSource).toContain("title={copy.createAgentHint}");
+    expect(createPanelSource).toContain("title={copy.createAgentToolBundlesHint}");
     expect(returnBannerPanelSource).toContain("title={copy.returnBannerHint}");
     expect(avatarEditorPanelSource).toContain("title={copy.avatarEditorHint}");
     expect(routeSource).toContain("title={copy.routeHint}");
@@ -868,7 +873,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("{selectedAgentRequiresPersona ? (");
     expect(routeSource).toContain("{selectedAgentRequiresTask ? (");
     expect(routeSource).toContain("{selectedAgentRequiresTeamMembership ? (");
-    expect(routeSource).toContain("{!createDraftIsWorkSession ? (");
+    expect(routeSource).toContain("isWorkSession={createDraftIsWorkSession}");
+    expect(createPanelSource).toContain("{!isWorkSession ? (");
     expect(routeSource).toContain("const roleKey = workSession ? \"\" : draft.roleKey.trim()");
     expect(routeSource).toContain("const personaProfile = workSession");
     expect(routeSource).toContain("const taskProfile = workSession");
@@ -963,8 +969,10 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("method: \"POST\"");
     expect(routeSource).toContain("createAgentMutation");
     expect(routeSource).toContain("copy.createAgent");
-    expect(routeSource).toContain("styles.createAgentPanel");
-    expect(routeSource).toContain("styles.createAgentGrid");
+    expect(routeSource).toContain("<AgentCreatePanel");
+    expect(routeSource).toContain("onCreate={createAgent}");
+    expect(createPanelSource).toContain("styles.createAgentPanel");
+    expect(createPanelSource).toContain("styles.createAgentGrid");
     expect(routeSource).toContain("archiveAgentMutation");
     expect(routeSource).toContain("method: \"DELETE\"");
     expect(routeSource).toContain("window.confirm");
@@ -1235,6 +1243,7 @@ describe("AgentsRoute layout contract", () => {
     const editorActionBlocks = [
       ...sourceBlocksForStyle("editorActions"),
       ...sourceBlocksForStyle("editorActions", archiveZonePanelSource),
+      ...sourceBlocksForStyle("editorActions", createPanelSource),
       ...sourceBlocksForStyle("editorActions", debugResetPanelSource),
       ...sourceBlocksForStyle("editorActions", modeMembershipPanelSource),
       ...sourceBlocksForStyle("editorActions", personaProfilePanelSource),
