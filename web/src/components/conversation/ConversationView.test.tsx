@@ -7,7 +7,6 @@ import { ChatNextStateSignalSummary, ConversationMessage, SessionTurnError } fro
 import styles from "./ConversationView.styles";
 import conversationViewStylesModuleSource from "./ConversationView.styles.ts?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
-import streamingRevealStateSource from "./streamingRevealState.ts?raw";
 import {
   buildStreamingTimelineScrollSignal,
   buildTimelineScrollSignal,
@@ -28,6 +27,10 @@ const conversationViewStylesSource = [
   ...Object.keys(styles).map((key) => `.${key}`),
   ...Object.values(styles),
 ].join("\n");
+const streamingResponseContentSource = conversationViewSource.slice(
+  conversationViewSource.indexOf("function StreamingResponseContent"),
+  conversationViewSource.indexOf("function lightweightJsonSignal"),
+);
 
 function semanticArticleClassCount(html: string, className: string) {
   const escaped = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -163,16 +166,14 @@ describe("ConversationView edit resend affordance", () => {
   it("renders streaming assistant markdown progressively instead of waiting for the final answer", () => {
     expect(conversationViewSource).toContain("function renderStreamingResponseText(content: string)");
     expect(conversationViewSource).toContain("<StreamingResponseContent content={content} renderBlock={renderMarkdownBlock} />");
+    expect(streamingResponseContentSource).toContain("function StreamingResponseContent");
     expect(conversationViewSource).toContain("projectStreamingMarkdownBlocks");
-    expect(conversationViewSource).toContain("nextStreamingRevealLength");
-    expect(conversationViewSource).toContain("type StreamingRevealState");
-    expect(conversationViewSource).toContain("appendStableText");
-    expect(streamingRevealStateSource).toContain("STREAMING_RESPONSE_REVEAL_MAX_CHARS");
-    expect(streamingRevealStateSource).toContain("STREAMING_RESPONSE_CATCH_UP_BACKLOG_CHARS");
-    expect(streamingRevealStateSource).toContain("stableText");
-    expect(streamingRevealStateSource).toContain("revealTail");
-    expect(conversationViewSource).toContain("requestAnimationFrame");
-    expect(conversationViewSource).toContain("setVisibleContent");
+    expect(conversationViewSource).toContain("const visibleText = targetContent");
+    expect(conversationViewSource).not.toContain("nextStreamingRevealLength");
+    expect(conversationViewSource).not.toContain("type StreamingRevealState");
+    expect(conversationViewSource).not.toContain("appendStableText");
+    expect(streamingResponseContentSource).not.toContain("requestAnimationFrame");
+    expect(streamingResponseContentSource).not.toContain("setVisibleContent");
     expect(conversationViewSource).toContain("const isResponseStreaming = Boolean(message.streaming) && showResponseBlock");
     expect(conversationViewSource).toContain("showResponseBlock && !isStreamingStatusPlaceholder && responseExpanded && !isResponseStreaming");
     expect(conversationViewSource).toContain("? renderStreamingResponseText(responseText)");
