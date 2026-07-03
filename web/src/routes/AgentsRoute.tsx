@@ -72,12 +72,13 @@ import {
   type AgentConfigDraft,
   type AgentCoreConfigLlmSlotView,
 } from "./AgentCoreConfigPanel";
+import { AgentConfigPolicyPanePanel } from "./AgentConfigPolicyPanePanel";
 import { type AgentCreateDraft } from "./AgentCreatePanel";
 import { type AgentResetOptions } from "./AgentDebugResetPanel";
 import { AgentDetailHeaderPanel } from "./AgentDetailHeaderPanel";
 import { AgentDetailWorkspacePanel } from "./AgentDetailWorkspacePanel";
 import { AgentListWorkspacePanel } from "./AgentListWorkspacePanel";
-import { AgentMemoryPolicyPanel, type AgentMemoryPolicyDraft } from "./AgentMemoryPolicyPanel";
+import { type AgentMemoryPolicyDraft } from "./AgentMemoryPolicyPanel";
 import { AgentModeMembershipPanel, type AgentModeMembershipDraft } from "./AgentModeMembershipPanel";
 import { AgentManagementBriefPanel } from "./AgentManagementBriefPanel";
 import { AgentManagementHeaderPanel } from "./AgentManagementHeaderPanel";
@@ -97,7 +98,6 @@ import {
 import { AgentSelectedDetailContentPanel } from "./AgentSelectedDetailContentPanel";
 import { type AgentTaskDraft } from "./AgentTaskProfilePanel";
 import { governanceStatusLabel } from "./AgentToolGovernancePanel";
-import { AgentToolSummaryPanel } from "./AgentToolSummaryPanel";
 import {
   agentCenterMemoryRoute,
   agentCenterModelsRoute,
@@ -6038,38 +6038,37 @@ export function AgentsRoute() {
                   />
               )}
               configPolicies={(
-                <>
-                  <AgentToolSummaryPanel
-                    copy={copy}
-                    lang={lang}
-                    policyId={selectedAgent.toolPolicyId}
-                    allowedCount={selectedAgent.toolPolicy?.allowedTools?.length ?? 0}
-                    preferredCount={selectedAgent.toolPolicy?.preferredTools?.length ?? 0}
-                    blockedCount={selectedAgent.toolPolicy?.blockedTools?.length ?? 0}
-                    toolCategoryCount={toolBundles.length}
-                    onConfigure={() => navigate(selectedAgentToolConfigRoute)}
-                  />
-
-                  <AgentMemoryPolicyPanel
-                    copy={copy}
-                    lang={lang}
-                    policyId={selectedAgent.memoryPolicyId || "-"}
-                    rootPath={selectedAgent.memoryPolicy?.privateMemoryRoot || selectedAgent.workspacePath || "-"}
-                    draft={memoryPolicyDraft}
-                    memoryGroupOptions={memoryGroupOptions}
-                    dirty={memoryPolicyDirty}
-                    pending={selectedAgentMemoryPolicyPending}
-                    canSave={canSaveMemoryPolicy}
-                    onDraftChange={updateMemoryDraftField}
-                    onAddMemoryGroup={addMemoryGroup}
-                    onRemoveMemoryGroup={removeMemoryGroup}
-                    onAddKnowledgeBaseId={addKnowledgeBaseId}
-                    onRemoveKnowledgeBaseId={removeKnowledgeBaseId}
-                    onOpenMemoryPage={() => navigate(selectedAgentMemoryConfigRoute)}
-                    onReset={() => setMemoryPolicyDraft(memoryPolicyDraftFromAgent(selectedAgent))}
-                    onSave={saveMemoryPolicy}
-                  />
-                </>
+                <AgentConfigPolicyPanePanel
+                  toolSummary={{
+                    copy,
+                    lang,
+                    policyId: selectedAgent.toolPolicyId,
+                    allowedCount: selectedAgent.toolPolicy?.allowedTools?.length ?? 0,
+                    preferredCount: selectedAgent.toolPolicy?.preferredTools?.length ?? 0,
+                    blockedCount: selectedAgent.toolPolicy?.blockedTools?.length ?? 0,
+                    toolCategoryCount: toolBundles.length,
+                    onConfigure: () => navigate(selectedAgentToolConfigRoute),
+                  }}
+                  memoryPolicy={{
+                    copy,
+                    lang,
+                    policyId: selectedAgent.memoryPolicyId || "-",
+                    rootPath: selectedAgent.memoryPolicy?.privateMemoryRoot || selectedAgent.workspacePath || "-",
+                    draft: memoryPolicyDraft,
+                    memoryGroupOptions,
+                    dirty: memoryPolicyDirty,
+                    pending: selectedAgentMemoryPolicyPending,
+                    canSave: canSaveMemoryPolicy,
+                    onDraftChange: updateMemoryDraftField,
+                    onAddMemoryGroup: addMemoryGroup,
+                    onRemoveMemoryGroup: removeMemoryGroup,
+                    onAddKnowledgeBaseId: addKnowledgeBaseId,
+                    onRemoveKnowledgeBaseId: removeKnowledgeBaseId,
+                    onOpenMemoryPage: () => navigate(selectedAgentMemoryConfigRoute),
+                    onReset: () => setMemoryPolicyDraft(memoryPolicyDraftFromAgent(selectedAgent)),
+                    onSave: saveMemoryPolicy,
+                  }}
+                />
               )}
               configReferences={(
                 <>
