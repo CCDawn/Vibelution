@@ -69,7 +69,6 @@ import {
   TeamSourcePagination,
   TeamSourceResultItem,
   TeamSourceResultList,
-  TeamSourceResultStats,
   type TeamSourceEmptyStateFact,
   type TeamSourceResultTone,
 } from "../components/vui/product/team-management";
@@ -80,6 +79,7 @@ import { TeamMemoryIndexPanel, type TeamMemoryIndexMember } from "./TeamMemoryIn
 import { TeamSourceCollectionStageAgentsPanel, type TeamSourceCollectionStageAgentCard, type TeamSourceCollectionStageAgentTone } from "./TeamSourceCollectionStageAgentsPanel";
 import { TeamSourceCollectionRunSwitcherPanel, type TeamSourceCollectionRunSwitcherRun } from "./TeamSourceCollectionRunSwitcherPanel";
 import { TeamSourceCollectionFindingDetailsPanel } from "./TeamSourceCollectionFindingDetailsPanel";
+import { TeamSourceCollectionConversationPanel } from "./TeamSourceCollectionConversationPanel";
 import {
   TeamSourceCollectionSourceDetailPanel,
   type TeamSourceCollectionSourceDetailAction,
@@ -7531,42 +7531,21 @@ export function TeamsRoute({
             </VButton>
           );
     return (
-      <section id="source-collection-process" className={styles.sourceCollectionConversationPanel} aria-label={lang === "zh" ? "搜集对话流" : "Collection conversation"}>
-        <div className={styles.sourceCollectionConversationHeader}>
-          <div>
-            <strong>{lang === "zh" ? "本轮资料" : "Sources in this run"}</strong>
-          </div>
-          <small>{rawRecordRangeText}</small>
-        </div>
-        <section id="source-collection-results" className={styles.sourceCollectionResultsPanel} aria-label={lang === "zh" ? "本轮原始资料记录" : "Raw collected records"}>
-          <div className={styles.sourceCollectionResultsHeader}>
-            <strong>{lang === "zh" ? "资料列表" : "Source list"}</strong>
-            <span>{rawRecordHeaderText}</span>
-          </div>
-          {renderSourceCollectionFilterBar(sourceCollectionRecordFilterCounts, lang === "zh" ? "资料来源过滤" : "Source filters", sourceCollectionRecordsDataLoading)}
-          <TeamSourceResultStats
-            ariaLabel={lang === "zh" ? "资料统计" : "Source stats"}
-            stats={[
-              { key: "raw", label: lang === "zh" ? "原始记录" : "raw records", value: sourceCollectionCollectedCountText },
-              { key: "imported", label: lang === "zh" ? "已入候选" : "imported to candidates", value: sourceCollectionDisplayedCandidateCountText },
-              { key: "clickable", label: lang === "zh" ? "可点击来源" : "clickable sources", value: sourceCollectionRecordClickableSourceCountText },
-              { key: "local", label: lang === "zh" ? "本地文件" : "local files", value: sourceCollectionRecordLocalFileCountText },
-            ]}
-          />
-          {sourceCollectionPendingCandidateImportCount > 0 ? (
-            <div className={styles.sourceCollectionResultWarning}>
-              {lang === "zh"
-                ? `还有 ${sourceCollectionPendingCandidateImportCount} 条原始记录尚未进入候选库，所以“已搜到”和“候选资料”不会相等。`
-                : `${sourceCollectionPendingCandidateImportCount} raw records are not imported into candidates yet, so raw and candidate counts will differ.`}
-            </div>
-          ) : null}
-          {sourceCollectionRecordMissingSourceCount > 0 ? (
-            <div className={styles.sourceCollectionResultWarning}>
-              {lang === "zh"
-                ? `${sourceCollectionRecordMissingSourceCount} 条原始记录缺少 DOI、链接或本地文件路径，暂时不能视为可溯源结果。`
-                : `${sourceCollectionRecordMissingSourceCount} raw records are missing DOI, link, or local file path.`}
-            </div>
-          ) : null}
+      <TeamSourceCollectionConversationPanel
+        lang={lang}
+        rangeText={rawRecordRangeText}
+        headerText={rawRecordHeaderText}
+        filterBar={renderSourceCollectionFilterBar(sourceCollectionRecordFilterCounts, lang === "zh" ? "资料来源过滤" : "Source filters", sourceCollectionRecordsDataLoading)}
+        stats={[
+          { key: "raw", label: lang === "zh" ? "原始记录" : "raw records", value: sourceCollectionCollectedCountText },
+          { key: "imported", label: lang === "zh" ? "已入候选" : "imported to candidates", value: sourceCollectionDisplayedCandidateCountText },
+          { key: "clickable", label: lang === "zh" ? "可点击来源" : "clickable sources", value: sourceCollectionRecordClickableSourceCountText },
+          { key: "local", label: lang === "zh" ? "本地文件" : "local files", value: sourceCollectionRecordLocalFileCountText },
+        ]}
+        pendingCandidateImportCount={sourceCollectionPendingCandidateImportCount}
+        missingSourceCount={sourceCollectionRecordMissingSourceCount}
+        pagination={sourceCollectionRecordsDataLoading ? null : renderSourceCollectionPagination("finding", sourceCollectionFilteredRecords.length)}
+      >
           {visibleResults.length ? (
             <TeamSourceResultList ariaLabel={lang === "zh" ? "原始资料记录" : "Raw source records"}>
               {visibleResults.map((record) => {
@@ -7639,9 +7618,7 @@ export function TeamsRoute({
                 : "The source list only renders real records; empty runs stay compact."}
             />
           )}
-          {sourceCollectionRecordsDataLoading ? null : renderSourceCollectionPagination("finding", sourceCollectionFilteredRecords.length)}
-        </section>
-      </section>
+      </TeamSourceCollectionConversationPanel>
     );
   }
 
