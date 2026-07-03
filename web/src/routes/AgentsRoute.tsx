@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   Database,
   Layers3,
-  MessageSquare,
   Plus,
   RefreshCw,
   Square,
@@ -83,6 +82,7 @@ import {
 } from "./AgentCoreConfigPanel";
 import { AgentCreatePanel, type AgentCreateDraft } from "./AgentCreatePanel";
 import { AgentDebugResetPanel, type AgentResetOptions } from "./AgentDebugResetPanel";
+import { AgentHealthMaintenancePanel } from "./AgentHealthMaintenancePanel";
 import { AgentMemoryPolicyPanel, type AgentMemoryPolicyDraft } from "./AgentMemoryPolicyPanel";
 import { AgentModeMembershipPanel, type AgentModeMembershipDraft } from "./AgentModeMembershipPanel";
 import { AgentManagementNav } from "./AgentManagementNav";
@@ -6069,44 +6069,28 @@ export function AgentsRoute() {
               />
               ) : null}
 
-              <section className={styles.detailSection} title={issueNextStep(selectedAgent.health, lang)}>
-                <div className={styles.panelHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{issuePanelLabel(selectedAgent.health, copy)}</p>
-                    <h3>{issueLabel(selectedAgent.health, lang)} · {issueSummary(selectedAgent.health, lang)}</h3>
-                  </div>
-                  {selectedAgent.health.length ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
-                </div>
-                {selectedAgent.health.length ? (
-                  <div className={styles.issueList}>
-                    {selectedAgent.health.map((issue) => (
-                      <article key={`${issue.code}:${issue.detail}`} className={`${styles.issueItem} ${styles[`issueItem_${issue.severity}`]}`}>
-                        <strong>{issueDisplayTitle(issue, lang)}</strong>
-                        <p>{issue.detail}</p>
-                        {issue.code === "pending_inbox_messages" ? (
-                          <VButton
-                            type="button"
-                            variant="secondary"
-                            icon={<MessageSquare size={15} />}
-                            onPress={() => setActivePane("activity")}
-                          >
-                            {copy.handleInboxNow}
-                          </VButton>
-                        ) : null}
-                      </article>
-                    ))}
-                  </div>
-                ) : (
-                  <p className={styles.emptyText}>{copy.noIssues}</p>
-                )}
-              </section>
-
-              <section className={styles.maintenanceIntro} title={copy.maintenanceHint}>
-                <div>
-                  <p className={styles.panelEyebrow}>{copy.maintenanceTitle}</p>
-                  <h3>{copy.maintenanceTitle}</h3>
-                </div>
-              </section>
+              <AgentHealthMaintenancePanel
+                copy={{
+                  handleInboxNow: copy.handleInboxNow,
+                  maintenanceHint: copy.maintenanceHint,
+                  maintenanceTitle: copy.maintenanceTitle,
+                  noIssues: copy.noIssues,
+                }}
+                health={{
+                  title: issueNextStep(selectedAgent.health, lang),
+                  label: issuePanelLabel(selectedAgent.health, copy),
+                  headline: `${issueLabel(selectedAgent.health, lang)} · ${issueSummary(selectedAgent.health, lang)}`,
+                  hasIssues: selectedAgent.health.length > 0,
+                  issues: selectedAgent.health.map((issue) => ({
+                    key: `${issue.code}:${issue.detail}`,
+                    severity: issue.severity,
+                    title: issueDisplayTitle(issue, lang),
+                    detail: issue.detail,
+                    showInboxAction: issue.code === "pending_inbox_messages",
+                  })),
+                }}
+                onOpenActivity={() => setActivePane("activity")}
+              />
 
               <AgentArchiveZonePanel
                 copy={copy}
