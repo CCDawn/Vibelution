@@ -71,11 +71,7 @@ import {
   TeamSourceResultList,
   TeamSourceResultStats,
   type TeamSourceEmptyStateFact,
-  TeamStageCard,
-  TeamStageCommandBar,
-  TeamStagePipeline,
   type TeamSourceResultTone,
-  type TeamStageTone,
 } from "../components/vui/product/team-management";
 import { agentCenterMemoryRoute, teamMemoryRoute } from "./agentCenterRoutes";
 import { agentDisplayInfo } from "./agentDisplay";
@@ -90,6 +86,11 @@ import {
   type TeamSourceCollectionSourceDetailFact,
   type TeamSourceCollectionSourceDetailLink,
 } from "./TeamSourceCollectionSourceDetailPanel";
+import {
+  TeamSourceCollectionStageActionIcon,
+  TeamSourceCollectionStandaloneStagePanel,
+  type TeamSourceCollectionStandaloneStageModule,
+} from "./TeamSourceCollectionStandaloneStagePanel";
 import { TeamSourceCollectionStorageActionsPanel, type TeamSourceCollectionStorageAction } from "./TeamSourceCollectionStorageActionsPanel";
 import { TeamWorkflowGraphView, workflowGraphLayout } from "./TeamWorkflowGraphView";
 import styles from "./TeamsRoute.styles";
@@ -8977,7 +8978,7 @@ export function TeamsRoute({
               onClick={activeModule.onAction}
               title={sourceCollectionActionDisabledTitle(sourceCollectionStageActionReadinessFor(activeModule.id), activeModule.actionLabel)}
             >
-              {renderSourceCollectionStageActionIcon(activeModule.actionIcon)}
+              <TeamSourceCollectionStageActionIcon icon={activeModule.actionIcon} />
               {activeModule.actionLabel}
             </VNativeButton>
             {primaryStageAgentChatRoute ? (
@@ -11883,21 +11884,25 @@ export function TeamsRoute({
           artifactIds: [],
           detail: module.summary,
         }));
-  const renderSourceCollectionStageActionIcon = (icon: SourceCollectionStageModule["actionIcon"]) => {
-    if (icon === "search") {
-      return <Search size={13} />;
-    }
-    if (icon === "check") {
-      return <CheckCircle2 size={13} />;
-    }
-    if (icon === "archive") {
-      return <Archive size={13} />;
-    }
-    if (icon === "refresh") {
-      return <RefreshCw size={13} />;
-    }
-    return <Play size={13} />;
-  };
+  const sourceCollectionStandaloneStageModules: TeamSourceCollectionStandaloneStageModule[] = sourceCollectionStageModules.map((module) => {
+    const cardActionReadiness = sourceCollectionStageActionReadinessFor(module.id);
+    return {
+      id: module.id,
+      tone: module.state,
+      selected: module.id === selectedSourceCollectionStageId,
+      title: module.detailLabel,
+      status: module.status,
+      label: module.label,
+      metric: module.metric,
+      nextLabel: `${lang === "zh" ? "下一步：" : "Next: "}${module.nextLabel}`,
+      actionLabel: module.actionLabel,
+      actionDisabled: module.actionDisabled,
+      actionTitle: sourceCollectionActionDisabledTitle(cardActionReadiness, module.actionLabel),
+      actionIcon: module.actionIcon,
+      onAction: module.onAction,
+      onDetail: module.onDetail,
+    };
+  });
   const activeWorkflowItemCount = teamWorkflow?.activeWorkflowItems.length ?? 0;
   const researchCanvasVisible = researchCanvasReadOnly;
   const teamListInitialLoading = teamsQuery.isPending && !teamsQuery.data;
@@ -12030,56 +12035,22 @@ export function TeamsRoute({
           </div>
         </header>
         {researchWorkflowTeamSelected ? (
-          <main className={styles.sourceCollectionPageBody}>
-            <TeamStageCommandBar
-              ariaLabel={lang === "zh" ? "知识搜集操作台" : "Knowledge collection command bar"}
-              tone={sourceCollectionConsoleState as TeamStageTone}
-              title={sourceCollectionRunTitleLabel(selectedSourceCollectionRun?.title || sourceCollectionDraft.title, lang)}
-              subtitle={sourceCollectionDecisionText}
-              stats={[
-                { key: "status", label: lang === "zh" ? "当前" : "status", value: sourceCollectionConsoleStatusText },
-                { key: "next", label: lang === "zh" ? "下一步" : "next", value: sourceCollectionBoardNextStepLabel },
-                { key: "sources", label: lang === "zh" ? "资料" : "sources", value: sourceCollectionCollectedCountLabel },
-              ]}
-            />
-            {renderSourceCollectionRunSwitcher()}
-            <TeamStagePipeline
-              id="source-collection-stage-status"
-              ariaLabel={lang === "zh" ? "知识搜集内部模块" : "Knowledge collection modules"}
-            >
-              {sourceCollectionStageModules.map((module, index) => {
-                const cardActionReadiness = sourceCollectionStageActionReadinessFor(module.id);
-                return (
-                  <TeamStageCard
-                    key={module.id}
-                    index={index}
-                    tone={module.state as TeamStageTone}
-                    selected={module.id === selectedSourceCollectionStageId}
-                    title={module.detailLabel}
-                    onActivate={module.onDetail}
-                    status={module.status}
-                    label={module.label}
-                    metric={module.metric}
-                    nextLabel={`${lang === "zh" ? "下一步：" : "Next: "}${module.nextLabel}`}
-                    actions={
-                      <VNativeButton
-                        type="button"
-                        disabled={module.actionDisabled}
-                        onClick={module.onAction}
-                        title={sourceCollectionActionDisabledTitle(cardActionReadiness, module.actionLabel)}
-                      >
-                        {renderSourceCollectionStageActionIcon(module.actionIcon)}
-                        {module.actionLabel}
-                      </VNativeButton>
-                    }
-                  />
-                );
-              })}
-            </TeamStagePipeline>
-            <div className={styles.sourceCollectionPageGrid}>
-              {renderSourceCollectionActiveStagePanel()}
-            </div>
-          </main>
+          <TeamSourceCollectionStandaloneStagePanel
+            commandAriaLabel={lang === "zh" ? "知识搜集操作台" : "Knowledge collection command bar"}
+            commandTone={sourceCollectionConsoleState}
+            commandTitle={sourceCollectionRunTitleLabel(selectedSourceCollectionRun?.title || sourceCollectionDraft.title, lang)}
+            commandSubtitle={sourceCollectionDecisionText}
+            commandStats={[
+              { key: "status", label: lang === "zh" ? "当前" : "status", value: sourceCollectionConsoleStatusText },
+              { key: "next", label: lang === "zh" ? "下一步" : "next", value: sourceCollectionBoardNextStepLabel },
+              { key: "sources", label: lang === "zh" ? "资料" : "sources", value: sourceCollectionCollectedCountLabel },
+            ]}
+            runSwitcher={renderSourceCollectionRunSwitcher()}
+            stagePipelineId="source-collection-stage-status"
+            stagePipelineAriaLabel={lang === "zh" ? "知识搜集内部模块" : "Knowledge collection modules"}
+            modules={sourceCollectionStandaloneStageModules}
+            activePanel={renderSourceCollectionActiveStagePanel()}
+          />
         ) : (
           <main className={styles.sourceCollectionPageBody}>
             <section className={styles.sourceCollectionUnavailable}>
