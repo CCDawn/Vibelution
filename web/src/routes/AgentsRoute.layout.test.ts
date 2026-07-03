@@ -18,6 +18,10 @@ const bulkConfigPanelSource = readFileSync(
   new URL("./AgentBulkConfigPanel.tsx", import.meta.url),
   "utf-8",
 );
+const contextCompressionPanelSource = readFileSync(
+  new URL("./AgentContextCompressionPanel.tsx", import.meta.url),
+  "utf-8",
+);
 const createPanelSource = readFileSync(
   new URL("./AgentCreatePanel.tsx", import.meta.url),
   "utf-8",
@@ -312,15 +316,18 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("function contextCompressionPolicyFromDraft");
     expect(routeSource).toContain("contextCompressionPolicy: contextCompressionPolicyFromDraft(payload.draft.contextCompressionPolicy)");
     expect(routeSource).toContain("updateContextCompressionDraft");
-    expect(routeSource).toContain("copy.contextCompressionPolicy");
-    expect(routeSource).toContain("copy.contextCompressionInherit");
-    expect(routeSource).toContain("copy.contextCompressionCustom");
+    expect(routeSource).toContain("<AgentContextCompressionPanel");
+    expect(routeSource).toContain("policy={configDraft.contextCompressionPolicy}");
+    expect(routeSource).toContain("onPolicyChange={updateContextCompressionDraft}");
+    expect(contextCompressionPanelSource).toContain("copy.contextCompressionPolicy");
+    expect(contextCompressionPanelSource).toContain("copy.contextCompressionInherit");
+    expect(contextCompressionPanelSource).toContain("copy.contextCompressionCustom");
     expect(routeSource).toContain("contextCompressionPolicyLine");
     expect(routeSource).toContain("compressionTriggerTokenLimit");
     expect(routeSource).toContain("modelContextWindowLimit");
-    expect(routeSource).toContain("styles.compressionPolicyGrid");
-    expect(routeSource).toContain("styles.compressionPolicySubgrid");
-    expect(routeSource).toContain("styles.compressionPolicyFooter");
+    expect(contextCompressionPanelSource).toContain("styles.compressionPolicyGrid");
+    expect(contextCompressionPanelSource).toContain("styles.compressionPolicySubgrid");
+    expect(contextCompressionPanelSource).toContain("styles.compressionPolicyFooter");
     expect(styles.compressionPolicyGrid).toBeTruthy();
     expect(styles.compressionPolicySubgrid).toBeTruthy();
     expect(styles.compressionPolicyFooter).toBeTruthy();
@@ -740,10 +747,10 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("returnTo: selectedAgentReturnRoute");
     expect(routeSource).toContain("styles.configDeepLinkRow");
     expect(routeSource).toContain("onPress={() => navigate(selectedAgentModelConfigRoute)}");
-    expect(routeSource).toContain("onPress={() => navigate(selectedAgentContextConfigRoute)}");
+    expect(routeSource).toContain("onOpenContextConfig={() => navigate(selectedAgentContextConfigRoute)}");
     expect(routeSource).toContain("onOpenMemoryPage={() => navigate(selectedAgentMemoryConfigRoute)}");
     expect(routeSource).toContain("去模型库配置");
-    expect(routeSource).toContain("去上下文配置");
+    expect(contextCompressionPanelSource).toContain("去上下文配置");
     expect(memoryPolicyPanelSource).toContain("去记忆页配置");
     expect(styles.configDeepLinkRow).toBeTruthy();
   });
@@ -1252,7 +1259,10 @@ describe("AgentsRoute layout contract", () => {
       ...sourceBlocksForStyle("editorActions", memoryPolicyPanelSource),
       ...sourceBlocksForStyle("editorActions", toolSummaryPanelSource),
     ];
-    const deepLinkActionBlocks = sourceBlocksForStyle("configDeepLinkRow");
+    const deepLinkActionBlocks = [
+      ...sourceBlocksForStyle("configDeepLinkRow"),
+      ...sourceBlocksForStyle("configDeepLinkRow", contextCompressionPanelSource),
+    ];
     const governanceActionBlocks = sourceBlocksForStyle("governanceActions", toolGovernancePanelSource);
     const promptConfigActionBlocks = sourceBlocksForStyle("promptConfigRow");
     const inboxMessageActionBlocks = sourceBlocksForStyle("inboxMessageTop");

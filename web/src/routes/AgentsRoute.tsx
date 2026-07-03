@@ -63,7 +63,7 @@ import {
   type AgentFilterSectionView,
   type AgentSummaryMetric,
 } from "../components/vui/product/agent-management";
-import { VButton, VCheckbox, VChip, VEmptyState, VFieldRow, VHStack, VNativeButton, VNativeInput, VNativeSelect, VNativeTextarea, VPanelHeader } from "../components/vui";
+import { VButton, VChip, VEmptyState, VFieldRow, VHStack, VNativeButton, VNativeInput, VNativeSelect, VNativeTextarea, VPanelHeader } from "../components/vui";
 import { vuiFormLabelClass } from "../components/vui/forms/formClasses";
 import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
@@ -77,6 +77,10 @@ import {
   type AgentBulkConfigDraft,
   type AgentBulkConfigField,
 } from "./AgentBulkConfigPanel";
+import {
+  AgentContextCompressionPanel,
+  type AgentContextCompressionPolicyDraft,
+} from "./AgentContextCompressionPanel";
 import { AgentCreatePanel, type AgentCreateDraft } from "./AgentCreatePanel";
 import { AgentDebugResetPanel, type AgentResetOptions } from "./AgentDebugResetPanel";
 import { AgentMemoryPolicyPanel, type AgentMemoryPolicyDraft } from "./AgentMemoryPolicyPanel";
@@ -134,24 +138,6 @@ type AgentConfigDraft = {
   memoryPolicyId: string;
   contextCompressionPolicy: AgentContextCompressionPolicyDraft;
   status: string;
-};
-
-type AgentContextCompressionPolicyDraft = {
-  mode: "inherit" | "custom";
-  enabled: boolean;
-  maxTokenLimit: string;
-  maxCompressionsPerSession: string;
-  lightThreshold: string;
-  standardThreshold: string;
-  deepThreshold: string;
-  emergencyThreshold: string;
-  lightSummaryChars: string;
-  standardSummaryChars: string;
-  deepSummaryChars: string;
-  emergencySummaryChars: string;
-  keepAiMessages: string;
-  preserveErrors: boolean;
-  extractKeyDecisions: boolean;
 };
 
 type AgentToolPolicyDraft = {
@@ -6104,160 +6090,14 @@ export function AgentsRoute() {
                       ))}
                     </VNativeSelect>
                   </VFieldRow>
-                  <section className={styles.fieldWide} title={contextCompressionPolicyLine}>
-                    <span>{copy.contextCompressionPolicy}</span>
-                    <div className={styles.compressionPolicyGrid}>
-                      <VFieldRow label={copy.contextCompressionPolicy}>
-                        <VNativeSelect
-                          value={configDraft.contextCompressionPolicy.mode}
-                          onChange={(event) => updateContextCompressionDraft({
-                            mode: event.target.value === "custom" ? "custom" : "inherit",
-                          })}
-                        >
-                          <option value="inherit">{copy.contextCompressionInherit}</option>
-                          <option value="custom">{copy.contextCompressionCustom}</option>
-                        </VNativeSelect>
-                      </VFieldRow>
-                      <VCheckbox
-                        isSelected={configDraft.contextCompressionPolicy.enabled}
-                        isDisabled={!contextCompressionCustom}
-                        onChange={(value) => updateContextCompressionDraft({ enabled: value })}
-                      >
-                        {copy.contextCompressionEnabled}
-                      </VCheckbox>
-                      <VFieldRow label={copy.contextCompressionMaxTokenLimit}>
-                        <VNativeInput
-                          type="number"
-                          min={1}
-                          value={configDraft.contextCompressionPolicy.maxTokenLimit}
-                          disabled={!contextCompressionCustom}
-                          onChange={(event) => updateContextCompressionDraft({ maxTokenLimit: event.target.value })}
-                        />
-                      </VFieldRow>
-                      <VFieldRow label={copy.contextCompressionMaxCount}>
-                        <VNativeInput
-                          type="number"
-                          min={0}
-                          value={configDraft.contextCompressionPolicy.maxCompressionsPerSession}
-                          disabled={!contextCompressionCustom}
-                          onChange={(event) => updateContextCompressionDraft({ maxCompressionsPerSession: event.target.value })}
-                        />
-                      </VFieldRow>
-                    </div>
-                    <div className={styles.compressionPolicySubgrid}>
-                      <VFieldRow label={`${copy.contextCompressionThresholds} · ${lang === "zh" ? "轻量" : "Light"}`}>
-                        <VNativeInput
-                          type="number"
-                          min={1}
-                          max={100}
-                          value={configDraft.contextCompressionPolicy.lightThreshold}
-                          disabled={!contextCompressionCustom}
-                          onChange={(event) => updateContextCompressionDraft({ lightThreshold: event.target.value })}
-                        />
-                      </VFieldRow>
-                      <VFieldRow label={`${copy.contextCompressionThresholds} · ${lang === "zh" ? "标准" : "Standard"}`}>
-                        <VNativeInput
-                          type="number"
-                          min={1}
-                          max={100}
-                          value={configDraft.contextCompressionPolicy.standardThreshold}
-                          disabled={!contextCompressionCustom}
-                          onChange={(event) => updateContextCompressionDraft({ standardThreshold: event.target.value })}
-                        />
-                      </VFieldRow>
-                      <VFieldRow label={`${copy.contextCompressionThresholds} · ${lang === "zh" ? "深度" : "Deep"}`}>
-                        <VNativeInput
-                          type="number"
-                          min={1}
-                          max={100}
-                          value={configDraft.contextCompressionPolicy.deepThreshold}
-                          disabled={!contextCompressionCustom}
-                          onChange={(event) => updateContextCompressionDraft({ deepThreshold: event.target.value })}
-                        />
-                      </VFieldRow>
-                      <VFieldRow label={`${copy.contextCompressionThresholds} · ${lang === "zh" ? "紧急" : "Emergency"}`}>
-                        <VNativeInput
-                          type="number"
-                          min={1}
-                          max={100}
-                          value={configDraft.contextCompressionPolicy.emergencyThreshold}
-                          disabled={!contextCompressionCustom}
-                          onChange={(event) => updateContextCompressionDraft({ emergencyThreshold: event.target.value })}
-                        />
-                      </VFieldRow>
-                      <VFieldRow label={`${copy.contextCompressionSummaryChars} · ${lang === "zh" ? "轻量" : "Light"}`}>
-                        <VNativeInput
-                          type="number"
-                          min={1}
-                          value={configDraft.contextCompressionPolicy.lightSummaryChars}
-                          disabled={!contextCompressionCustom}
-                          onChange={(event) => updateContextCompressionDraft({ lightSummaryChars: event.target.value })}
-                        />
-                      </VFieldRow>
-                      <VFieldRow label={`${copy.contextCompressionSummaryChars} · ${lang === "zh" ? "标准" : "Standard"}`}>
-                        <VNativeInput
-                          type="number"
-                          min={1}
-                          value={configDraft.contextCompressionPolicy.standardSummaryChars}
-                          disabled={!contextCompressionCustom}
-                          onChange={(event) => updateContextCompressionDraft({ standardSummaryChars: event.target.value })}
-                        />
-                      </VFieldRow>
-                      <VFieldRow label={`${copy.contextCompressionSummaryChars} · ${lang === "zh" ? "深度" : "Deep"}`}>
-                        <VNativeInput
-                          type="number"
-                          min={1}
-                          value={configDraft.contextCompressionPolicy.deepSummaryChars}
-                          disabled={!contextCompressionCustom}
-                          onChange={(event) => updateContextCompressionDraft({ deepSummaryChars: event.target.value })}
-                        />
-                      </VFieldRow>
-                      <VFieldRow label={`${copy.contextCompressionSummaryChars} · ${lang === "zh" ? "紧急" : "Emergency"}`}>
-                        <VNativeInput
-                          type="number"
-                          min={1}
-                          value={configDraft.contextCompressionPolicy.emergencySummaryChars}
-                          disabled={!contextCompressionCustom}
-                          onChange={(event) => updateContextCompressionDraft({ emergencySummaryChars: event.target.value })}
-                        />
-                      </VFieldRow>
-                    </div>
-                    <div className={styles.compressionPolicyFooter}>
-                      <VFieldRow label={copy.contextCompressionKeepAi}>
-                        <VNativeInput
-                          type="number"
-                          min={0}
-                          value={configDraft.contextCompressionPolicy.keepAiMessages}
-                          disabled={!contextCompressionCustom}
-                          onChange={(event) => updateContextCompressionDraft({ keepAiMessages: event.target.value })}
-                        />
-                      </VFieldRow>
-                      <VCheckbox
-                        isSelected={configDraft.contextCompressionPolicy.preserveErrors}
-                        isDisabled={!contextCompressionCustom}
-                        onChange={(value) => updateContextCompressionDraft({ preserveErrors: value })}
-                      >
-                        {copy.contextCompressionPreserveErrors}
-                      </VCheckbox>
-                      <VCheckbox
-                        isSelected={configDraft.contextCompressionPolicy.extractKeyDecisions}
-                        isDisabled={!contextCompressionCustom}
-                        onChange={(value) => updateContextCompressionDraft({ extractKeyDecisions: value })}
-                      >
-                        {copy.contextCompressionExtractDecisions}
-                      </VCheckbox>
-                    </div>
-                    <div className={styles.configDeepLinkRow}>
-                      <VButton
-                        type="button"
-                        variant="secondary"
-                        icon={<ExternalLink size={15} />}
-                        onPress={() => navigate(selectedAgentContextConfigRoute)}
-                      >
-                        {lang === "zh" ? "去上下文配置" : "Open context config"}
-                      </VButton>
-                    </div>
-                  </section>
+                  <AgentContextCompressionPanel
+                    copy={copy}
+                    lang={lang}
+                    policy={configDraft.contextCompressionPolicy}
+                    title={contextCompressionPolicyLine}
+                    onPolicyChange={updateContextCompressionDraft}
+                    onOpenContextConfig={() => navigate(selectedAgentContextConfigRoute)}
+                  />
                 </div>
                 {notice ? (
                   <p className={notice.tone === "error" ? styles.errorText : styles.successText}>{notice.text}</p>
