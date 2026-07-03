@@ -30,6 +30,10 @@ const modeMembershipPanelSource = readFileSync(
   new URL("./AgentModeMembershipPanel.tsx", import.meta.url),
   "utf-8",
 );
+const personaProfilePanelSource = readFileSync(
+  new URL("./AgentPersonaProfilePanel.tsx", import.meta.url),
+  "utf-8",
+);
 const filterRailSource = readFileSync(
   new URL("../components/vui/product/agent-management/AgentFilterRail.tsx", import.meta.url),
   "utf-8",
@@ -569,12 +573,20 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("updatedAgentWorkspaceCache");
     expect(routeSource).toContain("setPersonaDraft(personaDraftFromAgent(agent))");
     expect(routeSource).toContain("draftSyncSourceRef.current = draftSyncSourceFromAgent(workspace, agent)");
-    expect(routeSource).toContain("copy.personaTitle");
-    expect(routeSource).toContain("copy.gender");
-    expect(routeSource).toContain("copy.age");
-    expect(routeSource).toContain("copy.communicationStyle");
-    expect(routeSource).toContain("copy.collaborationPreference");
-    expect(routeSource).toContain("copy.identityNotes");
+    expect(routeSource).toContain("<AgentPersonaProfilePanel");
+    expect(routeSource).toContain("summary={personaProfileSummary(selectedAgent, lang)}");
+    expect(routeSource).toContain("draft={personaDraft}");
+    expect(routeSource).toContain("dirty={personaDirty}");
+    expect(routeSource).toContain("canSave={canSavePersona}");
+    expect(routeSource).toContain("pending={selectedAgentPersonaPending}");
+    expect(routeSource).toContain("onDraftChange={updatePersonaDraft}");
+    expect(routeSource).toContain("onSave={savePersonaProfile}");
+    expect(personaProfilePanelSource).toContain("copy.personaTitle");
+    expect(personaProfilePanelSource).toContain("copy.gender");
+    expect(personaProfilePanelSource).toContain("copy.age");
+    expect(personaProfilePanelSource).toContain("copy.communicationStyle");
+    expect(personaProfilePanelSource).toContain("copy.collaborationPreference");
+    expect(personaProfilePanelSource).toContain("copy.identityNotes");
     expect(routeSource).toContain("styles.fieldWide");
     expect(routeSource).toContain("updatePersonaMutation");
     expect(routeSource).not.toContain("recommendAgents");
@@ -1193,6 +1205,7 @@ describe("AgentsRoute layout contract", () => {
       ...sourceBlocksForStyle("editorActions", archiveZonePanelSource),
       ...sourceBlocksForStyle("editorActions", debugResetPanelSource),
       ...sourceBlocksForStyle("editorActions", modeMembershipPanelSource),
+      ...sourceBlocksForStyle("editorActions", personaProfilePanelSource),
       ...sourceBlocksForStyle("editorActions", toolSummaryPanelSource),
     ];
     const deepLinkActionBlocks = sourceBlocksForStyle("configDeepLinkRow");
