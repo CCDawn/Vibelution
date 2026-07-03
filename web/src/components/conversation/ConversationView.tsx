@@ -52,7 +52,7 @@ import {
   type AgentMessageOperation,
   type AgentMessageOperationKind,
   type AgentMessageReActOperationGroup,
-} from "./conversationOperations";
+} from "./agentMessageOperations";
 import {
   buildAgentMessageTimelineItems,
   type AgentMessageTimelineItem,

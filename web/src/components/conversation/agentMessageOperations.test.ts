@@ -1,15 +1,18 @@
+import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { ConversationMessage } from "../../api/types";
 import { conversationMessageToAgentMessage } from "../../agent-thread/adapters";
 import type { AgentMessage } from "../../agent-thread";
-import * as conversationOperationsModule from "./conversationOperations";
-import conversationOperationsSource from "./conversationOperations.ts?raw";
+import * as agentMessageOperationsModule from "./agentMessageOperations";
+import agentMessageTimelineSource from "./agentMessageTimeline.ts?raw";
+import conversationViewSource from "./ConversationView.tsx?raw";
+import agentMessageOperationsSource from "./agentMessageOperations.ts?raw";
 import {
   buildAgentMessageOperationGroups,
   buildAgentMessageOperations,
   buildAgentMessageReActOperationGroups,
-} from "./conversationOperations";
+} from "./agentMessageOperations";
 
 const labels = {
   thought: "Deep thinking",
@@ -25,33 +28,42 @@ function operationGroupsForConversationMessage(message: ConversationMessage) {
   return buildAgentMessageOperationGroups(conversationMessageToAgentMessage(message), labels);
 }
 
-describe("conversationOperations", () => {
+describe("agentMessageOperations", () => {
+  it("uses the AgentMessage operation module path as the only production entry", () => {
+    expect(existsSync(new URL("./agentMessageOperations.ts", import.meta.url))).toBe(true);
+    expect(existsSync(new URL("./conversationOperations.ts", import.meta.url))).toBe(false);
+    expect(agentMessageTimelineSource).toContain("./agentMessageOperations");
+    expect(conversationViewSource).toContain("./agentMessageOperations");
+    expect(agentMessageTimelineSource).not.toContain("./conversationOperations");
+    expect(conversationViewSource).not.toContain("./conversationOperations");
+  });
+
   it("keeps display normalization helpers internal to the operation model", () => {
-    expect("normalizeTimelineOperations" in conversationOperationsModule).toBe(false);
-    expect("displayToolLabel" in conversationOperationsModule).toBe(false);
+    expect("normalizeTimelineOperations" in agentMessageOperationsModule).toBe(false);
+    expect("displayToolLabel" in agentMessageOperationsModule).toBe(false);
   });
 
   it("exports ReAct grouping through AgentMessage naming only", () => {
-    expect("buildAgentMessageReActOperationGroups" in conversationOperationsModule).toBe(true);
-    expect("buildConversationReActOperationGroups" in conversationOperationsModule).toBe(false);
-    expect(conversationOperationsSource).toContain("AgentMessageReActOperationGroup");
-    expect(conversationOperationsSource).not.toContain("ConversationReActOperationGroup");
+    expect("buildAgentMessageReActOperationGroups" in agentMessageOperationsModule).toBe(true);
+    expect("buildConversationReActOperationGroups" in agentMessageOperationsModule).toBe(false);
+    expect(agentMessageOperationsSource).toContain("AgentMessageReActOperationGroup");
+    expect(agentMessageOperationsSource).not.toContain("ConversationReActOperationGroup");
   });
 
   it("exports operation model types through AgentMessage naming only", () => {
-    expect(conversationOperationsSource).toContain("export type AgentMessageOperationKind");
-    expect(conversationOperationsSource).toContain("export type AgentMessageOperation =");
-    expect(conversationOperationsSource).toContain("export type AgentMessageOperationLabels");
-    expect(conversationOperationsSource).toContain("export type AgentMessageOperationGroups");
-    expect(conversationOperationsSource).not.toContain("export type ConversationOperationKind");
-    expect(conversationOperationsSource).not.toContain("export type ConversationOperation =");
-    expect(conversationOperationsSource).not.toContain("export type ConversationOperationLabels");
-    expect(conversationOperationsSource).not.toContain("export type ConversationOperationGroups");
+    expect(agentMessageOperationsSource).toContain("export type AgentMessageOperationKind");
+    expect(agentMessageOperationsSource).toContain("export type AgentMessageOperation =");
+    expect(agentMessageOperationsSource).toContain("export type AgentMessageOperationLabels");
+    expect(agentMessageOperationsSource).toContain("export type AgentMessageOperationGroups");
+    expect(agentMessageOperationsSource).not.toContain("export type ConversationOperationKind");
+    expect(agentMessageOperationsSource).not.toContain("export type ConversationOperation =");
+    expect(agentMessageOperationsSource).not.toContain("export type ConversationOperationLabels");
+    expect(agentMessageOperationsSource).not.toContain("export type ConversationOperationGroups");
   });
 
   it("keeps the AgentMessage operation model decoupled from the conversation DTO", () => {
-    expect(conversationOperationsSource).not.toContain("../../api/types");
-    expect(conversationOperationsSource).not.toContain("ConversationFeedbackEvent");
+    expect(agentMessageOperationsSource).not.toContain("../../api/types");
+    expect(agentMessageOperationsSource).not.toContain("ConversationFeedbackEvent");
   });
 
   it("builds operation groups from AgentMessage parts", () => {
