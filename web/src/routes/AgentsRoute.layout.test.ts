@@ -38,6 +38,10 @@ const avatarEditorPanelSource = readFileSync(
   new URL("./AgentAvatarEditorPanel.tsx", import.meta.url),
   "utf-8",
 );
+const returnBannerPanelSource = readFileSync(
+  new URL("./AgentReturnBannerPanel.tsx", import.meta.url),
+  "utf-8",
+);
 
 function sourceBlocksForStyle(styleName: string, source = routeSource): string[] {
   const marker = `className={styles.${styleName}}`;
@@ -146,9 +150,10 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('normalized === "research_flow"');
     expect(routeSource).toContain("返回科研流程画布");
     expect(routeSource).toContain("returnBannerTitle: \"返回跳转前页面\"");
-    expect(routeSource).toContain("className={styles.returnBanner}");
-    expect(routeSource).toContain("className={styles.returnBannerButton}");
-    expect(routeSource).toContain("onClick={() => navigate(returnToPath)}");
+    expect(routeSource).toContain("AgentReturnBannerPanel");
+    expect(routeSource).toContain("onReturn={() => navigate(returnToPath)}");
+    expect(returnBannerPanelSource).toContain("className={styles.returnBanner}");
+    expect(returnBannerPanelSource).toContain("className={styles.returnBannerButton}");
     expect(routeSource).toContain("if (requestedAgentId && selectedAgent?.agentId === requestedAgentId)");
     expect(routeSource).not.toContain("className={styles.returnButton}");
     expect(styles.returnBanner).toBeTruthy();
@@ -494,7 +499,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("<small>{toolPolicySourceLine}</small>");
     expect(routeSource).toContain("title={copy.createAgentHint}");
     expect(routeSource).toContain("title={copy.createAgentToolBundlesHint}");
-    expect(routeSource).toContain("title={copy.returnBannerHint}");
+    expect(returnBannerPanelSource).toContain("title={copy.returnBannerHint}");
     expect(avatarEditorPanelSource).toContain("title={copy.avatarEditorHint}");
     expect(routeSource).toContain("title={copy.routeHint}");
     expect(managementBriefPanelSource).toContain("title={copy.managementBriefHint}");
