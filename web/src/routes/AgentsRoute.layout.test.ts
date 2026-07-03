@@ -34,6 +34,10 @@ const activityHistoryPanelSource = readFileSync(
   new URL("./AgentActivityHistoryPanel.tsx", import.meta.url),
   "utf-8",
 );
+const avatarEditorPanelSource = readFileSync(
+  new URL("./AgentAvatarEditorPanel.tsx", import.meta.url),
+  "utf-8",
+);
 
 function sourceBlocksForStyle(styleName: string, source = routeSource): string[] {
   const marker = `className={styles.${styleName}}`;
@@ -158,11 +162,16 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("styles.detailPanel");
     expect(routeSource).toContain("<AgentDenseList");
     expect(routeSource).toContain("agent.avatarImageUrl");
-    expect(routeSource).toContain("styles.agentAvatarImage");
+    expect(routeSource).toContain("AgentAvatarEditorPanel");
+    expect(avatarEditorPanelSource).toContain("styles.agentAvatarImage");
     expect(routeSource).toContain("/api/agents/avatar-options");
     expect(routeSource).toContain("/avatar-image");
     expect(routeSource).toContain("/avatar");
-    expect(routeSource).toContain("styles.avatarEditorPanel");
+    expect(routeSource).not.toContain("styles.avatarEditorPanel");
+    expect(avatarEditorPanelSource).toContain("styles.avatarEditorPanel");
+    expect(avatarEditorPanelSource).not.toContain("useQuery");
+    expect(avatarEditorPanelSource).not.toContain("useMutation");
+    expect(avatarEditorPanelSource).not.toContain("fetchJson");
     expect(routeSource).not.toContain("agentCardGrid");
   });
 
@@ -219,7 +228,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("label: healthStatusLabel");
     expect(routeSource).toContain("title: healthStatusDescription");
     expect(routeSource).toContain("ariaLabel: `${copy.workspaceHealthStatus}: ${healthStatusLabel}. ${healthStatusDescription}`");
-    expect(routeSource).toContain("aria-label={copy.editAvatar}");
+    expect(avatarEditorPanelSource).toContain("aria-label={copy.editAvatar}");
   });
 
   it("shows the unified Agent card sections needed by later editing phases", () => {
@@ -486,7 +495,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("title={copy.createAgentHint}");
     expect(routeSource).toContain("title={copy.createAgentToolBundlesHint}");
     expect(routeSource).toContain("title={copy.returnBannerHint}");
-    expect(routeSource).toContain("title={copy.avatarEditorHint}");
+    expect(avatarEditorPanelSource).toContain("title={copy.avatarEditorHint}");
     expect(routeSource).toContain("title={copy.routeHint}");
     expect(managementBriefPanelSource).toContain("title={copy.managementBriefHint}");
     expect(routeSource).toContain("title={copy.personaHint}");
@@ -1168,10 +1177,10 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("renders Agent micro action controls through VUI buttons instead of route-local button CSS", () => {
-    const avatarActionStart = routeSource.indexOf("className={styles.avatarEditorActions}");
-    const avatarActionSource = routeSource.slice(
+    const avatarActionStart = avatarEditorPanelSource.indexOf("className={styles.avatarEditorActions}");
+    const avatarActionSource = avatarEditorPanelSource.slice(
       avatarActionStart,
-      routeSource.indexOf("className={styles.avatarLibraryHeader}", avatarActionStart),
+      avatarEditorPanelSource.indexOf("className={styles.avatarLibraryHeader}", avatarActionStart),
     );
     const memoryPolicyStart = routeSource.indexOf("className={styles.memoryPolicyGrid}");
     const memoryPolicySource = routeSource.slice(
