@@ -1081,7 +1081,8 @@ def prompt_template_detail(template_id: str) -> dict:
 @router.patch("/prompt-templates/{template_id}")
 def prompt_template_update(template_id: str, payload: PromptTemplateUpdatePayload) -> dict:
     try:
-        return update_prompt_template(
+        _ensure_prompt_template_status_update_allowed(template_id, payload.status)
+        return _with_agent_workspace_cache_invalidated(update_prompt_template(
             template_id,
             name=payload.name,
             category=payload.category,
@@ -1089,7 +1090,7 @@ def prompt_template_update(template_id: str, payload: PromptTemplateUpdatePayloa
             content=payload.content,
             metadata=payload.metadata,
             status=payload.status,
-        )
+        ))
     except PromptTemplateError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -1097,9 +1098,30 @@ def prompt_template_update(template_id: str, payload: PromptTemplateUpdatePayloa
 @router.post("/prompt-templates/{template_id}/reset")
 def prompt_template_reset(template_id: str) -> dict:
     try:
-        return reset_prompt_template(template_id)
+        return _with_agent_workspace_cache_invalidated(reset_prompt_template(template_id))
     except PromptTemplateError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _ensure_prompt_template_status_update_allowed(template_id: str, next_status: str | None) -> None:
+    if str(next_status or "").strip().lower() != "inactive":
+        return
+    normalized = str(template_id or "").strip()
+    linked_agents = [
+        agent for agent in list_agents(include_archived=False, detail="summary")
+        if str(agent.get("promptTemplateId") or "").strip() == normalized
+        and str(agent.get("status") or "active").strip() != "archived"
+    ]
+    if not linked_agents:
+        return
+    labels = [
+        str(agent.get("displayName") or agent.get("agentCode") or agent.get("agentId") or "").strip()
+        for agent in linked_agents[:5]
+    ]
+    raise PromptTemplateError(
+        "Cannot deactivate prompt template used by active Agent: "
+        + ", ".join(label for label in labels if label)
+    )
 
 
 @router.get("/agent-mode-bindings")

@@ -75,6 +75,9 @@ function copyFor(lang: string) {
         hash: "内容哈希",
         content: "提示词内容",
         defaultPreview: "默认内容预览",
+        sourceAuthority: "内容权威",
+        sourceDrift: "源文件状态",
+        snapshotNotice: "已有会话保留创建时的提示词快照，新会话使用最新模板。",
         noAgents: "暂无 Agent 引用这个模板。",
         yes: "是",
         no: "否",
@@ -123,6 +126,9 @@ function copyFor(lang: string) {
         hash: "Content hash",
         content: "Prompt content",
         defaultPreview: "Default preview",
+        sourceAuthority: "Content authority",
+        sourceDrift: "Source status",
+        snapshotNotice: "Existing sessions keep the prompt snapshot captured at creation; new sessions use the latest template.",
         noAgents: "No Agents reference this template.",
         yes: "Yes",
         no: "No",
@@ -151,6 +157,8 @@ function templateSearchText(template: PromptTemplate, linkedAgents: AgentInstanc
     template.name,
     template.category,
     template.sourcePath,
+    template.sourceAuthority,
+    template.sourceDriftStatus,
     template.status,
     template.contentHash,
     ...linkedAgents.flatMap((agent) => [agent.agentId, agent.agentCode, agent.displayName, agent.roleKey, agent.primaryMode]),
@@ -206,7 +214,7 @@ export function PromptTemplatesRoute() {
 
   const templatesQuery = useQuery({
     queryKey: queryKeys.promptTemplates(),
-    queryFn: () => fetchJson<PromptTemplateWorkspace>("/api/prompt-templates"),
+    queryFn: () => fetchJson<PromptTemplateWorkspace>("/api/prompt-templates?includeInactive=true"),
   });
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
@@ -322,6 +330,15 @@ export function PromptTemplatesRoute() {
     }
   }, [activeTemplate, detailQuery.data]);
 
+  async function invalidatePromptTemplateState(templateId = "") {
+    await queryClient.invalidateQueries({ queryKey: queryKeys.promptTemplates() });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
+    const targetTemplateId = templateId || activeTemplateId;
+    if (targetTemplateId) {
+      await queryClient.invalidateQueries({ queryKey: ["prompt-templates", targetTemplateId, "detail"] });
+    }
+  }
+
   const saveMutation = useMutation({
     mutationFn: (payload: PromptEditorState) =>
       fetchJson<PromptTemplate>(`/api/prompt-templates/${encodeURIComponent(payload.templateId)}`, {
@@ -337,8 +354,7 @@ export function PromptTemplatesRoute() {
         setEditor(editorFromTemplate(template));
       }
       setNotice(copy.saved);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.promptTemplates() });
-      await queryClient.invalidateQueries({ queryKey: ["prompt-templates", template.promptTemplateId, "detail"] });
+      await invalidatePromptTemplateState(template.promptTemplateId);
     },
   });
   const resetMutation = useMutation({
@@ -352,15 +368,14 @@ export function PromptTemplatesRoute() {
         setEditor(editorFromTemplate(template));
       }
       setNotice(copy.resetDone);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.promptTemplates() });
-      await queryClient.invalidateQueries({ queryKey: ["prompt-templates", template.promptTemplateId, "detail"] });
+      await invalidatePromptTemplateState(template.promptTemplateId);
     },
   });
   const savePending = saveMutation.isPending && saveMutation.variables?.templateId === activeTemplateId;
   const resetPending = resetMutation.isPending && resetMutation.variables === activeTemplateId;
   const busy = savePending || resetPending || detailQuery.isFetching;
   const editableTemplate = detailQuery.data ?? activeTemplate;
-  const hasDefault = Boolean(editableTemplate?.defaultContent?.trim());
+  const hasDefault = Boolean(editableTemplate?.hasDefault);
   const categoriesInUse = new Set(templates.map((template) => template.category || "general"));
   const visibleFilters = CATEGORY_FILTERS.filter((filter) => filter === "all" || filter === "general" || categoriesInUse.has(filter));
 
@@ -423,10 +438,7 @@ export function PromptTemplatesRoute() {
     setBulkPromptPending(false);
     setNotice(promptBulkActionSummary(actionLabel, success, 0, failed, notes, lang));
     clearSelectedTemplates();
-    await queryClient.invalidateQueries({ queryKey: queryKeys.promptTemplates() });
-    if (activeTemplateId) {
-      await queryClient.invalidateQueries({ queryKey: ["prompt-templates", activeTemplateId, "detail"] });
-    }
+    await invalidatePromptTemplateState();
   }
 
   async function bulkResetTemplates() {
@@ -447,7 +459,7 @@ export function PromptTemplatesRoute() {
     let failed = 0;
     const notes: string[] = [];
     for (const template of selectedTemplates) {
-      if (!template.defaultContent?.trim()) {
+      if (!template.hasDefault) {
         skipped += 1;
         notes.push(`${template.name || template.promptTemplateId}: ${copy.bulkSkippedNoDefault}`);
         continue;
@@ -466,10 +478,7 @@ export function PromptTemplatesRoute() {
     setBulkPromptPending(false);
     setNotice(promptBulkActionSummary(copy.bulkResetResult, success, skipped, failed, notes, lang));
     clearSelectedTemplates();
-    await queryClient.invalidateQueries({ queryKey: queryKeys.promptTemplates() });
-    if (activeTemplateId) {
-      await queryClient.invalidateQueries({ queryKey: ["prompt-templates", activeTemplateId, "detail"] });
-    }
+    await invalidatePromptTemplateState();
   }
 
   return (
@@ -648,6 +657,7 @@ export function PromptTemplatesRoute() {
                       </span>
                       <span className={styles.templateMetaClass}>
                         <span className={styles.categoryPillClass}>{categoryLabel(template.category, lang)}</span>
+                        <span>{template.status || "active"}</span>
                         <span>{copy.usage}: {linkedCount}</span>
                         <span>{template.sourcePath || "-"}</span>
                       </span>
@@ -681,6 +691,14 @@ export function PromptTemplatesRoute() {
                   <strong className={styles.detailValueClass}>{editableTemplate.sourceExists ? copy.yes : copy.no}</strong>
                 </section>
                 <section className={styles.detailRowClass}>
+                  <span className={styles.detailLabelClass}>{copy.sourceAuthority}</span>
+                  <strong className={styles.detailValueClass}>{editableTemplate.sourceAuthority || "-"}</strong>
+                </section>
+                <section className={styles.detailRowClass}>
+                  <span className={styles.detailLabelClass}>{copy.sourceDrift}</span>
+                  <strong className={styles.detailValueClass}>{editableTemplate.sourceDriftStatus || "-"}</strong>
+                </section>
+                <section className={styles.detailRowClass}>
                   <span className={styles.detailLabelClass}>{copy.status}</span>
                   <strong className={styles.detailValueClass}>{editableTemplate.status || "active"}</strong>
                 </section>
@@ -702,7 +720,7 @@ export function PromptTemplatesRoute() {
                     <h3 className={styles.cardTitleClass}>{copy.defaultPreview}</h3>
                     <span className={hasDefault ? styles.statePillClass : styles.templateMetaClass}>{hasDefault ? copy.yes : copy.no}</span>
                   </div>
-                  <p className={styles.detailCardHelperClass}>{clip(editableTemplate.defaultContent || copy.resetUnavailable)}</p>
+                  <p className={styles.detailCardHelperClass}>{clip(editableTemplate.defaultContent || editableTemplate.defaultContentPreview || copy.resetUnavailable)}</p>
                   <section className={styles.detailRowClass}>
                     <span className={styles.detailLabelClass}>{copy.hash}</span>
                     <strong className={styles.detailValueClass}>{editableTemplate.contentHash || "-"}</strong>
@@ -728,6 +746,7 @@ export function PromptTemplatesRoute() {
               </div>
 
               <div className={styles.actionsClass}>
+                <p className={styles.helperTextClass}>{copy.snapshotNotice}</p>
                 {notice ? <p className={styles.noticeClass}>{notice}</p> : null}
                 {saveMutation.error ? <p className={styles.errorTextClass}>{errorMessage(saveMutation.error)}</p> : null}
                 {resetMutation.error ? <p className={styles.errorTextClass}>{errorMessage(resetMutation.error)}</p> : null}
