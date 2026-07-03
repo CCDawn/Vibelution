@@ -85,6 +85,7 @@ const productSharedParentStyleConsumers = [
   "routes/MemorySourceAndItemPanels.tsx",
   "routes/MemoryWarningStrip.tsx",
   "routes/TeamMemoryIndexPanel.tsx",
+  "routes/TeamSourceCollectionCandidatePanel.tsx",
   "routes/TeamSourceCollectionConversationPanel.tsx",
   "routes/TeamSourceCollectionFindingDetailsPanel.tsx",
   "routes/TeamSourceCollectionRunSettingsPanel.tsx",

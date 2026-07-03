@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
 import routeSource from "./TeamsRoute.tsx?raw";
 import teamMemoryIndexPanelSource from "./TeamMemoryIndexPanel.tsx?raw";
+import teamSourceCollectionCandidatePanelSource from "./TeamSourceCollectionCandidatePanel.tsx?raw";
 import teamSourceCollectionConversationPanelSource from "./TeamSourceCollectionConversationPanel.tsx?raw";
 import teamSourceCollectionFindingDetailsPanelSource from "./TeamSourceCollectionFindingDetailsPanel.tsx?raw";
 import teamSourceCollectionRunSettingsPanelSource from "./TeamSourceCollectionRunSettingsPanel.tsx?raw";
@@ -550,7 +551,8 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionScreeningPanelSource).toContain("sourceCollectionScreeningScrollHint");
     expect(teamSourceCollectionScreeningPanelSource).toContain("资料提炼复核候选列表，可向下滚动查看更多");
     expect(teamSourceCollectionScreeningPanelSource).toContain("向下滚动查看更多本页候选");
-    expect(routeSource).toContain("source-collection-candidates-panel");
+    expect(routeSource).toContain("TeamSourceCollectionCandidatePanel");
+    expect(teamSourceCollectionCandidatePanelSource).toContain("source-collection-candidates-panel");
     expect(routeSource).toContain("source-collection-graph-panel");
     expect(routeSource).toContain("source-collection-memory-panel");
     expect(routeSource).not.toContain("researchView=candidates");
@@ -854,7 +856,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionCandidateQualityState(candidate).approved");
     expect(routeSource).toContain("source_needs_quality_revision: \"需补资料\"");
     expect(routeSource).toContain("source_screened: \"已审查\"");
-    expect(routeSource).toContain("sourceCollectionCandidateListShell");
+    expect(teamSourceCollectionCandidatePanelSource).toContain("sourceCollectionCandidateListShell");
     expect(routeSource).toContain("待 Agent 复核");
     expect(routeSource).not.toContain("待质检");
     expect(routeSource).not.toContain("workflowSourceCollectionPrimaryButton");
