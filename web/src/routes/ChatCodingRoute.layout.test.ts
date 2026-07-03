@@ -709,6 +709,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("styles.cacheDetailBoundaryTrack");
     expect(routeSource).toContain("styles.cacheDetailBoundaryHit");
     expect(routeSource).toContain("styles.cacheDetailBoundaryMiss");
+    expect(routeSource).toContain("--cache-boundary-hit-width");
+    expect(routeSource).toContain("--cache-boundary-miss-width");
+    expect(routeSource).toContain("--cache-boundary-unknown-width");
+    expect(routeSource).not.toContain("style={{ width: `${observedCachedPercent}%` }}");
+    expect(routeSource).not.toContain("style={{ width: `${observedMissedPercent}%` }}");
+    expect(routeSource).not.toContain("style={{ width: `${observedUnknownPercent}%` }}");
     expect(routeSource).toContain("observedCachedPercent");
     expect(routeSource).toContain("observedMissedPercent");
     expect(routeSource).toContain("styles.cacheDetailDonutPanel");
@@ -806,6 +812,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.tokenStatusRing).toContain("conic-gradient");
     expect(routeStyles.tokenStatusBar).toContain("[&>span]:w-[calc(var(--token-status-value)*1%)]");
     expect(routeStyles.cacheDetailBoundaryTrack).toContain("[&_span+span]:border-l");
+    expect(routeStyles.cacheDetailBoundaryHit).toContain("w-[var(--cache-boundary-hit-width)]");
+    expect(routeStyles.cacheDetailBoundaryMiss).toContain("w-[var(--cache-boundary-miss-width)]");
+    expect(routeStyles.cacheDetailBoundaryUnknown).toContain("w-[var(--cache-boundary-unknown-width)]");
     expect(routeStyles.cacheDonutSegmentToolDescriptions).toContain("stroke-[var(--accent-warm)]");
     expect(routeStyles.cacheDonutSegmentToolSchema).toContain("stroke-[var(--accent-warm)]");
     expect(routeStyles.contextCompositionSegmentSystem).toBeTypeOf("string");
