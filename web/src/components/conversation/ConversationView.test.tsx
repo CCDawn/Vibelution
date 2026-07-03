@@ -487,6 +487,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("projectAgentMessageTimelineMessages");
     expect(conversationViewSource).toContain("const activeAgentMessageTimelineProjection = useMemo");
     expect(conversationViewSource).toContain("activeAgentMessageTimelineProjection.messages");
+    expect(conversationViewSource).toContain("activeAgentMessageTimelineProjection.agentMessages");
     expect(conversationViewSource).toContain("activeAgentMessageTimelineProjection.streamingMessages");
     expect(conversationViewSource).toContain("activeAgentMessageTimelineProjection.rowIdentities");
     expect(conversationViewSource).toContain("captureTimelineRowKeyAnchor");
@@ -523,8 +524,10 @@ describe("ConversationView edit resend affordance", () => {
   });
 
   it("keeps AgentThread projection behind a focused hook", () => {
-    expect(conversationViewSource).toContain("useAgentThreadProjection");
-    expect(conversationViewSource).toContain("const agentThread = useAgentThreadProjection(sessionId, activeTimelineMessages)");
+    expect(conversationViewSource).toContain("useAgentThread");
+    expect(conversationViewSource).toContain("const activeAgentMessages = activeAgentMessageTimelineProjection.agentMessages");
+    expect(conversationViewSource).toContain("const agentThread = useAgentThread(sessionId, activeAgentMessages)");
+    expect(conversationViewSource).not.toContain("useAgentThreadProjection");
     expect(conversationViewSource).not.toContain("function useAgentThreadForTimelineMessages");
     expect(conversationViewSource).not.toContain("agentMessageCacheRef");
     expect(conversationViewSource).not.toContain("conversationMessagesToAgentThread(");

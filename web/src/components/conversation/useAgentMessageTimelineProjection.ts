@@ -1,5 +1,6 @@
 import type { ConversationMessage } from "../../api/types";
 import { conversationMessageToAgentMessage } from "../../agent-thread/adapters";
+import type { AgentMessage } from "../../agent-thread/types";
 import { answerProjectionContent } from "./conversationInternalStatus";
 import { mergeAgentFeedbackEvents } from "../../agent-thread/agentFeedbackEvents";
 import { projectAgentMessageProcessMessages } from "./agentMessageProcessProjection";
@@ -15,6 +16,7 @@ export type AgentMessageTimelineProjectionInput = {
 
 export type AgentMessageTimelineProjection = {
   messages: ConversationMessage[];
+  agentMessages: AgentMessage[];
   streamingMessages: ConversationMessage[];
   rowIdentities: AgentMessageTimelineRowIdentity[];
 };
@@ -158,6 +160,7 @@ export function projectAgentMessageTimelineMessages({
 
   return {
     messages: projectedMessages,
+    agentMessages: projectedAgentMessages,
     streamingMessages: projectedMessages.filter((message) => message.streaming),
     rowIdentities: buildAgentMessageTimelineRowIdentities(projectedAgentMessages),
   };
