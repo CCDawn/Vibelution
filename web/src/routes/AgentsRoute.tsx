@@ -91,6 +91,7 @@ import {
   type AgentOverviewPanelPolicy,
   type AgentOverviewTerritory,
 } from "./AgentOverviewPanel";
+import { AgentPersonaProfilePanel, type AgentPersonaDraft } from "./AgentPersonaProfilePanel";
 import {
   AgentReferencesPanel,
   type AgentReferenceItemView,
@@ -150,10 +151,6 @@ type AgentContextCompressionPolicyDraft = {
   keepAiMessages: string;
   preserveErrors: boolean;
   extractKeyDecisions: boolean;
-};
-
-type AgentPersonaDraft = Omit<AgentPersonaProfile, "expertise"> & {
-  expertise: string;
 };
 
 type AgentTaskDraft = Omit<AgentTaskProfile, "taskTypes"> & {
@@ -6472,74 +6469,18 @@ export function AgentsRoute() {
               </section>
 
               {selectedAgentRequiresPersona ? (
-              <section className={styles.configEditor}>
-                <div className={styles.panelHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{copy.personaTitle}</p>
-                    <h3>{personaProfileSummary(selectedAgent, lang)}</h3>
-                  </div>
-                  <span className={personaDirty ? styles.dirtyPill : styles.cleanPill}>
-                    {personaDirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}
-                  </span>
-                </div>
-                <div className={styles.editorGrid}>
-                  <VFieldRow label={copy.gender}>
-                    <VNativeInput value={personaDraft.gender} onChange={(event) => updatePersonaDraft({ gender: event.target.value })} />
-                  </VFieldRow>
-                  <VFieldRow label={copy.age}>
-                    <VNativeInput value={personaDraft.age} onChange={(event) => updatePersonaDraft({ age: event.target.value })} />
-                  </VFieldRow>
-                  <VFieldRow label={copy.pronouns}>
-                    <VNativeInput value={personaDraft.pronouns} onChange={(event) => updatePersonaDraft({ pronouns: event.target.value })} />
-                  </VFieldRow>
-                  <VFieldRow label={copy.expertise}>
-                    <VNativeInput
-                      value={personaDraft.expertise}
-                      placeholder={copy.expertisePlaceholder}
-                      onChange={(event) => updatePersonaDraft({ expertise: event.target.value })}
-                    />
-                  </VFieldRow>
-                  <VFieldRow label={copy.personality} className="col-span-full">
-                    <VNativeTextarea value={personaDraft.personality} onChange={(event) => updatePersonaDraft({ personality: event.target.value })} />
-                  </VFieldRow>
-                  <VFieldRow label={copy.communicationStyle} className="col-span-full">
-                    <VNativeTextarea
-                      value={personaDraft.communicationStyle}
-                      onChange={(event) => updatePersonaDraft({ communicationStyle: event.target.value })}
-                    />
-                  </VFieldRow>
-                  <VFieldRow label={copy.background} className="col-span-full">
-                    <VNativeTextarea value={personaDraft.background} onChange={(event) => updatePersonaDraft({ background: event.target.value })} />
-                  </VFieldRow>
-                  <VFieldRow label={copy.collaborationPreference} className="col-span-full">
-                    <VNativeTextarea
-                      value={personaDraft.collaborationPreference}
-                      onChange={(event) => updatePersonaDraft({ collaborationPreference: event.target.value })}
-                    />
-                  </VFieldRow>
-                  <VFieldRow label={copy.identityNotes} className="col-span-full">
-                    <VNativeTextarea value={personaDraft.identityNotes} onChange={(event) => updatePersonaDraft({ identityNotes: event.target.value })} />
-                  </VFieldRow>
-                </div>
-                <div className={styles.editorActions}>
-                  <VButton
-                    type="button"
-                    variant="secondary"
-                    isDisabled={!personaDirty || selectedAgentPersonaPending}
-                    onPress={() => setPersonaDraft(personaDraftFromAgent(selectedAgent))}
-                  >
-                    {copy.resetConfig}
-                  </VButton>
-                  <VButton
-                    type="button"
-                    variant="primary"
-                    isDisabled={!canSavePersona || selectedAgentPersonaPending}
-                    onPress={savePersonaProfile}
-                  >
-                    {selectedAgentPersonaPending ? copy.savingPersona : copy.savePersona}
-                  </VButton>
-                </div>
-              </section>
+              <AgentPersonaProfilePanel
+                copy={copy}
+                lang={lang}
+                summary={personaProfileSummary(selectedAgent, lang)}
+                draft={personaDraft}
+                dirty={personaDirty}
+                canSave={canSavePersona}
+                pending={selectedAgentPersonaPending}
+                onDraftChange={updatePersonaDraft}
+                onReset={() => setPersonaDraft(personaDraftFromAgent(selectedAgent))}
+                onSave={savePersonaProfile}
+              />
               ) : null}
 
               <section className={styles.configEditor} title={
