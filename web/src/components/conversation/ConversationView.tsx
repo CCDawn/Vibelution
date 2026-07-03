@@ -48,10 +48,10 @@ import {
 } from "./conversationInternalStatus";
 import {
   buildAgentMessageOperationGroups,
-  buildConversationReActOperationGroups,
+  buildAgentMessageReActOperationGroups,
   type ConversationOperation,
   type ConversationOperationKind,
-  type ConversationReActOperationGroup,
+  type AgentMessageReActOperationGroup,
 } from "./conversationOperations";
 import {
   buildAgentMessageTimelineItems,
@@ -1787,7 +1787,7 @@ export function ConversationView({
     return "pending";
   }
 
-  function reActGroupTone(group: ConversationReActOperationGroup) {
+  function reActGroupTone(group: AgentMessageReActOperationGroup) {
     return operationCollectionTone(group.operations);
   }
 
@@ -2002,7 +2002,7 @@ export function ConversationView({
     return compacted;
   }
 
-  function reActGroupDurationLabel(group: ConversationReActOperationGroup) {
+  function reActGroupDurationLabel(group: AgentMessageReActOperationGroup) {
     const durations = group.operations
       .map((operation) => operation.durationSeconds)
       .filter((duration): duration is number => typeof duration === "number" && Number.isFinite(duration) && duration > 0);
@@ -2012,11 +2012,11 @@ export function ConversationView({
     return formatDuration(durations.reduce((total, duration) => total + duration, 0));
   }
 
-  function reActActionOperations(group: ConversationReActOperationGroup) {
+  function reActActionOperations(group: AgentMessageReActOperationGroup) {
     return group.operations.filter((operation) => operation.kind === "tool");
   }
 
-  function reActThoughtItems(group: ConversationReActOperationGroup) {
+  function reActThoughtItems(group: AgentMessageReActOperationGroup) {
     const seen = new Set<string>();
     return group.operations
       .filter((operation) => operation.kind === "thought")
@@ -2034,7 +2034,7 @@ export function ConversationView({
       .filter((item): item is { id: string; value: string } => item !== null);
   }
 
-  function reActResultItems(group: ConversationReActOperationGroup) {
+  function reActResultItems(group: AgentMessageReActOperationGroup) {
     return group.operations
       .filter((operation) => operation.kind === "tool" || (operation.kind === "status" && Boolean(operation.error?.trim())))
       .map((operation) => {
@@ -2141,7 +2141,7 @@ export function ConversationView({
     return "";
   }
 
-  function shouldExpandReActGroupByDefault(group: ConversationReActOperationGroup) {
+  function shouldExpandReActGroupByDefault(group: AgentMessageReActOperationGroup) {
     const tone = reActGroupTone(group);
     return tone === "running" || tone === "failed" || tone === "pending";
   }
@@ -2654,7 +2654,7 @@ export function ConversationView({
     );
   }
 
-  function renderReActActionSection(group: ConversationReActOperationGroup) {
+  function renderReActActionSection(group: AgentMessageReActOperationGroup) {
     const actions = reActActionOperations(group);
     if (actions.length === 0) {
       return null;
@@ -2712,7 +2712,7 @@ export function ConversationView({
     );
   }
 
-  function renderReActThoughtSection(group: ConversationReActOperationGroup) {
+  function renderReActThoughtSection(group: AgentMessageReActOperationGroup) {
     const thoughts = reActThoughtItems(group);
     if (thoughts.length === 0) {
       return null;
@@ -2729,7 +2729,7 @@ export function ConversationView({
     );
   }
 
-  function renderReActResultSection(messageId: string, group: ConversationReActOperationGroup) {
+  function renderReActResultSection(messageId: string, group: AgentMessageReActOperationGroup) {
     const results = reActResultItems(group);
     if (results.length === 0) {
       return null;
@@ -2772,7 +2772,7 @@ export function ConversationView({
     );
   }
 
-  function renderReActOperationGroup(messageId: string, group: ConversationReActOperationGroup) {
+  function renderReActOperationGroup(messageId: string, group: AgentMessageReActOperationGroup) {
     if (group.operations.length === 0) {
       return null;
     }
@@ -2894,7 +2894,7 @@ export function ConversationView({
     if (visibleOperations.length === 0) {
       return renderCompactRequestSummary(operations);
     }
-    const reActGroups = buildConversationReActOperationGroups(visibleOperations);
+    const reActGroups = buildAgentMessageReActOperationGroups(visibleOperations);
     if (reActGroups.length === 0) {
       return renderCompactRequestSummary(operations);
     }
