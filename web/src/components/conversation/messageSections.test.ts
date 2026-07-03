@@ -7,11 +7,6 @@ import {
   agentMessageContentSections,
   agentMessageProcessSections,
   buildAgentMessageSectionState,
-  hasMentalBlock,
-  hasResponseBlock,
-  hasThoughtBlock,
-  hasToolBlock,
-  hasUserContent,
   imageArtifactForMessage,
   isAgentInboxMessage,
   isGroupRoomTranscriptMessage,
@@ -21,6 +16,7 @@ import {
   isTurnErrorMessage,
   researchOrgMessageChips,
 } from "./messageSections";
+import messageSectionsSource from "./messageSections.ts?raw";
 
 function message(overrides: Partial<ConversationMessage>): ConversationMessage {
   return {
@@ -32,7 +28,15 @@ function message(overrides: Partial<ConversationMessage>): ConversationMessage {
   };
 }
 
+function sectionState(message: ConversationMessage) {
+  return buildAgentMessageSectionState(conversationMessageToAgentMessage(message));
+}
+
 describe("messageSections", () => {
+  it("does not export retired ConversationMessage content or block helpers", () => {
+    expect(messageSectionsSource).not.toMatch(/export function (?:hasUserContent|has(?:Response|Thought|Mental|Tool)Block)\b/);
+  });
+
   it("builds AgentMessage section state from legacy assistant fields", () => {
     const assistantMessage = message({
       role: "assistant",
@@ -263,9 +267,10 @@ describe("messageSections", () => {
       role: "user",
       content: "你知道你上文说了什么吗",
     });
+    const state = sectionState(userMessage);
 
-    expect(hasUserContent(userMessage)).toBe(true);
-    expect(hasResponseBlock(userMessage)).toBe(false);
+    expect(state.hasUserContent).toBe(true);
+    expect(state.hasResponseBlock).toBe(false);
   });
 
   it("keeps assistant content in the response block", () => {
@@ -273,9 +278,10 @@ describe("messageSections", () => {
       role: "assistant",
       content: "我会先检查日志。",
     });
+    const state = sectionState(assistantMessage);
 
-    expect(hasUserContent(assistantMessage)).toBe(false);
-    expect(hasResponseBlock(assistantMessage)).toBe(true);
+    expect(state.hasUserContent).toBe(false);
+    expect(state.hasResponseBlock).toBe(true);
   });
 
   it.each([
@@ -288,7 +294,7 @@ describe("messageSections", () => {
     });
 
     expect(isRuntimeNoticeMessage(noticeMessage)).toBe(true);
-    expect(hasResponseBlock(noticeMessage)).toBe(false);
+    expect(sectionState(noticeMessage).hasResponseBlock).toBe(false);
   });
 
   it("keeps transient reasoning placeholders out of assistant response blocks", () => {
@@ -300,7 +306,7 @@ describe("messageSections", () => {
     });
 
     expect(isRuntimeStatusContent(statusMessage)).toBe(true);
-    expect(hasResponseBlock(statusMessage)).toBe(false);
+    expect(sectionState(statusMessage).hasResponseBlock).toBe(false);
   });
 
   it("keeps normal assistant replies that mention thinking visible", () => {
@@ -312,7 +318,7 @@ describe("messageSections", () => {
     });
 
     expect(isRuntimeStatusContent(assistantMessage)).toBe(false);
-    expect(hasResponseBlock(assistantMessage)).toBe(true);
+    expect(sectionState(assistantMessage).hasResponseBlock).toBe(true);
   });
 
   it.each([
@@ -327,9 +333,9 @@ describe("messageSections", () => {
 
     expect(isRuntimeNoticeMessage(errorMessage)).toBe(false);
     expect(isTurnErrorMessage(errorMessage)).toBe(true);
-    expect(hasThoughtBlock({ ...errorMessage, thought: "hidden" })).toBe(true);
-    expect(hasToolBlock({ ...errorMessage, toolCalls: [{ name: "tool", status: "done" }] })).toBe(true);
-    expect(hasResponseBlock(errorMessage)).toBe(false);
+    expect(sectionState({ ...errorMessage, thought: "hidden" }).hasThoughtBlock).toBe(true);
+    expect(sectionState({ ...errorMessage, toolCalls: [{ name: "tool", status: "done" }] }).hasToolBlock).toBe(true);
+    expect(sectionState(errorMessage).hasResponseBlock).toBe(false);
   });
 
   it("treats legacy provider failure summary replies as turn-error notices", () => {
@@ -342,9 +348,10 @@ describe("messageSections", () => {
 
     expect(isProviderFailureSummaryText(errorMessage.content)).toBe(true);
     expect(isTurnErrorMessage(errorMessage)).toBe(true);
-    expect(hasThoughtBlock(errorMessage)).toBe(true);
-    expect(hasToolBlock(errorMessage)).toBe(true);
-    expect(hasResponseBlock(errorMessage)).toBe(false);
+    const state = sectionState(errorMessage);
+    expect(state.hasThoughtBlock).toBe(true);
+    expect(state.hasToolBlock).toBe(true);
+    expect(state.hasResponseBlock).toBe(false);
   });
 
   it("treats failed image-generation artifact messages as turn-error notices", () => {
@@ -360,8 +367,9 @@ describe("messageSections", () => {
     });
 
     expect(isTurnErrorMessage(errorMessage)).toBe(true);
-    expect(hasToolBlock(errorMessage)).toBe(true);
-    expect(hasResponseBlock(errorMessage)).toBe(false);
+    const state = sectionState(errorMessage);
+    expect(state.hasToolBlock).toBe(true);
+    expect(state.hasResponseBlock).toBe(false);
   });
 
   it("does not classify user text as a runtime notice", () => {
@@ -430,7 +438,7 @@ describe("messageSections", () => {
     });
 
     expect(isGroupRoomTranscriptMessage(transcript)).toBe(true);
-    expect(hasResponseBlock(transcript)).toBe(false);
+    expect(sectionState(transcript).hasResponseBlock).toBe(false);
   });
 
   it("keeps assistant-only diagnostic sections scoped away from operator messages", () => {
@@ -453,9 +461,10 @@ describe("messageSections", () => {
       toolCalls: [{ name: "rg", status: "completed" }],
     });
 
-    expect(hasThoughtBlock(userMessage)).toBe(false);
-    expect(hasMentalBlock(userMessage)).toBe(false);
-    expect(hasToolBlock(userMessage)).toBe(false);
+    const state = sectionState(userMessage);
+    expect(state.hasThoughtBlock).toBe(false);
+    expect(state.hasMentalBlock).toBe(false);
+    expect(state.hasToolBlock).toBe(false);
   });
 
   it("extracts image artifact metadata into a typed section contract", () => {
