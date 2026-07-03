@@ -1691,6 +1691,7 @@ describe("TeamsRoute layout contract", () => {
 
   it("centers compact Team canvases and renders function role badges", () => {
     expect(routeSource).toContain("canvasViewStyle");
+    expect(routeSource).toContain("type TeamsRouteDynamicStyle");
     expect(routeSource).toContain("CANVAS_VIEWPORT_WIDTH");
     expect(routeSource).toContain("CANVAS_VIEWPORT_HEIGHT");
     expect(routeSource).toContain("canvasViewportStyle");
@@ -1703,6 +1704,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("--canvas-offset-x");
     expect(routeSource).toContain("--canvas-scale");
     expect(routeSource).toContain("--node-x");
+    expect(routeSource).toContain("teamCanvasNodeStyle(node)");
     expect(routeSource).toContain("roleBadgeTone");
     expect(routeSource).toContain("teamNodeFunctionLabel");
     expect(routeSource).toContain("能力管家");
@@ -1718,6 +1720,22 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.node).toContain("!absolute");
     expect(routeStyles.node).toContain("left-[calc(var(--canvas-offset-x,0px)+var(--node-x,0px))]");
     expect(routeStyles.node).toContain("top-[calc(var(--canvas-offset-y,0px)+var(--node-y,0px))]");
+  });
+
+  it("keeps Teams dynamic layout values behind typed CSS variable helpers", () => {
+    expect(routeSource).toContain("workflowGraphFrameStyle(visibleGraphLayout)");
+    expect(routeSource).toContain("workflowGraphFrameStyle(teamWorkflowCandidateGraphLayout)");
+    expect(routeSource).toContain("workflowGraphNodeStyle(node)");
+    expect(routeSource).toContain("teamCanvasNodeStyle(node)");
+    expect(routeSource).not.toContain("style={{");
+    expect(routeStyles.workflowGraphFrame).toContain("min-h-[var(--workflow-graph-height");
+    expect(routeStyles.workflowGraphFrame).toContain("w-[var(--workflow-graph-width");
+    expect(routeStyles.workflowGraphCanvas).toContain("relative");
+    expect(routeStyles.workflowGraphSvg).toContain("h-full");
+    expect(routeStyles.workflowGraphSvg).toContain("w-full");
+    expect(routeStyles.workflowGraphNode).toContain("absolute");
+    expect(routeStyles.workflowGraphNode).toContain("left-[var(--workflow-graph-node-x");
+    expect(routeStyles.workflowGraphNode).toContain("top-[var(--workflow-graph-node-y");
   });
 
   it("keeps read-only research canvas auto layout visual-only and deterministic", () => {
