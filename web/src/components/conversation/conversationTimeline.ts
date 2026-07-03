@@ -1,4 +1,3 @@
-import type { ConversationTimelineItem as ApiConversationTimelineItem } from "../../api/types";
 import type { AgentMessage, AgentMessagePart, AgentTextPart } from "../../agent-thread/types";
 import { AgentMessageOperation } from "./conversationOperations";
 
@@ -50,11 +49,28 @@ export type AgentMessageTimelineOptions = {
   includeAssistantText?: boolean;
 };
 
+export type AgentMessageTimelineServerItem = {
+  id: string;
+  turnId?: string;
+  messageId?: string;
+  sequence?: number;
+  kind: "thought" | "assistant_text" | "operation" | "command_group" | string;
+  status?: "pending" | "running" | "completed" | "failed" | string;
+  title?: string;
+  summary?: string;
+  text?: string;
+  preview?: string;
+  defaultExpanded?: boolean;
+  sourceOperationIds?: string[];
+  operationIds?: string[];
+  metadata?: Record<string, unknown>;
+};
+
 const agentTimelineItemsCache = new WeakMap<
   AgentMessage,
   {
     operations: AgentMessageOperation[];
-    serverItems: ApiConversationTimelineItem[] | undefined;
+    serverItems: AgentMessageTimelineServerItem[] | undefined;
     lang: string;
     includeAssistantText: boolean | undefined;
     items: AgentMessageTimelineItem[];
@@ -65,7 +81,7 @@ export function buildAgentMessageTimelineItems(
   message: AgentMessage,
   operations: AgentMessageOperation[],
   options: AgentMessageTimelineOptions,
-  serverItems?: ApiConversationTimelineItem[],
+  serverItems?: AgentMessageTimelineServerItem[],
 ): AgentMessageTimelineItem[] {
   if (message.role !== "assistant") {
     return [];
@@ -95,7 +111,7 @@ function buildAgentMessageTimelineItemsUncached(
   message: AgentMessage,
   operations: AgentMessageOperation[],
   options: AgentMessageTimelineOptions,
-  serverItems?: ApiConversationTimelineItem[],
+  serverItems?: AgentMessageTimelineServerItem[],
 ): AgentMessageTimelineItem[] {
   if ((serverItems?.length ?? 0) > 0) {
     return timelineItemsFromServer(serverItems ?? [], operations, options);
@@ -193,7 +209,7 @@ function isAgentAnswerTextPart(part: AgentMessagePart): part is AgentTextPart {
 }
 
 function timelineItemsFromServer(
-  serverItems: ApiConversationTimelineItem[],
+  serverItems: AgentMessageTimelineServerItem[],
   operations: AgentMessageOperation[],
   options: AgentMessageTimelineOptions,
 ): AgentMessageTimelineItem[] {
@@ -265,7 +281,7 @@ function timelineItemsFromServer(
 }
 
 function serverOperation(
-  item: ApiConversationTimelineItem,
+  item: AgentMessageTimelineServerItem,
   status: AgentMessageTimelineItemStatus,
 ): AgentMessageOperation {
   return {
