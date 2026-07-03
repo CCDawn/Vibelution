@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import routeSource from "./KernelTaskCenterRoute.tsx?raw";
+import stylesSource from "./KernelTaskCenterRoute.styles.ts?raw";
 import routerSource from "../app/router.tsx?raw";
 
 describe("KernelTaskCenterRoute layout contract", () => {
@@ -35,5 +36,34 @@ describe("KernelTaskCenterRoute layout contract", () => {
     expect(routeSource).toContain("useShellI18n");
     expect(routeSource).toContain("const COPY = {");
     expect(routeSource).not.toContain("useAppI18n");
+  });
+
+  it("presents Kernel as a ledger-first task chain instead of a logs surface", () => {
+    expect(routeSource).toContain("copy.taskChain");
+    expect(routeSource).toContain("copy.evidenceRefs");
+    expect(routeSource).toContain("copy.lifecycleTimeline");
+    expect(routeSource).not.toContain("copy.runtimeRefs");
+    expect(routeSource).not.toContain("copy.timeline");
+    expect(routeSource).not.toContain("运行证据");
+    expect(routeSource).not.toContain("Runtime evidence");
+    expect(routeSource).not.toContain("时间线");
+    expect(routeSource).not.toContain("/logs");
+
+    expect(stylesSource).toContain("ledgerFlowClass");
+    expect(stylesSource).toContain("ledgerBucketClass");
+    expect(stylesSource).toContain("evidenceRefListClass");
+    expect(stylesSource).toContain("lifecycleTimelineClass");
+    expect(stylesSource).not.toContain("timelineListClass");
+    expect(stylesSource).not.toContain("timelineRowClass");
+  });
+
+  it("allows Kernel task rows to render multiline content inside VButton", () => {
+    expect(routeSource).toContain("<VButton");
+    expect(stylesSource).toContain("data-slot=vui-button-content");
+    expect(stylesSource).toContain("data-slot=vui-button-label");
+    expect(stylesSource).toContain("!h-auto");
+    expect(stylesSource).toContain("!min-h-[112px]");
+    expect(stylesSource).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(stylesSource).toContain("whitespace-normal");
   });
 });
