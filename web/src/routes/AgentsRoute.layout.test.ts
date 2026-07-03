@@ -34,6 +34,10 @@ const configPolicyPanePanelSource = readFileSync(
   new URL("./AgentConfigPolicyPanePanel.tsx", import.meta.url),
   "utf-8",
 );
+const configReferencesPanePanelSource = readFileSync(
+  new URL("./AgentConfigReferencesPanePanel.tsx", import.meta.url),
+  "utf-8",
+);
 const createPanelSource = readFileSync(
   new URL("./AgentCreatePanel.tsx", import.meta.url),
   "utf-8",
@@ -733,13 +737,14 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("AgentModeMembershipDraft");
     expect(routeSource).toContain("membershipDraftFromWorkspace");
     expect(routeSource).toContain("/mode-membership");
-    expect(routeSource).toContain("<AgentModeMembershipPanel");
-    expect(routeSource).toContain("draft={membershipDraft}");
-    expect(routeSource).toContain("dirty={membershipDirty}");
-    expect(routeSource).toContain("canSave={canSaveMembership}");
-    expect(routeSource).toContain("pending={selectedAgentMembershipPending}");
-    expect(routeSource).toContain("onDraftChange={updateMembershipDraft}");
-    expect(routeSource).toContain("onSave={saveModeMembership}");
+    expect(routeSource).toContain("<AgentConfigReferencesPanePanel");
+    expect(configReferencesPanePanelSource).toContain("<AgentModeMembershipPanel");
+    expect(routeSource).toContain("draft: membershipDraft");
+    expect(routeSource).toContain("dirty: membershipDirty");
+    expect(routeSource).toContain("canSave: canSaveMembership");
+    expect(routeSource).toContain("pending: selectedAgentMembershipPending");
+    expect(routeSource).toContain("onDraftChange: updateMembershipDraft");
+    expect(routeSource).toContain("onSave: saveModeMembership");
     expect(modeMembershipPanelSource).toContain("chatDefault: value");
     expect(modeMembershipPanelSource).toContain("copy.researchPool");
     expect(modeMembershipPanelSource).toContain("copy.supervisedSlot");
@@ -753,7 +758,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("只读引用");
     expect(routeSource).toContain("Read-only");
     expect(routeSource).toContain("selectedAgent.references.filter((reference) => reference.kind === \"chat_room\").length");
-    expect(routeSource).toContain("AgentReferencesPanel");
+    expect(configReferencesPanePanelSource).toContain("AgentReferencesPanel");
     expect(routeSource).not.toContain("className={styles.roomMembershipList}");
     expect(routeSource).not.toContain("className={styles.roomCheckField}");
     expect(routeSource).toContain("compactProjectionRoute(room");
@@ -775,7 +780,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("reference.projectionEdit?.canonicalEditRoute || reference.sourceRef?.canonicalEditRoute");
     expect(routeSource).toContain("compactProjectionRoute(room");
     expect(routeSource).toContain('`/teams?team=${encodeURIComponent(reference.sourceId)}`');
-    expect(routeSource).toContain("onOpenRoute={(route) => navigate(route)}");
+    expect(routeSource).toContain("onOpenRoute: (route) => navigate(route)");
     expect(routeSource).not.toContain("className={styles.referenceList}");
   });
 
@@ -955,7 +960,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("selectedAgentRequiresTeamMembership");
     expect(routeSource).toContain("personaProfile={selectedAgentRequiresPersona ? {");
     expect(routeSource).toContain("taskProfile={selectedAgentRequiresTask ? {");
-    expect(routeSource).toContain("{selectedAgentRequiresTeamMembership ? (");
+    expect(routeSource).toContain("modeMembership={selectedAgentRequiresTeamMembership ? {");
     expect(routeSource).toContain("isWorkSession: createDraftIsWorkSession");
     expect(createPanelSource).toContain("{!isWorkSession ? (");
     expect(routeSource).toContain("const roleKey = workSession ? \"\" : draft.roleKey.trim()");
@@ -1410,8 +1415,8 @@ describe("AgentsRoute layout contract", () => {
     expect(memoryPolicySource).not.toContain("<button");
 
     expect(routeSource).not.toContain("styles.referenceRouteButton");
-    expect(routeSource).toContain("AgentReferencesPanel");
-    expect(routeSource).toContain("onOpenRoute={(route) => navigate(route)}");
+    expect(configReferencesPanePanelSource).toContain("AgentReferencesPanel");
+    expect(routeSource).toContain("onOpenRoute: (route) => navigate(route)");
 
     for (const block of timelineActionBlocks) {
       expect(block).toContain("<VButton");
