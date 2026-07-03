@@ -430,6 +430,9 @@ def _compact_source_collection_context_result(result_str: str, max_chars: int, c
     payload = _try_parse_json_object(result_str)
     if not payload:
         return None
+    raw_context_mode = str(payload.get("contextMode") or "compact").strip().lower() or "compact"
+    if raw_context_mode not in {"compact", "minimal", "retry_missing", "full"}:
+        raw_context_mode = "compact"
     record_page = payload.get("recordPage") if isinstance(payload.get("recordPage"), dict) else {}
     page = payload.get("candidatePage") if isinstance(payload.get("candidatePage"), dict) else {}
     records = [
@@ -442,10 +445,10 @@ def _compact_source_collection_context_result(result_str: str, max_chars: int, c
         compact_records.append(
             {
                 "recordId": str(item.get("recordId") or item.get("id") or "")[:160],
-                "title": str(item.get("title") or "")[:180],
+                "title": str(item.get("title") or "")[:80],
                 "sourceType": str(item.get("sourceType") or "")[:80],
-                "locator": str(item.get("doi") or item.get("sourceUrl") or item.get("sourceRef") or "")[:240],
-                "summaryPreview": str(item.get("summary") or "")[:220],
+                "locator": str(item.get("doi") or item.get("sourceUrl") or item.get("sourceRef") or "")[:120],
+                "summaryPreview": str(item.get("summary") or "")[:48],
             }
         )
     candidates = [
@@ -455,81 +458,131 @@ def _compact_source_collection_context_result(result_str: str, max_chars: int, c
     ]
     compact_candidates = []
     for item in candidates[:12]:
-        doi = str(item.get("doi") or "")[:160]
-        source_url = str(item.get("sourceUrl") or "")[:240]
-        source_path = str(item.get("sourcePath") or "")[:240]
+        doi = str(item.get("doi") or "")[:120]
+        source_url = str(item.get("sourceUrl") or "")[:120]
+        source_path = str(item.get("sourcePath") or "")[:120]
         compact_candidates.append(
             {
                 "candidateId": str(item.get("candidateId") or item.get("id") or "")[:160],
-                "title": str(item.get("title") or "")[:180],
+                "title": str(item.get("title") or "")[:80],
                 "sourceKind": str(item.get("sourceKind") or "")[:80],
                 "locator": doi or source_url or source_path,
                 "qualityBucket": str(item.get("qualityBucket") or "")[:80],
-                "summaryPreview": str(item.get("summary") or "")[:220],
+                "summaryPreview": str(item.get("summary") or item.get("summaryPreview") or "")[:48],
             }
         )
     compact_usage = {
         "readTool": "source_collection_context_tool",
         "writebackTool": "source_collection_stage_writeback_tool",
-        "continuationHint": continuation_hint,
+        "continuationHint": "",
     }
     if record_page.get("hasMore"):
         compact_usage["recordContinuationHint"] = (
-            "继续调用 source_collection_context_tool，"
-            f"record_offset={record_page.get('nextOffset')}, record_limit={record_page.get('limit') or 5}, context_mode=compact。"
+            "source_collection_context_tool("
+            f"record_offset={record_page.get('nextOffset')},record_limit={record_page.get('limit') or 5},context_mode={raw_context_mode})"
         )
-    if page.get("hasMore") and not continuation_hint:
+    if page.get("hasMore"):
         compact_usage["continuationHint"] = (
-            "继续调用 source_collection_context_tool，"
-            f"candidate_offset={page.get('nextOffset')}, candidate_limit={page.get('limit') or 5}, context_mode=compact。"
+            "source_collection_context_tool("
+            f"candidate_offset={page.get('nextOffset')},candidate_limit={page.get('limit') or 5},context_mode={raw_context_mode})"
         )
+    elif continuation_hint:
+        compact_usage["continuationHint"] = continuation_hint[:180]
     compact = {
         "status": payload.get("status"),
         "contextKind": payload.get("contextKind"),
-        "contextMode": "compact_from_tool_result",
+        "contextMode": f"{raw_context_mode}_from_tool_result",
         "fieldMode": "preview_only",
         "candidateFieldsTruncated": True,
         "doNotUsePreviewAsEvidence": True,
         "visibleCandidateCount": len(compact_candidates),
         "omittedReturnedCandidateCount": max(0, int(page.get("returned") or len(compact_candidates)) - len(compact_candidates)),
-        "visibleRecordCount": len(compact_records),
-        "omittedReturnedRecordCount": max(0, int(record_page.get("returned") or len(compact_records)) - len(compact_records)),
         "counts": payload.get("counts") if isinstance(payload.get("counts"), dict) else {},
-        "excludedSourceSummary": payload.get("excludedSourceSummary") if isinstance(payload.get("excludedSourceSummary"), dict) else {},
-        "recordPage": record_page,
-        "recordIds": [item.get("recordId") for item in compact_records if item.get("recordId")],
-        "records": compact_records,
+        "excludedSourceSummary": _compact_source_collection_tool_excluded_summary(
+            payload.get("excludedSourceSummary") if isinstance(payload.get("excludedSourceSummary"), dict) else {}
+        ),
         "candidatePage": page,
         "candidateIds": [item.get("candidateId") for item in compact_candidates if item.get("candidateId")],
         "candidates": compact_candidates,
-        "unassessedCandidateIds": payload.get("unassessedCandidateIds") if isinstance(payload.get("unassessedCandidateIds"), list) else [],
         "usage": compact_usage,
         "truncationGuard": {
             "originalLength": len(result_str),
-            "message": "source_collection_context_tool result was structurally compacted; previews are not final evidence.",
+            "message": "structured_compact; previews_not_evidence",
         },
     }
-    content = json.dumps(compact, ensure_ascii=False, sort_keys=True)
+    if compact_records or record_page.get("hasMore") or record_page.get("total"):
+        compact["visibleRecordCount"] = len(compact_records)
+        compact["omittedReturnedRecordCount"] = max(0, int(record_page.get("returned") or len(compact_records)) - len(compact_records))
+        compact["recordPage"] = record_page
+    unassessed_candidate_ids = payload.get("unassessedCandidateIds") if isinstance(payload.get("unassessedCandidateIds"), list) else []
+    if unassessed_candidate_ids:
+        compact["unassessedCandidateIds"] = unassessed_candidate_ids[:40]
+    if compact_records:
+        compact["recordIds"] = [item.get("recordId") for item in compact_records if item.get("recordId")]
+        compact["records"] = compact_records
+    content = json.dumps(compact, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     if len(content) <= max_chars + 500:
+        return content
+    compact["candidates"] = [
+        {
+            "candidateId": str(item.get("candidateId") or "")[:160],
+            "title": str(item.get("title") or "")[:32],
+            "locator": str(item.get("locator") or "")[:80],
+            "summaryPreview": str(item.get("summaryPreview") or "")[:24],
+        }
+        for item in compact_candidates[:12]
+    ]
+    compact["candidateIds"] = [item.get("candidateId") for item in compact["candidates"] if item.get("candidateId")]
+    compact["usage"] = {
+        key: value
+        for key, value in {
+            "readTool": "source_collection_context_tool",
+            "continuationHint": compact_usage.get("continuationHint"),
+            "recordContinuationHint": compact_usage.get("recordContinuationHint"),
+        }.items()
+        if value
+    }
+    compact.pop("status", None)
+    compact.pop("contextKind", None)
+    compact.pop("truncationGuard", None)
+    if not compact_records and not (record_page.get("hasMore") or record_page.get("total")):
+        compact.pop("visibleRecordCount", None)
+        compact.pop("omittedReturnedRecordCount", None)
+        compact.pop("recordPage", None)
+        compact.pop("recordIds", None)
+        compact.pop("records", None)
+    content = json.dumps(compact, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    if len(content) <= max_chars + 700:
         return content
     for item in compact_candidates:
-        item["summaryPreview"] = str(item.get("summaryPreview") or "")[:80]
-        item["title"] = str(item.get("title") or "")[:120]
+        item["summaryPreview"] = str(item.get("summaryPreview") or "")[:24]
+        item["title"] = str(item.get("title") or "")[:64]
+        item["locator"] = str(item.get("locator") or "")[:96]
     for item in compact_records:
-        item["summaryPreview"] = str(item.get("summaryPreview") or "")[:80]
-        item["title"] = str(item.get("title") or "")[:120]
-    content = json.dumps(compact, ensure_ascii=False, sort_keys=True)
+        item["summaryPreview"] = str(item.get("summaryPreview") or "")[:24]
+        item["title"] = str(item.get("title") or "")[:64]
+        item["locator"] = str(item.get("locator") or "")[:96]
+    content = json.dumps(compact, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     if len(content) <= max_chars + 500:
         return content
-    compact["records"] = compact_records[:5]
-    compact["recordIds"] = [item.get("recordId") for item in compact["records"] if item.get("recordId")]
-    compact["visibleRecordCount"] = len(compact["records"])
-    compact["omittedReturnedRecordCount"] = max(0, int(record_page.get("returned") or len(compact_records)) - len(compact["records"]))
+    if compact_records or record_page.get("hasMore") or record_page.get("total"):
+        compact["records"] = compact_records[:5]
+        compact["recordIds"] = [item.get("recordId") for item in compact["records"] if item.get("recordId")]
+        compact["visibleRecordCount"] = len(compact["records"])
+        compact["omittedReturnedRecordCount"] = max(0, int(record_page.get("returned") or len(compact_records)) - len(compact["records"]))
     compact["candidates"] = compact_candidates[:5]
     compact["candidateIds"] = [item.get("candidateId") for item in compact["candidates"] if item.get("candidateId")]
     compact["visibleCandidateCount"] = len(compact["candidates"])
     compact["omittedReturnedCandidateCount"] = max(0, int(page.get("returned") or len(compact_candidates)) - len(compact["candidates"]))
-    return json.dumps(compact, ensure_ascii=False, sort_keys=True)
+    return json.dumps(compact, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _compact_source_collection_tool_excluded_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: summary.get(key)
+        for key in ("excludedCount", "activeRecordCount", "rawRecordCount")
+        if key in summary
+    }
 
 
 def package_tool_result(

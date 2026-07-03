@@ -91,7 +91,8 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     assert source_extractor["metadata"]["roleKey"] == "source_extractor"
     assert "candidate_offset" in source_extractor["content"]
     assert "candidate_limit" in source_extractor["content"]
-    assert "context_mode=compact" in source_extractor["content"]
+    assert "context_mode=minimal" in source_extractor["content"]
+    assert "context_mode=retry_missing" in source_extractor["content"]
     assert "candidateExtractions" in source_extractor["content"]
     assert "candidateDecisions" in source_extractor["content"]
     assert "不能根据截断上下文猜结果" in source_extractor["content"]
@@ -99,6 +100,7 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     assert source_relation_mapper is not None
     assert source_relation_mapper["metadata"]["roleKey"] == "source_relation_mapper"
     assert "候选级主题、来源和证据关系" in source_relation_mapper["content"]
+    assert "minimal 上下文" in source_relation_mapper["content"]
     assert "不写正式知识库" in source_relation_mapper["content"]
     source_ingestor = prompt_template_service.get_prompt_template("prompt-source-ingestor")
     assert source_ingestor is not None
