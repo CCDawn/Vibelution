@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 
 import type { ConversationMessage } from "../../api/types";
 import {
-  buildConversationTimelineRowIdentities,
+  buildAgentMessageTimelineRowIdentities,
   conversationTimelineItemRowKey,
 } from "./conversationTimelineRows";
+
+const timelineRowsSource = readFileSync(new URL("./conversationTimelineRows.ts", import.meta.url), "utf8");
 
 function assistantMessage(
   id: string,
@@ -21,6 +24,13 @@ function assistantMessage(
 }
 
 describe("conversation timeline rows", () => {
+  it("exports row identity helpers through AgentMessage timeline naming only", () => {
+    expect(timelineRowsSource).toContain("export type AgentMessageTimelineRowIdentity");
+    expect(timelineRowsSource).toContain("export function buildAgentMessageTimelineRowIdentities");
+    expect(timelineRowsSource).not.toContain("ConversationTimelineRowIdentity");
+    expect(timelineRowsSource).not.toContain("buildConversationTimelineRowIdentities");
+  });
+
   it("keeps same-turn live, active, and committed assistant packets on one stable row", () => {
     const liveOverlay = assistantMessage("live-overlay", {
       content: "",
@@ -38,9 +48,9 @@ describe("conversation timeline rows", () => {
       metadata: { turnId: "turn-1" },
     });
 
-    const [liveRow] = buildConversationTimelineRowIdentities([liveOverlay]);
-    const [activeRow] = buildConversationTimelineRowIdentities([activeLayer]);
-    const [committedRow] = buildConversationTimelineRowIdentities([committed]);
+    const [liveRow] = buildAgentMessageTimelineRowIdentities([liveOverlay]);
+    const [activeRow] = buildAgentMessageTimelineRowIdentities([activeLayer]);
+    const [committedRow] = buildAgentMessageTimelineRowIdentities([committed]);
 
     expect(liveRow.rowKey).toBe("assistant-turn:turn-1");
     expect(activeRow.rowKey).toBe(liveRow.rowKey);
@@ -51,7 +61,7 @@ describe("conversation timeline rows", () => {
   });
 
   it("keeps duplicate same-turn rows unique when a user boundary prevents projection merging", () => {
-    const rows = buildConversationTimelineRowIdentities([
+    const rows = buildAgentMessageTimelineRowIdentities([
       assistantMessage("tool-before-user", { content: "", metadata: { turnId: "turn-shared" } }),
       {
         id: "user-message",
@@ -70,7 +80,7 @@ describe("conversation timeline rows", () => {
   });
 
   it("derives stable child keys for timeline items under the process part", () => {
-    const [row] = buildConversationTimelineRowIdentities([
+    const [row] = buildAgentMessageTimelineRowIdentities([
       assistantMessage("message-with-timeline", { metadata: { turnId: "turn-timeline" } }),
     ]);
 

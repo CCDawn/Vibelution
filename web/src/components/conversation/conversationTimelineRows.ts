@@ -1,7 +1,7 @@
 import type { ConversationMessage } from "../../api/types";
 import type { AgentMessageTimelineItem } from "./conversationTimeline";
 
-export type ConversationTimelineRowIdentity = {
+export type AgentMessageTimelineRowIdentity = {
   messageId: string;
   rowKey: string;
   messageKey: string;
@@ -48,7 +48,7 @@ function baseTimelineRowKey(message: ConversationMessage) {
   return `${message.role}-message:${message.id}`;
 }
 
-function timelineRowIdentity(message: ConversationMessage, rowKey: string): ConversationTimelineRowIdentity {
+function timelineRowIdentity(message: ConversationMessage, rowKey: string): AgentMessageTimelineRowIdentity {
   return {
     messageId: message.id,
     rowKey,
@@ -58,9 +58,9 @@ function timelineRowIdentity(message: ConversationMessage, rowKey: string): Conv
   };
 }
 
-export function buildConversationTimelineRowIdentities(
+export function buildAgentMessageTimelineRowIdentities(
   messages: ConversationMessage[],
-): ConversationTimelineRowIdentity[] {
+): AgentMessageTimelineRowIdentity[] {
   const baseKeys = messages.map(baseTimelineRowKey);
   const counts = new Map<string, number>();
   for (const key of baseKeys) {
@@ -77,7 +77,7 @@ export function buildConversationTimelineRowIdentities(
 }
 
 export function conversationTimelineItemRowKey(
-  row: Pick<ConversationTimelineRowIdentity, "processKey">,
+  row: Pick<AgentMessageTimelineRowIdentity, "processKey">,
   item: TimelineItemKeyInput,
 ) {
   return `${row.processKey}:item:${item.kind}:${item.id}`;

@@ -59,7 +59,7 @@ import {
 } from "./conversationTimeline";
 import {
   conversationTimelineItemRowKey,
-  type ConversationTimelineRowIdentity,
+  type AgentMessageTimelineRowIdentity,
 } from "./conversationTimelineRows";
 import { useAgentThreadProjection } from "./useAgentThreadProjection";
 import { projectConversationTimelineMessages } from "./useConversationTimelineProjection";
@@ -869,7 +869,7 @@ type ConversationTurnRowProps = {
   agentMessage?: AgentMessage;
   agentRenderState?: AgentMessageRenderState;
   previousAgentRenderState?: AgentMessageRenderState;
-  rowIdentity: ConversationTimelineRowIdentity;
+  rowIdentity: AgentMessageTimelineRowIdentity;
   defaultResponseExpanded: boolean;
   latestUserMessageId: string;
   editingMessageId?: string;
@@ -899,8 +899,8 @@ type ConversationTurnRowProps = {
 };
 
 function conversationTimelineRowIdentityIsEqual(
-  previous: ConversationTimelineRowIdentity,
-  next: ConversationTimelineRowIdentity,
+  previous: AgentMessageTimelineRowIdentity,
+  next: AgentMessageTimelineRowIdentity,
 ) {
   return previous.messageId === next.messageId
     && previous.rowKey === next.rowKey
@@ -2463,7 +2463,7 @@ export function ConversationView({
   function renderConversationTimeline(
     message: ConversationMessage,
     items: AgentMessageTimelineItem[],
-    rowIdentity: ConversationTimelineRowIdentity,
+    rowIdentity: AgentMessageTimelineRowIdentity,
     processSectionIds?: string,
   ) {
     if (items.length === 0) {
@@ -2485,7 +2485,7 @@ export function ConversationView({
   function renderConversationTimelineItem(
     message: ConversationMessage,
     item: AgentMessageTimelineItem,
-    rowIdentity: ConversationTimelineRowIdentity,
+    rowIdentity: AgentMessageTimelineRowIdentity,
     isActiveTimelineItem: boolean,
   ) {
     if (item.kind === "thought") {
@@ -2503,7 +2503,7 @@ export function ConversationView({
   function renderThoughtTimelineItem(
     message: ConversationMessage,
     item: Extract<AgentMessageTimelineItem, { kind: "thought" }>,
-    rowIdentity: ConversationTimelineRowIdentity,
+    rowIdentity: AgentMessageTimelineRowIdentity,
     isActiveTimelineItem: boolean,
   ) {
     const expanded = getExpansionState(message.id, item.id, item.defaultExpanded);
@@ -2533,7 +2533,7 @@ export function ConversationView({
   function renderAssistantTextTimelineItem(
     message: ConversationMessage,
     item: Extract<AgentMessageTimelineItem, { kind: "assistant_text" }>,
-    rowIdentity: ConversationTimelineRowIdentity,
+    rowIdentity: AgentMessageTimelineRowIdentity,
   ) {
     const segments = getCachedResponseSegments(item.text);
     return (
@@ -2562,7 +2562,7 @@ export function ConversationView({
 
   function renderCommandGroupTimelineItem(
     item: Extract<AgentMessageTimelineItem, { kind: "command_group" }>,
-    rowIdentity: ConversationTimelineRowIdentity,
+    rowIdentity: AgentMessageTimelineRowIdentity,
     isActiveTimelineItem: boolean,
   ) {
     const expanded = getExpansionState(item.id, "details", false);
@@ -2614,7 +2614,7 @@ export function ConversationView({
 
   function renderOperationTimelineItem(
     item: Extract<AgentMessageTimelineItem, { kind: "operation" }>,
-    rowIdentity: ConversationTimelineRowIdentity,
+    rowIdentity: AgentMessageTimelineRowIdentity,
     isActiveTimelineItem: boolean,
   ) {
     const operation = item.operation;
