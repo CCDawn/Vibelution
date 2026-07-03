@@ -189,7 +189,7 @@ export const selfEvolutionTrackStyles: Record<string, string> = {
   vitalList: "grid gap-2",
   vitalItem: "grid gap-1.5",
   vitalTrack: "h-2 w-full overflow-hidden rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--fg-secondary)_70%,transparent)]",
-  vitalFill: "h-full rounded-[var(--radius-control)] bg-[var(--vui-gradient-route-soft)]",
+  vitalFill: "h-full w-[var(--self-vital-progress)] rounded-[var(--radius-control)] bg-[var(--vui-gradient-route-soft)]",
   paginationGroup: "flex flex-wrap items-center gap-2",
   emptyState: "flex min-h-[120px] items-center justify-center text-center text-[var(--fg-secondary)]",
 };

@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import appShellStyles from "../../app/AppShell.styles";
 import agentStyles from "../../routes/AgentsRoute.styles";
 import evolutionStyles from "../../routes/EvolutionRoute.styles";
+import petStyles from "../../routes/PetRoute.styles";
 import teamStyles from "../../routes/TeamsRoute.styles";
 
 const sourceRoot = resolve(import.meta.dirname, "../..");
@@ -335,5 +336,13 @@ describe("VUI batch migration", () => {
     expect(teamStyles.sourceCollectionStagePrimaryAction).not.toMatch(/(^|\s)w-full(\s|$)/);
     expect(teamStyles.sourceCollectionPanelActions).toContain("flex");
     expect(teamStyles.sourceCollectionPanelActions).toContain("flex-wrap");
+  });
+
+  it("keeps PetRoute progress width in Tailwind instead of raw inline width", () => {
+    const source = readTargetSource("routes/PetRoute.tsx");
+
+    expect(source).toContain("--pet-progress");
+    expect(source).not.toContain("style={{ width: `${progress}%` }}");
+    expect(petStyles.progressFillClass).toContain("w-[var(--pet-progress)]");
   });
 });
