@@ -1578,6 +1578,7 @@ def get_source_collection_stage_task_context(
     )
     if normalized_stage_id not in SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES:
         raise TeamWorkflowOrchestrationError(f"Unsupported source collection stage: {normalized_stage_id}")
+    normalized_context_mode = _normalize_source_collection_context_mode(context_mode)
     run_bundle = _source_collection_run_context_bundle(normalized_team_id, normalized_run_id)
     task_agent_id = _trim_text(task.get("agentId"), max_length=160)
     task_agent_role = _normalize_source_collection_agent_role(task.get("agentRole"))
@@ -1613,6 +1614,26 @@ def get_source_collection_stage_task_context(
     pageable_candidates = [
         item for item in source_candidates if _source_quality_bucket(item) == "approved"
     ] if memory_steward_mode else source_candidates
+    retry_focus = {}
+    if normalized_context_mode == "retry_missing":
+        retry_focus = _source_collection_stage_retry_focus(task, pageable_candidates, records)
+        missing_candidate_ids = set(_normalize_text_list(retry_focus.get("missingCandidateIds"), max_items=500, max_length=160))
+        if missing_candidate_ids:
+            pageable_candidates = [
+                item
+                for item in pageable_candidates
+                if _trim_text(item.get("candidateId"), max_length=160) in missing_candidate_ids
+            ]
+        missing_record_ids = set(_normalize_text_list(retry_focus.get("missingRecordIds"), max_items=500, max_length=160))
+        if missing_record_ids:
+            records = [
+                item
+                for item in records
+                if _trim_text(item.get("recordId"), max_length=160) in missing_record_ids
+            ]
+            selected_records = records[record_page_offset:record_page_offset + record_page_limit]
+            next_record_offset = record_page_offset + len(selected_records)
+            record_has_more = next_record_offset < len(records)
     candidate_page_offset = _normalize_int(candidate_offset, default=0, minimum=0, maximum=10000)
     candidate_page_limit = _normalize_int(
         candidate_limit if candidate_limit is not None else limit,
@@ -1633,7 +1654,7 @@ def get_source_collection_stage_task_context(
         "schemaVersion": SCHEMA_VERSION,
         "status": "ok",
         "contextKind": "source_collection_stage_task_context",
-        "contextMode": _normalize_source_collection_context_mode(context_mode),
+        "contextMode": normalized_context_mode,
         "teamId": normalized_team_id,
         "runId": normalized_run_id,
         "stageId": normalized_stage_id,
@@ -1687,6 +1708,12 @@ def get_source_collection_stage_task_context(
             "fallback": "If required context is missing, write back status=blocked with a short reason.",
         },
     }
+    if retry_focus:
+        context["retryFocus"] = retry_focus
+        context["usage"]["retryInstruction"] = (
+            "本轮是缺口重试：只补 retryFocus.missingCandidateIds / missingRecordIds，"
+            "不要重做已处理 ID；回写时继续使用完整真实 ID。"
+        )
     context["usage"]["continuationHint"] = _source_collection_context_continuation_hint(
         context["candidatePage"],
         context_mode=context["contextMode"],
@@ -18340,7 +18367,56 @@ def _source_collection_context_candidate_summary(candidate: dict[str, Any]) -> d
 
 
 def _normalize_source_collection_context_mode(value: Any) -> str:
-    return "full" if _trim_text(value, max_length=40).lower() == "full" else "compact"
+    normalized = _trim_text(value, max_length=40).lower()
+    if normalized in {"full", "compact", "minimal", "retry_missing"}:
+        return normalized
+    return "compact"
+
+
+def _source_collection_stage_retry_focus(
+    task: dict[str, Any],
+    candidates: list[dict[str, Any]],
+    records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if not isinstance(task, dict) or not task:
+        return {}
+    coverage = _source_collection_stage_task_coverage_summary(task)
+    if not isinstance(coverage, dict) or not bool(coverage.get("applicable")) or bool(coverage.get("complete")):
+        return {}
+    candidate_ids = {
+        _trim_text(item.get("candidateId"), max_length=160)
+        for item in candidates
+        if _trim_text(item.get("candidateId"), max_length=160)
+    }
+    record_ids = {
+        _trim_text(item.get("recordId"), max_length=160)
+        for item in records
+        if _trim_text(item.get("recordId"), max_length=160)
+    }
+    missing_candidate_ids = [
+        item
+        for item in _normalize_text_list(coverage.get("missingCandidateIds"), max_items=500, max_length=160)
+        if item in candidate_ids
+    ]
+    missing_record_ids = [
+        item
+        for item in _normalize_text_list(coverage.get("missingRecordIds"), max_items=500, max_length=160)
+        if item in record_ids
+    ]
+    if not missing_candidate_ids and not missing_record_ids:
+        return {}
+    return {
+        "mode": "missing_stage_coverage",
+        "sourceTaskId": _trim_text(task.get("taskId"), max_length=160),
+        "coverageKind": _trim_text(coverage.get("coverageKind"), max_length=80),
+        "total": _source_collection_count(coverage.get("total")),
+        "processed": _source_collection_count(coverage.get("processed")),
+        "missing": _source_collection_count(coverage.get("missing")),
+        "invalid": _source_collection_count(coverage.get("invalid")),
+        "missingCandidateIds": missing_candidate_ids[:120],
+        "missingRecordIds": missing_record_ids[:120],
+        "retryInstruction": "只补这些缺失 ID；不要重新处理 processedCandidateIds / processedRecordIds。",
+    }
 
 
 def _source_collection_context_continuation_hint(candidate_page: dict[str, Any], *, context_mode: str) -> str:
@@ -18362,23 +18438,28 @@ def _source_collection_context_record_continuation_hint(record_page: dict[str, A
 
 
 def _compact_source_collection_stage_task_context(context: dict[str, Any]) -> dict[str, Any]:
+    context_mode = _normalize_source_collection_context_mode(context.get("contextMode"))
+    minimal_mode = context_mode in {"minimal", "retry_missing"}
     candidate_page = context.get("candidatePage") if isinstance(context.get("candidatePage"), dict) else {}
     record_page = context.get("recordPage") if isinstance(context.get("recordPage"), dict) else {}
     usage = context.get("usage") if isinstance(context.get("usage"), dict) else {}
-    record_continuation_hint = _source_collection_context_record_continuation_hint(record_page, context_mode="compact")
+    record_continuation_hint = _source_collection_context_record_continuation_hint(record_page, context_mode=context_mode)
     compact_usage = {
         "readTool": "source_collection_context_tool",
         "writebackTool": "source_collection_stage_writeback_tool",
-        "doNotUse": usage.get("doNotUse") if isinstance(usage.get("doNotUse"), list) else [],
-        "continuationHint": _source_collection_context_continuation_hint(candidate_page, context_mode="compact"),
+        "continuationHint": _source_collection_context_continuation_hint(candidate_page, context_mode=context_mode),
     }
+    if not minimal_mode:
+        compact_usage["doNotUse"] = usage.get("doNotUse") if isinstance(usage.get("doNotUse"), list) else []
+    if _trim_text(usage.get("retryInstruction"), max_length=1000):
+        compact_usage["retryInstruction"] = _trim_text(usage.get("retryInstruction"), max_length=1000)
     records = [
         _compact_source_collection_context_record(item)
         for item in list(context.get("records") or [])
         if isinstance(item, dict)
-    ]
+    ] if not minimal_mode or not list(context.get("candidates") or []) else []
     candidates = [
-        _compact_source_collection_context_candidate(item)
+        _compact_source_collection_context_candidate(item, minimal=minimal_mode)
         for item in list(context.get("candidates") or [])
         if isinstance(item, dict)
     ]
@@ -18387,34 +18468,39 @@ def _compact_source_collection_stage_task_context(context: dict[str, Any]) -> di
         "schemaVersion": context.get("schemaVersion"),
         "status": context.get("status"),
         "contextKind": context.get("contextKind"),
-        "contextMode": "compact",
-        "fieldMode": "preview_only",
+        "contextMode": context_mode,
+        "fieldMode": "id_and_locator_only" if minimal_mode else "preview_only",
         "candidateFieldsTruncated": True,
         "doNotUsePreviewAsEvidence": True,
-        "visibleCandidateCount": len(candidates),
-        "omittedReturnedCandidateCount": max(0, returned_candidate_count - len(candidates)),
         "teamId": _trim_text(context.get("teamId"), max_length=128),
         "runId": _trim_text(context.get("runId"), max_length=128),
         "stageId": _trim_text(context.get("stageId"), max_length=80),
         "taskId": _trim_text(context.get("taskId"), max_length=160),
-        "agentId": _trim_text(context.get("agentId"), max_length=160),
-        "agentRole": _trim_text(context.get("agentRole"), max_length=80),
         "counts": _normalize_metadata(context.get("counts")),
-        "run": _compact_source_collection_context_run(context.get("run") if isinstance(context.get("run"), dict) else {}),
-        "task": _compact_source_collection_context_task(context.get("task") if isinstance(context.get("task"), dict) else {}),
-        "records": records,
         "candidates": candidates,
         "candidatePage": _normalize_metadata(candidate_page),
-        "unassessedCandidateIds": _normalize_text_list(context.get("unassessedCandidateIds"), max_items=80, max_length=160),
-        "allUnassessedCandidateCount": _source_collection_count(context.get("allUnassessedCandidateCount")),
-        "writebackContract": _compact_source_collection_writeback_contract(
-            context.get("writebackContract") if isinstance(context.get("writebackContract"), dict) else {}
-        ),
-        "boundaries": _compact_source_collection_boundaries(
-            context.get("boundaries") if isinstance(context.get("boundaries"), dict) else {}
-        ),
         "usage": compact_usage,
     }
+    if not minimal_mode:
+        compact["visibleCandidateCount"] = len(candidates)
+        compact["omittedReturnedCandidateCount"] = max(0, returned_candidate_count - len(candidates))
+        compact["agentId"] = _trim_text(context.get("agentId"), max_length=160)
+        compact["agentRole"] = _trim_text(context.get("agentRole"), max_length=80)
+        compact["run"] = _compact_source_collection_context_run(context.get("run") if isinstance(context.get("run"), dict) else {})
+        compact["task"] = _compact_source_collection_context_task(context.get("task") if isinstance(context.get("task"), dict) else {})
+        compact["unassessedCandidateIds"] = _normalize_text_list(context.get("unassessedCandidateIds"), max_items=80, max_length=160)
+        compact["allUnassessedCandidateCount"] = _source_collection_count(context.get("allUnassessedCandidateCount"))
+    if records:
+        compact["records"] = records
+    if not minimal_mode:
+        compact["writebackContract"] = _compact_source_collection_writeback_contract(
+            context.get("writebackContract") if isinstance(context.get("writebackContract"), dict) else {}
+        )
+        compact["boundaries"] = _compact_source_collection_boundaries(
+            context.get("boundaries") if isinstance(context.get("boundaries"), dict) else {}
+        )
+    if isinstance(context.get("retryFocus"), dict):
+        compact["retryFocus"] = _normalize_metadata(context["retryFocus"])
     compact_record_ids = [
         _trim_text(item.get("recordId"), max_length=160)
         for item in records
@@ -18424,13 +18510,21 @@ def _compact_source_collection_stage_task_context(context: dict[str, Any]) -> di
         compact_usage["recordContinuationHint"] = record_continuation_hint
     excluded_source_summary = _normalize_metadata(context.get("excludedSourceSummary"))
     if _source_collection_count(excluded_source_summary.get("excludedCount")):
-        compact["excludedSourceSummary"] = excluded_source_summary
+        compact["excludedSourceSummary"] = _compact_source_collection_excluded_summary(excluded_source_summary)
     if compact_record_ids or _source_collection_count(record_page.get("total")) or bool(record_page.get("hasMore")):
         compact["recordPage"] = _normalize_metadata(record_page)
         compact["recordIds"] = compact_record_ids
     if isinstance(context.get("stewardActionPacket"), dict):
         compact["stewardActionPacket"] = context["stewardActionPacket"]
     return compact
+
+
+def _compact_source_collection_excluded_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: summary.get(key)
+        for key in ("excludedCount", "activeRecordCount", "rawRecordCount")
+        if key in summary
+    }
 
 
 def _compact_source_collection_context_record(record: dict[str, Any]) -> dict[str, Any]:
@@ -18449,30 +18543,30 @@ def _compact_source_collection_context_record(record: dict[str, Any]) -> dict[st
     }
 
 
-def _compact_source_collection_context_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+def _compact_source_collection_context_candidate(candidate: dict[str, Any], *, minimal: bool = False) -> dict[str, Any]:
     latest_assessment = candidate.get("latestAssessment") if isinstance(candidate.get("latestAssessment"), dict) else {}
     content_extraction = candidate.get("contentExtraction") if isinstance(candidate.get("contentExtraction"), dict) else {}
     doi = _trim_text(candidate.get("doi"), max_length=160)
-    source_url = _trim_text(candidate.get("sourceUrl"), max_length=180)
-    source_path = _trim_text(candidate.get("sourcePath"), max_length=180)
+    source_url = _trim_text(candidate.get("sourceUrl"), max_length=120 if minimal else 180)
+    source_path = _trim_text(candidate.get("sourcePath"), max_length=120 if minimal else 180)
     locator = doi or source_url or source_path
     compact: dict[str, Any] = {
         "candidateId": _trim_text(candidate.get("candidateId"), max_length=128),
-        "title": _trim_text(candidate.get("title"), max_length=120),
-        "summaryPreview": _trim_text(candidate.get("summary"), max_length=24),
+        "title": _trim_text(candidate.get("title"), max_length=80 if minimal else 120),
+        "summaryPreview": _trim_text(candidate.get("summary"), max_length=48 if minimal else 24),
         "sourceKind": _trim_text(candidate.get("sourceKind"), max_length=80),
         "locator": locator,
         "sourceRecordId": _trim_text(candidate.get("sourceRecordId"), max_length=128),
         "qualityStatus": _trim_text(candidate.get("qualityStatus"), max_length=80),
         "qualityBucket": _trim_text(candidate.get("qualityBucket"), max_length=80),
     }
-    if latest_assessment:
+    if latest_assessment and not minimal:
         compact["latestAssessment"] = {
             "decision": _trim_text(latest_assessment.get("decision"), max_length=80),
             "assessedByAgent": _trim_text(latest_assessment.get("assessedByAgent"), max_length=160),
             "notes": _trim_text(latest_assessment.get("notes"), max_length=220),
         }
-    if content_extraction:
+    if content_extraction and not minimal:
         compact["contentExtraction"] = {
             "status": _trim_text(content_extraction.get("status"), max_length=80),
             "summary": _trim_text(content_extraction.get("summary"), max_length=140),
@@ -19158,10 +19252,29 @@ def _source_collection_stage_previous_attempt_lines(previous_task: dict[str, Any
     normalized_invalid_ids = [_trim_text(item, max_length=160) for item in invalid_ids[:8] if _trim_text(item, max_length=160)]
     if normalized_invalid_ids:
         lines.append("- 未匹配 ID：" + "、".join(normalized_invalid_ids))
+    missing_ids: list[str] = []
+    if isinstance(coverage, dict):
+        missing_ids = [
+            *_normalize_text_list(coverage.get("missingCandidateIds"), max_items=8, max_length=160),
+            *_normalize_text_list(coverage.get("missingRecordIds"), max_items=8, max_length=160),
+        ][:8]
+    if missing_ids:
+        lines.append("- 待补 ID：" + "、".join(missing_ids))
     if retry_instruction:
         lines.append(f"- 本轮重试建议：{retry_instruction}")
     lines.append("- 本轮必须基于工具返回的真实 recordId/candidateId 重新覆盖缺口，不要复用上一轮短 ID 或聚合占位符。")
     return lines
+
+
+def _source_collection_stage_task_has_missing_coverage(task: dict[str, Any] | None) -> bool:
+    if not isinstance(task, dict) or not task:
+        return False
+    coverage = _source_collection_stage_task_coverage_summary(task)
+    if not isinstance(coverage, dict) or not bool(coverage.get("applicable")):
+        return False
+    if bool(coverage.get("complete")):
+        return False
+    return bool(_source_collection_count(coverage.get("missing")) or coverage.get("missingCandidateIds") or coverage.get("missingRecordIds"))
 
 
 def _source_collection_stage_session_task_message(
@@ -19211,6 +19324,11 @@ def _source_collection_stage_session_task_message(
     )
     task_title = _source_collection_stage_task_title(stage_id)
     contract_json = json.dumps(writeback_contract, ensure_ascii=False, sort_keys=True)
+    context_mode = "compact"
+    if stage_id == "extraction" and not can_materialize_formal_knowledge:
+        context_mode = "retry_missing" if _source_collection_stage_task_has_missing_coverage(previous_task) else "minimal"
+    elif stage_id == "relations":
+        context_mode = "minimal"
     context_tool_payload = {
         "team_id": writeback_contract.get("teamId", ""),
         "run_id": writeback_contract.get("runId", ""),
@@ -19222,7 +19340,7 @@ def _source_collection_stage_session_task_message(
         "record_limit": 5,
         "candidate_offset": 0,
         "candidate_limit": 5,
-        "context_mode": "compact",
+        "context_mode": context_mode,
     }
     if can_materialize_formal_knowledge:
         context_tool_payload["candidate_limit"] = 80
@@ -19262,6 +19380,11 @@ def _source_collection_stage_session_task_message(
             "- 资料寻找阶段的新资料首选写入 `candidateLeads[]`；兼容字段只用于历史回写，不要把自然语言表格当作唯一结果。",
             "- 资料寻找阶段的无效来源写入 `invalidSources[]`，每条包含 title/sourceRef 或 DOI/url、reason，系统会记录并从后续流程过滤。",
             "- 在本会话里完成当前阶段任务，并把可审查的结论、证据引用和下一步写清楚。",
+            (
+                "- 本轮是缺口重试：`context_mode=retry_missing` 只返回上一轮未覆盖 ID；只补 `retryFocus.missingCandidateIds` / `missingRecordIds`，不要重做已处理资料。"
+                if context_mode == "retry_missing"
+                else "- 本轮默认使用最小上下文：先拿真实 ID、标题和 locator，必要时分页读取；不要把旧提炼摘要当作本轮证据。"
+            ),
             "- 如果返回的 `recordPage.hasMore=true`，必须继续按 `record_offset=recordPage.nextOffset` 分页读取，直到本阶段应处理原始资料都有真实 recordId 的结论。",
             "- 如果返回的 `candidatePage.hasMore=true`，必须继续按 `candidate_offset=candidatePage.nextOffset` 分页读取，直到本阶段应处理候选都有真实 candidateId 的结论。",
             "- 资料提炼阶段如果 `candidatePage.total=0`，输入就是原始 DataRecord：请用 `recordExtractions[]` 回写，并绑定完整 `recordId`；已有候选后优先用 `candidateExtractions[]` 绑定完整 `candidateId`，可直接在每项里写 `decision=keep/needs_more_info/exclude`。",

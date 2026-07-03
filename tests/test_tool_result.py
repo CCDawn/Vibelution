@@ -203,6 +203,81 @@ class TestTruncateResult:
         assert "summaryPreview" in compact["candidates"][0]
         assert "summary" not in compact["candidates"][0]
 
+    def test_package_tool_result_source_collection_context_strips_non_page_payload(self):
+        payload = {
+            "status": "ok",
+            "contextKind": "source_collection_stage_task_context",
+            "contextMode": "minimal",
+            "counts": {
+                "recordCount": 34,
+                "excludedSourceCount": 50,
+                "returnedRecordCount": 5,
+                "candidateCount": 34,
+                "returnedCandidateCount": 5,
+            },
+            "excludedSourceSummary": {
+                "excludedCount": 50,
+                "activeRecordCount": 34,
+                "rawRecordCount": 84,
+                "excluded": [
+                    {
+                        "recordId": f"excluded-{index}",
+                        "title": "Noise source " + ("X" * 200),
+                        "reason": "no_effective_content",
+                    }
+                    for index in range(50)
+                ],
+            },
+            "candidatePage": {
+                "offset": 5,
+                "limit": 5,
+                "returned": 5,
+                "total": 34,
+                "hasMore": True,
+                "nextOffset": 10,
+            },
+            "candidates": [
+                {
+                    "candidateId": f"candidate-{index}",
+                    "title": "Predictive coding source " + ("Y" * 180),
+                    "sourceKind": "paper",
+                    "qualityBucket": "pending",
+                    "summary": "Only a short preview should remain. " * 30,
+                    "contentExtraction": {
+                        "status": "stale",
+                        "summary": "A stale previous extraction must not be shown as current evidence. " * 40,
+                    },
+                    "latestAssessment": {"decision": "needs_more_info", "notes": "N" * 800},
+                }
+                for index in range(5, 10)
+            ],
+            "usage": {
+                "readTool": "source_collection_context_tool",
+                "writebackTool": "source_collection_stage_writeback_tool",
+            },
+        }
+
+        packaged = package_tool_result(
+            json.dumps(payload, ensure_ascii=False),
+            tool_name="source_collection_context_tool",
+            max_chars=900,
+        )
+
+        assert packaged.truncated is True
+        compact = json.loads(packaged.content)
+        assert len(packaged.content) <= 1600
+        assert compact["contextMode"] == "minimal_from_tool_result"
+        assert compact["excludedSourceSummary"] == {
+            "excludedCount": 50,
+            "activeRecordCount": 34,
+            "rawRecordCount": 84,
+        }
+        assert compact["candidateIds"] == [f"candidate-{index}" for index in range(5, 10)]
+        assert "candidate_offset=10" in compact["usage"]["continuationHint"]
+        assert "contentExtraction" not in compact["candidates"][0]
+        assert "latestAssessment" not in compact["candidates"][0]
+        assert "excluded-49" not in packaged.content
+
     def test_package_tool_result_compacts_source_collection_context_with_record_paging_ids(self):
         payload = {
             "status": "ok",

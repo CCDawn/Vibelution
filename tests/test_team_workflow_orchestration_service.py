@@ -3904,6 +3904,178 @@ def test_source_collection_context_compact_candidate_paging_stays_model_visible(
     assert len(json.dumps(pages[0], ensure_ascii=False)) < 4000
 
 
+def test_source_collection_context_retry_missing_returns_only_uncovered_candidates(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经预测编码资料提炼",
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": agent["agentId"]},
+            "querySeeds": ["predictive coding neural algorithm"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    candidates = [
+        team_workflow_orchestration_service.register_candidate_source(
+            team["teamId"],
+            {
+                "title": f"Predictive coding retry candidate {index}",
+                "sourceUrl": f"https://doi.org/10.0000/retry-missing-{index}",
+                "sourceKind": "paper",
+                "summary": "Predictive coding evidence for retry-missing context.",
+                "allowedForAnalysis": True,
+                "metadata": {"sourceCollectionRunId": run_id, "doi": f"10.0000/retry-missing-{index}"},
+                "createdByAgent": "content-extraction-agent",
+            },
+        )["candidate"]
+        for index in range(6)
+    ]
+    submitted_messages: list[str] = []
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: submitted_messages.append(content)
+        or {"accepted": True, "sessionId": session_id, "turnId": f"turn-retry-{len(submitted_messages)}", "status": "running"},
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
+    )
+
+    partial = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "只完成 2/6 条候选提炼。",
+            "result": {
+                "candidateExtractions": [
+                    {"candidateId": item["candidateId"], "status": "extracted", "summary": f"{item['title']} 已提炼。"}
+                    for item in candidates[:2]
+                ]
+            },
+            "recordedByAgent": agent["agentId"],
+        },
+    )
+
+    assert partial["writeback"]["status"] == "needs_review"
+    retry_context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
+        team["teamId"],
+        task_id=task["taskId"],
+        candidate_offset=0,
+        candidate_limit=5,
+        context_mode="retry_missing",
+    )
+
+    expected_missing_ids = [item["candidateId"] for item in candidates[2:]]
+    assert retry_context["contextMode"] == "retry_missing"
+    assert [item["candidateId"] for item in retry_context["candidates"]] == expected_missing_ids
+    assert retry_context["candidatePage"]["total"] == 4
+    assert retry_context["candidatePage"]["hasMore"] is False
+    assert retry_context["retryFocus"]["missingCandidateIds"] == expected_missing_ids
+    assert "只补" in retry_context["usage"]["retryInstruction"]
+
+    retry_task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {
+            "stageId": "extraction",
+            "agentId": agent["agentId"],
+            "agentRole": "source_extractor",
+            "idempotencyKey": "retry-missing-candidate-coverage",
+        },
+    )
+
+    assert retry_task["created"] is True
+    assert len(submitted_messages) == 2
+    assert '"context_mode": "retry_missing"' in submitted_messages[-1]
+    assert "只补" in submitted_messages[-1]
+    assert candidates[0]["candidateId"] not in submitted_messages[-1]
+    assert candidates[2]["candidateId"] in submitted_messages[-1]
+
+
+def test_source_collection_context_minimal_strips_stale_candidate_artifacts(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "预测编码资料提炼",
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": agent["agentId"]},
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    for index in range(5):
+        team_workflow_orchestration_service.register_candidate_source(
+            team["teamId"],
+            {
+                "title": f"Predictive coding minimal candidate {index}",
+                "sourceUrl": f"https://doi.org/10.0000/minimal-context-{index}",
+                "sourceKind": "paper",
+                "summary": "Detailed predictive coding source summary. " * 8,
+                "allowedForAnalysis": True,
+                "metadata": {
+                    "sourceCollectionRunId": run_id,
+                    "doi": f"10.0000/minimal-context-{index}",
+                    "contentExtraction": {
+                        "status": "stale",
+                        "summary": "上一轮很长的提炼摘要不应污染本轮模型可见输入。" * 20,
+                        "taskId": "old-task",
+                    },
+                },
+                "createdByAgent": "content-extraction-agent",
+            },
+        )
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-minimal-context", "status": "running"},
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
+    )
+
+    context = team_workflow_orchestration_service.get_source_collection_stage_task_context(
+        team["teamId"],
+        task_id=task["taskId"],
+        candidate_limit=5,
+        context_mode="minimal",
+    )
+
+    assert context["contextMode"] == "minimal"
+    assert context["candidatePage"]["returned"] == 5
+    assert context["fieldMode"] == "id_and_locator_only"
+    assert "writebackContract" not in context
+    assert "boundaries" not in context
+    assert "records" not in context
+    assert "contentExtraction" not in context["candidates"][0]
+    assert "latestAssessment" not in context["candidates"][0]
+    assert "summary" not in context["candidates"][0]
+    assert "summaryPreview" in context["candidates"][0]
+    assert len(json.dumps(context, ensure_ascii=False)) < 2600
+
+
 def test_source_quality_stage_writeback_materializes_candidate_decisions(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
