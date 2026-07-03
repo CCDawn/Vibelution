@@ -67,6 +67,7 @@ import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy"
 import { VButton, VNativeInput, VNativeSelect, VNativeTextarea, VRouteHeader } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
+import { MemoryAgentMemoryPanel } from "./MemoryAgentMemoryPanel";
 import { MemoryDetailPanel } from "./MemoryDetailPanel";
 import { MemoryEffectivePanel } from "./MemoryEffectivePanel";
 import { MemoryManagementEditor, type MemoryManagementEditorDraft } from "./MemoryManagementEditor";
@@ -4310,7 +4311,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     />
   );
 
-  const renderAgentMemoryView = () => {
+  const createAgentMemoryPanel = () => {
     const summary = agentMemoryInventoryQuery.data?.summary;
     const agentSearch = searchText.trim().toLowerCase();
     const visibleAgents = agentMemoryInventoryAgents.filter((agent) =>
@@ -4326,188 +4327,79 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       ].some((value) => String(value || "").toLowerCase().includes(agentSearch)),
     );
     return (
-      <>
-        <div className={styles.summaryGrid}>
-          <section className={styles.summaryCard}>
-            <span>{copy.agentMemoryAgents}</span>
-            <strong>{summary?.agentCount ?? 0}</strong>
-          </section>
-          <section className={styles.summaryCard}>
-            <span>{copy.agentMemoryPrivateFiles}</span>
-            <strong>{summary?.privateFileCount ?? 0}</strong>
-            <small>{formatByteCount(summary?.privateByteCount ?? 0)}</small>
-          </section>
-          <section className={styles.summaryCard}>
-            <span>{copy.agentMemoryFormalKnowledge}</span>
-            <strong>{summary?.formalKnowledgeItemCount ?? 0}</strong>
-            <small>{copy.agentMemoryFormalBases}: {summary?.formalKnowledgeBaseCount ?? 0}</small>
-          </section>
-          <section className={styles.summaryCard}>
-            <span>{copy.warnings}</span>
-            <strong>{summary?.warnings.length ?? 0}</strong>
-          </section>
-        </div>
-        <div className={`${styles.workspace} ${styles.agentMemoryWorkspace}`}>
-          <aside className={styles.sourcePanel}>
-            <div className={styles.panelHeader}>
-              <div>
-                <p className={styles.panelEyebrow}>{copy.agentMemoryAgents}</p>
-                <h2>{copy.agentMemorySelectedAgent}</h2>
-              </div>
-              <span className={styles.countPill}>{visibleAgents.length}</span>
-            </div>
-            <label className={styles.searchBox}>
-              <Search size={15} />
-              <VNativeInput value={searchText} placeholder={copy.searchPlaceholder} onChange={(event) => setSearchText(event.target.value)} />
-            </label>
-            <div className={styles.itemList}>
-              {agentMemoryInventoryQuery.isPending ? <div className={styles.emptyState}>{copy.loading}</div> : null}
-              {agentMemoryInventoryQuery.isError ? (
-                <div className={styles.emptyState}>
-                  {copy.loadFailed}: {agentMemoryInventoryQuery.error instanceof Error ? agentMemoryInventoryQuery.error.message : String(agentMemoryInventoryQuery.error)}
-                </div>
-              ) : null}
-              {!agentMemoryInventoryQuery.isPending && !visibleAgents.length ? <div className={styles.emptyState}>{copy.agentMemoryNoAgents}</div> : null}
-              {visibleAgents.map((agent) => {
-                const active = agent.agentId === selectedAgentMemoryAgentId;
-                return (
-                  <VButton
-                    key={agent.agentId}
-                    type="button"
-                    className={active ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
-                    onClick={() => selectMemoryAgent(agent.agentId)}
-                  >
-                    <span className={styles.itemHeader}>
-                      <strong>{agent.displayName || agent.agentId}</strong>
-                      <span>{agent.status}</span>
-                    </span>
-                    <span className={styles.itemOrigin}>{agent.agentCode || agent.agentId}</span>
-                    <span className={styles.itemPath}>{agent.privateMemoryRoot || agent.workspacePath}</span>
-                    <span className={styles.itemBadges}>
-                      <span className={agent.hasPrivateMemory ? styles.statusPillVisible : styles.statusPill}>
-                        {copy.agentMemoryPrivateFiles}: {agent.fileCount}
-                      </span>
-                      <span className={styles.statusPill}>
-                        {copy.agentMemoryFormalBases}: {agent.knowledgeSummary.knowledgeBaseCount}
-                      </span>
-                    </span>
-                  </VButton>
-                );
-              })}
-            </div>
-          </aside>
-
-          <main className={styles.itemPanel}>
-            <div className={styles.panelHeader}>
-              <div>
-                <p className={styles.panelEyebrow}>{copy.agentMemoryPrivateRoot}</p>
-                <h2 title={selectedAgentMemoryAgent?.privateMemoryRoot || selectedAgentMemoryAgent?.workspacePath || ""}>
-                  {selectedAgentMemoryAgent?.displayName ?? copy.agentMemorySelectedAgent}
-                </h2>
-              </div>
-              <span className={styles.countPill}>{selectedAgentMemoryAgent?.fileCount ?? 0}</span>
-            </div>
-            <section className={styles.detailMeta}>
-              <span>{copy.agentMemoryPrivateRoot}: {selectedAgentMemoryAgent?.privateMemoryRoot || "-"}</span>
-              <span>{copy.sourcePath}: {selectedAgentMemoryAgent?.workspacePath || "-"}</span>
-              <span>{copy.agentMemoryFormalKnowledge}: {selectedAgentMemoryAgent?.knowledgeSummary.itemCount ?? 0}</span>
-            </section>
-            <div className={styles.itemList}>
-              {agentMemoryDetailQuery.isPending && selectedAgentMemoryAgentId ? <div className={styles.emptyState}>{copy.loading}</div> : null}
-              {agentMemoryDetailQuery.isError ? (
-                <div className={styles.emptyState}>
-                  {copy.loadFailed}: {agentMemoryDetailQuery.error instanceof Error ? agentMemoryDetailQuery.error.message : String(agentMemoryDetailQuery.error)}
-                </div>
-              ) : null}
-              {!selectedAgentMemoryItems.length && !agentMemoryDetailQuery.isPending ? (
-                <div className={styles.emptyState}>{copy.agentMemoryNoPrivateMemory}</div>
-              ) : null}
-              {selectedAgentMemoryItems.map((item) => {
-                const active = item.id === selectedAgentMemoryItem?.id;
-                return (
-                  <VButton
-                    key={item.id}
-                    type="button"
-                    className={active ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
-                    onClick={() => setSelectedAgentMemoryItemId(item.id)}
-                  >
-                    <span className={styles.itemHeader}>
-                      <strong>{item.relativePath || item.title}</strong>
-                      <span>{formatTimestamp(item.updatedAt, lang)}</span>
-                    </span>
-                    <span className={styles.itemPath}>{item.path}</span>
-                    <span className={styles.itemSummary}>{item.summary}</span>
-                    <span className={styles.itemBadges}>
-                      <span className={styles.statusPill}>{formatByteCount(item.sizeBytes)}</span>
-                      <span className={styles.statusPill}>{item.contentType}</span>
-                      {item.contentTruncated ? <span className={styles.statusPill}>{copy.truncated}</span> : null}
-                    </span>
-                  </VButton>
-                );
-              })}
-            </div>
-          </main>
-
-          <aside className={styles.detailPanel}>
-            {selectedAgentMemoryAgent ? (
-              <>
-                <div className={styles.detailHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{copy.agentMemorySelectedFile}</p>
-                    <h2>{selectedAgentMemoryItem?.relativePath ?? copy.agentMemoryNoFileSelected}</h2>
-                    <p>{selectedAgentMemoryItem?.path || selectedAgentMemoryAgent.privateMemoryRoot || "-"}</p>
-                  </div>
-                  {selectedAgentMemoryItem ? <span className={styles.countPill}>{formatByteCount(selectedAgentMemoryItem.sizeBytes)}</span> : null}
-                </div>
-                <section className={styles.sectionPanel}>
-                  <div className={styles.panelHeader}>
-                    <div>
-                      <p className={styles.panelEyebrow}>{copy.agentMemoryFormalKnowledge}</p>
-                      <h3>{copy.agentMemoryFormalBases}</h3>
-                    </div>
-                    <span className={styles.countPill}>{selectedAgentMemoryAgent.knowledgeSummary.knowledgeBaseCount}</span>
-                  </div>
-                  {selectedAgentMemoryAgent.knowledgeSummary.error ? <p>{selectedAgentMemoryAgent.knowledgeSummary.error}</p> : null}
-                  {selectedAgentMemoryAgent.knowledgeSummary.knowledgeBases.length ? (
-                    <div className={styles.usageList}>
-                      {selectedAgentMemoryAgent.knowledgeSummary.knowledgeBases.map((base) => (
-                        <span key={base.scopedKnowledgeBaseId || base.knowledgeBaseId} title={base.scopedKnowledgeBaseId || base.knowledgeBaseId}>
-                          <Database size={13} />
-                          {base.name || base.knowledgeBaseId}
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <p>{copy.noMatches}</p>
-                  )}
-                </section>
-                <details className={styles.rawPanel} open>
-                  <summary>
-                    <FileText size={15} />
-                    <span>{copy.rawContent}</span>
-                    <code>{selectedAgentMemoryItem?.contentType ?? "-"}</code>
-                  </summary>
-                  {agentMemoryDetailQuery.isFetching ? <p>{copy.loading}</p> : null}
-                  {selectedAgentMemoryItem?.content ? (
-                    <pre data-language={contentLanguage(selectedAgentMemoryItem.contentType)}>{selectedAgentMemoryItem.content}</pre>
-                  ) : !agentMemoryDetailQuery.isFetching ? (
-                    <p>{selectedAgentMemoryItem ? copy.noContent : copy.agentMemoryNoFileSelected}</p>
-                  ) : null}
-                </details>
-                <p className={styles.generatedAt}>
-                  {copy.generatedAt}: {formatTimestamp(agentMemoryDetailQuery.data?.generatedAt ?? agentMemoryInventoryQuery.data?.generatedAt ?? "", lang)}
-                </p>
-              </>
-            ) : (
-              <section className={styles.emptyDetail}>
-                <Brain size={24} />
-                <strong>{copy.agentMemorySelectedAgent}</strong>
-                <p>{agentMemoryInventoryQuery.isPending ? copy.loading : copy.agentMemoryNoAgents}</p>
-              </section>
-            )}
-          </aside>
-        </div>
-      </>
+      <MemoryAgentMemoryPanel
+        copy={copy}
+        summary={{
+          agentCount: summary?.agentCount ?? 0,
+          privateFileCount: summary?.privateFileCount ?? 0,
+          privateByteText: formatByteCount(summary?.privateByteCount ?? 0),
+          formalKnowledgeItemCount: summary?.formalKnowledgeItemCount ?? 0,
+          formalKnowledgeBaseCount: summary?.formalKnowledgeBaseCount ?? 0,
+          warningCount: summary?.warnings.length ?? 0,
+        }}
+        searchText={searchText}
+        onSearchTextChange={setSearchText}
+        agents={visibleAgents.map((agent) => ({
+          id: agent.agentId,
+          name: agent.displayName || agent.agentId,
+          status: agent.status,
+          origin: agent.agentCode || agent.agentId,
+          path: agent.privateMemoryRoot || agent.workspacePath,
+          privateFileCount: agent.fileCount,
+          formalKnowledgeBaseCount: agent.knowledgeSummary.knowledgeBaseCount,
+          hasPrivateMemory: agent.hasPrivateMemory,
+          active: agent.agentId === selectedAgentMemoryAgentId,
+        }))}
+        selectedAgent={
+          selectedAgentMemoryAgent
+            ? {
+              name: selectedAgentMemoryAgent.displayName || selectedAgentMemoryAgent.agentId,
+              privateRoot: selectedAgentMemoryAgent.privateMemoryRoot,
+              workspacePath: selectedAgentMemoryAgent.workspacePath,
+              fileCount: selectedAgentMemoryAgent.fileCount,
+              formalKnowledgeItemCount: selectedAgentMemoryAgent.knowledgeSummary.itemCount,
+              formalKnowledgeBaseCount: selectedAgentMemoryAgent.knowledgeSummary.knowledgeBaseCount,
+              knowledgeError: selectedAgentMemoryAgent.knowledgeSummary.error,
+              knowledgeBases: selectedAgentMemoryAgent.knowledgeSummary.knowledgeBases.map((base) => ({
+                id: base.scopedKnowledgeBaseId || base.knowledgeBaseId,
+                label: base.name || base.knowledgeBaseId,
+                title: base.scopedKnowledgeBaseId || base.knowledgeBaseId,
+              })),
+            }
+            : null
+        }
+        selectedItem={
+          selectedAgentMemoryItem
+            ? {
+              title: selectedAgentMemoryItem.relativePath || selectedAgentMemoryItem.title,
+              path: selectedAgentMemoryItem.path,
+              sizeText: formatByteCount(selectedAgentMemoryItem.sizeBytes),
+              contentType: selectedAgentMemoryItem.contentType,
+              contentLanguage: contentLanguage(selectedAgentMemoryItem.contentType),
+              content: selectedAgentMemoryItem.content,
+            }
+            : null
+        }
+        items={selectedAgentMemoryItems.map((item) => ({
+          id: item.id,
+          title: item.relativePath || item.title,
+          updatedAtText: formatTimestamp(item.updatedAt, lang),
+          path: item.path,
+          summary: item.summary,
+          sizeText: formatByteCount(item.sizeBytes),
+          contentType: item.contentType,
+          truncated: item.contentTruncated,
+          active: item.id === selectedAgentMemoryItem?.id,
+        }))}
+        inventoryPending={agentMemoryInventoryQuery.isPending}
+        inventoryErrorText={agentMemoryInventoryQuery.error instanceof Error ? agentMemoryInventoryQuery.error.message : agentMemoryInventoryQuery.error ? String(agentMemoryInventoryQuery.error) : ""}
+        detailPending={agentMemoryDetailQuery.isPending && Boolean(selectedAgentMemoryAgentId)}
+        detailFetching={agentMemoryDetailQuery.isFetching}
+        detailErrorText={agentMemoryDetailQuery.error instanceof Error ? agentMemoryDetailQuery.error.message : agentMemoryDetailQuery.error ? String(agentMemoryDetailQuery.error) : ""}
+        generatedAtText={formatTimestamp(agentMemoryDetailQuery.data?.generatedAt ?? agentMemoryInventoryQuery.data?.generatedAt ?? "", lang)}
+        onSelectAgent={selectMemoryAgent}
+        onSelectItem={setSelectedAgentMemoryItemId}
+      />
     );
   };
 
@@ -6131,7 +6023,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
            : forcedView === "effective"
              ? createEffectivePanel()
              : forcedView === "agents"
-              ? renderAgentMemoryView()
+              ? createAgentMemoryPanel()
               : forcedView === "manage"
                 ? createManagePanel()
                 : forcedView === "knowledge"

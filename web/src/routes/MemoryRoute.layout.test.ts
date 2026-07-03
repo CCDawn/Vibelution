@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import routeSource from "./MemoryRoute.tsx?raw";
+import agentMemoryPanelSource from "./MemoryAgentMemoryPanel.tsx?raw";
 import detailPanelSource from "./MemoryDetailPanel.tsx?raw";
 import effectivePanelSource from "./MemoryEffectivePanel.tsx?raw";
 import managementEditorSource from "./MemoryManagementEditor.tsx?raw";
@@ -48,12 +49,23 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain(
       "`/api/memory/agents/${encodeURIComponent(selectedAgentMemoryAgentId)}?actorAgentId=${encodeURIComponent(selectedAgentMemoryAgentId)}`",
     );
-    expect(routeSource).toContain("renderAgentMemoryView()");
+    expect(routeSource).toContain("createAgentMemoryPanel()");
     expect(routeSource).toContain("copy.agentMemoryView");
-    expect(routeSource).toContain("copy.agentMemoryPrivateFiles");
+    expect(agentMemoryPanelSource).toContain("copy.agentMemoryPrivateFiles");
     expect(routeSource).toContain("styles.agentMemoryViewStack");
     expect(memoryCssSource).toContain(".agentMemoryViewStack");
     expect(memoryCssSource).toContain(".agentMemoryWorkspace");
+    expect(routeSource).toContain('from "./MemoryAgentMemoryPanel"');
+    expect(routeSource).toContain("<MemoryAgentMemoryPanel");
+    expect(routeSource).not.toContain("const renderAgentMemoryView = () =>");
+    expect(agentMemoryPanelSource).toContain("export function MemoryAgentMemoryPanel");
+    expect(agentMemoryPanelSource).toContain("styles.agentMemoryWorkspace");
+    expect(agentMemoryPanelSource).toContain("styles.sourcePanel");
+    expect(agentMemoryPanelSource).toContain("styles.itemPanel");
+    expect(agentMemoryPanelSource).toContain("styles.detailPanel");
+    expect(agentMemoryPanelSource).not.toContain("useQuery");
+    expect(agentMemoryPanelSource).not.toContain("useMutation");
+    expect(agentMemoryPanelSource).not.toContain("fetchJson");
   });
 
   it("supports returning from Agent Center deep links", () => {
@@ -153,7 +165,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("styles.subnav");
     expect(routeSource).toContain("<MemoryOverviewPanel");
     expect(routeSource).toContain("createEffectivePanel()");
-    expect(routeSource).toContain("renderAgentMemoryView()");
+    expect(routeSource).toContain("createAgentMemoryPanel()");
     expect(routeSource).toContain("createManagePanel()");
     expect(routeSource).toContain("renderSourcesView()");
     expect(routeSource).toContain("renderKnowledgeView()");
