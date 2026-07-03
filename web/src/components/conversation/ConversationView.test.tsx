@@ -211,6 +211,17 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.responseToggle).toContain("[&_[data-slot=vui-button-label]]:contents");
   });
 
+  it("keeps the latest compact process prompt on one visual line", () => {
+    expect(styles.answerOnlyProcessTitle).toContain("truncate");
+    expect(styles.answerOnlyProcessTitle).toContain("whitespace-nowrap");
+    expect(styles.answerOnlyProcessMeta).toContain("truncate");
+    expect(styles.answerOnlyProcessMeta).toContain("whitespace-nowrap");
+    expect(styles.answerOnlyProcessPreview).toContain("truncate");
+    expect(styles.answerOnlyProcessPreview).toContain("whitespace-nowrap");
+    expect(styles.answerOnlyProcessPreview).not.toContain("whitespace-normal");
+    expect(styles.answerOnlyProcessPreview).not.toContain("[overflow-wrap:anywhere]");
+  });
+
   it("keeps conversation timeline previews wrapped and button slots flat", () => {
     expect(styles.timelineCellHeader).toContain("items-start");
     expect(styles.timelineCellHeader).toContain("!grid");
