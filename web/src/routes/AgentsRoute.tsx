@@ -100,6 +100,7 @@ import {
 import { AgentReturnBannerPanel } from "./AgentReturnBannerPanel";
 import { AgentRuntimeFocusPanel } from "./AgentRuntimeFocusPanel";
 import { AgentRuntimePolicyPanel } from "./AgentRuntimePolicyPanel";
+import { AgentTaskProfilePanel, type AgentTaskDraft } from "./AgentTaskProfilePanel";
 import { AgentToolSummaryPanel } from "./AgentToolSummaryPanel";
 import {
   agentCenterMemoryRoute,
@@ -151,10 +152,6 @@ type AgentContextCompressionPolicyDraft = {
   keepAiMessages: string;
   preserveErrors: boolean;
   extractKeyDecisions: boolean;
-};
-
-type AgentTaskDraft = Omit<AgentTaskProfile, "taskTypes"> & {
-  taskTypes: string;
 };
 
 type AgentCreateDraft = {
@@ -6549,77 +6546,18 @@ export function AgentsRoute() {
               </section>
 
               {selectedAgentRequiresTask ? (
-              <section className={styles.configEditor} title={copy.taskHint}>
-                <div className={styles.panelHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{copy.taskTitle}</p>
-                    <h3>{taskProfileSummary(selectedAgent, lang)}</h3>
-                  </div>
-                  <span className={taskDirty ? styles.dirtyPill : styles.cleanPill}>
-                    {taskDirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}
-                  </span>
-                </div>
-                <div className={styles.editorGrid}>
-                  <label className={styles.fieldWide}>
-                    <span>{copy.mission}</span>
-                    <VNativeTextarea value={taskDraft.mission} onChange={(event) => updateTaskDraft({ mission: event.target.value })} />
-                  </label>
-                  <label className={styles.fieldWide}>
-                    <span>{copy.taskTypes}</span>
-                    <VNativeInput
-                      value={taskDraft.taskTypes}
-                      placeholder={copy.taskTypesPlaceholder}
-                      onChange={(event) => updateTaskDraft({ taskTypes: event.target.value })}
-                    />
-                  </label>
-                  <label className={styles.fieldWide}>
-                    <span>{copy.responsibilities}</span>
-                    <VNativeTextarea value={taskDraft.responsibilities} onChange={(event) => updateTaskDraft({ responsibilities: event.target.value })} />
-                  </label>
-                  <label className={styles.fieldWide}>
-                    <span>{copy.preferredTasks}</span>
-                    <VNativeTextarea value={taskDraft.preferredTasks} onChange={(event) => updateTaskDraft({ preferredTasks: event.target.value })} />
-                  </label>
-                  <label className={styles.fieldWide}>
-                    <span>{copy.avoidTasks}</span>
-                    <VNativeTextarea value={taskDraft.avoidTasks} onChange={(event) => updateTaskDraft({ avoidTasks: event.target.value })} />
-                  </label>
-                  <label className={styles.fieldWide}>
-                    <span>{copy.successCriteria}</span>
-                    <VNativeTextarea value={taskDraft.successCriteria} onChange={(event) => updateTaskDraft({ successCriteria: event.target.value })} />
-                  </label>
-                  <label className={styles.fieldWide}>
-                    <span>{copy.deliverables}</span>
-                    <VNativeTextarea value={taskDraft.deliverables} onChange={(event) => updateTaskDraft({ deliverables: event.target.value })} />
-                  </label>
-                  <label className={styles.fieldWide}>
-                    <span>{copy.constraints}</span>
-                    <VNativeTextarea value={taskDraft.constraints} onChange={(event) => updateTaskDraft({ constraints: event.target.value })} />
-                  </label>
-                  <label className={styles.fieldWide}>
-                    <span>{copy.handoffNotes}</span>
-                    <VNativeTextarea value={taskDraft.handoffNotes} onChange={(event) => updateTaskDraft({ handoffNotes: event.target.value })} />
-                  </label>
-                </div>
-                <div className={styles.editorActions}>
-                  <VButton
-                    type="button"
-                    variant="secondary"
-                    isDisabled={!taskDirty || selectedAgentTaskPending}
-                    onPress={() => setTaskDraft(taskDraftFromAgent(selectedAgent))}
-                  >
-                    {copy.resetConfig}
-                  </VButton>
-                  <VButton
-                    type="button"
-                    variant="primary"
-                    isDisabled={!canSaveTask || selectedAgentTaskPending}
-                    onPress={saveTaskProfile}
-                  >
-                    {selectedAgentTaskPending ? copy.savingTask : copy.saveTask}
-                  </VButton>
-                </div>
-              </section>
+              <AgentTaskProfilePanel
+                copy={copy}
+                lang={lang}
+                summary={taskProfileSummary(selectedAgent, lang)}
+                draft={taskDraft}
+                dirty={taskDirty}
+                canSave={canSaveTask}
+                pending={selectedAgentTaskPending}
+                onDraftChange={updateTaskDraft}
+                onReset={() => setTaskDraft(taskDraftFromAgent(selectedAgent))}
+                onSave={saveTaskProfile}
+              />
               ) : null}
 
               <section className={styles.detailSection} title={issueNextStep(selectedAgent.health, lang)}>

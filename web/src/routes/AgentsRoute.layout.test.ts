@@ -34,6 +34,10 @@ const personaProfilePanelSource = readFileSync(
   new URL("./AgentPersonaProfilePanel.tsx", import.meta.url),
   "utf-8",
 );
+const taskProfilePanelSource = readFileSync(
+  new URL("./AgentTaskProfilePanel.tsx", import.meta.url),
+  "utf-8",
+);
 const filterRailSource = readFileSync(
   new URL("../components/vui/product/agent-management/AgentFilterRail.tsx", import.meta.url),
   "utf-8",
@@ -530,7 +534,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("title={copy.routeHint}");
     expect(managementBriefPanelSource).toContain("title={copy.managementBriefHint}");
     expect(routeSource).toContain("title={copy.personaHint}");
-    expect(routeSource).toContain("title={copy.taskHint}");
+    expect(taskProfilePanelSource).toContain("title={copy.taskHint}");
     expect(routeSource).toContain("title={copy.maintenanceHint}");
     expect(debugResetPanelSource).toContain("title={copy.resetAgentHint}");
     expect(routeSource).not.toContain("<p>{copy.createAgentHint}</p>");
@@ -612,13 +616,21 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("AgentTaskDraft");
     expect(routeSource).toContain("taskProfileFromDraft");
     expect(routeSource).toContain("taskProfile: taskProfileFromDraft(payload.draft)");
-    expect(routeSource).toContain("copy.taskTitle");
-    expect(routeSource).toContain("copy.mission");
-    expect(routeSource).toContain("copy.taskTypes");
-    expect(routeSource).toContain("copy.responsibilities");
-    expect(routeSource).toContain("copy.preferredTasks");
-    expect(routeSource).toContain("copy.successCriteria");
-    expect(routeSource).toContain("copy.handoffNotes");
+    expect(routeSource).toContain("<AgentTaskProfilePanel");
+    expect(routeSource).toContain("summary={taskProfileSummary(selectedAgent, lang)}");
+    expect(routeSource).toContain("draft={taskDraft}");
+    expect(routeSource).toContain("dirty={taskDirty}");
+    expect(routeSource).toContain("canSave={canSaveTask}");
+    expect(routeSource).toContain("pending={selectedAgentTaskPending}");
+    expect(routeSource).toContain("onDraftChange={updateTaskDraft}");
+    expect(routeSource).toContain("onSave={saveTaskProfile}");
+    expect(taskProfilePanelSource).toContain("copy.taskTitle");
+    expect(taskProfilePanelSource).toContain("copy.mission");
+    expect(taskProfilePanelSource).toContain("copy.taskTypes");
+    expect(taskProfilePanelSource).toContain("copy.responsibilities");
+    expect(taskProfilePanelSource).toContain("copy.preferredTasks");
+    expect(taskProfilePanelSource).toContain("copy.successCriteria");
+    expect(taskProfilePanelSource).toContain("copy.handoffNotes");
     expect(routeSource).toContain("updateTaskMutation");
     expect(routeSource).not.toContain("autoRouteAgent");
   });
@@ -1206,6 +1218,7 @@ describe("AgentsRoute layout contract", () => {
       ...sourceBlocksForStyle("editorActions", debugResetPanelSource),
       ...sourceBlocksForStyle("editorActions", modeMembershipPanelSource),
       ...sourceBlocksForStyle("editorActions", personaProfilePanelSource),
+      ...sourceBlocksForStyle("editorActions", taskProfilePanelSource),
       ...sourceBlocksForStyle("editorActions", toolSummaryPanelSource),
     ];
     const deepLinkActionBlocks = sourceBlocksForStyle("configDeepLinkRow");
