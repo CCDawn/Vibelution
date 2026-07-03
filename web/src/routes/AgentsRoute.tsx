@@ -8,7 +8,6 @@ import {
   Database,
   Layers3,
   Plus,
-  RefreshCw,
   Square,
   Trash2,
   UserRound,
@@ -52,8 +51,6 @@ import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy"
 import {
   AgentBulkActionBar,
   AgentFilterRail,
-  AgentPageHeader,
-  AgentSummaryStrip,
   AgentWorkspacePanel,
   type AgentDenseColumn,
   type AgentFilterSectionView,
@@ -86,8 +83,8 @@ import { AgentHealthMaintenancePanel } from "./AgentHealthMaintenancePanel";
 import { AgentListStatePanel } from "./AgentListStatePanel";
 import { AgentMemoryPolicyPanel, type AgentMemoryPolicyDraft } from "./AgentMemoryPolicyPanel";
 import { AgentModeMembershipPanel, type AgentModeMembershipDraft } from "./AgentModeMembershipPanel";
-import { AgentManagementNav } from "./AgentManagementNav";
 import { AgentManagementBriefPanel } from "./AgentManagementBriefPanel";
+import { AgentManagementHeaderPanel } from "./AgentManagementHeaderPanel";
 import {
   AgentOverviewPanel,
   type AgentOverviewFact,
@@ -5726,35 +5723,21 @@ export function AgentsRoute() {
 
   return (
     <section className={styles.route}>
-      <div title={copy.subtitle}>
-        <AgentPageHeader
-          eyebrow={copy.eyebrow}
-          title={copy.title}
-        actions={[
-          {
-            id: "refresh",
-            label: copy.refresh,
-            icon: <RefreshCw size={14} />,
-            onPress: refresh,
-          },
-        ]}
+      <AgentManagementHeaderPanel
+        copy={{
+          eyebrow: copy.eyebrow,
+          title: copy.title,
+          subtitle: copy.subtitle,
+          refresh: copy.refresh,
+          workspaceSummary: copy.workspaceSummary,
+          workspaceHealthStatus: copy.workspaceHealthStatus,
+        }}
+        healthStatus={healthStatus}
+        healthStatusLabel={healthStatusLabel}
+        healthStatusDescription={healthStatusDescription}
+        metrics={agentSummaryMetrics}
+        onRefresh={refresh}
       />
-      </div>
-
-      <div className={styles.controlStrip}>
-        <AgentManagementNav active="agents" className={styles.managementNav} />
-
-        <AgentSummaryStrip
-          ariaLabel={copy.workspaceSummary}
-          status={{
-            label: healthStatusLabel,
-            title: healthStatusDescription,
-            ariaLabel: `${copy.workspaceHealthStatus}: ${healthStatusLabel}. ${healthStatusDescription}`,
-            tone: healthStatus === "blocked" ? "danger" : healthStatus === "warning" ? "warning" : "success",
-          }}
-          metrics={agentSummaryMetrics}
-        />
-      </div>
 
       <div className={createOpen ? `${styles.workspace} ${styles.workspaceCreating}` : styles.workspace}>
         <AgentFilterRail
