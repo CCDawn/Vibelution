@@ -1,4 +1,29 @@
-import type { ConversationFeedbackEvent } from "../api/types";
+export type AgentFeedbackEvent = {
+  sequence?: number;
+  kind: "thought" | "mental" | "tool" | "status" | (string & {});
+  status?: string;
+  timestamp?: string;
+  name?: string;
+  summary?: string;
+  arguments?: Record<string, unknown>;
+  resultPreview?: string;
+  resultType?: string;
+  resultLength?: number;
+  error?: string;
+  durationMs?: number;
+  durationSeconds?: number;
+  timeoutSeconds?: number;
+  transportStatus?: string;
+  semanticStatus?: string;
+  exitCode?: number | null;
+  timedOut?: boolean;
+  failureClass?: string;
+  resultKind?: string;
+  truncated?: boolean;
+  originalLength?: number;
+  tracePath?: string;
+  relatedThoughtSequence?: number;
+};
 
 function positiveNumber(value: unknown): number {
   const numeric = Number(value ?? 0);
@@ -25,7 +50,7 @@ function stableJsonSignal(value: unknown): string {
   return JSON.stringify(value) ?? String(value);
 }
 
-export function conversationFeedbackEventIdentityKey(event: ConversationFeedbackEvent): string {
+export function agentFeedbackEventIdentityKey(event: AgentFeedbackEvent): string {
   const sequence = positiveNumber(event.sequence);
   if (sequence > 0) {
     return `seq:${sequence}`;
@@ -70,13 +95,13 @@ export function conversationFeedbackEventIdentityKey(event: ConversationFeedback
   ].join(":");
 }
 
-export function mergeConversationFeedbackEvents(
-  ...eventGroups: Array<ConversationFeedbackEvent[] | undefined>
-): ConversationFeedbackEvent[] {
-  const merged = new Map<string, ConversationFeedbackEvent>();
+export function mergeAgentFeedbackEvents<TEvent extends AgentFeedbackEvent>(
+  ...eventGroups: Array<TEvent[] | undefined>
+): TEvent[] {
+  const merged = new Map<string, TEvent>();
   for (const group of eventGroups) {
     for (const event of group ?? []) {
-      const key = conversationFeedbackEventIdentityKey(event);
+      const key = agentFeedbackEventIdentityKey(event);
       const previous = merged.get(key);
       merged.set(key, previous ? { ...previous, ...event } : event);
     }
