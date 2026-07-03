@@ -93,6 +93,11 @@ import {
   hasComposerImageDragPayload,
   hasComposerSessionReferenceDragPayload,
 } from "./conversationComposerDropPayload";
+import {
+  buildConversationTurnErrorReasonRows,
+  buildCurrentTurnErrorRows,
+  resolveConversationTurnErrorType,
+} from "./conversationTurnErrorPresentation";
 import { VButton, VNativeInput, VNativeTextarea } from "../vui";
 import styles from "./ConversationView.styles";
 
@@ -406,46 +411,6 @@ function agentInboxSummary(message: ConversationMessage) {
     .map((line) => line.trim())
     .find((line) => line && !line.startsWith("[Agent 私信") && !line.startsWith("来源 Agent") && !line.startsWith("消息ID"))
     ?? "";
-}
-
-function turnErrorType(message: ConversationMessage) {
-  const raw = message.metadata?.errorType ?? message.metadata?.error_type;
-  return typeof raw === "string" ? raw.trim() : "";
-}
-
-function turnErrorReasonRows(message: ConversationMessage, lang: "zh" | "en") {
-  const summary = metadataText(message.metadata, "reasonSummary") || metadataText(message.metadata, "reason_summary");
-  const detail = metadataText(message.metadata, "reasonDetail") || metadataText(message.metadata, "reason_detail");
-  const code = metadataText(message.metadata, "reasonCode") || metadataText(message.metadata, "reason_code");
-  const httpStatus = metadataText(message.metadata, "httpStatus") || metadataText(message.metadata, "http_status");
-  const providerErrorType = metadataText(message.metadata, "providerErrorType") || metadataText(message.metadata, "provider_error_type");
-  const providerErrorMessage = metadataText(message.metadata, "providerErrorMessage") || metadataText(message.metadata, "provider_error_message");
-  const provider = metadataText(message.metadata, "provider");
-  const providerHost = metadataText(message.metadata, "providerHost") || metadataText(message.metadata, "provider_host");
-  const model = metadataText(message.metadata, "model");
-  return [
-    httpStatus ? { label: lang === "zh" ? "状态码" : "Status", value: httpStatus } : null,
-    summary ? { label: lang === "zh" ? "原因" : "Reason", value: summary } : null,
-    detail ? { label: lang === "zh" ? "详情" : "Detail", value: detail } : null,
-    providerErrorType ? { label: lang === "zh" ? "类型" : "Type", value: providerErrorType } : null,
-    providerErrorMessage ? { label: lang === "zh" ? "上游" : "Upstream", value: providerErrorMessage } : null,
-    provider || providerHost ? { label: lang === "zh" ? "通道" : "Provider", value: [provider, providerHost].filter(Boolean).join(" · ") } : null,
-    model ? { label: lang === "zh" ? "模型" : "Model", value: model } : null,
-    code ? { label: lang === "zh" ? "代码" : "Code", value: code } : null,
-  ].filter((row): row is { label: string; value: string } => Boolean(row));
-}
-
-function turnErrorBannerRows(turnError: SessionTurnError, lang: "zh" | "en") {
-  return [
-    turnError.httpStatus ? { label: lang === "zh" ? "状态码" : "Status", value: String(turnError.httpStatus) } : null,
-    turnError.reasonSummary ? { label: lang === "zh" ? "原因" : "Reason", value: turnError.reasonSummary } : null,
-    turnError.reasonDetail ? { label: lang === "zh" ? "详情" : "Detail", value: turnError.reasonDetail } : null,
-    turnError.providerErrorType ? { label: lang === "zh" ? "类型" : "Type", value: turnError.providerErrorType } : null,
-    turnError.providerErrorMessage ? { label: lang === "zh" ? "上游" : "Upstream", value: turnError.providerErrorMessage } : null,
-    turnError.provider || turnError.providerHost ? { label: lang === "zh" ? "通道" : "Provider", value: [turnError.provider, turnError.providerHost].filter(Boolean).join(" · ") } : null,
-    turnError.model ? { label: lang === "zh" ? "模型" : "Model", value: turnError.model } : null,
-    turnError.reasonCode ? { label: lang === "zh" ? "代码" : "Code", value: turnError.reasonCode } : null,
-  ].filter((row): row is { label: string; value: string } => Boolean(row));
 }
 
 function groupRoomTranscriptLabel(message: ConversationMessage) {
@@ -3787,12 +3752,12 @@ export function ConversationView({
                       <div className={styles.turnErrorNoticeBody}>
                         <div className={styles.turnErrorNoticeMeta}>
                           <span>{lang === "zh" ? "运行提示" : "Runtime notice"}</span>
-                          {turnErrorType(message) ? <span>{turnErrorType(message)}</span> : null}
+                          {resolveConversationTurnErrorType(message) ? <span>{resolveConversationTurnErrorType(message)}</span> : null}
                         </div>
                         <div className={styles.turnErrorNoticeText}>{renderResponseText(message.content)}</div>
-                        {turnErrorReasonRows(message, lang).length > 0 ? (
+                        {buildConversationTurnErrorReasonRows(message, lang).length > 0 ? (
                           <dl className={styles.turnErrorReasonList}>
-                            {turnErrorReasonRows(message, lang).map((row) => (
+                            {buildConversationTurnErrorReasonRows(message, lang).map((row) => (
                               <div key={`${row.label}-${row.value}`} className={styles.turnErrorReasonRow}>
                                 <dt>{row.label}</dt>
                                 <dd>{row.value}</dd>
@@ -3833,7 +3798,7 @@ export function ConversationView({
           <div className={styles.turnErrorText}>
             <span className={styles.turnErrorLabel}>{t("turnErrorLabel")}</span>
             <span>{turnError.message}</span>
-            {turnErrorBannerRows(turnError, lang).map((row) => (
+            {buildCurrentTurnErrorRows(turnError, lang).map((row) => (
               <span key={`${row.label}-${row.value}`} className={styles.turnErrorDetail}>
                 {row.label}: {row.value}
               </span>
