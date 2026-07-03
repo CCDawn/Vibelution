@@ -177,6 +177,17 @@ const routeStyleTargets = [
   },
 ] as const;
 
+const staticInlineStyleCleanupTargets = [
+  {
+    path: "components/editor/LazyJsonCodeMirror.tsx",
+    forbidden: 'style={{ minHeight: "100%" }}',
+  },
+  {
+    path: "components/vui/renderers/heroui/HeroProvider.tsx",
+    forbidden: 'style={{ display: "contents" }}',
+  },
+] as const;
+
 function readTargetSource(path: string): string {
   return readFileSync(resolve(sourceRoot, path), "utf8");
 }
@@ -344,5 +355,11 @@ describe("VUI batch migration", () => {
     expect(source).toContain("--pet-progress");
     expect(source).not.toContain("style={{ width: `${progress}%` }}");
     expect(petStyles.progressFillClass).toContain("w-[var(--pet-progress)]");
+  });
+
+  it.each(staticInlineStyleCleanupTargets)("$path keeps static layout styles out of raw inline style props", ({ path, forbidden }) => {
+    const source = readTargetSource(path);
+
+    expect(source).not.toContain(forbidden);
   });
 });

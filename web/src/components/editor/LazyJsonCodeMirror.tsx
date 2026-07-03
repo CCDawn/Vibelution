@@ -1,5 +1,7 @@
 import { lazy, Suspense, useMemo, type ComponentType } from "react";
 
+import styles from "./LazyJsonCodeMirror.styles";
+
 type JsonCodeMirrorProps = {
   value: string;
   onChange: (value: string) => void;
@@ -37,7 +39,7 @@ const JsonCodeMirrorImpl = lazy(() =>
 
 export function LazyJsonCodeMirror({ value, onChange }: JsonCodeMirrorProps) {
   return (
-    <Suspense fallback={<div style={{ minHeight: "100%" }} />}>
+    <Suspense fallback={<div className={styles.fallback} />}>
       <JsonCodeMirrorImpl value={value} onChange={onChange} />
     </Suspense>
   );

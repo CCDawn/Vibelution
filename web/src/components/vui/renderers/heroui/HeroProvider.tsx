@@ -9,9 +9,8 @@ export function VibelutionHeroProvider({ children }: VibelutionHeroProviderProps
   // explicit so app code does not learn package-level assumptions.
   return (
     <div
-      className="vui-heroui-provider"
+      className="vui-heroui-provider contents"
       data-vui-provider="heroui"
-      style={{ display: "contents" }}
     >
       {children}
     </div>
