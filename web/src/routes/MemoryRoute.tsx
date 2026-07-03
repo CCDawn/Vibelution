@@ -72,6 +72,7 @@ import { MemoryDetailPanel } from "./MemoryDetailPanel";
 import { MemoryEffectivePanel } from "./MemoryEffectivePanel";
 import { MemoryKnowledgeRagPanel } from "./MemoryKnowledgeRagPanel";
 import { MemoryKnowledgeStewardPanel } from "./MemoryKnowledgeStewardPanel";
+import { MemoryKnowledgeUsageContractPanel } from "./MemoryKnowledgeUsageContractPanel";
 import { MemoryManagementEditor, type MemoryManagementEditorDraft } from "./MemoryManagementEditor";
 import { MemoryManagePanel } from "./MemoryManagePanel";
 import { MemoryMatrixPanel } from "./MemoryMatrixPanel";
@@ -4443,88 +4444,25 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         </div>
       </section>
       <div className={styles.knowledgeGovernanceDeck}>
-      <section className={styles.usageContractPanel} aria-label={copy.usageContract}>
-        <div className={styles.managementHeader}>
-          <div>
-            <p className={styles.panelEyebrow}>{copy.usageContract}</p>
-            <h2>{copy.memoryDomains}</h2>
-          </div>
-          <span className={styles.countPill}>{memoryUsageContract?.domains.length ?? 0}</span>
-        </div>
-        <div className={styles.contractPrinciples}>
-          <span title={(memoryUsageContract?.principles ?? []).join("\n")}>
-            {(memoryUsageContract?.principles ?? []).length} {lang === "zh" ? "条边界规则" : "boundary rules"}
-          </span>
-          <span title={copy.reviewerRequired}>{copy.reviewerRequired}</span>
-          <span title={copy.promptBoundary}>{copy.promptBoundary}</span>
-        </div>
-        <div className={styles.contractDomainGrid}>
-          {(memoryUsageContract?.domains ?? []).slice(0, 4).map((domain) => (
-            <section
-              key={domain.domainId}
-              className={styles.contractDomainRow}
-              title={[
-                domain.label,
-                domain.owner && `${copy.ownerScope}: ${domain.owner}`,
-                domain.storage && `${copy.sourcePath}: ${domain.storage}`,
-                `${copy.allowedUse}: ${domain.readsThrough.join(", ") || "-"}`,
-                `${copy.writeBoundary}: ${domain.canCreateFormalKnowledge ? copy.reviewerRequired : domain.boundary}`,
-                `Prompt: ${domain.promptDefault || "-"}`,
-              ].filter(Boolean).join("\n")}
-            >
-              <div>
-                <strong>{memoryDomainDisplayLabel(domain.label, domain.domainId, lang)}</strong>
-                <small>{memoryDomainOwnerLabel(domain.owner, lang)}</small>
-              </div>
-              <span>{domain.canCreateFormalKnowledge ? (lang === "zh" ? "需审核" : copy.reviewerRequired) : memoryBoundaryLabel(domain.boundary, lang)}</span>
-              <code>{policyTokenLabel(domain.promptDefault, lang)}</code>
-            </section>
-          ))}
-          {(memoryUsageContract?.domains.length ?? 0) > 4 ? (
-            <section className={styles.contractDomainRow} title={(memoryUsageContract?.domains ?? []).slice(4).map((domain) => domain.label).join("\n")}>
-              <div>
-                <strong>+{(memoryUsageContract?.domains.length ?? 0) - 4}</strong>
-                <small>{copy.memoryDomains}</small>
-              </div>
-              <span>{lang === "zh" ? "悬停查看" : "Hover for details"}</span>
-              <code>{copy.promptBoundary}</code>
-            </section>
-          ) : null}
-        </div>
-        <div className={styles.contractStateGrid}>
-          <section>
-            <span>{copy.currentContractState}</span>
-            <strong>{Number(memoryUsageContract?.currentState.knowledge.knowledgeBaseCount ?? 0)}</strong>
-            <small>{copy.knowledgeBases}</small>
-          </section>
-          <section>
-            <span>{copy.healthFindings}</span>
-            <strong>{Number(memoryUsageContract?.currentState.operationsHealth.findingCount ?? 0)}</strong>
-            <small>{copy.operationsHealth}</small>
-          </section>
-          <section>
-            <span>{copy.governancePlan}</span>
-            <strong>{Number(memoryUsageContract?.currentState.governancePlan.actionCount ?? 0)}</strong>
-            <small>{copy.planOnly}</small>
-          </section>
-        </div>
-        <div className={styles.contractForbiddenList} aria-label={copy.forbiddenActions}>
-          <span title={(memoryUsageContract?.forbiddenActions ?? []).join("\n")}>
-            <XCircle size={13} />
-            {(memoryUsageContract?.forbiddenActions ?? []).length} {copy.forbiddenActions}
-          </span>
-        </div>
-      </section>
-      <MemoryKnowledgeStewardPanel
-        copy={copy}
-        lang={lang}
-        knowledgeSteward={knowledgeSteward}
-        recommendations={knowledgeStewardRecommendations}
-        knowledgeStewardWorkbench={knowledgeStewardWorkbench}
-        recommendationsOnly={knowledgeDashboardSnapshot?.recommendations.operatingBoundary.recommendationsOnly ?? false}
-        formatPolicyToken={(value) => policyTokenLabel(value, lang)}
-        onTraceTarget={setTraceTargetId}
-      />
+        <MemoryKnowledgeUsageContractPanel
+          copy={copy}
+          lang={lang}
+          contract={memoryUsageContract}
+          formatDomainLabel={(label, domainId) => memoryDomainDisplayLabel(label, domainId, lang)}
+          formatOwnerLabel={(owner) => memoryDomainOwnerLabel(owner, lang)}
+          formatBoundaryLabel={(boundary) => memoryBoundaryLabel(boundary, lang)}
+          formatPolicyToken={(value) => policyTokenLabel(value, lang)}
+        />
+        <MemoryKnowledgeStewardPanel
+          copy={copy}
+          lang={lang}
+          knowledgeSteward={knowledgeSteward}
+          recommendations={knowledgeStewardRecommendations}
+          knowledgeStewardWorkbench={knowledgeStewardWorkbench}
+          recommendationsOnly={knowledgeDashboardSnapshot?.recommendations.operatingBoundary.recommendationsOnly ?? false}
+          formatPolicyToken={(value) => policyTokenLabel(value, lang)}
+          onTraceTarget={setTraceTargetId}
+        />
       </div>
       {knowledgeFeedback.tone !== "idle" ? (
         <section className={knowledgeFeedback.tone === "error" ? styles.panelError : styles.panelNotice}>
