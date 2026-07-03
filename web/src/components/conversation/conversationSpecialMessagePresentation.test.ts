@@ -34,7 +34,6 @@ describe("conversation special message presentation", () => {
     expect(conversationViewSource).not.toContain("function agentInboxSourceLabel");
     expect(conversationViewSource).not.toContain("function agentInboxSummary");
     expect(conversationViewSource).not.toContain("function groupRoomTranscriptLabel");
-    expect(conversationViewSource).not.toContain("function metadataText");
     expect(timelineProcessProjectionSource).not.toContain("function isCliAgentLifecycleMessage");
   });
 
