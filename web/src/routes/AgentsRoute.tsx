@@ -60,14 +60,13 @@ import {
   type AgentFilterSectionView,
   type AgentSummaryMetric,
 } from "../components/vui/product/agent-management";
-import { VButton, VChip, VEmptyState, VHStack, VNativeButton, VNativeSelect, VPanelHeader } from "../components/vui";
+import { VButton, VChip, VEmptyState, VHStack, VNativeSelect, VPanelHeader } from "../components/vui";
 import { vuiFormLabelClass } from "../components/vui/forms/formClasses";
 import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
 import { AgentArchiveZonePanel } from "./AgentArchiveZonePanel";
 import { AgentActivityHistoryPanel, type AgentActivityTimelineItem } from "./AgentActivityHistoryPanel";
-import { AgentAvatarEditorPanel } from "./AgentAvatarEditorPanel";
 import {
   AgentBulkConfigPanel,
   type AgentBulkConfigApply,
@@ -82,6 +81,7 @@ import {
 } from "./AgentCoreConfigPanel";
 import { AgentCreatePanel, type AgentCreateDraft } from "./AgentCreatePanel";
 import { AgentDebugResetPanel, type AgentResetOptions } from "./AgentDebugResetPanel";
+import { AgentDetailHeaderPanel } from "./AgentDetailHeaderPanel";
 import { AgentHealthMaintenancePanel } from "./AgentHealthMaintenancePanel";
 import { AgentMemoryPolicyPanel, type AgentMemoryPolicyDraft } from "./AgentMemoryPolicyPanel";
 import { AgentModeMembershipPanel, type AgentModeMembershipDraft } from "./AgentModeMembershipPanel";
@@ -5907,52 +5907,32 @@ export function AgentsRoute() {
             />
           ) : selectedAgent ? (
             <>
-              <section className={styles.detailHeader} title={copy.routeHint}>
-                <AgentAvatarEditorPanel
-                  copy={copy}
-                  lang={lang}
-                  isOpen={avatarEditorOpen}
-                  avatarImageUrl={selectedAgent.avatarImageUrl}
-                  avatarImagePath={selectedAgent.avatarImagePath}
-                  avatarInitials={avatarInitials(selectedAgent.agentCode, agentLabel(selectedAgent))}
-                  avatarOptions={avatarOptionsQuery.data}
-                  avatarOptionsPending={avatarOptionsQuery.isPending}
-                  uploadPending={selectedAgentAvatarUploadPending}
-                  updatePending={selectedAgentAvatarUpdatePending}
-                  onOpenChange={setAvatarEditorOpen}
-                  onUploadAvatar={uploadSelectedAgentAvatar}
-                  onResetAvatar={resetSelectedAgentAvatar}
-                  onSelectAvatar={selectAgentAvatar}
-                />
-                <div>
-                  <p className={styles.panelEyebrow}>{agentFunctionalLabel(selectedAgent, lang)}</p>
-                  <h2>{agentLabel(selectedAgent)}</h2>
-                  <span className={`${styles.agentRoleTag} ${styles[`agentRoleTag_${agentFunctionTone(selectedAgent, lang)}`]}`}>
-                    {agentFunctionalLabel(selectedAgent, lang)}
-                  </span>
-                </div>
-                <div className={styles.detailHeaderActions}>
-                  <span className={styles.detailHealthStatus} title={issueSummary(selectedAgent.health, lang)}>
-                    <span className={`${styles.issuePill} ${styles[`issue_${issueTone(selectedAgent.health)}`]}`}>
-                      {issueLabel(selectedAgent.health, lang)}
-                    </span>
-                  </span>
-                </div>
-              </section>
-
-              <nav className={styles.detailTabs} aria-label={copy.title}>
-                {panes.map((pane) => (
-                  <VNativeButton
-                    key={pane.id}
-                    type="button"
-                    className={activePane === pane.id ? styles.detailTabActive : styles.detailTab}
-                    onClick={() => setActivePane(pane.id)}
-                  >
-                    <span>{pane.label}</span>
-                    <strong>{pane.count}</strong>
-                  </VNativeButton>
-                ))}
-              </nav>
+              <AgentDetailHeaderPanel
+                copy={copy}
+                lang={lang}
+                title={copy.routeHint}
+                agentName={agentLabel(selectedAgent)}
+                roleLabel={agentFunctionalLabel(selectedAgent, lang)}
+                roleTone={agentFunctionTone(selectedAgent, lang)}
+                healthTitle={issueSummary(selectedAgent.health, lang)}
+                healthTone={issueTone(selectedAgent.health)}
+                healthLabel={issueLabel(selectedAgent.health, lang)}
+                panes={panes}
+                activePane={activePane}
+                isAvatarEditorOpen={avatarEditorOpen}
+                avatarImageUrl={selectedAgent.avatarImageUrl}
+                avatarImagePath={selectedAgent.avatarImagePath}
+                avatarInitials={avatarInitials(selectedAgent.agentCode, agentLabel(selectedAgent))}
+                avatarOptions={avatarOptionsQuery.data}
+                avatarOptionsPending={avatarOptionsQuery.isPending}
+                avatarUploadPending={selectedAgentAvatarUploadPending}
+                avatarUpdatePending={selectedAgentAvatarUpdatePending}
+                onAvatarEditorOpenChange={setAvatarEditorOpen}
+                onUploadAvatar={uploadSelectedAgentAvatar}
+                onResetAvatar={resetSelectedAgentAvatar}
+                onSelectAvatar={selectAgentAvatar}
+                onSelectPane={setActivePane}
+              />
 
               <AgentManagementBriefPanel
                 brief={managementBrief}
