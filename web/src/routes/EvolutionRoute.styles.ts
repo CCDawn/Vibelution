@@ -605,9 +605,9 @@ const styles: Record<string, string> = {
   workflowStepItemCurrent:
     "workflowStepItemCurrent text-[var(--accent-warm-2)]",
   workflowStepMeta:
-    "workflowStepMeta min-w-0 flex items-center justify-between gap-1.5 overflow-hidden text-ellipsis whitespace-nowrap text-[0.66rem] font-semibold leading-tight text-[var(--fg-tertiary)]",
+    "workflowStepMeta min-w-0 flex items-center justify-between gap-1.5 overflow-hidden text-ellipsis whitespace-nowrap text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-tertiary)]",
   workflowStepPreview:
-    "workflowStepPreview line-clamp-2 min-w-0 overflow-hidden text-ellipsis text-[0.68rem] leading-[1.35] text-[var(--fg-secondary)]",
+    "workflowStepPreview line-clamp-2 min-w-0 overflow-hidden text-ellipsis text-[var(--vui-font-xs)] leading-[1.35] text-[var(--fg-secondary)]",
   workflowStepRail:
     "workflowStepRail min-w-0 grid max-h-[min(196px,30vh)] gap-1 overflow-auto",
   surface:
