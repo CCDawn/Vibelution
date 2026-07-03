@@ -4,15 +4,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { ChatNextStateSignalSummary, ConversationMessage, SessionTurnError } from "../../api/types";
-import { conversationMessageToAgentMessage } from "../../agent-thread";
 import styles from "./ConversationView.styles";
 import agentMessageRenderStateSource from "./agentMessageRenderState.ts?raw";
-import { buildAgentMessageRenderState } from "./agentMessageRenderState";
 import conversationViewStylesModuleSource from "./ConversationView.styles.ts?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
 import {
-  buildStreamingTimelineScrollSignal,
-  buildTimelineScrollSignal,
   COMPOSER_SESSION_REFERENCE_MIME,
   ConversationView,
   type ConversationProcessDisplayMode,
@@ -34,27 +30,6 @@ const streamingResponseContentSource = conversationViewSource.slice(
   conversationViewSource.indexOf("function StreamingResponseContent"),
   conversationViewSource.indexOf("function operationDetailsKind"),
 );
-
-function renderStatesForMessages(messages: ConversationMessage[]) {
-  return new Map(
-    messages.map((message) => [
-      message.id,
-      buildAgentMessageRenderState(conversationMessageToAgentMessage(message)),
-    ]),
-  );
-}
-
-function timelineSignalFor(messages: ConversationMessage[]) {
-  return buildTimelineScrollSignal(messages, renderStatesForMessages(messages));
-}
-
-function timelineSignalWithoutMentalFor(messages: ConversationMessage[]) {
-  return buildTimelineScrollSignal(messages, renderStatesForMessages(messages), { includeMentalSignals: false });
-}
-
-function streamingTimelineSignalFor(messages: ConversationMessage[]) {
-  return buildStreamingTimelineScrollSignal(messages, renderStatesForMessages(messages));
-}
 
 function semanticArticleClassCount(html: string, className: string) {
   const escaped = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -500,8 +475,8 @@ describe("ConversationView edit resend affordance", () => {
   it("names AgentMessage timeline rendering internals after the AgentMessage model", () => {
     expect(conversationViewSource).toContain("./agentMessageTimeline");
     expect(conversationViewSource).toContain("./agentMessageTimelineRows");
-    expect(conversationViewSource).not.toContain("./conversationTimeline");
-    expect(conversationViewSource).not.toContain("./conversationTimelineRows");
+    expect(conversationViewSource).not.toContain("from \"./conversationTimeline\"");
+    expect(conversationViewSource).not.toContain("from \"./conversationTimelineRows\"");
     expect(conversationViewSource).toContain("function renderAgentMessageTimeline(");
     expect(conversationViewSource).toContain("function renderAgentMessageTimelineItem(");
     expect(conversationViewSource).toContain("const agentMessageTimelineItems = buildAgentMessageTimelineItems");
@@ -1026,11 +1001,12 @@ describe("ConversationView edit resend affordance", () => {
   });
 
   it("derives process scroll and latest tool summaries from AgentMessage render state", () => {
+    expect(conversationViewSource).toContain("from \"./conversationTimelineScrollSignals\"");
     expect(conversationViewSource).toContain("buildTimelineScrollSignal(timelineMessages, agentRenderStatesByMessageId, {");
     expect(conversationViewSource).toContain("buildStreamingTimelineScrollSignal(streamingTimelineMessages, agentRenderStatesByMessageId, {");
     expect(conversationViewSource).toContain("renderState.toolCalls");
-    expect(conversationViewSource).toContain("renderState.processSignal");
-    expect(conversationViewSource).toContain("renderState.processSignalWithoutMental");
+    expect(conversationViewSource).not.toContain("renderState.processSignal");
+    expect(conversationViewSource).not.toContain("renderState.processSignalWithoutMental");
     expect(conversationViewSource).not.toContain("timelineSignalMessages");
     expect(conversationViewSource).not.toContain("mentalSnapshot: undefined");
     expect(conversationViewSource).not.toContain("message.thought?.length");
@@ -3764,124 +3740,6 @@ describe("ConversationView markdown URL safety", () => {
     expect(html).not.toContain("javascript:alert");
     expect(html).toContain('src="/api/sessions/s1/artifacts/good.png"');
     expect(html).toContain('href="/api/sessions/s1/artifacts/good.png"');
-  });
-});
-
-describe("ConversationView timeline scroll signal", () => {
-  const baseAssistantMessage: ConversationMessage = {
-    id: "message-assistant",
-    role: "assistant",
-    content: "",
-    timestamp: "2026-05-22T00:01:00Z",
-    streaming: true,
-    toolCalls: [{ name: "read_file", status: "running" }],
-  };
-
-  it("changes when a tool status changes without changing tool count", () => {
-    const before = timelineSignalFor([baseAssistantMessage]);
-    const after = timelineSignalFor([
-      {
-        ...baseAssistantMessage,
-        toolCalls: [{ name: "read_file", status: "done" }],
-      },
-    ]);
-
-    expect(after).not.toBe(before);
-  });
-
-  it("changes when a tool summary appears without changing message text length", () => {
-    const before = timelineSignalFor([baseAssistantMessage]);
-    const after = timelineSignalFor([
-      {
-        ...baseAssistantMessage,
-        toolCalls: [{ name: "read_file", status: "running", summary: "opened session_service.py" }],
-      },
-    ]);
-
-    expect(after).not.toBe(before);
-  });
-
-  it("changes when a mental snapshot becomes visible", () => {
-    const before = timelineSignalFor([baseAssistantMessage]);
-    const after = timelineSignalFor([
-      {
-        ...baseAssistantMessage,
-        mentalSnapshot: {
-          mood: "focused",
-          feeling: "tracking tool output",
-          whisper: "",
-          summary: "Following the active tool result",
-          cognitiveState: "productive",
-          confidence: 0.7,
-          sampleSize: 1,
-          interventionCount: 0,
-          updatedAt: "2026-05-22T00:01:05Z",
-          source: "runtime",
-        },
-      },
-    ]);
-
-    expect(after).not.toBe(before);
-  });
-
-  it("ignores mental snapshot signal changes when mental snapshots are hidden", () => {
-    const before = timelineSignalWithoutMentalFor([baseAssistantMessage]);
-    const after = timelineSignalWithoutMentalFor([
-      {
-        ...baseAssistantMessage,
-        mentalSnapshot: {
-          mood: "focused",
-          feeling: "tracking tool output",
-          whisper: "",
-          summary: "Following the active tool result",
-          cognitiveState: "productive",
-          confidence: 0.7,
-          sampleSize: 1,
-          interventionCount: 0,
-          updatedAt: "2026-05-22T00:01:05Z",
-          source: "runtime",
-        },
-      },
-    ]);
-
-    expect(after).toBe(before);
-  });
-
-  it("does not change the synchronous scroll signal when streaming text grows", () => {
-    const before = timelineSignalFor([baseAssistantMessage]);
-    const after = timelineSignalFor([
-      {
-        ...baseAssistantMessage,
-        content: "streaming response text is still growing",
-      },
-    ]);
-
-    expect(after).toBe(before);
-  });
-
-  it("tracks streaming text growth in the deferred scroll signal", () => {
-    const before = streamingTimelineSignalFor([baseAssistantMessage]);
-    const after = streamingTimelineSignalFor([
-      {
-        ...baseAssistantMessage,
-        content: "streaming response text is still growing",
-      },
-    ]);
-
-    expect(after).not.toBe(before);
-  });
-
-  it("changes the synchronous scroll signal when settled text changes", () => {
-    const before = timelineSignalFor([{ ...baseAssistantMessage, streaming: false }]);
-    const after = timelineSignalFor([
-      {
-        ...baseAssistantMessage,
-        streaming: false,
-        content: "settled response text changed",
-      },
-    ]);
-
-    expect(after).not.toBe(before);
   });
 });
 
