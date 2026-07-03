@@ -4,6 +4,7 @@ import type { ConversationMessage } from "../../api/types";
 import {
   imageArtifactForMessage,
   isAgentInboxMessage,
+  isCliAgentLifecycleMessage,
   isGroupRoomTranscriptMessage,
   isProviderFailureSummaryText,
   isRuntimeNoticeMessage,
@@ -84,6 +85,19 @@ describe("conversationMessagePredicates", () => {
       role: "assistant",
       content: "[群聊同步]\n群聊: 科研团队 团队群聊",
     }))).toBe(true);
+  });
+
+  it("classifies CLI Agent lifecycle messages from metadata", () => {
+    expect(isCliAgentLifecycleMessage(message({
+      role: "assistant",
+      content: "terminal closed",
+      metadata: { kind: "cli_agent_lifecycle" },
+    }))).toBe(true);
+    expect(isCliAgentLifecycleMessage(message({
+      role: "assistant",
+      content: "ordinary assistant output",
+      metadata: { kind: "session_live_overlay" },
+    }))).toBe(false);
   });
 
   it("extracts research organization communication chips from Agent inbox metadata", () => {

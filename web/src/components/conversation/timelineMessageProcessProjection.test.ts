@@ -46,6 +46,14 @@ describe("timeline message process projection", () => {
     expect(timelineProjectionSource).not.toContain("./conversationProcessProjection");
   });
 
+  it("uses shared special-message predicates instead of local CLI lifecycle checks", () => {
+    const moduleSource = readFileSync(timelineProcessProjectionModulePath, "utf8");
+
+    expect(moduleSource).toContain("isCliAgentLifecycleMessage");
+    expect(moduleSource).toContain("./conversationMessagePredicates");
+    expect(moduleSource).not.toContain("function isCliAgentLifecycleMessage");
+  });
+
   it("merges consecutive process-only messages from the same turn while preserving each tool event", () => {
     const projected = projectTimelineProcessMessages([
       toolMessage("message-tool-1", "[编辑] 成功修改 config/public_config.py"),
