@@ -67,6 +67,7 @@ import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy"
 import { VButton, VNativeInput, VNativeSelect, VNativeTextarea, VRouteHeader } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
+import { MemoryDetailPanel } from "./MemoryDetailPanel";
 import { MemoryManagementEditor, type MemoryManagementEditorDraft } from "./MemoryManagementEditor";
 import { MemoryMatrixPanel } from "./MemoryMatrixPanel";
 import { MemoryOverviewPanel } from "./MemoryOverviewPanel";
@@ -4169,155 +4170,28 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     />
   );
 
-  const renderDetailPanel = (showEditor = true) => (
-    <aside className={showEditor ? styles.detailPanel : `${styles.detailPanel} ${styles.manageDetailPanel}`}>
-      {showEditor ? createManagementEditor() : null}
-
-      {resolvedActiveItem && activeSection ? (
-        <>
-          <section className={styles.detailHeader}>
-            <div>
-              <p className={styles.panelEyebrow}>{activeSection.title}</p>
-              <h2>{resolvedActiveItem.title}</h2>
-              <p>{resolvedActiveItem.summary}</p>
-            </div>
-            <span className={statusClassName(resolvedActiveItem.agentVisible, resolvedActiveItem.inPrompt)}>
-              {resolvedActiveItem.inPrompt ? copy.inPrompt : resolvedActiveItem.agentVisible ? copy.canUse : copy.manualOnly}
-            </span>
-          </section>
-
-          {activeImpact ? (
-            <section className={styles.impactPanel}>
-              <div className={styles.visibilityHeader}>
-                <Brain size={16} />
-                <div>
-                  <strong>{copy.impact}</strong>
-                  <p>{activeImpact.title}</p>
-                </div>
-              </div>
-              <p>{activeImpact.body}</p>
-            </section>
-          ) : null}
-
-          <div className={styles.detailActions}>
-            <VButton type="button" className={styles.detailActionButton} onClick={handleCopySourceSummary}>
-              <CopyIcon size={14} />
-              <span>{copy.copySourceSummary}</span>
-            </VButton>
-            <VButton type="button" className={styles.detailActionButton} onClick={handleCopySourcePath}>
-              <FileText size={14} />
-              <span>{copy.copySourcePath}</span>
-            </VButton>
-            <VButton
-              type="button"
-              className={styles.detailActionButton}
-              onClick={handleCopyRawContent}
-              isDisabled={!canCopyRawContent}
-              title={!canCopyRawContent ? copy.noContent : undefined}
-            >
-              <FileText size={14} />
-              <span>{copy.copyRawContentAction}</span>
-            </VButton>
-            <VButton type="button" className={styles.detailActionButton} onClick={handleCopyCurrentLink}>
-              <Link2 size={14} />
-              <span>{copy.copyCurrentLink}</span>
-            </VButton>
-          </div>
-
-          {copyFeedback.tone !== "idle" ? (
-            <p className={styles.copyNotice} data-tone={copyFeedback.tone}>
-              {copyFeedback.tone === "success" ? <CheckCircle2 size={14} /> : <TriangleAlert size={14} />}
-              <span>{copyFeedback.text}</span>
-            </p>
-          ) : null}
-
-          <div className={styles.factGrid}>
-            <section>
-              <span>{copy.sourcePath}</span>
-              <strong title={resolvedActiveItem.path}>{resolvedActiveItem.path || "-"}</strong>
-            </section>
-            <section>
-              <span>{copy.sourceApi}</span>
-              <strong title={activeSection.sourceApi}>{activeSection.sourceApi || "-"}</strong>
-            </section>
-            <section>
-              <span>{copy.agentVisible}</span>
-              <strong>{resolvedActiveItem.agentVisible ? copy.yes : copy.no}</strong>
-            </section>
-            <section>
-              <span>{copy.runtimeInjected}</span>
-              <strong>{resolvedActiveItem.inPrompt ? copy.yes : copy.no}</strong>
-            </section>
-          </div>
-
-          <section className={styles.visibilityPanel}>
-            <div className={styles.visibilityHeader}>
-              <Eye size={16} />
-              <div>
-                <strong>{copy.agentVisibility}</strong>
-                <p>{activeSection.agentVisibility}</p>
-              </div>
-            </div>
-            <div className={styles.usageList}>
-              {itemChannelPills(copy, resolvedActiveItem).map((pill) => (
-                <span key={`${resolvedActiveItem.id}:channel:${pill.label}`} title={pill.hint}>
-                  <CheckCircle2 size={13} />
-                  {pill.label}
-                </span>
-              ))}
-            </div>
-            <div className={styles.usageList}>
-              {resolvedActiveItem.usedBy.map((usage) => (
-                <span key={`${resolvedActiveItem.id}:${usage}`}>
-                  <CheckCircle2 size={13} />
-                  {usage}
-                </span>
-              ))}
-            </div>
-          </section>
-
-          <section className={styles.sectionPanel}>
-            <div className={styles.panelHeader}>
-              <div>
-                <p className={styles.panelEyebrow}>{copy.summary}</p>
-                <h3>{activeSection.sourceKind}</h3>
-              </div>
-              <span className={styles.countPill}>{formatTimestamp(activeSection.updatedAt, lang)}</span>
-            </div>
-            <p>{activeSection.summary}</p>
-          </section>
-
-          <details className={styles.rawPanel} open={showEditor}>
-            <summary>
-              <FileText size={15} />
-              <span>{copy.rawContent}</span>
-              <code>{resolvedActiveItem.contentType}</code>
-            </summary>
-            {activeItemDetailQuery.isFetching ? <p>{copy.loading}</p> : null}
-            {activeItemDetailQuery.isError ? (
-              <p>{copy.loadFailed}: {activeItemDetailQuery.error instanceof Error ? activeItemDetailQuery.error.message : String(activeItemDetailQuery.error)}</p>
-            ) : null}
-            {resolvedActiveItem.content ? (
-              <pre data-language={contentLanguage(resolvedActiveItem.contentType)}>{resolvedActiveItem.content}</pre>
-            ) : !activeItemDetailQuery.isFetching ? (
-              <p>{copy.noContent}</p>
-            ) : null}
-          </details>
-        </>
-      ) : editDraft ? null : (
-        <section className={styles.emptyDetail}>
-          <Brain size={24} />
-          <strong>{copy.title}</strong>
-          <p>{overviewQuery.isPending ? copy.loading : copy.noMatches}</p>
-        </section>
-      )}
-
-      {overview ? (
-        <p className={styles.generatedAt}>
-          {copy.generatedAt}: {formatTimestamp(overview.generatedAt, lang)}
-        </p>
-      ) : null}
-    </aside>
+  const createDetailPanel = (showEditor = true) => (
+    <MemoryDetailPanel
+      copy={copy}
+      showEditor={showEditor}
+      managementEditor={createManagementEditor()}
+      section={activeSection}
+      item={resolvedActiveItem}
+      activeImpact={activeImpact}
+      channelPills={resolvedActiveItem ? itemChannelPills(copy, resolvedActiveItem) : []}
+      copyFeedback={copyFeedback}
+      canCopyRawContent={canCopyRawContent}
+      isDetailFetching={activeItemDetailQuery.isFetching}
+      detailErrorText={activeItemDetailQuery.isError ? (activeItemDetailQuery.error instanceof Error ? activeItemDetailQuery.error.message : String(activeItemDetailQuery.error)) : ""}
+      isEditing={Boolean(editDraft)}
+      overviewIsPending={overviewQuery.isPending}
+      sectionUpdatedAt={activeSection ? formatTimestamp(activeSection.updatedAt, lang) : ""}
+      generatedAt={overview ? formatTimestamp(overview.generatedAt, lang) : ""}
+      onCopySourceSummary={handleCopySourceSummary}
+      onCopySourcePath={handleCopySourcePath}
+      onCopyRawContent={handleCopyRawContent}
+      onCopyCurrentLink={handleCopyCurrentLink}
+    />
   );
 
   const renderEffectiveView = () => (
@@ -4579,7 +4453,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           ) : null}
         </section>
 
-        {renderDetailPanel(false)}
+        {createDetailPanel(false)}
       </div>
     </>
   );
@@ -4791,7 +4665,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       {createWarningStrip()}
       <div className={styles.workspace}>
         {renderSourceAndItemPanels(copy.sourceAudit)}
-        {renderDetailPanel()}
+        {createDetailPanel()}
       </div>
     </>
   );
