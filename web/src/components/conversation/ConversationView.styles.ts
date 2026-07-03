@@ -31,6 +31,39 @@ const userMessageBubble = cv(
   readableMessageText,
   "w-fit max-w-[min(100%,76ch)] justify-self-end rounded-[var(--radius-panel)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--surface-panel))] px-3 py-2 text-left text-[var(--fg-primary)] shadow-[var(--vui-shadow-hairline)]",
 );
+const conversationComposerShell = cv(
+  "composer",
+  "grid flex-none grid-cols-[minmax(0,1fr)_auto_auto_auto] items-end gap-2 border-t border-[color-mix(in_srgb,var(--border-soft)_82%,transparent)] bg-[color-mix(in_srgb,var(--surface-panel)_74%,transparent)] px-[11px] py-[7px] pb-[9px] backdrop-blur-[6px] shadow-none",
+);
+const composerNativeFieldTargets =
+  "[&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full";
+const composerFieldBase = `min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] ${composerNativeFieldTargets}`;
+const composerFieldShell = cv("composerField", composerFieldBase);
+const composerFieldDragActiveShell = cv(
+  "composerFieldDragActive",
+  "border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]",
+);
+const compactControlButton =
+  "min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55";
+const compactIconButtonSize =
+  "h-[var(--vui-control-height-sm)] min-h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)]";
+const composerRoundActionButton = cv(
+  "composerRoundButton",
+  "min-w-0 inline-grid",
+  compactIconButtonSize,
+  "place-items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-0 text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)]",
+);
+const composerPrimaryActionButton = cv(
+  "composerRoundButtonPrimary",
+  "min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]",
+);
+const composerSendActionButton = cv(
+  "sendButton",
+  compactControlButton,
+  "bg-[color-mix(in_srgb,var(--accent-cool)_14%,var(--surface-card))] shadow-none hover:translate-y-0",
+);
+const composerHiddenAttachmentField = cv("hiddenAttachmentInput", composerFieldBase, "hidden");
+const composerGenericInputField = cv("input", composerFieldBase);
 
 const styles: Record<string, string> = {
   agentInboxMessageBody:
@@ -210,18 +243,15 @@ const styles: Record<string, string> = {
     "vui-components-conversationview cliAgentLifecycleTime min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   cliAgentLifecycleTurn:
     "vui-components-conversationview cliAgentLifecycleTurn min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] bg-[color-mix(in_srgb,var(--surface-panel)_72%,transparent)]",
-  composer:
-    "vui-components-conversationview composer grid flex-none grid-cols-[minmax(0,1fr)_auto_auto_auto] items-end gap-2 border-t border-[color-mix(in_srgb,var(--border-soft)_82%,transparent)] bg-[color-mix(in_srgb,var(--surface-panel)_74%,transparent)] px-[11px] py-[7px] pb-[9px] backdrop-blur-[6px] shadow-none",
+  composer: conversationComposerShell,
   composerAttachmentChip:
     "vui-components-conversationview composerAttachmentChip min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   composerAttachmentTray:
     "vui-components-conversationview composerAttachmentTray min-w-0",
   composerError:
     "vui-components-conversationview composerError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
-  composerField:
-    "vui-components-conversationview composerField min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
-  composerFieldDragActive:
-    "vui-components-conversationview composerFieldDragActive min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  composerField: composerFieldShell,
+  composerFieldDragActive: composerFieldDragActiveShell,
   composerGuidance:
     "vui-components-conversationview composerGuidance min-w-0",
   composerGuidanceIcon:
@@ -238,10 +268,8 @@ const styles: Record<string, string> = {
     "vui-components-conversationview composerReferenceIcon min-w-0 shrink-0 text-[var(--fg-tertiary)]",
   composerReferenceTray:
     "vui-components-conversationview composerReferenceTray min-w-0",
-  composerRoundButton:
-    "vui-components-conversationview composerRoundButton min-w-0 inline-grid h-[var(--vui-control-height-sm)] min-h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] place-items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-0 text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)]",
-  composerRoundButtonPrimary:
-    "vui-components-conversationview composerRoundButtonPrimary min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]",
+  composerRoundButton: composerRoundActionButton,
+  composerRoundButtonPrimary: composerPrimaryActionButton,
   computerUseActions:
     "vui-components-conversationview computerUseActions min-w-0 flex flex-wrap items-center gap-1.5",
   computerUseError:
@@ -274,8 +302,7 @@ const styles: Record<string, string> = {
     "vui-components-conversationview header min-w-0 flex flex-wrap items-center gap-1.5",
   headerControls:
     "vui-components-conversationview headerControls min-w-0 flex flex-wrap items-center gap-1.5",
-  hiddenAttachmentInput:
-    "vui-components-conversationview hiddenAttachmentInput min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full hidden",
+  hiddenAttachmentInput: composerHiddenAttachmentField,
   imageArtifact:
     "vui-components-conversationview imageArtifact min-w-0",
   imageArtifactFooter:
@@ -310,8 +337,7 @@ const styles: Record<string, string> = {
     "vui-components-conversationview inlineLink min-w-0",
   inlineStrong:
     "vui-components-conversationview inlineStrong min-w-0",
-  input:
-    "vui-components-conversationview input min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+  input: composerGenericInputField,
   markdownBlockquote:
     "vui-components-conversationview markdownBlockquote min-w-0",
   markdownBody:
@@ -888,8 +914,7 @@ const styles: Record<string, string> = {
     "vui-components-conversationview sectionPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   sectionToggle:
     "vui-components-conversationview sectionToggle min-w-0",
-  sendButton:
-    "vui-components-conversationview sendButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 bg-[color-mix(in_srgb,var(--accent-cool)_14%,var(--surface-card))] shadow-none hover:translate-y-0",
+  sendButton: composerSendActionButton,
   sessionMeta:
     "vui-components-conversationview sessionMeta min-w-0 flex flex-wrap items-center gap-1.5",
   statPill:

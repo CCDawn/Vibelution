@@ -381,6 +381,21 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewStylesModuleSource).toContain("userMessageBody: userMessageBubble");
   });
 
+  it("keeps composer and send controls as named Tailwind slices", () => {
+    expect(conversationViewStylesModuleSource).toContain("const conversationComposerShell");
+    expect(conversationViewStylesModuleSource).toContain("const composerFieldShell");
+    expect(conversationViewStylesModuleSource).toContain("const composerFieldDragActiveShell");
+    expect(conversationViewStylesModuleSource).toContain("const composerRoundActionButton");
+    expect(conversationViewStylesModuleSource).toContain("const composerPrimaryActionButton");
+    expect(conversationViewStylesModuleSource).toContain("const composerSendActionButton");
+    expect(conversationViewStylesModuleSource).toContain("composer: conversationComposerShell");
+    expect(conversationViewStylesModuleSource).toContain("composerField: composerFieldShell");
+    expect(conversationViewStylesModuleSource).toContain("composerFieldDragActive: composerFieldDragActiveShell");
+    expect(conversationViewStylesModuleSource).toContain("composerRoundButton: composerRoundActionButton");
+    expect(conversationViewStylesModuleSource).toContain("composerRoundButtonPrimary: composerPrimaryActionButton");
+    expect(conversationViewStylesModuleSource).toContain("sendButton: composerSendActionButton");
+  });
+
   it("uses shared readable scale tokens for dense conversation text", () => {
     expect(conversationViewStylesSource).toContain("var(--vui-font-xs)");
     expect(conversationViewStylesSource).toContain("var(--vui-font-sm)");
