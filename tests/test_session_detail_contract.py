@@ -769,15 +769,15 @@ def test_persist_turn_result_exposes_previous_context_and_cache_composition(tmp_
     assert detail["lastCacheComposition"]["calibratedCachedInputTokens"] == 250
     assert detail["lastCacheComposition"]["calibratedCacheHitRate"] == pytest.approx(0.25)
     assert detail["lastCacheComposition"]["predictedInputTokens"] == 1000
-    assert detail["lastCacheComposition"]["predictedCachedInputTokens"] == 250
-    assert detail["lastCacheComposition"]["predictedUncachedInputTokens"] == 750
-    assert detail["lastCacheComposition"]["predictedCacheHitRate"] == pytest.approx(0.25)
+    assert detail["lastCacheComposition"]["predictedCachedInputTokens"] == 996
+    assert detail["lastCacheComposition"]["predictedUncachedInputTokens"] == 4
+    assert detail["lastCacheComposition"]["predictedCacheHitRate"] == pytest.approx(0.996)
     assert detail["lastCacheComposition"]["computedOverestimatedInputTokens"] == 746
     assert detail["lastCacheComposition"]["providerExtraCachedInputTokens"] == 0
     assert detail["lastCacheComposition"]["calibrationStatus"] == "provider_lower_than_computed"
-    assert detail["lastCacheComposition"]["predictionStatus"] == "provider_lower_than_computed"
+    assert detail["lastCacheComposition"]["predictionStatus"] == "computed_upper_bound"
     assert "Xiaomi/MiMo" in detail["lastCacheComposition"]["calibrationReason"]
-    assert "Xiaomi/MiMo" in detail["lastCacheComposition"]["predictionReason"]
+    assert "stable prompt-prefix" in detail["lastCacheComposition"]["predictionReason"]
     assert detail["lastCacheComposition"]["averageInputTokens"] == 1500
     assert detail["lastCacheComposition"]["averageCachedInputTokens"] == 350
     assert detail["lastCacheComposition"]["averageObservedTurnCount"] == 2

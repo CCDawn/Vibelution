@@ -4552,20 +4552,6 @@ export function ChatCodingRoute() {
     0,
     lastCacheComposition?.uncachedInputTokens ?? (providerCacheInputTokens - providerCachedInputTokens),
   );
-  const predictedCacheInputTokens = Math.max(
-    0,
-    lastCacheDiagnostics?.predictedInputTokens ?? lastCacheDiagnostics?.calibratedInputTokens ?? providerCacheInputTokens,
-  );
-  const predictedCachedInputTokens = Math.max(
-    0,
-    Math.min(
-      lastCacheDiagnostics?.predictedCachedInputTokens ?? lastCacheDiagnostics?.calibratedCachedInputTokens ?? providerCachedInputTokens,
-      predictedCacheInputTokens,
-    ),
-  );
-  const predictedCacheHitRate = predictedCacheInputTokens > 0
-    ? (lastCacheDiagnostics?.predictedCacheHitRate ?? (predictedCachedInputTokens / predictedCacheInputTokens))
-    : 0;
   const cacheCalibrationStatus = lastCacheComposition?.calibrationStatus || "";
   const cacheCalibrationReason = lastCacheComposition?.calibrationReason || "";
   const cacheComputedOverestimatedInputTokens = Math.max(0, lastCacheComposition?.computedOverestimatedInputTokens ?? 0);
@@ -4654,7 +4640,6 @@ export function ChatCodingRoute() {
     [cachePromptCompositionSegments, cachePromptCompositionTotalTokens],
   );
   const cacheCompositionPercent = Math.round(Math.max(0, Math.min(1, lastCacheComposition?.cacheHitRate ?? 0)) * 100);
-  const predictedCacheCompositionPercent = Math.round(Math.max(0, Math.min(1, predictedCacheHitRate)) * 100);
   const upperBoundCacheCompositionPercent = Math.round(Math.max(0, Math.min(1, upperBoundCacheHitRate)) * 100);
   const averageCacheObservedTurnCount = Math.max(
     0,
@@ -4673,8 +4658,7 @@ export function ChatCodingRoute() {
     : (detail?.cacheUsage?.totalCacheHitRate ?? lastCacheComposition?.averageCacheHitRate ?? 0);
   const averageCacheCompositionPercent = Math.round(Math.max(0, Math.min(1, averageCacheHitRate)) * 100);
   const cacheCompositionTrueLabel = lang === "zh" ? "真" : "true";
-  const cacheCompositionPredictedLabel = lang === "zh" ? "预" : "pred";
-  const cacheCompositionUpperBoundLabel = lang === "zh" ? "上" : "max";
+  const cacheCompositionUpperBoundLabel = lang === "zh" ? "计" : "calc";
   const cacheCompositionAverageLabel = lang === "zh" ? "均" : "avg";
   const cacheCompositionAverageValue = averageCacheObservedTurnCount > 0 ? `${averageCacheCompositionPercent}%` : "--";
   const cacheDetailAvailable = Boolean(lastCacheComposition);
@@ -4682,7 +4666,7 @@ export function ChatCodingRoute() {
   const cacheDetailOpenLabel = lang === "zh" ? "查看上一轮缓存命中详情" : "View previous cache hit details";
   const cacheCompositionSummary = lastCacheComposition
     ? lastCacheComposition.source === "provider_usage"
-      ? `${cacheCompositionTrueLabel} ${cacheCompositionPercent}% · ${cacheCompositionPredictedLabel} ${predictedCacheCompositionPercent}% · ${cacheCompositionUpperBoundLabel} ${upperBoundCacheCompositionPercent}% · ${cacheCompositionAverageLabel} ${cacheCompositionAverageValue}`
+      ? `${cacheCompositionTrueLabel} ${cacheCompositionPercent}% · ${cacheCompositionUpperBoundLabel} ${upperBoundCacheCompositionPercent}% · ${cacheCompositionAverageLabel} ${cacheCompositionAverageValue}`
       : lastCacheComposition.source === "not_called"
         ? t("cacheHitNotCalled")
       : t("cacheHitMissing")
@@ -4691,7 +4675,6 @@ export function ChatCodingRoute() {
     ? lastCacheComposition.source === "provider_usage"
       ? [
         `${cacheCompositionTrueLabel} ${numberFormatter.format(providerCachedInputTokens)} / ${numberFormatter.format(providerCacheInputTokens)} · ${cacheCompositionPercent}%`,
-        `${cacheCompositionPredictedLabel} ${numberFormatter.format(predictedCachedInputTokens)} / ${numberFormatter.format(predictedCacheInputTokens)} · ${predictedCacheCompositionPercent}%`,
         `${cacheCompositionUpperBoundLabel} ${numberFormatter.format(upperBoundCachedInputTokens)} / ${numberFormatter.format(upperBoundCacheInputTokens)} · ${upperBoundCacheCompositionPercent}%`,
         `${cacheCompositionAverageLabel} ${numberFormatter.format(averageCachedInputTokens)} / ${numberFormatter.format(averageCacheInputTokens)} · ${cacheCompositionAverageValue}`,
         `${lang === "zh" ? "观测轮次" : "observed turns"} ${numberFormatter.format(averageCacheObservedTurnCount)}`,
@@ -8115,12 +8098,7 @@ export function ChatCodingRoute() {
                 <small>{numberFormatter.format(providerCachedInputTokens)} / {numberFormatter.format(providerCacheInputTokens)}</small>
               </div>
               <div>
-                <span>{lang === "zh" ? "预测命中" : "Predicted hit"}</span>
-                <strong>{predictedCacheCompositionPercent}%</strong>
-                <small>{numberFormatter.format(predictedCachedInputTokens)} / {numberFormatter.format(predictedCacheInputTokens)}</small>
-              </div>
-              <div>
-                <span>{lang === "zh" ? "计算上界" : "Computed upper bound"}</span>
+                <span>{lang === "zh" ? "计算命中" : "Computed hit"}</span>
                 <strong>{upperBoundCacheCompositionPercent}%</strong>
                 <small>{numberFormatter.format(upperBoundCachedInputTokens)} / {numberFormatter.format(upperBoundCacheInputTokens)}</small>
               </div>
@@ -8183,8 +8161,8 @@ export function ChatCodingRoute() {
                   </svg>
                 <div className={`${styles.cacheDonutCenter} ${styles.cacheDetailDonutCenter}`} title={cacheCompositionTitle}>
                   <strong>{cacheCompositionPercent}%</strong>
-                  <span>{cacheCompositionPredictedLabel} {predictedCacheCompositionPercent}%</span>
-                  <small>{cacheCompositionUpperBoundLabel} {upperBoundCacheCompositionPercent}% · {cacheCompositionAverageLabel} {cacheCompositionAverageValue}</small>
+                  <span>{cacheCompositionUpperBoundLabel} {upperBoundCacheCompositionPercent}%</span>
+                  <small>{cacheCompositionAverageLabel} {cacheCompositionAverageValue}</small>
                 </div>
               </div>
                 <div className={styles.cacheDetailDonutLegend}>

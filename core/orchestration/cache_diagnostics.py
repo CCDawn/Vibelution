@@ -600,6 +600,8 @@ def build_runtime_cache_composition(
     elif provider_extra:
         status = "provider_higher_than_computed"
         reason = "Provider reported more cached input than the runtime context manifest can map."
+    computed_input_total = max(input_tokens, computed_cached + computed_uncached)
+    computed_cache_hit_rate = (computed_cached / computed_input_total) if computed_input_total > 0 else 0.0
     return {
         "turnId": str(turn_id or "").strip(),
         "recordedAt": usage.get("recordedAt") or _now_timestamp(),
@@ -620,15 +622,15 @@ def build_runtime_cache_composition(
             {"key": "cache_write", "label": "cache write", "tokens": cache_creation_tokens, "status": "write"},
             {"key": "uncached", "label": "uncached", "tokens": uncached_tokens, "status": "miss"},
         ],
-        "computedInputTokens": max(input_tokens, computed_cached + computed_uncached),
+        "computedInputTokens": computed_input_total,
         "computedCachedInputTokens": computed_cached,
         "computedUncachedInputTokens": computed_uncached,
-        "computedCacheHitRate": (computed_cached / input_tokens) if input_tokens > 0 else 0.0,
+        "computedCacheHitRate": computed_cache_hit_rate,
         "computedSegments": computed,
-        "upperBoundInputTokens": max(input_tokens, computed_cached + computed_uncached),
+        "upperBoundInputTokens": computed_input_total,
         "upperBoundCachedInputTokens": computed_cached,
         "upperBoundUncachedInputTokens": computed_uncached,
-        "upperBoundCacheHitRate": (computed_cached / input_tokens) if input_tokens > 0 else 0.0,
+        "upperBoundCacheHitRate": computed_cache_hit_rate,
         "calibratedInputTokens": input_tokens,
         "calibratedCachedInputTokens": cached_tokens,
         "calibratedCacheHitRate": (cached_tokens / input_tokens) if input_tokens > 0 else 0.0,
@@ -637,12 +639,12 @@ def build_runtime_cache_composition(
         "providerExtraCachedInputTokens": provider_extra,
         "calibrationStatus": status,
         "calibrationReason": reason,
-        "predictedInputTokens": input_tokens,
-        "predictedCachedInputTokens": cached_tokens,
-        "predictedUncachedInputTokens": uncached_tokens,
-        "predictedCacheHitRate": (cached_tokens / input_tokens) if input_tokens > 0 else 0.0,
-        "predictionStatus": status,
-        "predictionReason": reason,
+        "predictedInputTokens": computed_input_total,
+        "predictedCachedInputTokens": computed_cached,
+        "predictedUncachedInputTokens": computed_uncached,
+        "predictedCacheHitRate": computed_cache_hit_rate,
+        "predictionStatus": "computed_upper_bound",
+        "predictionReason": "computed from stable prompt-prefix composition",
         "averageInputTokens": average_input,
         "averageCachedInputTokens": average_cached,
         "averageObservedTurnCount": _coerce_nonnegative_int(
