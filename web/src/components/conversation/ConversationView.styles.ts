@@ -144,13 +144,13 @@ const styles: Record<string, string> = {
   answerOnlyProcessIcon:
     "vui-components-conversationview answerOnlyProcessIcon min-w-0 shrink-0 text-[var(--fg-tertiary)]",
   answerOnlyProcessMeta:
-    "vui-components-conversationview answerOnlyProcessMeta min-w-0 flex flex-wrap items-center gap-1.5",
+    "vui-components-conversationview answerOnlyProcessMeta min-w-0 truncate whitespace-nowrap",
   answerOnlyProcessPreview:
-    "vui-components-conversationview answerOnlyProcessPreview min-w-0 border-0 bg-transparent p-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] shadow-none line-clamp-1 whitespace-normal [overflow-wrap:anywhere]",
+    "vui-components-conversationview answerOnlyProcessPreview min-w-0 truncate whitespace-nowrap border-0 bg-transparent p-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] shadow-none",
   answerOnlyProcessStatic:
     "vui-components-conversationview answerOnlyProcessStatic min-w-0 grid [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:grid-cols-[14px_auto_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5",
   answerOnlyProcessTitle:
-    "vui-components-conversationview answerOnlyProcessTitle min-w-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
+    "vui-components-conversationview answerOnlyProcessTitle min-w-0 truncate whitespace-nowrap text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   answerOnlyProcessToggle:
     "vui-components-conversationview answerOnlyProcessToggle min-w-0 grid border-0 bg-transparent p-0 text-[var(--fg-secondary)] hover:border-transparent hover:bg-transparent [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:inline-grid [&_[data-slot=vui-button-label]]:max-w-full [&_[data-slot=vui-button-label]]:grid-cols-[14px_auto_auto_minmax(0,1fr)_14px] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5",
   assistantCard:
