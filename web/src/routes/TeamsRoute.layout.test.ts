@@ -5,6 +5,7 @@ import routeSource from "./TeamsRoute.tsx?raw";
 import teamMemoryIndexPanelSource from "./TeamMemoryIndexPanel.tsx?raw";
 import teamSourceCollectionCandidatePanelSource from "./TeamSourceCollectionCandidatePanel.tsx?raw";
 import teamSourceCollectionConversationPanelSource from "./TeamSourceCollectionConversationPanel.tsx?raw";
+import teamSourceCollectionControlsPanelSource from "./TeamSourceCollectionControlsPanel.tsx?raw";
 import teamSourceCollectionFindingDetailsPanelSource from "./TeamSourceCollectionFindingDetailsPanel.tsx?raw";
 import teamSourceCollectionGraphPanelSource from "./TeamSourceCollectionGraphPanel.tsx?raw";
 import teamSourceCollectionMemoryPanelSource from "./TeamSourceCollectionMemoryPanel.tsx?raw";
@@ -542,6 +543,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionExpandedPanelId");
     expect(routeSource).toContain("sourceCollectionFocusedPanelId");
     expect(routeSource).toContain("sourceCollectionControlPanelRef");
+    expect(routeSource).toContain("TeamSourceCollectionControlsPanel");
+    expect(teamSourceCollectionControlsPanelSource).toContain("source-collection-actions");
+    expect(teamSourceCollectionControlsPanelSource).toContain("sourceCollectionControlPanel");
+    expect(teamSourceCollectionControlsPanelSource).toContain("forwardRef");
     expect(routeSource).toContain("sourceCollectionPanelClassName");
     expect(teamSourceCollectionStandaloneStagePanelSource).toContain("TeamStagePipeline");
     expect(routeSource).toContain("container.scrollTo");
@@ -744,7 +749,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionStageModules.map");
     expect(routeSource).toContain("sourceCollectionStepClassName");
     expect(routeSource).not.toContain("下一步操作");
-    expect(routeSource).toContain("步骤侧栏");
+    expect(teamSourceCollectionControlsPanelSource).toContain("步骤侧栏");
     expect(routeSource).toContain("输入");
     expect(routeSource).toContain("输出");
     expect(routeSource).toContain("styles.researchStageCardHead");
