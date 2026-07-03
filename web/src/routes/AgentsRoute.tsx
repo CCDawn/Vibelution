@@ -79,7 +79,8 @@ import { AgentDetailHeaderPanel } from "./AgentDetailHeaderPanel";
 import { AgentDetailWorkspacePanel } from "./AgentDetailWorkspacePanel";
 import { AgentListWorkspacePanel } from "./AgentListWorkspacePanel";
 import { type AgentMemoryPolicyDraft } from "./AgentMemoryPolicyPanel";
-import { AgentModeMembershipPanel, type AgentModeMembershipDraft } from "./AgentModeMembershipPanel";
+import { AgentConfigReferencesPanePanel } from "./AgentConfigReferencesPanePanel";
+import { type AgentModeMembershipDraft } from "./AgentModeMembershipPanel";
 import { AgentManagementBriefPanel } from "./AgentManagementBriefPanel";
 import { AgentManagementHeaderPanel } from "./AgentManagementHeaderPanel";
 import {
@@ -90,11 +91,7 @@ import {
   type AgentOverviewTerritory,
 } from "./AgentOverviewPanel";
 import { type AgentPersonaDraft } from "./AgentPersonaProfilePanel";
-import {
-  AgentReferencesPanel,
-  type AgentReferenceItemView,
-  type AgentReferenceRoomView,
-} from "./AgentReferencesPanel";
+import { type AgentReferenceItemView, type AgentReferenceRoomView } from "./AgentReferencesPanel";
 import { AgentSelectedDetailContentPanel } from "./AgentSelectedDetailContentPanel";
 import { type AgentTaskDraft } from "./AgentTaskProfilePanel";
 import { governanceStatusLabel } from "./AgentToolGovernancePanel";
@@ -6071,45 +6068,40 @@ export function AgentsRoute() {
                 />
               )}
               configReferences={(
-                <>
-                  {selectedAgentRequiresTeamMembership ? (
-                    <AgentModeMembershipPanel
-                      copy={copy}
-                      lang={lang}
-                      modesLabel={uniqueModes(selectedAgent).map((mode) => modeLabel(mode, lang)).join(" / ")}
-                      draft={membershipDraft}
-                      supervisedSlots={Object.keys(workspace?.modeBindings.supervised_evolution?.slots ?? {})}
-                      selfEvolutionSlots={Object.keys(workspace?.modeBindings.self_evolution?.slots ?? {})}
-                      dirty={membershipDirty}
-                      canSave={canSaveMembership}
-                      pending={selectedAgentMembershipPending}
-                      onDraftChange={updateMembershipDraft}
-                      onReset={() => setMembershipDraft(membershipDraftFromWorkspace(workspace, selectedAgent))}
-                      onSave={saveModeMembership}
-                    />
-                  ) : null}
-
-                  {selectedAgentReferencesPanel ? (
-                    <AgentReferencesPanel
-                      copy={{
-                        chatRoomMembership: copy.chatRoomMembership,
-                        references: copy.references,
-                        noChatRooms: copy.noChatRooms,
-                        selectAgent: copy.selectAgent,
-                        readOnlyLabel: lang === "zh" ? "只读引用" : "Read-only",
-                        membershipHelp: lang === "zh"
-                          ? "群聊成员关系在对话页的群设置中维护；团队关联群聊由团队页同步。这里仅展示引用，避免多处写同一份成员状态。"
-                          : "Group membership is edited from Chat group settings, while Team-owned rooms sync from Teams. This Agent view is read-only to avoid duplicate writers.",
-                      }}
-                      showChatRoomMembership={selectedAgentRequiresTeamMembership}
-                      chatRoomSummary={selectedAgentReferencesPanel.chatRoomSummary}
-                      referenceCount={selectedAgent.references.length}
-                      chatRooms={selectedAgentReferencesPanel.chatRooms}
-                      references={selectedAgentReferencesPanel.references}
-                      onOpenRoute={(route) => navigate(route)}
-                    />
-                  ) : null}
-                </>
+                <AgentConfigReferencesPanePanel
+                  modeMembership={selectedAgentRequiresTeamMembership ? {
+                    copy,
+                    lang,
+                    modesLabel: uniqueModes(selectedAgent).map((mode) => modeLabel(mode, lang)).join(" / "),
+                    draft: membershipDraft,
+                    supervisedSlots: Object.keys(workspace?.modeBindings.supervised_evolution?.slots ?? {}),
+                    selfEvolutionSlots: Object.keys(workspace?.modeBindings.self_evolution?.slots ?? {}),
+                    dirty: membershipDirty,
+                    canSave: canSaveMembership,
+                    pending: selectedAgentMembershipPending,
+                    onDraftChange: updateMembershipDraft,
+                    onReset: () => setMembershipDraft(membershipDraftFromWorkspace(workspace, selectedAgent)),
+                    onSave: saveModeMembership,
+                  } : null}
+                  references={selectedAgentReferencesPanel ? {
+                    copy: {
+                      chatRoomMembership: copy.chatRoomMembership,
+                      references: copy.references,
+                      noChatRooms: copy.noChatRooms,
+                      selectAgent: copy.selectAgent,
+                      readOnlyLabel: lang === "zh" ? "只读引用" : "Read-only",
+                      membershipHelp: lang === "zh"
+                        ? "群聊成员关系在对话页的群设置中维护；团队关联群聊由团队页同步。这里仅展示引用，避免多处写同一份成员状态。"
+                        : "Group membership is edited from Chat group settings, while Team-owned rooms sync from Teams. This Agent view is read-only to avoid duplicate writers.",
+                    },
+                    showChatRoomMembership: selectedAgentRequiresTeamMembership,
+                    chatRoomSummary: selectedAgentReferencesPanel.chatRoomSummary,
+                    referenceCount: selectedAgent.references.length,
+                    chatRooms: selectedAgentReferencesPanel.chatRooms,
+                    references: selectedAgentReferencesPanel.references,
+                    onOpenRoute: (route) => navigate(route),
+                  } : null}
+                />
               )}
               activity={(
                 <AgentActivityPanePanel
