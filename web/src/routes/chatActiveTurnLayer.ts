@@ -1,4 +1,4 @@
-import { mergeConversationFeedbackEvents } from "../conversation-model/feedbackEvents";
+import { mergeAgentFeedbackEvents } from "../agent-thread/agentFeedbackEvents";
 import {
   answerProjectionContent,
   isInternalStreamingStatusContent,
@@ -66,7 +66,7 @@ export function mergeAssistantDeltaIntoActiveTurnLayer(
   const content = payload.replaceContent ? contentDelta : `${base?.answerContent ?? ""}${contentDelta}`;
   const thought = payload.replaceThought ? thoughtDelta : `${base?.thoughtContent ?? ""}${thoughtDelta}`;
   const feedbackEvents = payload.feedbackEvents
-    ? mergeConversationFeedbackEvents(base?.feedbackEvents, payload.feedbackEvents)
+    ? mergeAgentFeedbackEvents(base?.feedbackEvents, payload.feedbackEvents)
     : base?.feedbackEvents ?? [];
   if (!content && !thought && !payload.stage && !feedbackEvents.length) {
     return undefined;

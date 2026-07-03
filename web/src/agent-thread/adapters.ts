@@ -1,10 +1,9 @@
 import type {
-  ConversationFeedbackEvent,
   ConversationMessage,
   MentalStateSnapshot,
   ToolCall,
 } from "../api/types";
-import { mergeConversationFeedbackEvents } from "../conversation-model/feedbackEvents";
+import { mergeAgentFeedbackEvents, type AgentFeedbackEvent } from "./agentFeedbackEvents";
 import type {
   AgentMentalPart,
   AgentMessage,
@@ -71,7 +70,7 @@ function processPartsForAssistantMessage(message: ConversationMessage): AgentMes
 }
 
 function feedbackPartsForMessage(message: ConversationMessage): AgentMessagePart[] {
-  return mergeConversationFeedbackEvents(message.feedbackEvents)
+  return mergeAgentFeedbackEvents(message.feedbackEvents)
     .sort((left, right) => normalizedSequence(left.sequence) - normalizedSequence(right.sequence))
     .map((event, index) => feedbackEventToAgentPart(message, event, index))
     .filter((part): part is AgentMessagePart => part !== null);
@@ -79,7 +78,7 @@ function feedbackPartsForMessage(message: ConversationMessage): AgentMessagePart
 
 function feedbackEventToAgentPart(
   message: ConversationMessage,
-  event: ConversationFeedbackEvent,
+  event: AgentFeedbackEvent,
   index: number,
 ): AgentMessagePart | null {
   const id = `${message.id}-feedback-${event.sequence || index + 1}`;
@@ -112,7 +111,7 @@ function feedbackEventToAgentPart(
   return runtimeEventToAgentPart(id, event);
 }
 
-function runtimeEventToAgentPart(id: string, event: ConversationFeedbackEvent): AgentRuntimeEventPart {
+function runtimeEventToAgentPart(id: string, event: AgentFeedbackEvent): AgentRuntimeEventPart {
   return {
     id,
     type: "runtime-event",
@@ -128,7 +127,7 @@ function runtimeEventToAgentPart(id: string, event: ConversationFeedbackEvent): 
   };
 }
 
-function toolEventToAgentPart(id: string, event: ConversationFeedbackEvent): AgentToolCallPart {
+function toolEventToAgentPart(id: string, event: AgentFeedbackEvent): AgentToolCallPart {
   return {
     id,
     type: "tool-call",
