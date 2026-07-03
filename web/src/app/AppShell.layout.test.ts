@@ -285,6 +285,22 @@ describe("AppShell layout contract", () => {
     expect(styles.activeWorkDetailLink).toContain("focus-visible:ring-2");
   });
 
+  it("expands the active work chip itself on hover and focus", () => {
+    expect(shellSource).toContain("activeWorkInlineDetails");
+    expect(shellSource).toContain("activeWorkInlineItem");
+    expect(shellSource).toContain("activeWorkIndicator.items.slice(0, 2).map");
+    expect(shellSource).toContain("{item.summary}");
+
+    expect(styles.activeWorkInlineDetails).toBeTypeOf("string");
+    expect(styles.activeWorkInlineItem).toBeTypeOf("string");
+    expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkChip:hover .activeWorkInlineDetails");
+    expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkChip:focus-within .activeWorkInlineDetails");
+    expect(shellStyles).toContain("max-width: min(38vw, 360px)");
+    expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkInlineItem");
+    expect(shellStyles).toContain(":where(.vui-app-appshell).brandBlock {\n  display: flex;");
+    expect(shellStyles).toContain("overflow: visible");
+  });
+
   it("uses one shared page instance id and stops periodic memory sampling while hidden", () => {
     expect(shellSource).toContain("getPageInstanceId");
     expect(shellSource).toContain("useRef(getPageInstanceId())");
