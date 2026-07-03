@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import routeSource from "./MemoryRoute.tsx?raw";
+import detailPanelSource from "./MemoryDetailPanel.tsx?raw";
 import managementEditorSource from "./MemoryManagementEditor.tsx?raw";
 import matrixPanelSource from "./MemoryMatrixPanel.tsx?raw";
 import overviewPanelSource from "./MemoryOverviewPanel.tsx?raw";
@@ -108,7 +109,7 @@ describe("MemoryRoute layout contract", () => {
     const sourcesViewIndex = routeSource.indexOf("const renderSourcesView");
     const sourcesWorkspaceIndex = routeSource.indexOf("styles.workspace", sourcesViewIndex);
     const sourcesPanelsIndex = routeSource.indexOf("renderSourceAndItemPanels(copy.sourceAudit)", sourcesWorkspaceIndex);
-    const detailPanelIndex = routeSource.indexOf("renderDetailPanel()", sourcesPanelsIndex);
+    const detailPanelIndex = routeSource.indexOf("createDetailPanel()", sourcesPanelsIndex);
 
     expect(sourceAndItemRendererIndex).toBeGreaterThan(0);
     expect(sourcePanelIndex).toBeGreaterThan(0);
@@ -665,14 +666,21 @@ describe("MemoryRoute layout contract", () => {
   });
 
   it("surfaces agent visibility, prompt injection, and raw content in the detail pane", () => {
-    expect(routeSource).toContain("resolvedActiveItem.agentVisible");
-    expect(routeSource).toContain("resolvedActiveItem.inPrompt");
-    expect(routeSource).toContain("<details className={styles.rawPanel} open={showEditor}>");
-    expect(routeSource).toContain("resolvedActiveItem.content");
-    expect(routeSource).toContain("copySourceSummary");
-    expect(routeSource).toContain("copySourcePath");
-    expect(routeSource).toContain("copyRawContentAction");
-    expect(routeSource).toContain("copyCurrentLink");
+    expect(routeSource).toContain('from "./MemoryDetailPanel"');
+    expect(routeSource).toContain("<MemoryDetailPanel");
+    expect(routeSource).not.toContain("const renderDetailPanel = (showEditor = true) =>");
+    expect(detailPanelSource).toContain("export function MemoryDetailPanel");
+    expect(detailPanelSource).toContain("item.agentVisible");
+    expect(detailPanelSource).toContain("item.inPrompt");
+    expect(detailPanelSource).toContain("<details className={styles.rawPanel} open={showEditor}>");
+    expect(detailPanelSource).toContain("item.content");
+    expect(detailPanelSource).toContain("copySourceSummary");
+    expect(detailPanelSource).toContain("copySourcePath");
+    expect(detailPanelSource).toContain("copyRawContentAction");
+    expect(detailPanelSource).toContain("copyCurrentLink");
+    expect(detailPanelSource).not.toContain("useQuery");
+    expect(detailPanelSource).not.toContain("useMutation");
+    expect(detailPanelSource).not.toContain("fetchJson");
     expect(routeSource).toContain("copy.management");
     expect(routeSource).toContain("styles.managementPanel");
   });
@@ -738,8 +746,8 @@ describe("MemoryRoute layout contract", () => {
   });
 
   it("prioritizes impact explanation before raw memory content", () => {
-    const impactIndex = routeSource.indexOf("styles.impactPanel");
-    const rawPanelIndex = routeSource.indexOf("styles.rawPanel");
+    const impactIndex = detailPanelSource.indexOf("styles.impactPanel");
+    const rawPanelIndex = detailPanelSource.indexOf("styles.rawPanel");
 
     expect(impactIndex).toBeGreaterThan(0);
     expect(rawPanelIndex).toBeGreaterThan(impactIndex);
@@ -749,21 +757,21 @@ describe("MemoryRoute layout contract", () => {
   it("makes source origin and inspection actions directly visible in the UI", () => {
     expect(routeSource).toContain("sourceOriginLabel(section, item)");
     expect(routeSource).toContain("styles.itemOrigin");
-    expect(routeSource).toContain("styles.detailActions");
-    expect(routeSource).toContain("styles.detailActionButton");
-    expect(routeSource).toContain("styles.copyNotice");
-    expect(routeSource).toContain("section.sourceApi");
+    expect(detailPanelSource).toContain("styles.detailActions");
+    expect(detailPanelSource).toContain("styles.detailActionButton");
+    expect(detailPanelSource).toContain("styles.copyNotice");
+    expect(detailPanelSource).toContain("section.sourceApi");
     expect(routeSource).toContain("handleCopySourcePath");
     expect(routeSource).toContain("resolvedActiveItem.path || resolvedActiveItem.source || activeSection.sourcePath");
   });
 
   it("keeps inspection actions compact enough for narrow detail panes", () => {
-    expect(routeSource).toContain("styles.detailActions");
-    expect(routeSource).toContain("styles.detailActionButton");
-    expect(routeSource).toContain("copySourceSummary");
-    expect(routeSource).toContain("copySourcePath");
-    expect(routeSource).toContain("copyRawContentAction");
-    expect(routeSource).toContain("copyCurrentLink");
+    expect(detailPanelSource).toContain("styles.detailActions");
+    expect(detailPanelSource).toContain("styles.detailActionButton");
+    expect(detailPanelSource).toContain("copySourceSummary");
+    expect(detailPanelSource).toContain("copySourcePath");
+    expect(detailPanelSource).toContain("copyRawContentAction");
+    expect(detailPanelSource).toContain("copyCurrentLink");
   });
 
   it("keeps loaded memory visible when a later refresh fails", () => {
