@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Archive,
-  ArrowLeft,
   Bot,
   CheckSquare,
   CheckCircle2,
@@ -88,6 +87,7 @@ import {
   type AgentReferenceItemView,
   type AgentReferenceRoomView,
 } from "./AgentReferencesPanel";
+import { AgentReturnBannerPanel } from "./AgentReturnBannerPanel";
 import { AgentRuntimeFocusPanel } from "./AgentRuntimeFocusPanel";
 import { AgentRuntimePolicyPanel } from "./AgentRuntimePolicyPanel";
 import {
@@ -6052,20 +6052,11 @@ export function AgentsRoute() {
           className={createOpen ? `${styles.detailPanel} ${styles.detailPanelCreating}` : styles.detailPanel}
         >
           {returnToPath ? (
-            <section className={styles.returnBanner} aria-label={copy.returnBannerTitle} title={copy.returnBannerHint}>
-              <div className={styles.returnBannerCopy}>
-                <strong>{copy.returnBannerTitle}</strong>
-              </div>
-              <VNativeButton
-                type="button"
-                className={styles.returnBannerButton}
-                onClick={() => navigate(returnToPath)}
-                title={returnToLabel}
-              >
-                <ArrowLeft size={16} />
-                <span>{returnToLabel}</span>
-              </VNativeButton>
-            </section>
+            <AgentReturnBannerPanel
+              copy={copy}
+              returnToLabel={returnToLabel}
+              onReturn={() => navigate(returnToPath)}
+            />
           ) : null}
           {selectedBulkAgents.length > 1 ? (
             <section className={styles.configEditor}>
