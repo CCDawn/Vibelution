@@ -7,16 +7,8 @@ import {
   agentMessageContentSections,
   agentMessageProcessSections,
   buildAgentMessageSectionState,
-  imageArtifactForMessage,
-  isAgentInboxMessage,
-  isGroupRoomTranscriptMessage,
-  isProviderFailureSummaryText,
-  isRuntimeNoticeMessage,
-  isRuntimeStatusContent,
-  isTurnErrorMessage,
-  researchOrgMessageChips,
-} from "./messageSections";
-import messageSectionsSource from "./messageSections.ts?raw";
+} from "./agentMessageSections";
+import agentMessageSectionsSource from "./agentMessageSections.ts?raw";
 
 function message(overrides: Partial<ConversationMessage>): ConversationMessage {
   return {
@@ -32,9 +24,9 @@ function sectionState(message: ConversationMessage) {
   return buildAgentMessageSectionState(conversationMessageToAgentMessage(message));
 }
 
-describe("messageSections", () => {
+describe("agentMessageSections", () => {
   it("does not export retired ConversationMessage content or block helpers", () => {
-    expect(messageSectionsSource).not.toMatch(/export function (?:hasUserContent|has(?:Response|Thought|Mental|Tool)Block)\b/);
+    expect(agentMessageSectionsSource).not.toMatch(/export function (?:hasUserContent|has(?:Response|Thought|Mental|Tool)Block)\b/);
   });
 
   it("builds AgentMessage section state from legacy assistant fields", () => {
@@ -54,7 +46,7 @@ describe("messageSections", () => {
         updatedAt: "2026-07-02T10:20:00Z",
         source: "test",
       },
-      toolCalls: [{ name: "read_file_tool", status: "done", summary: "读取 messageSections" }],
+      toolCalls: [{ name: "read_file_tool", status: "done", summary: "读取 agentMessageSections" }],
     });
 
     const state = buildAgentMessageSectionState(conversationMessageToAgentMessage(assistantMessage));
@@ -293,7 +285,6 @@ describe("messageSections", () => {
       content,
     });
 
-    expect(isRuntimeNoticeMessage(noticeMessage)).toBe(true);
     expect(sectionState(noticeMessage).hasResponseBlock).toBe(false);
   });
 
@@ -305,7 +296,6 @@ describe("messageSections", () => {
       streamStage: "model_thinking",
     });
 
-    expect(isRuntimeStatusContent(statusMessage)).toBe(true);
     expect(sectionState(statusMessage).hasResponseBlock).toBe(false);
   });
 
@@ -317,7 +307,6 @@ describe("messageSections", () => {
       streamStage: "responding",
     });
 
-    expect(isRuntimeStatusContent(assistantMessage)).toBe(false);
     expect(sectionState(assistantMessage).hasResponseBlock).toBe(true);
   });
 
@@ -331,14 +320,12 @@ describe("messageSections", () => {
       metadata: { kind: "turn_error", providerFailure: true },
     });
 
-    expect(isRuntimeNoticeMessage(errorMessage)).toBe(false);
-    expect(isTurnErrorMessage(errorMessage)).toBe(true);
     expect(sectionState({ ...errorMessage, thought: "hidden" }).hasThoughtBlock).toBe(true);
     expect(sectionState({ ...errorMessage, toolCalls: [{ name: "tool", status: "done" }] }).hasToolBlock).toBe(true);
     expect(sectionState(errorMessage).hasResponseBlock).toBe(false);
   });
 
-  it("treats legacy provider failure summary replies as turn-error notices", () => {
+  it("keeps legacy provider failure summary replies out of assistant response blocks", () => {
     const errorMessage = message({
       role: "assistant",
       content: "模型服务上游暂时失败，本轮没有完成。完整 provider 错误已写入运行日志。",
@@ -346,15 +333,13 @@ describe("messageSections", () => {
       toolCalls: [{ name: "image2_generate_tool", status: "done" }],
     });
 
-    expect(isProviderFailureSummaryText(errorMessage.content)).toBe(true);
-    expect(isTurnErrorMessage(errorMessage)).toBe(true);
     const state = sectionState(errorMessage);
     expect(state.hasThoughtBlock).toBe(true);
     expect(state.hasToolBlock).toBe(true);
     expect(state.hasResponseBlock).toBe(false);
   });
 
-  it("treats failed image-generation artifact messages as turn-error notices", () => {
+  it("keeps failed image-generation artifact messages out of assistant response blocks", () => {
     const errorMessage = message({
       role: "assistant",
       content: "模型服务上游暂时失败，本轮没有完成。完整 provider 错误已写入运行日志。",
@@ -366,68 +351,9 @@ describe("messageSections", () => {
       toolCalls: [{ name: "image2_generate_tool", status: "done" }],
     });
 
-    expect(isTurnErrorMessage(errorMessage)).toBe(true);
     const state = sectionState(errorMessage);
     expect(state.hasToolBlock).toBe(true);
     expect(state.hasResponseBlock).toBe(false);
-  });
-
-  it("does not classify user text as a runtime notice", () => {
-    const userMessage = message({
-      role: "user",
-      content: "上一轮运行已被中断，当前会话已恢复为可继续状态。",
-    });
-
-    expect(isRuntimeNoticeMessage(userMessage)).toBe(false);
-  });
-
-  it("classifies Agent inbox wake prompts separately from operator-authored user text", () => {
-    expect(isAgentInboxMessage(message({
-      role: "user",
-      content: "普通用户输入",
-    }))).toBe(false);
-    expect(isAgentInboxMessage(message({
-      role: "user",
-      content: "普通内容",
-      metadata: { kind: "agent_inbox_message" },
-    }))).toBe(true);
-    expect(isAgentInboxMessage(message({
-      role: "user",
-      content: "[Agent 私信]\n来源 Agent: A011 · 夏予安",
-    }))).toBe(true);
-  });
-
-  it("extracts research organization communication chips from Agent inbox metadata", () => {
-    const chips = researchOrgMessageChips(message({
-      role: "user",
-      content: "[Agent 私信]",
-      metadata: {
-        kind: "agent_inbox_message",
-        inboxKind: "research_org_report",
-        researchOrgIntent: "status_report",
-        researchOrgMessageType: "report",
-        researchOrgDeliveryMode: "private",
-        wakeStatus: "not_requested",
-      },
-    }));
-
-    expect(chips).toEqual([
-      { key: "intent", label: "intent: status report", tone: "intent" },
-      { key: "type", label: "type: report", tone: "meta" },
-      { key: "delivery", label: "delivery: private", tone: "meta" },
-      { key: "wake", label: "wake: not requested", tone: "wake" },
-    ]);
-  });
-
-  it("does not add research organization chips to ordinary private messages", () => {
-    expect(researchOrgMessageChips(message({
-      role: "user",
-      content: "[Agent 私信]",
-      metadata: {
-        kind: "agent_inbox_message",
-        inboxKind: "agent_direct_message",
-      },
-    }))).toEqual([]);
   });
 
   it("keeps group room transcript sync out of assistant response blocks", () => {
@@ -437,7 +363,6 @@ describe("messageSections", () => {
       metadata: { kind: "group_room_transcript" },
     });
 
-    expect(isGroupRoomTranscriptMessage(transcript)).toBe(true);
     expect(sectionState(transcript).hasResponseBlock).toBe(false);
   });
 
@@ -467,45 +392,4 @@ describe("messageSections", () => {
     expect(state.hasToolBlock).toBe(false);
   });
 
-  it("extracts image artifact metadata into a typed section contract", () => {
-    const assistantMessage = message({
-      role: "assistant",
-      content: "海报生成完成",
-      metadata: {
-        kind: "image2_generation",
-        status: "succeeded",
-        imageUrl: "/api/sessions/session-a/artifacts/image.png",
-        downloadUrl: "/api/sessions/session-a/artifacts/image.png?download=1",
-        prompt: "AI poster",
-        artifactId: "image.png",
-        size: "1024x1536",
-        quality: "high",
-        model: "gpt-image-1.5",
-      },
-    });
-
-    expect(imageArtifactForMessage(assistantMessage)).toEqual({
-      imageUrl: "/api/sessions/session-a/artifacts/image.png",
-      downloadUrl: "/api/sessions/session-a/artifacts/image.png?download=1",
-      prompt: "AI poster",
-      artifactId: "image.png",
-      size: "1024x1536",
-      quality: "high",
-      model: "gpt-image-1.5",
-    });
-  });
-
-  it("ignores unfinished image artifact metadata", () => {
-    const assistantMessage = message({
-      role: "assistant",
-      content: "生成中",
-      metadata: {
-        kind: "image2_generation",
-        status: "running",
-        imageUrl: "/api/sessions/session-a/artifacts/image.png",
-      },
-    });
-
-    expect(imageArtifactForMessage(assistantMessage)).toBeNull();
-  });
 });

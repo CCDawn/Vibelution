@@ -5,7 +5,7 @@ import type {
   AgentAttachmentPart,
   AgentReferencePart,
 } from "../../agent-thread/types";
-import type { AgentMessageContextSection } from "./messageSections";
+import type { AgentMessageContextSection } from "./agentMessageSections";
 import styles from "./ConversationView.styles";
 
 type AgentContextSectionsViewProps = {
