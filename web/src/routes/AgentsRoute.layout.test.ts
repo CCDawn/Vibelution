@@ -86,6 +86,10 @@ const avatarEditorPanelSource = readFileSync(
   new URL("./AgentAvatarEditorPanel.tsx", import.meta.url),
   "utf-8",
 );
+const detailHeaderPanelSource = readFileSync(
+  new URL("./AgentDetailHeaderPanel.tsx", import.meta.url),
+  "utf-8",
+);
 const returnBannerPanelSource = readFileSync(
   new URL("./AgentReturnBannerPanel.tsx", import.meta.url),
   "utf-8",
@@ -219,7 +223,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("styles.detailPanel");
     expect(routeSource).toContain("<AgentDenseList");
     expect(routeSource).toContain("agent.avatarImageUrl");
-    expect(routeSource).toContain("AgentAvatarEditorPanel");
+    expect(routeSource).toContain("<AgentDetailHeaderPanel");
+    expect(detailHeaderPanelSource).toContain("AgentAvatarEditorPanel");
     expect(avatarEditorPanelSource).toContain("styles.agentAvatarImage");
     expect(routeSource).toContain("/api/agents/avatar-options");
     expect(routeSource).toContain("/avatar-image");
@@ -556,7 +561,8 @@ describe("AgentsRoute layout contract", () => {
     expect(createPanelSource).toContain("title={toolBundleSummary.meta || copy.createAgentToolBundleEmpty}");
     expect(routeSource).not.toContain("<small>{createToolBundleSummaryValue.meta || copy.createAgentToolBundleEmpty}</small>");
     expect(routeSource).not.toContain("<small>{toolBundleMeta(bundle, lang)}</small>");
-    expect(routeSource).toContain("<span className={styles.detailHealthStatus} title={issueSummary(selectedAgent.health, lang)}>");
+    expect(routeSource).toContain("healthTitle={issueSummary(selectedAgent.health, lang)}");
+    expect(detailHeaderPanelSource).toContain("className={styles.detailHealthStatus}");
     expect(routeSource).not.toContain("<small>{issueSummary(selectedAgent.health, lang)}</small>");
     expect(coreConfigPanelSource).toContain("title={`${slot.required ? copy.requiredSlot : copy.optionalSlot} · ${slot.description}`}");
     expect(routeSource).not.toContain("<small>{slot.required ? copy.requiredSlot : copy.optionalSlot}</small>");
@@ -568,6 +574,7 @@ describe("AgentsRoute layout contract", () => {
     expect(returnBannerPanelSource).toContain("title={copy.returnBannerHint}");
     expect(avatarEditorPanelSource).toContain("title={copy.avatarEditorHint}");
     expect(routeSource).toContain("title={copy.routeHint}");
+    expect(detailHeaderPanelSource).toContain("className={styles.detailHeader}");
     expect(managementBriefPanelSource).toContain("title={copy.managementBriefHint}");
     expect(routeSource).toContain("title={copy.personaHint}");
     expect(taskProfilePanelSource).toContain("title={copy.taskHint}");
@@ -597,7 +604,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("Inbox 有待处理消息");
     expect(routeSource).toContain("这是 Inbox 待办提醒，不代表配置坏了");
     expect(routeSource).toContain("issueTone: issueTone(agent.health)");
-    expect(routeSource).toContain("styles.detailHealthStatus");
+    expect(detailHeaderPanelSource).toContain("styles.detailHealthStatus");
     expect(routeSource).toContain("copy.healthNextStep");
     expect(routeSource).toContain("copy.statusReminders");
     expect(routeSource).toContain("issueSummary(agent.health, lang)");
@@ -839,7 +846,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("className={styles.policyGrid}");
     expect(managementBriefPanelSource).toContain("styles.managementBriefPanel");
     expect(managementBriefPanelSource).toContain("styles.nextActionList");
-    expect(routeSource).toContain("styles.detailTabs");
+    expect(detailHeaderPanelSource).toContain("styles.detailTabs");
     expect(routeSource).toContain("activePane === \"overview\"");
     expect(routeSource).toContain("activePane === \"config\"");
     expect(routeSource).not.toContain("activePane === \"policies\"");
