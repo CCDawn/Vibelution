@@ -82,6 +82,11 @@ import {
   type AgentOverviewPanelPolicy,
   type AgentOverviewTerritory,
 } from "./AgentOverviewPanel";
+import {
+  AgentReferencesPanel,
+  type AgentReferenceItemView,
+  type AgentReferenceRoomView,
+} from "./AgentReferencesPanel";
 import { AgentRuntimeFocusPanel } from "./AgentRuntimeFocusPanel";
 import { AgentRuntimePolicyPanel } from "./AgentRuntimePolicyPanel";
 import {
@@ -5744,6 +5749,40 @@ export function AgentsRoute() {
     };
   })() : null;
 
+  const selectedAgentReferencesPanel: {
+    chatRoomSummary: string;
+    chatRooms: AgentReferenceRoomView[];
+    references: AgentReferenceItemView[];
+  } | null = selectedAgent ? (() => {
+    const chatRooms: AgentReferenceRoomView[] = (workspace?.chatRooms ?? []).map((room) => {
+      const selected = room.agentIds.includes(selectedAgent.agentId);
+      return {
+        id: room.roomId,
+        statusLabel: selected ? (lang === "zh" ? "已加入" : "Joined") : (lang === "zh" ? "未加入" : "Not joined"),
+        statusTone: selected ? "active" : "stale",
+        title: room.title || room.roomId,
+        meta: `${room.mode || "-"} · ${room.participantCount} members · ${formatTimestamp(room.updatedAt, lang)}`,
+        route: compactProjectionRoute(room, `/chat?room=${encodeURIComponent(room.roomId)}`),
+        actionLabel: lang === "zh" ? "打开群聊" : "Open room",
+      };
+    });
+    const references: AgentReferenceItemView[] = selectedAgent.references.map((reference) => ({
+      id: `${reference.kind}:${reference.sourceId}:${reference.mode}:${reference.field}`,
+      label: referenceLabel(reference, lang),
+      statusLabel: reference.status || "active",
+      statusTone: reference.status === "stale" ? "stale" : "active",
+      sourceLabel: reference.sourceLabel,
+      meta: [reference.mode, reference.field].filter(Boolean).join(" / ") || reference.sourceId,
+      route: referenceRoute(reference),
+      actionLabel: lang === "zh" ? "打开" : "Open",
+    }));
+    return {
+      chatRoomSummary: `${selectedAgent.references.filter((reference) => reference.kind === "chat_room").length} / ${workspace?.chatRooms.length ?? 0}`,
+      chatRooms,
+      references,
+    };
+  })() : null;
+
   return (
     <section className={styles.route}>
       <div title={copy.subtitle}>
@@ -7329,90 +7368,26 @@ export function AgentsRoute() {
               </section>
               ) : null}
 
-              {selectedAgentRequiresTeamMembership ? (
-              <section className={styles.configEditor}>
-                <div className={styles.panelHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{copy.chatRoomMembership}</p>
-                    <h3>{selectedAgent.references.filter((reference) => reference.kind === "chat_room").length} / {workspace?.chatRooms.length ?? 0}</h3>
-                  </div>
-                  <span className={styles.cleanPill}>{lang === "zh" ? "只读引用" : "Read-only"}</span>
-                </div>
-                {(workspace?.chatRooms.length ?? 0) > 0 ? (
-                  <div className={styles.roomMembershipList}>
-                    {workspace?.chatRooms.map((room) => {
-                      const selected = room.agentIds.includes(selectedAgent.agentId);
-                      return (
-                        <div key={room.roomId} className={styles.roomCheckField}>
-                          <span className={selected ? styles.referenceStatusActive : styles.referenceStatusStale}>
-                            {selected ? (lang === "zh" ? "已加入" : "Joined") : (lang === "zh" ? "未加入" : "Not joined")}
-                          </span>
-                          <span>
-                            <strong>{room.title || room.roomId}</strong>
-                            <small>{room.mode || "-"} · {room.participantCount} members · {formatTimestamp(room.updatedAt, lang)}</small>
-                          </span>
-                          <VButton
-                            type="button"
-                            variant="ghost"
-                            icon={<ExternalLink size={12} />}
-                            onPress={() => navigate(compactProjectionRoute(room, `/chat?room=${encodeURIComponent(room.roomId)}`))}
-                          >
-                            {lang === "zh" ? "打开群聊" : "Open room"}
-                          </VButton>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className={styles.emptyText}>{copy.noChatRooms}</p>
-                )}
-                <p className={styles.emptyText}>
-                  {lang === "zh"
-                    ? "群聊成员关系在对话页的群设置中维护；团队关联群聊由团队页同步。这里仅展示引用，避免多处写同一份成员状态。"
-                    : "Group membership is edited from Chat group settings, while Team-owned rooms sync from Teams. This Agent view is read-only to avoid duplicate writers."}
-                </p>
-              </section>
+              {selectedAgentReferencesPanel ? (
+                <AgentReferencesPanel
+                  copy={{
+                    chatRoomMembership: copy.chatRoomMembership,
+                    references: copy.references,
+                    noChatRooms: copy.noChatRooms,
+                    selectAgent: copy.selectAgent,
+                    readOnlyLabel: lang === "zh" ? "只读引用" : "Read-only",
+                    membershipHelp: lang === "zh"
+                      ? "群聊成员关系在对话页的群设置中维护；团队关联群聊由团队页同步。这里仅展示引用，避免多处写同一份成员状态。"
+                      : "Group membership is edited from Chat group settings, while Team-owned rooms sync from Teams. This Agent view is read-only to avoid duplicate writers.",
+                  }}
+                  showChatRoomMembership={selectedAgentRequiresTeamMembership}
+                  chatRoomSummary={selectedAgentReferencesPanel.chatRoomSummary}
+                  referenceCount={selectedAgent.references.length}
+                  chatRooms={selectedAgentReferencesPanel.chatRooms}
+                  references={selectedAgentReferencesPanel.references}
+                  onOpenRoute={(route) => navigate(route)}
+                />
               ) : null}
-
-              <section className={styles.detailSection}>
-                <div className={styles.panelHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{copy.references}</p>
-                    <h3>{selectedAgent.references.length}</h3>
-                  </div>
-                  <Users size={16} />
-                </div>
-                {selectedAgent.references.length ? (
-                  <div className={styles.referenceList}>
-                    {selectedAgent.references.map((reference) => (
-                      <div key={`${reference.kind}:${reference.sourceId}:${reference.mode}:${reference.field}`} className={styles.referenceItem}>
-                        <div className={styles.referenceHeader}>
-                          <strong>{referenceLabel(reference, lang)}</strong>
-                          <span className={reference.status === "stale" ? styles.referenceStatusStale : styles.referenceStatusActive}>
-                            {reference.status || "active"}
-                          </span>
-                        </div>
-                        <span>{reference.sourceLabel}</span>
-                        <div className={styles.referenceMetaRow}>
-                          <small>{[reference.mode, reference.field].filter(Boolean).join(" / ") || reference.sourceId}</small>
-                          {referenceRoute(reference) ? (
-                            <VButton
-                              type="button"
-                              variant="ghost"
-                              icon={<ExternalLink size={12} />}
-                              onPress={() => navigate(referenceRoute(reference))}
-                            >
-                              {lang === "zh" ? "打开" : "Open"}
-                            </VButton>
-                          ) : null}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className={styles.emptyText}>{copy.selectAgent}</p>
-                )}
-              </section>
                 </>
               ) : null}
 
