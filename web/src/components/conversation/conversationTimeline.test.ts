@@ -1,15 +1,29 @@
 import { describe, expect, it } from "vitest";
 
 import { ConversationMessage } from "../../api/types";
+import { conversationMessageToAgentMessage } from "../../agent-thread/adapters";
 import type { AgentMessage } from "../../agent-thread";
-import { buildAgentMessageOperations, buildConversationOperations } from "./conversationOperations";
-import { buildAgentMessageTimelineItems, buildConversationTimelineItems } from "./conversationTimeline";
+import { buildAgentMessageOperations } from "./conversationOperations";
+import { buildAgentMessageTimelineItems, type ConversationTimelineOptions } from "./conversationTimeline";
 
 const labels = {
   thought: "思考",
   mental: "心智状态",
   status: "运行状态",
 };
+
+function timelineItemsForConversationMessage(
+  message: ConversationMessage,
+  options: ConversationTimelineOptions,
+) {
+  const agentMessage = conversationMessageToAgentMessage(message);
+  return buildAgentMessageTimelineItems(
+    agentMessage,
+    buildAgentMessageOperations(agentMessage, labels),
+    options,
+    message.timelineItems,
+  );
+}
 
 describe("conversationTimeline", () => {
   it("builds timeline items from AgentMessage parts", () => {
@@ -149,11 +163,7 @@ describe("conversationTimeline", () => {
       ],
     };
 
-    const items = buildConversationTimelineItems(
-      message,
-      buildConversationOperations(message, labels),
-      { lang: "zh" },
-    );
+    const items = timelineItemsForConversationMessage(message, { lang: "zh" });
 
     expect(items[0]).toMatchObject({
       kind: "thought",
@@ -199,11 +209,7 @@ describe("conversationTimeline", () => {
       ],
     };
 
-    const items = buildConversationTimelineItems(
-      message,
-      buildConversationOperations(message, labels),
-      { lang: "zh" },
-    );
+    const items = timelineItemsForConversationMessage(message, { lang: "zh" });
 
     expect(items.map((item) => item.kind)).toEqual(["command_group", "operation", "assistant_text"]);
     expect(items[0]).toMatchObject({
@@ -239,11 +245,7 @@ describe("conversationTimeline", () => {
       },
     };
 
-    const items = buildConversationTimelineItems(
-      message,
-      buildConversationOperations(message, labels),
-      { lang: "zh" },
-    );
+    const items = timelineItemsForConversationMessage(message, { lang: "zh" });
 
     expect(items).toEqual([]);
   });
@@ -281,11 +283,7 @@ describe("conversationTimeline", () => {
       ],
     };
 
-    const items = buildConversationTimelineItems(
-      message,
-      buildConversationOperations(message, labels),
-      { lang: "zh" },
-    );
+    const items = timelineItemsForConversationMessage(message, { lang: "zh" });
 
     expect(items).toHaveLength(2);
     expect(items[0]).toMatchObject({
@@ -332,11 +330,7 @@ describe("conversationTimeline", () => {
       ],
     };
 
-    const items = buildConversationTimelineItems(
-      message,
-      buildConversationOperations(message, labels),
-      { lang: "zh", includeAssistantText: false },
-    );
+    const items = timelineItemsForConversationMessage(message, { lang: "zh", includeAssistantText: false });
 
     expect(items.map((item) => item.kind)).toEqual(["thought"]);
     expect(items.map((item) => ("text" in item ? item.text : ""))).not.toContain("最终回答");

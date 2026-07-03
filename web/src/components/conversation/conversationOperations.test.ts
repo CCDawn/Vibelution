@@ -6,8 +6,6 @@ import type { AgentMessage } from "../../agent-thread";
 import {
   buildAgentMessageOperationGroups,
   buildAgentMessageOperations,
-  buildConversationOperationGroups,
-  buildConversationOperations,
   buildConversationReActOperationGroups,
 } from "./conversationOperations";
 
@@ -16,6 +14,14 @@ const labels = {
   mental: "Mental model",
   status: "Runtime status",
 };
+
+function operationsForConversationMessage(message: ConversationMessage) {
+  return buildAgentMessageOperations(conversationMessageToAgentMessage(message), labels);
+}
+
+function operationGroupsForConversationMessage(message: ConversationMessage) {
+  return buildAgentMessageOperationGroups(conversationMessageToAgentMessage(message), labels);
+}
 
 describe("conversationOperations", () => {
   it("builds operation groups from AgentMessage parts", () => {
@@ -158,7 +164,7 @@ describe("conversationOperations", () => {
       ],
     };
 
-    const operations = buildConversationOperations(message, labels);
+    const operations = operationsForConversationMessage(message);
 
     expect(operations.map((item) => `${item.kind}:${item.label}:${item.summary}`)).toEqual([
       "thought:Deep thinking:先看日志",
@@ -189,7 +195,7 @@ describe("conversationOperations", () => {
       ],
     };
 
-    const compatibilityOperations = buildConversationOperations(message, labels);
+    const compatibilityOperations = operationsForConversationMessage(message);
     const agentOperations = buildAgentMessageOperations(conversationMessageToAgentMessage(message), labels);
 
     expect(compatibilityOperations).toEqual(agentOperations);
@@ -221,7 +227,7 @@ describe("conversationOperations", () => {
       ],
     };
 
-    const operations = buildConversationOperations(message, labels);
+    const operations = operationsForConversationMessage(message);
 
     expect(operations).toHaveLength(1);
     expect(operations[0]).toMatchObject({
@@ -257,7 +263,7 @@ describe("conversationOperations", () => {
       ],
     };
 
-    const operations = buildConversationOperations(message, labels);
+    const operations = operationsForConversationMessage(message);
 
     expect(operations).toEqual(buildAgentMessageOperations(conversationMessageToAgentMessage(message), labels));
     expect(operations).toHaveLength(4);
@@ -322,7 +328,7 @@ describe("conversationOperations", () => {
       ],
     };
 
-    const grouped = buildConversationOperationGroups(message, labels);
+    const grouped = operationGroupsForConversationMessage(message);
 
     expect(grouped.timeline.map((item) => `${item.kind}:${item.label}:${item.status}:${item.summary}`)).toEqual([
       "status:准备上下文:done:读取会话、Agent 与工具权限",
@@ -349,7 +355,7 @@ describe("conversationOperations", () => {
       streaming: true,
     };
 
-    const operations = buildConversationOperations(message, labels);
+    const operations = operationsForConversationMessage(message);
     const groups = buildConversationReActOperationGroups(operations);
 
     expect(groups.map((group) => group.operations.map((operation) => operation.sequence))).toEqual([
@@ -372,7 +378,7 @@ describe("conversationOperations", () => {
       ],
     };
 
-    const groups = buildConversationReActOperationGroups(buildConversationOperations(message, labels));
+    const groups = buildConversationReActOperationGroups(operationsForConversationMessage(message));
 
     expect(groups).toHaveLength(1);
     expect(groups[0].operations.map((operation) => operation.sequence)).toEqual([1, 2]);
@@ -391,7 +397,7 @@ describe("conversationOperations", () => {
       ],
     };
 
-    const groups = buildConversationReActOperationGroups(buildConversationOperations(message, labels));
+    const groups = buildConversationReActOperationGroups(operationsForConversationMessage(message));
 
     expect(groups.map((group) => group.id)).toEqual(["react-thought-4", "react-thought-6"]);
     expect(groups.map((group) => group.operations.map((operation) => operation.sequence))).toEqual([
@@ -413,7 +419,7 @@ describe("conversationOperations", () => {
       ],
     };
 
-    const groups = buildConversationReActOperationGroups(buildConversationOperations(message, labels));
+    const groups = buildConversationReActOperationGroups(operationsForConversationMessage(message));
 
     expect(groups).toHaveLength(1);
     expect(groups[0]).toMatchObject({
@@ -436,7 +442,7 @@ describe("conversationOperations", () => {
       ],
     };
 
-    const groups = buildConversationReActOperationGroups(buildConversationOperations(message, labels));
+    const groups = buildConversationReActOperationGroups(operationsForConversationMessage(message));
 
     expect(groups).toHaveLength(1);
     expect(groups[0]).toMatchObject({
@@ -477,7 +483,7 @@ describe("conversationOperations", () => {
       ],
     };
 
-    const operations = buildConversationOperations(message, labels);
+    const operations = operationsForConversationMessage(message);
 
     expect(operations).toHaveLength(2);
     expect(operations[0]).toMatchObject({
@@ -496,7 +502,7 @@ describe("conversationOperations", () => {
   });
 
   it("keeps ReAct group ids stable when status events are inserted before thought events", () => {
-    const baseOperations = buildConversationOperations({
+    const baseOperations = operationsForConversationMessage({
       id: "message-stable-react-group",
       role: "assistant",
       content: "",
@@ -506,8 +512,8 @@ describe("conversationOperations", () => {
         { sequence: 2, kind: "thought", status: "running", summary: "先读日志", resultPreview: "先读日志" },
         { sequence: 3, kind: "tool", status: "done", name: "read_log", summary: "opened", relatedThoughtSequence: 2 },
       ],
-    }, labels);
-    const withPrepStatus = buildConversationOperations({
+    });
+    const withPrepStatus = operationsForConversationMessage({
       id: "message-stable-react-group",
       role: "assistant",
       content: "",
@@ -518,7 +524,7 @@ describe("conversationOperations", () => {
         { sequence: 2, kind: "thought", status: "running", summary: "先读日志", resultPreview: "先读日志" },
         { sequence: 3, kind: "tool", status: "done", name: "read_log", summary: "opened", relatedThoughtSequence: 2 },
       ],
-    }, labels);
+    });
 
     expect(buildConversationReActOperationGroups(baseOperations)[0].id).toBe("react-thought-2");
     expect(buildConversationReActOperationGroups(withPrepStatus)[0].id).toBe("react-thought-2");
@@ -538,7 +544,7 @@ describe("conversationOperations", () => {
       ],
     };
 
-    const operations = buildConversationOperations(message, labels);
+    const operations = operationsForConversationMessage(message);
 
     expect(operations.map((item) => item.status)).toEqual(["done", "done", "running"]);
     expect(operations.map((item) => item.rawStatus)).toEqual(["running", "running", "running"]);
@@ -557,7 +563,7 @@ describe("conversationOperations", () => {
       ],
     };
 
-    const operations = buildConversationOperations(message, labels);
+    const operations = operationsForConversationMessage(message);
 
     expect(operations.map((item) => item.status)).toEqual(["done", "done"]);
     expect(operations[0].rawStatus).toBe("running");
@@ -581,7 +587,7 @@ describe("conversationOperations", () => {
       ],
     };
 
-    const operations = buildConversationOperations(message, labels);
+    const operations = operationsForConversationMessage(message);
 
     expect(operations).toHaveLength(1);
     expect(operations[0]).toMatchObject({
@@ -605,7 +611,7 @@ describe("conversationOperations", () => {
       ],
     };
 
-    const operations = buildConversationOperations(message, labels);
+    const operations = operationsForConversationMessage(message);
 
     expect(operations.map((item) => `${item.kind}:${item.status}:${item.rawStatus}`)).toEqual([
       "tool:done:done",
@@ -659,7 +665,7 @@ describe("conversationOperations", () => {
       ],
     };
 
-    const operations = buildConversationOperations(message, labels);
+    const operations = operationsForConversationMessage(message);
 
     expect(operations.map((item) => `${item.kind}:${item.label}:${item.status}:${item.rawStatus}`)).toEqual([
       "status:准备上下文:done:failed",
@@ -679,7 +685,7 @@ describe("conversationOperations", () => {
       toolCalls: [{ name: "ignored", status: "done" }],
     };
 
-    expect(buildConversationOperations(message, labels)).toEqual([]);
+    expect(operationsForConversationMessage(message)).toEqual([]);
   });
 
   it("keeps the latest streaming historical operation running while normalizing tool details", () => {
@@ -708,7 +714,7 @@ describe("conversationOperations", () => {
       ] as unknown as ConversationMessage["toolCalls"],
     };
 
-    const operations = buildConversationOperations(message, labels);
+    const operations = operationsForConversationMessage(message);
 
     expect(operations).toEqual(buildAgentMessageOperations(conversationMessageToAgentMessage(message), labels));
     expect(operations).toHaveLength(4);
@@ -772,7 +778,7 @@ describe("conversationOperations", () => {
       toolCalls: [{ name: "rg", status: "done" }],
     };
 
-    const grouped = buildConversationOperationGroups(message, labels);
+    const grouped = operationGroupsForConversationMessage(message);
 
     expect(grouped.thoughts.map((item) => item.kind)).toEqual(["thought"]);
     expect(grouped.mental.map((item) => item.kind)).toEqual(["mental"]);
@@ -789,7 +795,7 @@ describe("conversationOperations", () => {
       thought: "先看日志。\n然后确认前端有没有渲染 thought 字段。",
     };
 
-    const thought = buildConversationOperationGroups(message, labels).thoughts[0];
+    const thought = operationGroupsForConversationMessage(message).thoughts[0];
 
     expect(thought.summary).toBe("先看日志。 然后确认前端有没有渲染 thought 字段。");
     expect(thought.resultPreview).toBe("先看日志。\n然后确认前端有没有渲染 thought 字段。");
@@ -815,7 +821,7 @@ describe("conversationOperations", () => {
       },
     };
 
-    expect(buildConversationOperationGroups(message, labels).mental[0]?.summary).toBe(
+    expect(operationGroupsForConversationMessage(message).mental[0]?.summary).toBe(
       "当前以规则诊断为主，认知态：稳定。",
     );
   });
