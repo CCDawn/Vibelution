@@ -31,9 +31,15 @@ import {
 } from "../../api/types";
 import {
   conversationMessageToAgentMessage,
-  conversationMessagesToAgentThread,
 } from "../../agent-thread/adapters";
-import type { AgentAttachmentPart, AgentMentalPart, AgentReferencePart, AgentTextPart } from "../../agent-thread/types";
+import type {
+  AgentAttachmentPart,
+  AgentMentalPart,
+  AgentMessage,
+  AgentReferencePart,
+  AgentTextPart,
+  AgentThread,
+} from "../../agent-thread/types";
 import { fetchJson } from "../../api/client";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
@@ -816,6 +822,7 @@ export type ConversationViewProps = {
   showComposer?: boolean;
   processDisplayMode?: ConversationProcessDisplayMode;
   autoScrollToLatest?: boolean;
+  onStreamingFramePaint?: (metrics: ConversationStreamingFramePaintMetrics) => void;
   composerValue: string;
   composerPlaceholder: string;
   composerDisabled: boolean;
@@ -855,6 +862,13 @@ export type ConversationViewProps = {
   onStop?: () => void;
   onSafeGuidance?: () => void;
   onInterruptGuidance?: () => void;
+};
+
+export type ConversationStreamingFramePaintMetrics = {
+  sessionId: string;
+  streamingMessageCount: number;
+  renderedTextLength: number;
+  scrollSignal: string;
 };
 
 type ConversationTurnRowProps = {
@@ -936,6 +950,32 @@ const ConversationTurnRow = React.memo(function ConversationTurnRow({
   return <>{renderTurn()}</>;
 }, conversationTurnRowPropsAreEqual);
 
+function useAgentThreadForTimelineMessages(sessionId: string, messages: ConversationMessage[]): AgentThread {
+  const agentMessageCacheRef = useRef<{
+    messages: ConversationMessage[];
+    agentMessages: AgentMessage[];
+  }>({ messages: [], agentMessages: [] });
+
+  return useMemo(() => {
+    const previousMessages = agentMessageCacheRef.current.messages;
+    const previousAgentMessages = agentMessageCacheRef.current.agentMessages;
+    const agentMessages = messages.map((message, index) => {
+      const previousAgentMessage = previousAgentMessages[index];
+      if (previousMessages[index] === message && previousAgentMessage) {
+        return previousAgentMessage;
+      }
+      return conversationMessageToAgentMessage(message);
+    });
+    agentMessageCacheRef.current = { messages, agentMessages };
+    return {
+      id: sessionId,
+      source: { kind: "conversation-view", id: sessionId },
+      status: agentMessages.some((message) => message.streaming) ? "streaming" : "idle",
+      messages: agentMessages,
+    };
+  }, [messages, sessionId]);
+}
+
 export function ConversationView({
   sessionId,
   title,
@@ -964,6 +1004,7 @@ export function ConversationView({
   showComposer = true,
   processDisplayMode = "answer",
   autoScrollToLatest = true,
+  onStreamingFramePaint,
   composerValue,
   composerPlaceholder,
   composerDisabled,
@@ -1016,6 +1057,7 @@ export function ConversationView({
   const atBottomRef = useRef(true);
   const followLatestRef = useRef(true);
   const lastTimelineScrollTopRef = useRef(0);
+  const streamingScrollFrameRef = useRef<number | null>(null);
   const lastComposerFocusSignalRef = useRef("");
   const defaultExpansionRef = useRef<Record<string, Record<string, boolean>>>({});
   const responseSegmentCacheRef = useRef<Map<string, ResponseSegment[]>>(new Map());
@@ -1191,14 +1233,7 @@ export function ConversationView({
   const activeTimelineMessages = activeTimelineProjection.messages;
   const streamingTimelineMessages = activeTimelineProjection.streamingMessages;
   const activeTimelineRowIdentities = activeTimelineProjection.rowIdentities;
-  const agentThread = useMemo(
-    () => conversationMessagesToAgentThread(
-      sessionId,
-      activeTimelineMessages,
-      { source: { kind: "conversation-view", id: sessionId } },
-    ),
-    [activeTimelineMessages, sessionId],
-  );
+  const agentThread = useAgentThreadForTimelineMessages(sessionId, activeTimelineMessages);
   const imageArtifactUrlsBeforeMessage = useMemo(() => {
     const urlsByMessageId = new Map<string, Set<string>>();
     const seenImageUrls = new Set<string>();
@@ -1304,6 +1339,26 @@ export function ConversationView({
     setPreviewImage(image);
   }
 
+  function scrollTimelineToBottom(
+    timeline: HTMLDivElement,
+    options: { followLatest?: boolean; behavior?: ScrollBehavior } = {},
+  ) {
+    const wasAtBottom = atBottomRef.current;
+    if (options.behavior) {
+      timeline.scrollTo({ top: timeline.scrollHeight, behavior: options.behavior });
+    } else {
+      timeline.scrollTop = timeline.scrollHeight;
+    }
+    atBottomRef.current = true;
+    if (options.followLatest) {
+      followLatestRef.current = true;
+    }
+    lastTimelineScrollTopRef.current = timeline.scrollTop;
+    if (!wasAtBottom) {
+      setIsAtBottom(true);
+    }
+  }
+
   useLayoutEffect(() => {
     const anchor = historyScrollAnchorRef.current;
     if (!anchor) {
@@ -1325,18 +1380,11 @@ export function ConversationView({
     }
     if (initializedSessionRef.current !== sessionId) {
       initializedSessionRef.current = sessionId;
-      timeline.scrollTop = timeline.scrollHeight;
-      atBottomRef.current = true;
-      followLatestRef.current = true;
-      lastTimelineScrollTopRef.current = timeline.scrollTop;
-      setIsAtBottom(true);
+      scrollTimelineToBottom(timeline, { followLatest: true });
       return;
     }
     if (autoScrollToLatest && followLatestRef.current) {
-      timeline.scrollTop = timeline.scrollHeight;
-      atBottomRef.current = true;
-      lastTimelineScrollTopRef.current = timeline.scrollTop;
-      setIsAtBottom(true);
+      scrollTimelineToBottom(timeline);
     }
   }, [autoScrollToLatest, sessionId, timelineScrollSignal]);
 
@@ -1344,18 +1392,41 @@ export function ConversationView({
     if (!streamingTimelineScrollSignal || !autoScrollToLatest || !followLatestRef.current) {
       return undefined;
     }
-    const frameId = window.requestAnimationFrame(() => {
+    if (streamingScrollFrameRef.current !== null) {
+      return undefined;
+    }
+    streamingScrollFrameRef.current = window.requestAnimationFrame(() => {
+      streamingScrollFrameRef.current = null;
       const timeline = timelineRef.current;
       if (!timeline || !followLatestRef.current) {
         return;
       }
-      timeline.scrollTop = timeline.scrollHeight;
-      atBottomRef.current = true;
-      lastTimelineScrollTopRef.current = timeline.scrollTop;
-      setIsAtBottom(true);
+      scrollTimelineToBottom(timeline);
     });
-    return () => window.cancelAnimationFrame(frameId);
+    return undefined;
   }, [autoScrollToLatest, sessionId, streamingTimelineScrollSignal]);
+
+  useEffect(() => () => {
+    if (streamingScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(streamingScrollFrameRef.current);
+      streamingScrollFrameRef.current = null;
+    }
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!streamingTimelineScrollSignal || !onStreamingFramePaint) {
+      return;
+    }
+    onStreamingFramePaint?.({
+      sessionId,
+      streamingMessageCount: streamingTimelineMessages.length,
+      renderedTextLength: streamingTimelineMessages.reduce(
+        (total, message) => total + message.content.length + (message.thought?.length ?? 0),
+        0,
+      ),
+      scrollSignal: streamingTimelineScrollSignal,
+    });
+  }, [onStreamingFramePaint, sessionId, streamingTimelineMessages, streamingTimelineScrollSignal]);
 
   useEffect(() => {
     const timeline = timelineRef.current;
@@ -1563,11 +1634,7 @@ export function ConversationView({
     if (!timeline) {
       return;
     }
-    timeline.scrollTo({ top: timeline.scrollHeight, behavior: "smooth" });
-    atBottomRef.current = true;
-    followLatestRef.current = true;
-    lastTimelineScrollTopRef.current = timeline.scrollTop;
-    setIsAtBottom(true);
+    scrollTimelineToBottom(timeline, { followLatest: true, behavior: "smooth" });
   }
 
   function showEarlierMessages() {
