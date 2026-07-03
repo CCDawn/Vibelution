@@ -9,11 +9,18 @@ import {
 import { conversationMessageToAgentMessage } from ".";
 
 const adapterSource = readFileSync(new URL("./adapters.ts", import.meta.url), "utf8");
+const typesSource = readFileSync(new URL("./types.ts", import.meta.url), "utf8");
 
 describe("agent thread adapters", () => {
   it("does not export the retired batch ConversationMessage to AgentThread adapter", () => {
     expect(adapterSource).not.toContain("conversationMessagesToAgentThread");
     expect(adapterSource).not.toContain("ConversationMessagesToAgentThreadOptions");
+  });
+
+  it("declares AgentMessageRole without deriving it from the conversation DTO", () => {
+    expect(typesSource).toContain('export type AgentMessageRole = "user" | "assistant";');
+    expect(typesSource).not.toContain('ConversationMessage["role"]');
+    expect(typesSource).not.toContain("ConversationMessage,");
   });
 
   it("maps a user conversation message to text, attachment, and reference parts", () => {
