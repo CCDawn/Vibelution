@@ -23,6 +23,15 @@ describe("agent thread adapters", () => {
     expect(typesSource).not.toContain("ConversationMessage,");
   });
 
+  it("keeps AgentThread model types independent from API DTO imports", () => {
+    expect(typesSource).not.toContain("../api/types");
+    expect(typesSource).not.toContain("ConversationFeedbackEvent");
+    expect(typesSource).not.toContain("ConversationAttachment");
+    expect(typesSource).not.toContain("SessionReferenceAttachment");
+    expect(typesSource).not.toContain("MentalStateSnapshot");
+    expect(typesSource).not.toContain("original?:");
+  });
+
   it("maps a user conversation message to text, attachment, and reference parts", () => {
     const message: ConversationMessage = {
       id: "user-1",
