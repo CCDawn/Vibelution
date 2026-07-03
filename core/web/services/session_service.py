@@ -9189,28 +9189,12 @@ def _normalize_session_cache_composition(value: Any) -> dict[str, Any] | None:
         ),
         input_tokens,
     ) if input_tokens else 0
-    predicted_input_tokens = _coerce_nonnegative_int(
-        value.get("predictedInputTokens")
-        or value.get("predicted_input_tokens")
-        or value.get("calibratedInputTokens")
-        or value.get("calibrated_input_tokens")
-        or input_tokens
-    )
+    predicted_input_tokens = upper_bound_input_tokens
     predicted_cached_tokens = min(
-        _coerce_nonnegative_int(
-            value.get("predictedCachedInputTokens")
-            or value.get("predicted_cached_input_tokens")
-            or value.get("calibratedCachedInputTokens")
-            or value.get("calibrated_cached_input_tokens")
-            or calibrated_cached_tokens
-        ),
+        upper_bound_cached_tokens,
         predicted_input_tokens,
     ) if predicted_input_tokens else 0
-    predicted_uncached_tokens = _coerce_nonnegative_int(
-        value.get("predictedUncachedInputTokens")
-        or value.get("predicted_uncached_input_tokens")
-        or 0
-    )
+    predicted_uncached_tokens = upper_bound_uncached_tokens
     if predicted_input_tokens and not predicted_uncached_tokens:
         predicted_uncached_tokens = max(0, predicted_input_tokens - predicted_cached_tokens)
     computed_overestimated_tokens = _coerce_nonnegative_int(
@@ -9263,16 +9247,12 @@ def _normalize_session_cache_composition(value: Any) -> dict[str, Any] | None:
         "predictionStatus": str(
             value.get("predictionStatus")
             or value.get("prediction_status")
-            or value.get("calibrationStatus")
-            or value.get("calibration_status")
-            or ""
+            or "computed_upper_bound"
         ).strip(),
         "predictionReason": str(
             value.get("predictionReason")
             or value.get("prediction_reason")
-            or value.get("calibrationReason")
-            or value.get("calibration_reason")
-            or ""
+            or "computed from stable prompt-prefix composition"
         ).strip(),
         "averageInputTokens": average_input_tokens,
         "averageCachedInputTokens": average_cached_tokens,
@@ -9738,15 +9718,11 @@ def _enrich_session_cache_composition(
         "upperBoundCachedInputTokens": computed_cached,
         "upperBoundUncachedInputTokens": computed_uncached,
         **calibration,
-        "predictedInputTokens": calibration["calibratedInputTokens"],
-        "predictedCachedInputTokens": calibration["calibratedCachedInputTokens"],
-        "predictedUncachedInputTokens": max(
-            0,
-            _coerce_nonnegative_int(calibration["calibratedInputTokens"])
-            - _coerce_nonnegative_int(calibration["calibratedCachedInputTokens"]),
-        ),
-        "predictionStatus": calibration["calibrationStatus"],
-        "predictionReason": calibration["calibrationReason"],
+        "predictedInputTokens": computed_input_total,
+        "predictedCachedInputTokens": computed_cached,
+        "predictedUncachedInputTokens": computed_uncached,
+        "predictionStatus": "computed_upper_bound",
+        "predictionReason": "computed from stable prompt-prefix composition",
         "averageInputTokens": average["inputTokens"],
         "averageCachedInputTokens": average["cachedInputTokens"],
         "averageObservedTurnCount": average["observedTurnCount"],

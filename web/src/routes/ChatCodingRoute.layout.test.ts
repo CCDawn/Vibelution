@@ -689,8 +689,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("cacheObservedStatusLabel(segment.observedStatus, lang)");
     expect(routeSource).toContain("cacheComputedStatusLabel(segment.status, lang)");
     expect(routeSource).toContain("segment.contentPreview");
-    expect(routeSource).toContain("{lang === \"zh\" ? \"预测命中\" : \"Predicted hit\"}");
-    expect(routeSource).toContain("{lang === \"zh\" ? \"计算上界\" : \"Computed upper bound\"}");
+    expect(routeSource).not.toContain("{lang === \"zh\" ? \"预测命中\" : \"Predicted hit\"}");
+    expect(routeSource).toContain("{lang === \"zh\" ? \"计算命中\" : \"Computed hit\"}");
     expect(routeSource).toContain("{lang === \"zh\" ? \"上界未兑现\" : \"upper bound gap\"}");
     expect(routeSource).not.toContain("styles.cacheDonutLegendPreview");
     expect(routeSource).not.toContain("key={`${segment.key}-${segment.status}-${index}-legend`}");
