@@ -77,7 +77,6 @@ export function SupervisedWorkspaceControls({
         queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.evolutionOverview() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorkbench() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionRuns() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.evolutionLibrary() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.evolutionChatReview() }),
       ]);

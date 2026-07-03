@@ -2793,7 +2793,6 @@ export function ConfigRoute() {
     if (domains.includes("evolution")) {
       invalidations.push(
         queryClient.invalidateQueries({ queryKey: queryKeys.evolutionOverview() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionRuns() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.evolutionLibrary() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.evolutionSelfOverview() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorkspaceSnapshot() }),

@@ -30,20 +30,14 @@ export function createEvolutionWorkspaceCache(queryClient: QueryClientLike) {
       return invalidateAll(queryClient, [
         queryKeys.evolutionWorkspaceSnapshot(),
         queryKeys.evolutionWorkbench(),
-        queryKeys.evolutionActiveRun(),
-        queryKeys.evolutionLatestRun(),
         queryKeys.evolutionOverview(),
-        queryKeys.evolutionRuns(),
         queryKeys.evolutionLibrary(),
       ]);
     },
     afterSupervisedRunTerminal() {
       return invalidateAll(queryClient, [
         queryKeys.evolutionWorkspaceSnapshot(),
-        queryKeys.evolutionActiveRun(),
-        queryKeys.evolutionLatestRun(),
         queryKeys.evolutionOverview(),
-        queryKeys.evolutionRuns(),
         queryKeys.evolutionLibrary(),
         queryKeys.evolutionWorkbench(),
       ]);
@@ -51,8 +45,6 @@ export function createEvolutionWorkspaceCache(queryClient: QueryClientLike) {
     refreshSupervisedActiveRun() {
       return invalidateAll(queryClient, [
         queryKeys.evolutionWorkspaceSnapshot(),
-        queryKeys.evolutionActiveRun(),
-        queryKeys.evolutionLatestRun(),
       ]);
     },
     afterWorktreeRunChanged() {
@@ -78,7 +70,6 @@ export function createEvolutionWorkspaceCache(queryClient: QueryClientLike) {
       return invalidateAll(queryClient, [
         queryKeys.evolutionWorkspaceSnapshot(),
         queryKeys.evolutionOverview(),
-        queryKeys.evolutionRuns(),
         queryKeys.evolutionLibrary(),
         queryKeys.evolutionProposal(sessionId),
       ]);
