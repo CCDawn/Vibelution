@@ -79,6 +79,7 @@ import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import { TeamMemoryIndexPanel, type TeamMemoryIndexMember } from "./TeamMemoryIndexPanel";
 import { TeamSourceCollectionStageAgentsPanel, type TeamSourceCollectionStageAgentCard, type TeamSourceCollectionStageAgentTone } from "./TeamSourceCollectionStageAgentsPanel";
 import { TeamSourceCollectionRunSwitcherPanel, type TeamSourceCollectionRunSwitcherRun } from "./TeamSourceCollectionRunSwitcherPanel";
+import { TeamSourceCollectionFindingDetailsPanel } from "./TeamSourceCollectionFindingDetailsPanel";
 import {
   TeamSourceCollectionSourceDetailPanel,
   type TeamSourceCollectionSourceDetailAction,
@@ -8550,6 +8551,22 @@ export function TeamsRoute({
     const activeModule =
       sourceCollectionStageModules.find((module) => module.id === selectedSourceCollectionStageId)
       ?? sourceCollectionStageModules[0];
+    const sourceCollectionFindingRunOptions = sourceCollectionRuns.map((run) => ({
+      id: run.runId,
+      label: `${sourceCollectionRunLabel(run.runId)} · ${sourceCollectionRunTitleLabel(run.title, lang)}`,
+    }));
+    const sourceCollectionFindingAssignments = sourceCollectionAssignments.map((assignment) => ({
+      id: assignment.assignmentId,
+      roleLabel: sourceCollectionAgentRoleLabel(assignment.agentRole, lang),
+      statusLabel: sourceCollectionStatusLabel(assignment.status, lang),
+      queryCountLabel: `${assignment.scope.queryCount ?? assignment.scope.assignedQueries?.length ?? 0} ${lang === "zh" ? "条搜索" : "queries"}`,
+      active: assignment.assignmentId === selectedSourceCollectionAssignment?.assignmentId,
+    }));
+    const sourceCollectionFindingQueries = selectedSourceCollectionQueries.slice(0, 6).map((query) => ({
+      id: query.queryId,
+      title: translateResearchPhrase(query.query, lang),
+      meta: `${query.queryId} · ${sourceCollectionSourceTypeLabel(query.sourceType, lang)} · ${sourceCollectionLanguageLabel(query.language, lang)}`,
+    }));
     return (
       <section
         id="source-collection-actions"
@@ -8591,61 +8608,16 @@ export function TeamsRoute({
             });
           }}
         />
-        <div className={styles.workflowSourceCollectionRuns}>
-          <label>
-            <span>{lang === "zh" ? "最近批次" : "Recent runs"}</span>
-            <VNativeSelect
-              value={selectedSourceCollectionRunEffectiveId}
-              onChange={(event) => setSelectedSourceCollectionRunId(event.target.value)}
-              disabled={!sourceCollectionRuns.length}
-            >
-              {sourceCollectionRuns.length ? (
-                sourceCollectionRuns.map((run) => (
-                  <option key={run.runId} value={run.runId}>
-                    {sourceCollectionRunLabel(run.runId)} · {sourceCollectionRunTitleLabel(run.title, lang)}
-                  </option>
-                ))
-              ) : (
-                <option value="">{lang === "zh" ? "暂无批次" : "No runs"}</option>
-              )}
-            </VNativeSelect>
-          </label>
-        </div>
-        {renderSourceCollectionStorageActions()}
-        <details className={styles.workflowSourceCollectionDetails}>
-          <summary>
-            <span>{lang === "zh" ? "查询与分工详情" : "Query and assignment details"}</span>
-          </summary>
-          {sourceCollectionAssignments.length ? (
-            <div className={styles.workflowSourceCollectionAssignments}>
-              {sourceCollectionAssignments.map((assignment) => (
-                <VNativeButton
-                  key={assignment.assignmentId}
-                  type="button"
-                  className={assignment.assignmentId === selectedSourceCollectionAssignment?.assignmentId ? styles.workflowSourceCollectionAssignmentActive : ""}
-                  onClick={() => setSourceCollectionOutputDraft((current) => ({ ...current, assignmentId: assignment.assignmentId }))}
-                >
-                  <strong>{sourceCollectionAgentRoleLabel(assignment.agentRole, lang)}</strong>
-                  <span>
-                    {sourceCollectionStatusLabel(assignment.status, lang)} · {assignment.scope.queryCount ?? assignment.scope.assignedQueries?.length ?? 0} {lang === "zh" ? "条搜索" : "queries"}
-                  </span>
-                </VNativeButton>
-              ))}
-            </div>
-          ) : (
-            <div className={styles.empty}>{lang === "zh" ? "还没有生成 Agent 分工。" : "No Agent assignments yet."}</div>
-          )}
-          {selectedSourceCollectionQueries.length ? (
-            <div className={styles.workflowSourceCollectionQueries}>
-              {selectedSourceCollectionQueries.slice(0, 6).map((query) => (
-                <span key={query.queryId}>
-                  <strong>{translateResearchPhrase(query.query, lang)}</strong>
-                  <small>{query.queryId} · {sourceCollectionSourceTypeLabel(query.sourceType, lang)} · {sourceCollectionLanguageLabel(query.language, lang)}</small>
-                </span>
-              ))}
-            </div>
-          ) : null}
-        </details>
+        <TeamSourceCollectionFindingDetailsPanel
+          lang={lang}
+          selectedRunId={selectedSourceCollectionRunEffectiveId}
+          runs={sourceCollectionFindingRunOptions}
+          assignments={sourceCollectionFindingAssignments}
+          queries={sourceCollectionFindingQueries}
+          storageActions={renderSourceCollectionStorageActions()}
+          onRunChange={setSelectedSourceCollectionRunId}
+          onAssignmentSelect={(assignmentId) => setSourceCollectionOutputDraft((current) => ({ ...current, assignmentId }))}
+        />
         <details className={styles.workflowSourceCollectionDetails}>
           <summary>
             <span>{lang === "zh" ? "兜底手工回写" : "Fallback manual writeback"}</span>
