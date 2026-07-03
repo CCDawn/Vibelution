@@ -1819,9 +1819,25 @@ export function ConversationView({
     return operations.length > 0 && operations.every((operation) => !shouldShowTimelineOperation(operation));
   }
 
+  function hasModelThinkingProcess(operations: AgentMessageOperation[]) {
+    return operations.some((operation) => operationMatchesAny(operation, [
+      "model_thinking",
+      "正在思考",
+      "reasoning",
+      "model thinking",
+    ]));
+  }
+
+  function compactInternalProcessStateLabel(tone: string, operations: AgentMessageOperation[]) {
+    if (tone === "running" && hasModelThinkingProcess(operations)) {
+      return lang === "zh" ? "正在思考中" : "Thinking";
+    }
+    return compactRequestStateLabel(tone);
+  }
+
   function processSummaryTitle(tone: string, operations: AgentMessageOperation[]) {
     if (isCompactAnswerOnlyRequestProcess(operations)) {
-      return compactRequestStateLabel(tone);
+      return compactInternalProcessStateLabel(tone, operations);
     }
     if (tone === "running") {
       return lang === "zh" ? "生成中" : "Generating";
@@ -1851,7 +1867,7 @@ export function ConversationView({
       mentalCount > 0 ? `${t("mentalProcess")} ${mentalCount}` : "",
       visibleStatusCount > 0 ? `${lang === "zh" ? "状态" : "Status"} ${visibleStatusCount}` : "",
     ].filter(Boolean);
-    return parts.length > 0 ? parts.join(" · ") : compactRequestStateLabel(operationCollectionTone(operations));
+    return parts.length > 0 ? parts.join(" · ") : compactInternalProcessStateLabel(operationCollectionTone(operations), operations);
   }
 
   function processSummaryPreview(operations: AgentMessageOperation[]) {
@@ -2816,7 +2832,7 @@ export function ConversationView({
 
   function renderCompactRequestSummary(operations: AgentMessageOperation[]) {
     const tone = operationCollectionTone(operations);
-    const title = compactRequestStateLabel(tone);
+    const title = compactInternalProcessStateLabel(tone, operations);
     return (
       <section className={`${styles.operationGroup} ${styles.executionTraceGroup}`}>
         <div
@@ -2903,7 +2919,7 @@ export function ConversationView({
     const title = operationTimelineTitle(visibleOperations);
     const collectionTone = operationCollectionTone(operations);
     const stateLabel = operations.length > visibleOperations.length && collectionTone === "running"
-      ? compactRequestStateLabel(collectionTone)
+      ? compactInternalProcessStateLabel(collectionTone, operations)
       : operationStateLabel(operationCollectionTone(visibleOperations));
     return (
       <section
