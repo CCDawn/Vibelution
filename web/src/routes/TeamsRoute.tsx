@@ -80,6 +80,7 @@ import {
 import { agentCenterMemoryRoute, teamMemoryRoute } from "./agentCenterRoutes";
 import { agentDisplayInfo } from "./agentDisplay";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
+import { TeamMemoryIndexPanel, type TeamMemoryIndexMember } from "./TeamMemoryIndexPanel";
 import { TeamWorkflowGraphView, workflowGraphLayout } from "./TeamWorkflowGraphView";
 import styles from "./TeamsRoute.styles";
 
@@ -6454,77 +6455,12 @@ export function TeamsRoute({
       return null;
     }
     return (
-      <section className={styles.teamMemoryIndex} aria-label={lang === "zh" ? "团队记忆索引" : "Team memory index"}>
-        <div className={styles.teamMemoryIndexHeader}>
-          <div>
-            <strong>{lang === "zh" ? "团队记忆索引" : "Team memory index"}</strong>
-            <span>{selectedTeamMemoryMembers.length} {lang === "zh" ? "个成员" : "members"}</span>
-          </div>
-          <div className={styles.teamMemoryActionRail}>
-            <Link to={selectedTeamKnowledgeRoute} title={lang === "zh" ? "打开当前团队知识库" : "Open this team's knowledge bases"}>
-              <Link2 size={13} />
-              <span>{lang === "zh" ? "知识库" : "Knowledge"}</span>
-            </Link>
-            <Link to={selectedTeamGraphRoute} title={lang === "zh" ? "打开团队记忆图谱" : "Open team memory graph"}>
-              <Eye size={13} />
-              <span>{lang === "zh" ? "图谱" : "Graph"}</span>
-            </Link>
-          </div>
-        </div>
-        <div className={styles.teamMemoryMemberTable}>
-          {selectedTeamMemoryMembers.length ? (
-            <div className={styles.teamMemoryMemberHeading} aria-hidden="true">
-              <span>Agent</span>
-              <span>{lang === "zh" ? "职责" : "Role"}</span>
-              <span>{lang === "zh" ? "状态" : "Status"}</span>
-              <span>{lang === "zh" ? "入口" : "Open"}</span>
-            </div>
-          ) : null}
-          {selectedTeamMemoryMembers.map(({ member, agent, display }) => {
-            const agentId = String(member.agentId || "").trim();
-            const agentName = display.name || member.agentName || member.agentCode || agentId;
-            const agentCode = member.agentCode || agent?.agentCode || agentId;
-            const roleLabel = member.role || agent?.roleKey || agent?.primaryMode || "-";
-            const roleTitle = [roleLabel, member.purpose, ...(member.responsibilities ?? [])].filter(Boolean).join(" · ");
-            const statusLabel = researchStageAgentConfigStatusLabel(agent, lang);
-            const statusTitle = agent
-              ? researchStageAgentModelLabel(agent, lang)
-              : (lang === "zh" ? "未找到 Agent 目录绑定" : "Agent directory binding missing");
-            const agentMemoryRoute = agentCenterMemoryRoute({
-              agentId,
-              teamId: selectedTeam?.teamId,
-              view: "agents",
-              returnLabel: "teams",
-              returnTo: selectedTeamReturnRoute,
-            });
-            return (
-              <section key={`team-memory-${selectedTeam.teamId}-${agentId}`} className={styles.teamMemoryMemberCard}>
-                <div className={styles.teamMemoryMemberIdentity}>
-                  <strong>{agentName}</strong>
-                  <span>{agentCode}</span>
-                </div>
-                <span className={styles.teamMemoryRole} title={roleTitle || undefined}>{roleLabel}</span>
-                <span className={styles.teamMemoryStatusBadge} data-tone={researchStageAgentConfigTone(agent)} title={statusTitle}>
-                  {statusLabel}
-                </span>
-                <div className={styles.teamMemoryMemberActions}>
-                  <Link to={agentMemoryRoute} title={lang === "zh" ? "打开该 Agent 私有记忆" : "Open this Agent's private memory"}>
-                    <Bot size={13} />
-                    <span>{lang === "zh" ? "记忆" : "Memory"}</span>
-                  </Link>
-                  <Link to={researchStageAgentManagementRoute(agentId)} title={lang === "zh" ? "打开该 Agent 记忆配置" : "Open this Agent's memory configuration"}>
-                    <Link2 size={13} />
-                    <span>{lang === "zh" ? "配置" : "Config"}</span>
-                  </Link>
-                </div>
-              </section>
-            );
-          })}
-          {!selectedTeamMemoryMembers.length ? (
-            <div className={styles.empty}>{lang === "zh" ? "当前团队还没有绑定成员 Agent。" : "No member Agents are bound to this team yet."}</div>
-          ) : null}
-        </div>
-      </section>
+      <TeamMemoryIndexPanel
+        lang={lang}
+        members={selectedTeamMemoryMembers}
+        knowledgeRoute={selectedTeamKnowledgeRoute}
+        graphRoute={selectedTeamGraphRoute}
+      />
     );
   }
 
@@ -10402,14 +10338,36 @@ export function TeamsRoute({
         returnTo: selectedTeamReturnRoute,
       })
     : "/memory/graph";
-  const selectedTeamMemoryMembers = (selectedTeam?.members ?? [])
+  const selectedTeamMemoryMembers: TeamMemoryIndexMember[] = (selectedTeam?.members ?? [])
     .filter((member) => Boolean(member.agentId))
     .map((member) => {
-      const agent = activeAgentsById.get(member.agentId);
+      const agentId = String(member.agentId || "").trim();
+      const agent = activeAgentsById.get(agentId);
       const display = agentDisplayInfo(agent, lang, {
-        name: member.agentName || member.agentCode || member.agentId,
+        name: member.agentName || member.agentCode || agentId,
       });
-      return { member, agent, display };
+      const roleLabel = member.role || agent?.roleKey || agent?.primaryMode || "-";
+      const statusTitle = agent
+        ? researchStageAgentModelLabel(agent, lang)
+        : (lang === "zh" ? "未找到 Agent 目录绑定" : "Agent directory binding missing");
+      return {
+        id: `team-memory-${selectedTeam?.teamId || "team"}-${agentId}`,
+        agentName: display.name || member.agentName || member.agentCode || agentId,
+        agentCode: member.agentCode || agent?.agentCode || agentId,
+        roleLabel,
+        roleTitle: [roleLabel, member.purpose, ...(member.responsibilities ?? [])].filter(Boolean).join(" · "),
+        statusLabel: researchStageAgentConfigStatusLabel(agent, lang),
+        statusTitle,
+        statusTone: researchStageAgentConfigTone(agent),
+        memoryRoute: agentCenterMemoryRoute({
+          agentId,
+          teamId: selectedTeam?.teamId,
+          view: "agents",
+          returnLabel: "teams",
+          returnTo: selectedTeamReturnRoute,
+        }),
+        configRoute: researchStageAgentManagementRoute(agentId),
+      };
     });
   const selectedTeamStartRoundPending = startTeamRoundMutation.isPending && startTeamRoundMutation.variables?.teamId === selectedTeam?.teamId;
   const selectedTeamStartRoundResult =

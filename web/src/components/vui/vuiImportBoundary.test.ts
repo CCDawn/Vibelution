@@ -79,6 +79,7 @@ const productSharedParentStyleConsumers = [
   "routes/MemorySelectedConfigPanel.tsx",
   "routes/MemorySourceAndItemPanels.tsx",
   "routes/MemoryWarningStrip.tsx",
+  "routes/TeamMemoryIndexPanel.tsx",
   "routes/RuntimeScenesPane.tsx",
   "routes/SessionContextMenu.tsx",
   "routes/TeamWorkflowGraphView.tsx",
