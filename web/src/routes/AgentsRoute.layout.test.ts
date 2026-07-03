@@ -98,6 +98,10 @@ const detailWorkspacePanelSource = readFileSync(
   new URL("./AgentDetailWorkspacePanel.tsx", import.meta.url),
   "utf-8",
 );
+const selectedDetailContentPanelSource = readFileSync(
+  new URL("./AgentSelectedDetailContentPanel.tsx", import.meta.url),
+  "utf-8",
+);
 const emptySelectionPanelSource = readFileSync(
   new URL("./AgentEmptySelectionPanel.tsx", import.meta.url),
   "utf-8",
@@ -247,7 +251,14 @@ describe("AgentsRoute layout contract", () => {
     expect(listWorkspacePanelSource).toContain("<AgentListStatePanel");
     expect(listStatePanelSource).toContain("<AgentDenseList");
     expect(routeSource).toContain("agent.avatarImageUrl");
+    expect(routeSource).toContain("<AgentSelectedDetailContentPanel");
     expect(routeSource).toContain("<AgentDetailHeaderPanel");
+    expect(selectedDetailContentPanelSource).toContain('activePane === "overview"');
+    expect(selectedDetailContentPanelSource).toContain('activePane === "config"');
+    expect(selectedDetailContentPanelSource).toContain('activePane === "activity"');
+    expect(routeSource).not.toContain('activePane === "overview" ? (');
+    expect(routeSource).not.toContain('activePane === "config" ? (');
+    expect(routeSource).not.toContain('activePane === "activity" ? (');
     expect(detailHeaderPanelSource).toContain("AgentAvatarEditorPanel");
     expect(avatarEditorPanelSource).toContain("styles.agentAvatarImage");
     expect(routeSource).toContain("/api/agents/avatar-options");
@@ -871,14 +882,14 @@ describe("AgentsRoute layout contract", () => {
     expect(managementBriefPanelSource).toContain("styles.managementBriefPanel");
     expect(managementBriefPanelSource).toContain("styles.nextActionList");
     expect(detailHeaderPanelSource).toContain("styles.detailTabs");
-    expect(routeSource).toContain("activePane === \"overview\"");
-    expect(routeSource).toContain("activePane === \"config\"");
+    expect(selectedDetailContentPanelSource).toContain("activePane === \"overview\"");
+    expect(selectedDetailContentPanelSource).toContain("activePane === \"config\"");
     expect(routeSource).not.toContain("activePane === \"policies\"");
     expect(routeSource).not.toContain("activePane === \"membership\"");
     expect(toolSummaryPanelSource).toContain("copy.toolPolicyTitle");
     expect(memoryPolicyPanelSource).toContain("copy.memoryPolicyTitle");
     expect(modeMembershipPanelSource).toContain("copy.membershipTitle");
-    expect(routeSource).toContain("activePane === \"activity\"");
+    expect(selectedDetailContentPanelSource).toContain("activePane === \"activity\"");
     expect(routeSource).toContain("fetchJson<AgentRunHistory>");
     expect(routeSource).toContain("queryKeys.agentRuns");
     expect(routeSource).toContain("summary?.runningAgentCount");
