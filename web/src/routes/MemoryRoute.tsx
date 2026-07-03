@@ -3,11 +3,8 @@ import {
   ArrowLeft,
   Brain,
   CheckCircle2,
-  Copy as CopyIcon,
-  Database,
   Eye,
   FileText,
-  Link2,
   Network,
   Pencil,
   RefreshCw,
@@ -74,6 +71,12 @@ import { MemoryKnowledgeBaseSidebar } from "./MemoryKnowledgeBaseSidebar";
 import { MemoryKnowledgeModeTabs } from "./MemoryKnowledgeModeTabs";
 import { MemoryKnowledgePipelinePanel } from "./MemoryKnowledgePipelinePanel";
 import { MemoryKnowledgeRagPanel } from "./MemoryKnowledgeRagPanel";
+import {
+  MemoryKnowledgeSourceGovernancePanel,
+  type MemoryKnowledgeOwnerSourceDraft,
+  type MemoryKnowledgeSourceInboxStatusFilter,
+  type MemoryKnowledgeSourceOwnerType,
+} from "./MemoryKnowledgeSourceGovernancePanel";
 import { MemoryKnowledgeStewardPanel } from "./MemoryKnowledgeStewardPanel";
 import { MemoryKnowledgeUsageContractPanel } from "./MemoryKnowledgeUsageContractPanel";
 import { MemoryManagementEditor, type MemoryManagementEditorDraft } from "./MemoryManagementEditor";
@@ -573,22 +576,6 @@ type MemoryPair = {
 type BulkMemoryAction = "disable" | "restore";
 type MemoryProposalStatusFilter = "pending" | "";
 type MemoryProposalResolveStatus = "applied" | "rejected" | "conflict" | "superseded";
-type SourceDraft = {
-  sourceType: string;
-  sourceRef: string;
-  sourceCreatedAt: string;
-  capturedBy: string;
-  evidenceRange: string;
-  title: string;
-  summary: string;
-};
-type SourceOwnerType = "team" | "agent";
-type SourceInboxStatusFilter = "pending" | "accepted" | "rejected" | "duplicate" | "needs_more_context" | "all";
-type OwnerSourceDraft = SourceDraft & {
-  originalContent: string;
-  originalFilename: string;
-  sourceHash: string;
-};
 type ProposalDraft = {
   sourceArtifactIds: string;
   proposedByAgentId: string;
@@ -1789,7 +1776,7 @@ function draftFromItem(section: MemorySection, item: MemoryItem): MemoryManageme
   };
 }
 
-function newSourceDraft(): SourceDraft {
+function newOwnerSourceDraft(): MemoryKnowledgeOwnerSourceDraft {
   return {
     sourceType: "manual_user_entry",
     sourceRef: "{}",
@@ -1798,12 +1785,6 @@ function newSourceDraft(): SourceDraft {
     evidenceRange: "{}",
     title: "",
     summary: "",
-  };
-}
-
-function newOwnerSourceDraft(): OwnerSourceDraft {
-  return {
-    ...newSourceDraft(),
     originalContent: "",
     originalFilename: "source.txt",
     sourceHash: "",
@@ -2071,7 +2052,7 @@ function knowledgeBaseRequestId(base: TeamKnowledgeBase | null) {
   return String(base?.scopedKnowledgeBaseId || base?.knowledgeBaseId || "").trim();
 }
 
-function normalizeSourceOwnerType(value: string | undefined | null): SourceOwnerType {
+function normalizeSourceOwnerType(value: string | undefined | null): MemoryKnowledgeSourceOwnerType {
   return value === "agent" ? "agent" : "team";
 }
 
@@ -2080,25 +2061,6 @@ function knowledgeBaseOwnerId(base: TeamKnowledgeBase | null) {
     return "";
   }
   return String(base.ownerId || (base.ownerType === "agent" ? base.agentId : base.teamId) || "").trim();
-}
-
-function sourceInboxStatusLabel(copy: Copy, status: SourceInboxStatusFilter | string) {
-  if (status === "pending") {
-    return copy.pendingSources;
-  }
-  if (status === "accepted") {
-    return copy.acceptedSources;
-  }
-  if (status === "rejected") {
-    return copy.rejectedSources;
-  }
-  if (status === "duplicate") {
-    return copy.duplicateSources;
-  }
-  if (status === "needs_more_context") {
-    return copy.needsMoreContextSources;
-  }
-  return copy.allSourceStatuses;
 }
 
 function policyTokenLabel(value: string | undefined, lang: "zh" | "en") {
@@ -2252,10 +2214,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const [activeKnowledgeBaseId, setActiveKnowledgeBaseId] = useState("");
   const [activeKnowledgeWorkspaceMode, setActiveKnowledgeWorkspaceMode] = useState<KnowledgeWorkspaceMode>("sources");
   const [showOwnerSourceForm, setShowOwnerSourceForm] = useState(false);
-  const [sourceOwnerType, setSourceOwnerType] = useState<SourceOwnerType>("team");
+  const [sourceOwnerType, setSourceOwnerType] = useState<MemoryKnowledgeSourceOwnerType>("team");
   const [sourceOwnerId, setSourceOwnerId] = useState("");
-  const [sourceInboxStatus, setSourceInboxStatus] = useState<SourceInboxStatusFilter>("pending");
-  const [ownerSourceDraft, setOwnerSourceDraft] = useState<OwnerSourceDraft>(() => newOwnerSourceDraft());
+  const [sourceInboxStatus, setSourceInboxStatus] = useState<MemoryKnowledgeSourceInboxStatusFilter>("pending");
+  const [ownerSourceDraft, setOwnerSourceDraft] = useState<MemoryKnowledgeOwnerSourceDraft>(() => newOwnerSourceDraft());
   const [sourceReviewNote, setSourceReviewNote] = useState("");
   const [duplicateCentralSourceId, setDuplicateCentralSourceId] = useState("");
   const [proposalDraft, setProposalDraft] = useState<ProposalDraft>(() => newProposalDraft());
@@ -3004,7 +2966,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     refetchIntervalInBackground: false,
   });
   const sourceInboxCollectMutation = useMutation({
-    mutationFn: async (draft: OwnerSourceDraft) =>
+    mutationFn: async (draft: MemoryKnowledgeOwnerSourceDraft) =>
       fetchJson<KnowledgeOwnerSource>("/api/knowledge/sources/inbox", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -4474,233 +4436,37 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             onModeChange={setActiveKnowledgeWorkspaceMode}
           />
           {activeKnowledgeWorkspaceMode === "sources" ? (
-          <section className={styles.managementPanel}>
-            <div className={styles.managementHeader}>
-              <div>
-                <p className={styles.panelEyebrow}>{copy.sourceGovernance}</p>
-                <h2>{copy.ownerSourceInbox}</h2>
-              </div>
-              <span className={styles.countPill}>{sourceInboxQuery.data?.summary.sourceCount ?? ownerInboxSources.length}</span>
-            </div>
-            <div className={styles.sourceGovernanceControls}>
-              <label>
-                <span>{copy.ownerScope}</span>
-                <VNativeSelect value={sourceOwnerType} onChange={(event) => setSourceOwnerType(event.target.value as SourceOwnerType)}>
-                  <option value="team">{copy.ownerTeam}</option>
-                  <option value="agent">{copy.ownerAgent}</option>
-                </VNativeSelect>
-              </label>
-              <label>
-                <span>{copy.ownerId}</span>
-                <VNativeInput value={sourceOwnerId} onChange={(event) => setSourceOwnerId(event.target.value)} />
-              </label>
-              <label>
-                <span>{copy.status}</span>
-                <VNativeSelect value={sourceInboxStatus} onChange={(event) => setSourceInboxStatus(event.target.value as SourceInboxStatusFilter)}>
-                  {(["pending", "accepted", "rejected", "duplicate", "needs_more_context", "all"] as SourceInboxStatusFilter[]).map((status) => (
-                    <option key={status} value={status}>{sourceInboxStatusLabel(copy, status)}</option>
-                  ))}
-                </VNativeSelect>
-              </label>
-              <VButton type="button" className={styles.detailActionButton} onClick={applyActiveKnowledgeOwner}>
-                <Database size={14} />
-                <span>{copy.useActiveKnowledgeOwner}</span>
-              </VButton>
-            </div>
-            <div className={styles.sourceGovernanceGrid}>
-              <div className={styles.sourceGovernanceColumn}>
-                <div className={styles.managementHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{copy.collectOwnerSource}</p>
-                    <h3>{copy.ownerSourceInbox}</h3>
-                  </div>
-                  <VButton type="button" className={styles.primaryActionButton} onClick={() => setShowOwnerSourceForm((value) => !value)}>
-                    <Pencil size={15} />
-                    <span>{showOwnerSourceForm ? copy.cancelEdit : copy.submitSource}</span>
-                  </VButton>
-                </div>
-                {showOwnerSourceForm ? (
-                <>
-                <div className={styles.knowledgeFormGrid}>
-                  <label>
-                    <span>{copy.sourceType}</span>
-                    <VNativeSelect value={ownerSourceDraft.sourceType} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, sourceType: event.target.value })}>
-                      {["manual_user_entry", "team_chat_refinement", "external_search_refinement", "pdf_refinement", "agent_authored", "runtime_evidence_refinement"].map((type) => (
-                        <option key={type} value={type}>{type}</option>
-                      ))}
-                    </VNativeSelect>
-                  </label>
-                  <label>
-                    <span>{copy.titleField}</span>
-                    <VNativeInput value={ownerSourceDraft.title} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, title: event.target.value })} />
-                  </label>
-                  <label>
-                    <span>{copy.originalFilename}</span>
-                    <VNativeInput value={ownerSourceDraft.originalFilename} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, originalFilename: event.target.value })} />
-                  </label>
-                  <label>
-                    <span>{copy.sourceCreatedAt}</span>
-                    <VNativeInput value={ownerSourceDraft.sourceCreatedAt} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, sourceCreatedAt: event.target.value })} />
-                  </label>
-                  <label>
-                    <span>{copy.capturedBy}</span>
-                    <VNativeInput value={ownerSourceDraft.capturedBy} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, capturedBy: event.target.value })} />
-                  </label>
-                  <label>
-                    <span>{copy.sourceHash}</span>
-                    <VNativeInput value={ownerSourceDraft.sourceHash} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, sourceHash: event.target.value })} />
-                  </label>
-                  <label className={styles.wideField}>
-                    <span>{copy.sourceRef}</span>
-                    <VNativeTextarea rows={2} value={ownerSourceDraft.sourceRef} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, sourceRef: event.target.value })} />
-                  </label>
-                  <label className={styles.wideField}>
-                    <span>{copy.evidenceRange}</span>
-                    <VNativeTextarea rows={2} value={ownerSourceDraft.evidenceRange} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, evidenceRange: event.target.value })} />
-                  </label>
-                  <label className={styles.wideField}>
-                    <span>{copy.summaryField}</span>
-                    <VNativeTextarea rows={2} value={ownerSourceDraft.summary} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, summary: event.target.value })} />
-                  </label>
-                  <label className={styles.wideField}>
-                    <span>{copy.originalContent}</span>
-                    <VNativeTextarea rows={4} value={ownerSourceDraft.originalContent} onChange={(event) => setOwnerSourceDraft({ ...ownerSourceDraft, originalContent: event.target.value })} />
-                  </label>
-                </div>
-                <div className={styles.formActionRow}>
-                  <VButton type="button" className={styles.primaryActionButton} onClick={submitOwnerSource} isDisabled={knowledgeBusy || !activeSourceOwnerId}>
-                    <Link2 size={15} />
-                    <span>{copy.collectOwnerSource}</span>
-                  </VButton>
-                </div>
-                </>
-                ) : (
-                <VButton type="button" className={styles.collapsedFormButton} onClick={() => setShowOwnerSourceForm(true)}>
-                  <Pencil size={15} />
-                  <span>{copy.submitSource}</span>
-                  <small>{ownerSourceDraft.sourceType}</small>
-                </VButton>
-                )}
-              </div>
-              <div className={styles.sourceGovernanceColumn}>
-                <div className={styles.managementHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{copy.reviewSource}</p>
-                    <h3>{copy.centralSourceRegistry}</h3>
-                  </div>
-                  <span className={styles.countPill}>{centralSourcesQuery.data?.summary.centralSourceCount ?? centralSources.length}</span>
-                </div>
-                <div className={styles.sourceGovernanceControls}>
-                  <label>
-                    <span>{copy.sourceReviewNote}</span>
-                    <VNativeInput value={sourceReviewNote} onChange={(event) => setSourceReviewNote(event.target.value)} />
-                  </label>
-                  <label>
-                    <span>{copy.centralSourceId}</span>
-                    <VNativeInput value={duplicateCentralSourceId} onChange={(event) => setDuplicateCentralSourceId(event.target.value)} />
-                  </label>
-                </div>
-                <div className={styles.sourceRecordList}>
-                  {ownerInboxSources.map((source) => (
-                    <article key={source.inboxSourceId} className={styles.sourceRecord}>
-                      <div className={styles.sourceRecordHeader}>
-                        <strong>{source.title || source.inboxSourceId}</strong>
-                        <span className={source.status === "pending" || source.status === "needs_more_context" ? styles.statusPill : styles.statusPillMuted}>
-                          {source.status}
-                        </span>
-                      </div>
-                      <p>{source.summary || source.sourceType}</p>
-                      <div className={styles.sourceRecordMeta}>
-                        <span>{copy.originalPath}: {source.originalPath || "-"}</span>
-                        <span>{copy.sourceHash}: {source.sourceHash || "-"}</span>
-                        <span>{copy.curationStatus}: {source.curationStatus || "-"}</span>
-                        <span>{copy.dedupeStatus}: {source.dedupeStatus || "-"}</span>
-                      </div>
-                      <div className={styles.sourceRecordActions}>
-                        <VButton
-                          type="button"
-                          className={styles.detailActionButton}
-                          isDisabled={knowledgeBusy || !(source.status === "pending" || source.status === "needs_more_context")}
-                          onClick={() => reviewOwnerSource(source, "accepted")}
-                        >
-                          <CheckCircle2 size={14} />
-                          <span>{copy.acceptSource}</span>
-                        </VButton>
-                        <VButton
-                          type="button"
-                          className={styles.detailActionButton}
-                          isDisabled={knowledgeBusy || !(source.status === "pending" || source.status === "needs_more_context")}
-                          onClick={() => reviewOwnerSource(source, "needs_more_context")}
-                        >
-                          <Eye size={14} />
-                          <span>{copy.needsMoreContext}</span>
-                        </VButton>
-                        <VButton
-                          type="button"
-                          className={styles.detailActionButton}
-                          isDisabled={knowledgeBusy || !(source.status === "pending" || source.status === "needs_more_context") || !duplicateCentralSourceId.trim()}
-                          onClick={() => reviewOwnerSource(source, "duplicate")}
-                        >
-                          <CopyIcon size={14} />
-                          <span>{copy.markDuplicate}</span>
-                        </VButton>
-                        <VButton
-                          type="button"
-                          className={styles.detailActionButton}
-                          isDisabled={knowledgeBusy || !(source.status === "pending" || source.status === "needs_more_context")}
-                          onClick={() => reviewOwnerSource(source, "rejected")}
-                        >
-                          <XCircle size={14} />
-                          <span>{copy.rejectProposal}</span>
-                        </VButton>
-                      </div>
-                    </article>
-                  ))}
-                  {!sourceInboxQuery.isPending && !ownerInboxSources.length ? (
-                    <section className={styles.emptyDetail}>
-                      <FileText size={20} />
-                      <strong>{copy.noInboxSources}</strong>
-                    </section>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-            <div className={styles.sourceRecordList}>
-              {centralSources.map((source) => (
-                <article key={source.centralSourceId} className={styles.sourceRecord}>
-                  <div className={styles.sourceRecordHeader}>
-                    <strong>{source.title || source.centralSourceId}</strong>
-                    <span className={styles.statusPill}>{source.status}</span>
-                  </div>
-                  <p>{source.summary || source.sourceType}</p>
-                  <div className={styles.sourceRecordMeta}>
-                    <span>{copy.centralSourceId}: {source.centralSourceId}</span>
-                    <span>{copy.centralPath}: {source.centralPath || "-"}</span>
-                    <span>{copy.originalPath}: {source.originOriginalPath || "-"}</span>
-                    <span>{copy.reviewedBy}: {source.acceptedByAgentId || "-"}</span>
-                    <span>{copy.reviewedAt}: {formatTimestamp(source.acceptedAt, lang)}</span>
-                  </div>
-                  <div className={styles.sourceRecordActions}>
-                    <VButton
-                      type="button"
-                      className={styles.detailActionButton}
-                      isDisabled={!activeKnowledgeBase?.permissions.canPropose || knowledgeBusy || !activeKnowledgeBaseForItems}
-                      onClick={() => attachCentralSource(source.centralSourceId)}
-                    >
-                      <Link2 size={14} />
-                      <span>{copy.attachCentralSource}</span>
-                    </VButton>
-                  </div>
-                </article>
-              ))}
-              {!centralSourcesQuery.isPending && !centralSources.length ? (
-                <section className={styles.emptyDetail}>
-                  <Database size={20} />
-                  <strong>{copy.noCentralSources}</strong>
-                </section>
-              ) : null}
-            </div>
-          </section>
+          <MemoryKnowledgeSourceGovernancePanel
+            copy={copy}
+            sourceOwnerType={sourceOwnerType}
+            sourceOwnerId={sourceOwnerId}
+            sourceInboxStatus={sourceInboxStatus}
+            sourceCount={sourceInboxQuery.data?.summary.sourceCount ?? ownerInboxSources.length}
+            centralSourceCount={centralSourcesQuery.data?.summary.centralSourceCount ?? centralSources.length}
+            showOwnerSourceForm={showOwnerSourceForm}
+            ownerSourceDraft={ownerSourceDraft}
+            sourceReviewNote={sourceReviewNote}
+            duplicateCentralSourceId={duplicateCentralSourceId}
+            ownerInboxSources={ownerInboxSources}
+            centralSources={centralSources}
+            isSourceInboxPending={sourceInboxQuery.isPending}
+            isCentralSourcesPending={centralSourcesQuery.isPending}
+            knowledgeBusy={knowledgeBusy}
+            canSubmitOwnerSource={!knowledgeBusy && Boolean(activeSourceOwnerId)}
+            canAttachCentralSource={Boolean(activeKnowledgeBase?.permissions.canPropose && activeKnowledgeBaseForItems) && !knowledgeBusy}
+            onSourceOwnerTypeChange={setSourceOwnerType}
+            onSourceOwnerIdChange={setSourceOwnerId}
+            onSourceInboxStatusChange={setSourceInboxStatus}
+            onApplyActiveKnowledgeOwner={applyActiveKnowledgeOwner}
+            onShowOwnerSourceFormChange={setShowOwnerSourceForm}
+            onOwnerSourceDraftChange={setOwnerSourceDraft}
+            onSourceReviewNoteChange={setSourceReviewNote}
+            onDuplicateCentralSourceIdChange={setDuplicateCentralSourceId}
+            onSubmitOwnerSource={submitOwnerSource}
+            onReviewOwnerSource={reviewOwnerSource}
+            onAttachCentralSource={attachCentralSource}
+            formatTimestamp={(value) => formatTimestamp(value, lang)}
+          />
           ) : null}
 
           {activeKnowledgeWorkspaceMode === "search" ? (
