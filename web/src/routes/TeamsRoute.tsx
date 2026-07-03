@@ -34,7 +34,6 @@ import {
   TeamWorkflowCandidate,
   TeamWorkflowCandidateGraphBuildPayload,
   TeamWorkflowCandidateGraphPayload,
-  TeamWorkflowCandidateGraphNode,
   TeamWorkflowCoordinationStatus,
   TeamWorkflowKnowledgeCollectionIngestionPayload,
   TeamWorkflowKnowledgeIngestionWorkRun,
@@ -81,6 +80,7 @@ import {
 import { agentCenterMemoryRoute, teamMemoryRoute } from "./agentCenterRoutes";
 import { agentDisplayInfo } from "./agentDisplay";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
+import { TeamWorkflowGraphView, workflowGraphLayout } from "./TeamWorkflowGraphView";
 import styles from "./TeamsRoute.styles";
 
 const NODE_WIDTH = 172;
@@ -106,13 +106,6 @@ const TEAM_BOOTSTRAP_ACTIVE_REFETCH_MS = 2_000;
 const TEAM_BOOTSTRAP_BACKGROUND_REFETCH_MS = 12_000;
 const TEAM_BOOTSTRAP_REFETCH_STATUSES = new Set(["running", "needs_retry"]);
 const SOURCE_COLLECTION_STAGE_WRITEBACK_SYNC_GRACE_MS = 30_000;
-const WORKFLOW_GRAPH_WIDTH = 1120;
-const WORKFLOW_GRAPH_MIN_HEIGHT = 320;
-const WORKFLOW_GRAPH_NODE_WIDTH = 168;
-const WORKFLOW_GRAPH_NODE_HEIGHT = 58;
-const WORKFLOW_GRAPH_NODE_GAP = 30;
-const WORKFLOW_GRAPH_MARGIN_X = 22;
-const WORKFLOW_GRAPH_MARGIN_Y = 28;
 const SOURCE_COLLECTION_RUN_PREVIEW_LIMIT = 20;
 const SOURCE_COLLECTION_RESULT_PAGE_SIZE = 8;
 const SOURCE_COLLECTION_DEFAULT_ROLES = ["source_finder", "source_extractor", "source_relation_mapper", "source_ingestor"];
@@ -2232,33 +2225,13 @@ type TeamsRouteDynamicVariable =
   | "--canvas-offset-y"
   | "--canvas-scale"
   | "--node-x"
-  | "--node-y"
-  | "--workflow-graph-height"
-  | "--workflow-graph-width"
-  | "--workflow-graph-node-x"
-  | "--workflow-graph-node-y";
+  | "--node-y";
 
 type TeamsRouteDynamicStyle = CSSProperties & Partial<Record<TeamsRouteDynamicVariable, string>>;
 
 type CanvasViewportStyle = TeamsRouteDynamicStyle & Record<"--canvas-offset-x" | "--canvas-offset-y" | "--canvas-scale", string>;
 
 type NodePositionStyle = TeamsRouteDynamicStyle & Record<"--node-x" | "--node-y", string>;
-
-type WorkflowGraphFrameStyle = TeamsRouteDynamicStyle & Record<"--workflow-graph-height" | "--workflow-graph-width", string>;
-
-type WorkflowGraphNodeStyle = TeamsRouteDynamicStyle & Record<"--workflow-graph-node-x" | "--workflow-graph-node-y", string>;
-
-type WorkflowGraphNodeView = TeamWorkflowCandidateGraphNode & {
-  x: number;
-  y: number;
-};
-
-type WorkflowGraphLayout = {
-  nodes: WorkflowGraphNodeView[];
-  edges: TeamWorkflowCandidateGraphPayload["edges"];
-  width: number;
-  height: number;
-};
 
 type CanvasFrameSize = {
   width: number;
@@ -3331,20 +3304,6 @@ function teamCanvasNodeStyle(node: Pick<TeamCanvasNode, "x" | "y">): NodePositio
   };
 }
 
-function workflowGraphFrameStyle(layout: Pick<WorkflowGraphLayout, "height" | "width">): WorkflowGraphFrameStyle {
-  return {
-    "--workflow-graph-height": `${layout.height}px`,
-    "--workflow-graph-width": `${layout.width}px`,
-  };
-}
-
-function workflowGraphNodeStyle(node: Pick<WorkflowGraphNodeView, "x" | "y">): WorkflowGraphNodeStyle {
-  return {
-    "--workflow-graph-node-x": `${node.x}px`,
-    "--workflow-graph-node-y": `${node.y}px`,
-  };
-}
-
 function canvasStyleScale(style: CanvasViewportStyle) {
   const parsed = Number(style["--canvas-scale"]);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
@@ -4359,83 +4318,6 @@ function latestWorkflowCandidate(candidates: TeamWorkflowCandidate[]) {
     const leftTime = new Date(left.updatedAt || left.createdAt || "").getTime();
     return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0);
   })[0] ?? null;
-}
-
-function workflowGraphTypeRank(candidateType: string) {
-  const order: Record<string, number> = {
-    source_manifest: 0,
-    paper_note: 1,
-    neuro_mechanism: 2,
-    mechanism_mapping: 3,
-    algorithm_hypothesis: 4,
-    review_record: 5,
-    candidate_graph: 6,
-  };
-  return order[candidateType] ?? 7;
-}
-
-function workflowGraphLayout(graph: TeamWorkflowCandidateGraphPayload): WorkflowGraphLayout {
-  const columns = Math.max(1, Math.floor((WORKFLOW_GRAPH_WIDTH - WORKFLOW_GRAPH_MARGIN_X * 2 + WORKFLOW_GRAPH_NODE_GAP) / (WORKFLOW_GRAPH_NODE_WIDTH + WORKFLOW_GRAPH_NODE_GAP)));
-  const nodes = [...graph.nodes]
-    .sort((left, right) => {
-      const rankDelta = workflowGraphTypeRank(left.candidateType) - workflowGraphTypeRank(right.candidateType);
-      if (rankDelta !== 0) {
-        return rankDelta;
-      }
-      return String(left.title || left.candidateId).localeCompare(String(right.title || right.candidateId));
-    })
-    .map((node, index) => ({
-      ...node,
-      x: WORKFLOW_GRAPH_MARGIN_X + (index % columns) * (WORKFLOW_GRAPH_NODE_WIDTH + WORKFLOW_GRAPH_NODE_GAP),
-      y: WORKFLOW_GRAPH_MARGIN_Y + Math.floor(index / columns) * (WORKFLOW_GRAPH_NODE_HEIGHT + WORKFLOW_GRAPH_NODE_GAP),
-    }));
-  const rows = Math.max(1, Math.ceil(nodes.length / columns));
-  const height = Math.max(
-    WORKFLOW_GRAPH_MIN_HEIGHT,
-    WORKFLOW_GRAPH_MARGIN_Y * 2 + rows * WORKFLOW_GRAPH_NODE_HEIGHT + Math.max(0, rows - 1) * WORKFLOW_GRAPH_NODE_GAP,
-  );
-  return { nodes, edges: graph.edges, width: WORKFLOW_GRAPH_WIDTH, height };
-}
-
-function workflowGraphVisualEndpoints(edge: TeamWorkflowCandidateGraphPayload["edges"][number]) {
-  const evidenceToCandidateRelations = new Set([
-    "supported_by_paper_note",
-    "maps_from_neuro_mechanism",
-    "inspired_by_mapping",
-    "inspired_by_neuro_mechanism",
-    "reviews_candidate",
-  ]);
-  return evidenceToCandidateRelations.has(edge.relation)
-    ? { sourceCandidateId: edge.targetCandidateId, targetCandidateId: edge.sourceCandidateId }
-    : { sourceCandidateId: edge.sourceCandidateId, targetCandidateId: edge.targetCandidateId };
-}
-
-function workflowGraphEdgePath(edge: TeamWorkflowCandidateGraphPayload["edges"][number], nodes: WorkflowGraphNodeView[]) {
-  const endpoints = workflowGraphVisualEndpoints(edge);
-  const source = nodes.find((node) => node.candidateId === endpoints.sourceCandidateId);
-  const target = nodes.find((node) => node.candidateId === endpoints.targetCandidateId);
-  if (!source || !target) {
-    return null;
-  }
-  const x1 = source.x + WORKFLOW_GRAPH_NODE_WIDTH;
-  const y1 = source.y + WORKFLOW_GRAPH_NODE_HEIGHT / 2;
-  const x2 = target.x;
-  const y2 = target.y + WORKFLOW_GRAPH_NODE_HEIGHT / 2;
-  const curve = Math.max(34, Math.abs(x2 - x1) * 0.42);
-  return `M ${x1} ${y1} C ${x1 + curve} ${y1}, ${x2 - curve} ${y2}, ${x2} ${y2}`;
-}
-
-function workflowGraphNodeTone(node: TeamWorkflowCandidateGraphNode) {
-  if (!node.valid || String(node.qualityStatus || "").includes("broken")) {
-    return styles.workflowGraphNodeDanger;
-  }
-  if (node.requiresReview || String(node.currentState || "").includes("revision")) {
-    return styles.workflowGraphNodeWarning;
-  }
-  if (String(node.currentState || "").includes("synced") || String(node.qualityStatus || "").includes("ready")) {
-    return styles.workflowGraphNodeReady;
-  }
-  return styles.workflowGraphNodeNeutral;
 }
 
 export function TeamsRoute({
@@ -8458,48 +8340,11 @@ export function TeamsRoute({
               <span>{lang === "zh" ? "缺口" : "missing"} <strong>{visibleGraphSummary.missingLinkCount}</strong></span>
               <span>{lang === "zh" ? "待审" : "review"} <strong>{visibleGraphSummary.unreviewedNodeCount}</strong></span>
             </div>
-            <div
-              className={styles.workflowGraphFrame}
-              style={workflowGraphFrameStyle(visibleGraphLayout)}
-            >
-              <div className={styles.workflowGraphCanvas}>
-                <svg
-                  className={styles.workflowGraphSvg}
-                  viewBox={`0 0 ${visibleGraphLayout.width} ${visibleGraphLayout.height}`}
-                  preserveAspectRatio="xMinYMin meet"
-                  aria-hidden="true"
-                >
-                  <defs>
-                    <marker id="workflow-graph-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
-                      <path d="M 0 0 L 10 5 L 0 10 z" />
-                    </marker>
-                  </defs>
-                  {visibleGraphLayout.edges.map((edge) => {
-                    const path = workflowGraphEdgePath(edge, visibleGraphLayout.nodes);
-                    return path ? (
-                      <path
-                        key={`${edge.sourceCandidateId}-${edge.targetCandidateId}-${edge.relation}`}
-                        className={styles.workflowGraphEdge}
-                        d={path}
-                      >
-                        <title>{edge.relation}</title>
-                      </path>
-                    ) : null;
-                  })}
-                </svg>
-                {visibleGraphLayout.nodes.map((node) => (
-                  <div
-                    key={node.candidateId}
-                    className={`${styles.workflowGraphNode} ${workflowGraphNodeTone(node)}`}
-                    style={workflowGraphNodeStyle(node)}
-                    title={`${node.candidateId} · ${node.currentState}`}
-                  >
-                    <strong>{node.title || node.candidateId}</strong>
-                    <span>{workflowStateLabel(node.currentState, lang)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <TeamWorkflowGraphView
+              layout={visibleGraphLayout}
+              markerId="source-collection-workflow-graph-arrow"
+              stateLabel={(value) => workflowStateLabel(value, lang)}
+            />
             {visibleGraph.nodes.length ? (
               <div className={styles.workflowCandidateList}>
                 {pagedGraphNodes.items.map((node) => {
@@ -13278,48 +13123,11 @@ export function TeamsRoute({
                                   : (lang === "zh" ? "候选边界" : "candidate boundary")}
                               </span>
                             </div>
-                            <div
-                              className={styles.workflowGraphFrame}
-                              style={workflowGraphFrameStyle(teamWorkflowCandidateGraphLayout)}
-                            >
-                              <div className={styles.workflowGraphCanvas}>
-                                <svg
-                                  className={styles.workflowGraphSvg}
-                                  viewBox={`0 0 ${teamWorkflowCandidateGraphLayout.width} ${teamWorkflowCandidateGraphLayout.height}`}
-                                  preserveAspectRatio="xMinYMin meet"
-                                  aria-hidden="true"
-                                >
-                                  <defs>
-                                    <marker id="workflow-graph-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto">
-                                      <path d="M 0 0 L 10 5 L 0 10 z" />
-                                    </marker>
-                                  </defs>
-                                  {teamWorkflowCandidateGraphLayout.edges.map((edge) => {
-                                    const path = workflowGraphEdgePath(edge, teamWorkflowCandidateGraphLayout.nodes);
-                                    return path ? (
-                                      <path
-                                        key={`${edge.sourceCandidateId}-${edge.targetCandidateId}-${edge.relation}`}
-                                        className={styles.workflowGraphEdge}
-                                        d={path}
-                                      >
-                                        <title>{edge.relation}</title>
-                                      </path>
-                                    ) : null;
-                                  })}
-                                </svg>
-                                {teamWorkflowCandidateGraphLayout.nodes.map((node) => (
-                                  <div
-                                    key={node.candidateId}
-                                    className={`${styles.workflowGraphNode} ${workflowGraphNodeTone(node)}`}
-                                    style={workflowGraphNodeStyle(node)}
-                                    title={`${node.candidateId} · ${node.currentState}`}
-                                  >
-                                    <strong>{node.title || node.candidateId}</strong>
-                                    <span>{workflowStateLabel(node.currentState, lang)}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
+                            <TeamWorkflowGraphView
+                              layout={teamWorkflowCandidateGraphLayout}
+                              markerId="team-candidate-workflow-graph-arrow"
+                              stateLabel={(value) => workflowStateLabel(value, lang)}
+                            />
                             {teamWorkflowCandidateGraph.missingLinks.length || teamWorkflowCandidateGraph.unreviewedNodes.length ? (
                               <div className={styles.workflowGraphIssues}>
                                 {teamWorkflowCandidateGraph.missingLinks.slice(0, 3).map((edge) => (

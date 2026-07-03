@@ -29,6 +29,7 @@ const productSharedParentStyleConsumers = [
   "routes/MemoryGraphCanvas.tsx",
   "routes/RuntimeScenesPane.tsx",
   "routes/SessionContextMenu.tsx",
+  "routes/TeamWorkflowGraphView.tsx",
   "routes/chat/CliAgentRunTerminalPanel.tsx",
 ] as const;
 
