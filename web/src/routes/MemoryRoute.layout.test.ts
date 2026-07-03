@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import routeSource from "./MemoryRoute.tsx?raw";
 import detailPanelSource from "./MemoryDetailPanel.tsx?raw";
+import effectivePanelSource from "./MemoryEffectivePanel.tsx?raw";
 import managementEditorSource from "./MemoryManagementEditor.tsx?raw";
 import matrixPanelSource from "./MemoryMatrixPanel.tsx?raw";
 import overviewPanelSource from "./MemoryOverviewPanel.tsx?raw";
@@ -137,7 +138,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("MEMORY_VIEWS");
     expect(routeSource).toContain("styles.subnav");
     expect(routeSource).toContain("<MemoryOverviewPanel");
-    expect(routeSource).toContain("renderEffectiveView()");
+    expect(routeSource).toContain("createEffectivePanel()");
     expect(routeSource).toContain("renderAgentMemoryView()");
     expect(routeSource).toContain("renderManageView()");
     expect(routeSource).toContain("renderSourcesView()");
@@ -823,6 +824,15 @@ describe("MemoryRoute layout contract", () => {
   });
 
   it("keeps effective memory panels scrollable instead of clipping dense narrow content", () => {
+    expect(routeSource).toContain('from "./MemoryEffectivePanel"');
+    expect(routeSource).toContain("<MemoryEffectivePanel");
+    expect(routeSource).not.toContain("const renderEffectiveView = () => (");
+    expect(effectivePanelSource).toContain("export function MemoryEffectivePanel");
+    expect(effectivePanelSource).toContain("styles.effectiveGrid");
+    expect(effectivePanelSource).toContain("styles.overviewPanel");
+    expect(effectivePanelSource).not.toContain("useQuery");
+    expect(effectivePanelSource).not.toContain("useMutation");
+    expect(effectivePanelSource).not.toContain("fetchJson");
     expect(styles.effectiveGrid).toContain("[&_.overviewPanel]:max-h-[min(260px,36vh)]");
     expect(styles.effectiveGrid).toContain("[&_.overviewPanel]:overflow-auto");
     expect(styles.effectiveGrid).toContain("[&_.panelLead]:line-clamp-2");
