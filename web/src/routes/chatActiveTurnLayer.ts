@@ -1,4 +1,4 @@
-import { mergeConversationFeedbackEvents } from "../components/conversation/conversationFeedbackEvents";
+import { mergeConversationFeedbackEvents } from "../conversation-model/feedbackEvents";
 import {
   answerProjectionContent,
   isInternalStreamingStatusContent,

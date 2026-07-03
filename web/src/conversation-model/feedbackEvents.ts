@@ -1,4 +1,4 @@
-import type { ConversationFeedbackEvent } from "../../api/types";
+import type { ConversationFeedbackEvent } from "../api/types";
 
 function positiveNumber(value: unknown): number {
   const numeric = Number(value ?? 0);
