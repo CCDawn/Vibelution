@@ -30,6 +30,9 @@ describe("projectAgentMessageTimelineMessages", () => {
     expect(projectionSource).toContain("export type AgentMessageTimelineProjectionInput");
     expect(projectionSource).toContain("export type AgentMessageTimelineProjection =");
     expect(projectionSource).toContain("export function projectAgentMessageTimelineMessages");
+    expect(projectionSource).toContain("./conversationMessageIdentity");
+    expect(projectionSource).not.toContain("function metadataText");
+    expect(projectionSource).not.toContain("function conversationMessageTurnId");
     expect(projectionSource).not.toContain("ConversationTimelineProjectionInput");
     expect(projectionSource).not.toContain("ConversationTimelineProjection =");
     expect(projectionSource).not.toContain("projectConversationTimelineMessages");

@@ -1,22 +1,15 @@
 import type { ConversationMessage } from "../../api/types";
 import {
+  conversationMessageTurnId,
+  projectedConversationMessageIdsOrSelf,
+} from "./conversationMessageIdentity";
+import {
   isCliAgentLifecycleMessage,
   isGroupRoomTranscriptMessage,
   isRuntimeNoticeMessage,
   isTurnErrorMessage,
 } from "./conversationMessagePredicates";
 import { answerProjectionContent } from "./conversationInternalStatus";
-
-function metadataText(metadata: Record<string, unknown> | undefined, key: string) {
-  const value = metadata?.[key];
-  if (typeof value === "string") {
-    return value.trim();
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value).trim();
-  }
-  return "";
-}
 
 function exactItemKey(value: unknown) {
   return JSON.stringify(value) ?? String(value);
@@ -58,14 +51,6 @@ function mergeText(...values: Array<string | undefined>) {
   return merged.join("\n\n");
 }
 
-function projectedMessageIds(message: ConversationMessage) {
-  const existing = message.metadata?.projectedMessageIds;
-  if (Array.isArray(existing)) {
-    return existing.map((item) => String(item)).filter(Boolean);
-  }
-  return [message.id];
-}
-
 function isExcludedAssistantProjectionMessage(message: ConversationMessage) {
   if (
     message.role !== "assistant"
@@ -94,7 +79,7 @@ function isProjectableProcessOnlyMessage(message: ConversationMessage) {
 }
 
 function normalizedTurnId(message: ConversationMessage) {
-  return metadataText(message.metadata, "turnId").replace(/^live:/, "");
+  return conversationMessageTurnId(message);
 }
 
 function processProjectionKey(message: ConversationMessage) {
@@ -144,8 +129,8 @@ function mergeProcessProjectionMessages(previous: ConversationMessage, next: Con
       ...(previous.metadata ?? {}),
       ...(next.metadata ?? {}),
       projectedMessageIds: [
-        ...projectedMessageIds(previous),
-        ...projectedMessageIds(next),
+        ...projectedConversationMessageIdsOrSelf(previous),
+        ...projectedConversationMessageIdsOrSelf(next),
       ],
     },
   };

@@ -3,6 +3,10 @@ import { conversationMessageToAgentMessage } from "../../agent-thread/adapters";
 import type { AgentMessage } from "../../agent-thread/types";
 import { answerProjectionContent } from "./conversationInternalStatus";
 import { mergeAgentFeedbackEvents } from "../../agent-thread/agentFeedbackEvents";
+import {
+  conversationMessageMetadataText,
+  conversationMessageTurnId,
+} from "./conversationMessageIdentity";
 import { projectTimelineProcessMessages } from "./timelineMessageProcessProjection";
 import {
   buildAgentMessageTimelineRowIdentities,
@@ -21,27 +25,14 @@ export type AgentMessageTimelineProjection = {
   rowIdentities: AgentMessageTimelineRowIdentity[];
 };
 
-function metadataText(metadata: Record<string, unknown> | undefined, key: string) {
-  const value = metadata?.[key];
-  if (typeof value === "string") {
-    return value.trim();
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value).trim();
-  }
-  return "";
-}
-
-function conversationMessageTurnId(message: ConversationMessage) {
-  return metadataText(message.metadata, "turnId").replace(/^live:/, "");
-}
-
 function isSessionLiveOverlayMessage(message: ConversationMessage) {
-  return message.role === "assistant" && metadataText(message.metadata, "kind") === "session_live_overlay";
+  return message.role === "assistant"
+    && conversationMessageMetadataText(message.metadata, "kind") === "session_live_overlay";
 }
 
 function isSessionActiveTurnLayerMessage(message: ConversationMessage) {
-  return message.role === "assistant" && metadataText(message.metadata, "kind") === "session_active_turn_layer";
+  return message.role === "assistant"
+    && conversationMessageMetadataText(message.metadata, "kind") === "session_active_turn_layer";
 }
 
 function isSameConversationTurn(left: ConversationMessage, right: ConversationMessage) {
