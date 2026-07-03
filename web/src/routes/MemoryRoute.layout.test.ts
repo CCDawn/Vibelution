@@ -13,6 +13,7 @@ import knowledgePermissionsPanelSource from "./MemoryKnowledgePermissionsPanel.t
 import knowledgePipelinePanelSource from "./MemoryKnowledgePipelinePanel.tsx?raw";
 import knowledgeRagPanelSource from "./MemoryKnowledgeRagPanel.tsx?raw";
 import knowledgeReviewPanelSource from "./MemoryKnowledgeReviewPanel.tsx?raw";
+import knowledgeSearchPanelSource from "./MemoryKnowledgeSearchPanel.tsx?raw";
 import knowledgeSourceGovernancePanelSource from "./MemoryKnowledgeSourceGovernancePanel.tsx?raw";
 import knowledgeStewardPanelSource from "./MemoryKnowledgeStewardPanel.tsx?raw";
 import knowledgeUsageContractPanelSource from "./MemoryKnowledgeUsageContractPanel.tsx?raw";
@@ -576,8 +577,25 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain('params.set("agentId", activeKnowledgeActorAgentId)');
     expect(routeSource).toContain("actorAgentIdForKnowledgeContext(activeKnowledgeBase, knowledgeActorAgents, fallbackKnowledgeActorAgentId)");
     expect(routeSource).toContain("fetchJson<KnowledgeRagRetrievalPayload>");
-    expect(routeSource).toContain('from "./MemoryKnowledgeRagPanel"');
-    expect(routeSource).toContain("<MemoryKnowledgeRagPanel");
+    expect(routeSource).toContain('from "./MemoryKnowledgeSearchPanel"');
+    expect(routeSource).toContain("<MemoryKnowledgeSearchPanel");
+    expect(routeSource).not.toContain('from "./MemoryKnowledgeRagPanel"');
+    expect(knowledgeSearchPanelSource).toContain("export function MemoryKnowledgeSearchPanel");
+    expect(knowledgeSearchPanelSource).toContain("export type MemoryKnowledgeSearchDraft");
+    expect(knowledgeSearchPanelSource).toContain("copy.knowledgeSearch");
+    expect(knowledgeSearchPanelSource).toContain("copy.searchQuery");
+    expect(knowledgeSearchPanelSource).toContain("copy.searchMode");
+    expect(knowledgeSearchPanelSource).toContain("copy.ragTopK");
+    expect(knowledgeSearchPanelSource).toContain("copy.ragContextBudget");
+    expect(knowledgeSearchPanelSource).toContain("copy.semanticScore");
+    expect(knowledgeSearchPanelSource).toContain("copy.noMatches");
+    expect(knowledgeSearchPanelSource).toContain("styles.knowledgeFormGrid");
+    expect(knowledgeSearchPanelSource).toContain("styles.knowledgeProposalList");
+    expect(knowledgeSearchPanelSource).toContain("styles.knowledgeRow");
+    expect(knowledgeSearchPanelSource).toContain("MemoryKnowledgeRagPanel");
+    expect(knowledgeSearchPanelSource).not.toContain("useQuery");
+    expect(knowledgeSearchPanelSource).not.toContain("useMutation");
+    expect(knowledgeSearchPanelSource).not.toContain("fetchJson");
     expect(knowledgeRagPanelSource).toContain("export function MemoryKnowledgeRagPanel");
     expect(knowledgeRagPanelSource).toContain("copy.ragRetrieval");
     expect(knowledgeRagPanelSource).toContain("copy.ragContextCandidates");
@@ -665,7 +683,7 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgeGovernancePanelSource).toContain("copy.governancePlan");
     expect(knowledgeGovernancePanelSource).toContain("copy.planOnly");
     expect(routeSource).toContain("searchMode");
-    expect(routeSource).toContain("semanticScore");
+    expect(knowledgeSearchPanelSource).toContain("semanticScore");
     expect(knowledgePermissionsPanelSource).toContain("copy.ingestionAdapters");
     expect(knowledgeGovernancePanelSource).toContain("copy.traceability");
     expect(routeSource).toContain('from "./MemoryKnowledgeStewardPanel"');
@@ -830,8 +848,8 @@ describe("MemoryRoute layout contract", () => {
     expect(detailPanelSource).not.toContain("useQuery");
     expect(detailPanelSource).not.toContain("useMutation");
     expect(detailPanelSource).not.toContain("fetchJson");
-    expect(routeSource).toContain("copy.management");
-    expect(routeSource).toContain("styles.managementPanel");
+    expect(managePanelSource).toContain("copy.management");
+    expect(knowledgeSearchPanelSource).toContain("styles.managementPanel");
   });
 
   it("adds perception matrix and quick filters before the source drilldown", () => {
