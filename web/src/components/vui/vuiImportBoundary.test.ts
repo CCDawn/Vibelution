@@ -21,6 +21,7 @@ const localStylesObjectPattern = /const\s+styles\s*=/;
 const productSharedParentStyleConsumers = [
   "app/AppShellStatusGuidePanel.tsx",
   "app/AppShellUtilityMenu.tsx",
+  "components/conversation/AgentContextSectionsView.tsx",
   "routes/AgentSessionTabStrip.tsx",
   "routes/ConversationIndexSection.tsx",
   "routes/ConversationIndexTree.tsx",
