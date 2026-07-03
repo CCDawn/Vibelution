@@ -466,6 +466,17 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).not.toContain("buildConversationTimelineRowIdentities(activeTimelineMessages)");
   });
 
+  it("names AgentMessage timeline rendering internals after the AgentMessage model", () => {
+    expect(conversationViewSource).toContain("function renderAgentMessageTimeline(");
+    expect(conversationViewSource).toContain("function renderAgentMessageTimelineItem(");
+    expect(conversationViewSource).toContain("const agentMessageTimelineItems = buildAgentMessageTimelineItems");
+    expect(conversationViewSource).toContain("const hasAgentMessageTimeline =");
+    expect(conversationViewSource).not.toContain("function renderConversationTimeline(");
+    expect(conversationViewSource).not.toContain("function renderConversationTimelineItem(");
+    expect(conversationViewSource).not.toContain("const conversationTimelineItems =");
+    expect(conversationViewSource).not.toContain("const hasConversationTimeline =");
+  });
+
   it("isolates conversation turn rendering behind a memoized row boundary", () => {
     expect(conversationViewSource).toContain("const ConversationTurnRow = React.memo");
     expect(conversationViewSource).toContain("function conversationTurnRowPropsAreEqual");

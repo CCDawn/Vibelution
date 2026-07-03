@@ -2460,7 +2460,7 @@ export function ConversationView({
     return "";
   }
 
-  function renderConversationTimeline(
+  function renderAgentMessageTimeline(
     message: ConversationMessage,
     items: AgentMessageTimelineItem[],
     rowIdentity: AgentMessageTimelineRowIdentity,
@@ -2477,12 +2477,12 @@ export function ConversationView({
         data-agent-process-section-ids={processSectionIds}
         data-agent-process-kind={processSectionIds ? "timeline" : undefined}
       >
-        {items.map((item) => renderConversationTimelineItem(message, item, rowIdentity, item.id === activeItemId))}
+        {items.map((item) => renderAgentMessageTimelineItem(message, item, rowIdentity, item.id === activeItemId))}
       </div>
     );
   }
 
-  function renderConversationTimelineItem(
+  function renderAgentMessageTimelineItem(
     message: ConversationMessage,
     item: AgentMessageTimelineItem,
     rowIdentity: AgentMessageTimelineRowIdentity,
@@ -3788,19 +3788,19 @@ export function ConversationView({
               lang,
               includeAssistantText: false,
             };
-            const conversationTimelineItems = buildAgentMessageTimelineItems(
+            const agentMessageTimelineItems = buildAgentMessageTimelineItems(
               agentMessage,
               operationGroups.timeline,
               timelineOptions,
               message.timelineItems,
             );
-            const hasConversationTimeline =
+            const hasAgentMessageTimeline =
               message.role === "assistant"
               && hasFeedbackTimeline
               && !turnErrorMessage
               && !agentInboxMessage
               && !groupTranscriptMessage
-              && conversationTimelineItems.length > 0;
+              && agentMessageTimelineItems.length > 0;
             const showUserContent = agentSections.hasUserContent;
             const userAuthoredMessage = message.role === "user" && !agentInboxMessage;
             const isStreamingStatusPlaceholder = Boolean(message.streaming)
@@ -3867,8 +3867,8 @@ export function ConversationView({
               </>
             );
             const renderProcessDetails = () => {
-              if (hasConversationTimeline) {
-                return renderConversationTimeline(message, conversationTimelineItems, rowIdentity, agentRenderState.processSectionIds);
+              if (hasAgentMessageTimeline) {
+                return renderAgentMessageTimeline(message, agentMessageTimelineItems, rowIdentity, agentRenderState.processSectionIds);
               }
               if (hasFeedbackTimeline) {
                 return renderFeedbackTimelineGroup(
@@ -3907,8 +3907,8 @@ export function ConversationView({
                 isStreamingStatusPlaceholder ? compactStreamingStatusPlaceholder(responseText) : undefined,
                 agentRenderState.processSectionIds,
               )
-            ) : hasConversationTimeline ? (
-              renderConversationTimeline(message, conversationTimelineItems, rowIdentity, agentRenderState.processSectionIds)
+            ) : hasAgentMessageTimeline ? (
+              renderAgentMessageTimeline(message, agentMessageTimelineItems, rowIdentity, agentRenderState.processSectionIds)
             ) : hasFeedbackTimeline ? (
               renderFeedbackTimelineGroup(
                 message.id,
