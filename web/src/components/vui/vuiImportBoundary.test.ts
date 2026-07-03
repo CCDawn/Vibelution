@@ -46,6 +46,7 @@ const productSharedParentStyleConsumers = [
   "routes/MemoryGraphCanvas.tsx",
   "routes/MemoryKnowledgeRagPanel.tsx",
   "routes/MemoryKnowledgeStewardPanel.tsx",
+  "routes/MemoryKnowledgeUsageContractPanel.tsx",
   "routes/MemoryOverviewPanel.tsx",
   "routes/MemoryProjectMemoryQueuePanel.tsx",
   "routes/MemoryReviewQueuePanel.tsx",
