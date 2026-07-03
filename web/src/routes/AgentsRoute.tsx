@@ -96,6 +96,7 @@ import {
 import { AgentReturnBannerPanel } from "./AgentReturnBannerPanel";
 import { AgentRuntimeFocusPanel } from "./AgentRuntimeFocusPanel";
 import { AgentRuntimePolicyPanel } from "./AgentRuntimePolicyPanel";
+import { AgentToolSummaryPanel } from "./AgentToolSummaryPanel";
 import {
   agentCenterMemoryRoute,
   agentCenterModelsRoute,
@@ -6889,38 +6890,16 @@ export function AgentsRoute() {
 
               {activePane === "config" ? (
                 <>
-              <section
-                className={styles.configEditor}
-                title={
-                  lang === "zh"
-                    ? "工具能力已迁移到 Agent 管理的工具页集中配置；这里保留当前 Agent 的工具摘要和入口。"
-                    : "Tool permissions are configured in the Agent Tools page. This panel keeps only the current Agent summary and entry point."
-                }
-              >
-                <div className={styles.panelHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{copy.toolPolicyTitle}</p>
-                    <h3>{selectedAgent.toolPolicyId || "-"}</h3>
-                  </div>
-                  <Wrench size={16} />
-                </div>
-                <div className={styles.policySummaryGrid}>
-                  <span>{copy.allowedTools}: <strong>{selectedAgent.toolPolicy?.allowedTools?.length ?? 0}</strong></span>
-                  <span>{copy.preferredTools}: <strong>{selectedAgent.toolPolicy?.preferredTools?.length ?? 0}</strong></span>
-                  <span>{copy.blockedTools}: <strong>{selectedAgent.toolPolicy?.blockedTools?.length ?? 0}</strong></span>
-                  <span>{copy.toolCategoryCount}: <strong>{toolBundles.length}</strong></span>
-                </div>
-                <div className={styles.editorActions}>
-                  <VButton
-                    type="button"
-                    variant="primary"
-                    icon={<Wrench size={15} />}
-                    onPress={() => navigate(selectedAgentToolConfigRoute)}
-                  >
-                    {lang === "zh" ? "配置工具能力" : "Configure tools"}
-                  </VButton>
-                </div>
-              </section>
+              <AgentToolSummaryPanel
+                copy={copy}
+                lang={lang}
+                policyId={selectedAgent.toolPolicyId}
+                allowedCount={selectedAgent.toolPolicy?.allowedTools?.length ?? 0}
+                preferredCount={selectedAgent.toolPolicy?.preferredTools?.length ?? 0}
+                blockedCount={selectedAgent.toolPolicy?.blockedTools?.length ?? 0}
+                toolCategoryCount={toolBundles.length}
+                onConfigure={() => navigate(selectedAgentToolConfigRoute)}
+              />
 
               <section className={styles.configEditor}>
                 <div className={styles.panelHeader}>
