@@ -235,7 +235,7 @@ const styles: Record<string, string> = {
   returnButton:
     "returnButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
   route:
-    "route min-w-0 grid h-full min-h-0 content-start overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)]",
+    "route min-w-0 grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] content-start overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)]",
   rowSelect:
     "rowSelect min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   schemaDisclosure:
@@ -411,7 +411,7 @@ const styles: Record<string, string> = {
   toolCopy:
     "toolCopy min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
   toolDetailPanel:
-    "toolDetailPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+    "toolDetailPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)] grid min-h-0 content-start gap-1.5 overflow-auto",
   toolList:
     "toolList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
   toolPermissionGroup:
@@ -429,7 +429,7 @@ const styles: Record<string, string> = {
   ts:
     "ts min-w-0",
   workspace:
-    "workspace min-w-0 grid min-h-0 gap-2 p-2 !grid grid-cols-[var(--tools-left-panel-width)_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden",
+    "workspace min-w-0 grid h-full min-h-0 gap-2 p-2 !grid grid-cols-[var(--tools-left-panel-width)_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden",
   workspaceScopePanel:
     "workspaceScopePanel min-w-0 grid min-h-0 gap-2 p-2 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[7px] p-2 rounded-[7px] border border-[var(--border-soft)] bg-[var(--surface-card)] max-[900px]:grid-cols-[repeat(2,minmax(0,1fr))]",
 };

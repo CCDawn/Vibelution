@@ -308,4 +308,16 @@ describe("ToolsRoute layout contract", () => {
     expect(styles.policyDraftSummary).toContain("bg-[var(--surface-card)]");
     expect(styles.policyDraftSummary).toContain("max-[900px]:grid-cols-[repeat(2,minmax(0,1fr))]");
   });
+
+  it("allocates the remaining route height to the tools workspace", () => {
+    expect(styles.route).toContain("h-full");
+    expect(styles.route).toContain("grid-rows-[auto_auto_minmax(0,1fr)]");
+    expect(styles.route).toContain("overflow-hidden");
+    expect(styles.workspace).toContain("h-full");
+    expect(styles.workspace).toContain("min-h-0");
+    expect(styles.workspace).toContain("grid-rows-[minmax(0,1fr)]");
+    expect(styles.workspace).toContain("overflow-hidden");
+    expect(styles.listPanel).toContain("overflow-auto");
+    expect(styles.toolDetailPanel).toContain("overflow-auto");
+  });
 });

@@ -56,4 +56,16 @@ describe("LogsRoute layout contract", () => {
     expect(styles.workspace).toContain("grid-rows-[minmax(0,1fr)]");
     expect(styles.workspace).toContain("overflow-hidden");
   });
+
+  it("allocates the remaining route height to the logs workspace", () => {
+    expect(styles.route).toContain("h-full");
+    expect(styles.route).toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(styles.route).toContain("overflow-hidden");
+    expect(styles.workspace).toContain("h-full");
+    expect(styles.workspace).toContain("min-h-0");
+    expect(styles.workspace).toContain("grid-rows-[minmax(0,1fr)]");
+    expect(styles.workspace).toContain("overflow-hidden");
+    expect(styles.resizableLayout).toContain("h-full");
+    expect(styles.resizableLayout).toContain("overflow-hidden");
+  });
 });
