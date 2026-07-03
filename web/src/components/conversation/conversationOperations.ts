@@ -347,7 +347,7 @@ function reActGroupTitle(group: ConversationReActOperationGroup) {
   return primaryLabels.join("/") || "执行";
 }
 
-export function normalizeTimelineOperations(
+function normalizeTimelineOperations(
   operations: ConversationOperation[],
   messageStreaming: boolean,
 ): ConversationOperation[] {
@@ -548,7 +548,7 @@ function isRunningStatus(status: string) {
   );
 }
 
-export function displayToolLabel(name: string) {
+function displayToolLabel(name: string) {
   const normalized = String(name || "").trim();
   const lower = normalized.toLowerCase();
   if (!normalized) {
