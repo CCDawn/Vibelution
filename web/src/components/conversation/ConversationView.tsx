@@ -1225,18 +1225,11 @@ export function ConversationView({
     }
     return ids;
   }, [activeTimelineMessages, agentRenderStatesByMessageId]);
-  const timelineSignalMessages = useMemo(
-    () =>
-      showMentalSnapshots
-        ? timelineMessages
-        : timelineMessages.map((message) => ({ ...message, mentalSnapshot: undefined })),
-    [showMentalSnapshots, timelineMessages],
-  );
   const timelineScrollSignal = useMemo(
-    () => buildTimelineScrollSignal(timelineSignalMessages, agentRenderStatesByMessageId, {
+    () => buildTimelineScrollSignal(timelineMessages, agentRenderStatesByMessageId, {
       includeMentalSignals: showMentalSnapshots,
     }),
-    [agentRenderStatesByMessageId, showMentalSnapshots, timelineSignalMessages],
+    [agentRenderStatesByMessageId, showMentalSnapshots, timelineMessages],
   );
   const streamingTimelineScrollSignal = useMemo(
     () => buildStreamingTimelineScrollSignal(streamingTimelineMessages, agentRenderStatesByMessageId, {

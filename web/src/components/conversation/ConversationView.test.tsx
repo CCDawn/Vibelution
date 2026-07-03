@@ -1023,11 +1023,13 @@ describe("ConversationView edit resend affordance", () => {
   });
 
   it("derives process scroll and latest tool summaries from AgentMessage render state", () => {
-    expect(conversationViewSource).toContain("buildTimelineScrollSignal(timelineSignalMessages, agentRenderStatesByMessageId, {");
+    expect(conversationViewSource).toContain("buildTimelineScrollSignal(timelineMessages, agentRenderStatesByMessageId, {");
     expect(conversationViewSource).toContain("buildStreamingTimelineScrollSignal(streamingTimelineMessages, agentRenderStatesByMessageId, {");
     expect(conversationViewSource).toContain("renderState.toolCalls");
     expect(conversationViewSource).toContain("renderState.processSignal");
     expect(conversationViewSource).toContain("renderState.processSignalWithoutMental");
+    expect(conversationViewSource).not.toContain("timelineSignalMessages");
+    expect(conversationViewSource).not.toContain("mentalSnapshot: undefined");
     expect(conversationViewSource).not.toContain("message.thought?.length");
     expect(conversationViewSource).not.toContain("const mentalSnapshot = message.mentalSnapshot");
     expect(conversationViewSource).not.toContain("const toolSignal = (message.toolCalls ?? [])");
