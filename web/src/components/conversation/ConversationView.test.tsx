@@ -481,6 +481,13 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).not.toContain("conversationMessagesToAgentThread(");
   });
 
+  it("keeps AgentMessage render-state collection behind a focused helper", () => {
+    expect(conversationViewSource).toContain("buildAgentMessageRenderState");
+    expect(conversationViewSource).toContain("const agentRenderState = buildAgentMessageRenderState(agentMessage)");
+    expect(conversationViewSource).not.toContain("function contentSectionIdsForChannel");
+    expect(conversationViewSource).not.toContain("function processSectionIdsForSections");
+  });
+
   it("coalesces streaming auto-scroll frames without dispatching bottom state on every token", () => {
     expect(conversationViewSource).toContain("streamingScrollFrameRef");
     expect(conversationViewSource).toContain("function scrollTimelineToBottom");
