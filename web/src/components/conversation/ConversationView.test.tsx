@@ -368,6 +368,19 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.answerOnlyProcessGroup).toContain("p-0");
   });
 
+  it("keeps visible message shell styles as named Tailwind slices", () => {
+    expect(conversationViewStylesModuleSource).toContain("const conversationViewScope");
+    expect(conversationViewStylesModuleSource).toContain("const readableMessageText");
+    expect(conversationViewStylesModuleSource).toContain("const assistantResponseSection");
+    expect(conversationViewStylesModuleSource).toContain("const assistantResponseBody");
+    expect(conversationViewStylesModuleSource).toContain("const answerOnlyProcessShell");
+    expect(conversationViewStylesModuleSource).toContain("const userMessageBubble");
+    expect(conversationViewStylesModuleSource).toContain("responseSection: assistantResponseSection");
+    expect(conversationViewStylesModuleSource).toContain("responseBody: assistantResponseBody");
+    expect(conversationViewStylesModuleSource).toContain("answerOnlyProcessGroup: answerOnlyProcessShell");
+    expect(conversationViewStylesModuleSource).toContain("userMessageBody: userMessageBubble");
+  });
+
   it("uses shared readable scale tokens for dense conversation text", () => {
     expect(conversationViewStylesSource).toContain("var(--vui-font-xs)");
     expect(conversationViewStylesSource).toContain("var(--vui-font-sm)");
