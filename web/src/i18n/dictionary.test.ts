@@ -5,6 +5,11 @@ import { petAvatarPresetLabel } from "./petLabels";
 import { shellDictionary } from "./shellDictionary";
 
 describe("dictionary", () => {
+  it("does not keep the retired conversation operation summary key", () => {
+    expect("conversationOperationsExecuted" in dictionary.zh).toBe(false);
+    expect("conversationOperationsExecuted" in dictionary.en).toBe(false);
+  });
+
   it("keeps the pet area readable in Chinese", () => {
     const keys = [
       "petSpace",
