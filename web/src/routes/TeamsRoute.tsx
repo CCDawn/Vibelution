@@ -83,6 +83,13 @@ import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import { TeamMemoryIndexPanel, type TeamMemoryIndexMember } from "./TeamMemoryIndexPanel";
 import { TeamSourceCollectionStageAgentsPanel, type TeamSourceCollectionStageAgentCard, type TeamSourceCollectionStageAgentTone } from "./TeamSourceCollectionStageAgentsPanel";
 import { TeamSourceCollectionRunSwitcherPanel, type TeamSourceCollectionRunSwitcherRun } from "./TeamSourceCollectionRunSwitcherPanel";
+import {
+  TeamSourceCollectionSourceDetailPanel,
+  type TeamSourceCollectionSourceDetailAction,
+  type TeamSourceCollectionSourceDetailEvidence,
+  type TeamSourceCollectionSourceDetailFact,
+  type TeamSourceCollectionSourceDetailLink,
+} from "./TeamSourceCollectionSourceDetailPanel";
 import { TeamSourceCollectionStorageActionsPanel, type TeamSourceCollectionStorageAction } from "./TeamSourceCollectionStorageActionsPanel";
 import { TeamWorkflowGraphView, workflowGraphLayout } from "./TeamWorkflowGraphView";
 import styles from "./TeamsRoute.styles";
@@ -7681,7 +7688,65 @@ export function TeamsRoute({
       : null;
     const hasReadableSource = Boolean(provenance.href || fileStorageTarget);
     const hasSearchEvidence = Boolean(trace.searchUrl || trace.query || trace.searchProvider || trace.queryId || trace.assignmentId);
-    const traceRows = [
+    const storageTargets: SourceCollectionStorageOpenTarget[] = ["run_directory", "search_events", "records", "candidates"];
+    const readableLinks: TeamSourceCollectionSourceDetailLink[] = provenance.href
+      ? [{
+          id: "source",
+          href: provenance.href,
+          title: provenance.href,
+          label: sourceCollectionCandidateOpenLabel(provenance, lang),
+        }]
+      : [];
+    const sourceActions: TeamSourceCollectionSourceDetailAction[] = fileStorageTarget
+      ? [{
+          id: `file-${fileStorageTarget}`,
+          target: fileStorageTarget,
+          runId,
+          label: sourceCollectionStorageTargetLabel(fileStorageTarget, lang),
+          title: provenance.value,
+        }]
+      : [];
+    const storageActions: TeamSourceCollectionSourceDetailAction[] = runId
+      ? storageTargets.map((target) => ({
+          id: `${selectedSourceCollectionCandidate.candidateId}-${target}`,
+          target,
+          runId,
+          label: sourceCollectionStorageTargetLabel(target, lang),
+        }))
+      : [];
+    const noticeMessage = hasReadableSource
+      ? ""
+      : provenance.kind === "search_evidence"
+        ? (lang === "zh" ? "仅有搜索记录，缺少可读来源" : "Only search evidence is available")
+        : (lang === "zh" ? "缺少可读来源" : "Readable source missing");
+    const searchEvidence: TeamSourceCollectionSourceDetailEvidence[] = [
+      trace.query
+        ? {
+            id: "query",
+            label: lang === "zh" ? "搜索问题" : "Search query",
+            value: translateResearchPhrase(trace.query, lang),
+            title: trace.query,
+          }
+        : null,
+      trace.searchProvider
+        ? {
+            id: "provider",
+            label: lang === "zh" ? "搜索源" : "Provider",
+            value: trace.searchProvider,
+            title: trace.searchProvider,
+          }
+        : null,
+      trace.searchUrl
+        ? {
+            id: "api",
+            label: lang === "zh" ? "API 证据" : "API evidence",
+            value: lang === "zh" ? "打开 API 原文" : "Open raw API",
+            title: trace.searchUrl,
+            href: trace.searchUrl,
+          }
+        : null,
+    ].filter((item): item is TeamSourceCollectionSourceDetailEvidence => Boolean(item));
+    const facts: TeamSourceCollectionSourceDetailFact[] = [
       [lang === "zh" ? "类型" : "Type", sourceCollectionSourceTypeLabel(selectedSourceCollectionCandidate.sourceKind || selectedSourceCollectionCandidate.candidateType, lang)],
       [lang === "zh" ? "来源" : "Source", provenance.value],
       [lang === "zh" ? "查询" : "Query", trace.query ? translateResearchPhrase(trace.query, lang) : ""],
@@ -7689,103 +7754,27 @@ export function TeamsRoute({
       [lang === "zh" ? "批次" : "Run", runId ? sourceCollectionRunLabel(runId) : ""],
       [lang === "zh" ? "分工" : "Assignment", trace.assignmentId],
       [lang === "zh" ? "搜索源" : "Provider", trace.searchProvider],
-    ].filter(([, value]) => Boolean(value));
-    const storageTargets: SourceCollectionStorageOpenTarget[] = ["run_directory", "search_events", "records", "candidates"];
+    ]
+      .filter(([, value]) => Boolean(value))
+      .map(([label, value]) => ({ label: String(label), value: String(value) }));
+    const statusLabel = sourceQualitySummary
+      ? `${workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)} · ${sourceQualitySummary.overallScore}/100`
+      : workflowStateLabel(selectedSourceCollectionCandidate.currentState, lang);
     return (
-      <section className={styles.sourceCollectionSourceDetailPanel} aria-label={lang === "zh" ? "资料来源详情" : "Source provenance detail"}>
-        <div className={styles.sourceCollectionSourceDetailHeader}>
-          <div>
-            <strong title={selectedSourceCollectionCandidate.title || selectedSourceCollectionCandidate.candidateId}>
-              {selectedSourceCollectionCandidate.title || selectedSourceCollectionCandidate.candidateId}
-            </strong>
-            <span>{selectedSourceCollectionCandidate.candidateId}</span>
-          </div>
-          <span className={`${styles.workflowTag} ${workflowQualityTone(selectedSourceCollectionCandidate.qualityStatus)}`}>
-            {sourceQualitySummary
-              ? `${workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)} · ${sourceQualitySummary.overallScore}/100`
-              : workflowStateLabel(selectedSourceCollectionCandidate.currentState, lang)}
-          </span>
-        </div>
-        <div className={styles.sourceCollectionSourceDetailActions}>
-          {hasReadableSource ? (
-            <>
-              {provenance.href ? (
-                <a href={provenance.href} target="_blank" rel="noreferrer" title={provenance.href}>
-                  <Link2 size={12} />
-                  {sourceCollectionCandidateOpenLabel(provenance, lang)}
-                </a>
-              ) : null}
-              {fileStorageTarget ? (
-                <VNativeButton
-                  type="button"
-                  onClick={() => openSourceCollectionStorageTarget(fileStorageTarget, runId)}
-                  disabled={selectedSourceCollectionStorageOpenPending}
-                  title={provenance.value}
-                >
-                  <Link2 size={12} />
-                  {sourceCollectionStorageTargetLabel(fileStorageTarget, lang)}
-                </VNativeButton>
-              ) : null}
-            </>
-          ) : (
-            <span className={styles.sourceCollectionSourceDetailNotice}>
-              {provenance.kind === "search_evidence"
-                ? (lang === "zh" ? "仅有搜索记录，缺少可读来源" : "Only search evidence is available")
-                : (lang === "zh" ? "缺少可读来源" : "Readable source missing")}
-            </span>
-          )}
-          {runId ? storageTargets.map((target) => (
-            <VNativeButton
-              key={`${selectedSourceCollectionCandidate.candidateId}-${target}`}
-              type="button"
-              onClick={() => openSourceCollectionStorageTarget(target, runId)}
-              disabled={selectedSourceCollectionStorageOpenPending}
-            >
-              <Link2 size={12} />
-              {sourceCollectionStorageTargetLabel(target, lang)}
-            </VNativeButton>
-          )) : null}
-        </div>
-        {hasSearchEvidence ? (
-          <details className={styles.sourceCollectionSearchEvidence}>
-            <summary>
-              <Search size={12} />
-              {lang === "zh" ? "查看搜索证据" : "View search evidence"}
-            </summary>
-            <div className={styles.sourceCollectionSearchEvidenceBody}>
-              {trace.query ? (
-                <span>
-                  <b>{lang === "zh" ? "搜索问题" : "Search query"}</b>
-                  <code title={trace.query}>{translateResearchPhrase(trace.query, lang)}</code>
-                </span>
-              ) : null}
-              {trace.searchProvider ? (
-                <span>
-                  <b>{lang === "zh" ? "搜索源" : "Provider"}</b>
-                  <code title={trace.searchProvider}>{trace.searchProvider}</code>
-                </span>
-              ) : null}
-              {trace.searchUrl ? (
-                <span>
-                  <b>{lang === "zh" ? "API 证据" : "API evidence"}</b>
-                  <a href={trace.searchUrl} target="_blank" rel="noreferrer" title={trace.searchUrl}>
-                    <Link2 size={12} />
-                    {lang === "zh" ? "打开 API 原文" : "Open raw API"}
-                  </a>
-                </span>
-              ) : null}
-            </div>
-          </details>
-        ) : null}
-        <div className={styles.sourceCollectionSourceDetailFacts}>
-          {traceRows.map(([label, value]) => (
-            <span key={`${label}-${value}`}>
-              <b>{label}</b>
-              <code title={value}>{value}</code>
-            </span>
-          ))}
-        </div>
-      </section>
+      <TeamSourceCollectionSourceDetailPanel
+        lang={lang}
+        title={selectedSourceCollectionCandidate.title || selectedSourceCollectionCandidate.candidateId}
+        candidateId={selectedSourceCollectionCandidate.candidateId}
+        statusLabel={statusLabel}
+        statusToneClassName={workflowQualityTone(selectedSourceCollectionCandidate.qualityStatus)}
+        readableLinks={readableLinks}
+        actions={[...sourceActions, ...storageActions]}
+        noticeMessage={noticeMessage}
+        searchEvidence={hasSearchEvidence ? searchEvidence : []}
+        facts={facts}
+        pending={selectedSourceCollectionStorageOpenPending}
+        onOpenTarget={(target, targetRunId) => openSourceCollectionStorageTarget(target as SourceCollectionStorageOpenTarget, targetRunId)}
+      />
     );
   }
 
