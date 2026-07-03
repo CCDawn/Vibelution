@@ -421,6 +421,7 @@ def _schema_for_tool_policy(
 
 def _payload_thinking_parameters(
     profile: LLMProfile,
+    provider: ProviderConfig,
     route: ResolvedProtocolRoute,
     actions: PayloadPolicyActions,
 ) -> Dict[str, Any]:
@@ -429,11 +430,43 @@ def _payload_thinking_parameters(
         return {}
     if thinking_type == "disabled":
         actions.qwen_thinking_parameter = "disabled"
-        return {"enable_thinking": False}
+        enabled = False
+        return _qwen_thinking_payload(enabled, provider=provider, route=route)
     if thinking_type:
         actions.qwen_thinking_parameter = "enabled"
-        return {"enable_thinking": True}
+        enabled = True
+        return _qwen_thinking_payload(enabled, provider=provider, route=route)
     return {}
+
+
+def _qwen_thinking_payload(
+    enabled: bool,
+    *,
+    provider: ProviderConfig,
+    route: ResolvedProtocolRoute,
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {"enable_thinking": enabled}
+    provider_kind = str(getattr(provider, "kind", "") or "").strip().lower()
+    protocol = str(getattr(route.protocol, "value", route.protocol) or "").strip().lower()
+    if provider_kind == "local" and protocol == "qwen_thinking_no_prefill":
+        payload["extra_body"] = {"chat_template_kwargs": {"enable_thinking": enabled}}
+    return payload
+
+
+def _merge_extra_body(payload: Dict[str, Any], extra_body: Any) -> None:
+    if not isinstance(extra_body, dict) or not extra_body:
+        return
+    existing = payload.get("extra_body")
+    if not isinstance(existing, dict):
+        payload["extra_body"] = dict(extra_body)
+        return
+    merged = dict(existing)
+    for key, value in extra_body.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = {**merged[key], **value}
+        else:
+            merged[key] = value
+    payload["extra_body"] = merged
 
 
 def _content_cache_marker_count(content: Any) -> int:
@@ -667,7 +700,10 @@ def build_llm_payload(
     }
     payload.update(adapter.payload_sampling_parameters())
     payload.update(adapter.payload_thinking_parameters())
-    payload.update(_payload_thinking_parameters(profile, route, policy_actions))
+    thinking_payload = _payload_thinking_parameters(profile, build_input.provider, route, policy_actions)
+    thinking_extra_body = thinking_payload.pop("extra_body", None)
+    payload.update(thinking_payload)
+    _merge_extra_body(payload, thinking_extra_body)
 
     prompt_cache = getattr(profile, "prompt_cache", None)
     if prompt_cache_mode == "automatic":

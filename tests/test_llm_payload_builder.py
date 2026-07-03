@@ -24,6 +24,22 @@ def make_llamacpp_qwen_config(**kwargs):
     return make_config(**values)
 
 
+def make_vllm_qwen_config(**kwargs):
+    values = {
+        "llm.providers.default.kind": "local",
+        "llm.providers.default.requires_api_key": False,
+        "llm.providers.default.base_url": "http://192.168.20.63:8011/v1",
+        "llm.providers.default.api": "openai-completions",
+        "llm.profiles.primary.provider_id": "default",
+        "llm.profiles.primary.model": "qwen3.6-35b-a3b",
+        "llm.profiles.primary.protocol": "qwen_thinking_no_prefill",
+        "llm.profiles.primary.transport": "chat_completions",
+        "llm.profiles.primary.thinking_type": "adaptive",
+    }
+    values.update(kwargs)
+    return make_config(**values)
+
+
 def test_llamacpp_qwen_thinking_shapes_system_messages_and_thinking_flag():
     client = LLMClient(config=make_llamacpp_qwen_config(), backend=lambda payload: payload)
 
@@ -39,6 +55,27 @@ def test_llamacpp_qwen_thinking_shapes_system_messages_and_thinking_flag():
     assert [item["role"] for item in payload["messages"]] == ["system", "user", "user"]
     assert client._last_payload_protocol_summary["payloadPolicySystemMessagesConverted"] == 1
     assert client._last_payload_protocol_summary["payloadPolicyQwenThinkingParameter"] == "enabled"
+
+
+def test_vllm_qwen_thinking_adds_chat_template_kwargs_for_reasoning_parser():
+    client = LLMClient(config=make_vllm_qwen_config(), backend=lambda payload: payload)
+
+    payload = client._build_payload([{"role": "user", "content": "ping"}])
+
+    assert payload["enable_thinking"] is True
+    assert payload["extra_body"]["chat_template_kwargs"]["enable_thinking"] is True
+
+
+def test_vllm_qwen_thinking_disabled_updates_chat_template_kwargs():
+    client = LLMClient(
+        config=make_vllm_qwen_config(**{"llm.profiles.primary.thinking_type": "disabled"}),
+        backend=lambda payload: payload,
+    )
+
+    payload = client._build_payload([{"role": "user", "content": "ping"}])
+
+    assert payload["enable_thinking"] is False
+    assert payload["extra_body"]["chat_template_kwargs"]["enable_thinking"] is False
 
 
 def test_llamacpp_qwen_thinking_strips_empty_assistant_prefill_and_reasoning():
