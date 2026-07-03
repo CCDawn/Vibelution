@@ -26,19 +26,6 @@ export function hasMentalSnapshot(snapshot: MentalStateSnapshot | undefined) {
   ].some((value) => String(value ?? "").trim().length > 0);
 }
 
-export function hasThoughtBlock(message: ConversationMessage) {
-  return message.role === "assistant"
-    && Boolean(message.thought?.trim());
-}
-
-export function hasMentalBlock(message: ConversationMessage) {
-  return message.role === "assistant" && hasMentalSnapshot(message.mentalSnapshot);
-}
-
-export function hasToolBlock(message: ConversationMessage) {
-  return message.role === "assistant" && (message.toolCalls?.length ?? 0) > 0;
-}
-
 export type AgentMessageSectionState = {
   sectionCount: number;
   sectionKinds: AgentMessageSectionKind[];
@@ -311,19 +298,6 @@ export function isGroupRoomTranscriptMessage(message: ConversationMessage) {
     return true;
   }
   return String(message.content ?? "").trim().startsWith("[群聊同步]");
-}
-
-export function hasUserContent(message: ConversationMessage) {
-  return message.role !== "assistant" && Boolean(message.content.trim());
-}
-
-export function hasResponseBlock(message: ConversationMessage) {
-  return message.role === "assistant"
-    && !isRuntimeNoticeMessage(message)
-    && !isRuntimeStatusContent(message)
-    && !isTurnErrorMessage(message)
-    && !isGroupRoomTranscriptMessage(message)
-    && Boolean(message.content.trim());
 }
 
 export type ImageArtifactMessage = {
