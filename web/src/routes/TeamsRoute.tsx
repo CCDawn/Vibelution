@@ -7831,26 +7831,28 @@ export function TeamsRoute({
           <span>{lang === "zh" ? "待 Agent 复核" : "pending agent review"} <strong>{sourceCollectionRunPendingScreeningCountText}</strong></span>
         </div>
         <div className={styles.sourceCollectionPanelActions}>
-          <VNativeButton
+          <VButton
             type="button"
-            className={styles.sourceCollectionStagePrimaryAction}
-            onClick={runSourceCollectionScreeningAction}
-            disabled={sourceCollectionScreeningDisabled || selectedTeamSourceQualityPending}
+            density="compact"
+            variant="primary"
+            icon={<CheckCircle2 size={13} />}
+            onPress={runSourceCollectionScreeningAction}
+            isDisabled={sourceCollectionScreeningDisabled || selectedTeamSourceQualityPending}
             title={sourceCollectionActionDisabledTitle(sourceCollectionScreeningActionReadiness, sourceCollectionScreeningButtonText)}
           >
-            <CheckCircle2 size={13} />
             {sourceCollectionScreeningButtonText}
-          </VNativeButton>
-          <VNativeButton
+          </VButton>
+          <VButton
             type="button"
-            className={styles.sourceCollectionStageSecondaryAction}
-            onClick={openSourceCollectionScreeningPanel}
-            disabled={sourceCollectionScreeningDisabled}
+            density="compact"
+            variant="secondary"
+            icon={<Eye size={13} />}
+            onPress={openSourceCollectionScreeningPanel}
+            isDisabled={sourceCollectionScreeningDisabled}
             title={sourceCollectionActionDisabledTitle(sourceCollectionScreeningActionReadiness, lang === "zh" ? "查看筛选结果" : "View results")}
           >
-            <Eye size={13} />
             {lang === "zh" ? "查看筛选结果" : "View results"}
-          </VNativeButton>
+          </VButton>
         </div>
         {screeningCandidates.length ? (
           <div
@@ -8110,30 +8112,37 @@ export function TeamsRoute({
           </div>
         </div>
         <div className={styles.sourceCollectionExtractionRecoveryActions}>
-          <VNativeButton
+          <VButton
             type="button"
-            className={styles.sourceCollectionStagePrimaryAction}
-            onClick={runSourceCollectionCandidateExtractionAction}
-            disabled={sourceCollectionCandidateExtractionActionReadiness.disabled}
+            density="compact"
+            variant="primary"
+            icon={<RefreshCw size={13} />}
+            onPress={runSourceCollectionCandidateExtractionAction}
+            isDisabled={sourceCollectionCandidateExtractionActionReadiness.disabled}
             title={sourceCollectionActionDisabledTitle(sourceCollectionCandidateExtractionActionReadiness, lang === "zh" ? "继续补全提炼" : "Continue extraction")}
           >
-            <RefreshCw size={13} />
             {lang === "zh" ? "继续补全提炼" : "Continue extraction"}
-          </VNativeButton>
-          <VNativeButton
+          </VButton>
+          <VButton
             type="button"
-            className={styles.sourceCollectionStageSecondaryAction}
-            onClick={runSourceCollectionScreeningAction}
-            disabled={sourceCollectionScreeningActionReadiness.disabled}
+            density="compact"
+            variant="secondary"
+            icon={<CheckCircle2 size={13} />}
+            onPress={runSourceCollectionScreeningAction}
+            isDisabled={sourceCollectionScreeningActionReadiness.disabled}
             title={sourceCollectionActionDisabledTitle(sourceCollectionScreeningActionReadiness, sourceCollectionScreeningButtonText)}
           >
-            <CheckCircle2 size={13} />
             {sourceCollectionScreeningButtonText}
-          </VNativeButton>
-          <VNativeButton type="button" className={styles.sourceCollectionStageSecondaryAction} onClick={() => void openSourceCollectionStageAgentChat("extraction")}>
-            <MessageSquare size={13} />
+          </VButton>
+          <VButton
+            type="button"
+            density="compact"
+            variant="secondary"
+            icon={<MessageSquare size={13} />}
+            onPress={() => void openSourceCollectionStageAgentChat("extraction")}
+          >
             {lang === "zh" ? "进入 Agent 私聊" : "Open Agent chat"}
-          </VNativeButton>
+          </VButton>
         </div>
       </section>
     );
@@ -9842,16 +9851,18 @@ export function TeamsRoute({
                 {lang === "zh" ? "团队讨论" : "Team discussion"}
               </Link>
             ) : (
-              <VNativeButton
+              <VButton
                 type="button"
-                onClick={() => selectedTeam?.teamId && syncTeamChatRoomMutation.mutate(selectedTeam.teamId)}
-                disabled={!selectedTeam || activeTeamMemberCount === 0 || selectedTeamSyncPending}
+                density="compact"
+                variant="secondary"
+                icon={<Users size={14} />}
+                onPress={() => selectedTeam?.teamId && syncTeamChatRoomMutation.mutate(selectedTeam.teamId)}
+                isDisabled={!selectedTeam || activeTeamMemberCount === 0 || selectedTeamSyncPending}
               >
-                <Users size={14} />
                 {selectedTeamSyncPending
                   ? (lang === "zh" ? "同步中" : "Syncing")
                   : (lang === "zh" ? "同步团队讨论" : "Sync team discussion")}
-              </VNativeButton>
+              </VButton>
             )}
             <Link to={teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)}>
               <ArrowLeft size={14} />
@@ -11925,10 +11936,16 @@ export function TeamsRoute({
               <ArrowLeft size={14} />
               {lang === "zh" ? "返回团队页面" : "Back to team"}
             </Link>
-            <VNativeButton type="button" onClick={() => void sourceCollectionRunsQuery.refetch()} disabled={sourceCollectionRunsQuery.isFetching}>
-              <RefreshCw size={14} />
+            <VButton
+              type="button"
+              density="compact"
+              variant="secondary"
+              icon={<RefreshCw size={14} />}
+              onPress={() => void sourceCollectionRunsQuery.refetch()}
+              isDisabled={sourceCollectionRunsQuery.isFetching}
+            >
               {lang === "zh" ? "刷新" : "Refresh"}
-            </VNativeButton>
+            </VButton>
           </div>
         </header>
         {researchWorkflowTeamSelected ? (
