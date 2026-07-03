@@ -5,11 +5,11 @@ import { readFileSync } from "node:fs";
 import routeSource from "./AgentsRoute.tsx?raw";
 import agentManagementNavSource from "./AgentManagementNav.tsx?raw";
 import agentWorkspaceCacheSource from "./agentWorkspaceCache.ts?raw";
-import styles from "./AgentsRoute.module.css";
+import styles from "./AgentsRoute.styles";
+import stylesSource from "./AgentsRoute.styles.ts?raw";
 import routerSource from "../app/router.tsx?raw";
 import shellSource from "../app/AppShell.tsx?raw";
 
-const stylesSource = readFileSync(new URL("./AgentsRoute.module.css", import.meta.url), "utf-8");
 const bulkActionBarSource = readFileSync(
   new URL("../components/vui/product/agent-management/AgentBulkActionBar.tsx", import.meta.url),
   "utf-8",
@@ -234,6 +234,9 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.delegation");
     expect(routeSource).toContain("copy.modeMembership");
     expect(routeSource).toContain("copy.references");
+    expect(styles.factGrid).toContain("[grid-template-columns:repeat(auto-fit,_minmax(190px,_1fr))]");
+    expect(styles.factGrid).toContain("[&_section]:[grid-template-columns:18px_minmax(0,_1fr)]");
+    expect(styles.factGrid).toContain("[&_strong]:[text-overflow:ellipsis]");
   });
 
   it("lets each Agent inherit or override its context compression policy", () => {
@@ -960,31 +963,31 @@ describe("AgentsRoute layout contract", () => {
     expect(denseListSource).toContain('data-vui="agent-row"');
     expect(routeSource).toContain("styles.detailPanel");
     expect(styles.workspace).toBeTruthy();
-    expect(stylesSource).toContain("grid-template-columns: minmax(214px, 268px) minmax(430px, 1.08fr) minmax(330px, 0.86fr)");
-    expect(stylesSource).toContain("@media (max-width: 1040px)");
-    expect(stylesSource).not.toContain("@media (max-width: 1280px)");
-    expect(stylesSource).toContain("grid-auto-rows: minmax(180px, auto)");
-    expect(stylesSource).toContain("grid-template-rows: auto auto minmax(0, 1fr)");
-    expect(stylesSource).toContain("overflow: auto");
-    expect(stylesSource).toContain("min-height: 220px");
+    expect(styles.workspace).toContain("[grid-template-columns:minmax(214px,_268px)_minmax(430px,_1.08fr)_minmax(330px,_0.86fr)]");
+    expect(styles.workspace).toContain("max-[1040px]:[grid-template-columns:minmax(220px,_270px)_minmax(0,_1fr)]");
+    expect(stylesSource).not.toContain("max-[1280px]");
+    expect(styles.workspace).toContain("max-[1040px]:[grid-auto-rows:minmax(180px,_auto)]");
+    expect(styles.agentPanel).toContain("[grid-template-rows:auto_auto_minmax(0,_1fr)]");
+    expect(styles.detailPanel).toContain("[overflow:auto]");
+    expect(styles.detailPanel).toContain("max-[1040px]:[min-height:220px]");
+    expect(styles.detailPanel).not.toContain("max-[1040px]:hidden");
+    expect(styles.detailPanelCreating).toContain("max-[1040px]:hidden");
   });
 
   it("keeps the 1024px Agent management stack compact enough to show list and detail context", () => {
-    const narrowBreakpoint = stylesSource.slice(stylesSource.indexOf("@media (max-width: 860px)"));
-
-    expect(narrowBreakpoint).toContain("grid-auto-rows: auto");
-    expect(narrowBreakpoint).toContain("align-content: start");
-    expect(narrowBreakpoint).toContain(".filterPanel {\n    min-height: 150px;");
-    expect(narrowBreakpoint).toContain(".agentPanel {\n    min-height: 240px;");
-    expect(narrowBreakpoint).toContain(".detailPanel {\n    min-height: 180px;");
+    expect(styles.workspace).toContain("max-[860px]:[grid-auto-rows:auto]");
+    expect(styles.workspace).toContain("max-[860px]:[align-content:start]");
+    expect(styles.filterPanel).toContain("max-[860px]:[min-height:150px]");
+    expect(styles.agentPanel).toContain("max-[860px]:[min-height:240px]");
+    expect(styles.detailPanel).toContain("max-[860px]:[min-height:420px]");
   });
 
   it("keeps Agent empty states compact and left-aligned for dense workbench scanning", () => {
     expect(styles.emptyState).toBeTruthy();
     expect(routeSource).toContain("styles.emptyState");
-    expect(stylesSource).toContain("place-items: start");
-    expect(stylesSource).toContain("min-height: 72px");
-    expect(stylesSource).toContain("text-align: left");
+    expect(styles.emptyState).toContain("[place-items:start]");
+    expect(styles.emptyState).toContain("[min-height:72px]");
+    expect(styles.emptyState).toContain("[text-align:left]");
   });
 
   it("renders every Agent as a person name plus colored functional role tag", () => {
@@ -1038,12 +1041,12 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("styles.bulkFieldHeader");
     expect(routeSource).toContain("bulkSelected: selectedBulkAgentIds.has(agent.agentId)");
     expect(denseListSource).toContain("onToggleBulk");
-    expect(stylesSource).toContain("grid-template-rows: auto auto minmax(0, 1fr)");
+    expect(styles.agentPanel).toContain("[grid-template-rows:auto_auto_minmax(0,_1fr)]");
     expect(routeSource).not.toContain("styles.bulkActionBar");
     expect(stylesSource).not.toContain(".bulkActionBar {");
     expect(stylesSource).not.toContain(".bulkSummary");
     expect(stylesSource).not.toContain(".bulkPromptPicker");
-    expect(stylesSource).toContain(".agentRowBulkSelected");
+    expect(styles.agentRowBulkSelected).toContain("[background:color-mix(in_srgb,_var(--accent-cool)_10%,_var(--surface-panel-strong))]");
     expect(bulkActionBarSource).toContain("!flex-nowrap items-center overflow-x-auto");
     expect(bulkActionBarSource).not.toContain("!flex-wrap items-center overflow-visible");
   });

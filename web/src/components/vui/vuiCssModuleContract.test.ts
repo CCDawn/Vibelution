@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 
 const sourceRoot = resolve(import.meta.dirname, "../..");
 const allowedRestoredRouteModules = [
-  "routes/AgentsRoute.module.css",
   "routes/EvolutionRoute.module.css",
 ] as const;
 
