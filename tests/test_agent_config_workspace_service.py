@@ -1019,6 +1019,44 @@ def test_agent_config_workspace_reports_missing_model_key_and_prompt(tmp_path, m
     assert research_choice["contextWindow"] == 64000
 
 
+def test_agent_config_workspace_allows_self_evolution_observer_without_prompt_template():
+    agent = {
+        "agentId": "agent-observer",
+        "agentCode": "A102",
+        "displayName": "观察 Agent",
+        "status": "active",
+        "primaryMode": "self_evolution",
+        "roleKey": "observer",
+        "promptTemplateId": "",
+        "directSessionId": "session-observer",
+        "workspacePath": "workspace/agents/agent-observer",
+        "toolPolicyId": "tool-agent-observer",
+        "memoryPolicyId": "memory-agent-observer",
+        "toolPolicy": {"allowedTools": []},
+        "llmBindings": {"dialogue": {"modelId": "model-primary"}},
+        "metadata": {"fixedRole": True, "selfEvolutionRole": "observer"},
+        "personaProfile": {"background": "旁路观察自进化。"},
+        "taskProfile": {"mission": "观察风险信号。"},
+    }
+
+    health = agent_config_workspace_service._derive_health(
+        agents=[agent],
+        prompt_refs={},
+        model_refs={"model-primary": {"modelId": "model-primary", "requiresApiKey": False}},
+        mode_bindings={"modes": {}},
+        chat_rooms=[],
+        teams=[],
+        active_agent_ids={"agent-observer"},
+    )
+
+    prompt_issue_codes = {
+        item["code"]
+        for item in health["issues"]
+        if "prompt" in str(item.get("code") or "")
+    }
+    assert "missing_prompt_template_id" not in prompt_issue_codes
+
+
 def test_agent_api_effective_compression_uses_dialogue_model_context_window(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     cfg = config_package.get_config().model_copy(deep=True)
