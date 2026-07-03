@@ -366,7 +366,7 @@ function normalizeTimelineOperations(
     ? merged.length - 1
     : -1;
   const latestProgressIndex = findLatestConcreteProgressIndex(merged);
-  return merged.map((operation, index) => {
+  const normalized = merged.map((operation, index) => {
     if (
       isSyntheticFailedOperation(operation)
       && (["thought", "mental"].includes(operation.kind) || index < latestProgressIndex)
@@ -389,6 +389,7 @@ function normalizeTimelineOperations(
       rawStatus: operation.rawStatus ?? operation.status,
     };
   });
+  return compactRepeatedBatchedProgressTools(normalized);
 }
 
 function findLatestConcreteProgressIndex(operations: ConversationOperation[]) {
@@ -409,6 +410,68 @@ function isSyntheticFailedOperation(operation: ConversationOperation) {
     return false;
   }
   return operation.kind === "status" || operation.kind === "thought" || operation.kind === "mental";
+}
+
+function compactRepeatedBatchedProgressTools(operations: ConversationOperation[]) {
+  const batchKeysWithFailures = new Set(
+    operations
+      .filter((operation) => isBatchedProgressTool(operation) && operation.status === "failed")
+      .map((operation) => batchedProgressToolKey(operation)),
+  );
+  const reversedCompacted: ConversationOperation[] = [];
+  const seenKeys = new Set<string>();
+  const droppedThoughtSequences = new Set<number>();
+
+  for (let index = operations.length - 1; index >= 0; index -= 1) {
+    const operation = operations[index];
+    if (!isBatchedProgressTool(operation) || batchKeysWithFailures.has(batchedProgressToolKey(operation))) {
+      reversedCompacted.push(operation);
+      continue;
+    }
+    const key = batchedProgressToolKey(operation);
+    if (!seenKeys.has(key)) {
+      seenKeys.add(key);
+      reversedCompacted.push(operation);
+      continue;
+    }
+    if (typeof operation.relatedThoughtSequence === "number") {
+      droppedThoughtSequences.add(operation.relatedThoughtSequence);
+    }
+  }
+
+  const compacted = reversedCompacted.reverse();
+  if (droppedThoughtSequences.size === 0) {
+    return compacted;
+  }
+  const retainedThoughtSequences = new Set(
+    compacted
+      .map((operation) => operation.relatedThoughtSequence)
+      .filter((sequence): sequence is number => typeof sequence === "number"),
+  );
+  return compacted.filter((operation) => {
+    if (
+      operation.kind === "thought"
+      && typeof operation.sequence === "number"
+      && droppedThoughtSequences.has(operation.sequence)
+      && !retainedThoughtSequences.has(operation.sequence)
+      && operation.status === "done"
+    ) {
+      return false;
+    }
+    return true;
+  });
+}
+
+function isBatchedProgressTool(operation: ConversationOperation) {
+  if (operation.kind !== "tool") {
+    return false;
+  }
+  const rawName = String(operation.rawLabel ?? operation.label ?? "").trim().toLowerCase();
+  return rawName === "source_collection_stage_writeback_tool";
+}
+
+function batchedProgressToolKey(operation: ConversationOperation) {
+  return String(operation.rawLabel ?? operation.label ?? "").trim().toLowerCase();
 }
 
 function mergeThoughtOperation(

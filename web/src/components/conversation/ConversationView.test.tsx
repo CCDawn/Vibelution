@@ -1647,6 +1647,56 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("写回尝试完成");
   });
 
+  it("keeps repeated successful writeback batches behind one compact process summary", () => {
+    const feedbackEvents = [
+      {
+        sequence: 1,
+        kind: "thought" as const,
+        status: "done",
+        summary: "继续回写第1批。",
+        resultPreview: "继续回写第1批。",
+      },
+      ...Array.from({ length: 7 }, (_, index) => ({
+        sequence: index + 2,
+        kind: "tool" as const,
+        status: index === 6 ? "running" : "completed",
+        name: "source_collection_stage_writeback_tool",
+        summary: index === 6
+          ? "资料提炼进行中：已完成第7批4条候选提炼"
+          : `资料提炼进行中：已完成第${index + 1}批5条候选提炼`,
+        arguments: {
+          agentId: "agent-20260629-201552-158796",
+          resultJson: "{ batch payload omitted }",
+        },
+        resultPreview: index === 6 ? "completed" : "accepted",
+        relatedThoughtSequence: 1,
+      })),
+    ];
+
+    const html = renderConversation(
+      [
+        {
+          id: "assistant-repeated-writeback-success",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-07-03T19:54:00Z",
+          streaming: true,
+          feedbackEvents,
+        },
+      ],
+      { useDefaultProcessDisplayMode: true },
+    );
+
+    expect(html).toContain("过程");
+    expect(html).toContain("工具调用 1");
+    expect(html.match(/source_collection_stage_writeback_tool/g)?.length ?? 0).toBe(1);
+    expect(html).toContain("资料提炼进行中：已完成第7批4条候选提炼");
+    expect(html).not.toContain("资料提炼进行中：已完成第1批5条候选提炼");
+    expect(html).not.toContain("资料提炼进行中：已完成第6批5条候选提炼");
+    expect(html).not.toContain("agent-20260629-201552-158796");
+    expect(html).not.toContain("accepted");
+  });
+
   it("renders group-room transcripts as sync records instead of assistant answers", () => {
     const html = renderConversation([
       {
