@@ -56,13 +56,13 @@ import {
 import {
   buildAgentMessageTimelineItems,
   type AgentMessageTimelineItem,
-} from "./conversationTimeline";
+} from "./agentMessageTimeline";
 import {
   agentMessageTimelineItemRowKey,
   type AgentMessageTimelineRowIdentity,
-} from "./conversationTimelineRows";
+} from "./agentMessageTimelineRows";
 import { useAgentThreadProjection } from "./useAgentThreadProjection";
-import { projectAgentMessageTimelineMessages } from "./useConversationTimelineProjection";
+import { projectAgentMessageTimelineMessages } from "./useAgentMessageTimelineProjection";
 import {
   imageArtifactForMessage,
   isAgentInboxMessage,

@@ -1,5 +1,5 @@
 import type { ConversationMessage } from "../../api/types";
-import type { AgentMessageTimelineItem } from "./conversationTimeline";
+import type { AgentMessageTimelineItem } from "./agentMessageTimeline";
 
 export type AgentMessageTimelineRowIdentity = {
   messageId: string;

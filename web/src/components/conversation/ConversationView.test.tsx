@@ -456,6 +456,8 @@ describe("ConversationView edit resend affordance", () => {
   });
 
   it("keeps active-turn projection and history expansion anchors outside the render hot path", () => {
+    expect(conversationViewSource).toContain("./useAgentMessageTimelineProjection");
+    expect(conversationViewSource).not.toContain("./useConversationTimelineProjection");
     expect(conversationViewSource).toContain("projectAgentMessageTimelineMessages");
     expect(conversationViewSource).toContain("const activeAgentMessageTimelineProjection = useMemo");
     expect(conversationViewSource).toContain("activeAgentMessageTimelineProjection.messages");
@@ -469,6 +471,10 @@ describe("ConversationView edit resend affordance", () => {
   });
 
   it("names AgentMessage timeline rendering internals after the AgentMessage model", () => {
+    expect(conversationViewSource).toContain("./agentMessageTimeline");
+    expect(conversationViewSource).toContain("./agentMessageTimelineRows");
+    expect(conversationViewSource).not.toContain("./conversationTimeline");
+    expect(conversationViewSource).not.toContain("./conversationTimelineRows");
     expect(conversationViewSource).toContain("function renderAgentMessageTimeline(");
     expect(conversationViewSource).toContain("function renderAgentMessageTimelineItem(");
     expect(conversationViewSource).toContain("const agentMessageTimelineItems = buildAgentMessageTimelineItems");
