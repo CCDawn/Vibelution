@@ -70,6 +70,7 @@ import { MemoryAgentMemoryPanel } from "./MemoryAgentMemoryPanel";
 import { MemoryCleanupPanel } from "./MemoryCleanupPanel";
 import { MemoryDetailPanel } from "./MemoryDetailPanel";
 import { MemoryEffectivePanel } from "./MemoryEffectivePanel";
+import { MemoryKnowledgePipelinePanel } from "./MemoryKnowledgePipelinePanel";
 import { MemoryKnowledgeRagPanel } from "./MemoryKnowledgeRagPanel";
 import { MemoryKnowledgeStewardPanel } from "./MemoryKnowledgeStewardPanel";
 import { MemoryKnowledgeUsageContractPanel } from "./MemoryKnowledgeUsageContractPanel";
@@ -4397,52 +4398,15 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
   const renderKnowledgeView = () => (
     <>
-      <div className={styles.summaryGrid}>
-        <section className={styles.summaryCard}>
-          <span>{copy.knowledgeBases}</span>
-          <strong>{knowledgeOverview?.summary.knowledgeBaseCount ?? 0}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.pendingProposals}</span>
-          <strong>{knowledgeOverview?.summary.pendingProposalCount ?? 0}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.formalKnowledge}</span>
-          <strong>{knowledgeOverview?.summary.itemCount ?? 0}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.sourceArtifacts}</span>
-          <strong>{knowledgeOverview?.summary.sourceArtifactCount ?? 0}</strong>
-        </section>
-      </div>
-      <section className={styles.pipelinePanel} aria-label={copy.platformPipeline} title={copy.knowledgeSubtitle}>
-        <div className={styles.pipelineHeader}>
-          <div>
-            <p className={styles.panelEyebrow}>{copy.platformPipeline}</p>
-            <h2>{copy.teamKnowledgeDomain}</h2>
-          </div>
-          <div className={styles.pipelineBoundary}>
-            <span>{copy.toolReadableOnly}</span>
-            <span>{copy.promptBoundary}</span>
-            <span>{copy.governance}</span>
-          </div>
-        </div>
-        <div className={styles.pipelineSteps}>
-          {[
-            { label: copy.pipelineSource, value: knowledgeOverview?.summary.sourceArtifactCount ?? 0 },
-            { label: copy.pipelineProposal, value: knowledgeOverview?.summary.pendingProposalCount ?? 0 },
-            { label: copy.pipelineBatch, value: knowledgeBases.reduce((total, base) => total + base.stats.batchCount, 0) },
-            { label: copy.pipelineFormal, value: knowledgeOverview?.summary.itemCount ?? 0 },
-            { label: copy.pipelineRating, value: ratingSuggestionsQuery.data?.summary.pendingSuggestionCount ?? knowledgeItems.filter((item) => item.markedAt).length },
-          ].map((step, index) => (
-            <div key={step.label} className={styles.pipelineStep}>
-              <span className={styles.pipelineIndex}>{index + 1}</span>
-              <strong>{step.value}</strong>
-              <span>{step.label}</span>
-            </div>
-          ))}
-        </div>
-      </section>
+      <MemoryKnowledgePipelinePanel
+        copy={copy}
+        knowledgeBaseCount={knowledgeOverview?.summary.knowledgeBaseCount ?? 0}
+        pendingProposalCount={knowledgeOverview?.summary.pendingProposalCount ?? 0}
+        itemCount={knowledgeOverview?.summary.itemCount ?? 0}
+        sourceArtifactCount={knowledgeOverview?.summary.sourceArtifactCount ?? 0}
+        batchCount={knowledgeBases.reduce((total, base) => total + base.stats.batchCount, 0)}
+        pendingRatingSuggestionCount={ratingSuggestionsQuery.data?.summary.pendingSuggestionCount ?? knowledgeItems.filter((item) => item.markedAt).length}
+      />
       <div className={styles.knowledgeGovernanceDeck}>
         <MemoryKnowledgeUsageContractPanel
           copy={copy}
