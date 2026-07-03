@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { relative, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -9,6 +9,14 @@ import evolutionStyles from "../../routes/EvolutionRoute.styles";
 import teamStyles from "../../routes/TeamsRoute.styles";
 
 const sourceRoot = resolve(import.meta.dirname, "../..");
+const rawControlPattern = /<(button|input|select|textarea)\b/;
+
+const rawControlAllowedFiles = new Set([
+  "components/vui/forms/VNativeInput.tsx",
+  "components/vui/forms/VNativeSelect.tsx",
+  "components/vui/forms/VNativeTextarea.tsx",
+  "components/vui/primitives/VNativeButton.tsx",
+]);
 
 const migrationTargets = [
   {
@@ -172,6 +180,24 @@ function readTargetSource(path: string): string {
   return readFileSync(resolve(sourceRoot, path), "utf8");
 }
 
+function toSourceRelativePath(path: string): string {
+  return relative(sourceRoot, path).replaceAll("\\", "/");
+}
+
+function listSourceTsxFiles(root: string): string[] {
+  return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
+    const fullPath = resolve(root, entry.name);
+    if (entry.isDirectory()) {
+      return listSourceTsxFiles(fullPath);
+    }
+    return entry.isFile() && entry.name.endsWith(".tsx") ? [toSourceRelativePath(fullPath)] : [];
+  });
+}
+
+function isRawControlGuardExempt(path: string): boolean {
+  return rawControlAllowedFiles.has(path) || /\.test\.tsx$/.test(path) || /\.spec\.tsx$/.test(path);
+}
+
 describe("VUI batch migration", () => {
   it.each(migrationTargets)(
     "$path uses VUI controls instead of raw buttons",
@@ -196,6 +222,14 @@ describe("VUI batch migration", () => {
       }
     },
   );
+
+  it("keeps business TSX sources raw-control free outside VUI primitives and tests", () => {
+    const violations = listSourceTsxFiles(sourceRoot)
+      .filter((path) => !isRawControlGuardExempt(path))
+      .filter((path) => rawControlPattern.test(readTargetSource(path)));
+
+    expect(violations).toEqual([]);
+  });
 
   it("routes/EvolutionRoute.styles.ts preserves block button geometry after VUI native migration", () => {
     for (const className of [
