@@ -13042,6 +13042,10 @@ def _run_session_continuation_loop(
         )
         turn_attachments = list(attachments or []) if turn_index == 1 else []
         llm_started_at = _perf_counter()
+        _set_session_model_thinking_live_output(
+            session_id,
+            turn_id=getattr(turn_control, "turn_id", ""),
+        )
         with prompt_cache_partition_scope(prompt_cache_partition):
             result = run_existing_agent_single_turn(
                 agent,
@@ -18148,8 +18152,8 @@ def _set_session_turn_progress_live_output(session_id: str, stage: str, *, turn_
         ),
         "model_thinking": text_for(
             language,
-            zh="正在思考，已收到思考片段...\n模型已经开始返回 reasoning，正文可能稍后出现。",
-            en="Thinking; reasoning chunks are arriving...\nThe model is returning reasoning and visible text may follow.",
+            zh="正在思考中，等待模型输出...\n模型请求已发出，服务端可能正在推理，正文会在生成后显示。",
+            en="Thinking and waiting for model output...\nThe model request has been sent; server-side reasoning may be running and visible text will appear after generation.",
         ),
         "followup_prepare": text_for(
             language,
@@ -18285,13 +18289,14 @@ def _set_session_model_thinking_live_output(session_id: str, *, turn_id: str = "
     if live_state is not None and str(live_state.stage or "").strip() == "model_thinking":
         return
     _set_session_turn_progress_live_output(session_id, "model_thinking", turn_id=turn_id)
+    event_status = "reasoning" if max(0, int(thought_chars or 0)) > 0 else "server_thinking"
     _record_session_turn_lifecycle_event(
         session_id,
-        "llm_status_reasoning",
+        "llm_status_reasoning" if event_status == "reasoning" else "llm_status_server_thinking",
         turn_id=turn_id,
         outcome="running",
         fields={
-            "llmStatus": "reasoning",
+            "llmStatus": event_status,
             "thoughtChars": max(0, int(thought_chars or 0)),
         },
     )

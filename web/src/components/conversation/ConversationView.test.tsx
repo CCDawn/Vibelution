@@ -767,6 +767,7 @@ describe("ConversationView edit resend affordance", () => {
     );
 
     expect(html).toContain("正在请求");
+    expect(html).not.toContain("正在思考中");
     expect(html).not.toContain("正在唤起对话 agent");
     expect(html).not.toContain("正在绑定 Agent 实例");
     expect(html.match(/assistantTurn/g)?.length ?? 0).toBe(1);
@@ -2942,7 +2943,8 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("正在请求");
+    expect(html).toContain("正在思考中");
+    expect(html).not.toContain("正在请求");
     expect(html).not.toContain("执行过程");
     expect(html).not.toContain("模型思考");
     expect(html).not.toContain("工具调用");
@@ -2976,7 +2978,8 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("正在请求");
+    expect(html).toContain("正在思考中");
+    expect(html).not.toContain("正在请求");
     expect(html).not.toContain("正在思考，已收到思考片段");
     expect(html).not.toContain("模型已经开始返回 reasoning");
     expect(html).not.toContain("正文可能稍后出现");
@@ -3035,6 +3038,38 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("回答</span>");
     expect((html.match(new RegExp(fullModelStatus, "g")) ?? [])).toHaveLength(0);
     expect(html.match(/statusSpinner/g)?.length).toBe(1);
+  });
+
+  it("renders server-side model thinking as a compact thinking state without fake reasoning content", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-server-side-thinking",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-07-04T02:10:00Z",
+          streaming: true,
+          streamStage: "model_thinking",
+          feedbackEvents: [
+            {
+              sequence: 1,
+              kind: "status",
+              status: "running",
+              name: "model_thinking",
+              summary: "正在思考，等待模型输出。",
+              resultPreview: "正在思考，等待模型输出。",
+            },
+          ],
+        },
+      ],
+      { useDefaultProcessDisplayMode: true },
+    );
+
+    expect(html).toContain("正在思考中");
+    expect(html).not.toContain("正在请求");
+    expect(html).not.toContain("思考过程");
+    expect(html).not.toContain("正在思考，等待模型输出。");
+    expect(html).not.toContain("responseSection");
   });
 
   it("shows model-request placeholder as a compact process state instead of a separate answer block", () => {
