@@ -80,12 +80,10 @@ import {
   ConversationAttachment,
   ToolCall,
 } from "../api/types";
-import {
-  type ConversationStreamingFramePaintMetrics,
-  type TurnAvatarResolution,
-} from "../components/conversation/ConversationView";
 import { COMPOSER_SESSION_REFERENCE_MIME } from "../components/conversation/conversationConstants";
+import type { ConversationStreamingFramePaintMetrics } from "../components/conversation/conversationStreamingMetrics";
 import { shouldShowNextStateSignalInConversation } from "../components/conversation/conversationNextStateSignal";
+import type { TurnAvatarResolution } from "../components/conversation/conversationTurnAvatar";
 import { LazyConversationView } from "../components/conversation/LazyConversationView";
 import { isAgentInboxMessage, isTurnErrorMessage } from "../components/conversation/conversationMessagePredicates";
 import { LazyFilePreview } from "../components/preview/LazyFilePreview";
