@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ConversationMessage } from "../../api/types";
 import { ConversationView } from "./ConversationView";
+import conversationViewSource from "./ConversationView.tsx?raw";
 
 function renderConversation(messages: ConversationMessage[], activeTurnMessage?: ConversationMessage) {
   const queryClient = new QueryClient({
@@ -39,6 +40,10 @@ function renderConversation(messages: ConversationMessage[], activeTurnMessage?:
 }
 
 describe("ConversationView agent thread bridge", () => {
+  it("derives peripheral response and process visibility from AgentMessage section state", () => {
+    expect(conversationViewSource).not.toMatch(/\bhas(?:Response|Thought|Mental)Block\s*\(/);
+  });
+
   it("projects legacy conversation props into an AgentThread without changing visible output", () => {
     const html = renderConversation(
       [
