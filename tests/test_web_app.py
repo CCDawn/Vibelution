@@ -5804,6 +5804,49 @@ def test_capture_session_ui_stream_records_tool_error_next_state_signal(tmp_path
     assert any(item["metadata"]["toolName"] == "read_file_tool" for item in signals)
 
 
+def test_capture_session_ui_stream_promotes_tool_error_to_active_work_run(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "_WORK_RUN_STORE",
+        session_service.WorkRunStore(tmp_path / ".runtime" / "runtime-manager" / "work_runs"),
+    )
+    stub_ui = SimpleNamespace(
+        stream_thought=lambda *args, **kwargs: None,
+        clear_thought_stream=lambda *args, **kwargs: None,
+        stream_response=lambda *args, **kwargs: None,
+        clear_response_stream=lambda *args, **kwargs: None,
+        set_pet_mental_state=lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr("core.ui.get_ui", lambda: stub_ui)
+
+    session_service._persist_chat_turn_work_run(
+        session_id="session-live",
+        turn_id="turn-source-writeback",
+        status="running",
+        user_message="## 资料搜集阶段任务：资料提炼任务\n请完成 source_collection_stage_writeback_tool 回写。",
+        summary="正在思考，已收到思考片段...",
+    )
+
+    capture = session_service.SessionTurnCapture(session_id="session-live", turn_id="turn-source-writeback")
+    with session_service._capture_session_ui_stream("session-live", capture):
+        session_service.get_event_bus().publish(
+            session_service.EventNames.TOOL_ERROR,
+            {
+                "name": "source_collection_stage_writeback_tool",
+                "error": "[超时] source_collection_stage_writeback_tool 执行超时 (30秒)",
+            },
+        )
+
+    active = session_service._WORK_RUN_STORE.load_active_snapshot("chat_turn")
+    assert active["runId"] == "turn-source-writeback"
+    assert active["status"] == "running"
+    assert "source_collection_stage_writeback_tool" in active["summary"]
+    assert "超时" in active["summary"]
+    assert active["lastToolError"]["toolName"] == "source_collection_stage_writeback_tool"
+    assert "超时" in active["lastToolError"]["summary"]
+
+
 def test_capture_session_ui_stream_surfaces_llm_retry_status(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     lifecycle_events: list[dict] = []

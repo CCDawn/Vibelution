@@ -11545,6 +11545,7 @@ def _persist_chat_turn_work_run(
     started_at: str = "",
     updated_at: str = "",
     finished_at: str = "",
+    last_tool_error: dict[str, Any] | None = None,
 ) -> None:
     normalized_turn_id = str(turn_id or "").strip()
     if not normalized_turn_id:
@@ -11592,6 +11593,14 @@ def _persist_chat_turn_work_run(
         }
         else "",
     }
+    if isinstance(last_tool_error, dict) and last_tool_error:
+        payload["lastToolError"] = {
+            "toolName": trim_lines(str(last_tool_error.get("toolName") or ""), max_lines=1),
+            "summary": trim_lines(str(last_tool_error.get("summary") or ""), max_lines=2),
+            "errorPreview": trim_lines(str(last_tool_error.get("errorPreview") or ""), max_lines=2),
+            "relatedEventCode": trim_lines(str(last_tool_error.get("relatedEventCode") or ""), max_lines=1),
+            "updatedAt": str(last_tool_error.get("updatedAt") or now).strip(),
+        }
     _WORK_RUN_STORE.persist_snapshot("chat_turn", payload, active_run_id=active_run_id)
 
 
@@ -18107,6 +18116,7 @@ def _touch_chat_turn_work_run(
     turn_id: str,
     stage: str,
     summary: str = "",
+    last_tool_error: dict[str, Any] | None = None,
 ) -> None:
     normalized_turn_id = str(turn_id or "").strip()
     if not normalized_turn_id:
@@ -18123,6 +18133,7 @@ def _touch_chat_turn_work_run(
         status=status,
         summary=summary or str(previous.get("summary") or "").strip(),
         updated_at=_now_timestamp(),
+        last_tool_error=last_tool_error,
     )
 
 
@@ -18704,6 +18715,25 @@ def _capture_session_ui_stream(
             feedback_events=capture.feedback_events,
         )
         if event.name == EventNames.TOOL_ERROR:
+            error_preview = trim_lines(summary or str(error or ""), max_lines=2)
+            work_run_summary = text_for(
+                get_web_language(),
+                zh=f"工具失败：{name}。" + (f" {error_preview}" if error_preview else ""),
+                en=f"Tool failed: {name}." + (f" {error_preview}" if error_preview else ""),
+            )
+            _touch_chat_turn_work_run(
+                session_id=session_id,
+                turn_id=capture.turn_id,
+                stage="tool_error",
+                summary=work_run_summary,
+                last_tool_error={
+                    "toolName": name,
+                    "summary": work_run_summary,
+                    "errorPreview": error_preview,
+                    "relatedEventCode": "conversation.tool_error",
+                    "updatedAt": _now_timestamp(),
+                },
+            )
             _record_chat_next_state_signal(
                 session_id=session_id,
                 turn_id=capture.turn_id,
