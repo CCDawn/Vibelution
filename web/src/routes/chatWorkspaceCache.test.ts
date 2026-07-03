@@ -34,6 +34,19 @@ describe("createChatWorkspaceCache", () => {
     ]);
   });
 
+  it("invalidates conversation indexes after a failed direct turn", async () => {
+    const { cache, queryKeysFromCalls } = makeCache();
+
+    await cache.afterDirectTurnFailed("session-a");
+
+    expect(queryKeysFromCalls()).toEqual([
+      queryKeys.session("session-a"),
+      queryKeys.sessions(),
+      queryKeys.conversations(),
+      queryKeys.runtimeSummary(),
+    ]);
+  });
+
   it("deduplicates team conversation membership keys", async () => {
     const { cache, queryKeysFromCalls } = makeCache();
 
