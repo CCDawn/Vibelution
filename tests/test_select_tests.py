@@ -87,6 +87,31 @@ def test_selector_matches_session_service_to_chat_validation_commands():
     assert any("ChatCodingRoute.layout.test.ts" in command for command in result["commands"])
 
 
+def test_selector_matches_chat_style_map_to_chat_validation_commands():
+    result = select_tests.select_tests(
+        ["web/src/routes/ChatCodingRoute.styles.ts"],
+        select_tests.load_matrix(),
+    )
+
+    assert result["matchedRules"][0]["id"] == "web-session-chat"
+    assert "web/src/routes/ChatCodingRoute.styles.ts" in result["matchedRules"][0]["matchedFiles"]
+    assert any("tests/test_web_session_routes.py" in command for command in result["commands"])
+    assert any("ChatCodingRoute.layout.test.ts" in command for command in result["commands"])
+
+
+def test_selector_matches_teams_style_map_to_teams_validation_commands():
+    result = select_tests.select_tests(
+        ["web/src/routes/TeamsRoute.styles.ts"],
+        select_tests.load_matrix(),
+    )
+
+    assert result["matchedRules"][0]["id"] == "teams-knowledge"
+    assert "web/src/routes/TeamsRoute.styles.ts" in result["matchedRules"][0]["matchedFiles"]
+    assert any("tests/test_team_workflow_orchestration_service.py" in command for command in result["commands"])
+    assert any("TeamsRoute.layout.test.ts" in command for command in result["commands"])
+    assert any("build_research_flow_site.mjs" in command for command in result["commands"])
+
+
 def test_selector_matches_real_session_route_files_to_chat_validation_commands():
     result = select_tests.select_tests(
         [
