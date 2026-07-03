@@ -68,6 +68,7 @@ import { VButton, VNativeInput, VNativeSelect, VNativeTextarea, VRouteHeader } f
 import { useShellI18n } from "../i18n/useShellI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { MemoryDetailPanel } from "./MemoryDetailPanel";
+import { MemoryEffectivePanel } from "./MemoryEffectivePanel";
 import { MemoryManagementEditor, type MemoryManagementEditorDraft } from "./MemoryManagementEditor";
 import { MemoryMatrixPanel } from "./MemoryMatrixPanel";
 import { MemoryOverviewPanel } from "./MemoryOverviewPanel";
@@ -4194,28 +4195,21 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     />
   );
 
-  const renderEffectiveView = () => (
-    <>
-      {createMatrixPanel(copy.effectiveByChannel)}
-      {createWarningStrip()}
-      <div className={styles.effectiveGrid}>
-        {matrixCards.map((card) => {
-          const pairs = allPairs.filter((pair) => matchesMemoryChannel(card.channel, pair));
-          return (
-            <section key={card.id} className={styles.overviewPanel}>
-              <div className={styles.panelHeader}>
-                <div>
-                  <p className={styles.panelEyebrow}>{copy.whereMemoryWorks}</p>
-                  <h2>{card.title}</h2>
-                </div>
-                <span className={styles.countPill}>{pairs.length}</span>
-              </div>
-              {renderMemoryList(pairs, copy.noMatches, true)}
-            </section>
-          );
-        })}
-      </div>
-    </>
+  const createEffectivePanel = () => (
+    <MemoryEffectivePanel
+      copy={copy}
+      matrixPanel={createMatrixPanel(copy.effectiveByChannel)}
+      warningStrip={createWarningStrip()}
+      cards={matrixCards.map((card) => {
+        const pairs = allPairs.filter((pair) => matchesMemoryChannel(card.channel, pair));
+        return {
+          id: card.id,
+          title: card.title,
+          count: pairs.length,
+          memoryList: renderMemoryList(pairs, copy.noMatches, true),
+        };
+      })}
+    />
   );
 
   const renderSourceAndItemPanels = (title: string) => (
@@ -6277,7 +6271,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             />
           )
           : forcedView === "effective"
-            ? renderEffectiveView()
+            ? createEffectivePanel()
             : forcedView === "agents"
               ? renderAgentMemoryView()
               : forcedView === "manage"
