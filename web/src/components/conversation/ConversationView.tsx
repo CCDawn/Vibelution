@@ -40,6 +40,7 @@ import { useAppI18n } from "../../i18n/useAppI18n";
 import { AgentContextSectionsView } from "./AgentContextSectionsView";
 import { AgentMessageTurnView } from "./AgentMessageTurnView";
 import { AgentResponseSectionView } from "./AgentResponseSectionView";
+import { AgentUserContentSectionView } from "./AgentUserContentSectionView";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
 import { buildAgentMessageRenderState } from "./agentMessageRenderState";
 import { COMPOSER_SESSION_REFERENCE_MIME } from "./conversationConstants";
@@ -3930,13 +3931,9 @@ export function ConversationView({
                       ) : null}
                     </section>
                   ) : showUserContent ? (
-                    <div
-                      className={styles.userMessageBody}
-                      data-agent-content-section-ids={agentRenderState.userContentSectionIds}
-                      data-agent-content-channel={agentRenderState.userContentSectionIds ? "user" : undefined}
-                    >
+                    <AgentUserContentSectionView userContentSectionIds={agentRenderState.userContentSectionIds}>
                       {renderResponseText(userContentText)}
-                    </div>
+                    </AgentUserContentSectionView>
                   ) : null}
                   {groupTranscriptMessage ? (
                     <div className={styles.groupTranscriptBody}>{renderResponseText(message.content)}</div>
