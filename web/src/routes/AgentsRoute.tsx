@@ -4,11 +4,9 @@ import {
   Archive,
   ArrowLeft,
   Bot,
-  Brain,
   CheckSquare,
   CheckCircle2,
   Database,
-  FolderTree,
   Layers3,
   MessageSquare,
   Plus,
@@ -77,6 +75,13 @@ import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
 import { AgentActivityHistoryPanel, type AgentActivityTimelineItem } from "./AgentActivityHistoryPanel";
 import { AgentManagementNav } from "./AgentManagementNav";
 import { AgentManagementBriefPanel } from "./AgentManagementBriefPanel";
+import {
+  AgentOverviewPanel,
+  type AgentOverviewFact,
+  type AgentOverviewModeMembership,
+  type AgentOverviewPanelPolicy,
+  type AgentOverviewTerritory,
+} from "./AgentOverviewPanel";
 import { AgentRuntimeFocusPanel } from "./AgentRuntimeFocusPanel";
 import {
   agentCenterMemoryRoute,
@@ -5608,6 +5613,136 @@ export function AgentsRoute() {
     }),
   }));
 
+  const selectedAgentOverviewPanel: {
+    facts: AgentOverviewFact[];
+    territory: AgentOverviewTerritory;
+    modeMembership: AgentOverviewModeMembership;
+    policies: AgentOverviewPanelPolicy[];
+  } | null = selectedAgent ? (() => {
+    const selectedModelDisplay = agentDialogueModelDisplay(selectedAgent, lang);
+    const normalizedBindings = normalizeAgentLlmBindings(selectedAgent.llmBindings);
+    const facts: AgentOverviewFact[] = [
+      {
+        id: "model",
+        icon: "model",
+        title: selectedModelDisplay.detail,
+        label: copy.model,
+        value: selectedModelDisplay.label,
+      },
+      {
+        id: "llm-slots",
+        icon: "llm",
+        title: llmSlots.map((slot) => `${slot.label}: ${agentLlmSlotModelId(selectedAgent.llmBindings, slot) || "-"}`).join(" / "),
+        label: copy.llmSlots,
+        value: `${Object.keys(normalizedBindings).length}/${llmSlots.length}`,
+      },
+      {
+        id: "system-ids",
+        icon: "system",
+        title: selectedAgent.agentId || "-",
+        label: lang === "zh" ? "系统编号" : "System IDs",
+        value: selectedAgent.agentCode || "-",
+      },
+      {
+        id: "prompt",
+        icon: "prompt",
+        title: selectedAgent.promptTemplate?.sourcePath || "-",
+        label: copy.prompt,
+        value: promptTemplateDisplayName(selectedAgent.promptTemplate, selectedAgent.promptTemplateId, lang),
+      },
+      {
+        id: "tools",
+        icon: "tools",
+        title: `allowed ${selectedAgent.toolPolicy?.allowedTools?.length ?? 0} / blocked ${selectedAgent.toolPolicy?.blockedTools?.length ?? 0}`,
+        label: copy.tools,
+        value: selectedAgent.toolPolicyId || "-",
+      },
+      {
+        id: "memory",
+        icon: "memory",
+        title: selectedAgent.memoryPolicy?.privateMemoryRoot || "-",
+        label: copy.memory,
+        value: selectedAgent.memoryPolicyId || "-",
+      },
+    ];
+
+    if (selectedAgentRequiresPersona) {
+      facts.push({
+        id: "persona",
+        icon: "persona",
+        title: (selectedAgent.personaProfile?.expertise ?? []).join(" / ") || copy.expertise,
+        label: copy.personaTitle,
+        value: personaProfileSummary(selectedAgent, lang),
+      });
+    }
+
+    if (selectedAgentRequiresTask) {
+      facts.push({
+        id: "task",
+        icon: "task",
+        title: (selectedAgent.taskProfile?.taskTypes ?? []).join(" / ") || copy.taskTypes,
+        label: copy.taskTitle,
+        value: taskProfileSummary(selectedAgent, lang),
+      });
+    }
+
+    facts.push({
+      id: "territory",
+      icon: "territory",
+      title: selectedAgent.workspaceTerritory?.privateRoot || selectedAgent.workspacePath || "-",
+      label: copy.territory,
+      value: selectedAgent.workspaceTerritory?.defaultWriteScope || "private",
+    });
+
+    return {
+      facts,
+      territory: {
+        eyebrow: copy.territory,
+        title: selectedAgent.workspaceTerritory?.defaultWriteScope || "private",
+        privateLabel: copy.privateTerritory,
+        privateValue: selectedAgent.workspaceTerritory?.privateRoot || selectedAgent.workspacePath || "-",
+        sharedLabel: copy.sharedTerritory,
+        sharedValue: selectedAgent.workspaceTerritory?.sharedRoot || "workspace/shared",
+        writeBoundaryLabel: copy.writeBoundary,
+        writeBoundaryValue: (selectedAgent.workspaceTerritory?.writeScopes ?? ["private"]).join(" / "),
+      },
+      modeMembership: {
+        eyebrow: copy.modeMembership,
+        title: `${modeLabel(selectedAgent.primaryMode, lang)} / ${selectedAgent.roleKey || "-"}`,
+        modes: uniqueModes(selectedAgent).map((mode) => ({
+          id: mode,
+          label: modeLabel(mode, lang),
+        })),
+      },
+      policies: [
+        {
+          id: "context",
+          icon: "context",
+          label: copy.context,
+          value: `${selectedAgent.groupContextEvents?.length ?? 0} group events`,
+        },
+        {
+          id: "runtime",
+          icon: "runtime",
+          label: copy.runtimeStatus,
+          value: runtimeStatusLabel(selectedAgent, lang),
+        },
+        {
+          id: "communication",
+          icon: "communication",
+          label: copy.communication,
+          value: `${selectedAgent.agentInboxPendingCount ?? 0} pending`,
+        },
+        {
+          id: "delegation",
+          icon: "delegation",
+          label: copy.delegation,
+          value: metadataText(selectedAgent, "maxSubagentDepth") || copy.policyPending,
+        },
+      ],
+    };
+  })() : null;
+
   return (
     <section className={styles.route}>
       <div title={copy.subtitle}>
@@ -6152,128 +6287,7 @@ export function AgentsRoute() {
               />
 
               {activePane === "overview" ? (
-                <>
-                  <div className={styles.factGrid}>
-                    {(() => {
-                      const selectedModelDisplay = agentDialogueModelDisplay(selectedAgent, lang);
-                      return (
-                    <section title={selectedModelDisplay.detail}>
-                      <Bot size={16} />
-                      <span>{copy.model}</span>
-                      <strong>{selectedModelDisplay.label}</strong>
-                    </section>
-                      );
-                    })()}
-                    <section title={llmSlots.map((slot) => `${slot.label}: ${agentLlmSlotModelId(selectedAgent.llmBindings, slot) || "-"}`).join(" / ")}>
-                      <Brain size={16} />
-                      <span>{copy.llmSlots}</span>
-                      <strong>
-                        {Object.keys(normalizeAgentLlmBindings(selectedAgent.llmBindings)).length}/{llmSlots.length}
-                      </strong>
-                    </section>
-                    <section title={selectedAgent.agentId || "-"}>
-                      <Layers3 size={16} />
-                      <span>{lang === "zh" ? "系统编号" : "System IDs"}</span>
-                      <strong>{selectedAgent.agentCode || "-"}</strong>
-                    </section>
-                    <section title={selectedAgent.promptTemplate?.sourcePath || "-"}>
-                      <Brain size={16} />
-                      <span>{copy.prompt}</span>
-                      <strong>{promptTemplateDisplayName(selectedAgent.promptTemplate, selectedAgent.promptTemplateId, lang)}</strong>
-                    </section>
-                    <section title={`allowed ${selectedAgent.toolPolicy?.allowedTools?.length ?? 0} / blocked ${selectedAgent.toolPolicy?.blockedTools?.length ?? 0}`}>
-                      <Wrench size={16} />
-                      <span>{copy.tools}</span>
-                      <strong>{selectedAgent.toolPolicyId || "-"}</strong>
-                    </section>
-                    <section title={selectedAgent.memoryPolicy?.privateMemoryRoot || "-"}>
-                      <Database size={16} />
-                      <span>{copy.memory}</span>
-                      <strong>{selectedAgent.memoryPolicyId || "-"}</strong>
-                    </section>
-                    {selectedAgentRequiresPersona ? (
-                      <section title={(selectedAgent.personaProfile?.expertise ?? []).join(" / ") || copy.expertise}>
-                        <UserRound size={16} />
-                        <span>{copy.personaTitle}</span>
-                        <strong>{personaProfileSummary(selectedAgent, lang)}</strong>
-                      </section>
-                    ) : null}
-                    {selectedAgentRequiresTask ? (
-                      <section title={(selectedAgent.taskProfile?.taskTypes ?? []).join(" / ") || copy.taskTypes}>
-                        <CheckCircle2 size={16} />
-                        <span>{copy.taskTitle}</span>
-                        <strong>{taskProfileSummary(selectedAgent, lang)}</strong>
-                      </section>
-                    ) : null}
-                    <section title={selectedAgent.workspaceTerritory?.privateRoot || selectedAgent.workspacePath || "-"}>
-                      <FolderTree size={16} />
-                      <span>{copy.territory}</span>
-                      <strong>{selectedAgent.workspaceTerritory?.defaultWriteScope || "private"}</strong>
-                    </section>
-                  </div>
-
-                  <section className={styles.detailSection}>
-                    <div className={styles.panelHeader}>
-                      <div>
-                        <p className={styles.panelEyebrow}>{copy.territory}</p>
-                        <h3>{selectedAgent.workspaceTerritory?.defaultWriteScope || "private"}</h3>
-                      </div>
-                      <FolderTree size={16} />
-                    </div>
-                    <div className={styles.boundarySummaryGrid}>
-                      <span>
-                        <strong>{copy.privateTerritory}</strong>
-                        <small>{selectedAgent.workspaceTerritory?.privateRoot || selectedAgent.workspacePath || "-"}</small>
-                      </span>
-                      <span>
-                        <strong>{copy.sharedTerritory}</strong>
-                        <small>{selectedAgent.workspaceTerritory?.sharedRoot || "workspace/shared"}</small>
-                      </span>
-                      <span>
-                        <strong>{copy.writeBoundary}</strong>
-                        <small>{(selectedAgent.workspaceTerritory?.writeScopes ?? ["private"]).join(" / ")}</small>
-                      </span>
-                    </div>
-                  </section>
-
-                  <section className={styles.detailSection}>
-                    <div className={styles.panelHeader}>
-                      <div>
-                        <p className={styles.panelEyebrow}>{copy.modeMembership}</p>
-                        <h3>{modeLabel(selectedAgent.primaryMode, lang)} / {selectedAgent.roleKey || "-"}</h3>
-                      </div>
-                      <Layers3 size={16} />
-                    </div>
-                    <div className={styles.pillList}>
-                      {uniqueModes(selectedAgent).map((mode) => (
-                        <span key={`${selectedAgent.agentId}:mode:${mode}`}>{modeLabel(mode, lang)}</span>
-                      ))}
-                    </div>
-                  </section>
-
-                  <section className={styles.policyGrid}>
-                    <div>
-                      <MessageSquare size={16} />
-                      <strong>{copy.context}</strong>
-                      <span>{selectedAgent.groupContextEvents?.length ?? 0} group events</span>
-                    </div>
-                    <div>
-                      <ShieldCheck size={16} />
-                      <strong>{copy.runtimeStatus}</strong>
-                      <span>{runtimeStatusLabel(selectedAgent, lang)}</span>
-                    </div>
-                    <div>
-                      <Users size={16} />
-                      <strong>{copy.communication}</strong>
-                      <span>{selectedAgent.agentInboxPendingCount ?? 0} pending</span>
-                    </div>
-                    <div>
-                      <Layers3 size={16} />
-                      <strong>{copy.delegation}</strong>
-                      <span>{metadataText(selectedAgent, "maxSubagentDepth") || copy.policyPending}</span>
-                    </div>
-                  </section>
-                </>
+                selectedAgentOverviewPanel ? <AgentOverviewPanel {...selectedAgentOverviewPanel} /> : null
               ) : null}
 
               {activePane === "config" ? (

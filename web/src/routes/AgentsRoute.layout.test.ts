@@ -708,9 +708,13 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("AgentManagementBrief");
     expect(routeSource).toContain("buildAgentManagementBrief(selectedAgent, copy, lang)");
     expect(routeSource).toContain("AgentManagementBriefPanel");
+    expect(routeSource).toContain("AgentOverviewPanel");
     expect(routeSource).toContain("copy.managementBriefTitle");
     expect(routeSource).toContain("copy.nextActionsTitle");
     expect(routeSource).not.toContain("className={styles.managementBriefPanel}");
+    expect(routeSource).not.toContain("className={styles.factGrid}");
+    expect(routeSource).not.toContain("className={styles.boundarySummaryGrid}");
+    expect(routeSource).not.toContain("className={styles.policyGrid}");
     expect(managementBriefPanelSource).toContain("styles.managementBriefPanel");
     expect(managementBriefPanelSource).toContain("styles.nextActionList");
     expect(routeSource).toContain("styles.detailTabs");
@@ -729,7 +733,6 @@ describe("AgentsRoute layout contract", () => {
     expect(runtimeFocusPanelSource).toContain("styles.runtimePill");
     expect(runtimeFocusPanelSource).toContain("styles.runtimeFocusPanel");
     expect(activityHistoryPanelSource).toContain("styles.runHistoryList");
-    expect(routeSource).toContain("styles.boundarySummaryGrid");
     expect(styles.managementBriefPanel).toBeTruthy();
     expect(styles.nextActionList).toBeTruthy();
     expect(styles.boundarySummaryGrid).toBeTruthy();
