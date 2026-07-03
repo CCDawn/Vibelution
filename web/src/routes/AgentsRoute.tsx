@@ -13,7 +13,6 @@ import {
   MessageSquare,
   Plus,
   RefreshCw,
-  Search,
   ShieldCheck,
   Square,
   SquarePen,
@@ -75,6 +74,7 @@ import { vuiFormLabelClass } from "../components/vui/forms/formClasses";
 import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
+import { AgentActivityHistoryPanel, type AgentActivityTimelineItem } from "./AgentActivityHistoryPanel";
 import { AgentManagementNav } from "./AgentManagementNav";
 import { AgentManagementBriefPanel } from "./AgentManagementBriefPanel";
 import { AgentRuntimeFocusPanel } from "./AgentRuntimeFocusPanel";
@@ -270,18 +270,6 @@ type AgentManagementFilterGroup = {
   healthCount?: number;
 };
 type AgentFilterGroup = AgentConfigWorkspaceGroup | AgentTeamIndexGroup;
-type AgentActivityTimelineItem = {
-  id: string;
-  kind: "run" | "sub_run" | "inbox" | "context";
-  title: string;
-  body: string;
-  meta: string;
-  timestamp: string;
-  sessionId: string;
-  messageId: string;
-  canOpenLogs: boolean;
-  evidence: AgentRuntimeEvidenceMatch | null;
-};
 type AgentBulkPromptTemplateResponse = Omit<AgentBulkActionResponse, "success"> & {
   success: AgentConfigWorkspaceAgent[];
   promptTemplateId?: string;
@@ -7441,154 +7429,54 @@ export function AgentsRoute() {
                 onOpenSession={runtimeFocusSessionId ? () => openAgentSession(runtimeFocusSessionId) : undefined}
               />
 
-              <section className={styles.detailSection}>
-                <div className={styles.panelHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{copy.sessions}</p>
-                    <h3>{selectedAgent.directSessionId || "-"}</h3>
-                  </div>
-                  <MessageSquare size={16} />
-                </div>
-                <div className={styles.pathList}>
-                  <code>{selectedAgent.workspacePath || "-"}</code>
-                  <code>{selectedAgent.directSessionId || "-"}</code>
-                  <span>{copy.logs}: {formatTimestamp(selectedAgent.updatedAt, lang)}</span>
-                </div>
-              </section>
-
-              <section className={styles.detailSection}>
-                <div className={styles.panelHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{copy.activityPane}</p>
-                    <h3>{copy.activityTimeline}</h3>
-                  </div>
-                  <Layers3 size={16} />
-                </div>
-                {agentRunsQuery.isPending || agentMessagesQuery.isPending ? (
-                  <p className={styles.emptyText}>{copy.loading}</p>
-                ) : activityTimeline.length ? (
-                  <div className={styles.activityTimelineList}>
-                    {activityTimeline.map((item) => (
-                      <article key={item.id} className={`${styles.activityTimelineItem} ${styles[`activityTimelineItem_${item.kind}`]}`}>
-                        <strong>{item.title}</strong>
-                        <p>{item.body}</p>
-                        <small>{item.meta}</small>
-                        <div className={styles.timelineActions}>
-                          {item.sessionId ? (
-                            <VButton type="button" variant="ghost" icon={<ExternalLink size={13} />} onPress={() => openAgentSession(item.sessionId)}>
-                              {copy.openSession}
-                            </VButton>
-                          ) : null}
-                          {item.canOpenLogs ? (
-                            <VButton type="button" variant="ghost" icon={<Search size={13} />} onPress={() => openAgentLogs(item.evidence)}>
-                              {item.evidence ? `${copy.openLogs} · ${item.evidence.runtimeSceneId}` : copy.openLogs}
-                            </VButton>
-                          ) : null}
-                          {item.messageId ? (
-                            <VButton type="button" variant="ghost" icon={<MessageSquare size={13} />} onPress={() => focusInboxMessage(item.messageId)}>
-                              {copy.focusMessage}
-                            </VButton>
-                          ) : null}
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                ) : (
-                  <p className={styles.emptyText}>{copy.activityTimelineEmpty}</p>
-                )}
-              </section>
-
-              <section className={styles.detailSection}>
-                <div className={styles.panelHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{copy.runHistoryTitle}</p>
-                    <h3>{copy.parentRuns}: {agentRunsQuery.data?.runs.length ?? 0} / {copy.subAgentRuns}: {agentRunsQuery.data?.subAgentRuns.length ?? 0}</h3>
-                  </div>
-                  <ShieldCheck size={16} />
-                </div>
-                {agentRunsQuery.isPending ? (
-                  <p className={styles.emptyText}>{copy.runHistoryLoading}</p>
-                ) : (agentRunsQuery.data?.runs.length ?? 0) + (agentRunsQuery.data?.subAgentRuns.length ?? 0) > 0 ? (
-                  <div className={styles.runHistoryList}>
-                    {agentRunsQuery.data?.runs.map((run) => (
-                      <article key={run.runId} className={styles.runHistoryItem}>
-                        <strong>{run.status || run.currentPhase || run.runKind}</strong>
-                        <span>{run.summary || run.runId}</span>
-                        <small>{run.currentPhase || run.sessionId || "-"} · {formatTimestamp(run.updatedAt || run.startedAt, lang)}</small>
-                      </article>
-                    ))}
-                    {agentRunsQuery.data?.subAgentRuns.map((run) => (
-                      <article key={run.runId} className={styles.runHistoryItem}>
-                        <strong>{copy.subAgentRuns} · {run.status || run.currentPhase || run.runKind}</strong>
-                        <span>{run.summary || run.subRunId || run.runId}</span>
-                        <small>{run.contextMode || "-"} · {copy.maxDepth} {run.depth}/{run.maxDepth} · {formatTimestamp(run.updatedAt || run.createdAt, lang)}</small>
-                      </article>
-                    ))}
-                  </div>
-                ) : (
-                  <p className={styles.emptyText}>{copy.noRunHistory}</p>
-                )}
-              </section>
-
-              <section className={styles.detailSection}>
-                <div className={styles.panelHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{copy.communication}</p>
-                    <h3>{copy.inboxTitle}: {selectedAgentInboxPendingCount}</h3>
-                  </div>
-                  <div className={styles.panelHeaderActions}>
-                    <VButton
-                      type="button"
-                      variant="secondary"
-                      isDisabled={selectedAgentInboxPendingCount <= 0 || selectedAgentConsumeAllPending}
-                      onPress={consumeAllInboxMessages}
-                    >
-                      {selectedAgentConsumeAllPending ? copy.consumingMessage : copy.consumeAllMessages}
-                    </VButton>
-                    <MessageSquare size={16} />
-                  </div>
-                </div>
-                {agentMessagesQuery.isPending ? (
-                  <p className={styles.emptyText}>{copy.inboxLoading}</p>
-                ) : (agentMessagesQuery.data?.length ?? 0) > 0 ? (
-                  <div className={styles.inboxMessageList}>
-                    {agentMessagesQuery.data?.map((message) => {
-                      const messageId = message.messageId || message.eventId;
-                      const messagePending =
-                        consumeMessageMutation.isPending
-                        && consumeMessageMutation.variables?.agentId === selectedAgent.agentId
-                        && consumeMessageMutation.variables?.messageId === messageId;
-                      return (
-                        <article
-                          key={messageId}
-                          className={focusedMessageId === messageId ? `${styles.inboxMessageItem} ${styles.inboxMessageItemFocused}` : styles.inboxMessageItem}
-                        >
-                          <div className={styles.inboxMessageTop}>
-                            <span>
-                              <strong>{message.sourceAgentName || message.sourceAgentCode || message.sourceAgentId || "-"}</strong>
-                              <small>{formatTimestamp(message.createdAt, lang)} · {message.kind || "agent_message"}</small>
-                            </span>
-                            <VButton
-                              type="button"
-                              variant="secondary"
-                              isDisabled={messagePending}
-                              onPress={() => consumeInboxMessage(message)}
-                            >
-                              {messagePending ? copy.consumingMessage : copy.consumeMessage}
-                            </VButton>
-                          </div>
-                          <p>{message.summary || message.content || message.threadId || messageId}</p>
-                          <small>
-                            {copy.wakeStatus}: {message.delivery?.wakeStatus || "pending"} · thread {message.threadId || "-"}
-                          </small>
-                        </article>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className={styles.emptyText}>{copy.inboxEmpty}</p>
-                )}
-              </section>
+              <AgentActivityHistoryPanel
+                agent={selectedAgent}
+                copy={{
+                  sessions: copy.sessions,
+                  logs: copy.logs,
+                  activityPane: copy.activityPane,
+                  activityTimeline: copy.activityTimeline,
+                  loading: copy.loading,
+                  activityTimelineEmpty: copy.activityTimelineEmpty,
+                  openSession: copy.openSession,
+                  openLogs: copy.openLogs,
+                  focusMessage: copy.focusMessage,
+                  runHistoryTitle: copy.runHistoryTitle,
+                  parentRuns: copy.parentRuns,
+                  subAgentRuns: copy.subAgentRuns,
+                  maxDepth: copy.maxDepth,
+                  runHistoryLoading: copy.runHistoryLoading,
+                  noRunHistory: copy.noRunHistory,
+                  communication: copy.communication,
+                  inboxTitle: copy.inboxTitle,
+                  consumeAllMessages: copy.consumeAllMessages,
+                  consumingMessage: copy.consumingMessage,
+                  inboxLoading: copy.inboxLoading,
+                  consumeMessage: copy.consumeMessage,
+                  wakeStatus: copy.wakeStatus,
+                  inboxEmpty: copy.inboxEmpty,
+                }}
+                lang={lang}
+                activityTimeline={activityTimeline}
+                isActivityLoading={agentRunsQuery.isPending || agentMessagesQuery.isPending}
+                runHistory={agentRunsQuery.data}
+                isRunHistoryLoading={agentRunsQuery.isPending}
+                inboxMessages={agentMessagesQuery.data}
+                isInboxLoading={agentMessagesQuery.isPending}
+                inboxPendingCount={selectedAgentInboxPendingCount}
+                focusedMessageId={focusedMessageId}
+                pendingMessageId={
+                  consumeMessageMutation.isPending && consumeMessageMutation.variables?.agentId === selectedAgent.agentId
+                    ? consumeMessageMutation.variables?.messageId ?? ""
+                    : ""
+                }
+                isConsumeAllPending={selectedAgentConsumeAllPending}
+                onOpenSession={openAgentSession}
+                onOpenLogs={openAgentLogs}
+                onFocusMessage={focusInboxMessage}
+                onConsumeAllMessages={consumeAllInboxMessages}
+                onConsumeInboxMessage={consumeInboxMessage}
+              />
 
               <section className={styles.configEditor}>
                 <div className={styles.panelHeader}>
