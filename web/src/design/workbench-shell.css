@@ -186,7 +186,7 @@
   align-items: center;
   gap: 10px;
   max-width: 100%;
-  overflow: hidden;
+  overflow: visible;
 }
 
 :where(.vui-app-appshell).brandCopy {
@@ -396,6 +396,49 @@
 :where(.vui-app-appshell).utilityChevron {
   color: var(--fg-tertiary);
   transition: transform 150ms ease;
+}
+
+:where(.vui-app-appshell).activeWorkChip {
+  max-width: min(66vw, 620px);
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+:where(.vui-app-appshell).activeWorkInlineDetails {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
+  max-width: 0;
+  min-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-4px);
+  transition: max-width 180ms ease, opacity 140ms ease, transform 140ms ease;
+}
+
+:where(.vui-app-appshell).activeWorkChip:hover .activeWorkInlineDetails,
+:where(.vui-app-appshell).activeWorkChip:focus-within .activeWorkInlineDetails {
+  max-width: min(38vw, 360px);
+  opacity: 1;
+  transform: translateX(0);
+}
+
+:where(.vui-app-appshell).activeWorkInlineItem {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  padding-left: 8px;
+  border-left: 1px solid color-mix(in srgb, var(--accent-cool) 24%, transparent);
+  color: var(--fg-secondary);
+}
+
+:where(.vui-app-appshell).activeWorkInlineItem span {
+  max-width: min(34vw, 320px);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 :where(.vui-app-appshell).utilityCluster:hover .utilityChevron,
