@@ -40,14 +40,12 @@ describe("shouldShowNextStateSignalInConversation", () => {
     const routeConversationViewImportEnd = chatCodingRouteSource.indexOf(
       'from "../components/conversation/ConversationView";',
     );
-    const routeConversationViewImportStart = chatCodingRouteSource.lastIndexOf(
-      "import {",
-      routeConversationViewImportEnd,
-    );
-    const routeConversationViewImport = chatCodingRouteSource.slice(
-      routeConversationViewImportStart,
-      routeConversationViewImportEnd,
-    );
+    const routeConversationViewImportStart = routeConversationViewImportEnd >= 0
+      ? chatCodingRouteSource.lastIndexOf("import {", routeConversationViewImportEnd)
+      : -1;
+    const routeConversationViewImport = routeConversationViewImportStart >= 0
+      ? chatCodingRouteSource.slice(routeConversationViewImportStart, routeConversationViewImportEnd)
+      : "";
 
     expect(conversationViewSource).toContain('from "./conversationNextStateSignal"');
     expect(conversationViewSource).not.toMatch(
