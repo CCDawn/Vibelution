@@ -8,6 +8,7 @@ import matrixPanelSource from "./MemoryMatrixPanel.tsx?raw";
 import overviewPanelSource from "./MemoryOverviewPanel.tsx?raw";
 import projectMemoryQueuePanelSource from "./MemoryProjectMemoryQueuePanel.tsx?raw";
 import reviewQueuePanelSource from "./MemoryReviewQueuePanel.tsx?raw";
+import selectedConfigPanelSource from "./MemorySelectedConfigPanel.tsx?raw";
 import warningStripSource from "./MemoryWarningStrip.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
 import appShellSource from "../app/AppShell.tsx?raw";
@@ -71,9 +72,9 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("managedState");
     expect(routeSource).toContain("copy.addMemory");
     expect(routeSource).toContain("copy.editMemory");
-    expect(routeSource).toContain("copy.disableMemory");
-    expect(routeSource).toContain("copy.restoreMemory");
-    expect(routeSource).toContain("copy.deleteMemory");
+    expect(selectedConfigPanelSource).toContain("copy.disableMemory");
+    expect(selectedConfigPanelSource).toContain("copy.restoreMemory");
+    expect(selectedConfigPanelSource).toContain("copy.deleteMemory");
   });
 
   it("surfaces the project-memory proposal queue without implying a coordinator role", () => {
@@ -605,8 +606,17 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("styles.manageFilterPanel");
     expect(routeSource).toContain("styles.manageSourceFilters");
     expect(routeSource).toContain("styles.sourceChip");
-    expect(routeSource).toContain("const renderSelectedMemoryConfig");
-    expect(routeSource).toContain("styles.selectedConfigSummary");
+    expect(routeSource).toContain('from "./MemorySelectedConfigPanel"');
+    expect(routeSource).toContain("<MemorySelectedConfigPanel");
+    expect(routeSource).not.toContain("const renderSelectedMemoryConfig = () =>");
+    expect(selectedConfigPanelSource).toContain("export function MemorySelectedConfigPanel");
+    expect(selectedConfigPanelSource).toContain("styles.selectedConfigSummary");
+    expect(selectedConfigPanelSource).toContain("onEdit");
+    expect(selectedConfigPanelSource).toContain("onRestore");
+    expect(selectedConfigPanelSource).toContain("onDisableOrDelete");
+    expect(selectedConfigPanelSource).not.toContain("useQuery");
+    expect(selectedConfigPanelSource).not.toContain("useMutation");
+    expect(selectedConfigPanelSource).not.toContain("fetchJson");
     expect(routeSource).toContain('from "./MemoryManagementEditor"');
     expect(routeSource).toContain("MemoryManagementEditorDraft");
     expect(routeSource).toContain("<MemoryManagementEditor");
@@ -620,7 +630,7 @@ describe("MemoryRoute layout contract", () => {
     expect(managementEditorSource).not.toContain("useQuery");
     expect(managementEditorSource).not.toContain("useMutation");
     expect(managementEditorSource).not.toContain("fetchJson");
-    expect(routeSource.indexOf("{renderSelectedMemoryConfig()}")).toBeGreaterThan(routeSource.indexOf("{createManagementEditor()}"));
+    expect(routeSource.indexOf("{createSelectedMemoryConfig()}")).toBeGreaterThan(routeSource.indexOf("{createManagementEditor()}"));
     expect(routeSource).toContain("copy.selectedCount");
     expect(routeSource).toContain("copy.bulkDisable");
     expect(routeSource).toContain("copy.bulkRestore");
