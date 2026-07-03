@@ -9,11 +9,11 @@ import type {
 } from "../../agent-thread/types";
 import { agentMessageProcessSections } from "./messageSections";
 
-export type ConversationOperationKind = "thought" | "mental" | "tool" | "status";
+export type AgentMessageOperationKind = "thought" | "mental" | "tool" | "status";
 
-export type ConversationOperation = {
+export type AgentMessageOperation = {
   id: string;
-  kind: ConversationOperationKind;
+  kind: AgentMessageOperationKind;
   label: string;
   rawLabel?: string;
   preserveToolLabel?: boolean;
@@ -33,52 +33,52 @@ export type ConversationOperation = {
   relatedThoughtSequence?: number;
 };
 
-export type ConversationOperationLabels = {
+export type AgentMessageOperationLabels = {
   thought: string;
   mental: string;
   status: string;
 };
 
-export type ConversationOperationGroups = {
-  timeline: ConversationOperation[];
-  thoughts: ConversationOperation[];
-  mental: ConversationOperation[];
-  status: ConversationOperation[];
-  tools: ConversationOperation[];
+export type AgentMessageOperationGroups = {
+  timeline: AgentMessageOperation[];
+  thoughts: AgentMessageOperation[];
+  mental: AgentMessageOperation[];
+  status: AgentMessageOperation[];
+  tools: AgentMessageOperation[];
 };
 
 export type AgentMessageReActOperationGroup = {
   id: string;
   index: number;
-  operations: ConversationOperation[];
+  operations: AgentMessageOperation[];
   thoughtSequence?: number;
   title: string;
-  primaryKind: ConversationOperationKind;
+  primaryKind: AgentMessageOperationKind;
 };
 
 const agentOperationGroupsCache = new WeakMap<
   AgentMessage,
-  { labels: ConversationOperationLabels; groups: ConversationOperationGroups }
+  { labels: AgentMessageOperationLabels; groups: AgentMessageOperationGroups }
 >();
 
 export function buildAgentMessageOperations(
   message: AgentMessage,
-  labels: ConversationOperationLabels,
-): ConversationOperation[] {
+  labels: AgentMessageOperationLabels,
+): AgentMessageOperation[] {
   if (message.role !== "assistant") {
     return [];
   }
   const processParts = agentMessageProcessSections(message).flatMap((section) => section.parts);
   const operations = processParts
     .map((part, index) => agentMessagePartToOperation(message, part, index, labels))
-    .filter((operation): operation is ConversationOperation => operation !== null);
+    .filter((operation): operation is AgentMessageOperation => operation !== null);
   return normalizeTimelineOperations(operations, message.streaming);
 }
 
 export function buildAgentMessageOperationGroups(
   message: AgentMessage,
-  labels: ConversationOperationLabels,
-): ConversationOperationGroups {
+  labels: AgentMessageOperationLabels,
+): AgentMessageOperationGroups {
   const cached = agentOperationGroupsCache.get(message);
   if (cached && cached.labels === labels) {
     return cached.groups;
@@ -99,8 +99,8 @@ function agentMessagePartToOperation(
   message: AgentMessage,
   part: AgentMessagePart,
   index: number,
-  labels: ConversationOperationLabels,
-): ConversationOperation | null {
+  labels: AgentMessageOperationLabels,
+): AgentMessageOperation | null {
   if (part.type === "thought") {
     return agentThoughtPartToOperation(message, part, labels);
   }
@@ -119,8 +119,8 @@ function agentMessagePartToOperation(
 function agentThoughtPartToOperation(
   message: AgentMessage,
   part: AgentThoughtPart,
-  labels: ConversationOperationLabels,
-): ConversationOperation | null {
+  labels: AgentMessageOperationLabels,
+): AgentMessageOperation | null {
   const text = part.text || part.summary || "";
   if (!text.trim()) {
     return null;
@@ -141,8 +141,8 @@ function agentThoughtPartToOperation(
 function agentMentalPartToOperation(
   message: AgentMessage,
   part: AgentMentalPart,
-  labels: ConversationOperationLabels,
-): ConversationOperation | null {
+  labels: AgentMessageOperationLabels,
+): AgentMessageOperation | null {
   const summary = part.summary.trim();
   if (!summary) {
     return null;
@@ -162,7 +162,7 @@ function agentMentalPartToOperation(
 function agentToolCallPartToOperation(
   part: AgentToolCallPart,
   index: number,
-): ConversationOperation {
+): AgentMessageOperation {
   const rawLabel = part.name?.trim() || "tool";
   return {
     id: part.id || `agent-tool-${index}`,
@@ -189,8 +189,8 @@ function agentToolCallPartToOperation(
 function agentRuntimeEventPartToOperation(
   part: AgentRuntimeEventPart,
   index: number,
-  labels: ConversationOperationLabels,
-): ConversationOperation {
+  labels: AgentMessageOperationLabels,
+): AgentMessageOperation {
   const event: ConversationFeedbackEvent = {
     sequence: numberOrNull(part.sequence) ?? index + 1,
     kind: "status",
@@ -221,12 +221,12 @@ function agentRuntimeEventPartToOperation(
 }
 
 export function buildAgentMessageReActOperationGroups(
-  operations: ConversationOperation[],
+  operations: AgentMessageOperation[],
 ): AgentMessageReActOperationGroup[] {
   const groups: AgentMessageReActOperationGroup[] = [];
   let current: AgentMessageReActOperationGroup | null = null;
 
-  const startGroup = (operation: ConversationOperation, thoughtSequence?: number) => {
+  const startGroup = (operation: AgentMessageOperation, thoughtSequence?: number) => {
     const group: AgentMessageReActOperationGroup = {
       id: `react-${groups.length + 1}-${operation.id}`,
       index: groups.length + 1,
@@ -335,7 +335,7 @@ function reActGroupPrimaryOperations(group: AgentMessageReActOperationGroup) {
   return group.operations;
 }
 
-function reActGroupPrimaryKind(group: AgentMessageReActOperationGroup): ConversationOperationKind {
+function reActGroupPrimaryKind(group: AgentMessageReActOperationGroup): AgentMessageOperationKind {
   return reActGroupPrimaryOperations(group)[0]?.kind ?? group.operations[0]?.kind ?? "tool";
 }
 
@@ -348,10 +348,10 @@ function reActGroupTitle(group: AgentMessageReActOperationGroup) {
 }
 
 function normalizeTimelineOperations(
-  operations: ConversationOperation[],
+  operations: AgentMessageOperation[],
   messageStreaming: boolean,
-): ConversationOperation[] {
-  const merged: ConversationOperation[] = [];
+): AgentMessageOperation[] {
+  const merged: AgentMessageOperation[] = [];
   for (const operation of operations) {
     const next = normalizeOperationDisplay(operation);
     const previous = merged[merged.length - 1];
@@ -392,7 +392,7 @@ function normalizeTimelineOperations(
   return compactRepeatedBatchedProgressTools(normalized);
 }
 
-function findLatestConcreteProgressIndex(operations: ConversationOperation[]) {
+function findLatestConcreteProgressIndex(operations: AgentMessageOperation[]) {
   for (let index = operations.length - 1; index >= 0; index -= 1) {
     const operation = operations[index];
     if (operation && ["done", "failed"].includes(operation.status)) {
@@ -402,7 +402,7 @@ function findLatestConcreteProgressIndex(operations: ConversationOperation[]) {
   return -1;
 }
 
-function isSyntheticFailedOperation(operation: ConversationOperation) {
+function isSyntheticFailedOperation(operation: AgentMessageOperation) {
   if (operation.status !== "failed") {
     return false;
   }
@@ -412,13 +412,13 @@ function isSyntheticFailedOperation(operation: ConversationOperation) {
   return operation.kind === "status" || operation.kind === "thought" || operation.kind === "mental";
 }
 
-function compactRepeatedBatchedProgressTools(operations: ConversationOperation[]) {
+function compactRepeatedBatchedProgressTools(operations: AgentMessageOperation[]) {
   const batchKeysWithFailures = new Set(
     operations
       .filter((operation) => isBatchedProgressTool(operation) && operation.status === "failed")
       .map((operation) => batchedProgressToolKey(operation)),
   );
-  const reversedCompacted: ConversationOperation[] = [];
+  const reversedCompacted: AgentMessageOperation[] = [];
   const seenKeys = new Set<string>();
   const droppedThoughtSequences = new Set<number>();
 
@@ -462,7 +462,7 @@ function compactRepeatedBatchedProgressTools(operations: ConversationOperation[]
   });
 }
 
-function isBatchedProgressTool(operation: ConversationOperation) {
+function isBatchedProgressTool(operation: AgentMessageOperation) {
   if (operation.kind !== "tool") {
     return false;
   }
@@ -470,14 +470,14 @@ function isBatchedProgressTool(operation: ConversationOperation) {
   return rawName === "source_collection_stage_writeback_tool";
 }
 
-function batchedProgressToolKey(operation: ConversationOperation) {
+function batchedProgressToolKey(operation: AgentMessageOperation) {
   return String(operation.rawLabel ?? operation.label ?? "").trim().toLowerCase();
 }
 
 function mergeThoughtOperation(
-  operations: ConversationOperation[],
+  operations: AgentMessageOperation[],
   targetIndex: number,
-  next: ConversationOperation,
+  next: AgentMessageOperation,
 ) {
   const previous = operations[targetIndex];
   if (!previous || previous.kind !== "thought" || next.kind !== "thought") {
@@ -503,7 +503,7 @@ function mergeThoughtOperation(
   return true;
 }
 
-function normalizeOperationDisplay(operation: ConversationOperation): ConversationOperation {
+function normalizeOperationDisplay(operation: AgentMessageOperation): AgentMessageOperation {
   const rawStatus = operation.rawStatus ?? operation.status;
   return {
     ...operation,

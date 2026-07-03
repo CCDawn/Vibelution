@@ -49,8 +49,8 @@ import {
 import {
   buildAgentMessageOperationGroups,
   buildAgentMessageReActOperationGroups,
-  type ConversationOperation,
-  type ConversationOperationKind,
+  type AgentMessageOperation,
+  type AgentMessageOperationKind,
   type AgentMessageReActOperationGroup,
 } from "./conversationOperations";
 import {
@@ -336,7 +336,7 @@ function lightweightTextSignal(value: unknown): string {
   return `${text.length}:${text.slice(0, 96)}:${text.slice(-32)}`;
 }
 
-function operationDetailsKind(operation: ConversationOperation): OperationDetailKind {
+function operationDetailsKind(operation: AgentMessageOperation): OperationDetailKind {
   if (operation.kind === "thought") {
     return "thought";
   }
@@ -354,11 +354,11 @@ function DeferredOperationDetails({
   buildDetailRows,
   className,
 }: {
-  operation: ConversationOperation;
+  operation: AgentMessageOperation;
   expanded: boolean;
   detailsId: string;
   kind: OperationDetailKind;
-  buildDetailRows: (operation: ConversationOperation) => OperationDetailRow[];
+  buildDetailRows: (operation: AgentMessageOperation) => OperationDetailRow[];
   className?: string;
 }) {
   const deferredExpanded = useDeferredValue(expanded);
@@ -1649,7 +1649,7 @@ export function ConversationView({
     return `${Math.round(seconds)}s`;
   }
 
-  function operationIcon(kind: ConversationOperationKind, label: string) {
+  function operationIcon(kind: AgentMessageOperationKind, label: string) {
     const normalized = label.trim().toLowerCase();
     if (kind === "thought") {
       return <Sparkles size={17} />;
@@ -1677,7 +1677,7 @@ export function ConversationView({
     return <Wrench size={17} />;
   }
 
-  function operationTone(operation: ConversationOperation) {
+  function operationTone(operation: AgentMessageOperation) {
     if (operation.kind === "thought") {
       return "thought";
     }
@@ -1690,7 +1690,7 @@ export function ConversationView({
     return "tool";
   }
 
-  function operationStatusIcon(operation: ConversationOperation, animateRunning = true) {
+  function operationStatusIcon(operation: AgentMessageOperation, animateRunning = true) {
     const status = operation.status.trim().toLowerCase();
     if (["done", "success", "completed", "succeeded"].includes(status)) {
       return <CheckCircle2 size={14} />;
@@ -1709,7 +1709,7 @@ export function ConversationView({
     return <CircleDot size={14} />;
   }
 
-  function operationStatusTone(operation: ConversationOperation) {
+  function operationStatusTone(operation: AgentMessageOperation) {
     const status = operation.status.trim().toLowerCase();
     if (["failed", "error", "timeout"].includes(status)) {
       return "failed";
@@ -1727,7 +1727,7 @@ export function ConversationView({
     return RUNNING_OPERATION_STATUSES.has(status.trim().toLowerCase());
   }
 
-  function operationLabel(operation: ConversationOperation) {
+  function operationLabel(operation: AgentMessageOperation) {
     if (operation.kind !== "tool") {
       return operation.label;
     }
@@ -1746,7 +1746,7 @@ export function ConversationView({
     return normalized;
   }
 
-  function operationGroupTitle(kind: ConversationOperationKind, count: number) {
+  function operationGroupTitle(kind: AgentMessageOperationKind, count: number) {
     if (kind === "thought") {
       return t("thoughtProcess");
     }
@@ -1756,7 +1756,7 @@ export function ConversationView({
     return `${t("toolProcess")} ${count}`;
   }
 
-  function operationTimelineTitle(operations: ConversationOperation[]) {
+  function operationTimelineTitle(operations: AgentMessageOperation[]) {
     if (operations.length > 0) {
       return lang === "zh" ? "执行过程" : "Execution trace";
     }
@@ -1771,7 +1771,7 @@ export function ConversationView({
     return parts.length > 0 ? parts.join(" · ") : `${t("toolProcess")} ${operations.length}`;
   }
 
-  function operationCollectionTone(operations: ConversationOperation[]) {
+  function operationCollectionTone(operations: AgentMessageOperation[]) {
     if (operations.some((operation) => isLongLoopProgressOperation(operation) && operationStatusTone(operation) === "running")) {
       return "running";
     }
@@ -1815,11 +1815,11 @@ export function ConversationView({
     return lang === "zh" ? "等待请求" : "Pending request";
   }
 
-  function isCompactAnswerOnlyRequestProcess(operations: ConversationOperation[]) {
+  function isCompactAnswerOnlyRequestProcess(operations: AgentMessageOperation[]) {
     return operations.length > 0 && operations.every((operation) => !shouldShowTimelineOperation(operation));
   }
 
-  function processSummaryTitle(tone: string, operations: ConversationOperation[]) {
+  function processSummaryTitle(tone: string, operations: AgentMessageOperation[]) {
     if (isCompactAnswerOnlyRequestProcess(operations)) {
       return compactRequestStateLabel(tone);
     }
@@ -1835,7 +1835,7 @@ export function ConversationView({
     return lang === "zh" ? "过程待处理" : "Process pending";
   }
 
-  function processSummaryMeta(operations: ConversationOperation[]) {
+  function processSummaryMeta(operations: AgentMessageOperation[]) {
     if (isCompactAnswerOnlyRequestProcess(operations)) {
       return "";
     }
@@ -1854,7 +1854,7 @@ export function ConversationView({
     return parts.length > 0 ? parts.join(" · ") : compactRequestStateLabel(operationCollectionTone(operations));
   }
 
-  function processSummaryPreview(operations: ConversationOperation[]) {
+  function processSummaryPreview(operations: AgentMessageOperation[]) {
     const tone = operationCollectionTone(operations);
     const running = [...operations]
       .reverse()
@@ -1921,7 +1921,7 @@ export function ConversationView({
     return <CircleDot size={14} />;
   }
 
-  function operationMatchesAny(operation: ConversationOperation, markers: string[]) {
+  function operationMatchesAny(operation: AgentMessageOperation, markers: string[]) {
     const haystack = [
       operation.rawLabel,
       operation.label,
@@ -1931,7 +1931,7 @@ export function ConversationView({
     return markers.some((marker) => haystack.includes(marker));
   }
 
-  function isInternalPipelineOperation(operation: ConversationOperation) {
+  function isInternalPipelineOperation(operation: AgentMessageOperation) {
     if (operation.kind !== "status") {
       return false;
     }
@@ -1953,7 +1953,7 @@ export function ConversationView({
     ]);
   }
 
-  function isLongLoopProgressOperation(operation: ConversationOperation) {
+  function isLongLoopProgressOperation(operation: AgentMessageOperation) {
     if (operation.kind !== "status") {
       return false;
     }
@@ -1964,14 +1964,14 @@ export function ConversationView({
     ]);
   }
 
-  function shouldShowTimelineOperation(operation: ConversationOperation) {
+  function shouldShowTimelineOperation(operation: AgentMessageOperation) {
     if (operation.kind === "status") {
       return isLongLoopProgressOperation(operation) || Boolean(operation.error?.trim());
     }
     return !isInternalPipelineOperation(operation) || Boolean(operation.error?.trim());
   }
 
-  function visibleTimelineOperationDedupeKey(operation: ConversationOperation) {
+  function visibleTimelineOperationDedupeKey(operation: AgentMessageOperation) {
     if (operation.kind !== "status" || !isLongLoopProgressOperation(operation) || operation.error?.trim()) {
       return "";
     }
@@ -1982,8 +1982,8 @@ export function ConversationView({
     ].join(":");
   }
 
-  function compactVisibleTimelineOperations(operations: ConversationOperation[]) {
-    const compacted: ConversationOperation[] = [];
+  function compactVisibleTimelineOperations(operations: AgentMessageOperation[]) {
+    const compacted: AgentMessageOperation[] = [];
     const indexesByKey = new Map<string, number>();
     for (const operation of operations) {
       const key = visibleTimelineOperationDedupeKey(operation);
@@ -2060,7 +2060,7 @@ export function ConversationView({
       .filter((item): item is { id: string; label: string; value: string; tone: string } => item !== null);
   }
 
-  function readableOperationResult(operation: ConversationOperation) {
+  function readableOperationResult(operation: AgentMessageOperation) {
     const result = String(operation.resultPreview ?? "").trim();
     if (!result) {
       return "";
@@ -2083,7 +2083,7 @@ export function ConversationView({
     }
   }
 
-  function shouldKeepResultInDetailsOnly(operation: ConversationOperation, result: string) {
+  function shouldKeepResultInDetailsOnly(operation: AgentMessageOperation, result: string) {
     if (operation.kind !== "tool" || operation.status !== "done") {
       return false;
     }
@@ -2146,7 +2146,7 @@ export function ConversationView({
     return tone === "running" || tone === "failed" || tone === "pending";
   }
 
-  function hasOperationDetails(operation: ConversationOperation) {
+  function hasOperationDetails(operation: AgentMessageOperation) {
     return Boolean(
       Object.keys(operation.arguments ?? {}).length
       || operation.resultPreview
@@ -2158,7 +2158,7 @@ export function ConversationView({
     );
   }
 
-  function operationDetailRows(operation: ConversationOperation): OperationDetailRow[] {
+  function operationDetailRows(operation: AgentMessageOperation): OperationDetailRow[] {
     const rows: OperationDetailRow[] = [];
     const args = operation.arguments ?? {};
     const rawLabel = operation.kind === "tool" ? String(operation.rawLabel ?? "").trim() : "";
@@ -2212,7 +2212,7 @@ export function ConversationView({
       .join("\n");
   }
 
-  function computerUseResultForOperation(operation: ConversationOperation): ComputerUseResult | null {
+  function computerUseResultForOperation(operation: AgentMessageOperation): ComputerUseResult | null {
     if (operation.kind !== "tool" || (operation.rawLabel ?? operation.label) !== COMPUTER_USE_TOOL_NAME) {
       return null;
     }
@@ -2241,7 +2241,7 @@ export function ConversationView({
     }
   }
 
-  function renderComputerUseResult(operation: ConversationOperation) {
+  function renderComputerUseResult(operation: AgentMessageOperation) {
     const result = computerUseResultForOperation(operation);
     if (!result) {
       return null;
@@ -2349,7 +2349,7 @@ export function ConversationView({
     );
   }
 
-  function renderOperationTimeline(operations: ConversationOperation[], options: { limitInitialRows?: boolean } = {}) {
+  function renderOperationTimeline(operations: AgentMessageOperation[], options: { limitInitialRows?: boolean } = {}) {
     const shouldLimitRows = options.limitInitialRows && operations.length > INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT;
     const hiddenOperationCount = shouldLimitRows ? operations.length - INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT : 0;
     const visibleOperations = shouldLimitRows
@@ -2814,7 +2814,7 @@ export function ConversationView({
     );
   }
 
-  function renderCompactRequestSummary(operations: ConversationOperation[]) {
+  function renderCompactRequestSummary(operations: AgentMessageOperation[]) {
     const tone = operationCollectionTone(operations);
     const title = compactRequestStateLabel(tone);
     return (
@@ -2840,7 +2840,7 @@ export function ConversationView({
   function renderOperationGroup(
     messageId: string,
     section: "thought" | "mental" | "tools",
-    operations: ConversationOperation[],
+    operations: AgentMessageOperation[],
     defaultExpanded: boolean,
   ) {
     if (operations.length === 0) {
@@ -2883,7 +2883,7 @@ export function ConversationView({
 
   function renderFeedbackTimelineGroup(
     messageId: string,
-    operations: ConversationOperation[],
+    operations: AgentMessageOperation[],
     defaultExpanded: boolean,
     processSectionIds?: string,
   ) {
@@ -2938,7 +2938,7 @@ export function ConversationView({
 
   function renderAnswerOnlyProcessGroup(
     messageId: string,
-    operations: ConversationOperation[],
+    operations: AgentMessageOperation[],
     defaultExpanded: boolean,
     renderDetails: () => ReactNode,
     inlinePreview?: string,
@@ -3002,7 +3002,7 @@ export function ConversationView({
     );
   }
 
-  function shouldExpandToolGroupByDefault(message: ConversationMessage, operations: ConversationOperation[]) {
+  function shouldExpandToolGroupByDefault(message: ConversationMessage, operations: AgentMessageOperation[]) {
     return Boolean(message.streaming)
       || operations.some((operation) => operation.kind === "tool" && (operation.rawLabel ?? operation.label) === COMPUTER_USE_TOOL_NAME);
   }

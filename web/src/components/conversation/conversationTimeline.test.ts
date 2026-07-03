@@ -4,6 +4,7 @@ import { ConversationMessage } from "../../api/types";
 import { conversationMessageToAgentMessage } from "../../agent-thread/adapters";
 import type { AgentMessage } from "../../agent-thread";
 import { buildAgentMessageOperations } from "./conversationOperations";
+import conversationTimelineSource from "./conversationTimeline.ts?raw";
 import { buildAgentMessageTimelineItems, type ConversationTimelineOptions } from "./conversationTimeline";
 
 const labels = {
@@ -26,6 +27,11 @@ function timelineItemsForConversationMessage(
 }
 
 describe("conversationTimeline", () => {
+  it("names operation timeline items after the AgentMessage operation model", () => {
+    expect(conversationTimelineSource).toContain("AgentMessageOperationTimelineItem");
+    expect(conversationTimelineSource).not.toContain("ConversationOperationTimelineItem");
+  });
+
   it("builds timeline items from AgentMessage parts", () => {
     const message: AgentMessage = {
       id: "agent-message-timeline",

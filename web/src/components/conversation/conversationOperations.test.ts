@@ -38,6 +38,17 @@ describe("conversationOperations", () => {
     expect(conversationOperationsSource).not.toContain("ConversationReActOperationGroup");
   });
 
+  it("exports operation model types through AgentMessage naming only", () => {
+    expect(conversationOperationsSource).toContain("export type AgentMessageOperationKind");
+    expect(conversationOperationsSource).toContain("export type AgentMessageOperation =");
+    expect(conversationOperationsSource).toContain("export type AgentMessageOperationLabels");
+    expect(conversationOperationsSource).toContain("export type AgentMessageOperationGroups");
+    expect(conversationOperationsSource).not.toContain("export type ConversationOperationKind");
+    expect(conversationOperationsSource).not.toContain("export type ConversationOperation =");
+    expect(conversationOperationsSource).not.toContain("export type ConversationOperationLabels");
+    expect(conversationOperationsSource).not.toContain("export type ConversationOperationGroups");
+  });
+
   it("builds operation groups from AgentMessage parts", () => {
     const message: AgentMessage = {
       id: "agent-message-parts",
