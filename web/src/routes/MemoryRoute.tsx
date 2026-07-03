@@ -68,6 +68,7 @@ import { MemoryCleanupPanel } from "./MemoryCleanupPanel";
 import { MemoryDetailPanel } from "./MemoryDetailPanel";
 import { MemoryEffectivePanel } from "./MemoryEffectivePanel";
 import { MemoryKnowledgeBaseSidebar } from "./MemoryKnowledgeBaseSidebar";
+import { MemoryKnowledgeGovernancePanel } from "./MemoryKnowledgeGovernancePanel";
 import { MemoryKnowledgeModeTabs } from "./MemoryKnowledgeModeTabs";
 import { MemoryKnowledgePermissionsPanel } from "./MemoryKnowledgePermissionsPanel";
 import { MemoryKnowledgePipelinePanel } from "./MemoryKnowledgePipelinePanel";
@@ -4552,102 +4553,16 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           ) : null}
 
           {activeKnowledgeWorkspaceMode === "governance" ? (
-          <>
-          <section className={styles.managementPanel}>
-            <div className={styles.managementHeader}>
-              <div>
-                <p className={styles.panelEyebrow}>{copy.operationsHealth}</p>
-                <h2>{copy.healthFindings}</h2>
-              </div>
-              <span className={styles.countPill}>{knowledgeOperationsHealth?.summary.findingCount ?? 0}</span>
-            </div>
-            <div className={styles.healthStrip}>
-              <span>{copy.knowledgeBases}: {knowledgeOperationsHealth?.summary.knowledgeBaseCount ?? 0}</span>
-              <span>{copy.pendingProposals}: {knowledgeOperationsHealth?.summary.pendingProposalCount ?? 0}</span>
-              <span>{copy.ratingSuggestions}: {knowledgeOperationsHealth?.summary.pendingRatingSuggestionCount ?? 0}</span>
-              <span>{copy.formalKnowledge}: {knowledgeOperationsHealth?.summary.unratedItemCount ?? 0}</span>
-            </div>
-            <div className={styles.knowledgeProposalList}>
-              {(knowledgeOperationsHealth?.findings ?? []).slice(0, 8).map((finding) => (
-                <section key={finding.findingId} className={styles.knowledgeRow}>
-                  <span className={styles.statusPill}>{finding.severity}</span>
-                  <strong>{finding.findingType}</strong>
-                  <span>{finding.message}</span>
-                  <small>{finding.knowledgeBaseName} · {finding.count}</small>
-                  <small>{finding.nextReviewTargetIds.slice(0, 2).join(", ") || "-"}</small>
-                </section>
-              ))}
-              {!knowledgeDashboardSnapshotQuery.isPending && !(knowledgeOperationsHealth?.findings ?? []).length ? (
-                <section className={styles.emptyDetail}>
-                  <CheckCircle2 size={20} />
-                  <strong>{copy.noIssues}</strong>
-                </section>
-              ) : null}
-            </div>
-          </section>
-
-          <section className={styles.managementPanel}>
-            <div className={styles.managementHeader}>
-              <div>
-                <p className={styles.panelEyebrow}>{copy.governancePlan}</p>
-                <h2>{copy.planOnly}</h2>
-              </div>
-              <span className={styles.statusPillMuted}>{knowledgeGovernancePlan?.mode ?? "recommendations_only"}</span>
-            </div>
-            <div className={styles.healthStrip}>
-              <span>{copy.noDirectApply}: {knowledgeGovernancePlan?.operatingBoundary.canDirectlyApplyKnowledge ? copy.yes : copy.no}</span>
-              <span>{copy.reviewerRequired}: {knowledgeGovernancePlan?.operatingBoundary.formalKnowledgeRequiresReviewer ? copy.yes : copy.no}</span>
-              <span>{copy.stewardNextActions}: {knowledgeGovernancePlan?.summary.actionCount ?? 0}</span>
-            </div>
-            <div className={styles.knowledgeProposalList}>
-              {(knowledgeGovernancePlan?.actions ?? []).slice(0, 8).map((action) => (
-                <section key={action.planActionId} className={styles.knowledgeRow}>
-                  <span className={styles.statusPill}>{action.priority}</span>
-                  <strong>{action.title}</strong>
-                  <span>{action.nextStep}</span>
-                  <small>{action.kind} · {action.recommendedTool}</small>
-                  <small>{action.mutatesFormalKnowledge ? copy.createsKnowledgeItem : copy.planOnly}</small>
-                </section>
-              ))}
-              {!knowledgeDashboardSnapshotQuery.isPending && !(knowledgeGovernancePlan?.actions ?? []).length ? (
-                <section className={styles.emptyDetail}>
-                  <CheckCircle2 size={20} />
-                  <strong>{copy.noIssues}</strong>
-                </section>
-              ) : null}
-            </div>
-          </section>
-
-          <section className={styles.managementPanel}>
-            <div className={styles.managementHeader}>
-              <div>
-                <p className={styles.panelEyebrow}>{copy.governanceTasks}</p>
-                <h2>{copy.teamKnowledgeDomain}</h2>
-              </div>
-              <span className={styles.countPill}>{governanceTasksQuery.data?.summary.openTaskCount ?? 0}</span>
-            </div>
-            <div className={styles.knowledgeProposalList}>
-              {governanceTasks.slice(0, 8).map((task) => (
-                <section key={task.taskId} className={styles.knowledgeRow}>
-                  <span className={styles.statusPill}>{task.priority}</span>
-                  <strong>{task.title}</strong>
-                  <span>{task.summary || task.targetId}</span>
-                  <small>{task.taskType} · {task.targetStatus} · {task.knowledgeBaseName}</small>
-                  <VButton type="button" className={styles.detailActionButton} onClick={() => setTraceTargetId(task.targetId)}>
-                    <Eye size={14} />
-                    <span>{copy.traceability}</span>
-                  </VButton>
-                </section>
-              ))}
-              {!governanceTasksQuery.isPending && !governanceTasks.length ? (
-                <section className={styles.emptyDetail}>
-                  <CheckCircle2 size={20} />
-                  <strong>{copy.noIssues}</strong>
-                </section>
-              ) : null}
-            </div>
-          </section>
-          </>
+          <MemoryKnowledgeGovernancePanel
+            copy={copy}
+            operationsHealth={knowledgeOperationsHealth}
+            governancePlan={knowledgeGovernancePlan}
+            governanceTasks={governanceTasks}
+            operationsPending={knowledgeDashboardSnapshotQuery.isPending}
+            governanceTasksPending={governanceTasksQuery.isPending}
+            openGovernanceTaskCount={governanceTasksQuery.data?.summary.openTaskCount ?? 0}
+            onTraceTarget={setTraceTargetId}
+          />
           ) : null}
 
           {activeKnowledgeWorkspaceMode === "permissions" ? (
