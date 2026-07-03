@@ -89,35 +89,39 @@ export function SupervisedWorkspaceControls({
   );
 
   return (
-    <>
-      <SupervisedWorkspaceTabs
-        activeView={activeView}
-        activeWorkflowStepId={activeWorkflowStepId}
-        onWorkflowStepSelect={onWorkflowStepSelect}
-        summaries={tabSummaries}
-      />
+    <div className={styles.controlsShellClass}>
+      <div className={styles.flowRegionClass}>
+        <SupervisedWorkspaceTabs
+          activeView={activeView}
+          activeWorkflowStepId={activeWorkflowStepId}
+          onWorkflowStepSelect={onWorkflowStepSelect}
+          summaries={tabSummaries}
+        />
+      </div>
 
-      <div className={styles.intakeControlClass}>
-        <span className={styles.controlLabelClass}>{t("intakeMode")}</span>
-        <div className={styles.intakeSegmentedClass}>
-          {(["manual_review", "auto"] as const).map((mode) => (
-            <VButton
-              key={mode}
-              type="button"
-              className={
-                currentIntakeMode === mode
-                  ? `${styles.intakeButtonClass} ${styles.intakeButtonActiveClass}`
-                  : styles.intakeButtonClass
-              }
-              aria-pressed={currentIntakeMode === mode}
-              isDisabled={intakeModeMutation.isPending}
-              onClick={() => intakeModeMutation.mutate(mode)}
-            >
-              {intakeModeLabel(mode)}
-            </VButton>
-          ))}
+      <div className={styles.modeRegionClass}>
+        <div className={styles.intakeControlClass}>
+          <span className={styles.controlLabelClass}>{t("intakeMode")}</span>
+          <div className={styles.intakeSegmentedClass}>
+            {(["manual_review", "auto"] as const).map((mode) => (
+              <VButton
+                key={mode}
+                type="button"
+                className={
+                  currentIntakeMode === mode
+                    ? `${styles.intakeButtonClass} ${styles.intakeButtonActiveClass}`
+                    : styles.intakeButtonClass
+                }
+                aria-pressed={currentIntakeMode === mode}
+                isDisabled={intakeModeMutation.isPending}
+                onClick={() => intakeModeMutation.mutate(mode)}
+              >
+                {intakeModeLabel(mode)}
+              </VButton>
+            ))}
+          </div>
         </div>
       </div>
-    </>
+    </div>
   );
 }

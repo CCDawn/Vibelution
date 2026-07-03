@@ -78,7 +78,7 @@ import {
   storedPaneSize,
   storedPaneWidth,
 } from "./resizablePane";
-import styles from "./EvolutionRoute.module.css";
+import styles from "./EvolutionRoute.styles";
 
 type RunFilter = "all" | "success" | "failed";
 type LibraryView = "items" | "pending";
@@ -2762,7 +2762,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
             </div>
           ) : null}
 
-          <div className={styles.toolbarControls}>
+          <div
+            className={
+              hideSupervisedToolbarIntro
+                ? `${styles.toolbarControls} ${styles.toolbarControlsSupervisedFocus}`
+                : styles.toolbarControls
+            }
+          >
             {showTrackToggle ? (
               <div className={styles.segmented}>
                 {([
@@ -3582,6 +3588,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                                 </div>
                               ))}
                             </div>
+                            {!selectedWorkflowHasConversationMessages ? (
+                              <div className={styles.caseOverviewEmptyState}>
+                                <strong>{selectedWorkflowAssistantName || "--"}</strong>
+                                <span>{selectedWorkflowConversationNotice}</span>
+                              </div>
+                            ) : null}
                             {supervisedLiveConversationSupplement}
                           </div>
                         </div>
@@ -3598,7 +3610,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 title={resizeLiveIoLabel}
                 onPointerDown={handleLiveIoResizeStart}
                 onKeyDown={handleLiveIoResizeKeyDown}
-              />
+              >
+                <span className={styles.liveIoResizeHandleLine} aria-hidden="true" />
+              </button>
           </section>
 
         </div>
