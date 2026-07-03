@@ -14,9 +14,58 @@ from core.evaluation.chat_dataset_capture import (
     reject_chat_candidate,
     resolve_chat_dataset_paths,
 )
-from core.evaluation.chat_review_queue import get_review_item, list_review_items
+from core.evaluation import chat_review_queue
+from core.evaluation.chat_review_queue import (
+    append_review_decision,
+    append_review_queue_candidate,
+    get_review_item,
+    list_review_items,
+)
 from core.evaluation.chat_segmenter import ChatTurnRecord
 from core.evaluation.dataset_registry import ensure_dataset_registry, materialize_dataset_bundle
+
+
+def test_chat_review_queue_cache_reuses_signature_and_invalidates_after_append(tmp_path: Path, monkeypatch):
+    queue_path = tmp_path / "review_queue.jsonl"
+    append_review_queue_candidate(
+        {
+            "candidate_id": "candidate-cache",
+            "session_id": "session-cache",
+            "status": "pending",
+            "topic_summary": "缓存回归",
+        },
+        queue_path,
+    )
+
+    original_iter_queue_events = chat_review_queue.iter_queue_events
+    read_count = 0
+
+    def counting_iter_queue_events(path: Path):
+        nonlocal read_count
+        read_count += 1
+        return original_iter_queue_events(path)
+
+    monkeypatch.setattr(chat_review_queue, "iter_queue_events", counting_iter_queue_events)
+
+    first_items = list_review_items(queue_path)
+    first_items[0]["status"] = "mutated"
+    second_items = list_review_items(queue_path)
+
+    assert read_count == 1
+    assert second_items[0]["status"] == "pending"
+
+    append_review_decision(
+        "candidate-cache",
+        status="positive",
+        reviewer_note="缓存失效回归",
+        queue_path=queue_path,
+    )
+    updated = get_review_item("candidate-cache", queue_path)
+
+    assert read_count == 2
+    assert updated is not None
+    assert updated["status"] == "positive"
+    assert updated["reviewer_note"] == "缓存失效回归"
 
 
 def test_chat_candidate_capture_writes_raw_and_queue(tmp_path: Path):
