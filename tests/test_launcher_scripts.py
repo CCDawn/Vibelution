@@ -845,6 +845,27 @@ def test_desktop_entry_source_signature_changes_when_developer_mode_changes(monk
     assert before != after
 
 
+def test_desktop_entry_source_signature_tracks_launcher_style_maps(monkeypatch, tmp_path):
+    bridge = _load_desktop_entry_py()
+    monkeypatch.setattr(bridge, "PROJECT_ROOT", tmp_path)
+
+    assert "web/src/app/LauncherShell.styles.ts" in bridge.SOURCE_SIGNATURE_PATHS
+    assert "web/src/routes/LauncherRoute.styles.ts" in bridge.SOURCE_SIGNATURE_PATHS
+    assert not any(path.endswith(".module.css") for path in bridge.SOURCE_SIGNATURE_PATHS)
+
+    for relative_path in bridge.SOURCE_SIGNATURE_PATHS:
+        source_path = tmp_path / relative_path
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_text(f"initial {relative_path}\n", encoding="utf-8")
+
+    before = bridge._source_signature()
+    launcher_route_styles = tmp_path / "web" / "src" / "routes" / "LauncherRoute.styles.ts"
+    launcher_route_styles.write_text("changed launcher route styles\n", encoding="utf-8")
+    after = bridge._source_signature()
+
+    assert before != after
+
+
 def test_desktop_entry_python_bridge_starts_launcher_natively(monkeypatch, tmp_path):
     bridge = _load_desktop_entry_py()
     calls: list[tuple[str, object]] = []
@@ -3770,14 +3791,23 @@ foreach ($requiredControlInput in @(
     "core\\runtime_manager\\work_run_store.py",
     "core\\runtime_manager\\workbench_controller.py",
     "web\\src\\routes\\LauncherRoute.tsx",
-    "web\\src\\routes\\LauncherRoute.module.css",
+    "web\\src\\routes\\LauncherRoute.styles.ts",
     "web\\src\\app\\LauncherShell.tsx",
+    "web\\src\\app\\LauncherShell.styles.ts",
     "web\\src\\app\\pollingPolicy.ts",
     "web\\src\\api\\launcher.ts",
     "web\\src\\api\\client.ts"
 )) {
     if ($signatureText -notmatch [regex]::Escape($requiredControlInput)) {
         throw "Launcher control source signature is missing '$requiredControlInput'."
+    }
+}
+foreach ($retiredControlInput in @(
+    "web\\src\\routes\\LauncherRoute.module.css",
+    "web\\src\\app\\LauncherShell.module.css"
+)) {
+    if ($signatureText -match [regex]::Escape($retiredControlInput)) {
+        throw "Launcher control source signature still includes retired '$retiredControlInput'."
     }
 }
 
