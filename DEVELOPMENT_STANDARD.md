@@ -66,6 +66,32 @@ If the true root cause is unknown, plan diagnosis first. Retrying, delaying, add
 
 Temporary mitigation is allowed only when explicitly labeled as mitigation, with the remaining evidence needed for a permanent fix.
 
+### 3.1 Single Source Of Truth Discipline
+
+Every meaningful feature, state machine, setting, lifecycle status, memory record, registry entry, version value, and user-visible derived view must have exactly one declared source of truth.
+
+Do not implement competing facts across frontend state, backend state, runtime files, config files, caches, generated views, or logs. Mirrors, caches, summaries, UI projections, and generated files are allowed only when they are explicitly derived from the canonical source, read-only for normal behavior, and refreshable from that source.
+
+Before implementing or changing a data/state path, identify:
+
+- canonical source of truth;
+- allowed derived surfaces;
+- write owner;
+- read paths;
+- invalidation or refresh rule;
+- migration/rollback behavior if replacing an older source.
+
+For non-trivial state, config, lifecycle, cache, registry, memory, or generated-view changes, include a compact source-of-truth table in the plan, review notes, or final report:
+
+| Fact | Canonical source | Writer | Readers / derived surfaces | Refresh or invalidation | Old source cleanup |
+| --- | --- | --- | --- | --- | --- |
+
+If the table cannot be filled in, the design is not ready for implementation.
+
+Dual writes, compatibility aliases, copied defaults, duplicated lifecycle status, and parallel registries are temporary migration scaffolding only. They require an explicit owner, expiry or removal trigger, validation evidence, and cleanup plan before stable merge.
+
+Validation anchor: changes must prove that writes go to the canonical source, derived views refresh from it, stale derived data cannot override it, and old sources cannot silently become active again.
+
 ## 4. Log-First Diagnosis
 
 For bugs, regressions, stalls, runtime mismatches, failed commands, unexpected behavior, bad delegation, repeated tool loops, or broken convergence, start from the newest relevant lifecycle log package under:
