@@ -77,6 +77,7 @@ import {
   type AgentBulkConfigDraft,
   type AgentBulkConfigField,
 } from "./AgentBulkConfigPanel";
+import { AgentCreatePanel, type AgentCreateDraft } from "./AgentCreatePanel";
 import { AgentDebugResetPanel, type AgentResetOptions } from "./AgentDebugResetPanel";
 import { AgentMemoryPolicyPanel, type AgentMemoryPolicyDraft } from "./AgentMemoryPolicyPanel";
 import { AgentModeMembershipPanel, type AgentModeMembershipDraft } from "./AgentModeMembershipPanel";
@@ -151,18 +152,6 @@ type AgentContextCompressionPolicyDraft = {
   keepAiMessages: string;
   preserveErrors: boolean;
   extractKeyDecisions: boolean;
-};
-
-type AgentCreateDraft = {
-  displayName: string;
-  llmBindings: AgentLlmBindings;
-  primaryMode: string;
-  roleKey: string;
-  promptTemplateId: string;
-  personaSummary: string;
-  taskMission: string;
-  selectedToolBundleIds: string[];
-  allowedTools: string;
 };
 
 type AgentToolPolicyDraft = {
@@ -5788,165 +5777,43 @@ export function AgentsRoute() {
             }
           />
           {createOpen ? (
-            <section className={styles.createAgentPanel} title={copy.createAgentHint}>
-              <div className={styles.panelHeader}>
-                <div>
-                  <p className={styles.panelEyebrow}>{copy.createAgentTitle}</p>
-                  <h3>{copy.createAgent}</h3>
-                </div>
-                <Bot size={16} />
-              </div>
-              <div className={styles.createAgentGrid}>
-                <VFieldRow label={copy.createAgentName}>
-                  <VNativeInput
-                    value={createDraft.displayName}
-                    placeholder={copy.createAgentNamePlaceholder}
-                    onChange={(event) => updateCreateDraft({ displayName: event.target.value })}
-                  />
-                </VFieldRow>
-                <VFieldRow label={copy.model}>
-                  <VNativeSelect
-                    value={agentLlmSlotModelId(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0])}
-                    onChange={(event) => updateCreateDraft({
-                      llmBindings: updateAgentLlmSlotBinding(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0], event.target.value),
-                    })}
-                  >
-                    {agentModelChoices.map((model) => (
-                      <option key={model.key} value={model.modelId} title={model.modelLabel || model.modelId}>
-                        {model.label}
-                      </option>
-                    ))}
-                  </VNativeSelect>
-                </VFieldRow>
-                <VFieldRow label={copy.modeMembership}>
-                  <VNativeSelect
-                    value={createDraft.primaryMode}
-                    onChange={(event) => {
-                      const primaryMode = event.target.value;
-                      updateCreateDraft({
-                        primaryMode,
-                        selectedToolBundleIds: toolBundleIdsForModeChange(createDraft, primaryMode, toolBundles),
-                      });
-                    }}
-                  >
-                    {AGENT_PRIMARY_MODE_OPTIONS.map((mode) => (
-                      <option key={mode} value={mode}>
-                        {modeLabel(mode, lang)}
-                      </option>
-                    ))}
-                  </VNativeSelect>
-                </VFieldRow>
-                {!createDraftIsWorkSession ? (
-                  <VFieldRow label={copy.createAgentRole}>
-                    <VNativeInput
-                      value={createDraft.roleKey}
-                      placeholder={copy.createAgentRolePlaceholder}
-                      onChange={(event) => updateCreateDraft({ roleKey: event.target.value })}
-                    />
-                  </VFieldRow>
-                ) : null}
-                <VFieldRow label={copy.prompt}>
-                  <VNativeSelect value={createDraft.promptTemplateId} onChange={(event) => updateCreateDraft({ promptTemplateId: event.target.value })}>
-                    <option value="">-</option>
-                    {workspace?.promptTemplates.map((template) => (
-                      <option key={template.promptTemplateId || template.templateId} value={template.promptTemplateId || template.templateId || ""}>
-                        {promptTemplateOptionLabel(template, lang)}
-                      </option>
-                    ))}
-                  </VNativeSelect>
-                </VFieldRow>
-                {!createDraftIsWorkSession ? (
-                  <>
-                    <VFieldRow label={copy.createAgentPersonaSummary} className="col-span-full">
-                      <VNativeTextarea
-                        value={createDraft.personaSummary}
-                        placeholder={copy.createAgentPersonaPlaceholder}
-                        onChange={(event) => updateCreateDraft({ personaSummary: event.target.value })}
-                      />
-                    </VFieldRow>
-                    <VFieldRow label={copy.createAgentTaskMission} className="col-span-full">
-                      <VNativeTextarea
-                        value={createDraft.taskMission}
-                        placeholder={copy.createAgentTaskMissionPlaceholder}
-                        onChange={(event) => updateCreateDraft({ taskMission: event.target.value })}
-                      />
-                    </VFieldRow>
-                  </>
-                ) : null}
-                <section className={styles.fieldWide} title={copy.createAgentToolBundlesHint}>
-                  <span>{copy.createAgentToolBundles}</span>
-                  {toolBundles.length ? (
-                    <div className={styles.createToolBundleGrid}>
-                      {toolBundles.map((bundle) => {
-                        const selected = createDraft.selectedToolBundleIds.includes(bundle.bundleId);
-                        return (
-                          <label
-                            key={bundle.bundleId}
-                            className={selected ? styles.createToolBundleSelected : styles.createToolBundleOption}
-                            title={[bundle.label, toolBundleMeta(bundle, lang), bundle.description].filter(Boolean).join("\n")}
-                          >
-                            <VNativeInput
-                              type="checkbox"
-                              checked={selected}
-                              onChange={(event) => {
-                                const next = new Set(createDraft.selectedToolBundleIds);
-                                if (event.target.checked) {
-                                  next.add(bundle.bundleId);
-                                } else {
-                                  next.delete(bundle.bundleId);
-                                }
-                                updateCreateDraft({ selectedToolBundleIds: sortedIds(Array.from(next)) });
-                              }}
-                            />
-                            <span>
-                              <strong>{bundle.label}</strong>
-                            </span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <VNativeInput
-                      value={createDraft.allowedTools}
-                      placeholder={copy.createAgentAllowedToolsPlaceholder}
-                      onChange={(event) => updateCreateDraft({ allowedTools: event.target.value })}
-                    />
-                  )}
-                </section>
-                <section
-                  className={`${styles.fieldWide} ${styles.createToolBundlePreview}`}
-                  title={createToolBundleSummaryValue.meta || copy.createAgentToolBundleEmpty}
-                >
-                  <span>{copy.createAgentToolBundlePreview}</span>
-                  <strong>{createToolBundleSummaryValue.label}</strong>
-                </section>
-              </div>
-              {notice ? (
-                <p className={notice.tone === "error" ? styles.errorText : styles.successText}>{notice.text}</p>
-              ) : null}
-              <div className={styles.editorActions}>
-                <VButton
-                  type="button"
-                  variant="secondary"
-                  isDisabled={createAgentMutation.isPending}
-                  onPress={() => {
-                    setCreateOpen(false);
-                    setCreateDraft(createDraftFromWorkspace(workspace, toolBundles));
-                  }}
-                >
-                  {copy.cancelCreate}
-                </VButton>
-                <VButton
-                  type="button"
-                  variant="primary"
-                  icon={<Plus size={15} />}
-                  isDisabled={!canCreateAgent || createAgentMutation.isPending}
-                  onPress={createAgent}
-                >
-                  {createAgentMutation.isPending ? copy.creatingAgent : copy.createAgent}
-                </VButton>
-              </div>
-            </section>
+            <AgentCreatePanel
+              copy={copy}
+              draft={createDraft}
+              selectedModelId={agentLlmSlotModelId(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0])}
+              isWorkSession={createDraftIsWorkSession}
+              canCreate={canCreateAgent}
+              pending={createAgentMutation.isPending}
+              notice={notice}
+              modelChoices={agentModelChoices}
+              primaryModeOptions={bulkPrimaryModeOptions}
+              promptTemplateOptions={bulkPromptTemplateOptions}
+              toolBundles={toolBundles}
+              toolBundleSummary={createToolBundleSummaryValue}
+              toolBundleMeta={(bundle) => toolBundleMeta(bundle, lang)}
+              onDraftChange={updateCreateDraft}
+              onModelChange={(modelId) => updateCreateDraft({
+                llmBindings: updateAgentLlmSlotBinding(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0], modelId),
+              })}
+              onPrimaryModeChange={(primaryMode) => updateCreateDraft({
+                primaryMode,
+                selectedToolBundleIds: toolBundleIdsForModeChange(createDraft, primaryMode, toolBundles),
+              })}
+              onToolBundleToggle={(bundleId, selected) => {
+                const next = new Set(createDraft.selectedToolBundleIds);
+                if (selected) {
+                  next.add(bundleId);
+                } else {
+                  next.delete(bundleId);
+                }
+                updateCreateDraft({ selectedToolBundleIds: sortedIds(Array.from(next)) });
+              }}
+              onCancel={() => {
+                setCreateOpen(false);
+                setCreateDraft(createDraftFromWorkspace(workspace, toolBundles));
+              }}
+              onCreate={createAgent}
+            />
           ) : null}
           {!createOpen ? (
             <AgentBulkActionBar
