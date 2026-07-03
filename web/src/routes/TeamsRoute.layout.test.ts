@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
 import routeSource from "./TeamsRoute.tsx?raw";
+import workflowGraphViewSource from "./TeamWorkflowGraphView.tsx?raw";
 import teamCandidateCardSource from "../components/vui/product/team-management/TeamCandidateCard.tsx?raw";
 import teamSourceEmptyStateSource from "../components/vui/product/team-management/TeamSourceEmptyState.tsx?raw";
 import teamSourceFilterBarSource from "../components/vui/product/team-management/TeamSourceFilterBar.tsx?raw";
@@ -398,8 +399,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("styles.workflowIngestionStages");
     expect(routeSource).toContain("styles.workflowIngestionBoundary");
     expect(routeSource).toContain("styles.workflowGraphPanel");
-    expect(routeSource).toContain("styles.workflowGraphFrame");
-    expect(routeSource).toContain("styles.workflowGraphNode");
+    expect(workflowGraphViewSource).toContain("styles.workflowGraphFrame");
+    expect(workflowGraphViewSource).toContain("styles.workflowGraphNode");
     expect(routeSource).toContain("styles.workflowGraphBoundary");
     expect(routeSource).toContain("styles.workflowCandidateList");
     expect(routeSource).toContain("styles.workflowValidation");
@@ -1723,11 +1724,17 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("keeps Teams dynamic layout values behind typed CSS variable helpers", () => {
-    expect(routeSource).toContain("workflowGraphFrameStyle(visibleGraphLayout)");
-    expect(routeSource).toContain("workflowGraphFrameStyle(teamWorkflowCandidateGraphLayout)");
-    expect(routeSource).toContain("workflowGraphNodeStyle(node)");
+    expect(routeSource).toContain("TeamWorkflowGraphView");
+    expect(routeSource.match(/<TeamWorkflowGraphView/g)?.length ?? 0).toBe(2);
+    expect(routeSource).not.toContain("workflowGraphFrameStyle(visibleGraphLayout)");
+    expect(routeSource).not.toContain("workflowGraphFrameStyle(teamWorkflowCandidateGraphLayout)");
+    expect(routeSource).not.toContain("className={styles.workflowGraphSvg}");
+    expect(workflowGraphViewSource).toContain("workflowGraphFrameStyle(layout)");
+    expect(workflowGraphViewSource).toContain("workflowGraphNodeStyle(node)");
+    expect(workflowGraphViewSource).toContain("className={styles.workflowGraphSvg}");
     expect(routeSource).toContain("teamCanvasNodeStyle(node)");
     expect(routeSource).not.toContain("style={{");
+    expect(workflowGraphViewSource).not.toContain("style={{");
     expect(routeStyles.workflowGraphFrame).toContain("min-h-[var(--workflow-graph-height");
     expect(routeStyles.workflowGraphFrame).toContain("w-[var(--workflow-graph-width");
     expect(routeStyles.workflowGraphCanvas).toContain("relative");
