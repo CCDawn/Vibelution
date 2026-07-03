@@ -49,7 +49,12 @@ const migrationTargets = [
 const nativeControlTargets = [
   {
     path: "routes/AgentsRoute.tsx",
-    expected: ["VNativeButton", "VNativeInput", "VNativeSelect", "VNativeTextarea"],
+    expected: ["VNativeButton", "VNativeSelect"],
+    forbidden: ["<button", "<input", "<select", "<textarea"],
+  },
+  {
+    path: "routes/AgentCoreConfigPanel.tsx",
+    expected: ["VNativeInput", "VNativeSelect"],
     forbidden: ["<button", "<input", "<select", "<textarea"],
   },
   {

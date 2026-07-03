@@ -22,6 +22,10 @@ const contextCompressionPanelSource = readFileSync(
   new URL("./AgentContextCompressionPanel.tsx", import.meta.url),
   "utf-8",
 );
+const coreConfigPanelSource = readFileSync(
+  new URL("./AgentCoreConfigPanel.tsx", import.meta.url),
+  "utf-8",
+);
 const createPanelSource = readFileSync(
   new URL("./AgentCreatePanel.tsx", import.meta.url),
   "utf-8",
@@ -311,14 +315,16 @@ describe("AgentsRoute layout contract", () => {
 
   it("lets each Agent inherit or override its context compression policy", () => {
     expect(routeSource).toContain("AgentContextCompressionPolicy");
-    expect(routeSource).toContain("contextCompressionPolicy: AgentContextCompressionPolicyDraft");
+    expect(coreConfigPanelSource).toContain("contextCompressionPolicy: AgentContextCompressionPolicyDraft");
     expect(routeSource).toContain("function contextCompressionDraftFromAgent");
     expect(routeSource).toContain("function contextCompressionPolicyFromDraft");
     expect(routeSource).toContain("contextCompressionPolicy: contextCompressionPolicyFromDraft(payload.draft.contextCompressionPolicy)");
     expect(routeSource).toContain("updateContextCompressionDraft");
-    expect(routeSource).toContain("<AgentContextCompressionPanel");
-    expect(routeSource).toContain("policy={configDraft.contextCompressionPolicy}");
-    expect(routeSource).toContain("onPolicyChange={updateContextCompressionDraft}");
+    expect(routeSource).toContain("<AgentCoreConfigPanel");
+    expect(routeSource).toContain("onContextCompressionChange={updateContextCompressionDraft}");
+    expect(coreConfigPanelSource).toContain("<AgentContextCompressionPanel");
+    expect(coreConfigPanelSource).toContain("policy={draft.contextCompressionPolicy}");
+    expect(coreConfigPanelSource).toContain("onPolicyChange={onContextCompressionChange}");
     expect(contextCompressionPanelSource).toContain("copy.contextCompressionPolicy");
     expect(contextCompressionPanelSource).toContain("copy.contextCompressionInherit");
     expect(contextCompressionPanelSource).toContain("copy.contextCompressionCustom");
@@ -341,7 +347,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("!text.includes(\"image2\")");
     expect(routeSource).toContain("buildAgentModelChoices(workspace?.agentModelChoices ?? [])");
     expect(routeSource).toContain("buildAgentSlotModelChoicesWithCurrent");
-    expect(routeSource).toContain("selectedSlotModelId");
+    expect(routeSource).toContain("coreConfigLlmSlots");
+    expect(routeSource).toContain("selectedModelId");
     expect(routeSource).toContain("agentLlmSlots(workspace)");
     expect(routeSource).toContain("workspace?.agentLlmSlots?.length");
     expect(routeSource).toContain("key: model.modelId");
@@ -354,13 +361,15 @@ describe("AgentsRoute layout contract", () => {
     expect(createPanelSource).toContain("modelChoices.map((model)");
     expect(routeSource).toContain("selectedModelId={agentLlmSlotModelId(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0])}");
     expect(createPanelSource).toContain("value={selectedModelId}");
-    expect(routeSource).toContain("value={selectedSlotModelId}");
-    expect(routeSource).toContain("styles.llmSlotGrid");
-    expect(routeSource).toContain("llmSlotsHint");
+    expect(coreConfigPanelSource).toContain("value={selectedModelId}");
+    expect(coreConfigPanelSource).toContain("styles.llmSlotGrid");
+    expect(coreConfigPanelSource).toContain("copy.llmSlotsHint");
     expect(routeSource).toContain("按 Agent 自己配置对话、心智模型、摘要、子 Agent 和视觉等 LLM 槽位");
     expect(routeSource).toContain("设置页只维护模型库资产");
     expect(createPanelSource).toContain("title={model.modelLabel || model.modelId}");
     expect(createPanelSource).toContain("{model.label}");
+    expect(routeSource).toContain("title: model.modelLabel || model.modelId");
+    expect(coreConfigPanelSource).toContain("title={model.title}");
     expect(routeSource).not.toContain("buildModelProfileChoices(workspace?.modelProfiles ?? [])");
     expect(routeSource).not.toContain("modelProfileChoices.map((profile)");
     expect(routeSource).not.toContain("value={createDraft.profileId}");
@@ -375,14 +384,15 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("shows GPT reasoning effort only for Agent slots whose bound model supports it", () => {
-    expect(routeSource).toContain("reasoningEffortBySlot: Record<string, string>");
+    expect(coreConfigPanelSource).toContain("reasoningEffortBySlot: Record<string, string>");
     expect(routeSource).toContain("agentModelSupportsReasoningEffort");
     expect(routeSource).toContain("supportsReasoningEffort");
     expect(routeSource).toContain("metadata.llmReasoningEffort = pruned");
     expect(routeSource).toContain("pruneAgentReasoningEffortBySlot");
-    expect(routeSource).toContain("copy.reasoningEffort");
-    expect(routeSource).toContain('value={normalizeAgentReasoningEffort(configDraft.reasoningEffortBySlot[slot.slot])}');
-    expect(routeSource).toContain("<option value=\"high\">{copy.reasoningEffort}: {copy.reasoningEffortHigh}</option>");
+    expect(coreConfigPanelSource).toContain("copy.reasoningEffort");
+    expect(routeSource).toContain("reasoningEffort: normalizeAgentReasoningEffort(configDraft.reasoningEffortBySlot[slot.slot])");
+    expect(coreConfigPanelSource).toContain("value={reasoningEffort}");
+    expect(coreConfigPanelSource).toContain("<option value=\"high\">{copy.reasoningEffort}: {copy.reasoningEffortHigh}</option>");
   });
 
   it("keeps permanent Agent deletion behind the archived-state safety gate", () => {
@@ -510,15 +520,16 @@ describe("AgentsRoute layout contract", () => {
   it("edits the minimal Agent card fields through the Agent PATCH endpoint", () => {
     expect(routeSource).toContain("AgentConfigDraft");
     expect(routeSource).toContain("useMutation");
-    expect(routeSource).toContain("copy.configTitle");
+    expect(coreConfigPanelSource).toContain("copy.configTitle");
     expect(routeSource).toContain("copy.toolPolicyPickerHint");
     expect(routeSource).toContain("copy.memoryPolicyPickerHint");
     expect(routeSource).not.toContain("copy.configGuideTitle");
     expect(routeSource).not.toContain("copy.configGuideBoundaryHint");
     expect(routeSource).not.toContain("styles.configGuidePanel");
     expect(routeSource).not.toContain("这页先回答三个问题");
-    expect(routeSource).toContain("title={copy.llmSlotsHint}");
-    expect(routeSource).toContain("tooltip={copy.memoryPolicyPickerHint}");
+    expect(coreConfigPanelSource).toContain("title={copy.llmSlotsHint}");
+    expect(routeSource).toContain("memoryPolicyTooltip={copy.memoryPolicyPickerHint}");
+    expect(coreConfigPanelSource).toContain("tooltip={memoryPolicyTooltip}");
     expect(routeSource).toContain("displayName: payload.draft.displayName");
     expect(routeSource).toContain("llmBindings: normalizeAgentLlmBindings(payload.draft.llmBindings)");
     expect(routeSource).toContain("promptTemplateId: payload.draft.promptTemplateId");
@@ -543,9 +554,10 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("<small>{toolBundleMeta(bundle, lang)}</small>");
     expect(routeSource).toContain("<span className={styles.detailHealthStatus} title={issueSummary(selectedAgent.health, lang)}>");
     expect(routeSource).not.toContain("<small>{issueSummary(selectedAgent.health, lang)}</small>");
-    expect(routeSource).toContain("title={`${slot.required ? copy.requiredSlot : copy.optionalSlot} · ${slot.description}`}");
+    expect(coreConfigPanelSource).toContain("title={`${slot.required ? copy.requiredSlot : copy.optionalSlot} · ${slot.description}`}");
     expect(routeSource).not.toContain("<small>{slot.required ? copy.requiredSlot : copy.optionalSlot}</small>");
-    expect(routeSource).toContain("tooltip={[toolPolicySourceLine, toolPolicySource?.description || copy.toolPolicyPickerHint].filter(Boolean).join(\"\\n\")}");
+    expect(routeSource).toContain("const coreConfigToolPolicyTooltip = [");
+    expect(coreConfigPanelSource).toContain("tooltip={toolPolicyTooltip}");
     expect(routeSource).not.toContain("<small>{toolPolicySourceLine}</small>");
     expect(createPanelSource).toContain("title={copy.createAgentHint}");
     expect(createPanelSource).toContain("title={copy.createAgentToolBundlesHint}");
@@ -611,7 +623,7 @@ describe("AgentsRoute layout contract", () => {
     expect(personaProfilePanelSource).toContain("copy.communicationStyle");
     expect(personaProfilePanelSource).toContain("copy.collaborationPreference");
     expect(personaProfilePanelSource).toContain("copy.identityNotes");
-    expect(routeSource).toContain("styles.fieldWide");
+    expect(coreConfigPanelSource).toContain("styles.fieldWide");
     expect(routeSource).toContain("updatePersonaMutation");
     expect(routeSource).not.toContain("recommendAgents");
     expect(styles.fieldWide).toBeTruthy();
@@ -730,9 +742,9 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('focus: "editor"');
     expect(routeSource).toContain('returnLabel: "agents"');
     expect(routeSource).toContain("returnTo: selectedAgentReturnRoute");
-    expect(routeSource).toContain("styles.promptConfigRow");
-    expect(routeSource).toContain("onPress={() => navigate(selectedAgentPromptConfigRoute)}");
-    expect(routeSource).toContain("配置提示词");
+    expect(coreConfigPanelSource).toContain("styles.promptConfigRow");
+    expect(routeSource).toContain("onOpenPromptConfig={() => navigate(selectedAgentPromptConfigRoute)}");
+    expect(coreConfigPanelSource).toContain("配置提示词");
   });
 
   it("adds cross-center links for model, context, and memory configuration", () => {
@@ -745,11 +757,12 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('section: "runtime-context"');
     expect(routeSource).toContain('view: "agents"');
     expect(routeSource).toContain("returnTo: selectedAgentReturnRoute");
-    expect(routeSource).toContain("styles.configDeepLinkRow");
-    expect(routeSource).toContain("onPress={() => navigate(selectedAgentModelConfigRoute)}");
+    expect(coreConfigPanelSource).toContain("styles.configDeepLinkRow");
+    expect(routeSource).toContain("onOpenModelConfig={() => navigate(selectedAgentModelConfigRoute)}");
+    expect(coreConfigPanelSource).toContain("onPress={onOpenModelConfig}");
     expect(routeSource).toContain("onOpenContextConfig={() => navigate(selectedAgentContextConfigRoute)}");
     expect(routeSource).toContain("onOpenMemoryPage={() => navigate(selectedAgentMemoryConfigRoute)}");
-    expect(routeSource).toContain("去模型库配置");
+    expect(coreConfigPanelSource).toContain("去模型库配置");
     expect(contextCompressionPanelSource).toContain("去上下文配置");
     expect(memoryPolicyPanelSource).toContain("去记忆页配置");
     expect(styles.configDeepLinkRow).toBeTruthy();
@@ -1249,6 +1262,7 @@ describe("AgentsRoute layout contract", () => {
   it("renders Agent editor action rows through VUI buttons instead of page-owned button CSS", () => {
     const editorActionBlocks = [
       ...sourceBlocksForStyle("editorActions"),
+      ...sourceBlocksForStyle("editorActions", coreConfigPanelSource),
       ...sourceBlocksForStyle("editorActions", archiveZonePanelSource),
       ...sourceBlocksForStyle("editorActions", createPanelSource),
       ...sourceBlocksForStyle("editorActions", debugResetPanelSource),
@@ -1261,10 +1275,11 @@ describe("AgentsRoute layout contract", () => {
     ];
     const deepLinkActionBlocks = [
       ...sourceBlocksForStyle("configDeepLinkRow"),
+      ...sourceBlocksForStyle("configDeepLinkRow", coreConfigPanelSource),
       ...sourceBlocksForStyle("configDeepLinkRow", contextCompressionPanelSource),
     ];
     const governanceActionBlocks = sourceBlocksForStyle("governanceActions", toolGovernancePanelSource);
-    const promptConfigActionBlocks = sourceBlocksForStyle("promptConfigRow");
+    const promptConfigActionBlocks = sourceBlocksForStyle("promptConfigRow", coreConfigPanelSource);
     const inboxMessageActionBlocks = sourceBlocksForStyle("inboxMessageTop");
     const panelHeaderActionBlocks = sourceBlocksForStyle("panelHeaderActions")
       .filter((block) => block.includes("copy.createAgent") || block.includes("copy.consumeAllMessages"));
