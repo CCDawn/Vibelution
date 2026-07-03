@@ -30,6 +30,7 @@ import {
   SessionTurnError,
 } from "../../api/types";
 import type {
+  AgentMessage,
   AgentMentalPart,
 } from "../../agent-thread/types";
 import { fetchJson } from "../../api/client";
@@ -865,6 +866,9 @@ export type ConversationStreamingFramePaintMetrics = {
 type ConversationTurnRowProps = {
   message: ConversationMessage;
   previousMessage?: ConversationMessage;
+  agentMessage?: AgentMessage;
+  agentRenderState?: AgentMessageRenderState;
+  previousAgentRenderState?: AgentMessageRenderState;
   rowIdentity: ConversationTimelineRowIdentity;
   defaultResponseExpanded: boolean;
   latestUserMessageId: string;
@@ -911,6 +915,9 @@ function conversationTurnRowPropsAreEqual(
 ) {
   return previous.message === next.message
     && previous.previousMessage === next.previousMessage
+    && previous.agentMessage === next.agentMessage
+    && previous.agentRenderState === next.agentRenderState
+    && previous.previousAgentRenderState === next.previousAgentRenderState
     && conversationTimelineRowIdentityIsEqual(previous.rowIdentity, next.rowIdentity)
     && previous.defaultResponseExpanded === next.defaultResponseExpanded
     && previous.latestUserMessageId === next.latestUserMessageId
@@ -1199,18 +1206,21 @@ export function ConversationView({
   const streamingTimelineMessages = activeTimelineProjection.streamingMessages;
   const activeTimelineRowIdentities = activeTimelineProjection.rowIdentities;
   const agentThread = useAgentThreadProjection(sessionId, activeTimelineMessages);
+  const agentMessagesByMessageId = useMemo(() => {
+    const agentMessages = new Map<string, AgentMessage>();
+    for (const agentMessage of agentThread.messages) {
+      agentMessages.set(agentMessage.id, agentMessage);
+    }
+    return agentMessages;
+  }, [agentThread]);
   const agentRenderStatesByMessageId = useMemo(() => {
     const renderStates = new Map<string, AgentMessageRenderState>();
-    activeTimelineMessages.forEach((message, index) => {
-      const agentMessage = agentThread.messages[index];
-      if (!agentMessage) {
-        return;
-      }
+    for (const agentMessage of agentThread.messages) {
       const agentRenderState = buildAgentMessageRenderState(agentMessage);
-      renderStates.set(message.id, agentRenderState);
-    });
+      renderStates.set(agentMessage.id, agentRenderState);
+    }
     return renderStates;
-  }, [activeTimelineMessages, agentThread]);
+  }, [agentThread]);
   const imageArtifactUrlsBeforeMessage = useMemo(() => {
     const urlsByMessageId = new Map<string, Set<string>>();
     const seenImageUrls = new Set<string>();
@@ -3673,6 +3683,13 @@ export function ConversationView({
                 key={activeTimelineRowIdentities[index].rowKey}
                 message={message}
                 previousMessage={activeTimelineMessages[index - 1]}
+                agentMessage={agentMessagesByMessageId.get(message.id)}
+                agentRenderState={agentRenderStatesByMessageId.get(message.id)}
+                previousAgentRenderState={
+                  activeTimelineMessages[index - 1]
+                    ? agentRenderStatesByMessageId.get(activeTimelineMessages[index - 1].id)
+                    : undefined
+                }
                 rowIdentity={activeTimelineRowIdentities[index]}
                 defaultResponseExpanded={defaultExpandedResponseIds.has(message.id)}
                 latestUserMessageId={latestUserMessageId}
@@ -3722,7 +3739,10 @@ export function ConversationView({
                 </article>
               );
             }
-            const agentMessage = agentThread.messages[index];
+            const agentMessage = agentMessagesByMessageId.get(message.id);
+            if (!agentMessage) {
+              return null;
+            }
             const operationGroups = buildAgentMessageOperationGroups(agentMessage, operationLabels);
             const agentRenderState = agentRenderStatesByMessageId.get(message.id) ?? buildAgentMessageRenderState(agentMessage);
             const agentSections = agentRenderState.sectionState;
