@@ -301,6 +301,26 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("overflow: visible");
   });
 
+  it("keeps the active work popover compact without nested cards or horizontal overflow", () => {
+    expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkDetailPanel");
+    expect(shellStyles).toContain("width: min(420px, calc(100vw - 24px))");
+    expect(shellStyles).toContain("overflow-x: hidden");
+    expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkDetailHeader");
+    expect(shellStyles).toContain("padding: 0 2px 2px");
+    expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkDetailList");
+    expect(shellStyles).toContain("padding: 0");
+    expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkDetailCopy");
+    expect(shellStyles).toContain("background: transparent");
+    expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkDetailTitle");
+    expect(shellStyles).toContain("grid-template-columns: minmax(0, 1fr) max-content");
+    expect(shellStyles).toContain(":where(.vui-app-appshell).activeWorkDetailCopy code");
+    expect(shellStyles).toContain("text-overflow: ellipsis");
+
+    const narrowBlock = shellStyles.slice(shellStyles.indexOf("@media (max-width: 640px)"));
+    expect(narrowBlock).toContain(".activeWorkDetailPanel");
+    expect(narrowBlock).toContain("width: min(340px, calc(100vw - 20px))");
+  });
+
   it("uses one shared page instance id and stops periodic memory sampling while hidden", () => {
     expect(shellSource).toContain("getPageInstanceId");
     expect(shellSource).toContain("useRef(getPageInstanceId())");
