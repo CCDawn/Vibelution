@@ -28,7 +28,7 @@ describe("agent message section module boundary", () => {
       "ConversationView.tsx",
       "agentMessageRenderState.ts",
       "agentMessageOperations.ts",
-      "agentMessageProcessProjection.ts",
+      "timelineMessageProcessProjection.ts",
       "AgentContextSectionsView.tsx",
       "../../routes/ChatCodingRoute.tsx",
     ]) {

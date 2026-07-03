@@ -2,9 +2,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import type { ConversationMessage } from "../../api/types";
-import { projectAgentMessageProcessMessages } from "./agentMessageProcessProjection";
+import { projectTimelineProcessMessages } from "./timelineMessageProcessProjection";
 
-const agentMessageProjectionModulePath = new URL("./agentMessageProcessProjection.ts", import.meta.url);
+const timelineProcessProjectionModulePath = new URL("./timelineMessageProcessProjection.ts", import.meta.url);
+const retiredAgentMessageProjectionModulePath = new URL("./agentMessageProcessProjection.ts", import.meta.url);
 const retiredConversationProjectionModulePath = new URL("./conversationProcessProjection.ts", import.meta.url);
 const timelineProjectionSource = readFileSync(
   new URL("./useAgentMessageTimelineProjection.ts", import.meta.url),
@@ -35,16 +36,18 @@ function toolMessage(
   };
 }
 
-describe("agent message process projection", () => {
-  it("uses the AgentMessage process projection module as the only production entry", () => {
-    expect(existsSync(agentMessageProjectionModulePath)).toBe(true);
+describe("timeline message process projection", () => {
+  it("uses the timeline process projection module as the only production DTO packet entry", () => {
+    expect(existsSync(timelineProcessProjectionModulePath)).toBe(true);
+    expect(existsSync(retiredAgentMessageProjectionModulePath)).toBe(false);
     expect(existsSync(retiredConversationProjectionModulePath)).toBe(false);
-    expect(timelineProjectionSource).toContain("./agentMessageProcessProjection");
+    expect(timelineProjectionSource).toContain("./timelineMessageProcessProjection");
+    expect(timelineProjectionSource).not.toContain("./agentMessageProcessProjection");
     expect(timelineProjectionSource).not.toContain("./conversationProcessProjection");
   });
 
   it("merges consecutive process-only messages from the same turn while preserving each tool event", () => {
-    const projected = projectAgentMessageProcessMessages([
+    const projected = projectTimelineProcessMessages([
       toolMessage("message-tool-1", "[编辑] 成功修改 config/public_config.py"),
       toolMessage("message-tool-2", "[编辑] 成功修改 config/workbench.py"),
       toolMessage("message-tool-3", "[编辑] 成功修改 config/settings.py"),
@@ -65,7 +68,7 @@ describe("agent message process projection", () => {
   });
 
   it("merges a same-turn process-only prefix into the following assistant answer", () => {
-    const projected = projectAgentMessageProcessMessages([
+    const projected = projectTimelineProcessMessages([
       toolMessage("message-tool-1", "[编辑] 成功修改 config/public_config.py"),
       toolMessage("message-tool-2", "[编辑] 成功修改 config/workbench.py"),
       {
@@ -102,7 +105,7 @@ describe("agent message process projection", () => {
   });
 
   it("keeps same-turn live overlay status text out of the committed assistant answer", () => {
-    const projected = projectAgentMessageProcessMessages([
+    const projected = projectTimelineProcessMessages([
       {
         id: "message-live-overlay",
         role: "assistant",
@@ -140,7 +143,7 @@ describe("agent message process projection", () => {
   });
 
   it("merges same-turn process-only events that arrive after the assistant answer", () => {
-    const projected = projectAgentMessageProcessMessages([
+    const projected = projectTimelineProcessMessages([
       {
         id: "message-answer",
         role: "assistant",
@@ -167,7 +170,7 @@ describe("agent message process projection", () => {
   });
 
   it("does not merge across user messages while merging the next same-turn answer packet", () => {
-    const projected = projectAgentMessageProcessMessages([
+    const projected = projectTimelineProcessMessages([
       toolMessage("message-tool-1", "[编辑] 成功修改 config/public_config.py"),
       {
         id: "message-user",
@@ -204,7 +207,7 @@ describe("agent message process projection", () => {
   });
 
   it("does not merge adjacent process-only messages from different turn ids", () => {
-    const projected = projectAgentMessageProcessMessages([
+    const projected = projectTimelineProcessMessages([
       toolMessage("message-tool-1", "[编辑] 成功修改 config/public_config.py", { metadata: { turnId: "turn-a" } }),
       toolMessage("message-tool-2", "[编辑] 成功修改 config/workbench.py", { metadata: { turnId: "turn-b" } }),
     ]);
