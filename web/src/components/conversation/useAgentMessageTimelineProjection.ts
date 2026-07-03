@@ -1,6 +1,6 @@
 import type { ConversationMessage } from "../../api/types";
 import { answerProjectionContent } from "./conversationInternalStatus";
-import { mergeConversationFeedbackEvents } from "../../conversation-model/feedbackEvents";
+import { mergeAgentFeedbackEvents } from "../../agent-thread/agentFeedbackEvents";
 import { projectAgentMessageProcessMessages } from "./agentMessageProcessProjection";
 import {
   buildAgentMessageTimelineRowIdentities,
@@ -94,7 +94,7 @@ function mergeLiveOverlayIntoActiveTurnMessage(
   liveOverlayMessage: ConversationMessage,
   activeTurnMessage: ConversationMessage,
 ): ConversationMessage {
-  const feedbackEvents = mergeConversationFeedbackEvents(
+  const feedbackEvents = mergeAgentFeedbackEvents(
     liveOverlayMessage.feedbackEvents,
     activeTurnMessage.feedbackEvents,
   );
