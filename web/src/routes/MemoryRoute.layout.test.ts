@@ -7,6 +7,7 @@ import matrixPanelSource from "./MemoryMatrixPanel.tsx?raw";
 import overviewPanelSource from "./MemoryOverviewPanel.tsx?raw";
 import projectMemoryQueuePanelSource from "./MemoryProjectMemoryQueuePanel.tsx?raw";
 import reviewQueuePanelSource from "./MemoryReviewQueuePanel.tsx?raw";
+import warningStripSource from "./MemoryWarningStrip.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
 import appShellSource from "../app/AppShell.tsx?raw";
 import graphCanvasSource from "./MemoryGraphCanvas.tsx?raw";
@@ -193,6 +194,20 @@ describe("MemoryRoute layout contract", () => {
     expect(overviewPanelSource).not.toContain("useQuery");
     expect(overviewPanelSource).not.toContain("useMutation");
     expect(overviewPanelSource).not.toContain("fetchJson");
+  });
+
+  it("delegates diagnostic warnings to a dedicated warning strip component", () => {
+    expect(routeSource).toContain('import { MemoryWarningStrip } from "./MemoryWarningStrip"');
+    expect(routeSource).toContain("<MemoryWarningStrip");
+    expect(routeSource).not.toContain("const renderWarningStrip = () =>");
+
+    expect(warningStripSource).toContain("export function MemoryWarningStrip");
+    expect(warningStripSource).toContain("styles.warningStrip");
+    expect(warningStripSource).toContain("TriangleAlert");
+    expect(warningStripSource).toContain("warnings.join");
+    expect(warningStripSource).not.toContain("useQuery");
+    expect(warningStripSource).not.toContain("useMutation");
+    expect(warningStripSource).not.toContain("fetchJson");
   });
 
   it("preserves a compact narrow Memory layout without turning every detail pane full width", () => {

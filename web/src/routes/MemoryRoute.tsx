@@ -71,6 +71,7 @@ import { MemoryMatrixPanel } from "./MemoryMatrixPanel";
 import { MemoryOverviewPanel } from "./MemoryOverviewPanel";
 import { MemoryProjectMemoryQueuePanel } from "./MemoryProjectMemoryQueuePanel";
 import { MemoryReviewQueuePanel } from "./MemoryReviewQueuePanel";
+import { MemoryWarningStrip } from "./MemoryWarningStrip";
 import styles from "./MemoryRoute.styles";
 
 const MemoryGraphCanvas = lazy(() => import("./MemoryGraphCanvas").then((module) => ({ default: module.MemoryGraphCanvas })));
@@ -3575,7 +3576,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   };
 
   const selectedSection = sections.find((section) => section.id === activeSectionId) ?? null;
-  const warningCount = overview?.summary.warnings.length ?? 0;
   const handleChannelCardClick = (channel: MemoryChannel) => {
     setActiveSectionId("");
     setActiveItemId("");
@@ -4146,14 +4146,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     />
   );
 
-  const renderWarningStrip = () =>
-    warningCount > 0 ? (
-      <section className={styles.warningStrip} aria-label={copy.warnings}>
-        <TriangleAlert size={16} />
-        <strong>{copy.warnings}</strong>
-        <span>{overview?.summary.warnings.join("；")}</span>
-      </section>
-    ) : null;
+  const createWarningStrip = () => <MemoryWarningStrip label={copy.warnings} warnings={overview?.summary.warnings ?? []} />;
 
   const renderManagementEditor = () =>
     editDraft ? (
@@ -4453,7 +4446,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const renderEffectiveView = () => (
     <>
       {createMatrixPanel(copy.effectiveByChannel)}
-      {renderWarningStrip()}
+      {createWarningStrip()}
       <div className={styles.effectiveGrid}>
         {matrixCards.map((card) => {
           const pairs = allPairs.filter((pair) => matchesMemoryChannel(card.channel, pair));
@@ -4581,7 +4574,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
   const renderManageView = () => (
     <>
-      {renderWarningStrip()}
+      {createWarningStrip()}
       <div className={`${styles.workspace} ${styles.manageWorkspace}`}>
         <main className={styles.manageListPanel}>
           <div className={styles.panelHeader}>
@@ -4918,7 +4911,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const renderSourcesView = () => (
     <>
       {createMatrixPanel(copy.sourceAudit)}
-      {renderWarningStrip()}
+      {createWarningStrip()}
       <div className={styles.workspace}>
         {renderSourceAndItemPanels(copy.sourceAudit)}
         {renderDetailPanel()}
@@ -6525,7 +6518,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               priorityReviewCount={priorityReviewPairs.length}
               runtimeMemoryCount={runtimePairs.length}
               reviewMemoryCount={reviewPairs.length}
-              warningStrip={renderWarningStrip()}
+              warningStrip={createWarningStrip()}
               reviewQueue={reviewQueuePanel}
               projectMemoryQueue={projectMemoryQueuePanel}
               runtimeMemoryList={renderMemoryList(runtimePairs, copy.noRuntimeMemory, true)}
