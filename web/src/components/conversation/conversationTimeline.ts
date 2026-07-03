@@ -1,4 +1,4 @@
-import { ConversationMessage, type ConversationTimelineItem as ApiConversationTimelineItem } from "../../api/types";
+import type { ConversationTimelineItem as ApiConversationTimelineItem } from "../../api/types";
 import type { AgentMessage, AgentMessagePart, AgentTextPart } from "../../agent-thread/types";
 import { ConversationOperation } from "./conversationOperations";
 
@@ -50,15 +50,6 @@ export type ConversationTimelineOptions = {
   includeAssistantText?: boolean;
 };
 
-const timelineItemsCache = new WeakMap<
-  ConversationMessage,
-  {
-    operations: ConversationOperation[];
-    lang: string;
-    includeAssistantText: boolean | undefined;
-    items: ConversationTimelineItem[];
-  }
->();
 const agentTimelineItemsCache = new WeakMap<
   AgentMessage,
   {
@@ -69,33 +60,6 @@ const agentTimelineItemsCache = new WeakMap<
     items: ConversationTimelineItem[];
   }
 >();
-
-export function buildConversationTimelineItems(
-  message: ConversationMessage,
-  operations: ConversationOperation[],
-  options: ConversationTimelineOptions,
-): ConversationTimelineItem[] {
-  if (message.role !== "assistant") {
-    return [];
-  }
-  const cached = timelineItemsCache.get(message);
-  if (
-    cached
-    && cached.operations === operations
-    && cached.lang === options.lang
-    && cached.includeAssistantText === options.includeAssistantText
-  ) {
-    return cached.items;
-  }
-  const items = buildConversationTimelineItemsUncached(message, operations, options);
-  timelineItemsCache.set(message, {
-    operations,
-    lang: options.lang,
-    includeAssistantText: options.includeAssistantText,
-    items,
-  });
-  return items;
-}
 
 export function buildAgentMessageTimelineItems(
   message: AgentMessage,
@@ -125,23 +89,6 @@ export function buildAgentMessageTimelineItems(
     items,
   });
   return items;
-}
-
-function buildConversationTimelineItemsUncached(
-  message: ConversationMessage,
-  operations: ConversationOperation[],
-  options: ConversationTimelineOptions,
-): ConversationTimelineItem[] {
-  if ((message.timelineItems?.length ?? 0) > 0) {
-    return timelineItemsFromServer(message.timelineItems ?? [], operations, options);
-  }
-  return timelineItemsFromOperations(
-    message.id,
-    Boolean(message.streaming),
-    String(message.content ?? "").trim(),
-    operations,
-    options,
-  );
 }
 
 function buildAgentMessageTimelineItemsUncached(
