@@ -1395,6 +1395,42 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const supervisedClosedLoopLineageLabel = supervisedClosedLoopRecord?.evidence.lineageIndexPath
     ? (lang === "zh" ? "已记录" : "Recorded")
     : "--";
+  const selectedWorkflowOverviewItems = [
+    {
+      label: lang === "zh" ? "阶段" : "Stage",
+      value: supervisedWorkflowStepLabel(supervisedSelectedWorkflowStep, lang),
+    },
+    {
+      label: lang === "zh" ? "状态" : "Status",
+      value: statusLabel(supervisedSelectedWorkflowStep.status),
+    },
+    {
+      label: lang === "zh" ? "摘要" : "Summary",
+      value: selectedWorkflowTaskSummary || selectedWorkflowConversationNotice,
+    },
+    {
+      label: lang === "zh" ? "最近闭环" : "Latest ledger",
+      value: supervisedClosedLoopDecisionLabel || supervisedClosedLoopRecord?.nextAction.label || "--",
+    },
+  ];
+  const selectedWorkflowEvidenceItems = [
+    {
+      label: lang === "zh" ? "运行入口" : "Run entry",
+      value: monitoredRunIdentity || supervisedMembersRunIdentity || "--",
+    },
+    {
+      label: "Agent",
+      value: selectedWorkflowAssistantName || "--",
+    },
+    {
+      label: lang === "zh" ? "当前 case" : "Current case",
+      value: monitoredCaseLabel || "--",
+    },
+    {
+      label: lang === "zh" ? "提案证据" : "Proposal evidence",
+      value: String(supervisedClosedLoopProposalCount),
+    },
+  ];
   const supervisedMembersRunStatusLabel = supervisedMembersRun?.decision === "INCONCLUSIVE"
     ? displayDecisionLabel(supervisedMembersRun.decision)
     : statusLabel(supervisedMembersRun?.status || "");
@@ -3099,7 +3135,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       <span className={styles.secondaryPill}>{supervisedWorkflowCards.length}</span>
                     </div>
                   </div>
-                  <div className={styles.supervisedWorkflowCardGrid} aria-label={lang === "zh" ? "监督进化步骤导航" : "Supervised evolution step navigation"}>
+                  <div className={styles.workflowStepRail} aria-label={lang === "zh" ? "监督进化步骤导航" : "Supervised evolution step navigation"}>
                     {supervisedWorkflowCards.map((step) => {
                       const selected = step.id === supervisedSelectedWorkflowStep.id;
                       const current = step.id === supervisedRuntimeWorkflowStepId;
@@ -3108,68 +3144,59 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       const stepMeta = step.role ? runRoleLabel(step.role) : (lang === "zh" ? "人工审批" : "Human approval");
                       const stepMetric = typeof step.metrics?.scoreDelta === "number"
                         ? `Δ ${step.metrics.scoreDelta}`
-                        : typeof step.metrics?.score === "number"
-                          ? String(step.metrics.score)
-                          : statusLabel(step.status);
+                          : typeof step.metrics?.score === "number"
+                            ? String(step.metrics.score)
+                            : statusLabel(step.status);
                       return (
-                        <article
+                        <div
                           key={step.id}
-                          className={
-                            selected
-                              ? `${styles.supervisedWorkflowCard} ${styles.supervisedWorkflowCardActive}`
-                              : current
-                                ? `${styles.supervisedWorkflowCard} ${styles.supervisedWorkflowCardCurrent}`
-                                : styles.supervisedWorkflowCard
-                          }
+                          className={current && !selected ? `${styles.workflowStepItem} ${styles.workflowStepItemCurrent}` : styles.workflowStepItem}
                         >
                           <button
                             type="button"
-                            className={styles.supervisedWorkflowCardButton}
+                            className={selected ? `${styles.workflowStepButton} ${styles.workflowStepButtonActive}` : styles.workflowStepButton}
                             aria-pressed={selected}
                             onClick={() => setSelectedSupervisedWorkflowStepId(step.id)}
                             title={lang === "zh" ? `查看${supervisedWorkflowStepLabel(step, lang)}` : `View ${supervisedWorkflowStepLabel(step, lang)}`}
                           >
-                            <span className={styles.supervisedWorkflowCardTopline}>
-                              <span>{supervisedWorkflowStepLabel(step, lang)}</span>
-                              {current ? <em>{lang === "zh" ? "当前" : "Live"}</em> : null}
+                            <span className={styles.workflowStepMeta}>
+                              <span>{current ? (lang === "zh" ? "当前" : "Live") : stepMetric}</span>
+                              <span>{stepMeta}</span>
                             </span>
-                            <strong>{stepMeta}</strong>
-                            <span className={styles.supervisedWorkflowLivePreview}>
+                            <strong>{supervisedWorkflowStepLabel(step, lang)}</strong>
+                            <span className={styles.workflowStepPreview}>
                               {step.livePreview || step.summary || (lang === "zh" ? "等待实时输出" : "Waiting for live output")}
                             </span>
                           </button>
-                          <div className={styles.supervisedWorkflowCardFooter}>
-                            <span>{stepMetric}</span>
-                            {stepRoute ? (
-                              <Link
-                                className={styles.supervisedWorkflowSessionLink}
-                                to={stepRoute}
-                                title={
-                                  member?.chatRoute
-                                    ? lang === "zh" ? `打开监督成员 ${member.name} 的会话` : `Open supervised member session for ${member.name}`
-                                    : lang === "zh" ? "打开监督会话" : "Open supervised session"
-                                }
-                                aria-label={
-                                  member?.chatRoute
-                                    ? lang === "zh" ? `打开监督成员 ${member.name} 的会话` : `Open supervised member session for ${member.name}`
-                                    : lang === "zh" ? "打开监督会话" : "Open supervised session"
-                                }
-                              >
-                                <span>{lang === "zh" ? "会话" : "Session"}</span>
-                                <ArrowUpRight size={13} aria-hidden="true" />
-                              </Link>
-                            ) : member?.configRoute ? (
-                              <Link
-                                className={styles.supervisedWorkflowSessionLink}
-                                to={member.configRoute}
-                                title={lang === "zh" ? `配置 ${member.name}` : `Configure ${member.name}`}
-                              >
-                                <span>{lang === "zh" ? "配置" : "Config"}</span>
-                                <ArrowUpRight size={13} aria-hidden="true" />
-                              </Link>
-                            ) : null}
-                          </div>
-                        </article>
+                          {stepRoute ? (
+                            <Link
+                              className={styles.supervisedWorkflowSessionLink}
+                              to={stepRoute}
+                              title={
+                                member?.chatRoute
+                                  ? lang === "zh" ? `打开监督成员 ${member.name} 的会话` : `Open supervised member session for ${member.name}`
+                                  : lang === "zh" ? "打开监督会话" : "Open supervised session"
+                              }
+                              aria-label={
+                                member?.chatRoute
+                                  ? lang === "zh" ? `打开监督成员 ${member.name} 的会话` : `Open supervised member session for ${member.name}`
+                                  : lang === "zh" ? "打开监督会话" : "Open supervised session"
+                              }
+                            >
+                              <span>{lang === "zh" ? "会话" : "Session"}</span>
+                              <ArrowUpRight size={13} aria-hidden="true" />
+                            </Link>
+                          ) : member?.configRoute ? (
+                            <Link
+                              className={styles.supervisedWorkflowSessionLink}
+                              to={member.configRoute}
+                              title={lang === "zh" ? `配置 ${member.name}` : `Configure ${member.name}`}
+                            >
+                              <span>{lang === "zh" ? "配置" : "Config"}</span>
+                              <ArrowUpRight size={13} aria-hidden="true" />
+                            </Link>
+                          ) : null}
+                        </div>
                       );
                     })}
                   </div>
@@ -3501,40 +3528,64 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 ) : (
                   <div className={styles.ioStack}>
                     <div className={styles.caseConversationShell}>
-                      <LazyConversationView
-                        sessionId={selectedWorkflowConversationSessionId}
-                        className={styles.caseConversationTranscript}
-                        density="compact"
-                        eyebrowLabel={selectedWorkflowIsRuntimeStep ? t("currentCaseTranscript") : supervisedWorkflowStepLabel(supervisedSelectedWorkflowStep, lang)}
-                        title={
-                          selectedWorkflowIsRuntimeStep
-                            ? monitoredRun?.currentCaseId || supervisedSelectedWorkflowStep.label || t("currentCaseOutput")
-                            : supervisedSelectedWorkflowStep.label || t("currentCaseOutput")
-                        }
-                        phase={
-                          selectedWorkflowIsRuntimeStep
-                            ? monitoredRun?.currentPhase || monitoredRun?.status || supervisedSelectedWorkflowStep.status
-                            : supervisedSelectedWorkflowStep.status
-                        }
-                        messages={selectedWorkflowConversationMessages}
-                        assistantDisplayName={selectedWorkflowAssistantName}
-                        userDisplayName={lang === "zh" ? "监督任务" : "Supervised task"}
-                        taskSummary={selectedWorkflowTaskSummary}
-                        defaultFileContext={monitoredRun?.currentCaseScenario || "supervised"}
-                        summaryItems={[]}
-                        showHeader={false}
-                        showSessionOverview={Boolean(supervisedLiveConversationSupplement)}
-                        supplementalContent={supervisedLiveConversationSupplement}
-                        showComposer={false}
-                        autoScrollToLatest={true}
-                        composerValue=""
-                        composerPlaceholder={t("caseIoWaiting")}
-                        composerDisabled={true}
-                        composerPending={false}
-                        onComposerChange={() => undefined}
-                        onSubmit={() => undefined}
-                        fallback={<div className={styles.caseConversationFallback}>{t("loadingSession")}</div>}
-                      />
+                      {selectedWorkflowHasConversationMessages ? (
+                        <LazyConversationView
+                          sessionId={selectedWorkflowConversationSessionId}
+                          className={styles.caseConversationTranscript}
+                          density="compact"
+                          eyebrowLabel={selectedWorkflowIsRuntimeStep ? t("currentCaseTranscript") : supervisedWorkflowStepLabel(supervisedSelectedWorkflowStep, lang)}
+                          title={
+                            selectedWorkflowIsRuntimeStep
+                              ? monitoredRun?.currentCaseId || supervisedSelectedWorkflowStep.label || t("currentCaseOutput")
+                              : supervisedSelectedWorkflowStep.label || t("currentCaseOutput")
+                          }
+                          phase={
+                            selectedWorkflowIsRuntimeStep
+                              ? monitoredRun?.currentPhase || monitoredRun?.status || supervisedSelectedWorkflowStep.status
+                              : supervisedSelectedWorkflowStep.status
+                          }
+                          messages={selectedWorkflowConversationMessages}
+                          assistantDisplayName={selectedWorkflowAssistantName}
+                          userDisplayName={lang === "zh" ? "监督任务" : "Supervised task"}
+                          taskSummary={selectedWorkflowTaskSummary}
+                          defaultFileContext={monitoredRun?.currentCaseScenario || "supervised"}
+                          summaryItems={[]}
+                          showHeader={false}
+                          showSessionOverview={Boolean(supervisedLiveConversationSupplement)}
+                          supplementalContent={supervisedLiveConversationSupplement}
+                          showComposer={false}
+                          autoScrollToLatest={true}
+                          composerValue=""
+                          composerPlaceholder={t("caseIoWaiting")}
+                          composerDisabled={true}
+                          composerPending={false}
+                          onComposerChange={() => undefined}
+                          onSubmit={() => undefined}
+                          fallback={<div className={styles.caseConversationFallback}>{t("loadingSession")}</div>}
+                        />
+                      ) : (
+                        <div className={styles.caseOverviewWorkspace}>
+                          <div className={styles.caseOverviewGrid}>
+                            {selectedWorkflowOverviewItems.map((item) => (
+                              <article key={item.label} className={styles.caseOverviewItem}>
+                                <span>{item.label}</span>
+                                <strong>{item.value || "--"}</strong>
+                              </article>
+                            ))}
+                          </div>
+                          <div className={styles.caseOverviewEvidence}>
+                            <div className={styles.caseOverviewEvidenceGrid}>
+                              {selectedWorkflowEvidenceItems.map((item) => (
+                                <div key={item.label} className={styles.caseOverviewEvidenceItem}>
+                                  <span>{item.label}</span>
+                                  <strong>{item.value || "--"}</strong>
+                                </div>
+                              ))}
+                            </div>
+                            {supervisedLiveConversationSupplement}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
