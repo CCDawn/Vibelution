@@ -26,7 +26,7 @@ describe("PromptTemplatesRoute layout contract", () => {
 
   it("loads prompt templates and linked Agents through the existing APIs", () => {
     expect(routeSource).toContain('queryKeys.promptTemplates()');
-    expect(routeSource).toContain('fetchJson<PromptTemplateWorkspace>("/api/prompt-templates")');
+    expect(routeSource).toContain('fetchJson<PromptTemplateWorkspace>("/api/prompt-templates?includeInactive=true")');
     expect(routeSource).toContain('queryKeys.agents()');
     expect(routeSource).toContain('fetchJson<AgentInstance[]>("/api/agents?detail=summary")');
     expect(routeSource).toContain("agentsByTemplate");
@@ -46,6 +46,16 @@ describe("PromptTemplatesRoute layout contract", () => {
     expect(routeSource).toContain("saveMutation.variables?.templateId === activeTemplateId");
     expect(routeSource).toContain("resetMutation.variables === activeTemplateId");
     expect(routeSource).not.toContain("const busy = saveMutation.isPending || resetMutation.isPending || detailQuery.isFetching");
+  });
+
+  it("keeps prompt edits coherent with Agent workspace cache and frozen session snapshots", () => {
+    expect(routeSource).toContain("queryKeys.agentConfigWorkspace()");
+    expect(routeSource).toContain("copy.snapshotNotice");
+    expect(routeSource).toContain("editableTemplate?.hasDefault");
+    expect(routeSource).toContain("if (!template.hasDefault)");
+    expect(routeSource).not.toContain("if (!template.defaultContent?.trim())");
+    expect(routeSource).toContain("sourceAuthority");
+    expect(routeSource).toContain("sourceDriftStatus");
   });
 
   it("supports category deep links and the expected workbench panels", () => {
