@@ -83,6 +83,7 @@ import {
   type AgentOverviewTerritory,
 } from "./AgentOverviewPanel";
 import { AgentRuntimeFocusPanel } from "./AgentRuntimeFocusPanel";
+import { AgentRuntimePolicyPanel } from "./AgentRuntimePolicyPanel";
 import {
   agentCenterMemoryRoute,
   agentCenterModelsRoute,
@@ -7492,132 +7493,49 @@ export function AgentsRoute() {
                 onConsumeInboxMessage={consumeInboxMessage}
               />
 
-              <section className={styles.configEditor}>
-                <div className={styles.panelHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{copy.delegation}</p>
-                    <h3>{copy.supervisedRole}: {metadataText(selectedAgent, "supervisedRole") || metadataText(selectedAgent, "selfEvolutionRole") || "-"}</h3>
-                  </div>
-                  <span className={runtimePolicyDirty ? styles.dirtyPill : styles.cleanPill}>
-                    {runtimePolicyDirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}
-                  </span>
-                </div>
-                <div className={styles.runtimePolicyGrid}>
-                  <section>
-                    <span>{copy.delegationPolicyTitle}</span>
-                    <div className={styles.toggleGrid}>
-                      <VCheckbox
-                        isSelected={delegationPolicyDraft.allowSubagents}
-                        onChange={(value) => updateDelegationPolicyDraft({ allowSubagents: value })}
-                      >
-                        {copy.allowSubagents}
-                      </VCheckbox>
-                      <VCheckbox
-                        isSelected={delegationPolicyDraft.allowWakeMessages}
-                        onChange={(value) => updateDelegationPolicyDraft({ allowWakeMessages: value })}
-                      >
-                        {copy.allowWakeMessages}
-                      </VCheckbox>
-                    </div>
-                    <div className={styles.editorGrid}>
-                      <VFieldRow label={copy.maxConcurrent}>
-                        <VNativeInput
-                          type="number"
-                          min={0}
-                          max={8}
-                          value={delegationPolicyDraft.maxConcurrent}
-                          onChange={(event) => updateDelegationPolicyDraft({ maxConcurrent: clampNumber(event.target.value, 0, 8, 0) })}
-                        />
-                      </VFieldRow>
-                      <VFieldRow label={copy.maxDepth}>
-                        <VNativeInput
-                          type="number"
-                          min={0}
-                          max={4}
-                          value={delegationPolicyDraft.maxDepth}
-                          onChange={(event) => updateDelegationPolicyDraft({ maxDepth: clampNumber(event.target.value, 0, 4, 0) })}
-                        />
-                      </VFieldRow>
-                    </div>
-                    <div className={styles.contextModeGrid}>
-                      <VCheckbox
-                        isSelected={delegationPolicyDraft.allowedContextModes.includes("isolated")}
-                        onChange={(value) => toggleDelegationContextMode("isolated", value)}
-                      >
-                        {copy.allowedContextModes}: isolated
-                      </VCheckbox>
-                      <VCheckbox
-                        isSelected={delegationPolicyDraft.allowedContextModes.includes("fork")}
-                        onChange={(value) => toggleDelegationContextMode("fork", value)}
-                      >
-                        {copy.allowedContextModes}: fork
-                      </VCheckbox>
-                    </div>
-                  </section>
-                  <section>
-                    <span>{copy.supervisionPolicyTitle}</span>
-                    <div className={styles.toggleGrid}>
-                      <VCheckbox
-                        isSelected={supervisionPolicyDraft.supervisionEnabled}
-                        onChange={(value) => updateSupervisionPolicyDraft({ supervisionEnabled: value })}
-                      >
-                        {copy.supervisionEnabled}
-                      </VCheckbox>
-                      <VCheckbox
-                        isSelected={supervisionPolicyDraft.requiresReview}
-                        isDisabled={supervisionPolicyDraft.reviewMode === "required" || supervisionPolicyDraft.reviewMode === "disabled"}
-                        onChange={(value) => updateSupervisionPolicyDraft({ requiresReview: value })}
-                      >
-                        {copy.requiresReview}
-                      </VCheckbox>
-                    </div>
-                    <div className={styles.editorGrid}>
-                      <VFieldRow label={copy.reviewMode}>
-                        <VNativeSelect value={supervisionPolicyDraft.reviewMode} onChange={(event) => updateSupervisionPolicyDraft({ reviewMode: event.target.value })}>
-                          <option value="advisory">{lang === "zh" ? "建议" : "Advisory"}</option>
-                          <option value="required">{lang === "zh" ? "强制" : "Required"}</option>
-                          <option value="disabled">{lang === "zh" ? "关闭" : "Disabled"}</option>
-                        </VNativeSelect>
-                      </VFieldRow>
-                      <VFieldRow label={copy.evidenceLevel}>
-                        <VNativeSelect value={supervisionPolicyDraft.evidenceLevel} onChange={(event) => updateSupervisionPolicyDraft({ evidenceLevel: event.target.value })}>
-                          <option value="light">{lang === "zh" ? "轻量" : "Light"}</option>
-                          <option value="standard">{lang === "zh" ? "标准" : "Standard"}</option>
-                          <option value="strict">{lang === "zh" ? "严格" : "Strict"}</option>
-                        </VNativeSelect>
-                      </VFieldRow>
-                    </div>
-                    <div className={styles.pathList}>
-                      <span>{copy.communication}: {selectedAgent.agentInboxPendingCount ?? 0} pending</span>
-                      <span>{copy.context}: {selectedAgent.groupContextEvents?.length ?? 0} group events</span>
-                    </div>
-                  </section>
-                </div>
-                {notice ? (
-                  <p className={notice.tone === "error" ? styles.errorText : styles.successText}>{notice.text}</p>
-                ) : null}
-                <div className={styles.editorActions}>
-                  <VButton
-                    type="button"
-                    variant="secondary"
-                    isDisabled={!runtimePolicyDirty || selectedAgentRuntimePolicyPending}
-                    onPress={() => {
-                      setDelegationPolicyDraft(delegationPolicyDraftFromAgent(selectedAgent));
-                      setSupervisionPolicyDraft(supervisionPolicyDraftFromAgent(selectedAgent));
-                    }}
-                  >
-                    {copy.resetConfig}
-                  </VButton>
-                  <VButton
-                    type="button"
-                    variant="primary"
-                    isDisabled={!canSaveRuntimePolicy || selectedAgentRuntimePolicyPending}
-                    onPress={saveRuntimePolicy}
-                  >
-                    {selectedAgentRuntimePolicyPending ? copy.savingRuntimePolicy : copy.saveRuntimePolicy}
-                  </VButton>
-                </div>
-              </section>
+              <AgentRuntimePolicyPanel
+                copy={{
+                  allowedContextModes: copy.allowedContextModes,
+                  allowSubagents: copy.allowSubagents,
+                  allowWakeMessages: copy.allowWakeMessages,
+                  communication: copy.communication,
+                  context: copy.context,
+                  delegation: copy.delegation,
+                  delegationPolicyTitle: copy.delegationPolicyTitle,
+                  evidenceLevel: copy.evidenceLevel,
+                  maxConcurrent: copy.maxConcurrent,
+                  maxDepth: copy.maxDepth,
+                  requiresReview: copy.requiresReview,
+                  resetConfig: copy.resetConfig,
+                  reviewMode: copy.reviewMode,
+                  saveRuntimePolicy: copy.saveRuntimePolicy,
+                  savingRuntimePolicy: copy.savingRuntimePolicy,
+                  supervisionEnabled: copy.supervisionEnabled,
+                  supervisionPolicyTitle: copy.supervisionPolicyTitle,
+                }}
+                lang={lang}
+                roleLabel={`${copy.supervisedRole}: ${metadataText(selectedAgent, "supervisedRole") || metadataText(selectedAgent, "selfEvolutionRole") || "-"}`}
+                dirtyLabel={lang === "zh" ? "未保存" : "Unsaved"}
+                cleanLabel={lang === "zh" ? "已同步" : "Synced"}
+                isDirty={runtimePolicyDirty}
+                isPending={selectedAgentRuntimePolicyPending}
+                canSave={canSaveRuntimePolicy}
+                notice={notice}
+                delegationPolicyDraft={delegationPolicyDraft}
+                supervisionPolicyDraft={supervisionPolicyDraft}
+                inboxPendingCount={selectedAgent.agentInboxPendingCount ?? 0}
+                groupContextEventCount={selectedAgent.groupContextEvents?.length ?? 0}
+                onUpdateDelegationPolicy={updateDelegationPolicyDraft}
+                onToggleDelegationContextMode={toggleDelegationContextMode}
+                onMaxConcurrentChange={(value) => updateDelegationPolicyDraft({ maxConcurrent: clampNumber(value, 0, 8, 0) })}
+                onMaxDepthChange={(value) => updateDelegationPolicyDraft({ maxDepth: clampNumber(value, 0, 4, 0) })}
+                onUpdateSupervisionPolicy={updateSupervisionPolicyDraft}
+                onReset={() => {
+                  setDelegationPolicyDraft(delegationPolicyDraftFromAgent(selectedAgent));
+                  setSupervisionPolicyDraft(supervisionPolicyDraftFromAgent(selectedAgent));
+                }}
+                onSave={saveRuntimePolicy}
+              />
                 </>
               ) : null}
             </>
