@@ -306,36 +306,6 @@ function StreamingResponseContent({
   );
 }
 
-function lightweightJsonSignal(value: unknown): string {
-  if (value === null || value === undefined) {
-    return "";
-  }
-  if (typeof value === "string") {
-    return `s:${value.length}:${value.slice(0, 64)}`;
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  if (Array.isArray(value)) {
-    return `a:${value.length}:${value.slice(0, 6).map((item) => lightweightJsonSignal(item)).join(",")}`;
-  }
-  if (typeof value === "object") {
-    return Object.entries(value as Record<string, unknown>)
-      .slice(0, 12)
-      .map(([key, item]) => `${key}:${lightweightJsonSignal(item)}`)
-      .join(",");
-  }
-  return String(value);
-}
-
-function lightweightTextSignal(value: unknown): string {
-  const text = String(value ?? "");
-  if (!text) {
-    return "";
-  }
-  return `${text.length}:${text.slice(0, 96)}:${text.slice(-32)}`;
-}
-
 function operationDetailsKind(operation: AgentMessageOperation): OperationDetailKind {
   if (operation.kind === "thought") {
     return "thought";
@@ -385,58 +355,35 @@ function DeferredOperationDetails({
   );
 }
 
-export function buildTimelineScrollSignal(messages: ConversationMessage[]) {
+function renderStateForScrollSignal(
+  message: ConversationMessage,
+  agentRenderStatesByMessageId: Map<string, AgentMessageRenderState>,
+) {
+  return agentRenderStatesByMessageId.get(message.id) ?? {
+    processSignal: "",
+    processSignalWithoutMental: "",
+    renderedTextLength: 0,
+  };
+}
+
+type TimelineScrollSignalOptions = {
+  includeMentalSignals?: boolean;
+};
+
+export function buildTimelineScrollSignal(
+  messages: ConversationMessage[],
+  agentRenderStatesByMessageId: Map<string, AgentMessageRenderState>,
+  options: TimelineScrollSignalOptions = {},
+) {
   return messages
     .map((message) => {
+      const renderState = renderStateForScrollSignal(message, agentRenderStatesByMessageId);
+      const processSignal = options.includeMentalSignals === false
+        ? renderState.processSignalWithoutMental
+        : renderState.processSignal;
       const contentSignal = message.streaming
         ? ""
-        : [message.content.length, message.thought?.length ?? 0].join(":");
-      const mentalSnapshot = message.mentalSnapshot;
-      const mentalSignal = mentalSnapshot
-        ? [
-            mentalSnapshot.mood,
-            mentalSnapshot.feeling,
-            mentalSnapshot.whisper,
-            mentalSnapshot.summary,
-            mentalSnapshot.cognitiveState,
-            mentalSnapshot.confidence,
-            mentalSnapshot.sampleSize,
-            mentalSnapshot.interventionCount,
-            mentalSnapshot.updatedAt,
-            mentalSnapshot.source,
-            mentalSnapshot.intervention ?? "",
-            JSON.stringify(mentalSnapshot.metrics ?? {}),
-          ].join(":")
-        : "";
-      const toolSignal = (message.toolCalls ?? [])
-        .map((toolCall) =>
-          [
-            toolCall.name,
-            toolCall.status,
-            toolCall.summary ?? "",
-            lightweightJsonSignal(toolCall.arguments ?? {}),
-            lightweightTextSignal(toolCall.resultPreview ?? ""),
-            toolCall.error ?? "",
-            toolCall.durationMs ?? "",
-            toolCall.timeoutSeconds ?? "",
-            toolCall.tracePath ?? "",
-          ].join(":"),
-        )
-        .join("|");
-      const feedbackSignal = (message.feedbackEvents ?? [])
-        .map((event) =>
-          [
-            event.sequence,
-            event.kind,
-            event.status,
-            event.name ?? "",
-            event.summary ?? "",
-            lightweightTextSignal(event.resultPreview ?? ""),
-            event.error ?? "",
-            event.relatedThoughtSequence ?? "",
-          ].join(":"),
-        )
-        .join("|");
+        : renderState.renderedTextLength;
       const metadataSignal = message.metadata
         ? [
             String(message.metadata.kind ?? ""),
@@ -449,9 +396,7 @@ export function buildTimelineScrollSignal(messages: ConversationMessage[]) {
       return [
         message.id,
         contentSignal,
-        feedbackSignal,
-        toolSignal,
-        mentalSignal,
+        processSignal,
         metadataSignal,
         message.streaming ? 1 : 0,
       ].join(":");
@@ -459,10 +404,20 @@ export function buildTimelineScrollSignal(messages: ConversationMessage[]) {
     .join("|");
 }
 
-export function buildStreamingTimelineScrollSignal(messages: ConversationMessage[]) {
+export function buildStreamingTimelineScrollSignal(
+  messages: ConversationMessage[],
+  agentRenderStatesByMessageId: Map<string, AgentMessageRenderState>,
+  options: TimelineScrollSignalOptions = {},
+) {
   return messages
     .filter((message) => message.streaming)
-    .map((message) => [message.id, message.content.length, message.thought?.length ?? 0].join(":"))
+    .map((message) => {
+      const renderState = renderStateForScrollSignal(message, agentRenderStatesByMessageId);
+      const processSignal = options.includeMentalSignals === false
+        ? renderState.processSignalWithoutMental
+        : renderState.processSignal;
+      return [message.id, renderState.renderedTextLength, processSignal].join(":");
+    })
     .join("|");
 }
 
@@ -1236,11 +1191,19 @@ export function ConversationView({
     return urlsByMessageId;
   }, [displayMessages]);
   const latestToolCalls = useMemo(
-    () =>
-      [...displayMessages]
-        .reverse()
-        .find((message) => !isTurnErrorMessage(message) && (message.toolCalls?.length ?? 0) > 0)?.toolCalls ?? [],
-    [displayMessages],
+    () => {
+      for (const message of [...activeTimelineMessages].reverse()) {
+        if (isTurnErrorMessage(message)) {
+          continue;
+        }
+        const renderState = agentRenderStatesByMessageId.get(message.id);
+        if (renderState?.toolCalls.length) {
+          return renderState.toolCalls;
+        }
+      }
+      return [];
+    },
+    [activeTimelineMessages, agentRenderStatesByMessageId],
   );
   const defaultExpandedResponseIds = useMemo(() => {
     const ids = new Set<string>();
@@ -1269,10 +1232,17 @@ export function ConversationView({
         : timelineMessages.map((message) => ({ ...message, mentalSnapshot: undefined })),
     [showMentalSnapshots, timelineMessages],
   );
-  const timelineScrollSignal = useMemo(() => buildTimelineScrollSignal(timelineSignalMessages), [timelineSignalMessages]);
+  const timelineScrollSignal = useMemo(
+    () => buildTimelineScrollSignal(timelineSignalMessages, agentRenderStatesByMessageId, {
+      includeMentalSignals: showMentalSnapshots,
+    }),
+    [agentRenderStatesByMessageId, showMentalSnapshots, timelineSignalMessages],
+  );
   const streamingTimelineScrollSignal = useMemo(
-    () => buildStreamingTimelineScrollSignal(streamingTimelineMessages),
-    [streamingTimelineMessages],
+    () => buildStreamingTimelineScrollSignal(streamingTimelineMessages, agentRenderStatesByMessageId, {
+      includeMentalSignals: showMentalSnapshots,
+    }),
+    [agentRenderStatesByMessageId, showMentalSnapshots, streamingTimelineMessages],
   );
   const hasSessionMeta = resolvedStats.length > 0 || latestToolCalls.length > 0;
   const hasMetaSection = showSessionOverview && (hasSessionMeta || Boolean(supplementalContent));
@@ -1408,12 +1378,18 @@ export function ConversationView({
       sessionId,
       streamingMessageCount: streamingTimelineMessages.length,
       renderedTextLength: streamingTimelineMessages.reduce(
-        (total, message) => total + message.content.length + (message.thought?.length ?? 0),
+        (total, message) => total + (agentRenderStatesByMessageId.get(message.id)?.renderedTextLength ?? 0),
         0,
       ),
       scrollSignal: streamingTimelineScrollSignal,
     });
-  }, [onStreamingFramePaint, sessionId, streamingTimelineMessages, streamingTimelineScrollSignal]);
+  }, [
+    agentRenderStatesByMessageId,
+    onStreamingFramePaint,
+    sessionId,
+    streamingTimelineMessages,
+    streamingTimelineScrollSignal,
+  ]);
 
   useEffect(() => {
     const timeline = timelineRef.current;

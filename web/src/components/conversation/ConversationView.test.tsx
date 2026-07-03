@@ -4,7 +4,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { ChatNextStateSignalSummary, ConversationMessage, SessionTurnError } from "../../api/types";
+import { conversationMessageToAgentMessage } from "../../agent-thread";
 import styles from "./ConversationView.styles";
+import agentMessageRenderStateSource from "./agentMessageRenderState.ts?raw";
+import { buildAgentMessageRenderState } from "./agentMessageRenderState";
 import conversationViewStylesModuleSource from "./ConversationView.styles.ts?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
 import {
@@ -29,8 +32,29 @@ const conversationViewStylesSource = [
 ].join("\n");
 const streamingResponseContentSource = conversationViewSource.slice(
   conversationViewSource.indexOf("function StreamingResponseContent"),
-  conversationViewSource.indexOf("function lightweightJsonSignal"),
+  conversationViewSource.indexOf("function operationDetailsKind"),
 );
+
+function renderStatesForMessages(messages: ConversationMessage[]) {
+  return new Map(
+    messages.map((message) => [
+      message.id,
+      buildAgentMessageRenderState(conversationMessageToAgentMessage(message)),
+    ]),
+  );
+}
+
+function timelineSignalFor(messages: ConversationMessage[]) {
+  return buildTimelineScrollSignal(messages, renderStatesForMessages(messages));
+}
+
+function timelineSignalWithoutMentalFor(messages: ConversationMessage[]) {
+  return buildTimelineScrollSignal(messages, renderStatesForMessages(messages), { includeMentalSignals: false });
+}
+
+function streamingTimelineSignalFor(messages: ConversationMessage[]) {
+  return buildStreamingTimelineScrollSignal(messages, renderStatesForMessages(messages));
+}
 
 function semanticArticleClassCount(html: string, className: string) {
   const escaped = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -447,12 +471,14 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).not.toContain("const detailRows = detailsExpanded ? operationDetailRows(operation) : []");
   });
 
-  it("uses lightweight tool signals instead of full detail payloads for scroll tracking", () => {
-    expect(conversationViewSource).toContain("function lightweightJsonSignal(value: unknown)");
-    expect(conversationViewSource).toContain("function lightweightTextSignal(value: unknown)");
-    expect(conversationViewSource).toContain("lightweightJsonSignal(toolCall.arguments ?? {})");
-    expect(conversationViewSource).toContain("lightweightTextSignal(toolCall.resultPreview ?? \"\")");
+  it("centralizes compact process signals in AgentMessage render state", () => {
+    expect(agentMessageRenderStateSource).toContain("function compactJsonSignal(value: unknown)");
+    expect(agentMessageRenderStateSource).toContain("function compactTextSignal(value: unknown)");
+    expect(agentMessageRenderStateSource).toContain("compactJsonSignal(part.arguments ?? {})");
+    expect(agentMessageRenderStateSource).toContain("compactTextSignal(part.resultPreview ?? \"\")");
     expect(conversationViewSource).not.toContain("JSON.stringify(toolCall.arguments ?? {})");
+    expect(conversationViewSource).not.toContain("function lightweightJsonSignal(value: unknown)");
+    expect(conversationViewSource).not.toContain("function lightweightTextSignal(value: unknown)");
   });
 
   it("keeps active-turn projection and history expansion anchors outside the render hot path", () => {
@@ -990,9 +1016,22 @@ describe("ConversationView edit resend affordance", () => {
   it("keeps active streaming scroll signals on a small streaming-only tail", () => {
     expect(conversationViewSource).toContain("projectAgentMessageTimelineMessages({ timelineMessages, activeTurnMessage })");
     expect(conversationViewSource).toContain("const streamingTimelineMessages = activeAgentMessageTimelineProjection.streamingMessages");
-    expect(conversationViewSource).toContain("buildStreamingTimelineScrollSignal(streamingTimelineMessages)");
+    expect(conversationViewSource).toContain("buildStreamingTimelineScrollSignal(streamingTimelineMessages, agentRenderStatesByMessageId, {");
+    expect(conversationViewSource).toContain("includeMentalSignals: showMentalSnapshots");
     expect(conversationViewSource).not.toContain("activeTimelineMessages.filter((message) => message.streaming)");
     expect(conversationViewSource).not.toContain("activeTimelineSignalMessages");
+  });
+
+  it("derives process scroll and latest tool summaries from AgentMessage render state", () => {
+    expect(conversationViewSource).toContain("buildTimelineScrollSignal(timelineSignalMessages, agentRenderStatesByMessageId, {");
+    expect(conversationViewSource).toContain("buildStreamingTimelineScrollSignal(streamingTimelineMessages, agentRenderStatesByMessageId, {");
+    expect(conversationViewSource).toContain("renderState.toolCalls");
+    expect(conversationViewSource).toContain("renderState.processSignal");
+    expect(conversationViewSource).toContain("renderState.processSignalWithoutMental");
+    expect(conversationViewSource).not.toContain("message.thought?.length");
+    expect(conversationViewSource).not.toContain("const mentalSnapshot = message.mentalSnapshot");
+    expect(conversationViewSource).not.toContain("const toolSignal = (message.toolCalls ?? [])");
+    expect(conversationViewSource).not.toContain(".find((message) => !isTurnErrorMessage(message) && (message.toolCalls?.length ?? 0) > 0)?.toolCalls");
   });
 
   it("captures a scroll anchor before revealing earlier messages", () => {
@@ -3734,8 +3773,8 @@ describe("ConversationView timeline scroll signal", () => {
   };
 
   it("changes when a tool status changes without changing tool count", () => {
-    const before = buildTimelineScrollSignal([baseAssistantMessage]);
-    const after = buildTimelineScrollSignal([
+    const before = timelineSignalFor([baseAssistantMessage]);
+    const after = timelineSignalFor([
       {
         ...baseAssistantMessage,
         toolCalls: [{ name: "read_file", status: "done" }],
@@ -3746,8 +3785,8 @@ describe("ConversationView timeline scroll signal", () => {
   });
 
   it("changes when a tool summary appears without changing message text length", () => {
-    const before = buildTimelineScrollSignal([baseAssistantMessage]);
-    const after = buildTimelineScrollSignal([
+    const before = timelineSignalFor([baseAssistantMessage]);
+    const after = timelineSignalFor([
       {
         ...baseAssistantMessage,
         toolCalls: [{ name: "read_file", status: "running", summary: "opened session_service.py" }],
@@ -3758,8 +3797,8 @@ describe("ConversationView timeline scroll signal", () => {
   });
 
   it("changes when a mental snapshot becomes visible", () => {
-    const before = buildTimelineScrollSignal([baseAssistantMessage]);
-    const after = buildTimelineScrollSignal([
+    const before = timelineSignalFor([baseAssistantMessage]);
+    const after = timelineSignalFor([
       {
         ...baseAssistantMessage,
         mentalSnapshot: {
@@ -3780,9 +3819,32 @@ describe("ConversationView timeline scroll signal", () => {
     expect(after).not.toBe(before);
   });
 
+  it("ignores mental snapshot signal changes when mental snapshots are hidden", () => {
+    const before = timelineSignalWithoutMentalFor([baseAssistantMessage]);
+    const after = timelineSignalWithoutMentalFor([
+      {
+        ...baseAssistantMessage,
+        mentalSnapshot: {
+          mood: "focused",
+          feeling: "tracking tool output",
+          whisper: "",
+          summary: "Following the active tool result",
+          cognitiveState: "productive",
+          confidence: 0.7,
+          sampleSize: 1,
+          interventionCount: 0,
+          updatedAt: "2026-05-22T00:01:05Z",
+          source: "runtime",
+        },
+      },
+    ]);
+
+    expect(after).toBe(before);
+  });
+
   it("does not change the synchronous scroll signal when streaming text grows", () => {
-    const before = buildTimelineScrollSignal([baseAssistantMessage]);
-    const after = buildTimelineScrollSignal([
+    const before = timelineSignalFor([baseAssistantMessage]);
+    const after = timelineSignalFor([
       {
         ...baseAssistantMessage,
         content: "streaming response text is still growing",
@@ -3793,8 +3855,8 @@ describe("ConversationView timeline scroll signal", () => {
   });
 
   it("tracks streaming text growth in the deferred scroll signal", () => {
-    const before = buildStreamingTimelineScrollSignal([baseAssistantMessage]);
-    const after = buildStreamingTimelineScrollSignal([
+    const before = streamingTimelineSignalFor([baseAssistantMessage]);
+    const after = streamingTimelineSignalFor([
       {
         ...baseAssistantMessage,
         content: "streaming response text is still growing",
@@ -3805,8 +3867,8 @@ describe("ConversationView timeline scroll signal", () => {
   });
 
   it("changes the synchronous scroll signal when settled text changes", () => {
-    const before = buildTimelineScrollSignal([{ ...baseAssistantMessage, streaming: false }]);
-    const after = buildTimelineScrollSignal([
+    const before = timelineSignalFor([{ ...baseAssistantMessage, streaming: false }]);
+    const after = timelineSignalFor([
       {
         ...baseAssistantMessage,
         streaming: false,
