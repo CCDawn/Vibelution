@@ -26,6 +26,10 @@ const debugResetPanelSource = readFileSync(
   new URL("./AgentDebugResetPanel.tsx", import.meta.url),
   "utf-8",
 );
+const modeMembershipPanelSource = readFileSync(
+  new URL("./AgentModeMembershipPanel.tsx", import.meta.url),
+  "utf-8",
+);
 const filterRailSource = readFileSync(
   new URL("../components/vui/product/agent-management/AgentFilterRail.tsx", import.meta.url),
   "utf-8",
@@ -611,12 +615,19 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("AgentModeMembershipDraft");
     expect(routeSource).toContain("membershipDraftFromWorkspace");
     expect(routeSource).toContain("/mode-membership");
-    expect(routeSource).toContain("chatDefault: value");
-    expect(routeSource).toContain("copy.researchPool");
-    expect(routeSource).toContain("copy.supervisedSlot");
-    expect(routeSource).toContain("copy.selfEvolutionSlot");
+    expect(routeSource).toContain("<AgentModeMembershipPanel");
+    expect(routeSource).toContain("draft={membershipDraft}");
+    expect(routeSource).toContain("dirty={membershipDirty}");
+    expect(routeSource).toContain("canSave={canSaveMembership}");
+    expect(routeSource).toContain("pending={selectedAgentMembershipPending}");
+    expect(routeSource).toContain("onDraftChange={updateMembershipDraft}");
+    expect(routeSource).toContain("onSave={saveModeMembership}");
+    expect(modeMembershipPanelSource).toContain("chatDefault: value");
+    expect(modeMembershipPanelSource).toContain("copy.researchPool");
+    expect(modeMembershipPanelSource).toContain("copy.supervisedSlot");
+    expect(modeMembershipPanelSource).toContain("copy.selfEvolutionSlot");
     expect(routeSource).toContain("chatWorkspaceCache.afterAgentWorkspaceChanged()");
-    expect(routeSource).toContain("styles.toggleGrid");
+    expect(modeMembershipPanelSource).toContain("styles.toggleGrid");
   });
 
   it("shows Agent group room membership as read-only references", () => {
@@ -759,7 +770,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("activePane === \"membership\"");
     expect(toolSummaryPanelSource).toContain("copy.toolPolicyTitle");
     expect(routeSource).toContain("copy.memoryPolicyTitle");
-    expect(routeSource).toContain("copy.membershipTitle");
+    expect(modeMembershipPanelSource).toContain("copy.membershipTitle");
     expect(routeSource).toContain("activePane === \"activity\"");
     expect(routeSource).toContain("fetchJson<AgentRunHistory>");
     expect(routeSource).toContain("queryKeys.agentRuns");
@@ -1181,6 +1192,7 @@ describe("AgentsRoute layout contract", () => {
       ...sourceBlocksForStyle("editorActions"),
       ...sourceBlocksForStyle("editorActions", archiveZonePanelSource),
       ...sourceBlocksForStyle("editorActions", debugResetPanelSource),
+      ...sourceBlocksForStyle("editorActions", modeMembershipPanelSource),
       ...sourceBlocksForStyle("editorActions", toolSummaryPanelSource),
     ];
     const deepLinkActionBlocks = sourceBlocksForStyle("configDeepLinkRow");

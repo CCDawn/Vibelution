@@ -81,6 +81,7 @@ import {
   type AgentBulkConfigField,
 } from "./AgentBulkConfigPanel";
 import { AgentDebugResetPanel, type AgentResetOptions } from "./AgentDebugResetPanel";
+import { AgentModeMembershipPanel, type AgentModeMembershipDraft } from "./AgentModeMembershipPanel";
 import { AgentManagementNav } from "./AgentManagementNav";
 import { AgentManagementBriefPanel } from "./AgentManagementBriefPanel";
 import {
@@ -169,14 +170,6 @@ type AgentCreateDraft = {
   taskMission: string;
   selectedToolBundleIds: string[];
   allowedTools: string;
-};
-
-type AgentModeMembershipDraft = {
-  chatDefault: boolean;
-  chatAvailable: boolean;
-  researchPool: boolean;
-  supervisedSlot: string;
-  selfEvolutionSlot: string;
 };
 
 type AgentToolPolicyDraft = {
@@ -6979,73 +6972,20 @@ export function AgentsRoute() {
               {activePane === "config" ? (
                 <>
               {selectedAgentRequiresTeamMembership ? (
-              <section className={styles.configEditor}>
-                <div className={styles.panelHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{copy.membershipTitle}</p>
-                    <h3>{uniqueModes(selectedAgent).map((mode) => modeLabel(mode, lang)).join(" / ") || "-"}</h3>
-                  </div>
-                  <span className={membershipDirty ? styles.dirtyPill : styles.cleanPill}>
-                    {membershipDirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}
-                  </span>
-                </div>
-                <div className={styles.toggleGrid}>
-                  <VCheckbox
-                    isSelected={membershipDraft.chatDefault}
-                    onChange={(value) => updateMembershipDraft({ chatDefault: value, chatAvailable: value ? true : membershipDraft.chatAvailable })}
-                  >
-                    {copy.chatDefault}
-                  </VCheckbox>
-                  <VCheckbox
-                    isSelected={membershipDraft.chatAvailable}
-                    onChange={(value) => updateMembershipDraft({ chatAvailable: value, chatDefault: value ? membershipDraft.chatDefault : false })}
-                  >
-                    {copy.chatAvailable}
-                  </VCheckbox>
-                  <VCheckbox
-                    isSelected={membershipDraft.researchPool}
-                    onChange={(value) => updateMembershipDraft({ researchPool: value })}
-                  >
-                    {copy.researchPool}
-                  </VCheckbox>
-                </div>
-                <div className={styles.editorGrid}>
-                  <VFieldRow label={copy.supervisedSlot}>
-                    <VNativeSelect value={membershipDraft.supervisedSlot} onChange={(event) => updateMembershipDraft({ supervisedSlot: event.target.value })}>
-                      <option value="">{copy.noSlot}</option>
-                      {Object.keys(workspace?.modeBindings.supervised_evolution?.slots ?? {}).map((slot) => (
-                        <option key={slot} value={slot}>{slot}</option>
-                      ))}
-                    </VNativeSelect>
-                  </VFieldRow>
-                  <VFieldRow label={copy.selfEvolutionSlot}>
-                    <VNativeSelect value={membershipDraft.selfEvolutionSlot} onChange={(event) => updateMembershipDraft({ selfEvolutionSlot: event.target.value })}>
-                      <option value="">{copy.noSlot}</option>
-                      {Object.keys(workspace?.modeBindings.self_evolution?.slots ?? {}).map((slot) => (
-                        <option key={slot} value={slot}>{slot}</option>
-                      ))}
-                    </VNativeSelect>
-                  </VFieldRow>
-                </div>
-                <div className={styles.editorActions}>
-                  <VButton
-                    type="button"
-                    variant="secondary"
-                    isDisabled={!membershipDirty || selectedAgentMembershipPending}
-                    onPress={() => setMembershipDraft(membershipDraftFromWorkspace(workspace, selectedAgent))}
-                  >
-                    {copy.resetConfig}
-                  </VButton>
-                  <VButton
-                    type="button"
-                    variant="primary"
-                    isDisabled={!canSaveMembership || selectedAgentMembershipPending}
-                    onPress={saveModeMembership}
-                  >
-                    {selectedAgentMembershipPending ? copy.savingMembership : copy.saveMembership}
-                  </VButton>
-                </div>
-              </section>
+              <AgentModeMembershipPanel
+                copy={copy}
+                lang={lang}
+                modesLabel={uniqueModes(selectedAgent).map((mode) => modeLabel(mode, lang)).join(" / ")}
+                draft={membershipDraft}
+                supervisedSlots={Object.keys(workspace?.modeBindings.supervised_evolution?.slots ?? {})}
+                selfEvolutionSlots={Object.keys(workspace?.modeBindings.self_evolution?.slots ?? {})}
+                dirty={membershipDirty}
+                canSave={canSaveMembership}
+                pending={selectedAgentMembershipPending}
+                onDraftChange={updateMembershipDraft}
+                onReset={() => setMembershipDraft(membershipDraftFromWorkspace(workspace, selectedAgent))}
+                onSave={saveModeMembership}
+              />
               ) : null}
 
               {selectedAgentReferencesPanel ? (
