@@ -1,10 +1,7 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import routeSource from "./ConfigRoute.tsx?raw";
-
-const stylesModuleSource = readFileSync(new URL("./ConfigRoute.module.css", import.meta.url), "utf-8");
-const stylesSource = stylesModuleSource;
+import stylesSource from "./ConfigRoute.styles.ts?raw";
 
 describe("ConfigRoute layout contract", () => {
   it("uses a full workspace placeholder for initial loading and load failure states", () => {
@@ -40,38 +37,27 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("styles.modelLibrarySection");
     expect(routeSource).toContain("styles.configEditorSection");
     expect(routeSource).toContain('section.id === "llm-discovery" ? styles.configDiscoverySection : ""');
-    expect(stylesSource).toContain(".contentModels");
     expect(routeSource).toContain("styles.notice");
     expect(routeSource).toContain("styles.profileTableWrap");
     expect(routeSource).toContain("styles.profileTaskCell");
-    expect(stylesSource).toContain(".configDiscoverySection");
-    expect(stylesModuleSource).toContain(".contentModels");
-    expect(stylesModuleSource).toContain(".modelLibrarySection");
-    expect(stylesModuleSource).toContain(".configEditorSection");
-    expect(stylesModuleSource).toContain(".configDiscoverySection");
+    expect(stylesSource).toContain("contentModels:");
+    expect(stylesSource).toContain("modelLibrarySection:");
+    expect(stylesSource).toContain("configEditorSection:");
+    expect(stylesSource).toContain("configDiscoverySection:");
   });
 
   it("keeps the tablet config sidebar compact instead of stretching every control full width", () => {
-    const tabletBlock = stylesSource.slice(
-      stylesSource.indexOf("@media (max-width: 1120px)"),
-      stylesSource.indexOf("@media (max-width: 720px)"),
-    );
-    const mobileBlock = stylesSource.slice(stylesSource.indexOf("@media (max-width: 720px)"));
+    expect(stylesSource).toContain("sidebarStatus:");
+    expect(stylesSource).toContain("max-[1120px]:[grid-template-columns:minmax(150px,0.7fr)_minmax(180px,1fr)_max-content]");
+    expect(stylesSource).toContain("max-[1120px]:[&_.buttonBlock]:[width:auto]");
+    expect(stylesSource).toContain("max-[1120px]:[&:not(.sidebarNavPanelCollapsed)]:[display:grid]");
+    expect(stylesSource).toContain("max-[1120px]:[&:not(.sidebarNavPanelCollapsed)]:[grid-template-columns:minmax(170px,0.32fr)_minmax(0,1fr)]");
+    expect(stylesSource).toContain("max-[1120px]:[display:flex]");
+    expect(stylesSource).toContain("max-[1120px]:[flex-wrap:wrap]");
 
-    expect(tabletBlock).toContain(".sidebarStatus {");
-    expect(tabletBlock).toContain("grid-template-columns: minmax(150px, 0.7fr) minmax(180px, 1fr) max-content;");
-    expect(tabletBlock).toContain(".sidebarStatus .buttonBlock");
-    expect(tabletBlock).toContain("width: auto");
-    expect(tabletBlock).toContain(".sidebarNavPanel:not(.sidebarNavPanelCollapsed)");
-    expect(tabletBlock).toContain("grid-template-columns: minmax(170px, 0.32fr) minmax(0, 1fr)");
-    expect(tabletBlock).toContain(".sectionNav {");
-    expect(tabletBlock).toContain("display: flex");
-    expect(tabletBlock).toContain("flex-wrap: wrap");
-
-    expect(mobileBlock).toContain(".sidebarStatus .buttonBlock");
-    expect(mobileBlock).toContain("width: 100%");
-    expect(mobileBlock).toContain(".sectionNav {");
-    expect(mobileBlock).toContain("display: grid");
+    expect(stylesSource).toContain("max-[720px]:[&_.buttonBlock]:[width:100%]");
+    expect(stylesSource).toContain("max-[720px]:[display:grid]");
+    expect(stylesSource).toContain("max-[720px]:[grid-template-columns:1fr]");
   });
 
   it("supports Agent Center return links and section deep links", () => {
@@ -86,7 +72,7 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("setActiveSectionId(requestedSectionId)");
     expect(routeSource).toContain("className={styles.returnButton}");
     expect(routeSource).toContain("to={returnToPath}");
-    expect(stylesSource).toContain(".returnButton");
+    expect(stylesSource).toContain("returnButton:");
   });
 
   it("splits model creation into vendor templates and concrete model discovery", () => {
@@ -135,17 +121,17 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("title={hint || undefined}");
     expect(routeSource).toContain("themeBackgroundPresetButton");
     expect(routeSource).toContain("aria-pressed={active}");
-    expect(stylesSource).toContain(".themeBackgroundDropButton");
-    expect(stylesSource).toContain(".themeBackgroundImagePreview");
-    expect(stylesSource).toContain(".themeBackgroundPresetGrid");
-    expect(stylesSource).toContain(".themeBackgroundImageValue");
+    expect(stylesSource).toContain("themeBackgroundDropButton:");
+    expect(stylesSource).toContain("themeBackgroundImagePreview:");
+    expect(stylesSource).toContain("themeBackgroundPresetGrid:");
+    expect(stylesSource).toContain("themeBackgroundImageValue:");
     expect(routeSource).toContain("themeBackgroundPresetButton");
     expect(routeSource).toContain("aria-pressed={active}");
     expect(routeSource).toContain("{active ? <em>{lang === \"zh\" ? \"当前\" : \"Current\"}</em> : null}");
-    expect(stylesSource).toContain(".themeBackgroundDropButton");
-    expect(stylesModuleSource).toContain(".themeBackgroundPresetGrid");
-    expect(stylesModuleSource).toContain("display: grid");
-    expect(stylesSource).toContain(".themeBackgroundPresetButton");
+    expect(stylesSource).toContain("themeBackgroundDropButton:");
+    expect(stylesSource).toContain("themeBackgroundPresetGrid:");
+    expect(stylesSource).toContain("[display:grid]");
+    expect(stylesSource).toContain("themeBackgroundPresetButton:");
   });
 
   it("renders the Web user avatar as a compact image control instead of a raw path field", () => {
@@ -157,11 +143,11 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("className={styles.avatarImageUploadCue}");
     expect(routeSource).toContain("className={styles.avatarImageMeta}");
     expect(routeSource).toContain("await beginAvatarCrop(file, absolutePath)");
-    expect(stylesSource).toContain(".avatarImageMeta");
-    expect(stylesSource).toContain(".avatarImageDropButton");
-    expect(stylesSource).toContain(".avatarImageUploadCue");
-    expect(stylesSource).toContain(".avatarImageDropButton");
-    expect(stylesSource).toContain(".avatarImageMeta");
+    expect(stylesSource).toContain("avatarImageMeta:");
+    expect(stylesSource).toContain("avatarImageDropButton:");
+    expect(stylesSource).toContain("avatarImageUploadCue:");
+    expect(stylesSource).toContain("avatarImageDropButton:");
+    expect(stylesSource).toContain("avatarImageMeta:");
   });
 
   it("keeps empty string-list settings out of object-list layout blocks", () => {
@@ -184,13 +170,12 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("styles.userProfileAvatarFields");
     expect(routeSource).toContain("copy.userProfileAvatarGroupTitle");
     expect(routeSource).toContain("copy.userProfileAvatarGroupHint");
-    expect(stylesSource).toContain(".userProfileLayout");
-    expect(stylesSource).toContain(".userProfileIdentityFields");
-    expect(stylesSource).toContain(".userProfileAvatarFields");
-    expect(stylesModuleSource).toContain(".userProfileLayout");
-    expect(stylesModuleSource).toContain("display: grid");
-    expect(stylesSource).toContain(".userProfileIdentityFields");
-    expect(stylesSource).toContain(".userProfileAvatarFields");
+    expect(stylesSource).toContain("userProfileLayout:");
+    expect(stylesSource).toContain("userProfileIdentityFields:");
+    expect(stylesSource).toContain("userProfileAvatarFields:");
+    expect(stylesSource).toContain("[display:grid]");
+    expect(stylesSource).toContain("userProfileIdentityFields:");
+    expect(stylesSource).toContain("userProfileAvatarFields:");
   });
 
   it("uses a compact layout for large config sections with many fields", () => {
@@ -205,8 +190,9 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("styles.treeFieldCardEdit");
     expect(routeSource).toContain("styles.treeObjectCell");
     expect(routeSource).toContain("styles.treeToggle");
-    expect(stylesModuleSource).toContain(".configDenseSection > .treeGrid");
-    expect(stylesModuleSource).toContain(".treeGrid");
+    expect(stylesSource).toContain("configDenseSection:");
+    expect(stylesSource).toContain("[&>_.treeGrid]:[grid-template-columns:repeat(auto-fit,minmax(186px,1fr))]");
+    expect(stylesSource).toContain("treeGrid:");
   });
 
   it("routes Config controls through VUI primitives", () => {
