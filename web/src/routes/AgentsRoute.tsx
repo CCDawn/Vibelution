@@ -6175,6 +6175,7 @@ export function AgentsRoute() {
                       <VNativeButton
                         key={action.id}
                         type="button"
+                        className="w-full"
                         title={action.detail}
                         onClick={() => {
                           if (action.route) {

@@ -79,7 +79,7 @@ const styles: Record<string, string> = {
   avatarLibraryHeader:
     "flex [align-items:center] [justify-content:space-between] [gap:8px] min-w-0 [&_span]:[color:var(--fg-primary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[font-weight:800] [&_small]:[color:var(--fg-tertiary)] [&_small]:[font-size:var(--vui-font-xs)]",
   avatarOption:
-    "grid [place-items:center] [aspect-ratio:1] min-w-0 [padding:2px] [border:1px_solid_var(--border-soft)] [border-radius:50%] [background:var(--surface-card)] [cursor:pointer] hover:[border-color:color-mix(in_srgb,_var(--accent-cool)_48%,_transparent)] hover:[outline:none] focus-visible:[border-color:color-mix(in_srgb,_var(--accent-cool)_48%,_transparent)] focus-visible:[outline:none] [&_img]:block [&_img]:[width:100%] [&_img]:[height:100%] [&_img]:[border-radius:inherit] [&_img]:[object-fit:cover]",
+    "grid w-full [place-items:center] [aspect-ratio:1] min-w-0 [padding:2px] [border:1px_solid_var(--border-soft)] [border-radius:50%] [background:var(--surface-card)] [cursor:pointer] hover:[border-color:color-mix(in_srgb,_var(--accent-cool)_48%,_transparent)] hover:[outline:none] focus-visible:[border-color:color-mix(in_srgb,_var(--accent-cool)_48%,_transparent)] focus-visible:[outline:none] [&_img]:block [&_img]:[width:100%] [&_img]:[height:100%] [&_img]:[border-radius:inherit] [&_img]:[object-fit:cover]",
   avatarOptionGrid:
     "grid [grid-template-columns:repeat(auto-fill,_minmax(42px,_1fr))] [gap:7px] [max-height:178px] [overflow:auto] [padding-right:2px]",
   avatarOptionSelected:
@@ -135,7 +135,7 @@ const styles: Record<string, string> = {
   detailAvatar:
     "grid [place-items:center] [flex:0_0_auto] [border-radius:50%] [color:var(--fg-primary)] [background:color-mix(in_srgb,_var(--accent-cool)_10%,_var(--surface-card))] [font-family:var(--font-display)] [font-weight:800] [overflow:hidden] [width:46px] [height:46px] [font-size:var(--vui-font-xs)] [box-shadow:var(--focus-ring)]",
   detailAvatarButton:
-    "grid [place-items:center] [width:46px] [height:46px] [padding:0] [border:0] [border-radius:50%] [background:transparent] [color:inherit] [cursor:pointer] focus-visible:[outline:none]",
+    "grid w-[46px] h-[46px] [place-items:center] [width:46px] [height:46px] [padding:0] [border:0] [border-radius:50%] [background:transparent] [color:inherit] [cursor:pointer] focus-visible:[outline:none]",
   detailHeader:
     "flex [align-items:flex-start] [justify-content:space-between] [gap:8px] min-w-0 [&_div]:min-w-0 [&_p]:[margin:4px_0_0] [&_p]:[color:var(--fg-secondary)] [&_p]:[font-size:var(--vui-font-xs)] [&_p]:[line-height:1.42]",
   detailHeaderActions:
@@ -149,9 +149,9 @@ const styles: Record<string, string> = {
   detailSection:
     "min-w-0 [border:1px_solid_color-mix(in_srgb,_var(--border-soft)_76%,_transparent)] [border-radius:8px] [background:color-mix(in_srgb,_var(--surface-card)_72%,_transparent)] [&_svg]:[grid-area:icon] [&_svg]:[color:var(--accent-cool)] grid [gap:8px] [padding:10px]",
   detailTab:
-    "grid [justify-items:center] [gap:2px] min-w-0 [min-height:30px] [padding:5px_4px] [border:1px_solid_transparent] [border-radius:var(--radius-control)] [background:transparent] [color:var(--fg-tertiary)] [&_span]:[max-width:100%] [&_span]:[overflow:hidden] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[font-weight:700] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap] [&_strong]:[color:var(--fg-secondary)] [&_strong]:[font-size:var(--vui-font-xs)] hover:[background:var(--surface-panel-hover)] hover:[color:var(--fg-secondary)]",
+    "grid w-full [justify-items:center] [gap:2px] min-w-0 [min-height:30px] [padding:5px_4px] [border:1px_solid_transparent] [border-radius:var(--radius-control)] [background:transparent] [color:var(--fg-tertiary)] [&_span]:[max-width:100%] [&_span]:[overflow:hidden] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[font-weight:700] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap] [&_strong]:[color:var(--fg-secondary)] [&_strong]:[font-size:var(--vui-font-xs)] hover:[background:var(--surface-panel-hover)] hover:[color:var(--fg-secondary)]",
   detailTabActive:
-    "grid [justify-items:center] [gap:2px] min-w-0 [min-height:30px] [padding:5px_4px] [border:1px_solid_transparent] [border-radius:var(--radius-control)] [&_span]:[max-width:100%] [&_span]:[overflow:hidden] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[font-weight:700] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap] [&_strong]:[font-size:var(--vui-font-xs)] [border-color:color-mix(in_srgb,_var(--accent-cool)_30%,_transparent)] [background:color-mix(in_srgb,_var(--accent-cool)_10%,_transparent)] [color:var(--accent-cool)] [&_strong]:[color:var(--accent-cool)]",
+    "grid w-full [justify-items:center] [gap:2px] min-w-0 [min-height:30px] [padding:5px_4px] [border:1px_solid_transparent] [border-radius:var(--radius-control)] [&_span]:[max-width:100%] [&_span]:[overflow:hidden] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[font-weight:700] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap] [&_strong]:[font-size:var(--vui-font-xs)] [border-color:color-mix(in_srgb,_var(--accent-cool)_30%,_transparent)] [background:color-mix(in_srgb,_var(--accent-cool)_10%,_transparent)] [color:var(--accent-cool)] [&_strong]:[color:var(--accent-cool)]",
   detailTabs:
     "grid [grid-template-columns:repeat(3,_minmax(0,_1fr))] [gap:4px] min-w-0 [padding:4px] [border:1px_solid_var(--border-soft)] [border-radius:8px] [background:color-mix(in_srgb,_var(--surface-card)_74%,_var(--bg-canvas))] max-[860px]:[grid-template-columns:1fr]",
   dirtyPill:
@@ -213,7 +213,7 @@ const styles: Record<string, string> = {
   health_warning:
     "[border-color:color-mix(in_srgb,_var(--accent-warm)_30%,_transparent)] [background:color-mix(in_srgb,_var(--accent-warm)_10%,_transparent)] [color:var(--accent-warm-2)]",
   iconButton:
-    "grid [place-items:center] [width:26px] [height:26px] [border:1px_solid_var(--border-soft)] [border-radius:var(--radius-control)] [background:var(--surface-card)] [color:var(--fg-secondary)] [font:inherit] [font-size:1rem] [cursor:pointer]",
+    "grid w-[26px] h-[26px] [place-items:center] [width:26px] [height:26px] [border:1px_solid_var(--border-soft)] [border-radius:var(--radius-control)] [background:var(--surface-card)] [color:var(--fg-secondary)] [font:inherit] [font-size:1rem] [cursor:pointer]",
   inboxMessageItem:
     "grid [gap:5px] min-w-0 [padding:7px_8px] [border:1px_solid_var(--border-soft)] [border-radius:var(--radius-control)] [background:var(--surface-panel)] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_p]:min-w-0 [&_p]:[overflow:hidden] [&_p]:[text-overflow:ellipsis] [&_small]:min-w-0 [&_small]:[overflow:hidden] [&_small]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_small]:[white-space:nowrap] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_p]:[display:-webkit-box] [&_p]:[margin:0] [&_p]:[color:var(--fg-secondary)] [&_p]:[font-size:var(--vui-font-xs)] [&_p]:[line-height:1.35] [&_p]:[-webkit-box-orient:vertical] [&_p]:[-webkit-line-clamp:2] [&_small]:[color:var(--fg-tertiary)] [&_small]:[font-size:var(--vui-font-xs)]",
   inboxMessageItemFocused:
@@ -255,9 +255,9 @@ const styles: Record<string, string> = {
   managementChecklist:
     "grid [grid-template-columns:repeat(5,_minmax(0,_1fr))] [gap:4px] min-w-0 [&_button]:inline-flex [&_button]:[align-items:center] [&_button]:[justify-content:center] [&_button]:[gap:4px] [&_button]:min-w-0 [&_button]:[min-height:26px] [&_button]:[padding:3px_5px] [&_button]:[border:1px_solid_var(--border-soft)] [&_button]:[border-radius:var(--radius-control)] [&_button]:[background:var(--surface-panel)] [&_button]:[color:var(--fg-secondary)] [&_svg]:[flex:0_0_auto] [&_span]:min-w-0 [&_span]:[overflow:hidden] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[font-weight:720] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap] [&_button]:hover:[background:var(--surface-panel-hover)]",
   managementChecklistDone:
-    "[&_svg]:[color:var(--state-success)]",
+    "w-full [&_svg]:[color:var(--state-success)]",
   managementChecklistMissing:
-    "[&_svg]:[color:var(--accent-warm)]",
+    "w-full [&_svg]:[color:var(--accent-warm)]",
   managementNav:
     "[margin:0] max-[1120px]:[justify-self:start]",
   memoryPolicyGrid:
@@ -311,7 +311,7 @@ const styles: Record<string, string> = {
   returnBanner:
     "grid [grid-template-columns:minmax(0,_1fr)_auto] [align-items:center] [gap:10px] min-w-0 [padding:9px_10px] [border:1px_solid_color-mix(in_srgb,_var(--accent-cool)_38%,_var(--border-soft))] [border-radius:8px] [background:color-mix(in_srgb,_var(--accent-cool)_8%,_var(--surface-panel))] [box-shadow:none] max-[860px]:[grid-template-columns:1fr]",
   returnBannerButton:
-    "inline-flex [align-items:center] [justify-content:center] [gap:6px] [min-width:116px] [min-height:34px] [max-width:100%] [padding:0_12px] [border:1px_solid_color-mix(in_srgb,_var(--accent-cool)_68%,_var(--border-soft))] [border-radius:var(--radius-control)] [background:var(--accent-cool)] [color:var(--accent-cool-contrast)] [font-size:var(--vui-font-xs)] [font-weight:800] [white-space:nowrap] [cursor:pointer] hover:[border-color:color-mix(in_srgb,_var(--accent-cool)_86%,_var(--border-soft))] hover:[background:color-mix(in_srgb,_var(--accent-cool)_90%,_var(--fg-primary))] hover:[outline:none] hover:[box-shadow:var(--focus-ring)] focus-visible:[border-color:color-mix(in_srgb,_var(--accent-cool)_86%,_var(--border-soft))] focus-visible:[background:color-mix(in_srgb,_var(--accent-cool)_90%,_var(--fg-primary))] focus-visible:[outline:none] focus-visible:[box-shadow:var(--focus-ring)] max-[860px]:[width:100%]",
+    "inline-flex w-fit max-[860px]:w-full [align-items:center] [justify-content:center] [gap:6px] [min-width:116px] [min-height:34px] [max-width:100%] [padding:0_12px] [border:1px_solid_color-mix(in_srgb,_var(--accent-cool)_68%,_var(--border-soft))] [border-radius:var(--radius-control)] [background:var(--accent-cool)] [color:var(--accent-cool-contrast)] [font-size:var(--vui-font-xs)] [font-weight:800] [white-space:nowrap] [cursor:pointer] hover:[border-color:color-mix(in_srgb,_var(--accent-cool)_86%,_var(--border-soft))] hover:[background:color-mix(in_srgb,_var(--accent-cool)_90%,_var(--fg-primary))] hover:[outline:none] hover:[box-shadow:var(--focus-ring)] focus-visible:[border-color:color-mix(in_srgb,_var(--accent-cool)_86%,_var(--border-soft))] focus-visible:[background:color-mix(in_srgb,_var(--accent-cool)_90%,_var(--fg-primary))] focus-visible:[outline:none] focus-visible:[box-shadow:var(--focus-ring)] max-[860px]:[width:100%]",
   returnBannerCopy:
     "grid [gap:2px] min-w-0 [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_span]:min-w-0 [&_span]:[overflow:hidden] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[font-weight:820] [&_span]:[color:var(--fg-secondary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[line-height:1.25] max-[860px]:[&_span]:[white-space:normal]",
   roomCheckField:

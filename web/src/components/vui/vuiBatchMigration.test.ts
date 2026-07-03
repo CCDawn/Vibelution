@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import appShellStyles from "../../app/AppShell.styles";
+import agentStyles from "../../routes/AgentsRoute.styles";
 import evolutionStyles from "../../routes/EvolutionRoute.styles";
 import teamStyles from "../../routes/TeamsRoute.styles";
 
@@ -216,6 +217,21 @@ describe("VUI batch migration", () => {
     expect(denseListSource).toContain("!h-px");
     expect(filterRailSource).toContain("!border-0");
     expect(filterRailSource).toContain("!bg-transparent");
+  });
+
+  it("routes/AgentsRoute.styles.ts preserves block and fixed-size button geometry after VUI native migration", () => {
+    for (const className of [
+      agentStyles.avatarOption,
+      agentStyles.detailTab,
+      agentStyles.detailTabActive,
+      agentStyles.managementChecklistDone,
+      agentStyles.managementChecklistMissing,
+    ]) {
+      expect(className).toContain("w-full");
+    }
+    expect(agentStyles.detailAvatarButton).toContain("w-[46px]");
+    expect(agentStyles.iconButton).toContain("w-[26px]");
+    expect(agentStyles.returnBannerButton).toContain("w-fit");
   });
 
   it.each(cssModuleFreeTargets)("%s no longer imports a local CSS module", (path) => {
