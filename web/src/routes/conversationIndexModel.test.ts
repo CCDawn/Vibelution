@@ -194,6 +194,47 @@ describe("conversationIndexModel", () => {
     expect(model.groupedConversations[0].items[0].title).toBe("唐南栀");
   });
 
+  it("keeps team Agents in a stable team group while the team directory is still loading", () => {
+    const model = buildConversationIndexModel({
+      agents: [
+        agent({
+          agentId: "agent-research-member",
+          directSessionId: "session-research-member",
+          displayName: "江映白",
+          roleKey: "research_member",
+          conversationIndexKind: "team_agent",
+          conversationIndexVisibility: "team_private",
+          metadata: {
+            conversationIndexKind: "team_agent",
+            challengeCupTeamId: "research-team",
+            challengeCupTeamName: "挑战杯ai科研团队",
+            challengeCupTeamRole: "research_member",
+          },
+        }),
+      ],
+      conversations: [],
+      lang: "zh",
+      linkedTeamRoomIds: new Set(),
+      rawSessions: [],
+      rightIndexSessions: [],
+      sessionFilter: "",
+      sessionsById: new Map(),
+      teams: [],
+    });
+
+    expect(model.groupedConversations.map((group) => group.groupKey)).toEqual(["team:research-team"]);
+    expect(model.groupedConversations[0]).toMatchObject({
+      label: "挑战杯ai科研团队",
+      teamId: "research-team",
+      groupKind: "team",
+    });
+    expect(model.groupedConversations[0].items[0]).toMatchObject({
+      title: "江映白",
+      conversationIndexKind: "team_agent",
+      teamId: "research-team",
+    });
+  });
+
   it("preserves backend source authority refs when converting sessions", () => {
     const summary = sessionToConversationSummary(session({
       id: "session-source",
