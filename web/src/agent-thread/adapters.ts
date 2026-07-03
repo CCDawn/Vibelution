@@ -156,7 +156,6 @@ function toolEventToAgentPart(id: string, event: ConversationFeedbackEvent): Age
     timestamp: event.timestamp,
     relatedThoughtSequence: event.relatedThoughtSequence,
     source: "feedback-event",
-    original: event,
   };
 }
 
@@ -213,7 +212,6 @@ function legacyToolPartsForMessage(message: ConversationMessage): AgentToolCallP
     originalLength: toolCall.originalLength,
     tracePath: toolCall.tracePath,
     source: "legacy-tool-call",
-    original: toolCall,
   }));
 }
 
