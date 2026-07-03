@@ -21,10 +21,11 @@ const COPY = {
     subtitle: "TaskLedger / WorkRun / Outcome",
     taskList: "任务",
     detail: "详情",
-    deliveries: "投递",
-    timeline: "时间线",
+    taskChain: "任务链路",
+    deliveryResult: "投递结果",
+    lifecycleTimeline: "生命周期",
     projectionRefs: "投影引用",
-    runtimeRefs: "运行证据",
+    evidenceRefs: "证据引用",
     refresh: "刷新",
     status: "状态",
     allStatus: "全部状态",
@@ -52,10 +53,11 @@ const COPY = {
     subtitle: "TaskLedger / WorkRun / Outcome",
     taskList: "Tasks",
     detail: "Detail",
-    deliveries: "Deliveries",
-    timeline: "Timeline",
+    taskChain: "Task chain",
+    deliveryResult: "Delivery result",
+    lifecycleTimeline: "Lifecycle",
     projectionRefs: "Projection refs",
-    runtimeRefs: "Runtime evidence",
+    evidenceRefs: "Evidence refs",
     refresh: "Refresh",
     status: "Status",
     allStatus: "All status",
@@ -263,42 +265,36 @@ export function KernelTaskCenterRoute() {
 
               {selectedTaskHiddenFromList ? <div className={styles.selectionNoticeClass}>{copy.taskHidden}</div> : null}
 
-              <section className={styles.sectionClass}>
+              <section className={styles.ledgerSectionClass} aria-label={copy.taskChain}>
                 <div className={styles.sectionHeaderClass}>
-                  <h3 className={styles.sectionTitleClass}>{copy.deliveries}</h3>
-                  <span className={styles.sectionCountClass}>{timeline.deliveries.length}</span>
+                  <h3 className={styles.sectionTitleClass}>{copy.taskChain}</h3>
+                  <span className={styles.sectionCountClass}>3</span>
                 </div>
-                <div className={styles.deliveryGridClass}>
-                  {timeline.deliveries.map((delivery) => (
-                    <DeliveryRow key={`${delivery.targetAgentId}-${delivery.inboxMessageId}`} delivery={delivery} copy={copy} />
-                  ))}
+                <div className={styles.ledgerFlowClass}>
+                  <LedgerBucket title={copy.deliveryResult} count={timeline.deliveries.length}>
+                    <div className={styles.deliveryGridClass}>
+                      {timeline.deliveries.map((delivery) => (
+                        <DeliveryRow key={`${delivery.targetAgentId}-${delivery.inboxMessageId}`} delivery={delivery} copy={copy} />
+                      ))}
+                    </div>
+                  </LedgerBucket>
+                  <LedgerBucket title={copy.projectionRefs} count={timeline.projectionRefs.length}>
+                    <RefList refs={timeline.projectionRefs} />
+                  </LedgerBucket>
+                  <LedgerBucket title={copy.evidenceRefs} count={timeline.runtimeEvidenceRefs.length}>
+                    <RefList refs={timeline.runtimeEvidenceRefs} className={styles.evidenceRefListClass} />
+                  </LedgerBucket>
                 </div>
               </section>
 
-              <section className={styles.sectionClass}>
+              <section className={styles.lifecycleSectionClass}>
                 <div className={styles.sectionHeaderClass}>
-                  <h3 className={styles.sectionTitleClass}>{copy.projectionRefs}</h3>
-                  <span className={styles.sectionCountClass}>{timeline.projectionRefs.length}</span>
-                </div>
-                <RefList refs={timeline.projectionRefs} />
-              </section>
-
-              <section className={styles.sectionClass}>
-                <div className={styles.sectionHeaderClass}>
-                  <h3 className={styles.sectionTitleClass}>{copy.runtimeRefs}</h3>
-                  <span className={styles.sectionCountClass}>{timeline.runtimeEvidenceRefs.length}</span>
-                </div>
-                <RefList refs={timeline.runtimeEvidenceRefs} />
-              </section>
-
-              <section className={styles.sectionClass}>
-                <div className={styles.sectionHeaderClass}>
-                  <h3 className={styles.sectionTitleClass}>{copy.timeline}</h3>
+                  <h3 className={styles.sectionTitleClass}>{copy.lifecycleTimeline}</h3>
                   <span className={styles.sectionCountClass}>{timeline.timeline.length}</span>
                 </div>
-                <div className={styles.timelineListClass}>
+                <div className={styles.lifecycleTimelineClass}>
                   {timeline.timeline.map((item, index) => (
-                    <TimelineRow key={`${item.kind}-${item.at}-${index}`} item={item} />
+                    <LifecycleRow key={`${item.kind}-${item.at}-${index}`} item={item} />
                   ))}
                 </div>
               </section>
@@ -360,16 +356,36 @@ function DeliveryRow({
   );
 }
 
-function TimelineRow({ item }: { item: KernelTimelineItem }) {
+function LedgerBucket({
+  title,
+  count,
+  children,
+}: {
+  title: string;
+  count: number;
+  children: ReactNode;
+}) {
   return (
-    <div className={styles.timelineRowClass}>
-      <span className={`${styles.timelineDotClass} ${statusTone(item.status)}`} />
+    <section className={styles.ledgerBucketClass}>
+      <div className={styles.sectionHeaderClass}>
+        <h3 className={styles.sectionTitleClass}>{title}</h3>
+        <span className={styles.sectionCountClass}>{count}</span>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function LifecycleRow({ item }: { item: KernelTimelineItem }) {
+  return (
+    <div className={styles.lifecycleRowClass}>
+      <span className={`${styles.lifecycleDotClass} ${statusTone(item.status)}`} />
       <div>
-        <div className={styles.timelineTitleClass}>
-          <strong className={styles.timelineKindClass}>{item.kind}</strong>
+        <div className={styles.lifecycleTitleClass}>
+          <strong className={styles.lifecycleKindClass}>{item.kind}</strong>
           <StatusPill status={item.status} />
         </div>
-        <p className={styles.timelineSummaryClass}>{item.summary}</p>
+        <p className={styles.lifecycleSummaryClass}>{item.summary}</p>
         <span className={styles.mutedLineClass}>{formatTime(item.at)}</span>
         {item.refs.length > 0 ? (
           <div className={styles.chipsClass}>
@@ -383,12 +399,18 @@ function TimelineRow({ item }: { item: KernelTimelineItem }) {
   );
 }
 
-function RefList({ refs }: { refs: Array<Record<string, unknown>> }) {
+function RefList({
+  refs,
+  className = styles.refListClass,
+}: {
+  refs: Array<Record<string, unknown>>;
+  className?: string;
+}) {
   if (refs.length === 0) {
     return <div className={styles.emptyInlineClass}>-</div>;
   }
   return (
-    <div className={styles.refListClass}>
+    <div className={className}>
       {refs.map((ref, index) => {
         const sourceRef = ref.sourceRef && typeof ref.sourceRef === "object"
           ? ref.sourceRef as Record<string, unknown>
