@@ -1,6 +1,7 @@
 import { ChevronDown, Search } from "lucide-react";
 import { type ReactNode } from "react";
 
+import { VNativeButton, VNativeInput } from "../../index";
 import { AgentWorkspacePanel } from "./AgentWorkspacePanel";
 
 export type AgentFilterGroupView = {
@@ -68,7 +69,7 @@ function FilterSection({
         {section.groups.map((group) => {
           const active = activeGroupId === group.id;
           return (
-            <button
+            <VNativeButton
               key={group.id}
               type="button"
               data-vui="filter-group-button"
@@ -82,12 +83,12 @@ function FilterSection({
               title={group.title}
             >
               <span className={GROUP_LABEL}>
-                {group.icon}
+              {group.icon}
                 {group.label}
               </span>
               <strong className={COUNT_BADGE}>{group.count}</strong>
               {group.healthLabel ? <em className={HEALTH_BADGE}>{group.healthLabel}</em> : null}
-            </button>
+            </VNativeButton>
           );
         })}
       </div>
@@ -121,11 +122,11 @@ export function AgentFilterRail({
         className="flex items-center gap-2 min-h-[32px] px-[9px] rounded-lg border border-[var(--border-soft)] bg-[color-mix(in_srgb,var(--surface-input)_84%,var(--surface-card))] text-[var(--fg-tertiary)] focus-within:border-[color-mix(in_srgb,var(--accent-cool)_44%,transparent)] focus-within:shadow-[var(--focus-ring)] focus-within:text-[var(--fg-secondary)]"
       >
         <Search size={15} className="shrink-0" />
-        <input
+        <VNativeInput
           value={searchValue}
           placeholder={searchPlaceholder}
           onChange={(event) => onSearchChange(event.target.value)}
-          className="min-w-0 w-full border-0 outline-0 bg-transparent text-[var(--fg-primary)] text-[0.82rem] font-[inherit]"
+          className="min-w-0 w-full !border-0 !bg-transparent !px-0 !shadow-none outline-0 text-[var(--fg-primary)] text-[0.82rem] font-[inherit]"
         />
       </label>
 

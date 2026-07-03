@@ -36,6 +36,29 @@ const migrationTargets = [
   },
 ] as const;
 
+const nativeControlTargets = [
+  {
+    path: "routes/AgentsRoute.tsx",
+    expected: ["VNativeButton", "VNativeInput", "VNativeSelect", "VNativeTextarea"],
+    forbidden: ["<button", "<input", "<select", "<textarea"],
+  },
+  {
+    path: "routes/EvolutionRoute.tsx",
+    expected: ["VNativeButton", "VNativeInput", "VNativeSelect", "VNativeTextarea"],
+    forbidden: ["<button", "<input", "<select", "<textarea"],
+  },
+  {
+    path: "components/vui/product/agent-management/AgentDenseList.tsx",
+    expected: ["VNativeButton", "VNativeInput"],
+    forbidden: ["<button", "<input"],
+  },
+  {
+    path: "components/vui/product/agent-management/AgentFilterRail.tsx",
+    expected: ["VNativeButton", "VNativeInput"],
+    forbidden: ["<button", "<input"],
+  },
+] as const;
+
 const cssModuleFreeTargets = [
   "components/preview/FilePreview.tsx",
   "components/preview/StructuredLogPreview.tsx",
@@ -159,16 +182,19 @@ describe("VUI batch migration", () => {
     },
   );
 
-  it("routes/EvolutionRoute.tsx uses VUI native controls instead of raw form/action elements", () => {
-    const source = readTargetSource("routes/EvolutionRoute.tsx");
+  it.each(nativeControlTargets)(
+    "$path uses VUI native controls instead of raw form/action elements",
+    ({ path, expected, forbidden }) => {
+      const source = readTargetSource(path);
 
-    for (const primitive of ["VNativeButton", "VNativeInput", "VNativeSelect", "VNativeTextarea"]) {
-      expect(source).toContain(primitive);
-    }
-    for (const rawPattern of ["<button", "<input", "<select", "<textarea"]) {
-      expect(source).not.toContain(rawPattern);
-    }
-  });
+      for (const primitive of expected) {
+        expect(source).toContain(primitive);
+      }
+      for (const rawPattern of forbidden) {
+        expect(source).not.toContain(rawPattern);
+      }
+    },
+  );
 
   it("routes/EvolutionRoute.styles.ts preserves block button geometry after VUI native migration", () => {
     for (const className of [
@@ -180,6 +206,16 @@ describe("VUI batch migration", () => {
       expect(className).toContain("w-full");
     }
     expect(evolutionStyles.compactIconAction).toContain("w-9");
+  });
+
+  it("agent-management product controls preserve invisible checkboxes and embedded search geometry", () => {
+    const denseListSource = readTargetSource("components/vui/product/agent-management/AgentDenseList.tsx");
+    const filterRailSource = readTargetSource("components/vui/product/agent-management/AgentFilterRail.tsx");
+
+    expect(denseListSource).toContain("!w-px");
+    expect(denseListSource).toContain("!h-px");
+    expect(filterRailSource).toContain("!border-0");
+    expect(filterRailSource).toContain("!bg-transparent");
   });
 
   it.each(cssModuleFreeTargets)("%s no longer imports a local CSS module", (path) => {
