@@ -244,19 +244,21 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.layoutCenterFirst).toContain("var(--chat-right-pane-width,0px)");
   });
 
-  it("keeps side panes flush while preserving overlay resize handles", () => {
+  it("aligns side-pane gutters while preserving overlay resize handles", () => {
     expect(routeStyles.layout.split(/\s+/)).toContain("grid");
     expect(routeStyles.layout).toContain("!gap-0");
     expect(routeStyles.layout).toContain("!p-0");
     expect(routeStyles.layout).toContain(
-      "grid-cols-[var(--chat-left-pane-width,220px)_0px_minmax(0,1fr)_0px_var(--chat-right-pane-width,284px)]",
+      "grid-cols-[var(--chat-left-pane-width,220px)_var(--chat-workbench-gap)_minmax(0,1fr)_var(--chat-workbench-gap)_var(--chat-right-pane-width,284px)]",
     );
     expect(routeStyles.layout).toContain(
-      "max-[1100px]:grid-cols-[var(--chat-left-pane-width,220px)_0px_minmax(0,1fr)_0px_var(--chat-right-pane-width,284px)]",
+      "max-[1100px]:grid-cols-[var(--chat-left-pane-width,220px)_var(--chat-workbench-gap)_minmax(0,1fr)_var(--chat-workbench-gap)_var(--chat-right-pane-width,284px)]",
     );
     expect(routeStyles.layoutCenterFirst).toContain(
-      "!grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_0px_minmax(520px,1fr)_0px_minmax(0,var(--chat-right-pane-width,0px))]",
+      "!grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_var(--chat-workbench-gap)_minmax(520px,1fr)_var(--chat-workbench-gap)_minmax(0,var(--chat-right-pane-width,0px))]",
     );
+    expect(routeStyles.layout).not.toContain("_0px_minmax(0,1fr)_0px_");
+    expect(routeStyles.layoutCenterFirst).not.toContain("_0px_minmax(520px,1fr)_0px_");
     expect(routeStyles.layout).not.toContain("_8px_");
     expect(routeStyles.layoutCenterFirst).not.toContain("_8px_");
     expect(routeStyles.resizeHandle).toContain("h-full");
