@@ -6,6 +6,7 @@ import teamMemoryIndexPanelSource from "./TeamMemoryIndexPanel.tsx?raw";
 import teamSourceCollectionCandidatePanelSource from "./TeamSourceCollectionCandidatePanel.tsx?raw";
 import teamSourceCollectionConversationPanelSource from "./TeamSourceCollectionConversationPanel.tsx?raw";
 import teamSourceCollectionFindingDetailsPanelSource from "./TeamSourceCollectionFindingDetailsPanel.tsx?raw";
+import teamSourceCollectionMemoryPanelSource from "./TeamSourceCollectionMemoryPanel.tsx?raw";
 import teamSourceCollectionRunSettingsPanelSource from "./TeamSourceCollectionRunSettingsPanel.tsx?raw";
 import teamSourceCollectionScreeningPanelSource from "./TeamSourceCollectionScreeningPanel.tsx?raw";
 import teamSourceCollectionStageAgentsPanelSource from "./TeamSourceCollectionStageAgentsPanel.tsx?raw";
@@ -554,7 +555,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("TeamSourceCollectionCandidatePanel");
     expect(teamSourceCollectionCandidatePanelSource).toContain("source-collection-candidates-panel");
     expect(routeSource).toContain("source-collection-graph-panel");
-    expect(routeSource).toContain("source-collection-memory-panel");
+    expect(routeSource).toContain("TeamSourceCollectionMemoryPanel");
+    expect(teamSourceCollectionMemoryPanelSource).toContain("source-collection-memory-panel");
     expect(routeSource).not.toContain("researchView=candidates");
     expect(routeSource).toContain("查看提炼结果");
     expect(routeSource).toContain("openSourceCollectionCandidatePanel");

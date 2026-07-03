@@ -81,6 +81,7 @@ import { TeamSourceCollectionRunSwitcherPanel, type TeamSourceCollectionRunSwitc
 import { TeamSourceCollectionFindingDetailsPanel } from "./TeamSourceCollectionFindingDetailsPanel";
 import { TeamSourceCollectionCandidatePanel } from "./TeamSourceCollectionCandidatePanel";
 import { TeamSourceCollectionConversationPanel } from "./TeamSourceCollectionConversationPanel";
+import { TeamSourceCollectionMemoryPanel } from "./TeamSourceCollectionMemoryPanel";
 import { TeamSourceCollectionScreeningPanel } from "./TeamSourceCollectionScreeningPanel";
 import {
   TeamSourceCollectionSourceDetailPanel,
@@ -8358,8 +8359,8 @@ export function TeamsRoute({
     const pagedMemoryCandidates = sourceCollectionPageItems("ingestion", visibleMemoryCandidates);
     const orphanActionItems = actionItems.filter((item) => !item.candidateId || !teamWorkflowCandidatesById.has(item.candidateId));
     return (
-      <details
-        id="source-collection-memory-panel"
+      <TeamSourceCollectionMemoryPanel
+        lang={lang}
         className={sourceCollectionPanelClassName("source-collection-memory-panel")}
         open={
           selectedSourceCollectionStageId === "ingestion"
@@ -8371,22 +8372,29 @@ export function TeamsRoute({
             setSourceCollectionExpandedPanelId("");
           }
         }}
-        tabIndex={-1}
+        rangeText={`${pagedMemoryCandidates.start}-${pagedMemoryCandidates.end}/${visibleMemoryCandidates.length}`}
+        filterBar={renderSourceCollectionFilterBar(sourceCollectionCandidateFilterCounts, lang === "zh" ? "入库资料过滤" : "Ingestion source filters")}
+        stats={[
+          { key: "pending", label: lang === "zh" ? "待审" : "pending", value: knowledgePendingReviewCount },
+          { key: "formal", label: lang === "zh" ? "正式" : "formal", value: formalKnowledgeItemCount },
+          { key: "approved", label: lang === "zh" ? "通过候选" : "approved", value: sourceCollectionApprovedCount },
+          { key: "filtered", label: lang === "zh" ? "当前过滤" : "filtered", value: visibleMemoryCandidates.length },
+        ]}
+        hasCandidates={Boolean(visibleMemoryCandidates.length)}
+        emptyMessage={lang === "zh" ? "当前过滤条件下没有入库资料。" : "No ingestion items match this filter."}
+        pagination={renderSourceCollectionPagination("ingestion", visibleMemoryCandidates.length)}
+        statusItems={orphanActionItems.length
+          ? orphanActionItems.map((item) => (
+            <span key={`${item.code}-${item.message}`} className={workflowIngestionTone(item.severity)}>
+              {workflowIngestionStatusLabel(item.severity, lang)} · {item.message}
+            </span>
+          ))
+          : null}
+        error={teamWorkflowKnowledgeIngestionStatusQuery.error instanceof Error ? (
+          <div className={styles.messageError}>{teamWorkflowKnowledgeIngestionStatusQuery.error.message}</div>
+        ) : null}
       >
-        <summary>
-          <span>{lang === "zh" ? "入库审核" : "Knowledge ingestion review"}</span>
-          <small>{pagedMemoryCandidates.start}-{pagedMemoryCandidates.end}/{visibleMemoryCandidates.length}</small>
-        </summary>
-        {renderSourceCollectionFilterBar(sourceCollectionCandidateFilterCounts, lang === "zh" ? "入库资料过滤" : "Ingestion source filters")}
-        <div className={styles.workflowSourceQualityStats}>
-          <span>{lang === "zh" ? "待审" : "pending"} <strong>{knowledgePendingReviewCount}</strong></span>
-          <span>{lang === "zh" ? "正式" : "formal"} <strong>{formalKnowledgeItemCount}</strong></span>
-          <span>{lang === "zh" ? "通过候选" : "approved"} <strong>{sourceCollectionApprovedCount}</strong></span>
-          <span>{lang === "zh" ? "当前过滤" : "filtered"} <strong>{visibleMemoryCandidates.length}</strong></span>
-        </div>
-        {visibleMemoryCandidates.length ? (
-          <div className={styles.workflowCandidateList}>
-            {pagedMemoryCandidates.items.map((candidate) => {
+        {pagedMemoryCandidates.items.map((candidate) => {
               const provenance = sourceCollectionCandidateProvenance(candidate, lang);
               const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
               const candidateActionItems = actionItemsByCandidateId.get(candidate.candidateId) ?? [];
@@ -8430,29 +8438,7 @@ export function TeamsRoute({
                 />
               );
             })}
-          </div>
-        ) : (
-          <div className={styles.empty}>{lang === "zh" ? "当前过滤条件下没有入库资料。" : "No ingestion items match this filter."}</div>
-        )}
-        {renderSourceCollectionPagination("ingestion", visibleMemoryCandidates.length)}
-        {orphanActionItems.length ? (
-          <div className={styles.workflowIngestionActions}>
-            {orphanActionItems.map((item) => (
-              <span key={`${item.code}-${item.message}`} className={workflowIngestionTone(item.severity)}>
-                {workflowIngestionStatusLabel(item.severity, lang)} · {item.message}
-              </span>
-            ))}
-          </div>
-        ) : null}
-        <div className={styles.workflowIngestionBoundary}>
-          <span>{lang === "zh" ? "通过提炼复核" : "reviewed sources"}</span>
-          <span>{lang === "zh" ? "写入团队知识库" : "write to Team Knowledge"}</span>
-          <span>{lang === "zh" ? "保留来源追溯" : "keep source provenance"}</span>
-        </div>
-        {teamWorkflowKnowledgeIngestionStatusQuery.error instanceof Error ? (
-          <div className={styles.messageError}>{teamWorkflowKnowledgeIngestionStatusQuery.error.message}</div>
-        ) : null}
-      </details>
+      </TeamSourceCollectionMemoryPanel>
     );
   }
 
