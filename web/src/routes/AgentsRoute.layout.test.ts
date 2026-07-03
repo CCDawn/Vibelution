@@ -30,6 +30,10 @@ const managementBriefPanelSource = readFileSync(
   new URL("./AgentManagementBriefPanel.tsx", import.meta.url),
   "utf-8",
 );
+const activityHistoryPanelSource = readFileSync(
+  new URL("./AgentActivityHistoryPanel.tsx", import.meta.url),
+  "utf-8",
+);
 
 function sourceBlocksForStyle(styleName: string, source = routeSource): string[] {
   const marker = `className={styles.${styleName}}`;
@@ -724,7 +728,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("summary?.blockedAgentCount");
     expect(runtimeFocusPanelSource).toContain("styles.runtimePill");
     expect(runtimeFocusPanelSource).toContain("styles.runtimeFocusPanel");
-    expect(routeSource).toContain("styles.runHistoryList");
+    expect(activityHistoryPanelSource).toContain("styles.runHistoryList");
     expect(routeSource).toContain("styles.boundarySummaryGrid");
     expect(styles.managementBriefPanel).toBeTruthy();
     expect(styles.nextActionList).toBeTruthy();
@@ -802,9 +806,11 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.consumeAllMessages");
     expect(routeSource).toContain("copy.inboxTitle");
     expect(routeSource).toContain("const selectedAgentInboxPendingCount = selectedAgent?.agentInboxPendingCount ?? agentMessagesQuery.data?.length ?? 0");
-    expect(routeSource).toContain("<h3>{copy.inboxTitle}: {selectedAgentInboxPendingCount}</h3>");
-    expect(routeSource).toContain("styles.inboxMessageList");
-    expect(routeSource).toContain("styles.inboxMessageItem");
+    expect(routeSource).toContain("AgentActivityHistoryPanel");
+    expect(routeSource).not.toContain("<h3>{copy.inboxTitle}: {selectedAgentInboxPendingCount}</h3>");
+    expect(activityHistoryPanelSource).toContain("<h3>{copy.inboxTitle}: {inboxPendingCount}</h3>");
+    expect(activityHistoryPanelSource).toContain("styles.inboxMessageList");
+    expect(activityHistoryPanelSource).toContain("styles.inboxMessageItem");
   });
 
   it("summarizes runs, inbox messages, and context events in one activity timeline", () => {
@@ -836,11 +842,12 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('root: "runtime_scenes"');
     expect(routeSource).toContain("scene: evidence.runtimeSceneId");
     expect(routeSource).toContain("navigate(\"/logs\")");
-    expect(routeSource).toContain("styles.activityTimelineList");
-    expect(routeSource).toContain("styles.activityTimelineItem");
-    expect(routeSource).toContain("styles.timelineActions");
-    expect(routeSource).toContain("styles.inboxMessageItemFocused");
-    expect(routeSource).toContain("activityTimelineItem_${item.kind}");
+    expect(activityHistoryPanelSource).toContain("styles.activityTimelineList");
+    expect(activityHistoryPanelSource).toContain("styles.activityTimelineItem");
+    expect(activityHistoryPanelSource).toContain("styles.timelineActions");
+    expect(activityHistoryPanelSource).toContain("styles.runHistoryList");
+    expect(activityHistoryPanelSource).toContain("styles.inboxMessageItemFocused");
+    expect(activityHistoryPanelSource).toContain("activityTimelineItem_${item.kind}");
   });
 
   it("edits Agent runtime delegation and supervision policies from the activity pane", () => {
@@ -1168,6 +1175,7 @@ describe("AgentsRoute layout contract", () => {
     );
     const timelineActionBlocks = [
       ...sourceBlocksForStyle("timelineActions"),
+      ...sourceBlocksForStyle("timelineActions", activityHistoryPanelSource),
       ...sourceBlocksForStyle("timelineActions", runtimeFocusPanelSource),
     ];
 
