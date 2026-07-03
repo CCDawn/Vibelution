@@ -38,6 +38,7 @@ import type {
 import { fetchJson } from "../../api/client";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { AgentContextSectionsView } from "./AgentContextSectionsView";
+import { AgentMessageTurnView } from "./AgentMessageTurnView";
 import { AgentResponseSectionView } from "./AgentResponseSectionView";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
 import { buildAgentMessageRenderState } from "./agentMessageRenderState";
@@ -3844,17 +3845,17 @@ export function ConversationView({
               )
             ) : renderAgentProcessDetails();
             return (
-              <article
+              <AgentMessageTurnView
                 key={rowIdentity.rowKey}
+                rowKey={rowIdentity.rowKey}
+                messageKey={rowIdentity.messageKey}
+                agentMessageId={agentMessage.id}
+                sectionCount={agentSections.sectionCount}
+                sectionKinds={agentRenderState.sectionKinds}
                 className={turnClassName}
-                data-conversation-row-key={rowIdentity.rowKey}
-                data-conversation-message-key={rowIdentity.messageKey}
-                data-agent-message-id={agentMessage.id}
-                data-agent-section-count={agentSections.sectionCount}
-                data-agent-section-kinds={agentRenderState.sectionKinds || undefined}
-              >
-                <div className={styles.turnAvatar} aria-hidden="true">
-                  {compactTurnHeader
+                compactHeader={compactTurnHeader}
+                avatar={
+                  compactTurnHeader
                     ? null
                     : renderTurnAvatarContent(
                       resolveMessageTurnAvatar(message, {
@@ -3867,39 +3868,35 @@ export function ConversationView({
                         agentInboxMessage,
                         groupTranscriptMessage,
                       }),
-                    )}
-                </div>
-            <div className={styles.turnContent}>
-                  {compactTurnHeader ? null : (
-                    <div className={styles.turnMeta}>
-                      <div className={styles.turnMetaIdentity}>
-                        <span className={styles.turnSpeaker}>
-                          {speakerLabel}
-                        </span>
-                        {isEditingMessage ? <span className={styles.turnEditBadge}>{t("editMessage")}</span> : null}
-                      </div>
-                      <span className={styles.turnMetaActions}>
-                        {message.timestamp ? <span>{formatTimestamp(message.timestamp)}</span> : null}
-                        {userAuthoredMessage && message.id === latestUserMessageId && onEditUserMessage ? (
-                          <VButton
-                            type="button"
-                            className={
-                              isEditingMessage
-                                ? `${styles.turnIconButton} ${styles.turnIconButtonActive}`
-                                : styles.turnIconButton
-                            }
-                            onClick={() => onEditUserMessage(message)}
-                            isDisabled={editDisabled}
-                            aria-pressed={isEditingMessage}
-                            title={editDisabled ? composerPlaceholder : editUserMessageLabel ?? t("editMessage")}
-                            aria-label={editUserMessageLabel ?? t("editMessage")}
-                          >
-                            <Pencil size={14} />
-                          </VButton>
-                        ) : null}
-                      </span>
-                    </div>
-                  )}
+                    )
+                }
+                speakerLabel={speakerLabel}
+                identityAccessory={
+                  isEditingMessage ? <span className={styles.turnEditBadge}>{t("editMessage")}</span> : null
+                }
+                metaActions={
+                  <>
+                    {message.timestamp ? <span>{formatTimestamp(message.timestamp)}</span> : null}
+                    {userAuthoredMessage && message.id === latestUserMessageId && onEditUserMessage ? (
+                      <VButton
+                        type="button"
+                        className={
+                          isEditingMessage
+                            ? `${styles.turnIconButton} ${styles.turnIconButtonActive}`
+                            : styles.turnIconButton
+                        }
+                        onClick={() => onEditUserMessage(message)}
+                        isDisabled={editDisabled}
+                        aria-pressed={isEditingMessage}
+                        title={editDisabled ? composerPlaceholder : editUserMessageLabel ?? t("editMessage")}
+                        aria-label={editUserMessageLabel ?? t("editMessage")}
+                      >
+                        <Pencil size={14} />
+                      </VButton>
+                    ) : null}
+                  </>
+                }
+              >
 
                   {agentInboxMessage ? (
                     <section className={styles.agentInboxSection}>
@@ -3975,8 +3972,7 @@ export function ConversationView({
                   {renderImageArtifact(message)}
 
                   {!answerOnlyProcessMode ? responseSectionNode : null}
-                </div>
-              </article>
+              </AgentMessageTurnView>
             );
                 }}
               />
