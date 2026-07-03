@@ -81,6 +81,7 @@ import { TeamSourceCollectionRunSwitcherPanel, type TeamSourceCollectionRunSwitc
 import { TeamSourceCollectionFindingDetailsPanel } from "./TeamSourceCollectionFindingDetailsPanel";
 import { TeamSourceCollectionCandidatePanel } from "./TeamSourceCollectionCandidatePanel";
 import { TeamSourceCollectionConversationPanel } from "./TeamSourceCollectionConversationPanel";
+import { TeamSourceCollectionGraphPanel } from "./TeamSourceCollectionGraphPanel";
 import { TeamSourceCollectionMemoryPanel } from "./TeamSourceCollectionMemoryPanel";
 import { TeamSourceCollectionScreeningPanel } from "./TeamSourceCollectionScreeningPanel";
 import {
@@ -8252,8 +8253,8 @@ export function TeamsRoute({
       : null;
     const pagedGraphNodes = sourceCollectionPageItems("relations", visibleGraph?.nodes ?? []);
     return (
-      <details
-        id="source-collection-graph-panel"
+      <TeamSourceCollectionGraphPanel
+        lang={lang}
         className={sourceCollectionPanelClassName("source-collection-graph-panel")}
         open={
           selectedSourceCollectionStageId === "relations"
@@ -8266,78 +8267,75 @@ export function TeamsRoute({
             setSourceCollectionExpandedPanelId("");
           }
         }}
-        tabIndex={-1}
-      >
-        <summary>
-          <span>{lang === "zh" ? "入库关系图" : "Ingestion relationship map"}</span>
-          <small>{visibleGraph ? `${pagedGraphNodes.start}-${pagedGraphNodes.end}/${visibleGraph.nodes.length}` : `${sourceCollectionProjectedGraphNodeCount} / ${sourceCollectionProjectedGraphEdgeCount}`}</small>
-        </summary>
-        {renderSourceCollectionFilterBar(graphFilterCounts, lang === "zh" ? "入库关系过滤" : "Ingestion map filters")}
-        {visibleGraph && visibleGraphLayout && visibleGraphSummary && visibleGraph.nodes.length ? (
-          <>
-            <div className={styles.workflowGraphStats}>
-              <span>{lang === "zh" ? "当前节点" : "visible nodes"} <strong>{visibleGraphSummary.nodeCount}</strong></span>
-              <span>{lang === "zh" ? "当前关系" : "visible edges"} <strong>{visibleGraphSummary.edgeCount}</strong></span>
-              <span>{lang === "zh" ? "缺口" : "missing"} <strong>{visibleGraphSummary.missingLinkCount}</strong></span>
-              <span>{lang === "zh" ? "待审" : "review"} <strong>{visibleGraphSummary.unreviewedNodeCount}</strong></span>
-            </div>
-            <TeamWorkflowGraphView
-              layout={visibleGraphLayout}
-              markerId="source-collection-workflow-graph-arrow"
-              stateLabel={(value) => workflowStateLabel(value, lang)}
-            />
-            {visibleGraph.nodes.length ? (
-              <div className={styles.workflowCandidateList}>
-                {pagedGraphNodes.items.map((node) => {
-                  const candidate = teamWorkflowCandidatesById.get(node.candidateId) ?? null;
-                  const provenance = candidate ? sourceCollectionCandidateProvenance(candidate, lang) : null;
-                  const selected = candidate ? selectedSourceCollectionCandidateId === candidate.candidateId : false;
-                  return (
-                    <TeamCandidateCard
-                      key={`graph-node-${node.candidateId}`}
-                      tone={sourceCollectionResultTone(node.qualityStatus || node.currentState)}
-                      statusLabel={workflowStateLabel(node.currentState, lang)}
-                      title={node.title || node.candidateId}
-                      summary={node.candidateId}
-                      meta={[
-                        { key: "type", label: sourceCollectionSourceTypeLabel(node.candidateType, lang) },
-                        { key: "node", label: node.currentWorkflowNode },
-                        ...(candidate
-                          ? [{ key: "category", label: sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang) }]
-                          : []),
-                      ]}
-                      source={provenance ? {
-                        label: provenance.label,
-                        value: provenance.value,
-                        href: provenance.href,
-                        title: provenance.href || provenance.value,
-                        missing: provenance.kind === "missing",
-                      } : undefined}
-                      selected={selected}
-                      onActivate={candidate ? () => selectSourceCollectionCandidate(candidate) : undefined}
-                    />
-                  );
-                })}
-              </div>
-            ) : null}
-            {renderSourceCollectionPagination("relations", visibleGraph.nodes.length)}
-          </>
-        ) : (
-          <div className={styles.empty}>
-            {graphForSelectedSourceRun && !visibleGraph?.nodes.length
-              ? (lang === "zh" ? "当前过滤条件下没有入库关系节点。" : "No ingestion map nodes match this filter.")
-            : teamWorkflowCandidateGraphQuery.isPending
-              ? (lang === "zh" ? "正在读取入库关系图..." : "Loading ingestion map...")
-              : (lang === "zh" ? "尚未生成入库关系图。" : "No ingestion map yet.")}
+        rangeText={visibleGraph ? `${pagedGraphNodes.start}-${pagedGraphNodes.end}/${visibleGraph.nodes.length}` : `${sourceCollectionProjectedGraphNodeCount} / ${sourceCollectionProjectedGraphEdgeCount}`}
+        filterBar={renderSourceCollectionFilterBar(graphFilterCounts, lang === "zh" ? "入库关系过滤" : "Ingestion map filters")}
+        stats={[
+          { key: "nodes", label: lang === "zh" ? "当前节点" : "visible nodes", value: visibleGraphSummary?.nodeCount ?? 0 },
+          { key: "edges", label: lang === "zh" ? "当前关系" : "visible edges", value: visibleGraphSummary?.edgeCount ?? 0 },
+          { key: "missing", label: lang === "zh" ? "缺口" : "missing", value: visibleGraphSummary?.missingLinkCount ?? 0 },
+          { key: "review", label: lang === "zh" ? "待审" : "review", value: visibleGraphSummary?.unreviewedNodeCount ?? 0 },
+        ]}
+        hasGraph={Boolean(visibleGraph && visibleGraphLayout && visibleGraphSummary && visibleGraph.nodes.length)}
+        graphView={visibleGraphLayout ? (
+          <TeamWorkflowGraphView
+            layout={visibleGraphLayout}
+            markerId="source-collection-workflow-graph-arrow"
+            stateLabel={(value) => workflowStateLabel(value, lang)}
+          />
+        ) : null}
+        nodeList={visibleGraph?.nodes.length ? (
+          <div className={styles.workflowCandidateList}>
+            {pagedGraphNodes.items.map((node) => {
+              const candidate = teamWorkflowCandidatesById.get(node.candidateId) ?? null;
+              const provenance = candidate ? sourceCollectionCandidateProvenance(candidate, lang) : null;
+              const selected = candidate ? selectedSourceCollectionCandidateId === candidate.candidateId : false;
+              return (
+                <TeamCandidateCard
+                  key={`graph-node-${node.candidateId}`}
+                  tone={sourceCollectionResultTone(node.qualityStatus || node.currentState)}
+                  statusLabel={workflowStateLabel(node.currentState, lang)}
+                  title={node.title || node.candidateId}
+                  summary={node.candidateId}
+                  meta={[
+                    { key: "type", label: sourceCollectionSourceTypeLabel(node.candidateType, lang) },
+                    { key: "node", label: node.currentWorkflowNode },
+                    ...(candidate
+                      ? [{ key: "category", label: sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang) }]
+                      : []),
+                  ]}
+                  source={provenance ? {
+                    label: provenance.label,
+                    value: provenance.value,
+                    href: provenance.href,
+                    title: provenance.href || provenance.value,
+                    missing: provenance.kind === "missing",
+                  } : undefined}
+                  selected={selected}
+                  onActivate={candidate ? () => selectSourceCollectionCandidate(candidate) : undefined}
+                />
+              );
+            })}
           </div>
+        ) : null}
+        pagination={visibleGraph ? renderSourceCollectionPagination("relations", visibleGraph.nodes.length) : null}
+        emptyMessage={
+          graphForSelectedSourceRun && !visibleGraph?.nodes.length
+            ? (lang === "zh" ? "当前过滤条件下没有入库关系节点。" : "No ingestion map nodes match this filter.")
+          : teamWorkflowCandidateGraphQuery.isPending
+            ? (lang === "zh" ? "正在读取入库关系图..." : "Loading ingestion map...")
+            : (lang === "zh" ? "尚未生成入库关系图。" : "No ingestion map yet.")
+        }
+        errors={(
+          <>
+            {teamWorkflowCandidateGraphQuery.error instanceof Error ? (
+              <div className={styles.messageError}>{teamWorkflowCandidateGraphQuery.error.message}</div>
+            ) : null}
+            {selectedTeamBuildCandidateGraphError ? (
+              <div className={styles.messageError}>{selectedTeamBuildCandidateGraphError.message}</div>
+            ) : null}
+          </>
         )}
-        {teamWorkflowCandidateGraphQuery.error instanceof Error ? (
-          <div className={styles.messageError}>{teamWorkflowCandidateGraphQuery.error.message}</div>
-        ) : null}
-        {selectedTeamBuildCandidateGraphError ? (
-          <div className={styles.messageError}>{selectedTeamBuildCandidateGraphError.message}</div>
-        ) : null}
-      </details>
+      />
     );
   }
 
