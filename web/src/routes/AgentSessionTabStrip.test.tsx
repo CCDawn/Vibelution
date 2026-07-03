@@ -74,6 +74,7 @@ function renderStrip(overrides: Partial<ComponentProps<typeof AgentSessionTabStr
       summary,
       createdAt: "2026-06-09T00:00:00.000Z",
     }),
+    contextMenuSessionId: "",
     editingSessionId: null,
     editingSessionTitle: "",
     lang: "zh",
@@ -150,6 +151,16 @@ describe("AgentSessionTabStrip", () => {
     expect(markup).toContain("agentSessionTabMainAction");
     expect(markup).toContain("agentSessionTabCloseButton");
     expect(markup).toContain("关闭终端页 Codex Code");
+  });
+
+  it("marks the tab targeted by the right-click context menu", () => {
+    const markup = renderStrip({
+      activeSessionId: "session-child",
+      contextMenuSessionId: "session-root",
+    });
+
+    expect(markup).toContain("agentSessionTabContextTarget");
+    expect(markup).toContain("agentSessionTabActive");
   });
 
   it("renders nothing when there is only one session", () => {

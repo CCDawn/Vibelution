@@ -5276,6 +5276,7 @@ export function ChatCodingRoute() {
     }
     return sessionsById.get(sessionContextMenu.sessionId) ?? sessionContextMenu.session;
   }, [sessionContextMenu, sessionsById]);
+  const contextMenuSessionId = sessionContextMenu?.sessionId ?? "";
 
   const rightIndexSessions = useMemo(() => {
     return allVisibleSessions.filter((session) => !isRepresentedInAgentSessionTabs(session));
@@ -6341,6 +6342,7 @@ export function ChatCodingRoute() {
             avatarInitials={avatarInitials}
             buildSessionReferencePayload={buildSessionReferencePayload}
             collapsedConversationGroups={collapsedConversationGroups}
+            contextMenuSessionId={contextMenuSessionId}
             conversationGroupLabel={conversationGroupLabel}
             deleteBusyLabel={t("deleteSessionBusy")}
             editingSessionId={editingSessionId}
@@ -6941,6 +6943,7 @@ export function ChatCodingRoute() {
               activeCliAgentRunId={activeCliAgentRunId}
               agentsById={agentsById}
               buildSessionReferencePayload={buildSessionReferencePayload}
+              contextMenuSessionId={contextMenuSessionId}
               cliAgentRuns={cliAgentRunTabs}
               editingSessionId={editingSessionId}
               editingSessionTitle={editingSessionTitle}
