@@ -98,6 +98,11 @@ import {
   buildCurrentTurnErrorRows,
   resolveConversationTurnErrorType,
 } from "./conversationTurnErrorPresentation";
+import {
+  buildComputerUseStateForMessage,
+  COMPUTER_USE_TOOL_NAME,
+  type ComputerUseResult,
+} from "./conversationComputerUseState";
 import { VButton, VNativeInput, VNativeTextarea } from "../vui";
 import styles from "./ConversationView.styles";
 
@@ -108,86 +113,11 @@ const INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT = 36;
 const RESPONSE_PARSE_CACHE_LIMIT = 80;
 const MARKDOWN_PARSE_CACHE_LIMIT = 160;
 const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
-const COMPUTER_USE_TOOL_NAME = "computer_use_task_tool";
 const EMPTY_SECTION_EXPANSION: Record<string, boolean> = {};
 export type ConversationProcessDisplayMode = "answer" | "trace";
 
 type OperationDetailKind = "thought" | "status" | "tool";
 type OperationDetailRow = { label: string; value: string };
-
-type ComputerUseResult = {
-  status: string;
-  sessionId: string;
-  summary: string;
-  steps: Array<{ index?: number; action?: string; summary?: string; status?: string }>;
-  screenshotUrl: string;
-  needsConfirmation: boolean;
-  error: string;
-};
-
-function computerUseSessionIdFromPreview(preview: unknown) {
-  const value = String(preview ?? "").trim();
-  if (!value || !value.startsWith("{")) {
-    return "";
-  }
-  try {
-    const payload = JSON.parse(value) as { sessionId?: unknown };
-    return String(payload.sessionId ?? "").trim();
-  } catch {
-    return "";
-  }
-}
-
-function computerUseSessionIdsForMessage(message: ConversationMessage) {
-  if (message.role !== "assistant") {
-    return [];
-  }
-  const sessionIds = new Set<string>();
-  for (const toolCall of message.toolCalls ?? []) {
-    if (toolCall.name !== COMPUTER_USE_TOOL_NAME) {
-      continue;
-    }
-    const sessionId = computerUseSessionIdFromPreview(toolCall.resultPreview);
-    if (sessionId) {
-      sessionIds.add(sessionId);
-    }
-  }
-  for (const event of message.feedbackEvents ?? []) {
-    if (event.kind !== "tool" || event.name !== COMPUTER_USE_TOOL_NAME) {
-      continue;
-    }
-    const sessionId = computerUseSessionIdFromPreview(event.resultPreview);
-    if (sessionId) {
-      sessionIds.add(sessionId);
-    }
-  }
-  return Array.from(sessionIds).sort();
-}
-
-function computerUseStateForMessage(
-  message: ConversationMessage,
-  results: Record<string, ComputerUseResult>,
-  pending: Record<string, "confirm" | "cancel" | undefined>,
-) {
-  const sessionIds = computerUseSessionIdsForMessage(message);
-  if (sessionIds.length === 0) {
-    return "";
-  }
-  return sessionIds
-    .map((sessionId) => {
-      const result = results[sessionId];
-      return [
-        sessionId,
-        pending[sessionId] ?? "",
-        result?.status ?? "",
-        result?.summary ?? "",
-        result?.error ?? "",
-        result?.screenshotUrl ?? "",
-        result?.needsConfirmation ? "1" : "0",
-      ].join("\u001f");
-    })
-    .join("\u001e");
-}
 
 function projectedConversationMessageIds(message: ConversationMessage) {
   const rawIds = message.metadata?.projectedMessageIds;
@@ -3449,7 +3379,7 @@ export function ConversationView({
                 resolveTurnAvatar={resolveTurnAvatar}
                 onEditUserMessage={onEditUserMessage}
                 sectionExpansionForMessage={sectionExpansion[message.id] ?? EMPTY_SECTION_EXPANSION}
-                computerUseStateForMessage={computerUseStateForMessage(
+                computerUseStateForMessage={buildComputerUseStateForMessage(
                   message,
                   computerUseSessionResults,
                   computerUseSessionPending,
