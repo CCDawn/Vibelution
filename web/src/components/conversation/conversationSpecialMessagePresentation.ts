@@ -1,18 +1,5 @@
 import type { ConversationMessage } from "../../api/types";
-
-export function conversationMessageMetadataText(
-  metadata: Record<string, unknown> | undefined,
-  key: string,
-) {
-  const value = metadata?.[key];
-  if (typeof value === "string") {
-    return value.trim();
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value).trim();
-  }
-  return "";
-}
+import { conversationMessageMetadataText } from "./conversationMessageIdentity";
 
 export function cliAgentLifecycleLabel(message: ConversationMessage, lang: "zh" | "en") {
   const label = conversationMessageMetadataText(message.metadata, "label")

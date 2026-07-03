@@ -54,6 +54,14 @@ describe("timeline message process projection", () => {
     expect(moduleSource).not.toContain("function isCliAgentLifecycleMessage");
   });
 
+  it("uses shared conversation message identity helpers instead of local metadata parsing", () => {
+    const moduleSource = readFileSync(timelineProcessProjectionModulePath, "utf8");
+
+    expect(moduleSource).toContain("./conversationMessageIdentity");
+    expect(moduleSource).not.toContain("function metadataText");
+    expect(moduleSource).not.toContain("function projectedMessageIds");
+  });
+
   it("merges consecutive process-only messages from the same turn while preserving each tool event", () => {
     const projected = projectTimelineProcessMessages([
       toolMessage("message-tool-1", "[编辑] 成功修改 config/public_config.py"),
