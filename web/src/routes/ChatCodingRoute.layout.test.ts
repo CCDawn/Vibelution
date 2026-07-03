@@ -296,11 +296,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.leftRail).toContain("gap-[var(--chat-workbench-gap)]");
     expect(routeStyles.leftRail).toContain("p-[var(--chat-workbench-gap)]");
     expect(routeStyles.leftBlock).toContain("shrink-0");
-    expect(routeStyles.companionBlock).toContain("shrink-0");
-    expect(routeStyles.companionBlock).toContain("max-h-[min(420px,70dvh)]");
+    expect(routeStyles.companionBlock).toContain("!flex-1");
+    expect(routeStyles.companionBlock).toContain("content-start");
+    expect(routeStyles.companionBlock).not.toContain("max-h-[min(420px,70dvh)]");
     expect(routeStyles.companionBlock).toContain("min-h-0");
     expect(routeStyles.companionBlock).toContain("overflow-hidden");
-    expect(routeStyles.companionBlock).not.toContain("flex-1");
     expect(routeStyles.rightPane).toContain("grid");
     expect(routeStyles.rightPane).toContain("gap-[var(--chat-workbench-gap)]");
     expect(routeStyles.rightPane).toContain("p-[var(--chat-workbench-gap)]");
@@ -491,8 +491,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.oneLineValue).toContain("bg-[color-mix(in_srgb,var(--vui-surface-row)_42%,transparent)]");
     expect(routeStyles.oneLineValue).not.toContain("p-2");
 
-    expect(routeStyles.companionBlock).toContain("max-h-[min(420px,70dvh)]");
-    expect(routeStyles.companionBlock).not.toContain("flex-1");
+    expect(routeStyles.companionBlock).toContain("!flex-1");
+    expect(routeStyles.companionBlock).toContain("content-start");
+    expect(routeStyles.companionBlock).not.toContain("max-h-[min(420px,70dvh)]");
     expect(routeStyles.companionCompact).toContain("grid-cols-[32px_minmax(0,1fr)]");
     expect(routeStyles.companionTopLine).not.toContain("bg-[var(--vui-surface-row)]");
     expect(routeStyles.compactDetails).toContain("max-h-[220px]");
