@@ -23,7 +23,7 @@ import {
   safeConversationMarkdownUrl,
   shouldShowNextStateSignalInConversation,
 } from "./ConversationView";
-import { isAgentInboxMessage } from "./messageSections";
+import { isAgentInboxMessage } from "./conversationMessagePredicates";
 
 const conversationViewStylesSource = [
   conversationViewStylesModuleSource,

@@ -70,9 +70,11 @@ import {
   isRuntimeNoticeMessage,
   isTurnErrorMessage,
   researchOrgMessageChips,
+} from "./conversationMessagePredicates";
+import {
   type AgentMessageProcessSection,
   type AgentMessageSectionState,
-} from "./messageSections";
+} from "./agentMessageSections";
 import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
 import { projectStreamingMarkdownBlocks, type MarkdownBlock } from "./streamingMarkdown";
 import {

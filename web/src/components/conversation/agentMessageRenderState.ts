@@ -8,7 +8,7 @@ import {
   type AgentMessageContextSection,
   type AgentMessageProcessSection,
   type AgentMessageSectionState,
-} from "./messageSections";
+} from "./agentMessageSections";
 
 export type AgentMessageRenderState = {
   sectionState: AgentMessageSectionState;
