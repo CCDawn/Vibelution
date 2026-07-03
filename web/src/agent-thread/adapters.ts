@@ -4,7 +4,7 @@ import type {
   MentalStateSnapshot,
   ToolCall,
 } from "../api/types";
-import { mergeConversationFeedbackEvents } from "../components/conversation/conversationFeedbackEvents";
+import { mergeConversationFeedbackEvents } from "../conversation-model/feedbackEvents";
 import type {
   AgentMentalPart,
   AgentMessage,

@@ -1,6 +1,6 @@
 import type { ConversationMessage } from "../../api/types";
 import { answerProjectionContent } from "./conversationInternalStatus";
-import { mergeConversationFeedbackEvents } from "./conversationFeedbackEvents";
+import { mergeConversationFeedbackEvents } from "../../conversation-model/feedbackEvents";
 import { projectConversationProcessMessages } from "./conversationProcessProjection";
 import {
   buildConversationTimelineRowIdentities,
