@@ -76,6 +76,7 @@ import { agentCenterMemoryRoute, teamMemoryRoute } from "./agentCenterRoutes";
 import { agentDisplayInfo } from "./agentDisplay";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import { TeamMemoryIndexPanel, type TeamMemoryIndexMember } from "./TeamMemoryIndexPanel";
+import { TeamSourceCollectionActiveStagePanel } from "./TeamSourceCollectionActiveStagePanel";
 import { TeamSourceCollectionStageAgentsPanel, type TeamSourceCollectionStageAgentCard, type TeamSourceCollectionStageAgentTone } from "./TeamSourceCollectionStageAgentsPanel";
 import { TeamSourceCollectionRunSwitcherPanel, type TeamSourceCollectionRunSwitcherRun } from "./TeamSourceCollectionRunSwitcherPanel";
 import { TeamSourceCollectionFindingDetailsPanel } from "./TeamSourceCollectionFindingDetailsPanel";
@@ -8760,61 +8761,63 @@ export function TeamsRoute({
             )
           : renderSourceCollectionConversation();
     return (
-      <section className={styles.sourceCollectionStageWorkspace} aria-label={lang === "zh" ? "当前阶段子页" : "Current stage workspace"}>
-        <div className={styles.sourceCollectionStageWorkspaceHeader}>
-          <div>
-            <strong>{activeModule.label}</strong>
-            <span>{activeModule.status}</span>
-          </div>
-          <div className={styles.sourceCollectionStageHandoff}>
-            <span><b>{lang === "zh" ? "输入" : "Input"}</b>{activeModule.inputLabel}</span>
-            <span><b>{lang === "zh" ? "输出" : "Output"}</b>{activeModule.outputLabel}</span>
-            <span className={styles.sourceCollectionStageHandoffNext}><b>{lang === "zh" ? "下一步" : "Next"}</b>{activeModule.nextLabel}</span>
-          </div>
-          <div className={styles.sourceCollectionStageChatActions}>
-            <VNativeButton
-              type="button"
-              className={activeModule.actionTone === "primary" ? styles.sourceCollectionStagePrimaryAction : styles.sourceCollectionStageSecondaryAction}
-              disabled={activeModule.actionDisabled}
-              onClick={activeModule.onAction}
-              title={sourceCollectionActionDisabledTitle(sourceCollectionStageActionReadinessFor(activeModule.id), activeModule.actionLabel)}
-            >
-              <TeamSourceCollectionStageActionIcon icon={activeModule.actionIcon} />
-              {activeModule.actionLabel}
-            </VNativeButton>
-            {primaryStageAgentChatRoute ? (
-              <Link
-                to={primaryStageAgentChatRoute}
-                title={SOURCE_COLLECTION_STAGE_CHAT_LABELS[activeModule.id][lang]}
-              >
-                <MessageSquare size={13} />
-                {lang === "zh" ? "进入 Agent 私聊" : "Open Agent chat"}
-              </Link>
-            ) : (
-              <VNativeButton
-                type="button"
-                title={primaryStageAgentFallbackTitle}
-                onClick={() => openSourceCollectionStageAgentChat(activeModule.id)}
-                disabled={primaryStageAgentChatLoading || primaryStageAgentChatError || primaryStageAgentRepairPending}
-              >
-                <MessageSquare size={13} />
-                {primaryStageAgentFallbackLabel}
-              </VNativeButton>
-            )}
-            <Link to={primaryStageAgentConfigRoute} title={lang === "zh" ? "当前阶段 Agent 配置" : "Current stage Agent configuration"}>
-              <Link2 size={13} />
-              {primaryStageAgentConfigLabel}
-            </Link>
-          </div>
-        </div>
-        {repairChallengeCupTeamAgentsMutation.error instanceof Error ? (
-          <div className={styles.messageError}>{repairChallengeCupTeamAgentsMutation.error.message}</div>
-        ) : null}
-        {selectedTeamStartSourceCollectionStageTaskError ? (
-          <div className={styles.messageError}>{selectedTeamStartSourceCollectionStageTaskError.message}</div>
-        ) : null}
+      <TeamSourceCollectionActiveStagePanel
+        lang={lang}
+        title={activeModule.label}
+        status={activeModule.status}
+        inputLabel={activeModule.inputLabel}
+        outputLabel={activeModule.outputLabel}
+        nextLabel={activeModule.nextLabel}
+        primaryAction={(
+          <VNativeButton
+            type="button"
+            className={activeModule.actionTone === "primary" ? styles.sourceCollectionStagePrimaryAction : styles.sourceCollectionStageSecondaryAction}
+            disabled={activeModule.actionDisabled}
+            onClick={activeModule.onAction}
+            title={sourceCollectionActionDisabledTitle(sourceCollectionStageActionReadinessFor(activeModule.id), activeModule.actionLabel)}
+          >
+            <TeamSourceCollectionStageActionIcon icon={activeModule.actionIcon} />
+            {activeModule.actionLabel}
+          </VNativeButton>
+        )}
+        agentChatAction={primaryStageAgentChatRoute ? (
+          <Link
+            to={primaryStageAgentChatRoute}
+            title={SOURCE_COLLECTION_STAGE_CHAT_LABELS[activeModule.id][lang]}
+          >
+            <MessageSquare size={13} />
+            {lang === "zh" ? "进入 Agent 私聊" : "Open Agent chat"}
+          </Link>
+        ) : (
+          <VNativeButton
+            type="button"
+            title={primaryStageAgentFallbackTitle}
+            onClick={() => openSourceCollectionStageAgentChat(activeModule.id)}
+            disabled={primaryStageAgentChatLoading || primaryStageAgentChatError || primaryStageAgentRepairPending}
+          >
+            <MessageSquare size={13} />
+            {primaryStageAgentFallbackLabel}
+          </VNativeButton>
+        )}
+        agentConfigAction={(
+          <Link to={primaryStageAgentConfigRoute} title={lang === "zh" ? "当前阶段 Agent 配置" : "Current stage Agent configuration"}>
+            <Link2 size={13} />
+            {primaryStageAgentConfigLabel}
+          </Link>
+        )}
+        errors={(
+          <>
+            {repairChallengeCupTeamAgentsMutation.error instanceof Error ? (
+              <div className={styles.messageError}>{repairChallengeCupTeamAgentsMutation.error.message}</div>
+            ) : null}
+            {selectedTeamStartSourceCollectionStageTaskError ? (
+              <div className={styles.messageError}>{selectedTeamStartSourceCollectionStageTaskError.message}</div>
+            ) : null}
+          </>
+        )}
+      >
         {resultPanel}
-      </section>
+      </TeamSourceCollectionActiveStagePanel>
     );
   }
 
