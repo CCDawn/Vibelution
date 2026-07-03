@@ -58,11 +58,11 @@ import {
   type AgentMessageTimelineItem,
 } from "./conversationTimeline";
 import {
-  conversationTimelineItemRowKey,
+  agentMessageTimelineItemRowKey,
   type AgentMessageTimelineRowIdentity,
 } from "./conversationTimelineRows";
 import { useAgentThreadProjection } from "./useAgentThreadProjection";
-import { projectConversationTimelineMessages } from "./useConversationTimelineProjection";
+import { projectAgentMessageTimelineMessages } from "./useConversationTimelineProjection";
 import {
   imageArtifactForMessage,
   isAgentInboxMessage,
@@ -898,7 +898,7 @@ type ConversationTurnRowProps = {
   renderTurn: () => ReactNode;
 };
 
-function conversationTimelineRowIdentityIsEqual(
+function agentMessageTimelineRowIdentityIsEqual(
   previous: AgentMessageTimelineRowIdentity,
   next: AgentMessageTimelineRowIdentity,
 ) {
@@ -918,7 +918,7 @@ function conversationTurnRowPropsAreEqual(
     && previous.agentMessage === next.agentMessage
     && previous.agentRenderState === next.agentRenderState
     && previous.previousAgentRenderState === next.previousAgentRenderState
-    && conversationTimelineRowIdentityIsEqual(previous.rowIdentity, next.rowIdentity)
+    && agentMessageTimelineRowIdentityIsEqual(previous.rowIdentity, next.rowIdentity)
     && previous.defaultResponseExpanded === next.defaultResponseExpanded
     && previous.latestUserMessageId === next.latestUserMessageId
     && previous.editingMessageId === next.editingMessageId
@@ -1198,13 +1198,13 @@ export function ConversationView({
     () => displayMessages.slice(displayMessages.length - visibleMessageCount),
     [displayMessages, visibleMessageCount],
   );
-  const activeTimelineProjection = useMemo(
-    () => projectConversationTimelineMessages({ timelineMessages, activeTurnMessage }),
+  const activeAgentMessageTimelineProjection = useMemo(
+    () => projectAgentMessageTimelineMessages({ timelineMessages, activeTurnMessage }),
     [activeTurnMessage, timelineMessages],
   );
-  const activeTimelineMessages = activeTimelineProjection.messages;
-  const streamingTimelineMessages = activeTimelineProjection.streamingMessages;
-  const activeTimelineRowIdentities = activeTimelineProjection.rowIdentities;
+  const activeTimelineMessages = activeAgentMessageTimelineProjection.messages;
+  const streamingTimelineMessages = activeAgentMessageTimelineProjection.streamingMessages;
+  const activeTimelineRowIdentities = activeAgentMessageTimelineProjection.rowIdentities;
   const agentThread = useAgentThreadProjection(sessionId, activeTimelineMessages);
   const agentMessagesByMessageId = useMemo(() => {
     const agentMessages = new Map<string, AgentMessage>();
@@ -2509,9 +2509,9 @@ export function ConversationView({
     const expanded = getExpansionState(message.id, item.id, item.defaultExpanded);
     return (
       <section
-        key={conversationTimelineItemRowKey(rowIdentity, item)}
+        key={agentMessageTimelineItemRowKey(rowIdentity, item)}
         className={styles.timelineThoughtCell}
-        data-conversation-part-key={conversationTimelineItemRowKey(rowIdentity, item)}
+        data-conversation-part-key={agentMessageTimelineItemRowKey(rowIdentity, item)}
       >
         <VButton
           type="button"
@@ -2538,9 +2538,9 @@ export function ConversationView({
     const segments = getCachedResponseSegments(item.text);
     return (
       <section
-        key={conversationTimelineItemRowKey(rowIdentity, item)}
+        key={agentMessageTimelineItemRowKey(rowIdentity, item)}
         className={styles.timelineAssistantTextCell}
-        data-conversation-part-key={conversationTimelineItemRowKey(rowIdentity, item)}
+        data-conversation-part-key={agentMessageTimelineItemRowKey(rowIdentity, item)}
       >
         {segments.map((segment) => renderResponseSegment(segment, imageArtifactUrlsBeforeMessage.get(message.id)))}
       </section>
@@ -2579,9 +2579,9 @@ export function ConversationView({
     ].filter(Boolean).join(" ");
     return (
       <section
-        key={conversationTimelineItemRowKey(rowIdentity, item)}
+        key={agentMessageTimelineItemRowKey(rowIdentity, item)}
         className={className}
-        data-conversation-part-key={conversationTimelineItemRowKey(rowIdentity, item)}
+        data-conversation-part-key={agentMessageTimelineItemRowKey(rowIdentity, item)}
       >
         <VButton
           type="button"
@@ -2632,9 +2632,9 @@ export function ConversationView({
     ].filter(Boolean).join(" ");
     return (
       <section
-        key={conversationTimelineItemRowKey(rowIdentity, item)}
+        key={agentMessageTimelineItemRowKey(rowIdentity, item)}
         className={className}
-        data-conversation-part-key={conversationTimelineItemRowKey(rowIdentity, item)}
+        data-conversation-part-key={agentMessageTimelineItemRowKey(rowIdentity, item)}
       >
         <div className={styles.timelineCellHeader}>
           {operationStatusIcon(operation, isActiveTimelineItem)}

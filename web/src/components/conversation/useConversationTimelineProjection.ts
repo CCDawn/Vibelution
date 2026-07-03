@@ -7,12 +7,12 @@ import {
   type AgentMessageTimelineRowIdentity,
 } from "./conversationTimelineRows";
 
-export type ConversationTimelineProjectionInput = {
+export type AgentMessageTimelineProjectionInput = {
   timelineMessages: ConversationMessage[];
   activeTurnMessage?: ConversationMessage;
 };
 
-export type ConversationTimelineProjection = {
+export type AgentMessageTimelineProjection = {
   messages: ConversationMessage[];
   streamingMessages: ConversationMessage[];
   rowIdentities: AgentMessageTimelineRowIdentity[];
@@ -135,10 +135,10 @@ function hasCommittedAssistantAnswerForActiveTurn(
   });
 }
 
-export function projectConversationTimelineMessages({
+export function projectAgentMessageTimelineMessages({
   timelineMessages,
   activeTurnMessage,
-}: ConversationTimelineProjectionInput): ConversationTimelineProjection {
+}: AgentMessageTimelineProjectionInput): AgentMessageTimelineProjection {
   const projectedMessages = (() => {
     if (!activeTurnMessage || hasCommittedAssistantAnswerForActiveTurn(timelineMessages, activeTurnMessage)) {
       return projectConversationProcessMessages(timelineMessages);
