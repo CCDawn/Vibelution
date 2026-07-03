@@ -79,6 +79,7 @@ import { TeamMemoryIndexPanel, type TeamMemoryIndexMember } from "./TeamMemoryIn
 import { TeamSourceCollectionStageAgentsPanel, type TeamSourceCollectionStageAgentCard, type TeamSourceCollectionStageAgentTone } from "./TeamSourceCollectionStageAgentsPanel";
 import { TeamSourceCollectionRunSwitcherPanel, type TeamSourceCollectionRunSwitcherRun } from "./TeamSourceCollectionRunSwitcherPanel";
 import { TeamSourceCollectionFindingDetailsPanel } from "./TeamSourceCollectionFindingDetailsPanel";
+import { TeamSourceCollectionCandidatePanel } from "./TeamSourceCollectionCandidatePanel";
 import { TeamSourceCollectionConversationPanel } from "./TeamSourceCollectionConversationPanel";
 import { TeamSourceCollectionScreeningPanel } from "./TeamSourceCollectionScreeningPanel";
 import {
@@ -8126,8 +8127,8 @@ export function TeamsRoute({
       : `0/${candidatePanelFilteredCount}`;
     const candidateListAwaitingRefresh = !sourceCollectionRunCandidateCount && sourceCollectionDisplayedCandidateCount > 0;
     return (
-      <details
-        id="source-collection-candidates-panel"
+      <TeamSourceCollectionCandidatePanel
+        lang={lang}
         className={sourceCollectionPanelClassName("source-collection-candidates-panel")}
         open={
           (
@@ -8143,29 +8144,30 @@ export function TeamsRoute({
             setSourceCollectionExpandedPanelId("");
           }
         }}
-        tabIndex={-1}
+        rangeText={candidatePanelRange}
+        filterBar={renderSourceCollectionFilterBar(sourceCollectionDisplayedCandidateFilterCounts, lang === "zh" ? "提炼资料过滤" : "Extracted source filters", sourceCollectionPrimaryDataLoading)}
+        stats={[
+          { key: "candidate", label: lang === "zh" ? "本轮候选" : "run candidates", value: sourceCollectionDisplayedCandidateCountText },
+          { key: "filtered", label: lang === "zh" ? "当前过滤" : "filtered", value: candidatePanelFilteredCountText },
+          { key: "reviewed", label: lang === "zh" ? "已审查" : "reviewed", value: sourceCollectionProjectedAssessedCountText },
+          { key: "approved", label: lang === "zh" ? "通过" : "approved", value: sourceCollectionProjectedApprovedCountText },
+          { key: "pending", label: lang === "zh" ? "待 Agent 复核" : "pending agent review", value: sourceCollectionRunPendingScreeningCountText },
+        ]}
+        hasCandidates={Boolean(visibleCandidates.length)}
+        listNeedsScrollHint={candidateListNeedsScrollHint}
+        emptyMessage={sourceCollectionCandidateEmptyStateText({
+          lang,
+          loading: sourceCollectionPrimaryDataLoading,
+          awaitingRefresh: candidateListAwaitingRefresh,
+          displayedCandidateCount: sourceCollectionDisplayedCandidateCount,
+          filteredCandidateCount: candidatePanelFilteredCount,
+          rawRecordCount: sourceCollectionProjectedCollectedCount,
+          projection: candidateProjection,
+        })}
+        recoveryPanel={renderSourceCollectionExtractionRecoveryPanel(candidateProjection)}
+        pagination={renderSourceCollectionPagination("extraction", filteredCandidates.length)}
       >
-        <summary>
-          <span>{lang === "zh" ? "资料提炼结果" : "Extracted sources"}</span>
-          <small>{candidatePanelRange}</small>
-        </summary>
-        {renderSourceCollectionFilterBar(sourceCollectionDisplayedCandidateFilterCounts, lang === "zh" ? "提炼资料过滤" : "Extracted source filters", sourceCollectionPrimaryDataLoading)}
-        <div className={styles.workflowSourceQualityStats}>
-          <span>{lang === "zh" ? "本轮候选" : "run candidates"} <strong>{sourceCollectionDisplayedCandidateCountText}</strong></span>
-          <span>{lang === "zh" ? "当前过滤" : "filtered"} <strong>{candidatePanelFilteredCountText}</strong></span>
-          <span>{lang === "zh" ? "已审查" : "reviewed"} <strong>{sourceCollectionProjectedAssessedCountText}</strong></span>
-          <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionProjectedApprovedCountText}</strong></span>
-          <span>{lang === "zh" ? "待 Agent 复核" : "pending agent review"} <strong>{sourceCollectionRunPendingScreeningCountText}</strong></span>
-        </div>
-        {visibleCandidates.length ? (
-          <div
-            className={styles.sourceCollectionCandidateListShell}
-            role="region"
-            tabIndex={0}
-            aria-label={lang === "zh" ? "资料提炼候选列表，可向下滚动查看更多" : "Extracted candidate list, scroll for more"}
-          >
-            <div className={styles.workflowCandidateList}>
-              {visibleCandidates.map((candidate) => {
+        {visibleCandidates.map((candidate) => {
                 const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
                 const provenance = sourceCollectionCandidateProvenance(candidate, lang);
                 const qualityText = sourceCollectionSimpleCandidateStatusLabel(candidate, lang);
@@ -8200,29 +8202,7 @@ export function TeamsRoute({
                   />
                 );
               })}
-            </div>
-            {candidateListNeedsScrollHint ? (
-              <div className={styles.sourceCollectionScreeningScrollHint} aria-hidden="true">
-                <span>{lang === "zh" ? "向下滚动查看更多本页候选" : "Scroll down for more candidates on this page"}</span>
-              </div>
-            ) : null}
-          </div>
-        ) : (
-          <div className={styles.empty}>
-            {sourceCollectionCandidateEmptyStateText({
-              lang,
-              loading: sourceCollectionPrimaryDataLoading,
-              awaitingRefresh: candidateListAwaitingRefresh,
-              displayedCandidateCount: sourceCollectionDisplayedCandidateCount,
-              filteredCandidateCount: candidatePanelFilteredCount,
-              rawRecordCount: sourceCollectionProjectedCollectedCount,
-              projection: candidateProjection,
-            })}
-          </div>
-        )}
-        {renderSourceCollectionExtractionRecoveryPanel(candidateProjection)}
-        {renderSourceCollectionPagination("extraction", filteredCandidates.length)}
-      </details>
+      </TeamSourceCollectionCandidatePanel>
     );
   }
 
