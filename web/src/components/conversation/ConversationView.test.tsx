@@ -481,6 +481,11 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).not.toContain("conversationMessagesToAgentThread(");
   });
 
+  it("binds AgentMessages to conversation turns by id instead of timeline index", () => {
+    expect(conversationViewSource).toContain("agentMessagesByMessageId");
+    expect(conversationViewSource).not.toContain("agentThread.messages[index]");
+  });
+
   it("keeps AgentMessage render-state collection behind a focused helper", () => {
     expect(conversationViewSource).toContain("buildAgentMessageRenderState");
     expect(conversationViewSource).toContain("const agentRenderState = buildAgentMessageRenderState(agentMessage)");
