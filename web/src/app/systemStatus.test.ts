@@ -804,6 +804,28 @@ describe("systemStatus", () => {
     });
   });
 
+  it("prefers live chat work summaries over the original user prompt", () => {
+    const indicator = deriveActiveWorkIndicator(
+      runtimeWithActiveWork({
+        chat_turn: {
+          runId: "chat-writeback",
+          runKind: "chat_turn",
+          status: "running",
+          userMessage: "## 资料搜集阶段任务：资料提炼任务\n这是一段很长的原始阶段 prompt。",
+          summary: "source_collection_stage_writeback_tool 失败：执行超时 (30秒)",
+        },
+      }),
+    );
+
+    expect(indicator).toMatchObject({
+      kind: "chat",
+      summary: "source_collection_stage_writeback_tool 失败：执行超时 (30秒)",
+      status: "running",
+    });
+    expect(indicator?.detail).toContain("source_collection_stage_writeback_tool");
+    expect(indicator?.detail).not.toContain("资料搜集阶段任务");
+  });
+
   it("uses activeItems to show multiple parallel chat turns", () => {
     const indicator = deriveActiveWorkIndicator(
       runtimeWithActiveWork(
@@ -957,7 +979,17 @@ describe("systemStatus", () => {
     ).toBeNull();
   });
 
-  it.each(["stopped", "closed", "terminated"])(
+  it.each([
+    "stopped",
+    "closed",
+    "terminated",
+    "needs_continue",
+    "paused_limit",
+    "stopped_by_user",
+    "failed_provider",
+    "failed_runtime",
+    "superseded",
+  ])(
     "ignores %s active work snapshots left behind by shutdown",
     (status) => {
       expect(

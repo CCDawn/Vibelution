@@ -500,11 +500,17 @@ function isTerminalWorkRunStatus(status: string): boolean {
     "completed",
     "success",
     "failed",
+    "failed_provider",
+    "failed_runtime",
     "cancelled",
     "canceled",
     "stopped",
+    "stopped_by_user",
     "closed",
     "terminated",
+    "needs_continue",
+    "paused_limit",
+    "superseded",
     "error",
   ]).has(status);
 }
@@ -589,10 +595,20 @@ function activeWorkSummary(
     return summary || topic || (lang === "en" ? "Research team is collecting sources" : "AI 科研团队正在搜集资料");
   }
 
-  return firstTextValue(run, ["userMessage", "summary", "currentTask"])
+  const lastToolError = recordTextValue(run["lastToolError"], ["summary", "errorPreview", "toolName"]);
+  return firstTextValue(run, ["summary", "currentTask"])
+    || lastToolError
+    || firstTextValue(run, ["userMessage"])
     || textValue(runtime.taskSummary)
     || textValue(runtime.sessionTitle)
     || (lang === "en" ? "Chat turn is active" : "对话正在运行");
+}
+
+function recordTextValue(source: unknown, keys: string[]): string {
+  if (!source || typeof source !== "object" || Array.isArray(source)) {
+    return "";
+  }
+  return firstTextValue(source as Record<string, unknown>, keys);
 }
 
 function firstTextValue(source: Record<string, unknown>, keys: string[]): string {
