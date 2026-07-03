@@ -1,7 +1,7 @@
 import type { ConversationMessage } from "../../api/types";
 import { answerProjectionContent } from "./conversationInternalStatus";
 import { mergeConversationFeedbackEvents } from "../../conversation-model/feedbackEvents";
-import { projectConversationProcessMessages } from "./conversationProcessProjection";
+import { projectAgentMessageProcessMessages } from "./agentMessageProcessProjection";
 import {
   buildAgentMessageTimelineRowIdentities,
   type AgentMessageTimelineRowIdentity,
@@ -141,7 +141,7 @@ export function projectAgentMessageTimelineMessages({
 }: AgentMessageTimelineProjectionInput): AgentMessageTimelineProjection {
   const projectedMessages = (() => {
     if (!activeTurnMessage || hasCommittedAssistantAnswerForActiveTurn(timelineMessages, activeTurnMessage)) {
-      return projectConversationProcessMessages(timelineMessages);
+      return projectAgentMessageProcessMessages(timelineMessages);
     }
     let mergedActiveTurnMessage = activeTurnMessage;
     const dedupedTimelineMessages = timelineMessages.filter((message) => {
@@ -151,7 +151,7 @@ export function projectAgentMessageTimelineMessages({
       }
       return true;
     });
-    return projectConversationProcessMessages([...dedupedTimelineMessages, mergedActiveTurnMessage]);
+    return projectAgentMessageProcessMessages([...dedupedTimelineMessages, mergedActiveTurnMessage]);
   })();
 
   return {
