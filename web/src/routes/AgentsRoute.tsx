@@ -82,6 +82,7 @@ import {
 import { AgentCreatePanel, type AgentCreateDraft } from "./AgentCreatePanel";
 import { AgentDebugResetPanel, type AgentResetOptions } from "./AgentDebugResetPanel";
 import { AgentDetailHeaderPanel } from "./AgentDetailHeaderPanel";
+import { AgentEmptySelectionPanel } from "./AgentEmptySelectionPanel";
 import { AgentHealthMaintenancePanel } from "./AgentHealthMaintenancePanel";
 import { AgentMemoryPolicyPanel, type AgentMemoryPolicyDraft } from "./AgentMemoryPolicyPanel";
 import { AgentModeMembershipPanel, type AgentModeMembershipDraft } from "./AgentModeMembershipPanel";
@@ -6297,10 +6298,7 @@ export function AgentsRoute() {
               ) : null}
             </>
           ) : (
-            <section className={styles.emptyState}>
-              <Bot size={24} />
-              <strong>{copy.selectAgent}</strong>
-            </section>
+            <AgentEmptySelectionPanel title={copy.selectAgent} />
           )}
         </AgentWorkspacePanel>
       </div>
