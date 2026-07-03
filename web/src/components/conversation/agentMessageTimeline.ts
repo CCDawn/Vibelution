@@ -1,5 +1,5 @@
 import type { AgentMessage, AgentMessagePart, AgentTextPart } from "../../agent-thread/types";
-import { AgentMessageOperation } from "./conversationOperations";
+import { AgentMessageOperation } from "./agentMessageOperations";
 
 export type AgentMessageTimelineItemStatus = "pending" | "running" | "completed" | "failed";
 

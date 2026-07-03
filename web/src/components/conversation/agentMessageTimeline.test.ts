@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { ConversationMessage } from "../../api/types";
 import { conversationMessageToAgentMessage } from "../../agent-thread/adapters";
 import type { AgentMessage } from "../../agent-thread";
-import { buildAgentMessageOperations } from "./conversationOperations";
+import { buildAgentMessageOperations } from "./agentMessageOperations";
 import agentMessageTimelineSource from "./agentMessageTimeline.ts?raw";
 import { buildAgentMessageTimelineItems, type AgentMessageTimelineOptions } from "./agentMessageTimeline";
 
