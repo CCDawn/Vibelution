@@ -1488,8 +1488,15 @@ describe("ChatCodingRoute layout contract", () => {
   it("moves direct session actions into a right-click context menu", () => {
     expect(routeSource).toContain("type SessionContextMenuState");
     expect(routeSource).toContain("const [sessionContextMenu, setSessionContextMenu]");
+    expect(routeSource).toContain("const contextMenuSessionId = sessionContextMenu?.sessionId ?? \"\"");
     expect(routeSource).toContain("function openSessionContextMenu");
     expect(routeSource).toContain("onContextMenu={openSessionContextMenu}");
+    expect(routeSource).toContain("contextMenuSessionId={contextMenuSessionId}");
+    expect(conversationIndexTreeSource).toContain("contextMenuSessionId");
+    expect(directSessionIndexListSource).toContain("contextMenuActive={contextMenuSessionId === session.id}");
+    expect(directSessionIndexItemSource).toContain("styles.sessionItemContextTarget");
+    expect(agentSessionTabStripSource).toContain("contextMenuSessionId");
+    expect(agentSessionTabStripSource).toContain("styles.agentSessionTabContextTarget");
     expect(agentSessionTabStripSource).toContain("onContextMenu={(event) => onContextMenu(event, session)}");
     expect(routeSource).toContain("contextMenuSession");
     expect(routeSource).toContain("agentCenterConfigRoute");
@@ -1517,6 +1524,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.sessionContextMenu).toBeTypeOf("string");
     expect(routeStyles.sessionContextMenuItem).toBeTypeOf("string");
     expect(routeStyles.sessionContextMenuDanger).toBeTypeOf("string");
+    expect(routeStyles.sessionItemContextTarget).toContain("bg-[color-mix");
+    expect(routeStyles.sessionItemContextTarget).toContain("shadow-[var(--vui-shadow-inset-accent)]");
+    expect(routeStyles.agentSessionTabContextTarget).toContain("bg-[color-mix");
+    expect(routeStyles.agentSessionTabContextTarget).toContain("border-[color-mix");
   });
 
   it("shows each visible agent with a functional role label, not only a person name", () => {

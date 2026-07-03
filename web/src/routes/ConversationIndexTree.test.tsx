@@ -64,6 +64,8 @@ function team(overrides: Partial<Team> = {}): Team {
 }
 
 function renderTree(overrides: Partial<{
+  activeSessionId: string;
+  contextMenuSessionId: string;
   filteredConversationsCount: number;
   filteredStandaloneGroupConversations: ConversationSummary[];
   filteredTeams: Team[];
@@ -118,6 +120,7 @@ function renderTree(overrides: Partial<{
         }
         return "未归属群聊";
       }}
+      contextMenuSessionId=""
       deleteBusyLabel="会话忙碌"
       editingSessionId={null}
       editingSessionTitle=""
@@ -211,5 +214,22 @@ describe("ConversationIndexTree", () => {
     expect(markup).toContain("待配置团队");
     expect(markup).toContain("空团队");
     expect(markup).toContain("0人");
+  });
+
+  it("marks the session targeted by the right-click context menu", () => {
+    const markup = renderTree({
+      activeSessionId: "session-other",
+      contextMenuSessionId: "session-1",
+      groupedConversations: [{
+        groupKey: "user",
+        label: "用户会话",
+        items: [directConversation(), directConversation({ conversationId: "session-2", directSessionId: "session-2", title: "第二会话" })],
+      }],
+      filteredStandaloneGroupConversations: [],
+      filteredTeams: [],
+    });
+
+    expect(markup).toContain("sessionItemContextTarget");
+    expect(markup).not.toContain("sessionItemActive");
   });
 });

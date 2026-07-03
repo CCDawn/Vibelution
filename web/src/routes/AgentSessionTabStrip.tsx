@@ -26,6 +26,7 @@ export type AgentSessionTabStripProps = {
     displayName: string,
     summary: string,
   ) => SessionReferenceAttachment;
+  contextMenuSessionId: string;
   editingSessionId: string | null;
   editingSessionTitle: string;
   lang: "zh" | "en";
@@ -53,6 +54,7 @@ export function AgentSessionTabStrip({
   activeCliAgentRunId = "",
   agentsById,
   buildSessionReferencePayload,
+  contextMenuSessionId,
   editingSessionId,
   editingSessionTitle,
   lang,
@@ -94,11 +96,13 @@ export function AgentSessionTabStrip({
           || sessionDisplay.modelLabel
           || "";
         const tabActive = activeSessionId === session.id && workspaceActiveTab === "agent" && !activeCliAgentRunId;
+        const tabContextTarget = contextMenuSessionId === session.id;
         const tabEditing = editingSessionId === session.id;
         const tabClassName = [
           styles.agentSessionTab,
           sessionIsChild ? styles.agentSessionTabChild : styles.agentSessionTabRoot,
           tabActive ? styles.agentSessionTabActive : "",
+          tabContextTarget && !tabActive ? styles.agentSessionTabContextTarget : "",
           tabEditing ? styles.agentSessionTabEditing : "",
         ].filter(Boolean).join(" ");
         if (tabEditing) {

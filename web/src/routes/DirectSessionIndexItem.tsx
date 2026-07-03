@@ -199,6 +199,7 @@ function agentRoleClass(tone: string) {
 
 type DirectSessionIndexItemProps = {
   active: boolean;
+  contextMenuActive?: boolean;
   editing: boolean;
   editingTitle: string;
   itemMessage: string;
@@ -233,6 +234,7 @@ function renderSessionAvatar(className: string, imageUrl: string | undefined, fa
 
 export function DirectSessionIndexItem({
   active,
+  contextMenuActive = false,
   editing,
   editingTitle,
   itemMessage,
@@ -266,9 +268,13 @@ export function DirectSessionIndexItem({
   const unreadCount = sessionUnreadCount(session);
   const unreadTitle = sessionUnreadBadgeTitle(unreadCount, lang);
   const sessionRunning = sessionIsRunningStatus(sessionStatus);
-  const sessionItemClassName = active
-    ? `${styles.sessionItem} ${styles.directSessionItem} ${sessionIsChild ? styles.childTopLevelSessionItem : ""} ${styles.sessionItemActive}`
-    : `${styles.sessionItem} ${styles.directSessionItem} ${sessionIsChild ? styles.childTopLevelSessionItem : ""}`;
+  const sessionItemClassName = [
+    styles.sessionItem,
+    styles.directSessionItem,
+    sessionIsChild ? styles.childTopLevelSessionItem : "",
+    active ? styles.sessionItemActive : "",
+    contextMenuActive && !active ? styles.sessionItemContextTarget : "",
+  ].filter(Boolean).join(" ");
   const avatarClassName = `${styles.conversationAvatar} ${styles.conversationAvatarDirect}`;
   const renameLabel = t(sessionIsChild ? "renameTask" : isAgentRootSession(session) ? "renameAgent" : "renameSession");
   const saveLabel = t(sessionIsChild ? "saveTaskName" : isAgentRootSession(session) ? "saveAgentName" : "saveSessionName");

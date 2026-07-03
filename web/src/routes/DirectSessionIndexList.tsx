@@ -30,6 +30,7 @@ type DirectSessionIndexListProps = {
     displayName: string,
     summary: string,
   ) => SessionReferenceAttachment;
+  contextMenuSessionId: string;
   isBusyPhase: (value: string | null | undefined) => boolean;
   onCancelRename: () => void;
   onContextMenu: (event: MouseEvent<HTMLDivElement>, session: SessionSummary) => void;
@@ -136,6 +137,7 @@ export function DirectSessionIndexList({
   avatarImageUrlFrom,
   avatarInitials,
   buildSessionReferencePayload,
+  contextMenuSessionId,
   isBusyPhase,
   onCancelRename,
   onContextMenu,
@@ -168,6 +170,7 @@ export function DirectSessionIndexList({
           <DirectSessionIndexItem
             key={session.id}
             active={!groupPanelActive && activeSessionId === session.id}
+            contextMenuActive={contextMenuSessionId === session.id}
             editing={isEditingTitle}
             editingTitle={editingSessionTitle}
             itemMessage={sessionView.itemMessage}

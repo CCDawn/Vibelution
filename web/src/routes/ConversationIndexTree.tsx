@@ -32,6 +32,7 @@ type ConversationIndexTreeProps = {
     summary: string,
   ) => SessionReferenceAttachment;
   collapsedConversationGroups: Record<string, boolean>;
+  contextMenuSessionId: string;
   conversationGroupLabel: (groupKey: ConversationIndexGroupKey, lang: "zh" | "en") => string;
   deleteBusyLabel: string;
   editingSessionId: string | null;
@@ -79,6 +80,7 @@ export function ConversationIndexTree({
   avatarInitials,
   buildSessionReferencePayload,
   collapsedConversationGroups,
+  contextMenuSessionId,
   conversationGroupLabel,
   deleteBusyLabel,
   editingSessionId,
@@ -150,6 +152,7 @@ export function ConversationIndexTree({
               avatarImageUrlFrom={avatarImageUrlFrom}
               avatarInitials={avatarInitials}
               buildSessionReferencePayload={buildSessionReferencePayload}
+              contextMenuSessionId={contextMenuSessionId}
               conversations={directSessionConversations}
               deleteBusyLabel={deleteBusyLabel}
               editingSessionId={editingSessionId}
