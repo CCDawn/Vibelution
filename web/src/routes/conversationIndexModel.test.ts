@@ -125,16 +125,18 @@ describe("conversationIndexModel", () => {
       dialogueModelId: "gpt-5.5",
       agentRoleKey: "knowledge",
       agentInboxPendingCount: 4,
-      sourceRef: {
-        owner: "ConversationLedger",
-        canonicalEditRoute: "/chat?session=session-1",
-        projectionCanWrite: false,
-      },
-      projectionEdit: {
-        canWrite: false,
-        mode: "deep_link_to_source",
-      },
     });
+  });
+
+  it("does not synthesize session source authority when backend metadata is missing", () => {
+    const summary = sessionToConversationSummary(session({
+      id: "session-no-source",
+      agentId: "agent-no-source",
+    }));
+
+    expect(summary.sourceRef).toBeUndefined();
+    expect(summary.projectionEdit).toBeUndefined();
+    expect(summary.agentSourceRef).toBeUndefined();
   });
 
   it("keeps session-owned team identity when converting sessions for the conversation index", () => {
@@ -217,6 +219,15 @@ describe("conversationIndexModel", () => {
         allowedProjectionActions: ["view", "link"],
         sourceAuthorityVersion: 1,
       },
+      projectionEdit: {
+        canWrite: false,
+        mode: "deep_link_to_source",
+        reason: "backend_conversation_ledger_contract",
+        sourceOwner: "ConversationLedger",
+        canonicalEditRoute: "/chat?session=session-source",
+        canonicalMutationApi: "/api/sessions/session-source",
+        sourceAuthorityVersion: 1,
+      },
     }));
 
     expect(summary.sourceRef?.canonicalEditRoute).toBe("/chat?session=session-source");
@@ -286,20 +297,18 @@ describe("conversationIndexModel", () => {
       agentPromptTemplateId: "prompt-research-quality",
       dialogueModelId: "mimo-v2.5",
       agentInboxPendingCount: 2,
-      sourceRef: {
-        owner: "AgentDirectory",
-        canonicalEditRoute: "/agents?agent=agent-research&pane=config",
-        projectionCanWrite: false,
-      },
-      agentSourceRef: {
-        owner: "AgentDirectory",
-        canonicalEditRoute: "/agents?agent=agent-research&pane=config",
-      },
-      projectionEdit: {
-        canWrite: false,
-        mode: "deep_link_to_source",
-      },
     });
+  });
+
+  it("does not synthesize Agent source authority when backend metadata is missing", () => {
+    const summary = agentToConversationSummary(agent({
+      agentId: "agent-no-source",
+      directSessionId: "session-no-source-agent",
+    }));
+
+    expect(summary.sourceRef).toBeUndefined();
+    expect(summary.projectionEdit).toBeUndefined();
+    expect(summary.agentSourceRef).toBeUndefined();
   });
 
   it("preserves backend Agent projection edit contracts in conversation summaries", () => {
