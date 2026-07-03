@@ -36,11 +36,11 @@ import type {
   AgentAttachmentPart,
   AgentMentalPart,
   AgentReferencePart,
-  AgentTextPart,
 } from "../../agent-thread/types";
 import { fetchJson } from "../../api/client";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
+import { buildAgentMessageRenderState } from "./agentMessageRenderState";
 import { COMPOSER_SESSION_REFERENCE_MIME } from "./conversationConstants";
 import {
   isInternalStreamingStatusContent,
@@ -64,9 +64,6 @@ import {
 import { useAgentThreadProjection } from "./useAgentThreadProjection";
 import { projectConversationTimelineMessages } from "./useConversationTimelineProjection";
 import {
-  agentMessageContentSections,
-  agentMessageContextSections,
-  agentMessageProcessSections,
   buildAgentMessageSectionState,
   imageArtifactForMessage,
   isAgentInboxMessage,
@@ -74,7 +71,6 @@ import {
   isRuntimeNoticeMessage,
   isTurnErrorMessage,
   researchOrgMessageChips,
-  type AgentMessageContentSection,
   type AgentMessageContextSection,
   type AgentMessageProcessSection,
   type AgentMessageSectionState,
@@ -3497,20 +3493,6 @@ export function ConversationView({
     );
   }
 
-  function contentSectionIdsForChannel(
-    sections: AgentMessageContentSection[],
-    channel: AgentTextPart["channel"],
-  ) {
-    return sections
-      .filter((section) => section.parts.some((part) => part.channel === channel))
-      .map((section) => section.id)
-      .join(" ") || undefined;
-  }
-
-  function processSectionIdsForSections(sections: AgentMessageProcessSection[]) {
-    return sections.map((section) => section.id).join(" ") || undefined;
-  }
-
   function isNonNullNode<T>(node: T | null): node is T {
     return node !== null;
   }
@@ -3813,15 +3795,11 @@ export function ConversationView({
             }
             const agentMessage = agentThread.messages[index];
             const operationGroups = buildAgentMessageOperationGroups(agentMessage, operationLabels);
-            const agentSections = buildAgentMessageSectionState(agentMessage);
-            const contentSections = agentMessageContentSections(agentMessage);
-            const processSections = agentMessageProcessSections(agentMessage);
-            const agentMessageSectionKinds = agentSections.sectionKinds.join(" ");
+            const agentRenderState = buildAgentMessageRenderState(agentMessage);
+            const agentSections = agentRenderState.sectionState;
+            const processSections = agentRenderState.processSections;
             const responseText = agentSections.answerText;
             const userContentText = agentSections.userText;
-            const userContentSectionIds = contentSectionIdsForChannel(contentSections, "user");
-            const answerContentSectionIds = contentSectionIdsForChannel(contentSections, "answer");
-            const processSectionIds = processSectionIdsForSections(processSections);
             const hasActiveProcess = operationGroups.timeline.some((operation) => isRunningOperationStatus(operation.status));
             const hasFeedbackTimeline = agentSections.hasFeedbackTimeline;
             const showResponseBlock = shouldShowAgentResponseBlock(message, agentSections, hasFeedbackTimeline);
@@ -3864,7 +3842,7 @@ export function ConversationView({
             const agentInboxExpanded = getExpansionState(message.id, "agentInbox", false);
             const agentInboxPreview = agentInboxMessage ? compactPreview(agentInboxSummary(message), 140) : "";
             const researchOrgChips = researchOrgMessageChips(message);
-            const contextNode = renderAgentContextSections(agentMessageContextSections(agentMessage));
+            const contextNode = renderAgentContextSections(agentRenderState.contextSections);
             const turnClassName = [
               groupTranscriptMessage
                 ? styles.groupTranscriptTurn
@@ -3911,14 +3889,14 @@ export function ConversationView({
             );
             const renderProcessDetails = () => {
               if (hasConversationTimeline) {
-                return renderConversationTimeline(message, conversationTimelineItems, rowIdentity, processSectionIds);
+                return renderConversationTimeline(message, conversationTimelineItems, rowIdentity, agentRenderState.processSectionIds);
               }
               if (hasFeedbackTimeline) {
                 return renderFeedbackTimelineGroup(
                   message.id,
                   operationGroups.timeline,
                   true,
-                  processSectionIds,
+                  agentRenderState.processSectionIds,
                 );
               }
               return renderAgentProcessDetails(true);
@@ -3927,8 +3905,8 @@ export function ConversationView({
               <section
                 className={styles.responseSection}
                 data-conversation-part-key={rowIdentity.answerKey}
-                data-agent-content-section-ids={answerContentSectionIds}
-                data-agent-content-channel={answerContentSectionIds ? "answer" : undefined}
+                data-agent-content-section-ids={agentRenderState.answerContentSectionIds}
+                data-agent-content-channel={agentRenderState.answerContentSectionIds ? "answer" : undefined}
               >
                 <VButton
                   type="button"
@@ -3959,16 +3937,16 @@ export function ConversationView({
                 processDefaultExpanded,
                 renderProcessDetails,
                 isStreamingStatusPlaceholder ? compactStreamingStatusPlaceholder(responseText) : undefined,
-                processSectionIds,
+                agentRenderState.processSectionIds,
               )
             ) : hasConversationTimeline ? (
-              renderConversationTimeline(message, conversationTimelineItems, rowIdentity, processSectionIds)
+              renderConversationTimeline(message, conversationTimelineItems, rowIdentity, agentRenderState.processSectionIds)
             ) : hasFeedbackTimeline ? (
               renderFeedbackTimelineGroup(
                 message.id,
                 operationGroups.timeline,
                 false,
-                processSectionIds,
+                agentRenderState.processSectionIds,
               )
             ) : renderAgentProcessDetails();
             return (
@@ -3979,7 +3957,7 @@ export function ConversationView({
                 data-conversation-message-key={rowIdentity.messageKey}
                 data-agent-message-id={agentMessage.id}
                 data-agent-section-count={agentSections.sectionCount}
-                data-agent-section-kinds={agentMessageSectionKinds || undefined}
+                data-agent-section-kinds={agentRenderState.sectionKinds || undefined}
               >
                 <div className={styles.turnAvatar} aria-hidden="true">
                   {compactTurnHeader
@@ -4063,8 +4041,8 @@ export function ConversationView({
                   ) : showUserContent ? (
                     <div
                       className={styles.userMessageBody}
-                      data-agent-content-section-ids={userContentSectionIds}
-                      data-agent-content-channel={userContentSectionIds ? "user" : undefined}
+                      data-agent-content-section-ids={agentRenderState.userContentSectionIds}
+                      data-agent-content-channel={agentRenderState.userContentSectionIds ? "user" : undefined}
                     >
                       {renderResponseText(userContentText)}
                     </div>
