@@ -68,7 +68,6 @@ import {
   isAgentInboxMessage,
   isCliAgentLifecycleMessage,
   isGroupRoomTranscriptMessage,
-  isRuntimeNoticeMessage,
   isTurnErrorMessage,
   researchOrgMessageChips,
 } from "./conversationMessagePredicates";
@@ -104,9 +103,10 @@ import {
   agentInboxSummary,
   cliAgentLifecycleDetail,
   cliAgentLifecycleLabel,
-  conversationMessageMetadataText,
   groupRoomTranscriptLabel,
 } from "./conversationSpecialMessagePresentation";
+import { projectedConversationMessageIds } from "./conversationMessageIdentity";
+import { shouldCompactConversationTurnHeader } from "./conversationTurnHeaderCompaction";
 import {
   buildComputerUseStateForMessage,
   COMPUTER_USE_TOOL_NAME,
@@ -127,14 +127,6 @@ export type ConversationProcessDisplayMode = "answer" | "trace";
 
 type OperationDetailKind = "thought" | "status" | "tool";
 type OperationDetailRow = { label: string; value: string };
-
-function projectedConversationMessageIds(message: ConversationMessage) {
-  const rawIds = message.metadata?.projectedMessageIds;
-  if (!Array.isArray(rawIds)) {
-    return [];
-  }
-  return rawIds.map((id) => String(id).trim()).filter(Boolean);
-}
 
 function StreamingResponseContent({
   content,
@@ -284,52 +276,6 @@ function resolveMessageTurnAvatar(
     imageUrl: options.userAvatarImageUrl,
     fallback: options.userAvatarLabel,
   };
-}
-
-function conversationMessageTurnId(message: ConversationMessage) {
-  return conversationMessageMetadataText(message.metadata, "turnId").replace(/^live:/, "");
-}
-
-function isAssistantProcessThreadCandidate(message: ConversationMessage, sectionState: AgentMessageSectionState) {
-  if (
-    message.role !== "assistant"
-    || isRuntimeNoticeMessage(message)
-    || isCliAgentLifecycleMessage(message)
-    || isGroupRoomTranscriptMessage(message)
-  ) {
-    return false;
-  }
-  return Boolean(
-    message.streaming
-    || String(message.streamStage ?? "").trim()
-    || (message.timelineItems?.length ?? 0) > 0
-    || sectionState.hasProcessSection
-    || isTurnErrorMessage(message)
-  );
-}
-
-function conversationVisualThreadKey(
-  message: ConversationMessage | undefined,
-  sectionState: AgentMessageSectionState | undefined,
-) {
-  if (!message || !sectionState || !isAssistantProcessThreadCandidate(message, sectionState)) {
-    return "";
-  }
-  const turnId = conversationMessageTurnId(message);
-  if (turnId) {
-    return `assistant-turn:${turnId}`;
-  }
-  return "assistant-process-thread";
-}
-
-function shouldCompactConversationTurnHeader(
-  previous: ConversationMessage | undefined,
-  message: ConversationMessage,
-  previousSectionState: AgentMessageSectionState | undefined,
-  sectionState: AgentMessageSectionState,
-) {
-  const threadKey = conversationVisualThreadKey(message, sectionState);
-  return Boolean(threadKey && threadKey === conversationVisualThreadKey(previous, previousSectionState));
 }
 
 type PreviewImageState = {
