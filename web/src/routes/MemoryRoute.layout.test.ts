@@ -29,6 +29,7 @@ import appShellSource from "../app/AppShell.tsx?raw";
 import graphCanvasSource from "./MemoryGraphCanvas.tsx?raw";
 import styles from "./MemoryRoute.styles";
 import stylesModuleSource from "./MemoryRoute.styles.ts?raw";
+import knowledgeGovernancePanelSource from "./MemoryKnowledgeGovernancePanel.tsx?raw";
 
 const memoryCssSource = [
   stylesModuleSource,
@@ -604,7 +605,18 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgePermissionsPanelSource).not.toContain("fetchJson");
     expect(routeSource).not.toContain("copy.ingestionPackage");
     expect(routeSource).not.toContain("copy.submitIngestionPackage");
-    expect(routeSource).toContain("copy.governanceTasks");
+    expect(routeSource).toContain('from "./MemoryKnowledgeGovernancePanel"');
+    expect(routeSource).toContain("<MemoryKnowledgeGovernancePanel");
+    expect(knowledgeGovernancePanelSource).toContain("export function MemoryKnowledgeGovernancePanel");
+    expect(knowledgeGovernancePanelSource).toContain("copy.operationsHealth");
+    expect(knowledgeGovernancePanelSource).toContain("copy.governancePlan");
+    expect(knowledgeGovernancePanelSource).toContain("copy.governanceTasks");
+    expect(knowledgeGovernancePanelSource).toContain("copy.traceability");
+    expect(knowledgeGovernancePanelSource).toContain("styles.knowledgeProposalList");
+    expect(knowledgeGovernancePanelSource).toContain("styles.knowledgeRow");
+    expect(knowledgeGovernancePanelSource).not.toContain("useQuery");
+    expect(knowledgeGovernancePanelSource).not.toContain("useMutation");
+    expect(knowledgeGovernancePanelSource).not.toContain("fetchJson");
     expect(routeSource).toContain('from "./MemoryKnowledgeUsageContractPanel"');
     expect(routeSource).toContain("<MemoryKnowledgeUsageContractPanel");
     expect(knowledgeUsageContractPanelSource).toContain("export function MemoryKnowledgeUsageContractPanel");
@@ -618,13 +630,13 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgeUsageContractPanelSource).not.toContain("useQuery");
     expect(knowledgeUsageContractPanelSource).not.toContain("useMutation");
     expect(knowledgeUsageContractPanelSource).not.toContain("fetchJson");
-    expect(routeSource).toContain("copy.operationsHealth");
-    expect(routeSource).toContain("copy.governancePlan");
-    expect(routeSource).toContain("copy.planOnly");
+    expect(knowledgeGovernancePanelSource).toContain("copy.operationsHealth");
+    expect(knowledgeGovernancePanelSource).toContain("copy.governancePlan");
+    expect(knowledgeGovernancePanelSource).toContain("copy.planOnly");
     expect(routeSource).toContain("searchMode");
     expect(routeSource).toContain("semanticScore");
     expect(knowledgePermissionsPanelSource).toContain("copy.ingestionAdapters");
-    expect(routeSource).toContain("copy.traceability");
+    expect(knowledgeGovernancePanelSource).toContain("copy.traceability");
     expect(routeSource).toContain('from "./MemoryKnowledgeStewardPanel"');
     expect(routeSource).toContain("<MemoryKnowledgeStewardPanel");
     expect(knowledgeStewardPanelSource).toContain("export function MemoryKnowledgeStewardPanel");
