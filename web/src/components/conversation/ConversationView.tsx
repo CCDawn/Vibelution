@@ -108,12 +108,20 @@ import {
 import { projectedConversationMessageIds } from "./conversationMessageIdentity";
 import { shouldCompactConversationTurnHeader } from "./conversationTurnHeaderCompaction";
 import {
+  resolveMessageTurnAvatar,
+  userAvatarSymbol,
+  type TurnAvatarContent,
+  type TurnAvatarResolution,
+} from "./conversationTurnAvatar";
+import {
   buildComputerUseStateForMessage,
   COMPUTER_USE_TOOL_NAME,
   type ComputerUseResult,
 } from "./conversationComputerUseState";
 import { VButton, VNativeInput, VNativeTextarea } from "../vui";
 import styles from "./ConversationView.styles";
+
+export type { TurnAvatarResolution } from "./conversationTurnAvatar";
 
 const RUNNING_OPERATION_STATUSES = new Set(["queued", "pending", "running", "thinking", "tooling", "answering"]);
 const DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT = 3;
@@ -210,29 +218,6 @@ function isBusyConversationPhase(phase: string) {
   return ["queued", "running", "stopping"].includes(String(phase || "").trim().toLowerCase());
 }
 
-function userAvatarSymbol(preset: string | undefined, label: string) {
-  const normalized = String(preset ?? "").trim().toLowerCase();
-  if (normalized === "spark") {
-    return "*";
-  }
-  if (normalized === "codex") {
-    return "C";
-  }
-  if (normalized === "minimal") {
-    return ".";
-  }
-  return label.trim().slice(0, 1).toUpperCase() || "U";
-}
-
-export type TurnAvatarResolution = {
-  imageUrl?: string;
-  fallback: string;
-};
-
-type TurnAvatarContent =
-  | TurnAvatarResolution
-  | { icon: "groupTranscript" };
-
 function renderTurnAvatarContent(resolution: TurnAvatarContent) {
   if ("icon" in resolution) {
     return <MessageSquarePlus size={17} />;
@@ -241,41 +226,6 @@ function renderTurnAvatarContent(resolution: TurnAvatarContent) {
     return <img src={resolution.imageUrl} alt="" className={styles.turnAvatarImage} />;
   }
   return resolution.fallback;
-}
-
-function resolveMessageTurnAvatar(
-  message: ConversationMessage,
-  options: {
-    resolveTurnAvatar?: (message: ConversationMessage) => TurnAvatarResolution | undefined;
-    assistantAvatarImageUrl?: string;
-    assistantAvatarFallback?: string;
-    assistantLabel: string;
-    userAvatarImageUrl?: string;
-    userAvatarLabel: string;
-    agentInboxMessage: boolean;
-    groupTranscriptMessage: boolean;
-  },
-): TurnAvatarContent {
-  if (options.groupTranscriptMessage) {
-    return { icon: "groupTranscript" };
-  }
-  if (options.agentInboxMessage) {
-    const resolved = options.resolveTurnAvatar?.(message);
-    if (resolved) {
-      return resolved;
-    }
-    return { fallback: "?" };
-  }
-  if (message.role === "assistant") {
-    return {
-      imageUrl: options.assistantAvatarImageUrl,
-      fallback: options.assistantAvatarFallback || options.assistantLabel.trim().slice(0, 2) || "AI",
-    };
-  }
-  return {
-    imageUrl: options.userAvatarImageUrl,
-    fallback: options.userAvatarLabel,
-  };
 }
 
 type PreviewImageState = {
