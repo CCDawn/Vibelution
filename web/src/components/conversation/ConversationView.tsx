@@ -87,6 +87,7 @@ import {
   buildStreamingTimelineScrollSignal,
   buildTimelineScrollSignal,
 } from "./conversationTimelineScrollSignals";
+import { resolveTimelineFollowState } from "./conversationTimelineFollowState";
 import { VButton, VNativeInput, VNativeTextarea } from "../vui";
 import styles from "./ConversationView.styles";
 
@@ -98,24 +99,11 @@ const RESPONSE_PARSE_CACHE_LIMIT = 80;
 const MARKDOWN_PARSE_CACHE_LIMIT = 160;
 const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
 const COMPUTER_USE_TOOL_NAME = "computer_use_task_tool";
-const TIMELINE_BOTTOM_THRESHOLD_PX = 32;
-const TIMELINE_UPWARD_SCROLL_THRESHOLD_PX = 2;
 const EMPTY_SECTION_EXPANSION: Record<string, boolean> = {};
 export type ConversationProcessDisplayMode = "answer" | "trace";
 
 type OperationDetailKind = "thought" | "status" | "tool";
 type OperationDetailRow = { label: string; value: string };
-type TimelineFollowStateInput = {
-  scrollHeight: number;
-  clientHeight: number;
-  scrollTop: number;
-  previousScrollTop: number;
-  wasFollowingLatest: boolean;
-};
-type TimelineFollowState = {
-  isAtBottom: boolean;
-  shouldFollowLatest: boolean;
-};
 
 type ComposerDragData = {
   files?: ArrayLike<File> | Iterable<File> | null;
@@ -125,31 +113,6 @@ type ComposerDragData = {
 } | null | undefined;
 
 export { COMPOSER_SESSION_REFERENCE_MIME } from "./conversationConstants";
-
-export function isTimelineNearBottom(
-  { scrollHeight, clientHeight, scrollTop }: Pick<TimelineFollowStateInput, "scrollHeight" | "clientHeight" | "scrollTop">,
-  thresholdPx = TIMELINE_BOTTOM_THRESHOLD_PX,
-) {
-  return scrollHeight - scrollTop - clientHeight <= thresholdPx;
-}
-
-export function resolveTimelineFollowState({
-  scrollHeight,
-  clientHeight,
-  scrollTop,
-  previousScrollTop,
-  wasFollowingLatest,
-}: TimelineFollowStateInput): TimelineFollowState {
-  const isAtBottom = isTimelineNearBottom({ scrollHeight, clientHeight, scrollTop });
-  if (isAtBottom) {
-    return { isAtBottom: true, shouldFollowLatest: true };
-  }
-  const userScrolledUp = scrollTop < previousScrollTop - TIMELINE_UPWARD_SCROLL_THRESHOLD_PX;
-  return {
-    isAtBottom: false,
-    shouldFollowLatest: userScrolledUp ? false : wasFollowingLatest,
-  };
-}
 
 export function extractComposerImageDropFiles(data: ComposerDragData): File[] {
   const files = data?.files;
