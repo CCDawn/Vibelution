@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from config import Settings
 from core.chat.conversation_ledger import EVENT_ASSISTANT_MESSAGE, EVENT_USER_MESSAGE, append_conversation_event
 from core.infrastructure import developer_sandbox
 from core.llm.client import LLMClient
@@ -10,6 +9,7 @@ from core.llm.errors import classify_exception
 from core.llm.recovery import plan_recovery
 from core.ui.chat_state import CHAT_STATE_VERSION, save_chat_state
 from core.web.services import agent_directory_service, session_service
+from tests.helpers.isolated_config import isolated_settings_config
 
 
 def _use_tmp_session_root(tmp_path: Path, monkeypatch) -> None:
@@ -20,7 +20,7 @@ def _use_tmp_session_root(tmp_path: Path, monkeypatch) -> None:
 
 
 def _make_config(**kwargs):
-    return Settings(None, **kwargs).config
+    return isolated_settings_config(**kwargs)
 
 
 def _seed_session(root: Path) -> None:

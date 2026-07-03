@@ -1,14 +1,14 @@
 from langchain_core.messages import AIMessage, ToolMessage
 import pytest
 
-from config import Settings
 from core.llm.client import LLMClient
 from core.llm.types import LLMError
+from tests.helpers.isolated_config import isolated_settings_config
 
 
 def make_config(**kwargs):
     kwargs.setdefault("llm.profiles.primary.transport", "chat_completions")
-    return Settings(None, **kwargs).config
+    return isolated_settings_config(**kwargs)
 
 
 def make_llamacpp_qwen_config(**kwargs):

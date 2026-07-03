@@ -1,10 +1,10 @@
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
-from config import Settings
 from core.llm.client import LLMClient
 from core.llm.message_projector import normalize_messages_for_provider
 from core.llm.types import LLMError
+from tests.helpers.isolated_config import isolated_settings_config
 
 
 def make_config(**kwargs):
@@ -12,7 +12,7 @@ def make_config(**kwargs):
     kwargs.setdefault("llm.profiles.primary.streaming", True)
     kwargs.setdefault("llm.profiles.primary.tool_calling_mode", "auto")
     kwargs.setdefault("llm.profiles.primary.transport", "chat_completions")
-    return Settings(None, **kwargs).config
+    return isolated_settings_config(**kwargs)
 
 
 def test_projector_demotes_legacy_tool_calls_with_results_to_semantic_history():
