@@ -46,6 +46,10 @@ const returnBannerPanelSource = readFileSync(
   new URL("./AgentReturnBannerPanel.tsx", import.meta.url),
   "utf-8",
 );
+const toolSummaryPanelSource = readFileSync(
+  new URL("./AgentToolSummaryPanel.tsx", import.meta.url),
+  "utf-8",
+);
 
 function sourceBlocksForStyle(styleName: string, source = routeSource): string[] {
   const marker = `className={styles.${styleName}}`;
@@ -642,14 +646,16 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("const selectedAgentToolConfigRoute = useMemo(");
     expect(routeSource).toContain('returnLabel: "agents"');
     expect(routeSource).toContain("returnTo: selectedAgentReturnRoute");
-    expect(routeSource).toContain("copy.toolPolicyTitle");
+    expect(toolSummaryPanelSource).toContain("copy.toolPolicyTitle");
     expect(routeSource).toContain("toolPolicySourceLine");
     expect(routeSource).toContain("toolPolicySource?.description");
-    expect(routeSource).toContain("工具能力已迁移到 Agent 管理的工具页集中配置");
-    expect(routeSource).toContain("配置工具能力");
+    expect(routeSource).toContain("<AgentToolSummaryPanel");
+    expect(routeSource).toContain("onConfigure={() => navigate(selectedAgentToolConfigRoute)}");
+    expect(toolSummaryPanelSource).toContain("工具能力已迁移到 Agent 管理的工具页集中配置");
+    expect(toolSummaryPanelSource).toContain("配置工具能力");
+    expect(toolSummaryPanelSource).toContain("onPress={onConfigure}");
     expect(routeSource).toContain("去工具页配置");
-    expect(routeSource).toContain("onPress={() => navigate(selectedAgentToolConfigRoute)}");
-    expect(routeSource).toContain("copy.toolCategoryCount");
+    expect(toolSummaryPanelSource).toContain("copy.toolCategoryCount");
   });
 
   it("routes Agent prompt configuration to the Prompt Center", () => {
@@ -741,7 +747,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("activePane === \"config\"");
     expect(routeSource).not.toContain("activePane === \"policies\"");
     expect(routeSource).not.toContain("activePane === \"membership\"");
-    expect(routeSource).toContain("copy.toolPolicyTitle");
+    expect(toolSummaryPanelSource).toContain("copy.toolPolicyTitle");
     expect(routeSource).toContain("copy.memoryPolicyTitle");
     expect(routeSource).toContain("copy.membershipTitle");
     expect(routeSource).toContain("activePane === \"activity\"");
@@ -1154,7 +1160,10 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("renders Agent editor action rows through VUI buttons instead of page-owned button CSS", () => {
-    const editorActionBlocks = sourceBlocksForStyle("editorActions");
+    const editorActionBlocks = [
+      ...sourceBlocksForStyle("editorActions"),
+      ...sourceBlocksForStyle("editorActions", toolSummaryPanelSource),
+    ];
     const deepLinkActionBlocks = sourceBlocksForStyle("configDeepLinkRow");
     const governanceActionBlocks = sourceBlocksForStyle("governanceActions");
     const promptConfigActionBlocks = sourceBlocksForStyle("promptConfigRow");
