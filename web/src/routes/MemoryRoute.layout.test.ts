@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import routeSource from "./MemoryRoute.tsx?raw";
+import overviewPanelSource from "./MemoryOverviewPanel.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
 import appShellSource from "../app/AppShell.tsx?raw";
 import graphCanvasSource from "./MemoryGraphCanvas.tsx?raw";
@@ -120,7 +121,7 @@ describe("MemoryRoute layout contract", () => {
     );
     expect(routeSource).toContain("MEMORY_VIEWS");
     expect(routeSource).toContain("styles.subnav");
-    expect(routeSource).toContain("renderOverviewView()");
+    expect(routeSource).toContain("<MemoryOverviewPanel");
     expect(routeSource).toContain("renderEffectiveView()");
     expect(routeSource).toContain("renderAgentMemoryView()");
     expect(routeSource).toContain("renderManageView()");
@@ -167,6 +168,20 @@ describe("MemoryRoute layout contract", () => {
     expect(styles.compactItemSummary).toContain("line-clamp-2");
     expect(styles.overviewPanel).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(styles.overviewPanel).toContain("overflow-auto");
+  });
+
+  it("delegates the dense overview body to a dedicated panel component", () => {
+    expect(routeSource).toContain('import { MemoryOverviewPanel } from "./MemoryOverviewPanel"');
+    expect(routeSource).toContain("<MemoryOverviewPanel");
+    expect(routeSource).not.toContain("const renderOverviewView = () => (");
+
+    expect(overviewPanelSource).toContain("export function MemoryOverviewPanel");
+    expect(overviewPanelSource).toContain("className={styles.summaryGrid}");
+    expect(overviewPanelSource).toContain("className={styles.reviewQueuePanel}");
+    expect(overviewPanelSource).toContain("className={styles.overviewGrid}");
+    expect(overviewPanelSource).not.toContain("useQuery");
+    expect(overviewPanelSource).not.toContain("useMutation");
+    expect(overviewPanelSource).not.toContain("fetchJson");
   });
 
   it("preserves a compact narrow Memory layout without turning every detail pane full width", () => {
@@ -512,14 +527,14 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("memoryPairPriority");
     expect(routeSource).toContain("reviewReasonLabels(copy, item)");
     expect(routeSource).toContain("memoryPairActionTarget(pair)");
-    expect(routeSource).toContain("styles.reviewQueuePanel");
+    expect(overviewPanelSource).toContain("styles.reviewQueuePanel");
     expect(routeSource).toContain("styles.reviewQueueList");
     expect(routeSource).toContain("styles.reviewQueueTitleLine");
     expect(routeSource).toContain("styles.reviewQueueSummary");
     expect(routeSource).toContain("styles.reviewQueueTime");
     expect(routeSource).toContain("styles.reviewReasonPill");
-    expect(routeSource).toContain("copy.reviewQueue");
-    expect(routeSource).toContain("copy.reviewQueueHint");
+    expect(overviewPanelSource).toContain("copy.reviewQueue");
+    expect(overviewPanelSource).toContain("copy.reviewQueueHint");
     expect(routeSource).toContain("copy.auditMemory");
     expect(routeSource).toContain("copy.manageMemoryAction");
     expect(routeSource).toContain("reasonDisabled");
@@ -529,7 +544,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("reasonInPrompt");
     expect(routeSource).toContain("reasonAgentVisible");
     expect(routeSource).toContain("reasonUserManaged");
-    expect(routeSource).toContain('title={copy.reviewQueueHint}');
+    expect(overviewPanelSource).toContain('title={copy.reviewQueueHint}');
     expect(routeSource).not.toContain("<p className={styles.panelLead}>{copy.reviewQueueHint}</p>");
   });
 
@@ -574,7 +589,7 @@ describe("MemoryRoute layout contract", () => {
   it("keeps explanatory Memory platform copy out of persistent paragraphs", () => {
     expect(routeSource).toContain("meta={memoryViewSubtitle(copy, forcedView)}");
     expect(routeSource).toContain('title={copy.projectMemoryQueueHint}');
-    expect(routeSource).toContain('title={copy.reviewQueueHint}');
+    expect(overviewPanelSource).toContain('title={copy.reviewQueueHint}');
     expect(routeSource).toContain('title={copy.knowledgeSubtitle}');
     expect(routeSource).toContain('title={copy.knowledgeHint}');
     expect(routeSource).toContain('title={copy.ragRetrievalHint}');
