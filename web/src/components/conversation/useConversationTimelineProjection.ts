@@ -3,8 +3,8 @@ import { answerProjectionContent } from "./conversationInternalStatus";
 import { mergeConversationFeedbackEvents } from "../../conversation-model/feedbackEvents";
 import { projectConversationProcessMessages } from "./conversationProcessProjection";
 import {
-  buildConversationTimelineRowIdentities,
-  type ConversationTimelineRowIdentity,
+  buildAgentMessageTimelineRowIdentities,
+  type AgentMessageTimelineRowIdentity,
 } from "./conversationTimelineRows";
 
 export type ConversationTimelineProjectionInput = {
@@ -15,7 +15,7 @@ export type ConversationTimelineProjectionInput = {
 export type ConversationTimelineProjection = {
   messages: ConversationMessage[];
   streamingMessages: ConversationMessage[];
-  rowIdentities: ConversationTimelineRowIdentity[];
+  rowIdentities: AgentMessageTimelineRowIdentity[];
 };
 
 function metadataText(metadata: Record<string, unknown> | undefined, key: string) {
@@ -157,6 +157,6 @@ export function projectConversationTimelineMessages({
   return {
     messages: projectedMessages,
     streamingMessages: projectedMessages.filter((message) => message.streaming),
-    rowIdentities: buildConversationTimelineRowIdentities(projectedMessages),
+    rowIdentities: buildAgentMessageTimelineRowIdentities(projectedMessages),
   };
 }
