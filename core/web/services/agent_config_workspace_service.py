@@ -19,6 +19,7 @@ from .agent_directory_service import agent_task_profile_has_content
 from .agent_directory_service import AGENT_LLM_BINDING_SLOTS
 from .agent_directory_service import RESEARCH_SOURCE_ROLE_KEYS as SOURCE_COLLECTION_RESEARCH_SOURCE_ROLE_KEYS
 from .agent_directory_service import SESSION_AGENT_VISIBILITY_PENDING
+from .agent_directory_service import SELF_EVOLUTION_OBSERVER_ROLES
 from .agent_directory_service import _session_workspace_has_activity
 from .agent_directory_service import agent_dialogue_model_id
 from .agent_directory_service import build_agent_policy_options
@@ -640,7 +641,7 @@ def _derive_health(
                 )
 
         prompt_template_id = str(agent.get("promptTemplateId") or "").strip()
-        if not prompt_template_id:
+        if not prompt_template_id and not _agent_allows_empty_prompt_template(agent):
             issues.append(_agent_issue(agent, "warning", "missing_prompt_template_id", "Agent 未绑定提示词模板", "promptTemplateId 为空。"))
         elif prompt_template_id not in prompt_refs:
             issues.append(
@@ -1950,6 +1951,13 @@ def _timed_stage(timings: dict[str, float], name: str, fn: Any) -> Any:
         return fn()
     finally:
         timings[name] = round((perf_counter() - started) * 1000, 1)
+
+
+def _agent_allows_empty_prompt_template(agent: dict[str, Any]) -> bool:
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    primary_mode = str(agent.get("primaryMode") or metadata.get("agentMode") or "").strip()
+    role_key = str(agent.get("roleKey") or metadata.get("selfEvolutionRole") or "").strip()
+    return primary_mode == "self_evolution" and role_key in SELF_EVOLUTION_OBSERVER_ROLES
 
 
 def _agent_issue(agent: dict[str, Any], severity: str, code: str, title: str, detail: str) -> dict[str, Any]:

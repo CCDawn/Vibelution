@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from core.infrastructure import developer_sandbox
+from core.research.agent_templates import research_default_prompt
 
 from .runtime_scene_service import record_runtime_scene_event
 
@@ -21,6 +22,7 @@ CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION = 12
 PROMPT_TEMPLATE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,95}$")
 PROMPT_TEMPLATE_PATH = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "agent_config", "prompt_templates.json")
 RETIRED_PROMPT_TEMPLATE_IDS = frozenset({"prompt-self-summarizer"})
+RESEARCH_DEFAULT_PROMPT_VERSION = 1
 
 
 class PromptTemplateError(ValueError):
@@ -285,40 +287,40 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
         "name": "Research broad search",
         "category": "research",
         "sourcePath": "workspace/prompts/research/broad.md",
-        "content": "# 广撒网探索 agent\n\n用于快速展开研究空间、收集候选线索和发现后续深挖方向。",
-        "metadata": {"builtin": True, "roleKey": "research_broad"},
+        "content": research_default_prompt("broad"),
+        "metadata": {"builtin": True, "roleKey": "research_broad", "builtinContentVersion": RESEARCH_DEFAULT_PROMPT_VERSION},
     },
     {
         "templateId": "prompt-research-deep",
         "name": "Research deep search",
         "category": "research",
         "sourcePath": "workspace/prompts/research/deep.md",
-        "content": "# 深度研究 agent\n\n用于围绕已选线索做细读、证据归纳和风险核查。",
-        "metadata": {"builtin": True, "roleKey": "research_deep"},
+        "content": research_default_prompt("deep"),
+        "metadata": {"builtin": True, "roleKey": "research_deep", "builtinContentVersion": RESEARCH_DEFAULT_PROMPT_VERSION},
     },
     {
         "templateId": "prompt-research-review",
         "name": "Research review",
         "category": "research",
         "sourcePath": "workspace/prompts/research/review.md",
-        "content": "# 研究审查 agent\n\n用于复核研究结论、寻找证据缺口和提出反例。",
-        "metadata": {"builtin": True, "roleKey": "research_review"},
+        "content": research_default_prompt("review"),
+        "metadata": {"builtin": True, "roleKey": "research_review", "builtinContentVersion": RESEARCH_DEFAULT_PROMPT_VERSION},
     },
     {
         "templateId": "prompt-research-themes",
         "name": "Research themes",
         "category": "research",
         "sourcePath": "workspace/prompts/research/themes.md",
-        "content": "# 主题生成 agent\n\n用于把候选资料聚类成可执行研究主题。",
-        "metadata": {"builtin": True, "roleKey": "research_themes"},
+        "content": research_default_prompt("themes"),
+        "metadata": {"builtin": True, "roleKey": "research_themes", "builtinContentVersion": RESEARCH_DEFAULT_PROMPT_VERSION},
     },
     {
         "templateId": "prompt-research-card",
         "name": "Research card",
         "category": "research",
         "sourcePath": "workspace/prompts/research/card.md",
-        "content": "# 主题卡 agent\n\n用于把研究主题整理成结构化卡片。",
-        "metadata": {"builtin": True, "roleKey": "research_card"},
+        "content": research_default_prompt("card"),
+        "metadata": {"builtin": True, "roleKey": "research_card", "builtinContentVersion": RESEARCH_DEFAULT_PROMPT_VERSION},
     },
     {
         "templateId": "prompt-ai-search-scope-lead",
@@ -955,6 +957,7 @@ def repair_prompt_templates() -> dict[str, Any]:
                     **dict(existing.get("metadata") or {}),
                 }
                 restored_template_ids.add(record["templateId"])
+                changed = True
             templates_by_id[record["templateId"]] = _normalize_template_record(merged)
         else:
             templates_by_id[record["templateId"]] = record

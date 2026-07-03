@@ -2,6 +2,7 @@ from pathlib import Path
 import json
 import re
 
+from core.research.agent_templates import research_default_prompt
 from core.web.services import prompt_template_service
 
 
@@ -185,6 +186,78 @@ def test_prompt_template_api_exposes_default_and_source_authority_metadata(tmp_p
     assert "文件投影漂移" not in drifted["content"]
     assert drifted["sourceAuthority"] == "record_content"
     assert drifted["sourceDriftStatus"] == "drifted"
+
+
+def test_prompt_template_repair_upgrades_versioned_research_defaults(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    legacy_cases = {
+        "broad": (
+            "prompt-research-broad",
+            "broad.md",
+            "# 广撒网探索 agent\n\n用于快速展开研究空间、收集候选线索和发现后续深挖方向。",
+        ),
+        "deep": (
+            "prompt-research-deep",
+            "deep.md",
+            "# 深度研究 agent\n\n用于围绕已选线索做细读、证据归纳和风险核查。",
+        ),
+        "review": (
+            "prompt-research-review",
+            "review.md",
+            "# 研究审查 agent\n\n用于复核研究结论、寻找证据缺口和提出反例。",
+        ),
+        "themes": (
+            "prompt-research-themes",
+            "themes.md",
+            "# 主题生成 agent\n\n用于把候选资料聚类成可执行研究主题。",
+        ),
+        "card": (
+            "prompt-research-card",
+            "card.md",
+            "# 主题卡 agent\n\n用于把研究主题整理成结构化卡片。",
+        ),
+    }
+    path = prompt_template_service.prompt_template_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    source_root = tmp_path / "workspace" / "prompts" / "research"
+    source_root.mkdir(parents=True, exist_ok=True)
+    templates = []
+    for key, (template_id, filename, legacy_content) in legacy_cases.items():
+        (source_root / filename).write_text(legacy_content, encoding="utf-8")
+        templates.append(
+            {
+                "templateId": template_id,
+                "name": template_id,
+                "category": "research",
+                "sourcePath": f"workspace/prompts/research/{filename}",
+                "content": legacy_content,
+                "metadata": {"builtin": True, "roleKey": f"research_{key}"},
+            }
+        )
+    path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": prompt_template_service.PROMPT_TEMPLATE_INDEX_VERSION,
+                "templates": templates,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = prompt_template_service.repair_prompt_templates()
+    by_id = {item["templateId"]: item for item in payload["templates"]}
+    for key, (template_id, filename, _) in legacy_cases.items():
+        expected = research_default_prompt(key)
+        detail = prompt_template_service.get_prompt_template(template_id)
+
+        assert by_id[template_id]["content"] == expected
+        assert (source_root / filename).read_text(encoding="utf-8") == expected
+        assert detail is not None
+        assert detail["sourceDriftStatus"] == "synced"
+        assert detail["metadata"]["builtinContentVersion"] == prompt_template_service.RESEARCH_DEFAULT_PROMPT_VERSION
+    assert "Search Map" in by_id["prompt-research-broad"]["content"]
+    assert "Evidence Chain" in by_id["prompt-research-deep"]["content"]
 
 
 def test_prompt_template_repair_drops_retired_self_evolution_summarizer(tmp_path, monkeypatch):
