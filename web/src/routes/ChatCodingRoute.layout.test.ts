@@ -296,9 +296,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.leftRail).toContain("gap-[var(--chat-workbench-gap)]");
     expect(routeStyles.leftRail).toContain("p-[var(--chat-workbench-gap)]");
     expect(routeStyles.leftBlock).toContain("shrink-0");
-    expect(routeStyles.companionBlock).toContain("flex-1");
+    expect(routeStyles.companionBlock).toContain("shrink-0");
+    expect(routeStyles.companionBlock).toContain("max-h-[min(420px,70dvh)]");
     expect(routeStyles.companionBlock).toContain("min-h-0");
-    expect(routeStyles.companionBlock).toContain("overflow-auto");
+    expect(routeStyles.companionBlock).toContain("overflow-hidden");
+    expect(routeStyles.companionBlock).not.toContain("flex-1");
     expect(routeStyles.rightPane).toContain("grid");
     expect(routeStyles.rightPane).toContain("gap-[var(--chat-workbench-gap)]");
     expect(routeStyles.rightPane).toContain("p-[var(--chat-workbench-gap)]");
@@ -468,6 +470,34 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.compactDetails).toContain("[&[open]_.compactDetailsClosedLabel]:hidden");
     expect(routeStyles.compactDetailsClosedLabel).toContain("compactDetailsClosedLabel");
     expect(routeStyles.compactDetailsOpenLabel).toContain("compactDetailsOpenLabel");
+  });
+
+  it("keeps the left rail status stack soft and non-nested", () => {
+    expect(routeStyles.leftBlock).toContain("bg-[color-mix(in_srgb,var(--vui-surface-glass)_58%,transparent)]");
+    expect(routeStyles.leftBlock).toContain("border-[color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)]");
+    expect(routeStyles.leftBlock).not.toContain("bg-[color-mix(in_srgb,var(--vui-surface-glass)_82%,transparent)]");
+
+    expect(routeStyles.tokenCompressionCard).toBe("vui-routes-chatcodingroute tokenCompressionCard min-w-0");
+    expect(routeStyles.tokenCompressionCard).not.toContain("rounded-[var(--radius-panel)]");
+    expect(routeStyles.tokenCompressionCard).not.toContain("border border-[var(--vui-border-subtle)]");
+    expect(routeStyles.tokenCompressionCard).not.toContain("bg-[var(--vui-surface-glass)]");
+    expect(routeStyles.tokenCompressionCard).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+    expect(routeStyles.tokenCompressionCard).not.toContain("p-2");
+
+    expect(routeStyles.contextLineCompact).toContain("bg-[color-mix(in_srgb,var(--vui-surface-row)_42%,transparent)]");
+    expect(routeStyles.contextLineCompact).toContain("px-1.5");
+    expect(routeStyles.contextLineCompact).not.toContain("p-2");
+    expect(routeStyles.oneLineValue).toContain("bg-[color-mix(in_srgb,var(--vui-surface-row)_42%,transparent)]");
+    expect(routeStyles.oneLineValue).not.toContain("p-2");
+
+    expect(routeStyles.companionBlock).toContain("max-h-[min(420px,70dvh)]");
+    expect(routeStyles.companionBlock).not.toContain("flex-1");
+    expect(routeStyles.companionCompact).toContain("grid-cols-[32px_minmax(0,1fr)]");
+    expect(routeStyles.companionTopLine).not.toContain("bg-[var(--vui-surface-row)]");
+    expect(routeStyles.compactDetails).toContain("max-h-[220px]");
+    expect(routeStyles.compactDetails).toContain("overflow-auto");
+    expect(routeStyles.inlineMetaPill).toContain("min-h-[22px]");
+    expect(routeStyles.petShowcaseAction).toContain("min-h-[28px]");
   });
 
   it("keeps left rail VButton cards from collapsing their internal grid layout", () => {
