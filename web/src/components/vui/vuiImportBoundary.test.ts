@@ -33,6 +33,7 @@ const productSharedParentStyleConsumers = [
   "routes/AgentCreatePanel.tsx",
   "routes/AgentDebugResetPanel.tsx",
   "routes/AgentDetailHeaderPanel.tsx",
+  "routes/AgentEmptySelectionPanel.tsx",
   "routes/AgentHealthMaintenancePanel.tsx",
   "routes/AgentMemoryPolicyPanel.tsx",
   "routes/AgentModeMembershipPanel.tsx",

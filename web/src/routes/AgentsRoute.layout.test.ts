@@ -90,6 +90,10 @@ const detailHeaderPanelSource = readFileSync(
   new URL("./AgentDetailHeaderPanel.tsx", import.meta.url),
   "utf-8",
 );
+const emptySelectionPanelSource = readFileSync(
+  new URL("./AgentEmptySelectionPanel.tsx", import.meta.url),
+  "utf-8",
+);
 const returnBannerPanelSource = readFileSync(
   new URL("./AgentReturnBannerPanel.tsx", import.meta.url),
   "utf-8",
@@ -1166,7 +1170,8 @@ describe("AgentsRoute layout contract", () => {
 
   it("keeps Agent empty states compact and left-aligned for dense workbench scanning", () => {
     expect(styles.emptyState).toBeTruthy();
-    expect(routeSource).toContain("styles.emptyState");
+    expect(routeSource).toContain("AgentEmptySelectionPanel");
+    expect(emptySelectionPanelSource).toContain("className={styles.emptyState}");
     expect(styles.emptyState).toContain("[place-items:start]");
     expect(styles.emptyState).toContain("[min-height:72px]");
     expect(styles.emptyState).toContain("[text-align:left]");
