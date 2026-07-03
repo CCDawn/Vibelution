@@ -16,6 +16,7 @@ describe("VUI foundation primitives", () => {
     );
 
     expect(tailwindEntry).toContain('@source "../app/**/*.{ts,tsx}";');
+    expect(tailwindEntry).toContain('@source "../agent-thread/**/*.{ts,tsx}";');
     expect(tailwindEntry).toContain('@source "../components/**/*.{ts,tsx}";');
     expect(tailwindEntry).toContain('@source "../routes/**/*.{ts,tsx}";');
     expect(tailwindEntry).not.toContain(".test");

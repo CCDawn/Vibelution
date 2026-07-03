@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 
 const sourceRoot = resolve(import.meta.dirname, "../..");
 const allowedRestoredRouteModules = [
-  "agent-thread/AgentThreadView.module.css",
   "routes/AgentsRoute.module.css",
   "routes/ConfigRoute.module.css",
   "routes/EvolutionRoute.module.css",
@@ -43,6 +42,7 @@ describe("VUI CSS module contract", () => {
     const modulePaths = modules.map(({ path }) => path);
 
     expect(modulePaths).toEqual([...allowedRestoredRouteModules]);
+    expect(modulePaths).not.toContain("agent-thread/AgentThreadView.module.css");
     expect(modulePaths).not.toContain("app/LauncherShell.module.css");
     expect(modulePaths).not.toContain("app/RouteLoadingShell.module.css");
     expect(modulePaths).not.toContain("app/RouteErrorBoundary.module.css");

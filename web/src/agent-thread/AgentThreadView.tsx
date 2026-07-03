@@ -12,7 +12,7 @@ import type {
   AgentToolCallPart,
 } from "./types";
 import { agentMessageToSections } from "./sections";
-import styles from "./AgentThreadView.module.css";
+import styles from "./AgentThreadView.styles";
 
 export type AgentThreadViewProps = {
   thread: AgentThread;
@@ -40,9 +40,15 @@ export type AgentMessageViewProps = {
 };
 
 export function AgentMessageView({ message }: AgentMessageViewProps) {
+  const messageClassName = classNames(
+    styles.message,
+    message.role === "assistant" ? styles.messageAssistant : undefined,
+    message.role === "user" ? styles.messageUser : undefined,
+  );
+
   return (
     <article
-      className={styles.message}
+      className={messageClassName}
       data-agent-message-id={message.id}
       data-agent-message-role={message.role}
       data-agent-message-streaming={message.streaming ? "true" : "false"}
