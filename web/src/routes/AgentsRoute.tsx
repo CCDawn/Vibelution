@@ -95,7 +95,7 @@ import {
   type AgentTeamIndexGroup,
 } from "./agentWorkspaceCache";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
-import styles from "./AgentsRoute.module.css";
+import styles from "./AgentsRoute.styles";
 
 type FilterId = string;
 
@@ -5891,7 +5891,7 @@ export function AgentsRoute() {
         <AgentWorkspacePanel
           as="aside"
           ariaLabel={selectedAgent ? agentLabel(selectedAgent) : copy.title}
-          className={styles.detailPanel}
+          className={createOpen ? `${styles.detailPanel} ${styles.detailPanelCreating}` : styles.detailPanel}
         >
           {returnToPath ? (
             <section className={styles.returnBanner} aria-label={copy.returnBannerTitle} title={copy.returnBannerHint}>
