@@ -6,6 +6,7 @@ import teamMemoryIndexPanelSource from "./TeamMemoryIndexPanel.tsx?raw";
 import teamSourceCollectionCandidatePanelSource from "./TeamSourceCollectionCandidatePanel.tsx?raw";
 import teamSourceCollectionConversationPanelSource from "./TeamSourceCollectionConversationPanel.tsx?raw";
 import teamSourceCollectionFindingDetailsPanelSource from "./TeamSourceCollectionFindingDetailsPanel.tsx?raw";
+import teamSourceCollectionGraphPanelSource from "./TeamSourceCollectionGraphPanel.tsx?raw";
 import teamSourceCollectionMemoryPanelSource from "./TeamSourceCollectionMemoryPanel.tsx?raw";
 import teamSourceCollectionRunSettingsPanelSource from "./TeamSourceCollectionRunSettingsPanel.tsx?raw";
 import teamSourceCollectionScreeningPanelSource from "./TeamSourceCollectionScreeningPanel.tsx?raw";
@@ -554,7 +555,10 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionScreeningPanelSource).toContain("向下滚动查看更多本页候选");
     expect(routeSource).toContain("TeamSourceCollectionCandidatePanel");
     expect(teamSourceCollectionCandidatePanelSource).toContain("source-collection-candidates-panel");
+    expect(routeSource).toContain("TeamSourceCollectionGraphPanel");
     expect(routeSource).toContain("source-collection-graph-panel");
+    expect(teamSourceCollectionGraphPanelSource).toContain("source-collection-graph-panel");
+    expect(teamSourceCollectionGraphPanelSource).toContain("workflowGraphStats");
     expect(routeSource).toContain("TeamSourceCollectionMemoryPanel");
     expect(teamSourceCollectionMemoryPanelSource).toContain("source-collection-memory-panel");
     expect(routeSource).not.toContain("researchView=candidates");
