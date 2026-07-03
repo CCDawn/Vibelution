@@ -67,6 +67,7 @@ import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy"
 import { VButton, VNativeInput, VNativeSelect, VNativeTextarea, VRouteHeader } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
+import { MemoryMatrixPanel } from "./MemoryMatrixPanel";
 import { MemoryOverviewPanel } from "./MemoryOverviewPanel";
 import { MemoryProjectMemoryQueuePanel } from "./MemoryProjectMemoryQueuePanel";
 import { MemoryReviewQueuePanel } from "./MemoryReviewQueuePanel";
@@ -4133,49 +4134,16 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     />
   );
 
-  const renderMatrixPanel = (title = copy.whereMemoryWorks) => (
-    <section className={styles.matrixPanel} aria-label={copy.perceptionMatrix}>
-      <div className={styles.matrixHeader}>
-        <div>
-          <p className={styles.panelEyebrow}>{copy.perceptionMatrix}</p>
-          <h2>{title}</h2>
-        </div>
-        <div className={styles.matrixHeaderMeta}>
-          {activeChannel ? <span className={styles.activeChannelPill}>{channelFilterLabel(copy, activeChannel)}</span> : null}
-          {overview ? <span className={styles.countPill}>{formatTimestamp(overview.generatedAt, lang)}</span> : null}
-        </div>
-      </div>
-      <div className={styles.matrixGrid}>
-        {matrixCards.map((card) => (
-          <VButton
-            key={card.id}
-            type="button"
-            className={
-              activeChannel === card.channel
-                ? `${styles.matrixCard} ${styles.matrixCardButton} ${styles.matrixCardActive}`
-                : `${styles.matrixCard} ${styles.matrixCardButton}`
-            }
-            onClick={() => handleChannelCardClick(card.channel)}
-            aria-pressed={activeChannel === card.channel}
-          >
-            <div>
-              <strong>{card.title}</strong>
-              <span>{card.hint}</span>
-            </div>
-            <dl>
-              <div>
-                <dt>{copy.matrixItems}</dt>
-                <dd>{card.itemCount}</dd>
-              </div>
-              <div>
-                <dt>{copy.matrixPrompt}</dt>
-                <dd>{card.promptCount}</dd>
-              </div>
-            </dl>
-          </VButton>
-        ))}
-      </div>
-    </section>
+  const createMatrixPanel = (title = copy.whereMemoryWorks) => (
+    <MemoryMatrixPanel
+      copy={copy}
+      title={title}
+      activeChannel={activeChannel}
+      activeChannelLabel={activeChannel ? channelFilterLabel(copy, activeChannel) : ""}
+      generatedAt={overview ? formatTimestamp(overview.generatedAt, lang) : ""}
+      cards={matrixCards}
+      onSelectChannel={handleChannelCardClick}
+    />
   );
 
   const renderWarningStrip = () =>
@@ -4484,7 +4452,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
   const renderEffectiveView = () => (
     <>
-      {renderMatrixPanel(copy.effectiveByChannel)}
+      {createMatrixPanel(copy.effectiveByChannel)}
       {renderWarningStrip()}
       <div className={styles.effectiveGrid}>
         {matrixCards.map((card) => {
@@ -4949,7 +4917,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
   const renderSourcesView = () => (
     <>
-      {renderMatrixPanel(copy.sourceAudit)}
+      {createMatrixPanel(copy.sourceAudit)}
       {renderWarningStrip()}
       <div className={styles.workspace}>
         {renderSourceAndItemPanels(copy.sourceAudit)}

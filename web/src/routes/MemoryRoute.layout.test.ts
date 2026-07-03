@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import routeSource from "./MemoryRoute.tsx?raw";
+import matrixPanelSource from "./MemoryMatrixPanel.tsx?raw";
 import overviewPanelSource from "./MemoryOverviewPanel.tsx?raw";
 import projectMemoryQueuePanelSource from "./MemoryProjectMemoryQueuePanel.tsx?raw";
 import reviewQueuePanelSource from "./MemoryReviewQueuePanel.tsx?raw";
@@ -638,8 +639,15 @@ describe("MemoryRoute layout contract", () => {
   });
 
   it("adds perception matrix and quick filters before the source drilldown", () => {
-    expect(routeSource).toContain("styles.matrixPanel");
-    expect(routeSource).toContain("copy.perceptionMatrix");
+    expect(routeSource).toContain('import { MemoryMatrixPanel } from "./MemoryMatrixPanel"');
+    expect(routeSource).toContain("<MemoryMatrixPanel");
+    expect(routeSource).not.toContain("const renderMatrixPanel = (title = copy.whereMemoryWorks) => (");
+    expect(matrixPanelSource).toContain("export function MemoryMatrixPanel");
+    expect(matrixPanelSource).toContain("styles.matrixPanel");
+    expect(matrixPanelSource).toContain("copy.perceptionMatrix");
+    expect(matrixPanelSource).not.toContain("useQuery");
+    expect(matrixPanelSource).not.toContain("useMutation");
+    expect(matrixPanelSource).not.toContain("fetchJson");
     expect(routeSource).toContain("styles.filterGroup");
     expect(routeSource).toContain("itemMatchesFilter");
     expect(routeSource).toContain("filterPrompt");
@@ -674,10 +682,10 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("normalizeChannelFilter");
     expect(routeSource).toContain("itemMatchesChannelFilter");
     expect(routeSource).toContain("handleChannelCardClick");
-    expect(routeSource).toContain("styles.matrixCardButton");
-    expect(routeSource).toContain("styles.matrixCardActive");
-    expect(routeSource).toContain("aria-pressed={activeChannel === card.channel}");
-    expect(routeSource).toContain("onClick={() => handleChannelCardClick(card.channel)}");
+    expect(matrixPanelSource).toContain("styles.matrixCardButton");
+    expect(matrixPanelSource).toContain("styles.matrixCardActive");
+    expect(matrixPanelSource).toContain("aria-pressed={activeChannel === card.channel}");
+    expect(matrixPanelSource).toContain("onClick={() => onSelectChannel(card.channel)}");
     expect(routeSource).toContain("channel: \"research\" as const");
     expect(routeSource).toContain("channel: \"self_evolution\" as const");
     expect(routeSource).toContain("channel: \"supervised_evolution\" as const");
