@@ -14,7 +14,7 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { PointerEvent, WheelEvent } from "react";
+import type { CSSProperties, PointerEvent, WheelEvent } from "react";
 import { Link } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -73,6 +73,17 @@ type CanvasOffset = {
   x: number;
   y: number;
 };
+
+type ResearchFlowCanvasVariable =
+  | "--research-flow-canvas-viewport-width"
+  | "--research-flow-canvas-viewport-height"
+  | "--research-flow-canvas-width"
+  | "--research-flow-canvas-height"
+  | "--research-flow-canvas-offset-x"
+  | "--research-flow-canvas-offset-y"
+  | "--research-flow-canvas-zoom";
+
+type ResearchFlowCanvasStyle = CSSProperties & Partial<Record<ResearchFlowCanvasVariable, string | number>>;
 
 type EdgeEndpoint = "source" | "target";
 
@@ -494,6 +505,23 @@ export function canvasViewportFromView(offset: CanvasOffset, zoom: number) {
     x: Math.round(offset.x),
     y: Math.round(offset.y),
     zoom: clampCanvasZoom(zoom),
+  };
+}
+
+function canvasViewportStyle(width: number, height: number): ResearchFlowCanvasStyle {
+  return {
+    "--research-flow-canvas-viewport-width": `${width}px`,
+    "--research-flow-canvas-viewport-height": `${height}px`,
+  };
+}
+
+function canvasTransformStyle(width: number, height: number, offset: CanvasOffset, zoom: number): ResearchFlowCanvasStyle {
+  return {
+    "--research-flow-canvas-width": `${width}px`,
+    "--research-flow-canvas-height": `${height}px`,
+    "--research-flow-canvas-offset-x": `${offset.x}px`,
+    "--research-flow-canvas-offset-y": `${offset.y}px`,
+    "--research-flow-canvas-zoom": zoom,
   };
 }
 
@@ -2326,16 +2354,12 @@ export function ResearchFlowCanvasRoute() {
             >
               <div
                 className={styles.canvasViewport}
-                style={{ width: scaledCanvasWidth, height: scaledCanvasHeight }}
+                style={canvasViewportStyle(scaledCanvasWidth, scaledCanvasHeight)}
                 onClick={handleCanvasClick}
               >
                 <div
                   className={[styles.canvas, pan ? styles.canvasPanning : "", canvasLocked ? styles.canvasLocked : ""].join(" ")}
-                  style={{
-                    width: canvasWidth,
-                    height: canvasHeight,
-                    transform: `translate(${canvasOffset.x}px, ${canvasOffset.y}px) scale(${canvasZoom})`,
-                  }}
+                  style={canvasTransformStyle(canvasWidth, canvasHeight, canvasOffset, canvasZoom)}
                   onPointerDown={handleCanvasPointerDown}
                 >
                 <svg className={styles.edges} width={canvasWidth} height={canvasHeight} aria-hidden="true">
