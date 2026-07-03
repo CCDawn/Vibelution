@@ -3,14 +3,10 @@ import {
   ArrowLeft,
   Brain,
   CheckCircle2,
-  Eye,
   FileText,
   Network,
-  Pencil,
   RefreshCw,
   Search,
-  Square,
-  SquareCheckBig,
   TriangleAlert,
   Undo2,
   XCircle,
@@ -60,7 +56,7 @@ import {
   TeamKnowledgeBase,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
-import { VButton, VNativeInput, VNativeSelect, VNativeTextarea, VRouteHeader } from "../components/vui";
+import { VButton, VNativeInput, VNativeSelect, VRouteHeader } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { MemoryAgentMemoryPanel } from "./MemoryAgentMemoryPanel";
@@ -73,6 +69,7 @@ import { MemoryKnowledgeModeTabs } from "./MemoryKnowledgeModeTabs";
 import { MemoryKnowledgePermissionsPanel } from "./MemoryKnowledgePermissionsPanel";
 import { MemoryKnowledgePipelinePanel } from "./MemoryKnowledgePipelinePanel";
 import { MemoryKnowledgeRagPanel } from "./MemoryKnowledgeRagPanel";
+import { MemoryKnowledgeReviewPanel } from "./MemoryKnowledgeReviewPanel";
 import {
   MemoryKnowledgeSourceGovernancePanel,
   type MemoryKnowledgeOwnerSourceDraft,
@@ -4574,185 +4571,29 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           ) : null}
 
           {activeKnowledgeWorkspaceMode === "review" ? (
-          <>
-          <section className={styles.managementPanel}>
-            <div className={styles.managementHeader}>
-              <div>
-                <p className={styles.panelEyebrow}>{copy.refinementProposal}</p>
-                <h2>{copy.pendingProposals}</h2>
-              </div>
-              <VButton
-                type="button"
-                className={styles.primaryActionButton}
-                onClick={submitRefinementProposal}
-                isDisabled={!activeKnowledgeBase?.permissions.canPropose || knowledgeBusy}
-              >
-                <Pencil size={15} />
-                <span>{copy.submitProposal}</span>
-              </VButton>
-            </div>
-            <div className={styles.knowledgeFormGrid}>
-              <label>
-                <span>{copy.proposalTitle}</span>
-                <VNativeInput value={proposalDraft.title} onChange={(event) => setProposalDraft({ ...proposalDraft, title: event.target.value })} />
-              </label>
-              <label>
-                <span>{copy.capturedBy}</span>
-                <VNativeInput value={proposalDraft.proposedByAgentId} onChange={(event) => setProposalDraft({ ...proposalDraft, proposedByAgentId: event.target.value })} />
-              </label>
-              <label>
-                <span>{copy.sourceArtifacts}</span>
-                <VNativeInput value={proposalDraft.sourceArtifactIds} onChange={(event) => setProposalDraft({ ...proposalDraft, sourceArtifactIds: event.target.value })} />
-              </label>
-              <label>
-                <span>{copy.tags}</span>
-                <VNativeInput value={proposalDraft.tags} onChange={(event) => setProposalDraft({ ...proposalDraft, tags: event.target.value })} />
-              </label>
-              <label className={styles.wideField}>
-                <span>{copy.summaryField}</span>
-                <VNativeTextarea rows={2} value={proposalDraft.summary} onChange={(event) => setProposalDraft({ ...proposalDraft, summary: event.target.value })} />
-              </label>
-              <label className={styles.wideField}>
-                <span>{copy.proposalContent}</span>
-                <VNativeTextarea rows={4} value={proposalDraft.content} onChange={(event) => setProposalDraft({ ...proposalDraft, content: event.target.value })} />
-              </label>
-            </div>
-            <div className={styles.knowledgeProposalList}>
-              {(activeKnowledgeBase?.pendingProposals ?? []).map((proposal) => (
-                  <section key={proposal.proposalId} className={styles.knowledgeRow}>
-                    <strong>{proposal.title}</strong>
-                    <span>{proposal.summary || proposal.content}</span>
-                    <VButton
-                      type="button"
-                      className={styles.detailActionButton}
-                      isDisabled={!activeKnowledgeBase?.permissions.canReview || knowledgeBusy}
-                      onClick={() => reviewProposal(proposal.proposalId, "approved")}
-                    >
-                      <CheckCircle2 size={14} />
-                      <span>{copy.approveProposal}</span>
-                    </VButton>
-                    <VButton
-                      type="button"
-                      className={styles.detailActionButton}
-                      isDisabled={!activeKnowledgeBase?.permissions.canReview || knowledgeBusy}
-                      onClick={() => reviewProposal(proposal.proposalId, "rejected")}
-                    >
-                      <XCircle size={14} />
-                      <span>{copy.rejectProposal}</span>
-                    </VButton>
-                  </section>
-              ))}
-              {activeKnowledgeBase && activeKnowledgeBase.pendingProposals.length === 0 ? (
-                <section className={styles.emptyDetail}>
-                  <Eye size={20} />
-                  <strong>{copy.noIssues}</strong>
-                </section>
-              ) : null}
-            </div>
-          </section>
-
-          <section className={styles.managementPanel}>
-            <div className={styles.managementHeader}>
-              <div>
-                <p className={styles.panelEyebrow}>{copy.ratingSuggestions}</p>
-                <h2>{copy.governance}</h2>
-              </div>
-              <span className={styles.countPill}>{ratingSuggestions.length}</span>
-            </div>
-            <div className={styles.queueToolbar}>
-              <label>
-                <span>{copy.status}</span>
-                <VNativeSelect value={ratingSuggestionStatus} onChange={(event) => setRatingSuggestionStatus(event.target.value as RatingSuggestionStatusFilter)}>
-                  <option value="pending">{copy.pendingProposals}</option>
-                  <option value="applied">{copy.applySuggestion}</option>
-                  <option value="rejected">{copy.rejectSuggestion}</option>
-                  <option value="all">{copy.allStatuses}</option>
-                </VNativeSelect>
-              </label>
-              <label>
-                <span>{copy.priority}</span>
-                <VNativeSelect value={ratingSuggestionPriority} onChange={(event) => setRatingSuggestionPriority(event.target.value as RatingSuggestionPriorityFilter)}>
-                  <option value="all">{copy.allPriorities}</option>
-                  <option value="urgent">urgent</option>
-                  <option value="elevated">elevated</option>
-                  <option value="normal">normal</option>
-                </VNativeSelect>
-              </label>
-            </div>
-            <div className={styles.bulkActionBar}>
-              <span className={styles.countPill}>{copy.selectedSuggestions}: {selectedVisibleRatingSuggestionIds.length}</span>
-              <VButton type="button" className={styles.detailActionButton} onClick={toggleVisibleRatingSuggestions} isDisabled={!pendingVisibleRatingSuggestions.length || knowledgeBusy}>
-                <SquareCheckBig size={14} />
-                <span>{copy.selectAllVisibleSuggestions}</span>
-              </VButton>
-              <VButton type="button" className={styles.detailActionButton} onClick={() => setSelectedRatingSuggestionIds([])} isDisabled={!selectedVisibleRatingSuggestionIds.length || knowledgeBusy}>
-                <Square size={14} />
-                <span>{copy.clearSuggestionSelection}</span>
-              </VButton>
-              <VButton
-                type="button"
-                className={styles.detailActionButton}
-                isDisabled={!activeKnowledgeBase?.permissions.canRate || !selectedVisibleRatingSuggestionIds.length || knowledgeBusy}
-                onClick={() => reviewSelectedRatingSuggestions("applied")}
-              >
-                <CheckCircle2 size={14} />
-                <span>{copy.bulkApplySuggestions}</span>
-              </VButton>
-              <VButton
-                type="button"
-                className={styles.detailActionButton}
-                isDisabled={!activeKnowledgeBase?.permissions.canRate || !selectedVisibleRatingSuggestionIds.length || knowledgeBusy}
-                onClick={() => reviewSelectedRatingSuggestions("rejected")}
-              >
-                <XCircle size={14} />
-                <span>{copy.bulkRejectSuggestions}</span>
-              </VButton>
-            </div>
-            <div className={styles.knowledgeProposalList}>
-              {ratingSuggestions.map((suggestion) => (
-                <section key={suggestion.suggestionId} className={styles.knowledgeRow}>
-                  <label className={styles.inlineCheck}>
-                    <VNativeInput
-                      type="checkbox"
-                      aria-label={copy.selectSuggestion}
-                      checked={selectedRatingSuggestionIds.includes(suggestion.suggestionId)}
-                      disabled={suggestion.status !== "pending" || knowledgeBusy}
-                      onChange={() => toggleRatingSuggestionSelection(suggestion.suggestionId)}
-                    />
-                    <span>{copy.selectSuggestion}</span>
-                  </label>
-                  <strong>{suggestion.importanceLevel} · {suggestion.reviewPriority}</strong>
-                  <span>{suggestion.markingReason || suggestion.suggestionId}</span>
-                  <small>{suggestion.status} · {suggestion.targetType} · {suggestion.knowledgeItemId || suggestion.proposalId} · {copy.confidence}: {suggestion.confidence}</small>
-                  <VButton
-                    type="button"
-                    className={styles.detailActionButton}
-                    isDisabled={!activeKnowledgeBase?.permissions.canRate || suggestion.status !== "pending" || knowledgeBusy}
-                    onClick={() => reviewRatingSuggestion(suggestion.suggestionId, "applied")}
-                  >
-                    <CheckCircle2 size={14} />
-                    <span>{copy.applySuggestion}</span>
-                  </VButton>
-                  <VButton
-                    type="button"
-                    className={styles.detailActionButton}
-                    isDisabled={!activeKnowledgeBase?.permissions.canRate || suggestion.status !== "pending" || knowledgeBusy}
-                    onClick={() => reviewRatingSuggestion(suggestion.suggestionId, "rejected")}
-                  >
-                    <XCircle size={14} />
-                    <span>{copy.rejectSuggestion}</span>
-                  </VButton>
-                </section>
-              ))}
-              {!ratingSuggestionsQuery.isPending && !ratingSuggestions.length ? (
-                <section className={styles.emptyDetail}>
-                  <CheckCircle2 size={20} />
-                  <strong>{copy.noIssues}</strong>
-                </section>
-              ) : null}
-            </div>
-          </section>
-          </>
+          <MemoryKnowledgeReviewPanel
+            copy={copy}
+            activeKnowledgeBase={activeKnowledgeBase}
+            proposalDraft={proposalDraft}
+            ratingSuggestions={ratingSuggestions}
+            pendingVisibleRatingSuggestions={pendingVisibleRatingSuggestions}
+            selectedRatingSuggestionIds={selectedRatingSuggestionIds}
+            selectedVisibleRatingSuggestionIds={selectedVisibleRatingSuggestionIds}
+            ratingSuggestionStatus={ratingSuggestionStatus}
+            ratingSuggestionPriority={ratingSuggestionPriority}
+            ratingSuggestionsPending={ratingSuggestionsQuery.isPending}
+            knowledgeBusy={knowledgeBusy}
+            onProposalDraftChange={setProposalDraft}
+            onSubmitRefinementProposal={submitRefinementProposal}
+            onReviewProposal={reviewProposal}
+            onRatingSuggestionStatusChange={setRatingSuggestionStatus}
+            onRatingSuggestionPriorityChange={setRatingSuggestionPriority}
+            onToggleVisibleRatingSuggestions={toggleVisibleRatingSuggestions}
+            onClearRatingSuggestionSelection={() => setSelectedRatingSuggestionIds([])}
+            onReviewSelectedRatingSuggestions={reviewSelectedRatingSuggestions}
+            onToggleRatingSuggestionSelection={toggleRatingSuggestionSelection}
+            onReviewRatingSuggestion={reviewRatingSuggestion}
+          />
           ) : null}
 
         </main>
