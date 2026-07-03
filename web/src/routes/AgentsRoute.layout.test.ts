@@ -74,6 +74,10 @@ const runtimeFocusPanelSource = readFileSync(
   new URL("./AgentRuntimeFocusPanel.tsx", import.meta.url),
   "utf-8",
 );
+const managementHeaderPanelSource = readFileSync(
+  new URL("./AgentManagementHeaderPanel.tsx", import.meta.url),
+  "utf-8",
+);
 const managementBriefPanelSource = readFileSync(
   new URL("./AgentManagementBriefPanel.tsx", import.meta.url),
   "utf-8",
@@ -156,18 +160,19 @@ describe("AgentsRoute layout contract", () => {
     expect(routerSource).toContain("<AgentsRoute />");
     expect(shellSource).toContain('to="/agents"');
     expect(shellSource).toContain('t("navAgents")');
-    expect(routeSource).toContain('<AgentManagementNav active="agents" className={styles.managementNav} />');
-    expect(routeSource.indexOf('<AgentManagementNav active="agents" className={styles.managementNav} />')).toBeGreaterThan(
-      routeSource.indexOf("<AgentPageHeader"),
+    expect(routeSource).toContain("<AgentManagementHeaderPanel");
+    expect(managementHeaderPanelSource).toContain('<AgentManagementNav active="agents" className={styles.managementNav} />');
+    expect(managementHeaderPanelSource.indexOf('<AgentManagementNav active="agents" className={styles.managementNav} />')).toBeGreaterThan(
+      managementHeaderPanelSource.indexOf("<AgentPageHeader"),
     );
-    expect(routeSource.indexOf('<AgentManagementNav active="agents" className={styles.managementNav} />')).toBeLessThan(
-      routeSource.indexOf("<AgentSummaryStrip"),
+    expect(managementHeaderPanelSource.indexOf('<AgentManagementNav active="agents" className={styles.managementNav} />')).toBeLessThan(
+      managementHeaderPanelSource.indexOf("<AgentSummaryStrip"),
     );
   });
 
   it("uses VUI product components for the Agent management header and summary strip", () => {
-    expect(routeSource).toContain("AgentPageHeader");
-    expect(routeSource).toContain("AgentSummaryStrip");
+    expect(managementHeaderPanelSource).toContain("AgentPageHeader");
+    expect(managementHeaderPanelSource).toContain("AgentSummaryStrip");
     expect(routeSource).toContain("agentSummaryMetrics");
     expect(routeSource).not.toContain("styles.summaryCard");
     expect(routeSource).not.toContain("styles.refreshButton");
@@ -295,10 +300,10 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("workspaceHealthStatusDescription(healthStatus, summary, lang)");
     expect(routeSource).toContain("copy.workspaceHealthStatus");
     expect(routeSource).toContain("detail: `${copy.workspaceHealthStatus}: ${healthStatusLabel}. ${healthStatusDescription}`");
-    expect(routeSource).toContain("status={{");
-    expect(routeSource).toContain("label: healthStatusLabel");
-    expect(routeSource).toContain("title: healthStatusDescription");
-    expect(routeSource).toContain("ariaLabel: `${copy.workspaceHealthStatus}: ${healthStatusLabel}. ${healthStatusDescription}`");
+    expect(managementHeaderPanelSource).toContain("status={{");
+    expect(managementHeaderPanelSource).toContain("label: healthStatusLabel");
+    expect(managementHeaderPanelSource).toContain("title: healthStatusDescription");
+    expect(managementHeaderPanelSource).toContain("ariaLabel: `${copy.workspaceHealthStatus}: ${healthStatusLabel}. ${healthStatusDescription}`");
     expect(avatarEditorPanelSource).toContain("aria-label={copy.editAvatar}");
   });
 
@@ -560,7 +565,7 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("keeps Agent Center helper copy in hover text instead of permanent explanatory blocks", () => {
-    expect(routeSource).toContain("<div title={copy.subtitle}>");
+    expect(managementHeaderPanelSource).toContain("<div title={copy.subtitle}>");
     expect(routeSource).not.toContain("<p className={styles.subtitle}>{copy.subtitle}</p>");
     expect(routeSource).toContain("issueSummary: issueSummary(agent.health, lang)");
     expect(denseListSource).toContain("title={row.issueSummary}");
