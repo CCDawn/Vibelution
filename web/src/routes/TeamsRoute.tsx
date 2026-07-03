@@ -2227,26 +2227,26 @@ type NodeDragState = {
   moved: boolean;
 };
 
-type CanvasViewportStyle = CSSProperties & {
-  "--canvas-offset-x": string;
-  "--canvas-offset-y": string;
-  "--canvas-scale": string;
-};
+type TeamsRouteDynamicVariable =
+  | "--canvas-offset-x"
+  | "--canvas-offset-y"
+  | "--canvas-scale"
+  | "--node-x"
+  | "--node-y"
+  | "--workflow-graph-height"
+  | "--workflow-graph-width"
+  | "--workflow-graph-node-x"
+  | "--workflow-graph-node-y";
 
-type NodePositionStyle = CSSProperties & {
-  "--node-x": string;
-  "--node-y": string;
-};
+type TeamsRouteDynamicStyle = CSSProperties & Partial<Record<TeamsRouteDynamicVariable, string>>;
 
-type WorkflowGraphFrameStyle = CSSProperties & {
-  "--workflow-graph-height": string;
-  "--workflow-graph-width": string;
-};
+type CanvasViewportStyle = TeamsRouteDynamicStyle & Record<"--canvas-offset-x" | "--canvas-offset-y" | "--canvas-scale", string>;
 
-type WorkflowGraphNodeStyle = CSSProperties & {
-  "--workflow-graph-node-x": string;
-  "--workflow-graph-node-y": string;
-};
+type NodePositionStyle = TeamsRouteDynamicStyle & Record<"--node-x" | "--node-y", string>;
+
+type WorkflowGraphFrameStyle = TeamsRouteDynamicStyle & Record<"--workflow-graph-height" | "--workflow-graph-width", string>;
+
+type WorkflowGraphNodeStyle = TeamsRouteDynamicStyle & Record<"--workflow-graph-node-x" | "--workflow-graph-node-y", string>;
 
 type WorkflowGraphNodeView = TeamWorkflowCandidateGraphNode & {
   x: number;
@@ -3321,6 +3321,27 @@ function canvasViewStyle(nodes: TeamCanvasNode[], frameSize?: CanvasFrameSize): 
     "--canvas-offset-x": `${Math.round(targetX - minX)}px`,
     "--canvas-offset-y": `${Math.round(targetY - minY)}px`,
     "--canvas-scale": scale.toFixed(3),
+  };
+}
+
+function teamCanvasNodeStyle(node: Pick<TeamCanvasNode, "x" | "y">): NodePositionStyle {
+  return {
+    "--node-x": `${node.x}px`,
+    "--node-y": `${node.y}px`,
+  };
+}
+
+function workflowGraphFrameStyle(layout: Pick<WorkflowGraphLayout, "height" | "width">): WorkflowGraphFrameStyle {
+  return {
+    "--workflow-graph-height": `${layout.height}px`,
+    "--workflow-graph-width": `${layout.width}px`,
+  };
+}
+
+function workflowGraphNodeStyle(node: Pick<WorkflowGraphNodeView, "x" | "y">): WorkflowGraphNodeStyle {
+  return {
+    "--workflow-graph-node-x": `${node.x}px`,
+    "--workflow-graph-node-y": `${node.y}px`,
   };
 }
 
@@ -8439,10 +8460,7 @@ export function TeamsRoute({
             </div>
             <div
               className={styles.workflowGraphFrame}
-              style={{
-                "--workflow-graph-height": `${visibleGraphLayout.height}px`,
-                "--workflow-graph-width": `${visibleGraphLayout.width}px`,
-              } as WorkflowGraphFrameStyle}
+              style={workflowGraphFrameStyle(visibleGraphLayout)}
             >
               <div className={styles.workflowGraphCanvas}>
                 <svg
@@ -8473,10 +8491,7 @@ export function TeamsRoute({
                   <div
                     key={node.candidateId}
                     className={`${styles.workflowGraphNode} ${workflowGraphNodeTone(node)}`}
-                    style={{
-                      "--workflow-graph-node-x": `${node.x}px`,
-                      "--workflow-graph-node-y": `${node.y}px`,
-                    } as WorkflowGraphNodeStyle}
+                    style={workflowGraphNodeStyle(node)}
                     title={`${node.candidateId} · ${node.currentState}`}
                   >
                     <strong>{node.title || node.candidateId}</strong>
@@ -12454,7 +12469,7 @@ export function TeamsRoute({
                         selectedNode?.id === node.id ? styles.nodeActive : "",
                         researchCanvasReadOnly ? styles.nodeReadOnly : "",
                       ].filter(Boolean).join(" ")}
-                      style={{ "--node-x": `${node.x}px`, "--node-y": `${node.y}px` } as NodePositionStyle}
+                      style={teamCanvasNodeStyle(node)}
                       title={researchCanvasReadOnly ? (lang === "zh" ? "点击查看节点详情" : "Click to inspect node") : (lang === "zh" ? "拖动调整节点位置" : "Drag to reposition")}
                       onPointerDown={researchCanvasReadOnly ? undefined : (event) => startNodeDrag(event, node)}
                       onPointerMove={researchCanvasReadOnly ? undefined : moveNodeDrag}
@@ -13265,10 +13280,7 @@ export function TeamsRoute({
                             </div>
                             <div
                               className={styles.workflowGraphFrame}
-                              style={{
-                                "--workflow-graph-height": `${teamWorkflowCandidateGraphLayout.height}px`,
-                                "--workflow-graph-width": `${teamWorkflowCandidateGraphLayout.width}px`,
-                              } as WorkflowGraphFrameStyle}
+                              style={workflowGraphFrameStyle(teamWorkflowCandidateGraphLayout)}
                             >
                               <div className={styles.workflowGraphCanvas}>
                                 <svg
@@ -13299,10 +13311,7 @@ export function TeamsRoute({
                                   <div
                                     key={node.candidateId}
                                     className={`${styles.workflowGraphNode} ${workflowGraphNodeTone(node)}`}
-                                    style={{
-                                      "--workflow-graph-node-x": `${node.x}px`,
-                                      "--workflow-graph-node-y": `${node.y}px`,
-                                    } as WorkflowGraphNodeStyle}
+                                    style={workflowGraphNodeStyle(node)}
                                     title={`${node.candidateId} · ${node.currentState}`}
                                   >
                                     <strong>{node.title || node.candidateId}</strong>
