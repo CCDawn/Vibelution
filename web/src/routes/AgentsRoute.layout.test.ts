@@ -22,6 +22,10 @@ const archiveZonePanelSource = readFileSync(
   new URL("./AgentArchiveZonePanel.tsx", import.meta.url),
   "utf-8",
 );
+const debugResetPanelSource = readFileSync(
+  new URL("./AgentDebugResetPanel.tsx", import.meta.url),
+  "utf-8",
+);
 const filterRailSource = readFileSync(
   new URL("../components/vui/product/agent-management/AgentFilterRail.tsx", import.meta.url),
   "utf-8",
@@ -520,7 +524,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("title={copy.personaHint}");
     expect(routeSource).toContain("title={copy.taskHint}");
     expect(routeSource).toContain("title={copy.maintenanceHint}");
-    expect(routeSource).toContain("title={copy.resetAgentHint}");
+    expect(debugResetPanelSource).toContain("title={copy.resetAgentHint}");
     expect(routeSource).not.toContain("<p>{copy.createAgentHint}</p>");
     expect(routeSource).not.toContain("<span>{copy.returnBannerHint}</span>");
     expect(routeSource).not.toContain("<p>{copy.avatarEditorHint}</p>");
@@ -948,26 +952,32 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("next.delete(payload.agentId)");
     expect(routeSource).toContain("/reset");
     expect(routeSource).toContain("method: \"POST\"");
-    expect(routeSource).toContain("copy.resetAgent");
-    expect(routeSource).toContain("copy.resetClearRuntimeState");
-    expect(routeSource).toContain("copy.resetClearRuntimeStateHint");
-    expect(routeSource).toContain("copy.resetDirectSession");
-    expect(routeSource).toContain("copy.resetDirectSessionHint");
-    expect(routeSource).toContain("copy.resetPersonaProfile");
-    expect(routeSource).toContain("copy.resetPersonaProfileHint");
-    expect(routeSource).toContain("copy.resetTaskProfile");
-    expect(routeSource).toContain("copy.resetTaskProfileHint");
-    expect(routeSource).toContain("copy.resetToolPolicy");
-    expect(routeSource).toContain("copy.resetToolPolicyHint");
-    expect(routeSource).toContain("copy.resetMemoryPolicy");
-    expect(routeSource).toContain("copy.resetMemoryPolicyHint");
-    expect(routeSource).toContain("copy.resetRuntimePolicy");
-    expect(routeSource).toContain("copy.resetRuntimePolicyHint");
-    expect(routeSource).toContain("styles.resetOptionField");
+    expect(routeSource).toContain("<AgentDebugResetPanel");
+    expect(routeSource).toContain("options={resetOptions}");
+    expect(routeSource).toContain("canReset={canResetAgent}");
+    expect(routeSource).toContain("pending={selectedAgentResetPending}");
+    expect(routeSource).toContain("onOptionChange={updateResetOption}");
+    expect(routeSource).toContain("onReset={resetSelectedAgent}");
+    expect(debugResetPanelSource).toContain("copy.resetAgent");
+    expect(debugResetPanelSource).toContain("resetClearRuntimeState");
+    expect(debugResetPanelSource).toContain("resetClearRuntimeStateHint");
+    expect(debugResetPanelSource).toContain("resetDirectSession");
+    expect(debugResetPanelSource).toContain("resetDirectSessionHint");
+    expect(debugResetPanelSource).toContain("resetPersonaProfile");
+    expect(debugResetPanelSource).toContain("resetPersonaProfileHint");
+    expect(debugResetPanelSource).toContain("resetTaskProfile");
+    expect(debugResetPanelSource).toContain("resetTaskProfileHint");
+    expect(debugResetPanelSource).toContain("resetToolPolicy");
+    expect(debugResetPanelSource).toContain("resetToolPolicyHint");
+    expect(debugResetPanelSource).toContain("resetMemoryPolicy");
+    expect(debugResetPanelSource).toContain("resetMemoryPolicyHint");
+    expect(debugResetPanelSource).toContain("resetRuntimePolicy");
+    expect(debugResetPanelSource).toContain("resetRuntimePolicyHint");
+    expect(debugResetPanelSource).toContain("styles.resetOptionField");
     expect(routeSource).toContain("queryKeys.agentRuntimeEvidence(agent.agentId)");
     expect(routeSource).toContain("selectedAgent.status !== \"archived\"");
-    expect(routeSource).toContain("isDisabled={!canResetAgent || selectedAgentResetPending}");
-    expect(routeSource).toContain("selectedAgentResetPending ? copy.resettingAgent : copy.resetAgent");
+    expect(debugResetPanelSource).toContain("isDisabled={!canReset || pending}");
+    expect(debugResetPanelSource).toContain("pending ? copy.resettingAgent : copy.resetAgent");
     expect(routeSource).not.toContain("!canResetAgent || resetAgentMutation.isPending");
     expect(styles.resetZone).toBeTruthy();
     expect(styles.resetOptionGrid).toBeTruthy();
@@ -1170,6 +1180,7 @@ describe("AgentsRoute layout contract", () => {
     const editorActionBlocks = [
       ...sourceBlocksForStyle("editorActions"),
       ...sourceBlocksForStyle("editorActions", archiveZonePanelSource),
+      ...sourceBlocksForStyle("editorActions", debugResetPanelSource),
       ...sourceBlocksForStyle("editorActions", toolSummaryPanelSource),
     ];
     const deepLinkActionBlocks = sourceBlocksForStyle("configDeepLinkRow");
