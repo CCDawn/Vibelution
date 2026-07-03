@@ -1256,6 +1256,8 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute tokenStatusMetric_missing min-w-0",
   tokenStatusMetric_modelInput:
     "vui-routes-chatcodingroute tokenStatusMetric_modelInput border-[color-mix(in_srgb,var(--state-success)_22%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-success)_7%,var(--vui-control-muted))]",
+  tokenStatusMetric_speed:
+    "vui-routes-chatcodingroute tokenStatusMetric_speed border-[color-mix(in_srgb,var(--accent-cool)_22%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_6%,var(--vui-control-muted))]",
   tokenStatusMetric_moose:
     "vui-routes-chatcodingroute tokenStatusMetric_moose min-w-0",
   tokenStatusMetric_muted:
