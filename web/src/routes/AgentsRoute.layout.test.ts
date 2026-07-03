@@ -30,6 +30,10 @@ const configPrimaryPanePanelSource = readFileSync(
   new URL("./AgentConfigPrimaryPanePanel.tsx", import.meta.url),
   "utf-8",
 );
+const configPolicyPanePanelSource = readFileSync(
+  new URL("./AgentConfigPolicyPanePanel.tsx", import.meta.url),
+  "utf-8",
+);
 const createPanelSource = readFileSync(
   new URL("./AgentCreatePanel.tsx", import.meta.url),
   "utf-8",
@@ -784,8 +788,9 @@ describe("AgentsRoute layout contract", () => {
     expect(toolSummaryPanelSource).toContain("copy.toolPolicyTitle");
     expect(routeSource).toContain("toolPolicySourceLine");
     expect(routeSource).toContain("toolPolicySource?.description");
-    expect(routeSource).toContain("<AgentToolSummaryPanel");
-    expect(routeSource).toContain("onConfigure={() => navigate(selectedAgentToolConfigRoute)}");
+    expect(routeSource).toContain("<AgentConfigPolicyPanePanel");
+    expect(configPolicyPanePanelSource).toContain("<AgentToolSummaryPanel");
+    expect(routeSource).toContain("onConfigure: () => navigate(selectedAgentToolConfigRoute)");
     expect(toolSummaryPanelSource).toContain("工具能力已迁移到 Agent 管理的工具页集中配置");
     expect(toolSummaryPanelSource).toContain("配置工具能力");
     expect(toolSummaryPanelSource).toContain("onPress={onConfigure}");
@@ -819,7 +824,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("onOpenModelConfig: () => navigate(selectedAgentModelConfigRoute)");
     expect(coreConfigPanelSource).toContain("onPress={onOpenModelConfig}");
     expect(routeSource).toContain("onOpenContextConfig: () => navigate(selectedAgentContextConfigRoute)");
-    expect(routeSource).toContain("onOpenMemoryPage={() => navigate(selectedAgentMemoryConfigRoute)}");
+    expect(routeSource).toContain("onOpenMemoryPage: () => navigate(selectedAgentMemoryConfigRoute)");
     expect(coreConfigPanelSource).toContain("去模型库配置");
     expect(contextCompressionPanelSource).toContain("去上下文配置");
     expect(memoryPolicyPanelSource).toContain("去记忆页配置");
@@ -850,13 +855,13 @@ describe("AgentsRoute layout contract", () => {
 
   it("edits Agent memory policy from the same detail card", () => {
     expect(routeSource).toContain("AgentMemoryPolicyDraft");
-    expect(routeSource).toContain("<AgentMemoryPolicyPanel");
-    expect(routeSource).toContain("draft={memoryPolicyDraft}");
-    expect(routeSource).toContain("memoryGroupOptions={memoryGroupOptions}");
-    expect(routeSource).toContain("onDraftChange={updateMemoryDraftField}");
-    expect(routeSource).toContain("onAddMemoryGroup={addMemoryGroup}");
-    expect(routeSource).toContain("onAddKnowledgeBaseId={addKnowledgeBaseId}");
-    expect(routeSource).toContain("onSave={saveMemoryPolicy}");
+    expect(configPolicyPanePanelSource).toContain("<AgentMemoryPolicyPanel");
+    expect(routeSource).toContain("draft: memoryPolicyDraft");
+    expect(routeSource).toContain("memoryGroupOptions,");
+    expect(routeSource).toContain("onDraftChange: updateMemoryDraftField");
+    expect(routeSource).toContain("onAddMemoryGroup: addMemoryGroup");
+    expect(routeSource).toContain("onAddKnowledgeBaseId: addKnowledgeBaseId");
+    expect(routeSource).toContain("onSave: saveMemoryPolicy");
     expect(memoryPolicyPanelSource).toContain("copy.memoryPolicyTitle");
     expect(routeSource).toContain("memoryPolicy: {");
     expect(routeSource).toContain("readSharedGroups: sortedIds(payload.draft.readSharedGroups)");
