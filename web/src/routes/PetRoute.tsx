@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import type { CSSProperties } from "react";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -12,6 +13,9 @@ const ACHIEVEMENT_LABEL_KEYS = {
   level_10: "petAchievementLevel10",
 } as const;
 
+type PetProgressStyle = CSSProperties & {
+  "--pet-progress": string;
+};
 
 export function PetRoute() {
   const { t } = useAppI18n();
@@ -22,6 +26,9 @@ export function PetRoute() {
 
   const pet = petQuery.data;
   const progress = pet ? Math.round((pet.exp / pet.expToNext) * 100) : 0;
+  const progressStyle: PetProgressStyle = {
+    "--pet-progress": `${progress}%`,
+  };
   const avatarPresetLabel = petAvatarPresetLabel(t, pet?.avatarPreset);
 
   return (
@@ -74,7 +81,7 @@ export function PetRoute() {
         <article className={styles.cardClass}>
           <p className={styles.cardTitleClass}>{t("progress")}</p>
           <div className={styles.progressTrackClass}>
-            <div className={styles.progressFillClass} style={{ width: `${progress}%` }} />
+            <div className={styles.progressFillClass} style={progressStyle} />
           </div>
           <p className={styles.supportTextClass}>
             {pet?.exp ?? 0} / {pet?.expToNext ?? 0} {t("exp")}

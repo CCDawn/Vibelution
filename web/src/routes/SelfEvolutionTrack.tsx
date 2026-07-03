@@ -15,7 +15,7 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
-import { type PointerEvent as ReactPointerEvent, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, type PointerEvent as ReactPointerEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -44,6 +44,10 @@ import { useAppI18n } from "../i18n/useAppI18n";
 import { getPetAvatarSymbol } from "./chatCompactPanel";
 import { agentCenterConfigRoute } from "./agentCenterRoutes";
 import { selfEvolutionTrackStyles as styles } from "./SelfEvolutionTrack.styles";
+
+type PetVitalFillStyle = CSSProperties & {
+  "--self-vital-progress": string;
+};
 
 type SelfEvolutionTrackProps = {
   overview?: SelfEvolutionOverview;
@@ -2069,7 +2073,10 @@ export function SelfEvolutionTrack({
                         <span className={styles.secondaryPill}>{vital.value}</span>
                       </div>
                       <div className={styles.vitalTrack}>
-                        <div className={styles.vitalFill} style={{ width: `${vital.value}%` }} />
+                        <div
+                          className={styles.vitalFill}
+                          style={{ "--self-vital-progress": `${vital.value}%` } as PetVitalFillStyle}
+                        />
                       </div>
                     </div>
                   ))}
