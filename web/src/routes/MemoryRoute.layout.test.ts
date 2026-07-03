@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import routeSource from "./MemoryRoute.tsx?raw";
 import overviewPanelSource from "./MemoryOverviewPanel.tsx?raw";
+import projectMemoryQueuePanelSource from "./MemoryProjectMemoryQueuePanel.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
 import appShellSource from "../app/AppShell.tsx?raw";
 import graphCanvasSource from "./MemoryGraphCanvas.tsx?raw";
@@ -82,7 +83,15 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("copy.projectMemoryQueue");
     expect(routeSource).toContain("copy.projectMemoryQueueApply");
     expect(routeSource).toContain("copy.projectMemoryQueueConflict");
-    expect(routeSource).toContain("renderProjectMemoryQueue()");
+    expect(routeSource).toContain('import { MemoryProjectMemoryQueuePanel } from "./MemoryProjectMemoryQueuePanel"');
+    expect(routeSource).toContain("<MemoryProjectMemoryQueuePanel");
+    expect(routeSource).not.toContain("const renderProjectMemoryQueue = () => {");
+    expect(projectMemoryQueuePanelSource).toContain("export function MemoryProjectMemoryQueuePanel");
+    expect(projectMemoryQueuePanelSource).toContain("className={styles.projectMemoryQueuePanel}");
+    expect(projectMemoryQueuePanelSource).toContain("VNativeInput");
+    expect(projectMemoryQueuePanelSource).not.toContain("useQuery");
+    expect(projectMemoryQueuePanelSource).not.toContain("useMutation");
+    expect(projectMemoryQueuePanelSource).not.toContain("fetchJson");
     expect(memoryCssSource).toContain(".projectMemoryQueuePanel");
     expect(memoryCssSource).toContain(".projectMemoryProposalRow");
   });
@@ -588,7 +597,7 @@ describe("MemoryRoute layout contract", () => {
 
   it("keeps explanatory Memory platform copy out of persistent paragraphs", () => {
     expect(routeSource).toContain("meta={memoryViewSubtitle(copy, forcedView)}");
-    expect(routeSource).toContain('title={copy.projectMemoryQueueHint}');
+    expect(projectMemoryQueuePanelSource).toContain('title={copy.projectMemoryQueueHint}');
     expect(overviewPanelSource).toContain('title={copy.reviewQueueHint}');
     expect(routeSource).toContain('title={copy.knowledgeSubtitle}');
     expect(routeSource).toContain('title={copy.knowledgeHint}');
