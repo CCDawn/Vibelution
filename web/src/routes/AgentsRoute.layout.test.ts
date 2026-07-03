@@ -18,6 +18,10 @@ const bulkConfigPanelSource = readFileSync(
   new URL("./AgentBulkConfigPanel.tsx", import.meta.url),
   "utf-8",
 );
+const archiveZonePanelSource = readFileSync(
+  new URL("./AgentArchiveZonePanel.tsx", import.meta.url),
+  "utf-8",
+);
 const filterRailSource = readFileSync(
   new URL("../components/vui/product/agent-management/AgentFilterRail.tsx", import.meta.url),
   "utf-8",
@@ -349,10 +353,12 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('const canPurgeAgent = Boolean(selectedAgent?.agentId && selectedAgent.status === "archived" && !selectedAgentProtected)');
     expect(routeSource).toContain('agent.status !== "archived"');
     expect(routeSource).toContain("copy.bulkSkippedActive");
-    expect(routeSource).toContain("selectedAgent.status !== \"archived\" ? (");
-    expect(routeSource).toContain("onPress={archiveSelectedAgent}");
-    expect(routeSource).toContain("onPress={purgeSelectedAgent}");
-    expect(routeSource).toContain('variant="danger"');
+    expect(routeSource).toContain("onArchive={archiveSelectedAgent}");
+    expect(routeSource).toContain("onPurge={purgeSelectedAgent}");
+    expect(archiveZonePanelSource).toContain("!isArchived ? (");
+    expect(archiveZonePanelSource).toContain("onPress={onArchive}");
+    expect(archiveZonePanelSource).toContain("onPress={onPurge}");
+    expect(archiveZonePanelSource).toContain('variant="danger"');
     expect(routeSource).toContain("已彻底删除归档 Agent");
     expect(routeSource).not.toContain("const canPurgeAgent = Boolean(selectedAgent?.agentId && !selectedAgentProtected)");
   });
@@ -903,18 +909,19 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("archiveAgentMutation");
     expect(routeSource).toContain("method: \"DELETE\"");
     expect(routeSource).toContain("window.confirm");
-    expect(routeSource).toContain("copy.archiveAgent");
+    expect(archiveZonePanelSource).toContain("copy.archiveAgent");
     expect(routeSource).toContain("archivedWorkspaceCache");
     expect(routeSource).toContain("purgedWorkspaceCache");
     expect(routeSource).toContain("queryClient.setQueryData<AgentConfigWorkspace | undefined>");
     expect(routeSource).toContain("purgeAgentMutation");
     expect(routeSource).toContain("/purge");
-    expect(routeSource).toContain("copy.purgeAgent");
+    expect(archiveZonePanelSource).toContain("copy.purgeAgent");
     expect(routeSource).toContain("copy.maintenanceTitle");
     expect(routeSource).toContain("styles.maintenanceIntro");
     expect(routeSource).toContain("selectedAgent.status === \"archived\"");
-    expect(routeSource).toContain("styles.dangerZone");
-    expect(routeSource).toContain('variant="danger"');
+    expect(routeSource).toContain("<AgentArchiveZonePanel");
+    expect(archiveZonePanelSource).toContain("styles.dangerZone");
+    expect(archiveZonePanelSource).toContain('variant="danger"');
     expect(styles.maintenanceIntro).toBeTruthy();
   });
 
@@ -1000,10 +1007,10 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("separates protected core Agents from the destructive archive zone", () => {
-    expect(routeSource).toContain("copy.archiveProtection");
-    expect(routeSource).toContain("copy.archiveProtectionHint");
-    expect(routeSource).toContain("selectedAgentProtected ? styles.protectedZone : styles.dangerZone");
-    expect(routeSource).toContain("selectedAgentProtected ? <ShieldCheck");
+    expect(archiveZonePanelSource).toContain("copy.archiveProtection");
+    expect(archiveZonePanelSource).toContain("copy.archiveProtectionHint");
+    expect(archiveZonePanelSource).toContain("isProtected ? styles.protectedZone : styles.dangerZone");
+    expect(archiveZonePanelSource).toContain("isProtected ? <ShieldCheck");
     expect(routeSource).toContain("summary?.archivedAgentCount");
     expect(styles.protectedZone).toBeTruthy();
   });
@@ -1162,6 +1169,7 @@ describe("AgentsRoute layout contract", () => {
   it("renders Agent editor action rows through VUI buttons instead of page-owned button CSS", () => {
     const editorActionBlocks = [
       ...sourceBlocksForStyle("editorActions"),
+      ...sourceBlocksForStyle("editorActions", archiveZonePanelSource),
       ...sourceBlocksForStyle("editorActions", toolSummaryPanelSource),
     ];
     const deepLinkActionBlocks = sourceBlocksForStyle("configDeepLinkRow");
