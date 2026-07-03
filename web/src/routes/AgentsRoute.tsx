@@ -51,7 +51,6 @@ import {
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import {
   AgentBulkActionBar,
-  AgentDenseList,
   AgentFilterRail,
   AgentPageHeader,
   AgentSummaryStrip,
@@ -60,7 +59,7 @@ import {
   type AgentFilterSectionView,
   type AgentSummaryMetric,
 } from "../components/vui/product/agent-management";
-import { VButton, VChip, VEmptyState, VHStack, VNativeSelect, VPanelHeader } from "../components/vui";
+import { VButton, VChip, VHStack, VNativeSelect, VPanelHeader } from "../components/vui";
 import { vuiFormLabelClass } from "../components/vui/forms/formClasses";
 import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
@@ -84,6 +83,7 @@ import { AgentDebugResetPanel, type AgentResetOptions } from "./AgentDebugResetP
 import { AgentDetailHeaderPanel } from "./AgentDetailHeaderPanel";
 import { AgentEmptySelectionPanel } from "./AgentEmptySelectionPanel";
 import { AgentHealthMaintenancePanel } from "./AgentHealthMaintenancePanel";
+import { AgentListStatePanel } from "./AgentListStatePanel";
 import { AgentMemoryPolicyPanel, type AgentMemoryPolicyDraft } from "./AgentMemoryPolicyPanel";
 import { AgentModeMembershipPanel, type AgentModeMembershipDraft } from "./AgentModeMembershipPanel";
 import { AgentManagementNav } from "./AgentManagementNav";
@@ -5843,34 +5843,31 @@ export function AgentsRoute() {
               destructiveActions={bulkDestructiveActions}
             />
           ) : null}
-          {workspaceQuery.isError ? (
-            <VEmptyState icon={<AlertTriangle size={22} />} title={copy.loadFailed}>
-              {workspaceQuery.error instanceof Error ? workspaceQuery.error.message : String(workspaceQuery.error)}
-            </VEmptyState>
-          ) : workspaceQuery.isPending && !workspace ? (
-            <VEmptyState icon={<RefreshCw size={22} />} title={copy.loading} />
-          ) : visibleAgents.length === 0 ? (
-            <VEmptyState icon={<Bot size={22} />} title={copy.noAgents} />
-          ) : (
-            <AgentDenseList
-              columns={denseColumns}
-              columnLabels={{
-                agent: "Agent",
-                model: copy.model,
-                prompt: copy.prompt,
-                runtime: copy.runtimeStatus,
-                modes: copy.modeMembership,
-                reminders: copy.statusReminders,
-              }}
-              onSelectRow={(rowId, event) => {
-                const agent = agentRowLookup.get(rowId);
-                if (agent) {
-                  handleAgentRowSelect(agent, event);
-                }
-              }}
-              onToggleBulk={(rowId, checked, shiftKey) => toggleBulkAgent(rowId, checked, shiftKey)}
-            />
-          )}
+          <AgentListStatePanel
+            copy={{
+              loadFailed: copy.loadFailed,
+              loading: copy.loading,
+              noAgents: copy.noAgents,
+              model: copy.model,
+              prompt: copy.prompt,
+              runtimeStatus: copy.runtimeStatus,
+              modeMembership: copy.modeMembership,
+              statusReminders: copy.statusReminders,
+            }}
+            columns={denseColumns}
+            visibleAgentCount={visibleAgents.length}
+            isError={workspaceQuery.isError}
+            error={workspaceQuery.error}
+            isPending={workspaceQuery.isPending}
+            hasWorkspace={Boolean(workspace)}
+            onSelectRow={(rowId, event) => {
+              const agent = agentRowLookup.get(rowId);
+              if (agent) {
+                handleAgentRowSelect(agent, event);
+              }
+            }}
+            onToggleBulk={(rowId, checked, shiftKey) => toggleBulkAgent(rowId, checked, shiftKey)}
+          />
         </AgentWorkspacePanel>
 
         <AgentWorkspacePanel

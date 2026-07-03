@@ -94,6 +94,10 @@ const emptySelectionPanelSource = readFileSync(
   new URL("./AgentEmptySelectionPanel.tsx", import.meta.url),
   "utf-8",
 );
+const listStatePanelSource = readFileSync(
+  new URL("./AgentListStatePanel.tsx", import.meta.url),
+  "utf-8",
+);
 const returnBannerPanelSource = readFileSync(
   new URL("./AgentReturnBannerPanel.tsx", import.meta.url),
   "utf-8",
@@ -225,7 +229,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("<AgentFilterRail");
     expect(routeSource).toContain("styles.agentPanel");
     expect(routeSource).toContain("styles.detailPanel");
-    expect(routeSource).toContain("<AgentDenseList");
+    expect(routeSource).toContain("<AgentListStatePanel");
+    expect(listStatePanelSource).toContain("<AgentDenseList");
     expect(routeSource).toContain("agent.avatarImageUrl");
     expect(routeSource).toContain("<AgentDetailHeaderPanel");
     expect(detailHeaderPanelSource).toContain("AgentAvatarEditorPanel");
@@ -898,7 +903,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.nonSessionAgentColumn");
     expect(routeSource).toContain("nonSessionAgents = agents.filter((agent) => !isWorkSessionAgent(agent))");
     expect(routeSource).toContain("buildVisibleAgentColumns(visibleAgents, copy, teamIndexGroups)");
-    expect(routeSource).toContain("<AgentDenseList");
+    expect(listStatePanelSource).toContain("<AgentDenseList");
     expect(denseListSource).toContain('data-vui-product="agent-dense-list"');
     expect(routeSource).toContain("非会话 Agent");
     expect(routeSource).toContain("Non-session Agents");
