@@ -70,6 +70,7 @@ import { MemoryAgentMemoryPanel } from "./MemoryAgentMemoryPanel";
 import { MemoryCleanupPanel } from "./MemoryCleanupPanel";
 import { MemoryDetailPanel } from "./MemoryDetailPanel";
 import { MemoryEffectivePanel } from "./MemoryEffectivePanel";
+import { MemoryKnowledgeBaseSidebar } from "./MemoryKnowledgeBaseSidebar";
 import { MemoryKnowledgeModeTabs } from "./MemoryKnowledgeModeTabs";
 import { MemoryKnowledgePipelinePanel } from "./MemoryKnowledgePipelinePanel";
 import { MemoryKnowledgeRagPanel } from "./MemoryKnowledgeRagPanel";
@@ -4436,65 +4437,24 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         </section>
       ) : null}
       <div className={`${styles.workspace} ${styles.knowledgeWorkspace}`}>
-        <aside className={styles.sourcePanel}>
-          <div className={styles.panelHeader}>
-            <div>
-              <p className={styles.panelEyebrow}>{copy.teamKnowledge}</p>
-              <h2>{copy.knowledgeBases}</h2>
-            </div>
-            <span className={styles.countPill}>{knowledgeBases.length}</span>
-          </div>
-          <section className={styles.governanceMiniPanel} aria-label={copy.toolVisibility} title={copy.knowledgeHint}>
-            <strong>{copy.toolVisibility}</strong>
-            {(() => {
-              const tools = Object.values(permissionAudit?.tools ?? {});
-              const visibleTools = tools.filter((tool) => tool.visible);
-              const hiddenTools = tools.filter((tool) => !tool.visible);
-              return (
-                <>
-                  <span className={styles.statusPill} title={visibleTools.map((tool) => tool.toolName).join("\n")}>
-                    {copy.yes}: {visibleTools.length}
-                  </span>
-                  <span
-                    className={hiddenTools.length ? styles.statusPillMuted : styles.statusPill}
-                    title={hiddenTools.map((tool) => `${tool.toolName}: ${tool.reason}`).join("\n")}
-                  >
-                    {copy.missing}: {hiddenTools.length}
-                  </span>
-                </>
-              );
-            })()}
-          </section>
-          {knowledgeDashboardSnapshotQuery.isPending ? <div className={styles.emptyState}>{copy.loading}</div> : null}
-          {!knowledgeDashboardSnapshotQuery.isPending && !knowledgeBases.length ? (
-            <section className={styles.emptyDetail}>
-              <Database size={22} />
-              <strong>{copy.noKnowledgeBases}</strong>
-            </section>
-          ) : null}
-          <nav className={styles.sourceList} aria-label={copy.knowledgeBases}>
-            {knowledgeBases.map((base) => {
-              const requestId = knowledgeBaseRequestId(base);
-              return (
-                <VButton
-                  key={requestId}
-                  type="button"
-                  className={requestId === activeKnowledgeBaseForItems ? `${styles.sourceButton} ${styles.sourceButtonActive}` : styles.sourceButton}
-                  onClick={() => setActiveKnowledgeBaseId(requestId)}
-                >
-                  <span className={styles.sourceIcon}>
-                    <Database size={15} />
-                  </span>
-                  <span className={styles.sourceCopy}>
-                    <strong>{base.name}</strong>
-                    <span>{base.teamName || base.teamId}</span>
-                  </span>
-                  <span className={styles.sourceStats}>{base.stats.itemCount}/{base.stats.pendingProposalCount}</span>
-                </VButton>
-              );
-            })}
-          </nav>
-        </aside>
+        <MemoryKnowledgeBaseSidebar
+          copy={copy}
+          bases={knowledgeBases.map((base) => ({
+            requestId: knowledgeBaseRequestId(base),
+            name: base.name,
+            teamLabel: base.teamName || base.teamId,
+            itemCount: base.stats.itemCount,
+            pendingProposalCount: base.stats.pendingProposalCount,
+          }))}
+          permissionTools={Object.values(permissionAudit?.tools ?? {}).map((tool) => ({
+            toolName: tool.toolName,
+            visible: tool.visible,
+            reason: tool.reason,
+          }))}
+          activeBaseRequestId={activeKnowledgeBaseForItems}
+          isLoading={knowledgeDashboardSnapshotQuery.isPending}
+          onSelectBase={setActiveKnowledgeBaseId}
+        />
 
         <main className={styles.knowledgeMain}>
           <MemoryKnowledgeModeTabs
