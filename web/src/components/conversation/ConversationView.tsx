@@ -33,12 +33,11 @@ import {
   conversationMessageToAgentMessage,
 } from "../../agent-thread/adapters";
 import type {
-  AgentAttachmentPart,
   AgentMentalPart,
-  AgentReferencePart,
 } from "../../agent-thread/types";
 import { fetchJson } from "../../api/client";
 import { useAppI18n } from "../../i18n/useAppI18n";
+import { AgentContextSectionsView } from "./AgentContextSectionsView";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
 import { buildAgentMessageRenderState } from "./agentMessageRenderState";
 import { COMPOSER_SESSION_REFERENCE_MIME } from "./conversationConstants";
@@ -71,7 +70,6 @@ import {
   isRuntimeNoticeMessage,
   isTurnErrorMessage,
   researchOrgMessageChips,
-  type AgentMessageContextSection,
   type AgentMessageProcessSection,
   type AgentMessageSectionState,
 } from "./messageSections";
@@ -3397,102 +3395,6 @@ export function ConversationView({
     );
   }
 
-  function renderAgentContextSections(sections: AgentMessageContextSection[]) {
-    if (!sections.length) {
-      return null;
-    }
-    const renderedSections = sections
-      .map((section) => {
-        const attachmentNodes = section.parts
-          .filter((part): part is AgentAttachmentPart => part.type === "attachment")
-          .map(renderAgentContextAttachmentPart)
-          .filter(isNonNullNode);
-        const referenceNodes = section.parts
-          .filter((part): part is AgentReferencePart => part.type === "reference")
-          .map(renderAgentContextReferencePart)
-          .filter(isNonNullNode);
-        const renderedPartCount = attachmentNodes.length + referenceNodes.length;
-        if (renderedPartCount <= 0) {
-          return null;
-        }
-        return (
-          <div
-            key={section.id}
-            className={styles.userContextSection}
-            data-agent-context-section-id={section.id}
-            data-agent-context-part-count={renderedPartCount}
-          >
-            {attachmentNodes.length ? (
-              <div className={styles.userAttachmentGrid}>
-                {attachmentNodes}
-              </div>
-            ) : null}
-            {referenceNodes.length ? (
-              <div className={styles.userContextReferences}>
-                {referenceNodes}
-              </div>
-            ) : null}
-          </div>
-        );
-      })
-      .filter(isNonNullNode);
-    return renderedSections.length ? <>{renderedSections}</> : null;
-  }
-
-  function renderAgentContextAttachmentPart(part: AgentAttachmentPart) {
-    const attachment = part.attachment;
-    const imageUrl = attachment.imageUrl || attachment.url;
-    if (!imageUrl) {
-      return null;
-    }
-    const downloadLabel = lang === "zh" ? "下载图片" : "Download image";
-    const filename = attachment.filename || attachment.artifactId || (lang === "zh" ? "图片" : "Image");
-    return (
-      <figure
-        key={part.id}
-        className={styles.userAttachment}
-        data-agent-context-part-id={part.id}
-        data-agent-context-part-type={part.type}
-      >
-        <img className={styles.userAttachmentImage} src={imageUrl} alt={filename} loading="lazy" />
-        <figcaption className={styles.userAttachmentMeta}>
-          <span>{filename}</span>
-          <a
-            className={styles.imageDownloadButton}
-            href={attachment.downloadUrl || imageUrl}
-            download={attachment.artifactId || true}
-            title={downloadLabel}
-            aria-label={downloadLabel}
-          >
-            <Download size={14} />
-          </a>
-        </figcaption>
-      </figure>
-    );
-  }
-
-  function renderAgentContextReferencePart(part: AgentReferencePart) {
-    const reference = part.reference;
-    const title = reference.title || reference.sessionId || (lang === "zh" ? "会话引用" : "Session reference");
-    const agentLabel = reference.agentDisplayName || reference.agentCode || reference.agentId || "";
-    return (
-      <div
-        key={part.id}
-        className={styles.composerReferenceChip}
-        data-agent-context-part-id={part.id}
-        data-agent-context-part-type={part.type}
-      >
-        <span className={styles.composerReferenceIcon} aria-hidden="true">
-          <Link2 size={13} />
-        </span>
-        <span className={styles.composerReferenceCopy}>
-          {title}
-          {agentLabel ? <span> · {agentLabel}</span> : null}
-        </span>
-      </div>
-    );
-  }
-
   function isNonNullNode<T>(node: T | null): node is T {
     return node !== null;
   }
@@ -3842,7 +3744,9 @@ export function ConversationView({
             const agentInboxExpanded = getExpansionState(message.id, "agentInbox", false);
             const agentInboxPreview = agentInboxMessage ? compactPreview(agentInboxSummary(message), 140) : "";
             const researchOrgChips = researchOrgMessageChips(message);
-            const contextNode = renderAgentContextSections(agentRenderState.contextSections);
+            const contextNode = (
+              <AgentContextSectionsView sections={agentRenderState.contextSections} lang={lang} />
+            );
             const turnClassName = [
               groupTranscriptMessage
                 ? styles.groupTranscriptTurn
