@@ -600,7 +600,10 @@ def create_key_tools() -> List[BaseTool]:
             record_limit: 每页原始 DataRecord 数量，默认 5；资料提炼阶段应逐页读完
             candidate_offset: 候选资料分页起点，默认 0；下一页用 candidatePage.nextOffset
             candidate_limit: 每页候选资料数量，默认 5；阶段 Agent 应逐页读完
-            context_mode: compact 或 full；默认 compact，避免工具结果被通用截断
+            context_mode: compact/full/minimal/retry_missing；默认 compact。
+                minimal 只返回真实 ID、标题和 locator，避免旧提炼摘要污染本轮证据；
+                retry_missing 只返回上一轮未覆盖的 candidateId/recordId，用于缺口重试；
+                full 仅在确实需要完整上下文时使用。
 
         Returns:
             JSON 字符串，包含 counts、recordPage、candidatePage、真实 recordId/candidateId、records、candidates、excludedSourceSummary、writebackContract 和边界

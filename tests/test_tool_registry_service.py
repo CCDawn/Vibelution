@@ -153,6 +153,8 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     assert "candidate_offset" in key_tools_source
     assert "candidate_limit" in key_tools_source
     assert "context_mode" in key_tools_source
+    assert "minimal" in key_tools_source
+    assert "retry_missing" in key_tools_source
     stage_writeback_tool = next(item for item in payload["tools"] if item["name"] == "source_collection_stage_writeback_tool")
     assert stage_writeback_tool["source"] == "built_in"
     assert stage_writeback_tool["category"] == "media_research"
