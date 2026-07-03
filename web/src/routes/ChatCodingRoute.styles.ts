@@ -989,11 +989,11 @@ const styles: Record<string, string> = {
   sessionBindingNotice:
     "vui-routes-chatcodingroute sessionBindingNotice min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5",
   sessionContextMenu:
-    "vui-routes-chatcodingroute sessionContextMenu min-w-0 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+    "vui-routes-chatcodingroute sessionContextMenu fixed z-[80] grid w-[188px] max-w-[calc(100vw-24px)] content-start gap-1 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] p-1 text-[var(--fg-primary)] shadow-[var(--vui-shadow-hairline)] backdrop-blur",
   sessionContextMenuDanger:
-    "vui-routes-chatcodingroute sessionContextMenuDanger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+    "vui-routes-chatcodingroute sessionContextMenuDanger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   sessionContextMenuItem:
-    "vui-routes-chatcodingroute sessionContextMenuItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)] [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents [&_[data-slot=vui-button-label]]:col-span-full",
+    "vui-routes-chatcodingroute sessionContextMenuItem min-w-0 !w-full justify-start rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-2 py-1.5 text-left text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents [&_[data-slot=vui-button-label]]:col-span-full",
   sessionCurrentBadge:
     "vui-routes-chatcodingroute sessionCurrentBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
   sessionIconButton:
