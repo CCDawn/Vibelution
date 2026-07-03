@@ -5,7 +5,7 @@ import { projectConversationProcessMessages } from "./conversationProcessProject
 import {
   buildAgentMessageTimelineRowIdentities,
   type AgentMessageTimelineRowIdentity,
-} from "./conversationTimelineRows";
+} from "./agentMessageTimelineRows";
 
 export type AgentMessageTimelineProjectionInput = {
   timelineMessages: ConversationMessage[];

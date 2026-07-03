@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { existsSync } from "node:fs";
 
 import { ConversationMessage } from "../../api/types";
 import { conversationMessageToAgentMessage } from "../../agent-thread/adapters";
 import type { AgentMessage } from "../../agent-thread";
 import { buildAgentMessageOperations } from "./conversationOperations";
-import conversationTimelineSource from "./conversationTimeline.ts?raw";
-import { buildAgentMessageTimelineItems, type AgentMessageTimelineOptions } from "./conversationTimeline";
+import agentMessageTimelineSource from "./agentMessageTimeline.ts?raw";
+import { buildAgentMessageTimelineItems, type AgentMessageTimelineOptions } from "./agentMessageTimeline";
 
 const labels = {
   thought: "思考",
@@ -26,29 +27,34 @@ function timelineItemsForConversationMessage(
   );
 }
 
-describe("conversationTimeline", () => {
+describe("agentMessageTimeline", () => {
+  it("keeps the AgentMessage timeline module on AgentMessage-named files", () => {
+    expect(existsSync(new URL("./agentMessageTimeline.ts", import.meta.url))).toBe(true);
+    expect(existsSync(new URL("./conversationTimeline.ts", import.meta.url))).toBe(false);
+  });
+
   it("names timeline item contracts after the AgentMessage timeline model", () => {
-    expect(conversationTimelineSource).toContain("export type AgentMessageTimelineItemStatus");
-    expect(conversationTimelineSource).toContain("export type AgentMessageTimelineItem =");
-    expect(conversationTimelineSource).toContain("export type AgentMessageTimelineOptions");
-    expect(conversationTimelineSource).not.toContain("export type ConversationTimelineItemStatus");
-    expect(conversationTimelineSource).not.toContain("export type ConversationThoughtTimelineItem");
-    expect(conversationTimelineSource).not.toContain("export type ConversationAssistantTextTimelineItem");
-    expect(conversationTimelineSource).not.toContain("export type ConversationCommandGroupTimelineItem");
-    expect(conversationTimelineSource).not.toContain("export type ConversationTimelineItem =");
-    expect(conversationTimelineSource).not.toContain("export type ConversationTimelineOptions");
+    expect(agentMessageTimelineSource).toContain("export type AgentMessageTimelineItemStatus");
+    expect(agentMessageTimelineSource).toContain("export type AgentMessageTimelineItem =");
+    expect(agentMessageTimelineSource).toContain("export type AgentMessageTimelineOptions");
+    expect(agentMessageTimelineSource).not.toContain("export type ConversationTimelineItemStatus");
+    expect(agentMessageTimelineSource).not.toContain("export type ConversationThoughtTimelineItem");
+    expect(agentMessageTimelineSource).not.toContain("export type ConversationAssistantTextTimelineItem");
+    expect(agentMessageTimelineSource).not.toContain("export type ConversationCommandGroupTimelineItem");
+    expect(agentMessageTimelineSource).not.toContain("export type ConversationTimelineItem =");
+    expect(agentMessageTimelineSource).not.toContain("export type ConversationTimelineOptions");
   });
 
   it("names operation timeline items after the AgentMessage operation model", () => {
-    expect(conversationTimelineSource).toContain("AgentMessageOperationTimelineItem");
-    expect(conversationTimelineSource).not.toContain("ConversationOperationTimelineItem");
+    expect(agentMessageTimelineSource).toContain("AgentMessageOperationTimelineItem");
+    expect(agentMessageTimelineSource).not.toContain("ConversationOperationTimelineItem");
   });
 
   it("keeps the AgentMessage timeline model decoupled from API timeline DTO imports", () => {
-    expect(conversationTimelineSource).toContain("export type AgentMessageTimelineServerItem");
-    expect(conversationTimelineSource).not.toContain("../../api/types");
-    expect(conversationTimelineSource).not.toContain("ApiConversationTimelineItem");
-    expect(conversationTimelineSource).not.toContain("ConversationTimelineItem as");
+    expect(agentMessageTimelineSource).toContain("export type AgentMessageTimelineServerItem");
+    expect(agentMessageTimelineSource).not.toContain("../../api/types");
+    expect(agentMessageTimelineSource).not.toContain("ApiConversationTimelineItem");
+    expect(agentMessageTimelineSource).not.toContain("ConversationTimelineItem as");
   });
 
   it("builds timeline items from AgentMessage parts", () => {
@@ -81,7 +87,7 @@ describe("conversationTimeline", () => {
           source: "feedback-event",
           name: "read_file_tool",
           status: "running",
-          summary: "读取 conversationTimeline.ts",
+          summary: "读取 agentMessageTimeline.ts",
           sequence: 3,
         },
         {
@@ -109,7 +115,7 @@ describe("conversationTimeline", () => {
       kind: "command_group",
       status: "running",
       title: "正在运行 2 条命令",
-      summary: "搜索 timeline 调用；读取 conversationTimeline.ts",
+      summary: "搜索 timeline 调用；读取 agentMessageTimeline.ts",
     });
     expect(items[2]).toMatchObject({
       kind: "assistant_text",

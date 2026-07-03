@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 import type { ConversationMessage } from "../../api/types";
-import { projectAgentMessageTimelineMessages } from "./useConversationTimelineProjection";
+import { projectAgentMessageTimelineMessages } from "./useAgentMessageTimelineProjection";
 
-const projectionSource = readFileSync(new URL("./useConversationTimelineProjection.ts", import.meta.url), "utf8");
+const projectionSource = readFileSync(new URL("./useAgentMessageTimelineProjection.ts", import.meta.url), "utf8");
 
 function assistantMessage(
   id: string,
@@ -21,6 +21,11 @@ function assistantMessage(
 }
 
 describe("projectAgentMessageTimelineMessages", () => {
+  it("keeps active-turn projection on an AgentMessage-named hook module", () => {
+    expect(existsSync(new URL("./useAgentMessageTimelineProjection.ts", import.meta.url))).toBe(true);
+    expect(existsSync(new URL("./useConversationTimelineProjection.ts", import.meta.url))).toBe(false);
+  });
+
   it("exports the projection contract through AgentMessage timeline naming only", () => {
     expect(projectionSource).toContain("export type AgentMessageTimelineProjectionInput");
     expect(projectionSource).toContain("export type AgentMessageTimelineProjection =");

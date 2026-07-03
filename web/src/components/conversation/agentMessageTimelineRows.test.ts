@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 import type { ConversationMessage } from "../../api/types";
 import {
   agentMessageTimelineItemRowKey,
   buildAgentMessageTimelineRowIdentities,
-} from "./conversationTimelineRows";
+} from "./agentMessageTimelineRows";
 
-const timelineRowsSource = readFileSync(new URL("./conversationTimelineRows.ts", import.meta.url), "utf8");
+const timelineRowsSource = readFileSync(new URL("./agentMessageTimelineRows.ts", import.meta.url), "utf8");
 
 function assistantMessage(
   id: string,
@@ -23,7 +23,12 @@ function assistantMessage(
   };
 }
 
-describe("conversation timeline rows", () => {
+describe("AgentMessage timeline rows", () => {
+  it("keeps AgentMessage timeline row helpers on AgentMessage-named files", () => {
+    expect(existsSync(new URL("./agentMessageTimelineRows.ts", import.meta.url))).toBe(true);
+    expect(existsSync(new URL("./conversationTimelineRows.ts", import.meta.url))).toBe(false);
+  });
+
   it("exports row identity helpers through AgentMessage timeline naming only", () => {
     expect(timelineRowsSource).toContain("export type AgentMessageTimelineRowIdentity");
     expect(timelineRowsSource).toContain("export function buildAgentMessageTimelineRowIdentities");
