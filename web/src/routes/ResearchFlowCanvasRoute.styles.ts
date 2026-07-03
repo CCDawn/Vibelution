@@ -29,7 +29,7 @@ const styles: Record<string, string> = {
   body:
     "body min-w-0 grid h-full min-h-0 grid-cols-[minmax(0,1fr)_minmax(320px,380px)] gap-2 overflow-hidden text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-[1080px]:grid-cols-1 max-[1080px]:grid-rows-[minmax(420px,1fr)_minmax(260px,0.48fr)]",
   canvas:
-    "canvas min-w-0 grid min-h-0 gap-2 p-2",
+    "canvas min-w-0 grid min-h-0 gap-2 p-2 w-[var(--research-flow-canvas-width)] h-[var(--research-flow-canvas-height)] [transform:translate(var(--research-flow-canvas-offset-x),var(--research-flow-canvas-offset-y))_scale(var(--research-flow-canvas-zoom))]",
   canvasLocked:
     "canvasLocked min-w-0 grid min-h-0 gap-2 p-2",
   canvasPanning:
@@ -39,7 +39,7 @@ const styles: Record<string, string> = {
   canvasShell:
     "canvasShell min-w-0 grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)] gap-2 p-2",
   canvasViewport:
-    "canvasViewport min-w-0 grid min-h-full gap-2 p-2",
+    "canvasViewport min-w-0 grid min-h-full gap-2 p-2 w-[var(--research-flow-canvas-viewport-width)] h-[var(--research-flow-canvas-viewport-height)]",
   edge:
     "edge min-w-0",
   edgeActive:
