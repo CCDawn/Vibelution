@@ -6,7 +6,6 @@ import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-from config import Settings
 from core.llm.agent_runtime import config_for_agent_llm_model
 from core.orchestration.response_processor import ResponseProcessor
 from core.llm.client import LLMClient, _llm_provider_proxy_env, _ensure_no_proxy_for_local_base_url, llm_cancel_context
@@ -14,6 +13,7 @@ from core.llm.errors import classify_exception
 from core.llm.types import LLMError
 from core.llm.recovery import plan_recovery
 from core.llm.routing import attach_recovery_fallback, select_recovery_profile
+from tests.helpers.isolated_config import isolated_settings_config
 
 
 def make_config(**kwargs):
@@ -21,7 +21,7 @@ def make_config(**kwargs):
     kwargs.setdefault("llm.profiles.primary.streaming", True)
     kwargs.setdefault("llm.profiles.primary.tool_calling_mode", "auto")
     kwargs.setdefault("llm.profiles.primary.transport", "chat_completions")
-    return Settings(None, **kwargs).config
+    return isolated_settings_config(**kwargs)
 
 
 def test_litellm_payload_prefixes_minimax_model():

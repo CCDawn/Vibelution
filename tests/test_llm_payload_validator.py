@@ -1,11 +1,11 @@
-from config import Settings
 from core.llm.payload_validator import validate_payload_against_protocol
 from core.llm.protocol_resolver import resolve_model_protocol
+from tests.helpers.isolated_config import isolated_settings_config
 
 
 def make_config(**kwargs):
     kwargs.setdefault("llm.profiles.primary.transport", "chat_completions")
-    return Settings(None, **kwargs).config
+    return isolated_settings_config(**kwargs)
 
 
 def qwen_route():

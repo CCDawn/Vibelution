@@ -3,7 +3,6 @@ import json
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from config import Settings
 from core.infrastructure.llm_utils import build_cacheable_system_message
 from core.infrastructure.agent_session import reset_session_state
 from core.llm.client import LLMClient
@@ -24,12 +23,13 @@ from core.web.services.session_service import (
     _session_prompt_cache_partition,
     _session_prompt_cache_scope,
 )
+from tests.helpers.isolated_config import isolated_settings_config
 from tools.token_manager import EnhancedTokenCompressor
 
 
 def _make_config(**kwargs):
     kwargs.setdefault("llm.profiles.primary.transport", "chat_completions")
-    return Settings(None, **kwargs).config
+    return isolated_settings_config(**kwargs)
 
 
 def _reset_context_engine_project_root(tmp_path, monkeypatch):

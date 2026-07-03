@@ -3,11 +3,11 @@
 稳定运行档案测试
 """
 
-from config import Settings
 from config.profiles import apply_runtime_profile
+from tests.helpers.isolated_config import isolated_settings_config
 
 def make_config(**kwargs):
-    return Settings(None, **kwargs).config
+    return isolated_settings_config(**kwargs)
 
 
 def test_safe_local_profile_applies_local_guardrails():
