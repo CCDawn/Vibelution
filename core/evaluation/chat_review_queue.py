@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Tuple
 
 
 LEGACY_STATUS_MAP = {
@@ -14,6 +14,7 @@ LEGACY_STATUS_MAP = {
     "rejected": "discard",
     "discarded": "discard",
 }
+_REVIEW_ITEMS_CACHE: Dict[Path, Tuple[Tuple[int, int], List[Dict[str, Any]]]] = {}
 
 
 def _now_iso() -> str:
@@ -31,6 +32,7 @@ def append_queue_event(queue_path: Path, payload: Dict[str, Any]) -> None:
     queue_path.parent.mkdir(parents=True, exist_ok=True)
     with queue_path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    _REVIEW_ITEMS_CACHE.pop(queue_path.resolve(), None)
 
 
 def append_review_queue_candidate(candidate_payload: Dict[str, Any], queue_path: Path) -> None:
@@ -83,9 +85,20 @@ def iter_queue_events(queue_path: Path) -> Iterable[Dict[str, Any]]:
 
 
 def load_review_items(queue_path: Path) -> List[Dict[str, Any]]:
+    cache_key = queue_path.resolve()
+    try:
+        stat = cache_key.stat()
+    except FileNotFoundError:
+        _REVIEW_ITEMS_CACHE.pop(cache_key, None)
+        return []
+    cache_signature = (int(stat.st_mtime_ns), int(stat.st_size))
+    cached = _REVIEW_ITEMS_CACHE.get(cache_key)
+    if cached and cached[0] == cache_signature:
+        return [dict(item) for item in cached[1]]
+
     state: Dict[str, Dict[str, Any]] = {}
     order: List[str] = []
-    for event in iter_queue_events(queue_path):
+    for event in iter_queue_events(cache_key):
         candidate_id = str(event.get("candidate_id") or "").strip()
         if not candidate_id:
             continue
@@ -110,7 +123,8 @@ def load_review_items(queue_path: Path) -> List[Dict[str, Any]]:
 
     items = [state[item_id] for item_id in order if item_id in state]
     items.sort(key=lambda item: str(item.get("timestamp") or ""), reverse=True)
-    return items
+    _REVIEW_ITEMS_CACHE[cache_key] = (cache_signature, [dict(item) for item in items])
+    return [dict(item) for item in items]
 
 
 def list_review_items(queue_path: Path, *, status: str | None = None) -> List[Dict[str, Any]]:
