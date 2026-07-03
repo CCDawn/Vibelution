@@ -220,8 +220,8 @@ function legacyToolPartsForMessage(message: ConversationMessage): AgentToolCallP
     resultType: toolCall.resultType,
     resultLength: toolCall.resultLength,
     error: toolCall.error,
-    durationMs: toolCall.durationMs,
-    durationSeconds: toolCall.durationSeconds,
+    durationMs: optionalNumber(toolCall.durationMs),
+    durationSeconds: legacyToolDurationSeconds(toolCall),
     timeoutSeconds: toolCall.timeoutSeconds,
     transportStatus: toolCall.transportStatus,
     semanticStatus: toolCall.semanticStatus,
@@ -235,6 +235,22 @@ function legacyToolPartsForMessage(message: ConversationMessage): AgentToolCallP
     source: "legacy-tool-call",
     original: toolCall,
   }));
+}
+
+function legacyToolDurationSeconds(toolCall: ToolCall) {
+  return optionalNumber(toolCall.durationSeconds)
+    ?? optionalNumber((toolCall as ToolCall & { elapsedSeconds?: unknown }).elapsedSeconds);
+}
+
+function optionalNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
 }
 
 function textPartForMessage(message: ConversationMessage): AgentMessagePart[] {
