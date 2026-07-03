@@ -80,6 +80,7 @@ import {
   type AgentBulkConfigDraft,
   type AgentBulkConfigField,
 } from "./AgentBulkConfigPanel";
+import { AgentDebugResetPanel, type AgentResetOptions } from "./AgentDebugResetPanel";
 import { AgentManagementNav } from "./AgentManagementNav";
 import { AgentManagementBriefPanel } from "./AgentManagementBriefPanel";
 import {
@@ -205,16 +206,6 @@ type AgentMemoryPolicyDraft = {
   newProposeKnowledgeBaseId: string;
   newReviewKnowledgeBaseId: string;
   newRateKnowledgeBaseId: string;
-};
-
-type AgentResetOptions = {
-  clearRuntimeState: boolean;
-  resetDirectSession: boolean;
-  resetPersonaProfile: boolean;
-  resetTaskProfile: boolean;
-  resetToolPolicy: boolean;
-  resetMemoryPolicy: boolean;
-  resetRuntimePolicy: boolean;
 };
 
 type AgentResetSummary = {
@@ -6748,98 +6739,14 @@ export function AgentsRoute() {
                 onPurge={purgeSelectedAgent}
               />
               {selectedAgent.status !== "archived" ? (
-                <section className={styles.resetZone} title={copy.resetAgentHint}>
-                  <div className={styles.panelHeader}>
-                    <div>
-                      <p className={styles.panelEyebrow}>{copy.resetAgentTitle}</p>
-                      <h3>{copy.resetAgent}</h3>
-                    </div>
-                    <RefreshCw size={16} />
-                  </div>
-                  <div className={styles.resetOptionGrid}>
-                    <label className={styles.resetOptionField} title={copy.resetClearRuntimeStateHint}>
-                      <VNativeInput
-                        type="checkbox"
-                        checked={resetOptions.clearRuntimeState}
-                        onChange={(event) => updateResetOption("clearRuntimeState", event.target.checked)}
-                      />
-                      <span>
-                        <strong>{copy.resetClearRuntimeState}</strong>
-                      </span>
-                    </label>
-                    <label className={styles.resetOptionField} title={copy.resetDirectSessionHint}>
-                      <VNativeInput
-                        type="checkbox"
-                        checked={resetOptions.resetDirectSession}
-                        onChange={(event) => updateResetOption("resetDirectSession", event.target.checked)}
-                      />
-                      <span>
-                        <strong>{copy.resetDirectSession}</strong>
-                      </span>
-                    </label>
-                    <label className={styles.resetOptionField} title={copy.resetPersonaProfileHint}>
-                      <VNativeInput
-                        type="checkbox"
-                        checked={resetOptions.resetPersonaProfile}
-                        onChange={(event) => updateResetOption("resetPersonaProfile", event.target.checked)}
-                      />
-                      <span>
-                        <strong>{copy.resetPersonaProfile}</strong>
-                      </span>
-                    </label>
-                    <label className={styles.resetOptionField} title={copy.resetTaskProfileHint}>
-                      <VNativeInput
-                        type="checkbox"
-                        checked={resetOptions.resetTaskProfile}
-                        onChange={(event) => updateResetOption("resetTaskProfile", event.target.checked)}
-                      />
-                      <span>
-                        <strong>{copy.resetTaskProfile}</strong>
-                      </span>
-                    </label>
-                    <label className={styles.resetOptionField} title={copy.resetToolPolicyHint}>
-                      <VNativeInput
-                        type="checkbox"
-                        checked={resetOptions.resetToolPolicy}
-                        onChange={(event) => updateResetOption("resetToolPolicy", event.target.checked)}
-                      />
-                      <span>
-                        <strong>{copy.resetToolPolicy}</strong>
-                      </span>
-                    </label>
-                    <label className={styles.resetOptionField} title={copy.resetMemoryPolicyHint}>
-                      <VNativeInput
-                        type="checkbox"
-                        checked={resetOptions.resetMemoryPolicy}
-                        onChange={(event) => updateResetOption("resetMemoryPolicy", event.target.checked)}
-                      />
-                      <span>
-                        <strong>{copy.resetMemoryPolicy}</strong>
-                      </span>
-                    </label>
-                    <label className={styles.resetOptionField} title={copy.resetRuntimePolicyHint}>
-                      <VNativeInput
-                        type="checkbox"
-                        checked={resetOptions.resetRuntimePolicy}
-                        onChange={(event) => updateResetOption("resetRuntimePolicy", event.target.checked)}
-                      />
-                      <span>
-                        <strong>{copy.resetRuntimePolicy}</strong>
-                      </span>
-                    </label>
-                  </div>
-                  <div className={styles.editorActions}>
-                    <VButton
-                      type="button"
-                      variant="secondary"
-                      icon={<RefreshCw size={15} />}
-                      isDisabled={!canResetAgent || selectedAgentResetPending}
-                      onPress={resetSelectedAgent}
-                    >
-                      {selectedAgentResetPending ? copy.resettingAgent : copy.resetAgent}
-                    </VButton>
-                  </div>
-                </section>
+                <AgentDebugResetPanel
+                  copy={copy}
+                  options={resetOptions}
+                  canReset={canResetAgent}
+                  pending={selectedAgentResetPending}
+                  onOptionChange={updateResetOption}
+                  onReset={resetSelectedAgent}
+                />
               ) : null}
                 </>
               ) : null}
