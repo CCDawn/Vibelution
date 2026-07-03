@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { ConversationMessage } from "../../api/types";
 import { conversationMessageToAgentMessage } from "../../agent-thread/adapters";
 import type { AgentMessage } from "../../agent-thread";
+import * as conversationOperationsModule from "./conversationOperations";
 import {
   buildAgentMessageOperationGroups,
   buildAgentMessageOperations,
@@ -24,6 +25,11 @@ function operationGroupsForConversationMessage(message: ConversationMessage) {
 }
 
 describe("conversationOperations", () => {
+  it("keeps display normalization helpers internal to the operation model", () => {
+    expect("normalizeTimelineOperations" in conversationOperationsModule).toBe(false);
+    expect("displayToolLabel" in conversationOperationsModule).toBe(false);
+  });
+
   it("builds operation groups from AgentMessage parts", () => {
     const message: AgentMessage = {
       id: "agent-message-parts",
