@@ -29,7 +29,10 @@ import {
   SessionReferenceAttachment,
   SessionTurnError,
 } from "../../api/types";
-import { conversationMessagesToAgentThread } from "../../agent-thread/adapters";
+import {
+  conversationMessageToAgentMessage,
+  conversationMessagesToAgentThread,
+} from "../../agent-thread/adapters";
 import type { AgentAttachmentPart, AgentMentalPart, AgentReferencePart, AgentTextPart } from "../../agent-thread/types";
 import { fetchJson } from "../../api/client";
 import { useAppI18n } from "../../i18n/useAppI18n";
@@ -60,9 +63,6 @@ import {
   agentMessageContextSections,
   agentMessageProcessSections,
   buildAgentMessageSectionState,
-  hasResponseBlock,
-  hasThoughtBlock,
-  hasMentalBlock,
   imageArtifactForMessage,
   isAgentInboxMessage,
   isGroupRoomTranscriptMessage,
@@ -758,6 +758,14 @@ function conversationMessageTurnId(message: ConversationMessage) {
   return metadataText(message.metadata, "turnId").replace(/^live:/, "");
 }
 
+function conversationMessageAgentSectionState(message: ConversationMessage): AgentMessageSectionState {
+  return buildAgentMessageSectionState(conversationMessageToAgentMessage(message));
+}
+
+function conversationMessageHasAgentResponseBlock(message: ConversationMessage) {
+  return conversationMessageAgentSectionState(message).hasResponseBlock;
+}
+
 function isAssistantProcessThreadCandidate(message: ConversationMessage) {
   if (
     message.role !== "assistant"
@@ -767,14 +775,12 @@ function isAssistantProcessThreadCandidate(message: ConversationMessage) {
   ) {
     return false;
   }
+  const sectionState = conversationMessageAgentSectionState(message);
   return Boolean(
     message.streaming
     || String(message.streamStage ?? "").trim()
-    || (message.feedbackEvents?.length ?? 0) > 0
     || (message.timelineItems?.length ?? 0) > 0
-    || (message.toolCalls?.length ?? 0) > 0
-    || hasThoughtBlock(message)
-    || hasMentalBlock(message)
+    || sectionState.hasProcessSection
     || isTurnErrorMessage(message)
   );
 }
@@ -1282,7 +1288,8 @@ export function ConversationView({
     let expandedResponseCount = 0;
     for (let index = activeTimelineMessages.length - 1; index >= 0; index -= 1) {
       const message = activeTimelineMessages[index];
-      if (!hasResponseBlock(message)) {
+      const agentMessage = agentThread.messages[index];
+      if (!agentMessage || !buildAgentMessageSectionState(agentMessage).hasResponseBlock) {
         continue;
       }
       expandedResponseCount += 1;
@@ -1295,7 +1302,7 @@ export function ConversationView({
       }
     }
     return ids;
-  }, [activeTimelineMessages]);
+  }, [activeTimelineMessages, agentThread]);
   const timelineSignalMessages = useMemo(
     () =>
       showMentalSnapshots
@@ -1475,7 +1482,12 @@ export function ConversationView({
 
   useEffect(() => {
     const prewarmMessages = timelineMessages
-      .filter((message) => message.role === "assistant" && !message.streaming && hasResponseBlock(message))
+      .filter(
+        (message) =>
+          message.role === "assistant"
+          && !message.streaming
+          && conversationMessageHasAgentResponseBlock(message),
+      )
       .slice(-RESPONSE_PREWARM_MESSAGE_LIMIT);
     if (!prewarmMessages.length) {
       return undefined;
