@@ -82,6 +82,7 @@ import { TeamSourceCollectionFindingDetailsPanel } from "./TeamSourceCollectionF
 import { TeamSourceCollectionCandidatePanel } from "./TeamSourceCollectionCandidatePanel";
 import { TeamSourceCollectionConversationPanel } from "./TeamSourceCollectionConversationPanel";
 import { TeamSourceCollectionControlsPanel } from "./TeamSourceCollectionControlsPanel";
+import { TeamSourceCollectionExtractionRecoveryPanel } from "./TeamSourceCollectionExtractionRecoveryPanel";
 import { TeamSourceCollectionGraphPanel } from "./TeamSourceCollectionGraphPanel";
 import { TeamSourceCollectionMemoryPanel } from "./TeamSourceCollectionMemoryPanel";
 import { TeamSourceCollectionScreeningPanel } from "./TeamSourceCollectionScreeningPanel";
@@ -8042,39 +8043,16 @@ export function TeamsRoute({
         ? "本轮资料提炼没有完全闭环；先保留可用候选，再补齐失败记录。"
         : "This extraction run did not close cleanly; keep usable candidates and recover failed records.");
     return (
-      <section
-        className={styles.sourceCollectionExtractionRecoveryPanel}
-        aria-label={lang === "zh" ? "资料提炼失败恢复工作台" : "Source extraction recovery panel"}
-      >
-        <div className={styles.sourceCollectionExtractionRecoveryBody}>
-          <div className={styles.sourceCollectionResultsHeader}>
-            <AlertTriangle size={14} />
-            <strong>{lang === "zh" ? "提炼失败恢复" : "Extraction recovery"}</strong>
-            <span className={styles.sourceCollectionRunBadge}>
-              {sourceCollectionStageRecoveryStatusLabel("extraction", lang)}
-            </span>
-          </div>
-          <p>{recoverySummary}</p>
-          <div className={styles.sourceCollectionExtractionRecoveryStats}>
-            <span>
-              {lang === "zh" ? "提炼失败" : "failed extraction"}
-              <strong>{recoveryFailureText}</strong>
-            </span>
-            <span>
-              {lang === "zh" ? "可保留" : "salvageable"}
-              <strong>{sourceCollectionExtractionRecoverySalvageText}</strong>
-            </span>
-            <span>
-              {lang === "zh" ? "待补提炼" : "to recover"}
-              <strong>{sourceCollectionPrimaryDataLoading ? sourceCollectionLoadingText : recoveryMissingText}</strong>
-            </span>
-            <span>
-              {lang === "zh" ? "待 Agent 复核" : "pending agent review"}
-              <strong>{sourceCollectionRunPendingScreeningCountText}</strong>
-            </span>
-          </div>
-        </div>
-        <div className={styles.sourceCollectionExtractionRecoveryActions}>
+      <TeamSourceCollectionExtractionRecoveryPanel
+        lang={lang}
+        statusLabel={sourceCollectionStageRecoveryStatusLabel("extraction", lang)}
+        summary={recoverySummary}
+        failedText={recoveryFailureText}
+        salvageText={sourceCollectionExtractionRecoverySalvageText}
+        recoverText={sourceCollectionPrimaryDataLoading ? sourceCollectionLoadingText : recoveryMissingText}
+        pendingReviewText={sourceCollectionRunPendingScreeningCountText}
+        actions={(
+          <>
           <VButton
             type="button"
             density="compact"
@@ -8106,8 +8084,9 @@ export function TeamsRoute({
           >
             {lang === "zh" ? "进入 Agent 私聊" : "Open Agent chat"}
           </VButton>
-        </div>
-      </section>
+          </>
+        )}
+      />
     );
   }
 
