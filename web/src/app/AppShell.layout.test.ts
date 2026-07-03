@@ -81,6 +81,11 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("left: 0");
     expect(shellStyles).toContain("grid-template-columns: repeat(2, minmax(72px, max-content))");
     expect(shellStyles).toContain("word-break: keep-all");
+    expect(shellStyles).toContain(":where(.vui-app-appshell).statusCluster:hover .statusSummaryChip");
+    expect(shellStyles).toContain(":where(.vui-app-appshell).statusCluster:focus-within .statusSummaryChip");
+    expect(shellStyles).toContain(":where(.vui-app-appshell).statusCluster:focus-visible .statusSummaryChip");
+    expect(shellStyles).toContain("cursor: pointer");
+    expect(shellStyles).toContain("transition: border-color 140ms ease, background 140ms ease, color 140ms ease, box-shadow 140ms ease");
 
     const compactDesktopBlock = shellStyles.slice(
       shellStyles.indexOf("@media (max-width: 1420px)"),
