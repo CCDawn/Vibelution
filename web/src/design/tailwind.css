@@ -1,6 +1,7 @@
 @import "tailwindcss" source(none);
 
 @source "../app/**/*.{ts,tsx}";
+@source "../agent-thread/**/*.{ts,tsx}";
 @source "../components/**/*.{ts,tsx}";
 @source "../routes/**/*.{ts,tsx}";
 

@@ -1,4 +1,6 @@
 import React from "react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
@@ -10,6 +12,15 @@ function renderThread(thread: AgentThread) {
 }
 
 describe("AgentThreadView", () => {
+  it("uses Tailwind-scanned style mapping instead of a CSS module", () => {
+    const componentSource = readFileSync(resolve(import.meta.dirname, "AgentThreadView.tsx"), "utf8");
+    const tailwindEntry = readFileSync(resolve(import.meta.dirname, "../design/tailwind.css"), "utf8");
+
+    expect(componentSource).toContain('from "./AgentThreadView.styles"');
+    expect(componentSource).not.toContain(".module.css");
+    expect(tailwindEntry).toContain('@source "../agent-thread/**/*.{ts,tsx}";');
+  });
+
   it("renders thread messages and parts in model order", () => {
     const html = renderThread({
       id: "thread-1",
