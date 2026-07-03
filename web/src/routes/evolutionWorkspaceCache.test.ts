@@ -11,19 +11,16 @@ function makeCache() {
 }
 
 describe("createEvolutionWorkspaceCache", () => {
-  it("refreshes supervised workspace state through one semantic recipe", async () => {
+  it("refreshes supervised workspace state through current workspace projections", async () => {
     const { cache, invalidateQueries, queryKeysFromCalls } = makeCache();
 
     await cache.afterSupervisedWorkspaceChanged();
 
-    expect(invalidateQueries).toHaveBeenCalledTimes(7);
+    expect(invalidateQueries).toHaveBeenCalledTimes(4);
     expect(queryKeysFromCalls()).toEqual([
       queryKeys.evolutionWorkspaceSnapshot(),
       queryKeys.evolutionWorkbench(),
-      queryKeys.evolutionActiveRun(),
-      queryKeys.evolutionLatestRun(),
       queryKeys.evolutionOverview(),
-      queryKeys.evolutionRuns(),
       queryKeys.evolutionLibrary(),
     ]);
   });
@@ -41,29 +38,24 @@ describe("createEvolutionWorkspaceCache", () => {
     ]);
   });
 
-  it("refreshes active and latest supervised run snapshots together", async () => {
+  it("refreshes the supervised workspace snapshot for active run changes", async () => {
     const { cache, queryKeysFromCalls } = makeCache();
 
     await cache.refreshSupervisedActiveRun();
 
     expect(queryKeysFromCalls()).toEqual([
       queryKeys.evolutionWorkspaceSnapshot(),
-      queryKeys.evolutionActiveRun(),
-      queryKeys.evolutionLatestRun(),
     ]);
   });
 
-  it("refreshes latest supervised result when a live run reaches a terminal state", async () => {
+  it("refreshes current supervised projections when a live run reaches a terminal state", async () => {
     const { cache, queryKeysFromCalls } = makeCache();
 
     await cache.afterSupervisedRunTerminal();
 
     expect(queryKeysFromCalls()).toEqual([
       queryKeys.evolutionWorkspaceSnapshot(),
-      queryKeys.evolutionActiveRun(),
-      queryKeys.evolutionLatestRun(),
       queryKeys.evolutionOverview(),
-      queryKeys.evolutionRuns(),
       queryKeys.evolutionLibrary(),
       queryKeys.evolutionWorkbench(),
     ]);
@@ -85,7 +77,7 @@ describe("createEvolutionWorkspaceCache", () => {
     ]);
   });
 
-  it("refreshes proposal detail with the supervised indexes", async () => {
+  it("refreshes proposal detail with the current supervised indexes", async () => {
     const { cache, queryKeysFromCalls } = makeCache();
 
     await cache.afterProposalChanged("run-a");
@@ -93,7 +85,6 @@ describe("createEvolutionWorkspaceCache", () => {
     expect(queryKeysFromCalls()).toEqual([
       queryKeys.evolutionWorkspaceSnapshot(),
       queryKeys.evolutionOverview(),
-      queryKeys.evolutionRuns(),
       queryKeys.evolutionLibrary(),
       queryKeys.evolutionProposal("run-a"),
     ]);
