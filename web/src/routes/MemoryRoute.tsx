@@ -72,6 +72,7 @@ import { MemoryMatrixPanel } from "./MemoryMatrixPanel";
 import { MemoryOverviewPanel } from "./MemoryOverviewPanel";
 import { MemoryProjectMemoryQueuePanel } from "./MemoryProjectMemoryQueuePanel";
 import { MemoryReviewQueuePanel } from "./MemoryReviewQueuePanel";
+import { MemorySelectedConfigPanel } from "./MemorySelectedConfigPanel";
 import { MemoryWarningStrip } from "./MemoryWarningStrip";
 import styles from "./MemoryRoute.styles";
 
@@ -4154,62 +4155,19 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     />
   );
 
-  const renderSelectedMemoryConfig = () =>
-    resolvedActiveItem && activeSection && !editDraft ? (
-      <section className={styles.managementPanel} aria-label={copy.management} title={resolvedActiveItem.managedState?.actionHint || copy.managementHint}>
-        <div className={styles.managementHeader}>
-          <div>
-            <p className={styles.panelEyebrow}>{activeSection.title}</p>
-            <h2>{resolvedActiveItem.managedState?.userManaged ? copy.userManaged : resolvedActiveItem.managedState?.overridden ? copy.overridden : copy.management}</h2>
-          </div>
-          <span className={styles.countPill}>
-            {resolvedActiveItem.managedState?.disabled
-              ? copy.disabledByUser
-              : resolvedActiveItem.managedState?.userManaged
-                ? copy.userManaged
-                : resolvedActiveItem.managedState?.overridden
-                  ? copy.overridden
-                  : copy.canUse}
-          </span>
-        </div>
-        <div className={styles.selectedConfigSummary}>
-          <strong>{resolvedActiveItem.title}</strong>
-          <p>{resolvedActiveItem.summary || resolvedActiveItem.content || copy.noContent}</p>
-        </div>
-        <div className={styles.managementActions}>
-          <VButton
-            type="button"
-            className={styles.detailActionButton}
-            onClick={startEdit}
-            isDisabled={!resolvedActiveItem.managedState?.editable || mutationBusy}
-          >
-            <Pencil size={15} />
-            <span>{copy.editMemory}</span>
-          </VButton>
-          {resolvedActiveItem.managedState?.restorable ? (
-            <VButton type="button" className={styles.detailActionButton} onClick={restoreActiveItem} isDisabled={mutationBusy}>
-              <Undo2 size={15} />
-              <span>{copy.restoreMemory}</span>
-            </VButton>
-          ) : null}
-          <VButton
-            type="button"
-            className={styles.detailActionButton}
-            onClick={disableOrDeleteActiveItem}
-            isDisabled={!resolvedActiveItem.managedState?.deletable || mutationBusy}
-          >
-            <Trash2 size={15} />
-            <span>{resolvedActiveItem.managedState?.userManaged ? copy.deleteMemory : copy.disableMemory}</span>
-          </VButton>
-        </div>
-        {mutationFeedback.tone !== "idle" ? (
-          <p className={styles.copyNotice} data-tone={mutationFeedback.tone}>
-            {mutationFeedback.tone === "success" ? <CheckCircle2 size={14} /> : <TriangleAlert size={14} />}
-            <span>{mutationFeedback.text}</span>
-          </p>
-        ) : null}
-      </section>
-    ) : null;
+  const createSelectedMemoryConfig = () => (
+    <MemorySelectedConfigPanel
+      copy={copy}
+      sectionTitle={activeSection?.title ?? ""}
+      item={resolvedActiveItem}
+      isEditing={Boolean(editDraft)}
+      mutationBusy={mutationBusy}
+      mutationFeedback={mutationFeedback}
+      onEdit={startEdit}
+      onRestore={restoreActiveItem}
+      onDisableOrDelete={disableOrDeleteActiveItem}
+    />
+  );
 
   const renderDetailPanel = (showEditor = true) => (
     <aside className={showEditor ? styles.detailPanel : `${styles.detailPanel} ${styles.manageDetailPanel}`}>
@@ -4611,7 +4569,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             </VButton>
           </div>
           {createManagementEditor()}
-          {renderSelectedMemoryConfig()}
+          {createSelectedMemoryConfig()}
           {!editDraft && !activeItem ? (
             <section className={styles.emptyDetail}>
               <Brain size={24} />
