@@ -19,6 +19,8 @@ const hostGridDisplayClasses = new Set(["grid", "!grid", "inline-grid", "!inline
 const hostGridTemplatePattern = /^!?(grid-cols|grid-rows|grid-flow|auto-rows|auto-cols)-/;
 const composedGridTemplateModifiers = new Set([
   "ChatCodingRoute.styles.ts:layoutCenterFirst",
+  "ChatCodingRoute.styles.ts:rightPaneWithTabs",
+  "ChatCodingRoute.styles.ts:rightPaneWithoutTabs",
   "GitRoute.styles.ts:workspaceOverview",
   "GitRoute.styles.ts:historyPanel",
   "GitRoute.styles.ts:modelActionRow",
@@ -70,6 +72,7 @@ describe("route style display contract", () => {
 
   it("keeps composed grid-template modifiers attached to grid-bearing base styles", () => {
     expect(chatRouteSource).toContain("`${styles.layout} ${styles.layoutCenterFirst}`");
+    expect(chatRouteSource).toContain("`${styles.rightPane} ${rightPaneLayoutClassName}`");
 
     expect(gitRouteSource).toContain("`${styles.workspace} ${styles.workspaceOverview}`");
     expect(gitRouteSource).toContain("`${styles.commitPanel} ${styles.historyPanel}`");
