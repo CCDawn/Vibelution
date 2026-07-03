@@ -974,6 +974,21 @@ describe("AgentsRoute layout contract", () => {
     expect(styles.detailPanelCreating).toContain("max-[1040px]:hidden");
   });
 
+  it("keeps Agent card subgrids away from invalid quoted Tailwind grid areas", () => {
+    expect(styles.policyGrid).not.toContain("grid-template-areas");
+    expect(styles.policyGrid).toContain("[&_div]:[grid-template-rows:auto_auto]");
+    expect(styles.policyGrid).toContain("[&_svg]:[grid-column:1]");
+    expect(styles.policyGrid).toContain("[&_svg]:[grid-row:1_/_3]");
+    expect(styles.policyGrid).toContain("[&_span]:[grid-column:2]");
+    expect(styles.policyGrid).toContain("[&_strong]:[grid-row:2]");
+    expect(styles.toolBundleItem).not.toContain("grid-template-areas");
+    expect(styles.toolBundleItem).toContain("[grid-template-rows:auto_auto]");
+    expect(styles.toolBundleItem).toContain("[&_span]:[grid-column:1]");
+    expect(styles.toolBundleItem).toContain("[&_p]:[grid-row:2]");
+    expect(styles.toolBundleActions).toContain("[grid-column:2]");
+    expect(styles.toolBundleActions).toContain("[grid-row:1_/_3]");
+  });
+
   it("keeps the 1024px Agent management stack compact enough to show list and detail context", () => {
     expect(styles.workspace).toContain("max-[860px]:[grid-auto-rows:auto]");
     expect(styles.workspace).toContain("max-[860px]:[align-content:start]");
