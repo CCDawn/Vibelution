@@ -3,9 +3,7 @@ import { useMemo } from "react";
 import type {
   AgentInstance,
   ConversationSummary,
-  ProjectionEditContract,
   SessionSummary,
-  SourceAuthorityRef,
   Team,
 } from "../api/types";
 import { isChildSession, sessionListTitle } from "./DirectSessionIndexItem";
@@ -107,8 +105,6 @@ type ConversationTeamLookup = {
 const NON_DISCUSSION_TEAM_IDS = new Set(["self-evolution-team", "supervised-evolution-team"]);
 const NON_DISCUSSION_TEAM_KINDS = new Set(["self_evolution", "supervised_evolution"]);
 const NON_DISCUSSION_TEAM_SOURCES = new Set(["self_evolution", "supervised_evolution"]);
-const SOURCE_AUTHORITY_VERSION = 1;
-const ALLOWED_PROJECTION_ACTIONS = ["view", "link", "refresh", "repair"];
 
 export function isDiscussionTeam(team: Team | undefined | null) {
   if (!team) {
@@ -297,10 +293,6 @@ function conversationTeamSearchValues(team: ConversationIndexTeam | undefined): 
 }
 
 export function sessionToConversationSummary(session: SessionSummary): ConversationSummary {
-  const sourceRef = session.sourceRef ?? makeSourceAuthorityRef("session", session.id);
-  const projectionEdit = session.projectionEdit ?? makeProjectionEditContract(sourceRef);
-  const agentSourceRef = session.agentSourceRef
-    ?? (session.agentId ? makeSourceAuthorityRef("agent", session.agentId) : null);
   const teamAwareSession = session as SessionSummary & { teamId?: string; teamName?: string };
   const summary: TeamAwareConversationSummary = {
     conversationId: session.id,
@@ -327,9 +319,9 @@ export function sessionToConversationSummary(session: SessionSummary): Conversat
     conversationIndexErrors: session.conversationIndexErrors ?? [],
     teamId: teamAwareSession.teamId,
     teamName: teamAwareSession.teamName,
-    sourceRef,
-    projectionEdit,
-    agentSourceRef,
+    sourceRef: session.sourceRef,
+    projectionEdit: session.projectionEdit,
+    agentSourceRef: session.agentSourceRef,
   };
   return summary;
 }
@@ -439,9 +431,6 @@ export function isVisibleConversationAgent(agent: AgentInstance | undefined | nu
 
 export function agentToConversationSummary(agent: AgentInstance): ConversationSummary {
   const directSessionId = String(agent.directSessionId ?? "").trim();
-  const sourceRef = agent.sourceRef ?? makeSourceAuthorityRef("agent", agent.agentId);
-  const projectionEdit = agent.projectionEdit ?? makeProjectionEditContract(sourceRef);
-  const agentSourceRef = agent.sourceRef ?? makeSourceAuthorityRef("agent", agent.agentId);
   const classification = agentConversationIndexClassification(agent);
   const teamIdentity = metadataTeamIdentity(agent);
   const summary: TeamAwareConversationSummary = {
@@ -469,96 +458,11 @@ export function agentToConversationSummary(agent: AgentInstance): ConversationSu
     conversationIndexErrors: classification.errors,
     teamId: teamIdentity.teamId || undefined,
     teamName: teamIdentity.teamName || undefined,
-    sourceRef,
-    projectionEdit,
-    agentSourceRef,
+    sourceRef: agent.sourceRef,
+    projectionEdit: agent.projectionEdit,
+    agentSourceRef: agent.sourceRef,
   };
   return summary;
-}
-
-function makeSourceAuthorityRef(kind: string, id: string): SourceAuthorityRef {
-  const normalizedKind = String(kind || "").trim();
-  const normalizedId = String(id || "").trim();
-  const owner = sourceOwnerFor(normalizedKind);
-  return {
-    kind: normalizedKind,
-    id: normalizedId,
-    owner,
-    factAuthority: Boolean(normalizedId && owner !== "unknown"),
-    canonicalEditRoute: canonicalEditRouteFor(normalizedKind, normalizedId),
-    canonicalMutationApi: canonicalMutationApiFor(normalizedKind, normalizedId),
-    projectionCanWrite: false,
-    allowedProjectionActions: ALLOWED_PROJECTION_ACTIONS,
-    sourceAuthorityVersion: SOURCE_AUTHORITY_VERSION,
-  };
-}
-
-function makeProjectionEditContract(sourceRef: SourceAuthorityRef): ProjectionEditContract {
-  return {
-    canWrite: false,
-    mode: "deep_link_to_source",
-    reason: "projection_read_model",
-    sourceOwner: sourceRef.owner,
-    canonicalEditRoute: sourceRef.canonicalEditRoute,
-    canonicalMutationApi: sourceRef.canonicalMutationApi,
-    sourceAuthorityVersion: sourceRef.sourceAuthorityVersion,
-  };
-}
-
-function sourceOwnerFor(kind: string) {
-  if (kind === "agent") {
-    return "AgentDirectory";
-  }
-  if (kind === "session" || kind === "conversation") {
-    return "ConversationLedger";
-  }
-  if (kind === "room" || kind === "chat_room") {
-    return "ChatRoomService";
-  }
-  if (kind === "task" || kind === "kernel_task") {
-    return "TaskLedger";
-  }
-  return "unknown";
-}
-
-function canonicalEditRouteFor(kind: string, id: string) {
-  const encodedId = encodeURIComponent(id);
-  if (!id) {
-    return "";
-  }
-  if (kind === "agent") {
-    return `/agents?agent=${encodedId}&pane=config`;
-  }
-  if (kind === "session" || kind === "conversation") {
-    return `/chat?session=${encodedId}`;
-  }
-  if (kind === "room" || kind === "chat_room") {
-    return `/chat?room=${encodedId}`;
-  }
-  if (kind === "task" || kind === "kernel_task") {
-    return `/kernel?taskId=${encodedId}`;
-  }
-  return "";
-}
-
-function canonicalMutationApiFor(kind: string, id: string) {
-  const encodedId = encodeURIComponent(id);
-  if (!id) {
-    return "";
-  }
-  if (kind === "agent") {
-    return `/api/agents/${encodedId}`;
-  }
-  if (kind === "session" || kind === "conversation") {
-    return `/api/sessions/${encodedId}`;
-  }
-  if (kind === "room" || kind === "chat_room") {
-    return `/api/chat-rooms/${encodedId}`;
-  }
-  if (kind === "task" || kind === "kernel_task") {
-    return `/api/kernel/tasks/${encodedId}`;
-  }
-  return "";
 }
 
 export function isVisibleDirectSession(session: SessionSummary | undefined | null) {
