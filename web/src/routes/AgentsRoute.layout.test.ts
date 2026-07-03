@@ -26,6 +26,10 @@ const runtimeFocusPanelSource = readFileSync(
   new URL("./AgentRuntimeFocusPanel.tsx", import.meta.url),
   "utf-8",
 );
+const managementBriefPanelSource = readFileSync(
+  new URL("./AgentManagementBriefPanel.tsx", import.meta.url),
+  "utf-8",
+);
 
 function sourceBlocksForStyle(styleName: string, source = routeSource): string[] {
   const marker = `className={styles.${styleName}}`;
@@ -336,8 +340,10 @@ describe("AgentsRoute layout contract", () => {
 
   it("routes membership guidance to the team surface and not just the config pane", () => {
     expect(routeSource).toContain("route: agent?.agentId ? `/teams?agent=${encodeURIComponent(agent.agentId)}` : \"/teams\"");
-    expect(routeSource).toContain("void navigate(action.route)");
-    expect(routeSource).toContain("setActivePane(action.pane)");
+    expect(routeSource).toContain("void navigate(route)");
+    expect(managementBriefPanelSource).toContain("onOpenRoute(action.route)");
+    expect(routeSource).toContain("onSelectPane={setActivePane}");
+    expect(managementBriefPanelSource).toContain("onSelectPane(action.pane)");
     expect(routeSource).toContain("copy.nextSetupMembership");
   });
 
@@ -478,7 +484,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("title={copy.returnBannerHint}");
     expect(routeSource).toContain("title={copy.avatarEditorHint}");
     expect(routeSource).toContain("title={copy.routeHint}");
-    expect(routeSource).toContain("title={copy.managementBriefHint}");
+    expect(managementBriefPanelSource).toContain("title={copy.managementBriefHint}");
     expect(routeSource).toContain("title={copy.personaHint}");
     expect(routeSource).toContain("title={copy.taskHint}");
     expect(routeSource).toContain("title={copy.maintenanceHint}");
@@ -697,10 +703,12 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("agentConfigPanes(copy, selectedAgent)");
     expect(routeSource).toContain("AgentManagementBrief");
     expect(routeSource).toContain("buildAgentManagementBrief(selectedAgent, copy, lang)");
+    expect(routeSource).toContain("AgentManagementBriefPanel");
     expect(routeSource).toContain("copy.managementBriefTitle");
     expect(routeSource).toContain("copy.nextActionsTitle");
-    expect(routeSource).toContain("styles.managementBriefPanel");
-    expect(routeSource).toContain("styles.nextActionList");
+    expect(routeSource).not.toContain("className={styles.managementBriefPanel}");
+    expect(managementBriefPanelSource).toContain("styles.managementBriefPanel");
+    expect(managementBriefPanelSource).toContain("styles.nextActionList");
     expect(routeSource).toContain("styles.detailTabs");
     expect(routeSource).toContain("activePane === \"overview\"");
     expect(routeSource).toContain("activePane === \"config\"");

@@ -76,6 +76,7 @@ import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
 import { AgentManagementNav } from "./AgentManagementNav";
+import { AgentManagementBriefPanel } from "./AgentManagementBriefPanel";
 import { AgentRuntimeFocusPanel } from "./AgentRuntimeFocusPanel";
 import {
   agentCenterMemoryRoute,
@@ -6148,53 +6149,19 @@ export function AgentsRoute() {
                 ))}
               </nav>
 
-              <section className={styles.managementBriefPanel} title={copy.managementBriefHint}>
-                <div className={styles.managementBriefHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{copy.managementBriefTitle}</p>
-                    <h3>{managementBrief.statusLabel}</h3>
-                    <span>{managementBrief.statusDetail}</span>
-                  </div>
-                  <strong>{managementBrief.score}</strong>
-                </div>
-                <div className={styles.managementChecklist}>
-                  {managementBrief.items.map((item) => (
-                    <VNativeButton
-                      key={item.id}
-                      type="button"
-                      className={item.complete ? styles.managementChecklistDone : styles.managementChecklistMissing}
-                      onClick={() => setActivePane(item.pane)}
-                    >
-                      {item.complete ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
-                      <span>{item.label}</span>
-                    </VNativeButton>
-                  ))}
-                </div>
-                <div className={styles.nextActionList}>
-                  <span>{copy.nextActionsTitle}</span>
-                  {managementBrief.actions.length ? (
-                    managementBrief.actions.map((action) => (
-                      <VNativeButton
-                        key={action.id}
-                        type="button"
-                        className="w-full"
-                        title={action.detail}
-                        onClick={() => {
-                          if (action.route) {
-                            void navigate(action.route);
-                            return;
-                          }
-                          setActivePane(action.pane);
-                        }}
-                      >
-                        <strong>{action.label}</strong>
-                      </VNativeButton>
-                    ))
-                  ) : (
-                    <p>{copy.nextAllReady}</p>
-                  )}
-                </div>
-              </section>
+              <AgentManagementBriefPanel
+                brief={managementBrief}
+                copy={{
+                  managementBriefHint: copy.managementBriefHint,
+                  managementBriefTitle: copy.managementBriefTitle,
+                  nextActionsTitle: copy.nextActionsTitle,
+                  nextAllReady: copy.nextAllReady,
+                }}
+                onOpenRoute={(route) => {
+                  void navigate(route);
+                }}
+                onSelectPane={setActivePane}
+              />
 
               {activePane === "overview" ? (
                 <>
