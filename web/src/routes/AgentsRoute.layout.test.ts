@@ -592,8 +592,9 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("只读引用");
     expect(routeSource).toContain("Read-only");
     expect(routeSource).toContain("selectedAgent.references.filter((reference) => reference.kind === \"chat_room\").length");
-    expect(routeSource).toContain("styles.roomMembershipList");
-    expect(routeSource).toContain("styles.roomCheckField");
+    expect(routeSource).toContain("AgentReferencesPanel");
+    expect(routeSource).not.toContain("className={styles.roomMembershipList}");
+    expect(routeSource).not.toContain("className={styles.roomCheckField}");
     expect(routeSource).toContain("compactProjectionRoute(room");
     expect(routeSource).toContain("`/chat?room=${encodeURIComponent(room.roomId)}`");
     expect(routeSource).toContain("打开群聊");
@@ -613,8 +614,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("reference.projectionEdit?.canonicalEditRoute || reference.sourceRef?.canonicalEditRoute");
     expect(routeSource).toContain("compactProjectionRoute(room");
     expect(routeSource).toContain('`/teams?team=${encodeURIComponent(reference.sourceId)}`');
-    expect(routeSource).toContain("onPress={() => navigate(referenceRoute(reference))}");
-    expect(routeSource).toContain("styles.referenceStatusStale");
+    expect(routeSource).toContain("onOpenRoute={(route) => navigate(route)}");
+    expect(routeSource).not.toContain("className={styles.referenceList}");
   });
 
   it("routes detailed Agent tool permissions to the Tools page", () => {
@@ -1195,8 +1196,8 @@ describe("AgentsRoute layout contract", () => {
     expect(memoryPolicySource).not.toContain("<button");
 
     expect(routeSource).not.toContain("styles.referenceRouteButton");
-    expect(routeSource).toContain("onPress={() => navigate(compactProjectionRoute(room");
-    expect(routeSource).toContain("onPress={() => navigate(referenceRoute(reference))}");
+    expect(routeSource).toContain("AgentReferencesPanel");
+    expect(routeSource).toContain("onOpenRoute={(route) => navigate(route)}");
 
     for (const block of timelineActionBlocks) {
       expect(block).toContain("<VButton");
