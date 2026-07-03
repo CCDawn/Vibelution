@@ -441,6 +441,151 @@
   white-space: nowrap;
 }
 
+:where(.vui-app-appshell).activeWorkDetailPanel {
+  width: min(420px, calc(100vw - 24px));
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  overflow-x: hidden;
+  border-color: color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
+  background:
+    var(--vui-gradient-route-soft),
+    color-mix(in srgb, var(--shell-panel) 96%, transparent);
+  color: var(--fg-primary);
+  box-shadow: var(--vui-shadow-soft);
+}
+
+:where(.vui-app-appshell).activeWorkDetailHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 0 2px 2px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:where(.vui-app-appshell).activeWorkDetailHeader strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: var(--vui-font-chat);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).activeWorkDetailHeader span {
+  flex: 0 0 auto;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+:where(.vui-app-appshell).activeWorkDetailList {
+  display: grid;
+  gap: 6px;
+  max-height: min(42vh, 260px);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  list-style: none;
+}
+
+:where(.vui-app-appshell).activeWorkDetailItem {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 20%, var(--border-soft));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--shell-card) 58%, transparent);
+  color: var(--fg-secondary);
+  box-shadow: none;
+}
+
+:where(.vui-app-appshell).activeWorkDetailItem > .statusDot {
+  margin-top: 5px;
+}
+
+:where(.vui-app-appshell).activeWorkDetailLink {
+  display: block;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+:where(.vui-app-appshell).activeWorkDetailCopy {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-secondary);
+  box-shadow: none;
+}
+
+:where(.vui-app-appshell).activeWorkDetailTitle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:where(.vui-app-appshell).activeWorkDetailTitle strong,
+:where(.vui-app-appshell).activeWorkDetailTitle span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.vui-app-appshell).activeWorkDetailTitle strong {
+  color: var(--fg-primary);
+  font-size: var(--vui-font-md);
+  font-weight: 700;
+}
+
+:where(.vui-app-appshell).activeWorkDetailTitle span {
+  color: var(--accent-cool);
+  font-size: var(--vui-font-xs);
+  font-weight: 700;
+}
+
+:where(.vui-app-appshell).activeWorkDetailCopy p {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-sm);
+  line-height: 1.35;
+}
+
+:where(.vui-app-appshell).activeWorkDetailCopy code {
+  display: block;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 :where(.vui-app-appshell).utilityCluster:hover .utilityChevron,
 :where(.vui-app-appshell).utilityCluster:focus-within .utilityChevron,
 :where(.vui-app-appshell).utilityClusterOpen .utilityChevron {
@@ -1180,6 +1325,12 @@
 }
 
 @media (max-width: 640px) {
+  :where(.vui-app-appshell).activeWorkDetailPanel {
+    width: min(340px, calc(100vw - 20px));
+    max-height: min(70vh, 520px);
+    padding: 9px;
+  }
+
   .vui-app-appshell.statusGuidePanel {
     right: auto;
     left: 0;
