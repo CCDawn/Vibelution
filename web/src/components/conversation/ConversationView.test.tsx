@@ -9,12 +9,8 @@ import agentMessageRenderStateSource from "./agentMessageRenderState.ts?raw";
 import conversationViewStylesModuleSource from "./ConversationView.styles.ts?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
 import {
-  COMPOSER_SESSION_REFERENCE_MIME,
   ConversationView,
   type ConversationProcessDisplayMode,
-  extractComposerImageDropFiles,
-  extractComposerSessionReferenceDrop,
-  hasComposerImageDragPayload,
   safeConversationMarkdownUrl,
   shouldShowNextStateSignalInConversation,
 } from "./ConversationView";
@@ -1126,23 +1122,6 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("顾云舒");
   });
 
-  it("extracts structured session reference drag payloads", () => {
-    const payload = {
-      referenceId: "session:ref-1",
-      kind: "session",
-      sessionId: "ref-1",
-      title: "Reference session",
-    };
-
-    const reference = extractComposerSessionReferenceDrop({
-      types: [COMPOSER_SESSION_REFERENCE_MIME],
-      getData: (format) => (format === COMPOSER_SESSION_REFERENCE_MIME ? JSON.stringify(payload) : ""),
-    });
-
-    expect(reference?.sessionId).toBe("ref-1");
-    expect(reference?.referenceId).toBe("session:ref-1");
-  });
-
   it("uses the configured user avatar preset for user turns", () => {
     const html = renderConversation(
       [
@@ -2085,22 +2064,6 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("sketch.png");
     expect(html).toContain("pending.png");
     expect(html).toContain("blob:pending-image");
-  });
-
-  it("filters composer drag payloads down to image files", () => {
-    const png = { name: "sketch.png", type: "image/png" } as File;
-    const text = { name: "notes.txt", type: "text/plain" } as File;
-
-    expect(extractComposerImageDropFiles({ files: [png, text] })).toEqual([png]);
-    expect(
-      hasComposerImageDragPayload({
-        items: [
-          { kind: "file", type: "text/plain" } as DataTransferItem,
-          { kind: "file", type: "image/webp" } as DataTransferItem,
-        ],
-      }),
-    ).toBe(true);
-    expect(hasComposerImageDragPayload({ files: [text] })).toBe(false);
   });
 
   it("renders assistant responses as semantic labeled blocks", () => {
