@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import appShellStyles from "../../app/AppShell.styles";
+import evolutionStyles from "../../routes/EvolutionRoute.styles";
 import teamStyles from "../../routes/TeamsRoute.styles";
 
 const sourceRoot = resolve(import.meta.dirname, "../..");
@@ -157,6 +158,29 @@ describe("VUI batch migration", () => {
       expect(source).not.toContain("<button");
     },
   );
+
+  it("routes/EvolutionRoute.tsx uses VUI native controls instead of raw form/action elements", () => {
+    const source = readTargetSource("routes/EvolutionRoute.tsx");
+
+    for (const primitive of ["VNativeButton", "VNativeInput", "VNativeSelect", "VNativeTextarea"]) {
+      expect(source).toContain(primitive);
+    }
+    for (const rawPattern of ["<button", "<input", "<select", "<textarea"]) {
+      expect(source).not.toContain(rawPattern);
+    }
+  });
+
+  it("routes/EvolutionRoute.styles.ts preserves block button geometry after VUI native migration", () => {
+    for (const className of [
+      evolutionStyles.caseTraceSummary,
+      evolutionStyles.workflowStepButton,
+      evolutionStyles.runCardButton,
+      evolutionStyles.proposalCardButton,
+    ]) {
+      expect(className).toContain("w-full");
+    }
+    expect(evolutionStyles.compactIconAction).toContain("w-9");
+  });
 
   it.each(cssModuleFreeTargets)("%s no longer imports a local CSS module", (path) => {
     const source = readTargetSource(path);

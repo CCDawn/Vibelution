@@ -79,7 +79,7 @@ const styles: Record<string, string> = {
   caseTraceStatus:
     "[color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [white-space:nowrap] [padding:1px_5px] [border:1px_solid_color-mix(in_srgb,_var(--fg-tertiary)_14%,_transparent)] [border-radius:999px] [background:color-mix(in_srgb,_var(--surface-panel)_78%,_transparent)]",
   caseTraceSummary:
-    "grid [grid-template-columns:26px_minmax(0,_1fr)_auto_18px] [gap:10px] [align-items:start] min-w-0 [min-height:48px] [padding:9px_8px_9px_0] [border:1px_solid_transparent] [border-radius:9px] [color:var(--fg-secondary)] [cursor:pointer] [font:inherit] [text-align:left] hover:[border-color:color-mix(in_srgb,_var(--accent-cool)_26%,_transparent)] hover:[background:color-mix(in_srgb,_var(--surface-card-muted)_88%,_transparent)] hover:[outline:none] focus-visible:[border-color:color-mix(in_srgb,_var(--accent-cool)_26%,_transparent)] focus-visible:[background:color-mix(in_srgb,_var(--surface-card-muted)_88%,_transparent)] focus-visible:[outline:none] [border-left-color:color-mix(in_srgb,_var(--state-error)_58%,_transparent)] [background:color-mix(in_srgb,_var(--state-error)_8%,_var(--surface-card-muted))]",
+    "grid w-full [grid-template-columns:26px_minmax(0,_1fr)_auto_18px] [gap:10px] [align-items:start] min-w-0 [min-height:48px] [padding:9px_8px_9px_0] [border:1px_solid_transparent] [border-radius:9px] [color:var(--fg-secondary)] [cursor:pointer] [font:inherit] [text-align:left] hover:[border-color:color-mix(in_srgb,_var(--accent-cool)_26%,_transparent)] hover:[background:color-mix(in_srgb,_var(--surface-card-muted)_88%,_transparent)] hover:[outline:none] focus-visible:[border-color:color-mix(in_srgb,_var(--accent-cool)_26%,_transparent)] focus-visible:[background:color-mix(in_srgb,_var(--surface-card-muted)_88%,_transparent)] focus-visible:[outline:none] [border-left-color:color-mix(in_srgb,_var(--state-error)_58%,_transparent)] [background:color-mix(in_srgb,_var(--state-error)_8%,_var(--surface-card-muted))]",
   caseTraceTime:
     "[color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [white-space:nowrap]",
   caseTraceTimeline:
@@ -127,7 +127,7 @@ const styles: Record<string, string> = {
   compactFieldGrid:
     "grid [grid-template-columns:minmax(0,_1.52fr)_minmax(108px,_0.68fr)] [align-items:start] [gap:8px] min-w-0 max-[1200px]:[grid-template-columns:1fr] max-[1200px]:[gap:6px]",
   compactIconAction:
-    "inline-flex [align-items:center] [justify-content:center] [gap:7px] [min-height:34px] [border:1px_solid_var(--border-hairline)] [border-radius:8px] [background:var(--surface-card-muted)] [color:var(--fg-primary)] [transition:border-color_140ms_ease,_background-color_140ms_ease,_color_140ms_ease] [width:36px] [padding:0] hover:[border-color:color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)] hover:[background:var(--surface-card-hover)] disabled:[cursor:not-allowed] disabled:[color:var(--fg-tertiary)] disabled:[opacity:0.52]",
+    "inline-flex w-9 [align-items:center] [justify-content:center] [gap:7px] [min-height:34px] [border:1px_solid_var(--border-hairline)] [border-radius:8px] [background:var(--surface-card-muted)] [color:var(--fg-primary)] [transition:border-color_140ms_ease,_background-color_140ms_ease,_color_140ms_ease] [width:36px] [padding:0] hover:[border-color:color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)] hover:[background:var(--surface-card-hover)] disabled:[cursor:not-allowed] disabled:[color:var(--fg-tertiary)] disabled:[opacity:0.52]",
   compactRunList:
     "grid [gap:6px]",
   compactRunMain:
@@ -391,7 +391,7 @@ const styles: Record<string, string> = {
   proposalCard:
     "grid [border:1px_solid_var(--border-hairline)] [border-radius:8px] [background:var(--surface-card-muted)] [gap:8px] [padding:10px_12px]",
   proposalCardButton:
-    "grid [gap:8px] [border:0] [padding:0] [text-align:left] [background:transparent] [color:inherit]",
+    "grid w-full [gap:8px] [border:0] [padding:0] [text-align:left] [background:transparent] [color:inherit]",
   proposalEditGrid:
     "grid [gap:12px]",
   rawBlock:
@@ -409,7 +409,7 @@ const styles: Record<string, string> = {
   reviewLead:
     "[margin:0] [color:var(--fg-primary)_!important] [font-size:1.04rem] [line-height:1.55]",
   runCardButton:
-    "grid [gap:8px] [border:0] [padding:0] [background:transparent] [color:inherit] [text-align:left]",
+    "grid w-full [gap:8px] [border:0] [padding:0] [background:transparent] [color:inherit] [text-align:left]",
   runControlReason:
     "[margin:0] [color:var(--fg-secondary)] [font-size:var(--vui-font-xs)] [line-height:1.45] [overflow-wrap:anywhere]",
   runControlSummaryBody:
@@ -633,7 +633,7 @@ const styles: Record<string, string> = {
   viewStack:
     "grid [gap:16px] [align-content:start] min-h-0 [overflow:auto] [padding-right:4px]",
   workflowStepButton:
-    "grid [gap:3px] min-w-0 [padding:7px_8px] [border:1px_solid_var(--border-hairline)] [border-radius:7px] [background:color-mix(in_srgb,_var(--surface-panel)_76%,_transparent)] [color:inherit] [font:inherit] [text-align:left] [cursor:pointer] [transition:border-color_120ms_ease,_background_120ms_ease] hover:[border-color:color-mix(in_srgb,_var(--accent-cool)_42%,_var(--border-soft))] hover:[background:color-mix(in_srgb,_var(--accent-cool)_7%,_var(--surface-panel))] hover:[outline:none] focus-visible:[border-color:color-mix(in_srgb,_var(--accent-cool)_42%,_var(--border-soft))] focus-visible:[background:color-mix(in_srgb,_var(--accent-cool)_7%,_var(--surface-panel))] focus-visible:[outline:none] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[font-weight:750] [&_strong]:[white-space:nowrap]",
+    "grid w-full [gap:3px] min-w-0 [padding:7px_8px] [border:1px_solid_var(--border-hairline)] [border-radius:7px] [background:color-mix(in_srgb,_var(--surface-panel)_76%,_transparent)] [color:inherit] [font:inherit] [text-align:left] [cursor:pointer] [transition:border-color_120ms_ease,_background_120ms_ease] hover:[border-color:color-mix(in_srgb,_var(--accent-cool)_42%,_var(--border-soft))] hover:[background:color-mix(in_srgb,_var(--accent-cool)_7%,_var(--surface-panel))] hover:[outline:none] focus-visible:[border-color:color-mix(in_srgb,_var(--accent-cool)_42%,_var(--border-soft))] focus-visible:[background:color-mix(in_srgb,_var(--accent-cool)_7%,_var(--surface-panel))] focus-visible:[outline:none] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[font-weight:750] [&_strong]:[white-space:nowrap]",
   workflowStepButtonActive:
     "[border-color:color-mix(in_srgb,_var(--accent-cool)_54%,_var(--border-soft))] [background:color-mix(in_srgb,_var(--accent-cool)_10%,_var(--surface-panel))]",
   workflowStepItem:
