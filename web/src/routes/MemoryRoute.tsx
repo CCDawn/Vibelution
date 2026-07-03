@@ -67,6 +67,7 @@ import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy"
 import { VButton, VNativeInput, VNativeSelect, VNativeTextarea, VRouteHeader } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
+import { MemoryManagementEditor, type MemoryManagementEditorDraft } from "./MemoryManagementEditor";
 import { MemoryMatrixPanel } from "./MemoryMatrixPanel";
 import { MemoryOverviewPanel } from "./MemoryOverviewPanel";
 import { MemoryProjectMemoryQueuePanel } from "./MemoryProjectMemoryQueuePanel";
@@ -560,14 +561,6 @@ type MemoryPair = {
 type BulkMemoryAction = "disable" | "restore";
 type MemoryProposalStatusFilter = "pending" | "";
 type MemoryProposalResolveStatus = "applied" | "rejected" | "conflict" | "superseded";
-type EditDraft = {
-  mode: "create" | "edit";
-  sectionId: string;
-  itemId: string;
-  title: string;
-  summary: string;
-  content: string;
-};
 type SourceDraft = {
   sourceType: string;
   sourceRef: string;
@@ -1762,7 +1755,7 @@ function buildMemoryLink(
   return `${window.location.origin}${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
 }
 
-function newCreateDraft(): EditDraft {
+function newCreateDraft(): MemoryManagementEditorDraft {
   return {
     mode: "create",
     sectionId: "user-managed-memory",
@@ -1773,7 +1766,7 @@ function newCreateDraft(): EditDraft {
   };
 }
 
-function draftFromItem(section: MemorySection, item: MemoryItem): EditDraft {
+function draftFromItem(section: MemorySection, item: MemoryItem): MemoryManagementEditorDraft {
   return {
     mode: "edit",
     sectionId: section.id,
@@ -2259,7 +2252,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     tone: "idle",
     text: "",
   });
-  const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
+  const [editDraft, setEditDraft] = useState<MemoryManagementEditorDraft | null>(null);
   const [selectedMemoryKeys, setSelectedMemoryKeys] = useState<string[]>([]);
   const [mutationFeedback, setMutationFeedback] = useState<{ tone: "idle" | "success" | "error"; text: string }>({
     tone: "idle",
@@ -2398,7 +2391,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     enabled: forcedView === "graph" && Boolean(selectedGraphNodeId) && Boolean(fallbackKnowledgeActorAgentId),
   });
   const memoryMutation = useMutation({
-    mutationFn: async (draft: EditDraft) => {
+    mutationFn: async (draft: MemoryManagementEditorDraft) => {
       const body = JSON.stringify({
         title: draft.title,
         summary: draft.summary,
@@ -4148,92 +4141,18 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
   const createWarningStrip = () => <MemoryWarningStrip label={copy.warnings} warnings={overview?.summary.warnings ?? []} />;
 
-  const renderManagementEditor = () =>
-    editDraft ? (
-      <section className={styles.managementPanel} aria-label={copy.management} title={copy.managementHint}>
-        <div className={styles.managementHeader}>
-          <div>
-            <p className={styles.panelEyebrow}>{copy.management}</p>
-            <h2>{editDraft.mode === "create" ? copy.addMemory : copy.editMemory}</h2>
-          </div>
-          <VButton type="button" className={styles.iconButton} onClick={cancelDraft} isDisabled={mutationBusy}>
-            <XCircle size={16} />
-            <span>{copy.cancelEdit}</span>
-          </VButton>
-        </div>
-        <label className={styles.fieldStack}>
-          <span>{copy.titleField}</span>
-          <VNativeInput
-            value={editDraft.title}
-            placeholder={copy.titlePlaceholder}
-            onChange={(event) => setEditDraft((current) => (current ? { ...current, title: event.target.value } : current))}
-          />
-        </label>
-        <label className={styles.fieldStack}>
-          <span>{copy.summaryField}</span>
-          <VNativeInput
-            value={editDraft.summary}
-            placeholder={copy.summaryPlaceholder}
-            onChange={(event) => setEditDraft((current) => (current ? { ...current, summary: event.target.value } : current))}
-          />
-        </label>
-        <label className={styles.fieldStack}>
-          <span>{copy.contentField}</span>
-          <VNativeTextarea
-            value={editDraft.content}
-            placeholder={copy.contentPlaceholder}
-            onChange={(event) => setEditDraft((current) => (current ? { ...current, content: event.target.value } : current))}
-          />
-        </label>
-        <div className={styles.managementActions}>
-          <VButton type="button" className={styles.primaryActionButton} onClick={saveDraft} isDisabled={mutationBusy}>
-            <CheckCircle2 size={15} />
-            <span>{copy.saveMemory}</span>
-          </VButton>
-          <VButton type="button" className={styles.detailActionButton} onClick={cancelDraft} isDisabled={mutationBusy}>
-            <XCircle size={15} />
-            <span>{copy.cancelEdit}</span>
-          </VButton>
-        </div>
-        <section className={styles.editPreviewPanel} aria-label={copy.editPreview}>
-          <div className={styles.panelHeader}>
-            <div>
-              <p className={styles.panelEyebrow}>{copy.editPreview}</p>
-              <h3>{editDraft.title.trim() || copy.titleField}</h3>
-            </div>
-          </div>
-          {resolvedActiveItem && editDraft.mode === "edit" ? (
-            <div className={styles.editPreviewGrid}>
-              {[
-                { label: copy.titleField, current: resolvedActiveItem.title, draft: editDraft.title },
-                { label: copy.summaryField, current: resolvedActiveItem.summary, draft: editDraft.summary },
-                { label: copy.contentField, current: resolvedActiveItem.content, draft: editDraft.content },
-              ].map((field) => (
-                <section key={field.label}>
-                  <strong>{field.label}</strong>
-                  <div>
-                    <span>{copy.currentValue}</span>
-                    <p>{field.current || "-"}</p>
-                  </div>
-                  <div>
-                    <span>{copy.draftValue}</span>
-                    <p>{field.draft || "-"}</p>
-                  </div>
-                </section>
-              ))}
-            </div>
-          ) : (
-            <p>{editDraft.content.trim() || editDraft.summary.trim() || editDraft.title.trim() ? editDraft.summary || editDraft.content : copy.noDraftChanges}</p>
-          )}
-        </section>
-        {mutationFeedback.tone !== "idle" ? (
-          <p className={styles.copyNotice} data-tone={mutationFeedback.tone}>
-            {mutationFeedback.tone === "success" ? <CheckCircle2 size={14} /> : <TriangleAlert size={14} />}
-            <span>{mutationFeedback.text}</span>
-          </p>
-        ) : null}
-      </section>
-    ) : null;
+  const createManagementEditor = () => (
+    <MemoryManagementEditor
+      copy={copy}
+      draft={editDraft}
+      previewItem={resolvedActiveItem}
+      mutationBusy={mutationBusy}
+      mutationFeedback={mutationFeedback}
+      onCancel={cancelDraft}
+      onDraftChange={setEditDraft}
+      onSave={saveDraft}
+    />
+  );
 
   const renderSelectedMemoryConfig = () =>
     resolvedActiveItem && activeSection && !editDraft ? (
@@ -4294,7 +4213,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
   const renderDetailPanel = (showEditor = true) => (
     <aside className={showEditor ? styles.detailPanel : `${styles.detailPanel} ${styles.manageDetailPanel}`}>
-      {showEditor ? renderManagementEditor() : null}
+      {showEditor ? createManagementEditor() : null}
 
       {resolvedActiveItem && activeSection ? (
         <>
@@ -4691,7 +4610,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               <span>{copy.addMemory}</span>
             </VButton>
           </div>
-          {renderManagementEditor()}
+          {createManagementEditor()}
           {renderSelectedMemoryConfig()}
           {!editDraft && !activeItem ? (
             <section className={styles.emptyDetail}>
