@@ -673,17 +673,17 @@ const styles: Record<string, string> = {
   workflowGraphBoundary:
     "workflowGraphBoundary min-w-0",
   workflowGraphCanvas:
-    "workflowGraphCanvas min-w-0 grid min-h-0 gap-2 p-2",
+    "workflowGraphCanvas min-w-0 grid min-h-0 gap-2 p-2 relative h-full w-full",
   workflowGraphEdge:
     "workflowGraphEdge min-w-0",
   workflowGraphFrame:
-    "workflowGraphFrame min-w-0 h-full overflow-hidden",
+    "workflowGraphFrame min-w-0 h-full min-h-[var(--workflow-graph-height,360px)] w-[var(--workflow-graph-width,720px)] max-w-full overflow-hidden",
   workflowGraphHeader:
     "workflowGraphHeader min-w-0 flex flex-wrap items-center gap-1.5",
   workflowGraphIssues:
     "workflowGraphIssues min-w-0",
   workflowGraphNode:
-    "workflowGraphNode min-w-0",
+    "workflowGraphNode min-w-0 absolute left-[var(--workflow-graph-node-x,0px)] top-[var(--workflow-graph-node-y,0px)]",
   workflowGraphNodeDanger:
     "workflowGraphNodeDanger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   workflowGraphNodeNeutral:
@@ -697,7 +697,7 @@ const styles: Record<string, string> = {
   workflowGraphStats:
     "workflowGraphStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   workflowGraphSvg:
-    "workflowGraphSvg min-w-0",
+    "workflowGraphSvg min-w-0 absolute inset-0 h-full w-full overflow-visible",
   workflowIngestionActions:
     "workflowIngestionActions min-w-0 flex flex-wrap items-center gap-1.5",
   workflowIngestionBoundary:
