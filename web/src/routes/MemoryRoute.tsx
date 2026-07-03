@@ -14,7 +14,6 @@ import {
   Search,
   Square,
   SquareCheckBig,
-  Trash2,
   TriangleAlert,
   Undo2,
   XCircle,
@@ -68,6 +67,7 @@ import { VButton, VNativeInput, VNativeSelect, VNativeTextarea, VRouteHeader } f
 import { useShellI18n } from "../i18n/useShellI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { MemoryAgentMemoryPanel } from "./MemoryAgentMemoryPanel";
+import { MemoryCleanupPanel } from "./MemoryCleanupPanel";
 import { MemoryDetailPanel } from "./MemoryDetailPanel";
 import { MemoryEffectivePanel } from "./MemoryEffectivePanel";
 import { MemoryManagementEditor, type MemoryManagementEditorDraft } from "./MemoryManagementEditor";
@@ -5546,167 +5546,31 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     </>
   );
 
-  const renderCleanupView = () => {
+  const createCleanupPanel = () => {
     const report = cleanupExecution ?? cleanupPreview;
-    const totals = report?.totals;
     const canExecute = selectedCleanupTargets.length > 0 && cleanupConfirmationText.trim() === (report?.confirmationPhrase || "硬删除记忆");
+
     return (
-      <>
-        <div className={styles.summaryGrid}>
-          <section className={styles.summaryCard}>
-            <span>{copy.cleanupSelectedTargets}</span>
-            <strong>{selectedCleanupTargets.length}</strong>
-            <small>{cleanupTargetOptions.length}</small>
-          </section>
-          <section className={styles.summaryCard}>
-            <span>{copy.cleanupRows}</span>
-            <strong>{totals?.rowCount ?? 0}</strong>
-            <small>{copy.cleanupHardDelete}</small>
-          </section>
-          <section className={styles.summaryCard}>
-            <span>{copy.cleanupFiles}</span>
-            <strong>{totals?.fileCount ?? 0}</strong>
-            <small>{formatByteCount(totals?.byteCount ?? 0)}</small>
-          </section>
-          <section className={styles.summaryCard}>
-            <span>{copy.cleanupVectorRecords}</span>
-            <strong>{totals?.vectorRecordCount ?? 0}</strong>
-            <small>RAG</small>
-          </section>
-        </div>
-
-        <section className={styles.cleanupWarning} title={copy.cleanupNoBackup}>
-          <TriangleAlert size={16} />
-          <strong>{copy.cleanupHardDelete}</strong>
-        </section>
-
-        <div className={styles.cleanupWorkspace}>
-          <section className={styles.cleanupTargetPanel}>
-            <div className={styles.panelHeader}>
-              <div>
-                <h2 title={copy.cleanupSelectTargets}>{copy.cleanupTargets}</h2>
-              </div>
-              <span className={styles.countPill}>{selectedCleanupTargets.length}</span>
-            </div>
-            {knowledgeDashboardSnapshotQuery.isPending || agentsQuery.isPending ? <div className={styles.emptyState}>{copy.loading}</div> : null}
-            {!knowledgeDashboardSnapshotQuery.isPending && !agentsQuery.isPending && !cleanupTargetOptions.length ? (
-              <div className={styles.emptyState}>{copy.cleanupNoTargets}</div>
-            ) : null}
-            <div className={styles.cleanupTargetList}>
-              {cleanupTargetOptions.map((option) => {
-                const selected = selectedCleanupTargetKeys.includes(option.key);
-                return (
-                  <label key={option.key} className={styles.cleanupTargetRow} data-selected={selected} data-risk={option.risk}>
-                    <VNativeInput
-                      type="checkbox"
-                      checked={selected}
-                      onChange={() => toggleCleanupTarget(option.key)}
-                      aria-label={option.label}
-                    />
-                    <span>
-                      <strong>{option.label}</strong>
-                      <small>{option.detail}</small>
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
-          </section>
-
-          <section className={styles.cleanupPreviewPanel}>
-            <div className={styles.panelHeader}>
-              <div>
-                <h2 title={copy.cleanupCentralSourceBoundary}>{copy.cleanupPreview}</h2>
-              </div>
-              <VButton
-                type="button"
-                className={styles.inlineActionButton}
-                onClick={previewCleanup}
-                isDisabled={!selectedCleanupTargets.length || cleanupPreviewMutation.isPending}
-              >
-                <Eye size={15} />
-                {copy.cleanupPreview}
-              </VButton>
-            </div>
-            {report ? (
-              <>
-                <div className={styles.cleanupStats}>
-                  <span>{copy.cleanupRows}: {report.totals.rowCount}</span>
-                  <span>{copy.cleanupFiles}: {report.totals.fileCount}</span>
-                  <span>{copy.cleanupBytes}: {formatByteCount(report.totals.byteCount)}</span>
-                  <span>{copy.cleanupVectorRecords}: {report.totals.vectorRecordCount}</span>
-                </div>
-                <div className={styles.cleanupPreviewList}>
-                  {report.targets.map((target) => (
-                    <article key={target.targetKey} className={styles.cleanupPreviewItem}>
-                      <header>
-                        <strong>{target.label}</strong>
-                        <span>{target.status}</span>
-                      </header>
-                      <div className={styles.cleanupPreviewCounts}>
-                        <span>{copy.cleanupRows}: {target.counts.rowCount}</span>
-                        <span>{copy.cleanupFiles}: {target.counts.fileCount}</span>
-                        <span>{copy.cleanupVectorRecords}: {target.counts.vectorRecordCount}</span>
-                      </div>
-                      {target.warnings.map((warning) => (
-                        <p key={warning} className={styles.cleanupInlineWarning}>{warning}</p>
-                      ))}
-                      <div className={styles.cleanupPathList}>
-                        {target.paths.map((path) => (
-                          <span key={`${target.targetKey}:${path.path}:${path.action}`}>
-                            <small>{path.action}{path.status ? ` · ${path.status}` : ""}</small>
-                            <strong>{path.path}</strong>
-                            <em>{path.rowCount ? `${path.rowCount} ${copy.cleanupRows}` : path.fileCount ? `${path.fileCount} ${copy.cleanupFiles}` : path.exists ? path.kind : copy.missing}</em>
-                          </span>
-                        ))}
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <div className={styles.emptyState}>{copy.cleanupSelectTargets}</div>
-            )}
-          </section>
-
-          <section className={styles.cleanupExecutePanel}>
-            <div className={styles.panelHeader}>
-              <div>
-                <h2>{copy.cleanupExecute}</h2>
-                <p>{copy.cleanupConfirmPhrase}: {report?.confirmationPhrase ?? "硬删除记忆"}</p>
-              </div>
-              <Trash2 size={18} />
-            </div>
-            <label className={styles.cleanupConfirmField}>
-              <span>{copy.cleanupConfirmPhrase}</span>
-              <VNativeInput
-                value={cleanupConfirmationText}
-                placeholder={copy.cleanupConfirmPlaceholder}
-                onChange={(event) => setCleanupConfirmationText(event.target.value)}
-              />
-            </label>
-            <VButton
-              type="button"
-              className={styles.cleanupExecuteButton}
-              onClick={executeCleanup}
-              isDisabled={!canExecute || cleanupExecuteMutation.isPending}
-            >
-              <Trash2 size={15} />
-              {copy.cleanupExecute}
-            </VButton>
-            {cleanupFeedback.tone !== "idle" ? (
-              <p className={styles.cleanupFeedback} data-tone={cleanupFeedback.tone}>{cleanupFeedback.text}</p>
-            ) : null}
-            {cleanupExecution ? (
-              <div className={styles.cleanupExecutionSummary}>
-                <CheckCircle2 size={18} />
-                <span>{copy.cleanupExecuteDone}</span>
-                <strong>{cleanupExecution.totals.targetCount}</strong>
-              </div>
-            ) : null}
-          </section>
-        </div>
-      </>
+      <MemoryCleanupPanel
+        copy={copy}
+        targetOptions={cleanupTargetOptions}
+        selectedTargetKeys={selectedCleanupTargetKeys}
+        selectedTargetCount={selectedCleanupTargets.length}
+        totalTargetCount={cleanupTargetOptions.length}
+        targetsLoading={knowledgeDashboardSnapshotQuery.isPending || agentsQuery.isPending}
+        report={report}
+        execution={cleanupExecution}
+        confirmationText={cleanupConfirmationText}
+        feedback={cleanupFeedback}
+        previewPending={cleanupPreviewMutation.isPending}
+        executePending={cleanupExecuteMutation.isPending}
+        canExecute={canExecute}
+        formatByteCount={formatByteCount}
+        onToggleTarget={toggleCleanupTarget}
+        onPreview={previewCleanup}
+        onExecute={executeCleanup}
+        onConfirmationTextChange={setCleanupConfirmationText}
+      />
     );
   };
 
@@ -6031,7 +5895,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                   : forcedView === "graph"
                     ? renderGraphView()
                     : forcedView === "cleanup"
-                      ? renderCleanupView()
+                      ? createCleanupPanel()
                       : renderSourcesView()}
       </div>
     </section>

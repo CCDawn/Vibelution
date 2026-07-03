@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import routeSource from "./MemoryRoute.tsx?raw";
 import agentMemoryPanelSource from "./MemoryAgentMemoryPanel.tsx?raw";
+import cleanupPanelSource from "./MemoryCleanupPanel.tsx?raw";
 import detailPanelSource from "./MemoryDetailPanel.tsx?raw";
 import effectivePanelSource from "./MemoryEffectivePanel.tsx?raw";
 import managementEditorSource from "./MemoryManagementEditor.tsx?raw";
@@ -170,7 +171,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("renderSourcesView()");
     expect(routeSource).toContain("renderKnowledgeView()");
     expect(routeSource).toContain("renderGraphView()");
-    expect(routeSource).toContain("renderCleanupView()");
+    expect(routeSource).toContain("createCleanupPanel()");
     expect(routeSource).toContain('forcedView === "overview"');
     expect(routeSource).toContain('forcedView === "effective"');
     expect(routeSource).toContain('forcedView === "agents"');
@@ -434,9 +435,9 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain('fetchJson<MemoryCleanupExecuteResponse>("/api/memory/cleanup/execute"');
     expect(routeSource).toContain("confirmationPhrase");
     expect(routeSource).toContain("cleanupConfirmationText.trim()");
-    expect(routeSource).toContain("copy.cleanupHardDelete");
-    expect(routeSource).toContain("copy.cleanupNoBackup");
-    expect(routeSource).toContain("copy.cleanupCentralSourceBoundary");
+    expect(cleanupPanelSource).toContain("copy.cleanupHardDelete");
+    expect(cleanupPanelSource).toContain("copy.cleanupNoBackup");
+    expect(cleanupPanelSource).toContain("copy.cleanupCentralSourceBoundary");
     expect(routeSource).toContain("targetType: \"global_runtime_memory\"");
     expect(routeSource).toContain("targetType: \"sqlite_database_compact\"");
     expect(routeSource).toContain("targetType: \"evaluation_artifacts\"");
@@ -450,6 +451,18 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("targetType: \"team_knowledge\"");
     expect(routeSource).toContain("targetType: \"knowledge_base\"");
     expect(routeSource).toContain("queryKeys.memoryCleanupPreview()");
+    expect(routeSource).toContain('from "./MemoryCleanupPanel"');
+    expect(routeSource).toContain("<MemoryCleanupPanel");
+    expect(routeSource).not.toContain("const renderCleanupView = () =>");
+    expect(cleanupPanelSource).toContain("export function MemoryCleanupPanel");
+    expect(cleanupPanelSource).toContain("styles.cleanupWorkspace");
+    expect(cleanupPanelSource).toContain("styles.cleanupTargetPanel");
+    expect(cleanupPanelSource).toContain("styles.cleanupPreviewPanel");
+    expect(cleanupPanelSource).toContain("styles.cleanupExecutePanel");
+    expect(cleanupPanelSource).toContain("styles.cleanupExecuteButton");
+    expect(cleanupPanelSource).not.toContain("useQuery");
+    expect(cleanupPanelSource).not.toContain("useMutation");
+    expect(cleanupPanelSource).not.toContain("fetchJson");
     expect(memoryCssSource).toContain(".cleanupWorkspace");
     expect(memoryCssSource).toContain(".cleanupTargetPanel");
     expect(memoryCssSource).toContain(".cleanupPreviewPanel");
@@ -687,8 +700,8 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain('title={copy.knowledgeSubtitle}');
     expect(routeSource).toContain('title={copy.knowledgeHint}');
     expect(routeSource).toContain('title={copy.ragRetrievalHint}');
-    expect(routeSource).toContain('title={copy.cleanupNoBackup}');
-    expect(routeSource).toContain('title={copy.cleanupCentralSourceBoundary}');
+    expect(cleanupPanelSource).toContain('title={copy.cleanupNoBackup}');
+    expect(cleanupPanelSource).toContain('title={copy.cleanupCentralSourceBoundary}');
     expect(routeSource).toContain('title={copy.graphInteractionHint}');
 
     expect(routeSource).not.toContain("className={styles.subtitle}>{memoryViewSubtitle");

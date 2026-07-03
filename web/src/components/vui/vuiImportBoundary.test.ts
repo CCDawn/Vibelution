@@ -37,6 +37,7 @@ const productSharedParentStyleConsumers = [
   "routes/DirectSessionIndexItem.tsx",
   "routes/GroupSessionIndexItems.tsx",
   "routes/MemoryAgentMemoryPanel.tsx",
+  "routes/MemoryCleanupPanel.tsx",
   "routes/MemoryDetailPanel.tsx",
   "routes/MemoryEffectivePanel.tsx",
   "routes/MemoryManagePanel.tsx",
