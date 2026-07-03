@@ -70,6 +70,7 @@ import { MemoryAgentMemoryPanel } from "./MemoryAgentMemoryPanel";
 import { MemoryCleanupPanel } from "./MemoryCleanupPanel";
 import { MemoryDetailPanel } from "./MemoryDetailPanel";
 import { MemoryEffectivePanel } from "./MemoryEffectivePanel";
+import { MemoryKnowledgeRagPanel } from "./MemoryKnowledgeRagPanel";
 import { MemoryKnowledgeStewardPanel } from "./MemoryKnowledgeStewardPanel";
 import { MemoryManagementEditor, type MemoryManagementEditorDraft } from "./MemoryManagementEditor";
 import { MemoryManagePanel } from "./MemoryManagePanel";
@@ -4952,49 +4953,16 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 </section>
               ) : null}
             </div>
-            <section className={styles.ragPreviewPanel} aria-label={copy.ragRetrieval} title={copy.ragRetrievalHint}>
-              <div className={styles.ragPreviewHeader}>
-                <div>
-                  <p className={styles.panelEyebrow}>{copy.ragRetrieval}</p>
-                  <h3>{copy.ragContextCandidates}</h3>
-                </div>
-                <span className={styles.countPill}>{knowledgeRagRetrieveQuery.data?.summary.contextCount ?? 0}</span>
-              </div>
-              <div className={styles.ragHealthStrip} aria-label={copy.ragHealth}>
-                <span>{copy.ragProvider}: {localRagProviderHealth?.provider ?? knowledgeRagHealth?.provider ?? "local"} · {localRagProviderHealth?.status ?? knowledgeRagHealth?.status ?? copy.loading}</span>
-                <span>{copy.ragVector}: {localRagProviderHealth?.vectorEnabled ? copy.yes : copy.no}</span>
-                <span>{copy.ragIndexed}: {localRagProviderHealth?.indexedItemCount ?? 0}</span>
-                <span data-stale={Number(localRagProviderHealth?.staleItemCount ?? 0) > 0 ? "true" : "false"}>
-                  {copy.ragStale}: {localRagProviderHealth?.staleItemCount ?? 0}
-                </span>
-              </div>
-              <div className={styles.ragPolicyStrip}>
-                <span>{copy.ragNoPromptInjection}: {knowledgeRagPolicy?.injectsPromptByDefault ? copy.no : copy.yes}</span>
-                <span>ACL: {knowledgeRagPolicy?.honorsKnowledgeAcl ? copy.yes : copy.no}</span>
-                <span>{copy.noDirectApply}: {knowledgeRagPolicy?.mutatesFormalKnowledge ? copy.no : copy.yes}</span>
-                <span>{copy.ragCitations}: {knowledgeRagRetrieveQuery.data?.summary.citationCount ?? 0}</span>
-              </div>
-              <div className={styles.ragContextList}>
-                {knowledgeRagContexts.map((context) => (
-                  <article key={context.contextId} className={styles.ragContextCard}>
-                    <div className={styles.ragContextMeta}>
-                      <strong>{context.rank}. {context.title || context.contextId}</strong>
-                      <span>{Math.round(Number(context.score || 0) * 100)}% · {context.matchReason || context.retrievalMode}</span>
-                    </div>
-                    <p>{context.text}</p>
-                    <small>
-                      {copy.ragCitations}: {context.source.teamName || context.source.teamId} · {context.source.knowledgeBaseName || context.source.knowledgeBaseId} · {context.source.knowledgeItemId}
-                    </small>
-                  </article>
-                ))}
-                {!knowledgeRagRetrieveQuery.isPending && !knowledgeRagContexts.length ? (
-                  <section className={styles.emptyDetail}>
-                    <Link2 size={20} />
-                    <strong>{copy.ragNoContexts}</strong>
-                  </section>
-                ) : null}
-              </div>
-            </section>
+            <MemoryKnowledgeRagPanel
+              copy={copy}
+              contexts={knowledgeRagContexts}
+              health={knowledgeRagHealth}
+              providerHealth={localRagProviderHealth}
+              retrievalPolicy={knowledgeRagPolicy}
+              contextCount={knowledgeRagRetrieveQuery.data?.summary.contextCount ?? 0}
+              citationCount={knowledgeRagRetrieveQuery.data?.summary.citationCount ?? 0}
+              isPending={knowledgeRagRetrieveQuery.isPending}
+            />
           </section>
           ) : null}
 
