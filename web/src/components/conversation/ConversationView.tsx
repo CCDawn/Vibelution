@@ -63,6 +63,7 @@ import {
 } from "./agentMessageTimelineRows";
 import { useAgentThread } from "./useAgentThread";
 import { projectAgentMessageTimelineMessages } from "./useAgentMessageTimelineProjection";
+import { projectConversationDisplayMessages } from "./conversationDisplayMessages";
 import {
   imageArtifactForMessage,
   isAgentInboxMessage,
@@ -607,46 +608,6 @@ function groupRoomTranscriptLabel(message: ConversationMessage) {
   return roomTitle ? `群聊同步记录 · ${roomTitle}` : "群聊同步记录";
 }
 
-function mergeAdjacentTurnErrorMessages(previous: ConversationMessage, next: ConversationMessage): ConversationMessage {
-  const previousThought = String(previous.thought ?? "").trim();
-  const nextThought = String(next.thought ?? "").trim();
-  const thought = [previousThought, nextThought]
-    .filter(Boolean)
-    .filter((value, index, values) => values.indexOf(value) === index)
-    .join("\n\n");
-  const toolCalls = [...(previous.toolCalls ?? [])];
-  const seenToolCalls = new Set(toolCalls.map((toolCall) => JSON.stringify(toolCall)));
-  for (const toolCall of next.toolCalls ?? []) {
-    const key = JSON.stringify(toolCall);
-    if (seenToolCalls.has(key)) {
-      continue;
-    }
-    seenToolCalls.add(key);
-    toolCalls.push(toolCall);
-  }
-  const feedbackEvents = [...(previous.feedbackEvents ?? [])];
-  const seenFeedbackEvents = new Set(feedbackEvents.map((event) => JSON.stringify(event)));
-  for (const event of next.feedbackEvents ?? []) {
-    const key = JSON.stringify(event);
-    if (seenFeedbackEvents.has(key)) {
-      continue;
-    }
-    seenFeedbackEvents.add(key);
-    feedbackEvents.push(event);
-  }
-  return {
-    ...previous,
-    thought: thought || undefined,
-    mentalSnapshot: next.mentalSnapshot,
-    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-    feedbackEvents: feedbackEvents.length > 0 ? feedbackEvents : undefined,
-    metadata: {
-      ...(next.metadata ?? {}),
-      ...(previous.metadata ?? {}),
-    },
-  };
-}
-
 function conversationMessageTurnId(message: ConversationMessage) {
   return metadataText(message.metadata, "turnId").replace(/^live:/, "");
 }
@@ -1123,24 +1084,7 @@ export function ConversationView({
   ];
   const resolvedStats = stats ?? [];
   const displayMessages = useMemo(
-    () => {
-      const visibleMessages = messages.filter((message) => !isRuntimeNoticeMessage(message));
-      const mergedMessages: ConversationMessage[] = [];
-      for (const message of visibleMessages) {
-        const previous = mergedMessages[mergedMessages.length - 1];
-        if (
-          previous
-          && isTurnErrorMessage(previous)
-          && isTurnErrorMessage(message)
-          && normalizeNoticeText(previous.content) === normalizeNoticeText(message.content)
-        ) {
-          mergedMessages[mergedMessages.length - 1] = mergeAdjacentTurnErrorMessages(previous, message);
-          continue;
-        }
-        mergedMessages.push(message);
-      }
-      return mergedMessages;
-    },
+    () => projectConversationDisplayMessages(messages),
     [messages],
   );
   const hasVisibleTurnErrorMessage = useMemo(
@@ -1271,10 +1215,6 @@ export function ConversationView({
       return normalized;
     }
     return `${normalized.slice(0, maxLength - 1).trimEnd()}...`;
-  }
-
-  function normalizeNoticeText(value: string) {
-    return value.replace(/\s+/g, " ").trim().toLowerCase();
   }
 
   function addComparableImageUrl(target: Set<string>, url: string) {
