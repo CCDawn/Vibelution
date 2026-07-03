@@ -1,4 +1,5 @@
-import { ConversationFeedbackEvent, ConversationMessage, ToolCall } from "../../api/types";
+import { ConversationFeedbackEvent, ConversationMessage } from "../../api/types";
+import { conversationMessageToAgentMessage } from "../../agent-thread/adapters";
 import type {
   AgentMentalPart,
   AgentMessage,
@@ -7,8 +8,7 @@ import type {
   AgentThoughtPart,
   AgentToolCallPart,
 } from "../../agent-thread/types";
-import { mergeConversationFeedbackEvents } from "./conversationFeedbackEvents";
-import { agentMessageProcessSections, hasMentalBlock, hasThoughtBlock, hasToolBlock } from "./messageSections";
+import { agentMessageProcessSections } from "./messageSections";
 
 export type ConversationOperationKind = "thought" | "mental" | "tool" | "status";
 
@@ -57,8 +57,6 @@ export type ConversationReActOperationGroup = {
   primaryKind: ConversationOperationKind;
 };
 
-const FEEDBACK_OPERATION_CACHE_LIMIT = 200;
-const feedbackOperationCache = new Map<string, ConversationOperation[]>();
 const operationGroupsCache = new WeakMap<
   ConversationMessage,
   { labels: ConversationOperationLabels; groups: ConversationOperationGroups }
@@ -72,103 +70,7 @@ export function buildConversationOperations(
   message: ConversationMessage,
   labels: ConversationOperationLabels,
 ): ConversationOperation[] {
-  if (message.role !== "assistant") {
-    return [];
-  }
-
-  const operations: ConversationOperation[] = [];
-  const resolvedStatus = message.streaming ? "running" : "done";
-
-  if ((message.feedbackEvents?.length ?? 0) > 0) {
-    const cacheKey = feedbackOperationCacheKey(message, labels, resolvedStatus);
-    const cached = feedbackOperationCache.get(cacheKey);
-    if (cached) {
-      return cached;
-    }
-    const operations = buildOperationsFromFeedbackEvents(message, labels, resolvedStatus);
-    feedbackOperationCache.set(cacheKey, operations);
-    if (feedbackOperationCache.size > FEEDBACK_OPERATION_CACHE_LIMIT) {
-      const oldestCacheKey = feedbackOperationCache.keys().next().value;
-      if (oldestCacheKey) {
-        feedbackOperationCache.delete(oldestCacheKey);
-      }
-    }
-    return operations;
-  }
-
-  if (hasThoughtBlock(message)) {
-    const thought = message.thought?.trim() ?? "";
-    operations.push({
-      id: `${message.id}-thought`,
-      kind: "thought",
-      label: labels.thought,
-      status: resolvedStatus,
-      summary: compactPreview(thought),
-      durationSeconds: null,
-      resultPreview: thought,
-    });
-  }
-
-  if (hasMentalBlock(message)) {
-    operations.push({
-      id: `${message.id}-mental`,
-      kind: "mental",
-      label: labels.mental,
-      status: resolvedStatus,
-      summary: mentalSnapshotSummary(message.mentalSnapshot),
-      durationSeconds: null,
-    });
-  }
-
-  if (hasToolBlock(message)) {
-    message.toolCalls?.forEach((toolCall, index) => {
-      operations.push({
-        id: `${message.id}-tool-${index}`,
-        kind: "tool",
-        label: toolCall.name,
-        status: toolCall.status || "done",
-        summary: toolCall.summary?.trim() ?? "",
-        durationSeconds: coerceToolDurationSeconds(toolCall),
-        arguments: toolCall.arguments,
-        resultPreview: toolCall.resultPreview,
-        resultType: toolCall.resultType,
-        resultLength: numberOrNull(toolCall.resultLength) ?? undefined,
-        error: toolCall.error,
-        timeoutSeconds: numberOrNull(toolCall.timeoutSeconds) ?? undefined,
-        tracePath: toolCall.tracePath,
-      });
-    });
-  }
-
-  return operations;
-}
-
-function feedbackOperationCacheKey(
-  message: ConversationMessage,
-  labels: ConversationOperationLabels,
-  resolvedStatus: string,
-) {
-  const events = mergeConversationFeedbackEvents(message.feedbackEvents);
-  const eventsFingerprint = events.map((event) => [
-    event.sequence ?? "",
-    event.timestamp ?? "",
-    event.kind ?? "",
-    event.status ?? "",
-    event.name ?? "",
-    event.summary ?? "",
-    event.resultPreview ?? "",
-    event.error ?? "",
-  ].join(":")).join(";");
-  return [
-    message.id,
-    message.streaming ? "streaming" : "done",
-    resolvedStatus,
-    labels.thought,
-    labels.mental,
-    labels.status,
-    events.length,
-    eventsFingerprint,
-  ].join("|");
+  return buildAgentMessageOperations(conversationMessageToAgentMessage(message), labels);
 }
 
 export function buildConversationOperationGroups(
@@ -477,62 +379,6 @@ function reActGroupTitle(group: ConversationReActOperationGroup) {
   return primaryLabels.join("/") || "执行";
 }
 
-function buildOperationsFromFeedbackEvents(
-  message: ConversationMessage,
-  labels: ConversationOperationLabels,
-  resolvedStatus: string,
-) {
-  const operations = mergeConversationFeedbackEvents(message.feedbackEvents)
-    .sort((a, b) => (numberOrNull(a.sequence) ?? 0) - (numberOrNull(b.sequence) ?? 0))
-    .map((event, index) => feedbackEventToOperation(message.id, event, index, labels, resolvedStatus))
-    .filter((operation): operation is ConversationOperation => operation !== null);
-  return normalizeTimelineOperations(operations, Boolean(message.streaming));
-}
-
-function feedbackEventToOperation(
-  messageId: string,
-  event: ConversationFeedbackEvent,
-  index: number,
-  labels: ConversationOperationLabels,
-  resolvedStatus: string,
-): ConversationOperation | null {
-  const kind = event.kind;
-  if (!["thought", "mental", "tool", "status"].includes(kind)) {
-    return null;
-  }
-  const rawLabel = kind === "tool" ? event.name?.trim() || "tool" : undefined;
-  const statusDisplay = kind === "status" ? statusOperationDisplay(event, labels.status) : null;
-  const label = kind === "thought"
-    ? labels.thought
-    : kind === "mental"
-      ? labels.mental
-      : kind === "status"
-        ? statusDisplay?.label ?? labels.status
-        : displayToolLabel(rawLabel ?? "tool");
-  const status = event.status?.trim() || (kind === "tool" ? "done" : resolvedStatus);
-  const rawSummary = event.summary?.trim() || event.resultPreview?.trim() || "";
-  return {
-    id: `${messageId}-feedback-${event.sequence || index + 1}`,
-    kind,
-    label,
-    rawLabel: kind === "status" ? event.name?.trim() || undefined : rawLabel,
-    status,
-    rawStatus: status,
-    summary: compactPreview(statusDisplay?.summary ?? rawSummary),
-    durationSeconds: coerceDurationSeconds(event),
-    arguments: event.arguments,
-    resultPreview: statusDisplay?.detail ?? event.resultPreview,
-    resultType: event.resultType,
-    resultLength: numberOrNull(event.resultLength) ?? undefined,
-    error: event.error,
-    timeoutSeconds: numberOrNull(event.timeoutSeconds) ?? undefined,
-    tracePath: event.tracePath,
-    sequence: numberOrNull(event.sequence) ?? undefined,
-    timestamp: event.timestamp,
-    relatedThoughtSequence: numberOrNull(event.relatedThoughtSequence) ?? undefined,
-  };
-}
-
 export function normalizeTimelineOperations(
   operations: ConversationOperation[],
   messageStreaming: boolean,
@@ -770,16 +616,6 @@ export function displayToolLabel(name: string) {
   return normalized;
 }
 
-function coerceToolDurationSeconds(toolCall: ToolCall) {
-  const value = toolCall as ToolCall & { elapsedSeconds?: unknown };
-  const seconds = numberOrNull(value.durationSeconds ?? value.elapsedSeconds);
-  if (seconds !== null) {
-    return seconds;
-  }
-  const durationMs = numberOrNull(value.durationMs);
-  return durationMs === null ? null : durationMs / 1000;
-}
-
 function coerceAgentToolDurationSeconds(toolCall: AgentToolCallPart) {
   const seconds = numberOrNull(toolCall.durationSeconds);
   if (seconds !== null) {
@@ -787,30 +623,6 @@ function coerceAgentToolDurationSeconds(toolCall: AgentToolCallPart) {
   }
   const durationMs = numberOrNull(toolCall.durationMs);
   return durationMs === null ? null : durationMs / 1000;
-}
-
-function coerceDurationSeconds(value: ToolCall | ConversationFeedbackEvent) {
-  const seconds = numberOrNull(value.durationSeconds);
-  if (seconds !== null) {
-    return seconds;
-  }
-  const durationMs = numberOrNull(value.durationMs);
-  return durationMs === null ? null : durationMs / 1000;
-}
-
-function mentalSnapshotSummary(snapshot: ConversationMessage["mentalSnapshot"]) {
-  if (!snapshot) {
-    return "";
-  }
-  return [
-    snapshot.feeling,
-    snapshot.summary,
-    snapshot.whisper,
-    snapshot.intervention,
-    snapshot.cognitiveState ? `state: ${snapshot.cognitiveState}` : "",
-  ]
-    .map((item) => String(item ?? "").trim())
-    .find(Boolean) ?? "";
 }
 
 function compactPreview(value: string, maxLength = 180) {
