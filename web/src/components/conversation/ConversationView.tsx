@@ -61,7 +61,7 @@ import {
   agentMessageTimelineItemRowKey,
   type AgentMessageTimelineRowIdentity,
 } from "./agentMessageTimelineRows";
-import { useAgentThreadProjection } from "./useAgentThreadProjection";
+import { useAgentThread } from "./useAgentThread";
 import { projectAgentMessageTimelineMessages } from "./useAgentMessageTimelineProjection";
 import {
   imageArtifactForMessage,
@@ -1160,9 +1160,10 @@ export function ConversationView({
     [activeTurnMessage, timelineMessages],
   );
   const activeTimelineMessages = activeAgentMessageTimelineProjection.messages;
+  const activeAgentMessages = activeAgentMessageTimelineProjection.agentMessages;
   const streamingTimelineMessages = activeAgentMessageTimelineProjection.streamingMessages;
   const activeTimelineRowIdentities = activeAgentMessageTimelineProjection.rowIdentities;
-  const agentThread = useAgentThreadProjection(sessionId, activeTimelineMessages);
+  const agentThread = useAgentThread(sessionId, activeAgentMessages);
   const agentMessagesByMessageId = useMemo(() => {
     const agentMessages = new Map<string, AgentMessage>();
     for (const agentMessage of agentThread.messages) {
