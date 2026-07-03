@@ -115,6 +115,7 @@ import {
   type TurnAvatarContent,
   type TurnAvatarResolution,
 } from "./conversationTurnAvatar";
+import type { ConversationStreamingFramePaintMetrics } from "./conversationStreamingMetrics";
 import {
   buildComputerUseStateForMessage,
   COMPUTER_USE_TOOL_NAME,
@@ -315,13 +316,6 @@ export type ConversationViewProps = {
   onStop?: () => void;
   onSafeGuidance?: () => void;
   onInterruptGuidance?: () => void;
-};
-
-export type ConversationStreamingFramePaintMetrics = {
-  sessionId: string;
-  streamingMessageCount: number;
-  renderedTextLength: number;
-  scrollSignal: string;
 };
 
 type ConversationTurnRowProps = {
