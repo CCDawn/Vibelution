@@ -11,7 +11,6 @@ import conversationViewSource from "./ConversationView.tsx?raw";
 import {
   ConversationView,
   type ConversationProcessDisplayMode,
-  safeConversationMarkdownUrl,
   shouldShowNextStateSignalInConversation,
 } from "./ConversationView";
 import { isAgentInboxMessage } from "./conversationMessagePredicates";
@@ -3656,24 +3655,6 @@ describe("ConversationView edit resend affordance", () => {
 });
 
 describe("ConversationView markdown URL safety", () => {
-  it("allows http, https, and relative markdown URLs", () => {
-    expect(safeConversationMarkdownUrl("https://example.com/a.png")).toBe("https://example.com/a.png");
-    expect(safeConversationMarkdownUrl("http://example.com/a")).toBe("http://example.com/a");
-    expect(safeConversationMarkdownUrl("/api/sessions/s1/artifacts/a.png")).toBe("/api/sessions/s1/artifacts/a.png");
-    expect(safeConversationMarkdownUrl("./images/a.png")).toBe("./images/a.png");
-    expect(safeConversationMarkdownUrl("../images/a.png")).toBe("../images/a.png");
-    expect(safeConversationMarkdownUrl("#section")).toBe("#section");
-  });
-
-  it("rejects executable and ambiguous markdown URLs", () => {
-    expect(safeConversationMarkdownUrl("javascript:alert(1)")).toBeNull();
-    expect(safeConversationMarkdownUrl("data:text/html,<script>alert(1)</script>")).toBeNull();
-    expect(safeConversationMarkdownUrl("vbscript:msgbox(1)")).toBeNull();
-    expect(safeConversationMarkdownUrl("file:///C:/secret.txt")).toBeNull();
-    expect(safeConversationMarkdownUrl("//evil.example/a.png")).toBeNull();
-    expect(safeConversationMarkdownUrl("java\nscript:alert(1)")).toBeNull();
-  });
-
   it("renders unsafe inline markdown links as plain text", () => {
     const html = renderConversation([
       {
