@@ -7,6 +7,7 @@ import agentMemoryPanelSource from "./MemoryAgentMemoryPanel.tsx?raw";
 import cleanupPanelSource from "./MemoryCleanupPanel.tsx?raw";
 import detailPanelSource from "./MemoryDetailPanel.tsx?raw";
 import effectivePanelSource from "./MemoryEffectivePanel.tsx?raw";
+import knowledgePipelinePanelSource from "./MemoryKnowledgePipelinePanel.tsx?raw";
 import knowledgeRagPanelSource from "./MemoryKnowledgeRagPanel.tsx?raw";
 import knowledgeStewardPanelSource from "./MemoryKnowledgeStewardPanel.tsx?raw";
 import knowledgeUsageContractPanelSource from "./MemoryKnowledgeUsageContractPanel.tsx?raw";
@@ -720,7 +721,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("meta={memoryViewSubtitle(copy, forcedView)}");
     expect(projectMemoryQueuePanelSource).toContain('title={copy.projectMemoryQueueHint}');
     expect(overviewPanelSource).toContain('title={copy.reviewQueueHint}');
-    expect(routeSource).toContain('title={copy.knowledgeSubtitle}');
+    expect(knowledgePipelinePanelSource).toContain('title={copy.knowledgeSubtitle}');
     expect(routeSource).toContain('title={copy.knowledgeHint}');
     expect(knowledgeRagPanelSource).toContain('title={copy.ragRetrievalHint}');
     expect(cleanupPanelSource).toContain('title={copy.cleanupNoBackup}');
@@ -911,16 +912,22 @@ describe("MemoryRoute layout contract", () => {
   });
 
   it("visualizes the P1 team knowledge pipeline and prompt boundary", () => {
-    expect(routeSource).toContain("copy.platformPipeline");
-    expect(routeSource).toContain("copy.pipelineSource");
-    expect(routeSource).toContain("copy.pipelineProposal");
-    expect(routeSource).toContain("copy.pipelineBatch");
-    expect(routeSource).toContain("copy.pipelineFormal");
-    expect(routeSource).toContain("copy.pipelineRating");
-    expect(routeSource).toContain("copy.toolReadableOnly");
-    expect(routeSource).toContain("copy.promptBoundary");
-    expect(routeSource).toContain("styles.pipelinePanel");
-    expect(routeSource).toContain("styles.pipelineSteps");
+    expect(routeSource).toContain('from "./MemoryKnowledgePipelinePanel"');
+    expect(routeSource).toContain("<MemoryKnowledgePipelinePanel");
+    expect(knowledgePipelinePanelSource).toContain("export function MemoryKnowledgePipelinePanel");
+    expect(knowledgePipelinePanelSource).toContain("copy.platformPipeline");
+    expect(knowledgePipelinePanelSource).toContain("copy.pipelineSource");
+    expect(knowledgePipelinePanelSource).toContain("copy.pipelineProposal");
+    expect(knowledgePipelinePanelSource).toContain("copy.pipelineBatch");
+    expect(knowledgePipelinePanelSource).toContain("copy.pipelineFormal");
+    expect(knowledgePipelinePanelSource).toContain("copy.pipelineRating");
+    expect(knowledgePipelinePanelSource).toContain("copy.toolReadableOnly");
+    expect(knowledgePipelinePanelSource).toContain("copy.promptBoundary");
+    expect(knowledgePipelinePanelSource).toContain("styles.pipelinePanel");
+    expect(knowledgePipelinePanelSource).toContain("styles.pipelineSteps");
+    expect(knowledgePipelinePanelSource).not.toContain("useQuery");
+    expect(knowledgePipelinePanelSource).not.toContain("useMutation");
+    expect(knowledgePipelinePanelSource).not.toContain("fetchJson");
   });
 
   it("keeps team knowledge governance compact and hides internal policy tokens behind readable labels", () => {
