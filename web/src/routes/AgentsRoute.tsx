@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   Database,
   Layers3,
-  Plus,
   Square,
   Trash2,
   UserRound,
@@ -49,14 +48,13 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import {
-  AgentBulkActionBar,
   AgentFilterRail,
   AgentWorkspacePanel,
   type AgentDenseColumn,
   type AgentFilterSectionView,
   type AgentSummaryMetric,
 } from "../components/vui/product/agent-management";
-import { VButton, VChip, VHStack, VNativeSelect, VPanelHeader } from "../components/vui";
+import { VButton, VHStack, VNativeSelect } from "../components/vui";
 import { vuiFormLabelClass } from "../components/vui/forms/formClasses";
 import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
@@ -75,12 +73,12 @@ import {
   type AgentConfigDraft,
   type AgentCoreConfigLlmSlotView,
 } from "./AgentCoreConfigPanel";
-import { AgentCreatePanel, type AgentCreateDraft } from "./AgentCreatePanel";
+import { type AgentCreateDraft } from "./AgentCreatePanel";
 import { AgentDebugResetPanel, type AgentResetOptions } from "./AgentDebugResetPanel";
 import { AgentDetailHeaderPanel } from "./AgentDetailHeaderPanel";
 import { AgentEmptySelectionPanel } from "./AgentEmptySelectionPanel";
 import { AgentHealthMaintenancePanel } from "./AgentHealthMaintenancePanel";
-import { AgentListStatePanel } from "./AgentListStatePanel";
+import { AgentListWorkspacePanel } from "./AgentListWorkspacePanel";
 import { AgentMemoryPolicyPanel, type AgentMemoryPolicyDraft } from "./AgentMemoryPolicyPanel";
 import { AgentModeMembershipPanel, type AgentModeMembershipDraft } from "./AgentModeMembershipPanel";
 import { AgentManagementBriefPanel } from "./AgentManagementBriefPanel";
@@ -5755,79 +5753,61 @@ export function AgentsRoute() {
           storagePaths={agentStoragePaths}
         />
 
-        <AgentWorkspacePanel
-          as="main"
+        <AgentListWorkspacePanel
+          createOpen={createOpen}
           ariaLabel={activeGroupLabel}
-          className={createOpen ? `${styles.agentPanel} ${styles.agentPanelCreating}` : styles.agentPanel}
-        >
-          <VPanelHeader
-            eyebrow={copy.agentFilters}
-            title={activeGroupLabel}
-            actions={
-              <>
-                <VButton
-                  type="button"
-                  variant="secondary"
-                  icon={<Plus size={15} />}
-                  onPress={() => setCreateOpen((value) => !value)}
-                >
-                  {copy.createAgent}
-                </VButton>
-                <VChip tone="neutral">{visibleAgents.length}</VChip>
-              </>
-            }
-          />
-          {createOpen ? (
-            <AgentCreatePanel
-              copy={copy}
-              draft={createDraft}
-              selectedModelId={agentLlmSlotModelId(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0])}
-              isWorkSession={createDraftIsWorkSession}
-              canCreate={canCreateAgent}
-              pending={createAgentMutation.isPending}
-              notice={notice}
-              modelChoices={agentModelChoices}
-              primaryModeOptions={bulkPrimaryModeOptions}
-              promptTemplateOptions={bulkPromptTemplateOptions}
-              toolBundles={toolBundles}
-              toolBundleSummary={createToolBundleSummaryValue}
-              toolBundleMeta={(bundle) => toolBundleMeta(bundle, lang)}
-              onDraftChange={updateCreateDraft}
-              onModelChange={(modelId) => updateCreateDraft({
-                llmBindings: updateAgentLlmSlotBinding(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0], modelId),
-              })}
-              onPrimaryModeChange={(primaryMode) => updateCreateDraft({
-                primaryMode,
-                selectedToolBundleIds: toolBundleIdsForModeChange(createDraft, primaryMode, toolBundles),
-              })}
-              onToolBundleToggle={(bundleId, selected) => {
-                const next = new Set(createDraft.selectedToolBundleIds);
-                if (selected) {
-                  next.add(bundleId);
-                } else {
-                  next.delete(bundleId);
-                }
-                updateCreateDraft({ selectedToolBundleIds: sortedIds(Array.from(next)) });
-              }}
-              onCancel={() => {
-                setCreateOpen(false);
-                setCreateDraft(createDraftFromWorkspace(workspace, toolBundles));
-              }}
-              onCreate={createAgent}
-            />
-          ) : null}
-          {!createOpen ? (
-            <AgentBulkActionBar
-              ariaLabel={copy.bulkSelected}
-              summary={bulkActionSummary}
-              selectionActions={bulkSelectionActions}
-              promptPicker={bulkPromptPicker}
-              mutationActions={bulkMutationActions}
-              destructiveActions={bulkDestructiveActions}
-            />
-          ) : null}
-          <AgentListStatePanel
-            copy={{
+          headerEyebrow={copy.agentFilters}
+          headerTitle={activeGroupLabel}
+          createAgentLabel={copy.createAgent}
+          visibleAgentCount={visibleAgents.length}
+          onToggleCreate={() => setCreateOpen((value) => !value)}
+          createPanel={{
+            copy,
+            draft: createDraft,
+            selectedModelId: agentLlmSlotModelId(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0]),
+            isWorkSession: createDraftIsWorkSession,
+            canCreate: canCreateAgent,
+            pending: createAgentMutation.isPending,
+            notice,
+            modelChoices: agentModelChoices,
+            primaryModeOptions: bulkPrimaryModeOptions,
+            promptTemplateOptions: bulkPromptTemplateOptions,
+            toolBundles,
+            toolBundleSummary: createToolBundleSummaryValue,
+            toolBundleMeta: (bundle) => toolBundleMeta(bundle, lang),
+            onDraftChange: updateCreateDraft,
+            onModelChange: (modelId) => updateCreateDraft({
+              llmBindings: updateAgentLlmSlotBinding(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0], modelId),
+            }),
+            onPrimaryModeChange: (primaryMode) => updateCreateDraft({
+              primaryMode,
+              selectedToolBundleIds: toolBundleIdsForModeChange(createDraft, primaryMode, toolBundles),
+            }),
+            onToolBundleToggle: (bundleId, selected) => {
+              const next = new Set(createDraft.selectedToolBundleIds);
+              if (selected) {
+                next.add(bundleId);
+              } else {
+                next.delete(bundleId);
+              }
+              updateCreateDraft({ selectedToolBundleIds: sortedIds(Array.from(next)) });
+            },
+            onCancel: () => {
+              setCreateOpen(false);
+              setCreateDraft(createDraftFromWorkspace(workspace, toolBundles));
+            },
+            onCreate: createAgent,
+          }}
+          bulkActionBar={{
+            ariaLabel: copy.bulkSelected,
+            summary: bulkActionSummary,
+            selectionActions: bulkSelectionActions,
+            promptPicker: bulkPromptPicker,
+            mutationActions: bulkMutationActions,
+            destructiveActions: bulkDestructiveActions,
+          }}
+          listState={{
+            copy: {
               loadFailed: copy.loadFailed,
               loading: copy.loading,
               noAgents: copy.noAgents,
@@ -5836,22 +5816,22 @@ export function AgentsRoute() {
               runtimeStatus: copy.runtimeStatus,
               modeMembership: copy.modeMembership,
               statusReminders: copy.statusReminders,
-            }}
-            columns={denseColumns}
-            visibleAgentCount={visibleAgents.length}
-            isError={workspaceQuery.isError}
-            error={workspaceQuery.error}
-            isPending={workspaceQuery.isPending}
-            hasWorkspace={Boolean(workspace)}
-            onSelectRow={(rowId, event) => {
+            },
+            columns: denseColumns,
+            visibleAgentCount: visibleAgents.length,
+            isError: workspaceQuery.isError,
+            error: workspaceQuery.error,
+            isPending: workspaceQuery.isPending,
+            hasWorkspace: Boolean(workspace),
+            onSelectRow: (rowId, event) => {
               const agent = agentRowLookup.get(rowId);
               if (agent) {
                 handleAgentRowSelect(agent, event);
               }
-            }}
-            onToggleBulk={(rowId, checked, shiftKey) => toggleBulkAgent(rowId, checked, shiftKey)}
-          />
-        </AgentWorkspacePanel>
+            },
+            onToggleBulk: (rowId, checked, shiftKey) => toggleBulkAgent(rowId, checked, shiftKey),
+          }}
+        />
 
         <AgentWorkspacePanel
           as="aside"
