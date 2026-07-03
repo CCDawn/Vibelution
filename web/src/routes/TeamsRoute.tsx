@@ -8148,6 +8148,138 @@ export function TeamsRoute({
     );
   }
 
+  function renderSourceCollectionExtractionRecoveryPanel(
+    candidateProjection: SourceCollectionStageCardProjection | null | undefined,
+  ) {
+    const recoveryCoverage = candidateProjection?.currentCoverageSummary?.complete === false
+      ? candidateProjection.currentCoverageSummary
+      : candidateProjection?.latestTask?.coverageSummary;
+    const recoveryClosure = candidateProjection?.latestTask?.closureSummary;
+    const recoveryNumber = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0);
+    const sourceCollectionExtractionRecoveryInputCount = Math.max(
+      recoveryNumber(recoveryCoverage?.total),
+      recoveryNumber(candidateProjection?.counts?.input),
+      sourceCollectionRawRecordCount,
+    );
+    const sourceCollectionExtractionRecoveryInvalidCount = Math.max(
+      recoveryNumber(recoveryCoverage?.invalid),
+      recoveryClosure?.invalidIds?.length ?? 0,
+      candidateProjection?.latestTask?.invalidRecordIds?.length ?? 0,
+      candidateProjection?.latestTask?.invalidCandidateIds?.length ?? 0,
+    );
+    const sourceCollectionExtractionRecoveryCoverageMissingCount = recoveryNumber(recoveryCoverage?.missing);
+    const sourceCollectionExtractionRecoveryMissingCount = Math.max(
+      sourceCollectionExtractionRecoveryCoverageMissingCount,
+      recoveryNumber(candidateProjection?.counts?.pending),
+    );
+    const sourceCollectionExtractionRecoveryFailureCount = Math.max(
+      recoveryNumber(recoveryClosure?.failedCount),
+      recoveryNumber(recoveryClosure?.blockedCount),
+      recoveryNumber(recoveryCoverage?.blocked),
+      sourceCollectionExtractionRecoveryInvalidCount,
+      recoveryCoverage?.complete === false ? sourceCollectionExtractionRecoveryCoverageMissingCount : 0,
+    );
+    const sourceCollectionExtractionRecoverySalvageSignals = [
+      recoveryNumber(recoveryClosure?.successCount),
+      recoveryNumber(candidateProjection?.counts?.output),
+      sourceCollectionRunApprovedCount,
+    ].filter((value) => value > 0);
+    const sourceCollectionExtractionRecoverySalvageCount = sourceCollectionExtractionRecoverySalvageSignals.length
+      ? Math.max(...sourceCollectionExtractionRecoverySalvageSignals)
+      : sourceCollectionDisplayedCandidateCount;
+    const sourceCollectionExtractionRecoverySalvageText = sourceCollectionPrimaryDataLoading
+      ? sourceCollectionLoadingText
+      : String(sourceCollectionExtractionRecoverySalvageCount);
+    const recoveryNeedsWork = Boolean(
+      sourceCollectionExtractionRecoveryFailureCount > 0
+      || sourceCollectionExtractionRecoveryInvalidCount > 0
+      || recoveryCoverage?.complete === false
+      || recoveryClosure?.userStatus === "failed"
+      || candidateProjection?.status === "failed"
+      || candidateProjection?.status === "agent_blocked"
+      || candidateProjection?.status === "agent_interrupted"
+      || sourceCollectionCandidateStepState === "failed"
+    );
+    if (!recoveryNeedsWork) {
+      return null;
+    }
+    const recoveryFailureText = sourceCollectionExtractionRecoveryFailureCount > 0
+      ? sourceCollectionExtractionRecoveryInputCount > 0
+        ? `${sourceCollectionExtractionRecoveryFailureCount}/${sourceCollectionExtractionRecoveryInputCount}`
+        : String(sourceCollectionExtractionRecoveryFailureCount)
+      : (lang === "zh" ? "需要排查" : "review");
+    const recoveryMissingText = sourceCollectionExtractionRecoveryMissingCount > 0
+      ? String(sourceCollectionExtractionRecoveryMissingCount)
+      : sourceCollectionExtractionRecoveryInvalidCount > 0
+        ? String(sourceCollectionExtractionRecoveryInvalidCount)
+        : sourceCollectionStageRecoveryStatusLabel("extraction", lang);
+    const recoverySummary = sourceCollectionStageUserSummary(candidateProjection, lang)
+      || (lang === "zh"
+        ? "本轮资料提炼没有完全闭环；先保留可用候选，再补齐失败记录。"
+        : "This extraction run did not close cleanly; keep usable candidates and recover failed records.");
+    return (
+      <section
+        className={styles.sourceCollectionExtractionRecoveryPanel}
+        aria-label={lang === "zh" ? "资料提炼失败恢复工作台" : "Source extraction recovery panel"}
+      >
+        <div className={styles.sourceCollectionExtractionRecoveryBody}>
+          <div className={styles.sourceCollectionResultsHeader}>
+            <AlertTriangle size={14} />
+            <strong>{lang === "zh" ? "提炼失败恢复" : "Extraction recovery"}</strong>
+            <span className={styles.sourceCollectionRunBadge}>
+              {sourceCollectionStageRecoveryStatusLabel("extraction", lang)}
+            </span>
+          </div>
+          <p>{recoverySummary}</p>
+          <div className={styles.sourceCollectionExtractionRecoveryStats}>
+            <span>
+              {lang === "zh" ? "提炼失败" : "failed extraction"}
+              <strong>{recoveryFailureText}</strong>
+            </span>
+            <span>
+              {lang === "zh" ? "可保留" : "salvageable"}
+              <strong>{sourceCollectionExtractionRecoverySalvageText}</strong>
+            </span>
+            <span>
+              {lang === "zh" ? "待补提炼" : "to recover"}
+              <strong>{sourceCollectionPrimaryDataLoading ? sourceCollectionLoadingText : recoveryMissingText}</strong>
+            </span>
+            <span>
+              {lang === "zh" ? "待 Agent 复核" : "pending agent review"}
+              <strong>{sourceCollectionRunPendingScreeningCountText}</strong>
+            </span>
+          </div>
+        </div>
+        <div className={styles.sourceCollectionExtractionRecoveryActions}>
+          <VNativeButton
+            type="button"
+            className={styles.sourceCollectionStagePrimaryAction}
+            onClick={runSourceCollectionCandidateExtractionAction}
+            disabled={sourceCollectionCandidateExtractionActionReadiness.disabled}
+            title={sourceCollectionActionDisabledTitle(sourceCollectionCandidateExtractionActionReadiness, lang === "zh" ? "继续补全提炼" : "Continue extraction")}
+          >
+            <RefreshCw size={13} />
+            {lang === "zh" ? "继续补全提炼" : "Continue extraction"}
+          </VNativeButton>
+          <VNativeButton
+            type="button"
+            className={styles.sourceCollectionStageSecondaryAction}
+            onClick={runSourceCollectionScreeningAction}
+            disabled={sourceCollectionScreeningActionReadiness.disabled}
+            title={sourceCollectionActionDisabledTitle(sourceCollectionScreeningActionReadiness, sourceCollectionScreeningButtonText)}
+          >
+            <CheckCircle2 size={13} />
+            {sourceCollectionScreeningButtonText}
+          </VNativeButton>
+          <VNativeButton type="button" className={styles.sourceCollectionStageSecondaryAction} onClick={() => void openSourceCollectionStageAgentChat("extraction")}>
+            <MessageSquare size={13} />
+            {lang === "zh" ? "进入 Agent 私聊" : "Open Agent chat"}
+          </VNativeButton>
+        </div>
+      </section>
+    );
+  }
+
   function renderSourceCollectionCandidatePanel() {
     const filteredCandidates = sourceCollectionFilteredRunCandidates;
     const pagedCandidates = sourceCollectionPageItems("extraction", filteredCandidates);
@@ -8261,6 +8393,7 @@ export function TeamsRoute({
             })}
           </div>
         )}
+        {renderSourceCollectionExtractionRecoveryPanel(candidateProjection)}
         {renderSourceCollectionPagination("extraction", filteredCandidates.length)}
       </details>
     );
