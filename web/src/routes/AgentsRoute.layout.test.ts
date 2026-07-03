@@ -94,6 +94,10 @@ const detailHeaderPanelSource = readFileSync(
   new URL("./AgentDetailHeaderPanel.tsx", import.meta.url),
   "utf-8",
 );
+const detailWorkspacePanelSource = readFileSync(
+  new URL("./AgentDetailWorkspacePanel.tsx", import.meta.url),
+  "utf-8",
+);
 const emptySelectionPanelSource = readFileSync(
   new URL("./AgentEmptySelectionPanel.tsx", import.meta.url),
   "utf-8",
@@ -185,11 +189,12 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("uses the VUI product panel surface for the Agent workspace columns", () => {
-    expect(routeSource).toContain("AgentWorkspacePanel");
+    expect(detailWorkspacePanelSource).toContain("AgentWorkspacePanel");
     expect(routeSource).toContain("<AgentFilterRail");
     expect(routeSource).toContain("ariaLabel={copy.agentFilters}");
     expect(filterRailSource).toContain('as="aside"');
     expect(listWorkspacePanelSource).toContain('as="main"');
+    expect(detailWorkspacePanelSource).toContain('as="aside"');
     expect(routeSource).toContain("ariaLabel={activeGroupLabel}");
     expect(routeSource).toContain("ariaLabel={selectedAgent ? agentLabel(selectedAgent) : copy.title}");
     expect(stylesSource).not.toContain("0 14px 34px");
@@ -223,8 +228,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('normalized === "research_flow"');
     expect(routeSource).toContain("返回科研流程画布");
     expect(routeSource).toContain("returnBannerTitle: \"返回跳转前页面\"");
-    expect(routeSource).toContain("AgentReturnBannerPanel");
-    expect(routeSource).toContain("onReturn={() => navigate(returnToPath)}");
+    expect(detailWorkspacePanelSource).toContain("AgentReturnBannerPanel");
+    expect(routeSource).toContain("onReturn: () => navigate(returnToPath)");
     expect(returnBannerPanelSource).toContain("className={styles.returnBanner}");
     expect(returnBannerPanelSource).toContain("className={styles.returnBannerButton}");
     expect(routeSource).toContain("if (requestedAgentId && selectedAgent?.agentId === requestedAgentId)");
@@ -238,7 +243,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("<AgentFilterRail");
     expect(routeSource).toContain("<AgentListWorkspacePanel");
     expect(listWorkspacePanelSource).toContain("styles.agentPanel");
-    expect(routeSource).toContain("styles.detailPanel");
+    expect(detailWorkspacePanelSource).toContain("styles.detailPanel");
     expect(listWorkspacePanelSource).toContain("<AgentListStatePanel");
     expect(listStatePanelSource).toContain("<AgentDenseList");
     expect(routeSource).toContain("agent.avatarImageUrl");
@@ -1147,7 +1152,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("styles.workspace");
     expect(denseListSource).toContain("max-[860px]:hidden");
     expect(denseListSource).toContain('data-vui="agent-row"');
-    expect(routeSource).toContain("styles.detailPanel");
+    expect(detailWorkspacePanelSource).toContain("styles.detailPanel");
     expect(styles.workspace).toBeTruthy();
     expect(styles.workspace).toContain("[grid-template-columns:minmax(214px,_268px)_minmax(430px,_1.08fr)_minmax(330px,_0.86fr)]");
     expect(styles.workspace).toContain("max-[1040px]:[grid-template-columns:minmax(220px,_270px)_minmax(0,_1fr)]");
@@ -1185,7 +1190,7 @@ describe("AgentsRoute layout contract", () => {
 
   it("keeps Agent empty states compact and left-aligned for dense workbench scanning", () => {
     expect(styles.emptyState).toBeTruthy();
-    expect(routeSource).toContain("AgentEmptySelectionPanel");
+    expect(detailWorkspacePanelSource).toContain("AgentEmptySelectionPanel");
     expect(emptySelectionPanelSource).toContain("className={styles.emptyState}");
     expect(styles.emptyState).toContain("[place-items:start]");
     expect(styles.emptyState).toContain("[min-height:72px]");
