@@ -1,13 +1,13 @@
 const flowTabsClass = [
-  "grid flex-[1_1_860px] grid-cols-[repeat(4,minmax(132px,1fr))] gap-1 rounded-lg border border-vui-border-soft",
-  "min-w-[min(720px,100%)] max-w-[920px] bg-[var(--surface-panel-muted)] p-[3px]",
-  "max-[1120px]:min-w-[min(560px,100%)] max-[1120px]:max-w-[760px] max-[1120px]:grid-cols-[repeat(4,minmax(110px,1fr))]",
+  "grid flex-[0_1_620px] grid-cols-[repeat(4,minmax(88px,1fr))] gap-1 rounded-md border border-vui-border-soft",
+  "min-w-[min(420px,100%)] max-w-[680px] bg-[var(--surface-panel-muted)] p-[2px]",
+  "max-[1120px]:min-w-[min(360px,100%)] max-[1120px]:max-w-[560px] max-[1120px]:grid-cols-[repeat(4,minmax(80px,1fr))]",
   "max-[760px]:min-w-0 max-[760px]:flex-[1_1_1px] max-[760px]:grid-cols-[repeat(4,minmax(74px,1fr))]",
 ].join(" ");
 const flowTabClass = [
-  "grid min-h-[44px] min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5 rounded-[7px] border border-transparent",
-  "bg-transparent p-[5px_7px] text-left font-[inherit] text-vui-fg-secondary no-underline transition-[background,border-color,color] duration-150",
-  "hover:bg-vui-surface-row-hover hover:text-vui-fg-primary max-[760px]:min-h-[38px] max-[760px]:p-[4px_5px]",
+  "grid min-h-[36px] min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1 rounded-[6px] border border-transparent",
+  "bg-transparent p-[4px_6px] text-left font-[inherit] text-vui-fg-secondary no-underline transition-[background,border-color,color] duration-150",
+  "hover:bg-vui-surface-row-hover hover:text-vui-fg-primary max-[760px]:min-h-[34px] max-[760px]:p-[3px_4px]",
 ].join(" ");
 const flowTabActiveClass = "border-[color-mix(in_srgb,var(--accent-warm)_28%,var(--border-hairline))] bg-[color-mix(in_srgb,var(--accent-warm)_13%,transparent)] text-[var(--accent-warm-2)]";
 const stepIndexClass = "inline-flex h-5 w-5 items-center justify-center whitespace-nowrap rounded-full border border-vui-border-soft text-[10px] leading-none text-vui-fg-tertiary max-[760px]:hidden";

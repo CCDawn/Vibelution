@@ -335,7 +335,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(stylesSource).toContain(".supervisedRunConsoleGrid");
   });
 
-  it("shows four compact supervised workflow cards and keeps approval evidence in one step", () => {
+  it("shows a compact supervised workflow rail and center overview fallback", () => {
     expect(routeSource).toContain("SUPERVISED_WORKFLOW_STEPS");
     expect(routeSource).toContain('{ id: "baseline_eval", zh: "基线评测", en: "Baseline", role: "baseline" }');
     expect(routeSource).toContain('{ id: "improve", zh: "提出建议与改良", en: "Improve", role: "candidate" }');
@@ -394,16 +394,33 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("setSelectedSupervisedWorkflowStepId(null)");
     expect(routeSource).toContain("跟随现场");
     expect(routeSource).toContain("styles.supervisedWorkflowPanel");
-    expect(routeSource).toContain("styles.supervisedWorkflowCardGrid");
-    expect(routeSource).toContain("styles.supervisedWorkflowCardActive");
-    expect(routeSource).toContain("styles.supervisedWorkflowCardCurrent");
+    expect(routeSource).toContain("styles.workflowStepRail");
+    expect(routeSource).toContain("styles.workflowStepButton");
+    expect(routeSource).toContain("styles.workflowStepButtonActive");
+    expect(routeSource).toContain("styles.workflowStepPreview");
+    expect(routeSource).toContain("selectedWorkflowOverviewItems");
+    expect(routeSource).toContain("selectedWorkflowEvidenceItems");
+    expect(routeSource).toContain("styles.caseOverviewWorkspace");
+    expect(routeSource).toContain("styles.caseOverviewEvidence");
+    expect(routeSource).toContain("styles.caseOverviewEvidenceGrid");
+    expect(routeSource).toContain("selectedWorkflowHasConversationMessages ? (");
+    expect(routeSource).not.toContain("styles.supervisedWorkflowCardGrid");
+    expect(routeSource).not.toContain("styles.supervisedWorkflowCardButton");
+    expect(routeSource).not.toContain("styles.supervisedWorkflowCardFooter");
     expect(routeSource).toContain("监督进化步骤导航");
     expect(stylesSource).toContain(".supervisedWorkflowPanel");
-    expect(stylesSource).toContain(".supervisedWorkflowCardGrid");
-    expect(stylesSource).toContain(".supervisedWorkflowCardActive");
-    expect(stylesSource).toContain(".supervisedWorkflowCardCurrent");
+    expect(stylesSource).toContain(".workflowStepRail");
+    expect(stylesSource).toContain(".workflowStepButton");
+    expect(stylesSource).toContain(".workflowStepButtonActive");
+    expect(stylesSource).toContain(".workflowStepPreview");
+    expect(stylesSource).toContain(".caseOverviewWorkspace");
+    expect(stylesSource).toContain(".caseOverviewItem");
+    expect(stylesSource).toContain(".caseOverviewEvidence");
+    expect(stylesSource).toContain(".caseOverviewEvidenceGrid");
+    expect(stylesSource).not.toContain(".supervisedWorkflowCardGrid");
+    expect(stylesSource).not.toContain(".supervisedWorkflowCardButton");
+    expect(stylesSource).not.toContain(".supervisedWorkflowCardFooter");
     expect(stylesSource).toContain(".supervisedWorkflowFollowButton");
-    expect(stylesSource).toContain(".supervisedWorkflowLivePreview");
   });
 
   it("shows immediate local feedback while a supervised worktree run is waiting for the run record", () => {

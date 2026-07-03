@@ -42,6 +42,18 @@ const styles: Record<string, string> = {
     "caseConversationShell min-w-0 grid h-full min-h-0 content-start overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)] min-h-0",
   caseConversationTranscript:
     "caseConversationTranscript min-w-0 min-h-0",
+  caseOverviewGrid:
+    "caseOverviewGrid min-w-0 !grid grid-cols-[repeat(2,minmax(0,1fr))] gap-2",
+  caseOverviewEvidence:
+    "caseOverviewEvidence min-w-0 grid min-h-0 content-start gap-2.5 overflow-auto rounded-[7px] border border-[var(--border-hairline)] bg-[color-mix(in_srgb,var(--surface-panel)_52%,transparent)] p-2.5",
+  caseOverviewEvidenceGrid:
+    "caseOverviewEvidenceGrid min-w-0 !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-2",
+  caseOverviewEvidenceItem:
+    "caseOverviewEvidenceItem min-w-0 grid gap-1 border-b border-[var(--border-hairline)] pb-2",
+  caseOverviewItem:
+    "caseOverviewItem min-w-0 rounded-[7px] border border-[var(--border-hairline)] bg-[color-mix(in_srgb,var(--surface-panel)_68%,transparent)] p-[8px_10px]",
+  caseOverviewWorkspace:
+    "caseOverviewWorkspace min-w-0 grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] content-start gap-2.5 overflow-auto p-2.5",
   casePreflightIssue:
     "casePreflightIssue min-w-0",
   caseRawEvidence:
@@ -578,28 +590,26 @@ const styles: Record<string, string> = {
     "supervisedStepMemberLabel min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   supervisedStepMemberRail:
     "supervisedStepMemberRail min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
-  supervisedWorkflowCard:
-    "supervisedWorkflowCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid min-h-[148px] grid-rows-[1fr_auto] overflow-visible p-2",
-  supervisedWorkflowCardActive:
-    "supervisedWorkflowCardActive min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
-  supervisedWorkflowCardButton:
-    "supervisedWorkflowCardButton min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 !grid !h-full !min-h-[106px] !w-full !max-w-none grid-rows-[auto_auto_minmax(0,1fr)] items-start justify-stretch gap-1.5 p-2 text-left [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
-  supervisedWorkflowCardCurrent:
-    "supervisedWorkflowCardCurrent min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
-  supervisedWorkflowCardFooter:
-    "supervisedWorkflowCardFooter min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5 mt-1 grid min-h-[26px] w-full grid-cols-2 gap-1",
-  supervisedWorkflowCardGrid:
-    "supervisedWorkflowCardGrid min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid gap-2 grid-cols-[repeat(4,minmax(168px,1fr))] items-stretch gap-1.5 overflow-visible max-[1280px]:grid-cols-2 max-[760px]:grid-cols-1",
-  supervisedWorkflowCardTopline:
-    "supervisedWorkflowCardTopline min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex min-h-0 w-full items-center justify-between gap-1 rounded-none border-0 bg-transparent p-0 text-[var(--vui-font-xs)] leading-tight",
   supervisedWorkflowFollowButton:
     "supervisedWorkflowFollowButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 min-h-[26px] px-2 text-[var(--vui-font-xs)]",
-  supervisedWorkflowLivePreview:
-    "supervisedWorkflowLivePreview min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)] line-clamp-2 min-h-[30px] text-[var(--vui-font-xs)] leading-[1.28]",
   supervisedWorkflowPanel:
     "supervisedWorkflowPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 overflow-visible",
   supervisedWorkflowSessionLink:
     "supervisedWorkflowSessionLink min-w-0 min-h-[24px] w-full justify-center px-1.5 text-[var(--vui-font-xs)] leading-none",
+  workflowStepButton:
+    "workflowStepButton min-w-0 grid gap-1 rounded-[7px] border border-[var(--border-hairline)] bg-[color-mix(in_srgb,var(--surface-panel)_76%,transparent)] p-[7px_8px] text-left",
+  workflowStepButtonActive:
+    "workflowStepButtonActive border-[color-mix(in_srgb,var(--accent-cool)_54%,var(--border-soft))] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--surface-panel))]",
+  workflowStepItem:
+    "workflowStepItem min-w-0 !grid grid-cols-[minmax(0,1fr)_auto] items-stretch gap-1",
+  workflowStepItemCurrent:
+    "workflowStepItemCurrent text-[var(--accent-warm-2)]",
+  workflowStepMeta:
+    "workflowStepMeta min-w-0 flex items-center justify-between gap-1.5 overflow-hidden text-ellipsis whitespace-nowrap text-[0.66rem] font-semibold leading-tight text-[var(--fg-tertiary)]",
+  workflowStepPreview:
+    "workflowStepPreview line-clamp-2 min-w-0 overflow-hidden text-ellipsis text-[0.68rem] leading-[1.35] text-[var(--fg-secondary)]",
+  workflowStepRail:
+    "workflowStepRail min-w-0 grid max-h-[min(196px,30vh)] gap-1 overflow-auto",
   surface:
     "surface min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   surfaceHeader:
