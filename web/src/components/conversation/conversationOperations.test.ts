@@ -390,6 +390,55 @@ describe("conversationOperations", () => {
     expect(groups[0].operations.map((operation) => operation.sequence)).toEqual([1, 2]);
   });
 
+  it("compacts repeated successful source writeback batches and drops superseded batch thoughts", () => {
+    const message: ConversationMessage = {
+      id: "message-successful-writeback-batches",
+      role: "assistant",
+      content: "",
+      timestamp: "2026-07-03T19:54:00Z",
+      streaming: true,
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "thought",
+          status: "done",
+          summary: "继续回写第1批。",
+          resultPreview: "继续回写第1批。",
+        },
+        {
+          sequence: 2,
+          kind: "tool",
+          status: "completed",
+          name: "source_collection_stage_writeback_tool",
+          summary: "资料提炼进行中：已完成第1批5条候选提炼",
+          relatedThoughtSequence: 1,
+        },
+        {
+          sequence: 3,
+          kind: "thought",
+          status: "done",
+          summary: "继续回写第2批。",
+          resultPreview: "继续回写第2批。",
+        },
+        {
+          sequence: 4,
+          kind: "tool",
+          status: "running",
+          name: "source_collection_stage_writeback_tool",
+          summary: "资料提炼进行中：已完成第2批5条候选提炼",
+          relatedThoughtSequence: 3,
+        },
+      ],
+    };
+
+    const operations = operationsForConversationMessage(message);
+
+    expect(operations.map((operation) => `${operation.kind}:${operation.summary}`)).toEqual([
+      "thought:继续回写第2批。",
+      "tool:资料提炼进行中：已完成第2批5条候选提炼",
+    ]);
+  });
+
   it("starts a new ReAct packet when a tool references a different thought sequence", () => {
     const message: ConversationMessage = {
       id: "message-related-thought-split",
