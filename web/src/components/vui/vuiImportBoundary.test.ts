@@ -27,6 +27,7 @@ const productSharedParentStyleConsumers = [
   "components/conversation/AgentUserContentSectionView.tsx",
   "routes/AgentActivityHistoryPanel.tsx",
   "routes/AgentManagementBriefPanel.tsx",
+  "routes/AgentOverviewPanel.tsx",
   "routes/AgentRuntimeFocusPanel.tsx",
   "routes/AgentSessionTabStrip.tsx",
   "routes/ConversationIndexSection.tsx",
