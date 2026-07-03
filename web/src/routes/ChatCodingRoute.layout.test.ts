@@ -1318,6 +1318,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(queueAssistantDeltaBody).not.toContain("activeTurnLayerTextLength");
   });
 
+  it("records stream render-frame telemetry after ConversationView commits live text", () => {
+    expect(routeSource).toContain("lastConversationStreamingFrameTelemetryAtRef");
+    expect(routeSource).toContain("const handleConversationStreamingFramePaint = useCallback");
+    expect(routeSource).toContain("browser.conversation_stream.frame_painted");
+    expect(routeSource).toContain("renderedTextLength");
+    expect(routeSource).toContain("onStreamingFramePaint={handleConversationStreamingFramePaint}");
+  });
+
   it("backs off index polling when detail streams own live queries", () => {
     expect(routeSource).toContain("const directSessionPanelActive = Boolean(activeSessionId) && !groupPanelActive");
     expect(routeSource).toContain("const sessionStreamAvailable = typeof EventSource !== \"undefined\"");

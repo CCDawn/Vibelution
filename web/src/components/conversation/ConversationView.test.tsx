@@ -462,6 +462,22 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).not.toContain("activeTimelineMessages.map((message, index) => {");
   });
 
+  it("reuses converted AgentMessage objects while only the active turn is streaming", () => {
+    expect(conversationViewSource).toContain("function useAgentThreadForTimelineMessages");
+    expect(conversationViewSource).toContain("agentMessageCacheRef");
+    expect(conversationViewSource).toContain("previousMessages[index] === message");
+    expect(conversationViewSource).toContain("conversationMessageToAgentMessage(message)");
+    expect(conversationViewSource).not.toContain("conversationMessagesToAgentThread(");
+  });
+
+  it("coalesces streaming auto-scroll frames without dispatching bottom state on every token", () => {
+    expect(conversationViewSource).toContain("streamingScrollFrameRef");
+    expect(conversationViewSource).toContain("function scrollTimelineToBottom");
+    expect(conversationViewSource).toContain("if (!wasAtBottom) {");
+    expect(conversationViewSource).toContain("onStreamingFramePaint?.({");
+    expect(conversationViewSource).not.toContain("const frameId = window.requestAnimationFrame");
+  });
+
   it("scopes row memo invalidation to the current message state", () => {
     expect(conversationViewSource).toContain("sectionExpansionForMessage");
     expect(conversationViewSource).toContain("computerUseStateForMessage");

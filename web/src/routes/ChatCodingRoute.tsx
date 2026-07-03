@@ -82,6 +82,7 @@ import {
 } from "../api/types";
 import {
   shouldShowNextStateSignalInConversation,
+  type ConversationStreamingFramePaintMetrics,
   type TurnAvatarResolution,
 } from "../components/conversation/ConversationView";
 import { COMPOSER_SESSION_REFERENCE_MIME } from "../components/conversation/conversationConstants";
@@ -2143,6 +2144,7 @@ export function ChatCodingRoute() {
   const sessionStreamErrorLoggedRef = useRef<Record<string, boolean>>({});
   const sessionStreamPayloadErrorLoggedRef = useRef<Record<string, boolean>>({});
   const sessionStreamApplyStatsRef = useRef<Record<string, { received: number; applied: number; dropped: number }>>({});
+  const lastConversationStreamingFrameTelemetryAtRef = useRef<Record<string, number>>({});
   const activeTurnLayersBySessionRef = useRef<Record<string, ActiveTurnLayerState>>({});
   const sessionStreamDecisionSnapshotRef = useRef({
     sessionId: "",
@@ -4154,6 +4156,34 @@ export function ChatCodingRoute() {
     () => activeTurnLayerToConversationMessage(activeTurnLayer),
     [activeTurnLayer],
   );
+  const handleConversationStreamingFramePaint = useCallback((metrics: ConversationStreamingFramePaintMetrics) => {
+    const sessionId = String(metrics.sessionId || "").trim();
+    if (!sessionId || sessionId !== activeSessionId) {
+      return;
+    }
+    const now = Date.now();
+    const lastLoggedAt = lastConversationStreamingFrameTelemetryAtRef.current[sessionId] ?? 0;
+    if (now - lastLoggedAt < 1_000) {
+      return;
+    }
+    lastConversationStreamingFrameTelemetryAtRef.current = {
+      ...lastConversationStreamingFrameTelemetryAtRef.current,
+      [sessionId]: now,
+    };
+    postBrowserTelemetry({
+      phase: "conversation_stream",
+      eventCode: "browser.conversation_stream.frame_painted",
+      message: "Conversation streaming frame was committed by the conversation view.",
+      level: "info",
+      fields: {
+        sessionId,
+        streamingMessageCount: metrics.streamingMessageCount,
+        renderedTextLength: metrics.renderedTextLength,
+        scrollSignalLength: metrics.scrollSignal.length,
+        activeTurnTextLength: activeTurnLayerTextLength(activeTurnLayersBySessionRef.current[sessionId]),
+      },
+    });
+  }, [activeSessionId]);
   const closedCliAgentRunTokens = activeSessionId ? (closedCliAgentRunTokensBySession[activeSessionId] ?? []) : [];
   const closedCliAgentRunTokenSet = useMemo(() => new Set(closedCliAgentRunTokens), [closedCliAgentRunTokens]);
   const cliAgentRunTabs = useMemo(
@@ -7606,6 +7636,7 @@ export function ChatCodingRoute() {
                   phase={detail.currentPhase}
                   messages={detail.messages}
                   activeTurnMessage={activeTurnMessage}
+                  onStreamingFramePaint={handleConversationStreamingFramePaint}
                   assistantDisplayName={activeAgentDisplayName}
                   assistantAvatarImageUrl={activeAgentAvatarImageUrl}
                   assistantAvatarFallback={activeAgentAvatarFallback}
