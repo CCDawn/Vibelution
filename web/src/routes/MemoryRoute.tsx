@@ -67,6 +67,7 @@ import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy"
 import { VButton, VNativeInput, VNativeSelect, VNativeTextarea, VRouteHeader } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
+import { MemoryOverviewPanel } from "./MemoryOverviewPanel";
 import styles from "./MemoryRoute.styles";
 
 const MemoryGraphCanvas = lazy(() => import("./MemoryGraphCanvas").then((module) => ({ default: module.MemoryGraphCanvas })));
@@ -4641,76 +4642,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     </aside>
   );
 
-  const renderOverviewView = () => (
-    <>
-      <div className={styles.summaryGrid}>
-        <section className={styles.summaryCard}>
-          <span>{copy.sectionCount}</span>
-          <strong>{overview?.summary.sectionCount ?? 0}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.itemCount}</span>
-          <strong>{overview?.summary.itemCount ?? 0}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.agentVisible}</span>
-          <strong>{overview?.summary.agentVisibleCount ?? 0}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.runtimeInjected}</span>
-          <strong>{overview?.summary.runtimeInjectedCount ?? 0}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.managedMemory}</span>
-          <strong>{managedStateCount}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.disabledOrOverridden}</span>
-          <strong>{disabledOrOverriddenCount}</strong>
-        </section>
-      </div>
-
-      {renderWarningStrip()}
-
-      <section className={styles.reviewQueuePanel}>
-        <div className={styles.panelHeader}>
-          <div>
-            <p className={styles.panelEyebrow}>{copy.healthOverview}</p>
-            <h2>{copy.reviewQueue}</h2>
-          </div>
-          <span className={styles.countPill}>{priorityReviewPairs.length}</span>
-        </div>
-        <div title={copy.reviewQueueHint}>{renderReviewQueue()}</div>
-      </section>
-
-      {renderProjectMemoryQueue()}
-
-      <div className={styles.overviewGrid}>
-        <section className={styles.overviewPanel}>
-          <div className={styles.panelHeader}>
-            <div>
-              <p className={styles.panelEyebrow}>{copy.healthOverview}</p>
-              <h2>{copy.affectedRuntimeMemory}</h2>
-            </div>
-            <span className={styles.countPill}>{runtimePairs.length}</span>
-          </div>
-          {renderMemoryList(runtimePairs, copy.noRuntimeMemory, true)}
-        </section>
-
-        <section className={styles.overviewPanel}>
-          <div className={styles.panelHeader}>
-            <div>
-              <p className={styles.panelEyebrow}>{copy.healthOverview}</p>
-              <h2>{copy.needsReview}</h2>
-            </div>
-            <span className={styles.countPill}>{reviewPairs.length}</span>
-          </div>
-          {renderMemoryList(reviewPairs, copy.noIssues, true)}
-        </section>
-      </div>
-    </>
-  );
-
   const renderEffectiveView = () => (
     <>
       {renderMatrixPanel(copy.effectiveByChannel)}
@@ -6777,7 +6708,22 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
       <div className={viewStackClassName}>
         {forcedView === "overview"
-          ? renderOverviewView()
+          ? (
+            <MemoryOverviewPanel
+              copy={copy}
+              summary={overview?.summary}
+              managedStateCount={managedStateCount}
+              disabledOrOverriddenCount={disabledOrOverriddenCount}
+              priorityReviewCount={priorityReviewPairs.length}
+              runtimeMemoryCount={runtimePairs.length}
+              reviewMemoryCount={reviewPairs.length}
+              warningStrip={renderWarningStrip()}
+              reviewQueue={renderReviewQueue()}
+              projectMemoryQueue={renderProjectMemoryQueue()}
+              runtimeMemoryList={renderMemoryList(runtimePairs, copy.noRuntimeMemory, true)}
+              reviewMemoryList={renderMemoryList(reviewPairs, copy.noIssues, true)}
+            />
+          )
           : forcedView === "effective"
             ? renderEffectiveView()
             : forcedView === "agents"
