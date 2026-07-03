@@ -22,25 +22,29 @@ const denseListSource = readFileSync(
   new URL("../components/vui/product/agent-management/AgentDenseList.tsx", import.meta.url),
   "utf-8",
 );
+const runtimeFocusPanelSource = readFileSync(
+  new URL("./AgentRuntimeFocusPanel.tsx", import.meta.url),
+  "utf-8",
+);
 
-function sourceBlocksForStyle(styleName: string): string[] {
+function sourceBlocksForStyle(styleName: string, source = routeSource): string[] {
   const marker = `className={styles.${styleName}}`;
   const blocks: string[] = [];
   let offset = 0;
 
-  while (offset < routeSource.length) {
-    const markerIndex = routeSource.indexOf(marker, offset);
+  while (offset < source.length) {
+    const markerIndex = source.indexOf(marker, offset);
     if (markerIndex < 0) {
       break;
     }
 
-    const blockStart = routeSource.lastIndexOf("<div", markerIndex);
-    const blockEnd = routeSource.indexOf("</div>", markerIndex);
+    const blockStart = source.lastIndexOf("<div", markerIndex);
+    const blockEnd = source.indexOf("</div>", markerIndex);
 
     expect(blockStart).toBeGreaterThanOrEqual(0);
     expect(blockEnd).toBeGreaterThan(markerIndex);
 
-    blocks.push(routeSource.slice(blockStart, blockEnd));
+    blocks.push(source.slice(blockStart, blockEnd));
     offset = blockEnd + "</div>".length;
   }
 
@@ -710,8 +714,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("queryKeys.agentRuns");
     expect(routeSource).toContain("summary?.runningAgentCount");
     expect(routeSource).toContain("summary?.blockedAgentCount");
-    expect(routeSource).toContain("styles.runtimePill");
-    expect(routeSource).toContain("styles.runtimeFocusPanel");
+    expect(runtimeFocusPanelSource).toContain("styles.runtimePill");
+    expect(runtimeFocusPanelSource).toContain("styles.runtimeFocusPanel");
     expect(routeSource).toContain("styles.runHistoryList");
     expect(routeSource).toContain("styles.boundarySummaryGrid");
     expect(styles.managementBriefPanel).toBeTruthy();
@@ -799,19 +803,22 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("AgentActivityTimelineItem");
     expect(routeSource).toContain("buildActivityTimeline");
     expect(routeSource).toContain("activityTimeline");
+    expect(routeSource).toContain("AgentRuntimeFocusPanel");
     expect(routeSource).toContain("copy.activityTimeline");
     expect(routeSource).toContain("copy.runtimeFocus");
     expect(routeSource).toContain("copy.runtimeNextStep");
     expect(routeSource).toContain("copy.runtimeEvidence");
-    expect(routeSource).toContain("styles.runtimeNextStep");
-    expect(routeSource).toContain("styles.runtimeEvidenceHint");
+    expect(routeSource).not.toContain("className={styles.runtimeFocusPanel}");
+    expect(runtimeFocusPanelSource).toContain("styles.runtimeFocusPanel");
+    expect(runtimeFocusPanelSource).toContain("styles.runtimeNextStep");
+    expect(runtimeFocusPanelSource).toContain("styles.runtimeEvidenceHint");
     expect(styles.runtimeEvidenceHint).toBeTruthy();
     expect(routeSource).toContain("RuntimeFocusEvidenceResult");
     expect(routeSource).toContain("findRuntimeFocusEvidence");
     expect(routeSource).toContain("runtimeFocusEvidence");
     expect(routeSource).toContain("runtimeFocusEvidence.match?.runtimeSceneId");
     expect(routeSource).toContain("selectedAgent.runtimeStatus?.runId");
-    expect(routeSource).toContain("selectedAgent.runtimeStatus?.sessionId");
+    expect(routeSource).toContain("selectedAgent?.runtimeStatus?.sessionId");
     expect(routeSource).toContain("runtimeEvidenceReasonLabel");
     expect(routeSource).toContain("openAgentLogs(runtimeFocusEvidence.match)");
     expect(routeSource).toContain("openAgentSession");
@@ -1151,7 +1158,10 @@ describe("AgentsRoute layout contract", () => {
       memoryPolicyStart,
       routeSource.indexOf("<datalist", memoryPolicyStart),
     );
-    const timelineActionBlocks = sourceBlocksForStyle("timelineActions");
+    const timelineActionBlocks = [
+      ...sourceBlocksForStyle("timelineActions"),
+      ...sourceBlocksForStyle("timelineActions", runtimeFocusPanelSource),
+    ];
 
     expect(avatarActionStart).toBeGreaterThanOrEqual(0);
     expect(memoryPolicyStart).toBeGreaterThanOrEqual(0);

@@ -76,6 +76,7 @@ import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
 import { AgentManagementNav } from "./AgentManagementNav";
+import { AgentRuntimeFocusPanel } from "./AgentRuntimeFocusPanel";
 import {
   agentCenterMemoryRoute,
   agentCenterModelsRoute,
@@ -3929,6 +3930,7 @@ export function AgentsRoute() {
     () => findRuntimeFocusEvidence(selectedAgent, agentRuntimeEvidenceQuery.data),
     [agentRuntimeEvidenceQuery.data, selectedAgent],
   );
+  const runtimeFocusSessionId = selectedAgent?.runtimeStatus?.sessionId || selectedAgent?.directSessionId || "";
   const summary = workspace?.summary;
   const healthStatus = workspace?.health.status ?? "ok";
   const healthStatusLabel = workspaceHealthStatusLabel(healthStatus, lang);
@@ -7446,56 +7448,31 @@ export function AgentsRoute() {
 
               {activePane === "activity" ? (
                 <>
-              <section className={styles.runtimeFocusPanel}>
-                <div className={styles.runtimeFocusHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{copy.runtimeFocus}</p>
-                    <h3>{runtimeStatusLabel(selectedAgent, lang)}</h3>
-                  </div>
-                  <span className={`${styles.runtimePill} ${styles[`runtime_${runtimeStatusTone(selectedAgent)}`]}`}>
-                    {selectedAgent.runtimeStatus?.reason || selectedAgent.status || "-"}
-                  </span>
-                </div>
-                <p>{selectedAgent.runtimeStatus?.summary || selectedAgent.directSessionId || selectedAgent.workspacePath || "-"}</p>
-                <div className={styles.runtimeFocusMeta}>
-                  <span>
-                    <strong>{copy.runtimeLatestRun}</strong>
-                    <code>{selectedAgent.runtimeStatus?.runId || "-"}</code>
-                  </span>
-                  <span>
-                    <strong>{copy.runtimeReason}</strong>
-                    <code>{selectedAgent.runtimeStatus?.runKind || selectedAgent.runtimeStatus?.state || "-"}</code>
-                  </span>
-                  <span>
-                    <strong>{copy.runtimeUpdated}</strong>
-                    <code>{formatTimestamp(selectedAgent.runtimeStatus?.updatedAt || selectedAgent.updatedAt, lang)}</code>
-                  </span>
-                </div>
-                <div className={styles.runtimeNextStep}>
-                  <strong>{copy.runtimeNextStep}</strong>
-                  <span>{runtimeNextStep(selectedAgent, lang)}</span>
-                </div>
-                <div className={styles.runtimeEvidenceHint}>
-                  <strong>{copy.runtimeEvidence}</strong>
-                  <span>{runtimeEvidenceReasonLabel(runtimeFocusEvidence.reason, lang)}</span>
-                  <code>{runtimeFocusEvidence.match?.runtimeSceneId || "-"}</code>
-                </div>
-                <div className={styles.timelineActions}>
-                  {selectedAgent.runtimeStatus?.sessionId || selectedAgent.directSessionId ? (
-                    <VButton
-                      type="button"
-                      variant="ghost"
-                      icon={<ExternalLink size={13} />}
-                      onPress={() => openAgentSession(selectedAgent.runtimeStatus?.sessionId || selectedAgent.directSessionId)}
-                    >
-                      {copy.openSession}
-                    </VButton>
-                  ) : null}
-                  <VButton type="button" variant="ghost" icon={<Search size={13} />} onPress={() => openAgentLogs(runtimeFocusEvidence.match)}>
-                    {runtimeFocusEvidence.match ? `${copy.openLogs} · ${runtimeFocusEvidence.match.runtimeSceneId}` : copy.openLogs}
-                  </VButton>
-                </div>
-              </section>
+              <AgentRuntimeFocusPanel
+                copy={{
+                  runtimeFocus: copy.runtimeFocus,
+                  runtimeLatestRun: copy.runtimeLatestRun,
+                  runtimeReason: copy.runtimeReason,
+                  runtimeUpdated: copy.runtimeUpdated,
+                  runtimeNextStep: copy.runtimeNextStep,
+                  runtimeEvidence: copy.runtimeEvidence,
+                  openSession: copy.openSession,
+                  openLogs: copy.openLogs,
+                }}
+                statusLabel={runtimeStatusLabel(selectedAgent, lang)}
+                statusReason={selectedAgent.runtimeStatus?.reason || selectedAgent.status || "-"}
+                tone={runtimeStatusTone(selectedAgent)}
+                summary={selectedAgent.runtimeStatus?.summary || selectedAgent.directSessionId || selectedAgent.workspacePath || "-"}
+                latestRunId={selectedAgent.runtimeStatus?.runId || "-"}
+                runReason={selectedAgent.runtimeStatus?.runKind || selectedAgent.runtimeStatus?.state || "-"}
+                updatedAt={formatTimestamp(selectedAgent.runtimeStatus?.updatedAt || selectedAgent.updatedAt, lang)}
+                nextStep={runtimeNextStep(selectedAgent, lang)}
+                evidenceReason={runtimeEvidenceReasonLabel(runtimeFocusEvidence.reason, lang)}
+                evidenceSceneId={runtimeFocusEvidence.match?.runtimeSceneId || "-"}
+                logsTargetLabel={runtimeFocusEvidence.match?.runtimeSceneId}
+                onOpenLogs={() => openAgentLogs(runtimeFocusEvidence.match)}
+                onOpenSession={runtimeFocusSessionId ? () => openAgentSession(runtimeFocusSessionId) : undefined}
+              />
 
               <section className={styles.detailSection}>
                 <div className={styles.panelHeader}>
