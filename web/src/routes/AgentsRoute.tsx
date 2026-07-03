@@ -59,7 +59,8 @@ import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
 import { AgentArchiveZonePanel } from "./AgentArchiveZonePanel";
-import { AgentActivityHistoryPanel, type AgentActivityTimelineItem } from "./AgentActivityHistoryPanel";
+import { AgentActivityPanePanel } from "./AgentActivityPanePanel";
+import { type AgentActivityTimelineItem } from "./AgentActivityHistoryPanel";
 import {
   AgentBulkConfigPanel,
   type AgentBulkConfigApply,
@@ -95,8 +96,6 @@ import {
   type AgentReferenceItemView,
   type AgentReferenceRoomView,
 } from "./AgentReferencesPanel";
-import { AgentRuntimeFocusPanel } from "./AgentRuntimeFocusPanel";
-import { AgentRuntimePolicyPanel } from "./AgentRuntimePolicyPanel";
 import { AgentSelectedDetailContentPanel } from "./AgentSelectedDetailContentPanel";
 import { AgentTaskProfilePanel, type AgentTaskDraft } from "./AgentTaskProfilePanel";
 import { AgentToolGovernancePanel, governanceStatusLabel } from "./AgentToolGovernancePanel";
@@ -6128,9 +6127,9 @@ export function AgentsRoute() {
                 </>
               )}
               activity={(
-                <>
-                  <AgentRuntimeFocusPanel
-                    copy={{
+                <AgentActivityPanePanel
+                  runtimeFocus={{
+                    copy: {
                       runtimeFocus: copy.runtimeFocus,
                       runtimeLatestRun: copy.runtimeLatestRun,
                       runtimeReason: copy.runtimeReason,
@@ -6139,25 +6138,24 @@ export function AgentsRoute() {
                       runtimeEvidence: copy.runtimeEvidence,
                       openSession: copy.openSession,
                       openLogs: copy.openLogs,
-                    }}
-                    statusLabel={runtimeStatusLabel(selectedAgent, lang)}
-                    statusReason={selectedAgent.runtimeStatus?.reason || selectedAgent.status || "-"}
-                    tone={runtimeStatusTone(selectedAgent)}
-                    summary={selectedAgent.runtimeStatus?.summary || selectedAgent.directSessionId || selectedAgent.workspacePath || "-"}
-                    latestRunId={selectedAgent.runtimeStatus?.runId || "-"}
-                    runReason={selectedAgent.runtimeStatus?.runKind || selectedAgent.runtimeStatus?.state || "-"}
-                    updatedAt={formatTimestamp(selectedAgent.runtimeStatus?.updatedAt || selectedAgent.updatedAt, lang)}
-                    nextStep={runtimeNextStep(selectedAgent, lang)}
-                    evidenceReason={runtimeEvidenceReasonLabel(runtimeFocusEvidence.reason, lang)}
-                    evidenceSceneId={runtimeFocusEvidence.match?.runtimeSceneId || "-"}
-                    logsTargetLabel={runtimeFocusEvidence.match?.runtimeSceneId}
-                    onOpenLogs={() => openAgentLogs(runtimeFocusEvidence.match)}
-                    onOpenSession={runtimeFocusSessionId ? () => openAgentSession(runtimeFocusSessionId) : undefined}
-                  />
-
-                  <AgentActivityHistoryPanel
-                    agent={selectedAgent}
-                    copy={{
+                    },
+                    statusLabel: runtimeStatusLabel(selectedAgent, lang),
+                    statusReason: selectedAgent.runtimeStatus?.reason || selectedAgent.status || "-",
+                    tone: runtimeStatusTone(selectedAgent),
+                    summary: selectedAgent.runtimeStatus?.summary || selectedAgent.directSessionId || selectedAgent.workspacePath || "-",
+                    latestRunId: selectedAgent.runtimeStatus?.runId || "-",
+                    runReason: selectedAgent.runtimeStatus?.runKind || selectedAgent.runtimeStatus?.state || "-",
+                    updatedAt: formatTimestamp(selectedAgent.runtimeStatus?.updatedAt || selectedAgent.updatedAt, lang),
+                    nextStep: runtimeNextStep(selectedAgent, lang),
+                    evidenceReason: runtimeEvidenceReasonLabel(runtimeFocusEvidence.reason, lang),
+                    evidenceSceneId: runtimeFocusEvidence.match?.runtimeSceneId || "-",
+                    logsTargetLabel: runtimeFocusEvidence.match?.runtimeSceneId,
+                    onOpenLogs: () => openAgentLogs(runtimeFocusEvidence.match),
+                    onOpenSession: runtimeFocusSessionId ? () => openAgentSession(runtimeFocusSessionId) : undefined,
+                  }}
+                  activityHistory={{
+                    agent: selectedAgent,
+                    copy: {
                       sessions: copy.sessions,
                       logs: copy.logs,
                       activityPane: copy.activityPane,
@@ -6181,31 +6179,29 @@ export function AgentsRoute() {
                       consumeMessage: copy.consumeMessage,
                       wakeStatus: copy.wakeStatus,
                       inboxEmpty: copy.inboxEmpty,
-                    }}
-                    lang={lang}
-                    activityTimeline={activityTimeline}
-                    isActivityLoading={agentRunsQuery.isPending || agentMessagesQuery.isPending}
-                    runHistory={agentRunsQuery.data}
-                    isRunHistoryLoading={agentRunsQuery.isPending}
-                    inboxMessages={agentMessagesQuery.data}
-                    isInboxLoading={agentMessagesQuery.isPending}
-                    inboxPendingCount={selectedAgentInboxPendingCount}
-                    focusedMessageId={focusedMessageId}
-                    pendingMessageId={
+                    },
+                    lang,
+                    activityTimeline,
+                    isActivityLoading: agentRunsQuery.isPending || agentMessagesQuery.isPending,
+                    runHistory: agentRunsQuery.data,
+                    isRunHistoryLoading: agentRunsQuery.isPending,
+                    inboxMessages: agentMessagesQuery.data,
+                    isInboxLoading: agentMessagesQuery.isPending,
+                    inboxPendingCount: selectedAgentInboxPendingCount,
+                    focusedMessageId,
+                    pendingMessageId:
                       consumeMessageMutation.isPending && consumeMessageMutation.variables?.agentId === selectedAgent.agentId
                         ? consumeMessageMutation.variables?.messageId ?? ""
-                        : ""
-                    }
-                    isConsumeAllPending={selectedAgentConsumeAllPending}
-                    onOpenSession={openAgentSession}
-                    onOpenLogs={openAgentLogs}
-                    onFocusMessage={focusInboxMessage}
-                    onConsumeAllMessages={consumeAllInboxMessages}
-                    onConsumeInboxMessage={consumeInboxMessage}
-                  />
-
-                  <AgentRuntimePolicyPanel
-                    copy={{
+                        : "",
+                    isConsumeAllPending: selectedAgentConsumeAllPending,
+                    onOpenSession: openAgentSession,
+                    onOpenLogs: openAgentLogs,
+                    onFocusMessage: focusInboxMessage,
+                    onConsumeAllMessages: consumeAllInboxMessages,
+                    onConsumeInboxMessage: consumeInboxMessage,
+                  }}
+                  runtimePolicy={{
+                    copy: {
                       allowedContextModes: copy.allowedContextModes,
                       allowSubagents: copy.allowSubagents,
                       allowWakeMessages: copy.allowWakeMessages,
@@ -6223,31 +6219,31 @@ export function AgentsRoute() {
                       savingRuntimePolicy: copy.savingRuntimePolicy,
                       supervisionEnabled: copy.supervisionEnabled,
                       supervisionPolicyTitle: copy.supervisionPolicyTitle,
-                    }}
-                    lang={lang}
-                    roleLabel={`${copy.supervisedRole}: ${metadataText(selectedAgent, "supervisedRole") || metadataText(selectedAgent, "selfEvolutionRole") || "-"}`}
-                    dirtyLabel={lang === "zh" ? "未保存" : "Unsaved"}
-                    cleanLabel={lang === "zh" ? "已同步" : "Synced"}
-                    isDirty={runtimePolicyDirty}
-                    isPending={selectedAgentRuntimePolicyPending}
-                    canSave={canSaveRuntimePolicy}
-                    notice={notice}
-                    delegationPolicyDraft={delegationPolicyDraft}
-                    supervisionPolicyDraft={supervisionPolicyDraft}
-                    inboxPendingCount={selectedAgent.agentInboxPendingCount ?? 0}
-                    groupContextEventCount={selectedAgent.groupContextEvents?.length ?? 0}
-                    onUpdateDelegationPolicy={updateDelegationPolicyDraft}
-                    onToggleDelegationContextMode={toggleDelegationContextMode}
-                    onMaxConcurrentChange={(value) => updateDelegationPolicyDraft({ maxConcurrent: clampNumber(value, 0, 8, 0) })}
-                    onMaxDepthChange={(value) => updateDelegationPolicyDraft({ maxDepth: clampNumber(value, 0, 4, 0) })}
-                    onUpdateSupervisionPolicy={updateSupervisionPolicyDraft}
-                    onReset={() => {
+                    },
+                    lang,
+                    roleLabel: `${copy.supervisedRole}: ${metadataText(selectedAgent, "supervisedRole") || metadataText(selectedAgent, "selfEvolutionRole") || "-"}`,
+                    dirtyLabel: lang === "zh" ? "未保存" : "Unsaved",
+                    cleanLabel: lang === "zh" ? "已同步" : "Synced",
+                    isDirty: runtimePolicyDirty,
+                    isPending: selectedAgentRuntimePolicyPending,
+                    canSave: canSaveRuntimePolicy,
+                    notice,
+                    delegationPolicyDraft,
+                    supervisionPolicyDraft,
+                    inboxPendingCount: selectedAgent.agentInboxPendingCount ?? 0,
+                    groupContextEventCount: selectedAgent.groupContextEvents?.length ?? 0,
+                    onUpdateDelegationPolicy: updateDelegationPolicyDraft,
+                    onToggleDelegationContextMode: toggleDelegationContextMode,
+                    onMaxConcurrentChange: (value) => updateDelegationPolicyDraft({ maxConcurrent: clampNumber(value, 0, 8, 0) }),
+                    onMaxDepthChange: (value) => updateDelegationPolicyDraft({ maxDepth: clampNumber(value, 0, 4, 0) }),
+                    onUpdateSupervisionPolicy: updateSupervisionPolicyDraft,
+                    onReset: () => {
                       setDelegationPolicyDraft(delegationPolicyDraftFromAgent(selectedAgent));
                       setSupervisionPolicyDraft(supervisionPolicyDraftFromAgent(selectedAgent));
-                    }}
-                    onSave={saveRuntimePolicy}
-                  />
-                </>
+                    },
+                    onSave: saveRuntimePolicy,
+                  }}
+                />
               )}
             />
           ) : null}

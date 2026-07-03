@@ -74,6 +74,10 @@ const runtimeFocusPanelSource = readFileSync(
   new URL("./AgentRuntimeFocusPanel.tsx", import.meta.url),
   "utf-8",
 );
+const activityPanePanelSource = readFileSync(
+  new URL("./AgentActivityPanePanel.tsx", import.meta.url),
+  "utf-8",
+);
 const managementHeaderPanelSource = readFileSync(
   new URL("./AgentManagementHeaderPanel.tsx", import.meta.url),
   "utf-8",
@@ -974,7 +978,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.consumeAllMessages");
     expect(routeSource).toContain("copy.inboxTitle");
     expect(routeSource).toContain("const selectedAgentInboxPendingCount = selectedAgent?.agentInboxPendingCount ?? agentMessagesQuery.data?.length ?? 0");
-    expect(routeSource).toContain("AgentActivityHistoryPanel");
+    expect(routeSource).toContain("AgentActivityPanePanel");
+    expect(activityPanePanelSource).toContain("AgentActivityHistoryPanel");
     expect(routeSource).toContain("showInboxAction: issue.code === \"pending_inbox_messages\"");
     expect(healthMaintenancePanelSource).toContain("copy.handleInboxNow");
     expect(routeSource).not.toContain("<h3>{copy.inboxTitle}: {selectedAgentInboxPendingCount}</h3>");
@@ -987,7 +992,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("AgentActivityTimelineItem");
     expect(routeSource).toContain("buildActivityTimeline");
     expect(routeSource).toContain("activityTimeline");
-    expect(routeSource).toContain("AgentRuntimeFocusPanel");
+    expect(activityPanePanelSource).toContain("AgentRuntimeFocusPanel");
     expect(routeSource).toContain("copy.activityTimeline");
     expect(routeSource).toContain("copy.runtimeFocus");
     expect(routeSource).toContain("copy.runtimeNextStep");
@@ -1029,7 +1034,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.supervisionPolicyTitle");
     expect(routeSource).toContain("copy.saveRuntimePolicy");
     expect(routeSource).toContain("updateRuntimePolicyMutation");
-    expect(routeSource).toContain("AgentRuntimePolicyPanel");
+    expect(activityPanePanelSource).toContain("AgentRuntimePolicyPanel");
     expect(routeSource).not.toContain("className={styles.runtimePolicyGrid}");
     expect(routeSource).not.toContain("className={styles.contextModeGrid}");
   });
