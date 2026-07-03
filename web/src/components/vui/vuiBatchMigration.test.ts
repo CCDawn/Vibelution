@@ -38,6 +38,7 @@ const migrationTargets = [
 const cssModuleFreeTargets = [
   "components/preview/FilePreview.tsx",
   "components/preview/StructuredLogPreview.tsx",
+  "routes/ConfigRoute.tsx",
   "routes/GitRoute.tsx",
   "routes/GitDiffView.tsx",
   "routes/KernelTaskCenterRoute.tsx",
