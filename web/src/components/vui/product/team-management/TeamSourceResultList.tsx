@@ -145,7 +145,7 @@ export function TeamSourceResultList({ ariaLabel, children }: TeamSourceResultLi
     <div
       data-vui-product="team-source-result-list"
       aria-label={ariaLabel}
-      className="grid max-h-[44vh] min-h-0 min-w-0 content-start gap-1.5 overflow-auto pr-1 [scrollbar-gutter:stable]"
+      className="grid min-h-0 min-w-0 flex-1 content-start gap-1.5 overflow-auto pr-1 [scrollbar-gutter:stable]"
     >
       {children}
     </div>
