@@ -1,7 +1,6 @@
 import type {
   ConversationAttachment,
   ConversationFeedbackEvent,
-  ConversationMessage,
   MentalStateSnapshot,
   SessionReferenceAttachment,
   ToolCall,
@@ -14,7 +13,7 @@ export type AgentThreadSource = {
   id?: string;
 };
 
-export type AgentMessageRole = ConversationMessage["role"];
+export type AgentMessageRole = "user" | "assistant";
 
 export type AgentMessageSource = {
   kind: "conversation-message";
