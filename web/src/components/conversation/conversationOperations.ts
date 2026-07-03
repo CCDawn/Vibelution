@@ -1,5 +1,4 @@
-import { ConversationFeedbackEvent, ConversationMessage } from "../../api/types";
-import { conversationMessageToAgentMessage } from "../../agent-thread/adapters";
+import { ConversationFeedbackEvent } from "../../api/types";
 import type {
   AgentMentalPart,
   AgentMessage,
@@ -57,41 +56,10 @@ export type ConversationReActOperationGroup = {
   primaryKind: ConversationOperationKind;
 };
 
-const operationGroupsCache = new WeakMap<
-  ConversationMessage,
-  { labels: ConversationOperationLabels; groups: ConversationOperationGroups }
->();
 const agentOperationGroupsCache = new WeakMap<
   AgentMessage,
   { labels: ConversationOperationLabels; groups: ConversationOperationGroups }
 >();
-
-export function buildConversationOperations(
-  message: ConversationMessage,
-  labels: ConversationOperationLabels,
-): ConversationOperation[] {
-  return buildAgentMessageOperations(conversationMessageToAgentMessage(message), labels);
-}
-
-export function buildConversationOperationGroups(
-  message: ConversationMessage,
-  labels: ConversationOperationLabels,
-): ConversationOperationGroups {
-  const cached = operationGroupsCache.get(message);
-  if (cached && cached.labels === labels) {
-    return cached.groups;
-  }
-  const operations = buildConversationOperations(message, labels);
-  const groups = {
-    timeline: operations,
-    thoughts: operations.filter((operation) => operation.kind === "thought"),
-    mental: operations.filter((operation) => operation.kind === "mental"),
-    status: operations.filter((operation) => operation.kind === "status"),
-    tools: operations.filter((operation) => operation.kind === "tool"),
-  };
-  operationGroupsCache.set(message, { labels, groups });
-  return groups;
-}
 
 export function buildAgentMessageOperations(
   message: AgentMessage,
