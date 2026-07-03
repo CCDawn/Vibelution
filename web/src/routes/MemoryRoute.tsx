@@ -69,6 +69,7 @@ import { MemoryDetailPanel } from "./MemoryDetailPanel";
 import { MemoryEffectivePanel } from "./MemoryEffectivePanel";
 import { MemoryKnowledgeBaseSidebar } from "./MemoryKnowledgeBaseSidebar";
 import { MemoryKnowledgeModeTabs } from "./MemoryKnowledgeModeTabs";
+import { MemoryKnowledgePermissionsPanel } from "./MemoryKnowledgePermissionsPanel";
 import { MemoryKnowledgePipelinePanel } from "./MemoryKnowledgePipelinePanel";
 import { MemoryKnowledgeRagPanel } from "./MemoryKnowledgeRagPanel";
 import {
@@ -603,20 +604,6 @@ type KnowledgeSearchDraft = {
 type RatingSuggestionStatusFilter = "pending" | "applied" | "rejected" | "all";
 type RatingSuggestionPriorityFilter = "all" | "urgent" | "elevated" | "normal";
 type KnowledgeWorkspaceMode = "sources" | "search" | "review" | "governance" | "permissions";
-type KnowledgePermissionEntry = KnowledgePermissionAuditPayload["knowledgeBases"][number]["permissions"][string] | string | null | undefined;
-
-function normalizeKnowledgePermission(permission: KnowledgePermissionEntry): { allowed: boolean; reason: string } {
-  if (permission && typeof permission === "object" && "allowed" in permission) {
-    return {
-      allowed: Boolean(permission.allowed),
-      reason: String(permission.reason || "-"),
-    };
-  }
-  return {
-    allowed: false,
-    reason: typeof permission === "string" && permission.trim() ? permission : "-",
-  };
-}
 
 const FILTER_MODES: FilterMode[] = ["all", "prompt", "visible", "manual", "missing"];
 const MANAGE_FILTER_MODES: ManageFilterMode[] = ["all", "prompt", "editable", "changed", "missing"];
@@ -4664,25 +4651,11 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           ) : null}
 
           {activeKnowledgeWorkspaceMode === "permissions" ? (
-          <section className={styles.managementPanel}>
-            <div className={styles.managementHeader}>
-              <div>
-                <p className={styles.panelEyebrow}>{copy.ingestionAdapters}</p>
-                <h2>{copy.outputContract}</h2>
-              </div>
-              <span className={styles.countPill}>{ingestionAdapters.length}</span>
-            </div>
-            <div className={styles.permissionMatrix}>
-              {ingestionAdapters.map((adapter) => (
-                <section key={adapter.sourceType} className={styles.permissionRow}>
-                  <strong>{adapter.sourceType}</strong>
-                  <span>{adapter.requiredSourceRef.join(", ")}</span>
-                  <small>{copy.outputContract}: {adapter.outputContract.creates.join(" + ")}</small>
-                  <small>{copy.createsKnowledgeItem}: {adapter.outputContract.createsKnowledgeItem ? copy.yes : copy.no}</small>
-                </section>
-              ))}
-            </div>
-          </section>
+          <MemoryKnowledgePermissionsPanel
+            copy={copy}
+            ingestionAdapters={ingestionAdapters}
+            permissionAudit={permissionAudit}
+          />
           ) : null}
 
           {activeKnowledgeWorkspaceMode === "review" ? (
@@ -4867,38 +4840,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           </>
           ) : null}
 
-          {activeKnowledgeWorkspaceMode === "permissions" ? (
-          <section className={styles.managementPanel}>
-            <div className={styles.managementHeader}>
-              <div>
-                <p className={styles.panelEyebrow}>{copy.permissionAudit}</p>
-                <h2>{copy.teamKnowledgeDomain}</h2>
-              </div>
-              <span className={styles.countPill}>{permissionAudit?.summary.knowledgeBaseCount ?? 0}</span>
-            </div>
-            <div className={styles.permissionMatrix}>
-              {(permissionAudit?.knowledgeBases ?? []).map((row) => (
-                <section key={`perm:${row.knowledgeBaseId}`} className={styles.permissionRow}>
-                  <strong>{row.knowledgeBaseName}</strong>
-                  <span>{row.teamName} · {row.teamRole || "-"}</span>
-                  {[
-                    { label: copy.readable, permission: row.permissions.read },
-                    { label: copy.proposable, permission: row.permissions.propose },
-                    { label: copy.reviewable, permission: row.permissions.review },
-                    { label: copy.rateable, permission: row.permissions.rate },
-                  ].map(({ label, permission }) => {
-                    const normalizedPermission = normalizeKnowledgePermission(permission);
-                    return (
-                      <small key={label} className={normalizedPermission.allowed ? styles.statusPill : styles.statusPillMuted}>
-                        {label}: {normalizedPermission.allowed ? copy.yes : normalizedPermission.reason}
-                      </small>
-                    );
-                  })}
-                </section>
-              ))}
-            </div>
-          </section>
-          ) : null}
         </main>
 
         <aside className={styles.detailPanel}>
