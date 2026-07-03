@@ -38,6 +38,7 @@ import type {
 import { fetchJson } from "../../api/client";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { AgentContextSectionsView } from "./AgentContextSectionsView";
+import { AgentResponseSectionView } from "./AgentResponseSectionView";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
 import { buildAgentMessageRenderState } from "./agentMessageRenderState";
 import { COMPOSER_SESSION_REFERENCE_MIME } from "./conversationConstants";
@@ -3806,33 +3807,22 @@ export function ConversationView({
               return renderAgentProcessDetails(true);
             };
             const responseSectionNode = showResponseBlock && !isStreamingStatusPlaceholder ? (
-              <section
-                className={styles.responseSection}
-                data-conversation-part-key={rowIdentity.answerKey}
-                data-agent-content-section-ids={agentRenderState.answerContentSectionIds}
-                data-agent-content-channel={agentRenderState.answerContentSectionIds ? "answer" : undefined}
+              <AgentResponseSectionView
+                answerKey={rowIdentity.answerKey}
+                answerContentSectionIds={agentRenderState.answerContentSectionIds}
+                expanded={responseExpanded}
+                label={t("responseLabel")}
+                expandedTitle={t("responseHidden")}
+                collapsedTitle={t("responseVisible")}
+                showSpinner={showResponseSpinner}
+                onToggle={() => toggleSection(message.id, "response", defaultResponseExpanded)}
               >
-                <VButton
-                  type="button"
-                  className={styles.responseToggle}
-                  aria-expanded={responseExpanded}
-                  onClick={() => toggleSection(message.id, "response", defaultResponseExpanded)}
-                  title={responseExpanded ? t("responseHidden") : t("responseVisible")}
-                >
-                  {responseExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                  <span>{t("responseLabel")}</span>
-                  {showResponseSpinner ? <LoaderCircle className={styles.statusSpinner} size={14} /> : null}
-                </VButton>
-                {responseExpanded ? (
-                  <div className={styles.responseBody}>
-                    {isResponseStreaming
-                      ? renderStreamingResponseText(responseText)
-                      : responseSegments.map((segment) =>
-                        renderResponseSegment(segment, imageArtifactUrlsBeforeMessage.get(message.id)),
-                      )}
-                  </div>
-                ) : null}
-              </section>
+                {isResponseStreaming
+                  ? renderStreamingResponseText(responseText)
+                  : responseSegments.map((segment) =>
+                    renderResponseSegment(segment, imageArtifactUrlsBeforeMessage.get(message.id)),
+                  )}
+              </AgentResponseSectionView>
             ) : null;
             const processNode = answerOnlyProcessMode ? (
               renderAnswerOnlyProcessGroup(
