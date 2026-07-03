@@ -12,6 +12,7 @@ import knowledgeModeTabsSource from "./MemoryKnowledgeModeTabs.tsx?raw";
 import knowledgePermissionsPanelSource from "./MemoryKnowledgePermissionsPanel.tsx?raw";
 import knowledgePipelinePanelSource from "./MemoryKnowledgePipelinePanel.tsx?raw";
 import knowledgeRagPanelSource from "./MemoryKnowledgeRagPanel.tsx?raw";
+import knowledgeReviewPanelSource from "./MemoryKnowledgeReviewPanel.tsx?raw";
 import knowledgeSourceGovernancePanelSource from "./MemoryKnowledgeSourceGovernancePanel.tsx?raw";
 import knowledgeStewardPanelSource from "./MemoryKnowledgeStewardPanel.tsx?raw";
 import knowledgeUsageContractPanelSource from "./MemoryKnowledgeUsageContractPanel.tsx?raw";
@@ -585,13 +586,21 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("queryKeys.knowledgeRatingSuggestions(");
     expect(routeSource).toContain("/rating-suggestions/review-batch");
     expect(routeSource).toContain("/api/knowledge/permissions/audit?agentId=");
-    expect(routeSource).toContain("copy.approveProposal");
-    expect(routeSource).toContain("copy.rejectProposal");
     expect(routeSource).toContain("copy.submitRatingSuggestion");
-    expect(routeSource).toContain("copy.bulkApplySuggestions");
-    expect(routeSource).toContain("copy.bulkRejectSuggestions");
     expect(routeSource).toContain("selectedRatingSuggestionIds");
     expect(routeSource).toContain("toggleVisibleRatingSuggestions");
+    expect(routeSource).toContain('from "./MemoryKnowledgeReviewPanel"');
+    expect(routeSource).toContain("<MemoryKnowledgeReviewPanel");
+    expect(knowledgeReviewPanelSource).toContain("export function MemoryKnowledgeReviewPanel");
+    expect(knowledgeReviewPanelSource).toContain("copy.approveProposal");
+    expect(knowledgeReviewPanelSource).toContain("copy.rejectProposal");
+    expect(knowledgeReviewPanelSource).toContain("copy.bulkApplySuggestions");
+    expect(knowledgeReviewPanelSource).toContain("copy.bulkRejectSuggestions");
+    expect(knowledgeReviewPanelSource).toContain("styles.knowledgeFormGrid");
+    expect(knowledgeReviewPanelSource).toContain("styles.bulkActionBar");
+    expect(knowledgeReviewPanelSource).not.toContain("useQuery");
+    expect(knowledgeReviewPanelSource).not.toContain("useMutation");
+    expect(knowledgeReviewPanelSource).not.toContain("fetchJson");
     expect(routeSource).toContain('from "./MemoryKnowledgePermissionsPanel"');
     expect(routeSource).toContain("<MemoryKnowledgePermissionsPanel");
     expect(routeSource).not.toContain("function normalizeKnowledgePermission");
@@ -698,7 +707,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("bulkActionPending");
     expect(routeSource).toContain("toggleVisibleMemorySelection");
     expect(routeSource).toContain("runBulkMemoryAction");
-    expect(routeSource).toContain("styles.bulkActionBar");
+    expect(managePanelSource).toContain("styles.bulkActionBar");
     expect(routeSource).toContain("styles.itemSelectionRow");
     expect(routeSource).toContain("styles.itemContentButton");
     expect(routeSource).toContain("renderMemoryList(flatVisibleItems, copy.noMatches, false, true)");
@@ -1050,14 +1059,16 @@ describe("MemoryRoute layout contract", () => {
   });
 
   it("routes Memory controls through VUI primitives", () => {
+    const memoryControlSource = [routeSource, knowledgeReviewPanelSource, knowledgeSourceGovernancePanelSource].join("\n");
+
     expect(routeSource).toContain('from "../components/vui"');
-    expect(routeSource).toContain("<VButton");
-    expect(routeSource).toContain("<VNativeInput");
-    expect(routeSource).toContain("<VNativeSelect");
-    expect(routeSource).toContain("<VNativeTextarea");
-    expect(routeSource).not.toMatch(/<button\b/);
-    expect(routeSource).not.toMatch(/<input\b/);
-    expect(routeSource).not.toMatch(/<select\b/);
-    expect(routeSource).not.toMatch(/<textarea\b/);
+    expect(memoryControlSource).toContain("<VButton");
+    expect(memoryControlSource).toContain("<VNativeInput");
+    expect(memoryControlSource).toContain("<VNativeSelect");
+    expect(memoryControlSource).toContain("<VNativeTextarea");
+    expect(memoryControlSource).not.toMatch(/<button\b/);
+    expect(memoryControlSource).not.toMatch(/<input\b/);
+    expect(memoryControlSource).not.toMatch(/<select\b/);
+    expect(memoryControlSource).not.toMatch(/<textarea\b/);
   });
 });
