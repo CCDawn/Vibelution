@@ -3,7 +3,7 @@ import {
   isGroupRoomTranscriptMessage,
   isRuntimeNoticeMessage,
   isTurnErrorMessage,
-} from "./messageSections";
+} from "./conversationMessagePredicates";
 import { answerProjectionContent } from "./conversationInternalStatus";
 
 function metadataText(metadata: Record<string, unknown> | undefined, key: string) {

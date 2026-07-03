@@ -6,7 +6,7 @@ import type {
   AgentThoughtPart,
   AgentToolCallPart,
 } from "../../agent-thread/types";
-import { agentMessageProcessSections } from "./messageSections";
+import { agentMessageProcessSections } from "./agentMessageSections";
 
 export type AgentMessageOperationKind = "thought" | "mental" | "tool" | "status";
 
