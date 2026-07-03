@@ -44,6 +44,13 @@ describe("conversationTimeline", () => {
     expect(conversationTimelineSource).not.toContain("ConversationOperationTimelineItem");
   });
 
+  it("keeps the AgentMessage timeline model decoupled from API timeline DTO imports", () => {
+    expect(conversationTimelineSource).toContain("export type AgentMessageTimelineServerItem");
+    expect(conversationTimelineSource).not.toContain("../../api/types");
+    expect(conversationTimelineSource).not.toContain("ApiConversationTimelineItem");
+    expect(conversationTimelineSource).not.toContain("ConversationTimelineItem as");
+  });
+
   it("builds timeline items from AgentMessage parts", () => {
     const message: AgentMessage = {
       id: "agent-message-timeline",
