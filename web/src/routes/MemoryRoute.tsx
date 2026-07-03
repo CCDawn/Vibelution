@@ -64,6 +64,7 @@ import { MemoryCleanupPanel } from "./MemoryCleanupPanel";
 import { MemoryDetailPanel } from "./MemoryDetailPanel";
 import { MemoryEffectivePanel } from "./MemoryEffectivePanel";
 import { MemoryKnowledgeBaseSidebar } from "./MemoryKnowledgeBaseSidebar";
+import { MemoryKnowledgeDetailPanel } from "./MemoryKnowledgeDetailPanel";
 import { MemoryKnowledgeGovernancePanel } from "./MemoryKnowledgeGovernancePanel";
 import { MemoryKnowledgeModeTabs } from "./MemoryKnowledgeModeTabs";
 import { MemoryKnowledgePermissionsPanel } from "./MemoryKnowledgePermissionsPanel";
@@ -4598,80 +4599,19 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
         </main>
 
-        <aside className={styles.detailPanel}>
-          <div className={styles.detailHeader}>
-            <p className={styles.panelEyebrow}>{copy.formalKnowledge}</p>
-            <h2>{activeKnowledgeBase?.name ?? copy.selectedKnowledgeDetail}</h2>
-          </div>
-          <section className={styles.managementPanel}>
-            <div className={styles.managementHeader}>
-              <div>
-                <p className={styles.panelEyebrow}>{copy.sourceChain}</p>
-                <h2>{copy.traceability}</h2>
-              </div>
-            </div>
-            <label>
-              <span>{copy.traceability}</span>
-              <VNativeInput value={traceTargetId} onChange={(event) => setTraceTargetId(event.target.value)} placeholder="source / proposal / item / rating id" />
-            </label>
-            {knowledgeTraceQuery.data ? (
-              <div className={styles.metaGrid}>
-                <span>{copy.sourceArtifacts}: {knowledgeTraceQuery.data.summary.sourceArtifacts ?? 0}</span>
-                <span>{copy.pendingProposals}: {knowledgeTraceQuery.data.summary.proposals ?? 0}</span>
-                <span>{copy.formalKnowledge}: {knowledgeTraceQuery.data.summary.items ?? 0}</span>
-                <span>{copy.ratingSuggestions}: {knowledgeTraceQuery.data.summary.ratingSuggestions ?? 0}</span>
-              </div>
-            ) : null}
-          </section>
-          {knowledgeItemsQuery.isPending ? <div className={styles.emptyState}>{copy.loading}</div> : null}
-          <div className={styles.knowledgeItems}>
-            {knowledgeItems.map((item) => (
-              <section key={item.knowledgeItemId} className={styles.knowledgeItemCard}>
-                <div className={styles.panelHeader}>
-                  <div>
-                    <strong>{item.title}</strong>
-                    <p>{item.summary || item.content}</p>
-                  </div>
-                  <span className={styles.statusPill}>{item.importanceLevel}</span>
-                </div>
-                <div className={styles.metaGrid}>
-                  <span>{copy.confidence}: {item.confidence}</span>
-                  <span>{copy.stability}: {item.stability}</span>
-                  <span>{copy.reviewPriority}: {item.reviewPriority}</span>
-                  <span>batch: {item.batchId}</span>
-                </div>
-                <label>
-                  <span>{copy.markingReason}</span>
-                  <VNativeInput value={ratingDraft.markingReason} onChange={(event) => setRatingDraft({ ...ratingDraft, markingReason: event.target.value })} />
-                </label>
-                <div className={styles.ratingControls}>
-                  <VNativeSelect value={ratingDraft.importanceLevel} onChange={(event) => setRatingDraft({ ...ratingDraft, importanceLevel: event.target.value })}>
-                    {["low", "medium", "high", "critical"].map((value) => <option key={value} value={value}>{value}</option>)}
-                  </VNativeSelect>
-                  <VNativeInput value={ratingDraft.confidence} onChange={(event) => setRatingDraft({ ...ratingDraft, confidence: event.target.value })} aria-label={copy.confidence} />
-                  <VNativeSelect value={ratingDraft.stability} onChange={(event) => setRatingDraft({ ...ratingDraft, stability: event.target.value })}>
-                    {["temporary", "evolving", "stable", "deprecated"].map((value) => <option key={value} value={value}>{value}</option>)}
-                  </VNativeSelect>
-                  <VButton
-                    type="button"
-                    className={styles.detailActionButton}
-                    onClick={() => updateKnowledgeRating(item)}
-                    isDisabled={!activeKnowledgeBase?.permissions.canRate || knowledgeBusy}
-                  >
-                    <CheckCircle2 size={14} />
-                    <span>{copy.submitRatingSuggestion}</span>
-                  </VButton>
-                </div>
-              </section>
-            ))}
-            {!knowledgeItemsQuery.isPending && !knowledgeItems.length ? (
-              <section className={styles.emptyDetail}>
-                <FileText size={22} />
-                <strong>{copy.noMatches}</strong>
-              </section>
-            ) : null}
-          </div>
-        </aside>
+        <MemoryKnowledgeDetailPanel
+          copy={copy}
+          activeKnowledgeBase={activeKnowledgeBase}
+          traceTargetId={traceTargetId}
+          trace={knowledgeTraceQuery.data}
+          knowledgeItems={knowledgeItems}
+          knowledgeItemsPending={knowledgeItemsQuery.isPending}
+          ratingDraft={ratingDraft}
+          knowledgeBusy={knowledgeBusy}
+          onTraceTargetChange={setTraceTargetId}
+          onRatingDraftChange={setRatingDraft}
+          onUpdateKnowledgeRating={updateKnowledgeRating}
+        />
       </div>
     </>
   );
