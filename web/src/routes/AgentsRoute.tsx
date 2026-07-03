@@ -73,6 +73,7 @@ import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
 import { AgentActivityHistoryPanel, type AgentActivityTimelineItem } from "./AgentActivityHistoryPanel";
+import { AgentAvatarEditorPanel } from "./AgentAvatarEditorPanel";
 import { AgentManagementNav } from "./AgentManagementNav";
 import { AgentManagementBriefPanel } from "./AgentManagementBriefPanel";
 import {
@@ -477,14 +478,6 @@ function avatarInitials(agentCode?: string, name?: string, fallback = "AI") {
   }
   const title = String(name ?? "").trim();
   return title.slice(0, 2) || fallback;
-}
-
-function renderAgentAvatar(className: string, imageUrl: string | undefined, fallback: string) {
-  return (
-    <span className={className} aria-hidden="true">
-      {imageUrl ? <img src={imageUrl} alt="" className={styles.agentAvatarImage} /> : fallback}
-    </span>
-  );
 }
 
 function encodeArrayBufferBase64(buffer: ArrayBuffer) {
@@ -3697,7 +3690,6 @@ export function AgentsRoute() {
   const [bulkAgentPending, setBulkAgentPending] = useState(false);
   const draftSyncSourceRef = useRef<AgentDraftSyncSource | null>(null);
   const appliedRouteTargetRef = useRef("");
-  const selectedAgentAvatarInputRef = useRef<HTMLInputElement | null>(null);
 
   const fullWorkspaceNeeded = Boolean(createOpen || activePane === "config" || activePane === "activity" || requestedAgentId);
   const workspaceQuery = useQuery({
@@ -6208,80 +6200,22 @@ export function AgentsRoute() {
           ) : selectedAgent ? (
             <>
               <section className={styles.detailHeader} title={copy.routeHint}>
-                <div className={styles.avatarEditorAnchor}>
-                  <VNativeButton
-                    type="button"
-                    className={styles.detailAvatarButton}
-                    onClick={() => setAvatarEditorOpen((current) => !current)}
-                    aria-expanded={avatarEditorOpen}
-                    aria-label={copy.editAvatar}
-                    title={copy.editAvatar}
-                  >
-                    {renderAgentAvatar(
-                      styles.detailAvatar,
-                      selectedAgent.avatarImageUrl,
-                      avatarInitials(selectedAgent.agentCode, agentLabel(selectedAgent)),
-                    )}
-                  </VNativeButton>
-                  {avatarEditorOpen ? (
-                    <section className={styles.avatarEditorPanel} title={copy.avatarEditorHint}>
-                      <div className={styles.avatarEditorHeader}>
-                        <div>
-                          <p className={styles.panelEyebrow}>{copy.avatarEditorTitle}</p>
-                          <strong>{copy.editAvatar}</strong>
-                        </div>
-                        <VNativeButton type="button" className={styles.iconButton} onClick={() => setAvatarEditorOpen(false)} aria-label={lang === "zh" ? "关闭" : "Close"}>
-                          ×
-                        </VNativeButton>
-                      </div>
-                      <div className={styles.avatarEditorActions}>
-                        <VNativeInput
-                          ref={selectedAgentAvatarInputRef}
-                          type="file"
-                          accept="image/png,image/jpeg,image/webp"
-                          disabled={selectedAgentAvatarUploadPending}
-                          onChange={(event) => {
-                            uploadSelectedAgentAvatar(event.target.files?.[0]);
-                            event.currentTarget.value = "";
-                          }}
-                        />
-                        <VButton type="button" variant="secondary" isDisabled={selectedAgentAvatarUploadPending} onPress={() => selectedAgentAvatarInputRef.current?.click()}>
-                          {selectedAgentAvatarUploadPending ? copy.uploadingAvatar : copy.uploadAvatar}
-                        </VButton>
-                        <VButton type="button" variant="secondary" isDisabled={selectedAgentAvatarUpdatePending} onPress={resetSelectedAgentAvatar}>
-                          {selectedAgentAvatarUpdatePending ? copy.resettingAvatar : copy.resetDefaultAvatar}
-                        </VButton>
-                      </div>
-                      <div className={styles.avatarLibraryHeader}>
-                        <span>{copy.avatarLibrary}</span>
-                        <small>{avatarOptionsQuery.data?.count ?? 0}</small>
-                      </div>
-                      {avatarOptionsQuery.isPending ? (
-                        <p className={styles.contextLine}>{copy.avatarLibraryLoading}</p>
-                      ) : avatarOptionsQuery.data?.options.length ? (
-                        <div className={styles.avatarOptionGrid}>
-                          {avatarOptionsQuery.data.options.map((option) => {
-                            const selected = option.path === selectedAgent.avatarImagePath;
-                            return (
-                              <VNativeButton
-                                key={option.path}
-                                type="button"
-                                className={selected ? `${styles.avatarOption} ${styles.avatarOptionSelected}` : styles.avatarOption}
-                                onClick={() => selectAgentAvatar(option.path)}
-                                disabled={selectedAgentAvatarUpdatePending}
-                                title={option.filename}
-                              >
-                                <img src={option.url} alt="" />
-                              </VNativeButton>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <p className={styles.contextLine}>{copy.avatarLibraryEmpty}</p>
-                      )}
-                    </section>
-                  ) : null}
-                </div>
+                <AgentAvatarEditorPanel
+                  copy={copy}
+                  lang={lang}
+                  isOpen={avatarEditorOpen}
+                  avatarImageUrl={selectedAgent.avatarImageUrl}
+                  avatarImagePath={selectedAgent.avatarImagePath}
+                  avatarInitials={avatarInitials(selectedAgent.agentCode, agentLabel(selectedAgent))}
+                  avatarOptions={avatarOptionsQuery.data}
+                  avatarOptionsPending={avatarOptionsQuery.isPending}
+                  uploadPending={selectedAgentAvatarUploadPending}
+                  updatePending={selectedAgentAvatarUpdatePending}
+                  onOpenChange={setAvatarEditorOpen}
+                  onUploadAvatar={uploadSelectedAgentAvatar}
+                  onResetAvatar={resetSelectedAgentAvatar}
+                  onSelectAvatar={selectAgentAvatar}
+                />
                 <div>
                   <p className={styles.panelEyebrow}>{agentFunctionalLabel(selectedAgent, lang)}</p>
                   <h2>{agentLabel(selectedAgent)}</h2>
