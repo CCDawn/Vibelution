@@ -10,29 +10,9 @@ import type {
   AgentMessage,
   AgentMessagePart,
   AgentRuntimeEventPart,
-  AgentThread,
-  AgentThreadSource,
   AgentThoughtPart,
   AgentToolCallPart,
 } from "./types";
-
-export type ConversationMessagesToAgentThreadOptions = {
-  source?: AgentThreadSource;
-};
-
-export function conversationMessagesToAgentThread(
-  id: string,
-  messages: ConversationMessage[],
-  options: ConversationMessagesToAgentThreadOptions = {},
-): AgentThread {
-  const agentMessages = messages.map(conversationMessageToAgentMessage);
-  return {
-    id,
-    source: options.source ?? { kind: "conversation", id },
-    status: agentMessages.some((message) => message.streaming) ? "streaming" : "idle",
-    messages: agentMessages,
-  };
-}
 
 export function conversationMessageToAgentMessage(message: ConversationMessage): AgentMessage {
   const parts = conversationMessageToAgentParts(message);
