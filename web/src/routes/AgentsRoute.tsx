@@ -49,7 +49,6 @@ import {
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import {
   AgentFilterRail,
-  AgentWorkspacePanel,
   type AgentDenseColumn,
   type AgentFilterSectionView,
   type AgentSummaryMetric,
@@ -76,7 +75,7 @@ import {
 import { type AgentCreateDraft } from "./AgentCreatePanel";
 import { AgentDebugResetPanel, type AgentResetOptions } from "./AgentDebugResetPanel";
 import { AgentDetailHeaderPanel } from "./AgentDetailHeaderPanel";
-import { AgentEmptySelectionPanel } from "./AgentEmptySelectionPanel";
+import { AgentDetailWorkspacePanel } from "./AgentDetailWorkspacePanel";
 import { AgentHealthMaintenancePanel } from "./AgentHealthMaintenancePanel";
 import { AgentListWorkspacePanel } from "./AgentListWorkspacePanel";
 import { AgentMemoryPolicyPanel, type AgentMemoryPolicyDraft } from "./AgentMemoryPolicyPanel";
@@ -96,7 +95,6 @@ import {
   type AgentReferenceItemView,
   type AgentReferenceRoomView,
 } from "./AgentReferencesPanel";
-import { AgentReturnBannerPanel } from "./AgentReturnBannerPanel";
 import { AgentRuntimeFocusPanel } from "./AgentRuntimeFocusPanel";
 import { AgentRuntimePolicyPanel } from "./AgentRuntimePolicyPanel";
 import { AgentTaskProfilePanel, type AgentTaskDraft } from "./AgentTaskProfilePanel";
@@ -5833,19 +5831,15 @@ export function AgentsRoute() {
           }}
         />
 
-        <AgentWorkspacePanel
-          as="aside"
+        <AgentDetailWorkspacePanel
+          createOpen={createOpen}
           ariaLabel={selectedAgent ? agentLabel(selectedAgent) : copy.title}
-          className={createOpen ? `${styles.detailPanel} ${styles.detailPanelCreating}` : styles.detailPanel}
-        >
-          {returnToPath ? (
-            <AgentReturnBannerPanel
-              copy={copy}
-              returnToLabel={returnToLabel}
-              onReturn={() => navigate(returnToPath)}
-            />
-          ) : null}
-          {selectedBulkAgents.length > 1 ? (
+          returnBanner={returnToPath ? {
+            copy,
+            returnToLabel,
+            onReturn: () => navigate(returnToPath),
+          } : null}
+          bulkConfigPanel={selectedBulkAgents.length > 1 ? (
             <AgentBulkConfigPanel
               copy={copy}
               selectedAgents={bulkSelectedAgentOptions}
@@ -5866,7 +5860,8 @@ export function AgentsRoute() {
               }}
               onSave={bulkApplyAgentConfig}
             />
-          ) : selectedAgent ? (
+          ) : null}
+          selectedContent={selectedAgent ? (
             <>
               <AgentDetailHeaderPanel
                 copy={copy}
@@ -6257,10 +6252,9 @@ export function AgentsRoute() {
                 </>
               ) : null}
             </>
-          ) : (
-            <AgentEmptySelectionPanel title={copy.selectAgent} />
-          )}
-        </AgentWorkspacePanel>
+          ) : null}
+          emptySelectionTitle={copy.selectAgent}
+        />
       </div>
     </section>
   );
