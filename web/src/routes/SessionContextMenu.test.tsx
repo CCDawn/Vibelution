@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { SessionSummary } from "../api/types";
+import routeStyles from "./ChatCodingRoute.styles";
 import { SessionContextMenu, sessionContextMenuStyle } from "./SessionContextMenu";
 
 function t(key: string) {
@@ -115,5 +116,20 @@ describe("SessionContextMenu", () => {
       left: 24,
       top: 32,
     });
+  });
+
+  it("renders as a floating overlay instead of a document-flow action block", () => {
+    expect(routeStyles.sessionContextMenu.split(/\s+/)).toContain("fixed");
+    expect(routeStyles.sessionContextMenu).toContain("z-[80]");
+    expect(routeStyles.sessionContextMenu).toContain("w-[188px]");
+    expect(routeStyles.sessionContextMenu).toContain("grid");
+    expect(routeStyles.sessionContextMenu).toContain("gap-1");
+    expect(routeStyles.sessionContextMenu).toContain("p-1");
+    expect(routeStyles.sessionContextMenu).toContain("shadow-[var(--vui-shadow-hairline)]");
+    expect(routeStyles.sessionContextMenuItem).toContain("!w-full");
+    expect(routeStyles.sessionContextMenuItem).toContain("justify-start");
+    expect(routeStyles.sessionContextMenuItem).toContain("text-left");
+    expect(routeStyles.sessionContextMenuDanger).toContain("text-[var(--state-error)]");
+    expect(routeStyles.sessionContextMenuDanger).not.toContain("text-[var(--accent-warm)]");
   });
 });
