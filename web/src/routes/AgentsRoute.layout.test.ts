@@ -1261,10 +1261,11 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('"/api/agents/bulk-archive"');
     expect(routeSource).toContain('"/api/agents/bulk-purge"');
     expect(routeSource).toContain("bulkPurgeWorkspaceCache");
-    expect(routeSource).toContain("<AgentBulkConfigPanel");
-    expect(routeSource).toContain("onToggleApply={toggleBulkConfigApply}");
-    expect(routeSource).toContain("onDraftChange={updateBulkConfigDraft}");
-    expect(routeSource).toContain("onSave={bulkApplyAgentConfig}");
+    expect(routeSource).toContain("bulkConfig={selectedBulkAgents.length > 1 ? {");
+    expect(detailWorkspacePanelSource).toContain("<AgentBulkConfigPanel");
+    expect(routeSource).toContain("onToggleApply: toggleBulkConfigApply");
+    expect(routeSource).toContain("onDraftChange: updateBulkConfigDraft");
+    expect(routeSource).toContain("onSave: bulkApplyAgentConfig");
     expect(listWorkspacePanelSource).toContain("AgentBulkActionBar");
     expect(routeSource).toContain("VButton");
     expect(routeSource).toContain("summary: bulkActionSummary");

@@ -61,7 +61,6 @@ import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
 import { AgentActivityPanePanel } from "./AgentActivityPanePanel";
 import { type AgentActivityTimelineItem } from "./AgentActivityHistoryPanel";
 import {
-  AgentBulkConfigPanel,
   type AgentBulkConfigApply,
   type AgentBulkConfigDraft,
   type AgentBulkConfigField,
@@ -5834,28 +5833,26 @@ export function AgentsRoute() {
             returnToLabel,
             onReturn: () => navigate(returnToPath),
           } : null}
-          bulkConfigPanel={selectedBulkAgents.length > 1 ? (
-            <AgentBulkConfigPanel
-              copy={copy}
-              selectedAgents={bulkSelectedAgentOptions}
-              draft={bulkConfigDraft}
-              apply={bulkConfigApply}
-              mixed={bulkConfigMixed}
-              pending={bulkAgentPending}
-              canSave={bulkConfigCanSave}
-              notice={notice}
-              modelOptions={bulkModelOptions}
-              promptTemplateOptions={bulkPromptTemplateOptions}
-              primaryModeOptions={bulkPrimaryModeOptions}
-              onToggleApply={toggleBulkConfigApply}
-              onDraftChange={updateBulkConfigDraft}
-              onReset={() => {
-                setBulkConfigDraft(bulkConfigDraftFromAgents(selectedBulkAgents));
-                setBulkConfigApply(DEFAULT_BULK_CONFIG_APPLY);
-              }}
-              onSave={bulkApplyAgentConfig}
-            />
-          ) : null}
+          bulkConfig={selectedBulkAgents.length > 1 ? {
+            copy,
+            selectedAgents: bulkSelectedAgentOptions,
+            draft: bulkConfigDraft,
+            apply: bulkConfigApply,
+            mixed: bulkConfigMixed,
+            pending: bulkAgentPending,
+            canSave: bulkConfigCanSave,
+            notice,
+            modelOptions: bulkModelOptions,
+            promptTemplateOptions: bulkPromptTemplateOptions,
+            primaryModeOptions: bulkPrimaryModeOptions,
+            onToggleApply: toggleBulkConfigApply,
+            onDraftChange: updateBulkConfigDraft,
+            onReset: () => {
+              setBulkConfigDraft(bulkConfigDraftFromAgents(selectedBulkAgents));
+              setBulkConfigApply(DEFAULT_BULK_CONFIG_APPLY);
+            },
+            onSave: bulkApplyAgentConfig,
+          } : null}
           selectedContent={selectedAgent ? (
             <AgentSelectedDetailContentPanel
               activePane={activePane}
