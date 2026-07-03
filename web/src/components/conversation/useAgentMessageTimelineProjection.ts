@@ -1,4 +1,5 @@
 import type { ConversationMessage } from "../../api/types";
+import { conversationMessageToAgentMessage } from "../../agent-thread/adapters";
 import { answerProjectionContent } from "./conversationInternalStatus";
 import { mergeAgentFeedbackEvents } from "../../agent-thread/agentFeedbackEvents";
 import { projectAgentMessageProcessMessages } from "./agentMessageProcessProjection";
@@ -153,10 +154,11 @@ export function projectAgentMessageTimelineMessages({
     });
     return projectAgentMessageProcessMessages([...dedupedTimelineMessages, mergedActiveTurnMessage]);
   })();
+  const projectedAgentMessages = projectedMessages.map(conversationMessageToAgentMessage);
 
   return {
     messages: projectedMessages,
     streamingMessages: projectedMessages.filter((message) => message.streaming),
-    rowIdentities: buildAgentMessageTimelineRowIdentities(projectedMessages),
+    rowIdentities: buildAgentMessageTimelineRowIdentities(projectedAgentMessages),
   };
 }
