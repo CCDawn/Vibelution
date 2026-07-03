@@ -77,13 +77,6 @@ import {
 import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
 import { projectStreamingMarkdownBlocks, type MarkdownBlock } from "./streamingMarkdown";
 import {
-  appendStableText,
-  EMPTY_STREAMING_REVEAL_STATE,
-  nextStreamingRevealLength,
-  streamingRevealText,
-  type StreamingRevealState,
-} from "./streamingRevealState";
-import {
   captureTimelineRowKeyAnchor,
   restoreTimelineRowKeyAnchor,
   type TimelineScrollRowKeyAnchor,
@@ -293,66 +286,10 @@ function StreamingResponseContent({
   renderBlock: (block: MarkdownBlock, index: number) => ReactNode;
 }) {
   const targetContent = String(content ?? "");
-  const [visibleContent, setVisibleContent] = useState<StreamingRevealState>(() =>
-    typeof window === "undefined"
-      ? appendStableText(EMPTY_STREAMING_REVEAL_STATE, targetContent)
-      : EMPTY_STREAMING_REVEAL_STATE
-  );
-  const targetContentRef = useRef(targetContent);
-  const visibleContentRef = useRef(visibleContent);
-  const frameIdRef = useRef<number | null>(null);
-  const visibleText = streamingRevealText(visibleContent);
+  const visibleText = targetContent;
   const markdownProjection = useMemo(() => projectStreamingMarkdownBlocks(visibleText), [visibleText]);
   const blocks = markdownProjection.blocks;
   const hasTable = blocks.some((block) => block.type === "table");
-
-  useEffect(() => {
-    visibleContentRef.current = visibleContent;
-  }, [visibleContent]);
-
-  useEffect(() => {
-    targetContentRef.current = targetContent;
-    if (typeof window === "undefined") {
-      return undefined;
-    }
-    if (!targetContent) {
-      visibleContentRef.current = EMPTY_STREAMING_REVEAL_STATE;
-      setVisibleContent(EMPTY_STREAMING_REVEAL_STATE);
-      return undefined;
-    }
-    if (!targetContent.startsWith(streamingRevealText(visibleContentRef.current))) {
-      const recoveredState = appendStableText(visibleContentRef.current, targetContent);
-      visibleContentRef.current = recoveredState;
-      setVisibleContent(recoveredState);
-      return undefined;
-    }
-
-    const revealNextFrame = () => {
-      frameIdRef.current = null;
-      const target = targetContentRef.current;
-      const current = streamingRevealText(visibleContentRef.current);
-      if (current.length >= target.length) {
-        return;
-      }
-      const nextLength = nextStreamingRevealLength(current.length, target.length);
-      const nextVisible = appendStableText(visibleContentRef.current, target.slice(0, nextLength));
-      visibleContentRef.current = nextVisible;
-      setVisibleContent(nextVisible);
-      if (nextLength < target.length) {
-        frameIdRef.current = window.requestAnimationFrame(revealNextFrame);
-      }
-    };
-
-    if (frameIdRef.current === null) {
-      frameIdRef.current = window.requestAnimationFrame(revealNextFrame);
-    }
-    return () => {
-      if (frameIdRef.current !== null) {
-        window.cancelAnimationFrame(frameIdRef.current);
-        frameIdRef.current = null;
-      }
-    };
-  }, [targetContent]);
 
   if (!visibleText || blocks.length === 0) {
     return null;
