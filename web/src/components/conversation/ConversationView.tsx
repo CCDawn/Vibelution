@@ -1879,6 +1879,18 @@ export function ConversationView({
     return isInternalStreamingStatusContent(content);
   }
 
+  function isNoFinalAnswerStatusContent(content: string) {
+    const normalized = String(content ?? "").replace(/\s+/g, " ").trim();
+    if (!normalized) {
+      return false;
+    }
+    const mentionsNoFinalAnswer =
+      normalized.startsWith("本轮还没有形成最终回答")
+      || normalized.startsWith("本轮尚未形成最终回答")
+      || normalized.startsWith("尚未形成最终回答");
+    return mentionsNoFinalAnswer && /继续|恢复|衔接|保留当前执行进度|工具循环/.test(normalized);
+  }
+
   function compactStreamingStatusPlaceholder(content: string) {
     if (isInternalStreamingStatusContent(content)) {
       return "";
@@ -3149,6 +3161,9 @@ export function ConversationView({
     if (!sectionState.hasResponseBlock) {
       return false;
     }
+    if (isNoFinalAnswerStatusContent(sectionState.answerText)) {
+      return false;
+    }
     if (!hasFeedbackTimeline) {
       return true;
     }
@@ -3713,6 +3728,9 @@ export function ConversationView({
             const agentSections = agentRenderState.sectionState;
             const processSections = agentRenderState.processSections;
             const responseText = agentSections.answerText;
+            const noFinalAnswerStatusText = isNoFinalAnswerStatusContent(responseText)
+              ? responseText.trim()
+              : "";
             const userContentText = agentSections.userText;
             const hasActiveProcess = operationGroups.timeline.some((operation) => isRunningOperationStatus(operation.status));
             const hasFeedbackTimeline = agentSections.hasFeedbackTimeline;
@@ -3863,6 +3881,12 @@ export function ConversationView({
                 agentRenderState.processSectionIds,
               )
             ) : renderAgentProcessDetails();
+            const turnStatusNode = noFinalAnswerStatusText ? (
+              <div className={styles.turnStatusNote} role="status" aria-live="polite">
+                <span className={styles.turnStatusLabel}>{lang === "zh" ? "状态" : "Status"}</span>
+                <span className={styles.turnStatusText}>{noFinalAnswerStatusText}</span>
+              </div>
+            ) : null;
             return (
               <AgentMessageTurnView
                 key={rowIdentity.rowKey}
@@ -3959,6 +3983,7 @@ export function ConversationView({
                   {contextNode}
 
                   {processNode}
+                  {turnStatusNode}
                   {answerOnlyProcessMode ? responseSectionNode : null}
                   {turnErrorMessage ? (
                     <div className={styles.turnErrorNotice} role="status" aria-live="polite">

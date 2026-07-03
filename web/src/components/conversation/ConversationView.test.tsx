@@ -999,6 +999,33 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.reActResultToggle).toContain("border-0");
   });
 
+  it("keeps ReAct tool rows as line items instead of nested white cards", () => {
+    const lineItemStyles = [
+      styles.reActToolList,
+      styles.reActToolItem,
+      styles.reActToolLine,
+      styles.reActToolSummary,
+      styles.reActToolStatus,
+      styles.reActToolDetailToggle,
+    ].join(" ");
+
+    expect(styles.reActToolLine).toContain("grid-cols-[minmax(9rem,auto)_minmax(0,1fr)_auto_auto]");
+    expect(styles.reActToolList).toContain("gap-0");
+    expect(styles.reActToolItem).toContain("border-0");
+    expect(styles.reActToolItem).toContain("bg-transparent");
+    expect(styles.reActToolLine).toContain("border-0");
+    expect(styles.reActToolLine).toContain("bg-transparent");
+    expect(styles.reActToolSummary).toContain("border-0");
+    expect(styles.reActToolSummary).toContain("bg-transparent");
+    expect(styles.reActToolStatus).toContain("border-0");
+    expect(styles.reActToolStatus).toContain("bg-transparent");
+    expect(styles.reActToolDetailToggle).toContain("border-0");
+    expect(styles.reActToolDetailToggle).toContain("bg-transparent");
+    expect(lineItemStyles).not.toContain("bg-[var(--vui-surface-glass)]");
+    expect(lineItemStyles).not.toContain("bg-[var(--vui-surface-row)]");
+    expect(lineItemStyles).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+  });
+
   it("keeps streamed execution rows readable instead of squeezed into micro columns", () => {
     expect(conversationViewStylesSource).not.toMatch(/font-size:\s*0\.(?:[0-6]\d?|7(?:0|1)?)rem/);
     expect(styles.operationItem).not.toContain("w-fit");
@@ -3104,6 +3131,42 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("状态 1");
     expect(html).toContain("第 2 次工具调用");
     expect(html).not.toContain("第 1 次工具调用");
+  });
+
+  it("renders no-final-answer interruption text as turn status instead of an answer body", () => {
+    const interruptionStatus = "本轮还没有形成最终回答，已保留当前执行进度；发送“继续”可衔接上一轮继续。";
+    const html = renderConversation(
+      [
+        {
+          id: "message-no-final-answer-status",
+          role: "assistant",
+          content: interruptionStatus,
+          timestamp: "2026-06-28T17:08:00Z",
+          feedbackEvents: [
+            {
+              sequence: 1,
+              kind: "thought",
+              status: "done",
+              summary: "我已经读取上下文，正在等待继续。",
+              resultPreview: "我已经读取上下文，正在等待继续。",
+            },
+            {
+              sequence: 2,
+              kind: "tool",
+              status: "done",
+              name: "get_recent_changes_tool",
+              summary: "读取最近变化",
+            },
+          ],
+        },
+      ],
+      { useDefaultProcessDisplayMode: true },
+    );
+
+    expect(html).toContain(interruptionStatus);
+    expect(html).toContain("状态");
+    expect(html).not.toContain("responseSection");
+    expect(html).not.toContain("回答</span>");
   });
 
   it("keeps the collapsed answer-only process summary static before details are expanded", () => {

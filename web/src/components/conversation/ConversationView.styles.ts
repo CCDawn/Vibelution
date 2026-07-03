@@ -747,19 +747,19 @@ const styles: Record<string, string> = {
   reActThoughtText:
     "vui-components-conversationview reActThoughtText min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] border-l-0 bg-transparent",
   reActToolDetailToggle:
-    "vui-components-conversationview reActToolDetailToggle min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+    "vui-components-conversationview reActToolDetailToggle min-w-0 border-0 bg-transparent p-0 text-[var(--fg-tertiary)] shadow-none hover:bg-transparent hover:text-[var(--fg-primary)]",
   reActToolItem:
-    "vui-components-conversationview reActToolItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+    "vui-components-conversationview reActToolItem min-w-0 border-0 bg-transparent p-0 text-[var(--fg-secondary)] shadow-none",
   reActToolLine:
-    "vui-components-conversationview reActToolLine min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+    "vui-components-conversationview reActToolLine min-w-0 grid grid-cols-[minmax(9rem,auto)_minmax(0,1fr)_auto_auto] items-start gap-1.5 border-0 border-b border-[color-mix(in_srgb,var(--accent-warm)_18%,var(--vui-border-subtle))] bg-transparent py-1.5 text-[var(--fg-secondary)] shadow-none",
   reActToolList:
-    "vui-components-conversationview reActToolList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+    "vui-components-conversationview reActToolList min-w-0 grid min-h-0 content-start gap-0 overflow-visible border-0 bg-transparent text-[var(--fg-secondary)]",
   reActToolName:
-    "vui-components-conversationview reActToolName min-w-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)] border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+    "vui-components-conversationview reActToolName min-w-0 truncate text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   reActToolStatus:
-    "vui-components-conversationview reActToolStatus min-w-0 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+    "vui-components-conversationview reActToolStatus min-w-0 inline-flex items-center gap-1 border-0 bg-transparent text-[var(--fg-tertiary)]",
   reActToolSummary:
-    "vui-components-conversationview reActToolSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+    "vui-components-conversationview reActToolSummary min-w-0 border-0 bg-transparent p-0 text-[var(--fg-secondary)] shadow-none line-clamp-1 whitespace-normal [overflow-wrap:anywhere]",
   researchOrgChip:
     "vui-components-conversationview researchOrgChip min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   researchOrgChipRow:
@@ -1049,6 +1049,12 @@ const styles: Record<string, string> = {
     "vui-components-conversationview turnMetaIdentity flex min-w-0 items-center gap-2",
   turnSpeaker:
     "vui-components-conversationview turnSpeaker min-w-0 truncate text-[var(--vui-font-md)] font-semibold leading-tight text-[var(--fg-primary)]",
+  turnStatusLabel:
+    "vui-components-conversationview turnStatusLabel min-w-0 shrink-0 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-tertiary)]",
+  turnStatusNote:
+    "vui-components-conversationview turnStatusNote min-w-0 inline-grid w-[min(100%,920px)] grid-cols-[auto_minmax(0,1fr)] items-start gap-2 border-l border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] bg-transparent py-1 pl-2.5 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  turnStatusText:
+    "vui-components-conversationview turnStatusText min-w-0 max-w-[min(100%,76ch)] whitespace-normal [overflow-wrap:anywhere]",
   updateLine:
     "vui-components-conversationview updateLine min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
   userAttachment:
