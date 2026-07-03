@@ -1,4 +1,3 @@
-import { ConversationFeedbackEvent } from "../../api/types";
 import type {
   AgentMentalPart,
   AgentMessage,
@@ -54,6 +53,12 @@ export type AgentMessageReActOperationGroup = {
   thoughtSequence?: number;
   title: string;
   primaryKind: AgentMessageOperationKind;
+};
+
+type AgentMessageOperationStatusDisplayInput = {
+  name?: string;
+  summary?: string;
+  resultPreview?: string;
 };
 
 const agentOperationGroupsCache = new WeakMap<
@@ -191,18 +196,11 @@ function agentRuntimeEventPartToOperation(
   index: number,
   labels: AgentMessageOperationLabels,
 ): AgentMessageOperation {
-  const event: ConversationFeedbackEvent = {
-    sequence: numberOrNull(part.sequence) ?? index + 1,
-    kind: "status",
-    status: part.status,
+  const statusDisplay = statusOperationDisplay({
     name: part.name,
     summary: part.summary,
     resultPreview: part.resultPreview,
-    error: part.error,
-    timestamp: part.timestamp,
-    tracePath: part.tracePath,
-  };
-  const statusDisplay = statusOperationDisplay(event, labels.status);
+  }, labels.status);
   return {
     id: part.id || `agent-runtime-${index}`,
     kind: "status",
@@ -530,7 +528,7 @@ function normalizeDisplayStatus(status: string) {
 }
 
 function statusOperationDisplay(
-  event: ConversationFeedbackEvent,
+  event: AgentMessageOperationStatusDisplayInput,
   fallbackLabel: string,
 ): { label: string; summary: string; detail: string } {
   const rawName = String(event.name ?? "").trim();
