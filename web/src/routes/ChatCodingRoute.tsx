@@ -1368,6 +1368,19 @@ function cacheDonutSegmentStyle(segment: CacheDonutSegment, gapPercent = 0): CSS
   };
 }
 
+type CacheBoundaryWidthVariable =
+  | "--cache-boundary-hit-width"
+  | "--cache-boundary-miss-width"
+  | "--cache-boundary-unknown-width";
+
+type CacheBoundaryFillStyle = CSSProperties & Partial<Record<CacheBoundaryWidthVariable, string>>;
+
+function cacheBoundaryFillStyle(variable: CacheBoundaryWidthVariable, percent: number): CacheBoundaryFillStyle {
+  return {
+    [variable]: `${percent}%`,
+  };
+}
+
 function removeSessionImageAttachment(
   current: Record<string, ComposerImageAttachment[]>,
   sessionId: string,
@@ -8249,16 +8262,16 @@ export function ChatCodingRoute() {
                             >
                               <span
                                 className={styles.cacheDetailBoundaryHit}
-                                style={{ width: `${observedCachedPercent}%` }}
+                                style={cacheBoundaryFillStyle("--cache-boundary-hit-width", observedCachedPercent)}
                               />
                               <span
                                 className={styles.cacheDetailBoundaryMiss}
-                                style={{ width: `${observedMissedPercent}%` }}
+                                style={cacheBoundaryFillStyle("--cache-boundary-miss-width", observedMissedPercent)}
                               />
                               {observedUnknownTokens > 0 ? (
                                 <span
                                   className={styles.cacheDetailBoundaryUnknown}
-                                  style={{ width: `${observedUnknownPercent}%` }}
+                                  style={cacheBoundaryFillStyle("--cache-boundary-unknown-width", observedUnknownPercent)}
                                 />
                               ) : null}
                             </div>

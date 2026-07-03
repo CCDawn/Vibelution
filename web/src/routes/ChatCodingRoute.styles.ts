@@ -133,15 +133,15 @@ const styles: Record<string, string> = {
   cacheDetailBoundary:
     "vui-routes-chatcodingroute cacheDetailBoundary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   cacheDetailBoundaryHit:
-    "vui-routes-chatcodingroute cacheDetailBoundaryHit min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "vui-routes-chatcodingroute cacheDetailBoundaryHit min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 w-[var(--cache-boundary-hit-width)]",
   cacheDetailBoundaryLabels:
     "vui-routes-chatcodingroute cacheDetailBoundaryLabels min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   cacheDetailBoundaryMiss:
-    "vui-routes-chatcodingroute cacheDetailBoundaryMiss min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "vui-routes-chatcodingroute cacheDetailBoundaryMiss min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 w-[var(--cache-boundary-miss-width)]",
   cacheDetailBoundaryTrack:
     "vui-routes-chatcodingroute cacheDetailBoundaryTrack min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 [&_span+span]:border-l [&_span+span]:border-[var(--vui-border-subtle)]",
   cacheDetailBoundaryUnknown:
-    "vui-routes-chatcodingroute cacheDetailBoundaryUnknown min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "vui-routes-chatcodingroute cacheDetailBoundaryUnknown min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 w-[var(--cache-boundary-unknown-width)]",
   cacheDetailCalibrationNote:
     "vui-routes-chatcodingroute cacheDetailCalibrationNote min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 !grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-[7px]",
   cacheDetailCloseButton:
