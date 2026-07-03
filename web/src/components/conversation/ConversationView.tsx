@@ -35,10 +35,8 @@ import {
 import type {
   AgentAttachmentPart,
   AgentMentalPart,
-  AgentMessage,
   AgentReferencePart,
   AgentTextPart,
-  AgentThread,
 } from "../../agent-thread/types";
 import { fetchJson } from "../../api/client";
 import { useAppI18n } from "../../i18n/useAppI18n";
@@ -63,6 +61,7 @@ import {
   conversationTimelineItemRowKey,
   type ConversationTimelineRowIdentity,
 } from "./conversationTimelineRows";
+import { useAgentThreadProjection } from "./useAgentThreadProjection";
 import { projectConversationTimelineMessages } from "./useConversationTimelineProjection";
 import {
   agentMessageContentSections,
@@ -950,32 +949,6 @@ const ConversationTurnRow = React.memo(function ConversationTurnRow({
   return <>{renderTurn()}</>;
 }, conversationTurnRowPropsAreEqual);
 
-function useAgentThreadForTimelineMessages(sessionId: string, messages: ConversationMessage[]): AgentThread {
-  const agentMessageCacheRef = useRef<{
-    messages: ConversationMessage[];
-    agentMessages: AgentMessage[];
-  }>({ messages: [], agentMessages: [] });
-
-  return useMemo(() => {
-    const previousMessages = agentMessageCacheRef.current.messages;
-    const previousAgentMessages = agentMessageCacheRef.current.agentMessages;
-    const agentMessages = messages.map((message, index) => {
-      const previousAgentMessage = previousAgentMessages[index];
-      if (previousMessages[index] === message && previousAgentMessage) {
-        return previousAgentMessage;
-      }
-      return conversationMessageToAgentMessage(message);
-    });
-    agentMessageCacheRef.current = { messages, agentMessages };
-    return {
-      id: sessionId,
-      source: { kind: "conversation-view", id: sessionId },
-      status: agentMessages.some((message) => message.streaming) ? "streaming" : "idle",
-      messages: agentMessages,
-    };
-  }, [messages, sessionId]);
-}
-
 export function ConversationView({
   sessionId,
   title,
@@ -1233,7 +1206,7 @@ export function ConversationView({
   const activeTimelineMessages = activeTimelineProjection.messages;
   const streamingTimelineMessages = activeTimelineProjection.streamingMessages;
   const activeTimelineRowIdentities = activeTimelineProjection.rowIdentities;
-  const agentThread = useAgentThreadForTimelineMessages(sessionId, activeTimelineMessages);
+  const agentThread = useAgentThreadProjection(sessionId, activeTimelineMessages);
   const imageArtifactUrlsBeforeMessage = useMemo(() => {
     const urlsByMessageId = new Map<string, Set<string>>();
     const seenImageUrls = new Set<string>();
