@@ -82,6 +82,7 @@ const productSharedParentStyleConsumers = [
   "routes/TeamMemoryIndexPanel.tsx",
   "routes/TeamSourceCollectionStageAgentsPanel.tsx",
   "routes/TeamSourceCollectionRunSwitcherPanel.tsx",
+  "routes/TeamSourceCollectionStorageActionsPanel.tsx",
   "routes/RuntimeScenesPane.tsx",
   "routes/SessionContextMenu.tsx",
   "routes/TeamWorkflowGraphView.tsx",

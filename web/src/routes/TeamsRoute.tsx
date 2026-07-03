@@ -83,6 +83,7 @@ import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import { TeamMemoryIndexPanel, type TeamMemoryIndexMember } from "./TeamMemoryIndexPanel";
 import { TeamSourceCollectionStageAgentsPanel, type TeamSourceCollectionStageAgentCard, type TeamSourceCollectionStageAgentTone } from "./TeamSourceCollectionStageAgentsPanel";
 import { TeamSourceCollectionRunSwitcherPanel, type TeamSourceCollectionRunSwitcherRun } from "./TeamSourceCollectionRunSwitcherPanel";
+import { TeamSourceCollectionStorageActionsPanel, type TeamSourceCollectionStorageAction } from "./TeamSourceCollectionStorageActionsPanel";
 import { TeamWorkflowGraphView, workflowGraphLayout } from "./TeamWorkflowGraphView";
 import styles from "./TeamsRoute.styles";
 
@@ -7645,49 +7646,25 @@ export function TeamsRoute({
       "candidates",
       "candidate_store",
     ];
+    const primaryAction: TeamSourceCollectionStorageAction = {
+      target: "run_directory",
+      label: sourceCollectionStorageTargetLabel("run_directory", lang),
+    };
+    const storageActions: TeamSourceCollectionStorageAction[] = detailActions.map((target) => ({
+      target,
+      label: sourceCollectionStorageTargetLabel(target, lang),
+    }));
     return (
-      <section className={styles.workflowSourceCollectionStorageActions} aria-label={lang === "zh" ? "搜集证据落盘位置" : "Source collection evidence storage"}>
-        <div>
-          <strong>{lang === "zh" ? "本轮产物" : "Run artifacts"}</strong>
-        </div>
-        <div className={styles.workflowSourceCollectionStorageButtons}>
-          <VNativeButton
-            type="button"
-            disabled={selectedSourceCollectionStorageOpenPending}
-            onClick={() => openSourceCollectionStorageTarget("run_directory")}
-          >
-            <Link2 size={12} />
-            {sourceCollectionStorageTargetLabel("run_directory", lang)}
-          </VNativeButton>
-        </div>
-        <details className={styles.workflowSourceCollectionStorageDetails}>
-          <summary>{lang === "zh" ? "更多证据文件" : "More evidence files"}</summary>
-          <div className={styles.workflowSourceCollectionStorageButtons}>
-            {detailActions.map((target) => (
-              <VNativeButton
-                key={target}
-                type="button"
-                disabled={selectedSourceCollectionStorageOpenPending}
-                onClick={() => openSourceCollectionStorageTarget(target)}
-              >
-                <Link2 size={12} />
-                {sourceCollectionStorageTargetLabel(target, lang)}
-              </VNativeButton>
-            ))}
-          </div>
-          <small title={selectedSourceCollectionStorageArtifacts.runDirectory}>
-            {selectedSourceCollectionStorageArtifacts.runDirectory}
-          </small>
-        </details>
-        {selectedSourceCollectionStorageOpenResult ? (
-          <small>
-            {lang === "zh" ? "已打开" : "Opened"} {selectedSourceCollectionStorageOpenResult.openedPath}
-          </small>
-        ) : null}
-        {selectedSourceCollectionStorageOpenError ? (
-          <small className={styles.workflowSourceCollectionStorageError}>{selectedSourceCollectionStorageOpenError.message}</small>
-        ) : null}
-      </section>
+      <TeamSourceCollectionStorageActionsPanel
+        lang={lang}
+        runDirectory={selectedSourceCollectionStorageArtifacts.runDirectory}
+        primaryAction={primaryAction}
+        detailActions={storageActions}
+        pending={selectedSourceCollectionStorageOpenPending}
+        openedPath={selectedSourceCollectionStorageOpenResult?.openedPath ?? ""}
+        errorMessage={selectedSourceCollectionStorageOpenError?.message ?? ""}
+        onOpenTarget={(target) => openSourceCollectionStorageTarget(target as SourceCollectionStorageOpenTarget)}
+      />
     );
   }
 
