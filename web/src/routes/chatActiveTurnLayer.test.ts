@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ConversationMessage, SessionDetail, SessionStreamEvent } from "../api/types";
+import * as chatActiveTurnLayerModule from "./chatActiveTurnLayer";
 import {
   activeTurnLayerToConversationMessage,
   type ActiveTurnLayerState,
@@ -31,6 +32,10 @@ function assistantDelta(
 }
 
 describe("chat active turn layer", () => {
+  it("keeps AgentMessage projection behind the shared conversation adapter", () => {
+    expect("activeTurnLayerToAgentMessage" in chatActiveTurnLayerModule).toBe(false);
+  });
+
   it("merges assistant deltas into a separate active layer message", () => {
     const first = mergeAssistantDeltaIntoActiveTurnLayer(undefined, assistantDelta({ contentDelta: "你" }));
     const second = mergeAssistantDeltaIntoActiveTurnLayer(first, assistantDelta({ contentDelta: "好" }));

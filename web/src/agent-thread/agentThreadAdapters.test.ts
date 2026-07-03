@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { ConversationMessage } from "../api/types";
-import { activeTurnLayerToAgentMessage, mergeAssistantDeltaIntoActiveTurnLayer } from "../routes/chatActiveTurnLayer";
+import {
+  activeTurnLayerToConversationMessage,
+  mergeAssistantDeltaIntoActiveTurnLayer,
+} from "../routes/chatActiveTurnLayer";
 import {
   conversationMessageToAgentMessage,
   conversationMessagesToAgentThread,
@@ -257,7 +260,8 @@ describe("agent thread adapters", () => {
       done: false,
     });
 
-    const agentMessage = activeTurnLayerToAgentMessage(layer);
+    const message = activeTurnLayerToConversationMessage(layer);
+    const agentMessage = message ? conversationMessageToAgentMessage(message) : undefined;
 
     expect(agentMessage?.id).toBe("session-1-message-active-turn-1");
     expect(agentMessage?.source.kind).toBe("conversation-message");
