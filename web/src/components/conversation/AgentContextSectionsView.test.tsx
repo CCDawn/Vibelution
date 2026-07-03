@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { AgentContextSectionsView } from "./AgentContextSectionsView";
-import type { AgentMessageContextSection } from "./messageSections";
+import type { AgentMessageContextSection } from "./agentMessageSections";
 
 describe("AgentContextSectionsView", () => {
   it("renders attachment and reference context sections with stable AgentMessage metadata", () => {

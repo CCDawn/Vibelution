@@ -87,7 +87,7 @@ import {
 } from "../components/conversation/ConversationView";
 import { COMPOSER_SESSION_REFERENCE_MIME } from "../components/conversation/conversationConstants";
 import { LazyConversationView } from "../components/conversation/LazyConversationView";
-import { isAgentInboxMessage, isTurnErrorMessage } from "../components/conversation/messageSections";
+import { isAgentInboxMessage, isTurnErrorMessage } from "../components/conversation/conversationMessagePredicates";
 import { LazyFilePreview } from "../components/preview/LazyFilePreview";
 import { VButton, VNativeInput, VNativeSelect } from "../components/vui";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../app/browserTelemetry";
