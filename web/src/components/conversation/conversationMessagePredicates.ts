@@ -108,6 +108,10 @@ export function isGroupRoomTranscriptMessage(message: ConversationMessage) {
   return String(message.content ?? "").trim().startsWith("[群聊同步]");
 }
 
+export function isCliAgentLifecycleMessage(message: ConversationMessage) {
+  return metadataString(message, "kind") === "cli_agent_lifecycle";
+}
+
 export type ImageArtifactMessage = {
   imageUrl: string;
   downloadUrl: string;

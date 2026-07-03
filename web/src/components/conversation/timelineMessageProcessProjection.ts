@@ -1,5 +1,6 @@
 import type { ConversationMessage } from "../../api/types";
 import {
+  isCliAgentLifecycleMessage,
   isGroupRoomTranscriptMessage,
   isRuntimeNoticeMessage,
   isTurnErrorMessage,
@@ -63,10 +64,6 @@ function projectedMessageIds(message: ConversationMessage) {
     return existing.map((item) => String(item)).filter(Boolean);
   }
   return [message.id];
-}
-
-function isCliAgentLifecycleMessage(message: ConversationMessage) {
-  return metadataText(message.metadata, "kind") === "cli_agent_lifecycle";
 }
 
 function isExcludedAssistantProjectionMessage(message: ConversationMessage) {
