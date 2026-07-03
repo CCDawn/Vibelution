@@ -2,50 +2,50 @@ import type { ConversationTimelineItem as ApiConversationTimelineItem } from "..
 import type { AgentMessage, AgentMessagePart, AgentTextPart } from "../../agent-thread/types";
 import { AgentMessageOperation } from "./conversationOperations";
 
-export type ConversationTimelineItemStatus = "pending" | "running" | "completed" | "failed";
+export type AgentMessageTimelineItemStatus = "pending" | "running" | "completed" | "failed";
 
-export type ConversationThoughtTimelineItem = {
+export type AgentMessageThoughtTimelineItem = {
   id: string;
   kind: "thought";
-  status: ConversationTimelineItemStatus;
+  status: AgentMessageTimelineItemStatus;
   text: string;
   preview: string;
   defaultExpanded: boolean;
   sourceOperationIds: string[];
 };
 
-export type ConversationAssistantTextTimelineItem = {
+export type AgentMessageAssistantTextTimelineItem = {
   id: string;
   kind: "assistant_text";
-  status: ConversationTimelineItemStatus;
+  status: AgentMessageTimelineItemStatus;
   text: string;
 };
 
 export type AgentMessageOperationTimelineItem = {
   id: string;
   kind: "operation";
-  status: ConversationTimelineItemStatus;
+  status: AgentMessageTimelineItemStatus;
   title: string;
   summary: string;
   operation: AgentMessageOperation;
 };
 
-export type ConversationCommandGroupTimelineItem = {
+export type AgentMessageCommandGroupTimelineItem = {
   id: string;
   kind: "command_group";
-  status: ConversationTimelineItemStatus;
+  status: AgentMessageTimelineItemStatus;
   title: string;
   summary: string;
   operations: AgentMessageOperation[];
 };
 
-export type ConversationTimelineItem =
-  | ConversationThoughtTimelineItem
-  | ConversationAssistantTextTimelineItem
+export type AgentMessageTimelineItem =
+  | AgentMessageThoughtTimelineItem
+  | AgentMessageAssistantTextTimelineItem
   | AgentMessageOperationTimelineItem
-  | ConversationCommandGroupTimelineItem;
+  | AgentMessageCommandGroupTimelineItem;
 
-export type ConversationTimelineOptions = {
+export type AgentMessageTimelineOptions = {
   lang: "zh" | "en" | string;
   includeAssistantText?: boolean;
 };
@@ -57,16 +57,16 @@ const agentTimelineItemsCache = new WeakMap<
     serverItems: ApiConversationTimelineItem[] | undefined;
     lang: string;
     includeAssistantText: boolean | undefined;
-    items: ConversationTimelineItem[];
+    items: AgentMessageTimelineItem[];
   }
 >();
 
 export function buildAgentMessageTimelineItems(
   message: AgentMessage,
   operations: AgentMessageOperation[],
-  options: ConversationTimelineOptions,
+  options: AgentMessageTimelineOptions,
   serverItems?: ApiConversationTimelineItem[],
-): ConversationTimelineItem[] {
+): AgentMessageTimelineItem[] {
   if (message.role !== "assistant") {
     return [];
   }
@@ -94,9 +94,9 @@ export function buildAgentMessageTimelineItems(
 function buildAgentMessageTimelineItemsUncached(
   message: AgentMessage,
   operations: AgentMessageOperation[],
-  options: ConversationTimelineOptions,
+  options: AgentMessageTimelineOptions,
   serverItems?: ApiConversationTimelineItem[],
-): ConversationTimelineItem[] {
+): AgentMessageTimelineItem[] {
   if ((serverItems?.length ?? 0) > 0) {
     return timelineItemsFromServer(serverItems ?? [], operations, options);
   }
@@ -114,9 +114,9 @@ function timelineItemsFromOperations(
   messageStreaming: boolean,
   assistantText: string,
   operations: AgentMessageOperation[],
-  options: ConversationTimelineOptions,
-): ConversationTimelineItem[] {
-  const items: ConversationTimelineItem[] = [];
+  options: AgentMessageTimelineOptions,
+): AgentMessageTimelineItem[] {
+  const items: AgentMessageTimelineItem[] = [];
   const sortedOperations = [...operations].sort((left, right) => (left.sequence ?? 0) - (right.sequence ?? 0));
   const commandBuffer: AgentMessageOperation[] = [];
 
@@ -195,10 +195,10 @@ function isAgentAnswerTextPart(part: AgentMessagePart): part is AgentTextPart {
 function timelineItemsFromServer(
   serverItems: ApiConversationTimelineItem[],
   operations: AgentMessageOperation[],
-  options: ConversationTimelineOptions,
-): ConversationTimelineItem[] {
+  options: AgentMessageTimelineOptions,
+): AgentMessageTimelineItem[] {
   const operationsById = new Map(operations.map((operation) => [operation.id, operation]));
-  const items: ConversationTimelineItem[] = [];
+  const items: AgentMessageTimelineItem[] = [];
   for (const item of serverItems) {
     const kind = String(item.kind || "").trim();
     const status = normalizeTimelineStatus(item.status);
@@ -266,7 +266,7 @@ function timelineItemsFromServer(
 
 function serverOperation(
   item: ApiConversationTimelineItem,
-  status: ConversationTimelineItemStatus,
+  status: AgentMessageTimelineItemStatus,
 ): AgentMessageOperation {
   return {
     id: item.id || `server-operation-${item.sequence ?? "unknown"}`,
@@ -293,7 +293,7 @@ function commandGroupTimelineItem(
   messageId: string,
   operations: AgentMessageOperation[],
   lang: string,
-): ConversationCommandGroupTimelineItem {
+): AgentMessageCommandGroupTimelineItem {
   const status = operations.some((operation) => isFailedStatus(operation.status))
     ? "failed"
     : operations.some((operation) => isRunningStatus(operation.status))
@@ -320,7 +320,7 @@ function commandGroupTimelineItem(
 
 function commandGroupTitle(
   operations: AgentMessageOperation[],
-  status: ConversationTimelineItemStatus,
+  status: AgentMessageTimelineItemStatus,
   lang: string,
 ) {
   const commandCount = operations.length;
@@ -330,8 +330,8 @@ function commandGroupTitle(
   return status === "running" ? `Running ${commandCount} commands` : `Ran ${commandCount} commands`;
 }
 
-function mergeAdjacentThoughtItems(items: ConversationTimelineItem[]) {
-  const merged: ConversationTimelineItem[] = [];
+function mergeAdjacentThoughtItems(items: AgentMessageTimelineItem[]) {
+  const merged: AgentMessageTimelineItem[] = [];
   for (const item of items) {
     const previous = merged[merged.length - 1];
     if (previous?.kind === "thought" && item.kind === "thought") {
@@ -414,7 +414,7 @@ function isCommandLikeOperation(operation: AgentMessageOperation) {
   ].some((marker) => haystack.includes(marker));
 }
 
-function normalizeTimelineStatus(status: string | undefined): ConversationTimelineItemStatus {
+function normalizeTimelineStatus(status: string | undefined): AgentMessageTimelineItemStatus {
   if (isFailedStatus(status)) {
     return "failed";
   }

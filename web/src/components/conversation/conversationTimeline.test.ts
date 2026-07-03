@@ -5,7 +5,7 @@ import { conversationMessageToAgentMessage } from "../../agent-thread/adapters";
 import type { AgentMessage } from "../../agent-thread";
 import { buildAgentMessageOperations } from "./conversationOperations";
 import conversationTimelineSource from "./conversationTimeline.ts?raw";
-import { buildAgentMessageTimelineItems, type ConversationTimelineOptions } from "./conversationTimeline";
+import { buildAgentMessageTimelineItems, type AgentMessageTimelineOptions } from "./conversationTimeline";
 
 const labels = {
   thought: "思考",
@@ -15,7 +15,7 @@ const labels = {
 
 function timelineItemsForConversationMessage(
   message: ConversationMessage,
-  options: ConversationTimelineOptions,
+  options: AgentMessageTimelineOptions,
 ) {
   const agentMessage = conversationMessageToAgentMessage(message);
   return buildAgentMessageTimelineItems(
@@ -27,6 +27,18 @@ function timelineItemsForConversationMessage(
 }
 
 describe("conversationTimeline", () => {
+  it("names timeline item contracts after the AgentMessage timeline model", () => {
+    expect(conversationTimelineSource).toContain("export type AgentMessageTimelineItemStatus");
+    expect(conversationTimelineSource).toContain("export type AgentMessageTimelineItem =");
+    expect(conversationTimelineSource).toContain("export type AgentMessageTimelineOptions");
+    expect(conversationTimelineSource).not.toContain("export type ConversationTimelineItemStatus");
+    expect(conversationTimelineSource).not.toContain("export type ConversationThoughtTimelineItem");
+    expect(conversationTimelineSource).not.toContain("export type ConversationAssistantTextTimelineItem");
+    expect(conversationTimelineSource).not.toContain("export type ConversationCommandGroupTimelineItem");
+    expect(conversationTimelineSource).not.toContain("export type ConversationTimelineItem =");
+    expect(conversationTimelineSource).not.toContain("export type ConversationTimelineOptions");
+  });
+
   it("names operation timeline items after the AgentMessage operation model", () => {
     expect(conversationTimelineSource).toContain("AgentMessageOperationTimelineItem");
     expect(conversationTimelineSource).not.toContain("ConversationOperationTimelineItem");

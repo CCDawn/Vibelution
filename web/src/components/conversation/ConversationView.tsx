@@ -55,7 +55,7 @@ import {
 } from "./conversationOperations";
 import {
   buildAgentMessageTimelineItems,
-  type ConversationTimelineItem,
+  type AgentMessageTimelineItem,
 } from "./conversationTimeline";
 import {
   conversationTimelineItemRowKey,
@@ -2431,7 +2431,7 @@ export function ConversationView({
     );
   }
 
-  function activeTimelineItemId(message: ConversationMessage, items: ConversationTimelineItem[]) {
+  function activeTimelineItemId(message: ConversationMessage, items: AgentMessageTimelineItem[]) {
     if (!message.streaming) {
       return "";
     }
@@ -2446,7 +2446,7 @@ export function ConversationView({
 
   function renderConversationTimeline(
     message: ConversationMessage,
-    items: ConversationTimelineItem[],
+    items: AgentMessageTimelineItem[],
     rowIdentity: ConversationTimelineRowIdentity,
     processSectionIds?: string,
   ) {
@@ -2468,7 +2468,7 @@ export function ConversationView({
 
   function renderConversationTimelineItem(
     message: ConversationMessage,
-    item: ConversationTimelineItem,
+    item: AgentMessageTimelineItem,
     rowIdentity: ConversationTimelineRowIdentity,
     isActiveTimelineItem: boolean,
   ) {
@@ -2486,7 +2486,7 @@ export function ConversationView({
 
   function renderThoughtTimelineItem(
     message: ConversationMessage,
-    item: Extract<ConversationTimelineItem, { kind: "thought" }>,
+    item: Extract<AgentMessageTimelineItem, { kind: "thought" }>,
     rowIdentity: ConversationTimelineRowIdentity,
     isActiveTimelineItem: boolean,
   ) {
@@ -2516,7 +2516,7 @@ export function ConversationView({
 
   function renderAssistantTextTimelineItem(
     message: ConversationMessage,
-    item: Extract<ConversationTimelineItem, { kind: "assistant_text" }>,
+    item: Extract<AgentMessageTimelineItem, { kind: "assistant_text" }>,
     rowIdentity: ConversationTimelineRowIdentity,
   ) {
     const segments = getCachedResponseSegments(item.text);
@@ -2531,7 +2531,7 @@ export function ConversationView({
     );
   }
 
-  function timelineStatusText(status: ConversationTimelineItem["status"]) {
+  function timelineStatusText(status: AgentMessageTimelineItem["status"]) {
     if (status === "failed") {
       return lang === "zh" ? "执行失败" : "Failed";
     }
@@ -2545,7 +2545,7 @@ export function ConversationView({
   }
 
   function renderCommandGroupTimelineItem(
-    item: Extract<ConversationTimelineItem, { kind: "command_group" }>,
+    item: Extract<AgentMessageTimelineItem, { kind: "command_group" }>,
     rowIdentity: ConversationTimelineRowIdentity,
     isActiveTimelineItem: boolean,
   ) {
@@ -2597,7 +2597,7 @@ export function ConversationView({
   }
 
   function renderOperationTimelineItem(
-    item: Extract<ConversationTimelineItem, { kind: "operation" }>,
+    item: Extract<AgentMessageTimelineItem, { kind: "operation" }>,
     rowIdentity: ConversationTimelineRowIdentity,
     isActiveTimelineItem: boolean,
   ) {

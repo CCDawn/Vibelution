@@ -1,5 +1,5 @@
 import type { ConversationMessage } from "../../api/types";
-import type { ConversationTimelineItem } from "./conversationTimeline";
+import type { AgentMessageTimelineItem } from "./conversationTimeline";
 
 export type ConversationTimelineRowIdentity = {
   messageId: string;
@@ -9,7 +9,7 @@ export type ConversationTimelineRowIdentity = {
   answerKey: string;
 };
 
-type TimelineItemKeyInput = Pick<ConversationTimelineItem, "id" | "kind"> | {
+type TimelineItemKeyInput = Pick<AgentMessageTimelineItem, "id" | "kind"> | {
   id: string;
   kind: string;
 };
