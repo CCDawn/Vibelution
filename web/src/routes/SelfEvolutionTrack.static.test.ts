@@ -321,6 +321,12 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(statusPageSurface).toContain("petVitals.map");
     expect(statusPageSurface).toContain("t(\"petSpace\")");
   });
+
+  it("keeps pet vital bars on Tailwind CSS variable widths", () => {
+    expect(selfEvolutionSource).toContain("--self-vital-progress");
+    expect(selfEvolutionSource).not.toContain("style={{ width: `${vital.value}%` }}");
+    expect(selfEvolutionStylesSource).toContain("w-[var(--self-vital-progress)]");
+  });
 });
 
 describe("self-observation duration input", () => {
