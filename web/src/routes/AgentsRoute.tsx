@@ -10,14 +10,12 @@ import {
   MessageSquare,
   Plus,
   RefreshCw,
-  ShieldCheck,
   Square,
   SquarePen,
   ExternalLink,
   Trash2,
   UserRound,
   Users,
-  Wrench,
   X,
 } from "lucide-react";
 import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
@@ -101,6 +99,7 @@ import { AgentReturnBannerPanel } from "./AgentReturnBannerPanel";
 import { AgentRuntimeFocusPanel } from "./AgentRuntimeFocusPanel";
 import { AgentRuntimePolicyPanel } from "./AgentRuntimePolicyPanel";
 import { AgentTaskProfilePanel, type AgentTaskDraft } from "./AgentTaskProfilePanel";
+import { AgentToolGovernancePanel, governanceStatusLabel } from "./AgentToolGovernancePanel";
 import { AgentToolSummaryPanel } from "./AgentToolSummaryPanel";
 import {
   agentCenterMemoryRoute,
@@ -2403,50 +2402,6 @@ function toolPolicyMode(draft: AgentToolPolicyDraft, toolName: string): ToolPoli
     return "excluded";
   }
   return "inherited";
-}
-
-function governanceRiskLabel(value: string, lang: "zh" | "en") {
-  const normalized = String(value || "").trim();
-  const zh: Record<string, string> = {
-    low: "低风险",
-    medium: "中风险",
-    high: "高风险",
-  };
-  const en: Record<string, string> = {
-    low: "Low risk",
-    medium: "Medium risk",
-    high: "High risk",
-  };
-  return ((lang === "zh" ? zh : en)[normalized] ?? normalized) || "-";
-}
-
-function governanceStatusLabel(value: string, lang: "zh" | "en") {
-  const normalized = String(value || "").trim();
-  const zh: Record<string, string> = {
-    pending_review: "待审批",
-    applied: "已应用",
-    rejected: "已拒绝",
-  };
-  const en: Record<string, string> = {
-    pending_review: "Pending review",
-    applied: "Applied",
-    rejected: "Rejected",
-  };
-  return ((lang === "zh" ? zh : en)[normalized] ?? normalized) || "-";
-}
-
-function governanceDeltaSummary(request: AgentToolGovernanceRequest | undefined, lang: "zh" | "en") {
-  const delta = request?.policyDelta;
-  if (!delta) {
-    return "-";
-  }
-  const parts = [
-    `${lang === "zh" ? "授权" : "Grant"} ${delta.grantTools?.length ?? 0}`,
-    `${lang === "zh" ? "撤销" : "Revoke"} ${delta.revokeTools?.length ?? 0}`,
-    `${lang === "zh" ? "禁用" : "Block"} ${delta.blockTools?.length ?? 0}`,
-    `${lang === "zh" ? "解除禁用" : "Unblock"} ${delta.unblockTools?.length ?? 0}`,
-  ];
-  return parts.join(" · ");
 }
 
 function toolPolicyModeLabel(mode: ToolPolicyMode, lang: "zh" | "en") {
@@ -6480,70 +6435,19 @@ export function AgentsRoute() {
               />
               ) : null}
 
-              <section className={styles.configEditor} title={
-                lang === "zh"
-                  ? "工具治理变更从工具页发起；这里保留最近记录和待审批处理。"
-                  : "Tool governance changes start from the Tools page. Recent records and approvals remain visible here."
-              }>
-                <div className={styles.panelHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{copy.toolGovernanceTitle}</p>
-                    <h3>{copy.toolGovernancePending}: {(selectedAgent.toolGovernanceRequests ?? []).filter((item) => item.status === "pending_review").length}</h3>
-                  </div>
-                  <ShieldCheck size={16} />
-                </div>
-                <div className={styles.toolGovernanceList}>
-                  {(selectedAgent.toolGovernanceRequests ?? []).length ? (
-                    (selectedAgent.toolGovernanceRequests ?? []).map((request) => {
-                      const requestPending =
-                        resolveToolGovernanceMutation.isPending
-                        && resolveToolGovernanceMutation.variables?.agentId === selectedAgent.agentId
-                        && resolveToolGovernanceMutation.variables?.requestId === request.requestId;
-                      return (
-                      <article key={request.requestId} className={styles.toolGovernanceItem}>
-                        <div>
-                          <strong>{governanceStatusLabel(request.status, lang)} · {governanceRiskLabel(request.riskLevel, lang)}</strong>
-                          <span>{governanceDeltaSummary(request, lang)}</span>
-                          <small>{request.reason || request.approvalReason || request.requestId}</small>
-                        </div>
-                        {request.status === "pending_review" ? (
-                          <div className={styles.governanceActions}>
-                            <VButton
-                              type="button"
-                              variant="secondary"
-                              isDisabled={requestPending}
-                              onPress={() => resolveToolGovernanceRequest(request, "reject")}
-                            >
-                              {copy.toolGovernanceReject}
-                            </VButton>
-                            <VButton
-                              type="button"
-                              variant="primary"
-                              isDisabled={requestPending}
-                              onPress={() => resolveToolGovernanceRequest(request, "approve")}
-                            >
-                              {copy.toolGovernanceApprove}
-                            </VButton>
-                          </div>
-                        ) : null}
-                      </article>
-                      );
-                    })
-                  ) : (
-                    <p className={styles.emptyText}>{copy.toolGovernanceEmpty}</p>
-                  )}
-                </div>
-                <div className={styles.editorActions}>
-                  <VButton
-                    type="button"
-                    variant="primary"
-                    icon={<Wrench size={15} />}
-                    onPress={() => navigate(selectedAgentToolConfigRoute)}
-                  >
-                    {lang === "zh" ? "去工具页配置" : "Configure in tools"}
-                  </VButton>
-                </div>
-              </section>
+              <AgentToolGovernancePanel
+                copy={copy}
+                lang={lang}
+                requests={selectedAgent.toolGovernanceRequests ?? []}
+                pendingRequestId={
+                  resolveToolGovernanceMutation.isPending
+                  && resolveToolGovernanceMutation.variables?.agentId === selectedAgent.agentId
+                    ? resolveToolGovernanceMutation.variables?.requestId ?? null
+                    : null
+                }
+                onResolve={resolveToolGovernanceRequest}
+                onConfigure={() => navigate(selectedAgentToolConfigRoute)}
+              />
 
               {selectedAgentRequiresTask ? (
               <AgentTaskProfilePanel
