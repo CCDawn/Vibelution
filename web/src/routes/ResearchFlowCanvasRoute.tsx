@@ -81,7 +81,17 @@ type ResearchFlowCanvasVariable =
   | "--research-flow-canvas-height"
   | "--research-flow-canvas-offset-x"
   | "--research-flow-canvas-offset-y"
-  | "--research-flow-canvas-zoom";
+  | "--research-flow-canvas-zoom"
+  | "--research-flow-edge-stroke"
+  | "--research-flow-edge-stroke-dasharray"
+  | "--research-flow-edge-stroke-width"
+  | "--research-flow-edge-fill"
+  | "--research-flow-edge-label-left"
+  | "--research-flow-edge-label-top"
+  | "--research-flow-edge-endpoint-left"
+  | "--research-flow-edge-endpoint-top"
+  | "--research-flow-node-left"
+  | "--research-flow-node-top";
 
 type ResearchFlowCanvasStyle = CSSProperties & Partial<Record<ResearchFlowCanvasVariable, string | number>>;
 
@@ -1069,6 +1079,41 @@ function edgeVisualStyle(type: string, active = false): EdgeVisualStyle {
     return { stroke: "#f87171", fill: "#f87171", strokeDasharray: "10 5", strokeWidth: 2.9 };
   }
   return { stroke: "#7dd3fc", fill: "#7dd3fc", strokeWidth: 2.8 };
+}
+
+function edgePathStyle(visual: EdgeVisualStyle): ResearchFlowCanvasStyle {
+  return {
+    "--research-flow-edge-stroke": visual.stroke,
+    "--research-flow-edge-stroke-dasharray": visual.strokeDasharray ?? "none",
+    "--research-flow-edge-stroke-width": visual.strokeWidth,
+  };
+}
+
+function edgeArrowHeadStyle(visual: EdgeVisualStyle): ResearchFlowCanvasStyle {
+  return {
+    "--research-flow-edge-fill": visual.fill,
+  };
+}
+
+function edgeLabelPositionStyle(point: CanvasPoint): ResearchFlowCanvasStyle {
+  return {
+    "--research-flow-edge-label-left": `${point.x - 58}px`,
+    "--research-flow-edge-label-top": `${point.y - 16}px`,
+  };
+}
+
+function edgeEndpointPositionStyle(point: CanvasPoint): ResearchFlowCanvasStyle {
+  return {
+    "--research-flow-edge-endpoint-left": `${point.x - 8}px`,
+    "--research-flow-edge-endpoint-top": `${point.y - 8}px`,
+  };
+}
+
+function nodePositionStyle(node: Pick<ResearchFlowNode, "x" | "y">): ResearchFlowCanvasStyle {
+  return {
+    "--research-flow-node-left": `${node.x}px`,
+    "--research-flow-node-top": `${node.y}px`,
+  };
 }
 
 function defaultEdgeTypeForCondition(condition: string) {
@@ -2378,13 +2423,9 @@ export function ResearchFlowCanvasRoute() {
                         <path
                           className={styles.edgePath}
                           d={geometry.path}
-                          style={{
-                            stroke: visual.stroke,
-                            strokeDasharray: visual.strokeDasharray,
-                            strokeWidth: visual.strokeWidth,
-                          }}
+                          style={edgePathStyle(visual)}
                         />
-                        <polygon className={styles.edgeArrowHead} points={geometry.arrowHead} style={{ fill: visual.fill }} />
+                        <polygon className={styles.edgeArrowHead} points={geometry.arrowHead} style={edgeArrowHeadStyle(visual)} />
                       </g>
                     );
                   })}
@@ -2405,7 +2446,7 @@ export function ResearchFlowCanvasRoute() {
                         selection?.kind === "edge" && selection.id === edge.id ? styles.edgeHotspotActive : "",
                         edgeLanes.get(edge.id)?.overlapCount ? styles.edgeHotspotOffset : "",
                       ].join(" ")}
-                      style={{ left: geometry.label.x - 58, top: geometry.label.y - 16 }}
+                      style={edgeLabelPositionStyle(geometry.label)}
                       onPointerDown={(event) => event.stopPropagation()}
                       onClick={(event) => {
                         event.stopPropagation();
@@ -2433,7 +2474,7 @@ export function ResearchFlowCanvasRoute() {
                           styles.edgeEndpointHandle,
                           reconnect?.edgeId === edge.id && reconnect.endpoint === "source" ? styles.edgeEndpointHandleActive : "",
                         ].join(" ")}
-                        style={{ left: geometry.start.x - 8, top: geometry.start.y - 8 }}
+                        style={edgeEndpointPositionStyle(geometry.start)}
                         title="拖动切换起点模块"
                         onPointerDown={(event) => startEdgeReconnect(event, edge, "source")}
                       >
@@ -2445,7 +2486,7 @@ export function ResearchFlowCanvasRoute() {
                           styles.edgeEndpointHandle,
                           reconnect?.edgeId === edge.id && reconnect.endpoint === "target" ? styles.edgeEndpointHandleActive : "",
                         ].join(" ")}
-                        style={{ left: geometry.end.x - 8, top: geometry.end.y - 8 }}
+                        style={edgeEndpointPositionStyle(geometry.end)}
                         title="拖动切换终点模块"
                         onPointerDown={(event) => startEdgeReconnect(event, edge, "target")}
                       >
@@ -2481,7 +2522,7 @@ export function ResearchFlowCanvasRoute() {
                         pendingSource ? styles.nodeConnectSource : "",
                         reconnectTarget ? styles.nodeReconnectTarget : "",
                       ].join(" ")}
-                      style={{ left: node.x, top: node.y }}
+                      style={nodePositionStyle(node)}
                       onPointerDown={(event) => handleNodePointerDown(event, node)}
                       onClick={(event) => {
                         event.stopPropagation();

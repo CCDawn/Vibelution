@@ -45,15 +45,15 @@ const styles: Record<string, string> = {
   edgeActive:
     "edgeActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   edgeArrowHead:
-    "edgeArrowHead min-w-0",
+    "edgeArrowHead min-w-0 [fill:var(--research-flow-edge-fill)]",
   edgeEndpointHandle:
-    "edgeEndpointHandle min-w-0",
+    "edgeEndpointHandle min-w-0 !absolute left-[var(--research-flow-edge-endpoint-left)] top-[var(--research-flow-edge-endpoint-top)]",
   edgeEndpointHandleActive:
     "edgeEndpointHandleActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   edgeEndpoints:
     "edgeEndpoints min-w-0",
   edgeHotspot:
-    "edgeHotspot min-w-0",
+    "edgeHotspot min-w-0 !absolute left-[var(--research-flow-edge-label-left)] top-[var(--research-flow-edge-label-top)]",
   edgeHotspotActive:
     "edgeHotspotActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   edgeHotspotOffset:
@@ -63,7 +63,7 @@ const styles: Record<string, string> = {
   edgePair:
     "edgePair min-w-0 !grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 p-2.5 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-page)]",
   edgePath:
-    "edgePath min-w-0 font-mono text-[var(--vui-font-xs)]",
+    "edgePath min-w-0 font-mono text-[var(--vui-font-xs)] [stroke:var(--research-flow-edge-stroke)] [stroke-dasharray:var(--research-flow-edge-stroke-dasharray)] [stroke-width:var(--research-flow-edge-stroke-width)]",
   edgeTrack:
     "edgeTrack min-w-0",
   edgeTypeHint:
@@ -215,7 +215,7 @@ const styles: Record<string, string> = {
   lockButtonActive:
     "lockButtonActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   node:
-    "node min-w-0",
+    "node min-w-0 !absolute left-[var(--research-flow-node-left)] top-[var(--research-flow-node-top)]",
   nodeActive:
     "nodeActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   nodeConnectSource:
