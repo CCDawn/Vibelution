@@ -13,7 +13,7 @@ const baseInput = {
   directSessionBackgroundSyncActive: false,
   groupBackgroundSyncActive: false,
   directSessionPanelActive: true,
-  legacyGroupRoomActive: false,
+  standardGroupRoomActive: false,
   sessionStreamAvailable: true,
   sessionStreamShouldConnect: true,
   groupStreamShouldConnect: false,
@@ -67,7 +67,7 @@ describe("resolveChatLiveQueryPolicy", () => {
     const policy = resolveChatLiveQueryPolicy({
       ...baseInput,
       directSessionPanelActive: false,
-      legacyGroupRoomActive: true,
+      standardGroupRoomActive: true,
       sessionStreamShouldConnect: false,
       groupStreamShouldConnect: true,
     });
