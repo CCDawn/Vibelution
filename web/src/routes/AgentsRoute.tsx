@@ -11,8 +11,6 @@ import {
   Plus,
   RefreshCw,
   Square,
-  SquarePen,
-  ExternalLink,
   Trash2,
   UserRound,
   Users,
@@ -63,7 +61,7 @@ import {
   type AgentFilterSectionView,
   type AgentSummaryMetric,
 } from "../components/vui/product/agent-management";
-import { VButton, VChip, VEmptyState, VFieldRow, VHStack, VNativeButton, VNativeInput, VNativeSelect, VNativeTextarea, VPanelHeader } from "../components/vui";
+import { VButton, VChip, VEmptyState, VHStack, VNativeButton, VNativeSelect, VPanelHeader } from "../components/vui";
 import { vuiFormLabelClass } from "../components/vui/forms/formClasses";
 import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
@@ -77,10 +75,12 @@ import {
   type AgentBulkConfigDraft,
   type AgentBulkConfigField,
 } from "./AgentBulkConfigPanel";
+import { type AgentContextCompressionPolicyDraft } from "./AgentContextCompressionPanel";
 import {
-  AgentContextCompressionPanel,
-  type AgentContextCompressionPolicyDraft,
-} from "./AgentContextCompressionPanel";
+  AgentCoreConfigPanel,
+  type AgentConfigDraft,
+  type AgentCoreConfigLlmSlotView,
+} from "./AgentCoreConfigPanel";
 import { AgentCreatePanel, type AgentCreateDraft } from "./AgentCreatePanel";
 import { AgentDebugResetPanel, type AgentResetOptions } from "./AgentDebugResetPanel";
 import { AgentMemoryPolicyPanel, type AgentMemoryPolicyDraft } from "./AgentMemoryPolicyPanel";
@@ -128,17 +128,6 @@ import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import styles from "./AgentsRoute.styles";
 
 type FilterId = string;
-
-type AgentConfigDraft = {
-  displayName: string;
-  llmBindings: AgentLlmBindings;
-  reasoningEffortBySlot: Record<string, string>;
-  promptTemplateId: string;
-  toolPolicyId: string;
-  memoryPolicyId: string;
-  contextCompressionPolicy: AgentContextCompressionPolicyDraft;
-  status: string;
-};
 
 type AgentToolPolicyDraft = {
   allowedTools: string[];
@@ -4071,6 +4060,48 @@ export function AgentsRoute() {
   const toolPolicySourceLine = toolPolicySource
     ? `${toolPolicySource.label} · ${toolPolicySource.allowedToolCount} ${copy.tools}${toolPolicySource.mutatingToolCount ? ` · ${toolPolicySource.mutatingToolCount} ${lang === "zh" ? "个可写/命令工具" : "mutating tools"}` : ""}`
     : copy.toolPolicyPickerHint;
+  const coreConfigLlmSlots = useMemo<AgentCoreConfigLlmSlotView[]>(
+    () => llmSlots.map((slot) => {
+      const selectedModelId = agentLlmSlotModelId(configDraft.llmBindings, slot);
+      const selectedModel = agentModelById(workspace?.agentModelChoices ?? [], selectedModelId);
+      return {
+        slot,
+        selectedModelId,
+        modelOptions: buildAgentSlotModelChoicesWithCurrent(
+          workspace?.agentModelChoices ?? [],
+          slot,
+          selectedModelId,
+          lang,
+        ).map((model) => ({
+          key: model.key,
+          value: model.modelId,
+          label: model.label,
+          title: model.modelLabel || model.modelId,
+        })),
+        supportsReasoningEffort: agentModelSupportsReasoningEffort(selectedModel),
+        reasoningEffort: normalizeAgentReasoningEffort(configDraft.reasoningEffortBySlot[slot.slot]),
+      };
+    }),
+    [configDraft.llmBindings, configDraft.reasoningEffortBySlot, lang, llmSlots, workspace?.agentModelChoices],
+  );
+  const coreConfigToolPolicyOptions = useMemo(
+    () => (workspace?.toolPolicies ?? []).map((policy) => ({
+      value: policy.policyId,
+      label: `${policy.policyId} · ${policy.allowedToolCount}/${policy.blockedToolCount}`,
+    })),
+    [workspace?.toolPolicies],
+  );
+  const coreConfigMemoryPolicyOptions = useMemo(
+    () => (workspace?.memoryPolicies ?? []).map((policy) => ({
+      value: policy.policyId,
+      label: `${policy.policyId} · ${policy.privateMemoryRoot || "-"}`,
+    })),
+    [workspace?.memoryPolicies],
+  );
+  const coreConfigToolPolicyTooltip = [
+    toolPolicySourceLine,
+    toolPolicySource?.description || copy.toolPolicyPickerHint,
+  ].filter(Boolean).join("\n");
 
   const createAgentMutation = useMutation({
     mutationFn: (draft: AgentCreateDraft) => {
@@ -5943,174 +5974,56 @@ export function AgentsRoute() {
 
               {activePane === "config" ? (
                 <>
-              <section className={styles.configEditor} title={copy.personaHint}>
-                <div className={styles.panelHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{copy.configTitle}</p>
-                    <h3>{agentLabel(selectedAgent)}</h3>
-                  </div>
-                  <span className={configDirty ? styles.dirtyPill : styles.cleanPill}>
-                    {configDirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}
-                  </span>
-                </div>
-                <section className={`${styles.healthGuidePanel} ${styles[`healthGuide_${issueTone(selectedAgent.health)}`]}`}>
-                  <div>
-                    <span>{issuePanelLabel(selectedAgent.health, copy)}</span>
-                    <strong>{issueLabel(selectedAgent.health, lang)} · {issueSummary(selectedAgent.health, lang)}</strong>
-                  </div>
-                  <p><strong>{copy.healthNextStep}</strong>{issueNextStep(selectedAgent.health, lang)}</p>
-                </section>
-                <div className={styles.editorGrid}>
-                  <VFieldRow label="Agent">
-                    <VNativeInput
-                      value={configDraft.displayName}
-                      onChange={(event) => updateDraft({ displayName: event.target.value })}
-                    />
-                  </VFieldRow>
-                  <VFieldRow label={copy.status}>
-                    <VNativeSelect value={configDraft.status} onChange={(event) => updateDraft({ status: event.target.value })}>
-                      <option value="active">{lang === "zh" ? "活跃" : "Active"}</option>
-                    </VNativeSelect>
-                  </VFieldRow>
-                  <section className={styles.fieldWide} title={copy.llmSlotsHint}>
-                    <span>{copy.llmSlots}</span>
-                    <div className={styles.llmSlotGrid}>
-                      {llmSlots.map((slot) => {
-                        const selectedSlotModelId = agentLlmSlotModelId(configDraft.llmBindings, slot);
-                        const selectedSlotModel = agentModelById(workspace?.agentModelChoices ?? [], selectedSlotModelId);
-                        const supportsReasoningEffort = agentModelSupportsReasoningEffort(selectedSlotModel);
-                        const slotChoices = buildAgentSlotModelChoicesWithCurrent(
-                          workspace?.agentModelChoices ?? [],
-                          slot,
-                          selectedSlotModelId,
-                          lang,
-                        );
-                        return (
-                          <label
-                            key={slot.slot}
-                            className={styles.llmSlotField}
-                            title={`${slot.required ? copy.requiredSlot : copy.optionalSlot} · ${slot.description}`}
-                          >
-                            <span>
-                              <strong>{slot.label}</strong>
-                            </span>
-                            <VNativeSelect
-                              value={selectedSlotModelId}
-                              onChange={(event) => {
-                                const nextBindings = updateAgentLlmSlotBinding(configDraft.llmBindings, slot, event.target.value);
-                                updateDraft({
-                                  llmBindings: nextBindings,
-                                  reasoningEffortBySlot: pruneAgentReasoningEffortBySlot(
-                                    configDraft.reasoningEffortBySlot,
-                                    nextBindings,
-                                    workspace?.agentModelChoices ?? [],
-                                  ),
-                                });
-                              }}
-                            >
-                              {!slot.required ? <option value="">{copy.inheritDialogueModel}</option> : null}
-                              {slotChoices.map((model) => (
-                                <option key={`${slot.slot}:${model.key}`} value={model.modelId} title={model.modelLabel || model.modelId}>
-                                  {model.label}
-                                </option>
-                              ))}
-                            </VNativeSelect>
-                            {supportsReasoningEffort ? (
-                              <VNativeSelect
-                                value={normalizeAgentReasoningEffort(configDraft.reasoningEffortBySlot[slot.slot])}
-                                aria-label={`${slot.label} ${copy.reasoningEffort}`}
-                                onChange={(event) => updateDraft({
-                                  reasoningEffortBySlot: updateAgentReasoningEffortBySlot(
-                                    configDraft.reasoningEffortBySlot,
-                                    slot.slot,
-                                    event.target.value,
-                                  ),
-                                })}
-                              >
-                                <option value="">{copy.reasoningEffort}: {copy.reasoningEffortDefault}</option>
-                                <option value="low">{copy.reasoningEffort}: {copy.reasoningEffortLow}</option>
-                                <option value="medium">{copy.reasoningEffort}: {copy.reasoningEffortMedium}</option>
-                                <option value="high">{copy.reasoningEffort}: {copy.reasoningEffortHigh}</option>
-                              </VNativeSelect>
-                            ) : null}
-                          </label>
-                        );
-                      })}
-                    </div>
-                    <div className={styles.configDeepLinkRow}>
-                      <VButton
-                        type="button"
-                        variant="secondary"
-                        icon={<ExternalLink size={15} />}
-                        onPress={() => navigate(selectedAgentModelConfigRoute)}
-                      >
-                        {lang === "zh" ? "去模型库配置" : "Open model library"}
-                      </VButton>
-                    </div>
-                  </section>
-                  <section className={`${styles.fieldWide} ${styles.promptConfigField}`}>
-                    <span>{copy.prompt}</span>
-                    <div className={styles.promptConfigRow}>
-                      <VNativeSelect value={configDraft.promptTemplateId} onChange={(event) => updateDraft({ promptTemplateId: event.target.value })}>
-                        <option value="">-</option>
-                        {workspace?.promptTemplates.map((template) => (
-                          <option key={template.promptTemplateId || template.templateId} value={template.promptTemplateId || template.templateId || ""}>
-                            {promptTemplateOptionLabel(template, lang)}
-                          </option>
-                        ))}
-                      </VNativeSelect>
-                      <VButton
-                        type="button"
-                        variant="secondary"
-                        icon={<SquarePen size={15} />}
-                        onPress={() => navigate(selectedAgentPromptConfigRoute)}
-                      >
-                        {lang === "zh" ? "配置提示词" : "Configure prompt"}
-                      </VButton>
-                    </div>
-                  </section>
-                  <VFieldRow
-                    label={copy.tools}
-                    tooltip={[toolPolicySourceLine, toolPolicySource?.description || copy.toolPolicyPickerHint].filter(Boolean).join("\n")}
-                  >
-                    <VNativeSelect value={configDraft.toolPolicyId} onChange={(event) => updateDraft({ toolPolicyId: event.target.value })}>
-                      {workspace?.toolPolicies.map((policy) => (
-                        <option key={policy.policyId} value={policy.policyId}>
-                          {policy.policyId} · {policy.allowedToolCount}/{policy.blockedToolCount}
-                        </option>
-                      ))}
-                    </VNativeSelect>
-                  </VFieldRow>
-                  <VFieldRow label={copy.memory} tooltip={copy.memoryPolicyPickerHint}>
-                    <VNativeSelect value={configDraft.memoryPolicyId} onChange={(event) => updateDraft({ memoryPolicyId: event.target.value })}>
-                      {workspace?.memoryPolicies.map((policy) => (
-                        <option key={policy.policyId} value={policy.policyId}>
-                          {policy.policyId} · {policy.privateMemoryRoot || "-"}
-                        </option>
-                      ))}
-                    </VNativeSelect>
-                  </VFieldRow>
-                  <AgentContextCompressionPanel
+                  <AgentCoreConfigPanel
                     copy={copy}
                     lang={lang}
-                    policy={configDraft.contextCompressionPolicy}
-                    title={contextCompressionPolicyLine}
-                    onPolicyChange={updateContextCompressionDraft}
+                    agentName={agentLabel(selectedAgent)}
+                    draft={configDraft}
+                    dirty={configDirty}
+                    canSave={canSaveConfig}
+                    pending={selectedAgentConfigPending}
+                    notice={notice}
+                    title={copy.personaHint}
+                    health={{
+                      tone: issueTone(selectedAgent.health),
+                      label: issuePanelLabel(selectedAgent.health, copy),
+                      headline: `${issueLabel(selectedAgent.health, lang)} · ${issueSummary(selectedAgent.health, lang)}`,
+                      nextStepLabel: copy.healthNextStep,
+                      nextStep: issueNextStep(selectedAgent.health, lang),
+                    }}
+                    llmSlots={coreConfigLlmSlots}
+                    promptTemplateOptions={bulkPromptTemplateOptions}
+                    toolPolicyOptions={coreConfigToolPolicyOptions}
+                    toolPolicyTooltip={coreConfigToolPolicyTooltip}
+                    memoryPolicyOptions={coreConfigMemoryPolicyOptions}
+                    memoryPolicyTooltip={copy.memoryPolicyPickerHint}
+                    contextCompressionTitle={contextCompressionPolicyLine}
+                    onDraftChange={updateDraft}
+                    onLlmSlotModelChange={(slot, modelId) => {
+                      const nextBindings = updateAgentLlmSlotBinding(configDraft.llmBindings, slot, modelId);
+                      updateDraft({
+                        llmBindings: nextBindings,
+                        reasoningEffortBySlot: pruneAgentReasoningEffortBySlot(
+                          configDraft.reasoningEffortBySlot,
+                          nextBindings,
+                          workspace?.agentModelChoices ?? [],
+                        ),
+                      });
+                    }}
+                    onReasoningEffortChange={(slot, reasoningEffort) => updateDraft({
+                      reasoningEffortBySlot: updateAgentReasoningEffortBySlot(
+                        configDraft.reasoningEffortBySlot,
+                        slot,
+                        reasoningEffort,
+                      ),
+                    })}
+                    onContextCompressionChange={updateContextCompressionDraft}
+                    onOpenModelConfig={() => navigate(selectedAgentModelConfigRoute)}
+                    onOpenPromptConfig={() => navigate(selectedAgentPromptConfigRoute)}
                     onOpenContextConfig={() => navigate(selectedAgentContextConfigRoute)}
+                    onReset={() => setConfigDraft(draftFromAgent(selectedAgent))}
+                    onSave={saveAgentConfig}
                   />
-                </div>
-                {notice ? (
-                  <p className={notice.tone === "error" ? styles.errorText : styles.successText}>{notice.text}</p>
-                ) : null}
-                <div className={styles.editorActions}>
-                  <VButton type="button" variant="secondary" isDisabled={!configDirty || selectedAgentConfigPending} onPress={() => setConfigDraft(draftFromAgent(selectedAgent))}>
-                    {copy.resetConfig}
-                  </VButton>
-                  <VButton type="button" variant="primary" isDisabled={!canSaveConfig || selectedAgentConfigPending} onPress={saveAgentConfig}>
-                    {selectedAgentConfigPending ? copy.savingConfig : copy.saveConfig}
-                  </VButton>
-                </div>
-              </section>
 
               {selectedAgentRequiresPersona ? (
               <AgentPersonaProfilePanel
