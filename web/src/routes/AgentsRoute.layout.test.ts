@@ -26,6 +26,10 @@ const coreConfigPanelSource = readFileSync(
   new URL("./AgentCoreConfigPanel.tsx", import.meta.url),
   "utf-8",
 );
+const configPrimaryPanePanelSource = readFileSync(
+  new URL("./AgentConfigPrimaryPanePanel.tsx", import.meta.url),
+  "utf-8",
+);
 const createPanelSource = readFileSync(
   new URL("./AgentCreatePanel.tsx", import.meta.url),
   "utf-8",
@@ -368,8 +372,9 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("function contextCompressionPolicyFromDraft");
     expect(routeSource).toContain("contextCompressionPolicy: contextCompressionPolicyFromDraft(payload.draft.contextCompressionPolicy)");
     expect(routeSource).toContain("updateContextCompressionDraft");
-    expect(routeSource).toContain("<AgentCoreConfigPanel");
-    expect(routeSource).toContain("onContextCompressionChange={updateContextCompressionDraft}");
+    expect(routeSource).toContain("<AgentConfigPrimaryPanePanel");
+    expect(configPrimaryPanePanelSource).toContain("<AgentCoreConfigPanel");
+    expect(routeSource).toContain("onContextCompressionChange: updateContextCompressionDraft");
     expect(coreConfigPanelSource).toContain("<AgentContextCompressionPanel");
     expect(coreConfigPanelSource).toContain("policy={draft.contextCompressionPolicy}");
     expect(coreConfigPanelSource).toContain("onPolicyChange={onContextCompressionChange}");
@@ -447,8 +452,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('const canPurgeAgent = Boolean(selectedAgent?.agentId && selectedAgent.status === "archived" && !selectedAgentProtected)');
     expect(routeSource).toContain('agent.status !== "archived"');
     expect(routeSource).toContain("copy.bulkSkippedActive");
-    expect(routeSource).toContain("onArchive={archiveSelectedAgent}");
-    expect(routeSource).toContain("onPurge={purgeSelectedAgent}");
+    expect(routeSource).toContain("onArchive: archiveSelectedAgent");
+    expect(routeSource).toContain("onPurge: purgeSelectedAgent");
     expect(archiveZonePanelSource).toContain("!isArchived ? (");
     expect(archiveZonePanelSource).toContain("onPress={onArchive}");
     expect(archiveZonePanelSource).toContain("onPress={onPurge}");
@@ -576,7 +581,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("styles.configGuidePanel");
     expect(routeSource).not.toContain("这页先回答三个问题");
     expect(coreConfigPanelSource).toContain("title={copy.llmSlotsHint}");
-    expect(routeSource).toContain("memoryPolicyTooltip={copy.memoryPolicyPickerHint}");
+    expect(routeSource).toContain("memoryPolicyTooltip: copy.memoryPolicyPickerHint");
     expect(coreConfigPanelSource).toContain("tooltip={memoryPolicyTooltip}");
     expect(routeSource).toContain("displayName: payload.draft.displayName");
     expect(routeSource).toContain("llmBindings: normalizeAgentLlmBindings(payload.draft.llmBindings)");
@@ -615,7 +620,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("title={copy.routeHint}");
     expect(detailHeaderPanelSource).toContain("className={styles.detailHeader}");
     expect(managementBriefPanelSource).toContain("title={copy.managementBriefHint}");
-    expect(routeSource).toContain("title={copy.personaHint}");
+    expect(routeSource).toContain("title: copy.personaHint");
     expect(taskProfilePanelSource).toContain("title={copy.taskHint}");
     expect(healthMaintenancePanelSource).toContain("title={copy.maintenanceHint}");
     expect(debugResetPanelSource).toContain("title={copy.resetAgentHint}");
@@ -648,7 +653,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.statusReminders");
     expect(routeSource).toContain("issueSummary(agent.health, lang)");
     expect(routeSource).toContain("issueNextStep(selectedAgent.health, lang)");
-    expect(routeSource).toContain("<AgentHealthMaintenancePanel");
+    expect(configPrimaryPanePanelSource).toContain("<AgentHealthMaintenancePanel");
     expect(healthMaintenancePanelSource).toContain("styles.issueList");
     expect(healthMaintenancePanelSource).toContain("issue.showInboxAction");
     expect(styles.healthCell).toBeTruthy();
@@ -662,14 +667,14 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("updatedAgentWorkspaceCache");
     expect(routeSource).toContain("setPersonaDraft(personaDraftFromAgent(agent))");
     expect(routeSource).toContain("draftSyncSourceRef.current = draftSyncSourceFromAgent(workspace, agent)");
-    expect(routeSource).toContain("<AgentPersonaProfilePanel");
-    expect(routeSource).toContain("summary={personaProfileSummary(selectedAgent, lang)}");
-    expect(routeSource).toContain("draft={personaDraft}");
-    expect(routeSource).toContain("dirty={personaDirty}");
-    expect(routeSource).toContain("canSave={canSavePersona}");
-    expect(routeSource).toContain("pending={selectedAgentPersonaPending}");
-    expect(routeSource).toContain("onDraftChange={updatePersonaDraft}");
-    expect(routeSource).toContain("onSave={savePersonaProfile}");
+    expect(configPrimaryPanePanelSource).toContain("<AgentPersonaProfilePanel");
+    expect(routeSource).toContain("summary: personaProfileSummary(selectedAgent, lang)");
+    expect(routeSource).toContain("draft: personaDraft");
+    expect(routeSource).toContain("dirty: personaDirty");
+    expect(routeSource).toContain("canSave: canSavePersona");
+    expect(routeSource).toContain("pending: selectedAgentPersonaPending");
+    expect(routeSource).toContain("onDraftChange: updatePersonaDraft");
+    expect(routeSource).toContain("onSave: savePersonaProfile");
     expect(personaProfilePanelSource).toContain("copy.personaTitle");
     expect(personaProfilePanelSource).toContain("copy.gender");
     expect(personaProfilePanelSource).toContain("copy.age");
@@ -701,14 +706,14 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("AgentTaskDraft");
     expect(routeSource).toContain("taskProfileFromDraft");
     expect(routeSource).toContain("taskProfile: taskProfileFromDraft(payload.draft)");
-    expect(routeSource).toContain("<AgentTaskProfilePanel");
-    expect(routeSource).toContain("summary={taskProfileSummary(selectedAgent, lang)}");
-    expect(routeSource).toContain("draft={taskDraft}");
-    expect(routeSource).toContain("dirty={taskDirty}");
-    expect(routeSource).toContain("canSave={canSaveTask}");
-    expect(routeSource).toContain("pending={selectedAgentTaskPending}");
-    expect(routeSource).toContain("onDraftChange={updateTaskDraft}");
-    expect(routeSource).toContain("onSave={saveTaskProfile}");
+    expect(configPrimaryPanePanelSource).toContain("<AgentTaskProfilePanel");
+    expect(routeSource).toContain("summary: taskProfileSummary(selectedAgent, lang)");
+    expect(routeSource).toContain("draft: taskDraft");
+    expect(routeSource).toContain("dirty: taskDirty");
+    expect(routeSource).toContain("canSave: canSaveTask");
+    expect(routeSource).toContain("pending: selectedAgentTaskPending");
+    expect(routeSource).toContain("onDraftChange: updateTaskDraft");
+    expect(routeSource).toContain("onSave: saveTaskProfile");
     expect(taskProfilePanelSource).toContain("copy.taskTitle");
     expect(taskProfilePanelSource).toContain("copy.mission");
     expect(taskProfilePanelSource).toContain("copy.taskTypes");
@@ -796,7 +801,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('returnLabel: "agents"');
     expect(routeSource).toContain("returnTo: selectedAgentReturnRoute");
     expect(coreConfigPanelSource).toContain("styles.promptConfigRow");
-    expect(routeSource).toContain("onOpenPromptConfig={() => navigate(selectedAgentPromptConfigRoute)}");
+    expect(routeSource).toContain("onOpenPromptConfig: () => navigate(selectedAgentPromptConfigRoute)");
     expect(coreConfigPanelSource).toContain("配置提示词");
   });
 
@@ -811,9 +816,9 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('view: "agents"');
     expect(routeSource).toContain("returnTo: selectedAgentReturnRoute");
     expect(coreConfigPanelSource).toContain("styles.configDeepLinkRow");
-    expect(routeSource).toContain("onOpenModelConfig={() => navigate(selectedAgentModelConfigRoute)}");
+    expect(routeSource).toContain("onOpenModelConfig: () => navigate(selectedAgentModelConfigRoute)");
     expect(coreConfigPanelSource).toContain("onPress={onOpenModelConfig}");
-    expect(routeSource).toContain("onOpenContextConfig={() => navigate(selectedAgentContextConfigRoute)}");
+    expect(routeSource).toContain("onOpenContextConfig: () => navigate(selectedAgentContextConfigRoute)");
     expect(routeSource).toContain("onOpenMemoryPage={() => navigate(selectedAgentMemoryConfigRoute)}");
     expect(coreConfigPanelSource).toContain("去模型库配置");
     expect(contextCompressionPanelSource).toContain("去上下文配置");
@@ -826,11 +831,11 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("toolGovernanceDraftFromAgent");
     expect(routeSource).toContain("toolPolicyDeltaFromDraft");
     expect(routeSource).toContain("/tool-governance-requests");
-    expect(routeSource).toContain("<AgentToolGovernancePanel");
-    expect(routeSource).toContain("requests={selectedAgent.toolGovernanceRequests ?? []}");
-    expect(routeSource).toContain("pendingRequestId={");
-    expect(routeSource).toContain("onResolve={resolveToolGovernanceRequest}");
-    expect(routeSource).toContain("onConfigure={() => navigate(selectedAgentToolConfigRoute)}");
+    expect(configPrimaryPanePanelSource).toContain("<AgentToolGovernancePanel");
+    expect(routeSource).toContain("requests: selectedAgent.toolGovernanceRequests ?? []");
+    expect(routeSource).toContain("pendingRequestId:");
+    expect(routeSource).toContain("onResolve: resolveToolGovernanceRequest");
+    expect(routeSource).toContain("onConfigure: () => navigate(selectedAgentToolConfigRoute)");
     expect(toolGovernancePanelSource).toContain("copy.toolGovernanceTitle");
     expect(toolGovernancePanelSource).toContain("copy.toolGovernancePending");
     expect(toolGovernancePanelSource).toContain("copy.toolGovernanceApprove");
@@ -943,8 +948,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("selectedAgentRequiresPersona");
     expect(routeSource).toContain("selectedAgentRequiresTask");
     expect(routeSource).toContain("selectedAgentRequiresTeamMembership");
-    expect(routeSource).toContain("{selectedAgentRequiresPersona ? (");
-    expect(routeSource).toContain("{selectedAgentRequiresTask ? (");
+    expect(routeSource).toContain("personaProfile={selectedAgentRequiresPersona ? {");
+    expect(routeSource).toContain("taskProfile={selectedAgentRequiresTask ? {");
     expect(routeSource).toContain("{selectedAgentRequiresTeamMembership ? (");
     expect(routeSource).toContain("isWorkSession: createDraftIsWorkSession");
     expect(createPanelSource).toContain("{!isWorkSession ? (");
@@ -1062,7 +1067,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.maintenanceTitle");
     expect(healthMaintenancePanelSource).toContain("styles.maintenanceIntro");
     expect(routeSource).toContain("selectedAgent.status === \"archived\"");
-    expect(routeSource).toContain("<AgentArchiveZonePanel");
+    expect(configPrimaryPanePanelSource).toContain("<AgentArchiveZonePanel");
     expect(archiveZonePanelSource).toContain("styles.dangerZone");
     expect(archiveZonePanelSource).toContain('variant="danger"');
     expect(styles.maintenanceIntro).toBeTruthy();
@@ -1091,12 +1096,12 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("next.delete(payload.agentId)");
     expect(routeSource).toContain("/reset");
     expect(routeSource).toContain("method: \"POST\"");
-    expect(routeSource).toContain("<AgentDebugResetPanel");
-    expect(routeSource).toContain("options={resetOptions}");
-    expect(routeSource).toContain("canReset={canResetAgent}");
-    expect(routeSource).toContain("pending={selectedAgentResetPending}");
-    expect(routeSource).toContain("onOptionChange={updateResetOption}");
-    expect(routeSource).toContain("onReset={resetSelectedAgent}");
+    expect(configPrimaryPanePanelSource).toContain("<AgentDebugResetPanel");
+    expect(routeSource).toContain("options: resetOptions");
+    expect(routeSource).toContain("canReset: canResetAgent");
+    expect(routeSource).toContain("pending: selectedAgentResetPending");
+    expect(routeSource).toContain("onOptionChange: updateResetOption");
+    expect(routeSource).toContain("onReset: resetSelectedAgent");
     expect(debugResetPanelSource).toContain("copy.resetAgent");
     expect(debugResetPanelSource).toContain("resetClearRuntimeState");
     expect(debugResetPanelSource).toContain("resetClearRuntimeStateHint");

@@ -58,7 +58,6 @@ import { vuiFormLabelClass } from "../components/vui/forms/formClasses";
 import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
-import { AgentArchiveZonePanel } from "./AgentArchiveZonePanel";
 import { AgentActivityPanePanel } from "./AgentActivityPanePanel";
 import { type AgentActivityTimelineItem } from "./AgentActivityHistoryPanel";
 import {
@@ -67,17 +66,16 @@ import {
   type AgentBulkConfigDraft,
   type AgentBulkConfigField,
 } from "./AgentBulkConfigPanel";
+import { AgentConfigPrimaryPanePanel } from "./AgentConfigPrimaryPanePanel";
 import { type AgentContextCompressionPolicyDraft } from "./AgentContextCompressionPanel";
 import {
-  AgentCoreConfigPanel,
   type AgentConfigDraft,
   type AgentCoreConfigLlmSlotView,
 } from "./AgentCoreConfigPanel";
 import { type AgentCreateDraft } from "./AgentCreatePanel";
-import { AgentDebugResetPanel, type AgentResetOptions } from "./AgentDebugResetPanel";
+import { type AgentResetOptions } from "./AgentDebugResetPanel";
 import { AgentDetailHeaderPanel } from "./AgentDetailHeaderPanel";
 import { AgentDetailWorkspacePanel } from "./AgentDetailWorkspacePanel";
-import { AgentHealthMaintenancePanel } from "./AgentHealthMaintenancePanel";
 import { AgentListWorkspacePanel } from "./AgentListWorkspacePanel";
 import { AgentMemoryPolicyPanel, type AgentMemoryPolicyDraft } from "./AgentMemoryPolicyPanel";
 import { AgentModeMembershipPanel, type AgentModeMembershipDraft } from "./AgentModeMembershipPanel";
@@ -90,15 +88,15 @@ import {
   type AgentOverviewPanelPolicy,
   type AgentOverviewTerritory,
 } from "./AgentOverviewPanel";
-import { AgentPersonaProfilePanel, type AgentPersonaDraft } from "./AgentPersonaProfilePanel";
+import { type AgentPersonaDraft } from "./AgentPersonaProfilePanel";
 import {
   AgentReferencesPanel,
   type AgentReferenceItemView,
   type AgentReferenceRoomView,
 } from "./AgentReferencesPanel";
 import { AgentSelectedDetailContentPanel } from "./AgentSelectedDetailContentPanel";
-import { AgentTaskProfilePanel, type AgentTaskDraft } from "./AgentTaskProfilePanel";
-import { AgentToolGovernancePanel, governanceStatusLabel } from "./AgentToolGovernancePanel";
+import { type AgentTaskDraft } from "./AgentTaskProfilePanel";
+import { governanceStatusLabel } from "./AgentToolGovernancePanel";
 import { AgentToolSummaryPanel } from "./AgentToolSummaryPanel";
 import {
   agentCenterMemoryRoute,
@@ -5909,33 +5907,33 @@ export function AgentsRoute() {
               )}
               overview={selectedAgentOverviewPanel ? <AgentOverviewPanel {...selectedAgentOverviewPanel} /> : null}
               configPrimary={(
-                <>
-                  <AgentCoreConfigPanel
-                    copy={copy}
-                    lang={lang}
-                    agentName={agentLabel(selectedAgent)}
-                    draft={configDraft}
-                    dirty={configDirty}
-                    canSave={canSaveConfig}
-                    pending={selectedAgentConfigPending}
-                    notice={notice}
-                    title={copy.personaHint}
-                    health={{
+                <AgentConfigPrimaryPanePanel
+                  coreConfig={{
+                    copy,
+                    lang,
+                    agentName: agentLabel(selectedAgent),
+                    draft: configDraft,
+                    dirty: configDirty,
+                    canSave: canSaveConfig,
+                    pending: selectedAgentConfigPending,
+                    notice,
+                    title: copy.personaHint,
+                    health: {
                       tone: issueTone(selectedAgent.health),
                       label: issuePanelLabel(selectedAgent.health, copy),
                       headline: `${issueLabel(selectedAgent.health, lang)} · ${issueSummary(selectedAgent.health, lang)}`,
                       nextStepLabel: copy.healthNextStep,
                       nextStep: issueNextStep(selectedAgent.health, lang),
-                    }}
-                    llmSlots={coreConfigLlmSlots}
-                    promptTemplateOptions={bulkPromptTemplateOptions}
-                    toolPolicyOptions={coreConfigToolPolicyOptions}
-                    toolPolicyTooltip={coreConfigToolPolicyTooltip}
-                    memoryPolicyOptions={coreConfigMemoryPolicyOptions}
-                    memoryPolicyTooltip={copy.memoryPolicyPickerHint}
-                    contextCompressionTitle={contextCompressionPolicyLine}
-                    onDraftChange={updateDraft}
-                    onLlmSlotModelChange={(slot, modelId) => {
+                    },
+                    llmSlots: coreConfigLlmSlots,
+                    promptTemplateOptions: bulkPromptTemplateOptions,
+                    toolPolicyOptions: coreConfigToolPolicyOptions,
+                    toolPolicyTooltip: coreConfigToolPolicyTooltip,
+                    memoryPolicyOptions: coreConfigMemoryPolicyOptions,
+                    memoryPolicyTooltip: copy.memoryPolicyPickerHint,
+                    contextCompressionTitle: contextCompressionPolicyLine,
+                    onDraftChange: updateDraft,
+                    onLlmSlotModelChange: (slot, modelId) => {
                       const nextBindings = updateAgentLlmSlotBinding(configDraft.llmBindings, slot, modelId);
                       updateDraft({
                         llmBindings: nextBindings,
@@ -5945,74 +5943,65 @@ export function AgentsRoute() {
                           workspace?.agentModelChoices ?? [],
                         ),
                       });
-                    }}
-                    onReasoningEffortChange={(slot, reasoningEffort) => updateDraft({
+                    },
+                    onReasoningEffortChange: (slot, reasoningEffort) => updateDraft({
                       reasoningEffortBySlot: updateAgentReasoningEffortBySlot(
                         configDraft.reasoningEffortBySlot,
                         slot,
                         reasoningEffort,
                       ),
-                    })}
-                    onContextCompressionChange={updateContextCompressionDraft}
-                    onOpenModelConfig={() => navigate(selectedAgentModelConfigRoute)}
-                    onOpenPromptConfig={() => navigate(selectedAgentPromptConfigRoute)}
-                    onOpenContextConfig={() => navigate(selectedAgentContextConfigRoute)}
-                    onReset={() => setConfigDraft(draftFromAgent(selectedAgent))}
-                    onSave={saveAgentConfig}
-                  />
-
-                  {selectedAgentRequiresPersona ? (
-                    <AgentPersonaProfilePanel
-                      copy={copy}
-                      lang={lang}
-                      summary={personaProfileSummary(selectedAgent, lang)}
-                      draft={personaDraft}
-                      dirty={personaDirty}
-                      canSave={canSavePersona}
-                      pending={selectedAgentPersonaPending}
-                      onDraftChange={updatePersonaDraft}
-                      onReset={() => setPersonaDraft(personaDraftFromAgent(selectedAgent))}
-                      onSave={savePersonaProfile}
-                    />
-                  ) : null}
-
-                  <AgentToolGovernancePanel
-                    copy={copy}
-                    lang={lang}
-                    requests={selectedAgent.toolGovernanceRequests ?? []}
-                    pendingRequestId={
+                    }),
+                    onContextCompressionChange: updateContextCompressionDraft,
+                    onOpenModelConfig: () => navigate(selectedAgentModelConfigRoute),
+                    onOpenPromptConfig: () => navigate(selectedAgentPromptConfigRoute),
+                    onOpenContextConfig: () => navigate(selectedAgentContextConfigRoute),
+                    onReset: () => setConfigDraft(draftFromAgent(selectedAgent)),
+                    onSave: saveAgentConfig,
+                  }}
+                  personaProfile={selectedAgentRequiresPersona ? {
+                    copy,
+                    lang,
+                    summary: personaProfileSummary(selectedAgent, lang),
+                    draft: personaDraft,
+                    dirty: personaDirty,
+                    canSave: canSavePersona,
+                    pending: selectedAgentPersonaPending,
+                    onDraftChange: updatePersonaDraft,
+                    onReset: () => setPersonaDraft(personaDraftFromAgent(selectedAgent)),
+                    onSave: savePersonaProfile,
+                  } : null}
+                  toolGovernance={{
+                    copy,
+                    lang,
+                    requests: selectedAgent.toolGovernanceRequests ?? [],
+                    pendingRequestId:
                       resolveToolGovernanceMutation.isPending
                       && resolveToolGovernanceMutation.variables?.agentId === selectedAgent.agentId
                         ? resolveToolGovernanceMutation.variables?.requestId ?? null
-                        : null
-                    }
-                    onResolve={resolveToolGovernanceRequest}
-                    onConfigure={() => navigate(selectedAgentToolConfigRoute)}
-                  />
-
-                  {selectedAgentRequiresTask ? (
-                    <AgentTaskProfilePanel
-                      copy={copy}
-                      lang={lang}
-                      summary={taskProfileSummary(selectedAgent, lang)}
-                      draft={taskDraft}
-                      dirty={taskDirty}
-                      canSave={canSaveTask}
-                      pending={selectedAgentTaskPending}
-                      onDraftChange={updateTaskDraft}
-                      onReset={() => setTaskDraft(taskDraftFromAgent(selectedAgent))}
-                      onSave={saveTaskProfile}
-                    />
-                  ) : null}
-
-                  <AgentHealthMaintenancePanel
-                    copy={{
+                        : null,
+                    onResolve: resolveToolGovernanceRequest,
+                    onConfigure: () => navigate(selectedAgentToolConfigRoute),
+                  }}
+                  taskProfile={selectedAgentRequiresTask ? {
+                    copy,
+                    lang,
+                    summary: taskProfileSummary(selectedAgent, lang),
+                    draft: taskDraft,
+                    dirty: taskDirty,
+                    canSave: canSaveTask,
+                    pending: selectedAgentTaskPending,
+                    onDraftChange: updateTaskDraft,
+                    onReset: () => setTaskDraft(taskDraftFromAgent(selectedAgent)),
+                    onSave: saveTaskProfile,
+                  } : null}
+                  healthMaintenance={{
+                    copy: {
                       handleInboxNow: copy.handleInboxNow,
                       maintenanceHint: copy.maintenanceHint,
                       maintenanceTitle: copy.maintenanceTitle,
                       noIssues: copy.noIssues,
-                    }}
-                    health={{
+                    },
+                    health: {
                       title: issueNextStep(selectedAgent.health, lang),
                       label: issuePanelLabel(selectedAgent.health, copy),
                       headline: `${issueLabel(selectedAgent.health, lang)} · ${issueSummary(selectedAgent.health, lang)}`,
@@ -6024,32 +6013,29 @@ export function AgentsRoute() {
                         detail: issue.detail,
                         showInboxAction: issue.code === "pending_inbox_messages",
                       })),
-                    }}
-                    onOpenActivity={() => setActivePane("activity")}
+                    },
+                    onOpenActivity: () => setActivePane("activity"),
+                  }}
+                  archiveZone={{
+                    copy,
+                    status: selectedAgent.status,
+                    isProtected: selectedAgentProtected,
+                    canArchive: canArchiveAgent,
+                    canPurge: canPurgeAgent,
+                    isArchivePending: selectedAgentArchivePending,
+                    isPurgePending: selectedAgentPurgePending,
+                    onArchive: archiveSelectedAgent,
+                    onPurge: purgeSelectedAgent,
+                  }}
+                  debugReset={selectedAgent.status !== "archived" ? {
+                    copy,
+                    options: resetOptions,
+                    canReset: canResetAgent,
+                    pending: selectedAgentResetPending,
+                    onOptionChange: updateResetOption,
+                    onReset: resetSelectedAgent,
+                  } : null}
                   />
-
-                  <AgentArchiveZonePanel
-                    copy={copy}
-                    status={selectedAgent.status}
-                    isProtected={selectedAgentProtected}
-                    canArchive={canArchiveAgent}
-                    canPurge={canPurgeAgent}
-                    isArchivePending={selectedAgentArchivePending}
-                    isPurgePending={selectedAgentPurgePending}
-                    onArchive={archiveSelectedAgent}
-                    onPurge={purgeSelectedAgent}
-                  />
-                  {selectedAgent.status !== "archived" ? (
-                    <AgentDebugResetPanel
-                      copy={copy}
-                      options={resetOptions}
-                      canReset={canResetAgent}
-                      pending={selectedAgentResetPending}
-                      onOptionChange={updateResetOption}
-                      onReset={resetSelectedAgent}
-                    />
-                  ) : null}
-                </>
               )}
               configPolicies={(
                 <>
