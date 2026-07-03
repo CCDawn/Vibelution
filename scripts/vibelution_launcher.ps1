@@ -1792,11 +1792,11 @@ function Get-LauncherControlSourceSignature {
         (Join-Path $projectDir "web\src\api\launcher.ts"),
         (Join-Path $projectDir "web\src\api\types.ts"),
         (Join-Path $projectDir "web\src\app\LauncherShell.tsx"),
-        (Join-Path $projectDir "web\src\app\LauncherShell.module.css"),
+        (Join-Path $projectDir "web\src\app\LauncherShell.styles.ts"),
         (Join-Path $projectDir "web\src\app\pollingPolicy.ts"),
         (Join-Path $projectDir "web\src\app\router.tsx"),
         (Join-Path $projectDir "web\src\routes\LauncherRoute.tsx"),
-        (Join-Path $projectDir "web\src\routes\LauncherRoute.module.css")
+        (Join-Path $projectDir "web\src\routes\LauncherRoute.styles.ts")
     )
     return Get-FileFingerprint -Paths $paths
 }

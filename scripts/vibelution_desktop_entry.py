@@ -56,11 +56,11 @@ SOURCE_SIGNATURE_PATHS = (
     "web/src/api/launcher.ts",
     "web/src/api/types.ts",
     "web/src/app/LauncherShell.tsx",
-    "web/src/app/LauncherShell.module.css",
+    "web/src/app/LauncherShell.styles.ts",
     "web/src/app/pollingPolicy.ts",
     "web/src/app/router.tsx",
     "web/src/routes/LauncherRoute.tsx",
-    "web/src/routes/LauncherRoute.module.css",
+    "web/src/routes/LauncherRoute.styles.ts",
 )
 
 
