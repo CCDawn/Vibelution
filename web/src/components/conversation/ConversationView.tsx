@@ -78,6 +78,7 @@ import {
 import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
 import { projectStreamingMarkdownBlocks, type MarkdownBlock } from "./streamingMarkdown";
 import { safeConversationMarkdownUrl } from "./conversationMarkdownUrl";
+import { shouldShowNextStateSignalInConversation } from "./conversationNextStateSignal";
 import {
   captureTimelineRowKeyAnchor,
   restoreTimelineRowKeyAnchor,
@@ -215,10 +216,6 @@ function DeferredOperationDetails({
   );
 }
 
-function isBusyConversationPhase(phase: string) {
-  return ["queued", "running", "stopping"].includes(String(phase || "").trim().toLowerCase());
-}
-
 function renderTurnAvatarContent(resolution: TurnAvatarContent) {
   if ("icon" in resolution) {
     return <MessageSquarePlus size={17} />;
@@ -243,16 +240,6 @@ type ComposerAttachment = {
   sizeBytes: number;
   contentType: string;
 };
-
-export function shouldShowNextStateSignalInConversation(
-  signal: ChatNextStateSignalSummary,
-  phase: string,
-) {
-  if (signal.kind === "user_continues") {
-    return isBusyConversationPhase(phase);
-  }
-  return true;
-}
 
 export type ConversationViewProps = {
   sessionId: string;

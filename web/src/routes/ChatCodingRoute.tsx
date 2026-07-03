@@ -81,11 +81,11 @@ import {
   ToolCall,
 } from "../api/types";
 import {
-  shouldShowNextStateSignalInConversation,
   type ConversationStreamingFramePaintMetrics,
   type TurnAvatarResolution,
 } from "../components/conversation/ConversationView";
 import { COMPOSER_SESSION_REFERENCE_MIME } from "../components/conversation/conversationConstants";
+import { shouldShowNextStateSignalInConversation } from "../components/conversation/conversationNextStateSignal";
 import { LazyConversationView } from "../components/conversation/LazyConversationView";
 import { isAgentInboxMessage, isTurnErrorMessage } from "../components/conversation/conversationMessagePredicates";
 import { LazyFilePreview } from "../components/preview/LazyFilePreview";
