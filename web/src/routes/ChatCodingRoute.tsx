@@ -2236,7 +2236,7 @@ export function ChatCodingRoute() {
   const chatPollingVisible = pageVisible || chatStartupWarmupActive;
   const projectBusActive = activeGroupRoomId === "__project_agent_bus__";
   const groupPanelActive = Boolean(activeGroupRoomId);
-  const legacyGroupRoomActive = groupPanelActive && !projectBusActive;
+  const standardGroupRoomActive = groupPanelActive && !projectBusActive;
   const directSessionPanelActive = Boolean(activeSessionId) && !groupPanelActive;
   const sessionQueryText = sessionFilter.trim();
   const [directSessionBackgroundSyncActive, setDirectSessionBackgroundSyncActive] = useState(false);
@@ -2305,7 +2305,7 @@ export function ChatCodingRoute() {
     routeSwitchGraceMsRemaining: Math.max(0, sessionStreamGraceUntilRef.current - Date.now()),
   };
   const groupStreamShouldConnect = Boolean(
-    legacyGroupRoomActive
+    standardGroupRoomActive
     && activeGroupRoomId
     && (chatPollingVisible || groupBackgroundSyncActive),
   );
@@ -2316,7 +2316,7 @@ export function ChatCodingRoute() {
     directSessionBackgroundSyncActive,
     groupBackgroundSyncActive,
     directSessionPanelActive,
-    legacyGroupRoomActive,
+    standardGroupRoomActive,
     sessionStreamAvailable,
     sessionStreamShouldConnect,
     groupStreamShouldConnect,
@@ -2326,10 +2326,10 @@ export function ChatCodingRoute() {
   const chatLiveQueryPolicy = resolveChatLiveQueryPolicy(chatLiveQueryPolicyInput);
   const { directSessionStreamOwnsLiveQueries, groupStreamOwnsLiveQueries } = chatLiveQueryPolicy;
   useEffect(() => {
-    if (!legacyGroupRoomActive && rightIndexPanel === "members") {
+    if (!standardGroupRoomActive && rightIndexPanel === "members") {
       setRightIndexPanel("conversations");
     }
-  }, [legacyGroupRoomActive, rightIndexPanel]);
+  }, [standardGroupRoomActive, rightIndexPanel]);
 
   const runtimeQuery = useQuery({
     queryKey: queryKeys.runtimeSummary(),
@@ -2396,23 +2396,23 @@ export function ChatCodingRoute() {
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
     queryFn: () => fetchJson<AgentInstance[]>("/api/agents?detail=summary"),
-    enabled: secondaryChatDataEnabled || groupComposerOpen || legacyGroupRoomActive || Boolean(activeSessionId),
+    enabled: secondaryChatDataEnabled || groupComposerOpen || standardGroupRoomActive || Boolean(activeSessionId),
   });
   const chatRoomModesQuery = useQuery({
     queryKey: queryKeys.chatRoomModes(),
     queryFn: () => fetchJson<ChatRoomMode[]>("/api/chat-rooms/modes"),
-    enabled: groupComposerOpen || legacyGroupRoomActive,
+    enabled: groupComposerOpen || standardGroupRoomActive,
   });
   const chatRoomPurposesQuery = useQuery({
     queryKey: queryKeys.chatRoomPurposes(),
     queryFn: () => fetchJson<ChatRoomPurpose[]>("/api/chat-rooms/purposes"),
-    enabled: groupComposerOpen || legacyGroupRoomActive,
+    enabled: groupComposerOpen || standardGroupRoomActive,
   });
   const activeGroupRoomQuery = useQuery({
     queryKey: queryKeys.chatRoom(activeGroupRoomId || "none"),
     queryFn: () => fetchJson<ChatRoomDetail>(`/api/chat-rooms/${activeGroupRoomId}`),
-    enabled: legacyGroupRoomActive,
-    refetchInterval: legacyGroupRoomActive
+    enabled: standardGroupRoomActive,
+    refetchInterval: standardGroupRoomActive
       ? resolvePollingInterval(
           chatPollingVisible,
           groupStreamConnected ? false : 3_000,
@@ -2432,8 +2432,8 @@ export function ChatCodingRoute() {
     queries: expandedGroupAgentSessionIds.map((sessionId) => ({
       queryKey: queryKeys.session(sessionId || "none"),
       queryFn: () => fetchJson<SessionDetail>(`/api/sessions/${sessionId}`),
-      enabled: legacyGroupRoomActive && Boolean(sessionId),
-      refetchInterval: legacyGroupRoomActive && sessionId
+      enabled: standardGroupRoomActive && Boolean(sessionId),
+      refetchInterval: standardGroupRoomActive && sessionId
         ? resolvePollingInterval(
             chatPollingVisible,
             3_000,
@@ -2558,10 +2558,10 @@ export function ChatCodingRoute() {
   );
   useEffect(() => {
     setGroupBackgroundSyncActive(Boolean(
-      legacyGroupRoomActive
+      standardGroupRoomActive
       && isBusyPhase(activeGroupRoomQuery.data?.status),
     ));
-  }, [activeGroupRoomQuery.data?.status, legacyGroupRoomActive]);
+  }, [activeGroupRoomQuery.data?.status, standardGroupRoomActive]);
   useEffect(() => {
     if (requestedRoomId && activeGroupRoomId !== requestedRoomId) {
       setActiveGroupRoomId(requestedRoomId);
@@ -2688,14 +2688,14 @@ export function ChatCodingRoute() {
   });
   useEffect(() => {
     const directReady = Boolean(activeSessionId ? sessionDetailQuery.data : sessionsQuery.data);
-    const groupReady = !legacyGroupRoomActive || Boolean(activeGroupRoomQuery.data);
+    const groupReady = !standardGroupRoomActive || Boolean(activeGroupRoomQuery.data);
     if (sessionsQuery.data && directReady && groupReady) {
       setChatStartupDataReady(true);
     }
   }, [
     activeGroupRoomQuery.data,
     activeSessionId,
-    legacyGroupRoomActive,
+    standardGroupRoomActive,
     sessionDetailQuery.data,
     sessionsQuery.data,
   ]);
@@ -2711,13 +2711,13 @@ export function ChatCodingRoute() {
       fields: {
         durationMs: Math.max(0, Date.now() - chatRouteMountStartedAtRef.current),
         activeSession: Boolean(activeSessionId),
-        legacyGroupRoomActive,
+        standardGroupRoomActive,
         runtimeReady: Boolean(runtimeQuery.data),
         sessionsReady: Boolean(sessionsQuery.data),
         conversationsReady: Boolean(conversationsQuery.data),
         teamsReady: Boolean(teamsQuery.data),
         sessionDetailReady: Boolean(activeSessionId ? sessionDetailQuery.data : true),
-        groupRoomReady: Boolean(!legacyGroupRoomActive || activeGroupRoomQuery.data),
+        groupRoomReady: Boolean(!standardGroupRoomActive || activeGroupRoomQuery.data),
       },
     });
   }, [
@@ -2725,7 +2725,7 @@ export function ChatCodingRoute() {
     activeSessionId,
     chatStartupDataReady,
     conversationsQuery.data,
-    legacyGroupRoomActive,
+    standardGroupRoomActive,
     runtimeQuery.data,
     sessionDetailQuery.data,
     sessionsQuery.data,
@@ -4402,7 +4402,7 @@ export function ChatCodingRoute() {
     }
   }, [activeGroupParticipantSessionSet, expandedGroupAgentSessionIds, groupPanelActive]);
   const groupManageChanged = Boolean(
-    legacyGroupRoomActive
+    standardGroupRoomActive
     &&
     activeGroupRoom
     && (
@@ -4414,7 +4414,7 @@ export function ChatCodingRoute() {
     ),
   );
   const groupManageDisabled =
-    !legacyGroupRoomActive
+    !standardGroupRoomActive
     ||
     !activeGroupRoom
     || activeGroupTeamOwned
@@ -4425,21 +4425,21 @@ export function ChatCodingRoute() {
     || !groupManageModeDraft
     || !groupManagePurposeDraft;
   const groupDeleteDisabled =
-    !legacyGroupRoomActive
+    !standardGroupRoomActive
     ||
     !activeGroupRoom
     || activeGroupTeamOwned
     || groupRoundActive
     || deleteGroupRoomMutation.isPending;
   const groupResetDisabled =
-    !legacyGroupRoomActive
+    !standardGroupRoomActive
     ||
     !activeGroupRoom
     || groupRoundActive
     || resetGroupRoomMutation.isPending
     || (activeGroupRoom?.rounds ?? []).length < 1;
   const groupStopDisabled =
-    !legacyGroupRoomActive
+    !standardGroupRoomActive
     || !activeGroupRoom
     || !groupRoundRunning
     || stopGroupRoundMutation.isPending;
@@ -6078,7 +6078,7 @@ export function ChatCodingRoute() {
 
   function handleStartGroupRound() {
     const topic = groupTopicDraft.trim();
-    if (!legacyGroupRoomActive || !activeGroupRoomId || !topic || startGroupRoundMutation.isPending || groupRoundActive) {
+    if (!standardGroupRoomActive || !activeGroupRoomId || !topic || startGroupRoundMutation.isPending || groupRoundActive) {
       return;
     }
     startGroupRoundMutation.mutate({
@@ -6090,7 +6090,7 @@ export function ChatCodingRoute() {
   }
 
   function handleStopGroupRound() {
-    if (!legacyGroupRoomActive || !activeGroupRoomId || !groupRoundRunning || stopGroupRoundMutation.isPending) {
+    if (!standardGroupRoomActive || !activeGroupRoomId || !groupRoundRunning || stopGroupRoundMutation.isPending) {
       return;
     }
     stopGroupRoundMutation.mutate({
@@ -6117,7 +6117,7 @@ export function ChatCodingRoute() {
   }
 
   function handleApplyGroupRoomManagement() {
-    if (!legacyGroupRoomActive || activeGroupTeamOwned || !activeGroupRoomId || groupManageDisabled) {
+    if (!standardGroupRoomActive || activeGroupTeamOwned || !activeGroupRoomId || groupManageDisabled) {
       return;
     }
     updateGroupRoomMutation.mutate({
@@ -6130,7 +6130,7 @@ export function ChatCodingRoute() {
   }
 
   function handleDeleteActiveGroupRoom() {
-    if (!legacyGroupRoomActive || activeGroupTeamOwned || !activeGroupRoomId || groupDeleteDisabled) {
+    if (!standardGroupRoomActive || activeGroupTeamOwned || !activeGroupRoomId || groupDeleteDisabled) {
       return;
     }
     const roomTitle = (activeGroupRoom?.title || activeGroupRoomId).trim();
@@ -6142,7 +6142,7 @@ export function ChatCodingRoute() {
   }
 
   function handleResetActiveGroupRoom() {
-    if (!legacyGroupRoomActive || !activeGroupRoomId || groupResetDisabled) {
+    if (!standardGroupRoomActive || !activeGroupRoomId || groupResetDisabled) {
       return;
     }
     const roomTitle = (activeGroupRoom?.title || activeGroupRoomId).trim();
@@ -6339,7 +6339,7 @@ export function ChatCodingRoute() {
   const conversationFrameClassName = bothSidePanesCollapsed
     ? `${styles.conversationFrame} ${styles.conversationFrameFocus}`
     : styles.conversationFrame;
-  const rightPaneLayoutClassName = legacyGroupRoomActive ? styles.rightPaneWithTabs : styles.rightPaneWithoutTabs;
+  const rightPaneLayoutClassName = standardGroupRoomActive ? styles.rightPaneWithTabs : styles.rightPaneWithoutTabs;
   const rightPaneClassName = `${styles.rightPane} ${rightPaneLayoutClassName}`;
 
   const contextMenuSessionIsBusy = contextMenuSession
@@ -6458,7 +6458,7 @@ export function ChatCodingRoute() {
       style={layoutStyle}
     >
       <aside className={leftRailCollapsed ? `${styles.leftRail} ${styles.paneCollapsed}` : styles.leftRail} aria-hidden={leftRailCollapsed}>
-        {legacyGroupRoomActive ? (
+        {standardGroupRoomActive ? (
           <section className={`${styles.leftBlock} ${styles.groupProfileBlock}`}>
             <div className={styles.sectionHeader}>
               <div className={styles.sectionIdentity}>
@@ -7324,7 +7324,7 @@ export function ChatCodingRoute() {
                 </VButton>
               </div>
             </div>
-          ) : legacyGroupRoomActive ? (
+          ) : standardGroupRoomActive ? (
             <div className={styles.groupConversationFrame}>
               <header className={styles.groupConversationHeader}>
                 <div>
@@ -7704,7 +7704,7 @@ export function ChatCodingRoute() {
       />
 
       <aside className={rightPaneCollapsed ? `${rightPaneClassName} ${styles.paneCollapsed}` : rightPaneClassName} aria-hidden={rightPaneCollapsed}>
-        {legacyGroupRoomActive ? (
+        {standardGroupRoomActive ? (
           <div
             className={styles.rightIndexTabs}
             role="tablist"
@@ -7733,7 +7733,7 @@ export function ChatCodingRoute() {
           </div>
         ) : null}
 
-        {rightIndexPanel === "members" && legacyGroupRoomActive ? (
+        {rightIndexPanel === "members" && standardGroupRoomActive ? (
           <div className={styles.memberIndexSummary}>
             <UsersRound size={15} />
             <span>
@@ -7755,7 +7755,7 @@ export function ChatCodingRoute() {
         )}
 
         <div className={styles.panelBody}>
-          {rightIndexPanel === "members" && legacyGroupRoomActive ? (
+          {rightIndexPanel === "members" && standardGroupRoomActive ? (
             <section className={styles.agentIndexRoster} aria-label={lang === "zh" ? "群成员状态索引" : "Group member status index"}>
               <div className={styles.sectionHeader}>
                 <div className={styles.sectionIdentity}>

@@ -582,9 +582,9 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("hides the right index tab switcher when only the conversation index is available", () => {
     const rightAsideStart = routeSource.indexOf("<aside className={rightPaneCollapsed");
-    const tabsRenderStart = routeSource.indexOf("{legacyGroupRoomActive ? (", rightAsideStart);
+    const tabsRenderStart = routeSource.indexOf("{standardGroupRoomActive ? (", rightAsideStart);
     const tabsClassStart = routeSource.indexOf("className={styles.rightIndexTabs}", tabsRenderStart);
-    const memberSummaryStart = routeSource.indexOf("{rightIndexPanel === \"members\" && legacyGroupRoomActive", tabsClassStart);
+    const memberSummaryStart = routeSource.indexOf("{rightIndexPanel === \"members\" && standardGroupRoomActive", tabsClassStart);
     expect(rightAsideStart).toBeGreaterThan(-1);
     expect(tabsRenderStart).toBeGreaterThan(rightAsideStart);
     expect(tabsClassStart).toBeGreaterThan(tabsRenderStart);
@@ -1326,7 +1326,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("sessionStreamShouldConnect,");
     expect(routeSource).toContain("directSessionPanelActive,");
     expect(routeSource).toContain("groupStreamShouldConnect,");
-    expect(routeSource).toContain("legacyGroupRoomActive,");
+    expect(routeSource).toContain("standardGroupRoomActive,");
+    expect(routeSource).not.toContain("legacyGroupRoomActive");
     expect(routeSource).toContain("const chatLiveQueryPolicy = resolveChatLiveQueryPolicy(chatLiveQueryPolicyInput)");
     expect(routeSource).toContain("const { directSessionStreamOwnsLiveQueries, groupStreamOwnsLiveQueries } = chatLiveQueryPolicy");
     expect(routeSource).toContain("refetchInterval: chatLiveQueryPolicy.sessionsRefetchInterval");
@@ -1414,7 +1415,7 @@ describe("ChatCodingRoute layout contract", () => {
   it("defers secondary chat dashboard queries until the shell is ready", () => {
     expect(routeSource).toContain("const secondaryChatDataEnabled = chatStartupDataReady");
     expect(routeSource).toContain("enabled: secondaryChatDataEnabled");
-    expect(routeSource).toContain("enabled: secondaryChatDataEnabled || groupComposerOpen || legacyGroupRoomActive || Boolean(activeSessionId)");
+    expect(routeSource).toContain("enabled: secondaryChatDataEnabled || groupComposerOpen || standardGroupRoomActive || Boolean(activeSessionId)");
     expect(routeSource).not.toContain("enabled: groupComposerOpen || Boolean(activeSessionId)");
   });
 

@@ -10,7 +10,7 @@ export type ChatLiveQueryPolicyInput = {
   directSessionBackgroundSyncActive: boolean;
   groupBackgroundSyncActive: boolean;
   directSessionPanelActive: boolean;
-  legacyGroupRoomActive: boolean;
+  standardGroupRoomActive: boolean;
   sessionStreamAvailable: boolean;
   sessionStreamShouldConnect: boolean;
   groupStreamShouldConnect: boolean;
@@ -38,7 +38,7 @@ export function resolveChatLiveQueryPolicy(input: ChatLiveQueryPolicyInput): Cha
   const groupStreamOwnsLiveQueries = Boolean(
     input.sessionStreamAvailable
     && input.groupStreamShouldConnect
-    && input.legacyGroupRoomActive,
+    && input.standardGroupRoomActive,
   );
   const directBackgroundMs =
     input.directSessionBackgroundSyncActive && !directSessionStreamOwnsLiveQueries
