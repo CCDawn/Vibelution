@@ -92,4 +92,47 @@ describe("parseStreamingMarkdownBlocks", () => {
     expect(projection.liveBlocks[0]).toMatchObject({ type: "table" });
     expect(projection.blocks).toEqual(parseStreamingMarkdownBlocks(content));
   });
+
+  it("does not rescan the full stable prefix when only the live tail grows", () => {
+    const stableParagraphs = Array.from(
+      { length: 160 },
+      (_, index) => `稳定段落 ${index} ${"证据内容 ".repeat(12)}`,
+    ).join("\n\n");
+    const liveTail = "正在流式输出的尾部 ".repeat(70);
+    const baseContent = [stableParagraphs, "", liveTail].join("\n");
+    const firstProjection = projectStreamingMarkdownBlocks(baseContent);
+    const nextContent = `${baseContent} 新增 token`;
+
+    expect(firstProjection.stableText.length).toBeGreaterThan(STREAMING_MARKDOWN_LIVE_TAIL_CHARS * 4);
+    expect(nextContent.startsWith(baseContent)).toBe(true);
+
+    const originalMatchAll = String.prototype.matchAll;
+    const originalSplit = String.prototype.split;
+    try {
+      String.prototype.matchAll = function patchedMatchAll(this: string, ...args: Parameters<String["matchAll"]>) {
+        if (String(this).length > STREAMING_MARKDOWN_LIVE_TAIL_CHARS * 4) {
+          throw new Error("streaming markdown should not run matchAll on the full stable prefix");
+        }
+        return originalMatchAll.apply(this, args);
+      };
+      String.prototype.split = function patchedSplit(
+        this: string,
+        separator?: string | RegExp,
+        limit?: number,
+      ) {
+        if (separator === "\n" && String(this).length > STREAMING_MARKDOWN_LIVE_TAIL_CHARS * 4) {
+          throw new Error("streaming markdown should not split the full stable prefix");
+        }
+        return originalSplit.call(this, separator, limit);
+      };
+
+      const nextProjection = projectStreamingMarkdownBlocks(nextContent);
+
+      expect(nextProjection.stableText).toBe(firstProjection.stableText);
+      expect(nextProjection.liveText).toContain("新增 token");
+    } finally {
+      String.prototype.matchAll = originalMatchAll;
+      String.prototype.split = originalSplit;
+    }
+  });
 });

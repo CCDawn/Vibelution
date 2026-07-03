@@ -21,6 +21,15 @@ export type StreamingMarkdownProjection = {
 
 const STABLE_MARKDOWN_BLOCK_CACHE_LIMIT = 120;
 const stableMarkdownBlockCache = new Map<string, MarkdownBlock[]>();
+let lastStableMarkdownSplitCache:
+  | {
+    content: string;
+    targetIndex: number;
+    splitIndex: number;
+    stableText: string;
+    liveText: string;
+  }
+  | null = null;
 
 export function projectStreamingMarkdownBlocks(content: string): StreamingMarkdownProjection {
   const normalizedContent = normalizeStreamingMarkdownContent(content);
@@ -194,62 +203,134 @@ function splitStableMarkdownText(content: string): { stableText: string; liveTex
   if (content.length <= STREAMING_MARKDOWN_LIVE_TAIL_CHARS) {
     return { stableText: "", liveText: content };
   }
+  const cached = growingStableMarkdownSplit(content);
+  if (cached) {
+    return cached;
+  }
+  const targetIndex = stableMarkdownTargetIndex(content);
   let splitIndex = stableMarkdownSplitIndex(content);
   if (splitIndex <= 0) {
-    return { stableText: "", liveText: content };
+    return rememberStableMarkdownSplit(content, targetIndex, 0);
   }
 
-  const stableCandidate = content.slice(0, splitIndex);
-  if (hasOpenCodeFence(stableCandidate)) {
-    splitIndex = lastCodeFenceLineStart(stableCandidate);
-  }
+  splitIndex = safeStableSplitIndexForCodeFence(content, 0, splitIndex);
   const tableHoldbackStart = recentMarkdownTableHoldbackStart(content, splitIndex);
   if (tableHoldbackStart !== null) {
     splitIndex = tableHoldbackStart;
   }
   if (splitIndex <= 0) {
-    return { stableText: "", liveText: content };
+    return rememberStableMarkdownSplit(content, targetIndex, 0);
   }
 
-  return {
-    stableText: content.slice(0, splitIndex).trimEnd(),
-    liveText: content.slice(splitIndex).replace(/^\n+/, ""),
+  return rememberStableMarkdownSplit(content, targetIndex, splitIndex);
+}
+
+function growingStableMarkdownSplit(content: string): { stableText: string; liveText: string } | null {
+  const cached = lastStableMarkdownSplitCache;
+  if (!cached || !content.startsWith(cached.content)) {
+    return null;
+  }
+  const targetIndex = stableMarkdownTargetIndex(content);
+  if (targetIndex < cached.targetIndex) {
+    return null;
+  }
+
+  let splitIndex = cached.splitIndex;
+  const nextSplitIndex = stableMarkdownSplitIndexInRange(content, cached.targetIndex, targetIndex);
+  if (nextSplitIndex > splitIndex) {
+    splitIndex = safeStableSplitIndexForCodeFence(content, cached.splitIndex, nextSplitIndex);
+    const tableHoldbackStart = recentMarkdownTableHoldbackStart(content, splitIndex);
+    if (tableHoldbackStart !== null) {
+      splitIndex = tableHoldbackStart;
+    }
+  }
+  return rememberStableMarkdownSplit(content, targetIndex, splitIndex);
+}
+
+function rememberStableMarkdownSplit(
+  content: string,
+  targetIndex: number,
+  splitIndex: number,
+): { stableText: string; liveText: string } {
+  const stableText = splitIndex > 0 ? content.slice(0, splitIndex).trimEnd() : "";
+  const liveText = splitIndex > 0 ? content.slice(splitIndex).replace(/^\n+/, "") : content;
+  lastStableMarkdownSplitCache = {
+    content,
+    targetIndex,
+    splitIndex,
+    stableText,
+    liveText,
   };
+  return { stableText, liveText };
+}
+
+function stableMarkdownTargetIndex(content: string) {
+  return Math.max(0, content.length - STREAMING_MARKDOWN_LIVE_TAIL_CHARS);
 }
 
 function stableMarkdownSplitIndex(content: string) {
-  const targetIndex = Math.max(0, content.length - STREAMING_MARKDOWN_LIVE_TAIL_CHARS);
-  const searchText = content.slice(0, targetIndex);
-  const boundaries = [...searchText.matchAll(/\n\s*\n/g)];
-  const boundary = boundaries[boundaries.length - 1];
-  if (!boundary || boundary.index === undefined) {
-    return 0;
+  return stableMarkdownSplitIndexInRange(content, 0, stableMarkdownTargetIndex(content));
+}
+
+function stableMarkdownSplitIndexInRange(content: string, startIndex: number, endIndex: number) {
+  const start = Math.max(0, startIndex - 2);
+  const end = Math.min(Math.max(0, endIndex), content.length);
+  let searchIndex = end;
+  while (searchIndex > start) {
+    const secondNewline = content.lastIndexOf("\n", searchIndex - 1);
+    if (secondNewline < start) {
+      return 0;
+    }
+    let cursor = secondNewline - 1;
+    while (cursor >= start && content[cursor] !== "\n" && /\s/.test(content[cursor])) {
+      cursor -= 1;
+    }
+    if (cursor >= start && content[cursor] === "\n") {
+      return secondNewline + 1;
+    }
+    searchIndex = secondNewline;
   }
-  return boundary.index + boundary[0].length;
+  return 0;
 }
 
-function codeFenceLineStarts(content: string) {
-  return [...content.matchAll(/(^|\n)```[A-Za-z0-9_+.-]*\s*($|\n)/g)].map((match) => {
-    const index = match.index ?? 0;
-    return match[1] === "\n" ? index + 1 : index;
-  });
+function safeStableSplitIndexForCodeFence(content: string, startIndex: number, splitIndex: number) {
+  const openFenceStart = openCodeFenceStartInRange(content, startIndex, splitIndex);
+  return openFenceStart ?? splitIndex;
 }
 
-function hasOpenCodeFence(content: string) {
-  return codeFenceLineStarts(content).length % 2 === 1;
-}
-
-function lastCodeFenceLineStart(content: string) {
-  const starts = codeFenceLineStarts(content);
-  return starts[starts.length - 1] ?? 0;
+function openCodeFenceStartInRange(content: string, startIndex: number, endIndex: number) {
+  const start = previousLineStart(content, startIndex);
+  const end = Math.min(Math.max(0, endIndex), content.length);
+  let open = false;
+  let lastFenceStart = 0;
+  let lineStart = start;
+  while (lineStart < end) {
+    const lineEnd = content.indexOf("\n", lineStart);
+    const boundedLineEnd = lineEnd < 0 || lineEnd > end ? end : lineEnd;
+    const line = content.slice(lineStart, boundedLineEnd).trim();
+    if (/^```[A-Za-z0-9_+.-]*\s*$/.test(line)) {
+      open = !open;
+      lastFenceStart = lineStart;
+    }
+    if (lineEnd < 0 || lineEnd >= end) {
+      break;
+    }
+    lineStart = lineEnd + 1;
+  }
+  return open ? lastFenceStart : null;
 }
 
 function recentMarkdownTableHoldbackStart(content: string, splitIndex: number) {
-  const lines = content.split("\n");
+  const windowStart = previousLineStart(
+    content,
+    Math.max(0, splitIndex - STREAMING_MARKDOWN_LIVE_TAIL_CHARS * 3),
+  );
+  const windowText = content.slice(windowStart, splitIndex);
+  const lines = windowText.split("\n");
   const lineStarts: number[] = [];
   let position = 0;
   for (let index = 0; index < lines.length; index += 1) {
-    lineStarts[index] = position;
+    lineStarts[index] = windowStart + position;
     position += lines[index].length + (index < lines.length - 1 ? 1 : 0);
   }
 
@@ -275,6 +356,12 @@ function recentMarkdownTableHoldbackStart(content: string, splitIndex: number) {
     index = afterTableIndex - 1;
   }
   return holdbackStart;
+}
+
+function previousLineStart(content: string, index: number) {
+  const boundedIndex = Math.min(Math.max(0, index), content.length);
+  const previousNewline = content.lastIndexOf("\n", Math.max(0, boundedIndex - 1));
+  return previousNewline < 0 ? 0 : previousNewline + 1;
 }
 
 function isMarkdownTableHeader(lines: string[], index: number) {
