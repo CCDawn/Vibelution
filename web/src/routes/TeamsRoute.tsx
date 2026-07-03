@@ -91,6 +91,7 @@ import {
   TeamSourceCollectionStandaloneStagePanel,
   type TeamSourceCollectionStandaloneStageModule,
 } from "./TeamSourceCollectionStandaloneStagePanel";
+import { TeamSourceCollectionRunSettingsPanel } from "./TeamSourceCollectionRunSettingsPanel";
 import { TeamSourceCollectionStorageActionsPanel, type TeamSourceCollectionStorageAction } from "./TeamSourceCollectionStorageActionsPanel";
 import { TeamWorkflowGraphView, workflowGraphLayout } from "./TeamWorkflowGraphView";
 import styles from "./TeamsRoute.styles";
@@ -8572,100 +8573,24 @@ export function TeamsRoute({
         {renderSourceCollectionSelectedSourcePanel()}
         {selectedSourceCollectionStageId === "finding" ? (
         <>
-        <details className={styles.workflowSourceCollectionDetails} open={!selectedSourceCollectionRun}>
-          <summary>
-            <span>{lang === "zh" ? "本轮配置" : "Run settings"}</span>
-          </summary>
-          <form
-            className={styles.workflowSourceCollectionForm}
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (!selectedTeam?.teamId || !sourceCollectionCanStart || selectedTeamStartSourceCollectionPending) {
-                return;
-              }
-              startSourceCollectionRunMutation.mutate({
-                teamId: selectedTeam.teamId,
-                draft: sourceCollectionDraft,
-              });
-            }}
-          >
-          <label>
-            <span>{lang === "zh" ? "主题" : "Topic"}</span>
-            <VNativeInput
-              value={sourceCollectionDraft.topic}
-              onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, topic: event.target.value }))}
-            />
-          </label>
-          <label>
-            <span>{lang === "zh" ? "标题" : "Title"}</span>
-            <VNativeInput
-              value={sourceCollectionDraft.title}
-              onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, title: event.target.value }))}
-            />
-          </label>
-          <label className={styles.workflowSourceCollectionWide}>
-            <span>{lang === "zh" ? "目标" : "Goal"}</span>
-            <VNativeTextarea
-              value={sourceCollectionDraft.goal}
-              onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, goal: event.target.value }))}
-              rows={2}
-            />
-          </label>
-          <label>
-            <span>{lang === "zh" ? "搜索种子" : "Query seeds"}</span>
-            <VNativeTextarea
-              value={sourceCollectionDraft.querySeeds}
-              onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, querySeeds: event.target.value }))}
-              rows={3}
-            />
-          </label>
-          <label>
-            <span>{lang === "zh" ? "输入引用" : "Input refs"}</span>
-            <VNativeTextarea
-              value={sourceCollectionDraft.inputRefs}
-              onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, inputRefs: event.target.value }))}
-              rows={3}
-              placeholder={lang === "zh" ? "可选：本地文件、seed-query:..." : "Optional: local file, seed-query:..."}
-            />
-          </label>
-          {renderSourceCollectionModeFields()}
-          <label>
-            <span>{lang === "zh" ? "语言" : "Languages"}</span>
-            <VNativeInput
-              value={sourceCollectionDraft.searchLanguages}
-              onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, searchLanguages: event.target.value }))}
-            />
-          </label>
-          <label>
-            <span>{lang === "zh" ? "资料类型" : "Source types"}</span>
-            <VNativeInput
-              value={sourceCollectionDraft.sourceTypes}
-              onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, sourceTypes: event.target.value }))}
-            />
-          </label>
-          <label>
-            <span>{lang === "zh" ? "每条上限" : "Max results"}</span>
-            <VNativeInput
-              type="number"
-              min={1}
-              max={100}
-              value={sourceCollectionDraft.maxResultsPerQuery}
-              onChange={(event) =>
-                setSourceCollectionDraft((current) => ({
-                  ...current,
-                  maxResultsPerQuery: Math.max(1, Math.min(100, Number(event.target.value) || 1)),
-                }))
-              }
-            />
-          </label>
-          <VNativeButton type="submit" disabled={!sourceCollectionCanStart || selectedTeamStartSourceCollectionPending}>
-            <Search size={13} />
-            {selectedTeamStartSourceCollectionPending
-              ? (lang === "zh" ? "启动中" : "Starting")
-              : (lang === "zh" ? "启动搜集批次" : "Start collection")}
-          </VNativeButton>
-          </form>
-        </details>
+        <TeamSourceCollectionRunSettingsPanel
+          lang={lang}
+          draft={sourceCollectionDraft}
+          modeFields={renderSourceCollectionModeFields()}
+          open={!selectedSourceCollectionRun}
+          canStart={sourceCollectionCanStart}
+          startPending={selectedTeamStartSourceCollectionPending}
+          onDraftChange={(patch) => setSourceCollectionDraft((current) => ({ ...current, ...patch }))}
+          onSubmit={() => {
+            if (!selectedTeam?.teamId || !sourceCollectionCanStart || selectedTeamStartSourceCollectionPending) {
+              return;
+            }
+            startSourceCollectionRunMutation.mutate({
+              teamId: selectedTeam.teamId,
+              draft: sourceCollectionDraft,
+            });
+          }}
+        />
         <div className={styles.workflowSourceCollectionRuns}>
           <label>
             <span>{lang === "zh" ? "最近批次" : "Recent runs"}</span>
