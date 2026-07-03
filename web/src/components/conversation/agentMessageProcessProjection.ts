@@ -154,7 +154,7 @@ function mergeProcessProjectionMessages(previous: ConversationMessage, next: Con
   };
 }
 
-export function projectConversationProcessMessages(messages: ConversationMessage[]) {
+export function projectAgentMessageProcessMessages(messages: ConversationMessage[]) {
   const projected: ConversationMessage[] = [];
   for (const message of messages) {
     const previous = projected[projected.length - 1];

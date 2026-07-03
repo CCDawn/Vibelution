@@ -1,7 +1,15 @@
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import type { ConversationMessage } from "../../api/types";
-import { projectConversationProcessMessages } from "./conversationProcessProjection";
+import { projectAgentMessageProcessMessages } from "./agentMessageProcessProjection";
+
+const agentMessageProjectionModulePath = new URL("./agentMessageProcessProjection.ts", import.meta.url);
+const retiredConversationProjectionModulePath = new URL("./conversationProcessProjection.ts", import.meta.url);
+const timelineProjectionSource = readFileSync(
+  new URL("./useAgentMessageTimelineProjection.ts", import.meta.url),
+  "utf8",
+);
 
 function toolMessage(
   id: string,
@@ -27,9 +35,16 @@ function toolMessage(
   };
 }
 
-describe("conversation process projection", () => {
+describe("agent message process projection", () => {
+  it("uses the AgentMessage process projection module as the only production entry", () => {
+    expect(existsSync(agentMessageProjectionModulePath)).toBe(true);
+    expect(existsSync(retiredConversationProjectionModulePath)).toBe(false);
+    expect(timelineProjectionSource).toContain("./agentMessageProcessProjection");
+    expect(timelineProjectionSource).not.toContain("./conversationProcessProjection");
+  });
+
   it("merges consecutive process-only messages from the same turn while preserving each tool event", () => {
-    const projected = projectConversationProcessMessages([
+    const projected = projectAgentMessageProcessMessages([
       toolMessage("message-tool-1", "[编辑] 成功修改 config/public_config.py"),
       toolMessage("message-tool-2", "[编辑] 成功修改 config/workbench.py"),
       toolMessage("message-tool-3", "[编辑] 成功修改 config/settings.py"),
@@ -50,7 +65,7 @@ describe("conversation process projection", () => {
   });
 
   it("merges a same-turn process-only prefix into the following assistant answer", () => {
-    const projected = projectConversationProcessMessages([
+    const projected = projectAgentMessageProcessMessages([
       toolMessage("message-tool-1", "[编辑] 成功修改 config/public_config.py"),
       toolMessage("message-tool-2", "[编辑] 成功修改 config/workbench.py"),
       {
@@ -87,7 +102,7 @@ describe("conversation process projection", () => {
   });
 
   it("keeps same-turn live overlay status text out of the committed assistant answer", () => {
-    const projected = projectConversationProcessMessages([
+    const projected = projectAgentMessageProcessMessages([
       {
         id: "message-live-overlay",
         role: "assistant",
@@ -125,7 +140,7 @@ describe("conversation process projection", () => {
   });
 
   it("merges same-turn process-only events that arrive after the assistant answer", () => {
-    const projected = projectConversationProcessMessages([
+    const projected = projectAgentMessageProcessMessages([
       {
         id: "message-answer",
         role: "assistant",
@@ -152,7 +167,7 @@ describe("conversation process projection", () => {
   });
 
   it("does not merge across user messages while merging the next same-turn answer packet", () => {
-    const projected = projectConversationProcessMessages([
+    const projected = projectAgentMessageProcessMessages([
       toolMessage("message-tool-1", "[编辑] 成功修改 config/public_config.py"),
       {
         id: "message-user",
@@ -189,7 +204,7 @@ describe("conversation process projection", () => {
   });
 
   it("does not merge adjacent process-only messages from different turn ids", () => {
-    const projected = projectConversationProcessMessages([
+    const projected = projectAgentMessageProcessMessages([
       toolMessage("message-tool-1", "[编辑] 成功修改 config/public_config.py", { metadata: { turnId: "turn-a" } }),
       toolMessage("message-tool-2", "[编辑] 成功修改 config/workbench.py", { metadata: { turnId: "turn-b" } }),
     ]);
