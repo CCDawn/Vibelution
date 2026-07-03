@@ -69,6 +69,7 @@ import { useShellI18n } from "../i18n/useShellI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { MemoryOverviewPanel } from "./MemoryOverviewPanel";
 import { MemoryProjectMemoryQueuePanel } from "./MemoryProjectMemoryQueuePanel";
+import { MemoryReviewQueuePanel } from "./MemoryReviewQueuePanel";
 import styles from "./MemoryRoute.styles";
 
 const MemoryGraphCanvas = lazy(() => import("./MemoryGraphCanvas").then((module) => ({ default: module.MemoryGraphCanvas })));
@@ -4095,74 +4096,42 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     />
   );
 
-  const renderReviewQueue = () => {
-    if (overviewQuery.isPending && !hasOverviewSections) {
-      return <div className={styles.emptyState}>{copy.loading}</div>;
-    }
-    if (showBlockingOverviewError) {
-      return (
-        <div className={styles.emptyState}>
-          {copy.loadFailed}: {overviewQuery.error instanceof Error ? overviewQuery.error.message : String(overviewQuery.error)}
-        </div>
-      );
-    }
-    if (!priorityReviewPairs.length) {
-      return <div className={styles.emptyState}>{copy.noIssues}</div>;
-    }
-    return (
-      <div className={styles.reviewQueueList}>
-        {priorityReviewPairs.map((pair, index) => {
-          const { section, item } = pair;
-          const reasons = reviewReasonLabels(copy, item);
-          const target = memoryPairActionTarget(pair);
-          return (
-            <article key={`${section.id}:${item.id}`} className={styles.reviewQueueItem}>
-              <div className={styles.reviewRank}>{index + 1}</div>
-              <div className={styles.reviewQueueBody}>
-                <div className={styles.reviewQueueTitleLine}>
-                  <strong>{item.title}</strong>
-                  <span>{sourceOriginLabel(section, item)}</span>
-                </div>
-              </div>
-              <span className={styles.reviewQueueSummary}>{item.summary}</span>
-              <div className={styles.reviewReasonList} aria-label={copy.reviewReason}>
-                {reasons.map((reason) => (
-                  <span key={`${item.id}:${reason}`} className={styles.reviewReasonPill}>
-                    {reason}
-                  </span>
-                ))}
-              </div>
-              <span className={styles.reviewQueueTime}>{formatTimestamp(item.updatedAt, lang)}</span>
-              <div className={styles.reviewQueueActions}>
-                <NavLink
-                  className={styles.detailActionButton}
-                  to={`/memory/sources?section=${encodeURIComponent(section.id)}&item=${encodeURIComponent(item.id)}`}
-                  onClick={() => openReviewTarget(pair)}
-                  title={copy.auditMemory}
-                  aria-label={`${copy.auditMemory}: ${item.title}`}
-                >
-                  <FileText size={14} />
-                  <span>{copy.auditMemory}</span>
-                </NavLink>
-                {target === "manage" ? (
-                  <NavLink
-                    className={styles.detailActionButton}
-                    to={`/memory/manage?section=${encodeURIComponent(section.id)}&item=${encodeURIComponent(item.id)}`}
-                    onClick={() => openReviewTarget(pair)}
-                    title={copy.manageMemoryAction}
-                    aria-label={`${copy.manageMemoryAction}: ${item.title}`}
-                  >
-                    <Pencil size={14} />
-                    <span>{copy.manageMemoryAction}</span>
-                  </NavLink>
-                ) : null}
-              </div>
-            </article>
-          );
-        })}
-      </div>
-    );
-  };
+  const reviewQueueErrorText = showBlockingOverviewError
+    ? overviewQuery.error instanceof Error
+      ? overviewQuery.error.message
+      : String(overviewQuery.error)
+    : "";
+  const reviewQueueItems = priorityReviewPairs.map((pair, index) => {
+    const { section, item } = pair;
+    const itemId = pairSelectionKey(section.id, item.id);
+    const encodedSectionId = encodeURIComponent(section.id);
+    const encodedItemId = encodeURIComponent(item.id);
+    return {
+      id: itemId,
+      rank: index + 1,
+      title: item.title,
+      origin: sourceOriginLabel(section, item),
+      summary: item.summary,
+      reasons: reviewReasonLabels(copy, item),
+      updatedAt: formatTimestamp(item.updatedAt, lang),
+      auditHref: `/memory/sources?section=${encodedSectionId}&item=${encodedItemId}`,
+      manageHref: memoryPairActionTarget(pair) === "manage" ? `/memory/manage?section=${encodedSectionId}&item=${encodedItemId}` : undefined,
+    };
+  });
+  const reviewQueuePanel = (
+    <MemoryReviewQueuePanel
+      copy={copy}
+      isLoading={overviewQuery.isPending && !hasOverviewSections}
+      errorText={reviewQueueErrorText}
+      items={reviewQueueItems}
+      onOpenItem={(itemId) => {
+        const pair = priorityReviewPairs.find(({ section, item }) => pairSelectionKey(section.id, item.id) === itemId);
+        if (pair) {
+          openReviewTarget(pair);
+        }
+      }}
+    />
+  );
 
   const renderMatrixPanel = (title = copy.whereMemoryWorks) => (
     <section className={styles.matrixPanel} aria-label={copy.perceptionMatrix}>
@@ -6589,7 +6558,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               runtimeMemoryCount={runtimePairs.length}
               reviewMemoryCount={reviewPairs.length}
               warningStrip={renderWarningStrip()}
-              reviewQueue={renderReviewQueue()}
+              reviewQueue={reviewQueuePanel}
               projectMemoryQueue={projectMemoryQueuePanel}
               runtimeMemoryList={renderMemoryList(runtimePairs, copy.noRuntimeMemory, true)}
               reviewMemoryList={renderMemoryList(reviewPairs, copy.noIssues, true)}
