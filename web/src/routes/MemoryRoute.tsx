@@ -70,6 +70,7 @@ import { MemoryAgentMemoryPanel } from "./MemoryAgentMemoryPanel";
 import { MemoryCleanupPanel } from "./MemoryCleanupPanel";
 import { MemoryDetailPanel } from "./MemoryDetailPanel";
 import { MemoryEffectivePanel } from "./MemoryEffectivePanel";
+import { MemoryKnowledgeModeTabs } from "./MemoryKnowledgeModeTabs";
 import { MemoryKnowledgePipelinePanel } from "./MemoryKnowledgePipelinePanel";
 import { MemoryKnowledgeRagPanel } from "./MemoryKnowledgeRagPanel";
 import { MemoryKnowledgeStewardPanel } from "./MemoryKnowledgeStewardPanel";
@@ -4496,53 +4497,22 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         </aside>
 
         <main className={styles.knowledgeMain}>
-          <div className={styles.knowledgeModeTabs} role="tablist" aria-label={copy.governance}>
-            {([
-              {
-                key: "sources",
-                label: lang === "zh" ? "来源" : "Sources",
-                hint: `${copy.ownerSourceInbox} / ${copy.centralSources}`,
-                count: (sourceInboxQuery.data?.summary.sourceCount ?? ownerInboxSources.length) + (centralSourcesQuery.data?.summary.centralSourceCount ?? centralSources.length),
-              },
-              {
-                key: "search",
-                label: lang === "zh" ? "检索" : "Search",
-                hint: `${copy.knowledgeSearch} / ${copy.ragRetrieval}`,
-                count: (knowledgeSearchQuery.data?.summary.resultCount ?? 0) + (knowledgeRagRetrieveQuery.data?.summary.contextCount ?? 0),
-              },
-              {
-                key: "review",
-                label: lang === "zh" ? "审核" : "Review",
-                hint: `${copy.pendingProposals} / ${copy.ratingSuggestions}`,
-                count: (activeKnowledgeBase?.pendingProposals.length ?? 0) + ratingSuggestions.length,
-              },
-              {
-                key: "governance",
-                label: lang === "zh" ? "治理" : "Governance",
-                hint: `${copy.operationsHealth} / ${copy.governanceTasks}`,
-                count: (knowledgeOperationsHealth?.summary.findingCount ?? 0) + (governanceTasksQuery.data?.summary.openTaskCount ?? 0),
-              },
-              {
-                key: "permissions",
-                label: lang === "zh" ? "权限" : "Permissions",
-                hint: `${copy.permissionAudit} / ${copy.ingestionAdapters}`,
-                count: (permissionAudit?.summary.knowledgeBaseCount ?? 0) + ingestionAdapters.length,
-              },
-            ] satisfies Array<{ key: KnowledgeWorkspaceMode; label: string; hint: string; count: number }>).map((mode) => (
-              <VButton
-                key={mode.key}
-                type="button"
-                role="tab"
-                aria-selected={activeKnowledgeWorkspaceMode === mode.key}
-                className={activeKnowledgeWorkspaceMode === mode.key ? styles.knowledgeModeTabActive : styles.knowledgeModeTab}
-                title={mode.hint}
-                onClick={() => setActiveKnowledgeWorkspaceMode(mode.key)}
-              >
-                <span>{mode.label}</span>
-                <strong>{mode.count}</strong>
-              </VButton>
-            ))}
-          </div>
+          <MemoryKnowledgeModeTabs
+            copy={copy}
+            lang={lang}
+            activeMode={activeKnowledgeWorkspaceMode}
+            sourceCount={sourceInboxQuery.data?.summary.sourceCount ?? ownerInboxSources.length}
+            centralSourceCount={centralSourcesQuery.data?.summary.centralSourceCount ?? centralSources.length}
+            searchResultCount={knowledgeSearchQuery.data?.summary.resultCount ?? 0}
+            ragContextCount={knowledgeRagRetrieveQuery.data?.summary.contextCount ?? 0}
+            pendingProposalCount={activeKnowledgeBase?.pendingProposals.length ?? 0}
+            ratingSuggestionCount={ratingSuggestions.length}
+            operationsFindingCount={knowledgeOperationsHealth?.summary.findingCount ?? 0}
+            openGovernanceTaskCount={governanceTasksQuery.data?.summary.openTaskCount ?? 0}
+            permissionKnowledgeBaseCount={permissionAudit?.summary.knowledgeBaseCount ?? 0}
+            ingestionAdapterCount={ingestionAdapters.length}
+            onModeChange={setActiveKnowledgeWorkspaceMode}
+          />
           {activeKnowledgeWorkspaceMode === "sources" ? (
           <section className={styles.managementPanel}>
             <div className={styles.managementHeader}>
