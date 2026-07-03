@@ -102,6 +102,11 @@ type ConversationTeamLookup = {
   byTeamName: Map<string, ConversationIndexTeam>;
 };
 
+type ConversationTeamIdentity = {
+  teamId: string;
+  teamName: string;
+};
+
 const NON_DISCUSSION_TEAM_IDS = new Set(["self-evolution-team", "supervised-evolution-team"]);
 const NON_DISCUSSION_TEAM_KINDS = new Set(["self_evolution", "supervised_evolution"]);
 const NON_DISCUSSION_TEAM_SOURCES = new Set(["self_evolution", "supervised_evolution"]);
@@ -274,22 +279,43 @@ export function conversationTeamFor(
   return undefined;
 }
 
-function conversationTeamSearchValues(team: ConversationIndexTeam | undefined): string[] {
-  if (!team) {
-    return [];
+function conversationTeamIdentityFor(conversation: ConversationSummary): ConversationTeamIdentity | undefined {
+  if (conversation.type !== "direct_agent") {
+    return undefined;
   }
-  return [
-    team.teamId,
-    team.name,
-    team.purpose,
-    team.status,
-    team.teamKind,
-    team.teamCategory,
-    team.teamSource,
-    team.teamTemplateId ?? "",
-    team.linkedChatRoom?.title ?? "",
-    ...(team.members ?? []).flatMap((member) => [member.agentName, member.agentCode, member.role, member.purpose]),
+  const teamAwareConversation = conversation as TeamAwareConversationSummary;
+  const teamId = String(teamAwareConversation.teamId ?? "").trim();
+  const teamName = String(teamAwareConversation.teamName ?? "").trim();
+  if (!teamId && !teamName) {
+    return undefined;
+  }
+  return { teamId, teamName };
+}
+
+function conversationTeamSearchValues(
+  team: ConversationIndexTeam | undefined,
+  conversation?: ConversationSummary,
+): string[] {
+  const identity = conversation ? conversationTeamIdentityFor(conversation) : undefined;
+  const values = [
+    identity?.teamId ?? "",
+    identity?.teamName ?? "",
   ];
+  if (team) {
+    values.push(
+      team.teamId,
+      team.name,
+      team.purpose,
+      team.status,
+      team.teamKind,
+      team.teamCategory,
+      team.teamSource,
+      team.teamTemplateId ?? "",
+      team.linkedChatRoom?.title ?? "",
+      ...(team.members ?? []).flatMap((member) => [member.agentName, member.agentCode, member.role, member.purpose]),
+    );
+  }
+  return [...new Set(values.map((value) => String(value ?? "").trim()).filter(Boolean))];
 }
 
 export function sessionToConversationSummary(session: SessionSummary): ConversationSummary {
@@ -720,7 +746,7 @@ export function buildConversationIndexModel({
           conversation.agentPrimaryMode ?? "",
           conversation.agentRoleKey ?? "",
           conversation.agentPromptTemplateId ?? "",
-          ...conversationTeamSearchValues(conversationTeamFor(conversation, conversationTeamLookup)),
+          ...conversationTeamSearchValues(conversationTeamFor(conversation, conversationTeamLookup), conversation),
           ...sessionSearchValues,
         ].some((value) => String(value ?? "").toLowerCase().includes(term));
       })
@@ -757,20 +783,32 @@ export function buildConversationIndexModel({
   const buckets = new Map<ConversationIndexGroupKey, ConversationSummary[]>(
     CONVERSATION_GROUP_ORDER.map((groupKey) => [groupKey, []]),
   );
-  const teamBuckets = new Map<string, { team: ConversationIndexTeam; items: ConversationSummary[] }>();
+  const teamOrderById = new Map(
+    discussionTeams.map((team, index) => [String(team.teamId ?? "").trim(), index]),
+  );
+  const teamBuckets = new Map<string, {
+    label: string;
+    orderIndex: number;
+    teamId: string;
+    items: ConversationSummary[];
+  }>();
   filteredConversations.forEach((conversation) => {
     const team = conversationTeamFor(conversation, conversationTeamLookup);
-    if (team) {
-      const teamId = String(team.teamId ?? "").trim();
-      if (teamId) {
-        const existing = teamBuckets.get(teamId);
-        if (existing) {
-          existing.items.push(conversation);
-        } else {
-          teamBuckets.set(teamId, { team, items: [conversation] });
-        }
-        return;
+    const explicitTeamIdentity = conversationTeamIdentityFor(conversation);
+    const teamId = String(team?.teamId ?? explicitTeamIdentity?.teamId ?? "").trim();
+    if (teamId) {
+      const existing = teamBuckets.get(teamId);
+      if (existing) {
+        existing.items.push(conversation);
+      } else {
+        teamBuckets.set(teamId, {
+          label: team?.name || explicitTeamIdentity?.teamName || teamId,
+          orderIndex: teamOrderById.get(teamId) ?? discussionTeams.length + teamBuckets.size,
+          teamId,
+          items: [conversation],
+        });
       }
+      return;
     }
     const groupKey = classifyConversation(conversation);
     buckets.get(groupKey)?.push(conversation);
@@ -778,20 +816,18 @@ export function buildConversationIndexModel({
   const leadingGroupKeys: ConversationIndexGroupKey[] = ["user", "group"];
   const trailingGroupKeys = CONVERSATION_GROUP_ORDER.filter((groupKey) => !leadingGroupKeys.includes(groupKey));
   const teamConversationGroups: ConversationIndexGroup[] = [];
-  discussionTeams.forEach((team) => {
-    const teamId = String(team.teamId ?? "").trim();
-    const bucket = teamId ? teamBuckets.get(teamId) : undefined;
-    if (!bucket) {
-      return;
-    }
-    teamConversationGroups.push({
-      groupKey: conversationTeamGroupKey(teamId),
-      label: team.name || teamId,
-      items: bucket.items,
-      teamId,
-      groupKind: "team",
+  [...teamBuckets.values()]
+    .sort((left, right) => left.orderIndex - right.orderIndex)
+    .forEach((bucket) => {
+      const teamId = bucket.teamId;
+      teamConversationGroups.push({
+        groupKey: conversationTeamGroupKey(teamId),
+        label: bucket.label,
+        items: bucket.items,
+        teamId,
+        groupKind: "team" as const,
+      });
     });
-  });
   const groupedConversations = [
     ...leadingGroupKeys
       .map((groupKey) => ({
