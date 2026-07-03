@@ -66,6 +66,7 @@ import { projectConversationDisplayMessages } from "./conversationDisplayMessage
 import {
   imageArtifactForMessage,
   isAgentInboxMessage,
+  isCliAgentLifecycleMessage,
   isGroupRoomTranscriptMessage,
   isRuntimeNoticeMessage,
   isTurnErrorMessage,
@@ -98,6 +99,14 @@ import {
   buildCurrentTurnErrorRows,
   resolveConversationTurnErrorType,
 } from "./conversationTurnErrorPresentation";
+import {
+  agentInboxSourceLabel,
+  agentInboxSummary,
+  cliAgentLifecycleDetail,
+  cliAgentLifecycleLabel,
+  conversationMessageMetadataText,
+  groupRoomTranscriptLabel,
+} from "./conversationSpecialMessagePresentation";
 import {
   buildComputerUseStateForMessage,
   COMPUTER_USE_TOOL_NAME,
@@ -277,80 +286,8 @@ function resolveMessageTurnAvatar(
   };
 }
 
-function metadataText(metadata: Record<string, unknown> | undefined, key: string) {
-  const value = metadata?.[key];
-  if (typeof value === "string") {
-    return value.trim();
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value).trim();
-  }
-  return "";
-}
-
-function isCliAgentLifecycleMessage(message: ConversationMessage) {
-  return metadataText(message.metadata, "kind") === "cli_agent_lifecycle";
-}
-
-function cliAgentLifecycleLabel(message: ConversationMessage, lang: "zh" | "en") {
-  const label = metadataText(message.metadata, "label") || metadataText(message.metadata, "adapterId") || "CLI Agent";
-  const event = metadataText(message.metadata, "event") || metadataText(message.metadata, "status");
-  if (event === "closed") {
-    return lang === "zh" ? `终端已关闭 · ${label}` : `Terminal closed · ${label}`;
-  }
-  return lang === "zh" ? `终端状态 · ${label}` : `Terminal status · ${label}`;
-}
-
-function cliAgentLifecycleDetail(message: ConversationMessage) {
-  return metadataText(message.metadata, "cliRunId")
-    || metadataText(message.metadata, "terminalSessionId")
-    || message.content;
-}
-
-function agentInboxSourceLabel(message: ConversationMessage) {
-  const metadata = message.metadata;
-  const sourceLabel = [
-    metadataText(metadata, "sourceAgentCode"),
-    metadataText(metadata, "sourceAgentName"),
-  ].filter(Boolean).join(" · ");
-  if (sourceLabel) {
-    return `Agent 私信 · ${sourceLabel}`;
-  }
-  const fallback = String(message.content ?? "").match(/^来源 Agent:\s*(.+)$/m)?.[1]?.trim();
-  return fallback ? `Agent 私信 · ${fallback}` : "Agent 私信";
-}
-
-function agentInboxSummary(message: ConversationMessage) {
-  const metadataSummary = metadataText(message.metadata, "summary");
-  if (metadataSummary) {
-    return metadataSummary;
-  }
-  const content = String(message.content ?? "");
-  const summaryMatch = content.match(/^摘要:\s*([\s\S]*?)(?:\n\s*消息内容:|$)/m);
-  const summary = summaryMatch?.[1]?.trim();
-  if (summary) {
-    return summary;
-  }
-  const bodyMatch = content.match(/^消息内容:\s*([\s\S]*)$/m);
-  const body = bodyMatch?.[1]?.trim();
-  if (body) {
-    return body.replace(/\s+/g, " ").trim();
-  }
-  return content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find((line) => line && !line.startsWith("[Agent 私信") && !line.startsWith("来源 Agent") && !line.startsWith("消息ID"))
-    ?? "";
-}
-
-function groupRoomTranscriptLabel(message: ConversationMessage) {
-  const metadata = message.metadata;
-  const roomTitle = metadataText(metadata, "sourceRoomTitle");
-  return roomTitle ? `群聊同步记录 · ${roomTitle}` : "群聊同步记录";
-}
-
 function conversationMessageTurnId(message: ConversationMessage) {
-  return metadataText(message.metadata, "turnId").replace(/^live:/, "");
+  return conversationMessageMetadataText(message.metadata, "turnId").replace(/^live:/, "");
 }
 
 function isAssistantProcessThreadCandidate(message: ConversationMessage, sectionState: AgentMessageSectionState) {
