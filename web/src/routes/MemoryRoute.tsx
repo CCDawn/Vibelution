@@ -4,7 +4,6 @@ import {
   Brain,
   CheckCircle2,
   RefreshCw,
-  Search,
   TriangleAlert,
   Undo2,
 } from "lucide-react";
@@ -66,8 +65,8 @@ import { MemoryGraphViewPanel, type MemoryGraphRelation } from "./MemoryGraphVie
 import { MemoryKnowledgeModeTabs } from "./MemoryKnowledgeModeTabs";
 import { MemoryKnowledgePermissionsPanel } from "./MemoryKnowledgePermissionsPanel";
 import { MemoryKnowledgePipelinePanel } from "./MemoryKnowledgePipelinePanel";
-import { MemoryKnowledgeRagPanel } from "./MemoryKnowledgeRagPanel";
 import { MemoryKnowledgeReviewPanel } from "./MemoryKnowledgeReviewPanel";
+import { MemoryKnowledgeSearchPanel, type MemoryKnowledgeSearchDraft } from "./MemoryKnowledgeSearchPanel";
 import {
   MemoryKnowledgeSourceGovernancePanel,
   type MemoryKnowledgeOwnerSourceDraft,
@@ -566,13 +565,6 @@ type RatingDraft = {
   scope: string;
   reviewPriority: string;
   markingReason: string;
-};
-type KnowledgeSearchDraft = {
-  query: string;
-  tags: string;
-  searchMode: "exact" | "semantic" | "hybrid";
-  ragTopK: number;
-  ragMaxContextChars: number;
 };
 type RatingSuggestionStatusFilter = "pending" | "applied" | "rejected" | "all";
 type RatingSuggestionPriorityFilter = "all" | "urgent" | "elevated" | "normal";
@@ -1774,7 +1766,7 @@ function newRatingDraft(): RatingDraft {
   };
 }
 
-function newKnowledgeSearchDraft(): KnowledgeSearchDraft {
+function newKnowledgeSearchDraft(): MemoryKnowledgeSearchDraft {
   return {
     query: "",
     tags: "",
@@ -2182,7 +2174,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const [duplicateCentralSourceId, setDuplicateCentralSourceId] = useState("");
   const [proposalDraft, setProposalDraft] = useState<ProposalDraft>(() => newProposalDraft());
   const [ratingDraft, setRatingDraft] = useState<RatingDraft>(() => newRatingDraft());
-  const [knowledgeSearchDraft, setKnowledgeSearchDraft] = useState<KnowledgeSearchDraft>(() => newKnowledgeSearchDraft());
+  const [knowledgeSearchDraft, setKnowledgeSearchDraft] = useState<MemoryKnowledgeSearchDraft>(() => newKnowledgeSearchDraft());
   const [ratingSuggestionStatus, setRatingSuggestionStatus] = useState<RatingSuggestionStatusFilter>("pending");
   const [ratingSuggestionPriority, setRatingSuggestionPriority] = useState<RatingSuggestionPriorityFilter>("all");
   const [selectedRatingSuggestionIds, setSelectedRatingSuggestionIds] = useState<string[]>([]);
@@ -4430,98 +4422,21 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           ) : null}
 
           {activeKnowledgeWorkspaceMode === "search" ? (
-          <section className={styles.managementPanel}>
-            <div className={styles.managementHeader}>
-              <div>
-                <p className={styles.panelEyebrow}>{copy.knowledgeSearch}</p>
-                <h2>{copy.governance}</h2>
-              </div>
-              <span className={styles.countPill}>{knowledgeSearchQuery.data?.summary.resultCount ?? 0}</span>
-            </div>
-            <div className={styles.knowledgeFormGrid}>
-              <label>
-                <span>{copy.searchQuery}</span>
-                <VNativeInput value={knowledgeSearchDraft.query} onChange={(event) => setKnowledgeSearchDraft({ ...knowledgeSearchDraft, query: event.target.value })} />
-              </label>
-              <label>
-                <span>{copy.tags}</span>
-                <VNativeInput value={knowledgeSearchDraft.tags} onChange={(event) => setKnowledgeSearchDraft({ ...knowledgeSearchDraft, tags: event.target.value })} />
-              </label>
-              <label>
-                <span>{copy.searchMode}</span>
-                <VNativeSelect
-                  value={knowledgeSearchDraft.searchMode}
-                  onChange={(event) =>
-                    setKnowledgeSearchDraft({
-                      ...knowledgeSearchDraft,
-                      searchMode: event.target.value as KnowledgeSearchDraft["searchMode"],
-                    })
-                  }
-                >
-                  <option value="exact">{copy.exactSearch}</option>
-                  <option value="semantic">{copy.semanticSearch}</option>
-                  <option value="hybrid">{copy.hybridSearch}</option>
-                </VNativeSelect>
-              </label>
-              <label>
-                <span>{copy.ragTopK}</span>
-                <VNativeInput
-                  type="number"
-                  min={1}
-                  max={20}
-                  value={knowledgeSearchDraft.ragTopK}
-                  onChange={(event) =>
-                    setKnowledgeSearchDraft({
-                      ...knowledgeSearchDraft,
-                      ragTopK: Math.min(20, Math.max(1, Number(event.target.value) || 5)),
-                    })
-                  }
-                />
-              </label>
-              <label>
-                <span>{copy.ragContextBudget}</span>
-                <VNativeInput
-                  type="number"
-                  min={120}
-                  max={4000}
-                  value={knowledgeSearchDraft.ragMaxContextChars}
-                  onChange={(event) =>
-                    setKnowledgeSearchDraft({
-                      ...knowledgeSearchDraft,
-                      ragMaxContextChars: Math.min(4000, Math.max(120, Number(event.target.value) || 1200)),
-                    })
-                  }
-                />
-              </label>
-            </div>
-            <div className={styles.knowledgeProposalList}>
-              {knowledgeSearchResults.map((item) => (
-                <section key={`search:${item.knowledgeItemId}`} className={styles.knowledgeRow}>
-                  <strong>{item.title}</strong>
-                  <span>{item.summary || item.content}</span>
-                  <span className={styles.statusPill}>{item.importanceLevel}</span>
-                  <small>{item.teamName} · {item.knowledgeBaseName} · {item.sourceTypes.join(", ") || copy.sourceArtifacts}</small>
-                  <small>{copy.semanticScore}: {Math.round(Number(item.semanticScore || 0) * 100)}% · {item.matchReason}</small>
-                </section>
-              ))}
-              {!knowledgeSearchQuery.isPending && !knowledgeSearchResults.length ? (
-                <section className={styles.emptyDetail}>
-                  <Search size={20} />
-                  <strong>{copy.noMatches}</strong>
-                </section>
-              ) : null}
-            </div>
-            <MemoryKnowledgeRagPanel
-              copy={copy}
-              contexts={knowledgeRagContexts}
-              health={knowledgeRagHealth}
-              providerHealth={localRagProviderHealth}
-              retrievalPolicy={knowledgeRagPolicy}
-              contextCount={knowledgeRagRetrieveQuery.data?.summary.contextCount ?? 0}
-              citationCount={knowledgeRagRetrieveQuery.data?.summary.citationCount ?? 0}
-              isPending={knowledgeRagRetrieveQuery.isPending}
-            />
-          </section>
+          <MemoryKnowledgeSearchPanel
+            copy={copy}
+            draft={knowledgeSearchDraft}
+            resultCount={knowledgeSearchQuery.data?.summary.resultCount ?? 0}
+            results={knowledgeSearchResults}
+            searchPending={knowledgeSearchQuery.isPending}
+            contexts={knowledgeRagContexts}
+            ragHealth={knowledgeRagHealth}
+            ragProviderHealth={localRagProviderHealth}
+            retrievalPolicy={knowledgeRagPolicy}
+            ragContextCount={knowledgeRagRetrieveQuery.data?.summary.contextCount ?? 0}
+            ragCitationCount={knowledgeRagRetrieveQuery.data?.summary.citationCount ?? 0}
+            ragPending={knowledgeRagRetrieveQuery.isPending}
+            onDraftChange={setKnowledgeSearchDraft}
+          />
           ) : null}
 
           {activeKnowledgeWorkspaceMode === "governance" ? (
