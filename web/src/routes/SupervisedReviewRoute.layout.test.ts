@@ -39,6 +39,23 @@ describe("SupervisedReviewRoute layout contract", () => {
     expect(routeStylesSource).not.toContain("min-h-[118px]");
   });
 
+  it("keeps repeated review controls as named Tailwind slices", () => {
+    expect(routeStylesSource).toContain("const reviewControlButton");
+    expect(routeStylesSource).toContain("const reviewControlButtonActive");
+    expect(routeStylesSource).toContain("const reviewPrimaryActionButton");
+    expect(routeStylesSource).toContain("const reviewFormLabel");
+    expect(routeStylesSource).toContain("const reviewInputTargets");
+    expect(routeStylesSource).toContain("const reviewTextAreaTargets");
+    expect(routeStylesSource).toContain("filterButton: reviewControlButton");
+    expect(routeStylesSource).toContain("decisionButton: reviewControlButton");
+    expect(routeStylesSource).toContain("secondaryAction: reviewControlButton");
+    expect(routeStylesSource).toContain("filterButtonActive: reviewControlButtonActive");
+    expect(routeStylesSource).toContain("decisionButtonActive: reviewControlButtonActive");
+    expect(routeStylesSource).toContain("primaryAction: reviewPrimaryActionButton");
+    expect(routeStylesSource).toContain("formField: reviewFormField");
+    expect(routeStylesSource).toContain("textAreaField: reviewTextAreaField");
+  });
+
   it("hosts candidate worktree review inside the sample review workspace", () => {
     expect(routeSource).toContain("SupervisedWorktreeReviewPanel");
     expect(routeSource).toContain("queryKeys.evolutionWorkspaceSnapshot()");

@@ -1,3 +1,18 @@
+const reviewControlButton =
+  "inline-flex min-h-8 items-center justify-center gap-2 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-card-muted)] px-2.5 text-[13px] font-semibold text-[var(--fg-primary)] no-underline transition hover:border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] disabled:cursor-not-allowed disabled:opacity-55";
+const reviewControlButtonActive =
+  "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] text-[var(--accent-warm-2)]";
+const reviewPrimaryActionButton =
+  "inline-flex min-h-8 items-center justify-center gap-2 rounded-lg border border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] px-2.5 text-[13px] font-semibold text-[var(--accent-warm-2)] no-underline transition disabled:cursor-not-allowed disabled:opacity-55";
+const reviewFormLabel =
+  "block [&_span]:mb-1 [&_span]:block [&_span]:text-xs [&_span]:uppercase [&_span]:tracking-[0.08em] [&_span]:text-[var(--fg-tertiary)]";
+const reviewInputTargets =
+  "[&_input]:min-h-[34px] [&_input]:w-full [&_input]:rounded-lg [&_input]:border [&_input]:border-[var(--border-soft)] [&_input]:bg-[var(--surface-card-muted)] [&_input]:px-3 [&_input]:font-[inherit] [&_input]:text-[var(--fg-primary)] [&_input]:outline-none [&_input::placeholder]:text-[var(--fg-tertiary)] [&_select]:min-h-[34px] [&_select]:w-full [&_select]:rounded-lg [&_select]:border [&_select]:border-[var(--border-soft)] [&_select]:bg-[var(--surface-card-muted)] [&_select]:px-3 [&_select]:font-[inherit] [&_select]:text-[var(--fg-primary)] [&_select]:outline-none";
+const reviewTextAreaTargets =
+  "[&_textarea]:min-h-[84px] [&_textarea]:w-full [&_textarea]:resize-y [&_textarea]:rounded-lg [&_textarea]:border [&_textarea]:border-[var(--border-soft)] [&_textarea]:bg-[var(--surface-card-muted)] [&_textarea]:p-2.5 [&_textarea]:font-[inherit] [&_textarea]:text-[var(--fg-primary)] [&_textarea]:outline-none [&_textarea::placeholder]:text-[var(--fg-tertiary)]";
+const reviewFormField = [reviewFormLabel, reviewInputTargets].join(" ");
+const reviewTextAreaField = [reviewFormLabel, reviewTextAreaTargets].join(" ");
+
 const styles = {
   page:
     "flex h-full min-h-0 flex-col gap-1.5 overflow-hidden px-3 py-2 pb-3 text-[var(--fg-primary)] max-[980px]:overflow-auto max-[980px]:pb-[18px]",
@@ -44,18 +59,12 @@ const styles = {
   queueControls: "flex flex-col gap-2.5",
   filterSegmented: "flex flex-wrap items-center gap-1.5",
   decisionSegmented: "flex flex-wrap items-center gap-1.5",
-  filterButton:
-    "inline-flex min-h-8 items-center justify-center gap-2 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-card-muted)] px-2.5 text-[13px] font-semibold text-[var(--fg-primary)] no-underline transition hover:border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] disabled:cursor-not-allowed disabled:opacity-55",
-  decisionButton:
-    "inline-flex min-h-8 items-center justify-center gap-2 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-card-muted)] px-2.5 text-[13px] font-semibold text-[var(--fg-primary)] no-underline transition hover:border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] disabled:cursor-not-allowed disabled:opacity-55",
-  filterButtonActive:
-    "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] text-[var(--accent-warm-2)]",
-  decisionButtonActive:
-    "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] text-[var(--accent-warm-2)]",
-  primaryAction:
-    "inline-flex min-h-8 items-center justify-center gap-2 rounded-lg border border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] px-2.5 text-[13px] font-semibold text-[var(--accent-warm-2)] no-underline transition disabled:cursor-not-allowed disabled:opacity-55",
-  secondaryAction:
-    "inline-flex min-h-8 items-center justify-center gap-2 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-card-muted)] px-2.5 text-[13px] font-semibold text-[var(--fg-primary)] no-underline transition hover:border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)]",
+  filterButton: reviewControlButton,
+  decisionButton: reviewControlButton,
+  filterButtonActive: reviewControlButtonActive,
+  decisionButtonActive: reviewControlButtonActive,
+  primaryAction: reviewPrimaryActionButton,
+  secondaryAction: reviewControlButton,
   compactAction:
     "inline-flex min-h-7 min-w-0 items-center justify-center gap-1.5 overflow-hidden whitespace-nowrap rounded-lg border border-[var(--border-soft)] bg-[var(--surface-card-muted)] px-2 text-[11px] font-semibold text-[var(--fg-primary)] no-underline transition disabled:cursor-not-allowed disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-label]]:truncate",
   dangerAction:
@@ -105,10 +114,8 @@ const styles = {
   transcriptCard:
     "rounded-lg border border-[var(--border-soft)] bg-[var(--surface-panel)] px-2.5 py-[9px] [&_p]:m-0 [&_p]:mt-2 [&_p]:whitespace-pre-wrap [&_p]:leading-normal",
   evidenceTop: "flex items-center justify-between gap-2.5",
-  formField:
-    "block [&_span]:mb-1 [&_span]:block [&_span]:text-xs [&_span]:uppercase [&_span]:tracking-[0.08em] [&_span]:text-[var(--fg-tertiary)] [&_input]:min-h-[34px] [&_input]:w-full [&_input]:rounded-lg [&_input]:border [&_input]:border-[var(--border-soft)] [&_input]:bg-[var(--surface-card-muted)] [&_input]:px-3 [&_input]:font-[inherit] [&_input]:text-[var(--fg-primary)] [&_input]:outline-none [&_input::placeholder]:text-[var(--fg-tertiary)] [&_select]:min-h-[34px] [&_select]:w-full [&_select]:rounded-lg [&_select]:border [&_select]:border-[var(--border-soft)] [&_select]:bg-[var(--surface-card-muted)] [&_select]:px-3 [&_select]:font-[inherit] [&_select]:text-[var(--fg-primary)] [&_select]:outline-none",
-  textAreaField:
-    "block [&_span]:mb-1 [&_span]:block [&_span]:text-xs [&_span]:uppercase [&_span]:tracking-[0.08em] [&_span]:text-[var(--fg-tertiary)] [&_textarea]:min-h-[84px] [&_textarea]:w-full [&_textarea]:resize-y [&_textarea]:rounded-lg [&_textarea]:border [&_textarea]:border-[var(--border-soft)] [&_textarea]:bg-[var(--surface-card-muted)] [&_textarea]:p-2.5 [&_textarea]:font-[inherit] [&_textarea]:text-[var(--fg-primary)] [&_textarea]:outline-none [&_textarea::placeholder]:text-[var(--fg-tertiary)]",
+  formField: reviewFormField,
+  textAreaField: reviewTextAreaField,
   actionRow: "flex items-center justify-between gap-2.5",
   detailHeaderActions: "flex items-center justify-between gap-2.5",
   feedbackText: "m-0 text-[var(--accent-warm-2)]",
