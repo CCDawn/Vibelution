@@ -27,7 +27,7 @@ const styles: Record<string, string> = {
   agentRoleTag_tool:
     "agentRoleTag_tool min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   body:
-    "body min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    "body min-w-0 grid h-full min-h-0 grid-cols-[minmax(0,1fr)_minmax(320px,380px)] gap-2 overflow-hidden text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-[1080px]:grid-cols-1 max-[1080px]:grid-rows-[minmax(420px,1fr)_minmax(260px,0.48fr)]",
   canvas:
     "canvas min-w-0 grid min-h-0 gap-2 p-2",
   canvasLocked:
@@ -35,11 +35,11 @@ const styles: Record<string, string> = {
   canvasPanning:
     "canvasPanning min-w-0 grid min-h-0 gap-2 p-2",
   canvasScroller:
-    "canvasScroller min-w-0 grid min-h-0 gap-2 p-2",
+    "canvasScroller min-w-0 grid h-full min-h-0 gap-2 overflow-auto p-2",
   canvasShell:
-    "canvasShell min-w-0 grid h-full min-h-0 content-start overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)] gap-2 p-2",
+    "canvasShell min-w-0 grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)] gap-2 p-2",
   canvasViewport:
-    "canvasViewport min-w-0 grid min-h-0 gap-2 p-2",
+    "canvasViewport min-w-0 grid min-h-full gap-2 p-2",
   edge:
     "edge min-w-0",
   edgeActive:
@@ -169,11 +169,11 @@ const styles: Record<string, string> = {
   inlineToggle:
     "inlineToggle min-w-0",
   inspector:
-    "inspector min-w-0",
+    "inspector min-w-0 grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden",
   inspectorBody:
-    "inspectorBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] !grid grid-cols-[76px_minmax(0,1fr)] min-h-0 overflow-hidden",
+    "inspectorBody min-w-0 h-full text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] !grid grid-cols-[76px_minmax(0,1fr)] min-h-0 overflow-hidden",
   inspectorContent:
-    "inspectorContent min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    "inspectorContent min-w-0 min-h-0 overflow-auto text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   inspectorHeader:
     "inspectorHeader min-w-0 flex flex-wrap items-center gap-1.5",
   inspectorTab:
@@ -183,7 +183,7 @@ const styles: Record<string, string> = {
   inspectorTabBadge:
     "inspectorTabBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   inspectorTabs:
-    "inspectorTabs min-w-0",
+    "inspectorTabs min-w-0 min-h-0 overflow-auto",
   issueCard:
     "issueCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   issueCardBody:
@@ -373,7 +373,7 @@ const styles: Record<string, string> = {
   reconnectHint:
     "reconnectHint min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   route:
-    "route min-w-0 grid h-full min-h-0 content-start overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)]",
+    "route min-w-0 grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)]",
   saveStatusError:
     "saveStatusError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   saveStatusIdle:
