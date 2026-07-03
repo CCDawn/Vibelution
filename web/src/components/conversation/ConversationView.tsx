@@ -1826,7 +1826,14 @@ export function ConversationView({
     return lang === "zh" ? "等待请求" : "Pending request";
   }
 
-  function processSummaryTitle(tone: string) {
+  function isCompactAnswerOnlyRequestProcess(operations: ConversationOperation[]) {
+    return operations.length > 0 && operations.every((operation) => !shouldShowTimelineOperation(operation));
+  }
+
+  function processSummaryTitle(tone: string, operations: ConversationOperation[]) {
+    if (isCompactAnswerOnlyRequestProcess(operations)) {
+      return compactRequestStateLabel(tone);
+    }
     if (tone === "running") {
       return lang === "zh" ? "生成中" : "Generating";
     }
@@ -1840,6 +1847,9 @@ export function ConversationView({
   }
 
   function processSummaryMeta(operations: ConversationOperation[]) {
+    if (isCompactAnswerOnlyRequestProcess(operations)) {
+      return "";
+    }
     const thoughtCount = operations.filter((operation) => operation.kind === "thought").length;
     const toolCount = operations.filter((operation) => operation.kind === "tool").length;
     const mentalCount = operations.filter((operation) => operation.kind === "mental").length;
@@ -2940,7 +2950,8 @@ export function ConversationView({
     const toneStyle = styles[`answerOnlyProcessGroup_${tone}` as keyof typeof styles] ?? "";
     const expanded = getExpansionState(messageId, "process", defaultExpanded);
     const preview = inlinePreview || processSummaryPreview(operations);
-    const title = processSummaryTitle(tone);
+    const title = processSummaryTitle(tone, operations);
+    const meta = processSummaryMeta(operations);
     const hasExpandableDetails = operations.some(shouldShowTimelineOperation);
     const summaryContent = (
       <>
@@ -2948,7 +2959,7 @@ export function ConversationView({
           {processSummaryIcon(tone)}
         </span>
         <span className={styles.answerOnlyProcessTitle}>{title}</span>
-        <span className={styles.answerOnlyProcessMeta}>{processSummaryMeta(operations)}</span>
+        {meta ? <span className={styles.answerOnlyProcessMeta}>{meta}</span> : null}
       </>
     );
     if (!hasExpandableDetails) {
