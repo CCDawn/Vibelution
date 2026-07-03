@@ -2955,8 +2955,8 @@ describe("ConversationView edit resend affordance", () => {
       { useDefaultProcessDisplayMode: true },
     );
 
-    expect(html).toContain("生成中");
     expect(html).toContain("正在请求");
+    expect(html).not.toContain("生成中");
     expect(html).not.toContain("正在请求模型，等待首个响应片段...");
     expect(html).not.toContain("上下文已组装完成");
     expect(html).not.toContain("answerOnlyProcessPreview");
@@ -2987,8 +2987,8 @@ describe("ConversationView edit resend affordance", () => {
       { useDefaultProcessDisplayMode: true },
     );
 
-    expect(html).toContain("生成中");
     expect(html).toContain("正在请求");
+    expect(html).not.toContain("生成中");
     expect(html).not.toContain("aria-expanded");
     expect(html).not.toContain('title="展开执行明细"');
     expect(html.match(/正在请求/g)?.length).toBe(1);
@@ -3106,8 +3106,8 @@ describe("ConversationView edit resend affordance", () => {
       { useDefaultProcessDisplayMode: true },
     );
 
-    expect(html).toContain("生成中");
     expect(html).toContain("正在请求");
+    expect(html).not.toContain("生成中");
     expect(html).not.toContain("statusSpinner");
   });
 
