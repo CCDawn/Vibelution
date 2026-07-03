@@ -40,6 +40,7 @@ const cssModuleFreeTargets = [
   "components/preview/StructuredLogPreview.tsx",
   "routes/AgentsRoute.tsx",
   "routes/ConfigRoute.tsx",
+  "routes/EvolutionRoute.tsx",
   "routes/GitRoute.tsx",
   "routes/GitDiffView.tsx",
   "routes/KernelTaskCenterRoute.tsx",

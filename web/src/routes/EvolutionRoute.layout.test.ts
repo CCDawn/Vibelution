@@ -4,8 +4,8 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import routeSource from "./EvolutionRoute.tsx?raw";
 import routeStyles from "./EvolutionRoute.styles";
+import stylesSource from "./EvolutionRoute.styles.ts?raw";
 
-const stylesSource = readFileSync(new URL("./EvolutionRoute.module.css", import.meta.url), "utf-8");
 const worktreeReviewStylesSource = readFileSync(new URL("./SupervisedWorktreeReviewPanel.styles.ts", import.meta.url), "utf-8");
 const dictionarySource = readFileSync(new URL("../i18n/dictionary.ts", import.meta.url), "utf-8");
 const apiTypesSource = readFileSync(new URL("../api/types.ts", import.meta.url), "utf-8");
@@ -132,7 +132,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("datasetCatalogStatusLabel");
     expect(dictionarySource).toContain('datasetCatalog: "评测集目录"');
     expect(dictionarySource).toContain('datasetCatalogHiddenReason: "隐藏原因"');
-    expect(stylesSource).toContain(".datasetCatalogPanel");
+    expect(routeStyles.datasetCatalogPanel).toContain("[max-height:min(238px,_34vh)]");
   });
 
   it("separates inconclusive terminal status and harness-only datasets from success wording", () => {
@@ -149,7 +149,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain('t("sourceOfficialVerifierWarning")');
     expect(routeSource).toContain("styles.sourceWarningStrip");
     expect(dictionarySource).toContain("Terminal-Bench 官方 Harbor 判分尚未接入");
-    expect(stylesSource).toContain(".sourceWarningStrip");
+    expect(routeStyles.sourceWarningStrip).toContain("var(--state-warning)");
   });
 
   it("keeps supervised rejection and runtime notes in governance wording instead of raw status codes", () => {
@@ -234,33 +234,23 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("lets the self-evolution workspace fill the remaining viewport height", () => {
-    const pageRule = stylesSource.slice(stylesSource.indexOf(".page {"), stylesSource.indexOf(".toolbar {"));
-    const selfPageRule = stylesSource.slice(stylesSource.indexOf(".selfPage {"), stylesSource.indexOf(".toolbar {"));
-    const selfModeRule = stylesSource.slice(stylesSource.indexOf(".selfModeStack {"), stylesSource.indexOf(".overviewGrid {"));
-    const tabletRuleStart = stylesSource.indexOf("@media (max-width: 900px)");
-    const tabletRuleEnd = stylesSource.indexOf("@media (max-width: 640px)");
-    const tabletRules = stylesSource.slice(tabletRuleStart, tabletRuleEnd);
-    const tabletPageRule = tabletRules.slice(tabletRules.indexOf("  .page {"), tabletRules.indexOf("  .selfModeStack {"));
-    const tabletSelfPageRule = tabletRules.slice(tabletRules.indexOf("  .selfPage {"), tabletRules.indexOf("  .selfModeStack {"));
-    const tabletSelfModeRule = tabletRules.slice(tabletRules.indexOf("  .selfModeStack {"), tabletRules.indexOf("  .toolbar {"));
-
     expect(routeSource).toContain('const showRouteToolbar = activeTrack !== "self";');
     expect(routeSource).toContain('activeTrack === "self" ? `${styles.page} ${styles.selfPage}` : styles.page');
     expect(routeSource).toContain("{showRouteToolbar ? (");
-    expect(pageRule).toContain("height: calc(100dvh - var(--shell-topbar-height));");
-    expect(pageRule).toContain("max-height: calc(100dvh - var(--shell-topbar-height));");
-    expect(selfPageRule).toContain("grid-template-rows: minmax(0, 1fr);");
-    expect(selfPageRule).toContain("gap: 0;");
-    expect(selfModeRule).toContain("grid-template-rows: minmax(0, 1fr);");
-    expect(selfModeRule).toContain("overflow: hidden;");
-    expect(selfModeRule).not.toContain("grid-template-rows: auto minmax(0, 1fr);");
-    expect(tabletPageRule).not.toContain("height: auto;");
-    expect(tabletPageRule).not.toContain("overflow: visible;");
-    expect(tabletSelfPageRule).toContain("grid-template-rows: minmax(0, 1fr);");
-    expect(tabletSelfPageRule).toContain("gap: 0;");
-    expect(tabletSelfModeRule).toContain("grid-template-rows: minmax(0, 1fr);");
-    expect(tabletSelfModeRule).toContain("height: 100%;");
-    expect(tabletSelfModeRule).toContain("overflow: auto;");
+    expect(routeStyles.page).toContain("[height:calc(100dvh_-_var(--shell-topbar-height))]");
+    expect(routeStyles.page).toContain("[max-height:calc(100dvh_-_var(--shell-topbar-height))]");
+    expect(routeStyles.selfPage).toContain("[grid-template-rows:minmax(0,_1fr)]");
+    expect(routeStyles.selfPage).toContain("[gap:0]");
+    expect(routeStyles.selfModeStack).toContain("[grid-template-rows:minmax(0,_1fr)]");
+    expect(routeStyles.selfModeStack).toContain("[overflow:hidden]");
+    expect(routeStyles.selfModeStack).not.toContain("[grid-template-rows:auto_minmax(0,_1fr)]");
+    expect(routeStyles.page).not.toContain("max-[900px]:[height:auto]");
+    expect(routeStyles.page).not.toContain("max-[900px]:[overflow:visible]");
+    expect(routeStyles.selfPage).toContain("max-[900px]:[grid-template-rows:minmax(0,_1fr)]");
+    expect(routeStyles.selfPage).toContain("max-[900px]:[gap:0]");
+    expect(routeStyles.selfModeStack).toContain("max-[900px]:[grid-template-rows:minmax(0,_1fr)]");
+    expect(routeStyles.selfModeStack).toContain("max-[900px]:[height:100%]");
+    expect(routeStyles.selfModeStack).toContain("max-[900px]:[overflow:auto]");
   });
 
   it("keeps evolution tracks from duplicating their fixed agents as system Team canvases", () => {
@@ -329,10 +319,10 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain('t("startClosedLoopRun")');
     expect(routeSource).not.toContain("styles.worktreeReviewSurface");
     expect(routeSource).not.toContain("worktreeReviewPanelHint");
-    expect(stylesSource).toContain(".liveLaunchStack");
-    expect(stylesSource).toContain(".liveLaunchStack > .launchSurface");
-    expect(stylesSource).toContain(".supervisedRunConsole");
-    expect(stylesSource).toContain(".supervisedRunConsoleGrid");
+    expect(routeStyles.liveLaunchStack).toContain("[grid-template-rows:minmax(0,_1fr)]");
+    expect(routeStyles.launchSurface).toContain("[max-height:none]");
+    expect(routeStyles.supervisedRunConsole).toContain("[container-type:inline-size]");
+    expect(routeStyles.supervisedRunConsoleGrid).toContain("[grid-template-columns:minmax(0,_1fr)]");
   });
 
   it("shows a compact supervised workflow rail and center overview fallback", () => {
@@ -408,19 +398,22 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).not.toContain("styles.supervisedWorkflowCardButton");
     expect(routeSource).not.toContain("styles.supervisedWorkflowCardFooter");
     expect(routeSource).toContain("监督进化步骤导航");
-    expect(stylesSource).toContain(".supervisedWorkflowPanel");
-    expect(stylesSource).toContain(".workflowStepRail");
-    expect(stylesSource).toContain(".workflowStepButton");
-    expect(stylesSource).toContain(".workflowStepButtonActive");
-    expect(stylesSource).toContain(".workflowStepPreview");
-    expect(stylesSource).toContain(".caseOverviewWorkspace");
-    expect(stylesSource).toContain(".caseOverviewItem");
-    expect(stylesSource).toContain(".caseOverviewEvidence");
-    expect(stylesSource).toContain(".caseOverviewEvidenceGrid");
+    expect(routeStyles.supervisedWorkflowPanel).toContain("[overflow:hidden]");
+    expect(routeStyles.workflowStepRail).toContain("[max-height:min(196px,_30vh)]");
+    expect(routeStyles.workflowStepButton).toContain("hover:[border-color:");
+    expect(routeStyles.workflowStepButtonActive).toContain("[border-color:");
+    expect(routeStyles.workflowStepPreview).toContain("[-webkit-line-clamp:2]");
+    expect(routeStyles.caseOverviewWorkspace).toContain("[grid-template-rows:auto_minmax(120px,_1fr)]");
+    expect(routeStyles.caseOverviewItem).toContain("grid");
+    expect(routeStyles.caseOverviewEvidence).toContain("[grid-template-rows:auto_minmax(120px,_1fr)_auto]");
+    expect(routeStyles.caseOverviewEvidenceGrid).toContain("[grid-template-columns:repeat(4,_minmax(0,_1fr))]");
+    expect(routeSource).toContain("styles.caseOverviewEmptyState");
+    expect(routeStyles.caseOverviewEmptyState).toContain("min-h-[120px]");
+    expect(routeStyles.caseOverviewEmptyState).toContain("[place-items:center]");
     expect(stylesSource).not.toContain(".supervisedWorkflowCardGrid");
     expect(stylesSource).not.toContain(".supervisedWorkflowCardButton");
     expect(stylesSource).not.toContain(".supervisedWorkflowCardFooter");
-    expect(stylesSource).toContain(".supervisedWorkflowFollowButton");
+    expect(routeStyles.supervisedWorkflowFollowButton).toContain("[min-height:24px]");
   });
 
   it("shows immediate local feedback while a supervised worktree run is waiting for the run record", () => {
@@ -472,71 +465,68 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("styles.closedLoopModeBadge");
     expect(routeSource).toContain("当前只演练编排链路，不调用真实 LLM 自改。");
     expect(dictionarySource).toContain("结果会进入下方候选审核，不会自动合并。");
-    expect(stylesSource).toContain(".closedLoopLaunchBlock");
-    expect(stylesSource).toContain(".closedLoopModeBadge");
+    expect(routeStyles.closedLoopLaunchBlock).toContain("[grid-template-columns:minmax(0,_1fr)_minmax(92px,_auto)]");
+    expect(routeStyles.closedLoopModeBadge).toContain("[border-radius:999px]");
   });
 
   it("keeps the supervised live console as a dense desktop split before narrow layouts", () => {
-    const desktopBreakpoint = stylesSource.slice(
-      stylesSource.indexOf("@media (max-width: 1360px)"),
-      stylesSource.indexOf("@media (max-width: 1200px)"),
-    );
-    expect(stylesSource).toContain("@media (max-width: 1360px)");
-    expect(desktopBreakpoint).toContain('"launch resize-launch io resize-run run"');
-    expect(desktopBreakpoint).not.toContain('"io io"\n      "launch run"');
+    expect(routeStyles.overviewGrid).toContain("[grid-template-columns:minmax(300px,_var(--evolution-live-launch-width,_348px))");
+    expect(routeStyles.overviewGrid).toContain("[grid-template-rows:minmax(0,_1fr)]");
+    expect(routeStyles.overviewGrid).not.toContain("grid-template-areas");
+    expect(routeStyles.overviewGrid).not.toContain("--evolution-overview-areas");
+    expect(routeStyles.dashboardLaunch).toContain("[grid-column:1]");
+    expect(routeStyles.dashboardLaunch).toContain("[grid-row:1]");
+    expect(routeStyles.liveResizeHandleLaunch).toContain("[grid-column:2]");
+    expect(routeStyles.liveResizeHandleLaunch).toContain("[grid-row:1]");
+    expect(routeStyles.dashboardIo).toContain("[grid-column:3]");
+    expect(routeStyles.dashboardIo).toContain("[grid-row:1]");
+    expect(routeStyles.liveResizeHandleRun).toContain("[grid-column:4]");
+    expect(routeStyles.liveResizeHandleRun).toContain("[grid-row:1]");
+    expect(routeStyles.dashboardRun).toContain("[grid-column:5]");
+    expect(routeStyles.dashboardRun).toContain("[grid-row:1]");
   });
 
   it("keeps supervised run empty states compact for first-viewport scanning", () => {
-    expect(stylesSource).toContain(".structuredEmptyState");
-    expect(stylesSource).toContain("min-height: 86px");
-    expect(stylesSource).toContain("padding: 10px 12px");
-    expect(stylesSource).not.toContain("min-height: 220px");
+    expect(routeStyles.structuredEmptyState).toContain("[min-height:86px]");
+    expect(routeStyles.structuredEmptyState).toContain("[padding:10px_12px]");
+    expect(routeStyles.structuredEmptyState).not.toContain("[min-height:220px]");
   });
 
   it("uses denser supervised launch and member panels at narrow workbench widths", () => {
-    const middleBreakpoint = stylesSource.slice(
-      stylesSource.indexOf("@media (min-width: 901px) and (max-width: 1200px)"),
-      stylesSource.indexOf("@media (max-width: 900px)"),
-    );
-
-    expect(stylesSource).toContain("minmax(300px, var(--evolution-live-launch-width, 348px))");
-    expect(stylesSource).toContain("minmax(300px, var(--evolution-live-run-width, 360px))");
-    expect(stylesSource).toContain("container-type: inline-size");
-    expect(stylesSource).toContain("@container (min-width: 560px)");
-    expect(stylesSource).toContain("grid-template-columns: minmax(0, 1.08fr) minmax(214px, 0.72fr)");
-    expect(stylesSource).toContain("grid-template-rows: minmax(0, 1fr)");
-    expect(stylesSource).not.toContain("grid-template-rows: minmax(0, auto) minmax(0, 0.9fr) minmax(150px, 0.82fr)");
-    expect(stylesSource).not.toContain("grid-template-rows: minmax(0, auto) minmax(156px, 0.86fr) minmax(150px, 0.74fr)");
-    expect(stylesSource).not.toContain("max-height: min(430px, 60vh)");
-    expect(middleBreakpoint).toContain(".liveLaunchStack > .launchSurface > .noticeText");
-    expect(middleBreakpoint).toContain(".liveLaunchStack > .launchSurface .formHint");
-    expect(middleBreakpoint).not.toContain(".liveLaunchStack > .launchSurface .sourceInventoryBar");
-    expect(middleBreakpoint).not.toContain(".liveLaunchStack > .launchSurface .sourceMetaCompact");
-    expect(middleBreakpoint).toContain("display: none");
-    expect(stylesSource).toContain("max-height: min(118px, 22vh)");
-    expect(stylesSource).toContain("max-height: min(238px, 34vh)");
-    expect(stylesSource).toContain("min-height: 34px");
-    expect(stylesSource).not.toContain("min-height: 40px");
-    expect(stylesSource).toContain("font-family: var(--font-mono)");
-    expect(stylesSource).not.toContain("align-self: end");
+    expect(routeStyles.overviewGrid).toContain("minmax(300px,_var(--evolution-live-launch-width,_348px))");
+    expect(routeStyles.overviewGrid).toContain("minmax(300px,_var(--evolution-live-run-width,_360px))");
+    expect(routeStyles.supervisedRunConsole).toContain("[container-type:inline-size]");
+    expect(routeStyles.supervisedRunConsoleGrid).toContain("[@container(min-width:560px)]:[grid-template-columns:minmax(0,_1.08fr)_minmax(214px,_0.72fr)]");
+    expect(routeStyles.supervisedRunConsoleGrid).toContain("[@container(min-width:560px)]:[align-items:start]");
+    expect(routeStyles.overviewGrid).toContain("[grid-template-rows:minmax(0,_1fr)]");
+    expect(routeStyles.overviewGrid).not.toContain("[grid-template-rows:minmax(0,_auto)_minmax(0,_0.9fr)_minmax(150px,_0.82fr)]");
+    expect(routeStyles.overviewGrid).not.toContain("[grid-template-rows:minmax(0,_auto)_minmax(156px,_0.86fr)_minmax(150px,_0.74fr)]");
+    expect(routeStyles.launchSurface).not.toContain("[max-height:min(430px,_60vh)]");
+    expect(routeStyles.noticeText).toContain("max-[1200px]:hidden");
+    expect(routeStyles.formHint).toContain("max-[1200px]:hidden");
+    expect(routeStyles.sourceInventoryBar).not.toContain("max-[1200px]:hidden");
+    expect(routeStyles.sourceMetaCompact).not.toContain("max-[1200px]:hidden");
+    expect(routeStyles.supervisedMembersList).toContain("[max-height:min(118px,_22vh)]");
+    expect(routeStyles.supervisedMembersList).toContain("[@container(min-width:560px)]:[max-height:min(238px,_34vh)]");
+    expect(routeStyles.supervisedMemberRow).toContain("[min-height:34px]");
+    expect(routeStyles.supervisedMemberRow).not.toContain("[min-height:40px]");
+    expect(routeStyles.supervisedMemberIdentity).toContain("[font-family:var(--font-mono)]");
+    expect(routeStyles.supervisedMembersPanel).not.toContain("[align-self:end]");
   });
 
   it("switches the supervised live grid to a single-column flow below tablet width", () => {
-    const tabletBreakpoint = stylesSource.slice(
-      stylesSource.indexOf("@media (max-width: 900px)"),
-      stylesSource.indexOf("@media (max-width: 640px)"),
-    );
-
-    expect(tabletBreakpoint).toContain("grid-template-rows: max-content max-content max-content");
-    expect(tabletBreakpoint).toContain('grid-template-areas:\n      "io"\n      "launch"\n      "run"');
-    expect(tabletBreakpoint).toContain("align-content: start");
-    expect(tabletBreakpoint).toContain("height: auto");
-    expect(tabletBreakpoint).toContain("overflow: auto");
-    expect(tabletBreakpoint).toContain("grid-auto-rows: max-content");
-    expect(tabletBreakpoint).toContain("height: max-content");
-    expect(tabletBreakpoint).toContain("min-height: max-content");
-    expect(tabletBreakpoint).toContain("overflow: visible");
-    expect(tabletBreakpoint).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))");
+    expect(routeStyles.overviewGrid).toContain("max-[900px]:[grid-template-rows:max-content_max-content_max-content]");
+    expect(routeStyles.dashboardIo).toContain("max-[900px]:[grid-row:1]");
+    expect(routeStyles.dashboardLaunch).toContain("max-[900px]:[grid-row:2]");
+    expect(routeStyles.dashboardRun).toContain("max-[900px]:[grid-row:3]");
+    expect(routeStyles.overviewGrid).toContain("max-[900px]:[align-content:start]");
+    expect(routeStyles.overviewGrid).toContain("max-[900px]:[height:auto]");
+    expect(routeStyles.overviewGrid).toContain("max-[900px]:[overflow:auto]");
+    expect(routeStyles.liveLaunchStack).toContain("max-[900px]:[grid-auto-rows:max-content]");
+    expect(routeStyles.launchSurface).toContain("max-[900px]:[height:max-content]");
+    expect(routeStyles.launchSurface).toContain("max-[900px]:[min-height:max-content]");
+    expect(routeStyles.launchSurface).toContain("max-[900px]:[overflow:visible]");
+    expect(routeStyles.supervisedMembersList).toContain("max-[900px]:[grid-template-columns:repeat(2,_minmax(0,_1fr))]");
   });
 
   it("lets the embedded supervised conversation fill the lower vertical space", () => {
@@ -544,15 +534,21 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("styles.caseConversationTranscript");
     expect(routeSource).toContain("styles.caseRawEvidence");
     expect(routeSource).toContain("currentCaseOutputLabel(monitoredRun)");
-    expect(stylesSource).toContain(".caseConversationShell");
-    expect(stylesSource).toContain(".caseConversationTranscript");
-    expect(stylesSource).toContain("flex: 1 1 0");
-    expect(stylesSource).toContain("height: 100%");
-    expect(stylesSource).toContain("background: transparent");
-    expect(stylesSource).toContain(".caseRawEvidence");
-    expect(stylesSource).toContain(".supervisedConversationTrace");
-    expect(stylesSource).toContain("max-height: min(260px, 30vh)");
-    expect(stylesSource).not.toContain("max-height: 340px");
+    expect(routeStyles.caseConversationShell).toContain("[flex:1_1_0]");
+    expect(routeStyles.caseConversationTranscript).toContain("[flex:1_1_0]");
+    expect(routeStyles.caseConversationTranscript).toContain("[height:100%]");
+    expect(routeStyles.caseConversationTranscript).toContain("[background:transparent_!important]");
+    expect(routeStyles.caseRawEvidence).toContain("[max-height:none]");
+    expect(routeStyles.supervisedConversationTrace).toContain("[max-height:min(260px,_30vh)]");
+    expect(routeStyles.supervisedConversationTrace).not.toContain("[max-height:340px]");
+    expect(routeStyles.ioSurface).toContain("[position:relative]");
+    expect(routeSource).toContain("styles.liveIoResizeHandleLine");
+    expect(routeStyles.liveIoResizeHandle).toContain("relative");
+    expect(routeStyles.liveIoResizeHandle).toContain("!min-h-[12px]");
+    expect(routeStyles.liveIoResizeHandle).toContain("!bg-transparent");
+    expect(routeStyles.liveIoResizeHandle).not.toContain("[position:absolute]");
+    expect(routeStyles.liveIoResizeHandleLine).toContain("h-[3px]");
+    expect(routeStyles.liveIoResizeHandleLine).toContain("group-hover:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)]");
   });
 
   it("shows environment preflight failures instead of waiting for agent output forever", () => {
@@ -561,21 +557,14 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("missing_verifier_dependency");
     expect(routeSource).toContain("monitoredPreflightIssue ? (");
     expect(routeSource).toContain("styles.casePreflightIssue");
-    expect(stylesSource).toContain(".casePreflightIssue");
-    expect(stylesSource).toContain("var(--state-warning)");
+    expect(routeStyles.casePreflightIssue).toContain("var(--state-warning)");
   });
 
   it("keeps supervised launch from reserving an empty worktree-review track", () => {
-    const launchStackRule = stylesSource.slice(
-      stylesSource.indexOf(".liveLaunchStack {"),
-      stylesSource.indexOf(".liveResizeHandleLaunch"),
-    );
-
-    expect(launchStackRule).toContain("grid-template-rows: minmax(0, 1fr)");
-    expect(launchStackRule).toContain("overflow: hidden");
-    expect(stylesSource).toContain(".liveLaunchStack > .launchSurface");
-    expect(stylesSource).toContain("max-height: none");
-    expect(stylesSource).not.toContain("max-height: min(430px, 60vh)");
+    expect(routeStyles.liveLaunchStack).toContain("[grid-template-rows:minmax(0,_1fr)]");
+    expect(routeStyles.liveLaunchStack).toContain("[overflow:hidden]");
+    expect(routeStyles.launchSurface).toContain("[max-height:none]");
+    expect(routeStyles.launchSurface).not.toContain("[max-height:min(430px,_60vh)]");
     expect(stylesSource).not.toContain(".worktreeReviewSurface");
     expect(worktreeReviewStylesSource).toContain("worktreeReviewSurfaceClass");
   });
@@ -583,11 +572,17 @@ describe("EvolutionRoute library user flow contract", () => {
   it("hides the supervised toolbar intro so workflow cards own the top row", () => {
     expect(routeSource).toContain('const hideSupervisedToolbarIntro = activeTrack === "supervised"');
     expect(routeSource).toContain("hideSupervisedToolbarIntro ? `${styles.toolbar} ${styles.toolbarSupervisedFocus}` : styles.toolbar");
+    expect(routeSource).toContain("hideSupervisedToolbarIntro");
+    expect(routeSource).toContain("styles.toolbarControlsSupervisedFocus");
     expect(routeSource).toContain("{!hideSupervisedToolbarIntro ? (");
-    expect(stylesSource).toContain(".toolbarSupervisedFocus");
-    expect(stylesSource).toContain(".toolbarSupervisedFocus .toolbarControls");
-    expect(stylesSource).toContain("flex: 1 1 100%");
-    expect(stylesSource).toContain("width: 100%");
+    expect(routeStyles.toolbarSupervisedFocus).toContain("[justify-content:flex-end]");
+    expect(routeStyles.toolbarControls).toContain("[justify-content:flex-end]");
+    expect(routeStyles.toolbarControls).toContain("max-[900px]:[justify-content:stretch]");
+    expect(routeStyles.toolbarControls).not.toContain("[flex:1_1_100%]");
+    expect(routeStyles.toolbarControlsSupervisedFocus).toContain("[align-items:stretch]");
+    expect(routeStyles.toolbarControlsSupervisedFocus).toContain("[flex:1_1_100%]");
+    expect(routeStyles.toolbarControlsSupervisedFocus).toContain("[width:100%]");
+    expect(routeStyles.toolbarControlsSupervisedFocus).toContain("[justify-content:flex-end]");
   });
 
   it("keeps the supervised center pane as a read-only embedded conversation surface", () => {
@@ -602,11 +597,11 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("supplementalContent={supervisedLiveConversationSupplement}");
     expect(routeSource).toContain("styles.caseConversationShell");
     expect(routeSource).toContain("styles.caseConversationTranscript");
-    expect(stylesSource).toContain(".caseConversationShell");
-    expect(stylesSource).toContain(".caseConversationTranscript");
-    expect(stylesSource).toContain(".caseConversationFallback");
-    expect(stylesSource).toContain(".supervisedConversationEvidence");
-    expect(stylesSource).toContain(".supervisedConversationTrace");
+    expect(routeStyles.caseConversationShell).toContain("[flex:1_1_0]");
+    expect(routeStyles.caseConversationTranscript).toContain("[height:100%]");
+    expect(routeStyles.caseConversationFallback).toContain("[place-items:center]");
+    expect(routeStyles.supervisedConversationEvidence).toContain("[width:100%]");
+    expect(routeStyles.supervisedConversationTrace).toContain("[max-height:min(260px,_30vh)]");
     expect(routeSource).not.toContain("styles.ioWaitingState");
     expect(routeSource).toContain("buildSupervisedCaseTraceItems");
     expect(routeSource).toContain("caseTraceItemExpanded");
@@ -619,38 +614,36 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("styles.caseTraceStack");
     expect(routeSource).toContain("styles.caseTraceMessage");
     expect(routeSource).toContain("styles.caseTraceMeta");
-    expect(stylesSource).toContain(".caseTraceTimeline::before");
-    expect(stylesSource).toContain(".caseTraceStack");
-    expect(stylesSource).toContain("justify-content: flex-end");
-    expect(stylesSource).toContain(".caseTraceSummary");
-    expect(stylesSource).toContain(".caseTraceMessage");
-    expect(stylesSource).toContain(".caseTraceMeta");
-    expect(stylesSource).toContain("-webkit-line-clamp: 2");
-    expect(stylesSource).toContain(".caseTraceStateGrid");
+    expect(routeStyles.caseTraceTimeline).toContain("[content:\"\"]");
+    expect(routeStyles.caseTraceStack).toContain("[justify-content:flex-end]");
+    expect(routeStyles.caseTraceSummary).toContain("[grid-template-columns:26px_minmax(0,_1fr)_auto_18px]");
+    expect(routeStyles.caseTraceMessage).toContain("grid");
+    expect(routeStyles.caseTraceMeta).toContain("[align-items:flex-end]");
+    expect(routeStyles.caseTracePreview).toContain("[-webkit-line-clamp:2]");
+    expect(routeStyles.caseTraceStateGrid).toContain("grid");
   });
 
   it("keeps the proposal library summary in three columns at common desktop widths", () => {
-    expect(stylesSource).toContain(".librarySummaryBar");
-    expect(stylesSource).toContain("minmax(300px, 1fr) minmax(260px, 0.8fr) minmax(300px, 0.9fr)");
+    expect(routeStyles.librarySummaryBar).toContain("max-[1360px]:[grid-template-columns:minmax(300px,_1fr)_minmax(260px,_0.8fr)_minmax(300px,_0.9fr)]");
   });
 
   it("keeps restored EvolutionRoute grids from the CSS module migration", () => {
     const restoredGridExpectations: Array<[string, string]> = [
-      [routeStyles.sourceMetaCompact, "grid-cols-[minmax(0,1fr)_minmax(96px,auto)]"],
-      [routeStyles.supervisedRunOptions, "grid-cols-[minmax(0,0.95fr)_minmax(126px,1.05fr)]"],
-      [routeStyles.datasetCatalogItem, "grid-cols-[minmax(0,1fr)_auto]"],
-      [routeStyles.caseTraceSummary, "grid-cols-[26px_minmax(0,1fr)_auto_18px]"],
-      [routeStyles.closedLoopLedgerEvidenceGrid, "grid-cols-[repeat(2,minmax(0,1fr))]"],
+      [routeStyles.sourceMetaCompact, "[grid-template-columns:minmax(0,_1fr)_minmax(96px,_auto)]"],
+      [routeStyles.supervisedRunOptions, "[grid-template-columns:minmax(0,_0.95fr)_minmax(126px,_1.05fr)]"],
+      [routeStyles.datasetCatalogItem, "[grid-template-columns:minmax(0,_1fr)_auto]"],
+      [routeStyles.caseTraceSummary, "[grid-template-columns:26px_minmax(0,_1fr)_auto_18px]"],
+      [routeStyles.closedLoopLedgerEvidenceGrid, "[grid-template-columns:repeat(2,_minmax(0,_1fr))]"],
     ];
 
     for (const [className, gridTemplate] of restoredGridExpectations) {
-      expect(className).toContain("!grid");
+      expect(className).toContain("grid");
       expect(className).toContain(gridTemplate);
     }
 
-    expect(routeStyles.toolbar).toContain("!flex");
-    expect(routeStyles.toolbar).toContain("max-[900px]:!grid");
-    expect(routeStyles.toolbar).toContain("max-[900px]:grid-cols-[1fr]");
+    expect(routeStyles.toolbar).toContain("flex");
+    expect(routeStyles.toolbar).toContain("max-[900px]:grid");
+    expect(routeStyles.toolbar).toContain("max-[900px]:[grid-template-columns:1fr]");
   });
 
   it("does not put long live supervised text into native title tooltips", () => {

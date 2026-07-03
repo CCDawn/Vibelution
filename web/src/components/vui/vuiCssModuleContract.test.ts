@@ -4,9 +4,7 @@ import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const sourceRoot = resolve(import.meta.dirname, "../..");
-const allowedRestoredRouteModules = [
-  "routes/EvolutionRoute.module.css",
-] as const;
+const allowedRestoredRouteModules = [] as const;
 
 function walkCssModules(dir: string): string[] {
   if (!existsSync(dir)) {
