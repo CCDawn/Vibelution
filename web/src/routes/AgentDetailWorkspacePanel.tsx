@@ -1,6 +1,7 @@
 import { type ComponentProps, type ReactNode } from "react";
 
 import { AgentWorkspacePanel } from "../components/vui/product/agent-management";
+import { AgentBulkConfigPanel } from "./AgentBulkConfigPanel";
 import { AgentEmptySelectionPanel } from "./AgentEmptySelectionPanel";
 import { AgentReturnBannerPanel } from "./AgentReturnBannerPanel";
 import styles from "./AgentsRoute.styles";
@@ -9,7 +10,7 @@ type AgentDetailWorkspacePanelProps = {
   createOpen: boolean;
   ariaLabel: string;
   returnBanner: ComponentProps<typeof AgentReturnBannerPanel> | null;
-  bulkConfigPanel: ReactNode;
+  bulkConfig: ComponentProps<typeof AgentBulkConfigPanel> | null;
   selectedContent: ReactNode;
   emptySelectionTitle: string;
 };
@@ -18,10 +19,12 @@ export function AgentDetailWorkspacePanel({
   createOpen,
   ariaLabel,
   returnBanner,
-  bulkConfigPanel,
+  bulkConfig,
   selectedContent,
   emptySelectionTitle,
 }: AgentDetailWorkspacePanelProps) {
+  const bulkConfigPanel = bulkConfig ? <AgentBulkConfigPanel {...bulkConfig} /> : null;
+
   return (
     <AgentWorkspacePanel
       as="aside"
