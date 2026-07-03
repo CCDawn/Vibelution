@@ -269,7 +269,7 @@ const styles: Record<string, string> = {
   compactDetailsOpenLabel:
     "vui-routes-chatcodingroute compactDetailsOpenLabel min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
   companionBlock:
-    "vui-routes-chatcodingroute companionBlock min-w-0 min-h-0 max-h-[min(420px,70dvh)] shrink-0 overflow-hidden",
+    "vui-routes-chatcodingroute companionBlock min-w-0 min-h-0 !flex-1 content-start overflow-hidden",
   companionCompact:
     "vui-routes-chatcodingroute companionCompact !grid min-w-0 grid-cols-[32px_minmax(0,1fr)] items-start gap-1.5",
   companionCopy:
