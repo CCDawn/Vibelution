@@ -29,9 +29,6 @@ import {
   SessionReferenceAttachment,
   SessionTurnError,
 } from "../../api/types";
-import {
-  conversationMessageToAgentMessage,
-} from "../../agent-thread/adapters";
 import type {
   AgentMentalPart,
 } from "../../agent-thread/types";
@@ -42,7 +39,7 @@ import { AgentMessageTurnView } from "./AgentMessageTurnView";
 import { AgentResponseSectionView } from "./AgentResponseSectionView";
 import { AgentUserContentSectionView } from "./AgentUserContentSectionView";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
-import { buildAgentMessageRenderState } from "./agentMessageRenderState";
+import { buildAgentMessageRenderState, type AgentMessageRenderState } from "./agentMessageRenderState";
 import { COMPOSER_SESSION_REFERENCE_MIME } from "./conversationConstants";
 import {
   isInternalStreamingStatusContent,
@@ -66,7 +63,6 @@ import {
 import { useAgentThreadProjection } from "./useAgentThreadProjection";
 import { projectConversationTimelineMessages } from "./useConversationTimelineProjection";
 import {
-  buildAgentMessageSectionState,
   imageArtifactForMessage,
   isAgentInboxMessage,
   isGroupRoomTranscriptMessage,
@@ -697,15 +693,7 @@ function conversationMessageTurnId(message: ConversationMessage) {
   return metadataText(message.metadata, "turnId").replace(/^live:/, "");
 }
 
-function conversationMessageAgentSectionState(message: ConversationMessage): AgentMessageSectionState {
-  return buildAgentMessageSectionState(conversationMessageToAgentMessage(message));
-}
-
-function conversationMessageHasAgentResponseBlock(message: ConversationMessage) {
-  return conversationMessageAgentSectionState(message).hasResponseBlock;
-}
-
-function isAssistantProcessThreadCandidate(message: ConversationMessage) {
+function isAssistantProcessThreadCandidate(message: ConversationMessage, sectionState: AgentMessageSectionState) {
   if (
     message.role !== "assistant"
     || isRuntimeNoticeMessage(message)
@@ -714,7 +702,6 @@ function isAssistantProcessThreadCandidate(message: ConversationMessage) {
   ) {
     return false;
   }
-  const sectionState = conversationMessageAgentSectionState(message);
   return Boolean(
     message.streaming
     || String(message.streamStage ?? "").trim()
@@ -724,8 +711,11 @@ function isAssistantProcessThreadCandidate(message: ConversationMessage) {
   );
 }
 
-function conversationVisualThreadKey(message: ConversationMessage | undefined) {
-  if (!message || !isAssistantProcessThreadCandidate(message)) {
+function conversationVisualThreadKey(
+  message: ConversationMessage | undefined,
+  sectionState: AgentMessageSectionState | undefined,
+) {
+  if (!message || !sectionState || !isAssistantProcessThreadCandidate(message, sectionState)) {
     return "";
   }
   const turnId = conversationMessageTurnId(message);
@@ -735,9 +725,14 @@ function conversationVisualThreadKey(message: ConversationMessage | undefined) {
   return "assistant-process-thread";
 }
 
-function shouldCompactConversationTurnHeader(previous: ConversationMessage | undefined, message: ConversationMessage) {
-  const threadKey = conversationVisualThreadKey(message);
-  return Boolean(threadKey && threadKey === conversationVisualThreadKey(previous));
+function shouldCompactConversationTurnHeader(
+  previous: ConversationMessage | undefined,
+  message: ConversationMessage,
+  previousSectionState: AgentMessageSectionState | undefined,
+  sectionState: AgentMessageSectionState,
+) {
+  const threadKey = conversationVisualThreadKey(message, sectionState);
+  return Boolean(threadKey && threadKey === conversationVisualThreadKey(previous, previousSectionState));
 }
 
 type PreviewImageState = {
@@ -1204,6 +1199,18 @@ export function ConversationView({
   const streamingTimelineMessages = activeTimelineProjection.streamingMessages;
   const activeTimelineRowIdentities = activeTimelineProjection.rowIdentities;
   const agentThread = useAgentThreadProjection(sessionId, activeTimelineMessages);
+  const agentRenderStatesByMessageId = useMemo(() => {
+    const renderStates = new Map<string, AgentMessageRenderState>();
+    activeTimelineMessages.forEach((message, index) => {
+      const agentMessage = agentThread.messages[index];
+      if (!agentMessage) {
+        return;
+      }
+      const agentRenderState = buildAgentMessageRenderState(agentMessage);
+      renderStates.set(message.id, agentRenderState);
+    });
+    return renderStates;
+  }, [activeTimelineMessages, agentThread]);
   const imageArtifactUrlsBeforeMessage = useMemo(() => {
     const urlsByMessageId = new Map<string, Set<string>>();
     const seenImageUrls = new Set<string>();
@@ -1230,8 +1237,8 @@ export function ConversationView({
     let expandedResponseCount = 0;
     for (let index = activeTimelineMessages.length - 1; index >= 0; index -= 1) {
       const message = activeTimelineMessages[index];
-      const agentMessage = agentThread.messages[index];
-      if (!agentMessage || !buildAgentMessageSectionState(agentMessage).hasResponseBlock) {
+      const agentRenderState = agentRenderStatesByMessageId.get(message.id);
+      if (!agentRenderState?.sectionState.hasResponseBlock) {
         continue;
       }
       expandedResponseCount += 1;
@@ -1244,7 +1251,7 @@ export function ConversationView({
       }
     }
     return ids;
-  }, [activeTimelineMessages, agentThread]);
+  }, [activeTimelineMessages, agentRenderStatesByMessageId]);
   const timelineSignalMessages = useMemo(
     () =>
       showMentalSnapshots
@@ -1461,10 +1468,12 @@ export function ConversationView({
   useEffect(() => {
     const prewarmMessages = timelineMessages
       .filter(
-        (message) =>
-          message.role === "assistant"
-          && !message.streaming
-          && conversationMessageHasAgentResponseBlock(message),
+        (message) => {
+          const agentRenderState = agentRenderStatesByMessageId.get(message.id);
+          return message.role === "assistant"
+            && !message.streaming
+            && Boolean(agentRenderState?.sectionState.hasResponseBlock);
+        },
       )
       .slice(-RESPONSE_PREWARM_MESSAGE_LIMIT);
     if (!prewarmMessages.length) {
@@ -1501,7 +1510,7 @@ export function ConversationView({
         window.clearTimeout(timeoutId);
       }
     };
-  }, [sessionId, timelineMessages]);
+  }, [agentRenderStatesByMessageId, sessionId, timelineMessages]);
 
   function getCachedResponseSegments(content: string) {
     const key = String(content ?? "");
@@ -3700,7 +3709,7 @@ export function ConversationView({
             }
             const agentMessage = agentThread.messages[index];
             const operationGroups = buildAgentMessageOperationGroups(agentMessage, operationLabels);
-            const agentRenderState = buildAgentMessageRenderState(agentMessage);
+            const agentRenderState = agentRenderStatesByMessageId.get(message.id) ?? buildAgentMessageRenderState(agentMessage);
             const agentSections = agentRenderState.sectionState;
             const processSections = agentRenderState.processSections;
             const responseText = agentSections.answerText;
@@ -3711,7 +3720,16 @@ export function ConversationView({
             const turnErrorMessage = isTurnErrorMessage(message);
             const agentInboxMessage = isAgentInboxMessage(message);
             const groupTranscriptMessage = isGroupRoomTranscriptMessage(message);
-            const compactTurnHeader = shouldCompactConversationTurnHeader(activeTimelineMessages[index - 1], message);
+            const previousMessage = activeTimelineMessages[index - 1];
+            const previousAgentRenderState = previousMessage
+              ? agentRenderStatesByMessageId.get(previousMessage.id)
+              : undefined;
+            const compactTurnHeader = shouldCompactConversationTurnHeader(
+              previousMessage,
+              message,
+              previousAgentRenderState?.sectionState,
+              agentSections,
+            );
             const timelineOptions = {
               lang,
               includeAssistantText: false,
