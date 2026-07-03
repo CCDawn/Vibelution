@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 
 import type { ConversationMessage } from "../../api/types";
 import {
+  agentMessageTimelineItemRowKey,
   buildAgentMessageTimelineRowIdentities,
-  conversationTimelineItemRowKey,
 } from "./conversationTimelineRows";
 
 const timelineRowsSource = readFileSync(new URL("./conversationTimelineRows.ts", import.meta.url), "utf8");
@@ -27,8 +27,10 @@ describe("conversation timeline rows", () => {
   it("exports row identity helpers through AgentMessage timeline naming only", () => {
     expect(timelineRowsSource).toContain("export type AgentMessageTimelineRowIdentity");
     expect(timelineRowsSource).toContain("export function buildAgentMessageTimelineRowIdentities");
+    expect(timelineRowsSource).toContain("export function agentMessageTimelineItemRowKey");
     expect(timelineRowsSource).not.toContain("ConversationTimelineRowIdentity");
     expect(timelineRowsSource).not.toContain("buildConversationTimelineRowIdentities");
+    expect(timelineRowsSource).not.toContain("conversationTimelineItemRowKey");
   });
 
   it("keeps same-turn live, active, and committed assistant packets on one stable row", () => {
@@ -84,7 +86,7 @@ describe("conversation timeline rows", () => {
       assistantMessage("message-with-timeline", { metadata: { turnId: "turn-timeline" } }),
     ]);
 
-    expect(conversationTimelineItemRowKey(row, { id: "tool-1", kind: "operation" })).toBe(
+    expect(agentMessageTimelineItemRowKey(row, { id: "tool-1", kind: "operation" })).toBe(
       "assistant-turn:turn-timeline:process:item:operation:tool-1",
     );
   });

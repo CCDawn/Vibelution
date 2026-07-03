@@ -76,7 +76,7 @@ export function buildAgentMessageTimelineRowIdentities(
   });
 }
 
-export function conversationTimelineItemRowKey(
+export function agentMessageTimelineItemRowKey(
   row: Pick<AgentMessageTimelineRowIdentity, "processKey">,
   item: TimelineItemKeyInput,
 ) {

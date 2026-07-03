@@ -456,13 +456,15 @@ describe("ConversationView edit resend affordance", () => {
   });
 
   it("keeps active-turn projection and history expansion anchors outside the render hot path", () => {
-    expect(conversationViewSource).toContain("projectConversationTimelineMessages");
-    expect(conversationViewSource).toContain("const activeTimelineProjection = useMemo");
-    expect(conversationViewSource).toContain("activeTimelineProjection.messages");
-    expect(conversationViewSource).toContain("activeTimelineProjection.streamingMessages");
-    expect(conversationViewSource).toContain("activeTimelineProjection.rowIdentities");
+    expect(conversationViewSource).toContain("projectAgentMessageTimelineMessages");
+    expect(conversationViewSource).toContain("const activeAgentMessageTimelineProjection = useMemo");
+    expect(conversationViewSource).toContain("activeAgentMessageTimelineProjection.messages");
+    expect(conversationViewSource).toContain("activeAgentMessageTimelineProjection.streamingMessages");
+    expect(conversationViewSource).toContain("activeAgentMessageTimelineProjection.rowIdentities");
     expect(conversationViewSource).toContain("captureTimelineRowKeyAnchor");
     expect(conversationViewSource).toContain("restoreTimelineRowKeyAnchor");
+    expect(conversationViewSource).not.toContain("projectConversationTimelineMessages");
+    expect(conversationViewSource).not.toContain("const activeTimelineProjection = useMemo");
     expect(conversationViewSource).not.toContain("buildConversationTimelineRowIdentities(activeTimelineMessages)");
   });
 
@@ -471,10 +473,14 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("function renderAgentMessageTimelineItem(");
     expect(conversationViewSource).toContain("const agentMessageTimelineItems = buildAgentMessageTimelineItems");
     expect(conversationViewSource).toContain("const hasAgentMessageTimeline =");
+    expect(conversationViewSource).toContain("function agentMessageTimelineRowIdentityIsEqual(");
+    expect(conversationViewSource).toContain("agentMessageTimelineItemRowKey");
     expect(conversationViewSource).not.toContain("function renderConversationTimeline(");
     expect(conversationViewSource).not.toContain("function renderConversationTimelineItem(");
     expect(conversationViewSource).not.toContain("const conversationTimelineItems =");
     expect(conversationViewSource).not.toContain("const hasConversationTimeline =");
+    expect(conversationViewSource).not.toContain("conversationTimelineRowIdentityIsEqual");
+    expect(conversationViewSource).not.toContain("conversationTimelineItemRowKey");
   });
 
   it("isolates conversation turn rendering behind a memoized row boundary", () => {
@@ -976,8 +982,8 @@ describe("ConversationView edit resend affordance", () => {
   });
 
   it("keeps active streaming scroll signals on a small streaming-only tail", () => {
-    expect(conversationViewSource).toContain("projectConversationTimelineMessages({ timelineMessages, activeTurnMessage })");
-    expect(conversationViewSource).toContain("const streamingTimelineMessages = activeTimelineProjection.streamingMessages");
+    expect(conversationViewSource).toContain("projectAgentMessageTimelineMessages({ timelineMessages, activeTurnMessage })");
+    expect(conversationViewSource).toContain("const streamingTimelineMessages = activeAgentMessageTimelineProjection.streamingMessages");
     expect(conversationViewSource).toContain("buildStreamingTimelineScrollSignal(streamingTimelineMessages)");
     expect(conversationViewSource).not.toContain("activeTimelineMessages.filter((message) => message.streaming)");
     expect(conversationViewSource).not.toContain("activeTimelineSignalMessages");

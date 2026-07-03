@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 
 import type { ConversationMessage } from "../../api/types";
-import { projectConversationTimelineMessages } from "./useConversationTimelineProjection";
+import { projectAgentMessageTimelineMessages } from "./useConversationTimelineProjection";
+
+const projectionSource = readFileSync(new URL("./useConversationTimelineProjection.ts", import.meta.url), "utf8");
 
 function assistantMessage(
   id: string,
@@ -17,7 +20,16 @@ function assistantMessage(
   };
 }
 
-describe("projectConversationTimelineMessages", () => {
+describe("projectAgentMessageTimelineMessages", () => {
+  it("exports the projection contract through AgentMessage timeline naming only", () => {
+    expect(projectionSource).toContain("export type AgentMessageTimelineProjectionInput");
+    expect(projectionSource).toContain("export type AgentMessageTimelineProjection =");
+    expect(projectionSource).toContain("export function projectAgentMessageTimelineMessages");
+    expect(projectionSource).not.toContain("ConversationTimelineProjectionInput");
+    expect(projectionSource).not.toContain("ConversationTimelineProjection =");
+    expect(projectionSource).not.toContain("projectConversationTimelineMessages");
+  });
+
   it("merges same-turn live overlay process into the active turn without exposing status text as answer", () => {
     const liveOverlay = assistantMessage("live-overlay", {
       content: "正在唤起对话 agent...\n正在绑定 Agent 实例、私人工作区、记忆根和工具工作区。",
@@ -40,7 +52,7 @@ describe("projectConversationTimelineMessages", () => {
       metadata: { kind: "session_active_turn_layer", turnId: "turn-1" },
     });
 
-    const projection = projectConversationTimelineMessages({
+    const projection = projectAgentMessageTimelineMessages({
       timelineMessages: [liveOverlay],
       activeTurnMessage: activeTurn,
     });
@@ -75,7 +87,7 @@ describe("projectConversationTimelineMessages", () => {
       metadata: { kind: "session_active_turn_layer", turnId: "turn-1" },
     });
 
-    const projection = projectConversationTimelineMessages({
+    const projection = projectAgentMessageTimelineMessages({
       timelineMessages: [liveOverlay],
       activeTurnMessage: activeTurn,
     });
@@ -97,7 +109,7 @@ describe("projectConversationTimelineMessages", () => {
       metadata: { kind: "session_active_turn_layer", turnId: "turn-1" },
     });
 
-    const projection = projectConversationTimelineMessages({
+    const projection = projectAgentMessageTimelineMessages({
       timelineMessages: [committed],
       activeTurnMessage: activeTurn,
     });
