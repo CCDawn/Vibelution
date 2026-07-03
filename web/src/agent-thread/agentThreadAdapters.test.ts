@@ -1,16 +1,21 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 
 import type { ConversationMessage } from "../api/types";
 import {
   activeTurnLayerToConversationMessage,
   mergeAssistantDeltaIntoActiveTurnLayer,
 } from "../routes/chatActiveTurnLayer";
-import {
-  conversationMessageToAgentMessage,
-  conversationMessagesToAgentThread,
-} from ".";
+import { conversationMessageToAgentMessage } from ".";
+
+const adapterSource = readFileSync(new URL("./adapters.ts", import.meta.url), "utf8");
 
 describe("agent thread adapters", () => {
+  it("does not export the retired batch ConversationMessage to AgentThread adapter", () => {
+    expect(adapterSource).not.toContain("conversationMessagesToAgentThread");
+    expect(adapterSource).not.toContain("ConversationMessagesToAgentThreadOptions");
+  });
+
   it("maps a user conversation message to text, attachment, and reference parts", () => {
     const message: ConversationMessage = {
       id: "user-1",
@@ -205,35 +210,6 @@ describe("agent thread adapters", () => {
         cognitiveState: "focused",
       },
     });
-  });
-
-  it("wraps conversation messages into a stable agent thread", () => {
-    const thread = conversationMessagesToAgentThread(
-      "session-1",
-      [
-        {
-          id: "user-1",
-          role: "user",
-          content: "你好",
-          timestamp: "2026-07-02T08:00:00Z",
-        },
-        {
-          id: "assistant-1",
-          role: "assistant",
-          content: "你好，我在",
-          timestamp: "2026-07-02T08:00:01Z",
-          streaming: true,
-        },
-      ],
-      { source: { kind: "session", id: "session-1" } },
-    );
-
-    expect(thread).toMatchObject({
-      id: "session-1",
-      source: { kind: "session", id: "session-1" },
-      status: "streaming",
-    });
-    expect(thread.messages.map((message) => message.id)).toEqual(["user-1", "assistant-1"]);
   });
 
   it("maps the active turn layer into the same agent message model", () => {
