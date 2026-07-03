@@ -38,6 +38,10 @@ const taskProfilePanelSource = readFileSync(
   new URL("./AgentTaskProfilePanel.tsx", import.meta.url),
   "utf-8",
 );
+const toolGovernancePanelSource = readFileSync(
+  new URL("./AgentToolGovernancePanel.tsx", import.meta.url),
+  "utf-8",
+);
 const filterRailSource = readFileSync(
   new URL("../components/vui/product/agent-management/AgentFilterRail.tsx", import.meta.url),
   "utf-8",
@@ -699,7 +703,7 @@ describe("AgentsRoute layout contract", () => {
     expect(toolSummaryPanelSource).toContain("工具能力已迁移到 Agent 管理的工具页集中配置");
     expect(toolSummaryPanelSource).toContain("配置工具能力");
     expect(toolSummaryPanelSource).toContain("onPress={onConfigure}");
-    expect(routeSource).toContain("去工具页配置");
+    expect(toolGovernancePanelSource).toContain("去工具页配置");
     expect(toolSummaryPanelSource).toContain("copy.toolCategoryCount");
   });
 
@@ -740,14 +744,19 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("toolGovernanceDraftFromAgent");
     expect(routeSource).toContain("toolPolicyDeltaFromDraft");
     expect(routeSource).toContain("/tool-governance-requests");
-    expect(routeSource).toContain("copy.toolGovernanceTitle");
-    expect(routeSource).toContain("copy.toolGovernancePending");
-    expect(routeSource).toContain("copy.toolGovernanceApprove");
-    expect(routeSource).toContain("copy.toolGovernanceReject");
+    expect(routeSource).toContain("<AgentToolGovernancePanel");
+    expect(routeSource).toContain("requests={selectedAgent.toolGovernanceRequests ?? []}");
+    expect(routeSource).toContain("pendingRequestId={");
+    expect(routeSource).toContain("onResolve={resolveToolGovernanceRequest}");
+    expect(routeSource).toContain("onConfigure={() => navigate(selectedAgentToolConfigRoute)}");
+    expect(toolGovernancePanelSource).toContain("copy.toolGovernanceTitle");
+    expect(toolGovernancePanelSource).toContain("copy.toolGovernancePending");
+    expect(toolGovernancePanelSource).toContain("copy.toolGovernanceApprove");
+    expect(toolGovernancePanelSource).toContain("copy.toolGovernanceReject");
     expect(routeSource).toContain("createToolGovernanceMutation");
     expect(routeSource).toContain("resolveToolGovernanceMutation");
-    expect(routeSource).toContain("styles.toolGovernanceList");
-    expect(routeSource).toContain("styles.toolGovernanceItem");
+    expect(toolGovernancePanelSource).toContain("styles.toolGovernanceList");
+    expect(toolGovernancePanelSource).toContain("styles.toolGovernanceItem");
     expect(styles.toolGovernanceList).toBeTruthy();
     expect(styles.toolGovernanceItem).toBeTruthy();
   });
@@ -1219,10 +1228,11 @@ describe("AgentsRoute layout contract", () => {
       ...sourceBlocksForStyle("editorActions", modeMembershipPanelSource),
       ...sourceBlocksForStyle("editorActions", personaProfilePanelSource),
       ...sourceBlocksForStyle("editorActions", taskProfilePanelSource),
+      ...sourceBlocksForStyle("editorActions", toolGovernancePanelSource),
       ...sourceBlocksForStyle("editorActions", toolSummaryPanelSource),
     ];
     const deepLinkActionBlocks = sourceBlocksForStyle("configDeepLinkRow");
-    const governanceActionBlocks = sourceBlocksForStyle("governanceActions");
+    const governanceActionBlocks = sourceBlocksForStyle("governanceActions", toolGovernancePanelSource);
     const promptConfigActionBlocks = sourceBlocksForStyle("promptConfigRow");
     const inboxMessageActionBlocks = sourceBlocksForStyle("inboxMessageTop");
     const panelHeaderActionBlocks = sourceBlocksForStyle("panelHeaderActions")
