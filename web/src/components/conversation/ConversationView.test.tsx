@@ -11,8 +11,8 @@ import conversationViewSource from "./ConversationView.tsx?raw";
 import {
   ConversationView,
   type ConversationProcessDisplayMode,
-  shouldShowNextStateSignalInConversation,
 } from "./ConversationView";
+import { shouldShowNextStateSignalInConversation } from "./conversationNextStateSignal";
 import { isAgentInboxMessage } from "./conversationMessagePredicates";
 
 const conversationViewStylesSource = [
