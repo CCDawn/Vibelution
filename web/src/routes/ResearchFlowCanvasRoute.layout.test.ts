@@ -155,9 +155,20 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
 
   it("uses a full canvas plus inspector layout", () => {
     expect(styles.route).toBeTypeOf("string");
+    expect(styles.route).toContain("grid-rows-[auto_auto_minmax(0,1fr)]");
+    expect(styles.body).toContain("grid");
+    expect(styles.body).toContain("h-full");
+    expect(styles.body).toContain("min-h-0");
+    expect(styles.body).toContain("grid-cols-[minmax(0,1fr)_minmax(320px,380px)]");
+    expect(styles.body).toContain("overflow-hidden");
     expect(styles.canvasShell).toBeTypeOf("string");
+    expect(styles.canvasShell).toContain("grid-rows-[auto_auto_minmax(0,1fr)]");
+    expect(styles.canvasShell).toContain("overflow-hidden");
     expect(styles.canvasScroller).toBeTypeOf("string");
+    expect(styles.canvasScroller).toContain("h-full");
+    expect(styles.canvasScroller).toContain("overflow-auto");
     expect(styles.canvasViewport).toBeTypeOf("string");
+    expect(styles.canvasViewport).toContain("min-h-full");
     expect(styles.canvasPanning).toBeTypeOf("string");
     expect(styles.reconnectHint).toBeTypeOf("string");
     expect(styles.zoomControl).toBeTypeOf("string");
@@ -179,12 +190,18 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
     expect(styles.saveStatusWarning).toBeTypeOf("string");
     expect(styles.saveStatusError).toBeTypeOf("string");
     expect(styles.inspector).toBeTypeOf("string");
+    expect(styles.inspector).toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(styles.inspector).toContain("h-full");
+    expect(styles.inspector).toContain("overflow-hidden");
     expect(styles.inspectorBody).toBeTypeOf("string");
+    expect(styles.inspectorBody).toContain("h-full");
     expect(styles.inspectorTabs).toBeTypeOf("string");
+    expect(styles.inspectorTabs).toContain("overflow-auto");
     expect(styles.inspectorTab).toBeTypeOf("string");
     expect(styles.inspectorTabActive).toBeTypeOf("string");
     expect(styles.inspectorTabBadge).toBeTypeOf("string");
     expect(styles.inspectorContent).toBeTypeOf("string");
+    expect(styles.inspectorContent).toContain("overflow-auto");
     expect(styles.issuePanel).toBeTypeOf("string");
     expect(styles.issueSummary).toBeTypeOf("string");
     expect(styles.issueCard).toBeTypeOf("string");

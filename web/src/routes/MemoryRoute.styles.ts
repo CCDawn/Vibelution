@@ -13,9 +13,9 @@ const styles: Record<string, string> = {
   activeChannelPill:
     "activeChannelPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   agentMemoryViewStack:
-    "agentMemoryViewStack min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    "agentMemoryViewStack min-w-0 !grid h-full min-h-0 !grid-rows-[auto_minmax(0,1fr)] overflow-hidden border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentMemoryWorkspace:
-    "agentMemoryWorkspace min-w-0 grid min-h-0 gap-2 p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    "agentMemoryWorkspace min-w-0 grid h-full min-h-0 gap-2 p-2 grid-cols-[minmax(210px,260px)_minmax(0,1fr)_minmax(280px,0.42fr)] overflow-hidden border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] max-[1100px]:grid-cols-[minmax(220px,280px)_minmax(0,1fr)] max-[1100px]:[&_.detailPanel]:col-span-2 max-[780px]:grid-cols-1 max-[780px]:overflow-auto",
   bulkActionBar:
     "bulkActionBar min-w-0 flex flex-wrap items-center gap-1.5",
   channelPill:
@@ -53,7 +53,7 @@ const styles: Record<string, string> = {
   cleanupWarning:
     "cleanupWarning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   cleanupWorkspace:
-    "cleanupWorkspace min-w-0 grid min-h-0 gap-2 p-2",
+    "cleanupWorkspace min-w-0 grid h-full min-h-0 flex-1 gap-2 p-2 overflow-auto",
   collapsedFormButton:
     "collapsedFormButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 grid gap-1 [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full hidden !grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-[7px] min-h-[42px] max-h-[92px]",
   compactItemMeta:
@@ -89,7 +89,7 @@ const styles: Record<string, string> = {
   detailMeta:
     "detailMeta min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
   detailPanel:
-    "detailPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "detailPanel min-w-0 min-h-0 overflow-auto rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   editPreviewGrid:
     "editPreviewGrid min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   editPreviewPanel:
@@ -97,7 +97,7 @@ const styles: Record<string, string> = {
   effectiveGrid:
     "effectiveGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] [&_.overviewPanel]:max-h-[min(260px,36vh)] [&_.overviewPanel]:overflow-auto [&_.panelLead]:line-clamp-2",
   emptyDetail:
-    "emptyDetail min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "emptyDetail min-w-0 grid min-h-[96px] content-center gap-1.5 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   emptyState:
     "emptyState min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   factGrid:
@@ -123,7 +123,7 @@ const styles: Record<string, string> = {
   graphCanvasMount:
     "graphCanvasMount min-w-0 grid min-h-0 gap-2 p-2",
   graphCanvasPanel:
-    "graphCanvasPanel min-w-0 grid min-h-0 gap-2 p-2 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)]",
+    "graphCanvasPanel min-w-0 grid h-full min-h-0 gap-2 p-2 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)]",
   graphCanvasShell:
     "graphCanvasShell min-w-0 grid h-full min-h-0 content-start overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)] gap-2 p-2 min-h-[360px] bg-[var(--vui-gradient-route-soft)] after:content-[''] after:[background-size:91px_91px]",
   graphCanvasToolbar:
@@ -163,9 +163,9 @@ const styles: Record<string, string> = {
   graphTypeList:
     "graphTypeList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto [&_button]:w-full [&_[data-active=true]]:border-[var(--accent-cool)]",
   graphViewStack:
-    "graphViewStack min-w-0",
+    "graphViewStack min-w-0 !grid h-full min-h-0 !grid-rows-[auto_minmax(0,1fr)] overflow-hidden",
   graphWorkspace:
-    "graphWorkspace min-w-0 grid min-h-0 gap-2 p-2 grid-cols-[minmax(210px,250px)_minmax(760px,1fr)_minmax(260px,0.34fr)]",
+    "graphWorkspace min-w-0 grid h-full min-h-0 gap-2 p-2 grid-cols-[minmax(210px,250px)_minmax(760px,1fr)_minmax(260px,0.34fr)] overflow-hidden max-[1280px]:grid-cols-[minmax(200px,240px)_minmax(560px,1fr)_minmax(240px,0.42fr)] max-[980px]:grid-cols-1 max-[980px]:overflow-auto",
   header:
     "header min-w-0 flex flex-wrap items-center gap-1.5",
   headerActions:
@@ -201,7 +201,7 @@ const styles: Record<string, string> = {
   itemOrigin:
     "itemOrigin min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
   itemPanel:
-    "itemPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 rounded-[var(--radius-control)] bg-[var(--vui-surface-row)]",
+    "itemPanel min-w-0 min-h-0 overflow-auto rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 rounded-[var(--radius-control)] bg-[var(--vui-surface-row)]",
   itemPath:
     "itemPath min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 font-mono text-[var(--vui-font-xs)]",
   itemSelectionRow:
@@ -233,9 +233,9 @@ const styles: Record<string, string> = {
   knowledgeStewardPanel:
     "knowledgeStewardPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   knowledgeViewStack:
-    "knowledgeViewStack min-w-0 grid !flex flex-col min-h-0 overflow-hidden [&>.summaryGrid]:[grid-template-columns:repeat(4,minmax(0,1fr))] [&>.knowledgeWorkspace]:flex-1 [&>.knowledgeGovernanceDeck]:hidden",
+    "knowledgeViewStack min-w-0 grid !flex h-full flex-col min-h-0 overflow-hidden [&>.summaryGrid]:[grid-template-columns:repeat(4,minmax(0,1fr))] [&>.knowledgeWorkspace]:flex-1 [&>.knowledgeGovernanceDeck]:hidden",
   knowledgeWorkspace:
-    "knowledgeWorkspace min-w-0 grid min-h-0 gap-2 p-2 grid-cols-[minmax(170px,205px)_minmax(0,1.24fr)_minmax(260px,0.62fr)]",
+    "knowledgeWorkspace min-w-0 grid h-full min-h-0 gap-2 p-2 grid-cols-[minmax(170px,205px)_minmax(0,1.24fr)_minmax(260px,0.62fr)] overflow-hidden max-[1180px]:grid-cols-[minmax(180px,220px)_minmax(0,1fr)] max-[1180px]:[&_.detailPanel]:col-span-2 max-[820px]:grid-cols-1 max-[820px]:overflow-auto",
   manageDetailPanel:
     "manageDetailPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   manageFilterHeader:
@@ -243,7 +243,7 @@ const styles: Record<string, string> = {
   manageFilterPanel:
     "manageFilterPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   manageFormPanel:
-    "manageFormPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full [&>p]:hidden",
+    "manageFormPanel min-w-0 min-h-0 overflow-auto rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full [&>p]:hidden",
   manageItemBadges:
     "manageItemBadges min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 grid grid-cols-[repeat(auto-fit,minmax(82px,1fr))] max-h-[74px] [&>span]:truncate",
   manageItemFooter:
@@ -259,7 +259,7 @@ const styles: Record<string, string> = {
   manageSourceFilters:
     "manageSourceFilters min-w-0 !grid grid-cols-[repeat(auto-fit,minmax(82px,1fr))] items-center gap-1 max-h-[74px] overflow-auto",
   manageWorkspace:
-    "manageWorkspace min-w-0 grid min-h-0 gap-2 p-2 grid-cols-[minmax(300px,0.76fr)_minmax(0,1fr)] grid-rows-[minmax(210px,0.58fr)_minmax(260px,1fr)] [&_.manageListPanel]:row-span-2 [&_.detailPanel]:col-start-2 [&_.detailPanel]:row-start-2 [&_.detailPanel]:max-h-none",
+    "manageWorkspace min-w-0 grid h-full min-h-0 gap-2 p-2 grid-cols-[minmax(300px,0.76fr)_minmax(0,1fr)] !grid-rows-[minmax(0,0.58fr)_minmax(0,1fr)] overflow-hidden [&_.manageListPanel]:row-span-2 [&_.detailPanel]:col-start-2 [&_.detailPanel]:row-start-2 [&_.detailPanel]:max-h-none max-[980px]:grid-cols-1 max-[980px]:!grid-rows-none max-[980px]:overflow-auto max-[980px]:[&_.manageListPanel]:row-span-1 max-[980px]:[&_.detailPanel]:col-start-auto max-[980px]:[&_.detailPanel]:row-start-auto",
   managementActions:
     "managementActions min-w-0 flex flex-wrap items-center gap-1.5",
   managementHeader:
@@ -385,7 +385,7 @@ const styles: Record<string, string> = {
   reviewReasonPill:
     "reviewReasonPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)]",
   route:
-    "route min-w-0 grid h-full min-h-0 content-start overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)]",
+    "route min-w-0 grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)]",
   searchBox:
     "searchBox min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   sectionPanel:
@@ -413,7 +413,7 @@ const styles: Record<string, string> = {
   sourceList:
     "sourceList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   sourcePanel:
-    "sourcePanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "sourcePanel min-w-0 min-h-0 overflow-auto rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   sourceRecord:
     "sourceRecord min-w-0",
   sourceRecordActions:
@@ -479,7 +479,7 @@ const styles: Record<string, string> = {
   usageList:
     "usageList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   viewStack:
-    "viewStack min-w-0",
+    "viewStack min-w-0 flex h-full min-h-0 flex-col overflow-hidden [&>.workspace]:flex-1 [&>.workspace]:min-h-0 [&>.cleanupWorkspace]:flex-1 [&>.cleanupWorkspace]:min-h-0 [&>.overviewGrid]:flex-1 [&>.overviewGrid]:min-h-0 [&>.effectiveGrid]:flex-1 [&>.effectiveGrid]:min-h-0",
   visibilityHeader:
     "visibilityHeader min-w-0 flex flex-wrap items-center gap-1.5 !grid grid-cols-[22px_minmax(0,1fr)] items-start gap-2",
   visibilityPanel:
@@ -489,7 +489,7 @@ const styles: Record<string, string> = {
   wideField:
     "wideField min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   workspace:
-    "workspace min-w-0 grid min-h-0 gap-2 p-2 grid-rows-[minmax(0,1fr)] overflow-auto",
+    "workspace min-w-0 grid h-full min-h-0 flex-1 gap-2 p-2 grid-rows-[minmax(0,1fr)] overflow-auto",
 };
 
 export default styles;

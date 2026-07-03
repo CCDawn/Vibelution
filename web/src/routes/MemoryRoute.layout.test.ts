@@ -146,8 +146,17 @@ describe("MemoryRoute layout contract", () => {
   });
 
   it("keeps dense Memory workspaces bounded with internal scrolling", () => {
+    expect(styles.route).toContain("grid-rows-[auto_auto_minmax(0,1fr)]");
+    expect(styles.viewStack).toContain("h-full");
+    expect(styles.viewStack).toContain("min-h-0");
+    expect(styles.viewStack).toContain("overflow-hidden");
+    expect(styles.workspace).toContain("h-full");
+    expect(styles.workspace).toContain("min-h-0");
     expect(styles.workspace).toContain("grid-rows-[minmax(0,1fr)]");
     expect(styles.workspace).toContain("overflow-auto");
+    expect(styles.detailPanel).toContain("min-h-0");
+    expect(styles.detailPanel).toContain("overflow-auto");
+    expect(styles.emptyDetail).toContain("min-h-[96px]");
     expect(styles.summaryGrid).toContain("grid-cols-[repeat(6,minmax(118px,1fr))]");
     expect(styles.summaryCard).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(styles.overviewGrid).toContain("grid-cols-[repeat(2,minmax(0,1fr))]");
@@ -162,12 +171,36 @@ describe("MemoryRoute layout contract", () => {
 
   it("preserves a compact narrow Memory layout without turning every detail pane full width", () => {
     expect(styles.manageWorkspace).toContain("grid-cols-[minmax(300px,0.76fr)_minmax(0,1fr)]");
-    expect(styles.manageWorkspace).toContain("grid-rows-[minmax(210px,0.58fr)_minmax(260px,1fr)]");
+    expect(styles.manageWorkspace).toContain("grid-rows-[minmax(0,0.58fr)_minmax(0,1fr)]");
+    expect(styles.manageWorkspace).toContain("h-full");
+    expect(styles.manageWorkspace).toContain("overflow-hidden");
     expect(styles.manageWorkspace).toContain("[&_.manageListPanel]:row-span-2");
     expect(styles.manageWorkspace).toContain("[&_.detailPanel]:col-start-2");
     expect(styles.manageWorkspace).toContain("[&_.detailPanel]:row-start-2");
     expect(styles.manageWorkspace).toContain("[&_.detailPanel]:max-h-none");
     expect(styles.reviewReasonList).toContain("hidden");
+  });
+
+  it("lets routed Memory subviews fill the route slot before their own panels scroll", () => {
+    for (const viewClassName of [styles.agentMemoryViewStack, styles.knowledgeViewStack, styles.graphViewStack]) {
+      expect(viewClassName).toContain("h-full");
+      expect(viewClassName).toContain("min-h-0");
+      expect(viewClassName).toContain("overflow-hidden");
+    }
+
+    for (const workspaceClassName of [styles.agentMemoryWorkspace, styles.knowledgeWorkspace, styles.graphWorkspace]) {
+      expect(workspaceClassName).toContain("h-full");
+      expect(workspaceClassName).toContain("min-h-0");
+      expect(workspaceClassName).toContain("overflow-hidden");
+    }
+
+    expect(styles.cleanupWorkspace).toContain("h-full");
+    expect(styles.cleanupWorkspace).toContain("min-h-0");
+    expect(styles.cleanupWorkspace).toContain("overflow-auto");
+    expect(styles.graphCanvasPanel).toContain("h-full");
+    expect(styles.graphCanvasPanel).toContain("overflow-hidden");
+    expect(styles.sourcePanel).toContain("min-h-0");
+    expect(styles.itemPanel).toContain("min-h-0");
   });
 
   it("keeps restored MemoryRoute grids from the CSS module migration", () => {
