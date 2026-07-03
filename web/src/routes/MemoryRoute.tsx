@@ -68,6 +68,7 @@ import { VButton, VNativeInput, VNativeSelect, VNativeTextarea, VRouteHeader } f
 import { useShellI18n } from "../i18n/useShellI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { MemoryOverviewPanel } from "./MemoryOverviewPanel";
+import { MemoryProjectMemoryQueuePanel } from "./MemoryProjectMemoryQueuePanel";
 import styles from "./MemoryRoute.styles";
 
 const MemoryGraphCanvas = lazy(() => import("./MemoryGraphCanvas").then((module) => ({ default: module.MemoryGraphCanvas })));
@@ -4058,171 +4059,41 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     return <span className={className}>{status || "-"}</span>;
   };
 
-  const renderProjectMemoryQueue = () => {
-    const isPendingOnly = memoryProposalStatusFilter === "pending";
-    const emptyText = isPendingOnly ? copy.projectMemoryQueueEmptyPending : copy.projectMemoryQueueEmptyAll;
-    const isResolving = projectMemoryUpdateResolveMutation.isPending;
-    return (
-      <section className={styles.projectMemoryQueuePanel}>
-        <div className={styles.panelHeader}>
-          <div>
-            <p className={styles.panelEyebrow}>{copy.governance}</p>
-            <h2>{copy.projectMemoryQueue}</h2>
-          </div>
-          <div className={styles.projectMemoryQueueControls} aria-label={copy.status}>
-            <VButton
-              type="button"
-              className={isPendingOnly ? styles.filterButtonActive : styles.filterButton}
-              aria-pressed={isPendingOnly}
-              onClick={() => setMemoryProposalStatusFilter("pending")}
-            >
-              {copy.projectMemoryQueuePendingOnly}
-            </VButton>
-            <VButton
-              type="button"
-              className={!isPendingOnly ? styles.filterButtonActive : styles.filterButton}
-              aria-pressed={!isPendingOnly}
-              onClick={() => setMemoryProposalStatusFilter("")}
-            >
-              {copy.projectMemoryQueueAll}
-            </VButton>
-          </div>
-        </div>
-        <div className={styles.projectMemoryQueueStats} title={copy.projectMemoryQueueHint}>
-          <span>
-            <strong>{pendingProjectMemoryProposalCount}</strong>
-            {copy.pendingProposals}
-          </span>
-          <span>
-            <strong>{projectMemoryUpdateProposals.length}</strong>
-            {isPendingOnly ? copy.projectMemoryQueuePendingOnly : copy.projectMemoryQueueAll}
-          </span>
-          <span>
-            <strong>{projectMemoryProposalLaneCount}</strong>
-            {copy.projectMemoryQueueLane}
-          </span>
-        </div>
-        {mutationFeedback.tone !== "idle" ? (
-          <p className={styles.copyNotice} data-tone={mutationFeedback.tone}>
-            {mutationFeedback.tone === "success" ? <CheckCircle2 size={14} /> : <TriangleAlert size={14} />}
-            <span>{mutationFeedback.text}</span>
-          </p>
-        ) : null}
-        {projectMemoryUpdatesQuery.isError ? (
-          <p className={styles.panelError}>
-            <TriangleAlert size={15} />
-            <span>{projectMemoryUpdatesQuery.error instanceof Error ? projectMemoryUpdatesQuery.error.message : String(projectMemoryUpdatesQuery.error)}</span>
-          </p>
-        ) : null}
-        <div className={styles.projectMemoryProposalList}>
-          {projectMemoryUpdateProposals.map((proposal) => {
-            const isPendingProposal = proposal.status === "pending";
-            const noteValue = memoryProposalResolutionNotes[proposal.proposalId] ?? "";
-            const relatedFiles = (proposal.relatedFiles ?? []).filter(Boolean);
-            return (
-              <article key={proposal.proposalId} className={styles.projectMemoryProposalRow} data-status={proposal.status || "unknown"}>
-                <div className={styles.projectMemoryProposalMain}>
-                  <div className={styles.projectMemoryProposalTitleLine}>
-                    <strong>{proposal.focus || proposal.update || proposal.proposalId}</strong>
-                    {renderProjectMemoryProposalStatus(proposal.status)}
-                  </div>
-                  <p>{proposal.update || proposal.details || "-"}</p>
-                  <small>{proposal.details || proposal.proposalId}</small>
-                </div>
-                <div className={styles.projectMemoryProposalMeta}>
-                  <span>{copy.projectMemoryQueueAgent}: {projectMemoryProposalAgentLabel(proposal)}</span>
-                  <span>{copy.projectMemoryQueueLane}: {proposal.laneId || "-"}</span>
-                  <span>{copy.projectMemoryQueueCreated}: {formatTimestamp(proposal.createdAt, lang)}</span>
-                </div>
-                <div className={styles.projectMemoryProposalFiles} aria-label={copy.projectMemoryQueueFiles}>
-                  {relatedFiles.length ? relatedFiles.slice(0, 3).map((file) => <code key={file}>{file}</code>) : <span>-</span>}
-                  {relatedFiles.length > 3 ? <span>+{relatedFiles.length - 3}</span> : null}
-                </div>
-                <div className={styles.projectMemoryProposalNote}>
-                  {isPendingProposal ? (
-                    <VNativeInput
-                      value={noteValue}
-                      placeholder={copy.projectMemoryQueueResolutionNote}
-                      onChange={(event) =>
-                        setMemoryProposalResolutionNotes((current) => ({
-                          ...current,
-                          [proposal.proposalId]: event.target.value,
-                        }))
-                      }
-                    />
-                  ) : (
-                    <span>
-                      {proposal.resolutionNote
-                        || `${copy.projectMemoryQueueResolved}: ${projectMemoryProposalResolverLabel(proposal.resolvedBy, lang)}`}
-                    </span>
-                  )}
-                </div>
-                <div className={styles.projectMemoryProposalActions}>
-                  {isPendingProposal ? (
-                    <>
-                      <VButton
-                        type="button"
-                        className={styles.detailActionButton}
-                        title={copy.projectMemoryQueueApply}
-                        isDisabled={isResolving}
-                        onClick={() => handleProjectMemoryProposalResolve(proposal, "applied")}
-                      >
-                        <CheckCircle2 size={14} />
-                        <span>{copy.projectMemoryQueueApply}</span>
-                      </VButton>
-                      <VButton
-                        type="button"
-                        className={styles.detailActionButton}
-                        title={copy.projectMemoryQueueReject}
-                        isDisabled={isResolving}
-                        onClick={() => handleProjectMemoryProposalResolve(proposal, "rejected")}
-                      >
-                        <XCircle size={14} />
-                        <span>{copy.projectMemoryQueueReject}</span>
-                      </VButton>
-                      <VButton
-                        type="button"
-                        className={styles.detailActionButton}
-                        title={copy.projectMemoryQueueConflict}
-                        isDisabled={isResolving}
-                        onClick={() => handleProjectMemoryProposalResolve(proposal, "conflict")}
-                      >
-                        <TriangleAlert size={14} />
-                        <span>{copy.projectMemoryQueueConflict}</span>
-                      </VButton>
-                      <VButton
-                        type="button"
-                        className={styles.detailActionButton}
-                        title={copy.projectMemoryQueueSupersede}
-                        isDisabled={isResolving}
-                        onClick={() => handleProjectMemoryProposalResolve(proposal, "superseded")}
-                      >
-                        <Square size={14} />
-                        <span>{copy.projectMemoryQueueSupersede}</span>
-                      </VButton>
-                    </>
-                  ) : (
-                    <span className={styles.projectMemoryProposalResolved}>
-                      {copy.projectMemoryQueueResolved}: {formatTimestamp(proposal.resolvedAt, lang)}
-                    </span>
-                  )}
-                </div>
-              </article>
-            );
-          })}
-          {projectMemoryUpdatesQuery.isPending && !projectMemoryUpdateProposals.length ? (
-            <section className={styles.emptyState}>{copy.loading}</section>
-          ) : null}
-          {!projectMemoryUpdatesQuery.isPending && !projectMemoryUpdateProposals.length ? (
-            <section className={styles.emptyState}>
-              <CheckCircle2 size={20} />
-              <span>{emptyText}</span>
-            </section>
-          ) : null}
-        </div>
-      </section>
-    );
-  };
+  const isPendingProjectMemoryOnly = memoryProposalStatusFilter === "pending";
+  const projectMemoryQueueEmptyText = isPendingProjectMemoryOnly ? copy.projectMemoryQueueEmptyPending : copy.projectMemoryQueueEmptyAll;
+  const projectMemoryQueueErrorText = projectMemoryUpdatesQuery.isError
+    ? projectMemoryUpdatesQuery.error instanceof Error
+      ? projectMemoryUpdatesQuery.error.message
+      : String(projectMemoryUpdatesQuery.error)
+    : "";
+  const projectMemoryQueuePanel = (
+    <MemoryProjectMemoryQueuePanel
+      copy={copy}
+      isPendingOnly={isPendingProjectMemoryOnly}
+      pendingProposalCount={pendingProjectMemoryProposalCount}
+      proposalCount={projectMemoryUpdateProposals.length}
+      laneCount={projectMemoryProposalLaneCount}
+      proposals={projectMemoryUpdateProposals}
+      resolutionNotes={memoryProposalResolutionNotes}
+      mutationFeedback={mutationFeedback}
+      errorText={projectMemoryQueueErrorText}
+      emptyText={projectMemoryQueueEmptyText}
+      isLoading={projectMemoryUpdatesQuery.isPending}
+      isResolving={projectMemoryUpdateResolveMutation.isPending}
+      onFilterChange={setMemoryProposalStatusFilter}
+      onResolutionNoteChange={(proposalId, note) =>
+        setMemoryProposalResolutionNotes((current) => ({
+          ...current,
+          [proposalId]: note,
+        }))
+      }
+      onResolve={handleProjectMemoryProposalResolve}
+      renderStatus={renderProjectMemoryProposalStatus}
+      formatTimestamp={(value) => formatTimestamp(value ?? "", lang)}
+      proposalAgentLabel={projectMemoryProposalAgentLabel}
+      proposalResolverLabel={(resolvedBy) => projectMemoryProposalResolverLabel(resolvedBy, lang)}
+    />
+  );
 
   const renderReviewQueue = () => {
     if (overviewQuery.isPending && !hasOverviewSections) {
@@ -6719,7 +6590,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               reviewMemoryCount={reviewPairs.length}
               warningStrip={renderWarningStrip()}
               reviewQueue={renderReviewQueue()}
-              projectMemoryQueue={renderProjectMemoryQueue()}
+              projectMemoryQueue={projectMemoryQueuePanel}
               runtimeMemoryList={renderMemoryList(runtimePairs, copy.noRuntimeMemory, true)}
               reviewMemoryList={renderMemoryList(reviewPairs, copy.noIssues, true)}
             />
