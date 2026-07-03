@@ -1022,25 +1022,61 @@ def _save_prompt_templates(payload: dict[str, Any]) -> None:
 
 def _template_to_api(record: dict[str, Any], *, include_content: bool) -> dict[str, Any]:
     content = _resolve_template_content(record)
+    template_id = str(record.get("templateId") or "").strip()
     source_path = str(record.get("sourcePath") or "").strip()
     source_exists = _source_exists(source_path)
+    source_type = "workspace_file" if source_path else ("inline_record" if "content" in record else "empty")
+    source_authority = "record_content" if "content" in record else ("source_file" if source_path else "empty")
+    source_content = _read_template_source_content(source_path)
+    source_content_hash = _content_hash(source_content or "") if source_content is not None else ""
+    if not source_path:
+        source_drift_status = "not_applicable"
+    elif not source_exists:
+        source_drift_status = "missing_source"
+    elif "content" not in record:
+        source_drift_status = "source_authority"
+    else:
+        source_drift_status = "synced" if source_content == content else "drifted"
+    default_record = _default_template_map().get(template_id)
+    default_content = str(default_record.get("content") or "") if default_record and "content" in default_record else ""
+    default_content_hash = _content_hash(default_content) if default_content else ""
     payload = {
-        "templateId": str(record.get("templateId") or "").strip(),
-        "promptTemplateId": str(record.get("templateId") or "").strip(),
+        "templateId": template_id,
+        "promptTemplateId": template_id,
         "name": str(record.get("name") or "").strip(),
         "category": str(record.get("category") or "general").strip(),
+        "sourceType": source_type,
         "sourcePath": source_path,
         "sourceExists": source_exists,
+        "sourceAuthority": source_authority,
+        "sourceDriftStatus": source_drift_status,
+        "sourceContentHash": source_content_hash,
         "status": str(record.get("status") or "active").strip(),
         "metadata": dict(record.get("metadata") or {}),
         "contentLength": len(content),
         "contentHash": _content_hash(content),
         "contentPreview": _trim_text(content.replace("\r\n", "\n"), max_chars=240),
         "content": content if include_content else "",
+        "hasDefault": bool(default_content.strip()),
+        "defaultContent": default_content if include_content else "",
+        "defaultContentHash": default_content_hash,
+        "defaultContentPreview": _trim_text(default_content.replace("\r\n", "\n"), max_chars=240),
         "createdAt": str(record.get("createdAt") or "").strip(),
         "updatedAt": str(record.get("updatedAt") or "").strip(),
     }
     return payload
+
+
+def _read_template_source_content(source_path: str) -> str | None:
+    if not source_path:
+        return None
+    try:
+        path = _resolve_project_path(source_path)
+        if path.exists() and path.is_file():
+            return path.read_text(encoding="utf-8")
+    except Exception:
+        return None
+    return None
 
 
 def _resolve_template_content(record: dict[str, Any]) -> str:

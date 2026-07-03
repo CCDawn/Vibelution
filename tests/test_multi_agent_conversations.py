@@ -969,12 +969,21 @@ def test_agents_api_returns_recent_agent_runs(tmp_path, monkeypatch):
 def test_agent_configuration_api_exposes_prompt_templates_and_mode_bindings(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(agents_route, "_ensure_config_agent_instances", lambda: None)
+    agents_route.invalidate_agent_config_workspace_cache()
     alpha = session_service.create_chat_session(title="Alpha Agent")
 
     templates_response = client.get("/api/prompt-templates")
     assert templates_response.status_code == 200, templates_response.text
     templates_payload = templates_response.json()
-    assert "prompt-research-broad" in {item["promptTemplateId"] for item in templates_payload["templates"]}
+    broad_summary = next(
+        item for item in templates_payload["templates"]
+        if item["promptTemplateId"] == "prompt-research-broad"
+    )
+    assert broad_summary["sourceType"] == "workspace_file"
+    assert broad_summary["sourceAuthority"] == "record_content"
+    assert broad_summary["hasDefault"] is True
+    assert broad_summary["defaultContent"] == ""
+    assert "广撒网探索 agent" in broad_summary["defaultContentPreview"]
 
     update_template_response = client.patch(
         "/api/prompt-templates/prompt-research-broad",
@@ -982,6 +991,7 @@ def test_agent_configuration_api_exposes_prompt_templates_and_mode_bindings(tmp_
     )
     assert update_template_response.status_code == 200, update_template_response.text
     assert update_template_response.json()["content"] == "# API 广搜提示词\n"
+    assert update_template_response.json()["sourceAuthority"] == "record_content"
 
     binding_response = client.get("/api/agent-mode-bindings")
     assert binding_response.status_code == 200, binding_response.text
@@ -1021,6 +1031,70 @@ def test_agent_configuration_api_exposes_prompt_templates_and_mode_bindings(tmp_
     )
     assert pool_response.status_code == 200, pool_response.text
     assert pool_response.json()["modes"]["research"]["pool"] == [pool_agent["agentId"]]
+
+
+def test_prompt_template_routes_include_inactive_and_invalidate_agent_workspace_cache(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(agents_route, "_ensure_config_agent_instances", lambda: None)
+    agents_route.invalidate_agent_config_workspace_cache()
+
+    first_workspace_response = client.get("/api/agents/config-workspace?includeRuntime=false")
+    assert first_workspace_response.status_code == 200, first_workspace_response.text
+    assert first_workspace_response.json()["diagnostics"]["cache"]["hit"] is False
+
+    inactive_response = client.patch(
+        "/api/prompt-templates/prompt-research-broad",
+        json={"status": "inactive"},
+    )
+    assert inactive_response.status_code == 200, inactive_response.text
+
+    default_list = client.get("/api/prompt-templates")
+    assert default_list.status_code == 200, default_list.text
+    assert "prompt-research-broad" not in {item["promptTemplateId"] for item in default_list.json()["templates"]}
+
+    inactive_list = client.get("/api/prompt-templates?includeInactive=true")
+    assert inactive_list.status_code == 200, inactive_list.text
+    inactive_template = next(
+        item for item in inactive_list.json()["templates"]
+        if item["promptTemplateId"] == "prompt-research-broad"
+    )
+    assert inactive_template["status"] == "inactive"
+    assert inactive_template["hasDefault"] is True
+
+    update_response = client.patch(
+        "/api/prompt-templates/prompt-research-broad",
+        json={"content": "# 缓存刷新提示词\n", "status": "active"},
+    )
+    assert update_response.status_code == 200, update_response.text
+
+    second_workspace_response = client.get("/api/agents/config-workspace?includeRuntime=false")
+    assert second_workspace_response.status_code == 200, second_workspace_response.text
+    second_workspace = second_workspace_response.json()
+    assert second_workspace["diagnostics"]["cache"]["hit"] is False
+    refreshed_template = next(
+        item for item in second_workspace["promptTemplates"]
+        if item["promptTemplateId"] == "prompt-research-broad"
+    )
+    assert "# 缓存刷新提示词" in refreshed_template["contentPreview"]
+
+
+def test_prompt_template_route_rejects_deactivating_template_used_by_active_agent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(agents_route, "_ensure_config_agent_instances", lambda: None)
+    agent_directory_service.create_agent_instance(
+        display_name="广搜 Agent",
+        primary_mode="research",
+        role_key="research_broad",
+        prompt_template_id="prompt-research-broad",
+    )
+
+    response = client.patch(
+        "/api/prompt-templates/prompt-research-broad",
+        json={"status": "inactive"},
+    )
+
+    assert response.status_code == 422, response.text
+    assert "active Agent" in response.json()["detail"]
 
 
 def test_agent_configuration_api_exposes_self_evolution_role_agents(tmp_path, monkeypatch):

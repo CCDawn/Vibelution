@@ -149,6 +149,44 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     assert (tmp_path / "workspace" / "prompts" / "research" / "source_relation_mapper.md").exists()
 
 
+def test_prompt_template_api_exposes_default_and_source_authority_metadata(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    prompt_template_service.repair_prompt_templates()
+
+    workspace = prompt_template_service.list_prompt_templates()
+    summary = next(
+        item for item in workspace["templates"]
+        if item["promptTemplateId"] == "prompt-chat-operation-default"
+    )
+
+    assert summary["content"] == ""
+    assert summary["sourceType"] == "workspace_file"
+    assert summary["sourceAuthority"] == "record_content"
+    assert summary["sourceDriftStatus"] == "synced"
+    assert summary["hasDefault"] is True
+    assert summary["defaultContent"] == ""
+    assert "默认操作型会话 Agent" in summary["defaultContentPreview"]
+    assert summary["defaultContentHash"].startswith("sha256:")
+
+    detail = prompt_template_service.get_prompt_template("prompt-chat-operation-default")
+    assert detail is not None
+    assert detail["sourceType"] == "workspace_file"
+    assert detail["sourceAuthority"] == "record_content"
+    assert detail["hasDefault"] is True
+    assert "默认操作型会话 Agent" in detail["defaultContent"]
+    assert detail["defaultContentHash"] == summary["defaultContentHash"]
+
+    source_file = tmp_path / detail["sourcePath"]
+    source_file.write_text("# 文件投影漂移\n\n这不是记录权威内容。", encoding="utf-8")
+
+    drifted = prompt_template_service.get_prompt_template("prompt-chat-operation-default")
+    assert drifted is not None
+    assert "默认操作型会话 Agent" in drifted["content"]
+    assert "文件投影漂移" not in drifted["content"]
+    assert drifted["sourceAuthority"] == "record_content"
+    assert drifted["sourceDriftStatus"] == "drifted"
+
+
 def test_prompt_template_repair_drops_retired_self_evolution_summarizer(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     path = prompt_template_service.prompt_template_path()
