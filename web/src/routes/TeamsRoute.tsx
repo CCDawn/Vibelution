@@ -81,6 +81,7 @@ import { agentCenterMemoryRoute, teamMemoryRoute } from "./agentCenterRoutes";
 import { agentDisplayInfo } from "./agentDisplay";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import { TeamMemoryIndexPanel, type TeamMemoryIndexMember } from "./TeamMemoryIndexPanel";
+import { TeamSourceCollectionStageAgentsPanel, type TeamSourceCollectionStageAgentCard, type TeamSourceCollectionStageAgentTone } from "./TeamSourceCollectionStageAgentsPanel";
 import { TeamSourceCollectionRunSwitcherPanel, type TeamSourceCollectionRunSwitcherRun } from "./TeamSourceCollectionRunSwitcherPanel";
 import { TeamWorkflowGraphView, workflowGraphLayout } from "./TeamWorkflowGraphView";
 import styles from "./TeamsRoute.styles";
@@ -6542,97 +6543,60 @@ export function TeamsRoute({
     if (!bindings.length) {
       return null;
     }
+    const agentCards: TeamSourceCollectionStageAgentCard[] = bindings.map((binding) => {
+      const agentHydrationPending = Boolean(
+        binding.agentId
+        && !binding.agent
+        && (agentSummaryQuery.isPending || agentSummaryQuery.isFetching),
+      );
+      const tone: TeamSourceCollectionStageAgentTone = binding.agent
+        ? researchStageAgentConfigTone(binding.agent)
+        : binding.agentId
+          ? "blocked"
+          : "missing";
+      const info = agentDisplayInfo(binding.agent, lang, {
+        name: binding.bindingLabel || (lang === "zh" ? binding.zh : binding.en),
+      });
+      const agentName = binding.agent
+        ? info.name
+        : binding.agentId
+          ? binding.agentId
+          : (lang === "zh" ? "未绑定" : "Not bound");
+      const statusLabel = binding.agent
+        ? researchStageAgentConfigStatusLabel(binding.agent, lang)
+        : binding.agentId
+          ? agentHydrationPending
+            ? (lang === "zh" ? "加载中" : "loading")
+            : agentSummaryQuery.isError
+              ? (lang === "zh" ? "Agent 加载失败" : "Agent load failed")
+              : (lang === "zh" ? "引用失效" : "missing reference")
+          : (lang === "zh" ? "待绑定" : "missing");
+      const agentMemoryRoute = binding.agentId
+        ? agentCenterMemoryRoute({
+            agentId: binding.agentId,
+            teamId: selectedTeam?.teamId,
+            view: "agents",
+            returnLabel: "teams",
+            returnTo: selectedTeamReturnRoute,
+          })
+        : "";
+      return {
+        id: `source-step-${stageId}-${binding.key}`,
+        tone,
+        roleLabel: lang === "zh" ? binding.zh : binding.en,
+        agentName,
+        modelLabel: researchStageAgentModelLabel(binding.agent, lang),
+        statusLabel,
+        memoryRoute: agentMemoryRoute,
+        configRoute: binding.agentId ? researchStageAgentManagementRoute(binding.agentId) : "/agents",
+        configLabel: binding.agent ? (lang === "zh" ? "配置" : "Configure") : (lang === "zh" ? "绑定" : "Bind"),
+      };
+    });
     return (
-      <section className={styles.sourceCollectionStageAgentPanel} aria-label={lang === "zh" ? "当前步骤 Agent 配置" : "Current step Agent configuration"}>
-        <div className={styles.sourceCollectionStageAgentHeader}>
-          <div>
-            <strong>{lang === "zh" ? "当前步骤 Agent 配置" : "Step Agent configuration"}</strong>
-            <span>{bindings.length} {lang === "zh" ? "个功能 Agent" : "functional Agents"}</span>
-          </div>
-          <Link to="/agents">
-            <Link2 size={12} />
-            {lang === "zh" ? "Agent 管理" : "Agent management"}
-          </Link>
-        </div>
-        <div className={styles.sourceCollectionStageAgentList}>
-          {bindings.map((binding) => {
-            const agentHydrationPending = Boolean(
-              binding.agentId
-              && !binding.agent
-              && (agentSummaryQuery.isPending || agentSummaryQuery.isFetching),
-            );
-            const tone = binding.agent
-              ? researchStageAgentConfigTone(binding.agent)
-              : binding.agentId
-                ? "blocked"
-                : "missing";
-            const info = agentDisplayInfo(binding.agent, lang, {
-              name: binding.bindingLabel || (lang === "zh" ? binding.zh : binding.en),
-            });
-            const agentName = binding.agent
-              ? info.name
-              : binding.agentId
-                ? binding.agentId
-                : (lang === "zh" ? "未绑定" : "Not bound");
-            const statusLabel = binding.agent
-              ? researchStageAgentConfigStatusLabel(binding.agent, lang)
-              : binding.agentId
-                ? agentHydrationPending
-                  ? (lang === "zh" ? "加载中" : "loading")
-                  : agentSummaryQuery.isError
-                    ? (lang === "zh" ? "Agent 加载失败" : "Agent load failed")
-                    : (lang === "zh" ? "引用失效" : "missing reference")
-                : (lang === "zh" ? "待绑定" : "missing");
-            const modelLabel = researchStageAgentModelLabel(binding.agent, lang);
-            const agentMemoryRoute = binding.agentId
-              ? agentCenterMemoryRoute({
-                  agentId: binding.agentId,
-                  teamId: selectedTeam?.teamId,
-                  view: "agents",
-                  returnLabel: "teams",
-                  returnTo: selectedTeamReturnRoute,
-                })
-              : "";
-            return (
-              <article
-                key={`source-step-${stageId}-${binding.key}`}
-                className={[
-                  styles.sourceCollectionStageAgentCard,
-                  styles[`researchStageAgentCard_${tone}`],
-                ].filter(Boolean).join(" ")}
-              >
-                <div className={styles.sourceCollectionStageAgentCardBody}>
-                  <span>
-                    <small>{lang === "zh" ? "职责" : "Role"}</small>
-                    <strong>{lang === "zh" ? binding.zh : binding.en}</strong>
-                  </span>
-                  <span>
-                    <small>Agent</small>
-                    <strong>{agentName}</strong>
-                  </span>
-                  <span>
-                    <small>{lang === "zh" ? "模型" : "Model"}</small>
-                    <strong>{modelLabel}</strong>
-                  </span>
-                </div>
-                <div className={styles.sourceCollectionStageAgentCardActions}>
-                  <span>{statusLabel}</span>
-                  {agentMemoryRoute ? (
-                    <Link to={agentMemoryRoute}>
-                      <Link2 size={12} />
-                      {lang === "zh" ? "Agent 记忆" : "Memory"}
-                    </Link>
-                  ) : null}
-                  <Link to={binding.agentId ? researchStageAgentManagementRoute(binding.agentId) : "/agents"}>
-                    <Link2 size={12} />
-                    {binding.agent ? (lang === "zh" ? "配置" : "Configure") : (lang === "zh" ? "绑定" : "Bind")}
-                  </Link>
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      </section>
+      <TeamSourceCollectionStageAgentsPanel
+        lang={lang}
+        agents={agentCards}
+      />
     );
   }
 
