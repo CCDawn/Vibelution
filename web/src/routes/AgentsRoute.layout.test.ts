@@ -42,6 +42,10 @@ const toolGovernancePanelSource = readFileSync(
   new URL("./AgentToolGovernancePanel.tsx", import.meta.url),
   "utf-8",
 );
+const memoryPolicyPanelSource = readFileSync(
+  new URL("./AgentMemoryPolicyPanel.tsx", import.meta.url),
+  "utf-8",
+);
 const filterRailSource = readFileSync(
   new URL("../components/vui/product/agent-management/AgentFilterRail.tsx", import.meta.url),
   "utf-8",
@@ -732,10 +736,10 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("styles.configDeepLinkRow");
     expect(routeSource).toContain("onPress={() => navigate(selectedAgentModelConfigRoute)}");
     expect(routeSource).toContain("onPress={() => navigate(selectedAgentContextConfigRoute)}");
-    expect(routeSource).toContain("onPress={() => navigate(selectedAgentMemoryConfigRoute)}");
+    expect(routeSource).toContain("onOpenMemoryPage={() => navigate(selectedAgentMemoryConfigRoute)}");
     expect(routeSource).toContain("去模型库配置");
     expect(routeSource).toContain("去上下文配置");
-    expect(routeSource).toContain("去记忆页配置");
+    expect(memoryPolicyPanelSource).toContain("去记忆页配置");
     expect(styles.configDeepLinkRow).toBeTruthy();
   });
 
@@ -763,7 +767,14 @@ describe("AgentsRoute layout contract", () => {
 
   it("edits Agent memory policy from the same detail card", () => {
     expect(routeSource).toContain("AgentMemoryPolicyDraft");
-    expect(routeSource).toContain("copy.memoryPolicyTitle");
+    expect(routeSource).toContain("<AgentMemoryPolicyPanel");
+    expect(routeSource).toContain("draft={memoryPolicyDraft}");
+    expect(routeSource).toContain("memoryGroupOptions={memoryGroupOptions}");
+    expect(routeSource).toContain("onDraftChange={updateMemoryDraftField}");
+    expect(routeSource).toContain("onAddMemoryGroup={addMemoryGroup}");
+    expect(routeSource).toContain("onAddKnowledgeBaseId={addKnowledgeBaseId}");
+    expect(routeSource).toContain("onSave={saveMemoryPolicy}");
+    expect(memoryPolicyPanelSource).toContain("copy.memoryPolicyTitle");
     expect(routeSource).toContain("memoryPolicy: {");
     expect(routeSource).toContain("readSharedGroups: sortedIds(payload.draft.readSharedGroups)");
     expect(routeSource).toContain("writeSharedGroups: sortedIds(payload.draft.writeSharedGroups)");
@@ -771,13 +782,13 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("proposeKnowledgeBaseIds: sortedIds(payload.draft.proposeKnowledgeBaseIds)");
     expect(routeSource).toContain("reviewKnowledgeBaseIds: sortedIds(payload.draft.reviewKnowledgeBaseIds)");
     expect(routeSource).toContain("rateKnowledgeBaseIds: sortedIds(payload.draft.rateKnowledgeBaseIds)");
-    expect(routeSource).toContain("copy.readKnowledgeBaseIds");
-    expect(routeSource).toContain("copy.proposeKnowledgeBaseIds");
-    expect(routeSource).toContain("copy.reviewKnowledgeBaseIds");
-    expect(routeSource).toContain("copy.rateKnowledgeBaseIds");
-    expect(routeSource).toContain("styles.memoryPolicyGrid");
-    expect(routeSource).toContain("styles.tagList");
-    expect(routeSource).toContain("styles.inlineAdd");
+    expect(memoryPolicyPanelSource).toContain("copy.readKnowledgeBaseIds");
+    expect(memoryPolicyPanelSource).toContain("copy.proposeKnowledgeBaseIds");
+    expect(memoryPolicyPanelSource).toContain("copy.reviewKnowledgeBaseIds");
+    expect(memoryPolicyPanelSource).toContain("copy.rateKnowledgeBaseIds");
+    expect(memoryPolicyPanelSource).toContain("styles.memoryPolicyGrid");
+    expect(memoryPolicyPanelSource).toContain("styles.tagList");
+    expect(memoryPolicyPanelSource).toContain("styles.inlineAdd");
   });
 
   it("organizes the Agent card into three switchable panes with run history", () => {
@@ -802,7 +813,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("activePane === \"policies\"");
     expect(routeSource).not.toContain("activePane === \"membership\"");
     expect(toolSummaryPanelSource).toContain("copy.toolPolicyTitle");
-    expect(routeSource).toContain("copy.memoryPolicyTitle");
+    expect(memoryPolicyPanelSource).toContain("copy.memoryPolicyTitle");
     expect(modeMembershipPanelSource).toContain("copy.membershipTitle");
     expect(routeSource).toContain("activePane === \"activity\"");
     expect(routeSource).toContain("fetchJson<AgentRunHistory>");
@@ -1229,6 +1240,7 @@ describe("AgentsRoute layout contract", () => {
       ...sourceBlocksForStyle("editorActions", personaProfilePanelSource),
       ...sourceBlocksForStyle("editorActions", taskProfilePanelSource),
       ...sourceBlocksForStyle("editorActions", toolGovernancePanelSource),
+      ...sourceBlocksForStyle("editorActions", memoryPolicyPanelSource),
       ...sourceBlocksForStyle("editorActions", toolSummaryPanelSource),
     ];
     const deepLinkActionBlocks = sourceBlocksForStyle("configDeepLinkRow");
@@ -1274,10 +1286,10 @@ describe("AgentsRoute layout contract", () => {
       avatarActionStart,
       avatarEditorPanelSource.indexOf("className={styles.avatarLibraryHeader}", avatarActionStart),
     );
-    const memoryPolicyStart = routeSource.indexOf("className={styles.memoryPolicyGrid}");
-    const memoryPolicySource = routeSource.slice(
+    const memoryPolicyStart = memoryPolicyPanelSource.indexOf("className={styles.memoryPolicyGrid}");
+    const memoryPolicySource = memoryPolicyPanelSource.slice(
       memoryPolicyStart,
-      routeSource.indexOf("<datalist", memoryPolicyStart),
+      memoryPolicyPanelSource.indexOf("<datalist", memoryPolicyStart),
     );
     const timelineActionBlocks = [
       ...sourceBlocksForStyle("timelineActions"),
