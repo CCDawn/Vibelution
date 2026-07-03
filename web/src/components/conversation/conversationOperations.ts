@@ -47,7 +47,7 @@ export type ConversationOperationGroups = {
   tools: ConversationOperation[];
 };
 
-export type ConversationReActOperationGroup = {
+export type AgentMessageReActOperationGroup = {
   id: string;
   index: number;
   operations: ConversationOperation[];
@@ -220,14 +220,14 @@ function agentRuntimeEventPartToOperation(
   };
 }
 
-export function buildConversationReActOperationGroups(
+export function buildAgentMessageReActOperationGroups(
   operations: ConversationOperation[],
-): ConversationReActOperationGroup[] {
-  const groups: ConversationReActOperationGroup[] = [];
-  let current: ConversationReActOperationGroup | null = null;
+): AgentMessageReActOperationGroup[] {
+  const groups: AgentMessageReActOperationGroup[] = [];
+  let current: AgentMessageReActOperationGroup | null = null;
 
   const startGroup = (operation: ConversationOperation, thoughtSequence?: number) => {
-    const group: ConversationReActOperationGroup = {
+    const group: AgentMessageReActOperationGroup = {
       id: `react-${groups.length + 1}-${operation.id}`,
       index: groups.length + 1,
       operations: [],
@@ -239,10 +239,10 @@ export function buildConversationReActOperationGroups(
     current = group;
     return group;
   };
-  const activeGroup = (): ConversationReActOperationGroup | null => current;
+  const activeGroup = (): AgentMessageReActOperationGroup | null => current;
 
   for (const operation of operations) {
-    let target: ConversationReActOperationGroup | null = activeGroup();
+    let target: AgentMessageReActOperationGroup | null = activeGroup();
     const relatedThoughtSequence =
       typeof operation.relatedThoughtSequence === "number" && operation.relatedThoughtSequence > 0
         ? operation.relatedThoughtSequence
@@ -295,11 +295,11 @@ export function buildConversationReActOperationGroups(
     .filter(reActGroupIsDisplayable);
 }
 
-function reactGroupHasThought(group: ConversationReActOperationGroup) {
+function reactGroupHasThought(group: AgentMessageReActOperationGroup) {
   return group.operations.some((operation) => operation.kind === "thought");
 }
 
-function stableReActGroupId(group: ConversationReActOperationGroup) {
+function stableReActGroupId(group: AgentMessageReActOperationGroup) {
   const relatedThoughtSequence = group.operations
     .map((operation) => operation.relatedThoughtSequence)
     .find((sequence): sequence is number => typeof sequence === "number" && sequence > 0);
@@ -316,14 +316,14 @@ function stableReActGroupId(group: ConversationReActOperationGroup) {
   return `react-${group.index}-${group.operations[0]?.id ?? "empty"}`;
 }
 
-function reActGroupIsDisplayable(group: ConversationReActOperationGroup) {
+function reActGroupIsDisplayable(group: AgentMessageReActOperationGroup) {
   if (group.operations.some((operation) => !["thought", "mental"].includes(operation.kind))) {
     return true;
   }
   return group.operations.some((operation) => operation.status !== "done");
 }
 
-function reActGroupPrimaryOperations(group: ConversationReActOperationGroup) {
+function reActGroupPrimaryOperations(group: AgentMessageReActOperationGroup) {
   const actions = group.operations.filter((operation) => !["thought", "mental"].includes(operation.kind));
   const tools = actions.filter((operation) => operation.kind === "tool");
   if (tools.length > 0) {
@@ -335,11 +335,11 @@ function reActGroupPrimaryOperations(group: ConversationReActOperationGroup) {
   return group.operations;
 }
 
-function reActGroupPrimaryKind(group: ConversationReActOperationGroup): ConversationOperationKind {
+function reActGroupPrimaryKind(group: AgentMessageReActOperationGroup): ConversationOperationKind {
   return reActGroupPrimaryOperations(group)[0]?.kind ?? group.operations[0]?.kind ?? "tool";
 }
 
-function reActGroupTitle(group: ConversationReActOperationGroup) {
+function reActGroupTitle(group: AgentMessageReActOperationGroup) {
   const primaryOperations = reActGroupPrimaryOperations(group);
   const primaryLabels = Array.from(
     new Set(primaryOperations.map((operation) => operation.label).filter(Boolean)),

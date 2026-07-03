@@ -4,10 +4,11 @@ import { ConversationMessage } from "../../api/types";
 import { conversationMessageToAgentMessage } from "../../agent-thread/adapters";
 import type { AgentMessage } from "../../agent-thread";
 import * as conversationOperationsModule from "./conversationOperations";
+import conversationOperationsSource from "./conversationOperations.ts?raw";
 import {
   buildAgentMessageOperationGroups,
   buildAgentMessageOperations,
-  buildConversationReActOperationGroups,
+  buildAgentMessageReActOperationGroups,
 } from "./conversationOperations";
 
 const labels = {
@@ -28,6 +29,13 @@ describe("conversationOperations", () => {
   it("keeps display normalization helpers internal to the operation model", () => {
     expect("normalizeTimelineOperations" in conversationOperationsModule).toBe(false);
     expect("displayToolLabel" in conversationOperationsModule).toBe(false);
+  });
+
+  it("exports ReAct grouping through AgentMessage naming only", () => {
+    expect("buildAgentMessageReActOperationGroups" in conversationOperationsModule).toBe(true);
+    expect("buildConversationReActOperationGroups" in conversationOperationsModule).toBe(false);
+    expect(conversationOperationsSource).toContain("AgentMessageReActOperationGroup");
+    expect(conversationOperationsSource).not.toContain("ConversationReActOperationGroup");
   });
 
   it("builds operation groups from AgentMessage parts", () => {
@@ -362,7 +370,7 @@ describe("conversationOperations", () => {
     };
 
     const operations = operationsForConversationMessage(message);
-    const groups = buildConversationReActOperationGroups(operations);
+    const groups = buildAgentMessageReActOperationGroups(operations);
 
     expect(groups.map((group) => group.operations.map((operation) => operation.sequence))).toEqual([
       [1, 2, 3],
@@ -384,7 +392,7 @@ describe("conversationOperations", () => {
       ],
     };
 
-    const groups = buildConversationReActOperationGroups(operationsForConversationMessage(message));
+    const groups = buildAgentMessageReActOperationGroups(operationsForConversationMessage(message));
 
     expect(groups).toHaveLength(1);
     expect(groups[0].operations.map((operation) => operation.sequence)).toEqual([1, 2]);
@@ -452,7 +460,7 @@ describe("conversationOperations", () => {
       ],
     };
 
-    const groups = buildConversationReActOperationGroups(operationsForConversationMessage(message));
+    const groups = buildAgentMessageReActOperationGroups(operationsForConversationMessage(message));
 
     expect(groups.map((group) => group.id)).toEqual(["react-thought-4", "react-thought-6"]);
     expect(groups.map((group) => group.operations.map((operation) => operation.sequence))).toEqual([
@@ -474,7 +482,7 @@ describe("conversationOperations", () => {
       ],
     };
 
-    const groups = buildConversationReActOperationGroups(operationsForConversationMessage(message));
+    const groups = buildAgentMessageReActOperationGroups(operationsForConversationMessage(message));
 
     expect(groups).toHaveLength(1);
     expect(groups[0]).toMatchObject({
@@ -497,7 +505,7 @@ describe("conversationOperations", () => {
       ],
     };
 
-    const groups = buildConversationReActOperationGroups(operationsForConversationMessage(message));
+    const groups = buildAgentMessageReActOperationGroups(operationsForConversationMessage(message));
 
     expect(groups).toHaveLength(1);
     expect(groups[0]).toMatchObject({
@@ -581,8 +589,8 @@ describe("conversationOperations", () => {
       ],
     });
 
-    expect(buildConversationReActOperationGroups(baseOperations)[0].id).toBe("react-thought-2");
-    expect(buildConversationReActOperationGroups(withPrepStatus)[0].id).toBe("react-thought-2");
+    expect(buildAgentMessageReActOperationGroups(baseOperations)[0].id).toBe("react-thought-2");
+    expect(buildAgentMessageReActOperationGroups(withPrepStatus)[0].id).toBe("react-thought-2");
   });
 
   it("keeps only the latest running operation active for legacy timelines", () => {
