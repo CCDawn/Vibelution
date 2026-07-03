@@ -31,6 +31,7 @@ import graphCanvasSource from "./MemoryGraphCanvas.tsx?raw";
 import styles from "./MemoryRoute.styles";
 import stylesModuleSource from "./MemoryRoute.styles.ts?raw";
 import knowledgeGovernancePanelSource from "./MemoryKnowledgeGovernancePanel.tsx?raw";
+import knowledgeDetailPanelSource from "./MemoryKnowledgeDetailPanel.tsx?raw";
 
 const memoryCssSource = [
   stylesModuleSource,
@@ -534,6 +535,17 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("/api/knowledge/search");
     expect(routeSource).toContain("queryKeys.knowledgeSearch(");
     expect(routeSource).toContain("queryKeys.knowledgeItems(activeKnowledgeBaseForItems, activeKnowledgeActorAgentId)");
+    expect(routeSource).toContain('from "./MemoryKnowledgeDetailPanel"');
+    expect(routeSource).toContain("<MemoryKnowledgeDetailPanel");
+    expect(knowledgeDetailPanelSource).toContain("export function MemoryKnowledgeDetailPanel");
+    expect(knowledgeDetailPanelSource).toContain("copy.formalKnowledge");
+    expect(knowledgeDetailPanelSource).toContain("copy.sourceChain");
+    expect(knowledgeDetailPanelSource).toContain("copy.traceability");
+    expect(knowledgeDetailPanelSource).toContain("styles.knowledgeItems");
+    expect(knowledgeDetailPanelSource).toContain("styles.ratingControls");
+    expect(knowledgeDetailPanelSource).not.toContain("useQuery");
+    expect(knowledgeDetailPanelSource).not.toContain("useMutation");
+    expect(knowledgeDetailPanelSource).not.toContain("fetchJson");
     expect(routeSource).toContain('from "./MemoryKnowledgeBaseSidebar"');
     expect(routeSource).toContain("<MemoryKnowledgeBaseSidebar");
     expect(knowledgeBaseSidebarSource).toContain("export function MemoryKnowledgeBaseSidebar");
@@ -586,7 +598,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("queryKeys.knowledgeRatingSuggestions(");
     expect(routeSource).toContain("/rating-suggestions/review-batch");
     expect(routeSource).toContain("/api/knowledge/permissions/audit?agentId=");
-    expect(routeSource).toContain("copy.submitRatingSuggestion");
+    expect(knowledgeDetailPanelSource).toContain("copy.submitRatingSuggestion");
     expect(routeSource).toContain("selectedRatingSuggestionIds");
     expect(routeSource).toContain("toggleVisibleRatingSuggestions");
     expect(routeSource).toContain('from "./MemoryKnowledgeReviewPanel"');
@@ -1024,7 +1036,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain('activeKnowledgeWorkspaceMode === "permissions"');
     expect(knowledgeSourceGovernancePanelSource).toContain("showOwnerSourceForm ? (");
     expect(knowledgeSourceGovernancePanelSource).toContain("styles.collapsedFormButton");
-    expect(routeSource).toContain("copy.selectedKnowledgeDetail");
+    expect(knowledgeDetailPanelSource).toContain("copy.selectedKnowledgeDetail");
 
     expect(styles.knowledgeGovernanceDeck).toContain("hidden");
     expect(styles.knowledgeViewStack).toContain("flex");
