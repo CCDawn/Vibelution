@@ -907,6 +907,8 @@ def reset_prompt_template(template_id: str) -> dict[str, Any]:
     default = _default_template_map().get(normalized)
     if not default:
         raise PromptTemplateError(f"Prompt template has no built-in default: {normalized}")
+    if not str(default.get("content") or "").strip():
+        raise PromptTemplateError(f"Prompt template has no built-in default content: {normalized}")
     payload = repair_prompt_templates()
     templates = [item for item in payload.get("templates") or [] if item.get("templateId") != normalized]
     reset_record = _normalize_template_record(copy.deepcopy(default))
