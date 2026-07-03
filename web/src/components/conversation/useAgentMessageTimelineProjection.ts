@@ -3,7 +3,7 @@ import { conversationMessageToAgentMessage } from "../../agent-thread/adapters";
 import type { AgentMessage } from "../../agent-thread/types";
 import { answerProjectionContent } from "./conversationInternalStatus";
 import { mergeAgentFeedbackEvents } from "../../agent-thread/agentFeedbackEvents";
-import { projectAgentMessageProcessMessages } from "./agentMessageProcessProjection";
+import { projectTimelineProcessMessages } from "./timelineMessageProcessProjection";
 import {
   buildAgentMessageTimelineRowIdentities,
   type AgentMessageTimelineRowIdentity,
@@ -144,7 +144,7 @@ export function projectAgentMessageTimelineMessages({
 }: AgentMessageTimelineProjectionInput): AgentMessageTimelineProjection {
   const projectedMessages = (() => {
     if (!activeTurnMessage || hasCommittedAssistantAnswerForActiveTurn(timelineMessages, activeTurnMessage)) {
-      return projectAgentMessageProcessMessages(timelineMessages);
+      return projectTimelineProcessMessages(timelineMessages);
     }
     let mergedActiveTurnMessage = activeTurnMessage;
     const dedupedTimelineMessages = timelineMessages.filter((message) => {
@@ -154,7 +154,7 @@ export function projectAgentMessageTimelineMessages({
       }
       return true;
     });
-    return projectAgentMessageProcessMessages([...dedupedTimelineMessages, mergedActiveTurnMessage]);
+    return projectTimelineProcessMessages([...dedupedTimelineMessages, mergedActiveTurnMessage]);
   })();
   const projectedAgentMessages = projectedMessages.map(conversationMessageToAgentMessage);
 
