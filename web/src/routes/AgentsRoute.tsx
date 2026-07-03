@@ -73,6 +73,12 @@ import { useShellI18n } from "../i18n/useShellI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
 import { AgentActivityHistoryPanel, type AgentActivityTimelineItem } from "./AgentActivityHistoryPanel";
 import { AgentAvatarEditorPanel } from "./AgentAvatarEditorPanel";
+import {
+  AgentBulkConfigPanel,
+  type AgentBulkConfigApply,
+  type AgentBulkConfigDraft,
+  type AgentBulkConfigField,
+} from "./AgentBulkConfigPanel";
 import { AgentManagementNav } from "./AgentManagementNav";
 import { AgentManagementBriefPanel } from "./AgentManagementBriefPanel";
 import {
@@ -290,9 +296,6 @@ type AgentBulkConfigResponse = Omit<AgentBulkActionResponse, "success"> & {
   success: AgentConfigWorkspaceAgent[];
   appliedFields?: string[];
 };
-type AgentBulkConfigField = "dialogueModelId" | "promptTemplateId" | "primaryMode" | "roleKey";
-type AgentBulkConfigDraft = Record<AgentBulkConfigField, string>;
-type AgentBulkConfigApply = Record<AgentBulkConfigField, boolean>;
 type ModelProfileChoice = {
   key: string;
   modelId: string;
@@ -3795,6 +3798,25 @@ export function AgentsRoute() {
       roleKey: bulkConfigValueMixed(selectedBulkAgents, (agent) => agent.roleKey || ""),
     };
   }, [selectedBulkAgentKey]);
+  const bulkSelectedAgentOptions = useMemo(
+    () => selectedBulkAgents.map((agent) => ({ agentId: agent.agentId, label: agentLabel(agent) })),
+    [selectedBulkAgents],
+  );
+  const bulkModelOptions = useMemo(
+    () => agentModelChoices.map((model) => ({ value: model.modelId, label: model.label })),
+    [agentModelChoices],
+  );
+  const bulkPromptTemplateOptions = useMemo(
+    () => (workspace?.promptTemplates ?? []).map((template) => ({
+      value: template.promptTemplateId || template.templateId || "",
+      label: promptTemplateOptionLabel(template, lang),
+    })),
+    [lang, workspace?.promptTemplates],
+  );
+  const bulkPrimaryModeOptions = useMemo(
+    () => AGENT_PRIMARY_MODE_OPTIONS.map((mode) => ({ value: mode, label: modeLabel(mode, lang) })),
+    [lang],
+  );
   const bulkConfigCanSave = selectedBulkAgents.length > 1 && bulkConfigReady(bulkConfigDraft, bulkConfigApply) && !bulkAgentPending;
   const allVisibleAgentsSelected = visibleAgents.length > 0 && selectedBulkAgents.length === visibleAgents.length;
   const visiblePolicyTools = useMemo(() => {
@@ -6059,135 +6081,26 @@ export function AgentsRoute() {
             />
           ) : null}
           {selectedBulkAgents.length > 1 ? (
-            <section className={styles.configEditor}>
-              <div className={styles.panelHeader}>
-                <div>
-                  <p className={styles.panelEyebrow}>{copy.bulkEditTitle}</p>
-                  <h3>{copy.bulkEditSelected}: {selectedBulkAgents.length}</h3>
-                </div>
-                <CheckSquare size={17} />
-              </div>
-              <div className={styles.bulkSelectionList}>
-                {selectedBulkAgents.slice(0, 8).map((agent) => (
-                  <span key={`bulk-selected:${agent.agentId}`}>
-                    {agentLabel(agent)}
-                  </span>
-                ))}
-                {selectedBulkAgents.length > 8 ? <span>+{selectedBulkAgents.length - 8}</span> : null}
-              </div>
-              <div className={styles.editorGrid}>
-                <label className={styles.field}>
-                  <span className={styles.bulkFieldHeader}>
-                    <VNativeInput
-                      type="checkbox"
-                      checked={bulkConfigApply.dialogueModelId}
-                      onChange={(event) => toggleBulkConfigApply("dialogueModelId", event.target.checked)}
-                    />
-                    {copy.bulkApplyField}
-                  </span>
-                  <span>{copy.bulkDialogueModel}</span>
-                  <VNativeSelect
-                    value={bulkConfigDraft.dialogueModelId}
-                    disabled={!bulkConfigApply.dialogueModelId || bulkAgentPending}
-                    onChange={(event) => updateBulkConfigDraft({ dialogueModelId: event.target.value })}
-                  >
-                    <option value="">{bulkConfigMixed.dialogueModelId ? copy.bulkEditMixed : "-"}</option>
-                    {agentModelChoices.map((model) => (
-                      <option key={`bulk-dialogue:${model.modelId}`} value={model.modelId}>
-                        {model.label}
-                      </option>
-                    ))}
-                  </VNativeSelect>
-                </label>
-                <label className={styles.field}>
-                  <span className={styles.bulkFieldHeader}>
-                    <VNativeInput
-                      type="checkbox"
-                      checked={bulkConfigApply.promptTemplateId}
-                      onChange={(event) => toggleBulkConfigApply("promptTemplateId", event.target.checked)}
-                    />
-                    {copy.bulkApplyField}
-                  </span>
-                  <span>{copy.prompt}</span>
-                  <VNativeSelect
-                    value={bulkConfigDraft.promptTemplateId}
-                    disabled={!bulkConfigApply.promptTemplateId || bulkAgentPending}
-                    onChange={(event) => updateBulkConfigDraft({ promptTemplateId: event.target.value })}
-                  >
-                    <option value="">{bulkConfigMixed.promptTemplateId ? copy.bulkEditMixed : "-"}</option>
-                    {workspace?.promptTemplates.map((template) => (
-                      <option key={`bulk-prompt:${template.promptTemplateId || template.templateId}`} value={template.promptTemplateId || template.templateId || ""}>
-                        {promptTemplateOptionLabel(template, lang)}
-                      </option>
-                    ))}
-                  </VNativeSelect>
-                </label>
-                <label className={styles.field}>
-                  <span className={styles.bulkFieldHeader}>
-                    <VNativeInput
-                      type="checkbox"
-                      checked={bulkConfigApply.primaryMode}
-                      onChange={(event) => toggleBulkConfigApply("primaryMode", event.target.checked)}
-                    />
-                    {copy.bulkApplyField}
-                  </span>
-                  <span>{copy.bulkPrimaryMode}</span>
-                  <VNativeSelect
-                    value={bulkConfigDraft.primaryMode}
-                    disabled={!bulkConfigApply.primaryMode || bulkAgentPending}
-                    onChange={(event) => updateBulkConfigDraft({ primaryMode: event.target.value })}
-                  >
-                    <option value="">{bulkConfigMixed.primaryMode ? copy.bulkEditMixed : "-"}</option>
-                    {AGENT_PRIMARY_MODE_OPTIONS.map((mode) => (
-                      <option key={`bulk-mode:${mode}`} value={mode}>
-                        {modeLabel(mode, lang)}
-                      </option>
-                    ))}
-                  </VNativeSelect>
-                </label>
-                <label className={styles.field}>
-                  <span className={styles.bulkFieldHeader}>
-                    <VNativeInput
-                      type="checkbox"
-                      checked={bulkConfigApply.roleKey}
-                      onChange={(event) => toggleBulkConfigApply("roleKey", event.target.checked)}
-                    />
-                    {copy.bulkApplyField}
-                  </span>
-                  <span>{copy.bulkRoleKey}</span>
-                  <VNativeInput
-                    value={bulkConfigDraft.roleKey}
-                    placeholder={bulkConfigMixed.roleKey ? copy.bulkEditMixed : "-"}
-                    disabled={!bulkConfigApply.roleKey || bulkAgentPending}
-                    onChange={(event) => updateBulkConfigDraft({ roleKey: event.target.value })}
-                  />
-                </label>
-              </div>
-              {notice ? (
-                <p className={notice.tone === "error" ? styles.errorText : styles.successText}>{notice.text}</p>
-              ) : null}
-              <div className={styles.editorActions}>
-                <VButton
-                  type="button"
-                  variant="secondary"
-                  isDisabled={bulkAgentPending}
-                  onPress={() => {
-                    setBulkConfigDraft(bulkConfigDraftFromAgents(selectedBulkAgents));
-                    setBulkConfigApply(DEFAULT_BULK_CONFIG_APPLY);
-                  }}
-                >
-                  {copy.bulkConfigReset}
-                </VButton>
-                <VButton
-                  type="button"
-                  variant="primary"
-                  isDisabled={!bulkConfigCanSave}
-                  onPress={bulkApplyAgentConfig}
-                >
-                  {bulkAgentPending ? copy.bulkWorking : copy.bulkApplyConfig}
-                </VButton>
-              </div>
-            </section>
+            <AgentBulkConfigPanel
+              copy={copy}
+              selectedAgents={bulkSelectedAgentOptions}
+              draft={bulkConfigDraft}
+              apply={bulkConfigApply}
+              mixed={bulkConfigMixed}
+              pending={bulkAgentPending}
+              canSave={bulkConfigCanSave}
+              notice={notice}
+              modelOptions={bulkModelOptions}
+              promptTemplateOptions={bulkPromptTemplateOptions}
+              primaryModeOptions={bulkPrimaryModeOptions}
+              onToggleApply={toggleBulkConfigApply}
+              onDraftChange={updateBulkConfigDraft}
+              onReset={() => {
+                setBulkConfigDraft(bulkConfigDraftFromAgents(selectedBulkAgents));
+                setBulkConfigApply(DEFAULT_BULK_CONFIG_APPLY);
+              }}
+              onSave={bulkApplyAgentConfig}
+            />
           ) : selectedAgent ? (
             <>
               <section className={styles.detailHeader} title={copy.routeHint}>

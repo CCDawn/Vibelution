@@ -14,6 +14,10 @@ const bulkActionBarSource = readFileSync(
   new URL("../components/vui/product/agent-management/AgentBulkActionBar.tsx", import.meta.url),
   "utf-8",
 );
+const bulkConfigPanelSource = readFileSync(
+  new URL("./AgentBulkConfigPanel.tsx", import.meta.url),
+  "utf-8",
+);
 const filterRailSource = readFileSync(
   new URL("../components/vui/product/agent-management/AgentFilterRail.tsx", import.meta.url),
   "utf-8",
@@ -1069,7 +1073,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.bulkSkippedProtected");
     expect(routeSource).toContain("copy.bulkPurgeConfirm");
     expect(routeSource).toContain("copy.bulkPurgeResult");
-    expect(routeSource).toContain("copy.bulkEditMixed");
+    expect(bulkConfigPanelSource).toContain("copy.bulkEditMixed");
     expect(routeSource).toContain('"/api/agents/bulk-prompt-template"');
     expect(routeSource).toContain('"/api/agents/bulk-config"');
     expect(routeSource).toContain("applyFields: bulkConfigApplyFields(bulkConfigApply)");
@@ -1079,6 +1083,10 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('"/api/agents/bulk-archive"');
     expect(routeSource).toContain('"/api/agents/bulk-purge"');
     expect(routeSource).toContain("bulkPurgeWorkspaceCache");
+    expect(routeSource).toContain("<AgentBulkConfigPanel");
+    expect(routeSource).toContain("onToggleApply={toggleBulkConfigApply}");
+    expect(routeSource).toContain("onDraftChange={updateBulkConfigDraft}");
+    expect(routeSource).toContain("onSave={bulkApplyAgentConfig}");
     expect(routeSource).toContain("AgentBulkActionBar");
     expect(routeSource).toContain("VButton");
     expect(routeSource).toContain('summary={bulkActionSummary}');
@@ -1092,9 +1100,12 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("`/api/agents/${encodeURIComponent(agent.agentId)}/purge`");
     expect(routeSource).toContain('method: "DELETE"');
     expect(routeSource).toContain("onPress={bulkPurgeAgents}");
-    expect(routeSource).toContain("onPress={bulkApplyAgentConfig}");
-    expect(routeSource).toContain("styles.bulkSelectionList");
-    expect(routeSource).toContain("styles.bulkFieldHeader");
+    expect(bulkConfigPanelSource).toContain("onPress={onSave}");
+    expect(bulkConfigPanelSource).toContain("onPress={onReset}");
+    expect(bulkConfigPanelSource).toContain("styles.bulkSelectionList");
+    expect(bulkConfigPanelSource).toContain("styles.bulkFieldHeader");
+    expect(bulkConfigPanelSource).toContain("<VNativeSelect");
+    expect(bulkConfigPanelSource).toContain("<VNativeInput");
     expect(routeSource).toContain("bulkSelected: selectedBulkAgentIds.has(agent.agentId)");
     expect(denseListSource).toContain("onToggleBulk");
     expect(styles.agentPanel).toContain("[grid-template-rows:auto_auto_minmax(0,_1fr)]");
