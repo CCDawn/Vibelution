@@ -405,7 +405,7 @@ const styles: Record<string, string> = {
   relatedRow:
     "grid [border-radius:8px] [background:var(--surface-card-muted)] [border:1px_solid_var(--border-hairline)] [gap:4px] [min-height:48px] [padding:9px_10px]",
   resizeHandle:
-    "[min-width:12px] [padding:0] [border:0] [cursor:col-resize] [outline:none] [touch-action:none] [content:\"\"] [position:absolute] [top:0] [bottom:0] [left:50%] [width:3px] [transform:translateX(-50%)] [border-radius:999px] [transition:background-color_150ms_ease,_box-shadow_150ms_ease] [background:color-mix(in_srgb,_var(--accent-warm)_52%,_transparent)] [box-shadow:none] max-[1200px]:hidden",
+    "relative h-full min-w-3 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none before:absolute before:inset-y-0 before:left-1/2 before:w-[3px] before:-translate-x-1/2 before:rounded-[var(--radius-control)] before:bg-[var(--surface-resize-track)] before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] hover:before:shadow-[var(--vui-shadow-soft)] focus-visible:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] focus-visible:before:shadow-[var(--vui-shadow-soft)] max-[1200px]:hidden",
   reviewLead:
     "[margin:0] [color:var(--fg-primary)_!important] [font-size:1.04rem] [line-height:1.55]",
   runCardButton:
