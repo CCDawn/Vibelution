@@ -7,6 +7,7 @@ import { ChatNextStateSignalSummary, ConversationMessage, SessionTurnError } fro
 import styles from "./ConversationView.styles";
 import agentMessageRenderStateSource from "./agentMessageRenderState.ts?raw";
 import conversationViewStylesModuleSource from "./ConversationView.styles.ts?raw";
+import conversationStreamingResponseContentSource from "./ConversationStreamingResponseContent.tsx?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
 import { ConversationView } from "./ConversationView";
 import type { ConversationProcessDisplayMode } from "./conversationViewTypes";
@@ -18,10 +19,6 @@ const conversationViewStylesSource = [
   ...Object.keys(styles).map((key) => `.${key}`),
   ...Object.values(styles),
 ].join("\n");
-const streamingResponseContentSource = conversationViewSource.slice(
-  conversationViewSource.indexOf("function StreamingResponseContent"),
-  conversationViewSource.indexOf("function operationDetailsKind"),
-);
 
 function semanticArticleClassCount(html: string, className: string) {
   const escaped = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -156,15 +153,17 @@ describe("ConversationView edit resend affordance", () => {
 
   it("renders streaming assistant markdown progressively instead of waiting for the final answer", () => {
     expect(conversationViewSource).toContain("function renderStreamingResponseText(content: string)");
-    expect(conversationViewSource).toContain("<StreamingResponseContent content={content} renderBlock={renderMarkdownBlock} />");
-    expect(streamingResponseContentSource).toContain("function StreamingResponseContent");
-    expect(conversationViewSource).toContain("projectStreamingMarkdownBlocks");
-    expect(conversationViewSource).toContain("const visibleText = targetContent");
+    expect(conversationViewSource).toContain('from "./ConversationStreamingResponseContent"');
+    expect(conversationViewSource).toContain("<ConversationStreamingResponseContent");
+    expect(conversationViewSource).toContain("markdownBodyWithTable: styles.markdownBodyWithTable");
+    expect(conversationViewSource).not.toContain("function StreamingResponseContent");
+    expect(conversationViewSource).not.toContain("projectStreamingMarkdownBlocks");
+    expect(conversationViewSource).not.toContain("const visibleText = targetContent");
     expect(conversationViewSource).not.toContain("nextStreamingRevealLength");
     expect(conversationViewSource).not.toContain("type StreamingRevealState");
     expect(conversationViewSource).not.toContain("appendStableText");
-    expect(streamingResponseContentSource).not.toContain("requestAnimationFrame");
-    expect(streamingResponseContentSource).not.toContain("setVisibleContent");
+    expect(conversationStreamingResponseContentSource).not.toContain("requestAnimationFrame");
+    expect(conversationStreamingResponseContentSource).not.toContain("setVisibleContent");
     expect(conversationViewSource).toContain("const isResponseStreaming = Boolean(message.streaming) && showResponseBlock");
     expect(conversationViewSource).toContain("showResponseBlock && !isStreamingStatusPlaceholder && responseExpanded && !isResponseStreaming");
     expect(conversationViewSource).toContain("? renderStreamingResponseText(responseText)");
