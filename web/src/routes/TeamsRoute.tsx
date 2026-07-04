@@ -104,6 +104,14 @@ import { TeamSourceCollectionRunSettingsPanel } from "./TeamSourceCollectionRunS
 import { TeamSourceCollectionStorageActionsPanel, type TeamSourceCollectionStorageAction } from "./TeamSourceCollectionStorageActionsPanel";
 import { TeamWorkflowCandidatePreviewPanel, type TeamWorkflowCandidatePreviewItem } from "./TeamWorkflowCandidatePreviewPanel";
 import { TeamWorkflowGraphView, workflowGraphLayout } from "./TeamWorkflowGraphView";
+import {
+  TeamWorkflowCandidateGraphStatusPanel,
+  TeamWorkflowCoordinationStatusPanel,
+  TeamWorkflowKnowledgeIngestionStatusPanel,
+  TeamWorkflowModelEvidenceStatusPanel,
+  TeamWorkflowPaperNoteChunkStatusPanel,
+  TeamWorkflowSourceQualityStatusPanel,
+} from "./TeamWorkflowStatusPanels";
 import styles from "./TeamsRoute.styles";
 
 const NODE_WIDTH = 172;
@@ -12494,70 +12502,13 @@ export function TeamsRoute({
                             <span>{teamWorkflow.ownerAgentId}</span>
                             <span>{teamWorkflow.candidateStore.storagePath}</span>
                           </div>
-                          <div className={styles.workflowModelEvidencePanel}>
-                            <div className={styles.workflowIngestionHeader}>
-                              <div>
-                                <strong>{lang === "zh" ? "模型调用证据链" : "Model evidence chain"}</strong>
-                                <span>
-                                  {teamWorkflowOfficialModelEvidenceStatus
-                                    ? `${teamWorkflowOfficialModelEvidenceStatus.summary.coveredNodeCount}/${teamWorkflowOfficialModelEvidenceStatus.summary.requiredNodeCount} nodes · ${teamWorkflowOfficialModelEvidenceStatus.summary.evidenceCount} evidence`
-                                    : teamWorkflowOfficialModelEvidenceStatusQuery.isPending
-                                    ? (lang === "zh" ? "读取中" : "loading")
-                                    : (lang === "zh" ? "等待模型证据" : "waiting for model evidence")}
-                                </span>
-                              </div>
-                              <span className={`${styles.workflowTag} ${workflowIngestionTone(teamWorkflowOfficialModelEvidenceStatus?.status || "")}`}>
-                                {teamWorkflowOfficialModelEvidenceStatus
-                                  ? workflowIngestionStatusLabel(teamWorkflowOfficialModelEvidenceStatus.status, lang)
-                                  : (lang === "zh" ? "未读取" : "not loaded")}
-                              </span>
-                            </div>
-                            {teamWorkflowOfficialModelEvidenceStatus ? (
-                              <>
-                                <div className={styles.workflowModelEvidenceStats}>
-                                  <span>Qwen <strong>{teamWorkflowOfficialModelEvidenceStatus.summary.qwenEvidenceCount}</strong></span>
-                                  <span>{lang === "zh" ? "百炼" : "Bailian"} <strong>{teamWorkflowOfficialModelEvidenceStatus.summary.bailianEvidenceCount}</strong></span>
-                                  <span>{lang === "zh" ? "本地" : "local"} <strong>{teamWorkflowOfficialModelEvidenceStatus.summary.localEvidenceCount}</strong></span>
-                                  <span>{lang === "zh" ? "候选关联" : "linked"} <strong>{teamWorkflowOfficialModelEvidenceStatus.summary.linkedCandidateCount}</strong></span>
-                                </div>
-                                <div className={styles.workflowModelEvidenceCoverage}>
-                                  {teamWorkflowOfficialModelEvidenceStatus.coverage.map((item) => (
-                                    <span key={item.taskType} className={`${styles.workflowIngestionStage} ${workflowIngestionTone(item.status === "covered" ? "ready" : "needs_evidence")}`}>
-                                      <strong>{item.label}</strong>
-                                      <small>{item.evidenceCount} · {item.status}</small>
-                                    </span>
-                                  ))}
-                                </div>
-                                {teamWorkflowOfficialModelEvidenceStatus.actionItems.length ? (
-                                  <div className={styles.workflowIngestionActions}>
-                                    {teamWorkflowOfficialModelEvidenceStatus.actionItems.slice(0, 3).map((item) => (
-                                      <span key={`${item.code}-${item.taskType}`} className={workflowIngestionTone(item.severity)}>
-                                        {workflowIngestionStatusLabel(item.severity, lang)} · {item.message}
-                                      </span>
-                                    ))}
-                                  </div>
-                                ) : null}
-                                <div className={styles.workflowIngestionBoundary}>
-                                  <span>{lang === "zh" ? "证据登记，不是正式知识" : "Evidence only, not formal knowledge"}</span>
-                                  <span>
-                                    {teamWorkflowOfficialModelEvidenceStatus.officialBoundary.writesFormalKnowledge
-                                      ? (lang === "zh" ? "会写正式知识" : "writes formal knowledge")
-                                      : (lang === "zh" ? "正式知识写入关闭" : "formal write off")}
-                                  </span>
-                                  <span>{teamWorkflowOfficialModelEvidenceStatus.storage.evidenceStorePath}</span>
-                                </div>
-                              </>
-                            ) : (
-                              <div className={styles.empty}>
-                                {teamWorkflowOfficialModelEvidenceStatusQuery.isPending
-                                  ? (lang === "zh" ? "正在读取 Qwen/百炼/本地模型调用证据覆盖..." : "Loading Qwen/Bailian/local model evidence coverage...")
-                                  : (lang === "zh" ? "暂无模型调用证据。" : "No model evidence yet.")}
-                              </div>
-                            )}
-                            {teamWorkflowOfficialModelEvidenceStatusQuery.error instanceof Error ? (
-                              <div className={styles.messageError}>{teamWorkflowOfficialModelEvidenceStatusQuery.error.message}</div>
-                            ) : null}
-                          </div>
+                          <TeamWorkflowModelEvidenceStatusPanel
+                            lang={lang}
+                            status={teamWorkflowOfficialModelEvidenceStatus}
+                            loading={teamWorkflowOfficialModelEvidenceStatusQuery.isPending}
+                            errorMessages={teamWorkflowOfficialModelEvidenceStatusQuery.error instanceof Error ? [teamWorkflowOfficialModelEvidenceStatusQuery.error.message] : []}
+                            statusLabel={(value) => workflowIngestionStatusLabel(value, lang)}
+                          />
                         </>
                       ) : null}
                       {showResearchSourceCollection ? (
@@ -12780,183 +12731,24 @@ export function TeamsRoute({
                       </div>
                       ) : null}
                       {showResearchCoordination ? (
-                      <div className={styles.workflowCoordinationPanel} id="research-workflow-coordination">
-                        <div className={styles.workflowIngestionHeader}>
-                          <div>
-                            <strong>{lang === "zh" ? "团队协调队列" : "Coordination queue"}</strong>
-                            <span>
-                              {teamWorkflowCoordinationStatus
-                                ? `${teamWorkflowCoordinationStatus.summary.pendingTransferCount} transfer / ${teamWorkflowCoordinationStatus.summary.reworkCandidateCount} rework / ${teamWorkflowCoordinationStatus.summary.blockedCandidateCount} blocked`
-                                : teamWorkflowCoordinationStatusQuery.isPending
-                                ? (lang === "zh" ? "读取中" : "loading")
-                                : (lang === "zh" ? "等待流程数据" : "waiting for workflow data")}
-                            </span>
-                          </div>
-                          <span className={`${styles.workflowTag} ${workflowIngestionTone(teamWorkflowCoordinationStatus?.status || "")}`}>
-                            {teamWorkflowCoordinationStatus
-                              ? workflowCoordinationStatusLabel(teamWorkflowCoordinationStatus.status, lang)
-                              : (lang === "zh" ? "未读取" : "not loaded")}
-                          </span>
-                        </div>
-                        {teamWorkflowCoordinationStatus ? (
-                          <>
-                            <div className={styles.workflowCoordinationStats}>
-                              <span>{lang === "zh" ? "待决" : "transfer"} <strong>{teamWorkflowCoordinationStatus.summary.pendingTransferCount}</strong></span>
-                              <span>{lang === "zh" ? "返工" : "rework"} <strong>{teamWorkflowCoordinationStatus.summary.reworkCandidateCount}</strong></span>
-                              <span>{lang === "zh" ? "治理" : "steward"} <strong>{teamWorkflowCoordinationStatus.summary.stewardshipCandidateCount}</strong></span>
-                              <span>{lang === "zh" ? "阻塞" : "blocked"} <strong>{teamWorkflowCoordinationStatus.summary.blockedCandidateCount}</strong></span>
-                            </div>
-                            <div className={styles.workflowCoordinationQueues}>
-                              {[
-                                ["pendingTransfers", teamWorkflowCoordinationStatus.queues.pendingTransfers],
-                                ["needsRework", teamWorkflowCoordinationStatus.queues.needsRework],
-                                ["stewardship", teamWorkflowCoordinationStatus.queues.stewardship],
-                                ["blockedQueue", teamWorkflowCoordinationStatus.queues.blocked],
-                              ].map(([queueName, queueItems]) => (
-                                <div key={String(queueName)} className={styles.workflowCoordinationQueue}>
-                                  <strong>{workflowCoordinationStatusLabel(String(queueName), lang)}</strong>
-                                  {(queueItems as TeamWorkflowCoordinationStatus["queues"]["active"]).length ? (
-                                    (queueItems as TeamWorkflowCoordinationStatus["queues"]["active"]).slice(0, 3).map((item) => (
-                                      <span key={`${queueName}-${item.transferId || item.candidateId}`}>
-                                        <strong>
-                                          {item.transferId ? `${item.fromNode || "-"} -> ${item.toNode || "-"}` : workflowStateLabel(item.currentState, lang)}
-                                          {" · "}
-                                          {item.title || item.candidateType || item.candidateId}
-                                        </strong>
-                                        {item.communicationBrief ? (
-                                          <small>
-                                            {item.communicationBrief.targetAgentRole}
-                                            {" · "}
-                                            {workflowCoordinationChannelLabel(item.communicationBrief.channel, lang)}
-                                          </small>
-                                        ) : null}
-                                      </span>
-                                    ))
-                                  ) : (
-                                    <small>{lang === "zh" ? "空" : "empty"}</small>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                            {teamWorkflowCoordinationStatus.actionItems.length ? (
-                              <div className={styles.workflowIngestionActions}>
-                                {teamWorkflowCoordinationStatus.actionItems.slice(0, 4).map((item) => (
-                                  <span key={`${item.code}-${item.queue}`} className={workflowIngestionTone(item.severity)}>
-                                    {workflowIngestionStatusLabel(item.severity, lang)} · {item.message}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : null}
-                            <div className={styles.workflowCoordinationBriefSummary}>
-                              <span>
-                                {lang === "zh" ? "沟通建议" : "briefs"} <strong>{teamWorkflowCoordinationStatus.communication.briefCount}</strong>
-                              </span>
-                              <span>{teamWorkflowCoordinationStatus.communication.recommendedSender}</span>
-                              <span>
-                                {teamWorkflowCoordinationStatus.communication.autoSendEnabled
-                                  ? (lang === "zh" ? "自动发送开启" : "auto-send on")
-                                  : (lang === "zh" ? "不会自动发送" : "no auto-send")}
-                              </span>
-                            </div>
-                            <div className={styles.workflowIngestionBoundary}>
-                              <span>{teamWorkflowCoordinationStatus.coordinationPolicy.coordinationAgentId}</span>
-                              <span>
-                                {teamWorkflowCoordinationStatus.coordinationPolicy.requiresUserConfirmation
-                                  ? (lang === "zh" ? "需要用户确认" : "user confirmation")
-                                  : (lang === "zh" ? "无需用户确认" : "no user confirmation")}
-                              </span>
-                              <span>
-                                {teamWorkflowCoordinationStatus.coordinationPolicy.autoTransferEnabled
-                                  ? (lang === "zh" ? "自动调转开启" : "auto transfer on")
-                                  : (lang === "zh" ? "只读状态总览" : "read-only status")}
-                              </span>
-                            </div>
-                          </>
-                        ) : (
-                          <div className={styles.empty}>
-                            {teamWorkflowCoordinationStatusQuery.isPending
-                              ? (lang === "zh" ? "正在汇总候选队列、返工项和转移请求..." : "Aggregating candidates, rework items, and transfers...")
-                              : (lang === "zh" ? "暂无协调队列状态。" : "No coordination status yet.")}
-                          </div>
-                        )}
-                        {teamWorkflowCoordinationStatusQuery.error instanceof Error ? (
-                          <div className={styles.messageError}>{teamWorkflowCoordinationStatusQuery.error.message}</div>
-                        ) : null}
-                      </div>
+                      <TeamWorkflowCoordinationStatusPanel
+                        lang={lang}
+                        status={teamWorkflowCoordinationStatus}
+                        loading={teamWorkflowCoordinationStatusQuery.isPending}
+                        errorMessages={teamWorkflowCoordinationStatusQuery.error instanceof Error ? [teamWorkflowCoordinationStatusQuery.error.message] : []}
+                        statusLabel={(value) => workflowCoordinationStatusLabel(value, lang)}
+                        channelLabel={(value) => workflowCoordinationChannelLabel(value, lang)}
+                        stateLabel={(value) => workflowStateLabel(value, lang)}
+                      />
                       ) : null}
                       {showResearchIngestion ? (
-                      <div className={styles.workflowIngestionPanel} id="research-workflow-ingestion">
-                        <div className={styles.workflowIngestionHeader}>
-                          <div>
-                            <strong>{lang === "zh" ? "入库审核状态" : "Knowledge ingestion review"}</strong>
-                            <span>
-                              {teamWorkflowKnowledgeIngestionStatus
-                                ? `${teamWorkflowKnowledgeIngestionStatus.summary.pendingProposalCount} pending / ${teamWorkflowKnowledgeIngestionStatus.summary.formalKnowledgeItemCount} formal`
-                                : teamWorkflowKnowledgeIngestionStatusQuery.isPending
-                                ? (lang === "zh" ? "读取中" : "loading")
-                                : (lang === "zh" ? "等待候选" : "waiting for candidates")}
-                            </span>
-                          </div>
-                          <span className={`${styles.workflowTag} ${workflowIngestionTone(teamWorkflowKnowledgeIngestionStatus?.status || "")}`}>
-                            {teamWorkflowKnowledgeIngestionStatus
-                              ? workflowIngestionStatusLabel(teamWorkflowKnowledgeIngestionStatus.status, lang)
-                              : (lang === "zh" ? "未读取" : "not loaded")}
-                          </span>
-                        </div>
-                        {teamWorkflowKnowledgeIngestionStatus ? (
-                          <>
-                            <div className={styles.workflowIngestionStages}>
-                              {teamWorkflowKnowledgeIngestionStatus.stages.map((stage) => (
-                                <span key={stage.stageId} className={`${styles.workflowIngestionStage} ${workflowIngestionTone(stage.status)}`}>
-                                  <strong>{stage.label}</strong>
-                                  <small>{workflowIngestionStatusLabel(stage.status, lang)} · {stage.count}</small>
-                                </span>
-                              ))}
-                            </div>
-                            <div className={styles.workflowIngestionStats}>
-                              <span>{lang === "zh" ? "来源" : "sources"} <strong>{teamWorkflowKnowledgeIngestionStatus.summary.sourceReadyCount}/{teamWorkflowKnowledgeIngestionStatus.summary.sourceCandidateCount}</strong></span>
-                              <span>{lang === "zh" ? "草稿" : "drafts"} <strong>{teamWorkflowKnowledgeIngestionStatus.summary.localDraftCandidateCount}</strong></span>
-                              <span>{lang === "zh" ? "待审" : "pending"} <strong>{teamWorkflowKnowledgeIngestionStatus.summary.pendingKnowledgeReviewCandidateCount}</strong></span>
-                              <span>{lang === "zh" ? "正式知识" : "formal"} <strong>{teamWorkflowKnowledgeIngestionStatus.summary.formalKnowledgeItemCount}</strong></span>
-                            </div>
-                            {teamWorkflowKnowledgeIngestionStatus.actionItems.length ? (
-                              <div className={styles.workflowIngestionActions}>
-                                {teamWorkflowKnowledgeIngestionStatus.actionItems.slice(0, 4).map((item) => (
-                                  <span key={`${item.code}-${item.candidateId || item.workflowNode}`} className={workflowIngestionTone(item.severity)}>
-                                    {workflowIngestionStatusLabel(item.severity, lang)} · {item.message}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : null}
-                            <div className={styles.workflowIngestionBoundary}>
-                              <span>
-                                {teamWorkflowKnowledgeIngestionStatus.officialBoundary.writesOfficialKnowledge
-                                  ? (lang === "zh" ? "正式知识已写入" : "official knowledge written")
-                                  : (lang === "zh" ? "正式知识未写入" : "official knowledge not written")}
-                              </span>
-                              <span>
-                                {teamWorkflowKnowledgeIngestionStatus.officialBoundary.writesOfficialGraph
-                                  ? (lang === "zh" ? "正式图谱已同步" : "official graph synced")
-                                  : (lang === "zh" ? "入库关系预览" : "ingestion map preview")}
-                              </span>
-                              <span>
-                                {teamWorkflowKnowledgeIngestionStatus.officialBoundary.writesOfficialRag
-                                  ? (lang === "zh" ? "RAG 已写入" : "RAG written")
-                                  : (lang === "zh" ? "RAG 不由本流程写入" : "RAG write off")}
-                              </span>
-                            </div>
-                          </>
-                        ) : (
-                          <div className={styles.empty}>
-                            {teamWorkflowKnowledgeIngestionStatusQuery.isPending
-                              ? (lang === "zh" ? "正在汇总 CandidateStore、Team Knowledge 和正式同步边界..." : "Aggregating CandidateStore, Team Knowledge, and sync boundary...")
-                              : (lang === "zh" ? "暂无入库审核状态。" : "No knowledge ingestion review status yet.")}
-                          </div>
-                        )}
-                        {teamWorkflowKnowledgeIngestionStatusQuery.error instanceof Error ? (
-                          <div className={styles.messageError}>{teamWorkflowKnowledgeIngestionStatusQuery.error.message}</div>
-                        ) : null}
-                      </div>
+                      <TeamWorkflowKnowledgeIngestionStatusPanel
+                        lang={lang}
+                        status={teamWorkflowKnowledgeIngestionStatus}
+                        loading={teamWorkflowKnowledgeIngestionStatusQuery.isPending}
+                        errorMessages={teamWorkflowKnowledgeIngestionStatusQuery.error instanceof Error ? [teamWorkflowKnowledgeIngestionStatusQuery.error.message] : []}
+                        statusLabel={(value) => workflowIngestionStatusLabel(value, lang)}
+                      />
                       ) : null}
                       {showResearchOverview ? (
                         <>
@@ -12987,220 +12779,44 @@ export function TeamsRoute({
                         </>
                       ) : null}
                       {showResearchGraph ? (
-                      <div className={styles.workflowGraphPanel} id="research-workflow-graph">
-                        <div className={styles.workflowGraphHeader}>
-                          <div>
-                            <strong>{lang === "zh" ? "入库关系图" : "Ingestion map"}</strong>
-                            <span>
-                              {teamWorkflowCandidateGraph
-                                ? `${teamWorkflowCandidateGraph.summary.nodeCount} nodes / ${teamWorkflowCandidateGraph.summary.edgeCount} edges`
-                                : teamWorkflowCandidateGraphQuery.isPending
-                                ? (lang === "zh" ? "读取中" : "loading")
-                                : (lang === "zh" ? "未生成" : "not built")}
-                            </span>
-                          </div>
-                          <VNativeButton
-                            type="button"
-                            onClick={runSourceCollectionGraphAction}
-                            disabled={sourceCollectionGraphActionDisabled}
-                            title={sourceCollectionActionDisabledTitle(sourceCollectionGraphActionReadiness, sourceCollectionGraphActionLabel)}
-                          >
-                            <RefreshCw size={13} />
-                            {sourceCollectionGraphActionLabel}
-                          </VNativeButton>
-                        </div>
-                        {teamWorkflowCandidateGraph && teamWorkflowCandidateGraphLayout ? (
-                          <>
-                            <div className={styles.workflowGraphStats}>
-                              <span>{teamWorkflowCandidateGraph.graphKind}</span>
-                              <span>{teamWorkflowCandidateGraph.summary.missingLinkCount} missing</span>
-                              <span>{teamWorkflowCandidateGraph.summary.unreviewedNodeCount} review</span>
-                              {typeof teamWorkflowCandidateGraph.summary.archivedCandidateCount === "number" ? (
-                                <span>{teamWorkflowCandidateGraph.summary.archivedCandidateCount} archived</span>
-                              ) : null}
-                              <span>
-                                {teamWorkflowCandidateGraph.officialBoundary.writesOfficialGraph
-                                  ? (lang === "zh" ? "会写正式图谱" : "writes official graph")
-                                  : (lang === "zh" ? "候选边界" : "candidate boundary")}
-                              </span>
-                            </div>
-                            <TeamWorkflowGraphView
-                              layout={teamWorkflowCandidateGraphLayout}
-                              markerId="team-candidate-workflow-graph-arrow"
-                              stateLabel={(value) => workflowStateLabel(value, lang)}
-                            />
-                            {teamWorkflowCandidateGraph.missingLinks.length || teamWorkflowCandidateGraph.unreviewedNodes.length ? (
-                              <div className={styles.workflowGraphIssues}>
-                                {teamWorkflowCandidateGraph.missingLinks.slice(0, 3).map((edge) => (
-                                  <span key={`${edge.sourceCandidateId}-${edge.targetCandidateId}-${edge.relation}`}>
-                                    {edge.relation}: {edge.targetCandidateId}
-                                  </span>
-                                ))}
-                                {teamWorkflowCandidateGraph.unreviewedNodes.slice(0, 3).map((node) => (
-                                  <span key={`${node.candidateId}-${node.reason}`}>{workflowStateLabel(node.currentState, lang)}</span>
-                                ))}
-                              </div>
-                            ) : null}
-                            <div className={styles.workflowGraphBoundary}>
-                              {lang === "zh"
-                                ? "CandidateStore 快照 · 正式知识/RAG/图谱写入关闭"
-                                : "CandidateStore snapshot · official Knowledge/RAG/Graph writes off"}
-                            </div>
-                          </>
-                        ) : (
-                          <div className={styles.empty}>
-                            {teamWorkflowCandidateGraphQuery.isPending
-                              ? (lang === "zh" ? "正在读取入库关系图..." : "Loading ingestion map...")
-                              : (lang === "zh" ? "还没有入库关系图，可先点击生成关系。" : "No ingestion map yet. Build the map first.")}
-                          </div>
-                        )}
-                        {teamWorkflowCandidateGraphQuery.error instanceof Error ? (
-                          <div className={styles.messageError}>{teamWorkflowCandidateGraphQuery.error.message}</div>
-                        ) : null}
-                        {selectedTeamBuildCandidateGraphError ? (
-                          <div className={styles.messageError}>{selectedTeamBuildCandidateGraphError.message}</div>
-                        ) : null}
-                      </div>
+                      <TeamWorkflowCandidateGraphStatusPanel
+                        lang={lang}
+                        graph={teamWorkflowCandidateGraph}
+                        layout={teamWorkflowCandidateGraphLayout}
+                        loading={teamWorkflowCandidateGraphQuery.isPending}
+                        errorMessages={[
+                          ...(teamWorkflowCandidateGraphQuery.error instanceof Error ? [teamWorkflowCandidateGraphQuery.error.message] : []),
+                          ...(selectedTeamBuildCandidateGraphError ? [selectedTeamBuildCandidateGraphError.message] : []),
+                        ]}
+                        actionLabel={sourceCollectionGraphActionLabel}
+                        actionDisabled={sourceCollectionGraphActionDisabled}
+                        actionTitle={sourceCollectionActionDisabledTitle(sourceCollectionGraphActionReadiness, sourceCollectionGraphActionLabel)}
+                        stateLabel={(value) => workflowStateLabel(value, lang)}
+                        onAction={runSourceCollectionGraphAction}
+                      />
                       ) : null}
                       {showResearchCandidates ? (
                         <>
-                      <div className={styles.workflowSourceQualityPanel}>
-                        <div className={styles.workflowIngestionHeader}>
-                          <div>
-                            <strong>{lang === "zh" ? "资料提炼复核" : "Source extraction review"}</strong>
-                            <span>
-                              {teamWorkflowSourceQualityStatus
-                                ? `${teamWorkflowSourceQualityStatus.summary.approvedSourceCandidateCount} approved / ${teamWorkflowSourceQualityStatus.summary.sourceCandidateCount} sources`
-                                : teamWorkflowSourceQualityStatusQuery.isPending
-                                ? (lang === "zh" ? "读取中" : "loading")
-                                : (lang === "zh" ? "等待 source_manifest" : "waiting for source_manifest")}
-                            </span>
-                          </div>
-                          <span className={`${styles.workflowTag} ${workflowIngestionTone(teamWorkflowSourceQualityStatus?.status || "")}`}>
-                            {teamWorkflowSourceQualityStatus
-                              ? workflowIngestionStatusLabel(teamWorkflowSourceQualityStatus.status, lang)
-                              : (lang === "zh" ? "未读取" : "not loaded")}
-                          </span>
-                        </div>
-                        {teamWorkflowSourceQualityStatus ? (
-                          <>
-                            <div className={styles.workflowSourceQualityStats}>
-                              <span>{lang === "zh" ? "来源" : "sources"} <strong>{teamWorkflowSourceQualityStatus.summary.sourceCandidateCount}</strong></span>
-                              <span>{lang === "zh" ? "已审查" : "reviewed"} <strong>{teamWorkflowSourceQualityStatus.summary.assessedSourceCandidateCount}</strong></span>
-                              <span>{lang === "zh" ? "通过" : "approved"} <strong>{teamWorkflowSourceQualityStatus.summary.approvedSourceCandidateCount}</strong></span>
-                              <span>{lang === "zh" ? "待修订" : "revision"} <strong>{teamWorkflowSourceQualityStatus.summary.needsRevisionSourceCandidateCount}</strong></span>
-                              <span>{lang === "zh" ? "未审查" : "pending review"} <strong>{teamWorkflowSourceQualityStatus.summary.unassessedSourceCandidateCount}</strong></span>
-                            </div>
-                            {teamWorkflowSourceQualityStatus.candidates.length ? (
-                              <div className={styles.workflowSourceQualityQueue}>
-                                {teamWorkflowSourceQualityStatus.candidates.slice(0, 5).map((item) => (
-                                  <span key={item.candidateId} className={workflowIngestionTone(item.bucket === "approved" ? "ready" : item.bucket)}>
-                                    <strong>{item.title}</strong>
-                                    <small>
-                                      {workflowIngestionStatusLabel(item.bucket, lang)} · {item.overallScore ? `${item.overallScore}/100` : "-"} · {item.sourceKind || "source"}
-                                    </small>
-                                  </span>
-                                ))}
-                              </div>
-                            ) : null}
-                            {teamWorkflowSourceQualityStatus.actionItems.length ? (
-                              <div className={styles.workflowIngestionActions}>
-                                {teamWorkflowSourceQualityStatus.actionItems.slice(0, 3).map((item) => (
-                                  <span key={`${item.code}-${item.candidateId}`} className={workflowIngestionTone(item.severity)}>
-                                    {workflowIngestionStatusLabel(item.severity, lang)} · {item.message}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : null}
-                            <div className={styles.workflowIngestionBoundary}>
-                              <span>{lang === "zh" ? "资料提炼 Agent" : "Source extraction Agent"}</span>
-                              <span>{lang === "zh" ? "只写 CandidateStore" : "CandidateStore only"}</span>
-                              <span>{lang === "zh" ? "不写正式知识/RAG/图谱" : "no formal Knowledge/RAG/Graph writes"}</span>
-                            </div>
-                          </>
-                        ) : (
-                          <div className={styles.empty}>
-                            {teamWorkflowSourceQualityStatusQuery.isPending
-                              ? (lang === "zh" ? "正在汇总资料提炼复核状态..." : "Aggregating source extraction review status...")
-                              : (lang === "zh" ? "暂无资料提炼复核状态。" : "No source extraction review status yet.")}
-                          </div>
-                        )}
-                        {teamWorkflowSourceQualityStatusQuery.error instanceof Error ? (
-                          <div className={styles.messageError}>{teamWorkflowSourceQualityStatusQuery.error.message}</div>
-                        ) : null}
-                        {selectedTeamSourceQualityError ? (
-                          <div className={styles.messageError}>{selectedTeamSourceQualityError.message}</div>
-                        ) : null}
-                      </div>
-                      <div className={styles.workflowPaperNoteChunkPanel}>
-                        <div className={styles.workflowIngestionHeader}>
-                          <div>
-                            <strong>{lang === "zh" ? "paper_note 分块计划" : "paper_note chunk plan"}</strong>
-                            <span>
-                              {teamWorkflowPaperNoteChunkStatus
-                                ? `${teamWorkflowPaperNoteChunkStatus.summary.planCount} plans / ${teamWorkflowPaperNoteChunkStatus.summary.chunkCount} chunks`
-                                : teamWorkflowPaperNoteChunkStatusQuery.isPending
-                                ? (lang === "zh" ? "读取中" : "loading")
-                                : (lang === "zh" ? "等待 source extraction" : "waiting for source extraction")}
-                            </span>
-                          </div>
-                          <span className={`${styles.workflowTag} ${workflowIngestionTone(teamWorkflowPaperNoteChunkStatus?.status || "")}`}>
-                            {teamWorkflowPaperNoteChunkStatus
-                              ? workflowIngestionStatusLabel(teamWorkflowPaperNoteChunkStatus.status, lang)
-                              : (lang === "zh" ? "未读取" : "not loaded")}
-                          </span>
-                        </div>
-                        {teamWorkflowPaperNoteChunkStatus ? (
-                          <>
-                            <div className={styles.workflowPaperNoteChunkStats}>
-                              <span>{lang === "zh" ? "可分块来源" : "ready sources"} <strong>{teamWorkflowPaperNoteChunkStatus.summary.readySourceCandidateCount}</strong></span>
-                              <span>{lang === "zh" ? "已规划来源" : "planned sources"} <strong>{teamWorkflowPaperNoteChunkStatus.summary.plannedSourceCandidateCount}</strong></span>
-                              <span>{lang === "zh" ? "缺计划" : "missing plans"} <strong>{teamWorkflowPaperNoteChunkStatus.summary.missingPlanSourceCandidateCount}</strong></span>
-                              <span>{lang === "zh" ? "待 draft" : "open chunks"} <strong>{teamWorkflowPaperNoteChunkStatus.summary.openChunkCount}</strong></span>
-                            </div>
-                            {teamWorkflowPaperNoteChunkStatus.plans.length ? (
-                              <div className={styles.workflowPaperNoteChunkPlans}>
-                                {teamWorkflowPaperNoteChunkStatus.plans.slice(0, 4).map((plan) => (
-                                  <span key={plan.planId}>
-                                    <strong>{plan.sourceTitle || plan.sourceCandidateId}</strong>
-                                    <small>{workflowIngestionStatusLabel(plan.status, lang)} · {plan.draftedChunkCount}/{plan.chunkCount} · {plan.pageScope || "-"}</small>
-                                  </span>
-                                ))}
-                              </div>
-                            ) : (
-                              <div className={styles.empty}>
-                                {lang === "zh" ? "还没有分块计划。对已完成内容提取的 source 生成计划后，才能按 chunk 产出 paper_note。" : "No chunk plan yet. Generate plans for extracted sources before drafting paper_notes by chunk."}
-                              </div>
-                            )}
-                            {teamWorkflowPaperNoteChunkStatus.actionItems.length ? (
-                              <div className={styles.workflowIngestionActions}>
-                                {teamWorkflowPaperNoteChunkStatus.actionItems.slice(0, 3).map((item) => (
-                                  <span key={`${item.code}-${item.candidateId}`} className={workflowIngestionTone(item.severity)}>
-                                    {workflowIngestionStatusLabel(item.severity, lang)} · {item.message}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : null}
-                            <div className={styles.workflowIngestionBoundary}>
-                              <span>{lang === "zh" ? "CandidateStore 计划" : "CandidateStore plan"}</span>
-                              <span>{lang === "zh" ? "不写正式知识/RAG/图谱" : "no formal Knowledge/RAG/Graph writes"}</span>
-                              <span>{lang === "zh" ? "后续 paper_note draft 需带 chunkId" : "paper_note draft should use chunkId"}</span>
-                            </div>
-                          </>
-                        ) : (
-                          <div className={styles.empty}>
-                            {teamWorkflowPaperNoteChunkStatusQuery.isPending
-                              ? (lang === "zh" ? "正在汇总 source extraction 与 paper_note chunk 计划..." : "Aggregating source extraction and paper_note chunk plans...")
-                              : (lang === "zh" ? "暂无 paper_note 分块状态。" : "No paper_note chunk status yet.")}
-                          </div>
-                        )}
-                        {teamWorkflowPaperNoteChunkStatusQuery.error instanceof Error ? (
-                          <div className={styles.messageError}>{teamWorkflowPaperNoteChunkStatusQuery.error.message}</div>
-                        ) : null}
-                        {selectedTeamPlanPaperNoteChunksError ? (
-                          <div className={styles.messageError}>{selectedTeamPlanPaperNoteChunksError.message}</div>
-                        ) : null}
-                      </div>
+                      <TeamWorkflowSourceQualityStatusPanel
+                        lang={lang}
+                        status={teamWorkflowSourceQualityStatus}
+                        loading={teamWorkflowSourceQualityStatusQuery.isPending}
+                        errorMessages={[
+                          ...(teamWorkflowSourceQualityStatusQuery.error instanceof Error ? [teamWorkflowSourceQualityStatusQuery.error.message] : []),
+                          ...(selectedTeamSourceQualityError ? [selectedTeamSourceQualityError.message] : []),
+                        ]}
+                        statusLabel={(value) => workflowIngestionStatusLabel(value, lang)}
+                      />
+                      <TeamWorkflowPaperNoteChunkStatusPanel
+                        lang={lang}
+                        status={teamWorkflowPaperNoteChunkStatus}
+                        loading={teamWorkflowPaperNoteChunkStatusQuery.isPending}
+                        errorMessages={[
+                          ...(teamWorkflowPaperNoteChunkStatusQuery.error instanceof Error ? [teamWorkflowPaperNoteChunkStatusQuery.error.message] : []),
+                          ...(selectedTeamPlanPaperNoteChunksError ? [selectedTeamPlanPaperNoteChunksError.message] : []),
+                        ]}
+                        statusLabel={(value) => workflowIngestionStatusLabel(value, lang)}
+                      />
                       <TeamWorkflowCandidatePreviewPanel
                         lang={lang}
                         items={teamWorkflowCandidatePreviewItems}
