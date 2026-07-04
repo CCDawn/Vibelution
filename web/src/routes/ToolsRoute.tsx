@@ -30,6 +30,8 @@ import styles from "./ToolsRoute.styles";
 
 type ToolFilter = "all" | "built_in" | "generated" | "llm" | "enabled";
 type ToolPolicyMode = "inherited" | "explicit_required" | "allowed" | "blocked" | "excluded";
+type ToolStatusTone = "error" | "active" | "enabled" | "idle";
+type ToolReadinessTone = "ready" | "blocked";
 type ToolBulkMutationResponse = {
   action: string;
   enabled?: boolean;
@@ -128,7 +130,7 @@ function displaySource(source: string, lang: string) {
   return source;
 }
 
-function statusTone(tool: ToolRegistryItem) {
+function statusTone(tool: ToolRegistryItem): ToolStatusTone {
   if (tool.status === "invalid") {
     return "error";
   }
@@ -268,7 +270,7 @@ function bundleLabelsForTool(tool: ToolRegistryItem, bundles: ToolBundle[], lang
   return labels.length ? labels : [unbundledToolGroupLabel(lang)];
 }
 
-function readinessTone(ready: boolean) {
+function readinessTone(ready: boolean): ToolReadinessTone {
   return ready ? "ready" : "blocked";
 }
 
