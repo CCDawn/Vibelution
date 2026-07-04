@@ -3,7 +3,7 @@ import { NavLink } from "react-router-dom";
 
 import type { KnowledgeStewardOverview, KnowledgeStewardRecommendation, KnowledgeStewardWorkbenchPayload } from "../api/types";
 import { VButton } from "../components/vui";
-import styles from "./MemoryRoute.styles";
+import styles from "./MemoryKnowledgeStewardPanel.styles";
 
 export type MemoryKnowledgeStewardPanelCopy = {
   knowledgeSteward: string;

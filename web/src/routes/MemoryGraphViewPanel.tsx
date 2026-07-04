@@ -3,7 +3,7 @@ import { lazy, Suspense } from "react";
 
 import type { MemoryKnowledgeGraphEdge, MemoryKnowledgeGraphNode, MemoryKnowledgeGraphPayload } from "../api/types";
 import { VButton, VNativeInput } from "../components/vui";
-import styles from "./MemoryRoute.styles";
+import styles from "./MemoryGraphViewPanel.styles";
 
 const MemoryGraphCanvas = lazy(() => import("./MemoryGraphCanvas").then((module) => ({ default: module.MemoryGraphCanvas })));
 

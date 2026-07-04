@@ -1,7 +1,7 @@
 import { Link2 } from "lucide-react";
 
 import type { KnowledgeRagContext, KnowledgeRagHealthPayload, KnowledgeRagProviderHealth, KnowledgeRagRetrievalPayload } from "../api/types";
-import styles from "./MemoryRoute.styles";
+import styles from "./MemoryKnowledgeRagPanel.styles";
 
 export type MemoryKnowledgeRagPanelCopy = {
   ragRetrieval: string;

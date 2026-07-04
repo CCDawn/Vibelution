@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { Brain, Pencil, Search, Square, SquareCheckBig, Trash2, Undo2 } from "lucide-react";
 
 import { VButton, VNativeInput } from "../components/vui";
-import styles from "./MemoryRoute.styles";
+import styles from "./MemoryManagePanel.styles";
 
 export type MemoryManageFilterView = {
   id: string;
