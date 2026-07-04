@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 import type { MemoryItem, MemorySection } from "../api/types";
 import { VButton } from "../components/vui";
-import styles from "./MemoryRoute.styles";
+import styles from "./MemoryDetailPanel.styles";
 
 type MemoryDetailPanelCopy = {
   title: string;

@@ -1,7 +1,7 @@
 import { FileText, Pencil } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
-import styles from "./MemoryRoute.styles";
+import styles from "./MemoryReviewQueuePanel.styles";
 
 export type MemoryReviewQueueItemView = {
   id: string;

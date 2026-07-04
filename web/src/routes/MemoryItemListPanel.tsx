@@ -1,6 +1,6 @@
 import { VButton, VNativeInput } from "../components/vui";
 import type { MemoryItem, MemorySection } from "../api/types";
-import styles from "./MemoryRoute.styles";
+import styles from "./MemoryItemListPanel.styles";
 
 export type MemoryItemListPair = {
   section: MemorySection;
