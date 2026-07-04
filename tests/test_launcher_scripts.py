@@ -884,6 +884,7 @@ def test_desktop_entry_python_bridge_starts_launcher_natively(monkeypatch, tmp_p
     monkeypatch.setattr(bridge, "_launcher_control_healthy", lambda port: False)
     monkeypatch.setattr(bridge, "_start_launcher_backend", lambda python_exe, port: calls.append(("backend", (python_exe, port))) or 111)
     monkeypatch.setattr(bridge, "_open_launcher_window", lambda url: calls.append(("browser", url)) or 222)
+    monkeypatch.setattr(bridge, "_repair_existing_launcher_browser_window", lambda browser_pid: 0)
     monkeypatch.setattr(bridge, "_pid_alive", lambda pid: False)
 
     result = bridge.main(["--action", "launcher", "--python-exe", str(tmp_path / "python.exe")])
