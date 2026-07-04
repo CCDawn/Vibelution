@@ -2,7 +2,7 @@ import { ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { VButton } from "../components/vui";
-import styles from "./ChatCodingRoute.styles";
+import styles from "./ConversationIndexSection.styles";
 
 type ConversationIndexSectionProps = {
   children: ReactNode;
