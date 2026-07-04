@@ -1,7 +1,7 @@
 import { CheckCircle2, Pencil, Trash2, TriangleAlert, Undo2 } from "lucide-react";
 
 import { VButton } from "../components/vui";
-import styles from "./MemoryRoute.styles";
+import styles from "./MemorySelectedConfigPanel.styles";
 
 export type MemorySelectedConfigItem = {
   title: string;

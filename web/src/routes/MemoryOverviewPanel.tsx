@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import styles from "./MemoryRoute.styles";
+import styles from "./MemoryOverviewPanel.styles";
 
 export type MemoryOverviewPanelCopy = {
   sectionCount: string;

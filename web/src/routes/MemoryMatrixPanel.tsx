@@ -1,5 +1,5 @@
 import { VButton } from "../components/vui";
-import styles from "./MemoryRoute.styles";
+import styles from "./MemoryMatrixPanel.styles";
 
 export type MemoryMatrixChannel = "conversation" | "research" | "self_evolution" | "supervised_evolution" | "explicit_read";
 
