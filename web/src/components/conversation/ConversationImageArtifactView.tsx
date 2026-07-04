@@ -4,7 +4,7 @@ import React from "react";
 import type { ImageArtifactMessage } from "./conversationMessagePredicates";
 import type { ConversationImagePreviewRequest } from "./ConversationImagePreviewDialog";
 import { VButton } from "../vui";
-import styles from "./ConversationView.styles";
+import styles from "./ConversationImageArtifactView.styles";
 
 type ConversationImageArtifactViewProps = {
   artifact: ImageArtifactMessage;
