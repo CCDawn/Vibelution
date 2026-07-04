@@ -3,7 +3,7 @@
 // system). Declarations are Tailwind arbitrary properties
 // emitting byte-identical CSS; descendant .a .b rules were flattened onto the
 // child key. Edit values directly.
-const styles: Record<string, string> = {
+const styles = {
   actionButton:
     "[border:1px_solid_var(--border-hairline)] [border-radius:8px] [transition:border-color_140ms_ease,_background-color_140ms_ease,_color_140ms_ease] hover:[border-color:color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)] hover:[background:var(--surface-card-hover)] inline-flex [align-items:center] [justify-content:center] [gap:8px] [min-height:34px] [padding:0_12px] [background:var(--surface-card-muted)] [color:var(--fg-primary)]",
   actionGrid:
@@ -518,6 +518,8 @@ const styles: Record<string, string> = {
     "grid [gap:10px] [padding:14px_16px_16px]",
   sourceWarningStrip:
     "[margin:0] [padding:7px_9px] [border:1px_solid_color-mix(in_srgb,_var(--state-warning)_40%,_var(--border-hairline))] [border-radius:7px] [background:color-mix(in_srgb,_var(--state-warning)_10%,_var(--surface-card-subtle))] [color:var(--fg-secondary)] [font-size:var(--vui-font-xs)] [line-height:1.36] [overflow-wrap:anywhere]",
+  spinIcon:
+    "animate-spin",
   statusIcon:
     "inline-flex [align-items:center] [justify-content:center] [border-radius:999px] [color:var(--accent-warm-2)] [background:color-mix(in_srgb,_var(--accent-warm)_12%,_transparent)] [width:30px] [height:30px]",
   statusLead:
@@ -646,6 +648,6 @@ const styles: Record<string, string> = {
     "min-w-0 [overflow:hidden] [text-overflow:ellipsis] [display:-webkit-box] [color:var(--fg-secondary)] [font-size:var(--vui-font-xs)] [line-height:1.35] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]",
   workflowStepRail:
     "grid [gap:5px] min-w-0 [max-height:min(196px,_30vh)] [overflow:auto] max-[900px]:[max-height:none] max-[900px]:[overflow:visible]",
-};
+} as const;
 
 export default styles;
