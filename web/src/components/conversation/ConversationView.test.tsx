@@ -2366,6 +2366,33 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("```bash");
   });
 
+  it("formats compact json code blocks without forcing horizontal conversation overflow", () => {
+    const compactWritebackContract = "{\"acceptedStatuses\":[\"blocked\",\"cancelled\",\"completed\",\"failed\",\"interrupted\",\"needs_review\",\"queued\",\"running\"],\"agentId\":\"agent-20260629-201556-388028\",\"endpoint\":\"/api/teams/research-team/workflow-orchestration/stage-session-tasks/stagetask-1/writeback\",\"resultAuthority\":\"source_collection_stage_writeback_tool\"}";
+    const html = renderConversation([
+      {
+        id: "message-writeback-contract",
+        role: "assistant",
+        content: [
+          "## 结构化回写合同",
+          "",
+          "```json",
+          compactWritebackContract,
+          "```",
+        ].join("\n"),
+        timestamp: "2026-07-04T00:01:00Z",
+      },
+    ]);
+
+    expect(html).toContain("responseSegmentPre");
+    expect(html).toContain("{\n  &quot;acceptedStatuses&quot;: [");
+    expect(html).toContain("\n  &quot;endpoint&quot;: &quot;/api/teams/research-team");
+    expect(html).not.toContain("{&quot;acceptedStatuses&quot;:[");
+    expect(styles.responseSegmentPre).toContain("max-w-full");
+    expect(styles.responseSegmentPre).toContain("whitespace-pre-wrap");
+    expect(styles.responseSegmentPre).toContain("[overflow-wrap:anywhere]");
+    expect(styles.responseSegmentPre).toContain("break-words");
+  });
+
   it("renders markdown in user messages with the same safe renderer", () => {
     const html = renderConversation([
       {
