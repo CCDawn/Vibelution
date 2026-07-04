@@ -2,9 +2,17 @@ import { describe, expect, it } from "vitest";
 
 import routeSource from "./LauncherRoute.tsx?raw";
 import developerModePanelSource from "./LauncherDeveloperModePanel.tsx?raw";
+import developerModePanelStylesSource from "./LauncherDeveloperModePanel.styles.ts?raw";
+import developerModePanelStyles from "./LauncherDeveloperModePanel.styles";
 import diagnosticsPanelSource from "./LauncherDiagnosticsPanel.tsx?raw";
+import diagnosticsPanelStylesSource from "./LauncherDiagnosticsPanel.styles.ts?raw";
+import diagnosticsPanelStyles from "./LauncherDiagnosticsPanel.styles";
 import projectMaintenancePanelSource from "./LauncherProjectMaintenancePanel.tsx?raw";
+import projectMaintenancePanelStylesSource from "./LauncherProjectMaintenancePanel.styles.ts?raw";
+import projectMaintenancePanelStyles from "./LauncherProjectMaintenancePanel.styles";
 import startupSettingsPanelSource from "./LauncherStartupSettingsPanel.tsx?raw";
+import startupSettingsPanelStylesSource from "./LauncherStartupSettingsPanel.styles.ts?raw";
+import startupSettingsPanelStyles from "./LauncherStartupSettingsPanel.styles";
 import stylesSource from "./LauncherRoute.styles.ts?raw";
 import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
 import launcherApiSource from "../api/launcher.ts?raw";
@@ -15,6 +23,12 @@ import launcherShellSource from "../app/LauncherShell.tsx?raw";
 import launcherShellStylesSource from "../app/LauncherShell.styles.ts?raw";
 
 const routeStylesSource = stylesSource;
+const launcherPanelStylesSource = [
+  developerModePanelStylesSource,
+  diagnosticsPanelStylesSource,
+  projectMaintenancePanelStylesSource,
+  startupSettingsPanelStylesSource,
+].join("\n");
 
 const sourceSlice = (source: string, startMarker: string, endMarker: string): string => {
   const startIndex = source.indexOf(startMarker);
@@ -29,6 +43,14 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("from \"../components/vui\"");
     expect(developerModePanelSource).toContain("from \"../components/vui\"");
     expect(startupSettingsPanelSource).toContain("from \"../components/vui\"");
+    expect(developerModePanelSource).toContain('from "./LauncherDeveloperModePanel.styles"');
+    expect(diagnosticsPanelSource).toContain('from "./LauncherDiagnosticsPanel.styles"');
+    expect(projectMaintenancePanelSource).toContain('from "./LauncherProjectMaintenancePanel.styles"');
+    expect(startupSettingsPanelSource).toContain('from "./LauncherStartupSettingsPanel.styles"');
+    expect(developerModePanelSource).not.toContain("LauncherRoute.styles");
+    expect(diagnosticsPanelSource).not.toContain("LauncherRoute.styles");
+    expect(projectMaintenancePanelSource).not.toContain("LauncherRoute.styles");
+    expect(startupSettingsPanelSource).not.toContain("LauncherRoute.styles");
     expect(routeSource).toContain("<VButton");
     expect(developerModePanelSource).toContain("<VButton");
     expect(startupSettingsPanelSource).toContain("<VButton");
@@ -163,27 +185,31 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).not.toContain("cardGrid");
     expect(styles.summaryStrip).toBeTypeOf("string");
     expect(styles.userGuide).toBeTypeOf("string");
-    expect(styles.settingsStrip).toBeTypeOf("string");
-    expect(styles.settingsHeader).toBeTypeOf("string");
-    expect(styles.settingField).toBeTypeOf("string");
-    expect(styles.settingToggle).toBeTypeOf("string");
-    expect(styles.settingsSaveButton).toBeTypeOf("string");
-    expect(styles.settingError).toBeTypeOf("string");
-    expect(styles.segmentedControl).toBeTypeOf("string");
-    expect(styles.developerPanel).toBeTypeOf("string");
-    expect(styles.developerGrid).toBeTypeOf("string");
-    expect(styles.cleanupConsole).toBeTypeOf("string");
-    expect(styles.cleanupPlan).toBeTypeOf("string");
+    expect(startupSettingsPanelStyles.settingsStrip).toBeTypeOf("string");
+    expect(startupSettingsPanelStyles.settingsHeader).toBeTypeOf("string");
+    expect(startupSettingsPanelStyles.settingField).toBeTypeOf("string");
+    expect(startupSettingsPanelStyles.settingToggle).toBeTypeOf("string");
+    expect(startupSettingsPanelStyles.settingsSaveButton).toBeTypeOf("string");
+    expect(startupSettingsPanelStyles.settingError).toBeTypeOf("string");
+    expect(startupSettingsPanelStyles.segmentedControl).toBeTypeOf("string");
+    expect(developerModePanelStyles.developerPanel).toBeTypeOf("string");
+    expect(developerModePanelStyles.developerGrid).toBeTypeOf("string");
+    expect(developerModePanelStyles.cleanupConsole).toBeTypeOf("string");
+    expect(developerModePanelStyles.cleanupPlan).toBeTypeOf("string");
+    expect(projectMaintenancePanelStyles.developerPanel).toBeTypeOf("string");
     expect(styles.guardStrip).toBeTypeOf("string");
     expect(styles.statusTable).toBeTypeOf("string");
     expect(styles.matrixPanel).toBeTypeOf("string");
-    expect(styles.guardianTable).toBeTypeOf("string");
-    expect(styles.diagnosticsPanel).toBeTypeOf("string");
-    expect(styles.diagnosticsBody).toBeTypeOf("string");
-    expect(styles.diagnosticSection).toBeTypeOf("string");
-    expect(styles.recoveryLine).toBeTypeOf("string");
-    expect(styles.specGrid).toBeTypeOf("string");
-    expect(styles.dangerButton).toBeTypeOf("string");
+    expect(diagnosticsPanelStyles.guardianTable).toBeTypeOf("string");
+    expect(diagnosticsPanelStyles.diagnosticsPanel).toBeTypeOf("string");
+    expect(diagnosticsPanelStyles.diagnosticsBody).toBeTypeOf("string");
+    expect(diagnosticsPanelStyles.diagnosticSection).toBeTypeOf("string");
+    expect(diagnosticsPanelStyles.recoveryLine).toBeTypeOf("string");
+    expect(diagnosticsPanelStyles.specGrid).toBeTypeOf("string");
+    expect(developerModePanelStyles.dangerButton).toBeTypeOf("string");
+    expect(launcherPanelStylesSource).toContain("settingsStrip");
+    expect(launcherPanelStylesSource).toContain("developerPanel");
+    expect(launcherPanelStylesSource).toContain("diagnosticsPanel");
   });
 
   it("puts user-readable launcher status before technical diagnostics", () => {
