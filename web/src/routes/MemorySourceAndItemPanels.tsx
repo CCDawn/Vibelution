@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { Brain, Database, Search, TriangleAlert } from "lucide-react";
 
 import { VButton, VNativeInput } from "../components/vui";
-import styles from "./MemoryRoute.styles";
+import styles from "./MemorySourceAndItemPanels.styles";
 
 export type MemorySourceFilterView = {
   id: string;

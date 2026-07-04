@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 // @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 // @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
-import { extname, join, relative } from "node:path";
+import { basename, extname, join, relative } from "node:path";
 // @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
 import { fileURLToPath } from "node:url";
 import * as heroUiReact from "@heroui/react";
@@ -18,6 +18,7 @@ const routeVisualUtilityPattern =
   /className\s*=\s*(?:["'`][^"'`]*(?:bg-|text-|border-|rounded-|shadow-|px-|py-|gap-|grid|flex)[^"'`]*["'`]|{`[^`]*(?:bg-|text-|border-|rounded-|shadow-|px-|py-|gap-|grid|flex)[^`]*`})/;
 const localVisualClassConstantPattern = /const\s+[A-Za-z0-9_]+Class\s*=/;
 const localStylesObjectPattern = /const\s+styles\s*=/;
+const parentRouteStyleImportPattern = /from\s+["']\.\/([A-Za-z0-9]+Route)\.styles["']/g;
 const productSharedParentStyleConsumers = [
   "components/conversation/AgentContextSectionsView.tsx",
   "components/conversation/AgentMessageTurnView.tsx",
@@ -38,7 +39,6 @@ const productSharedParentStyleConsumers = [
   "routes/GroupSessionIndexItems.tsx",
   "routes/MemoryAgentMemoryPanel.tsx",
   "routes/MemoryCleanupPanel.tsx",
-  "routes/MemoryDetailPanel.tsx",
   "routes/MemoryManagePanel.tsx",
   "routes/MemoryManagementEditor.tsx",
   "routes/MemoryGraphCanvas.tsx",
@@ -51,10 +51,6 @@ const productSharedParentStyleConsumers = [
   "routes/MemoryKnowledgeSearchPanel.tsx",
   "routes/MemoryKnowledgeSourceGovernancePanel.tsx",
   "routes/MemoryKnowledgeStewardPanel.tsx",
-  "routes/MemoryItemListPanel.tsx",
-  "routes/MemoryProjectMemoryQueuePanel.tsx",
-  "routes/MemoryReviewQueuePanel.tsx",
-  "routes/MemorySourceAndItemPanels.tsx",
   "routes/TeamMemoryIndexPanel.tsx",
   "routes/TeamSourceCollectionActiveStagePanel.tsx",
   "routes/TeamSourceCollectionCandidatePanel.tsx",
@@ -176,6 +172,30 @@ describe("VUI architecture boundary", () => {
       .filter((file) => !allowedRoots.some((root) => file.startsWith(root)))
       .filter((file) => !allowedSuffixes.some((suffix) => file.endsWith(suffix)))
       .filter((file) => localStylesObjectPattern.test(readText(join(sourceRoot, file))));
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("keeps parent route style imports bounded to the migration allow-list", () => {
+    const allowedRoots = [
+      "components/vui/",
+    ];
+    const allowedSuffixes = [
+      ".styles.ts",
+      ".test.ts",
+      ".test.tsx",
+    ];
+    const allowedSharedConsumers = new Set<string>(productSharedParentStyleConsumers);
+    const offenders = walkFiles(sourceRoot)
+      .filter((file) => routeSourceExtensions.has(extname(file)))
+      .map(relativeFromSourceRoot)
+      .filter((file) => !allowedRoots.some((root) => file.startsWith(root)))
+      .filter((file) => !allowedSuffixes.some((suffix) => file.endsWith(suffix)))
+      .filter((file) => {
+        const source = readText(join(sourceRoot, file));
+        return [...source.matchAll(parentRouteStyleImportPattern)].some((match) => basename(file) !== `${match[1]}.tsx`);
+      })
+      .filter((file) => !allowedSharedConsumers.has(file));
 
     expect(offenders).toEqual([]);
   });
