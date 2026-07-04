@@ -438,7 +438,11 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("const canExpandDetails = hasOperationDetails(operation)");
     expect(conversationViewSource).toContain("<DeferredOperationDetails");
     expect(conversationViewSource).toContain("classNames={OPERATION_DETAILS_CLASS_NAMES}");
-    expect(conversationViewSource).toContain("buildDetailRows={operationDetailRows}");
+    expect(conversationViewSource).toContain("buildOperationDetailRows(detailOperation, operationDetailLabels)");
+    expect(conversationViewSource).not.toContain("function operationDetailRows(");
+    expect(conversationViewSource).not.toContain("function readableOperationResult(");
+    expect(conversationViewSource).not.toContain("function structuredResultSummary(");
+    expect(conversationViewSource).not.toContain("function naturalRecordText(");
     expect(conversationViewSource).not.toContain("const detailRows = detailsExpanded ? operationDetailRows(operation) : []");
   });
 
