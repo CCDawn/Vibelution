@@ -1,6 +1,6 @@
 import { type ReactNode, type SyntheticEvent } from "react";
 
-import styles from "./TeamsRoute.styles";
+import styles from "./TeamSourceCollectionCandidatePanel.styles";
 
 export type TeamSourceCollectionCandidatePanelStat = {
   key: string;

@@ -1,7 +1,7 @@
 import { Link2, Search } from "lucide-react";
 
 import { VNativeButton } from "../components/vui";
-import styles from "./TeamsRoute.styles";
+import styles from "./TeamSourceCollectionSourceDetailPanel.styles";
 
 type TeamSourceCollectionSourceDetailLang = "zh" | "en";
 
