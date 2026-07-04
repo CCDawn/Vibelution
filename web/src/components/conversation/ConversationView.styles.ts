@@ -843,7 +843,7 @@ const styles: Record<string, string> = {
   responseSegmentMeta:
     "vui-components-conversationview responseSegmentMeta min-w-0 flex flex-wrap items-center gap-1.5",
   responseSegmentPre:
-    "vui-components-conversationview responseSegmentPre min-w-0",
+    "vui-components-conversationview responseSegmentPre min-w-0 max-w-full whitespace-pre-wrap break-words [overflow-wrap:anywhere]",
   responseSegment_active:
     "vui-components-conversationview responseSegment_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   responseSegment_answer:
