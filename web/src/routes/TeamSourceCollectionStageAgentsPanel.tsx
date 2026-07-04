@@ -1,7 +1,7 @@
 import { Link2 } from "lucide-react";
 import { Link } from "react-router-dom";
 
-import styles from "./TeamsRoute.styles";
+import styles from "./TeamSourceCollectionStageAgentsPanel.styles";
 
 type TeamSourceCollectionStageAgentsLang = "zh" | "en";
 export type TeamSourceCollectionStageAgentTone = "ready" | "warning" | "blocked" | "missing";

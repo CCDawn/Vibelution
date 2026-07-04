@@ -2,7 +2,7 @@ import { CheckCircle2 } from "lucide-react";
 import { type FormEvent } from "react";
 
 import { VNativeButton, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
-import styles from "./TeamsRoute.styles";
+import styles from "./TeamSourceCollectionManualWritebackPanel.styles";
 
 export type TeamSourceCollectionManualWritebackAssignment = {
   id: string;

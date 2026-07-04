@@ -1,7 +1,7 @@
 import { type ReactNode } from "react";
 
 import { VNativeButton, VNativeSelect } from "../components/vui";
-import styles from "./TeamsRoute.styles";
+import styles from "./TeamSourceCollectionFindingDetailsPanel.styles";
 
 type TeamSourceCollectionFindingDetailsLang = "zh" | "en";
 

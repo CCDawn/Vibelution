@@ -1,6 +1,6 @@
 import { type ReactNode, type SyntheticEvent } from "react";
 
-import styles from "./TeamsRoute.styles";
+import styles from "./TeamSourceCollectionScreeningPanel.styles";
 
 export type TeamSourceCollectionScreeningPanelStat = {
   key: string;
