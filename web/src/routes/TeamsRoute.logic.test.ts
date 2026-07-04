@@ -78,6 +78,10 @@ describe("source collection extraction recovery", () => {
     expect(state.recoverText).toBe("已排除 10");
     expect(state.summary).toContain("剩余 10 条资料已被排除");
     expect(state.primaryActionText).toBe("查看排除原因");
+    expect(state.panelTitle).toBe("提炼排除项确认");
+    expect(state.statusLabel).toBe("可继续推进");
+    expect(state.failedLabel).toBe("缺口处理");
+    expect(state.recoverLabel).toBe("已排除");
   });
 
   it("does not block normal recovery when excluded records are only part of the remaining gaps", () => {

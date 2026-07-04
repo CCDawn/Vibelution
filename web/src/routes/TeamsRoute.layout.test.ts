@@ -607,9 +607,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("renderSourceCollectionExtractionRecoveryPanel");
     expect(teamSourceCollectionExtractionRecoveryPanelSource).toContain("sourceCollectionExtractionRecoveryStats");
     expect(teamSourceCollectionExtractionRecoveryPanelSource).toContain("sourceCollectionExtractionRecoveryActions");
-    expect(teamSourceCollectionExtractionRecoveryPanelSource).toContain("提炼失败");
+    expect(teamSourceCollectionExtractionRecoveryPanelSource).toContain("titleLabel");
+    expect(teamSourceCollectionExtractionRecoveryPanelSource).toContain("failedLabel");
+    expect(teamSourceCollectionExtractionRecoveryPanelSource).toContain("recoverLabel");
     expect(teamSourceCollectionExtractionRecoveryPanelSource).toContain("可保留");
-    expect(teamSourceCollectionExtractionRecoveryPanelSource).toContain("待补提炼");
     expect(routeSource).toContain("进入 Agent 私聊");
     expect(routeSource).toContain("runSourceCollectionCandidateExtractionAction");
     expect(routeSource).toContain("runSourceCollectionScreeningAction");
@@ -620,6 +621,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionExtractionExcludedRecoveryState");
     expect(routeSource).toContain("剩余资料已被排除");
     expect(routeSource).toContain("查看排除原因");
+    expect(routeSource).toContain("提炼排除项确认");
+    expect(routeSource).toContain("sourceCollectionExtractionCanProceedAfterExclusions");
+    expect(routeSource).toContain("可继续推进");
     expect(routeSource).toContain('onPress={() => void openSourceCollectionStageAgentChat("extraction")}');
     expect(routeSource).not.toContain("sourceCollectionRunCandidates.slice(0, 12)");
     expect(routeSource).not.toContain("SOURCE_COLLECTION_RESULT_PREVIEW_LIMIT");
@@ -740,7 +744,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("加载 Agent...");
     expect(routeSource).toContain('chatState.status === "repair"');
     expect(routeSource).toContain("onAction: () => void startSourceCollectionStageSessionTask(\"finding\")");
-    expect(routeSource).toContain("onAction: () => void startSourceCollectionStageSessionTask(\"extraction\")");
+    expect(routeSource).toContain("onAction: sourceCollectionExtractionCanProceedAfterExclusions");
+    expect(routeSource).toContain(": () => void startSourceCollectionStageSessionTask(\"extraction\")");
     expect(routeSource).toContain("onAction: () => void startSourceCollectionStageSessionTask(\"relations\")");
     expect(routeSource).toContain("onAction: () => void startSourceCollectionStageSessionTask(\"ingestion\")");
     expect(routeSource).toContain("repairChallengeCupTeamAgentsMutation");
@@ -1783,8 +1788,10 @@ describe("TeamsRoute layout contract", () => {
     expect(extractionModuleSource.indexOf("sourceCollectionExtractionDisplayLoading")).toBeLessThan(
       extractionModuleSource.indexOf("sourceCollectionStageUserSummary(sourceCollectionExtractionProjection, lang)"),
     );
-    expect(extractionModuleSource).toContain('state: sourceCollectionStageDisplayState("extraction", sourceCollectionExtractionDisplayState)');
-    expect(extractionModuleSource).toContain('status: sourceCollectionStageDisplayStatus("extraction", sourceCollectionExtractionDisplayLoading ? sourceCollectionLoadingText');
+    expect(extractionModuleSource).toContain('state: sourceCollectionStageDisplayState("extraction", sourceCollectionExtractionCanProceedAfterExclusions');
+    expect(extractionModuleSource).toContain('status: sourceCollectionStageDisplayStatus(');
+    expect(extractionModuleSource).toContain("sourceCollectionExtractionDisplayLoading");
+    expect(extractionModuleSource).toContain("sourceCollectionExtractionExcludedRecoveryState.statusLabel");
   });
 
   it("keeps the source collection workspace in a simple status-board mode", () => {
