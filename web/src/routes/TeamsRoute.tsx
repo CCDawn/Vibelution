@@ -3708,6 +3708,12 @@ type SourceCollectionExcludedRecoveryInput = {
 type SourceCollectionExcludedRecoveryState = {
   blockedByExcludedSources: boolean;
   excludedCount: number;
+  panelTitle: string;
+  panelAriaLabel: string;
+  statusLabel: string;
+  failedLabel: string;
+  recoverLabel: string;
+  tone: "danger" | "progressable";
   summary: string;
   recoverText: string;
   primaryActionText: string;
@@ -3725,9 +3731,16 @@ export function deriveSourceCollectionExcludedRecoveryState(
   );
   const blockedByExcludedSources = excludedCount > 0 && remainingGapCount > 0 && excludedCount >= remainingGapCount;
   if (!blockedByExcludedSources) {
+    const zh = input.lang === "zh";
     return {
       blockedByExcludedSources: false,
       excludedCount,
+      panelTitle: zh ? "提炼失败恢复" : "Extraction recovery",
+      panelAriaLabel: zh ? "资料提炼失败恢复工作台" : "Source extraction recovery panel",
+      statusLabel: "",
+      failedLabel: zh ? "提炼失败" : "failed extraction",
+      recoverLabel: zh ? "待补提炼" : "to recover",
+      tone: "danger",
       summary: "",
       recoverText: "",
       primaryActionText: "",
@@ -3738,6 +3751,12 @@ export function deriveSourceCollectionExcludedRecoveryState(
   return {
     blockedByExcludedSources: true,
     excludedCount,
+    panelTitle: zh ? "提炼排除项确认" : "Extraction exclusions review",
+    panelAriaLabel: zh ? "资料提炼排除项确认工作台" : "Source extraction exclusions review panel",
+    statusLabel: zh ? "可继续推进" : "Ready to continue",
+    failedLabel: zh ? "缺口处理" : "gap handling",
+    recoverLabel: zh ? "已排除" : "excluded",
+    tone: "progressable",
     summary: zh
       ? `剩余 ${remainingGapCount} 条资料已被排除，不会再次导入候选；可进入 Agent 私聊查看排除原因，或返回资料寻找补充新来源。`
       : `${remainingGapCount} remaining sources are already excluded, so they will not be imported again. Open the Agent chat to inspect the reasons or search for new sources.`,
@@ -8195,20 +8214,6 @@ export function TeamsRoute({
       : sourceCollectionExtractionRecoveryInvalidCount > 0
         ? String(sourceCollectionExtractionRecoveryInvalidCount)
         : sourceCollectionStageRecoveryStatusLabel("extraction", lang);
-    const sourceCollectionExtractionExcludedRecoveryState = deriveSourceCollectionExcludedRecoveryState({
-      lang,
-      excludedCount: Math.max(
-        sourceCollectionExcludedSourceCount,
-        recoveryNumber(recoveryClosure?.excludedSourceCount),
-        recoveryNumber(candidateProjection?.counts?.excluded),
-      ),
-      missingCount: sourceCollectionExtractionRecoveryMissingCount,
-      importFailedCount: recoveryNumber(selectedTeamExtractSourceCollectionCandidatesResult?.failedCount),
-      importPendingRecordCount: Math.max(
-        sourceCollectionPendingCandidateImportCount,
-        recoveryNumber(selectedTeamExtractSourceCollectionCandidatesResult?.pendingRecordCount),
-      ),
-    });
     const sourceCollectionRecoveryAgentActionText = sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
       ? sourceCollectionExtractionExcludedRecoveryState.primaryActionText
       : (lang === "zh" ? "继续 Agent 提炼" : "Continue Agent extraction");
@@ -8228,10 +8233,25 @@ export function TeamsRoute({
     return (
       <TeamSourceCollectionExtractionRecoveryPanel
         lang={lang}
-        statusLabel={sourceCollectionStageRecoveryStatusLabel("extraction", lang)}
+        tone={sourceCollectionExtractionExcludedRecoveryState.tone}
+        ariaLabel={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
+          ? sourceCollectionExtractionExcludedRecoveryState.panelAriaLabel
+          : undefined}
+        titleLabel={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
+          ? sourceCollectionExtractionExcludedRecoveryState.panelTitle
+          : undefined}
+        statusLabel={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
+          ? sourceCollectionExtractionExcludedRecoveryState.statusLabel
+          : sourceCollectionStageRecoveryStatusLabel("extraction", lang)}
         summary={recoverySummary}
+        failedLabel={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
+          ? sourceCollectionExtractionExcludedRecoveryState.failedLabel
+          : undefined}
         failedText={recoveryFailureText}
         salvageText={sourceCollectionExtractionRecoverySalvageText}
+        recoverLabel={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
+          ? sourceCollectionExtractionExcludedRecoveryState.recoverLabel
+          : undefined}
         recoverText={sourceCollectionPrimaryDataLoading
           ? sourceCollectionLoadingText
           : sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
@@ -10958,6 +10978,38 @@ export function TeamsRoute({
     ? sourceCollectionLoadingText
     : String(sourceCollectionRunPendingScreeningCount);
   const sourceCollectionPendingCandidateImportCount = Math.max(0, sourceCollectionRawRecordCount - sourceCollectionDisplayedCandidateCount);
+  const sourceCollectionExtractionRecoveryCoverage = sourceCollectionCandidateProjection?.currentCoverageSummary?.complete === false
+    ? sourceCollectionCandidateProjection.currentCoverageSummary
+    : sourceCollectionCandidateProjection?.latestTask?.coverageSummary;
+  const sourceCollectionExtractionRecoveryClosure = sourceCollectionCandidateProjection?.latestTask?.closureSummary;
+  const sourceCollectionExtractionRecoveryMissingCount = Math.max(
+    sourceCollectionNonNegativeCount(sourceCollectionExtractionRecoveryCoverage?.missing),
+    sourceCollectionStageProjectionCount(sourceCollectionCandidateProjection, "pending", 0),
+    sourceCollectionPendingCandidateImportCount,
+    sourceCollectionNonNegativeCount(selectedTeamExtractSourceCollectionCandidatesResult?.pendingRecordCount),
+  );
+  const sourceCollectionExtractionExcludedRecoveryState = deriveSourceCollectionExcludedRecoveryState({
+    lang,
+    excludedCount: Math.max(
+      sourceCollectionExcludedSourceCount,
+      sourceCollectionNonNegativeCount(sourceCollectionExtractionRecoveryClosure?.excludedSourceCount),
+      sourceCollectionStageProjectionCount(sourceCollectionCandidateProjection, "excluded", 0),
+    ),
+    missingCount: sourceCollectionExtractionRecoveryMissingCount,
+    importFailedCount: sourceCollectionNonNegativeCount(selectedTeamExtractSourceCollectionCandidatesResult?.failedCount),
+    importPendingRecordCount: Math.max(
+      sourceCollectionPendingCandidateImportCount,
+      sourceCollectionNonNegativeCount(selectedTeamExtractSourceCollectionCandidatesResult?.pendingRecordCount),
+    ),
+  });
+  const sourceCollectionExtractionCanProceedAfterExclusions = Boolean(
+    sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
+    && sourceCollectionProjectedApprovedCount > 0
+    && sourceCollectionRunPendingScreeningCount <= 0,
+  );
+  const sourceCollectionExtractionProceedableSummary = lang === "zh"
+    ? `${sourceCollectionProjectedApprovedCountText} 条可进入关系整理；剩余 ${sourceCollectionExtractionExcludedRecoveryState.excludedCount} 条已排除，可查看原因或补充新来源。`
+    : `${sourceCollectionProjectedApprovedCountText} ready for relation mapping; ${sourceCollectionExtractionExcludedRecoveryState.excludedCount} excluded sources can be inspected or replaced.`;
 
   const sourceCollectionApprovedCount =
     teamWorkflowSourceQualityStatus?.summary.approvedSourceCandidateCount
@@ -11562,10 +11614,13 @@ export function TeamsRoute({
       : sourceCollectionDisplayedCandidateCount > 0 && sourceCollectionSearchOpenAssignmentCount <= 0
           ? "pending"
           : "idle";
-  const sourceCollectionScreeningStepState: SourceCollectionStepState = sourceCollectionStageProjectionState(
+  const sourceCollectionScreeningStepStateRaw: SourceCollectionStepState = sourceCollectionStageProjectionState(
     sourceCollectionScreeningProjection,
     sourceCollectionScreeningFallbackStepState,
   );
+  const sourceCollectionScreeningStepState: SourceCollectionStepState = sourceCollectionExtractionCanProceedAfterExclusions
+    ? "done"
+    : sourceCollectionScreeningStepStateRaw;
   const sourceCollectionCandidateFallbackStepState: SourceCollectionStepState = selectedTeamRecordSourceCollectionOutputError || selectedTeamExtractSourceCollectionCandidatesError
     ? "failed"
     : selectedTeamRecordSourceCollectionOutputPending || selectedTeamExtractSourceCollectionCandidatesPending
@@ -11575,10 +11630,13 @@ export function TeamsRoute({
         : selectedSourceCollectionRun
           ? "pending"
           : "idle";
-  const sourceCollectionCandidateStepState: SourceCollectionStepState = sourceCollectionStageProjectionState(
+  const sourceCollectionCandidateStepStateRaw: SourceCollectionStepState = sourceCollectionStageProjectionState(
     sourceCollectionCandidateProjection,
     sourceCollectionCandidateFallbackStepState,
   );
+  const sourceCollectionCandidateStepState: SourceCollectionStepState = sourceCollectionExtractionCanProceedAfterExclusions
+    ? "done"
+    : sourceCollectionCandidateStepStateRaw;
   const sourceCollectionExtractionDefaultPanelId =
     sourceCollectionRunPendingScreeningCount > 0
     || sourceCollectionScreeningStepState === "active"
@@ -11779,6 +11837,8 @@ export function TeamsRoute({
         ? sourceCollectionStageLaunchSummary("extraction")
         : sourceCollectionExtractionDisplayLoading
         ? sourceCollectionLoadingSummary
+        : sourceCollectionExtractionCanProceedAfterExclusions
+        ? sourceCollectionExtractionProceedableSummary
         : sourceCollectionStageUserSummary(sourceCollectionExtractionProjection, lang) || (sourceCollectionPrimaryDataLoading
         ? sourceCollectionLoadingSummary
         : sourceCollectionDisplayedCandidateCount <= 0
@@ -11789,24 +11849,37 @@ export function TeamsRoute({
       inputLabel: lang === "zh" ? `${sourceCollectionProjectedCollectedCountLabel} 原始资料` : sourceCollectionProjectedCollectedCountLabel,
       outputLabel: sourceCollectionPrimaryDataLoading || sourceCollectionScreeningDataLoading
         ? (lang === "zh" ? "提炼结果加载中" : "extraction result loading")
-        : (lang === "zh" ? `${sourceCollectionProjectedApprovedCountText} 条保留 / ${sourceCollectionRunPendingScreeningCountText} 条待处理` : `${sourceCollectionProjectedApprovedCountText} kept / ${sourceCollectionRunPendingScreeningCountText} pending`),
+        : sourceCollectionExtractionCanProceedAfterExclusions
+          ? (lang === "zh" ? `${sourceCollectionProjectedApprovedCountText} 条保留 / ${sourceCollectionExtractionExcludedRecoveryState.excludedCount} 条已排除` : `${sourceCollectionProjectedApprovedCountText} kept / ${sourceCollectionExtractionExcludedRecoveryState.excludedCount} excluded`)
+          : (lang === "zh" ? `${sourceCollectionProjectedApprovedCountText} 条保留 / ${sourceCollectionRunPendingScreeningCountText} 条待处理` : `${sourceCollectionProjectedApprovedCountText} kept / ${sourceCollectionRunPendingScreeningCountText} pending`),
       nextLabel: sourceCollectionRunPendingScreeningCount > 0
         ? (lang === "zh" ? "Agent 继续提炼" : "Agent continues extraction")
         : (lang === "zh" ? "进入资料关系整理" : "Move to relation mapping"),
-      state: sourceCollectionStageDisplayState("extraction", sourceCollectionExtractionDisplayState),
-      status: sourceCollectionStageDisplayStatus("extraction", sourceCollectionExtractionDisplayLoading ? sourceCollectionLoadingText : sourceCollectionStepStatusText(sourceCollectionExtractionStepState)),
-      detailLabel: lang === "zh" ? "查看提炼结果" : "View extraction details",
-      actionLabel: sourceCollectionStageActionLabelFor(
+      state: sourceCollectionStageDisplayState("extraction", sourceCollectionExtractionCanProceedAfterExclusions ? "done" : sourceCollectionExtractionDisplayState),
+      status: sourceCollectionStageDisplayStatus(
         "extraction",
-        sourceCollectionDisplayedCandidateCount > 0
-          ? (lang === "zh" ? "Agent 提炼资料" : "Agent extract sources")
-          : sourceCollectionCandidateExtractionButtonText,
+        sourceCollectionExtractionDisplayLoading
+          ? sourceCollectionLoadingText
+          : sourceCollectionExtractionCanProceedAfterExclusions
+            ? sourceCollectionExtractionExcludedRecoveryState.statusLabel
+            : sourceCollectionStepStatusText(sourceCollectionExtractionStepState),
       ),
-      actionDisabled: sourceCollectionStageActionReadinessFor("extraction").disabled,
+      detailLabel: lang === "zh" ? "查看提炼结果" : "View extraction details",
+      actionLabel: sourceCollectionExtractionCanProceedAfterExclusions
+        ? sourceCollectionExtractionExcludedRecoveryState.primaryActionText
+        : sourceCollectionStageActionLabelFor(
+          "extraction",
+          sourceCollectionDisplayedCandidateCount > 0
+            ? (lang === "zh" ? "Agent 提炼资料" : "Agent extract sources")
+            : sourceCollectionCandidateExtractionButtonText,
+        ),
+      actionDisabled: sourceCollectionExtractionCanProceedAfterExclusions ? false : sourceCollectionStageActionReadinessFor("extraction").disabled,
       actionTone: "primary",
       actionIcon: selectedTeamExtractSourceCollectionCandidatesPending || selectedTeamSourceQualityPending ? "refresh" : "archive",
       projection: sourceCollectionExtractionProjection,
-      onAction: () => void startSourceCollectionStageSessionTask("extraction"),
+      onAction: sourceCollectionExtractionCanProceedAfterExclusions
+        ? () => void openSourceCollectionStageAgentChat("extraction")
+        : () => void startSourceCollectionStageSessionTask("extraction"),
       onDetail: () => openSourceCollectionStage("extraction"),
     },
     {
