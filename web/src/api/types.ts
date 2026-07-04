@@ -245,22 +245,24 @@ export type MemoryUsageContractPayload = {
   };
 };
 
+export interface UserMarkdownSpaceCounts {
+  markdownFileCount: number;
+  pageCount: number;
+  linkCount: number;
+  taskCount: number;
+  tagCount: number;
+}
+
 export interface UserMarkdownSpaceSummary {
   spaceId: string;
   spaceName: string;
-  userId: string;
   canonicalPagesRoot: string;
   indexRoot: string;
-  sourceRef: Record<string, unknown>;
-  counts: {
-    markdownFileCount: number;
-    pageCount: number;
-    linkCount: number;
-    taskCount: number;
-    tagCount: number;
-  };
+  pageCount: number;
   updatedAt: string;
-  pageCount?: number;
+  userId?: string;
+  sourceRef?: Record<string, unknown>;
+  counts?: UserMarkdownSpaceCounts;
 }
 
 export interface UserMarkdownPageSummary {

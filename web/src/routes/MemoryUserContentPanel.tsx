@@ -9,6 +9,7 @@ import type {
   UserMarkdownSearchResult,
   UserMarkdownSpaceImportPayload,
   UserMarkdownSpaceImportPreviewPayload,
+  UserMarkdownSpaceCounts,
   UserMarkdownSpaceListPayload,
   UserMarkdownSpacePageListPayload,
   UserMarkdownSpacePagePayload,
@@ -22,7 +23,11 @@ export interface MemoryUserContentPanelProps {
   defaultUserId?: string;
 }
 
-type NormalizedSpaceSummary = UserMarkdownSpaceSummary;
+type NormalizedSpaceSummary = UserMarkdownSpaceSummary & {
+  userId: string;
+  sourceRef: Record<string, unknown>;
+  counts: UserMarkdownSpaceCounts;
+};
 
 function endpointWithUserId(path: string, userId: string, extras?: Record<string, string | number>) {
   const params = new URLSearchParams({ userId });
@@ -42,25 +47,21 @@ function errorText(error: unknown) {
   return error ? String(error) : "";
 }
 
-function normalizeSpaceSummary(
-  space: Partial<UserMarkdownSpaceSummary> & {
-    pageCount?: number;
-    counts?: unknown;
-    sourceRef?: unknown;
-  },
-): NormalizedSpaceSummary {
-  const legacyPageCount = Number(space.pageCount ?? 0);
-  const counts = space.counts && typeof space.counts === "object"
+function normalizeSpaceSummary(space: UserMarkdownSpaceSummary): NormalizedSpaceSummary {
+  const rawPageCount = Number(space.pageCount ?? 0);
+  const rawCounts = space.counts as unknown;
+  const countsRecord = rawCounts && typeof rawCounts === "object" ? rawCounts as Record<string, unknown> : null;
+  const counts = countsRecord
     ? {
-      markdownFileCount: Number((space.counts as Record<string, unknown>).markdownFileCount ?? legacyPageCount),
-      pageCount: Number((space.counts as Record<string, unknown>).pageCount ?? legacyPageCount),
-      linkCount: Number((space.counts as Record<string, unknown>).linkCount ?? 0),
-      taskCount: Number((space.counts as Record<string, unknown>).taskCount ?? 0),
-      tagCount: Number((space.counts as Record<string, unknown>).tagCount ?? 0),
+      markdownFileCount: Number(countsRecord.markdownFileCount ?? rawPageCount),
+      pageCount: Number(countsRecord.pageCount ?? rawPageCount),
+      linkCount: Number(countsRecord.linkCount ?? 0),
+      taskCount: Number(countsRecord.taskCount ?? 0),
+      tagCount: Number(countsRecord.tagCount ?? 0),
     }
     : {
-      markdownFileCount: legacyPageCount,
-      pageCount: legacyPageCount,
+      markdownFileCount: rawPageCount,
+      pageCount: rawPageCount,
       linkCount: 0,
       taskCount: 0,
       tagCount: 0,
@@ -74,7 +75,7 @@ function normalizeSpaceSummary(
     sourceRef: (space.sourceRef && typeof space.sourceRef === "object" ? space.sourceRef : {}) as Record<string, unknown>,
     counts,
     updatedAt: String(space.updatedAt ?? ""),
-    pageCount: legacyPageCount || counts.pageCount,
+    pageCount: rawPageCount || counts.pageCount,
   };
 }
 
@@ -88,7 +89,10 @@ function pageContent(payload?: UserMarkdownSpacePagePayload) {
   return payload.page?.content ?? "";
 }
 
-function sourceRefPreview(sourceRef: Record<string, unknown>) {
+function sourceRefPreview(sourceRef?: Record<string, unknown>) {
+  if (!sourceRef) {
+    return "";
+  }
   const path = typeof sourceRef.path === "string" ? sourceRef.path : "";
   const sha256 = typeof sourceRef.sha256 === "string" ? sourceRef.sha256 : "";
   return [path, sha256].filter(Boolean).join(" | ");
@@ -284,16 +288,16 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
                 <span className={styles.badge}>{preview.summary.taskCount} tasks</span>
                 <span className={styles.badge}>{preview.summary.tagCount} tags</span>
               </div>
-              <div className={styles.meta}>{preview.source.managedRoot}</div>
+              <div className={styles.metaWrap}>{preview.source.managedRoot}</div>
               <div className={styles.previewList}>
                 {(preview.pages ?? []).slice(0, 6).map((page) => (
                   <div key={`${page.relativePath}:${page.title}`}>
                     <strong>{page.title}</strong>
-                    <div className={styles.meta}>{page.relativePath}</div>
+                    <div className={styles.metaWrap}>{page.relativePath}</div>
                   </div>
                 ))}
                 {preview.ignoredFiles.length ? (
-                  <div className={styles.meta}>ignored: {preview.ignoredFiles.slice(0, 3).map((row) => row.relativePath).join(", ")}</div>
+                  <div className={styles.metaWrap}>ignored: {preview.ignoredFiles.slice(0, 3).map((row) => row.relativePath).join(", ")}</div>
                 ) : null}
               </div>
             </>
@@ -328,7 +332,7 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
           {pagesQuery.error ? <div className={styles.error}>{errorText(pagesQuery.error)}</div> : null}
           {selectedSpace ? (
             <>
-              <div className={styles.meta}>{selectedSpace.canonicalPagesRoot}</div>
+              <div className={styles.metaWrap}>{selectedSpace.canonicalPagesRoot}</div>
               <div className={styles.code}>{sourceRefPreview(selectedSpace.sourceRef) || "sourceRef unavailable"}</div>
             </>
           ) : (
@@ -355,7 +359,7 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
                 }}
               >
                 <strong>{space.spaceName || space.spaceId}</strong>
-                <span className={styles.meta}>{space.canonicalPagesRoot}</span>
+                <span className={styles.metaWrap}>{space.canonicalPagesRoot}</span>
                 <div className={styles.actionRow}>
                   <span className={styles.badge}>{space.counts.pageCount} pages</span>
                   <span className={styles.badge}>{space.counts.taskCount} tasks</span>
@@ -380,7 +384,7 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
                 onClick={() => setSelectedPageId(page.pageId)}
               >
                 <strong>{page.title}</strong>
-                <span className={styles.meta}>{page.relativePath}</span>
+                <span className={styles.metaWrap}>{page.relativePath}</span>
                 <div className={styles.actionRow}>
                   <span className={styles.badge}>{page.tags.length} tags</span>
                   <span className={styles.badge}>{page.taskCounts.total} tasks</span>
@@ -405,7 +409,7 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
                 <div className={styles.header}>
                   <div>
                     <strong>{selectedPagePayload.page.title}</strong>
-                    <div className={styles.meta}>{selectedPagePayload.page.relativePath}</div>
+                    <div className={styles.metaWrap}>{selectedPagePayload.page.relativePath}</div>
                   </div>
                   <div className={styles.actionRow}>
                     <span className={styles.badge}>{selectedPagePayload.page.tags.length} tags</span>
@@ -436,7 +440,7 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
                   <strong>{result.title}</strong>
                   <span className={styles.badge}>#{result.rank}</span>
                 </div>
-                <span className={styles.meta}>{result.spaceName} · {result.pageRelativePath}</span>
+                <span className={styles.metaWrap}>{result.spaceName} · {result.pageRelativePath}</span>
                 <span>{result.excerpt}</span>
               </button>
             ))}
