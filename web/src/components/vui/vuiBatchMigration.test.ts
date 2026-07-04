@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import utilityMenuStyles from "../../app/AppShellUtilityMenu.styles";
 import agentStyles from "../../routes/AgentsRoute.styles";
 import evolutionStyles from "../../routes/EvolutionRoute.styles";
+import evolutionRunRecordsStyles from "../../routes/EvolutionRunRecordsPanel.styles";
 import petStyles from "../../routes/PetRoute.styles";
 import teamStyles from "../../routes/TeamsRoute.styles";
 
@@ -253,11 +254,11 @@ describe("VUI batch migration", () => {
     expect(violations).toEqual([]);
   });
 
-  it("routes/EvolutionRoute.styles.ts preserves block button geometry after VUI native migration", () => {
+  it("Evolution route and run-record panels preserve block button geometry after VUI native migration", () => {
     for (const className of [
       evolutionStyles.caseTraceSummary,
       evolutionStyles.workflowStepButton,
-      evolutionStyles.runCardButton,
+      evolutionRunRecordsStyles.runCardButton,
       evolutionStyles.proposalCardButton,
     ]) {
       expect(className).toContain("w-full");
