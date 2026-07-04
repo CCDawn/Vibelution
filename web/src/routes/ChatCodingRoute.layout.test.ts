@@ -815,6 +815,19 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.cacheDetailBoundaryHit).toContain("w-[var(--cache-boundary-hit-width)]");
     expect(routeStyles.cacheDetailBoundaryMiss).toContain("w-[var(--cache-boundary-miss-width)]");
     expect(routeStyles.cacheDetailBoundaryUnknown).toContain("w-[var(--cache-boundary-unknown-width)]");
+    for (const value of [routeStyles.cacheDetailHeader, routeStyles.cacheDetailSegmentHeader]) {
+      expect(value).toContain("flex");
+      expect(value).toContain("items-center");
+      expect(value).not.toContain("rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)]");
+      expect(value).not.toContain("bg-[var(--vui-surface-glass)]");
+      expect(value).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+    }
+    for (const value of [routeStyles.cacheDonutShell, routeStyles.cacheDetailDonutShell]) {
+      expect(value).toContain("grid");
+      expect(value).not.toContain("bg-[var(--surface-page)]");
+      expect(value).not.toContain("bg-[var(--vui-surface-glass)]");
+      expect(value).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+    }
     expect(routeStyles.cacheDonutSegmentToolDescriptions).toContain("stroke-[var(--accent-warm)]");
     expect(routeStyles.cacheDonutSegmentToolSchema).toContain("stroke-[var(--accent-warm)]");
     expect(routeStyles.contextCompositionSegmentSystem).toBeTypeOf("string");

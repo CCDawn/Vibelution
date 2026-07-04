@@ -7,7 +7,7 @@ const styles = {
   lifecycleProofName: "vui-app-appshell lifecycleProofName min-w-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   statusDot: "vui-app-appshell statusDot inline-block h-2 w-2 shrink-0 rounded-full border border-[color-mix(in_srgb,currentColor_38%,transparent)] bg-current p-0 align-middle",
   statusGuideCard: "vui-app-appshell statusGuideCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
-  statusGuideCardHeader: "vui-app-appshell statusGuideCardHeader min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
+  statusGuideCardHeader: "vui-app-appshell statusGuideCardHeader min-w-0 flex flex-wrap items-center gap-1.5 px-0.5 pb-1",
   statusGuideGrid: "vui-app-appshell statusGuideGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   statusGuideHeader: "vui-app-appshell statusGuideHeader min-w-0 flex flex-wrap items-center gap-1.5",
   statusGuideList: "vui-app-appshell statusGuideList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",

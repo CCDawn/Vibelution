@@ -125,6 +125,31 @@ describe("AppShell layout contract", () => {
     expect(wrappedTopBarBlock).toContain("max-height: calc(100dvh - 124px)");
   });
 
+  it("keeps AppShell popover headers layout-only instead of card-like", () => {
+    const panelChromeTokens = [
+      "rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)]",
+      "bg-[var(--vui-surface-glass)]",
+      "shadow-[var(--vui-shadow-hairline)]",
+    ];
+    const headerStyles = [
+      styles.activeWorkDetailHeader,
+      styles.statusGuideCardHeader,
+      statusGuideStyles.statusGuideCardHeader,
+      styles.utilityPanelHeader,
+      utilityMenuStyles.utilityPanelHeader,
+    ];
+
+    for (const value of headerStyles) {
+      expect(value).toContain("flex");
+      expect(value).toContain("items-center");
+      for (const token of panelChromeTokens) {
+        expect(value).not.toContain(token);
+      }
+    }
+    expect(styles.activeWorkDetailHeader).toContain("border-b");
+    expect(styles.activeWorkDetailHeader).toContain("text-[var(--accent-cool)]");
+  });
+
   it("keeps the light shell top bar on light surfaces with a stable brand stack", () => {
     const lightThemeBlock = shellStyles.slice(
       shellStyles.indexOf('.shell[data-theme="light"] {'),
