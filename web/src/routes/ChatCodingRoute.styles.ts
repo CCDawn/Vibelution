@@ -155,19 +155,19 @@ const styles: Record<string, string> = {
   cacheDetailDonutPanel:
     "vui-routes-chatcodingroute cacheDetailDonutPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   cacheDetailDonutShell:
-    "vui-routes-chatcodingroute cacheDetailDonutShell min-w-0 grid h-full min-h-0 content-start overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)] rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "vui-routes-chatcodingroute cacheDetailDonutShell min-w-0 grid h-full min-h-0 content-start overflow-hidden text-[var(--fg-primary)]",
   cacheDetailDonutSvg:
     "vui-routes-chatcodingroute cacheDetailDonutSvg min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   cacheDetailEmpty:
     "vui-routes-chatcodingroute cacheDetailEmpty min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   cacheDetailHeader:
-    "vui-routes-chatcodingroute cacheDetailHeader min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
+    "vui-routes-chatcodingroute cacheDetailHeader min-w-0 flex flex-wrap items-center gap-1.5 px-0.5 pb-1",
   cacheDetailOverlay:
     "vui-routes-chatcodingroute cacheDetailOverlay min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   cacheDetailSegmentGroup:
     "vui-routes-chatcodingroute cacheDetailSegmentGroup min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   cacheDetailSegmentHeader:
-    "vui-routes-chatcodingroute cacheDetailSegmentHeader min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
+    "vui-routes-chatcodingroute cacheDetailSegmentHeader min-w-0 flex flex-wrap items-center gap-1.5 px-0.5 pb-1",
   cacheDetailSegmentList:
     "vui-routes-chatcodingroute cacheDetailSegmentList min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid min-h-0 content-start gap-1.5 overflow-auto",
   cacheDetailSegmentMeta:
@@ -229,7 +229,7 @@ const styles: Record<string, string> = {
   cacheDonutSegmentUser:
     "vui-routes-chatcodingroute cacheDonutSegmentUser min-w-0",
   cacheDonutShell:
-    "vui-routes-chatcodingroute cacheDonutShell min-w-0 grid h-full min-h-0 content-start overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)]",
+    "vui-routes-chatcodingroute cacheDonutShell min-w-0 grid h-full min-h-0 content-start overflow-hidden text-[var(--fg-primary)]",
   cacheDonutStats:
     "vui-routes-chatcodingroute cacheDonutStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   cacheDonutSvg:
