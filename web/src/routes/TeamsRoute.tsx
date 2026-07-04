@@ -80,6 +80,12 @@ import { TeamSourceCollectionActiveStagePanel } from "./TeamSourceCollectionActi
 import { TeamSourceCollectionStageAgentsPanel, type TeamSourceCollectionStageAgentCard, type TeamSourceCollectionStageAgentTone } from "./TeamSourceCollectionStageAgentsPanel";
 import { TeamSourceCollectionRunSwitcherPanel, type TeamSourceCollectionRunSwitcherRun } from "./TeamSourceCollectionRunSwitcherPanel";
 import { TeamSourceCollectionFindingDetailsPanel } from "./TeamSourceCollectionFindingDetailsPanel";
+import {
+  TeamSourceCollectionOverviewPanel,
+  type TeamSourceCollectionOverviewPlan,
+  type TeamSourceCollectionOverviewResult,
+  type TeamSourceCollectionOverviewStat,
+} from "./TeamSourceCollectionOverviewPanel";
 import { TeamSourceCollectionCandidatePanel } from "./TeamSourceCollectionCandidatePanel";
 import { TeamSourceCollectionConversationPanel } from "./TeamSourceCollectionConversationPanel";
 import { TeamSourceCollectionControlsPanel } from "./TeamSourceCollectionControlsPanel";
@@ -8596,22 +8602,6 @@ export function TeamsRoute({
     const activeModule =
       sourceCollectionStageModules.find((module) => module.id === selectedSourceCollectionStageId)
       ?? sourceCollectionStageModules[0];
-    const sourceCollectionFindingRunOptions = sourceCollectionRuns.map((run) => ({
-      id: run.runId,
-      label: `${sourceCollectionRunLabel(run.runId)} · ${sourceCollectionRunTitleLabel(run.title, lang)}`,
-    }));
-    const sourceCollectionFindingAssignments = sourceCollectionAssignments.map((assignment) => ({
-      id: assignment.assignmentId,
-      roleLabel: sourceCollectionAgentRoleLabel(assignment.agentRole, lang),
-      statusLabel: sourceCollectionStatusLabel(assignment.status, lang),
-      queryCountLabel: `${assignment.scope.queryCount ?? assignment.scope.assignedQueries?.length ?? 0} ${lang === "zh" ? "条搜索" : "queries"}`,
-      active: assignment.assignmentId === selectedSourceCollectionAssignment?.assignmentId,
-    }));
-    const sourceCollectionFindingQueries = selectedSourceCollectionQueries.slice(0, 6).map((query) => ({
-      id: query.queryId,
-      title: translateResearchPhrase(query.query, lang),
-      meta: `${query.queryId} · ${sourceCollectionSourceTypeLabel(query.sourceType, lang)} · ${sourceCollectionLanguageLabel(query.language, lang)}`,
-    }));
     return (
       <TeamSourceCollectionControlsPanel
         ref={sourceCollectionControlPanelRef}
@@ -10271,6 +10261,22 @@ export function TeamsRoute({
     ?? sourceCollectionAssignments[0]
     ?? null;
   const selectedSourceCollectionQueries = selectedSourceCollectionAssignment?.scope?.assignedQueries ?? [];
+  const sourceCollectionFindingRunOptions = sourceCollectionRuns.map((run) => ({
+    id: run.runId,
+    label: `${sourceCollectionRunLabel(run.runId)} · ${sourceCollectionRunTitleLabel(run.title, lang)}`,
+  }));
+  const sourceCollectionFindingAssignments = sourceCollectionAssignments.map((assignment) => ({
+    id: assignment.assignmentId,
+    roleLabel: sourceCollectionAgentRoleLabel(assignment.agentRole, lang),
+    statusLabel: sourceCollectionStatusLabel(assignment.status, lang),
+    queryCountLabel: `${assignment.scope.queryCount ?? assignment.scope.assignedQueries?.length ?? 0} ${lang === "zh" ? "条搜索" : "queries"}`,
+    active: assignment.assignmentId === selectedSourceCollectionAssignment?.assignmentId,
+  }));
+  const sourceCollectionFindingQueries = selectedSourceCollectionQueries.slice(0, 6).map((query) => ({
+    id: query.queryId,
+    title: translateResearchPhrase(query.query, lang),
+    meta: `${query.queryId} · ${sourceCollectionSourceTypeLabel(query.sourceType, lang)} · ${sourceCollectionLanguageLabel(query.language, lang)}`,
+  }));
   const sourceCollectionCanStart = Boolean(selectedTeam?.teamId && sourceCollectionDraft.topic.trim());
   const researchStageCanLaunch = Boolean(selectedTeam?.teamId && sourceCollectionDraft.topic.trim());
   const selectedTeamStartResearchStagePending =
@@ -11975,6 +11981,45 @@ export function TeamsRoute({
       ) : undefined,
     };
   });
+  const sourceCollectionOverviewSummary = selectedSourceCollectionRun
+    ? `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} · ${sourceCollectionCollectedRunSummaryText} / ${sourceCollectionAssignmentRunSummaryText}`
+    : sourceCollectionRunsQuery.isPending
+      ? (lang === "zh" ? "读取批次中" : "loading runs")
+      : (lang === "zh" ? "等待启动批次" : "waiting for run");
+  const sourceCollectionOverviewStatus = sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status || "";
+  const sourceCollectionOverviewStats: TeamSourceCollectionOverviewStat[] = [
+    { key: "records", label: lang === "zh" ? "资料" : "records", value: sourceCollectionCollectedCountText },
+    { key: "search", label: lang === "zh" ? "可搜索" : "search", value: sourceCollectionSearchOpenAssignmentCountText },
+    { key: "next", label: lang === "zh" ? "后续" : "next work", value: sourceCollectionDownstreamOpenAssignmentCountText },
+    { key: "queries", label: lang === "zh" ? "搜索问题" : "queries", value: sourceCollectionQueryCountText },
+    {
+      key: "prompt-cache",
+      label: "KV",
+      value: `${sourceCollectionPromptCacheStatusLabel(sourceCollectionPromptCacheStatus, lang)}${sourceCollectionPromptCacheMode ? ` · ${sourceCollectionPromptCacheMode}` : ""}`,
+    },
+  ];
+  const sourceCollectionOverviewPlan: TeamSourceCollectionOverviewPlan | null = selectedTeamStartSourceCollectionResult ? {
+    planId: selectedTeamStartSourceCollectionResult.searchPlan.planId,
+    seeds: selectedTeamStartSourceCollectionResult.searchPlan.querySeeds.join(" / "),
+    promptCache: `${sourceCollectionPromptCacheStatusLabel(selectedTeamStartSourceCollectionResult.promptCachePolicy.gate.status, lang)} · ${selectedTeamStartSourceCollectionResult.promptCachePolicy.promptCacheMode}`,
+    boundary: lang === "zh" ? "不触发外部搜索，不写正式知识/RAG/图谱" : "No external search, formal Knowledge/RAG/Graph writes off",
+  } : null;
+  const sourceCollectionOverviewAssignmentEmptyMessage = sourceCollectionAssignmentsQuery.isPending
+    ? (lang === "zh" ? "正在读取功能 Agent assignment..." : "Loading functional Agent assignments...")
+    : (lang === "zh" ? "启动批次后会生成资料寻找、资料提炼、资料关系整理和资料入库任务。" : "Starting a run will create source finding, extraction, relation mapping, and ingestion assignments.");
+  const sourceCollectionOverviewBoundaryItems = [
+    lang === "zh" ? "执行器：手动/Agent 均可提交 CollectionOutput" : "Executor: manual or Agent CollectionOutput",
+    lang === "zh" ? "正式知识写入关闭" : "formal knowledge write off",
+    lang === "zh" ? "进入候选仓库后再筛选" : "screen after candidate import",
+  ];
+  const sourceCollectionOverviewErrors = [
+    selectedTeamStartSourceCollectionError?.message,
+    selectedTeamRecordSourceCollectionOutputError?.message,
+  ].filter((message): message is string => Boolean(message));
+  const sourceCollectionOverviewResult: TeamSourceCollectionOverviewResult | null = selectedTeamRecordSourceCollectionOutputResult ? {
+    title: lang === "zh" ? "已回写" : "Written",
+    detail: `${selectedTeamRecordSourceCollectionOutputResult.output.createdRecords.length} DataRecord / ${selectedTeamRecordSourceCollectionOutputResult.imported.length} candidate`,
+  } : null;
   const selectedTeamContextTitle = selectedTeam
     ? [
       selectedTeam.name,
@@ -12512,223 +12557,45 @@ export function TeamsRoute({
                         </>
                       ) : null}
                       {showResearchSourceCollection ? (
-                      <div className={styles.workflowSourceCollectionPanel} id="research-workflow-source-collection">
-                        <div className={styles.workflowIngestionHeader}>
-                          <div>
-                            <strong>{lang === "zh" ? "资料搜索执行" : "Source collection"}</strong>
-                            <span>
-                              {selectedSourceCollectionRun
-                                ? lang === "zh"
-                                  ? `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} · ${sourceCollectionCollectedRunSummaryText} / ${sourceCollectionAssignmentRunSummaryText}`
-                                  : `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} · ${sourceCollectionCollectedRunSummaryText} / ${sourceCollectionAssignmentRunSummaryText}`
-                                : sourceCollectionRunsQuery.isPending
-                                ? (lang === "zh" ? "读取批次中" : "loading runs")
-                                : (lang === "zh" ? "等待启动批次" : "waiting for run")}
-                            </span>
-                          </div>
-                          <span className={`${styles.workflowTag} ${workflowIngestionTone(sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status || "")}`}>
-                            {sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status || (lang === "zh" ? "未启动" : "not started")}
-                          </span>
-                        </div>
-                        <form
-                          className={styles.workflowSourceCollectionForm}
-                          onSubmit={(event) => {
-                            event.preventDefault();
-                            if (!selectedTeam?.teamId || !sourceCollectionCanStart || selectedTeamStartSourceCollectionPending) {
-                              return;
-                            }
-                            startSourceCollectionRunMutation.mutate({
-                              teamId: selectedTeam.teamId,
-                              draft: sourceCollectionDraft,
-                            });
-                          }}
-                        >
-                          <label>
-                            <span>{lang === "zh" ? "主题" : "Topic"}</span>
-                            <VNativeInput
-                              value={sourceCollectionDraft.topic}
-                              onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, topic: event.target.value }))}
-                            />
-                          </label>
-                          <label>
-                            <span>{lang === "zh" ? "标题" : "Title"}</span>
-                            <VNativeInput
-                              value={sourceCollectionDraft.title}
-                              onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, title: event.target.value }))}
-                            />
-                          </label>
-                          <label className={styles.workflowSourceCollectionWide}>
-                            <span>{lang === "zh" ? "目标" : "Goal"}</span>
-                            <VNativeTextarea
-                              value={sourceCollectionDraft.goal}
-                              onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, goal: event.target.value }))}
-                              rows={2}
-                            />
-                          </label>
-                          <label>
-                            <span>{lang === "zh" ? "Query seeds" : "Query seeds"}</span>
-                            <VNativeTextarea
-                              value={sourceCollectionDraft.querySeeds}
-                              onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, querySeeds: event.target.value }))}
-                              rows={3}
-                            />
-                          </label>
-                          <label>
-                            <span>{lang === "zh" ? "输入引用" : "Input refs"}</span>
-                            <VNativeTextarea
-                              value={sourceCollectionDraft.inputRefs}
-                              onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, inputRefs: event.target.value }))}
-                              rows={3}
-                              placeholder={lang === "zh" ? "可选：本地文件、seed-query:..." : "Optional: local file, seed-query:..."}
-                            />
-                          </label>
-                          {renderSourceCollectionModeFields()}
-                          <label>
-                            <span>{lang === "zh" ? "语言" : "Languages"}</span>
-                            <VNativeInput
-                              value={sourceCollectionDraft.searchLanguages}
-                              onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, searchLanguages: event.target.value }))}
-                            />
-                          </label>
-                          <label>
-                            <span>{lang === "zh" ? "资料类型" : "Source types"}</span>
-                            <VNativeInput
-                              value={sourceCollectionDraft.sourceTypes}
-                              onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, sourceTypes: event.target.value }))}
-                            />
-                          </label>
-                          <label>
-                            <span>{lang === "zh" ? "每条上限" : "Max results"}</span>
-                            <VNativeInput
-                              type="number"
-                              min={1}
-                              max={100}
-                              value={sourceCollectionDraft.maxResultsPerQuery}
-                              onChange={(event) =>
-                                setSourceCollectionDraft((current) => ({
-                                  ...current,
-                                  maxResultsPerQuery: Math.max(1, Math.min(100, Number(event.target.value) || 1)),
-                                }))
-                              }
-                            />
-                          </label>
-                          <VNativeButton type="submit" disabled={!sourceCollectionCanStart || selectedTeamStartSourceCollectionPending}>
-                            <Search size={13} />
-                            {selectedTeamStartSourceCollectionPending
-                              ? (lang === "zh" ? "启动中" : "Starting")
-                              : (lang === "zh" ? "启动搜集批次" : "Start collection")}
-                          </VNativeButton>
-                        </form>
-                        <div className={styles.workflowSourceCollectionRuns}>
-                          <label>
-                            <span>{lang === "zh" ? "最近批次" : "Recent runs"}</span>
-                            <VNativeSelect
-                              value={selectedSourceCollectionRunEffectiveId}
-                              onChange={(event) => setSelectedSourceCollectionRunId(event.target.value)}
-                              disabled={!sourceCollectionRuns.length}
-                            >
-                              {sourceCollectionRuns.length ? (
-                                sourceCollectionRuns.map((run) => (
-                                  <option key={run.runId} value={run.runId}>
-                                    {sourceCollectionRunLabel(run.runId)} · {run.title}
-                                  </option>
-                                ))
-                              ) : (
-                                <option value="">{lang === "zh" ? "暂无批次" : "No runs"}</option>
-                              )}
-                            </VNativeSelect>
-                          </label>
-                          <div className={styles.workflowSourceCollectionStats}>
-                            <span>{lang === "zh" ? "资料" : "records"} <strong>{sourceCollectionCollectedCountText}</strong></span>
-                            <span>{lang === "zh" ? "可搜索" : "search"} <strong>{sourceCollectionSearchOpenAssignmentCountText}</strong></span>
-                            <span>{lang === "zh" ? "后续" : "next work"} <strong>{sourceCollectionDownstreamOpenAssignmentCountText}</strong></span>
-                            <span>{lang === "zh" ? "搜索问题" : "queries"} <strong>{sourceCollectionQueryCountText}</strong></span>
-                            <span>KV <strong>{sourceCollectionPromptCacheStatusLabel(sourceCollectionPromptCacheStatus, lang)}{sourceCollectionPromptCacheMode ? ` · ${sourceCollectionPromptCacheMode}` : ""}</strong></span>
-                          </div>
-                        </div>
-                        {renderSourceCollectionStorageActions()}
-                        {selectedTeamStartSourceCollectionResult ? (
-                          <div className={styles.workflowSourceCollectionPlan}>
-                            <div>
-                              <span>plan</span>
-                              <strong>{selectedTeamStartSourceCollectionResult.searchPlan.planId}</strong>
-                            </div>
-                            <div>
-                              <span>{lang === "zh" ? "seeds" : "seeds"}</span>
-                              <strong>{selectedTeamStartSourceCollectionResult.searchPlan.querySeeds.join(" / ")}</strong>
-                            </div>
-                            <div>
-                              <span>KV</span>
-                              <strong>
-                                {sourceCollectionPromptCacheStatusLabel(selectedTeamStartSourceCollectionResult.promptCachePolicy.gate.status, lang)}
-                                {" · "}
-                                {selectedTeamStartSourceCollectionResult.promptCachePolicy.promptCacheMode}
-                              </strong>
-                            </div>
-                            <div>
-                              <span>{lang === "zh" ? "边界" : "boundary"}</span>
-                              <strong>{lang === "zh" ? "不触发外部搜索，不写正式知识/RAG/图谱" : "No external search, formal Knowledge/RAG/Graph writes off"}</strong>
-                            </div>
-                          </div>
-                        ) : null}
-                        {sourceCollectionAssignments.length ? (
-                          <div className={styles.workflowSourceCollectionAssignments}>
-                            {sourceCollectionAssignments.map((assignment) => (
-                              <VNativeButton
-                                key={assignment.assignmentId}
-                                type="button"
-                                className={assignment.assignmentId === selectedSourceCollectionAssignment?.assignmentId ? styles.workflowSourceCollectionAssignmentActive : ""}
-                                onClick={() =>
-                                  setSourceCollectionOutputDraft((current) => ({ ...current, assignmentId: assignment.assignmentId }))
-                                }
-                              >
-                                <strong>{assignment.agentRole}</strong>
-                                <span>{assignment.status} · {assignment.scope.queryCount ?? assignment.scope.assignedQueries?.length ?? 0} queries</span>
-                              </VNativeButton>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className={styles.empty}>
-                            {sourceCollectionAssignmentsQuery.isPending
-                              ? (lang === "zh" ? "正在读取功能 Agent assignment..." : "Loading functional Agent assignments...")
-                              : (lang === "zh" ? "启动批次后会生成资料寻找、资料提炼、资料关系整理和资料入库任务。" : "Starting a run will create source finding, extraction, relation mapping, and ingestion assignments.")}
-                          </div>
-                        )}
-                        {selectedSourceCollectionQueries.length ? (
-                          <div className={styles.workflowSourceCollectionQueries}>
-                            {selectedSourceCollectionQueries.slice(0, 6).map((query) => (
-                              <span key={query.queryId}>
-                                <strong>{query.query}</strong>
-                                <small>{query.queryId} · {query.sourceType} · {query.language}</small>
-                              </span>
-                            ))}
-                          </div>
-                        ) : null}
-                        {renderSourceCollectionManualWritebackPanel({
+                      <TeamSourceCollectionOverviewPanel
+                        lang={lang}
+                        title={lang === "zh" ? "资料搜索执行" : "Source collection"}
+                        summary={sourceCollectionOverviewSummary}
+                        statusLabel={sourceCollectionOverviewStatus || (lang === "zh" ? "未启动" : "not started")}
+                        statusClassName={workflowIngestionTone(sourceCollectionOverviewStatus)}
+                        draft={sourceCollectionDraft}
+                        modeFields={renderSourceCollectionModeFields()}
+                        canStart={sourceCollectionCanStart}
+                        startPending={selectedTeamStartSourceCollectionPending}
+                        selectedRunId={selectedSourceCollectionRunEffectiveId}
+                        runs={sourceCollectionFindingRunOptions}
+                        stats={sourceCollectionOverviewStats}
+                        assignments={sourceCollectionFindingAssignments}
+                        assignmentEmptyMessage={sourceCollectionOverviewAssignmentEmptyMessage}
+                        queries={sourceCollectionFindingQueries}
+                        storageActions={renderSourceCollectionStorageActions()}
+                        plan={sourceCollectionOverviewPlan}
+                        manualWriteback={renderSourceCollectionManualWritebackPanel({
                           title: lang === "zh" ? "手工回写一条搜集结果" : "Manual result writeback",
                           description: lang === "zh" ? "写 DataRecord 后自动导入 source_manifest 候选" : "Writes DataRecord, then imports source_manifest candidate",
                           wrapInDetails: false,
                         })}
-                        <div className={styles.workflowIngestionBoundary}>
-                          <span>{lang === "zh" ? "执行器：手动/Agent 均可提交 CollectionOutput" : "Executor: manual or Agent CollectionOutput"}</span>
-                          <span>{lang === "zh" ? "正式知识写入关闭" : "formal knowledge write off"}</span>
-                          <span>{lang === "zh" ? "进入候选仓库后再筛选" : "screen after candidate import"}</span>
-                        </div>
-                        {selectedTeamStartSourceCollectionError ? (
-                          <div className={styles.messageError}>{selectedTeamStartSourceCollectionError.message}</div>
-                        ) : null}
-                        {selectedTeamRecordSourceCollectionOutputError ? (
-                          <div className={styles.messageError}>{selectedTeamRecordSourceCollectionOutputError.message}</div>
-                        ) : null}
-                        {selectedTeamRecordSourceCollectionOutputResult ? (
-                          <div className={styles.messageResult}>
-                            <strong>{lang === "zh" ? "已回写" : "Written"}</strong>
-                            <span>
-                              {selectedTeamRecordSourceCollectionOutputResult.output.createdRecords.length} DataRecord / {selectedTeamRecordSourceCollectionOutputResult.imported.length} candidate
-                            </span>
-                          </div>
-                        ) : null}
-                      </div>
+                        boundaryItems={sourceCollectionOverviewBoundaryItems}
+                        errorMessages={sourceCollectionOverviewErrors}
+                        result={sourceCollectionOverviewResult}
+                        onDraftChange={(patch) => setSourceCollectionDraft((current) => ({ ...current, ...patch }))}
+                        onStart={() => {
+                          if (!selectedTeam?.teamId || !sourceCollectionCanStart || selectedTeamStartSourceCollectionPending) {
+                            return;
+                          }
+                          startSourceCollectionRunMutation.mutate({
+                            teamId: selectedTeam.teamId,
+                            draft: sourceCollectionDraft,
+                          });
+                        }}
+                        onRunChange={setSelectedSourceCollectionRunId}
+                        onAssignmentSelect={(assignmentId) => setSourceCollectionOutputDraft((current) => ({ ...current, assignmentId }))}
+                      />
                       ) : null}
                       {showResearchCoordination ? (
                       <TeamWorkflowCoordinationStatusPanel
