@@ -1,4 +1,4 @@
-export const gitRouteStyles: Record<string, string> = {
+export const gitRouteStyles = {
   route:
     "grid h-full min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] bg-[color-mix(in_srgb,var(--surface-page)_94%,var(--bg-canvas))] max-[860px]:overflow-auto",
   header:
@@ -109,4 +109,4 @@ export const gitRouteStyles: Record<string, string> = {
   commitReady: "m-0 text-[var(--vui-font-xs)] leading-snug text-[var(--state-success)]",
   commitHeader:
     "flex min-w-0 items-center justify-between gap-2 leading-tight [&_code]:min-w-0 [&_code]:text-[var(--vui-font-xs)] [&_code]:text-[var(--accent-warm-2)] [&_span]:inline-flex [&_span]:min-w-0 [&_span]:items-center [&_span]:gap-[5px] [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:leading-tight [&_span]:text-[var(--fg-tertiary)]",
-};
+} as const;
