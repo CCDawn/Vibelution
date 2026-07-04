@@ -616,6 +616,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("openSourceCollectionStageAgentChat(\"extraction\")");
     expect(routeSource).toContain("sourceCollectionExtractionRecoveryFailureCount");
     expect(routeSource).toContain("sourceCollectionExtractionRecoverySalvageCount");
+    expect(routeSource).toContain("deriveSourceCollectionExcludedRecoveryState");
+    expect(routeSource).toContain("sourceCollectionExtractionExcludedRecoveryState");
+    expect(routeSource).toContain("剩余资料已被排除");
+    expect(routeSource).toContain("查看排除原因");
+    expect(routeSource).toContain('onPress={() => void openSourceCollectionStageAgentChat("extraction")}');
     expect(routeSource).not.toContain("sourceCollectionRunCandidates.slice(0, 12)");
     expect(routeSource).not.toContain("SOURCE_COLLECTION_RESULT_PREVIEW_LIMIT");
     expect(routeSource).toContain("sourceCollectionStageCard");

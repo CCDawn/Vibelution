@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  deriveSourceCollectionExcludedRecoveryState,
   deriveSourceCollectionDisplayState,
   linkedRoomRefetchInterval,
   selectDefaultSourceCollectionRun,
@@ -60,6 +61,36 @@ describe("source collection display state", () => {
     expect(state.active).toBe(false);
     expect(state.statusText).toBe("已返回一批");
     expect(state.decisionText).toContain("还有 3 个搜索任务可继续");
+  });
+});
+
+describe("source collection extraction recovery", () => {
+  it("classifies all remaining extraction gaps as excluded instead of recoverable import work", () => {
+    const state = deriveSourceCollectionExcludedRecoveryState({
+      lang: "zh",
+      excludedCount: 10,
+      missingCount: 10,
+      importFailedCount: 10,
+      importPendingRecordCount: 10,
+    });
+
+    expect(state.blockedByExcludedSources).toBe(true);
+    expect(state.recoverText).toBe("已排除 10");
+    expect(state.summary).toContain("剩余 10 条资料已被排除");
+    expect(state.primaryActionText).toBe("查看排除原因");
+  });
+
+  it("does not block normal recovery when excluded records are only part of the remaining gaps", () => {
+    const state = deriveSourceCollectionExcludedRecoveryState({
+      lang: "zh",
+      excludedCount: 2,
+      missingCount: 10,
+      importFailedCount: 2,
+      importPendingRecordCount: 10,
+    });
+
+    expect(state.blockedByExcludedSources).toBe(false);
+    expect(state.recoverText).toBe("");
   });
 });
 
