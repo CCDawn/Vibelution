@@ -32,13 +32,7 @@ const productSharedParentStyleConsumers = [
   "components/conversation/conversationInlineMarkdown.tsx",
   "routes/AgentBulkOperationsPanel.tsx",
   "routes/AgentListStatePanel.tsx",
-  "routes/AgentSessionTabStrip.tsx",
-  "routes/ConversationIndexSection.tsx",
-  "routes/ConversationIndexTree.tsx",
-  "routes/DirectSessionIndexItem.tsx",
-  "routes/GroupSessionIndexItems.tsx",
   "routes/RuntimeScenesPane.tsx",
-  "routes/SessionContextMenu.tsx",
   "routes/chat/CliAgentRunTerminalPanel.tsx",
 ] as const;
 

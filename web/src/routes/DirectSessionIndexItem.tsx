@@ -9,7 +9,7 @@ import {
   type AgentDisplayInfo,
   type ModelLabelResolver,
 } from "./agentDisplay";
-import styles from "./ChatCodingRoute.styles";
+import styles from "./DirectSessionIndexItem.styles";
 
 export function sessionListTitle(
   session: Pick<SessionSummary, "id" | "title" | "agentDisplayName" | "taskTitle" | "resultCard" | "sessionKind">,
@@ -193,8 +193,9 @@ export function buildDirectSessionIndexViewModel({
   };
 }
 
-function agentRoleClass(tone: string) {
-  return `agentRoleTag_${tone}`;
+function agentRoleToneClass(tone: string) {
+  const toneKey = `agentRoleTag_${tone}` as keyof typeof styles;
+  return styles[toneKey] || styles.agentRoleTag_general;
 }
 
 type DirectSessionIndexItemProps = {
@@ -367,7 +368,7 @@ export function DirectSessionIndexItem({
                 </span>
                 {sessionAgentMeta ? <span>{sessionAgentMeta}</span> : null}
                 {sessionFunctionVisible ? (
-                  <span className={`${styles.agentRoleTag} ${styles[agentRoleClass(sessionDisplay.tone)]}`} title={sessionDisplay.functionLabel}>
+                  <span className={`${styles.agentRoleTag} ${agentRoleToneClass(sessionDisplay.tone)}`} title={sessionDisplay.functionLabel}>
                     <Bot size={10} aria-hidden="true" />
                     {sessionDisplay.functionLabel}
                   </span>
@@ -415,7 +416,7 @@ export function DirectSessionIndexItem({
                 </span>
                 {sessionAgentMeta ? <span>{sessionAgentMeta}</span> : null}
                 {sessionFunctionVisible ? (
-                  <span className={`${styles.agentRoleTag} ${styles[agentRoleClass(sessionDisplay.tone)]}`} title={sessionDisplay.functionLabel}>
+                  <span className={`${styles.agentRoleTag} ${agentRoleToneClass(sessionDisplay.tone)}`} title={sessionDisplay.functionLabel}>
                     <Bot size={10} aria-hidden="true" />
                     {sessionDisplay.functionLabel}
                   </span>

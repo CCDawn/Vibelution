@@ -6,7 +6,7 @@ import { VButton, VIconButton, VNativeInput } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import { sessionAgentDisplayInfo } from "./agentDisplay";
 import { isChildSession } from "./DirectSessionIndexItem";
-import styles from "./ChatCodingRoute.styles";
+import styles from "./AgentSessionTabStrip.styles";
 
 export type CliAgentRunTab = {
   id: string;
