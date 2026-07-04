@@ -2,7 +2,7 @@ import { ShieldCheck, Wrench } from "lucide-react";
 
 import { AgentToolGovernanceRequest } from "../api/types";
 import { VButton } from "../components/vui";
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentToolGovernancePanel.styles";
 
 export type AgentToolGovernancePanelCopy = {
   toolGovernanceTitle: string;
