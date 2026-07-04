@@ -22,6 +22,8 @@ import knowledgeSourceGovernancePanelSource from "./MemoryKnowledgeSourceGoverna
 import knowledgeStewardPanelSource from "./MemoryKnowledgeStewardPanel.tsx?raw";
 import knowledgeUsageContractPanelSource from "./MemoryKnowledgeUsageContractPanel.tsx?raw";
 import knowledgeUsageContractPanelStyles from "./MemoryKnowledgeUsageContractPanel.styles";
+import managementActionPreviewPanelSource from "./MemoryManagementEditorActionPreviewPanel.tsx?raw";
+import managementActionPreviewPanelStyles from "./MemoryManagementEditorActionPreviewPanel.styles";
 import managementEditorSource from "./MemoryManagementEditor.tsx?raw";
 import managePanelSource from "./MemoryManagePanel.tsx?raw";
 import matrixPanelSource from "./MemoryMatrixPanel.tsx?raw";
@@ -876,21 +878,29 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).not.toContain("const renderManagementEditor = () =>");
     expect(managementEditorSource).toContain("export function MemoryManagementEditor");
     expect(managementEditorSource).toContain("export type MemoryManagementEditorDraft");
-    expect(managementEditorSource).toContain("styles.editPreviewPanel");
-    expect(managementEditorSource).toContain("styles.editPreviewGrid");
+    expect(managementEditorSource).toContain("MemoryManagementEditorActionPreviewPanel");
+    expect(managementEditorSource).toContain('from "./MemoryManagementEditorActionPreviewPanel"');
     expect(managementEditorSource).toContain("onDraftChange");
     expect(managementEditorSource).toContain("onSave");
     expect(managementEditorSource).not.toContain("useQuery");
     expect(managementEditorSource).not.toContain("useMutation");
     expect(managementEditorSource).not.toContain("fetchJson");
+    expect(managementActionPreviewPanelSource).toContain("export function MemoryManagementEditorActionPreviewPanel");
+    expect(managementActionPreviewPanelSource).toContain("styles.managementActions");
+    expect(managementActionPreviewPanelSource).toContain("styles.editPreviewPanel");
+    expect(managementActionPreviewPanelSource).toContain("styles.editPreviewGrid");
+    expect(managementActionPreviewPanelSource).toContain("mutationFeedback.tone");
+    expect(managementActionPreviewPanelSource).not.toContain("useQuery");
+    expect(managementActionPreviewPanelSource).not.toContain("useMutation");
+    expect(managementActionPreviewPanelSource).not.toContain("fetchJson");
     expect(routeSource.indexOf("selectedConfig={createSelectedMemoryConfig()}")).toBeGreaterThan(
       routeSource.indexOf("managementEditor={createManagementEditor()}"),
     );
     expect(managePanelSource).toContain("copy.selectedCount");
     expect(managePanelSource).toContain("copy.bulkDisable");
     expect(managePanelSource).toContain("copy.bulkRestore");
-    expect(managementEditorSource).toContain("styles.editPreviewPanel");
-    expect(managementEditorSource).toContain("styles.editPreviewGrid");
+    expect(managementActionPreviewPanelStyles.editPreviewPanel).toBeTypeOf("string");
+    expect(managementActionPreviewPanelStyles.editPreviewGrid).toBeTypeOf("string");
     expect(styles.itemButtonDense).toContain("min-h-[62px]");
     expect(styles.itemContentButtonDense).toContain("grid-rows-[16px_14px_18px]");
     expect(styles.manageItemBadges).toContain("[&>span]:truncate");
