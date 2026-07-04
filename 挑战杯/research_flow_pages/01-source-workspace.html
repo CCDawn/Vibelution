@@ -30,8 +30,8 @@
         <section class="plan-hero">
           <div class="kicker">Research Flow Node 01</div>
           <h1>资料进入工作区</h1>
-          <p class="subtitle">建立稳定证据源，并把本地 PDF 转成可引用的页码锚点。</p>
-          <div class="tag-row"><span class="tag active">第一阶段四步闭环入库搭建中</span><span class="tag">资料寻找 Agent</span><span class="tag">独立计划页</span></div>
+          <p class="subtitle">建立稳定证据源，并把本地 PDF 转成可引用的页码锚点和证据账本。</p>
+          <div class="tag-row"><span class="tag active">Evidence Ledger 与页码锚点已接入</span><span class="tag">资料寻找 Agent</span><span class="tag">独立计划页</span></div>
           <div class="diagram">
             <div class="flow-cell"><strong>输入</strong><span>用户提供的论文/PDF / 赛题 PDF</span></div>
             <div class="flow-cell"><strong>动作</strong><span>登记文件路径、资料类型、页码范围和来源可信度。</span></div>
@@ -53,19 +53,23 @@
 <li>挑战杯工作区路径</li></ul></article>
             <article class="plan-card"><h2>处理动作</h2><ul><li>登记文件路径、资料类型、页码范围和来源可信度。</li>
 <li>对本地 PDF source_manifest 运行 source-extraction，计算 sha256 并生成 pageAnchors 与 excerpt。</li>
+<li>把 candidateExtractions / recordExtractions 中的 claims、keyFindings、citations、sourceRefs 和 evidenceRefs 物化为 metadata.contentExtraction.evidenceLedger。</li>
+<li>用 evidence_ready / missing_evidence_anchor 标记每条结构化提炼是否具备 citation/page/source/evidence 锚点。</li>
 <li>区分允许分析、暂不分析、需要用户确认的资料。</li>
 <li>执行 source collection 搜索时写入真实 active source_collection_run work-run 快照；每条 query 完成后立即写入 CollectionOutput，并在后台结束时同步 ResearchStageRound 终态。</li>
 <li>保留原始文件，不在资料入口阶段改写内容。</li></ul></article>
             <article class="plan-card"><h2>输出物</h2><ul><li>资料清单</li>
 <li>sourceFiles 引用</li>
 <li>sourceExtraction.pageAnchors</li>
+<li>contentExtraction.evidenceLedger</li>
 <li>source_collection_run 运行快照</li>
 <li>query 级 CollectionOutput</li>
 <li>Paper 原始来源节点</li></ul></article>
             <article class="plan-card"><h2>风险</h2><ul><li>资料来源不明</li>
 <li>PDF 抽取失败</li>
+<li>结构化提炼缺少证据锚点</li>
 <li>联网搜索结果混入第一版</li></ul></article>
-            <article class="plan-card "><h2>未决事项</h2><ul><li>章节识别仍待补；当前先按 pageAnchors 生成 paper_note 分块计划。</li></ul></article>
+            <article class="plan-card "><h2>未决事项</h2><ul><li>章节识别和非 PDF 全文解析仍待补；Evidence Ledger 先作为 paper_note 与资料关系整理的候选证据输入。</li></ul></article>
           </div>
         </section>
 
@@ -75,7 +79,7 @@
             <p class="hint">区分候选工作区、知识治理 Agent、正式 Team Knowledge 和正式知识图谱。</p>
           </div>
           <div class="status-grid">
-            <div class="status-item"><b>候选状态</b><span>第一阶段四步闭环入库搭建中</span></div>
+            <div class="status-item"><b>候选状态</b><span>Evidence Ledger 与页码锚点已接入</span></div>
             <div class="status-item"><b>记忆平台</b><span>不进入正式记忆库；只作为后续 paper_note 的 sourceFiles。</span></div>
             <div class="status-item"><b>图谱同步</b><span>可作为资料关系整理的 Paper source 节点，不进入正式知识图谱。</span></div>
           </div>
@@ -92,7 +96,7 @@
         <div class="status-item"><b>功能岗位</b><span>资料寻找 Agent</span></div>
         <div class="status-item"><b>Agent 状态</b><span>四阶段知识搜集主线已收敛：资料寻找、资料提炼、资料关系整理、资料入库各绑定一个功能 Agent；阶段卡主按钮创建 Agent 私聊任务，结构化 writeback 回团队阶段，结果在同一轮候选资料仓库中去重叠加。</span></div>
         <div class="status-item"><b>进入条件</b><span>用户提供 PDF、论文、赛题或补充资料；文件可在挑战杯工作区定位。</span></div>
-        <div class="status-item"><b>退出条件</b><span>每个知识搜集轮次有 stageRoundId、roundNumber、teamMemoryRecord、coordinationContract.startResult(manual_only 或显式启动结果)、显式协调后的可选 coordinationRoomId/coordinationRoundId、sourceRunIds、dataSearchPlanRef、planned queries、assignedQueries、resultWritebackContract 和 sourceCollectionStageSessionTasks；每个阶段会话任务有 taskId、stageId、agentId、agentRole、sessionId、writebackContract、status、turn、result、evidenceRefs、nextActions 和作用域化 idempotencyKey，并持久化在 source_collection_runs/&lt;runId&gt;/stage_session_tasks.json；默认每次点击新建任务，只在显式相同 idempotencyKey 的同一次请求重试中复用；每个资料项先有 DataRecord/sourceRef/rawLocation/title/qualitySignals/collectionTrace，再有 source_manifest 的 id、path、type、allowedForAnalysis、sha256、pageScope、sourceExtraction.pageAnchors 和 sourceQualityAssessment。</span></div>
+        <div class="status-item"><b>退出条件</b><span>每个知识搜集轮次有 stageRoundId、roundNumber、teamMemoryRecord、coordinationContract.startResult(manual_only 或显式启动结果)、显式协调后的可选 coordinationRoomId/coordinationRoundId、sourceRunIds、dataSearchPlanRef、planned queries、assignedQueries、resultWritebackContract 和 sourceCollectionStageSessionTasks；每个阶段会话任务有 taskId、stageId、agentId、agentRole、sessionId、writebackContract、status、turn、result、evidenceRefs、nextActions 和作用域化 idempotencyKey，并持久化在 source_collection_runs/&lt;runId&gt;/stage_session_tasks.json；默认每次点击新建任务，只在显式相同 idempotencyKey 的同一次请求重试中复用；每个资料项先有 DataRecord/sourceRef/rawLocation/title/qualitySignals/collectionTrace，再有 source_manifest 的 id、path、type、allowedForAnalysis、sha256、pageScope、sourceExtraction.pageAnchors、sourceQualityAssessment 和 contentExtraction.evidenceLedger。</span></div>
         <div class="status-item"><b>审核门禁</b><span>确认资料允许分析、来源可信度和是否纳入本轮。</span></div>
       </div>
       <div class="plan-grid">
@@ -113,6 +117,7 @@
 <li>CollectionAssignment 搜索资料任务</li>
 <li>DataRecord 自动导入 source_manifest</li>
 <li>sourceQualityAssessment 审查</li>
+<li>contentExtraction.evidenceLedger</li>
 <li>资料入库 Agent 治理门禁</li></ul></article>
         <article class="plan-card"><h2>工具/平台能力</h2><ul><li>/api/teams/{teamId}/workflow-orchestration/stage-rounds/status</li>
 <li>/api/teams/{teamId}/workflow-orchestration/stage-rounds/start</li>
@@ -131,7 +136,7 @@
 <li>/api/teams/{teamId}/workflow-orchestration/official-model-evidence/status</li>
 <li>research_knowledge_query_tool</li>
 <li>/api/teams/{teamId}/workflow-orchestration/candidates/{candidateId}/source-extraction</li></ul></article>
-        <article class="plan-card"><h2>功能缺口</h2><p class="hint">科研总览控制台、资料搜集阶段轮次、资料搜集批次启动、active 轮次复用反馈、DataSearchPlan/query seed 契约、KV/prompt cache 启动门禁、缓存分区对话轨迹、通用资料搜集 assignment/output、Teams 高价值摘要层、metadata-only 搜索执行器、DataRecord 到 source_manifest 导入桥和 source-quality 筛选台已接入；全文网页/PDF 下载、长 PDF 自动分批、章节识别和非 PDF 资料解析仍待补。</p></article>
+        <article class="plan-card"><h2>功能缺口</h2><p class="hint">科研总览控制台、资料搜集阶段轮次、资料搜集批次启动、active 轮次复用反馈、DataSearchPlan/query seed 契约、KV/prompt cache 启动门禁、缓存分区对话轨迹、通用资料搜集 assignment/output、Teams 高价值摘要层、metadata-only 搜索执行器、DataRecord 到 source_manifest 导入桥、source-quality 筛选台和 Evidence Ledger 写回已接入；前端 Evidence Ledger 可视化、全文网页/PDF 下载、长 PDF 自动分批、章节识别和非 PDF 资料解析仍待补。</p></article>
         <article class="plan-card"><h2>失败回退</h2><p class="hint">资料不足、路径缺失、来源不明、权限不清、抽取失败或解析器不可用时，assignment 标记 returned/partial，挑战杯候选停在 source_needs_confirmation；显式启动群聊时若群聊缺失、忙碌或没有可发言成员，只把失败原因写入 coordinationContract，不影响资料搜集主流程。</p></article>
       </div>
     </section>
