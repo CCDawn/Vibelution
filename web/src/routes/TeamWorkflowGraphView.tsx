@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 
 import type { TeamWorkflowCandidateGraphNode, TeamWorkflowCandidateGraphPayload } from "../api/types";
-import styles from "./TeamsRoute.styles";
+import styles from "./TeamWorkflowGraphView.styles";
 
 const WORKFLOW_GRAPH_WIDTH = 1120;
 const WORKFLOW_GRAPH_MIN_HEIGHT = 320;

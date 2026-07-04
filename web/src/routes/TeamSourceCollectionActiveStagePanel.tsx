@@ -1,6 +1,6 @@
 import { type ReactNode } from "react";
 
-import styles from "./TeamsRoute.styles";
+import styles from "./TeamSourceCollectionActiveStagePanel.styles";
 
 type TeamSourceCollectionActiveStagePanelProps = {
   lang: "zh" | "en";

@@ -2,7 +2,7 @@ import { Search } from "lucide-react";
 import { type ReactNode } from "react";
 
 import { VNativeButton, VNativeInput, VNativeTextarea } from "../components/vui";
-import styles from "./TeamsRoute.styles";
+import styles from "./TeamSourceCollectionRunSettingsPanel.styles";
 
 export type TeamSourceCollectionRunSettingsDraft = {
   title: string;

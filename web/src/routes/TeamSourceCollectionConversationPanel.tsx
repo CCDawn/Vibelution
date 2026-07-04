@@ -4,7 +4,7 @@ import {
   TeamSourceResultStats,
   type TeamSourceResultStat,
 } from "../components/vui/product/team-management";
-import styles from "./TeamsRoute.styles";
+import styles from "./TeamSourceCollectionConversationPanel.styles";
 
 type TeamSourceCollectionConversationPanelProps = {
   lang: "zh" | "en";

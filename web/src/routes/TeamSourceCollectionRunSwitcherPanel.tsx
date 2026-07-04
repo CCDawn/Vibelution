@@ -1,7 +1,7 @@
 import { Search } from "lucide-react";
 
 import { VNativeButton, VNativeSelect } from "../components/vui";
-import styles from "./TeamsRoute.styles";
+import styles from "./TeamSourceCollectionRunSwitcherPanel.styles";
 
 type TeamSourceCollectionRunSwitcherLang = "zh" | "en";
 

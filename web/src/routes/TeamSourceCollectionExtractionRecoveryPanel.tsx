@@ -1,7 +1,7 @@
 import { AlertTriangle } from "lucide-react";
 import { type ReactNode } from "react";
 
-import styles from "./TeamsRoute.styles";
+import styles from "./TeamSourceCollectionExtractionRecoveryPanel.styles";
 
 type TeamSourceCollectionExtractionRecoveryPanelProps = {
   lang: "zh" | "en";
