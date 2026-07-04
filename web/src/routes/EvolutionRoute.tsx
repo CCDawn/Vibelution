@@ -63,7 +63,7 @@ import {
   selectSupervisedRunStreamTarget,
   shouldIgnoreActiveRunSnapshot,
 } from "./evolutionLiveRun";
-import { buildSupervisedRunRecordDisplay, supervisedDecisionLabel } from "./supervisedRunRecordLabel";
+import { supervisedDecisionLabel } from "./supervisedRunRecordLabel";
 import { buildSupervisedRunControlSummary } from "./supervisedRunSummary";
 import { buildSupervisedCaseTraceItems, type SupervisedCaseTraceItem, type SupervisedCaseTraceTone } from "./supervisedCaseTrace";
 import {
@@ -73,6 +73,7 @@ import {
   type EvolutionActiveRunMonitorMetric,
   type EvolutionActiveRunMonitorRunView,
 } from "./EvolutionActiveRunMonitorPanel";
+import { EvolutionRunRecordsPanel } from "./EvolutionRunRecordsPanel";
 import { createEvolutionWorkspaceCache } from "./evolutionWorkspaceCache";
 import { modelDisplayLabel } from "./agentDisplay";
 import {
@@ -3618,454 +3619,61 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
             </div>
           </section>
 
-          <div className={styles.runsWorkspace} style={runsWorkspaceStyle}>
-            <section
-              className={
-                runsQueueCollapsed
-                  ? `${styles.surface} ${styles.runQueuePanel} ${styles.paneCollapsed}`
-                  : `${styles.surface} ${styles.runQueuePanel}`
-              }
-              aria-hidden={runsQueueCollapsed}
-            >
-              <div className={styles.panelHeader}>
-                <div>
-                  <p className={styles.eyebrow}>{t("runQueue")}</p>
-                  <h2 className={styles.sectionTitle}>{t("runs")}</h2>
-                </div>
-                <span className={styles.secondaryPill}>{filteredRuns.length}</span>
-              </div>
-              {hasFilteredRuns ? (
-                <div className={styles.bulkToolbar}>
-                  <div className={styles.bulkToolbarText}>
-                    <strong>{t("selectedCount")}</strong>
-                    <span>{selectedRunIds.length}</span>
-                  </div>
-                  <div className={styles.actionRow}>
-                    <VNativeButton
-                      type="button"
-                      className={styles.inlineAction}
-                      disabled={visibleDeletableRunIds.length === 0 || allVisibleDeletableRunsSelected}
-                      onClick={selectVisibleRunRecords}
-                    >
-                      <CheckCircle2 size={15} />
-                      {t("selectVisibleRuns")}
-                    </VNativeButton>
-                    <VNativeButton
-                      type="button"
-                      className={styles.inlineAction}
-                      disabled={selectedRunIds.length === 0}
-                      onClick={() => setSelectedRunIds([])}
-                    >
-                      {t("clearSelection")}
-                    </VNativeButton>
-                    <VNativeButton
-                      type="button"
-                      className={styles.inlineAction}
-                      disabled={selectedRunIds.length === 0 || bulkDeleteRunRecordsMutation.isPending}
-                      onClick={triggerBulkRunRecordDelete}
-                    >
-                      {bulkDeleteRunRecordsMutation.isPending ? <LoaderCircle size={15} /> : <Trash2 size={15} />}
-                      {t("deleteSelectedRuns")}
-                    </VNativeButton>
-                  </div>
-                  <p className={styles.bulkToolbarHint}>{t("runBatchDeleteHint")}</p>
-                </div>
-              ) : (
-                <p className={styles.noticeText}>{runHeaderMessage}</p>
-              )}
-              {runRecordsFeedback ? <p className={styles.feedbackText}>{runRecordsFeedback}</p> : null}
-              {deleteRunRecordMutation.error ? <p className={styles.errorText}>{deleteRunRecordMutation.error.message}</p> : null}
-              {bulkDeleteRunRecordsMutation.error ? <p className={styles.errorText}>{bulkDeleteRunRecordsMutation.error.message}</p> : null}
-              {!hasRuns ? (
-                <div className={styles.structuredEmptyState}>
-                  <h3>{t("noSupervisedRunsYet")}</h3>
-                  <p>{t("noRunsRecordedHint")}</p>
-                  <div className={styles.actionRow}>
-                    <VNativeButton
-                      type="button"
-                      className={styles.inlineAction}
-                      onClick={() => goToSupervisedView("live")}
-                    >
-                      <ArrowUpRight size={15} />
-                      {t("returnToOverview")}
-                    </VNativeButton>
-                  </div>
-                </div>
-              ) : filteredRunsEmpty ? (
-                <div className={styles.structuredEmptyState}>
-                  <h3>{t("noRunMatches")}</h3>
-                  <p>{t("runFilterEmptyHint")}</p>
-                  <div className={styles.actionRow}>
-                    <VNativeButton
-                      type="button"
-                      className={styles.inlineAction}
-                      onClick={() => setRunFilter("all")}
-                    >
-                      {t("allRuns")}
-                    </VNativeButton>
-                  </div>
-                </div>
-              ) : (
-                <div className={styles.runListScrollable}>
-                  {filteredRuns.map((run) => {
-                    const runDisplay = buildSupervisedRunRecordDisplay(run, lang, {
-                      statusLabel,
-                      decisionLabel: displayDecisionLabel,
-                    });
-                    return (
-                    <article
-                      key={run.id}
-                      className={
-                        selectedRun?.id === run.id
-                          ? `${styles.runItem} ${styles.runItemActive} ${styles.runRecordCard}`
-                          : `${styles.runItem} ${styles.runRecordCard}`
-                      }
-                    >
-                      <div className={styles.selectionBar}>
-                        <label className={styles.batchToggle}>
-                          <VNativeInput
-                            type="checkbox"
-                            checked={selectedRunIdSet.has(run.id)}
-                            disabled={!run.canDelete}
-                            onChange={() => toggleRunSelection(run)}
-                          />
-                          <span>{t("selectRunForDelete")}</span>
-                        </label>
-                        <span className={run.canDelete ? styles.secondaryPill : styles.statusPill}>
-                          {run.canDelete ? t("deletionAllowed") : t("deletionBlocked")}
-                        </span>
-                      </div>
-                      <VNativeButton
-                        type="button"
-                        className={styles.runCardButton}
-                        onClick={() => setSelectedRunId(run.id)}
-                      >
-                        <div className={`${styles.listRowTop} ${styles.runRecordTitleRow}`}>
-                          <div className={styles.runRecordIdentity}>
-                            <strong>{runDisplay.title}</strong>
-                            <span>{runDisplay.idLabel}</span>
-                          </div>
-                          <span className={styles.secondaryPill}>{displayDecisionLabel(run.decision)}</span>
-                        </div>
-                        <div className={styles.metaRow}>
-                          <span>{displaySupervisedRunStatus(run, lang, statusLabel)}</span>
-                          <span>{supervisedProposalStatusLabel(run.outcomeSemantics.proposalStatus, run.outcomeSemantics.proposalStatusLabel, lang)}</span>
-                        </div>
-                        <div className={styles.scoreRow}>
-                          <span>{runDisplay.subtitle}</span>
-                          <strong>{run.candidateScore}</strong>
-                        </div>
-                        <p>{displaySupervisedRunSummary(run, lang, decisionLabel)}</p>
-                        <div className={styles.cardFooter}>
-                          <span>{riskLabel(run.riskLevel)}</span>
-                          <span title={run.nextAction || ""}>
-                            {displaySupervisedTechnicalText(run.nextAction, run.decision, lang, decisionLabel) || "--"}
-                          </span>
-                        </div>
-                      </VNativeButton>
-                      {!run.canDelete && run.deleteBlockReason ? (
-                        <p className={styles.noticeText}>{run.deleteBlockReason}</p>
-                      ) : null}
-                    </article>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
-
-            <PaneCollapseHandle
-              side="left"
-              collapsed={runsQueueCollapsed}
-              separatorLabel={resizeRunsQueueLabel}
-              collapseLabel={lang === "zh" ? "收起运行列表" : "Collapse run list"}
-              expandLabel={lang === "zh" ? "展开运行列表" : "Expand run list"}
-              className={styles.resizeHandle}
-              onToggle={() => setRunsQueueCollapsed((current) => !current)}
-              onPointerDown={handleRunsResizeStart}
-              onKeyDown={handleRunsResizeKeyDown}
-            />
-
-            <section className={`${styles.surface} ${styles.runDetailPanel}`}>
-              {selectedRun ? (
-                <>
-                  <div className={styles.detailHeader}>
-                    <div>
-                      <p className={styles.eyebrow}>{t("runDetail")}</p>
-                      <h2 className={styles.detailTitle}>
-                        {buildSupervisedRunRecordDisplay(selectedRun, lang, { statusLabel, decisionLabel: displayDecisionLabel }).title}
-                      </h2>
-                      <p className={styles.detailSubtleId}>{selectedRun.id}</p>
-                    </div>
-                    <div className={styles.detailHeaderActions}>
-                      <span className={styles.secondaryPill}>{displayDecisionLabel(selectedRun.decision)}</span>
-                      <span className={styles.secondaryPill}>
-                        {supervisedProposalStatusLabel(
-                          selectedRun.outcomeSemantics.proposalStatus,
-                          selectedRun.outcomeSemantics.proposalStatusLabel,
-                          lang,
-                        )}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className={styles.runDetailOverview}>
-                    <div className={styles.runScorePanel}>
-                      <span>{t("candidateScore")}</span>
-                      <p className={styles.detailLead}>{selectedRun.candidateScore}</p>
-                      <p>{displaySupervisedRunSummary(selectedRun, lang, decisionLabel)}</p>
-                      <div className={styles.runScoreDiagnosis}>
-                        <span>{t("diagnosis")}</span>
-                        <p>{selectedRun.diagnosis}</p>
-                      </div>
-                      <div className={styles.runScoreFacts}>
-                        <span>
-                          {t("baselineScore")}
-                          <strong>{selectedRun.baselineScore}</strong>
-                        </span>
-                        <span>
-                          {t("scoreDelta")}
-                          <strong>{selectedRun.deltaScore}</strong>
-                        </span>
-                        <span>
-                          {t("linkedItems")}
-                          <strong>{relatedProposalCount}</strong>
-                        </span>
-                      </div>
-                    </div>
-                    <div className={styles.runSignalStack}>
-                      <h3>{t("resultLayersTitle")}</h3>
-                      <div className={styles.runSignalGrid}>
-                        <article className={styles.compactFact}>
-                          <span>{t("runLayer")}</span>
-                          <strong>{displaySupervisedRunStatus(selectedRun, lang, statusLabel)}</strong>
-                        </article>
-                        <article className={styles.compactFact}>
-                          <span>{t("decision")}</span>
-                          <strong>{displayDecisionLabel(selectedRun.outcomeSemantics.decision || selectedRun.decision)}</strong>
-                        </article>
-                        <article className={styles.compactFact}>
-                          <span>{t("proposalLayer")}</span>
-                          <strong>
-                            {supervisedProposalStatusLabel(
-                              selectedRun.outcomeSemantics.proposalStatus,
-                              selectedRun.outcomeSemantics.proposalStatusLabel,
-                              lang,
-                            )}
-                          </strong>
-                        </article>
-                        <article className={styles.compactFact}>
-                          <span>{t("runtimeLayer")}</span>
-                          <strong>{selectedRun.outcomeSemantics.runtimeEffectLabel}</strong>
-                        </article>
-                        <article className={styles.compactFact}>
-                          <span>{t("nextRecommendedAction")}</span>
-                          <strong title={selectedRun.runSemantics.nextAction || ""}>
-                            {displaySupervisedTechnicalText(selectedRun.runSemantics.nextAction, selectedRun.decision, lang, decisionLabel) || "--"}
-                          </strong>
-                        </article>
-                        <article className={styles.compactFact}>
-                          <span>{t("riskLevel")}</span>
-                          <strong>{riskLabel(selectedRun.riskLevel)}</strong>
-                        </article>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className={`${styles.detailSection} ${styles.detailSectionCompact}`}>
-                    <div className={styles.runRuntimeNote}>
-                      <p title={selectedRun.outcomeSemantics.runtimeExplanation}>
-                        {displaySupervisedTechnicalText(selectedRun.outcomeSemantics.runtimeExplanation, selectedRun.decision, lang, decisionLabel)}
-                      </p>
-                      {selectedRun.riskReasons.length > 0 ? (
-                        <p title={selectedRun.riskReasons.join(" / ")}>
-                          {displaySupervisedTechnicalText(selectedRun.riskReasons.join(" / "), selectedRun.decision, lang, decisionLabel)}
-                        </p>
-                      ) : null}
-                    </div>
-                    {selectedRun.availableActions.length > 0 ? (
-                      <div className={styles.actionRow}>
-                        {selectedRun.availableActions.map((action) => (
-                          <VNativeButton
-                            key={action}
-                            type="button"
-                            className={styles.inlineAction}
-                            disabled={runLocked || actionMutation.isPending}
-                            onClick={() => triggerRunAction(selectedRun.id, action)}
-                          >
-                            <Sparkles size={15} />
-                            {proposalActionLabel(action)}
-                          </VNativeButton>
-                        ))}
-                      </div>
-                    ) : null}
-                    {actionFeedback ? <p className={styles.feedbackText}>{actionFeedback}</p> : null}
-                    {actionMutation.error ? <p className={styles.errorText}>{actionMutation.error.message}</p> : null}
-                  </div>
-
-                  <div className={styles.detailSection}>
-                    <h3>{t("caseDiagnostics")}</h3>
-                    {selectedRun.caseDiagnostics.length > 0 ? (
-                      <div className={styles.relatedList}>
-                        {selectedRun.caseDiagnostics.slice(0, 3).map((item) => (
-                          <article key={item.caseId || item.summary} className={styles.relatedRow}>
-                            <div className={styles.listRowTop}>
-                              <strong>{item.caseId || "--"}</strong>
-                              <span>{item.caseType && item.caseType !== "static" ? item.caseType : item.decisionSignal || "--"}</span>
-                            </div>
-                            <p>{item.summary}</p>
-                            {compactCaseObject(item.expectedFinalState) ? (
-                              <p>expected final: {compactCaseObject(item.expectedFinalState)}</p>
-                            ) : null}
-                            {compactCaseObject(item.expectedInfeasibleOutcome) ? (
-                              <p>expected infeasible: {compactCaseObject(item.expectedInfeasibleOutcome)}</p>
-                            ) : null}
-                          </article>
-                        ))}
-                      </div>
-                    ) : (
-                      <p>{t("noCaseDiagnostics")}</p>
-                    )}
-                  </div>
-
-                  <div className={styles.detailSection}>
-                    <h3>{t("outputsWorthPromoting")}</h3>
-                    {relatedLibraryItems.length === 0 && relatedPendingItems.length === 0 ? (
-                      <p>{t("noPromotionCandidates")}</p>
-                    ) : (
-                      <div className={styles.relatedList}>
-                        {relatedLibraryItems.map((item) => (
-                          <article key={item.id} className={styles.relatedRow}>
-                            <div className={styles.listRowTop}>
-                              <strong>{item.title}</strong>
-                              <span>{statusLabel(item.proposalStatus)}</span>
-                            </div>
-                            <p>{item.changeSummary || item.headline}</p>
-                            <div className={styles.actionRow}>
-                              <VNativeButton
-                                type="button"
-                                className={styles.inlineAction}
-                                onClick={() => openProposalFromRun(item, "items")}
-                              >
-                                <ArrowUpRight size={15} />
-                                {t("openProposal")}
-                              </VNativeButton>
-                              <VNativeButton
-                                type="button"
-                                className={styles.inlineAction}
-                                disabled={!item.canDelete || deleteProposalMutation.isPending}
-                                onClick={() => triggerProposalDelete(item.sourceRun)}
-                              >
-                                <Trash2 size={15} />
-                                {t("deleteProposal")}
-                              </VNativeButton>
-                            </div>
-                            {!item.canDelete && item.deleteBlockReason ? (
-                              <p>{item.deleteBlockReason}</p>
-                            ) : null}
-                          </article>
-                        ))}
-                        {relatedPendingItems.map((item) => (
-                          <article key={item.id} className={styles.relatedRow}>
-                            <div className={styles.listRowTop}>
-                              <strong>{item.title}</strong>
-                              <span>{statusLabel(item.proposalStatus)}</span>
-                            </div>
-                            <p>{item.changeSummary || item.headline}</p>
-                            <div className={styles.actionRow}>
-                              <VNativeButton
-                                type="button"
-                                className={styles.inlineAction}
-                                onClick={() => openProposalFromRun(item, "pending")}
-                              >
-                                <ArrowUpRight size={15} />
-                                {t("openProposal")}
-                              </VNativeButton>
-                              <VNativeButton
-                                type="button"
-                                className={styles.inlineAction}
-                                disabled={!item.canDelete || deleteProposalMutation.isPending}
-                                onClick={() => triggerProposalDelete(item.sourceRun)}
-                              >
-                                <Trash2 size={15} />
-                                {t("deleteProposal")}
-                              </VNativeButton>
-                            </div>
-                            {!item.canDelete && item.deleteBlockReason ? (
-                              <p>{item.deleteBlockReason}</p>
-                            ) : null}
-                          </article>
-                        ))}
-                      </div>
-                    )}
-                    {libraryFeedback ? <p className={styles.feedbackText}>{libraryFeedback}</p> : null}
-                    {deleteProposalMutation.error ? <p className={styles.errorText}>{deleteProposalMutation.error.message}</p> : null}
-                  </div>
-
-                  <div className={`${styles.detailSection} ${styles.dangerDetailSection}`}>
-                    <h3>{t("deleteAndCleanup")}</h3>
-                    <div className={styles.relatedList}>
-                      <article className={styles.relatedRow}>
-                        <strong>{selectedRun.canDelete ? t("deletionAllowed") : t("deletionBlocked")}</strong>
-                        <span>
-                          {selectedRun.canDelete
-                            ? t("deleteRunRecord")
-                            : selectedRun.deleteBlockReason || "--"}
-                        </span>
-                      </article>
-                    </div>
-                    <p>{t("runDeleteImpact")}</p>
-                    <div className={styles.actionRow}>
-                      <VNativeButton
-                        type="button"
-                        className={styles.inlineAction}
-                        disabled={!selectedRun.canDelete || deleteRunRecordMutation.isPending}
-                        onClick={() => triggerRunRecordDelete(selectedRun.id)}
-                      >
-                        {deleteRunRecordMutation.isPending ? <LoaderCircle size={15} /> : <Trash2 size={15} />}
-                        {t("deleteRunRecord")}
-                      </VNativeButton>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <div className={styles.structuredEmptyState}>
-                  <p className={styles.eyebrow}>{t("runDetail")}</p>
-                  <h3>{hasRuns ? t("noRunMatches") : t("noSupervisedRunsYet")}</h3>
-                  <p>{hasRuns ? t("runDetailFilterHint") : t("runDetailPlaceholder")}</p>
-                  <div className={styles.detailFactGrid}>
-                    <article className={styles.relatedRow}>
-                      <strong>{t("score")}</strong>
-                      <span>--</span>
-                    </article>
-                    <article className={styles.relatedRow}>
-                      <strong>{t("proposalStatus")}</strong>
-                      <span>--</span>
-                    </article>
-                  </div>
-                  <div className={styles.actionRow}>
-                    {!hasRuns ? (
-                      <VNativeButton
-                        type="button"
-                        className={styles.inlineAction}
-                        onClick={() => goToSupervisedView("live")}
-                      >
-                        <ArrowUpRight size={15} />
-                        {t("returnToOverview")}
-                      </VNativeButton>
-                    ) : (
-                      <VNativeButton
-                        type="button"
-                        className={styles.inlineAction}
-                        onClick={() => setRunFilter("all")}
-                      >
-                        {t("allRuns")}
-                      </VNativeButton>
-                    )}
-                  </div>
-                </div>
-              )}
-            </section>
-          </div>
+          <EvolutionRunRecordsPanel
+            className={styles.runsWorkspace}
+            style={runsWorkspaceStyle}
+            lang={lang}
+            labels={{ t, statusLabel, decisionLabel, riskLabel, proposalActionLabel }}
+            separator={(
+              <PaneCollapseHandle
+                side="left"
+                collapsed={runsQueueCollapsed}
+                separatorLabel={resizeRunsQueueLabel}
+                collapseLabel={lang === "zh" ? "收起运行列表" : "Collapse run list"}
+                expandLabel={lang === "zh" ? "展开运行列表" : "Expand run list"}
+                className={styles.resizeHandle}
+                onToggle={() => setRunsQueueCollapsed((current) => !current)}
+                onPointerDown={handleRunsResizeStart}
+                onKeyDown={handleRunsResizeKeyDown}
+              />
+            )}
+            queueCollapsed={runsQueueCollapsed}
+            filteredRuns={filteredRuns}
+            hasRuns={hasRuns}
+            hasFilteredRuns={hasFilteredRuns}
+            filteredRunsEmpty={filteredRunsEmpty}
+            runHeaderMessage={runHeaderMessage}
+            selectedRun={selectedRun}
+            selectedRunIds={selectedRunIds}
+            visibleDeletableRunCount={visibleDeletableRunIds.length}
+            allVisibleDeletableRunsSelected={allVisibleDeletableRunsSelected}
+            relatedLibraryItems={relatedLibraryItems}
+            relatedPendingItems={relatedPendingItems}
+            relatedProposalCount={relatedProposalCount}
+            runLocked={runLocked}
+            runRecordsFeedback={runRecordsFeedback}
+            deleteRunRecordError={deleteRunRecordMutation.error?.message ?? ""}
+            bulkDeleteRunRecordsError={bulkDeleteRunRecordsMutation.error?.message ?? ""}
+            bulkDeleteRunRecordsPending={bulkDeleteRunRecordsMutation.isPending}
+            deleteRunRecordPending={deleteRunRecordMutation.isPending}
+            actionFeedback={actionFeedback}
+            actionError={actionMutation.error?.message ?? ""}
+            actionPending={actionMutation.isPending}
+            libraryFeedback={libraryFeedback}
+            deleteProposalError={deleteProposalMutation.error?.message ?? ""}
+            deleteProposalPending={deleteProposalMutation.isPending}
+            onSelectVisibleRunRecords={selectVisibleRunRecords}
+            onClearRunSelection={() => setSelectedRunIds([])}
+            onBulkDeleteRunRecords={triggerBulkRunRecordDelete}
+            onReturnToOverview={() => goToSupervisedView("live")}
+            onShowAllRuns={() => setRunFilter("all")}
+            onSelectRun={setSelectedRunId}
+            onToggleRunSelection={toggleRunSelection}
+            onRunAction={triggerRunAction}
+            onOpenProposal={openProposalFromRun}
+            onDeleteProposal={triggerProposalDelete}
+            onDeleteRunRecord={triggerRunRecordDelete}
+          />
         </div>
       ) : null}
 
