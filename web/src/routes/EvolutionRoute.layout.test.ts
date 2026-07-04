@@ -6,6 +6,9 @@ import routeSource from "./EvolutionRoute.tsx?raw";
 import activeRunMonitorPanelSource from "./EvolutionActiveRunMonitorPanel.tsx?raw";
 import activeRunMonitorStyles from "./EvolutionActiveRunMonitorPanel.styles";
 import activeRunMonitorStylesSource from "./EvolutionActiveRunMonitorPanel.styles.ts?raw";
+import proposalActionBandsPanelSource from "./EvolutionProposalActionBandsPanel.tsx?raw";
+import proposalActionBandsStyles from "./EvolutionProposalActionBandsPanel.styles";
+import proposalActionBandsStylesSource from "./EvolutionProposalActionBandsPanel.styles.ts?raw";
 import runRecordsPanelSource from "./EvolutionRunRecordsPanel.tsx?raw";
 import runRecordsPanelStyles from "./EvolutionRunRecordsPanel.styles";
 import runRecordsPanelStylesSource from "./EvolutionRunRecordsPanel.styles.ts?raw";
@@ -204,6 +207,26 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(stylesSource).not.toContain("runQueuePanel");
     expect(stylesSource).not.toContain("runDetailOverview");
     expect(stylesSource).not.toContain("runRecordIdentity");
+  });
+
+  it("keeps proposal action bands in the extracted panel while route owns mutations", () => {
+    expect(routeSource).toContain('import { EvolutionProposalActionBandsPanel } from "./EvolutionProposalActionBandsPanel";');
+    expect(routeSource).toContain("<EvolutionProposalActionBandsPanel");
+    expect(routeSource).toContain("proposal={proposalDetailQuery.data}");
+    expect(routeSource).toContain("actionError={actionMutation.error?.message ?? \"\"}");
+    expect(routeSource).toContain("deleteProposalError={deleteProposalMutation.error?.message ?? \"\"}");
+    expect(routeSource).toContain("onRunAction={triggerRunAction}");
+    expect(routeSource).toContain("onDeleteProposal={triggerProposalDelete}");
+    expect(routeSource).not.toContain("proposalDetailQuery.data.availableActions.map((action)");
+    expect(proposalActionBandsPanelSource).toContain("export function EvolutionProposalActionBandsPanel");
+    expect(proposalActionBandsPanelSource).toContain("proposal.availableActions.map((action)");
+    expect(proposalActionBandsPanelSource).toContain("disabled={runLocked || actionPending}");
+    expect(proposalActionBandsPanelSource).toContain("disabled={!proposal.canDelete || deleteProposalPending}");
+    expect(proposalActionBandsPanelSource).not.toContain("useQuery");
+    expect(proposalActionBandsPanelSource).not.toContain("useMutation");
+    expect(proposalActionBandsPanelSource).not.toContain("queryClient");
+    expect(proposalActionBandsStyles.detailSection).toContain("border-top");
+    expect(proposalActionBandsStylesSource).toContain("relatedList");
   });
 
   it("keeps the latest finished supervised run out of the live monitor and into the closed-loop ledger", () => {
