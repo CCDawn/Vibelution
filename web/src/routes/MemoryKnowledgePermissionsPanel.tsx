@@ -1,5 +1,5 @@
 import type { KnowledgeIngestionAdapter, KnowledgePermissionAuditPayload } from "../api/types";
-import styles from "./MemoryRoute.styles";
+import styles from "./MemoryKnowledgePermissionsPanel.styles";
 
 type KnowledgePermissionEntry = KnowledgePermissionAuditPayload["knowledgeBases"][number]["permissions"][string] | string | null | undefined;
 
