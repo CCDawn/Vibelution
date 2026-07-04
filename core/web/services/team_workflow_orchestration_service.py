@@ -16745,6 +16745,91 @@ def _reconcile_source_collection_stage_session_task(team_id: str, run_id: str, t
     return reconciled
 
 
+def reconcile_source_collection_stage_session_task_after_turn(
+    team_id: str,
+    task_id: str,
+    *,
+    run_id: str = "",
+    session_id: str = "",
+    turn_id: str = "",
+    reason: str = "session_turn_completed",
+) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_task_id = _trim_text(task_id, max_length=160)
+    if not normalized_task_id:
+        return {"schemaVersion": SCHEMA_VERSION, "status": "skipped", "reason": "missing_task_id", "changed": False}
+    found_task, found_run_id = _find_source_collection_stage_session_task_by_id(normalized_team_id, normalized_task_id)
+    if found_task is None or not found_run_id:
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "teamId": normalized_team_id,
+            "taskId": normalized_task_id,
+            "status": "not_found",
+            "reason": "stage_session_task_not_found",
+            "changed": False,
+        }
+    normalized_run_id = _trim_text(run_id, max_length=128)
+    if normalized_run_id and normalized_run_id != found_run_id:
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "teamId": normalized_team_id,
+            "runId": found_run_id,
+            "requestedRunId": normalized_run_id,
+            "taskId": normalized_task_id,
+            "status": "skipped",
+            "reason": "run_id_mismatch",
+            "changed": False,
+        }
+    normalized_session_id = _trim_text(session_id, max_length=160)
+    task_turn = found_task.get("turn") if isinstance(found_task.get("turn"), dict) else {}
+    task_session_id = _trim_text(found_task.get("sessionId") or task_turn.get("sessionId"), max_length=160)
+    if normalized_session_id and task_session_id and normalized_session_id != task_session_id:
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "teamId": normalized_team_id,
+            "runId": found_run_id,
+            "taskId": normalized_task_id,
+            "status": "skipped",
+            "reason": "session_id_mismatch",
+            "changed": False,
+        }
+    normalized_turn_id = _trim_text(turn_id, max_length=200)
+    task_turn_id = _trim_text(task_turn.get("turnId"), max_length=200)
+    if normalized_turn_id and task_turn_id and normalized_turn_id != task_turn_id:
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "teamId": normalized_team_id,
+            "runId": found_run_id,
+            "taskId": normalized_task_id,
+            "status": "skipped",
+            "reason": "turn_id_mismatch",
+            "changed": False,
+        }
+    before_status = _trim_text(found_task.get("status"), max_length=80)
+    before_gate = found_task.get("completionGate") if isinstance(found_task.get("completionGate"), dict) else {}
+    reconciled = _reconcile_source_collection_stage_session_task(normalized_team_id, found_run_id, dict(found_task))
+    after_gate = reconciled.get("completionGate") if isinstance(reconciled.get("completionGate"), dict) else {}
+    task_tool_progress = reconciled.get("taskToolProgress") if isinstance(reconciled.get("taskToolProgress"), dict) else {}
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "runId": found_run_id,
+        "taskId": normalized_task_id,
+        "sessionId": task_session_id,
+        "turnId": task_turn_id,
+        "status": "reconciled",
+        "reason": _trim_text(reason, max_length=120) or "session_turn_completed",
+        "changed": reconciled != found_task,
+        "previousTaskStatus": before_status,
+        "taskStatus": _trim_text(reconciled.get("status"), max_length=80),
+        "previousCompletionGatePassed": bool(before_gate.get("passed")),
+        "completionGatePassed": bool(after_gate.get("passed")),
+        "taskChecklistComplete": bool(after_gate.get("taskChecklistComplete")),
+        "artifactComplete": bool(after_gate.get("artifactComplete")),
+        "taskToolProgress": task_tool_progress,
+    }
+
+
 def _repair_missing_source_collection_stage_round(team_id: str, run_id: str, tasks: list[dict[str, Any]]) -> bool:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     normalized_run_id = _normalize_required_id(run_id, "Data processing run id is required.")

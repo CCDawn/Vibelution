@@ -11590,6 +11590,100 @@ def _replacement_active_chat_turn_id(*, exclude_turn_id: str = "") -> str:
     return ""
 
 
+def _source_collection_stage_task_turn_metadata(messages: list[dict[str, Any]], turn_id: str = "") -> dict[str, str]:
+    normalized_turn_id = str(turn_id or "").strip()
+    for message in reversed(list(messages or [])):
+        if not isinstance(message, dict):
+            continue
+        if str(message.get("role") or "").strip().lower() != "user":
+            continue
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        if str(metadata.get("kind") or "").strip() != "source_collection_stage_session_task":
+            continue
+        message_turn_id = _message_turn_id(message)
+        if normalized_turn_id and message_turn_id and message_turn_id != normalized_turn_id:
+            continue
+        team_id = str(metadata.get("teamId") or "").strip()
+        task_id = str(metadata.get("sourceCollectionStageTaskId") or "").strip()
+        if not team_id or not task_id:
+            continue
+        return {
+            "teamId": team_id,
+            "runId": str(metadata.get("runId") or "").strip(),
+            "taskId": task_id,
+            "stageId": str(metadata.get("stageId") or "").strip(),
+            "agentId": str(metadata.get("agentId") or "").strip(),
+            "agentRole": str(metadata.get("agentRole") or "").strip(),
+            "turnId": message_turn_id,
+        }
+    return {}
+
+
+def _reconcile_source_collection_stage_task_after_turn(
+    metadata: dict[str, str],
+    *,
+    session_id: str,
+    turn_id: str,
+    final_status: str,
+) -> None:
+    if not isinstance(metadata, dict) or not metadata:
+        return
+    team_id = str(metadata.get("teamId") or "").strip()
+    task_id = str(metadata.get("taskId") or "").strip()
+    if not team_id or not task_id:
+        return
+    try:
+        from core.web.services import team_workflow_orchestration_service
+
+        result = team_workflow_orchestration_service.reconcile_source_collection_stage_session_task_after_turn(
+            team_id,
+            task_id,
+            run_id=str(metadata.get("runId") or "").strip(),
+            session_id=session_id,
+            turn_id=turn_id,
+            reason=f"session_turn_{final_status or 'completed'}",
+        )
+    except Exception as exc:  # pragma: no cover - defensive, session persistence must not fail here
+        _record_session_turn_lifecycle_event(
+            session_id,
+            "source_collection_stage_task_reconcile_failed",
+            turn_id=turn_id,
+            level="warning",
+            outcome="failed",
+            fields={
+                "teamId": team_id,
+                "taskId": task_id,
+                "runId": str(metadata.get("runId") or "").strip(),
+                "finalStatus": str(final_status or "").strip(),
+                "errorType": type(exc).__name__,
+                "error": trim_lines(str(exc), max_lines=2),
+            },
+        )
+        return
+    if not isinstance(result, dict) or not bool(result.get("changed")):
+        return
+    _record_session_turn_lifecycle_event(
+        session_id,
+        "source_collection_stage_task_reconciled",
+        turn_id=turn_id,
+        outcome=str(result.get("taskStatus") or "reconciled").strip() or "reconciled",
+        fields={
+            "teamId": team_id,
+            "runId": str(result.get("runId") or metadata.get("runId") or "").strip(),
+            "taskId": task_id,
+            "stageId": str(metadata.get("stageId") or "").strip(),
+            "agentId": str(metadata.get("agentId") or "").strip(),
+            "agentRole": str(metadata.get("agentRole") or "").strip(),
+            "finalStatus": str(final_status or "").strip(),
+            "previousTaskStatus": str(result.get("previousTaskStatus") or "").strip(),
+            "taskStatus": str(result.get("taskStatus") or "").strip(),
+            "completionGatePassed": bool(result.get("completionGatePassed")),
+            "taskChecklistComplete": bool(result.get("taskChecklistComplete")),
+            "artifactComplete": bool(result.get("artifactComplete")),
+        },
+    )
+
+
 def _set_session_running(
     session_id: str,
     is_running: bool,
@@ -13219,6 +13313,7 @@ def _persist_session_turn_result(
     lang = get_web_language()
     capture_messages: list[dict[str, Any]] | None = None
     agent_inbox_reply: dict[str, Any] | None = None
+    source_collection_stage_task_metadata: dict[str, str] = {}
     runtime_stop_requested = _is_session_stop_requested(session_id)
     with _CHAT_STATE_LOCK:
         payload = load_chat_state(PROJECT_ROOT)
@@ -13238,6 +13333,7 @@ def _persist_session_turn_result(
             )
             return
         result_status = str(result.get("status") or "").strip().lower() if isinstance(result, dict) else ""
+        source_collection_stage_task_metadata = _source_collection_stage_task_turn_metadata(messages, turn_id)
         result_stop_requested = bool(result.get("stop_requested")) if isinstance(result, dict) else False
         stop_requested = result_stop_requested and runtime_stop_requested
         if _is_provider_failed_result(result):
@@ -13740,6 +13836,12 @@ def _persist_session_turn_result(
             },
             source="persist_session_turn_result",
         )
+    _reconcile_source_collection_stage_task_after_turn(
+        source_collection_stage_task_metadata,
+        session_id=session_id,
+        turn_id=turn_id,
+        final_status=final_status,
+    )
     _record_session_cycle_message(
         session_id,
         assistant_entry,

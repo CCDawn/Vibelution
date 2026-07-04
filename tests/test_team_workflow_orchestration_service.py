@@ -4588,6 +4588,90 @@ def test_source_collection_context_reconciles_checklist_updates_after_writeback(
     assert stored_task["completionGate"]["passed"] is True
 
 
+def test_source_collection_stage_turn_completion_reconciles_post_writeback_checklist(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+    agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    direct_session = session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经预测编码资料提炼",
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": agent["agentId"]},
+            "querySeeds": ["predictive coding neural algorithm"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    candidate = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding turn closure candidate",
+            "sourceUrl": "https://doi.org/10.0000/turn-closure-candidate",
+            "sourceKind": "paper",
+            "summary": "Predictive coding evidence for turn closure.",
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/turn-closure-candidate"},
+            "createdByAgent": agent["agentId"],
+        },
+    )["candidate"]
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
+    )
+
+    first = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "已提炼候选，但 checklist 在 writeback 之后才补齐。",
+            "result": {
+                "candidateExtractions": [
+                    {
+                        "candidateId": candidate["candidateId"],
+                        "status": "extracted",
+                        "summary": "预测编码候选已提炼。",
+                    }
+                ],
+                "candidateDecisions": [{"candidateId": candidate["candidateId"], "decision": "keep"}],
+            },
+            "recordedByAgent": agent["agentId"],
+        },
+    )
+    assert first["task"]["status"] == "needs_review"
+    assert first["task"]["completionGate"]["artifactComplete"] is True
+    assert first["task"]["completionGate"]["taskChecklistComplete"] is False
+
+    _append_stage_task_tool_trace(tmp_path, first["task"])
+    session_service._persist_session_turn_result(
+        direct_session["id"],
+        {
+            "status": "needs_continue",
+            "summary": "本轮还没有形成最终回答，已保留当前执行进度；发送“继续”可衔接上一轮继续。",
+            "raw_output": "本轮还没有形成最终回答，已保留当前执行进度；发送“继续”可衔接上一轮继续。",
+            "tool_call_count": len(first["task"]["taskChecklist"]) + 1,
+            "tool_trace": [],
+        },
+        turn_id=task["turn"]["turnId"],
+    )
+
+    stored_task, _stored_run_id = team_workflow_orchestration_service._find_source_collection_stage_session_task_by_id(
+        team["teamId"],
+        task["taskId"],
+    )
+    assert stored_task["status"] == "completed"
+    assert stored_task["completionGate"]["passed"] is True
+    assert stored_task["taskToolProgress"]["completed"] == len(stored_task["taskChecklist"])
+
+
 def test_source_collection_stage_task_progress_counts_later_turn_tool_updates(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
