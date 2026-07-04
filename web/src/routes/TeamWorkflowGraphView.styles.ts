@@ -4,9 +4,9 @@ const styles = {
   workflowGraphEdge:
     "workflowGraphEdge min-w-0",
   workflowGraphFrame:
-    "workflowGraphFrame min-w-0 h-full min-h-[var(--workflow-graph-height,360px)] w-[var(--workflow-graph-width,720px)] max-w-full overflow-hidden",
+    "workflowGraphFrame min-w-0 h-[var(--workflow-graph-height,360px)] min-h-[var(--workflow-graph-height,360px)] w-[var(--workflow-graph-width,720px)] max-w-full overflow-hidden",
   workflowGraphNode:
-    "workflowGraphNode min-w-0 absolute left-[var(--workflow-graph-node-x,0px)] top-[var(--workflow-graph-node-y,0px)]",
+    "workflowGraphNode min-w-0 absolute left-[var(--workflow-graph-node-x,0px)] top-[var(--workflow-graph-node-y,0px)] grid h-[58px] w-[168px] content-center gap-0.5 overflow-hidden rounded-[var(--radius-control)] border border-[color:var(--border-soft)] bg-[color:var(--source-workbench-card)] px-2 py-1 text-[var(--vui-font-xs)] leading-tight shadow-[var(--vui-shadow-hairline)] [&_span]:truncate [&_strong]:truncate",
   workflowGraphNodeDanger:
     "workflowGraphNodeDanger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   workflowGraphNodeNeutral:

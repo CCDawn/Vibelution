@@ -1388,6 +1388,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionScreeningListShell).toContain("max-h-[44vh]");
     expect(routeStyles.sourceCollectionScreeningListShell).toContain("[scrollbar-gutter:stable]");
     expect(routeStylesSource).not.toContain("grid-template-rows: auto minmax(0, 1fr) auto auto");
+    expect(workflowGraphViewStyles.workflowGraphFrame).toContain("h-[var(--workflow-graph-height,360px)]");
+    expect(workflowGraphViewStyles.workflowGraphFrame).not.toContain("h-full");
+    expect(workflowGraphViewStyles.workflowGraphNode).toContain("w-[168px]");
+    expect(workflowGraphViewStyles.workflowGraphNode).toContain("h-[58px]");
+    expect(workflowGraphViewStyles.workflowGraphNode).toContain("overflow-hidden");
+    expect(workflowGraphViewStyles.workflowGraphNode).toContain("[&_strong]:truncate");
+    expect(workflowGraphViewStyles.workflowGraphNode).toContain("[&_span]:truncate");
     expect(routeStyles.sourceCollectionFilterBar).toContain("[&_[data-vui=native-button]]:flex-none");
     expect(routeStylesSource).not.toContain("min-height: 122px");
     expect(routeStylesSource).not.toContain("min-height: 96px");
@@ -1617,7 +1624,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.workspaceResearchCanvas).toContain("h-full");
     expect(routeStyles.workspaceResearchCanvas).toContain("grid-cols-[minmax(520px,1fr)_minmax(300px,380px)]");
     expect(routeStyles.workspaceResearchCanvas).toContain("overflow-hidden");
-    expect(workflowGraphViewStyles.workflowGraphFrame).toContain("h-full");
+    expect(workflowGraphViewStyles.workflowGraphFrame).toContain("h-[var(--workflow-graph-height,360px)]");
+    expect(workflowGraphViewStyles.workflowGraphFrame).not.toContain("h-full");
     expect(workflowGraphViewStyles.workflowGraphFrame).toContain("overflow-hidden");
     expect(routeStyles.canvasPanel).toContain("!flex");
     expect(routeStyles.inspector).toContain("!flex");
