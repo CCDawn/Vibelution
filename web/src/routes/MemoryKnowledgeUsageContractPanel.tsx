@@ -1,7 +1,7 @@
 import { XCircle } from "lucide-react";
 
 import type { MemoryUsageContractPayload } from "../api/types";
-import styles from "./MemoryRoute.styles";
+import styles from "./MemoryKnowledgeUsageContractPanel.styles";
 
 export type MemoryKnowledgeUsageContractPanelCopy = {
   usageContract: string;

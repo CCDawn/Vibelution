@@ -1,4 +1,4 @@
-import styles from "./MemoryRoute.styles";
+import styles from "./MemoryKnowledgePipelinePanel.styles";
 
 export type MemoryKnowledgePipelinePanelCopy = {
   knowledgeBases: string;
