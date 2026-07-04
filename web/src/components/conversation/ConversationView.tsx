@@ -22,7 +22,6 @@ import React, { DragEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useRe
 
 import type { ConversationMessage } from "../../api/types";
 import type {
-  AgentMentalSnapshot,
   AgentMessage,
   AgentMentalPart,
 } from "../../agent-thread/types";
@@ -890,35 +889,6 @@ export function ConversationView({
       }
       cache.delete(oldestKey);
     }
-  }
-
-  function cognitiveStateLabel(snapshot: AgentMentalSnapshot | undefined) {
-    const value = String(snapshot?.cognitiveState ?? "").trim().toLowerCase() || "unknown";
-    const keyMap = {
-      unknown: "mentalCognitiveState_unknown",
-      normal: "mentalCognitiveState_normal",
-      productive: "mentalCognitiveState_productive",
-      looping: "mentalCognitiveState_looping",
-      thrashing: "mentalCognitiveState_thrashing",
-      tunnel_vision: "mentalCognitiveState_tunnel_vision",
-      disoriented: "mentalCognitiveState_disoriented",
-    } as const;
-    const key = keyMap[value as keyof typeof keyMap];
-    return key ? t(key) : snapshot?.cognitiveState ?? "";
-  }
-
-  function mentalSourceLabel(source: string | undefined) {
-    const value = String(source ?? "").trim().toLowerCase();
-    if (value === "state") {
-      return t("mentalSourceState");
-    }
-    if (value === "diagnosis") {
-      return t("mentalSourceDiagnosis");
-    }
-    if (value === "runtime") {
-      return t("runtime");
-    }
-    return source ?? "";
   }
 
   function getExpansionState(messageId: string, section: string, defaultExpanded: boolean) {
@@ -1867,16 +1837,24 @@ export function ConversationView({
       lastUpdated: t("mentalLastUpdated"),
       whisper: t("mentalWhisper"),
       intervention: t("mentalIntervention"),
+      cognitiveStateUnknown: t("mentalCognitiveState_unknown"),
+      cognitiveStateNormal: t("mentalCognitiveState_normal"),
+      cognitiveStateProductive: t("mentalCognitiveState_productive"),
+      cognitiveStateLooping: t("mentalCognitiveState_looping"),
+      cognitiveStateThrashing: t("mentalCognitiveState_thrashing"),
+      cognitiveStateTunnelVision: t("mentalCognitiveState_tunnel_vision"),
+      cognitiveStateDisoriented: t("mentalCognitiveState_disoriented"),
+      sourceState: t("mentalSourceState"),
+      sourceDiagnosis: t("mentalSourceDiagnosis"),
+      sourceRuntime: t("runtime"),
     };
     const mentalFormatters: MentalStateFormatters = {
       compactPreview,
-      cognitiveStateLabel,
-      mentalSourceLabel,
       formatTimestamp,
     };
     const metaRows = buildMentalMetaRows(snapshot, mentalLabels, mentalFormatters);
     const bodyRows = buildMentalBodyRows(snapshot, mentalLabels);
-    const preview = mentalSnapshotPreview(snapshot, mentalFormatters);
+    const preview = mentalSnapshotPreview(snapshot, mentalLabels, mentalFormatters);
     return (
       <section className={`${styles.auxiliaryBlock} ${styles.auxiliaryBlock_mental}`}>
         <VButton
