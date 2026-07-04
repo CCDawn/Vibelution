@@ -23,11 +23,8 @@ import {
 import React, { DragEvent, ReactNode, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
-  ChatNextStateSignalSummary,
   ConversationMessage,
   MentalStateSnapshot,
-  SessionReferenceAttachment,
-  SessionTurnError,
 } from "../../api/types";
 import type {
   AgentMessage,
@@ -115,7 +112,7 @@ import {
   type TurnAvatarContent,
   type TurnAvatarResolution,
 } from "./conversationTurnAvatar";
-import type { ConversationStreamingFramePaintMetrics } from "./conversationStreamingMetrics";
+import type { ConversationViewProps } from "./conversationViewTypes";
 import {
   buildComputerUseStateForMessage,
   COMPUTER_USE_TOOL_NAME,
@@ -132,7 +129,6 @@ const RESPONSE_PARSE_CACHE_LIMIT = 80;
 const MARKDOWN_PARSE_CACHE_LIMIT = 160;
 const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
 const EMPTY_SECTION_EXPANSION: Record<string, boolean> = {};
-export type ConversationProcessDisplayMode = "answer" | "trace";
 
 type OperationDetailKind = "thought" | "status" | "tool";
 type OperationDetailRow = { label: string; value: string };
@@ -230,90 +226,6 @@ type PreviewImageState = {
   alt: string;
   downloadUrl: string;
   downloadName: string | true;
-};
-
-type ComposerAttachment = {
-  id: string;
-  filename: string;
-  previewUrl: string;
-  sizeBytes: number;
-  contentType: string;
-};
-
-export type ConversationViewProps = {
-  sessionId: string;
-  title: string;
-  phase: string;
-  messages: ConversationMessage[];
-  activeTurnMessage?: ConversationMessage;
-  className?: string;
-  density?: "default" | "compact";
-  eyebrowLabel?: string;
-  assistantDisplayName?: string;
-  assistantAvatarImageUrl?: string;
-  assistantAvatarFallback?: string;
-  resolveTurnAvatar?: (message: ConversationMessage) => TurnAvatarResolution | undefined;
-  userDisplayName?: string;
-  userAvatarPreset?: string;
-  userAvatarImageUrl?: string;
-  taskSummary?: string;
-  defaultFileContext: string;
-  summaryItems?: Array<{
-    label: string;
-    value: string;
-  }>;
-  stats?: Array<{
-    label: string;
-    value: string | number;
-  }>;
-  headerActions?: ReactNode;
-  supplementalContent?: ReactNode;
-  showHeader?: boolean;
-  showSessionOverview?: boolean;
-  showMentalSnapshots?: boolean;
-  showComposer?: boolean;
-  processDisplayMode?: ConversationProcessDisplayMode;
-  autoScrollToLatest?: boolean;
-  onStreamingFramePaint?: (metrics: ConversationStreamingFramePaintMetrics) => void;
-  composerValue: string;
-  composerPlaceholder: string;
-  composerDisabled: boolean;
-  composerActionDisabled?: boolean;
-  composerActionMode?: "send" | "stop";
-  composerPending: boolean;
-  composerSafeGuidancePending?: boolean;
-  composerInterruptGuidancePending?: boolean;
-  composerError?: string;
-  composerGuidance?: string;
-  composerAttachments?: ComposerAttachment[];
-  composerReferences?: SessionReferenceAttachment[];
-  composerAttachmentInputDisabled?: boolean;
-  turnError?: SessionTurnError | null;
-  nextStateSignals?: ChatNextStateSignalSummary[];
-  submitLabel?: string;
-  submitPendingLabel?: string;
-  stopLabel?: string;
-  stopPendingLabel?: string;
-  safeGuidanceLabel?: string;
-  safeGuidancePendingLabel?: string;
-  interruptGuidanceLabel?: string;
-  interruptGuidancePendingLabel?: string;
-  editingMessageId?: string;
-  editUserMessageLabel?: string;
-  editUserMessageDisabled?: boolean;
-  composerModeNotice?: string;
-  cancelComposerModeLabel?: string;
-  onComposerChange: (value: string) => void;
-  onAddComposerAttachments?: (files: FileList | File[]) => void;
-  onRemoveComposerAttachment?: (attachmentId: string) => void;
-  onAddComposerReference?: (reference: SessionReferenceAttachment) => void;
-  onRemoveComposerReference?: (referenceId: string) => void;
-  onEditUserMessage?: (message: ConversationMessage) => void;
-  onCancelComposerMode?: () => void;
-  onSubmit: () => void;
-  onStop?: () => void;
-  onSafeGuidance?: () => void;
-  onInterruptGuidance?: () => void;
 };
 
 type ConversationTurnRowProps = {
