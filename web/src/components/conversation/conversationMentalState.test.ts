@@ -7,8 +7,10 @@ import type { AgentMessageProcessSection } from "./agentMessageSections";
 import {
   buildMentalBodyRows,
   buildMentalMetaRows,
+  cognitiveStateLabel,
   latestAgentMentalPart,
   mentalFeelingSummaryRow,
+  mentalSourceLabel,
   mentalSnapshotPreview,
   type MentalStateFormatters,
   type MentalStateLabels,
@@ -26,12 +28,20 @@ const labels: MentalStateLabels = {
   lastUpdated: "Last updated",
   whisper: "Whisper",
   intervention: "Intervention",
+  cognitiveStateUnknown: "Unclassified",
+  cognitiveStateNormal: "Stable",
+  cognitiveStateProductive: "Productive",
+  cognitiveStateLooping: "Looping",
+  cognitiveStateThrashing: "Thrashing",
+  cognitiveStateTunnelVision: "Tunnel vision",
+  cognitiveStateDisoriented: "Disoriented",
+  sourceState: "Live state",
+  sourceDiagnosis: "Rule diagnosis",
+  sourceRuntime: "Runtime",
 };
 
 const formatters: MentalStateFormatters = {
   compactPreview: (value) => `compact:${value}`,
-  cognitiveStateLabel: (snapshot) => `state:${snapshot.cognitiveState}`,
-  mentalSourceLabel: (source) => `source:${source ?? ""}`,
   formatTimestamp: (timestamp) => `time:${timestamp}`,
 };
 
@@ -59,15 +69,33 @@ describe("conversation mental state helpers", () => {
     expect(source).not.toMatch(/function mentalSnapshotPreview\(/);
     expect(source).not.toMatch(/function mentalFeelingSummaryRow\(/);
     expect(source).not.toMatch(/function latestAgentMentalPart\(/);
+    expect(source).not.toMatch(/\bcognitiveStateLabel\b/);
+    expect(source).not.toMatch(/\bmentalSourceLabel\b/);
+  });
+
+  it("labels cognitive state values inside the mental-state helper boundary", () => {
+    expect(cognitiveStateLabel(undefined, labels)).toBe("Unclassified");
+    expect(cognitiveStateLabel(mentalSnapshot({ cognitiveState: "normal" }), labels)).toBe("Stable");
+    expect(cognitiveStateLabel(mentalSnapshot({ cognitiveState: " productive " }), labels)).toBe("Productive");
+    expect(cognitiveStateLabel(mentalSnapshot({ cognitiveState: "tunnel_vision" }), labels)).toBe("Tunnel vision");
+    expect(cognitiveStateLabel(mentalSnapshot({ cognitiveState: "custom_state" }), labels)).toBe("custom_state");
+  });
+
+  it("labels mental source values inside the mental-state helper boundary", () => {
+    expect(mentalSourceLabel(undefined, labels)).toBe("");
+    expect(mentalSourceLabel("state", labels)).toBe("Live state");
+    expect(mentalSourceLabel("diagnosis", labels)).toBe("Rule diagnosis");
+    expect(mentalSourceLabel("runtime", labels)).toBe("Runtime");
+    expect(mentalSourceLabel("custom", labels)).toBe("custom");
   });
 
   it("builds collapsed previews from the first available mental snapshot field", () => {
-    expect(mentalSnapshotPreview(undefined, formatters)).toBe("");
-    expect(mentalSnapshotPreview(mentalSnapshot({ feeling: " calm ", summary: "ignored" }), formatters))
+    expect(mentalSnapshotPreview(undefined, labels, formatters)).toBe("");
+    expect(mentalSnapshotPreview(mentalSnapshot({ feeling: " calm ", summary: "ignored" }), labels, formatters))
       .toBe("compact:calm");
-    expect(mentalSnapshotPreview(mentalSnapshot({ summary: " ready " }), formatters)).toBe("compact:ready");
-    expect(mentalSnapshotPreview(mentalSnapshot({ cognitiveState: "productive" }), formatters))
-      .toBe("compact:state:productive");
+    expect(mentalSnapshotPreview(mentalSnapshot({ summary: " ready " }), labels, formatters)).toBe("compact:ready");
+    expect(mentalSnapshotPreview(mentalSnapshot({ cognitiveState: "productive" }), labels, formatters))
+      .toBe("compact:Productive");
   });
 
   it("builds the feeling and summary row without duplicating identical content", () => {
@@ -82,7 +110,7 @@ describe("conversation mental state helpers", () => {
       .toEqual({ label: "Feeling / Summary", value: "uneasy\nneeds input" });
   });
 
-  it("builds mental metadata rows with formatter-owned labels and values", () => {
+  it("builds mental metadata rows with helper-owned semantic labels", () => {
     expect(buildMentalMetaRows(mentalSnapshot(), labels, formatters)).toEqual([]);
     expect(buildMentalMetaRows(
       mentalSnapshot({
@@ -97,8 +125,8 @@ describe("conversation mental state helpers", () => {
       formatters,
     )).toEqual([
       { label: "Mood", value: "focused" },
-      { label: "Cognitive state", value: "state:productive" },
-      { label: "Source", value: "source:runtime" },
+      { label: "Cognitive state", value: "Productive" },
+      { label: "Source", value: "Runtime" },
       { label: "Confidence", value: "72%" },
       { label: "Samples", value: "5" },
       { label: "Last updated", value: "time:2026-07-04T01:02:03Z" },
