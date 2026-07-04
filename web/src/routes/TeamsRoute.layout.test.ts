@@ -923,6 +923,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("source_needs_quality_revision: \"需补资料\"");
     expect(routeSource).toContain("source_screened: \"已审查\"");
     expect(teamSourceCollectionCandidatePanelSource).toContain("sourceCollectionCandidateListShell");
+    expect(teamSourceCollectionCandidatePanelSource).toContain("loading && !hasCandidates");
+    expect(teamSourceCollectionCandidatePanelSource).toContain("sourceCollectionCandidateSkeletonRow");
     expect(routeSource).toContain("待 Agent 复核");
     expect(routeSource).not.toContain("待质检");
     expect(routeSource).not.toContain("workflowSourceCollectionPrimaryButton");
@@ -1772,6 +1774,20 @@ describe("TeamsRoute layout contract", () => {
     );
     expect(sourceCollectionPrimaryLoadingSource).toContain("sourceCollectionCandidateListDataLoading");
 
+    expect(routeSource).toContain("sourceCollectionDataSyncText");
+    expect(routeSource).toContain("sourceCollectionStableCountText");
+    expect(routeSource).toContain("loading={sourceCollectionPrimaryDataLoading}");
+
+    const displayLoadingSource = routeSource.slice(
+      routeSource.indexOf("const sourceCollectionFindingDisplayLoading"),
+      routeSource.indexOf("const sourceCollectionStageModules"),
+    );
+    expect(displayLoadingSource).toContain("const sourceCollectionRelationsDisplayLoading = sourceCollectionGraphDataLoading");
+    expect(displayLoadingSource).toContain("const sourceCollectionIngestionDisplayLoading = sourceCollectionSourceQualityLoading || sourceCollectionKnowledgeIngestionDataLoading");
+    expect(displayLoadingSource).toContain("sourceCollectionCandidateSyncStatusText");
+    expect(displayLoadingSource).not.toContain("sourceCollectionPrimaryDataLoading || sourceCollectionGraphDataLoading");
+    expect(displayLoadingSource).not.toContain("sourceCollectionPrimaryDataLoading || sourceCollectionSourceQualityLoading || sourceCollectionKnowledgeIngestionDataLoading");
+
     const stageModuleSource = routeSource.slice(
       routeSource.indexOf("const sourceCollectionStageModules"),
       routeSource.indexOf("const sourceCollectionBoardCurrentModule"),
@@ -1791,6 +1807,7 @@ describe("TeamsRoute layout contract", () => {
     expect(extractionModuleSource).toContain('state: sourceCollectionStageDisplayState("extraction", sourceCollectionExtractionCanProceedAfterExclusions');
     expect(extractionModuleSource).toContain('status: sourceCollectionStageDisplayStatus(');
     expect(extractionModuleSource).toContain("sourceCollectionExtractionDisplayLoading");
+    expect(extractionModuleSource).toContain("sourceCollectionCandidateSyncStatusText");
     expect(extractionModuleSource).toContain("sourceCollectionExtractionExcludedRecoveryState.statusLabel");
   });
 

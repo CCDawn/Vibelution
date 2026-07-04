@@ -2435,6 +2435,25 @@ export function sourceCollectionRunCandidateMetric(run: SourceCollectionRunSumma
   return sourceCollectionRunMetric(run, ["sourceCandidateCount", "candidateCount", "importedCount"]);
 }
 
+export function sourceCollectionStableCountText(input: {
+  loading: boolean;
+  value: number;
+  lang: "zh" | "en";
+  zhUnit?: string;
+  enUnit?: string;
+  loadingText: string;
+  syncingText: string;
+}) {
+  const value = Number.isFinite(input.value) ? Math.max(0, Math.floor(input.value)) : 0;
+  const countText = input.lang === "zh"
+    ? [String(value), input.zhUnit].filter(Boolean).join(" ")
+    : input.enUnit ? `${value} ${input.enUnit}` : String(value);
+  if (!input.loading) {
+    return countText;
+  }
+  return value > 0 ? `${countText} · ${input.syncingText}` : input.loadingText;
+}
+
 function sourceCollectionRunHasUsableRecords(run: SourceCollectionRunSummaryValue) {
   return sourceCollectionRunRecordCount(run) > 0 || sourceCollectionRunCandidateMetric(run) > 0;
 }
@@ -7948,11 +7967,9 @@ export function TeamsRoute({
     const screeningPanelFilteredCount = sourceCollectionSourceFilter === "all"
       ? sourceCollectionDisplayedCandidateCount
       : filteredScreeningCandidates.length;
-    const screeningPanelFilteredCountText = sourceCollectionPrimaryDataLoading
-      ? sourceCollectionLoadingText
-      : String(screeningPanelFilteredCount);
+    const screeningPanelFilteredCountText = sourceCollectionCountText(sourceCollectionPrimaryDataLoading, screeningPanelFilteredCount);
     const screeningPanelRange = sourceCollectionPrimaryDataLoading
-      ? sourceCollectionLoadingText
+      ? sourceCollectionDataSyncText
       : screeningCandidates.length
       ? `${pagedScreeningCandidates.start}-${pagedScreeningCandidates.end}/${filteredScreeningCandidates.length}`
       : `0/${screeningPanelFilteredCount}`;
@@ -8321,11 +8338,9 @@ export function TeamsRoute({
     const candidatePanelFilteredCount = sourceCollectionSourceFilter === "all"
       ? sourceCollectionDisplayedCandidateCount
       : filteredCandidates.length;
-    const candidatePanelFilteredCountText = sourceCollectionPrimaryDataLoading
-      ? sourceCollectionLoadingText
-      : String(candidatePanelFilteredCount);
+    const candidatePanelFilteredCountText = sourceCollectionCountText(sourceCollectionPrimaryDataLoading, candidatePanelFilteredCount);
     const candidatePanelRange = sourceCollectionPrimaryDataLoading
-      ? sourceCollectionLoadingText
+      ? sourceCollectionDataSyncText
       : visibleCandidates.length
       ? `${pagedCandidates.start}-${pagedCandidates.end}/${filteredCandidates.length}`
       : `0/${candidatePanelFilteredCount}`;
@@ -8357,6 +8372,7 @@ export function TeamsRoute({
           { key: "approved", label: lang === "zh" ? "通过" : "approved", value: sourceCollectionProjectedApprovedCountText },
           { key: "pending", label: lang === "zh" ? "待 Agent 复核" : "pending agent review", value: sourceCollectionRunPendingScreeningCountText },
         ]}
+        loading={sourceCollectionPrimaryDataLoading}
         hasCandidates={Boolean(visibleCandidates.length)}
         listNeedsScrollHint={candidateListNeedsScrollHint}
         emptyMessage={sourceCollectionCandidateEmptyStateText({
@@ -10788,10 +10804,13 @@ export function TeamsRoute({
   const sourceCollectionCandidateProjectionFallbackCount = Number.isFinite(sourceCollectionStageSummaryCandidateCount)
     ? Math.max(sourceCollectionRunCandidateCount, Math.max(0, sourceCollectionStageSummaryCandidateCount))
     : sourceCollectionRunCandidateCount;
-  const sourceCollectionProjectedCollectedCount = sourceCollectionStageProjectionCount(
-    sourceCollectionCollectionProjection,
-    "artifact",
+  const sourceCollectionProjectedCollectedCount = Math.max(
     sourceCollectionCollectedCount,
+    sourceCollectionStageProjectionCount(
+      sourceCollectionCollectionProjection,
+      "artifact",
+      sourceCollectionCollectedCount,
+    ),
   );
   const sourceCollectionProjectedCandidateCount = sourceCollectionStageProjectionCount(
     sourceCollectionCandidateProjection,
@@ -10887,6 +10906,7 @@ export function TeamsRoute({
   );
   const sourceCollectionScreeningDataLoading = sourceCollectionPrimaryDataLoading || sourceCollectionSourceQualityLoading;
   const sourceCollectionLoadingText = lang === "zh" ? "加载中" : "loading";
+  const sourceCollectionDataSyncText = lang === "zh" ? "同步中" : "syncing";
   const sourceCollectionLoadingSummary = lang === "zh" ? "正在读取资料提炼结果" : "Loading extraction results";
   const sourceCollectionActionLoadingReason = lang === "zh" ? "正在读取当前批次数据" : "Loading current batch data";
   const sourceCollectionActionErrorReason = lang === "zh" ? "当前批次数据读取失败，请刷新后重试" : "Current batch data failed to load. Refresh and retry.";
@@ -10903,21 +10923,24 @@ export function TeamsRoute({
     : sourceCollectionActionReady;
   const sourceCollectionActionDisabledTitle = (readiness: SourceCollectionActionReadiness, fallback: string) =>
     readiness.disabled && readiness.reason ? readiness.reason : fallback;
-  const sourceCollectionCountWithUnit = (loading: boolean, value: number, zhUnit: string, enUnit = "") => {
-    if (loading) {
-      return sourceCollectionLoadingText;
-    }
-    if (lang === "zh") {
-      return `${value} ${zhUnit}`;
-    }
-    return enUnit ? `${value} ${enUnit}` : String(value);
-  };
-  const sourceCollectionCollectedCountText = sourceCollectionRecordsDataLoading
-    ? sourceCollectionLoadingText
-    : String(sourceCollectionCollectedCount);
-  const sourceCollectionProjectedCollectedCountText = sourceCollectionRecordsDataLoading
-    ? sourceCollectionLoadingText
-    : String(sourceCollectionProjectedCollectedCount);
+  const sourceCollectionCountText = (loading: boolean, value: number) => sourceCollectionStableCountText({
+    loading,
+    value,
+    lang,
+    loadingText: sourceCollectionLoadingText,
+    syncingText: sourceCollectionDataSyncText,
+  });
+  const sourceCollectionCountWithUnit = (loading: boolean, value: number, zhUnit: string, enUnit = "") => sourceCollectionStableCountText({
+    loading,
+    value,
+    lang,
+    zhUnit,
+    enUnit,
+    loadingText: sourceCollectionLoadingText,
+    syncingText: sourceCollectionDataSyncText,
+  });
+  const sourceCollectionCollectedCountText = sourceCollectionCountText(sourceCollectionRecordsDataLoading, sourceCollectionCollectedCount);
+  const sourceCollectionProjectedCollectedCountText = sourceCollectionCountText(sourceCollectionRecordsDataLoading, sourceCollectionProjectedCollectedCount);
   const sourceCollectionSearchOpenAssignmentCountText = sourceCollectionAssignmentsDataLoading
     ? sourceCollectionLoadingText
     : String(sourceCollectionSearchOpenAssignmentCount);
@@ -10948,18 +10971,11 @@ export function TeamsRoute({
     : lang === "zh"
     ? `${sourceCollectionAssignments.length} 个任务`
     : `${sourceCollectionAssignments.length} assignments`;
-  const sourceCollectionDisplayedCandidateCountText = sourceCollectionPrimaryDataLoading
-    ? sourceCollectionLoadingText
-    : String(sourceCollectionDisplayedCandidateCount);
-  const sourceCollectionProjectedCandidateCountText = sourceCollectionPrimaryDataLoading
-    ? sourceCollectionLoadingText
-    : String(sourceCollectionProjectedCandidateCount);
-  const sourceCollectionProjectedAssessedCountText = sourceCollectionScreeningDataLoading
-    ? sourceCollectionLoadingText
-    : String(sourceCollectionProjectedAssessedCount);
-  const sourceCollectionProjectedApprovedCountText = sourceCollectionScreeningDataLoading
-    ? sourceCollectionLoadingText
-    : String(sourceCollectionProjectedApprovedCount);
+  const sourceCollectionDisplayedCandidateCountText = sourceCollectionCountText(sourceCollectionPrimaryDataLoading, sourceCollectionDisplayedCandidateCount);
+  const sourceCollectionProjectedCandidateCountText = sourceCollectionCountText(sourceCollectionPrimaryDataLoading, sourceCollectionProjectedCandidateCount);
+  const sourceCollectionProjectedCandidateCountLabel = sourceCollectionCountWithUnit(sourceCollectionPrimaryDataLoading, sourceCollectionProjectedCandidateCount, "条候选资料", "candidate sources");
+  const sourceCollectionProjectedAssessedCountText = sourceCollectionCountText(sourceCollectionScreeningDataLoading, sourceCollectionProjectedAssessedCount);
+  const sourceCollectionProjectedApprovedCountText = sourceCollectionCountText(sourceCollectionScreeningDataLoading, sourceCollectionProjectedApprovedCount);
   const sourceCollectionDisplayedCandidateFilterCounts = useMemo(() => {
     if (sourceCollectionDisplayedCandidateCount <= sourceCollectionRunCandidateCount) {
       return sourceCollectionCandidateFilterCounts;
@@ -10974,9 +10990,7 @@ export function TeamsRoute({
     sourceCollectionRunCandidateCount,
   ]);
   const sourceCollectionRunPendingScreeningCount = Math.max(0, sourceCollectionProjectedCandidateCount - sourceCollectionProjectedAssessedCount);
-  const sourceCollectionRunPendingScreeningCountText = sourceCollectionScreeningDataLoading
-    ? sourceCollectionLoadingText
-    : String(sourceCollectionRunPendingScreeningCount);
+  const sourceCollectionRunPendingScreeningCountText = sourceCollectionCountText(sourceCollectionScreeningDataLoading, sourceCollectionRunPendingScreeningCount);
   const sourceCollectionPendingCandidateImportCount = Math.max(0, sourceCollectionRawRecordCount - sourceCollectionDisplayedCandidateCount);
   const sourceCollectionExtractionRecoveryCoverage = sourceCollectionCandidateProjection?.currentCoverageSummary?.complete === false
     ? sourceCollectionCandidateProjection.currentCoverageSummary
@@ -11008,8 +11022,8 @@ export function TeamsRoute({
     && sourceCollectionRunPendingScreeningCount <= 0,
   );
   const sourceCollectionExtractionProceedableSummary = lang === "zh"
-    ? `${sourceCollectionProjectedApprovedCountText} 条可进入关系整理；剩余 ${sourceCollectionExtractionExcludedRecoveryState.excludedCount} 条已排除，可查看原因或补充新来源。`
-    : `${sourceCollectionProjectedApprovedCountText} ready for relation mapping; ${sourceCollectionExtractionExcludedRecoveryState.excludedCount} excluded sources can be inspected or replaced.`;
+    ? `${sourceCollectionProjectedApprovedCount} 条可进入关系整理；剩余 ${sourceCollectionExtractionExcludedRecoveryState.excludedCount} 条已排除，可查看原因或补充新来源。`
+    : `${sourceCollectionProjectedApprovedCount} ready for relation mapping; ${sourceCollectionExtractionExcludedRecoveryState.excludedCount} excluded sources can be inspected or replaced.`;
 
   const sourceCollectionApprovedCount =
     teamWorkflowSourceQualityStatus?.summary.approvedSourceCandidateCount
@@ -11787,14 +11801,30 @@ export function TeamsRoute({
   const sourceCollectionExtractionDisplayState: SourceCollectionStepState = sourceCollectionExtractionDisplayLoading
     ? "pending"
     : sourceCollectionExtractionStepState;
-  const sourceCollectionRelationsDisplayLoading = sourceCollectionPrimaryDataLoading || sourceCollectionGraphDataLoading;
+  const sourceCollectionRelationsDisplayLoading = sourceCollectionGraphDataLoading;
   const sourceCollectionRelationsDisplayState: SourceCollectionStepState = sourceCollectionRelationsDisplayLoading
     ? "pending"
     : sourceCollectionGraphStepState;
-  const sourceCollectionIngestionDisplayLoading = sourceCollectionPrimaryDataLoading || sourceCollectionSourceQualityLoading || sourceCollectionKnowledgeIngestionDataLoading;
+  const sourceCollectionIngestionDisplayLoading = sourceCollectionSourceQualityLoading || sourceCollectionKnowledgeIngestionDataLoading;
   const sourceCollectionIngestionDisplayState: SourceCollectionStepState = sourceCollectionIngestionDisplayLoading
     ? "pending"
     : sourceCollectionMemoryStepState;
+  const sourceCollectionSourceSyncStatusText = sourceCollectionProjectedCollectedCount > 0
+    ? sourceCollectionDataSyncText
+    : sourceCollectionLoadingText;
+  const sourceCollectionCandidateSyncStatusText = sourceCollectionDisplayedCandidateCount > 0 || sourceCollectionProjectedCollectedCount > 0
+    ? sourceCollectionDataSyncText
+    : sourceCollectionLoadingText;
+  const sourceCollectionExtractionLoadingMetric = sourceCollectionProjectedCandidateCount > 0
+    ? (lang === "zh"
+      ? `已处理 ${sourceCollectionProjectedAssessedCount}/${sourceCollectionProjectedCandidateCount} · ${sourceCollectionDataSyncText}`
+      : `${sourceCollectionProjectedAssessedCount}/${sourceCollectionProjectedCandidateCount} processed · ${sourceCollectionDataSyncText}`)
+    : (lang === "zh" ? "提炼进度 加载中" : "extraction loading");
+  const sourceCollectionExtractionLoadingOutputLabel = sourceCollectionProjectedCandidateCount > 0 || sourceCollectionProjectedApprovedCount > 0
+    ? (lang === "zh"
+      ? `${sourceCollectionProjectedApprovedCount} 条保留 / ${sourceCollectionRunPendingScreeningCount} 条待处理 · ${sourceCollectionDataSyncText}`
+      : `${sourceCollectionProjectedApprovedCount} kept / ${sourceCollectionRunPendingScreeningCount} pending · ${sourceCollectionDataSyncText}`)
+    : (lang === "zh" ? "提炼结果加载中" : "extraction result loading");
   const sourceCollectionStageModules: SourceCollectionStageModule[] = [
     {
       id: "finding",
@@ -11817,7 +11847,7 @@ export function TeamsRoute({
         ? (lang === "zh" ? "继续寻找资料" : "Continue finding")
         : (lang === "zh" ? "进入资料提炼" : "Move to extraction"),
       state: sourceCollectionStageDisplayState("finding", sourceCollectionFindingDisplayState),
-      status: sourceCollectionStageDisplayStatus("finding", sourceCollectionFindingDisplayLoading ? sourceCollectionLoadingText : sourceCollectionStepStatusText(sourceCollectionSearchStepState)),
+      status: sourceCollectionStageDisplayStatus("finding", sourceCollectionFindingDisplayLoading ? sourceCollectionSourceSyncStatusText : sourceCollectionStepStatusText(sourceCollectionSearchStepState)),
       detailLabel: lang === "zh" ? "查看资料记录" : "View source records",
       actionLabel: sourceCollectionStageActionLabelFor("finding", sourceCollectionCollectionActionLabel),
       actionDisabled: sourceCollectionStageActionReadinessFor("finding").disabled,
@@ -11831,7 +11861,7 @@ export function TeamsRoute({
       id: "extraction",
       label: lang === "zh" ? "提炼" : "Extract",
       metric: sourceCollectionScreeningDataLoading || sourceCollectionPrimaryDataLoading
-        ? (lang === "zh" ? "提炼进度 加载中" : "extraction loading")
+        ? sourceCollectionExtractionLoadingMetric
         : (lang === "zh" ? `已处理 ${sourceCollectionProjectedAssessedCountText}/${sourceCollectionProjectedCandidateCountText}` : `${sourceCollectionProjectedAssessedCountText}/${sourceCollectionProjectedCandidateCountText} processed`),
       summary: sourceCollectionStageLaunchActive("extraction")
         ? sourceCollectionStageLaunchSummary("extraction")
@@ -11848,7 +11878,7 @@ export function TeamsRoute({
             : (lang === "zh" ? `${sourceCollectionProjectedApprovedCountText} 条可进入关系整理` : `${sourceCollectionProjectedApprovedCountText} ready for relation mapping`)),
       inputLabel: lang === "zh" ? `${sourceCollectionProjectedCollectedCountLabel} 原始资料` : sourceCollectionProjectedCollectedCountLabel,
       outputLabel: sourceCollectionPrimaryDataLoading || sourceCollectionScreeningDataLoading
-        ? (lang === "zh" ? "提炼结果加载中" : "extraction result loading")
+        ? sourceCollectionExtractionLoadingOutputLabel
         : sourceCollectionExtractionCanProceedAfterExclusions
           ? (lang === "zh" ? `${sourceCollectionProjectedApprovedCountText} 条保留 / ${sourceCollectionExtractionExcludedRecoveryState.excludedCount} 条已排除` : `${sourceCollectionProjectedApprovedCountText} kept / ${sourceCollectionExtractionExcludedRecoveryState.excludedCount} excluded`)
           : (lang === "zh" ? `${sourceCollectionProjectedApprovedCountText} 条保留 / ${sourceCollectionRunPendingScreeningCountText} 条待处理` : `${sourceCollectionProjectedApprovedCountText} kept / ${sourceCollectionRunPendingScreeningCountText} pending`),
@@ -11859,7 +11889,7 @@ export function TeamsRoute({
       status: sourceCollectionStageDisplayStatus(
         "extraction",
         sourceCollectionExtractionDisplayLoading
-          ? sourceCollectionLoadingText
+          ? sourceCollectionCandidateSyncStatusText
           : sourceCollectionExtractionCanProceedAfterExclusions
             ? sourceCollectionExtractionExcludedRecoveryState.statusLabel
             : sourceCollectionStepStatusText(sourceCollectionExtractionStepState),
@@ -11896,14 +11926,14 @@ export function TeamsRoute({
           ? (lang === "zh" ? "可由 Agent 整理资料关系" : "Agent can map source relationships")
           : (lang === "zh" ? "等资料提炼后整理关系" : "Map after extraction")),
       inputLabel: sourceCollectionPrimaryDataLoading
-        ? (lang === "zh" ? "候选资料加载中" : "candidate sources loading")
+        ? sourceCollectionProjectedCandidateCountLabel
         : (lang === "zh" ? `${sourceCollectionProjectedCandidateCountText} 条候选资料` : `${sourceCollectionProjectedCandidateCountText} candidate sources`),
       outputLabel: lang === "zh" ? `${sourceCollectionProjectedGraphNodeCount} 个节点 / ${sourceCollectionProjectedGraphEdgeCount} 条关系` : `${sourceCollectionProjectedGraphNodeCount} nodes / ${sourceCollectionProjectedGraphEdgeCount} edges`,
       nextLabel: sourceCollectionProjectedGraphNodeCount > 0
         ? (lang === "zh" ? "进入资料入库" : "Move to ingestion")
         : (lang === "zh" ? "生成资料关系" : "Build source relations"),
       state: sourceCollectionStageDisplayState("relations", sourceCollectionRelationsDisplayState),
-      status: sourceCollectionStageDisplayStatus("relations", sourceCollectionRelationsDisplayLoading ? sourceCollectionLoadingText : sourceCollectionStepStatusText(sourceCollectionGraphStepState)),
+      status: sourceCollectionStageDisplayStatus("relations", sourceCollectionRelationsDisplayLoading ? sourceCollectionDataSyncText : sourceCollectionStepStatusText(sourceCollectionGraphStepState)),
       detailLabel: lang === "zh" ? "查看资料关系" : "View relations",
       actionLabel: sourceCollectionStageActionLabelFor("relations", sourceCollectionGraphActionLabel),
       actionDisabled: sourceCollectionStageActionReadinessFor("relations").disabled,
@@ -11935,7 +11965,7 @@ export function TeamsRoute({
       inputLabel: sourceCollectionPrecheckCandidateCount > 0
         ? (lang === "zh" ? `${sourceCollectionPrecheckCandidateCount} 条通过资料` : `${sourceCollectionPrecheckCandidateCount} approved sources`)
         : sourceCollectionPrimaryDataLoading
-          ? (lang === "zh" ? "候选资料加载中" : "candidate sources loading")
+          ? sourceCollectionProjectedCandidateCountLabel
           : (lang === "zh" ? `${sourceCollectionProjectedCandidateCountText} 条候选资料` : `${sourceCollectionProjectedCandidateCountText} candidate sources`),
       outputLabel: lang === "zh" ? `${sourceCollectionProjectedFormalKnowledgeCount} 条正式知识 / ${sourceCollectionProjectedGraphNodeCount} 个关系节点` : `${sourceCollectionProjectedFormalKnowledgeCount} formal / ${sourceCollectionProjectedGraphNodeCount} graph nodes`,
       nextLabel: sourceCollectionProjectedFormalKnowledgeCount > 0
@@ -11944,7 +11974,7 @@ export function TeamsRoute({
           ? (lang === "zh" ? "等待入库完成" : "Wait for ingestion")
           : (lang === "zh" ? "Agent 入库资料" : "Agent ingest sources"),
       state: sourceCollectionStageDisplayState("ingestion", sourceCollectionIngestionDisplayState),
-      status: sourceCollectionStageDisplayStatus("ingestion", sourceCollectionIngestionDisplayLoading ? sourceCollectionLoadingText : sourceCollectionStepStatusText(sourceCollectionMemoryStepState)),
+      status: sourceCollectionStageDisplayStatus("ingestion", sourceCollectionIngestionDisplayLoading ? sourceCollectionDataSyncText : sourceCollectionStepStatusText(sourceCollectionMemoryStepState)),
       detailLabel: lang === "zh" ? "查看入库详情" : "View ingestion details",
       actionLabel: sourceCollectionStageActionLabelFor("ingestion", sourceCollectionMemoryActionLabel),
       actionDisabled: sourceCollectionStageActionReadinessFor("ingestion").disabled,

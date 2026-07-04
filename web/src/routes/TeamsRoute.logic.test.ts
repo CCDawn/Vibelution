@@ -6,6 +6,7 @@ import {
   linkedRoomRefetchInterval,
   selectDefaultSourceCollectionRun,
   sourceCollectionActiveWorkRunFromRuntime,
+  sourceCollectionStableCountText,
   sourceCollectionRunCandidateMetric,
   sourceCollectionRunRecordCount,
 } from "./TeamsRoute";
@@ -95,6 +96,32 @@ describe("source collection extraction recovery", () => {
 
     expect(state.blockedByExcludedSources).toBe(false);
     expect(state.recoverText).toBe("");
+  });
+});
+
+describe("source collection loading labels", () => {
+  it("keeps known counts visible while the selected batch is syncing", () => {
+    expect(sourceCollectionStableCountText({
+      loading: true,
+      value: 44,
+      lang: "zh",
+      zhUnit: "条",
+      enUnit: "records",
+      loadingText: "加载中",
+      syncingText: "同步中",
+    })).toBe("44 条 · 同步中");
+  });
+
+  it("uses the loading label only when no stable count is known yet", () => {
+    expect(sourceCollectionStableCountText({
+      loading: true,
+      value: 0,
+      lang: "zh",
+      zhUnit: "条",
+      enUnit: "records",
+      loadingText: "加载中",
+      syncingText: "同步中",
+    })).toBe("加载中");
   });
 });
 
