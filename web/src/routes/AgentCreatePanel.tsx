@@ -2,7 +2,7 @@ import { Bot, Plus } from "lucide-react";
 
 import { type AgentLlmBindings, type ToolBundle } from "../api/types";
 import { VButton, VFieldRow, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentCreatePanel.styles";
 
 export type AgentCreateDraft = {
   displayName: string;

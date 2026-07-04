@@ -7,7 +7,7 @@ import {
   type AgentContextCompressionPanelCopy,
   type AgentContextCompressionPolicyDraft,
 } from "./AgentContextCompressionPanel";
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentCoreConfigPanel.styles";
 
 export type AgentConfigDraft = {
   displayName: string;
@@ -99,6 +99,11 @@ type AgentCoreConfigPanelProps = {
   onSave: () => void;
 };
 
+function healthGuideToneClass(tone: AgentCoreConfigHealthView["tone"]) {
+  const toneKey = `healthGuide_${tone}` as keyof typeof styles;
+  return styles[toneKey] || styles.healthGuide_info;
+}
+
 export function AgentCoreConfigPanel({
   copy,
   lang,
@@ -138,7 +143,7 @@ export function AgentCoreConfigPanel({
           {dirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}
         </span>
       </div>
-      <section className={`${styles.healthGuidePanel} ${styles[`healthGuide_${health.tone}`]}`}>
+      <section className={`${styles.healthGuidePanel} ${healthGuideToneClass(health.tone)}`}>
         <div>
           <span>{health.label}</span>
           <strong>{health.headline}</strong>
