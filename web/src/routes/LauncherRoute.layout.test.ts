@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import routeSource from "./LauncherRoute.tsx?raw";
+import developerModePanelSource from "./LauncherDeveloperModePanel.tsx?raw";
 import startupSettingsPanelSource from "./LauncherStartupSettingsPanel.tsx?raw";
 import stylesSource from "./LauncherRoute.styles.ts?raw";
 import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
@@ -24,15 +25,21 @@ const sourceSlice = (source: string, startMarker: string, endMarker: string): st
 describe("LauncherRoute layout contract", () => {
   it("routes launcher controls through VUI primitives", () => {
     expect(routeSource).toContain("from \"../components/vui\"");
+    expect(developerModePanelSource).toContain("from \"../components/vui\"");
     expect(startupSettingsPanelSource).toContain("from \"../components/vui\"");
     expect(routeSource).toContain("<VButton");
+    expect(developerModePanelSource).toContain("<VButton");
     expect(startupSettingsPanelSource).toContain("<VButton");
     expect(startupSettingsPanelSource).toContain("<VNativeInput");
-    expect(routeSource).toContain("<VNativeSelect");
+    expect(developerModePanelSource).toContain("<VNativeSelect");
     expect(startupSettingsPanelSource).toContain("<VNativeSelect");
     expect(routeSource).not.toMatch(/<button\b/);
     expect(routeSource).not.toMatch(/<select\b/);
     expect(routeSource).not.toMatch(/<textarea\b/);
+    expect(developerModePanelSource).not.toMatch(/<button\b/);
+    expect(developerModePanelSource).not.toMatch(/<input\b/);
+    expect(developerModePanelSource).not.toMatch(/<select\b/);
+    expect(developerModePanelSource).not.toMatch(/<textarea\b/);
     expect(startupSettingsPanelSource).not.toMatch(/<button\b/);
     expect(startupSettingsPanelSource).not.toMatch(/<input\b/);
     expect(startupSettingsPanelSource).not.toMatch(/<select\b/);
@@ -142,8 +149,8 @@ describe("LauncherRoute layout contract", () => {
     expect(startupSettingsPanelSource).toContain("settingToggle");
     expect(startupSettingsPanelSource).toContain("settingsSaveButton");
     expect(startupSettingsPanelSource).toContain("segmentedControl");
-    expect(routeSource).toContain("DeveloperModePanel");
-    expect(routeSource).toContain("developerPanel");
+    expect(routeSource).toContain("LauncherDeveloperModePanel");
+    expect(developerModePanelSource).toContain("developerPanel");
     expect(routeSource).toContain("cleanupPlan");
     expect(routeSource).toContain("guardian?.supervisor?.stdoutPath");
     expect(routeSource).toContain("guardian?.supervisor?.stderrPath");
@@ -420,7 +427,7 @@ describe("LauncherRoute layout contract", () => {
     expect(launcherApiSource).toContain("WorkbenchWindowModeUpdateRequest");
     expect(startupSettingsPanelSource).toContain("onWindowModeChange({ mode, baseHash: current.configHash })");
     expect(routeSource).toContain('onError: (error) => {\n      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error), source: "window-mode" });\n      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });');
-    expect(routeSource).toContain("configHash");
+    expect(startupSettingsPanelSource).toContain("configHash");
     expect(startupSettingsPanelSource).toContain("runtimeProfile");
     expect(startupSettingsPanelSource).toContain("launcherControlPort");
     expect(startupSettingsPanelSource).toContain("backendPort");
@@ -461,8 +468,9 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("开发者模式");
     expect(routeSource).toContain("当前状态");
     expect(routeSource).toContain("最近保存");
-    expect(routeSource).toContain("developerModeStateLabel");
-    expect(routeSource).toContain("developerModeCurrentState}: ${developerModeStateLabel}");
+    expect(developerModePanelSource).toContain("developerModeStateLabel");
+    expect(developerModePanelSource).toContain("developerModeCurrentState}: ${developerModeStateLabel}");
+    expect(developerModePanelSource).toContain("copy.developerModeSettingsReadonly");
     expect(routeSource).toContain("设置页只读展示，不能在工作台设置里改动");
     expect(launcherApiSource).toContain("developer-mode/cleanup/preview");
     expect(launcherApiSource).toContain("developer-mode/cleanup/apply");
