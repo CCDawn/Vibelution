@@ -1,4 +1,4 @@
-export const selfEvolutionTrackStyles: Record<string, string> = {
+export const selfEvolutionTrackStyles = {
   pageStack: "grid h-full max-h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-2.5 overflow-hidden max-[1180px]:overflow-visible",
   pageTabsRow: "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2.5 max-[1180px]:grid-cols-1",
   runActionBar:
@@ -192,4 +192,4 @@ export const selfEvolutionTrackStyles: Record<string, string> = {
   vitalFill: "h-full w-[var(--self-vital-progress)] rounded-[var(--radius-control)] bg-[var(--vui-gradient-route-soft)]",
   paginationGroup: "flex flex-wrap items-center gap-2",
   emptyState: "flex min-h-[120px] items-center justify-center text-center text-[var(--fg-secondary)]",
-};
+} as const;

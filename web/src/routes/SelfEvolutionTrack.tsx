@@ -108,6 +108,13 @@ type ConversationTaskSummary = {
 };
 
 type SelfEvolutionPetCompanionTone = "idle" | "active" | "paused" | "caution" | "error";
+const SELF_EVOLUTION_PET_COMPANION_TONE_CLASS: Record<SelfEvolutionPetCompanionTone, string> = {
+  idle: styles.petCompanionTone_idle,
+  active: styles.petCompanionTone_active,
+  paused: styles.petCompanionTone_paused,
+  caution: styles.petCompanionTone_caution,
+  error: styles.petCompanionTone_error,
+};
 type SelfEvolutionMode = "isolated_development" | "observation";
 const OBSERVATION_MODE_TOOL_COUNT = "0";
 const OBSERVATION_MODE_WORKTREE_STATE = "no";
@@ -1696,7 +1703,7 @@ export function SelfEvolutionTrack({
 
             {renderSelfEvolutionAgentCards()}
 
-            <section className={`${styles.petCompanionSurface} ${styles[`petCompanionTone_${petCompanionState.tone}`]}`}>
+            <section className={`${styles.petCompanionSurface} ${SELF_EVOLUTION_PET_COMPANION_TONE_CLASS[petCompanionState.tone]}`}>
               <div className={styles.sectionHeader}>
                 <div>
                   <p className={styles.eyebrow}>{t("petSelfCompanion")}</p>
