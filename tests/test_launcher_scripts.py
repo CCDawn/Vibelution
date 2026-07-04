@@ -1188,6 +1188,7 @@ def test_desktop_entry_python_bridge_does_not_start_when_port_is_already_healthy
     monkeypatch.setattr(bridge, "_launcher_control_healthy", lambda port: True)
     monkeypatch.setattr(bridge, "_start_launcher_backend", lambda python_exe, port: calls.append("backend") or 333)
     monkeypatch.setattr(bridge, "_open_launcher_window", lambda url: calls.append("browser") or 444)
+    monkeypatch.setattr(bridge, "_repair_existing_launcher_browser_window", lambda browser_pid: 0)
     monkeypatch.setattr(bridge, "_pid_alive", lambda pid: False)
 
     result = bridge.main(["--action", "launcher"])
