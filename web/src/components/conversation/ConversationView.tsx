@@ -84,6 +84,13 @@ import {
   type OperationStateLabels,
 } from "./conversationOperationState";
 import {
+  reActActionOperations,
+  reActGroupDurationLabel,
+  reActResultItems,
+  reActThoughtItems,
+  shouldExpandReActGroupByDefault,
+} from "./conversationReActOperationItems";
+import {
   buildAgentMessageTimelineItems,
   type AgentMessageTimelineItem,
 } from "./agentMessageTimeline";
@@ -1085,69 +1092,6 @@ export function ConversationView({
     return <CircleDot size={14} />;
   }
 
-  function reActGroupDurationLabel(group: AgentMessageReActOperationGroup) {
-    const durations = group.operations
-      .map((operation) => operation.durationSeconds)
-      .filter((duration): duration is number => typeof duration === "number" && Number.isFinite(duration) && duration > 0);
-    if (durations.length === 0) {
-      return "";
-    }
-    return formatDuration(durations.reduce((total, duration) => total + duration, 0));
-  }
-
-  function reActActionOperations(group: AgentMessageReActOperationGroup) {
-    return group.operations.filter((operation) => operation.kind === "tool");
-  }
-
-  function reActThoughtItems(group: AgentMessageReActOperationGroup) {
-    const seen = new Set<string>();
-    return group.operations
-      .filter((operation) => operation.kind === "thought")
-      .map((operation) => {
-        const value = String(operation.resultPreview || operation.summary || "").trim();
-        if (!value || seen.has(value)) {
-          return null;
-        }
-        seen.add(value);
-        return {
-          id: `${operation.id}-thought`,
-          value,
-        };
-      })
-      .filter((item): item is { id: string; value: string } => item !== null);
-  }
-
-  function reActResultItems(group: AgentMessageReActOperationGroup) {
-    return group.operations
-      .filter((operation) => operation.kind === "tool" || (operation.kind === "status" && Boolean(operation.error?.trim())))
-      .map((operation) => {
-        if (operation.error?.trim()) {
-          return {
-            id: `${operation.id}-error`,
-            label: operationLabel(operation),
-            value: operation.error.trim(),
-            tone: "failed",
-          };
-        }
-        const result = readableOperationResult(operation, operationDetailLabels.structuredResultFallback);
-        if (!result || result === operation.summary.trim() || operation.kind === "status") {
-          return null;
-        }
-        return {
-          id: `${operation.id}-result`,
-          label: operationLabel(operation),
-          value: result,
-          tone: "default",
-        };
-      })
-      .filter((item): item is { id: string; label: string; value: string; tone: string } => item !== null);
-  }
-
-  function shouldExpandReActGroupByDefault(group: AgentMessageReActOperationGroup) {
-    const tone = reActGroupTone(group);
-    return tone === "running" || tone === "failed" || tone === "pending";
-  }
-
   function hasOperationDetails(operation: AgentMessageOperation) {
     return Boolean(
       Object.keys(operation.arguments ?? {}).length
@@ -1641,7 +1585,10 @@ export function ConversationView({
   }
 
   function renderReActResultSection(messageId: string, group: AgentMessageReActOperationGroup) {
-    const results = reActResultItems(group);
+    const results = reActResultItems(group, {
+      operationLabel,
+      readableOperationResult: (operation) => readableOperationResult(operation, operationDetailLabels.structuredResultFallback),
+    });
     if (results.length === 0) {
       return null;
     }
@@ -1694,7 +1641,7 @@ export function ConversationView({
     const groupTitle = group.title || operationLabel(group.operations[0]);
     const headerItems = [
       operationStateLabel(tone, operationStateLabels),
-      reActGroupDurationLabel(group),
+      reActGroupDurationLabel(group, formatDuration),
     ].filter(Boolean);
     return (
       <section className={`${styles.reActOperationGroup} ${styles[`reActOperationGroup_${tone}`]}`}>
