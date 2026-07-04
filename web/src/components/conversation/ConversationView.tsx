@@ -1928,7 +1928,7 @@ export function ConversationView({
         </div>
         {isCodeLike ? (
           <pre className={styles.responseSegmentPre}>
-            <code>{segment.content}</code>
+            <code>{formattedCodeBlockContent(segment.content, segment.language)}</code>
           </pre>
         ) : (
           renderResponseText(segment.content, duplicateImageUrls)
@@ -2073,7 +2073,7 @@ export function ConversationView({
             block.open ? styles.streamingCodeBlock : "",
           ].filter(Boolean).join(" ")}
         >
-          <code>{block.content}</code>
+          <code>{formattedCodeBlockContent(block.content, block.language)}</code>
         </pre>
       );
     }
@@ -2808,4 +2808,22 @@ export function ConversationView({
       ) : null}
     </div>
   );
+}
+
+function formattedCodeBlockContent(content: string, language?: string) {
+  const raw = String(content ?? "");
+  if (String(language ?? "").trim().toLowerCase() !== "json") {
+    return raw;
+  }
+
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+    return raw;
+  }
+
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2);
+  } catch {
+    return raw;
+  }
 }
