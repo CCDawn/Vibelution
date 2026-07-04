@@ -635,6 +635,10 @@ function sourceCollectionStageProjectionCount(
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
+function sourceCollectionNonNegativeCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
 function sourceCollectionCoverageMetric(
   coverage: SourceCollectionCoverageSummary | null | undefined,
   lang: "zh" | "en",
@@ -3692,6 +3696,58 @@ type SourceCollectionDisplayState = {
   statusText: string;
   decisionText: string;
 };
+
+type SourceCollectionExcludedRecoveryInput = {
+  lang: "zh" | "en";
+  excludedCount: number;
+  missingCount: number;
+  importFailedCount: number;
+  importPendingRecordCount: number;
+};
+
+type SourceCollectionExcludedRecoveryState = {
+  blockedByExcludedSources: boolean;
+  excludedCount: number;
+  summary: string;
+  recoverText: string;
+  primaryActionText: string;
+  primaryActionTitle: string;
+};
+
+export function deriveSourceCollectionExcludedRecoveryState(
+  input: SourceCollectionExcludedRecoveryInput,
+): SourceCollectionExcludedRecoveryState {
+  const excludedCount = sourceCollectionNonNegativeCount(input.excludedCount);
+  const remainingGapCount = Math.max(
+    sourceCollectionNonNegativeCount(input.missingCount),
+    sourceCollectionNonNegativeCount(input.importFailedCount),
+    sourceCollectionNonNegativeCount(input.importPendingRecordCount),
+  );
+  const blockedByExcludedSources = excludedCount > 0 && remainingGapCount > 0 && excludedCount >= remainingGapCount;
+  if (!blockedByExcludedSources) {
+    return {
+      blockedByExcludedSources: false,
+      excludedCount,
+      summary: "",
+      recoverText: "",
+      primaryActionText: "",
+      primaryActionTitle: "",
+    };
+  }
+  const zh = input.lang === "zh";
+  return {
+    blockedByExcludedSources: true,
+    excludedCount,
+    summary: zh
+      ? `剩余 ${remainingGapCount} 条资料已被排除，不会再次导入候选；可进入 Agent 私聊查看排除原因，或返回资料寻找补充新来源。`
+      : `${remainingGapCount} remaining sources are already excluded, so they will not be imported again. Open the Agent chat to inspect the reasons or search for new sources.`,
+    recoverText: zh ? `已排除 ${excludedCount}` : `${excludedCount} excluded`,
+    primaryActionText: zh ? "查看排除原因" : "Inspect exclusions",
+    primaryActionTitle: zh
+      ? "剩余资料已被排除，打开资料提炼 Agent 私聊查看原因"
+      : "Remaining sources are excluded; open the source extraction Agent chat to inspect why",
+  };
+}
 
 export function deriveSourceCollectionDisplayState(input: SourceCollectionDisplayInput): SourceCollectionDisplayState {
   const lang = input.lang;
@@ -8081,7 +8137,7 @@ export function TeamsRoute({
       ? candidateProjection.currentCoverageSummary
       : candidateProjection?.latestTask?.coverageSummary;
     const recoveryClosure = candidateProjection?.latestTask?.closureSummary;
-    const recoveryNumber = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0);
+    const recoveryNumber = sourceCollectionNonNegativeCount;
     const sourceCollectionExtractionRecoveryInputCount = Math.max(
       recoveryNumber(recoveryCoverage?.total),
       recoveryNumber(candidateProjection?.counts?.input),
@@ -8139,7 +8195,33 @@ export function TeamsRoute({
       : sourceCollectionExtractionRecoveryInvalidCount > 0
         ? String(sourceCollectionExtractionRecoveryInvalidCount)
         : sourceCollectionStageRecoveryStatusLabel("extraction", lang);
-    const recoverySummary = sourceCollectionStageUserSummary(candidateProjection, lang)
+    const sourceCollectionExtractionExcludedRecoveryState = deriveSourceCollectionExcludedRecoveryState({
+      lang,
+      excludedCount: Math.max(
+        sourceCollectionExcludedSourceCount,
+        recoveryNumber(recoveryClosure?.excludedSourceCount),
+        recoveryNumber(candidateProjection?.counts?.excluded),
+      ),
+      missingCount: sourceCollectionExtractionRecoveryMissingCount,
+      importFailedCount: recoveryNumber(selectedTeamExtractSourceCollectionCandidatesResult?.failedCount),
+      importPendingRecordCount: Math.max(
+        sourceCollectionPendingCandidateImportCount,
+        recoveryNumber(selectedTeamExtractSourceCollectionCandidatesResult?.pendingRecordCount),
+      ),
+    });
+    const sourceCollectionRecoveryAgentActionText = sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
+      ? sourceCollectionExtractionExcludedRecoveryState.primaryActionText
+      : (lang === "zh" ? "继续 Agent 提炼" : "Continue Agent extraction");
+    const sourceCollectionRecoveryAgentActionTitle = sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
+      ? sourceCollectionExtractionExcludedRecoveryState.primaryActionTitle
+      : sourceCollectionActionDisabledTitle(
+        sourceCollectionStageActionReadinessFor("extraction"),
+        sourceCollectionRecoveryAgentActionText,
+      );
+    const sourceCollectionImportCandidateActionText = lang === "zh" ? "补导入候选" : "Import candidates";
+    const recoverySummary = sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
+      ? sourceCollectionExtractionExcludedRecoveryState.summary
+      : sourceCollectionStageUserSummary(candidateProjection, lang)
       || (lang === "zh"
         ? "本轮资料提炼没有完全闭环；先保留可用候选，再补齐失败记录。"
         : "This extraction run did not close cleanly; keep usable candidates and recover failed records.");
@@ -8150,7 +8232,11 @@ export function TeamsRoute({
         summary={recoverySummary}
         failedText={recoveryFailureText}
         salvageText={sourceCollectionExtractionRecoverySalvageText}
-        recoverText={sourceCollectionPrimaryDataLoading ? sourceCollectionLoadingText : recoveryMissingText}
+        recoverText={sourceCollectionPrimaryDataLoading
+          ? sourceCollectionLoadingText
+          : sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
+            ? sourceCollectionExtractionExcludedRecoveryState.recoverText
+            : recoveryMissingText}
         pendingReviewText={sourceCollectionRunPendingScreeningCountText}
         actions={(
           <>
@@ -8158,13 +8244,28 @@ export function TeamsRoute({
             type="button"
             density="compact"
             variant="primary"
-            icon={<RefreshCw size={13} />}
-            onPress={runSourceCollectionCandidateExtractionAction}
-            isDisabled={sourceCollectionCandidateExtractionActionReadiness.disabled}
-            title={sourceCollectionActionDisabledTitle(sourceCollectionCandidateExtractionActionReadiness, lang === "zh" ? "继续补全提炼" : "Continue extraction")}
+            icon={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources ? <MessageSquare size={13} /> : <Play size={13} />}
+            onPress={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
+              ? () => void openSourceCollectionStageAgentChat("extraction")
+              : () => void startSourceCollectionStageSessionTask("extraction")}
+            isDisabled={!sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources && sourceCollectionStageActionReadinessFor("extraction").disabled}
+            title={sourceCollectionRecoveryAgentActionTitle}
           >
-            {lang === "zh" ? "继续补全提炼" : "Continue extraction"}
+            {sourceCollectionRecoveryAgentActionText}
           </VButton>
+          {!sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources ? (
+            <VButton
+              type="button"
+              density="compact"
+              variant="secondary"
+              icon={<RefreshCw size={13} />}
+              onPress={runSourceCollectionCandidateExtractionAction}
+              isDisabled={sourceCollectionCandidateExtractionActionReadiness.disabled}
+              title={sourceCollectionActionDisabledTitle(sourceCollectionCandidateExtractionActionReadiness, sourceCollectionImportCandidateActionText)}
+            >
+              {sourceCollectionImportCandidateActionText}
+            </VButton>
+          ) : null}
           <VButton
             type="button"
             density="compact"
@@ -10427,6 +10528,11 @@ export function TeamsRoute({
     extractSourceCollectionCandidatesMutation.variables?.teamId === selectedTeam?.teamId && extractSourceCollectionCandidatesMutation.error instanceof Error
       ? extractSourceCollectionCandidatesMutation.error
       : null;
+  const selectedTeamExtractSourceCollectionCandidatesResult =
+    extractSourceCollectionCandidatesMutation.variables?.teamId === selectedTeam?.teamId
+    && extractSourceCollectionCandidatesMutation.data?.runId === selectedSourceCollectionRunEffectiveId
+      ? extractSourceCollectionCandidatesMutation.data
+      : null;
   const selectedTeamInitialSourceCollectionSearchResult = selectedTeamStartResearchStageResult?.sourceCollectionSearchExecution;
   const selectedSourceCollectionSearchExecutionResult =
     selectedTeamExecuteSourceCollectionSearchResult ?? selectedTeamInitialSourceCollectionSearchResult;
@@ -10649,6 +10755,12 @@ export function TeamsRoute({
   const sourceCollectionScreeningProjection = sourceCollectionExtractionProjection;
   const sourceCollectionGraphProjection = sourceCollectionStageCardById.get("relations") ?? null;
   const sourceCollectionMemoryProjection = sourceCollectionStageCardById.get("ingestion") ?? null;
+  const sourceCollectionExcludedSourceCount = Math.max(
+    sourceCollectionNonNegativeCount(sourceCollectionStageRound?.sourceCollectionStageCardSummary?.excludedSourceCount),
+    sourceCollectionNonNegativeCount(sourceCollectionSummaryCounts.excludedSourceCount),
+    sourceCollectionStageProjectionCount(sourceCollectionCandidateProjection, "excluded", 0),
+    sourceCollectionNonNegativeCount(sourceCollectionCandidateProjection?.latestTask?.closureSummary?.excludedSourceCount),
+  );
   const sourceCollectionStageSummaryCandidateCount = Number(
     sourceCollectionStageRound?.sourceCollectionStageCardSummary?.sourceCandidateCount
     ?? sourceCollectionSummaryCounts.sourceCandidateCount,
