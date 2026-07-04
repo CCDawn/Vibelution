@@ -3300,7 +3300,7 @@ describe("ConversationView edit resend affordance", () => {
 
   it("does not use an animated spinner for the answer-only process summary icon", () => {
     const start = conversationViewSource.indexOf("function processSummaryIcon");
-    const end = conversationViewSource.indexOf("function reActGroupDurationLabel", start);
+    const end = conversationViewSource.indexOf("function hasOperationDetails", start);
     const processSummaryIconSource = conversationViewSource.slice(start, end);
 
     expect(processSummaryIconSource).toContain("function processSummaryIcon");
