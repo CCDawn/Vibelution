@@ -1,7 +1,7 @@
 import { ExternalLink, Search } from "lucide-react";
 
 import { VButton } from "../components/vui";
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentRuntimeFocusPanel.styles";
 
 export type AgentRuntimeFocusPanelCopy = {
   runtimeFocus: string;
