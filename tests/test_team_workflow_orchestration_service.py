@@ -4004,6 +4004,101 @@ def test_source_collection_context_retry_missing_returns_only_uncovered_candidat
     assert candidates[2]["candidateId"] in submitted_messages[-1]
 
 
+def test_source_collection_extraction_resume_after_interrupted_reading_prioritizes_writeback(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "预测编码资料提炼",
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": agent["agentId"]},
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    for index in range(8):
+        team_workflow_orchestration_service.register_candidate_source(
+            team["teamId"],
+            {
+                "title": f"Predictive coding interrupted candidate {index}",
+                "sourceUrl": f"https://doi.org/10.0000/interrupted-resume-{index}",
+                "sourceKind": "paper",
+                "summary": "Predictive coding evidence already reviewed in the interrupted turn.",
+                "allowedForAnalysis": True,
+                "metadata": {"sourceCollectionRunId": run_id, "doi": f"10.0000/interrupted-resume-{index}"},
+                "createdByAgent": "content-extraction-agent",
+            },
+        )
+    submitted_messages: list[str] = []
+
+    def fake_submit_session_message(session_id, content, **kwargs):
+        submitted_messages.append(content)
+        return {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": f"turn-interrupted-resume-{len(submitted_messages)}",
+            "status": "running",
+        }
+
+    monkeypatch.setattr(session_service, "submit_session_message", fake_submit_session_message)
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
+    )
+    append_conversation_event(
+        tmp_path,
+        task["sessionId"],
+        task["turn"]["turnId"],
+        "turn_started",
+        status="running",
+        payload={
+            "metadata": {
+                "kind": "source_collection_stage_session_task",
+                "sourceCollectionStageTaskId": task["taskId"],
+            }
+        },
+    )
+    _append_stage_task_tool_trace(tmp_path, task["task"], complete=False)
+    append_conversation_event(
+        tmp_path,
+        task["sessionId"],
+        task["turn"]["turnId"],
+        "turn_interrupted",
+        status="interrupted",
+        payload={"reason": "turn_budget_exhausted", "summary": "已读完候选，尚未调用 writeback。"},
+    )
+    team_workflow_orchestration_service.get_research_stage_round_status(team["teamId"])
+
+    retry_task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {
+            "stageId": "extraction",
+            "agentId": agent["agentId"],
+            "agentRole": "source_extractor",
+            "idempotencyKey": "resume-after-interrupted-before-writeback",
+        },
+    )
+
+    assert retry_task["created"] is True
+    assert len(submitted_messages) == 2
+    retry_message = submitted_messages[-1]
+    assert "上一轮结果" in retry_message
+    assert "状态：已中断，需要继续" in retry_message
+    assert "优先直接调用 `source_collection_stage_writeback_tool`" in retry_message
+    assert '"candidate_limit": 80' in retry_message
+    assert "如果返回的 `candidatePage.hasMore=true`，必须继续按 `candidate_offset=candidatePage.nextOffset` 分页读取" not in retry_message
+
+
 def test_source_collection_context_minimal_strips_stale_candidate_artifacts(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)

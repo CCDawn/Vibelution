@@ -19277,6 +19277,49 @@ def _source_collection_stage_task_has_missing_coverage(task: dict[str, Any] | No
     return bool(_source_collection_count(coverage.get("missing")) or coverage.get("missingCandidateIds") or coverage.get("missingRecordIds"))
 
 
+def _source_collection_stage_task_needs_writeback_resume(task: dict[str, Any] | None) -> bool:
+    if not isinstance(task, dict) or not task:
+        return False
+    if _source_collection_stage_task_has_missing_coverage(task):
+        return False
+    task_status = _trim_text(task.get("status"), max_length=80)
+    if task_status not in {"interrupted", "stopped"}:
+        return False
+    writeback = task.get("writeback") if isinstance(task.get("writeback"), dict) else {}
+    result = task.get("result") if isinstance(task.get("result"), dict) else {}
+    closure = (
+        writeback.get("closureSummary")
+        if isinstance(writeback.get("closureSummary"), dict)
+        else result.get("closureSummary") if isinstance(result.get("closureSummary"), dict) else {}
+    )
+    if _trim_text(closure.get("artifactStatus"), max_length=120) != "interrupted_before_writeback":
+        return False
+    progress = (
+        closure.get("taskToolProgress")
+        if isinstance(closure.get("taskToolProgress"), dict)
+        else task.get("taskToolProgress") if isinstance(task.get("taskToolProgress"), dict) else {}
+    )
+    total = _source_collection_count(progress.get("total"))
+    completed = _source_collection_count(progress.get("completed"))
+    completed_ids = {
+        _trim_text(item, max_length=120)
+        for item in list(progress.get("completedIds") or [])
+        if _trim_text(item, max_length=120)
+    }
+    stage_id = _normalize_source_collection_stage_id(task.get("stageId"), default="")
+    writeback_checkpoint_by_stage = {
+        "finding": "write_candidate_leads",
+        "extraction": "write_extractions",
+        "relations": "write_candidate_graph",
+        "ingestion": "write_ingestion_decision",
+    }
+    writeback_checkpoint = writeback_checkpoint_by_stage.get(stage_id)
+    return bool(
+        writeback_checkpoint and writeback_checkpoint in completed_ids
+        or (total > 1 and completed >= total - 1)
+    )
+
+
 def _source_collection_stage_session_task_message(
     *,
     team: dict[str, Any],
@@ -19324,6 +19367,7 @@ def _source_collection_stage_session_task_message(
     )
     task_title = _source_collection_stage_task_title(stage_id)
     contract_json = json.dumps(writeback_contract, ensure_ascii=False, sort_keys=True)
+    writeback_resume = _source_collection_stage_task_needs_writeback_resume(previous_task)
     context_mode = "compact"
     if stage_id == "extraction" and not can_materialize_formal_knowledge:
         context_mode = "retry_missing" if _source_collection_stage_task_has_missing_coverage(previous_task) else "minimal"
@@ -19344,6 +19388,9 @@ def _source_collection_stage_session_task_message(
     }
     if can_materialize_formal_knowledge:
         context_tool_payload["candidate_limit"] = 80
+    if writeback_resume:
+        context_tool_payload["record_limit"] = 80
+        context_tool_payload["candidate_limit"] = 80
     context_tool_json = json.dumps(context_tool_payload, ensure_ascii=False, sort_keys=True)
     task_tool_payload = [
         {"id": item.get("id"), "description": item.get("description")}
@@ -19359,6 +19406,16 @@ def _source_collection_stage_session_task_message(
     ]
     previous_attempt_lines = _source_collection_stage_previous_attempt_lines(previous_task)
     previous_attempt_block = [*previous_attempt_lines, ""] if previous_attempt_lines else []
+    if writeback_resume:
+        pagination_lines = [
+            "- 本轮是写回恢复：如果当前会话上下文中已有完整结论和真实 ID，优先直接调用 `source_collection_stage_writeback_tool` 回写，不要先重读全部资料。",
+            "- 只有缺少真实 recordId/candidateId 或证据时，才调用上面的 `source_collection_context_tool` 做一次性 ID 核对；不要因为 `candidatePage.hasMore=true` 自动翻完整批次。",
+        ]
+    else:
+        pagination_lines = [
+            "- 如果返回的 `recordPage.hasMore=true`，必须继续按 `record_offset=recordPage.nextOffset` 分页读取，直到本阶段应处理原始资料都有真实 recordId 的结论。",
+            "- 如果返回的 `candidatePage.hasMore=true`，必须继续按 `candidate_offset=candidatePage.nextOffset` 分页读取，直到本阶段应处理候选都有真实 candidateId 的结论。",
+        ]
     return "\n".join(
         [
             f"## 资料搜集阶段任务：{task_title}",
@@ -19385,8 +19442,7 @@ def _source_collection_stage_session_task_message(
                 if context_mode == "retry_missing"
                 else "- 本轮默认使用最小上下文：先拿真实 ID、标题和 locator，必要时分页读取；不要把旧提炼摘要当作本轮证据。"
             ),
-            "- 如果返回的 `recordPage.hasMore=true`，必须继续按 `record_offset=recordPage.nextOffset` 分页读取，直到本阶段应处理原始资料都有真实 recordId 的结论。",
-            "- 如果返回的 `candidatePage.hasMore=true`，必须继续按 `candidate_offset=candidatePage.nextOffset` 分页读取，直到本阶段应处理候选都有真实 candidateId 的结论。",
+            *pagination_lines,
             "- 资料提炼阶段如果 `candidatePage.total=0`，输入就是原始 DataRecord：请用 `recordExtractions[]` 回写，并绑定完整 `recordId`；已有候选后优先用 `candidateExtractions[]` 绑定完整 `candidateId`，可直接在每项里写 `decision=keep/needs_more_info/exclude`。",
             "- 资料提炼阶段不需要额外提交一份 `candidateDecisions[]`；只有专门做资料审查/质检时才单独回写 `candidateDecisions[]`。",
             "- 可以分批调用 `source_collection_stage_writeback_tool`，系统会按真实 `candidateId` / `recordId` 累计上一批结果；不要因为 compact 返回未展开完整数组而重复提交同一大包。",
