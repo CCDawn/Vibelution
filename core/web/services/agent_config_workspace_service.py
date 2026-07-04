@@ -768,17 +768,6 @@ def _derive_health(
                 )
             )
         if _should_enforce_role_governance(agent, governance, tool_policy):
-            expected_prompt_template_id = str((governance or {}).get("promptTemplateId") or "").strip()
-            if expected_prompt_template_id and prompt_template_id and prompt_template_id != expected_prompt_template_id:
-                issues.append(
-                    _agent_issue(
-                        agent,
-                        "warning",
-                        "role_prompt_template_mismatch",
-                        "角色提示词与治理配置不一致",
-                        f"roleKey={agent.get('roleKey') or '-'} 应使用 {expected_prompt_template_id}，当前为 {prompt_template_id}。",
-                    )
-                )
             forbidden_allowed = sorted(set(allowed_tools).intersection(set((governance or {}).get("forbiddenTools") or [])))
             if forbidden_allowed:
                 issues.append(
@@ -1940,6 +1929,8 @@ def _agent_option(agent: dict[str, Any]) -> dict[str, Any]:
         "roleKey": str(agent.get("roleKey") or "").strip(),
         "llmBindings": normalize_agent_llm_bindings(agent.get("llmBindings")),
         "promptTemplateId": str(agent.get("promptTemplateId") or "").strip(),
+        "defaultPromptTemplateId": str(agent.get("defaultPromptTemplateId") or "").strip(),
+        "promptTemplateCustomized": bool(agent.get("promptTemplateCustomized")),
         "directSessionId": str(agent.get("directSessionId") or "").strip(),
         "metadata": dict(metadata),
     }

@@ -3377,6 +3377,8 @@ export type AgentInstance = {
   contextCompressionPolicy?: AgentContextCompressionPolicy;
   contextCompressionEffectivePolicy?: AgentContextCompressionEffectivePolicy;
   promptTemplateId: string;
+  defaultPromptTemplateId?: string;
+  promptTemplateCustomized?: boolean;
   directSessionId: string;
   conversationIndexVisibility?: ConversationIndexVisibility;
   conversationIndexKind?: ConversationIndexKind;

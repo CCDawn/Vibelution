@@ -645,7 +645,14 @@ def create_agent_instance(
         normalized_role_key = _normalize_role_key(role_key)
         normalized_prompt_template_id = _normalize_prompt_template_id(prompt_template_id)
         if not normalized_prompt_template_id:
-            normalized_prompt_template_id = _prompt_template_id_for_role(normalized_role_key)
+            normalized_prompt_template_id = _infer_agent_prompt_template_id(
+                {
+                    "primaryMode": normalized_primary_mode,
+                    "roleKey": normalized_role_key,
+                    "metadata": metadata_payload,
+                    "createdBy": str(created_by or "user").strip() or "user",
+                }
+            )
         normalized_context_compression_policy = normalize_agent_context_compression_policy(context_compression_policy)
         normalized_direct_session_id = str(direct_session_id or "").strip()
         _ensure_active_direct_session_available(
@@ -782,7 +789,10 @@ def ensure_agent_for_session(
             agent["roleKey"] = normalized_role_key
             changed = True
         normalized_prompt_template_id = _normalize_prompt_template_id(
-            prompt_template_id or agent.get("promptTemplateId") or _infer_agent_prompt_template_id(agent)
+            prompt_template_id
+            or agent.get("promptTemplateId")
+            or _agent_metadata_prompt_template_id(agent)
+            or _infer_agent_prompt_template_id(agent)
         )
         if str(agent.get("promptTemplateId") or "").strip() != normalized_prompt_template_id:
             agent["promptTemplateId"] = normalized_prompt_template_id
@@ -5378,7 +5388,6 @@ def _agent_avatar_match_key(agent: dict[str, Any]) -> str:
     parts = [
         agent.get("primaryMode"),
         agent.get("roleKey"),
-        agent.get("promptTemplateId"),
         metadata.get("functionalDisplayName"),
         metadata.get("researchAgentKey"),
         metadata.get("selfEvolutionRole"),
@@ -5412,6 +5421,7 @@ def _agent_to_api(
     agent_projection_edit = _projection_edit_contract("agent", agent_id)
     conversation_index_classification = agent_conversation_index_classification({**agent, "metadata": metadata})
     conversation_index_visibility = agent_conversation_index_visibility({**agent, "metadata": metadata})
+    prompt_binding = _agent_prompt_template_binding({**agent, "metadata": metadata})
     return {
         "agentId": agent_id,
         "agentCode": _normalize_agent_code(agent.get("agentCode"))
@@ -5429,9 +5439,9 @@ def _agent_to_api(
             hydration.context_compression_base_policy if hydration is not None else None,
             context_window_limit=_agent_context_window_limit(agent, hydration=hydration),
         ),
-        "promptTemplateId": _normalize_prompt_template_id(
-            agent.get("promptTemplateId") or _infer_agent_prompt_template_id(agent)
-        ),
+        "promptTemplateId": prompt_binding["promptTemplateId"],
+        "defaultPromptTemplateId": prompt_binding["defaultPromptTemplateId"],
+        "promptTemplateCustomized": prompt_binding["promptTemplateCustomized"],
         "directSessionId": str(agent.get("directSessionId") or "").strip(),
         "conversationIndexVisibility": conversation_index_visibility,
         "conversationIndexKind": str(conversation_index_classification.get("kind") or "").strip(),
@@ -5489,6 +5499,7 @@ def _agent_to_api_summary(agent: dict[str, Any]) -> dict[str, Any]:
     agent_projection_edit = _projection_edit_contract("agent", agent_id)
     conversation_index_classification = agent_conversation_index_classification({**agent, "metadata": metadata})
     conversation_index_visibility = agent_conversation_index_visibility({**agent, "metadata": metadata})
+    prompt_binding = _agent_prompt_template_binding({**agent, "metadata": metadata})
     return {
         "agentId": agent_id,
         "agentCode": _normalize_agent_code(agent.get("agentCode"))
@@ -5505,9 +5516,9 @@ def _agent_to_api_summary(agent: dict[str, Any]) -> dict[str, Any]:
             agent,
             context_window_limit=_agent_context_window_limit(agent),
         ),
-        "promptTemplateId": _normalize_prompt_template_id(
-            agent.get("promptTemplateId") or _infer_agent_prompt_template_id(agent)
-        ),
+        "promptTemplateId": prompt_binding["promptTemplateId"],
+        "defaultPromptTemplateId": prompt_binding["defaultPromptTemplateId"],
+        "promptTemplateCustomized": prompt_binding["promptTemplateCustomized"],
         "directSessionId": str(agent.get("directSessionId") or "").strip(),
         "conversationIndexVisibility": conversation_index_visibility,
         "conversationIndexKind": str(conversation_index_classification.get("kind") or "").strip(),
@@ -6381,19 +6392,39 @@ def _prompt_template_id_for_role(role_key: Any, *, metadata: dict[str, Any] | No
 def _should_repair_agent_prompt_template_id(current: str, expected: str) -> bool:
     normalized_current = _normalize_prompt_template_id(current)
     normalized_expected = _normalize_prompt_template_id(expected)
-    if not normalized_expected:
-        return False
-    return (
-        not normalized_current
-        or normalized_current == "prompt-chat-default"
+    return bool(normalized_expected and not normalized_current)
+
+
+def _agent_metadata_prompt_template_id(agent: dict[str, Any]) -> str:
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    return _normalize_prompt_template_id(metadata.get("promptTemplateId"))
+
+
+def _active_agent_prompt_template_id(agent: dict[str, Any]) -> str:
+    return _normalize_prompt_template_id(
+        agent.get("promptTemplateId")
+        or _agent_metadata_prompt_template_id(agent)
+        or _infer_agent_prompt_template_id(agent)
     )
+
+
+def _agent_prompt_template_binding(agent: dict[str, Any]) -> dict[str, Any]:
+    default_prompt_template_id = _infer_agent_prompt_template_id(agent)
+    active_prompt_template_id = _active_agent_prompt_template_id(agent)
+    customized = bool(
+        active_prompt_template_id
+        and default_prompt_template_id
+        and active_prompt_template_id != default_prompt_template_id
+    )
+    return {
+        "promptTemplateId": active_prompt_template_id,
+        "defaultPromptTemplateId": default_prompt_template_id,
+        "promptTemplateCustomized": customized,
+    }
 
 
 def _is_operation_chat_agent(agent: dict[str, Any]) -> bool:
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-    created_by = str(agent.get("createdBy") or metadata.get("createdBy") or "").strip()
-    if created_by == "session_repair":
-        return True
     if bool(metadata.get("operationChat")):
         return True
     if str(metadata.get("agentBoundary") or "").strip() == "operation_chat":
@@ -6433,9 +6464,6 @@ def _infer_agent_role_key(agent: dict[str, Any]) -> str:
 
 def _infer_agent_prompt_template_id(agent: dict[str, Any]) -> str:
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-    explicit = str(metadata.get("promptTemplateId") or "").strip()
-    if explicit:
-        return _normalize_prompt_template_id(explicit)
     role_prompt_template_id = _prompt_template_id_for_role(agent.get("roleKey"), metadata=metadata)
     if role_prompt_template_id:
         return role_prompt_template_id
