@@ -6,19 +6,15 @@ import {
   BellRing,
   Check,
   ChevronRight,
-  CircleDot,
   HeartHandshake,
   MessageCircleHeart,
   Plus,
   RotateCcw,
   Search,
-  ShieldAlert,
-  ShieldCheck,
   Sparkles,
   Square,
   Trash2,
   UsersRound,
-  X,
 } from "lucide-react";
 import {
   useCallback,
@@ -185,6 +181,8 @@ import {
 } from "./chat/ChatConversationComposerBridge";
 import { ChatFilePreviewPanel } from "./chat/ChatFilePreviewPanel";
 import { ChatFileWorkspaceTabs } from "./chat/ChatFileWorkspaceTabs";
+import { ChatRuntimeNoticeStack } from "./chat/ChatRuntimeNoticeStack";
+import { ChatToolApprovalDialog } from "./chat/ChatToolApprovalDialog";
 import { TokenCoreStatusPanel, type TokenCoreStatusMetric } from "./chat/TokenCoreStatusPanel";
 import styles from "./ChatCodingRoute.styles";
 
@@ -7221,81 +7219,18 @@ export function ChatCodingRoute() {
                     {sessionDetailErrorMessage}
                   </div>
                 ) : null}
-                {activeRuntimeNotices.length > 0 ? (
-                  <div className={styles.runtimeNoticeStack} role="status" aria-live="polite">
-                    {activeRuntimeNotices.map((notice) => (
-                      <div
-                        key={notice.id || `${notice.kind}-${notice.timestamp}-${notice.message}`}
-                        className={[
-                          styles.runtimeNotice,
-                          styles[`runtimeNotice_${notice.level || "info"}`],
-                        ].filter(Boolean).join(" ")}
-                      >
-                        <CircleDot size={13} />
-                        <div className={styles.runtimeNoticeBody}>
-                          <span className={styles.runtimeNoticeLabel}>
-                            {lang === "zh" ? "运行状态" : "Runtime"}
-                            {notice.source ? ` · ${notice.source}` : ""}
-                          </span>
-                          <span className={styles.runtimeNoticeMessage}>{notice.message}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
+                <ChatRuntimeNoticeStack lang={lang} notices={activeRuntimeNotices} />
                 {pendingToolApproval ? (
-                  <div className={styles.toolApprovalOverlay} role="presentation">
-                    <section
-                      className={styles.toolApprovalDialog}
-                      role="dialog"
-                      aria-modal="true"
-                      aria-label={lang === "zh" ? "工具权限审批" : "Tool permission approval"}
-                    >
-                      <div className={styles.toolApprovalIcon}>
-                        <ShieldAlert size={18} />
-                      </div>
-                      <div className={styles.toolApprovalBody}>
-                        <div className={styles.toolApprovalHeader}>
-                          <strong>{lang === "zh" ? "工具权限审批" : "Tool permission approval"}</strong>
-                          <span>{pendingToolApprovalRisk}</span>
-                        </div>
-                        <p>
-                          {lang === "zh"
-                            ? `当前助手请求启用${pendingToolApprovalLabels.length > 1 ? "这些能力" : "此能力"}，批准后仅在${pendingToolApprovalScope}生效。`
-                            : `The current agent requests tool access. Approval applies to ${pendingToolApprovalScope}.`}
-                        </p>
-                        <div className={styles.toolApprovalToolList} title={pendingToolApprovalRawTitle}>
-                          {pendingToolApprovalLabels.length
-                            ? pendingToolApprovalLabels.slice(0, 4).map((item) => (
-                              <span key={item.id}>{item.label}</span>
-                            ))
-                            : <span>{lang === "zh" ? "工具策略变更" : "Tool policy change"}</span>}
-                          {pendingToolApprovalLabels.length > 4 ? (
-                            <span>{lang === "zh" ? `另 ${pendingToolApprovalLabels.length - 4} 项` : `+${pendingToolApprovalLabels.length - 4}`}</span>
-                          ) : null}
-                        </div>
-                      </div>
-                      <div className={styles.toolApprovalActions}>
-                        <VButton
-                          type="button"
-                          onClick={() => resolveToolApprovalMutation.mutate({ request: pendingToolApproval, decision: "reject" })}
-                          isDisabled={pendingToolApprovalPending}
-                        >
-                          <X size={15} />
-                          <span>{lang === "zh" ? "拒绝" : "Reject"}</span>
-                        </VButton>
-                        <VButton
-                          type="button"
-                          className={styles.toolApprovalAllow}
-                          onClick={() => resolveToolApprovalMutation.mutate({ request: pendingToolApproval, decision: "approve" })}
-                          isDisabled={pendingToolApprovalPending}
-                        >
-                          <ShieldCheck size={15} />
-                          <span>{pendingToolApprovalPending ? (lang === "zh" ? "处理中" : "Resolving") : (lang === "zh" ? "允许" : "Allow")}</span>
-                        </VButton>
-                      </div>
-                    </section>
-                  </div>
+                  <ChatToolApprovalDialog
+                    lang={lang}
+                    pending={pendingToolApprovalPending}
+                    rawTitle={pendingToolApprovalRawTitle}
+                    riskLabel={pendingToolApprovalRisk}
+                    scopeLabel={pendingToolApprovalScope}
+                    toolLabels={pendingToolApprovalLabels}
+                    onApprove={() => resolveToolApprovalMutation.mutate({ request: pendingToolApproval, decision: "approve" })}
+                    onReject={() => resolveToolApprovalMutation.mutate({ request: pendingToolApproval, decision: "reject" })}
+                  />
                 ) : null}
                 <ChatConversationComposerBridge
                   sessionId={activeSessionId ?? detail.id}
