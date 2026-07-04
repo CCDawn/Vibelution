@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import routeSource from "./ConfigRoute.tsx?raw";
+import logHelperCenterPanelSource from "./ConfigLogHelperCenterPanel.tsx?raw";
 import stylesSource from "./ConfigRoute.styles.ts?raw";
 
 describe("ConfigRoute layout contract", () => {
@@ -96,9 +97,11 @@ describe("ConfigRoute layout contract", () => {
 
   it("routes cleanup diagnostics to Launcher maintenance instead of Web Reset", () => {
     expect(routeSource).toContain("healthOpenLauncher");
-    expect(routeSource).toContain('href="/launcher"');
+    expect(routeSource).toContain("<ConfigLogHelperCenterPanel");
+    expect(logHelperCenterPanelSource).toContain('href="/launcher"');
     expect(routeSource).toContain("queryKeys.launcherMaintenanceSummary()");
     expect(routeSource).not.toContain("healthOpenReset");
+    expect(logHelperCenterPanelSource).not.toContain("healthOpenReset");
     expect(routeSource).not.toContain("queryKeys.resetSummary()");
     expect(routeSource).not.toContain("`/reset?item=");
     expect(routeSource).not.toContain('href={`/reset?item=');

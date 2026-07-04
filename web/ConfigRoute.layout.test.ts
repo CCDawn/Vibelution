@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import configRouteSource from "./src/routes/ConfigRoute.tsx?raw";
 
-const configRouteStylesSource = readFileSync(new URL("./src/routes/ConfigRoute.module.css", import.meta.url), "utf-8");
+const configRouteStylesSource = readFileSync(new URL("./src/routes/ConfigRoute.styles.ts", import.meta.url), "utf-8");
 
 describe("ConfigRoute layout density contract", () => {
   it("uses separate compact view and edit field card classes", () => {
@@ -12,17 +12,19 @@ describe("ConfigRoute layout density contract", () => {
   });
 
   it("keeps read-only config fields in dense label-value rows on wide screens", () => {
-    expect(configRouteStylesSource).toContain(".hashGrid");
-    expect(configRouteStylesSource).toContain(".treeGrid");
-    expect(configRouteStylesSource).toContain("display: grid");
-    expect(configRouteStylesSource).toContain("gap: 6px");
-    expect(configRouteStylesSource).toContain(".treeFieldCardView");
+    expect(configRouteStylesSource).toContain("hashGrid:");
+    expect(configRouteStylesSource).toContain("treeGrid:");
+    expect(configRouteStylesSource).toContain("[display:grid]");
+    expect(configRouteStylesSource).toContain("[gap:6px]");
+    expect(configRouteStylesSource).toContain("treeFieldCardView:");
     expect(configRouteSource).toContain("styles.treeFieldCardView");
   });
 
   it("does not collapse the config tree to one column until phone width", () => {
     expect(configRouteSource).toContain("styles.treeGrid");
-    expect(configRouteStylesSource).toContain("grid-template-columns: repeat(auto-fit, minmax(220px, 1fr))");
+    expect(configRouteStylesSource).toContain("[grid-template-columns:repeat(auto-fit,minmax(260px,1fr))]");
+    expect(configRouteStylesSource).toContain("max-[1120px]:[grid-template-columns:repeat(auto-fit,minmax(210px,1fr))]");
+    expect(configRouteStylesSource).toContain("max-[720px]:[grid-template-columns:1fr]");
     expect(configRouteStylesSource).not.toContain("ConfigRoute.legacy.css");
   });
 });
@@ -227,7 +229,7 @@ describe("ConfigRoute content experience contract", () => {
 
     expect(configRouteSource).toContain("styles.leaveGuardOverlay");
     expect(configRouteSource).toContain("styles.leaveGuardPanel");
-    expect(configRouteStylesSource).toContain(".leaveGuardOverlay");
-    expect(configRouteStylesSource).toContain(".leaveGuardPanel");
+    expect(configRouteStylesSource).toContain("leaveGuardOverlay:");
+    expect(configRouteStylesSource).toContain("leaveGuardPanel:");
   });
 });
