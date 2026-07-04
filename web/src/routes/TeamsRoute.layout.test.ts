@@ -673,6 +673,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("completionGatePassed");
     expect(routeSource).toContain("sourceCollectionTaskToolProgressMetric");
     expect(routeSource).toContain("检查项");
+    expect(routeSource).toContain("sourceCollectionStageLaunchActive");
+    expect(routeSource).toContain("sourceCollectionStageLaunchSummary");
+    expect(routeSource).toContain("Agent 已启动，正在进入私聊");
+    expect(routeSource).toContain("等待 Agent 回写");
+    expect(routeSource).toContain("sourceCollectionStageDisplayState");
+    expect(routeSource).toContain("sourceCollectionStageInterruptedSummary");
+    expect(routeSource).toContain("剩余检查项");
     expect(routeSource).toContain('sourceCollectionStageModules.find((module) => module.state === "failed")');
     expect(routeSource).not.toContain("仍需完成检查项或生成本阶段产物");
     expect(routeSource).toContain("invalidRecordIds");
@@ -1552,6 +1559,18 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStylesSource).toContain(".canvasLayoutModeSwitch");
   });
 
+  it("prioritizes active stage task launch and interruption status over stale summaries", () => {
+    const launchStateIndex = routeSource.indexOf("function sourceCollectionStageDisplayState");
+    const extractionModuleStateIndex = routeSource.indexOf('state: sourceCollectionStageDisplayState("extraction"');
+    expect(launchStateIndex).toBeGreaterThan(0);
+    expect(extractionModuleStateIndex).toBeGreaterThan(launchStateIndex);
+
+    const interruptedSummaryIndex = routeSource.indexOf("function sourceCollectionStageInterruptedSummary");
+    const staleUserSummaryIndex = routeSource.indexOf('if (lang === "zh" && projection.userSummary)');
+    expect(interruptedSummaryIndex).toBeGreaterThan(0);
+    expect(staleUserSummaryIndex).toBeGreaterThan(interruptedSummaryIndex);
+  });
+
   it("keeps restored TeamsRoute grids from the CSS module migration", () => {
     const restoredGridExpectations: Array<[string, string]> = [
       [routeStyles.aiSearchRunCards, "grid-cols-[repeat(auto-fit,minmax(220px,1fr))]"],
@@ -1699,12 +1718,15 @@ describe("TeamsRoute layout contract", () => {
       stageModuleSource.indexOf('id: "relations"'),
     );
     expect(extractionModuleSource).toContain("sourceCollectionExtractionDisplayLoading");
-    expect(extractionModuleSource).toContain("summary: sourceCollectionExtractionDisplayLoading");
-    expect(extractionModuleSource.indexOf("summary: sourceCollectionExtractionDisplayLoading")).toBeLessThan(
+    expect(extractionModuleSource).toContain('summary: sourceCollectionStageLaunchActive("extraction")');
+    expect(extractionModuleSource.indexOf('summary: sourceCollectionStageLaunchActive("extraction")')).toBeLessThan(
+      extractionModuleSource.indexOf("sourceCollectionExtractionDisplayLoading"),
+    );
+    expect(extractionModuleSource.indexOf("sourceCollectionExtractionDisplayLoading")).toBeLessThan(
       extractionModuleSource.indexOf("sourceCollectionStageUserSummary(sourceCollectionExtractionProjection, lang)"),
     );
-    expect(extractionModuleSource).toContain("state: sourceCollectionExtractionDisplayState");
-    expect(extractionModuleSource).toContain("status: sourceCollectionExtractionDisplayLoading ? sourceCollectionLoadingText");
+    expect(extractionModuleSource).toContain('state: sourceCollectionStageDisplayState("extraction", sourceCollectionExtractionDisplayState)');
+    expect(extractionModuleSource).toContain('status: sourceCollectionStageDisplayStatus("extraction", sourceCollectionExtractionDisplayLoading ? sourceCollectionLoadingText');
   });
 
   it("keeps the source collection workspace in a simple status-board mode", () => {
