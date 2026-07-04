@@ -67,8 +67,8 @@ import {
   shouldIgnoreActiveRunSnapshot,
 } from "./evolutionLiveRun";
 import { buildSupervisedRunRecordDisplay, supervisedDecisionLabel } from "./supervisedRunRecordLabel";
-import { buildSupervisedRunControlSummary } from "./supervisedRunSummary";
-import { buildSupervisedCaseTraceItems, type SupervisedCaseTraceItem } from "./supervisedCaseTrace";
+import { buildSupervisedRunControlSummary, type SupervisedRunControlSummary } from "./supervisedRunSummary";
+import { buildSupervisedCaseTraceItems, type SupervisedCaseTraceItem, type SupervisedCaseTraceTone } from "./supervisedCaseTrace";
 import { createEvolutionWorkspaceCache } from "./evolutionWorkspaceCache";
 import { modelDisplayLabel } from "./agentDisplay";
 import {
@@ -98,6 +98,20 @@ type SupervisedRouteView = "live" | "runs" | "library";
 type EvolutionRouteProps = {
   forcedTrack?: EvolutionRouteTrack;
   forcedView?: SupervisedRouteView;
+};
+const CASE_TRACE_TURN_CLASS: Record<SupervisedCaseTraceTone, string> = {
+  input: styles.caseTraceTurn_input,
+  thought: styles.caseTraceTurn_thought,
+  tool: styles.caseTraceTurn_tool,
+  assistant: styles.caseTraceTurn_assistant,
+  error: styles.caseTraceTurn_error,
+};
+const RUN_SUMMARY_TONE_CLASS: Record<SupervisedRunControlSummary["tone"], string> = {
+  running: styles.runSummaryTone_running,
+  success: styles.runSummaryTone_success,
+  warning: styles.runSummaryTone_warning,
+  danger: styles.runSummaryTone_danger,
+  idle: styles.runSummaryTone_idle,
 };
 const SELF_OVERVIEW_REFETCH_INTERVAL_MS = 12_000;
 const SELF_OVERVIEW_STALE_TIME_MS = 10_000;
@@ -1344,7 +1358,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 return (
                   <article
                     key={entry.key}
-                    className={`${styles.caseTraceTurn} ${styles[`caseTraceTurn_${entry.tone}`]}`}
+                    className={`${styles.caseTraceTurn} ${CASE_TRACE_TURN_CLASS[entry.tone]}`}
                   >
                     <VNativeButton
                       type="button"
@@ -3288,7 +3302,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   ) : null}
 
                   <div className={styles.monitorSummary}>
-                    <div className={`${styles.liveSummaryRow} ${monitoredControlSummary ? styles[`runSummaryTone_${monitoredControlSummary.tone}`] : ""}`}>
+                    <div className={`${styles.liveSummaryRow} ${monitoredControlSummary ? RUN_SUMMARY_TONE_CLASS[monitoredControlSummary.tone] : ""}`}>
                       <span className={styles.statusIcon}>{statusIcon(monitoredRun.status, monitoredRun.decision)}</span>
                       <div className={styles.runControlSummaryBody}>
                         <p className={styles.heroSummary}>
