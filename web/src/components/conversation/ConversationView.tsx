@@ -73,7 +73,8 @@ import {
   type AgentMessageSectionState,
 } from "./agentMessageSections";
 import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
-import { projectStreamingMarkdownBlocks, type MarkdownBlock } from "./streamingMarkdown";
+import { parseConversationMarkdownBlocks, type MarkdownBlock } from "./conversationMarkdownBlocks";
+import { projectStreamingMarkdownBlocks } from "./streamingMarkdown";
 import { safeConversationMarkdownUrl } from "./conversationMarkdownUrl";
 import {
   addComparableConversationImageUrl,
@@ -899,7 +900,7 @@ export function ConversationView({
       markdownBlockCacheRef.current.set(key, cached);
       return cached;
     }
-    const parsed = parseMarkdownBlocks(key);
+    const parsed = parseConversationMarkdownBlocks(key);
     markdownBlockCacheRef.current.set(key, parsed);
     trimOldestCacheEntries(markdownBlockCacheRef.current, MARKDOWN_PARSE_CACHE_LIMIT);
     return parsed;
@@ -2807,129 +2808,6 @@ export function ConversationView({
 
   function isNonNullNode<T>(node: T | null): node is T {
     return node !== null;
-  }
-
-  function parseMarkdownBlocks(content: string): MarkdownBlock[] {
-    const lines = String(content ?? "").replace(/\r\n/g, "\n").split("\n");
-    const blocks: MarkdownBlock[] = [];
-    let paragraphLines: string[] = [];
-
-    function flushParagraph() {
-      const paragraph = paragraphLines.join("\n").trim();
-      if (paragraph) {
-        blocks.push({ type: "paragraph", content: paragraph });
-      }
-      paragraphLines = [];
-    }
-
-    for (let index = 0; index < lines.length; index += 1) {
-      const line = lines[index];
-      const trimmed = line.trim();
-      if (!trimmed) {
-        flushParagraph();
-        continue;
-      }
-
-      const image = trimmed.match(/^!\[([^\]]*)\]\(([^)\s]+)\)$/);
-      if (image) {
-        flushParagraph();
-        blocks.push({ type: "image", alt: image[1].trim(), url: image[2].trim() });
-        continue;
-      }
-
-      const heading = trimmed.match(/^(#{1,4})\s+(.+?)\s*#*$/);
-      if (heading) {
-        flushParagraph();
-        blocks.push({
-          type: "heading",
-          level: Math.min(4, heading[1].length) as 1 | 2 | 3 | 4,
-          content: heading[2].trim(),
-        });
-        continue;
-      }
-
-      if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
-        flushParagraph();
-        blocks.push({ type: "divider" });
-        continue;
-      }
-
-      if (isMarkdownTableHeader(lines, index)) {
-        flushParagraph();
-        const headers = parseMarkdownTableRow(lines[index]);
-        const rows: string[][] = [];
-        index += 2;
-        for (; index < lines.length; index += 1) {
-          if (!isMarkdownTableRow(lines[index])) {
-            index -= 1;
-            break;
-          }
-          rows.push(parseMarkdownTableRow(lines[index]));
-        }
-        blocks.push({ type: "table", headers, rows });
-        continue;
-      }
-
-      const unorderedMatch = trimmed.match(/^[-*]\s+(.+)$/);
-      if (unorderedMatch) {
-        flushParagraph();
-        const items = [unorderedMatch[1].trim()];
-        for (let nextIndex = index + 1; nextIndex < lines.length; nextIndex += 1) {
-          const nextMatch = lines[nextIndex].trim().match(/^[-*]\s+(.+)$/);
-          if (!nextMatch) {
-            break;
-          }
-          items.push(nextMatch[1].trim());
-          index = nextIndex;
-        }
-        blocks.push({ type: "unorderedList", items });
-        continue;
-      }
-
-      const orderedMatch = trimmed.match(/^\d+[.)]\s+(.+)$/);
-      if (orderedMatch) {
-        flushParagraph();
-        const items = [orderedMatch[1].trim()];
-        for (let nextIndex = index + 1; nextIndex < lines.length; nextIndex += 1) {
-          const nextMatch = lines[nextIndex].trim().match(/^\d+[.)]\s+(.+)$/);
-          if (!nextMatch) {
-            break;
-          }
-          items.push(nextMatch[1].trim());
-          index = nextIndex;
-        }
-        blocks.push({ type: "orderedList", items });
-        continue;
-      }
-
-      paragraphLines.push(line);
-    }
-
-    flushParagraph();
-    return blocks;
-  }
-
-  function isMarkdownTableHeader(lines: string[], index: number) {
-    return isMarkdownTableRow(lines[index]) && isMarkdownTableSeparator(lines[index + 1] ?? "");
-  }
-
-  function isMarkdownTableRow(line: string) {
-    const trimmed = String(line ?? "").trim();
-    return trimmed.startsWith("|") && trimmed.endsWith("|") && trimmed.includes("|", 1);
-  }
-
-  function isMarkdownTableSeparator(line: string) {
-    const cells = parseMarkdownTableRow(line);
-    return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
-  }
-
-  function parseMarkdownTableRow(line: string) {
-    return String(line ?? "")
-      .trim()
-      .replace(/^\|/, "")
-      .replace(/\|$/, "")
-      .split("|")
-      .map((cell) => cell.trim());
   }
 
   return (
