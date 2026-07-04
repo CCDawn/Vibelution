@@ -3,7 +3,7 @@ import { relative, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import appShellStyles from "../../app/AppShell.styles";
+import utilityMenuStyles from "../../app/AppShellUtilityMenu.styles";
 import agentStyles from "../../routes/AgentsRoute.styles";
 import evolutionStyles from "../../routes/EvolutionRoute.styles";
 import petStyles from "../../routes/PetRoute.styles";
@@ -296,11 +296,11 @@ describe("VUI batch migration", () => {
     expect(source).not.toContain(".module.css");
   });
 
-  it("app/AppShell.styles.ts keeps VUI list button grid on internal slots", () => {
-    expect(appShellStyles.utilityFileButton).toContain("[&_[data-slot=vui-button-content]]:w-full");
-    expect(appShellStyles.utilityFileButton).toContain("[&_[data-slot=vui-button-label]]:grid");
-    expect(appShellStyles.utilityFileButton).toContain("grid-cols-[minmax(0,1fr)_auto]");
-    expect(appShellStyles.utilityFileButtonActive).toContain("[&_[data-slot=vui-button-label]]:grid");
+  it("app/AppShellUtilityMenu.styles.ts keeps VUI list button grid on internal slots", () => {
+    expect(utilityMenuStyles.utilityFileButton).toContain("[&_[data-slot=vui-button-content]]:w-full");
+    expect(utilityMenuStyles.utilityFileButton).toContain("[&_[data-slot=vui-button-label]]:grid");
+    expect(utilityMenuStyles.utilityFileButton).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(utilityMenuStyles.utilityFileButtonActive).toContain("[&_[data-slot=vui-button-label]]:grid");
   });
 
   it("routes/SkillsRoute.tsx keeps VUI list button grid on internal slots", () => {
