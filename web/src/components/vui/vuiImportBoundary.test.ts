@@ -117,7 +117,6 @@ const productSharedParentStyleConsumers = [
   "routes/LauncherStartupSettingsPanel.tsx",
   "routes/RuntimeScenesPane.tsx",
   "routes/SessionContextMenu.tsx",
-  "routes/ToolsRouteAgentScopePanel.tsx",
   "routes/TeamWorkflowGraphView.tsx",
   "routes/chat/CliAgentRunTerminalPanel.tsx",
 ] as const;
