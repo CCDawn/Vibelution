@@ -9,16 +9,23 @@ import teamSourceCollectionConversationPanelSource from "./TeamSourceCollectionC
 import teamSourceCollectionControlsPanelSource from "./TeamSourceCollectionControlsPanel.tsx?raw";
 import teamSourceCollectionExtractionRecoveryPanelSource from "./TeamSourceCollectionExtractionRecoveryPanel.tsx?raw";
 import teamSourceCollectionFindingDetailsPanelSource from "./TeamSourceCollectionFindingDetailsPanel.tsx?raw";
+import teamSourceCollectionFindingDetailsPanelStyles from "./TeamSourceCollectionFindingDetailsPanel.styles";
 import teamSourceCollectionGraphPanelSource from "./TeamSourceCollectionGraphPanel.tsx?raw";
 import teamSourceCollectionManualWritebackPanelSource from "./TeamSourceCollectionManualWritebackPanel.tsx?raw";
+import teamSourceCollectionManualWritebackPanelStyles from "./TeamSourceCollectionManualWritebackPanel.styles";
 import teamSourceCollectionMemoryPanelSource from "./TeamSourceCollectionMemoryPanel.tsx?raw";
+import teamSourceCollectionOverviewPanelSource from "./TeamSourceCollectionOverviewPanel.tsx?raw";
+import teamSourceCollectionOverviewPanelStyles from "./TeamSourceCollectionOverviewPanel.styles";
+import teamSourceCollectionOverviewPanelStylesSource from "./TeamSourceCollectionOverviewPanel.styles.ts?raw";
 import teamSourceCollectionRunSettingsPanelSource from "./TeamSourceCollectionRunSettingsPanel.tsx?raw";
+import teamSourceCollectionRunSettingsPanelStyles from "./TeamSourceCollectionRunSettingsPanel.styles";
 import teamSourceCollectionScreeningPanelSource from "./TeamSourceCollectionScreeningPanel.tsx?raw";
 import teamSourceCollectionStageAgentsPanelSource from "./TeamSourceCollectionStageAgentsPanel.tsx?raw";
 import teamSourceCollectionRunSwitcherPanelSource from "./TeamSourceCollectionRunSwitcherPanel.tsx?raw";
 import teamSourceCollectionSourceDetailPanelSource from "./TeamSourceCollectionSourceDetailPanel.tsx?raw";
 import teamSourceCollectionStandaloneStagePanelSource from "./TeamSourceCollectionStandaloneStagePanel.tsx?raw";
 import teamSourceCollectionStorageActionsPanelSource from "./TeamSourceCollectionStorageActionsPanel.tsx?raw";
+import teamSourceCollectionStorageActionsPanelStyles from "./TeamSourceCollectionStorageActionsPanel.styles";
 import teamWorkflowCandidatePreviewPanelSource from "./TeamWorkflowCandidatePreviewPanel.tsx?raw";
 import teamWorkflowCandidatePreviewPanelStylesSource from "./TeamWorkflowCandidatePreviewPanel.styles.ts?raw";
 import teamWorkflowStatusPanelsSource from "./TeamWorkflowStatusPanels.tsx?raw";
@@ -930,7 +937,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("return \"knowledge_collection\"");
     expect(routeSource).toContain('id="research-workflow-overview"');
     expect(routeSource).toContain('knowledge_collection: "research-workflow-knowledge-collection"');
-    expect(routeSource).toContain('id="research-workflow-source-collection"');
+    expect(teamSourceCollectionOverviewPanelSource).toContain('id="research-workflow-source-collection"');
     expect(routeSource).toContain('id="research-organization-canvas"');
     expect(routeSource).toContain('researchWorkspaceView === "canvas"');
     expect(routeSource).toContain('const researchCanvasReadOnly = researchWorkflowTeamSelected && researchWorkspaceView === "canvas"');
@@ -1190,17 +1197,24 @@ describe("TeamsRoute layout contract", () => {
     expect(teamWorkflowStatusPanelsSource).toContain("模型调用证据链");
     expect(teamWorkflowStatusPanelsSource).toContain("证据登记，不是正式知识");
     expect(teamWorkflowStatusPanelsSource).toContain("CandidateStore、Team Knowledge 和正式同步边界");
+    expect(routeSource).toContain("TeamSourceCollectionOverviewPanel");
+    expect(teamSourceCollectionOverviewPanelSource).toContain("workflowSourceCollectionPanel");
     expect(routeSource).toContain("资料搜索执行");
+    expect(routeSource).toContain("sourceCollectionOverviewSummary");
+    expect(routeSource).toContain("sourceCollectionOverviewStats");
+    expect(routeSource).toContain("sourceCollectionOverviewPlan");
     expect(routeSource).toContain("TeamSourceCollectionRunSettingsPanel");
     expect(routeSource).toContain("onDraftChange={(patch) => setSourceCollectionDraft");
     expect(teamSourceCollectionRunSettingsPanelSource).toContain("启动搜集批次");
     expect(teamSourceCollectionRunSettingsPanelSource).toContain("workflowSourceCollectionForm");
+    expect(teamSourceCollectionRunSettingsPanelSource).toContain("wrapInDetails");
     expect(routeSource).toContain("TeamSourceCollectionFindingDetailsPanel");
     expect(routeSource).toContain("sourceCollectionFindingRunOptions");
     expect(routeSource).toContain("sourceCollectionFindingAssignments");
     expect(routeSource).toContain("storageActions={renderSourceCollectionStorageActions()}");
     expect(teamSourceCollectionFindingDetailsPanelSource).toContain("最近批次");
     expect(teamSourceCollectionFindingDetailsPanelSource).toContain("查询与分工详情");
+    expect(teamSourceCollectionFindingDetailsPanelSource).toContain("assignmentEmptyMessage");
     expect(routeSource).toContain("手工回写一条搜集结果");
     expect(teamSourceCollectionManualWritebackPanelSource).toContain("回写并导入候选");
     expect(teamSourceCollectionManualWritebackPanelSource).toContain("原始位置");
@@ -1274,17 +1288,17 @@ describe("TeamsRoute layout contract", () => {
     expect(teamWorkflowStatusPanelStyles.workflowSourceQualityQueue).toBeTypeOf("string");
     expect(teamWorkflowStatusPanelStyles.workflowPaperNoteChunkPanel).toBeTypeOf("string");
     expect(teamWorkflowStatusPanelStyles.workflowPaperNoteChunkStats).toBeTypeOf("string");
-    expect(routeStyles.workflowSourceCollectionStorageActions).toBeTypeOf("string");
-    expect(routeStyles.workflowSourceCollectionStorageButtons).toBeTypeOf("string");
+    expect(teamSourceCollectionStorageActionsPanelStyles.workflowSourceCollectionStorageActions).toBeTypeOf("string");
+    expect(teamSourceCollectionStorageActionsPanelStyles.workflowSourceCollectionStorageButtons).toBeTypeOf("string");
     expect(teamWorkflowStatusPanelStyles.workflowPaperNoteChunkPlans).toBeTypeOf("string");
     expect(teamWorkflowStatusPanelStyles.workflowModelEvidencePanel).toBeTypeOf("string");
     expect(teamWorkflowStatusPanelStyles.workflowModelEvidenceStats).toBeTypeOf("string");
     expect(teamWorkflowStatusPanelStyles.workflowModelEvidenceCoverage).toBeTypeOf("string");
-    expect(routeStyles.workflowSourceCollectionPanel).toBeTypeOf("string");
-    expect(routeStyles.workflowSourceCollectionForm).toBeTypeOf("string");
-    expect(routeStyles.workflowSourceCollectionRuns).toBeTypeOf("string");
-    expect(routeStyles.workflowSourceCollectionAssignments).toBeTypeOf("string");
-    expect(routeStyles.workflowSourceCollectionOutputForm).toBeTypeOf("string");
+    expect(teamSourceCollectionOverviewPanelStyles.workflowSourceCollectionPanel).toBeTypeOf("string");
+    expect(teamSourceCollectionRunSettingsPanelStyles.workflowSourceCollectionForm).toBeTypeOf("string");
+    expect(teamSourceCollectionFindingDetailsPanelStyles.workflowSourceCollectionRuns).toBeTypeOf("string");
+    expect(teamSourceCollectionFindingDetailsPanelStyles.workflowSourceCollectionAssignments).toBeTypeOf("string");
+    expect(teamSourceCollectionManualWritebackPanelStyles.workflowSourceCollectionOutputForm).toBeTypeOf("string");
     expect(routeStyles.workflowSuccess).toBeTypeOf("string");
     expect(routeStyles.workflowError).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionPage).toBeTypeOf("string");
@@ -1455,9 +1469,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionPagination).toContain("select-none");
     expect(routeStyles.sourceCollectionPagination).toContain("whitespace-nowrap");
     expect(routeStyles.sourceCollectionPagination).toContain("[writing-mode:horizontal-tb]");
-    expect(routeStyles.workflowSourceCollectionStorageActions).toContain("grid-cols-[minmax(0,1fr)_auto]");
-    expect(routeStyles.workflowSourceCollectionStorageButtons).toContain("justify-end");
-    expect(routeStyles.workflowSourceCollectionStorageDetails).toContain("col-span-2");
+    expect(teamSourceCollectionStorageActionsPanelStyles.workflowSourceCollectionStorageActions).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(teamSourceCollectionStorageActionsPanelStyles.workflowSourceCollectionStorageButtons).toContain("justify-end");
+    expect(teamSourceCollectionStorageActionsPanelStyles.workflowSourceCollectionStorageDetails).toContain("col-span-2");
     expect(routeStyles.sourceCollectionControlPanel).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageModules).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStageCard).toBeTypeOf("string");
@@ -1495,7 +1509,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionStepDone).toContain("state-success");
     expect(routeStyles.sourceCollectionStepFailed).toContain("state-error");
     expect(routeStyles.sourceCollectionStepPending).toContain("state-warning");
-    expect(routeStyles.workflowSourceCollectionStorageDetails).toBeTypeOf("string");
+    expect(teamSourceCollectionStorageActionsPanelStyles.workflowSourceCollectionStorageDetails).toBeTypeOf("string");
     expect(routeStyles.researchStagePage).toBeTypeOf("string");
     expect(routeStyles.researchStageHeroPanel).toBeTypeOf("string");
     expect(routeStyles.researchStageActionPanel).toBeTypeOf("string");
@@ -1528,6 +1542,15 @@ describe("TeamsRoute layout contract", () => {
     expect(teamWorkflowStatusPanelStylesSource).toContain("workflowGraphPanel");
     expect(teamWorkflowStatusPanelStylesSource).toContain("workflowSourceQualityPanel");
     expect(teamWorkflowStatusPanelStylesSource).toContain("workflowPaperNoteChunkPanel");
+    expect(routeStylesSource).not.toContain("workflowSourceCollectionPanel");
+    expect(routeStylesSource).not.toContain("workflowSourceCollectionStats");
+    expect(routeStylesSource).not.toContain("workflowSourceCollectionPlan");
+    expect(routeStylesSource).not.toContain("workflowSourceCollectionForm");
+    expect(routeStylesSource).not.toContain("workflowSourceCollectionOutputForm");
+    expect(routeStylesSource).not.toContain("workflowSourceCollectionStorageActions");
+    expect(teamSourceCollectionOverviewPanelStylesSource).toContain("workflowSourceCollectionPanel");
+    expect(teamSourceCollectionOverviewPanelStylesSource).toContain("workflowSourceCollectionStats");
+    expect(teamSourceCollectionOverviewPanelStylesSource).toContain("workflowSourceCollectionPlan");
     expect(routeStyles.workflowValidation).toBeTypeOf("string");
     expect(routeStyles.workspaceResearch).toBeTypeOf("string");
     expect(routeStyles.workspaceResearchCanvas).toBeTypeOf("string");
@@ -1614,8 +1637,8 @@ describe("TeamsRoute layout contract", () => {
       [routeStyles.workflowStats, "grid-cols-[repeat(3,minmax(0,1fr))]"],
       [teamWorkflowStatusPanelStyles.workflowModelEvidenceStats, "grid-cols-[repeat(auto-fit,minmax(118px,1fr))]"],
       [teamWorkflowStatusPanelStyles.workflowModelEvidenceCoverage, "grid-cols-[repeat(auto-fit,minmax(118px,1fr))]"],
-      [routeStyles.workflowSourceCollectionForm, "grid-cols-[repeat(2,minmax(0,1fr))]"],
-      [routeStyles.workflowSourceCollectionOutputForm, "grid-cols-[repeat(2,minmax(0,1fr))]"],
+      [teamSourceCollectionRunSettingsPanelStyles.workflowSourceCollectionForm, "grid-cols-[repeat(2,minmax(0,1fr))]"],
+      [teamSourceCollectionManualWritebackPanelStyles.workflowSourceCollectionOutputForm, "grid-cols-[repeat(2,minmax(0,1fr))]"],
       [teamWorkflowStatusPanelStyles.workflowIngestionStages, "grid-cols-[repeat(5,minmax(58px,1fr))]"],
       [teamWorkflowStatusPanelStyles.workflowSourceQualityStats, "grid-cols-[repeat(5,minmax(72px,1fr))]"],
       [teamWorkflowStatusPanelStyles.workflowSourceQualityQueue, "grid-cols-[repeat(3,minmax(0,1fr))]"],
