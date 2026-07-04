@@ -676,6 +676,56 @@ def test_unified_memory_search_tool_rag_mode_honors_memory_policy_base_ids(tmp_p
     assert result["error"] == "knowledge_base_not_in_memory_policy"
 
 
+def test_unified_memory_search_tool_can_include_user_content(tmp_path, monkeypatch):
+    from core.web.services import user_content_markdown_service
+
+    monkeypatch.setattr(user_content_markdown_service, "PROJECT_ROOT", tmp_path / "project")
+    monkeypatch.setattr(team_knowledge_tools, "_current_runtime", lambda: {"agentId": "agent-1", "memoryPolicy": {}})
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "Guide.md").write_text("# Guide\nagent-readable user note", encoding="utf-8")
+    imported = user_content_markdown_service.import_markdown_space(str(source), space_name="User Notes")
+
+    result = team_knowledge_tools.unified_memory_search_tool(
+        query="agent-readable",
+        include_user_content=True,
+        user_content_space_ids=imported["space"]["spaceId"],
+    )
+
+    payload = json.loads(result)
+    assert payload["ok"] is True
+    assert payload["summary"]["userContentResultCount"] == 1
+
+
+def test_unified_memory_search_tool_blocks_user_content_space_outside_memory_policy(tmp_path, monkeypatch):
+    from core.web.services import user_content_markdown_service
+
+    monkeypatch.setattr(user_content_markdown_service, "PROJECT_ROOT", tmp_path / "project")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "Guide.md").write_text("# Guide\npolicy blocked note", encoding="utf-8")
+    imported = user_content_markdown_service.import_markdown_space(str(source), space_name="User Notes")
+    monkeypatch.setattr(
+        team_knowledge_tools,
+        "_current_runtime",
+        lambda: {
+            "agentId": "agent-1",
+            "memoryPolicy": {"readUserContentSpaceIds": ["another-space"]},
+        },
+    )
+
+    result = team_knowledge_tools.unified_memory_search_tool(
+        query="policy blocked",
+        include_user_content=True,
+        user_content_space_ids=imported["space"]["spaceId"],
+    )
+
+    payload = json.loads(result)
+    assert payload["ok"] is False
+    assert payload["status"] == "blocked"
+    assert payload["error"] == "user_content_space_not_in_memory_policy"
+
+
 def test_knowledge_rating_suggestion_tool_submits_pending_suggestion_only(tmp_path, monkeypatch):
     env = _seed_team_knowledge(tmp_path, monkeypatch)
     agent_directory_service.update_agent_instance(

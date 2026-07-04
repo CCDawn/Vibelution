@@ -29,6 +29,8 @@ def unified_memory_search_tool(
     tags: str = "",
     limit: int = 8,
     max_context_chars: int = 1200,
+    include_user_content: bool = False,
+    user_content_space_ids: str = "",
 ) -> str:
     """
     Search governed Agent/Team memory and formal knowledge through one read-only Agent-facing tool.
@@ -45,8 +47,14 @@ def unified_memory_search_tool(
     requested_base_id = str(knowledge_base_id or "").strip()
     memory_policy = runtime.get("memoryPolicy") if isinstance(runtime.get("memoryPolicy"), dict) else {}
     allowed_base_ids = _policy_ids(memory_policy, "readKnowledgeBaseIds")
+    requested_user_content_space_ids = _split_tags(user_content_space_ids)
+    allowed_user_content_space_ids = _policy_ids(memory_policy, "readUserContentSpaceIds")
     if requested_base_id and not _policy_allows_knowledge_base(requested_base_id, allowed_base_ids):
         return _json_result(_blocked_result(agent_id, "knowledge_base_not_in_memory_policy"))
+    if requested_user_content_space_ids and allowed_user_content_space_ids:
+        denied = [space_id for space_id in requested_user_content_space_ids if space_id not in allowed_user_content_space_ids]
+        if denied:
+            return _json_result(_blocked_result(agent_id, "user_content_space_not_in_memory_policy"))
 
     try:
         from core.web.services import unified_knowledge_search_service
@@ -60,6 +68,8 @@ def unified_memory_search_tool(
             knowledge_base_id=requested_base_id,
             tags=_split_tags(tags),
             allowed_knowledge_base_ids=allowed_base_ids,
+            include_user_content=bool(include_user_content),
+            allowed_user_content_space_ids=requested_user_content_space_ids or allowed_user_content_space_ids,
             limit=limit,
             max_context_chars=max_context_chars,
         )
@@ -73,6 +83,7 @@ def unified_memory_search_tool(
                 "queryMode": str((payload.get("request") or {}).get("effectiveQueryMode") or query_mode),
                 "backend": str((payload.get("request") or {}).get("backend") or ""),
                 "resultCount": int((payload.get("summary") or {}).get("resultCount") or 0),
+                "userContentResultCount": int((payload.get("summary") or {}).get("userContentResultCount") or 0),
             },
         )
         return _json_result({"ok": True, "status": "succeeded", **payload})
