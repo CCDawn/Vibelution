@@ -5,14 +5,11 @@ import {
   ChevronDown,
   ChevronRight,
   CheckCircle2,
-  Clock3,
-  Gauge,
   LibraryBig,
   LoaderCircle,
   Play,
   Save,
   Sparkles,
-  Square,
   Pencil,
   Trash2,
   TriangleAlert,
@@ -67,8 +64,15 @@ import {
   shouldIgnoreActiveRunSnapshot,
 } from "./evolutionLiveRun";
 import { buildSupervisedRunRecordDisplay, supervisedDecisionLabel } from "./supervisedRunRecordLabel";
-import { buildSupervisedRunControlSummary, type SupervisedRunControlSummary } from "./supervisedRunSummary";
+import { buildSupervisedRunControlSummary } from "./supervisedRunSummary";
 import { buildSupervisedCaseTraceItems, type SupervisedCaseTraceItem, type SupervisedCaseTraceTone } from "./supervisedCaseTrace";
+import {
+  EvolutionActiveRunMonitorPanel,
+  type EvolutionActiveRunClosedLoopLedger,
+  type EvolutionActiveRunMonitorEventItem,
+  type EvolutionActiveRunMonitorMetric,
+  type EvolutionActiveRunMonitorRunView,
+} from "./EvolutionActiveRunMonitorPanel";
 import { createEvolutionWorkspaceCache } from "./evolutionWorkspaceCache";
 import { modelDisplayLabel } from "./agentDisplay";
 import {
@@ -105,13 +109,6 @@ const CASE_TRACE_TURN_CLASS: Record<SupervisedCaseTraceTone, string> = {
   tool: styles.caseTraceTurn_tool,
   assistant: styles.caseTraceTurn_assistant,
   error: styles.caseTraceTurn_error,
-};
-const RUN_SUMMARY_TONE_CLASS: Record<SupervisedRunControlSummary["tone"], string> = {
-  running: styles.runSummaryTone_running,
-  success: styles.runSummaryTone_success,
-  warning: styles.runSummaryTone_warning,
-  danger: styles.runSummaryTone_danger,
-  idle: styles.runSummaryTone_idle,
 };
 const SELF_OVERVIEW_REFETCH_INTERVAL_MS = 12_000;
 const SELF_OVERVIEW_STALE_TIME_MS = 10_000;
@@ -446,27 +443,6 @@ function supervisedPreflightIssue(run: EvolutionActiveRun | null | undefined, la
       : "There is no agent output for this case because evaluation stopped during verifier environment checks.",
     reason,
   };
-}
-
-function statusIcon(status: string, decision = "") {
-  const normalized = String(status).trim().toLowerCase();
-  const normalizedDecision = String(decision).trim().toUpperCase();
-  if (normalizedDecision === "INCONCLUSIVE") {
-    return <TriangleAlert size={16} />;
-  }
-  if (normalized === "success") {
-    return <CheckCircle2 size={16} />;
-  }
-  if (normalized === "failed" || normalized === "caution") {
-    return <TriangleAlert size={16} />;
-  }
-  if (normalized === "running" || normalized === "waiting" || normalized === "queued" || normalized === "paused" || normalized === "stopping") {
-    return <Clock3 size={16} />;
-  }
-  if (normalized === "done" || normalized === "cancelled") {
-    return <CheckCircle2 size={16} />;
-  }
-  return <Gauge size={16} />;
 }
 
 function toLimitInput(value: number | null | undefined) {
@@ -1524,6 +1500,161 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     ?? startWorktreeRunMutation.error?.message
     ?? startSimulationWorktreeRunMutation.error?.message
     ?? "";
+  const terminateSupervisedDisabledReason = disabledReason(terminateSupervisedAction);
+  const supervisedActiveRunMonitorMetrics: EvolutionActiveRunMonitorMetric[] = monitoredRun
+    ? [
+      {
+        id: "session",
+        label: t("activeRunSession"),
+        value: monitoredRunIdentity,
+        title: monitoredRunIdentity,
+      },
+      {
+        id: "phase",
+        label: t("activeRunPhase"),
+        value: monitoredControlSummary?.stageLabel || statusLabel(monitoredRun.currentPhase || monitoredRun.status),
+      },
+      {
+        id: "case",
+        label: t("activeRunCurrentCase"),
+        value: monitoredCaseLabel,
+        title: monitoredCaseLabel,
+      },
+      {
+        id: "role",
+        label: t("activeRunCurrentRole"),
+        value: monitoredRun.currentRole || "--",
+      },
+      {
+        id: "result",
+        label: t("activeRunResult"),
+        value: monitoredControlSummary?.resultLabel || monitoredTaskLabel,
+      },
+      {
+        id: "updated",
+        label: t("latestLiveMessage"),
+        value: compactTimestamp(monitoredRun.updatedAt),
+      },
+    ]
+    : [];
+  const supervisedActiveRunMonitorEvents: EvolutionActiveRunMonitorEventItem[] = monitoredRun
+    ? monitoredRun.eventTail.map((item) => ({
+      key: `${item.timestamp}-${item.event}-${item.summary}`,
+      title: formatRunEventTitle(item),
+      statusLabel: statusLabel(item.status),
+      summary: formatRunEventSummary(item),
+      timestamp: compactTimestamp(item.timestamp),
+    }))
+    : [];
+  const supervisedClosedLoopLedger: EvolutionActiveRunClosedLoopLedger | null = supervisedClosedLoopRecord
+    ? {
+      eyebrow: lang === "zh" ? "闭环记录库" : "Closed-loop ledger",
+      title: supervisedClosedLoopRecord.runId,
+      statusLabel: supervisedClosedLoopDecisionLabel || "--",
+      statusTone: supervisedClosedLoopRecord.status === "failed" ? "primary" : "secondary",
+      description: displaySupervisedTechnicalText(
+        supervisedClosedLoopRecord.policySummary
+        || supervisedClosedLoopRecord.reason
+        || supervisedClosedLoopRecord.nextAction.description,
+        supervisedClosedLoopRecord.decision,
+        lang,
+        decisionLabel,
+      ) || "--",
+      evidence: [
+        {
+          id: "review",
+          label: lang === "zh" ? "审查入口" : "Review entry",
+          value: supervisedClosedLoopRecord.nextAction.label || "--",
+        },
+        {
+          id: "sessions",
+          label: lang === "zh" ? "Agent 会话" : "Agent sessions",
+          value: supervisedClosedLoopRecord.counts.roleSessionCount,
+        },
+        {
+          id: "proposal-evidence",
+          label: lang === "zh" ? "提案证据" : "Proposal evidence",
+          value: supervisedClosedLoopProposalCount,
+        },
+        {
+          id: "lineage",
+          label: "lineage",
+          value: supervisedClosedLoopLineageLabel,
+        },
+      ],
+      action: {
+        label: lang === "zh" ? "审查入口" : "Review",
+        title: supervisedClosedLoopRecord.nextAction.description,
+        onClick: () => {
+          setLibraryView("pending");
+          goToSupervisedView("library");
+        },
+      },
+    }
+    : null;
+  const supervisedActiveRunMonitorRun: EvolutionActiveRunMonitorRunView | null = monitoredRun
+    ? {
+      termination: {
+        disabled: !canTerminateSupervisedRun,
+        pending: terminateSupervisedPending,
+        title: terminateSupervisedDisabledReason || t("terminateSupervisedRun"),
+        ariaLabel: t("terminateSupervisedRun"),
+        onClick: handleTerminateSupervisedRun,
+      },
+      openSessionAction: monitoredRun.sessionId
+        ? {
+          label: t("openLatestRuns"),
+          onClick: () => openRun(monitoredRun.sessionId),
+        }
+        : null,
+      feedback: actionFeedback,
+      error: supervisedControlError,
+      warning: !canTerminateSupervisedRun && terminateSupervisedDisabledReason && worktreeRunStopping
+        ? terminateSupervisedDisabledReason
+        : null,
+      controlSummary: {
+        status: monitoredRun.status,
+        decision: monitoredRun.decision,
+        tone: monitoredControlSummary?.tone,
+        headline: monitoredControlSummary?.headline || monitoredRun.latestMessage,
+        reason: monitoredControlSummary?.reason,
+        nextActionLabel: t("nextRecommendedAction"),
+        nextAction: monitoredControlSummary?.nextAction,
+      },
+      metrics: supervisedActiveRunMonitorMetrics,
+      timelineTitle: t("activeRunTimeline"),
+      events: supervisedActiveRunMonitorEvents,
+    }
+    : null;
+  const supervisedActiveRunMonitorIdleMetrics: EvolutionActiveRunMonitorMetric[] = [
+    {
+      id: "latest-run",
+      label: t("latestRun"),
+      value: overviewLatestRunId || "--",
+    },
+    {
+      id: "pending-candidates",
+      label: t("pendingCandidates"),
+      value: pendingItems.length,
+    },
+    {
+      id: "selected-bundle",
+      label: t("selectedBundle"),
+      value: workbenchState?.bundleName || "--",
+    },
+  ];
+  const supervisedActiveRunMonitorIdleRelated: EvolutionActiveRunMonitorMetric[] = [
+    {
+      id: "latest-score",
+      label: t("latestScore"),
+      value: overviewRecentRuns[0] ? clampScore(overviewRecentRuns[0].score) : latestRun ? clampScore(latestRun.candidateScore) : "--",
+    },
+    {
+      id: "selected-dataset",
+      label: t("selectedDataset"),
+      value: workbenchState?.datasetName || "--",
+    },
+  ];
   const selfRunLocked = Boolean(
     selfWorktreeRun
     && ["queued", "running", "paused", "stopping"].includes(String(selfWorktreeRun.status || "").trim().toLowerCase()),
@@ -3239,241 +3370,41 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
             onKeyDown={handleLiveLaunchResizeKeyDown}
           />
 
-          <section
+          <EvolutionActiveRunMonitorPanel
+            ariaHidden={liveRunCollapsed}
             className={
               liveRunCollapsed
                 ? `${styles.surface} ${styles.liveSurface} ${styles.dashboardRun} ${styles.paneCollapsed}`
                 : `${styles.surface} ${styles.liveSurface} ${styles.dashboardRun}`
             }
-            aria-hidden={liveRunCollapsed}
-          >
-              <div className={styles.surfaceHeaderCompact}>
-                <div>
-                  <p className={styles.eyebrow}>{t("activeSupervisedRun")}</p>
-                  <h2 className={`${styles.sectionTitle} ${styles.truncateText}`} title={monitoredRunIdentity || undefined}>
-                    {monitoredRunIdentity || t("activeSupervisedRun")}
-                  </h2>
-                </div>
-                {monitoredRun ? (
-                  <div className={styles.liveStatusRow}>
-                    <span className={styles.statusPill}>{monitoredStatusLabel}</span>
-                    <span className={styles.secondaryPill}>{sourceKindLabel(monitoredRun.sourceKind)}</span>
-                  </div>
-                ) : (
-                  <span className={styles.secondaryPill}>
-                    {workbenchSourceLabel(workbenchState?.source ?? "unknown")}
-                  </span>
-                )}
-              </div>
-
-              {monitoredRun ? (
-                <div className={styles.runMonitorDense}>
-                  <div className={styles.liveRunToolbar}>
-                    <div className={styles.compactActionGroup}>
-                      <VNativeButton
-                        type="button"
-                        className={styles.compactIconAction}
-                        disabled={!canTerminateSupervisedRun || terminateSupervisedPending}
-                        title={disabledReason(terminateSupervisedAction) || t("terminateSupervisedRun")}
-                        onClick={handleTerminateSupervisedRun}
-                        aria-label={t("terminateSupervisedRun")}
-                      >
-                        {terminateSupervisedPending ? <LoaderCircle size={15} /> : <Square size={15} />}
-                      </VNativeButton>
-                    </div>
-                    <div className={styles.compactActionGroup}>
-                      {monitoredRun.sessionId ? (
-                        <VNativeButton
-                          type="button"
-                          className={styles.compactTextAction}
-                          onClick={() => openRun(monitoredRun.sessionId)}
-                        >
-                          <Activity size={15} />
-                          {t("openLatestRuns")}
-                        </VNativeButton>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  {actionFeedback ? <p className={styles.feedbackTextCompact}>{actionFeedback}</p> : null}
-                  {supervisedControlError ? <p className={styles.errorTextCompact}>{supervisedControlError}</p> : null}
-                  {!canTerminateSupervisedRun && disabledReason(terminateSupervisedAction) && worktreeRunStopping ? (
-                    <p className={styles.noticeTextCompact}>{disabledReason(terminateSupervisedAction)}</p>
-                  ) : null}
-
-                  <div className={styles.monitorSummary}>
-                    <div className={`${styles.liveSummaryRow} ${monitoredControlSummary ? RUN_SUMMARY_TONE_CLASS[monitoredControlSummary.tone] : ""}`}>
-                      <span className={styles.statusIcon}>{statusIcon(monitoredRun.status, monitoredRun.decision)}</span>
-                      <div className={styles.runControlSummaryBody}>
-                        <p className={styles.heroSummary}>
-                          {monitoredControlSummary?.headline || monitoredRun.latestMessage}
-                        </p>
-                        {monitoredControlSummary?.reason ? (
-                          <p className={styles.runControlReason}>{monitoredControlSummary.reason}</p>
-                        ) : null}
-                      </div>
-                    </div>
-                    {monitoredControlSummary?.nextAction ? (
-                      <div className={styles.runNextActionStrip}>
-                        <strong>{t("nextRecommendedAction")}</strong>
-                        <span>{monitoredControlSummary.nextAction}</span>
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className={styles.monitorMetricsDense}>
-                    <article className={styles.metricTile}>
-                      <span>{t("activeRunSession")}</span>
-                      <strong title={monitoredRunIdentity}>{monitoredRunIdentity}</strong>
-                    </article>
-                    <article className={styles.metricTile}>
-                      <span>{t("activeRunPhase")}</span>
-                      <strong>{monitoredControlSummary?.stageLabel || statusLabel(monitoredRun.currentPhase || monitoredRun.status)}</strong>
-                    </article>
-                    <article className={styles.metricTile}>
-                      <span>{t("activeRunCurrentCase")}</span>
-                      <strong title={monitoredCaseLabel}>{monitoredCaseLabel}</strong>
-                    </article>
-                    <article className={styles.metricTile}>
-                      <span>{t("activeRunCurrentRole")}</span>
-                      <strong>{monitoredRun.currentRole || "--"}</strong>
-                    </article>
-                    <article className={styles.metricTile}>
-                      <span>{t("activeRunResult")}</span>
-                      <strong>{monitoredControlSummary?.resultLabel || monitoredTaskLabel}</strong>
-                    </article>
-                    <article className={styles.metricTile}>
-                      <span>{t("latestLiveMessage")}</span>
-                      <strong>{compactTimestamp(monitoredRun.updatedAt)}</strong>
-                    </article>
-                  </div>
-
-                  <div className={`${styles.detailSection} ${styles.detailSectionCompact}`}>
-                    <h3>{t("activeRunTimeline")}</h3>
-                    <div className={`${styles.eventList} ${styles.eventListScrollable}`}>
-                      {monitoredRun.eventTail.map((item) => (
-                        <article key={`${item.timestamp}-${item.event}-${item.summary}`} className={styles.eventRow}>
-                          <div className={styles.eventHeader}>
-                            <strong>{formatRunEventTitle(item)}</strong>
-                            <span className={styles.secondaryPill}>{statusLabel(item.status)}</span>
-                          </div>
-                          <p className={styles.eventSummary}>{formatRunEventSummary(item)}</p>
-                          <span className={styles.formHint}>{compactTimestamp(item.timestamp)}</span>
-                        </article>
-                      ))}
-                    </div>
-                  </div>
-
-                </div>
-              ) : (
-                <div className={styles.idleMonitor}>
-                  <p className={styles.noticeText}>{t("noActiveSupervisedRun")}</p>
-                  {supervisedClosedLoopRecord ? (
-                    <div className={styles.closedLoopLedger}>
-                      <div className={styles.closedLoopLedgerHeader}>
-                        <div>
-                          <span className={styles.eyebrow}>{lang === "zh" ? "闭环记录库" : "Closed-loop ledger"}</span>
-                          <strong className={styles.truncateText} title={supervisedClosedLoopRecord.runId}>
-                            {supervisedClosedLoopRecord.runId}
-                          </strong>
-                        </div>
-                        <span className={supervisedClosedLoopRecord.status === "failed" ? styles.statusPill : styles.secondaryPill}>
-                          {supervisedClosedLoopDecisionLabel || "--"}
-                        </span>
-                      </div>
-                      <p>
-                        {displaySupervisedTechnicalText(
-                          supervisedClosedLoopRecord.policySummary
-                          || supervisedClosedLoopRecord.reason
-                          || supervisedClosedLoopRecord.nextAction.description,
-                          supervisedClosedLoopRecord.decision,
-                          lang,
-                          decisionLabel,
-                        ) || "--"}
-                      </p>
-                      <div className={styles.closedLoopLedgerEvidenceGrid}>
-                        <article>
-                          <span>{lang === "zh" ? "审查入口" : "Review entry"}</span>
-                          <strong>{supervisedClosedLoopRecord.nextAction.label || "--"}</strong>
-                        </article>
-                        <article>
-                          <span>{lang === "zh" ? "Agent 会话" : "Agent sessions"}</span>
-                          <strong>{supervisedClosedLoopRecord.counts.roleSessionCount}</strong>
-                        </article>
-                        <article>
-                          <span>{lang === "zh" ? "提案证据" : "Proposal evidence"}</span>
-                          <strong>{supervisedClosedLoopProposalCount}</strong>
-                        </article>
-                        <article>
-                          <span>{lang === "zh" ? "lineage" : "lineage"}</span>
-                          <strong>{supervisedClosedLoopLineageLabel}</strong>
-                        </article>
-                      </div>
-                      <div className={styles.actionRow}>
-                        <VNativeButton
-                          type="button"
-                          className={styles.inlineAction}
-                          onClick={() => {
-                            setLibraryView("pending");
-                            goToSupervisedView("library");
-                          }}
-                          title={supervisedClosedLoopRecord.nextAction.description}
-                        >
-                          <LibraryBig size={15} />
-                          {lang === "zh" ? "审查入口" : "Review"}
-                        </VNativeButton>
-                      </div>
-                    </div>
-                  ) : null}
-                  <div className={styles.metricStrip}>
-                    <article className={styles.stripItem}>
-                      <span>{t("latestRun")}</span>
-                      <strong>{overviewLatestRunId || "--"}</strong>
-                    </article>
-                    <article className={styles.stripItem}>
-                      <span>{t("pendingCandidates")}</span>
-                      <strong>{pendingItems.length}</strong>
-                    </article>
-                    <article className={styles.stripItem}>
-                      <span>{t("selectedBundle")}</span>
-                      <strong>{workbenchState?.bundleName || "--"}</strong>
-                    </article>
-                  </div>
-                  <div className={styles.relatedList}>
-                    <article className={styles.relatedRow}>
-                      <strong>{t("latestScore")}</strong>
-                      <span>{overviewRecentRuns[0] ? clampScore(overviewRecentRuns[0].score) : latestRun ? clampScore(latestRun.candidateScore) : "--"}</span>
-                    </article>
-                    <article className={styles.relatedRow}>
-                      <strong>{t("selectedDataset")}</strong>
-                      <span>{workbenchState?.datasetName || "--"}</span>
-                    </article>
-                  </div>
-                  <div className={styles.actionRow}>
-                    <VNativeButton
-                      type="button"
-                      className={styles.inlineAction}
-                      disabled={!overviewLatestRunId}
-                      onClick={() => openRun(overviewLatestRunId || null)}
-                    >
-                      <Activity size={15} />
-                      {t("openLatestRuns")}
-                    </VNativeButton>
-                    <VNativeButton
-                      type="button"
-                      className={styles.inlineAction}
-                      onClick={() => {
-                        setLibraryView("items");
-                        goToSupervisedView("library");
-                      }}
-                    >
-                      <LibraryBig size={15} />
-                      {t("openLibraryQueue")}
-                    </VNativeButton>
-                  </div>
-                </div>
-              )}
-          </section>
+            header={{
+              eyebrow: t("activeSupervisedRun"),
+              title: monitoredRunIdentity || t("activeSupervisedRun"),
+              titleTooltip: monitoredRunIdentity || undefined,
+              statusLabel: monitoredRun ? monitoredStatusLabel : undefined,
+              sourceKindLabel: monitoredRun ? sourceKindLabel(monitoredRun.sourceKind) : undefined,
+              fallbackStatusLabel: workbenchSourceLabel(workbenchState?.source ?? "unknown"),
+            }}
+            run={supervisedActiveRunMonitorRun}
+            idle={{
+              notice: t("noActiveSupervisedRun"),
+              closedLoop: supervisedClosedLoopLedger,
+              metrics: supervisedActiveRunMonitorIdleMetrics,
+              related: supervisedActiveRunMonitorIdleRelated,
+              latestRunAction: {
+                label: t("openLatestRuns"),
+                disabled: !overviewLatestRunId,
+                onClick: () => openRun(overviewLatestRunId || null),
+              },
+              libraryAction: {
+                label: t("openLibraryQueue"),
+                onClick: () => {
+                  setLibraryView("items");
+                  goToSupervisedView("library");
+                },
+              },
+            }}
+          />
 
           <PaneCollapseHandle
             side="right"
