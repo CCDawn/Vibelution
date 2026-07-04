@@ -39,9 +39,11 @@ import {
 import { ConversationStreamingResponseContent } from "./ConversationStreamingResponseContent";
 import { ConversationTurnAvatarContent } from "./ConversationTurnAvatarContent";
 import {
+  buildOperationDetailRows,
   DeferredOperationDetails,
   operationDetailsKind,
-  type OperationDetailRow,
+  readableOperationResult,
+  type OperationDetailLabels,
 } from "./ConversationOperationDetails";
 import { AgentMessageTurnView } from "./AgentMessageTurnView";
 import { AgentResponseSectionView } from "./AgentResponseSectionView";
@@ -452,6 +454,15 @@ export function ConversationView({
     [messages],
   );
   const formatTimestamp = (timestamp: string) => formatConversationTimestamp(timestamp, timestampFormatter);
+  const operationDetailLabels: OperationDetailLabels = {
+    rawName: lang === "zh" ? "原始名称" : "Raw name",
+    fullStatus: lang === "zh" ? "完整状态" : "Full status",
+    toolCallArguments: t("toolCallArguments"),
+    thoughtProcess: t("thoughtProcess"),
+    toolCallResult: t("toolCallResult"),
+    toolCallError: t("toolCallError"),
+    structuredResultFallback: lang === "zh" ? "返回结构化结果，可展开详情查看。" : "Structured result returned; expand details to inspect.",
+  };
 
   const taskFocus = compactPreview(taskSummary || latestUserMessage || title);
   const fileContext = defaultFileContext || "workspace";
@@ -1321,7 +1332,7 @@ export function ConversationView({
             tone: "failed",
           };
         }
-        const result = readableOperationResult(operation);
+        const result = readableOperationResult(operation, operationDetailLabels.structuredResultFallback);
         if (!result || result === operation.summary.trim() || operation.kind === "status") {
           return null;
         }
@@ -1333,87 +1344,6 @@ export function ConversationView({
         };
       })
       .filter((item): item is { id: string; label: string; value: string; tone: string } => item !== null);
-  }
-
-  function readableOperationResult(operation: AgentMessageOperation) {
-    const result = String(operation.resultPreview ?? "").trim();
-    if (!result) {
-      return "";
-    }
-    if (shouldKeepResultInDetailsOnly(operation, result)) {
-      return "";
-    }
-    if (!/^[{[]/.test(result)) {
-      return result;
-    }
-    try {
-      const parsed = JSON.parse(result) as unknown;
-      const summary = structuredResultSummary(parsed);
-      if (summary) {
-        return summary;
-      }
-      return lang === "zh" ? "返回结构化结果，可展开详情查看。" : "Structured result returned; expand details to inspect.";
-    } catch {
-      return result;
-    }
-  }
-
-  function shouldKeepResultInDetailsOnly(operation: AgentMessageOperation, result: string) {
-    if (operation.kind !== "tool" || operation.status !== "done") {
-      return false;
-    }
-    const rawName = String(operation.rawLabel ?? operation.label ?? "").trim().toLowerCase();
-    const commandLikeTool = [
-      "cli_tool",
-      "grep_search_tool",
-      "read_file_tool",
-      "glob_tool",
-    ].some((name) => rawName === name || rawName.includes(name));
-    if (!commandLikeTool) {
-      return false;
-    }
-    const meaningfulLines = result.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-    const codeOrTerminalLike = /(^|\n)\s*(def |class |from |import |return |if |for |while |try:|except |const |let |function |\{|\}|\[STD(?:OUT|ERR)\])/.test(result);
-    return result.length > 360 || meaningfulLines.length > 3 || codeOrTerminalLike;
-  }
-
-  function structuredResultSummary(value: unknown): string {
-    if (typeof value === "string") {
-      return value.trim();
-    }
-    if (typeof value === "number" || typeof value === "boolean") {
-      return String(value);
-    }
-    if (Array.isArray(value)) {
-      const primitiveItems = value
-        .map((item) => structuredResultSummary(item))
-        .filter(Boolean);
-      return primitiveItems.slice(0, 3).join("\n");
-    }
-    if (!value || typeof value !== "object") {
-      return "";
-    }
-    const record = value as Record<string, unknown>;
-    const summaryKeys = [
-      "summary",
-      "message",
-      "resultPreview",
-      "stdoutPreview",
-      "stderrPreview",
-      "output",
-      "text",
-      "content",
-      "title",
-      "error",
-      "status",
-    ];
-    for (const key of summaryKeys) {
-      const summary = structuredResultSummary(record[key]);
-      if (summary) {
-        return summary;
-      }
-    }
-    return "";
   }
 
   function shouldExpandReActGroupByDefault(group: AgentMessageReActOperationGroup) {
@@ -1431,60 +1361,6 @@ export function ConversationView({
       || operation.timeoutSeconds !== undefined
       || operation.tracePath,
     );
-  }
-
-  function operationDetailRows(operation: AgentMessageOperation): OperationDetailRow[] {
-    const rows: OperationDetailRow[] = [];
-    const args = operation.arguments ?? {};
-    const rawLabel = operation.kind === "tool" ? String(operation.rawLabel ?? "").trim() : "";
-    if (rawLabel && rawLabel !== operation.label) {
-      rows.push({ label: lang === "zh" ? "原始名称" : "Raw name", value: rawLabel });
-    }
-    if (operation.kind === "status" && operation.resultPreview) {
-      rows.push({ label: lang === "zh" ? "完整状态" : "Full status", value: operation.resultPreview });
-    }
-    if (Object.keys(args).length > 0) {
-      rows.push({ label: t("toolCallArguments"), value: naturalRecordText(args) });
-    }
-    if (operation.resultPreview && operation.kind !== "status") {
-      const readableResult = readableOperationResult(operation);
-      rows.push({
-        label: operation.kind === "thought" ? t("thoughtProcess") : t("toolCallResult"),
-        value: readableResult || operation.resultPreview,
-      });
-    }
-    if (operation.error) {
-      rows.push({ label: t("toolCallError"), value: operation.error });
-    }
-    return rows;
-  }
-
-  function naturalRecordText(value: unknown): string {
-    if (typeof value === "string") {
-      return value;
-    }
-    if (typeof value === "number" || typeof value === "boolean") {
-      return String(value);
-    }
-    if (Array.isArray(value)) {
-      return value
-        .map((item, index) => {
-          const text = naturalRecordText(item);
-          return text ? `${index + 1}. ${text}` : "";
-        })
-        .filter(Boolean)
-        .join("\n");
-    }
-    if (!value || typeof value !== "object") {
-      return "";
-    }
-    return Object.entries(value as Record<string, unknown>)
-      .map(([key, item]) => {
-        const text = naturalRecordText(item);
-        return text ? `${key}: ${text}` : "";
-      })
-      .filter(Boolean)
-      .join("\n");
   }
 
   function renderComputerUseResult(operation: AgentMessageOperation) {
@@ -1667,7 +1543,7 @@ export function ConversationView({
                   detailsId={detailsId}
                   kind={operationDetailsKind(operation)}
                   classNames={OPERATION_DETAILS_CLASS_NAMES}
-                  buildDetailRows={operationDetailRows}
+                  buildDetailRows={(detailOperation) => buildOperationDetailRows(detailOperation, operationDetailLabels)}
                 />
               ) : null}
               {computerUseResult}
@@ -1841,7 +1717,9 @@ export function ConversationView({
     const canExpandDetails = hasOperationDetails(operation);
     const duration = formatDuration(operation.durationSeconds);
     const computerUseResult = renderComputerUseResult(operation);
-    const readableResult = operation.kind === "tool" ? "" : readableOperationResult(operation);
+    const readableResult = operation.kind === "tool"
+      ? ""
+      : readableOperationResult(operation, operationDetailLabels.structuredResultFallback);
     const showReadableResult = Boolean(operation.kind !== "tool" && readableResult && readableResult !== item.summary.trim());
     const visibleStatus = timelineStatusText(item.status);
     const className = [
@@ -1880,7 +1758,7 @@ export function ConversationView({
             detailsId={detailsId}
             kind={operationDetailsKind(operation)}
             classNames={OPERATION_DETAILS_CLASS_NAMES}
-            buildDetailRows={operationDetailRows}
+            buildDetailRows={(detailOperation) => buildOperationDetailRows(detailOperation, operationDetailLabels)}
           />
         ) : null}
         {showReadableResult ? <pre className={styles.timelineOperationResult}>{readableResult}</pre> : null}
@@ -1936,7 +1814,7 @@ export function ConversationView({
                     detailsId={detailsId}
                     kind="tool"
                     classNames={OPERATION_DETAILS_CLASS_NAMES}
-                    buildDetailRows={operationDetailRows}
+                    buildDetailRows={(detailOperation) => buildOperationDetailRows(detailOperation, operationDetailLabels)}
                   />
                 ) : null}
                 {computerUseResult}
