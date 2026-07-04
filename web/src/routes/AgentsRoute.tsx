@@ -1,14 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
-  Archive,
   Bot,
-  CheckSquare,
   CheckCircle2,
   Database,
   Layers3,
-  Square,
-  Trash2,
   UserRound,
   Users,
 } from "lucide-react";
@@ -53,8 +49,7 @@ import {
   type AgentFilterSectionView,
   type AgentSummaryMetric,
 } from "../components/vui/product/agent-management";
-import { VButton, VHStack, VNativeSelect } from "../components/vui";
-import { vuiFormLabelClass } from "../components/vui/forms/formClasses";
+import { VButton } from "../components/vui";
 import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
@@ -65,6 +60,7 @@ import {
   type AgentBulkConfigDraft,
   type AgentBulkConfigField,
 } from "./AgentBulkConfigPanel";
+import { type AgentBulkPromptTemplateOption } from "./AgentBulkOperationsPanel";
 import { AgentConfigPrimaryPanePanel } from "./AgentConfigPrimaryPanePanel";
 import { type AgentContextCompressionPolicyDraft } from "./AgentContextCompressionPanel";
 import {
@@ -3678,7 +3674,7 @@ export function AgentsRoute() {
     () => agentModelChoices.map((model) => ({ value: model.modelId, label: model.label })),
     [agentModelChoices],
   );
-  const bulkPromptTemplateOptions = useMemo(
+  const bulkPromptTemplateOptions = useMemo<AgentBulkPromptTemplateOption[]>(
     () => (workspace?.promptTemplates ?? []).map((template) => ({
       value: template.promptTemplateId || template.templateId || "",
       label: promptTemplateOptionLabel(template, lang),
@@ -5378,75 +5374,6 @@ export function AgentsRoute() {
     }
   };
 
-  const bulkActionSummary = (
-    <>
-      <CheckSquare size={15} />
-      <strong>{copy.bulkSelected}</strong>
-      <span>{selectedBulkAgents.length} / {visibleAgents.length}</span>
-    </>
-  );
-
-  const bulkSelectionActions = (
-    <>
-      <VButton
-        type="button"
-        variant="secondary"
-        icon={allVisibleAgentsSelected ? <Square size={14} /> : <CheckSquare size={14} />}
-        isDisabled={!visibleAgents.length || bulkAgentPending}
-        onPress={allVisibleAgentsSelected ? clearBulkAgents : selectVisibleBulkAgents}
-      >
-        {allVisibleAgentsSelected ? copy.bulkClear : copy.bulkSelectVisible}
-      </VButton>
-      <VButton type="button" variant="secondary" icon={<Square size={14} />} isDisabled={!selectedBulkAgents.length || bulkAgentPending} onPress={clearBulkAgents}>
-        {copy.bulkClear}
-      </VButton>
-    </>
-  );
-
-  const bulkPromptPicker = (
-    <VHStack>
-      <label className={vuiFormLabelClass} htmlFor="agents-bulk-prompt">
-        {copy.bulkPromptLabel}
-      </label>
-      <VNativeSelect
-        id="agents-bulk-prompt"
-        value={bulkPromptTemplateId}
-        disabled={bulkAgentPending}
-        onChange={(event) => setBulkPromptTemplateId(event.target.value)}
-      >
-        <option value="">{copy.bulkPromptPlaceholder}</option>
-        {workspace?.promptTemplates.map((template) => (
-          <option key={template.promptTemplateId || template.templateId} value={template.promptTemplateId || template.templateId || ""}>
-            {promptTemplateOptionLabel(template, lang)}
-          </option>
-        ))}
-      </VNativeSelect>
-    </VHStack>
-  );
-
-  const bulkMutationActions = (
-    <>
-      <VButton
-        type="button"
-        variant="primary"
-        icon={<CheckCircle2 size={14} />}
-        isDisabled={!selectedBulkAgents.length || !bulkPromptTemplateId || bulkAgentPending}
-        onPress={bulkApplyPromptTemplate}
-      >
-        {bulkAgentPending ? copy.bulkWorking : copy.bulkApplyPrompt}
-      </VButton>
-      <VButton type="button" variant="secondary" icon={<Archive size={14} />} isDisabled={!selectedBulkAgents.length || bulkAgentPending} onPress={bulkArchiveAgents}>
-        {bulkAgentPending ? copy.bulkWorking : copy.bulkArchive}
-      </VButton>
-    </>
-  );
-
-  const bulkDestructiveActions = (
-    <VButton type="button" variant="danger" icon={<Trash2 size={14} />} isDisabled={!selectedBulkAgents.length || bulkAgentPending} onPress={bulkPurgeAgents}>
-      {bulkAgentPending ? copy.bulkWorking : copy.bulkPurge}
-    </VButton>
-  );
-
   const handleSelectFilterGroup = (groupId: string) => {
     setActiveFilter(groupId);
     setSelectedAgentId("");
@@ -5790,13 +5717,20 @@ export function AgentsRoute() {
             },
             onCreate: createAgent,
           }}
-          bulkActionBar={{
-            ariaLabel: copy.bulkSelected,
-            summary: bulkActionSummary,
-            selectionActions: bulkSelectionActions,
-            promptPicker: bulkPromptPicker,
-            mutationActions: bulkMutationActions,
-            destructiveActions: bulkDestructiveActions,
+          bulkOperations={{
+            copy,
+            selectedCount: selectedBulkAgents.length,
+            visibleCount: visibleAgents.length,
+            allVisibleSelected: allVisibleAgentsSelected,
+            pending: bulkAgentPending,
+            selectedPromptTemplateId: bulkPromptTemplateId,
+            promptTemplateOptions: bulkPromptTemplateOptions,
+            onSelectVisible: selectVisibleBulkAgents,
+            onClearSelection: clearBulkAgents,
+            onPromptTemplateChange: setBulkPromptTemplateId,
+            onApplyPromptTemplate: bulkApplyPromptTemplate,
+            onArchive: bulkArchiveAgents,
+            onPurge: bulkPurgeAgents,
           }}
           listState={{
             copy: {

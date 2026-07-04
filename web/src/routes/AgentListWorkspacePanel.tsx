@@ -1,11 +1,9 @@
 import { Plus } from "lucide-react";
 import { type ComponentProps } from "react";
 
-import {
-  AgentBulkActionBar,
-  AgentWorkspacePanel,
-} from "../components/vui/product/agent-management";
+import { AgentWorkspacePanel } from "../components/vui/product/agent-management";
 import { VButton, VChip, VPanelHeader } from "../components/vui";
+import { AgentBulkOperationsPanel } from "./AgentBulkOperationsPanel";
 import { AgentCreatePanel } from "./AgentCreatePanel";
 import { AgentListStatePanel } from "./AgentListStatePanel";
 import styles from "./AgentsRoute.styles";
@@ -18,7 +16,7 @@ type AgentListWorkspacePanelProps = {
   createAgentLabel: string;
   visibleAgentCount: number;
   createPanel: ComponentProps<typeof AgentCreatePanel>;
-  bulkActionBar: ComponentProps<typeof AgentBulkActionBar>;
+  bulkOperations: ComponentProps<typeof AgentBulkOperationsPanel>;
   listState: ComponentProps<typeof AgentListStatePanel>;
   onToggleCreate: () => void;
 };
@@ -31,7 +29,7 @@ export function AgentListWorkspacePanel({
   createAgentLabel,
   visibleAgentCount,
   createPanel,
-  bulkActionBar,
+  bulkOperations,
   listState,
   onToggleCreate,
 }: AgentListWorkspacePanelProps) {
@@ -59,7 +57,7 @@ export function AgentListWorkspacePanel({
         }
       />
       {createOpen ? <AgentCreatePanel {...createPanel} /> : null}
-      {!createOpen ? <AgentBulkActionBar {...bulkActionBar} /> : null}
+      {!createOpen ? <AgentBulkOperationsPanel {...bulkOperations} /> : null}
       <AgentListStatePanel {...listState} />
     </AgentWorkspacePanel>
   );
