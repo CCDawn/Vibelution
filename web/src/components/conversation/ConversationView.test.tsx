@@ -9,7 +9,9 @@ import agentMessageRenderStateSource from "./agentMessageRenderState.ts?raw";
 import conversationViewStylesModuleSource from "./ConversationView.styles.ts?raw";
 import conversationOperationDetailsSource from "./ConversationOperationDetails.tsx?raw";
 import conversationStreamingResponseContentSource from "./ConversationStreamingResponseContent.tsx?raw";
+import conversationTurnAvatarContentSource from "./ConversationTurnAvatarContent.tsx?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
+import conversationInlineMarkdownSource from "./conversationInlineMarkdown.tsx?raw";
 import { ConversationView } from "./ConversationView";
 import type { ConversationProcessDisplayMode } from "./conversationViewTypes";
 import { shouldShowNextStateSignalInConversation } from "./conversationNextStateSignal";
@@ -156,7 +158,8 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("function renderStreamingResponseText(content: string)");
     expect(conversationViewSource).toContain('from "./ConversationStreamingResponseContent"');
     expect(conversationViewSource).toContain("<ConversationStreamingResponseContent");
-    expect(conversationViewSource).toContain("markdownBodyWithTable: styles.markdownBodyWithTable");
+    expect(conversationViewSource).not.toContain("markdownBodyWithTable: styles.markdownBodyWithTable");
+    expect(conversationStreamingResponseContentSource).toContain("markdownBodyWithTable");
     expect(conversationViewSource).not.toContain("function StreamingResponseContent");
     expect(conversationViewSource).not.toContain("projectStreamingMarkdownBlocks");
     expect(conversationViewSource).not.toContain("const visibleText = targetContent");
@@ -440,13 +443,27 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationOperationDetailsSource).toContain("const detailRows = deferredExpanded ? buildDetailRows(operation) : []");
     expect(conversationViewSource).toContain("const canExpandDetails = hasOperationDetails(operation)");
     expect(conversationViewSource).toContain("<DeferredOperationDetails");
-    expect(conversationViewSource).toContain("classNames={OPERATION_DETAILS_CLASS_NAMES}");
+    expect(conversationViewSource).not.toContain("OPERATION_DETAILS_CLASS_NAMES");
+    expect(conversationViewSource).not.toContain("classNames={OPERATION_DETAILS_CLASS_NAMES}");
+    expect(conversationOperationDetailsSource).toContain('import styles from "./ConversationOperationDetails.styles"');
+    expect(conversationOperationDetailsSource).toContain("classNames = styles");
     expect(conversationViewSource).toContain("buildOperationDetailRows(detailOperation, operationDetailLabels)");
     expect(conversationViewSource).not.toContain("function operationDetailRows(");
     expect(conversationViewSource).not.toContain("function readableOperationResult(");
     expect(conversationViewSource).not.toContain("function structuredResultSummary(");
     expect(conversationViewSource).not.toContain("function naturalRecordText(");
     expect(conversationViewSource).not.toContain("const detailRows = detailsExpanded ? operationDetailRows(operation) : []");
+  });
+
+  it("keeps extracted conversation child views owning their local style defaults", () => {
+    expect(conversationStreamingResponseContentSource).toContain('import styles from "./ConversationStreamingResponseContent.styles"');
+    expect(conversationStreamingResponseContentSource).toContain("classNames = styles");
+    expect(conversationTurnAvatarContentSource).toContain('import styles from "./ConversationTurnAvatarContent.styles"');
+    expect(conversationTurnAvatarContentSource).toContain("imageClassName = styles.turnAvatarImage");
+    expect(conversationInlineMarkdownSource).toContain('import styles from "./conversationInlineMarkdown.styles"');
+    expect(conversationInlineMarkdownSource).toContain("classNames: ConversationInlineMarkdownClassNames = styles");
+    expect(conversationViewSource).not.toContain("classNames={{");
+    expect(conversationViewSource).not.toContain("imageClassName={styles.turnAvatarImage}");
   });
 
   it("centralizes compact process signals in AgentMessage render state", () => {

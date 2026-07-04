@@ -1,6 +1,6 @@
 import React, { ReactNode } from "react";
 
-import styles from "./ConversationView.styles";
+import styles from "./AgentUserContentSectionView.styles";
 
 type AgentUserContentSectionViewProps = {
   userContentSectionIds?: string;

@@ -20,16 +20,6 @@ const localVisualClassConstantPattern = /const\s+[A-Za-z0-9_]+Class\s*=/;
 const localStylesObjectPattern = /const\s+styles\s*=/;
 const parentRouteStyleImportPattern = /from\s+["']\.\/([A-Za-z0-9]+Route)\.styles["']/g;
 const productSharedParentStyleConsumers = [
-  "components/conversation/AgentContextSectionsView.tsx",
-  "components/conversation/AgentMessageTurnView.tsx",
-  "components/conversation/AgentResponseSectionView.tsx",
-  "components/conversation/AgentUserContentSectionView.tsx",
-  "components/conversation/ConversationImageArtifactView.tsx",
-  "components/conversation/ConversationImagePreviewDialog.tsx",
-  "components/conversation/ConversationOperationDetails.tsx",
-  "components/conversation/ConversationStreamingResponseContent.tsx",
-  "components/conversation/ConversationTurnAvatarContent.tsx",
-  "components/conversation/conversationInlineMarkdown.tsx",
   "routes/AgentBulkOperationsPanel.tsx",
   "routes/AgentListStatePanel.tsx",
   "routes/RuntimeScenesPane.tsx",
