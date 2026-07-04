@@ -652,20 +652,10 @@ const styles: Record<string, string> = {
     "toolbarActions min-w-0 flex flex-wrap items-center gap-1.5 !flex min-w-[220px] max-w-[min(100%,560px)] flex-wrap items-center justify-end gap-1.5 overflow-visible [&_a]:min-w-[72px] [&_a]:whitespace-nowrap [&_button]:min-w-[72px] [&_button]:whitespace-nowrap",
   toolbarLink:
     "toolbarLink min-w-0 flex flex-wrap items-center gap-1.5",
-  workflowCandidateActions:
-    "workflowCandidateActions min-w-0 flex flex-wrap items-center gap-1.5",
   workflowCandidateItemSelected:
     "workflowCandidateItemSelected min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
   workflowCandidateList:
     "workflowCandidateList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
-  workflowCandidateListHeader:
-    "workflowCandidateListHeader min-w-0 flex flex-wrap items-center gap-1.5 grid min-h-0 content-start overflow-auto",
-  workflowCandidateListPanel:
-    "workflowCandidateListPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid min-h-0 content-start gap-1.5 overflow-auto",
-  workflowCandidateListScroll:
-    "workflowCandidateListScroll min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
-  workflowCandidateListScrollHint:
-    "workflowCandidateListScrollHint min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   workflowCoordinationBriefSummary:
     "workflowCoordinationBriefSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   workflowCoordinationPanel:
