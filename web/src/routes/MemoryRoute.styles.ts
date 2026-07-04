@@ -4,12 +4,9 @@
 // explicit Tailwind class string; there are no name-based defaults. Edit
 // values directly. This file is transitional: it is deleted in the wave that
 // componentizes MemoryRoute.
-// Includes phantom keys (accessed by consumers but never declared in the old
-// styleKeys — the Proxy synthesized them on demand) and prefix×tone-vocabulary
-// coverage for dynamic `styles[`prefix_${tone}`]` lookups. Typed loosely as
-// Record<string, string> because those dynamic template indexes cannot index a
-// literal-keyed map; tightening is a follow-up, not Phase 0.
-const styles: Record<string, string> = {
+// Includes phantom keys accessed by consumers but never declared in the old
+// styleKeys; the Proxy synthesized them on demand.
+const styles = {
   activeChannelPill:
     "activeChannelPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   agentMemoryViewStack:
@@ -490,6 +487,6 @@ const styles: Record<string, string> = {
     "wideField min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   workspace:
     "workspace min-w-0 grid h-full min-h-0 flex-1 gap-2 p-2 grid-rows-[minmax(0,1fr)] overflow-auto",
-};
+} as const;
 
 export default styles;

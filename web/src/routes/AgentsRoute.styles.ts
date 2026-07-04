@@ -3,7 +3,7 @@
 // target: one styling system). Declarations are Tailwind arbitrary properties
 // emitting byte-identical CSS; descendant .a .b rules were flattened onto the
 // child key. Edit values directly.
-const styles: Record<string, string> = {
+const styles = {
   activityTimelineItem:
     "grid [gap:4px] min-w-0 [padding:7px_8px] [border:1px_solid_var(--border-soft)] [border-radius:var(--radius-control)] [background:var(--surface-panel)] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_p]:min-w-0 [&_p]:[overflow:hidden] [&_p]:[text-overflow:ellipsis] [&_small]:min-w-0 [&_small]:[overflow:hidden] [&_small]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_small]:[white-space:nowrap] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_p]:[display:-webkit-box] [&_p]:[margin:0] [&_p]:[color:var(--fg-secondary)] [&_p]:[font-size:var(--vui-font-xs)] [&_p]:[line-height:1.35] [&_p]:[-webkit-box-orient:vertical] [&_p]:[-webkit-line-clamp:2] [&_small]:[color:var(--fg-tertiary)] [&_small]:[font-size:var(--vui-font-xs)]",
   activityTimelineItem_context:
@@ -410,6 +410,6 @@ const styles: Record<string, string> = {
     "max-[1040px]:[grid-template-rows:minmax(0,_1fr)]",
   workspaceScopePanel:
     "grid [grid-template-columns:minmax(0,_1fr)_auto_auto] [align-items:center] [gap:6px] min-w-0 [padding:7px_8px] [border:1px_solid_var(--border-soft)] [border-radius:var(--radius-control)] [background:var(--surface-panel)] [&_div]:grid [&_div]:[gap:2px] [&_div]:min-w-0 [&_span]:min-w-0 [&_span]:[overflow:hidden] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap] [&_small]:min-w-0 [&_small]:[overflow:hidden] [&_small]:[text-overflow:ellipsis] [&_small]:[white-space:nowrap] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_small]:[color:var(--fg-secondary)] [&_small]:[font-size:var(--vui-font-xs)] max-[860px]:[grid-template-columns:1fr]",
-};
+} as const;
 
 export default styles;
