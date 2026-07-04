@@ -85,6 +85,7 @@ import { TeamSourceCollectionConversationPanel } from "./TeamSourceCollectionCon
 import { TeamSourceCollectionControlsPanel } from "./TeamSourceCollectionControlsPanel";
 import { TeamSourceCollectionExtractionRecoveryPanel } from "./TeamSourceCollectionExtractionRecoveryPanel";
 import { TeamSourceCollectionGraphPanel } from "./TeamSourceCollectionGraphPanel";
+import { TeamSourceCollectionManualWritebackPanel } from "./TeamSourceCollectionManualWritebackPanel";
 import { TeamSourceCollectionMemoryPanel } from "./TeamSourceCollectionMemoryPanel";
 import { TeamSourceCollectionScreeningPanel } from "./TeamSourceCollectionScreeningPanel";
 import {
@@ -8460,6 +8461,44 @@ export function TeamsRoute({
     );
   }
 
+  function renderSourceCollectionManualWritebackPanel(options?: {
+    title?: string;
+    description?: string;
+    wrapInDetails?: boolean;
+  }) {
+    return (
+      <TeamSourceCollectionManualWritebackPanel
+        lang={lang}
+        draft={sourceCollectionOutputDraft}
+        assignmentValue={sourceCollectionOutputDraft.assignmentId || selectedSourceCollectionAssignment?.assignmentId || ""}
+        assignments={sourceCollectionAssignments.map((assignment) => ({
+          id: assignment.assignmentId,
+          label: `${sourceCollectionAgentRoleLabel(assignment.agentRole, lang)} · ${sourceCollectionStatusLabel(assignment.status, lang)}`,
+        }))}
+        sourceTypes={["paper", "url", "dataset", "file", "note", "manual"]}
+        canSubmit={canRecordSourceCollectionOutput}
+        pending={selectedTeamRecordSourceCollectionOutputPending}
+        onDraftChange={(patch) => setSourceCollectionOutputDraft((current) => ({ ...current, ...patch }))}
+        onSubmit={(event) => {
+          event.preventDefault();
+          const assignmentId = sourceCollectionOutputDraft.assignmentId || selectedSourceCollectionAssignment?.assignmentId || "";
+          if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !assignmentId || !sourceCollectionOutputHasRecord) {
+            return;
+          }
+          recordSourceCollectionOutputMutation.mutate({
+            teamId: selectedTeam.teamId,
+            runId: selectedSourceCollectionRunEffectiveId,
+            draft: { ...sourceCollectionOutputDraft, assignmentId },
+          });
+        }}
+        sourceTypeLabel={(sourceType) => sourceCollectionSourceTypeLabel(sourceType, lang)}
+        title={options?.title}
+        description={options?.description}
+        wrapInDetails={options?.wrapInDetails}
+      />
+    );
+  }
+
   function renderSourceCollectionControlsPanel() {
     const activeModule =
       sourceCollectionStageModules.find((module) => module.id === selectedSourceCollectionStageId)
@@ -8523,100 +8562,7 @@ export function TeamsRoute({
           onRunChange={setSelectedSourceCollectionRunId}
           onAssignmentSelect={(assignmentId) => setSourceCollectionOutputDraft((current) => ({ ...current, assignmentId }))}
         />
-        <details className={styles.workflowSourceCollectionDetails}>
-          <summary>
-            <span>{lang === "zh" ? "兜底手工回写" : "Fallback manual writeback"}</span>
-          </summary>
-          <form
-            className={styles.workflowSourceCollectionOutputForm}
-            onSubmit={(event) => {
-              event.preventDefault();
-              const assignmentId = sourceCollectionOutputDraft.assignmentId || selectedSourceCollectionAssignment?.assignmentId || "";
-              if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !assignmentId || !sourceCollectionOutputHasRecord) {
-                return;
-              }
-              recordSourceCollectionOutputMutation.mutate({
-                teamId: selectedTeam.teamId,
-                runId: selectedSourceCollectionRunEffectiveId,
-                draft: { ...sourceCollectionOutputDraft, assignmentId },
-              });
-            }}
-          >
-          <div className={styles.workflowSourceCollectionOutputHeader}>
-            <strong>{lang === "zh" ? "写入一条资料结果" : "Write one collected source"}</strong>
-            <span>{lang === "zh" ? "生成资料记录后自动导入候选资料库" : "Creates a DataRecord, then imports a source_manifest candidate"}</span>
-          </div>
-          <label>
-            <span>{lang === "zh" ? "分工任务" : "Assignment"}</span>
-            <VNativeSelect
-              value={sourceCollectionOutputDraft.assignmentId || selectedSourceCollectionAssignment?.assignmentId || ""}
-              onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, assignmentId: event.target.value }))}
-              disabled={!sourceCollectionAssignments.length}
-            >
-              {sourceCollectionAssignments.map((assignment) => (
-                <option key={assignment.assignmentId} value={assignment.assignmentId}>
-                  {sourceCollectionAgentRoleLabel(assignment.agentRole, lang)} · {sourceCollectionStatusLabel(assignment.status, lang)}
-                </option>
-              ))}
-            </VNativeSelect>
-          </label>
-          <label>
-            <span>{lang === "zh" ? "类型" : "Type"}</span>
-            <VNativeSelect
-              value={sourceCollectionOutputDraft.sourceType}
-              onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, sourceType: event.target.value }))}
-            >
-              {["paper", "url", "dataset", "file", "note", "manual"].map((sourceType) => (
-                <option key={sourceType} value={sourceType}>{sourceCollectionSourceTypeLabel(sourceType, lang)}</option>
-              ))}
-            </VNativeSelect>
-          </label>
-          <label>
-            <span>{lang === "zh" ? "标题" : "Title"}</span>
-            <VNativeInput
-              value={sourceCollectionOutputDraft.title}
-              onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, title: event.target.value }))}
-            />
-          </label>
-          <label>
-            <span>{lang === "zh" ? "来源引用" : "Source ref"}</span>
-            <VNativeInput
-              value={sourceCollectionOutputDraft.sourceRef}
-              onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, sourceRef: event.target.value }))}
-              placeholder="https://doi.org/... / local path / dataset id"
-            />
-          </label>
-          <label>
-            <span>{lang === "zh" ? "原始位置" : "Raw location"}</span>
-            <VNativeInput
-              value={sourceCollectionOutputDraft.rawLocation}
-              onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, rawLocation: event.target.value }))}
-              placeholder={lang === "zh" ? "页码、文件路径、段落或采集位置" : "Page range, file path, section, or capture location"}
-            />
-          </label>
-          <label className={styles.workflowSourceCollectionWide}>
-            <span>{lang === "zh" ? "摘要" : "Summary"}</span>
-            <VNativeTextarea
-              value={sourceCollectionOutputDraft.summary}
-              onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, summary: event.target.value }))}
-              rows={2}
-            />
-          </label>
-          <label className={styles.workflowSourceCollectionWide}>
-            <span>{lang === "zh" ? "备注" : "Notes"}</span>
-            <VNativeInput
-              value={sourceCollectionOutputDraft.notes}
-              onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, notes: event.target.value }))}
-            />
-          </label>
-          <VNativeButton type="submit" disabled={!canRecordSourceCollectionOutput}>
-            <CheckCircle2 size={13} />
-            {selectedTeamRecordSourceCollectionOutputPending
-              ? (lang === "zh" ? "回写中" : "Writing")
-              : (lang === "zh" ? "回写并导入候选" : "Write back and import")}
-          </VNativeButton>
-          </form>
-        </details>
+        {renderSourceCollectionManualWritebackPanel()}
         </>
         ) : null}
         {selectedSourceCollectionStageId === "extraction" ? (
@@ -12562,95 +12508,11 @@ export function TeamsRoute({
                             ))}
                           </div>
                         ) : null}
-                        <form
-                          className={styles.workflowSourceCollectionOutputForm}
-                          onSubmit={(event) => {
-                            event.preventDefault();
-                            const assignmentId = sourceCollectionOutputDraft.assignmentId || selectedSourceCollectionAssignment?.assignmentId || "";
-                            if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !assignmentId || !sourceCollectionOutputHasRecord) {
-                              return;
-                            }
-                            recordSourceCollectionOutputMutation.mutate({
-                              teamId: selectedTeam.teamId,
-                              runId: selectedSourceCollectionRunEffectiveId,
-                              draft: { ...sourceCollectionOutputDraft, assignmentId },
-                            });
-                          }}
-                        >
-                          <div className={styles.workflowSourceCollectionOutputHeader}>
-                            <strong>{lang === "zh" ? "手工回写一条搜集结果" : "Manual result writeback"}</strong>
-                            <span>{lang === "zh" ? "写 DataRecord 后自动导入 source_manifest 候选" : "Writes DataRecord, then imports source_manifest candidate"}</span>
-                          </div>
-                          <label>
-                            <span>{lang === "zh" ? "Assignment" : "Assignment"}</span>
-                            <VNativeSelect
-                              value={sourceCollectionOutputDraft.assignmentId || selectedSourceCollectionAssignment?.assignmentId || ""}
-                              onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, assignmentId: event.target.value }))}
-                              disabled={!sourceCollectionAssignments.length}
-                            >
-                              {sourceCollectionAssignments.map((assignment) => (
-                                <option key={assignment.assignmentId} value={assignment.assignmentId}>
-                                  {assignment.agentRole} · {assignment.status}
-                                </option>
-                              ))}
-                            </VNativeSelect>
-                          </label>
-                          <label>
-                            <span>{lang === "zh" ? "类型" : "Type"}</span>
-                            <VNativeSelect
-                              value={sourceCollectionOutputDraft.sourceType}
-                              onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, sourceType: event.target.value }))}
-                            >
-                              {["paper", "url", "dataset", "file", "note", "manual"].map((sourceType) => (
-                                <option key={sourceType} value={sourceType}>{sourceType}</option>
-                              ))}
-                            </VNativeSelect>
-                          </label>
-                          <label>
-                            <span>{lang === "zh" ? "标题" : "Title"}</span>
-                            <VNativeInput
-                              value={sourceCollectionOutputDraft.title}
-                              onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, title: event.target.value }))}
-                            />
-                          </label>
-                          <label>
-                            <span>{lang === "zh" ? "来源引用" : "Source ref"}</span>
-                            <VNativeInput
-                              value={sourceCollectionOutputDraft.sourceRef}
-                              onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, sourceRef: event.target.value }))}
-                              placeholder="https://doi.org/... / local path / dataset id"
-                            />
-                          </label>
-                          <label>
-                            <span>{lang === "zh" ? "原始位置" : "Raw location"}</span>
-                            <VNativeInput
-                              value={sourceCollectionOutputDraft.rawLocation}
-                              onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, rawLocation: event.target.value }))}
-                              placeholder={lang === "zh" ? "页码、文件路径、段落或采集位置" : "Page range, file path, section, or capture location"}
-                            />
-                          </label>
-                          <label className={styles.workflowSourceCollectionWide}>
-                            <span>{lang === "zh" ? "摘要" : "Summary"}</span>
-                            <VNativeTextarea
-                              value={sourceCollectionOutputDraft.summary}
-                              onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, summary: event.target.value }))}
-                              rows={2}
-                            />
-                          </label>
-                          <label className={styles.workflowSourceCollectionWide}>
-                            <span>{lang === "zh" ? "备注" : "Notes"}</span>
-                            <VNativeInput
-                              value={sourceCollectionOutputDraft.notes}
-                              onChange={(event) => setSourceCollectionOutputDraft((current) => ({ ...current, notes: event.target.value }))}
-                            />
-                          </label>
-                          <VNativeButton type="submit" disabled={!canRecordSourceCollectionOutput}>
-                            <CheckCircle2 size={13} />
-                            {selectedTeamRecordSourceCollectionOutputPending
-                              ? (lang === "zh" ? "回写中" : "Writing")
-                              : (lang === "zh" ? "回写并导入候选" : "Write back and import")}
-                          </VNativeButton>
-                        </form>
+                        {renderSourceCollectionManualWritebackPanel({
+                          title: lang === "zh" ? "手工回写一条搜集结果" : "Manual result writeback",
+                          description: lang === "zh" ? "写 DataRecord 后自动导入 source_manifest 候选" : "Writes DataRecord, then imports source_manifest candidate",
+                          wrapInDetails: false,
+                        })}
                         <div className={styles.workflowIngestionBoundary}>
                           <span>{lang === "zh" ? "执行器：手动/Agent 均可提交 CollectionOutput" : "Executor: manual or Agent CollectionOutput"}</span>
                           <span>{lang === "zh" ? "正式知识写入关闭" : "formal knowledge write off"}</span>
