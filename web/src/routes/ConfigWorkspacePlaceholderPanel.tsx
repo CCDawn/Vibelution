@@ -1,4 +1,4 @@
-import styles from "./ConfigRoute.styles";
+import styles from "./ConfigWorkspacePlaceholderPanel.styles";
 
 type ConfigWorkspacePlaceholderPanelProps = {
   title: string;
