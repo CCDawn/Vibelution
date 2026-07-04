@@ -19,7 +19,10 @@ const routeVisualUtilityPattern =
 const localVisualClassConstantPattern = /const\s+[A-Za-z0-9_]+Class\s*=/;
 const localStylesObjectPattern = /const\s+styles\s*=/;
 const parentRouteStyleImportPattern = /from\s+["']\.\/([A-Za-z0-9]+Route)\.styles["']/g;
-const productSharedParentStyleConsumers = [] as const;
+const productSharedParentStyleConsumers = [
+  "routes/chat/CacheDetailDialog.tsx",
+  "routes/chat/TokenCoreStatusPanel.tsx",
+] as const;
 
 function walkFiles(dir: string): string[] {
   const entries = readdirSync(dir);
