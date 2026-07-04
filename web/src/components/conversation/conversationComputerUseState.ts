@@ -1,4 +1,5 @@
 import type { ConversationMessage } from "../../api/types";
+import type { AgentMessageOperation } from "./agentMessageOperations";
 
 export const COMPUTER_USE_TOOL_NAME = "computer_use_task_tool";
 
@@ -22,6 +23,38 @@ export function computerUseSessionIdFromPreview(preview: unknown) {
     return String(payload.sessionId ?? "").trim();
   } catch {
     return "";
+  }
+}
+
+export function computerUseResultForOperation(
+  operation: AgentMessageOperation,
+  results: Record<string, ComputerUseResult> = {},
+): ComputerUseResult | null {
+  if (operation.kind !== "tool" || (operation.rawLabel ?? operation.label) !== COMPUTER_USE_TOOL_NAME) {
+    return null;
+  }
+  const preview = String(operation.resultPreview ?? "").trim();
+  if (!preview || !preview.startsWith("{")) {
+    return null;
+  }
+  try {
+    const payload = JSON.parse(preview) as Partial<ComputerUseResult>;
+    const sessionId = String(payload.sessionId ?? "").trim();
+    if (!sessionId) {
+      return null;
+    }
+    const parsedResult = {
+      status: String(payload.status ?? ""),
+      sessionId,
+      summary: String(payload.summary ?? ""),
+      steps: Array.isArray(payload.steps) ? payload.steps : [],
+      screenshotUrl: String(payload.screenshotUrl ?? ""),
+      needsConfirmation: Boolean(payload.needsConfirmation),
+      error: String(payload.error ?? ""),
+    };
+    return results[sessionId] ?? parsedResult;
+  } catch {
+    return null;
   }
 }
 
