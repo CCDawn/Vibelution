@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import styles from "./MemoryRoute.styles";
+import styles from "./MemoryEffectivePanel.styles";
 
 export type MemoryEffectiveCardView = {
   id: string;

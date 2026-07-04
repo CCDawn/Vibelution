@@ -1,5 +1,5 @@
 import { VButton } from "../components/vui";
-import styles from "./MemoryRoute.styles";
+import styles from "./MemoryKnowledgeModeTabs.styles";
 
 export type MemoryKnowledgeWorkspaceMode = "sources" | "search" | "review" | "governance" | "permissions";
 

@@ -1,6 +1,6 @@
 import { TriangleAlert } from "lucide-react";
 
-import styles from "./MemoryRoute.styles";
+import styles from "./MemoryWarningStrip.styles";
 
 type MemoryWarningStripProps = {
   label: string;
