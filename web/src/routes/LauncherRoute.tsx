@@ -46,6 +46,7 @@ import {
 import { VButton, VRouteHeader } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { LauncherDeveloperModePanel } from "./LauncherDeveloperModePanel";
+import { LauncherDiagnosticsPanel } from "./LauncherDiagnosticsPanel";
 import { LauncherProjectMaintenancePanel } from "./LauncherProjectMaintenancePanel";
 import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
 import { LauncherStartupSettingsPanel } from "./LauncherStartupSettingsPanel";
@@ -1851,6 +1852,69 @@ export function LauncherRoute() {
   const recovery = evidence?.recovery;
   const recentResults = (evidence?.results.recent ?? []).slice(0, 3);
   const recentEvents = (evidence?.events.recent ?? []).slice(0, 3);
+  const controlPlaneSpecs = [
+    { label: copy.overall, value: launcherSummary },
+    { label: copy.guardian, value: guardianProgress },
+    { label: copy.reason, value: bundle?.lastOperation.reason || bundle?.lastReason || "-" },
+    { label: copy.requestTrigger, value: lastRequestTrigger },
+    { label: copy.transition, value: transitionAt },
+  ];
+  const controlEvidenceSpecs = [
+    { label: copy.state, value: humanState(evidence?.state.runtimeState, uiLang) },
+    { label: copy.activeCommand, value: activeCommand?.commandId ? humanCommandType(activeCommand.type, uiLang) : "-" },
+    { label: copy.pending, value: String(evidence?.queue.pendingCount ?? 0) },
+    { label: copy.processing, value: String(evidence?.queue.processingCount ?? 0) },
+    { label: copy.recovery, value: recovery?.active ? humanCommandType(recovery.commandType, uiLang) : copy.recoveryIdle },
+  ];
+  const recoveryLine = recovery?.active
+    ? {
+        label: copy.recovery,
+        value: recovery.statusLine || humanCommandType(recovery.commandType, uiLang),
+        meta: [recovery.commandId, compactDate(recovery.recoveredAt, locale)].filter(Boolean).join(" · ") || "-",
+        tone: recovery.resultOk === false ? "warning" as const : "success" as const,
+      }
+    : null;
+  const activeCommandLine = {
+    label: copy.activeCommand,
+    value: activeCommand?.commandId ? humanCommandType(activeCommand.type, uiLang) : "-",
+    meta: [activeCommand?.requestedBy, activeCommand?.reason].filter(Boolean).join(" · ") || "-",
+  };
+  const diagnosticQueueItems = [
+    ...recentResults.map((item) => ({
+      id: item.commandId,
+      primary: item.message || humanCommandType(item.commandId, uiLang),
+      secondary: `${item.ok ? "ok" : "failed"} · ${item.message || item.errorType || "-"}`,
+      tone: item.ok ? "success" as const : "error" as const,
+    })),
+    ...recentEvents.map((item) => ({
+      id: `${item.at}-${item.type}-${item.commandId}`,
+      primary: humanCommandType(item.type, uiLang),
+      secondary: [item.commandId, compactDate(item.at, locale)].filter(Boolean).join(" · ") || "-",
+      tone: item.ok === false ? "error" as const : item.ok === true ? "success" as const : "neutral" as const,
+    })),
+  ];
+  const guardianResponsibilityRows = (guardian?.responsibilities ?? []).map((item) => ({
+    id: item.id,
+    label: responsibilityLabel(item.id, uiLang),
+    owner: responsibilityOwner(item.owner, uiLang),
+    state: responsibilityDisplayState(item, uiLang),
+    detail: responsibilityDetail(item, uiLang),
+    tone: stateTone(responsibilityToneState(item)),
+  }));
+  const diagnosticSpecs = [
+    { label: copy.schema, value: String(bundle?.schemaVersion ?? "-") },
+    { label: "bundle mode", value: bundle?.mode || "-" },
+    { label: "url", value: bundle?.url || "-" },
+    { label: copy.source, value: bundle?.lastOperation.source || "-" },
+    { label: copy.requestEndpoint, value: lastRequestEndpoint },
+    { label: copy.proof, value: status?.lifecycleProof.summary || "-" },
+    { label: copy.supervisor, value: guardian?.supervisor?.blocking === false && guardian.supervisor.impact ? humanState(guardian.supervisor.impact, uiLang) : guardian?.supervisor?.status || "-" },
+    { label: copy.internalMigrationDetails, value: [status?.launcher.mode, guardian?.mode, status?.launcher.controlPlane.nextPhase, guardian?.targetMode].filter(Boolean).join(" | ") || "-" },
+    { label: copy.advancedDetails, value: [...keyStatusRows, ...diagnosticStatusRows].map((row) => `${row.label}: ${row.technical}`).join(" | ") || "-" },
+    { label: copy.scene, value: guardian?.supervisor?.runtimeSceneId || "-" },
+    { label: copy.stdout, value: guardian?.supervisor?.stdoutPath || "-" },
+    { label: copy.stderr, value: guardian?.supervisor?.stderrPath || "-" },
+  ];
   const expectedStopDisconnect = statusQuery.isError && (lastControlOperation === "stop" || lastControlOperation === "force-stop" || launcherStatusDisconnected);
   const trackedResult = trackedCommand
     ? (evidence?.results.recent ?? []).find((item) => item.commandId === trackedCommand.commandId)
@@ -2113,118 +2177,26 @@ export function LauncherRoute() {
           </div>
         </section>
 
-        <details className={`${styles.panel} ${styles.diagnosticsPanel}`}>
-          <summary>
-            <span>{copy.advancedDiagnostics}</span>
-            <strong>{copy.diagnosticsCollapsedHint}</strong>
-          </summary>
-          <div className={styles.diagnosticsBody}>
-            <section className={styles.diagnosticSection}>
-              <div className={styles.panelHeader}>
-                <p className={styles.panelEyebrow}>{copy.controlPlane}</p>
-                <strong>{humanState(status?.runtimeManager.runtimeState, uiLang)}</strong>
-              </div>
-              <dl className={styles.specGrid}>
-                <Spec label={copy.overall} value={launcherSummary} />
-                <Spec label={copy.guardian} value={guardianProgress} />
-                <Spec label={copy.reason} value={bundle?.lastOperation.reason || bundle?.lastReason || "-"} />
-                <Spec label={copy.requestTrigger} value={lastRequestTrigger} />
-                <Spec label={copy.transition} value={transitionAt} />
-              </dl>
-            </section>
-            <section className={styles.diagnosticSection}>
-              <div className={styles.panelHeader}>
-                <p className={styles.panelEyebrow}>{copy.controlEvidence}</p>
-                <strong>{evidence?.state.runtimeState || "-"}</strong>
-              </div>
-              <dl className={styles.specGrid}>
-                <Spec label={copy.state} value={humanState(evidence?.state.runtimeState, uiLang)} />
-                <Spec label={copy.activeCommand} value={activeCommand?.commandId ? humanCommandType(activeCommand.type, uiLang) : "-"} />
-                <Spec label={copy.pending} value={String(evidence?.queue.pendingCount ?? 0)} />
-                <Spec label={copy.processing} value={String(evidence?.queue.processingCount ?? 0)} />
-                <Spec label={copy.recovery} value={recovery?.active ? humanCommandType(recovery.commandType, uiLang) : copy.recoveryIdle} />
-              </dl>
-              {recovery?.active ? (
-                <div className={styles.recoveryLine} data-tone={recovery.resultOk === false ? "warning" : "success"}>
-                  <span>{copy.recovery}</span>
-                  <strong>{recovery.statusLine || humanCommandType(recovery.commandType, uiLang)}</strong>
-                  <small>{[recovery.commandId, compactDate(recovery.recoveredAt, locale)].filter(Boolean).join(" · ") || "-"}</small>
-                </div>
-              ) : null}
-              <div className={styles.commandLine}>
-                <span>{copy.activeCommand}</span>
-                <strong>{activeCommand?.commandId ? humanCommandType(activeCommand.type, uiLang) : "-"}</strong>
-                <small>{[activeCommand?.requestedBy, activeCommand?.reason].filter(Boolean).join(" · ") || "-"}</small>
-              </div>
-            </section>
-            <section className={styles.diagnosticSection}>
-              <div className={styles.panelHeader}>
-                <p className={styles.panelEyebrow}>{copy.queueAndEvents}</p>
-                <strong>{recentResults.length + recentEvents.length}</strong>
-              </div>
-              <CompactList
-                items={[
-                  ...recentResults.map((item) => ({
-                    id: item.commandId,
-                    primary: item.message || humanCommandType(item.commandId, uiLang),
-                    secondary: `${item.ok ? "ok" : "failed"} · ${item.message || item.errorType || "-"}`,
-                    tone: item.ok ? "success" as const : "error" as const,
-                  })),
-                  ...recentEvents.map((item) => ({
-                    id: `${item.at}-${item.type}-${item.commandId}`,
-                    primary: humanCommandType(item.type, uiLang),
-                    secondary: [item.commandId, compactDate(item.at, locale)].filter(Boolean).join(" · ") || "-",
-                    tone: item.ok === false ? "error" as const : item.ok === true ? "success" as const : "neutral" as const,
-                  })),
-                ]}
-              />
-            </section>
-            <section className={styles.diagnosticSection}>
-              <div className={styles.panelHeader}>
-                <p className={styles.panelEyebrow}>{copy.maintenanceDetails}</p>
-                <strong>{guardianProgress}</strong>
-              </div>
-              <div className={styles.guardianSummary}>
-                <span>{copy.maintenanceScopeSummary}</span>
-                <strong>{copy.owned}: {guardian?.ownedCount ?? 0}</strong>
-                <strong>{copy.legacyAdapter}: {guardian?.adapterCount ?? 0}</strong>
-                <VButton type="button" variant="secondary" className={styles.iconButton} onPress={() => supervisorMutation.mutate()} isDisabled={busy || !canRequestSupervisorReattach} title={copy.reattachSupervisor} icon={supervisorMutation.isPending ? <LoaderCircle size={15} className={styles.spin} /> : <RefreshCw size={15} />}>
-                  <span>{copy.reattachSupervisor}</span>
-                </VButton>
-              </div>
-              <div className={styles.guardianTable} role="table" aria-label={copy.guardian}>
-                <div className={styles.guardianHead} role="row">
-                  <span role="columnheader">{copy.unit}</span>
-                  <span role="columnheader">owner</span>
-                  <span role="columnheader">{copy.state}</span>
-                  <span role="columnheader">{copy.detail}</span>
-                </div>
-                {(guardian?.responsibilities ?? []).map((item) => (
-                  <div key={item.id} className={styles.guardianRow} role="row" data-tone={stateTone(responsibilityToneState(item))}>
-                    <span role="cell"><strong>{responsibilityLabel(item.id, uiLang)}</strong></span>
-                    <span role="cell">{responsibilityOwner(item.owner, uiLang)}</span>
-                    <span role="cell">{responsibilityDisplayState(item, uiLang)}</span>
-                    <span role="cell">{responsibilityDetail(item, uiLang)}</span>
-                  </div>
-                ))}
-              </div>
-            </section>
-          </div>
-          <dl className={styles.diagnosticsGrid}>
-            <Spec label={copy.schema} value={String(bundle?.schemaVersion ?? "-")} />
-            <Spec label="bundle mode" value={bundle?.mode || "-"} />
-            <Spec label="url" value={bundle?.url || "-"} />
-            <Spec label={copy.source} value={bundle?.lastOperation.source || "-"} />
-            <Spec label={copy.requestEndpoint} value={lastRequestEndpoint} />
-            <Spec label={copy.proof} value={status?.lifecycleProof.summary || "-"} />
-            <Spec label={copy.supervisor} value={guardian?.supervisor?.blocking === false && guardian.supervisor.impact ? humanState(guardian.supervisor.impact, uiLang) : guardian?.supervisor?.status || "-"} />
-            <Spec label={copy.internalMigrationDetails} value={[status?.launcher.mode, guardian?.mode, status?.launcher.controlPlane.nextPhase, guardian?.targetMode].filter(Boolean).join(" | ") || "-"} />
-            <Spec label={copy.advancedDetails} value={[...keyStatusRows, ...diagnosticStatusRows].map((row) => `${row.label}: ${row.technical}`).join(" | ") || "-"} />
-            <Spec label={copy.scene} value={guardian?.supervisor?.runtimeSceneId || "-"} />
-            <Spec label={copy.stdout} value={guardian?.supervisor?.stdoutPath || "-"} />
-            <Spec label={copy.stderr} value={guardian?.supervisor?.stderrPath || "-"} />
-          </dl>
-        </details>
+        <LauncherDiagnosticsPanel
+          copy={copy}
+          controlPlaneStatus={humanState(status?.runtimeManager.runtimeState, uiLang)}
+          controlPlaneSpecs={controlPlaneSpecs}
+          controlEvidenceStatus={evidence?.state.runtimeState || "-"}
+          controlEvidenceSpecs={controlEvidenceSpecs}
+          recoveryLine={recoveryLine}
+          activeCommandLine={activeCommandLine}
+          queueItemCount={recentResults.length + recentEvents.length}
+          queueItems={diagnosticQueueItems}
+          guardianProgress={guardianProgress}
+          guardianOwnedCount={guardian?.ownedCount ?? 0}
+          guardianAdapterCount={guardian?.adapterCount ?? 0}
+          guardianRows={guardianResponsibilityRows}
+          diagnosticSpecs={diagnosticSpecs}
+          busy={busy}
+          canRequestSupervisorReattach={canRequestSupervisorReattach}
+          supervisorPending={supervisorMutation.isPending}
+          onReattachSupervisor={() => supervisorMutation.mutate()}
+        />
       </div>
     </section>
   );
@@ -2248,32 +2220,6 @@ function Metric({
       <span>{label}</span>
       <strong>{value}</strong>
       {helper ? <small title={helperTitle || helper}>{helper}</small> : null}
-    </div>
-  );
-}
-
-function Spec({ label, value }: { label: string; value: string }) {
-  return (
-    <>
-      <dt>{label}</dt>
-      <dd>{value}</dd>
-    </>
-  );
-}
-
-function CompactList({
-  items,
-}: {
-  items: Array<{ id: string; primary: string; secondary: string; tone: "neutral" | "success" | "error" }>;
-}) {
-  return (
-    <div className={styles.compactList}>
-      {items.length ? items.map((item) => (
-        <div key={item.id || item.primary} className={styles.compactItem} data-tone={item.tone}>
-          <strong>{item.primary}</strong>
-          <small>{item.secondary}</small>
-        </div>
-      )) : <small>-</small>}
     </div>
   );
 }
