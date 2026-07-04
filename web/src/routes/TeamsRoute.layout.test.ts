@@ -10,6 +10,7 @@ import teamSourceCollectionControlsPanelSource from "./TeamSourceCollectionContr
 import teamSourceCollectionExtractionRecoveryPanelSource from "./TeamSourceCollectionExtractionRecoveryPanel.tsx?raw";
 import teamSourceCollectionFindingDetailsPanelSource from "./TeamSourceCollectionFindingDetailsPanel.tsx?raw";
 import teamSourceCollectionGraphPanelSource from "./TeamSourceCollectionGraphPanel.tsx?raw";
+import teamSourceCollectionManualWritebackPanelSource from "./TeamSourceCollectionManualWritebackPanel.tsx?raw";
 import teamSourceCollectionMemoryPanelSource from "./TeamSourceCollectionMemoryPanel.tsx?raw";
 import teamSourceCollectionRunSettingsPanelSource from "./TeamSourceCollectionRunSettingsPanel.tsx?raw";
 import teamSourceCollectionScreeningPanelSource from "./TeamSourceCollectionScreeningPanel.tsx?raw";
@@ -549,6 +550,16 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionControlsPanelSource).toContain("source-collection-actions");
     expect(teamSourceCollectionControlsPanelSource).toContain("sourceCollectionControlPanel");
     expect(teamSourceCollectionControlsPanelSource).toContain("forwardRef");
+    expect(routeSource).toContain("TeamSourceCollectionManualWritebackPanel");
+    expect(routeSource).toContain("renderSourceCollectionManualWritebackPanel");
+    expect(teamSourceCollectionManualWritebackPanelSource).toContain("workflowSourceCollectionDetails");
+    expect(teamSourceCollectionManualWritebackPanelSource).toContain("workflowSourceCollectionOutputForm");
+    expect(teamSourceCollectionManualWritebackPanelSource).toContain("兜底手工回写");
+    expect(teamSourceCollectionManualWritebackPanelSource).toContain("写入一条资料结果");
+    expect(teamSourceCollectionManualWritebackPanelSource).toContain("分工任务");
+    expect(teamSourceCollectionManualWritebackPanelSource).toContain("sourceTypeLabel(sourceType)");
+    expect(teamSourceCollectionManualWritebackPanelSource).toContain("回写并导入候选");
+    expect(teamSourceCollectionManualWritebackPanelSource).toContain("wrapInDetails");
     expect(routeSource).toContain("sourceCollectionPanelClassName");
     expect(teamSourceCollectionStandaloneStagePanelSource).toContain("TeamStagePipeline");
     expect(routeSource).toContain("container.scrollTo");
@@ -1172,8 +1183,8 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionFindingDetailsPanelSource).toContain("最近批次");
     expect(teamSourceCollectionFindingDetailsPanelSource).toContain("查询与分工详情");
     expect(routeSource).toContain("手工回写一条搜集结果");
-    expect(routeSource).toContain("回写并导入候选");
-    expect(routeSource).toContain("原始位置");
+    expect(teamSourceCollectionManualWritebackPanelSource).toContain("回写并导入候选");
+    expect(teamSourceCollectionManualWritebackPanelSource).toContain("原始位置");
     expect(routeSource).toContain("不触发外部搜索，不写正式知识/RAG/图谱");
     expect(routeSource).toContain("正式知识写入关闭");
     expect(routeSource).toContain("入库关系图");
