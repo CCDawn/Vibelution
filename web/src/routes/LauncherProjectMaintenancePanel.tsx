@@ -6,7 +6,7 @@ import type {
   LauncherMaintenanceSummary,
 } from "../api/types";
 import { VButton } from "../components/vui";
-import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
+import styles from "./LauncherProjectMaintenancePanel.styles";
 
 type LauncherProjectMaintenanceCopy = {
   maintenanceActiveWorkPolicy: string;
