@@ -9,7 +9,12 @@ import styles from "./AgentsRoute.styles";
 import stylesSource from "./AgentsRoute.styles.ts?raw";
 import emptySelectionStyles from "./AgentEmptySelectionPanel.styles";
 import managementBriefStyles from "./AgentManagementBriefPanel.styles";
+import memoryPolicyStyles from "./AgentMemoryPolicyPanel.styles";
+import modeMembershipStyles from "./AgentModeMembershipPanel.styles";
+import personaProfileStyles from "./AgentPersonaProfilePanel.styles";
 import referencesPanelStyles from "./AgentReferencesPanel.styles";
+import runtimePolicyStyles from "./AgentRuntimePolicyPanel.styles";
+import taskProfileStyles from "./AgentTaskProfilePanel.styles";
 import returnBannerStyles from "./AgentReturnBannerPanel.styles";
 import routerSource from "../app/router.tsx?raw";
 import shellSource from "../app/AppShell.tsx?raw";
@@ -92,6 +97,10 @@ const denseListSource = readFileSync(
 );
 const runtimeFocusPanelSource = readFileSync(
   new URL("./AgentRuntimeFocusPanel.tsx", import.meta.url),
+  "utf-8",
+);
+const runtimePolicyPanelSource = readFileSync(
+  new URL("./AgentRuntimePolicyPanel.tsx", import.meta.url),
   "utf-8",
 );
 const activityPanePanelSource = readFileSync(
@@ -703,6 +712,11 @@ describe("AgentsRoute layout contract", () => {
     expect(personaProfilePanelSource).toContain("copy.communicationStyle");
     expect(personaProfilePanelSource).toContain("copy.collaborationPreference");
     expect(personaProfilePanelSource).toContain("copy.identityNotes");
+    expect(personaProfilePanelSource).toContain('from "./AgentPersonaProfilePanel.styles"');
+    expect(personaProfilePanelSource).not.toContain("AgentsRoute.styles");
+    expect(personaProfileStyles.configEditor).toBeTruthy();
+    expect(personaProfileStyles.editorGrid).toBeTruthy();
+    expect(personaProfileStyles.editorActions).toBeTruthy();
     expect(coreConfigPanelSource).toContain("styles.fieldWide");
     expect(routeSource).toContain("updatePersonaMutation");
     expect(routeSource).not.toContain("recommendAgents");
@@ -743,6 +757,11 @@ describe("AgentsRoute layout contract", () => {
     expect(taskProfilePanelSource).toContain("copy.preferredTasks");
     expect(taskProfilePanelSource).toContain("copy.successCriteria");
     expect(taskProfilePanelSource).toContain("copy.handoffNotes");
+    expect(taskProfilePanelSource).toContain('from "./AgentTaskProfilePanel.styles"');
+    expect(taskProfilePanelSource).not.toContain("AgentsRoute.styles");
+    expect(taskProfileStyles.configEditor).toBeTruthy();
+    expect(taskProfileStyles.fieldWide).toBeTruthy();
+    expect(taskProfileStyles.editorActions).toBeTruthy();
     expect(routeSource).toContain("updateTaskMutation");
     expect(routeSource).not.toContain("autoRouteAgent");
   });
@@ -753,6 +772,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("/mode-membership");
     expect(routeSource).toContain("<AgentConfigReferencesPanePanel");
     expect(configReferencesPanePanelSource).toContain("<AgentModeMembershipPanel");
+    expect(modeMembershipPanelSource).toContain('from "./AgentModeMembershipPanel.styles"');
+    expect(modeMembershipPanelSource).not.toContain("AgentsRoute.styles");
     expect(routeSource).toContain("draft: membershipDraft");
     expect(routeSource).toContain("dirty: membershipDirty");
     expect(routeSource).toContain("canSave: canSaveMembership");
@@ -765,6 +786,9 @@ describe("AgentsRoute layout contract", () => {
     expect(modeMembershipPanelSource).toContain("copy.selfEvolutionSlot");
     expect(routeSource).toContain("chatWorkspaceCache.afterAgentWorkspaceChanged()");
     expect(modeMembershipPanelSource).toContain("styles.toggleGrid");
+    expect(modeMembershipStyles.configEditor).toBeTruthy();
+    expect(modeMembershipStyles.toggleGrid).toBeTruthy();
+    expect(modeMembershipStyles.editorGrid).toBeTruthy();
   });
 
   it("shows Agent group room membership as read-only references", () => {
@@ -901,9 +925,14 @@ describe("AgentsRoute layout contract", () => {
     expect(memoryPolicyPanelSource).toContain("copy.proposeKnowledgeBaseIds");
     expect(memoryPolicyPanelSource).toContain("copy.reviewKnowledgeBaseIds");
     expect(memoryPolicyPanelSource).toContain("copy.rateKnowledgeBaseIds");
+    expect(memoryPolicyPanelSource).toContain('from "./AgentMemoryPolicyPanel.styles"');
+    expect(memoryPolicyPanelSource).not.toContain("AgentsRoute.styles");
     expect(memoryPolicyPanelSource).toContain("styles.memoryPolicyGrid");
     expect(memoryPolicyPanelSource).toContain("styles.tagList");
     expect(memoryPolicyPanelSource).toContain("styles.inlineAdd");
+    expect(memoryPolicyStyles.memoryPolicyGrid).toBeTruthy();
+    expect(memoryPolicyStyles.tagList).toBeTruthy();
+    expect(memoryPolicyStyles.inlineAdd).toBeTruthy();
   });
 
   it("organizes the Agent card into three switchable panes with run history", () => {
@@ -1078,8 +1107,13 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.saveRuntimePolicy");
     expect(routeSource).toContain("updateRuntimePolicyMutation");
     expect(activityPanePanelSource).toContain("AgentRuntimePolicyPanel");
+    expect(runtimePolicyPanelSource).toContain('from "./AgentRuntimePolicyPanel.styles"');
+    expect(runtimePolicyPanelSource).not.toContain("AgentsRoute.styles");
     expect(routeSource).not.toContain("className={styles.runtimePolicyGrid}");
     expect(routeSource).not.toContain("className={styles.contextModeGrid}");
+    expect(runtimePolicyStyles.runtimePolicyGrid).toBeTruthy();
+    expect(runtimePolicyStyles.contextModeGrid).toBeTruthy();
+    expect(runtimePolicyStyles.editorActions).toBeTruthy();
   });
 
   it("creates and safely archives Agents from the unified Agent card", () => {
