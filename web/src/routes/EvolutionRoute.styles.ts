@@ -106,12 +106,6 @@ const styles = {
     "inline-flex [align-items:center] [gap:8px] [min-height:26px] [&_input]:[width:16px] [&_input]:[height:16px]",
   closedLoopLaunchBlock:
     "grid [grid-template-columns:minmax(0,_1fr)_minmax(92px,_auto)] [align-items:center] [gap:8px] min-w-0 [padding:7px_9px] [border:1px_solid_color-mix(in_srgb,_var(--accent-warm)_30%,_var(--border-hairline))] [border-radius:7px] [background:color-mix(in_srgb,_var(--accent-warm)_8%,_var(--surface-card-subtle))] [&_div]:grid [&_div]:[gap:2px] [&_div]:min-w-0 [&_strong]:[overflow-wrap:anywhere] [&_span]:min-w-0 [&_span]:[overflow-wrap:anywhere] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[line-height:1.3] max-[1200px]:[padding:6px_8px]",
-  closedLoopLedger:
-    "grid [gap:8px] min-w-0 [padding:10px] [border:1px_solid_color-mix(in_srgb,_var(--accent-cool)_30%,_var(--border-hairline))] [border-radius:7px] [background:color-mix(in_srgb,_var(--surface-card-subtle)_88%,_var(--accent-cool))] [&_p]:[margin:0] [&_p]:[color:var(--fg-secondary)] [&_p]:[font-size:var(--vui-font-xs)] [&_p]:[line-height:1.45] [&_p]:[overflow-wrap:anywhere]",
-  closedLoopLedgerEvidenceGrid:
-    "grid [grid-template-columns:repeat(2,_minmax(0,_1fr))] [gap:6px] [&_article]:grid [&_article]:[gap:3px] [&_article]:min-w-0 [&_article]:[padding:7px_8px] [&_article]:[border:1px_solid_var(--border-hairline)] [&_article]:[border-radius:6px] [&_article]:[background:var(--surface-card-muted)] [&_span]:min-w-0 [&_span]:[overflow:hidden] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)]",
-  closedLoopLedgerHeader:
-    "flex [align-items:flex-start] [justify-content:space-between] [gap:10px] min-w-0 [&_div]:grid [&_div]:[gap:3px] [&_div]:min-w-0",
   closedLoopModeBadge:
     "[flex:0_0_auto] [padding:2px_6px] [border:1px_solid_color-mix(in_srgb,_var(--accent-warm)_36%,_var(--border-hairline))] [border-radius:999px] [background:color-mix(in_srgb,_var(--accent-warm)_12%,_transparent)] [color:var(--accent-warm-2)] [font-size:var(--vui-font-xs)] [font-weight:740] [line-height:1] [white-space:nowrap]",
   closedLoopStatus:
@@ -222,8 +216,6 @@ const styles = {
     "flex [align-items:center] [justify-content:space-between] [gap:12px] min-w-0 [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap]",
   eventList:
     "grid [gap:8px]",
-  eventListScrollable:
-    "[max-height:220px] [overflow:auto] [padding-right:4px]",
   eventRow:
     "grid [gap:5px] min-w-0 [padding:9px_10px] [border-radius:8px] [background:var(--surface-card-muted)] [border:1px_solid_var(--border-hairline)]",
   eventSummary:
@@ -266,8 +258,6 @@ const styles = {
     "flex [align-items:start] [gap:14px]",
   heroTop:
     "flex [align-items:start] [justify-content:space-between] [gap:16px]",
-  idleMonitor:
-    "grid [align-content:start] [gap:8px] [height:100%] min-h-0 [padding:10px_12px_12px]",
   inlineAction:
     "[border:1px_solid_var(--border-hairline)] [border-radius:8px] [transition:border-color_140ms_ease,_background-color_140ms_ease,_color_140ms_ease] hover:[border-color:color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)] hover:[background:var(--surface-card-hover)] [justify-self:end] min-w-0 [max-width:100%] inline-flex [align-items:center] [justify-content:center] [gap:8px] [background:var(--surface-card-muted)] [color:var(--fg-primary)] [width:fit-content] [min-height:32px] [padding:0_10px] [font-size:var(--vui-font-xs)]",
   inlineNoticeRow:
@@ -326,8 +316,6 @@ const styles = {
     "[grid-column:2] [grid-row:1]",
   liveResizeHandleRun:
     "[grid-column:4] [grid-row:1]",
-  liveRunToolbar:
-    "flex [align-items:center] [justify-content:space-between] [gap:10px] min-w-0 [padding:8px] [border:1px_solid_var(--border-hairline)] [border-radius:8px] [background:var(--surface-card-subtle)]",
   liveStatusRow:
     "flex [align-items:center] [justify-content:flex-end] [gap:8px] min-w-0 [max-width:min(100%,_320px)] [flex-wrap:wrap]",
   liveSummaryRow:
@@ -364,10 +352,6 @@ const styles = {
     "grid [grid-template-columns:repeat(4,_minmax(0,_1fr))] [gap:5px] [&_span]:grid [&_span]:[gap:1px] [&_span]:min-w-0 [&_span]:[padding:5px_6px] [&_span]:[border:1px_solid_var(--border-hairline)] [&_span]:[border-radius:6px] [&_span]:[background:var(--surface-card-subtle)] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-family:var(--font-mono)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap]",
   monitorMetrics:
     "grid [grid-template-columns:repeat(3,_minmax(0,_1fr))] [gap:10px] max-[900px]:[grid-template-columns:repeat(2,_minmax(0,_1fr))] max-[640px]:[grid-template-columns:1fr]",
-  monitorMetricsDense:
-    "grid [grid-template-columns:repeat(2,_minmax(0,_1fr))] [gap:6px] max-[900px]:[grid-template-columns:repeat(2,_minmax(0,_1fr))] max-[640px]:[grid-template-columns:1fr]",
-  monitorSummary:
-    "grid [gap:10px]",
   mutedCounter:
     "[color:var(--fg-primary)] [font-weight:600] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap] [min-width:32px] [text-align:right] [font-size:1rem]",
   noticeText:
@@ -426,10 +410,6 @@ const styles = {
     "grid [gap:6px] [max-height:min(620px,_58vh)] [overflow:auto] [padding-right:4px]",
   runMonitor:
     "grid [gap:14px]",
-  runMonitorDense:
-    "grid [align-content:start] [gap:8px] [height:100%] min-h-0 [padding:10px_12px_12px]",
-  runNextActionStrip:
-    "grid [grid-template-columns:auto_minmax(0,_1fr)] [gap:8px] [align-items:start] min-w-0 [padding:8px_10px] [border-radius:7px] [border:1px_solid_var(--border-hairline)] [background:var(--surface-card-subtle)] [color:var(--fg-secondary)] [font-size:var(--vui-font-xs)] [line-height:1.45] [&_strong]:[color:var(--fg-primary)] [&_strong]:[white-space:nowrap] [&_span]:min-w-0 [&_span]:[overflow-wrap:anywhere]",
   runQueuePanel:
     "min-h-0 [padding:10px_12px] grid [align-content:start] [gap:10px] [overflow:auto]",
   runRecordCard:
@@ -450,16 +430,6 @@ const styles = {
     "grid [grid-template-columns:repeat(3,_minmax(0,_1fr))] [gap:8px] max-[900px]:[grid-template-columns:repeat(2,_minmax(0,_1fr))] max-[640px]:[grid-template-columns:1fr]",
   runSignalStack:
     "grid [align-content:start] [gap:8px] min-w-0",
-  runSummaryTone_danger:
-    "[border-color:color-mix(in_srgb,_var(--state-error)_38%,_var(--border-hairline))] [background:color-mix(in_srgb,_var(--state-error)_9%,_var(--surface-card-subtle))]",
-  runSummaryTone_idle:
-    "[border-color:var(--border-hairline)] [background:var(--surface-card-subtle)]",
-  runSummaryTone_running:
-    "[border-color:color-mix(in_srgb,_var(--accent-cool)_34%,_var(--border-hairline))] [background:color-mix(in_srgb,_var(--accent-cool)_8%,_var(--surface-card-subtle))]",
-  runSummaryTone_success:
-    "[border-color:color-mix(in_srgb,_var(--state-success)_34%,_var(--border-hairline))] [background:color-mix(in_srgb,_var(--state-success)_8%,_var(--surface-card-subtle))]",
-  runSummaryTone_warning:
-    "[border-color:color-mix(in_srgb,_var(--state-warning)_38%,_var(--border-hairline))] [background:color-mix(in_srgb,_var(--state-warning)_9%,_var(--surface-card-subtle))]",
   runsCommandHeader:
     "flex [flex-direction:column] [align-items:stretch] [justify-content:end] [gap:10px] min-w-0 max-[900px]:[flex-direction:column]",
   runsCommandMetrics:

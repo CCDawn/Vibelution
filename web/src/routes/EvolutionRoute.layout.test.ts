@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 // @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
 import { readFileSync } from "node:fs";
 import routeSource from "./EvolutionRoute.tsx?raw";
+import activeRunMonitorPanelSource from "./EvolutionActiveRunMonitorPanel.tsx?raw";
+import activeRunMonitorStyles from "./EvolutionActiveRunMonitorPanel.styles";
+import activeRunMonitorStylesSource from "./EvolutionActiveRunMonitorPanel.styles.ts?raw";
 import routeStyles from "./EvolutionRoute.styles";
 import stylesSource from "./EvolutionRoute.styles.ts?raw";
 
@@ -136,11 +139,15 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("separates inconclusive terminal status and harness-only datasets from success wording", () => {
-    expect(routeSource).toContain('normalizedDecision === "INCONCLUSIVE"');
-    expect(routeSource).toContain("statusIcon(monitoredRun.status, monitoredRun.decision)");
+    expect(activeRunMonitorPanelSource).toContain('normalizedDecision === "INCONCLUSIVE"');
+    expect(routeSource).toContain("<EvolutionActiveRunMonitorPanel");
+    expect(routeSource).toContain("supervisedActiveRunMonitorRun");
+    expect(activeRunMonitorPanelSource).toContain("function statusIcon");
+    expect(activeRunMonitorPanelSource).toContain("statusIcon(run.controlSummary.status, run.controlSummary.decision)");
     expect(routeSource).toContain("monitoredStatusLabel");
     expect(routeSource).toContain("supervisedClosedLoopDecisionLabel");
-    expect(routeSource).toContain("closedLoopLedger");
+    expect(routeSource).toContain("supervisedClosedLoopLedger");
+    expect(activeRunMonitorPanelSource).toContain("EvolutionActiveRunClosedLoopLedgerPanel");
     expect(routeSource).toContain('status === "agent_harness_ready"');
     expect(routeSource).toContain('status === "custom_harness_ready"');
     expect(routeSource).toContain("自定义评测");
@@ -183,7 +190,9 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("const supervisedClosedLoopRecord");
     expect(routeSource).toContain("workspaceSnapshot?.latestClosedLoopRecord");
     expect(routeSource).not.toContain("styles.latestSupervisedResult");
-    expect(routeSource).toContain("styles.closedLoopLedger");
+    expect(routeSource).toContain("closedLoop: supervisedClosedLoopLedger");
+    expect(routeSource).not.toContain("styles.closedLoopLedger");
+    expect(activeRunMonitorPanelSource).toContain("styles.closedLoopLedger");
   });
 
   it("loads self-evolution history separately but current flow from worktree snapshot", () => {
@@ -282,7 +291,9 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("const terminateWorktreeAction = supervisedWorktreeLiveRun?.actionStates?.terminate;");
     expect(routeSource).toContain('approvalWorktreeActionMutation.mutate({ runId: supervisedWorktreeLiveRun.runId, action: "terminate" });');
     expect(routeSource).toContain("const terminateSupervisedPending = approvalWorktreeActionMutation.isPending;");
-    expect(routeSource).toContain("disabled={!canTerminateSupervisedRun || terminateSupervisedPending}");
+    expect(routeSource).toContain("disabled: !canTerminateSupervisedRun");
+    expect(routeSource).toContain("pending: terminateSupervisedPending");
+    expect(activeRunMonitorPanelSource).toContain("disabled={run.termination.disabled || run.termination.pending}");
     expect(routeSource).not.toContain("terminateRunMutation.mutate(monitoredRun.runId);");
     expect(routeSource).not.toContain("legacyTerminateSupervisedAction");
   });
@@ -449,12 +460,35 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(apiTypesSource).toContain("latestClosedLoopRecord: EvolutionClosedLoopRecord | null");
     expect(routeSource).toContain("const supervisedClosedLoopRecord");
     expect(routeSource).toContain("workspaceSnapshot?.latestClosedLoopRecord");
-    expect(routeSource).toContain("styles.closedLoopLedger");
-    expect(routeSource).toContain("styles.closedLoopLedgerEvidenceGrid");
+    expect(routeSource).toContain("const supervisedClosedLoopLedger");
+    expect(routeSource).toContain("closedLoop: supervisedClosedLoopLedger");
+    expect(activeRunMonitorPanelSource).toContain("styles.closedLoopLedger");
+    expect(activeRunMonitorPanelSource).toContain("styles.closedLoopLedgerEvidenceGrid");
     expect(routeSource).toContain("闭环记录库");
     expect(routeSource).toContain("审查入口");
     expect(routeSource).toContain("supervisedClosedLoopRecord.nextAction");
-    expect(routeSource).toContain("supervisedClosedLoopRecord.evidence.proposalPaths.length");
+    expect(routeSource).toContain("supervisedClosedLoopProposalCount");
+  });
+
+  it("keeps the active run monitor DOM and local styles in the extracted display panel", () => {
+    expect(routeSource).toContain("<EvolutionActiveRunMonitorPanel");
+    expect(routeSource).toContain("const supervisedActiveRunMonitorMetrics");
+    expect(routeSource).toContain("const supervisedActiveRunMonitorEvents");
+    expect(routeSource).toContain("const supervisedActiveRunMonitorRun");
+    expect(routeSource).not.toContain("function statusIcon");
+    expect(routeSource).not.toContain("RUN_SUMMARY_TONE_CLASS");
+    expect(routeSource).not.toContain("styles.runMonitorDense");
+    expect(routeSource).not.toContain("styles.eventListScrollable");
+    expect(routeSource).not.toContain("styles.runNextActionStrip");
+    expect(activeRunMonitorPanelSource).toContain("RUN_SUMMARY_TONE_CLASS");
+    expect(activeRunMonitorPanelSource).toContain("<VNativeButton");
+    expect(activeRunMonitorPanelSource).toContain("styles.runMonitorDense");
+    expect(activeRunMonitorPanelSource).toContain("styles.eventListScrollable");
+    expect(activeRunMonitorPanelSource).toContain("styles.runNextActionStrip");
+    expect(activeRunMonitorStylesSource).toContain("runMonitorDense");
+    expect(activeRunMonitorStylesSource).toContain("closedLoopLedgerEvidenceGrid");
+    expect(stylesSource).not.toContain("runMonitorDense");
+    expect(stylesSource).not.toContain("eventListScrollable");
   });
 
   it("explains closed-loop launch and dataset case limits without changing review actions", () => {
@@ -643,7 +677,7 @@ describe("EvolutionRoute library user flow contract", () => {
       [routeStyles.supervisedRunOptions, "[grid-template-columns:minmax(0,_0.95fr)_minmax(126px,_1.05fr)]"],
       [routeStyles.datasetCatalogItem, "[grid-template-columns:minmax(0,_1fr)_auto]"],
       [routeStyles.caseTraceSummary, "[grid-template-columns:26px_minmax(0,_1fr)_auto_18px]"],
-      [routeStyles.closedLoopLedgerEvidenceGrid, "[grid-template-columns:repeat(2,_minmax(0,_1fr))]"],
+      [activeRunMonitorStyles.closedLoopLedgerEvidenceGrid, "[grid-template-columns:repeat(2,_minmax(0,_1fr))]"],
     ];
 
     for (const [className, gridTemplate] of restoredGridExpectations) {
