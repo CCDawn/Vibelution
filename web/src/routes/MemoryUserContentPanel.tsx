@@ -349,11 +349,11 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
           </div>
           <div className={styles.list}>
             {spaces.map((space) => (
-              <button
+              <VButton
                 key={space.spaceId}
                 type="button"
                 className={`${styles.listButton} ${space.spaceId === selectedSpaceId ? styles.listButtonActive : ""}`.trim()}
-                onClick={() => {
+                onPress={() => {
                   setSelectedSpaceId(space.spaceId);
                   setSelectedPageId("");
                 }}
@@ -364,7 +364,7 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
                   <span className={styles.badge}>{space.counts.pageCount} pages</span>
                   <span className={styles.badge}>{space.counts.taskCount} tasks</span>
                 </div>
-              </button>
+              </VButton>
             ))}
             {!spaces.length ? <div className={styles.emptyState}>导入后，这里会显示受管空间。</div> : null}
           </div>
@@ -377,11 +377,11 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
           </div>
           <div className={styles.list}>
             {pages.map((page) => (
-              <button
+              <VButton
                 key={page.pageId}
                 type="button"
                 className={`${styles.listButton} ${page.pageId === selectedPageId ? styles.listButtonActive : ""}`.trim()}
-                onClick={() => setSelectedPageId(page.pageId)}
+                onPress={() => setSelectedPageId(page.pageId)}
               >
                 <strong>{page.title}</strong>
                 <span className={styles.metaWrap}>{page.relativePath}</span>
@@ -389,7 +389,7 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
                   <span className={styles.badge}>{page.tags.length} tags</span>
                   <span className={styles.badge}>{page.taskCounts.total} tasks</span>
                 </div>
-              </button>
+              </VButton>
             ))}
             {!pages.length ? <div className={styles.emptyState}>当前筛选下没有页面。</div> : null}
           </div>
@@ -427,11 +427,11 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
           </section>
           <div className={styles.resultList}>
             {(searchResultsQuery.data?.results ?? []).map((result: UserMarkdownSearchResult) => (
-              <button
+              <VButton
                 key={result.resultId}
                 type="button"
                 className={styles.listButton}
-                onClick={() => {
+                onPress={() => {
                   setSelectedSpaceId(result.spaceId);
                   setSelectedPageId(result.pageId);
                 }}
@@ -442,7 +442,7 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
                 </div>
                 <span className={styles.metaWrap}>{result.spaceName} · {result.pageRelativePath}</span>
                 <span>{result.excerpt}</span>
-              </button>
+              </VButton>
             ))}
             {searchQuery.trim() && !searchResultsQuery.isPending && !(searchResultsQuery.data?.results.length ?? 0) ? (
               <div className={styles.emptyState}>
