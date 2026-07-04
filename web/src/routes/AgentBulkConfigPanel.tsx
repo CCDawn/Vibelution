@@ -1,7 +1,7 @@
 import { CheckSquare } from "lucide-react";
 
 import { VButton, VNativeInput, VNativeSelect } from "../components/vui";
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentBulkConfigPanel.styles";
 
 export type AgentBulkConfigField = "dialogueModelId" | "promptTemplateId" | "primaryMode" | "roleKey";
 export type AgentBulkConfigDraft = Record<AgentBulkConfigField, string>;
