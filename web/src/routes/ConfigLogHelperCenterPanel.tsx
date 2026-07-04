@@ -2,7 +2,7 @@ import { ExternalLink, RefreshCw } from "lucide-react";
 
 import type { HealthDiagnostics, HealthFinding, HealthQuickAction, LogHelper, SessionHelper } from "../api/types";
 import { VButton } from "../components/vui";
-import styles from "./ConfigRoute.styles";
+import styles from "./ConfigLogHelperCenterPanel.styles";
 
 type ConfigLogHelperLanguage = "zh" | "en";
 
