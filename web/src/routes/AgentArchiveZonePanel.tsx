@@ -1,7 +1,7 @@
 import { Archive, ShieldCheck, Trash2 } from "lucide-react";
 
 import { VButton } from "../components/vui";
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentArchiveZonePanel.styles";
 
 export type AgentArchiveZonePanelCopy = {
   archiveAgent: string;

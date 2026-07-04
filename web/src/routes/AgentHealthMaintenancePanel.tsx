@@ -1,7 +1,7 @@
 import { AlertTriangle, CheckCircle2, MessageSquare } from "lucide-react";
 
 import { VButton } from "../components/vui";
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentHealthMaintenancePanel.styles";
 
 export type AgentHealthMaintenanceIssueView = {
   key: string;
@@ -30,6 +30,11 @@ type AgentHealthMaintenancePanelProps = {
   onOpenActivity: () => void;
 };
 
+function issueItemToneClass(severity: string) {
+  const toneKey = `issueItem_${severity}` as keyof typeof styles;
+  return styles[toneKey] || "";
+}
+
 export function AgentHealthMaintenancePanel({
   copy,
   health,
@@ -48,7 +53,7 @@ export function AgentHealthMaintenancePanel({
         {health.hasIssues ? (
           <div className={styles.issueList}>
             {health.issues.map((issue) => (
-              <article key={issue.key} className={`${styles.issueItem} ${styles[`issueItem_${issue.severity}`]}`}>
+              <article key={issue.key} className={`${styles.issueItem} ${issueItemToneClass(issue.severity)}`}>
                 <strong>{issue.title}</strong>
                 <p>{issue.detail}</p>
                 {issue.showInboxAction ? (

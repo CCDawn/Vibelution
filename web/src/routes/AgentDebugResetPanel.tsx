@@ -1,7 +1,7 @@
 import { RefreshCw } from "lucide-react";
 
 import { VButton, VNativeInput } from "../components/vui";
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentDebugResetPanel.styles";
 
 export type AgentResetOptions = {
   clearRuntimeState: boolean;
