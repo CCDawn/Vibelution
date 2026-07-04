@@ -1,7 +1,7 @@
 import { Wrench } from "lucide-react";
 
 import { VButton } from "../components/vui";
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentToolSummaryPanel.styles";
 
 export type AgentToolSummaryPanelCopy = {
   toolPolicyTitle: string;

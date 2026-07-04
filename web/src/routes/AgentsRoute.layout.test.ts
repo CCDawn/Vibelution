@@ -8,13 +8,17 @@ import agentWorkspaceCacheSource from "./agentWorkspaceCache.ts?raw";
 import styles from "./AgentsRoute.styles";
 import stylesSource from "./AgentsRoute.styles.ts?raw";
 import emptySelectionStyles from "./AgentEmptySelectionPanel.styles";
+import activityHistoryStyles from "./AgentActivityHistoryPanel.styles";
 import managementBriefStyles from "./AgentManagementBriefPanel.styles";
 import memoryPolicyStyles from "./AgentMemoryPolicyPanel.styles";
 import modeMembershipStyles from "./AgentModeMembershipPanel.styles";
 import personaProfileStyles from "./AgentPersonaProfilePanel.styles";
 import referencesPanelStyles from "./AgentReferencesPanel.styles";
+import runtimeFocusStyles from "./AgentRuntimeFocusPanel.styles";
 import runtimePolicyStyles from "./AgentRuntimePolicyPanel.styles";
 import taskProfileStyles from "./AgentTaskProfilePanel.styles";
+import toolGovernanceStyles from "./AgentToolGovernancePanel.styles";
+import toolSummaryStyles from "./AgentToolSummaryPanel.styles";
 import returnBannerStyles from "./AgentReturnBannerPanel.styles";
 import routerSource from "../app/router.tsx?raw";
 import shellSource from "../app/AppShell.tsx?raw";
@@ -847,6 +851,10 @@ describe("AgentsRoute layout contract", () => {
     expect(toolSummaryPanelSource).toContain("onPress={onConfigure}");
     expect(toolGovernancePanelSource).toContain("去工具页配置");
     expect(toolSummaryPanelSource).toContain("copy.toolCategoryCount");
+    expect(toolSummaryPanelSource).toContain('from "./AgentToolSummaryPanel.styles"');
+    expect(toolSummaryPanelSource).not.toContain("AgentsRoute.styles");
+    expect(toolSummaryStyles.policySummaryGrid).toBeTruthy();
+    expect(toolSummaryStyles.editorActions).toBeTruthy();
   });
 
   it("routes Agent prompt configuration to the Prompt Center", () => {
@@ -896,12 +904,15 @@ describe("AgentsRoute layout contract", () => {
     expect(toolGovernancePanelSource).toContain("copy.toolGovernancePending");
     expect(toolGovernancePanelSource).toContain("copy.toolGovernanceApprove");
     expect(toolGovernancePanelSource).toContain("copy.toolGovernanceReject");
+    expect(toolGovernancePanelSource).toContain('from "./AgentToolGovernancePanel.styles"');
+    expect(toolGovernancePanelSource).not.toContain("AgentsRoute.styles");
     expect(routeSource).toContain("createToolGovernanceMutation");
     expect(routeSource).toContain("resolveToolGovernanceMutation");
     expect(toolGovernancePanelSource).toContain("styles.toolGovernanceList");
     expect(toolGovernancePanelSource).toContain("styles.toolGovernanceItem");
-    expect(styles.toolGovernanceList).toBeTruthy();
-    expect(styles.toolGovernanceItem).toBeTruthy();
+    expect(toolGovernanceStyles.toolGovernanceList).toBeTruthy();
+    expect(toolGovernanceStyles.toolGovernanceItem).toBeTruthy();
+    expect(toolGovernanceStyles.governanceActions).toBeTruthy();
   });
 
   it("edits Agent memory policy from the same detail card", () => {
@@ -1058,6 +1069,10 @@ describe("AgentsRoute layout contract", () => {
     expect(activityHistoryPanelSource).toContain("<h3>{copy.inboxTitle}: {inboxPendingCount}</h3>");
     expect(activityHistoryPanelSource).toContain("styles.inboxMessageList");
     expect(activityHistoryPanelSource).toContain("styles.inboxMessageItem");
+    expect(activityHistoryPanelSource).toContain('from "./AgentActivityHistoryPanel.styles"');
+    expect(activityHistoryPanelSource).not.toContain("AgentsRoute.styles");
+    expect(activityHistoryStyles.inboxMessageList).toBeTruthy();
+    expect(activityHistoryStyles.inboxMessageItemFocused).toBeTruthy();
   });
 
   it("summarizes runs, inbox messages, and context events in one activity timeline", () => {
@@ -1073,7 +1088,10 @@ describe("AgentsRoute layout contract", () => {
     expect(runtimeFocusPanelSource).toContain("styles.runtimeFocusPanel");
     expect(runtimeFocusPanelSource).toContain("styles.runtimeNextStep");
     expect(runtimeFocusPanelSource).toContain("styles.runtimeEvidenceHint");
-    expect(styles.runtimeEvidenceHint).toBeTruthy();
+    expect(runtimeFocusPanelSource).toContain('from "./AgentRuntimeFocusPanel.styles"');
+    expect(runtimeFocusPanelSource).not.toContain("AgentsRoute.styles");
+    expect(runtimeFocusStyles.runtimeEvidenceHint).toBeTruthy();
+    expect(runtimeFocusStyles.runtime_running).toBeTruthy();
     expect(routeSource).toContain("RuntimeFocusEvidenceResult");
     expect(routeSource).toContain("findRuntimeFocusEvidence");
     expect(routeSource).toContain("runtimeFocusEvidence");

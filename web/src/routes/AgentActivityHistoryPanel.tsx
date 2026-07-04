@@ -7,7 +7,7 @@ import type {
   AgentRuntimeEvidenceMatch,
 } from "../api/types";
 import { VButton } from "../components/vui";
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentActivityHistoryPanel.styles";
 
 export type AgentActivityTimelineItem = {
   id: string;
