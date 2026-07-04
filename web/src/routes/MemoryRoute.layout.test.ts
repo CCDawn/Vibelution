@@ -20,6 +20,7 @@ import knowledgeUsageContractPanelSource from "./MemoryKnowledgeUsageContractPan
 import managementEditorSource from "./MemoryManagementEditor.tsx?raw";
 import managePanelSource from "./MemoryManagePanel.tsx?raw";
 import matrixPanelSource from "./MemoryMatrixPanel.tsx?raw";
+import itemListPanelSource from "./MemoryItemListPanel.tsx?raw";
 import overviewPanelSource from "./MemoryOverviewPanel.tsx?raw";
 import projectMemoryQueuePanelSource from "./MemoryProjectMemoryQueuePanel.tsx?raw";
 import reviewQueuePanelSource from "./MemoryReviewQueuePanel.tsx?raw";
@@ -149,7 +150,7 @@ describe("MemoryRoute layout contract", () => {
   it("keeps the source audit filter stable instead of deriving focus from the first item", () => {
     expect(routeSource).toContain("const activePair =\n    activeItemId\n      ? flatVisibleItems.find(({ item }) => item.id === activeItemId) ?? null\n      : null;");
     expect(routeSource).toContain('const activePairKey = activePair ? pairSelectionKey(activePair.section.id, activePair.item.id) : "";');
-    expect(routeSource).toContain("const active = itemKey === activePairKey;");
+    expect(itemListPanelSource).toContain("const active = itemKey === activePairKey;");
     expect(routeSource).toContain("onSelectAllSections={() => {\n        setActiveItemId(\"\");\n        setActiveSectionId(\"\");\n      }}");
     expect(routeSource).toContain("onSelectSection={(sectionId) => {\n        setActiveItemId(\"\");\n        setActiveSectionId(sectionId);\n      }}");
     expect(routeSource).toContain("itemTitle={selectedSection?.title ?? title}");
@@ -748,8 +749,14 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("toggleVisibleMemorySelection");
     expect(routeSource).toContain("runBulkMemoryAction");
     expect(managePanelSource).toContain("styles.bulkActionBar");
-    expect(routeSource).toContain("styles.itemSelectionRow");
-    expect(routeSource).toContain("styles.itemContentButton");
+    expect(routeSource).toContain("<MemoryItemListPanel");
+    expect(routeSource).toContain("selectedMemoryKeys={selectedMemoryKeySet}");
+    expect(itemListPanelSource).toContain("styles.itemSelectionRow");
+    expect(itemListPanelSource).toContain("styles.itemContentButton");
+    expect(itemListPanelSource).toContain("styles.compactMemoryList");
+    expect(itemListPanelSource).toContain("styles.itemButtonCompact");
+    expect(itemListPanelSource).toContain("styles.itemBadges");
+    expect(itemListPanelSource).toContain("channelPills(item).map");
     expect(routeSource).toContain("renderMemoryList(flatVisibleItems, copy.noMatches, false, true)");
     expect(routeSource).toContain('from "./MemoryManagePanel"');
     expect(routeSource).toContain("<MemoryManagePanel");
@@ -922,8 +929,9 @@ describe("MemoryRoute layout contract", () => {
   });
 
   it("makes source origin and inspection actions directly visible in the UI", () => {
-    expect(routeSource).toContain("sourceOriginLabel(section, item)");
-    expect(routeSource).toContain("styles.itemOrigin");
+    expect(routeSource).toContain("formatSourceOrigin={sourceOriginLabel}");
+    expect(itemListPanelSource).toContain("formatSourceOrigin(section, item)");
+    expect(itemListPanelSource).toContain("styles.itemOrigin");
     expect(detailPanelSource).toContain("styles.detailActions");
     expect(detailPanelSource).toContain("styles.detailActionButton");
     expect(detailPanelSource).toContain("styles.copyNotice");

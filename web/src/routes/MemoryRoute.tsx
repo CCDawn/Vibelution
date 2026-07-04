@@ -51,7 +51,7 @@ import {
   TeamKnowledgeBase,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
-import { VButton, VNativeInput, VNativeSelect, VRouteHeader } from "../components/vui";
+import { VButton, VRouteHeader } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { MemoryAgentMemoryPanel } from "./MemoryAgentMemoryPanel";
@@ -78,6 +78,7 @@ import { MemoryKnowledgeUsageContractPanel } from "./MemoryKnowledgeUsageContrac
 import { MemoryManagementEditor, type MemoryManagementEditorDraft } from "./MemoryManagementEditor";
 import { MemoryManagePanel } from "./MemoryManagePanel";
 import { MemoryMatrixPanel } from "./MemoryMatrixPanel";
+import { MemoryItemListPanel } from "./MemoryItemListPanel";
 import { MemoryOverviewPanel } from "./MemoryOverviewPanel";
 import { MemoryProjectMemoryQueuePanel } from "./MemoryProjectMemoryQueuePanel";
 import { MemoryReviewQueuePanel } from "./MemoryReviewQueuePanel";
@@ -3790,155 +3791,29 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     </nav>
   );
 
-  const renderMemoryList = (pairs: MemoryPair[], emptyText: string, compact = false, selectable = false) => {
-    if (overviewQuery.isPending && !hasOverviewSections) {
-      return <div className={styles.emptyState}>{copy.loading}</div>;
-    }
-    if (showBlockingOverviewError) {
-      return (
-        <div className={styles.emptyState}>
-          {copy.loadFailed}: {overviewQuery.error instanceof Error ? overviewQuery.error.message : String(overviewQuery.error)}
-        </div>
-      );
-    }
-    if (!pairs.length) {
-      return <div className={styles.emptyState}>{emptyText}</div>;
-    }
-    return (
-      <div className={compact ? styles.compactMemoryList : styles.itemList}>
-        {pairs.map(({ section, item }) => {
-          const itemKey = pairSelectionKey(section.id, item.id);
-          const active = itemKey === activePairKey;
-          const compactItemBody = (
-            <>
-              <span className={styles.compactItemPrimary}>
-                <strong>{item.title}</strong>
-                <span>{formatTimestamp(item.updatedAt, lang)}</span>
-              </span>
-              <span className={styles.compactItemMeta}>
-                <span>{sourceOriginLabel(section, item)}</span>
-                <span title={item.path || item.source}>{item.path || item.source}</span>
-              </span>
-              <span className={styles.compactItemSummary}>{item.summary}</span>
-            </>
-          );
-          const denseItemBody = (
-            <>
-              <span className={styles.manageItemPrimary}>
-                <strong>{item.title}</strong>
-                <span>{formatTimestamp(item.updatedAt, lang)}</span>
-              </span>
-              <span className={styles.manageItemMeta}>
-                <span>{sourceOriginLabel(section, item)}</span>
-                <span title={item.path || item.source}>{item.path || item.source}</span>
-              </span>
-              <span className={styles.manageItemFooter}>
-                <span className={styles.manageItemSummary}>{item.summary}</span>
-                <span className={styles.manageItemBadges}>
-                  <span className={statusClassName(item.agentVisible, item.inPrompt)}>
-                    {item.inPrompt ? copy.inPrompt : item.agentVisible ? copy.canUse : copy.manualOnly}
-                  </span>
-                  {item.managedState?.userManaged ? <span className={styles.statusPill}>{copy.userManaged}</span> : null}
-                  {item.managedState?.overridden ? <span className={styles.statusPill}>{copy.overridden}</span> : null}
-                  {item.managedState?.disabled ? <span className={styles.statusPill}>{copy.disabledByUser}</span> : null}
-                  {!item.exists ? <span className={styles.statusPill}>{copy.missing}</span> : null}
-                  {item.contentTruncated ? <span className={styles.statusPill}>{copy.truncated}</span> : null}
-                </span>
-              </span>
-            </>
-          );
-          const itemBody = (
-            <>
-              <span className={styles.itemHeader}>
-                <strong>{item.title}</strong>
-                <span>{formatTimestamp(item.updatedAt, lang)}</span>
-              </span>
-              <span className={styles.itemOrigin}>
-                {copy.sourceOrigin}: {sourceOriginLabel(section, item)}
-              </span>
-              <span className={styles.itemPath}>{item.path || item.source}</span>
-              <span className={styles.itemSummary}>{item.summary}</span>
-              <span className={styles.itemBadges}>
-                <span className={statusClassName(item.agentVisible, item.inPrompt)}>
-                  {item.inPrompt ? copy.inPrompt : item.agentVisible ? copy.canUse : copy.manualOnly}
-                </span>
-                {item.managedState?.userManaged ? <span className={styles.statusPill}>{copy.userManaged}</span> : null}
-                {item.managedState?.overridden ? <span className={styles.statusPill}>{copy.overridden}</span> : null}
-                {item.managedState?.disabled ? <span className={styles.statusPill}>{copy.disabledByUser}</span> : null}
-                {itemChannelPills(copy, item).map((pill) => (
-                  <span key={`${item.id}:${pill.label}`} className={styles.channelPill} title={pill.hint}>
-                    {pill.label}
-                  </span>
-                ))}
-                {!item.exists ? <span className={styles.statusPill}>{copy.missing}</span> : null}
-                {item.contentTruncated ? <span className={styles.statusPill}>{copy.truncated}</span> : null}
-              </span>
-            </>
-          );
-
-          if (selectable) {
-            return (
-              <article
-                key={itemKey}
-                className={
-                  active
-                    ? `${styles.itemButton} ${styles.itemButtonDense} ${styles.itemButtonActive}`
-                    : `${styles.itemButton} ${styles.itemButtonDense}`
-                }
-              >
-                <label className={`${styles.itemSelectionRow} ${styles.itemSelectionRowDense}`}>
-                  <VNativeInput
-                    type="checkbox"
-                    checked={selectedMemoryKeySet.has(itemKey)}
-                    aria-label={`${copy.selectMemory}: ${item.title}`}
-                    onChange={() => toggleMemorySelection(section.id, item.id)}
-                  />
-                </label>
-                <VButton
-                  type="button"
-                  className={`${styles.itemContentButton} ${styles.itemContentButtonDense}`}
-                  onClick={() => selectMemoryPair(section.id, item.id)}
-                  aria-pressed={active}
-                >
-                  {denseItemBody}
-                </VButton>
-              </article>
-            );
-          }
-
-          if (compact) {
-            return (
-              <VButton
-                key={itemKey}
-                type="button"
-                className={
-                  active
-                    ? `${styles.itemButton} ${styles.itemButtonCompact} ${styles.itemButtonActive}`
-                    : `${styles.itemButton} ${styles.itemButtonCompact}`
-                }
-                onClick={() => selectMemoryPair(section.id, item.id)}
-                aria-pressed={active}
-              >
-                {compactItemBody}
-              </VButton>
-            );
-          }
-
-          return (
-            <VButton
-              key={itemKey}
-              type="button"
-              className={active ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
-              onClick={() => selectMemoryPair(section.id, item.id)}
-              aria-pressed={active}
-            >
-              {itemBody}
-            </VButton>
-          );
-        })}
-      </div>
-    );
-  };
+  const renderMemoryList = (pairs: MemoryPair[], emptyText: string, compact = false, selectable = false) => (
+    <MemoryItemListPanel
+      pairs={pairs}
+      emptyText={emptyText}
+      loading={overviewQuery.isPending && !hasOverviewSections}
+      errorText={
+        showBlockingOverviewError
+          ? `${copy.loadFailed}: ${overviewQuery.error instanceof Error ? overviewQuery.error.message : String(overviewQuery.error)}`
+          : ""
+      }
+      compact={compact}
+      selectable={selectable}
+      activePairKey={activePairKey}
+      selectedMemoryKeys={selectedMemoryKeySet}
+      copy={copy}
+      formatTimestamp={(value) => formatTimestamp(value, lang)}
+      formatSourceOrigin={sourceOriginLabel}
+      statusClassName={statusClassName}
+      channelPills={(item) => itemChannelPills(copy, item)}
+      onSelectPair={selectMemoryPair}
+      onToggleSelection={toggleMemorySelection}
+    />
+  );
 
   const openReviewTarget = (pair: MemoryPair) => {
     setActiveSectionId(pair.section.id);
