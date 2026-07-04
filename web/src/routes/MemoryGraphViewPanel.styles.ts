@@ -1,14 +1,6 @@
 const styles = {
   countPill:
     "countPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
-  detailHeader:
-    "detailHeader min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
-  detailMeta:
-    "detailMeta min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
-  detailPanel:
-    "detailPanel min-w-0 min-h-0 overflow-auto rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
-  emptyDetail:
-    "emptyDetail min-w-0 grid min-h-[96px] content-center gap-1.5 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   graphCanvasFallback:
     "graphCanvasFallback min-w-0 grid min-h-0 gap-2 p-2",
   graphCanvasPanel:
@@ -19,28 +11,10 @@ const styles = {
     "graphClearFocusButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
   graphInteractionHint:
     "graphInteractionHint min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
-  graphKnowledgeContent:
-    "graphKnowledgeContent min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
-  graphKnowledgeItem:
-    "graphKnowledgeItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 line-clamp-3",
-  graphKnowledgeList:
-    "graphKnowledgeList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
-  graphKnowledgePanel:
-    "graphKnowledgePanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   graphNodeList:
     "graphNodeList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   graphNodeTypeMark:
     "graphNodeTypeMark min-w-0",
-  graphRelationEmpty:
-    "graphRelationEmpty min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
-  graphRelationGroup:
-    "graphRelationGroup min-w-0 [&_button]:w-full",
-  graphRelationHeader:
-    "graphRelationHeader min-w-0 flex flex-wrap items-center gap-1.5",
-  graphRelationPanel:
-    "graphRelationPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
-  graphResponsibilityPanel:
-    "graphResponsibilityPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   graphTypeList:
     "graphTypeList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto [&_button]:w-full [&_[data-active=true]]:border-[var(--accent-cool)]",
   graphWorkspace:
@@ -57,12 +31,8 @@ const styles = {
     "panelEyebrow min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   panelHeader:
     "panelHeader min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
-  rawPanel:
-    "rawPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   searchBox:
     "searchBox min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
-  selectedConfigSummary:
-    "selectedConfigSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
   sourcePanel:
     "sourcePanel min-w-0 min-h-0 overflow-auto rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   summaryCard:
