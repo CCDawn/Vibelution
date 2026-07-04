@@ -111,7 +111,8 @@ class TestToolExecutorInit:
     def test_research_knowledge_tool_is_registered_and_llm_facing(self):
         """科研知识库查询工具进入默认 LLM 工具目录。"""
         canonical_names = {tool.name for tool in create_key_tools()}
-        llm_names = {tool.name for tool in create_llm_facing_tools()}
+        llm_tools = create_llm_facing_tools()
+        llm_names = {tool.name for tool in llm_tools}
 
         assert "research_knowledge_query_tool" in canonical_names
         assert "research_knowledge_query_tool" in llm_names
@@ -122,6 +123,13 @@ class TestToolExecutorInit:
         assert "knowledge_query_tool" not in canonical_names
         assert "knowledge_rag_retrieve_tool" not in canonical_names
         assert "unified_knowledge_search_tool" not in canonical_names
+
+        unified_tool = next(tool for tool in llm_tools if tool.name == "unified_memory_search_tool")
+        properties = unified_tool.args_schema.model_json_schema()["properties"]
+        assert "include_user_content" in properties
+        assert properties["include_user_content"]["default"] is False
+        assert "user_content_space_ids" in properties
+        assert properties["user_content_space_ids"]["default"] == ""
 
     def test_conversation_log_inspect_tool_is_registered_and_llm_facing(self):
         canonical_names = {tool.name for tool in create_key_tools()}
