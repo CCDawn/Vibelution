@@ -1,7 +1,7 @@
 // Explicit Tailwind style map for ConfigRoute.
 // Generated from the legacy ConfigRoute stylesheet during the CSS-module retirement wave;
 // edit values directly as named Tailwind/arbitrary-property utilities.
-const styles: Record<string, string> = {
+const styles = {
   actionButton:
     "vui-routes-configroute actionButton [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] [min-height:var(--control-height)] [padding:0_9px] [border-radius:var(--control-radius)] [font:inherit] [font-size:var(--vui-font-xs)] [font-weight:600] [line-height:1] [white-space:nowrap] [transition:border-color_140ms_ease,background-color_140ms_ease,color_140ms_ease] [border:1px_solid_var(--border-soft)] [background:var(--surface-card-subtle)] [color:var(--fg-primary)] hover:[cursor:pointer] hover:[border-color:color-mix(in_srgb,var(--surface-card)_14%,transparent)] disabled:[cursor:not-allowed] disabled:[opacity:0.56]",
   actionsRow:
@@ -418,6 +418,6 @@ const styles: Record<string, string> = {
     "vui-routes-configroute userProfileLayout [display:grid] [gap:7px] [&_.treeFieldCardView_.treeHint]:[-webkit-line-clamp:1]",
   userProfilePreferencesField:
     "vui-routes-configroute userProfilePreferencesField [min-width:0]",
-};
+} as const;
 
 export default styles;
