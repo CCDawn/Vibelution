@@ -16,7 +16,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { Suspense, lazy, type CSSProperties, type KeyboardEvent, type PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, type PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -75,6 +75,7 @@ import {
 } from "./EvolutionActiveRunMonitorPanel";
 import { EvolutionProposalActionBandsPanel } from "./EvolutionProposalActionBandsPanel";
 import { EvolutionRunRecordsPanel } from "./EvolutionRunRecordsPanel";
+import { EvolutionSelfTrackBoundary } from "./EvolutionSelfTrackBoundary";
 import { createEvolutionWorkspaceCache } from "./evolutionWorkspaceCache";
 import { modelDisplayLabel } from "./agentDisplay";
 import {
@@ -203,10 +204,6 @@ const SUPERVISED_WORKFLOW_STEPS: SupervisedWorkflowDefinition[] = [
   { id: "approval", zh: "用户审批", en: "Approval", role: null },
 ];
 const LOCAL_SUPERVISED_RUN_PREFIX = "local-supervised-start-";
-const LazySelfEvolutionTrack = lazy(() =>
-  import("./SelfEvolutionTrack").then((module) => ({ default: module.SelfEvolutionTrack })),
-);
-
 type ProposalEditDraft = {
   improvementType: string;
   expectedEffect: string;
@@ -2954,45 +2951,34 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       ) : null}
 
       {activeTrack === "self" ? (
-        <div className={styles.selfModeStack}>
-          <Suspense fallback={(
-            <section className={`${styles.surface} ${styles.structuredEmptyState}`}>
-              <LoaderCircle size={18} className={styles.spinIcon} aria-hidden="true" />
-              <div>
-                <h3>{lang === "zh" ? "正在加载自进化工作台" : "Loading self-evolution workspace"}</h3>
-                <p>{lang === "zh" ? "监督进化工作台已先保持可用，自进化面板正在按需载入。" : "The supervised workspace stays available while the self-evolution panel loads on demand."}</p>
-              </div>
-            </section>
-        )}>
-          <LazySelfEvolutionTrack
-            overview={selfOverview}
-            worktreeRun={selfWorktreeRun}
-            observationRun={selfObservationRun ?? null}
-            goalInput={selfGoalInput}
-            onGoalInputChange={setSelfGoalInput}
-            onStartRun={() => startSelfWorktreeRunMutation.mutate()}
-            onStartObservation={(payload) => startSelfObservationMutation.mutate(payload)}
-            onTerminateObservation={(runId) => selfObservationActionMutation.mutate({ runId, action: "terminate" })}
-            onWorktreeAction={(runId, action) => approvalWorktreeActionMutation.mutate({ runId, action })}
-            onDeleteHistoryGroups={(txnIds) => deleteSelfHistoryMutation.mutate(txnIds)}
-            startPending={startSelfWorktreeRunMutation.isPending}
-            observationStartPending={startSelfObservationMutation.isPending}
-            observationActionPending={selfObservationActionMutation.isPending}
-            worktreeActionPending={approvalWorktreeActionMutation.isPending}
-            deleteHistoryPending={deleteSelfHistoryMutation.isPending}
-            startWorktreeError={startSelfWorktreeRunMutation.error?.message ?? ""}
-            observationStartError={startSelfObservationMutation.error?.message ?? ""}
-            observationActionError={selfObservationActionMutation.error?.message ?? ""}
-            worktreeActionError={approvalWorktreeActionMutation.error?.message ?? ""}
-            deleteHistoryError={deleteSelfHistoryMutation.error?.message ?? ""}
-            actionFeedback={selfActionFeedback}
-            runLocked={selfRunLocked}
-            worktreeRunLocked={worktreeRunLocked}
-            transactions={selfTransactions}
-            loading={selfTrackLoading}
-          />
-          </Suspense>
-        </div>
+        <EvolutionSelfTrackBoundary
+          lang={lang}
+          overview={selfOverview}
+          worktreeRun={selfWorktreeRun}
+          observationRun={selfObservationRun ?? null}
+          goalInput={selfGoalInput}
+          onGoalInputChange={setSelfGoalInput}
+          onStartRun={() => startSelfWorktreeRunMutation.mutate()}
+          onStartObservation={(payload) => startSelfObservationMutation.mutate(payload)}
+          onTerminateObservation={(runId) => selfObservationActionMutation.mutate({ runId, action: "terminate" })}
+          onWorktreeAction={(runId, action) => approvalWorktreeActionMutation.mutate({ runId, action })}
+          onDeleteHistoryGroups={(txnIds) => deleteSelfHistoryMutation.mutate(txnIds)}
+          startPending={startSelfWorktreeRunMutation.isPending}
+          observationStartPending={startSelfObservationMutation.isPending}
+          observationActionPending={selfObservationActionMutation.isPending}
+          worktreeActionPending={approvalWorktreeActionMutation.isPending}
+          deleteHistoryPending={deleteSelfHistoryMutation.isPending}
+          startWorktreeError={startSelfWorktreeRunMutation.error?.message ?? ""}
+          observationStartError={startSelfObservationMutation.error?.message ?? ""}
+          observationActionError={selfObservationActionMutation.error?.message ?? ""}
+          worktreeActionError={approvalWorktreeActionMutation.error?.message ?? ""}
+          deleteHistoryError={deleteSelfHistoryMutation.error?.message ?? ""}
+          actionFeedback={selfActionFeedback}
+          runLocked={selfRunLocked}
+          worktreeRunLocked={worktreeRunLocked}
+          transactions={selfTransactions}
+          loading={selfTrackLoading}
+        />
       ) : null}
 
       {activeTrack === "supervised" && evolutionView === "live" ? (

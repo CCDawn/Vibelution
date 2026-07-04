@@ -12,6 +12,9 @@ import proposalActionBandsStylesSource from "./EvolutionProposalActionBandsPanel
 import runRecordsPanelSource from "./EvolutionRunRecordsPanel.tsx?raw";
 import runRecordsPanelStyles from "./EvolutionRunRecordsPanel.styles";
 import runRecordsPanelStylesSource from "./EvolutionRunRecordsPanel.styles.ts?raw";
+import selfTrackBoundarySource from "./EvolutionSelfTrackBoundary.tsx?raw";
+import selfTrackBoundaryStyles from "./EvolutionSelfTrackBoundary.styles";
+import selfTrackBoundaryStylesSource from "./EvolutionSelfTrackBoundary.styles.ts?raw";
 import routeStyles from "./EvolutionRoute.styles";
 import stylesSource from "./EvolutionRoute.styles.ts?raw";
 
@@ -290,11 +293,19 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("loads the self-evolution track only after that track is shown", () => {
-    expect(routeSource).toContain("LazySelfEvolutionTrack");
-    expect(routeSource).toContain('import("./SelfEvolutionTrack")');
-    expect(routeSource).toContain("<Suspense");
+    expect(routeSource).toContain('import { EvolutionSelfTrackBoundary } from "./EvolutionSelfTrackBoundary";');
+    expect(routeSource).toContain("<EvolutionSelfTrackBoundary");
+    expect(routeSource).not.toContain("LazySelfEvolutionTrack");
+    expect(routeSource).not.toContain('import("./SelfEvolutionTrack")');
+    expect(routeSource).not.toContain("<Suspense");
     expect(routeSource).not.toContain('import { SelfEvolutionTrack } from "./SelfEvolutionTrack";');
-    expect(routeSource).toContain("正在加载自进化工作台");
+    expect(selfTrackBoundarySource).toContain("LazySelfEvolutionTrack");
+    expect(selfTrackBoundarySource).toContain('import("./SelfEvolutionTrack")');
+    expect(selfTrackBoundarySource).toContain("<Suspense");
+    expect(selfTrackBoundarySource).toContain("正在加载自进化工作台");
+    expect(selfTrackBoundarySource).not.toContain("useQuery");
+    expect(selfTrackBoundarySource).not.toContain("useMutation");
+    expect(selfTrackBoundarySource).not.toContain("queryClient");
   });
 
   it("lets the self-evolution workspace fill the remaining viewport height", () => {
@@ -305,16 +316,17 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeStyles.page).toContain("[max-height:calc(100dvh_-_var(--shell-topbar-height))]");
     expect(routeStyles.selfPage).toContain("[grid-template-rows:minmax(0,_1fr)]");
     expect(routeStyles.selfPage).toContain("[gap:0]");
-    expect(routeStyles.selfModeStack).toContain("[grid-template-rows:minmax(0,_1fr)]");
-    expect(routeStyles.selfModeStack).toContain("[overflow:hidden]");
-    expect(routeStyles.selfModeStack).not.toContain("[grid-template-rows:auto_minmax(0,_1fr)]");
+    expect(selfTrackBoundaryStyles.selfModeStack).toContain("[grid-template-rows:minmax(0,_1fr)]");
+    expect(selfTrackBoundaryStyles.selfModeStack).toContain("[overflow:hidden]");
+    expect(selfTrackBoundaryStyles.selfModeStack).not.toContain("[grid-template-rows:auto_minmax(0,_1fr)]");
     expect(routeStyles.page).not.toContain("max-[900px]:[height:auto]");
     expect(routeStyles.page).not.toContain("max-[900px]:[overflow:visible]");
     expect(routeStyles.selfPage).toContain("max-[900px]:[grid-template-rows:minmax(0,_1fr)]");
     expect(routeStyles.selfPage).toContain("max-[900px]:[gap:0]");
-    expect(routeStyles.selfModeStack).toContain("max-[900px]:[grid-template-rows:minmax(0,_1fr)]");
-    expect(routeStyles.selfModeStack).toContain("max-[900px]:[height:100%]");
-    expect(routeStyles.selfModeStack).toContain("max-[900px]:[overflow:auto]");
+    expect(selfTrackBoundaryStyles.selfModeStack).toContain("max-[900px]:[grid-template-rows:minmax(0,_1fr)]");
+    expect(selfTrackBoundaryStyles.selfModeStack).toContain("max-[900px]:[height:100%]");
+    expect(selfTrackBoundaryStyles.selfModeStack).toContain("max-[900px]:[overflow:auto]");
+    expect(selfTrackBoundaryStylesSource).toContain("structuredEmptyState");
   });
 
   it("keeps evolution tracks from duplicating their fixed agents as system Team canvases", () => {
@@ -329,7 +341,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).not.toContain("teamOrganizationCanvas(modeSystemTeam)");
     expect(routeSource).not.toContain("function renderModeTeamCanvasPanel()");
     expect(routeSource).not.toContain("renderModeTeamCanvasPanel()");
-    expect(routeSource).toContain("styles.selfModeStack");
+    expect(selfTrackBoundarySource).toContain("styles.selfModeStack");
     expect(routeSource).not.toContain("系统团队画布");
     expect(routeSource).not.toContain("自进化系统团队");
     expect(routeSource).not.toContain("监督进化系统团队");
