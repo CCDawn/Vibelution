@@ -407,9 +407,12 @@ describe("ConversationView edit resend affordance", () => {
   });
 
   it("folds streaming request placeholders into the process strip", () => {
-    expect(conversationViewSource).toContain("function isStreamingStatusPlaceholderContent(content: string)");
+    expect(conversationViewSource).toContain('from "./conversationInternalStatus"');
+    expect(conversationViewSource).not.toMatch(/function isStreamingStatusPlaceholderContent\(/);
+    expect(conversationViewSource).not.toMatch(/function isNoFinalAnswerStatusContent\(/);
+    expect(conversationViewSource).not.toMatch(/function compactStreamingStatusPlaceholder\(/);
     expect(conversationViewSource).toContain("const isStreamingStatusPlaceholder = Boolean(message.streaming)");
-    expect(conversationViewSource).toContain("compactStreamingStatusPlaceholder(responseText)");
+    expect(conversationViewSource).toContain("compactStreamingStatusPlaceholder(responseText, compactPreview)");
     expect(conversationViewSource).toContain("showResponseBlock && !isStreamingStatusPlaceholder");
     expect(styles.answerOnlyProcessToggle).toContain("grid-cols-[14px_auto_auto_minmax(0,1fr)_14px]");
   });

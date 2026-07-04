@@ -45,6 +45,32 @@ export function isInternalStreamingStatusContent(content: string) {
   return STREAMING_STATUS_CONTENT_MARKERS.some((marker) => normalized.includes(marker));
 }
 
+export function isStreamingStatusPlaceholderContent(content: string) {
+  return isInternalStreamingStatusContent(content);
+}
+
+export function isNoFinalAnswerStatusContent(content: string) {
+  const normalized = String(content ?? "").replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return false;
+  }
+  const mentionsNoFinalAnswer =
+    normalized.startsWith("本轮还没有形成最终回答")
+    || normalized.startsWith("本轮尚未形成最终回答")
+    || normalized.startsWith("尚未形成最终回答");
+  return mentionsNoFinalAnswer && /继续|恢复|衔接|保留当前执行进度|工具循环/.test(normalized);
+}
+
+export function compactStreamingStatusPlaceholder(
+  content: string,
+  compactPreview: (value: string, maxLength?: number) => string,
+) {
+  if (isInternalStreamingStatusContent(content)) {
+    return "";
+  }
+  return compactPreview(String(content ?? "").replace(/\s+/g, " ").trim(), 92);
+}
+
 export function isInternalStreamingStatusStage(stage: unknown) {
   return INTERNAL_STREAMING_STATUS_STAGES.has(String(stage ?? "").trim().toLowerCase());
 }
