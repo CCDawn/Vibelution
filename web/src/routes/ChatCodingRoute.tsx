@@ -86,7 +86,6 @@ import { shouldShowNextStateSignalInConversation } from "../components/conversat
 import type { TurnAvatarResolution } from "../components/conversation/conversationTurnAvatar";
 import { LazyConversationView } from "../components/conversation/LazyConversationView";
 import { isAgentInboxMessage, isTurnErrorMessage } from "../components/conversation/conversationMessagePredicates";
-import { LazyFilePreview } from "../components/preview/LazyFilePreview";
 import { VButton, VNativeInput, VNativeSelect } from "../components/vui";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../app/browserTelemetry";
 import { getPageInstanceId } from "../app/pageInstance";
@@ -181,6 +180,8 @@ import {
   type ChatMentionTarget,
 } from "./chatMentionTokens";
 import { CacheDetailDialog, type CacheDonutSegment } from "./chat/CacheDetailDialog";
+import { ChatFilePreviewPanel } from "./chat/ChatFilePreviewPanel";
+import { ChatFileWorkspaceTabs } from "./chat/ChatFileWorkspaceTabs";
 import { TokenCoreStatusPanel, type TokenCoreStatusMetric } from "./chat/TokenCoreStatusPanel";
 import styles from "./ChatCodingRoute.styles";
 
@@ -6713,35 +6714,18 @@ export function ChatCodingRoute() {
               {t("agentSession")}
             </VButton>
           )}
-          {!groupPanelActive && workspace.openTabs.map((tabPath) => (
-            <div
-              key={tabPath}
-              className={
-                workspace.activeTab === tabPath
-                  ? `${styles.fileTab} ${styles.fileTabActive}`
-                  : styles.fileTab
-              }
-            >
-              <VButton
-                type="button"
-                className={styles.fileTabButton}
-                onClick={() => {
-                  activeSessionId && setActiveTab(activeSessionId, tabPath);
-                }}
-              >
-                {tabPath.split("/").at(-1)}
-              </VButton>
-              <VButton
-                type="button"
-                className={styles.fileTabClose}
-                onClick={() => activeSessionId && closePreviewTab(activeSessionId, tabPath)}
-                title={t("closePreviewTab")}
-                aria-label={`${t("closePreviewTab")} ${tabPath.split("/").at(-1)}`}
-              >
-                <X size={14} />
-              </VButton>
-            </div>
-          ))}
+          <ChatFileWorkspaceTabs
+            activeTab={workspace.activeTab}
+            closePreviewTabLabel={t("closePreviewTab")}
+            hidden={groupPanelActive}
+            openTabs={workspace.openTabs}
+            onCloseTab={(tabPath) => {
+              activeSessionId && closePreviewTab(activeSessionId, tabPath);
+            }}
+            onOpenTab={(tabPath) => {
+              activeSessionId && setActiveTab(activeSessionId, tabPath);
+            }}
+          />
         </div>
 
         <div className={styles.centerSurface}>
@@ -7359,19 +7343,14 @@ export function ChatCodingRoute() {
                 {lang === "zh" ? "这个 CLI 工具页还没有可显示的运行记录。" : "This CLI tool page has no run to display."}
               </div>
             )
-          ) : fileContentQuery.isError ? (
-            <div className={styles.emptySurface}>
-              {describeError(fileContentQuery.error, t("loadFailed"))}
-            </div>
-          ) : fileContentQuery.data ? (
-            <LazyFilePreview
-              file={fileContentQuery.data}
-              changed={changedFiles.has(fileContentQuery.data.path)}
-              sourceLabel={detail?.title ?? t("currentSession")}
-              fallback={<div className={styles.emptySurface}>{t("loadingFilePreview")}</div>}
-            />
           ) : (
-            <div className={styles.emptySurface}>{t("loadingFilePreview")}</div>
+            <ChatFilePreviewPanel
+              changed={fileContentQuery.data ? changedFiles.has(fileContentQuery.data.path) : false}
+              errorMessage={fileContentQuery.isError ? describeError(fileContentQuery.error, t("loadFailed")) : ""}
+              file={fileContentQuery.data}
+              loadingLabel={t("loadingFilePreview")}
+              sourceLabel={detail?.title ?? t("currentSession")}
+            />
           )}
         </div>
       </section>

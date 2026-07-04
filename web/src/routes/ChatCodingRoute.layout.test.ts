@@ -21,6 +21,10 @@ import sessionContextMenuSource from "./SessionContextMenu.tsx?raw";
 import routeStyles from "./ChatCodingRoute.styles";
 import routeStylesModuleSource from "./ChatCodingRoute.styles.ts?raw";
 import cacheDetailDialogSource from "./chat/CacheDetailDialog.tsx?raw";
+import chatFilePreviewPanelStyles from "./chat/ChatFilePreviewPanel.styles";
+import chatFilePreviewPanelSource from "./chat/ChatFilePreviewPanel.tsx?raw";
+import chatFileWorkspaceTabsStyles from "./chat/ChatFileWorkspaceTabs.styles";
+import chatFileWorkspaceTabsSource from "./chat/ChatFileWorkspaceTabs.tsx?raw";
 import tokenCoreStatusPanelSource from "./chat/TokenCoreStatusPanel.tsx?raw";
 
 const appShellCssSource = readFileSync(new URL("../design/workbench-shell.css", import.meta.url), "utf-8");
@@ -1688,6 +1692,51 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.agentSessionTabEditActions).toBeTypeOf("string");
     expect(routeStyles.agentSessionTabEditButton).toBeTypeOf("string");
     expect(routeStyles.conversationKindBadgeChild).toBeTypeOf("string");
+  });
+
+  it("moves file workspace tabs and preview display into chat file components while keeping route query ownership", () => {
+    expect(routeSource).toContain('import { ChatFilePreviewPanel } from "./chat/ChatFilePreviewPanel"');
+    expect(routeSource).toContain('import { ChatFileWorkspaceTabs } from "./chat/ChatFileWorkspaceTabs"');
+    expect(routeSource).toContain('const activeFilePath = workspace.activeTab !== "agent" && !activeCliAgentRunId ? workspace.activeTab : null;');
+    expect(routeSource).toContain("const fileContentQuery = useQuery({");
+    expect(routeSource).toContain("queryKeys.fileContent(activeFilePath ?? \"\")");
+    expect(routeSource).toContain("fetchJson<FileContent>(`/api/files/content?path=${encodeURIComponent(activeFilePath ?? \"\")}`)");
+    expect(routeSource).toContain("<ChatFileWorkspaceTabs");
+    expect(routeSource).toContain("openTabs={workspace.openTabs}");
+    expect(routeSource).toContain("activeTab={workspace.activeTab}");
+    expect(routeSource).toContain("closePreviewTab(activeSessionId, tabPath)");
+    expect(routeSource).toContain("setActiveTab(activeSessionId, tabPath)");
+    expect(routeSource).toContain("<ChatFilePreviewPanel");
+    expect(routeSource).toContain("changed={fileContentQuery.data ? changedFiles.has(fileContentQuery.data.path) : false}");
+    expect(routeSource).toContain("errorMessage={fileContentQuery.isError ? describeError(fileContentQuery.error, t(\"loadFailed\")) : \"\"}");
+    expect(routeSource).toContain("file={fileContentQuery.data}");
+    expect(routeSource).toContain("loadingLabel={t(\"loadingFilePreview\")}");
+    expect(routeSource).not.toContain("<LazyFilePreview");
+    expect(routeSource).not.toContain("styles.fileTab");
+    expect(routeStylesModuleSource).not.toContain("fileTab:");
+    expect(routeStylesModuleSource).not.toContain("fileTabButton:");
+    expect(routeStylesModuleSource).not.toContain("fileTabClose:");
+
+    expect(chatFileWorkspaceTabsSource).toContain("export function ChatFileWorkspaceTabs");
+    expect(chatFileWorkspaceTabsSource).toContain('from "./ChatFileWorkspaceTabs.styles"');
+    expect(chatFileWorkspaceTabsSource).toContain("styles.fileTab");
+    expect(chatFileWorkspaceTabsSource).toContain("styles.fileTabActive");
+    expect(chatFileWorkspaceTabsSource).toContain("styles.fileTabButton");
+    expect(chatFileWorkspaceTabsSource).toContain("styles.fileTabClose");
+    expect(chatFileWorkspaceTabsSource).toContain("<X size={14} />");
+    expect(chatFileWorkspaceTabsSource).toContain("fileTabName(tabPath)");
+    expect(chatFileWorkspaceTabsStyles.fileTab).toBeTypeOf("string");
+    expect(chatFileWorkspaceTabsStyles.fileTabActive).toBeTypeOf("string");
+    expect(chatFileWorkspaceTabsStyles.fileTabButton).toBeTypeOf("string");
+    expect(chatFileWorkspaceTabsStyles.fileTabClose).toBeTypeOf("string");
+
+    expect(chatFilePreviewPanelSource).toContain("export function ChatFilePreviewPanel");
+    expect(chatFilePreviewPanelSource).toContain('from "./ChatFilePreviewPanel.styles"');
+    expect(chatFilePreviewPanelSource).toContain("<LazyFilePreview");
+    expect(chatFilePreviewPanelSource).toContain("fallback={<div className={styles.emptySurface}>{loadingLabel}</div>}");
+    expect(chatFilePreviewPanelSource).toContain("return <div className={styles.emptySurface}>{loadingLabel}</div>;");
+    expect(chatFilePreviewPanelSource).toContain("return <div className={styles.emptySurface}>{errorMessage}</div>;");
+    expect(chatFilePreviewPanelStyles.emptySurface).toContain("min-h-[min(420px,calc(100dvh_-_190px))]");
   });
 
   it("renders cli agent tool calls as persistent terminal tabs beside child sessions", () => {
