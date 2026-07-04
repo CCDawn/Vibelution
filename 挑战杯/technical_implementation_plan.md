@@ -256,7 +256,7 @@ source_registered
 
 ### 5.1.1 已落地的前半段后端切片
 
-本轮已先完成 Team 编排与知识搜集/筛选入库前置链路的最小后端能力，并补入本地 PDF `source-extraction` 页码锚点抽取、资料提炼 `contentExtraction.evidenceLedger` 证据账本，以及 `sourceExtraction` 到 `paper_note_draft` 的自动草稿桥；Team 页面已新增科研流程只读面板，用于查看 `research-team` 的 workflow、CandidateStore、校验摘要和最近候选；前端 Evidence Ledger 展示仍待接，不直接接正式 Team Knowledge 入库。
+本轮已先完成 Team 编排与知识搜集/筛选入库前置链路的最小后端能力，并补入本地 PDF `source-extraction` 页码锚点抽取、资料提炼 `contentExtraction.evidenceLedger` 证据账本，以及 `sourceExtraction` 到 `paper_note_draft` 的自动草稿桥；Team 页面已新增科研流程视图，用于查看 `research-team` 的 workflow、CandidateStore、校验摘要、最近候选和 Evidence Ledger 状态；仍不直接接正式 Team Knowledge 入库。
 
 新增文件：
 
@@ -320,7 +320,7 @@ workspace/teams/<teamId>/
 - 成功或需修订的 `paper_note` 都停留在 CandidateStore，不写正式 Team Knowledge、RAG 或正式图谱；source candidate 会追加 `metadata.paperNoteDrafts` trace，保留 source -> paper_note 的可追溯关系。
 - 新增运行事件日志：`candidate_store.validated`，只记录候选数、invalid 数、error/warning 数和 workflowId。
 - `paper_note_draft` 输出契约已补齐 `keyFindings`、`methods`、`limitations`、`citations`；每条 `keyFinding` 必须带 `sourceRef` 和 `page` / `citation` / `evidenceRef` 锚点。
-- 合格 `paper_note` 本地模型输出进入 `paper_note_draft`；缺 citation/page anchor 或 Evidence Ledger 锚点不足时进入 `paper_note_needs_revision` / `missing_evidence_anchor`，不能自然推进到 `mechanism_candidate`。长文多 chunk 汇总、多草稿合并和 Evidence Ledger 前端展示仍待接。
+- 合格 `paper_note` 本地模型输出进入 `paper_note_draft`；缺 citation/page anchor 或 Evidence Ledger 锚点不足时进入 `paper_note_needs_revision` / `missing_evidence_anchor`，不能自然推进到 `mechanism_candidate`。长文多 chunk 汇总、多草稿合并和 Evidence Ledger 接入 paper_note 草稿输入仍待接。
 - `neuro_mechanism_extract` 输出契约已补齐 `paperNoteIds`、`description`、`brainSystems`、`cognitiveFunctions`、`experimentalPhenomena`、`authorInterpretation`、`projectInterpretation`。
 - 合格 `neuro_mechanism` 本地模型输出进入 `mechanism_candidate`；缺机制证据或神经术语不确定但未标记 `terminology_uncertain` 时进入 `mechanism_needs_revision`，不能自然推进到机制映射。
 - `mechanism_mapping` 输出契约已补齐 `neuroMechanismIds`、`computationalAbstraction`、`factLayer`、`inferenceLayer`、`overAnalogyRisk`、`engineeringImplication`。

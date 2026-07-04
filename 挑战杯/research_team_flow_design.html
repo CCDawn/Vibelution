@@ -47,7 +47,7 @@
           <div class="focus-list">
             <div class="focus-item"><b>优先看</b><span>知识搜集页是否能一眼判断是否进行中、下一步按钮是什么、结果存在哪里，以及详情里能否追溯原始证据与 Evidence Ledger。</span></div>
             <div class="focus-item"><b>不能做</b><span>当前执行器只取元数据引用，不抓全文、不审批入库、不把资料关系整理当作正式事实。</span></div>
-            <div class="focus-item"><b>下一步</b><span>把 Evidence Ledger 展示到资料卡和资料提炼详情；继续扩展全文下载/网页抽取、质量评分和 cache hit/miss 运行证据。</span></div>
+            <div class="focus-item"><b>下一步</b><span>把 Evidence Ledger 接入 paper_note 草稿输入；继续扩展全文下载/网页抽取、质量评分和 cache hit/miss 运行证据。</span></div>
           </div>
         </aside>
       </section>
@@ -232,7 +232,7 @@
                 <span class="num">01</span>
                 <h3>资料进入工作区</h3>
                 <p>建立稳定证据源，并把本地 PDF 转成可引用的页码锚点和证据账本。</p>
-                <div class="tag-row"><span class="tag active">Evidence Ledger 与页码锚点已接入</span><span class="tag">资料寻找 Agent</span></div>
+                <div class="tag-row"><span class="tag active">Evidence Ledger 与前端证据入口已接入</span><span class="tag">资料寻找 Agent</span></div>
               </a>
 <a class="node-card" href="research_flow_pages/02-paper-note.html">
                 <span class="num">02</span>
@@ -1427,7 +1427,7 @@
                 </div>
 <div class="service-row">
                   <b>TeamsRoute workflow workspace</b>
-                  <span>已落地入口：Teams 页顶部固定横向切换条只暴露 AI 搜索范围团队和 ai科学研究团队；选择 ai科学研究团队后直接进入 research-team 专属科研控制台。知识搜集页位于 /teams?team=research-team&amp;researchView=knowledge_collection，只展示资料寻找、资料提炼、资料关系整理、资料入库四张步骤卡；每张卡只绑定一个功能 Agent，主按钮创建 direct session task 并跳转 Chat，执行结果以 writeback 合同回写 sourceCollectionStageSessionTasks 后挂回 ResearchStageRound。</span>
+                  <span>已落地入口：Teams 页顶部固定横向切换条只暴露 AI 搜索范围团队和 ai科学研究团队；选择 ai科学研究团队后直接进入 research-team 专属科研控制台。知识搜集页位于 /teams?team=research-team&amp;researchView=knowledge_collection，只展示资料寻找、资料提炼、资料关系整理、资料入库四张步骤卡；每张卡只绑定一个功能 Agent，主按钮创建 direct session task 并跳转 Chat，执行结果以 writeback 合同回写 sourceCollectionStageSessionTasks 后挂回 ResearchStageRound；资料卡、资料提炼详情和资料关系整理节点已显示 Evidence Ledger 状态。</span>
                 </div>
 <div class="service-row">
                   <b>local_research_worker_model</b>
@@ -2040,7 +2040,7 @@
               <b>M2</b>
               <strong>paper_note 与 PDF 锚点</strong>
               <span>已新增 paper_note 输出契约与 Citation Anchor 校验，并接入 sourceExtraction -&gt; paper_note_draft 自动草稿桥：本地 PDF pageAnchors/excerpt 会被转为 sourceRefs/evidenceRefs/excerpt 后调用本地模型；contentExtraction.evidenceLedger 会保留 candidateExtractions/recordExtractions 的 claims、keyFindings、citations、sourceRefs 和 evidenceRefs，供下一轮 paper_note 输入和资料关系整理使用；paperNoteChunkPlan 可把长文切成可追踪 chunk seeds。</span>
-              <span>合格本地模型输出进入 paper_note_draft；Evidence Ledger 缺 sourceRef/page/citation/evidenceRef 锚点时进入 missing_evidence_anchor / needs_review，不能自然推进到 mechanism_candidate；Evidence Ledger 接入 paper_note 草稿、前端展示和多 chunk 草稿合并仍待接。</span>
+              <span>合格本地模型输出进入 paper_note_draft；Evidence Ledger 缺 sourceRef/page/citation/evidenceRef 锚点时进入 missing_evidence_anchor / needs_review，不能自然推进到 mechanism_candidate；Evidence Ledger 接入 paper_note 草稿输入和多 chunk 草稿合并仍待接。</span>
             </div>
 <div class="blueprint-row">
               <b>M3</b>
@@ -2466,7 +2466,7 @@
               <b>M6.69</b>
               <strong>资料提炼 Evidence Ledger</strong>
               <span>source_collection_stage_writeback_tool 回写 candidateExtractions[] / recordExtractions[] 时会把结构化提炼物化为 metadata.contentExtraction.evidenceLedger，保留 claims、keyFindings、citations、sourceRefs、evidenceRefs、limitations、uncertainty、riskFlags、supportLevel 和 nextAction。</span>
-              <span>候选 writeback 会统计 evidenceLedgerCandidateCount、evidenceReadyCandidateCount 和 missingEvidenceAnchorCount；存在结构化证据但缺 sourceRef/page/citation/evidenceRef 锚点时降级为 needs_review，避免无来源结论进入 paper_note、机制提取或资料关系整理。</span>
+              <span>候选 writeback 会统计 evidenceLedgerCandidateCount、evidenceReadyCandidateCount 和 missingEvidenceAnchorCount；Teams 资料卡、资料提炼详情和资料关系整理节点会显示 evidence_ready / missing_evidence_anchor，缺锚点结构化证据降级为 needs_review，避免无来源结论进入 paper_note、机制提取或资料关系整理。</span>
             </div>
 <div class="blueprint-row">
               <b>M7</b>
