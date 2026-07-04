@@ -1,7 +1,7 @@
 import { ArrowLeft } from "lucide-react";
 
 import { VNativeButton } from "../components/vui";
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentReturnBannerPanel.styles";
 
 export type AgentReturnBannerPanelCopy = {
   returnBannerTitle: string;
