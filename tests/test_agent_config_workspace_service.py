@@ -526,7 +526,7 @@ def test_agent_config_workspace_health_flags_role_governance_tool_drift():
     assert "role_forbidden_tool_allowed" in codes
 
 
-def test_agent_directory_repair_aligns_fixed_roles_and_operation_chat_prompt(tmp_path, monkeypatch):
+def test_agent_directory_repair_preserves_active_prompt_and_exposes_duty_default(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
     registry_path = tmp_path / "workspace" / "agents" / "agents.json"
@@ -588,8 +588,128 @@ def test_agent_directory_repair_aligns_fixed_roles_and_operation_chat_prompt(tmp
     repaired = agent_directory_service.repair_agent_directory()
     agents = {item["agentId"]: item for item in repaired["agents"]}
 
-    assert agents["agent-ai-search"]["promptTemplateId"] == "prompt-ai-search-scope-lead"
-    assert agents["agent-session"]["promptTemplateId"] == "prompt-chat-operation-default"
+    assert agents["agent-ai-search"]["promptTemplateId"] == "prompt-chat-default"
+    assert agents["agent-session"]["promptTemplateId"] == "prompt-chat-default"
+
+    ai_search = agent_directory_service.get_agent("agent-ai-search")
+    session = agent_directory_service.get_agent("agent-session")
+
+    assert ai_search["promptTemplateId"] == "prompt-chat-default"
+    assert ai_search["defaultPromptTemplateId"] == "prompt-ai-search-scope-lead"
+    assert ai_search["promptTemplateCustomized"] is True
+    assert session["promptTemplateId"] == "prompt-chat-default"
+    assert session["defaultPromptTemplateId"] == "prompt-chat-default"
+    assert session["promptTemplateCustomized"] is False
+
+
+def test_agent_directory_repair_fills_missing_prompt_from_duty_default(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    registry_path = tmp_path / "workspace" / "agents" / "agents.json"
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "agents": [
+                    {
+                        "agentId": "agent-operation-chat",
+                        "agentCode": "A204",
+                        "displayName": "操作会话",
+                        "kind": "persistent",
+                        "primaryMode": "chat",
+                        "roleKey": "",
+                        "promptTemplateId": "",
+                        "directSessionId": "session-operation",
+                        "workspacePath": "workspace/agents/agent-operation-chat",
+                        "toolPolicyId": "tool-agent-operation-chat",
+                        "memoryPolicyId": "memory-agent-operation-chat",
+                        "createdBy": "user",
+                        "status": "active",
+                        "metadata": {"operationChat": True},
+                    },
+                ],
+                "toolPolicies": {
+                    "tool-agent-operation-chat": agent_directory_service.default_session_agent_tool_policy(
+                        "tool-agent-operation-chat"
+                    ),
+                },
+                "memoryPolicies": {},
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    repaired = agent_directory_service.repair_agent_directory()
+    agent = next(item for item in repaired["agents"] if item["agentId"] == "agent-operation-chat")
+    api_agent = agent_directory_service.get_agent("agent-operation-chat")
+
+    assert agent["promptTemplateId"] == "prompt-chat-operation-default"
+    assert api_agent["defaultPromptTemplateId"] == "prompt-chat-operation-default"
+    assert api_agent["promptTemplateCustomized"] is False
+
+
+def test_create_agent_instance_uses_duty_default_when_prompt_missing(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+
+    agent = agent_directory_service.create_agent_instance(
+        display_name="操作会话",
+        primary_mode="chat",
+        prompt_template_id="",
+        metadata={"operationChat": True},
+    )
+
+    assert agent["promptTemplateId"] == "prompt-chat-operation-default"
+    assert agent["defaultPromptTemplateId"] == "prompt-chat-operation-default"
+    assert agent["promptTemplateCustomized"] is False
+
+
+def test_agent_config_workspace_treats_role_prompt_override_as_customized_not_mismatch():
+    agent = {
+        "agentId": "agent-custom-prompt-role",
+        "displayName": "搜索范围",
+        "primaryMode": "research",
+        "roleKey": "ai_search_scope_lead",
+        "promptTemplateId": "prompt-chat-custom",
+        "directSessionId": "session-custom-prompt-role",
+        "workspacePath": "workspace/agents/agent-custom-prompt-role",
+        "toolPolicyId": "tool-agent-custom-prompt-role",
+        "memoryPolicyId": "memory-agent-custom-prompt-role",
+        "status": "active",
+        "metadata": {"fixedRole": True, "configSurface": "team"},
+        "llmBindings": {"dialogue": {"modelId": "model-primary"}},
+        "toolPolicy": agent_directory_service.default_research_source_tool_policy(
+            "tool-agent-custom-prompt-role",
+            role_key="ai_search_scope_lead",
+        ),
+    }
+
+    health = agent_config_workspace_service._derive_health(
+        agents=[agent],
+        prompt_refs={
+            "prompt-ai-search-scope-lead": {
+                "promptTemplateId": "prompt-ai-search-scope-lead",
+                "contentLength": 12,
+                "contentPreview": "default role",
+            },
+            "prompt-chat-custom": {
+                "promptTemplateId": "prompt-chat-custom",
+                "contentLength": 11,
+                "contentPreview": "custom chat",
+            },
+        },
+        model_refs={"model-primary": {"modelId": "model-primary", "requiresApiKey": False}},
+        mode_bindings={"modes": {}},
+        chat_rooms=[],
+        teams=[],
+        active_agent_ids={"agent-custom-prompt-role"},
+    )
+
+    assert "role_prompt_template_mismatch" not in {item["code"] for item in health["issues"]}
 
 
 def test_agent_config_workspace_flags_fixed_role_without_governance_profile():
@@ -2099,7 +2219,9 @@ def test_repair_agent_directory_uses_role_governance_prompt_for_research_org_met
     agent_directory_service.repair_agent_directory()
     repaired = agent_directory_service.get_agent(agent["agentId"])
 
-    assert repaired["promptTemplateId"] == "prompt-research-ceo"
+    assert repaired["promptTemplateId"] == "prompt-chat-default"
+    assert repaired["defaultPromptTemplateId"] == "prompt-research-ceo"
+    assert repaired["promptTemplateCustomized"] is True
 
 
 def test_repair_agent_directory_fills_research_agent_profiles(tmp_path, monkeypatch):
