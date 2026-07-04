@@ -44,7 +44,6 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import {
-  AgentFilterRail,
   type AgentDenseColumn,
   type AgentFilterSectionView,
   type AgentSummaryMetric,
@@ -53,7 +52,6 @@ import { VButton } from "../components/vui";
 import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
-import { AgentActivityPanePanel } from "./AgentActivityPanePanel";
 import { type AgentActivityTimelineItem } from "./AgentActivityHistoryPanel";
 import {
   type AgentBulkConfigApply,
@@ -61,25 +59,17 @@ import {
   type AgentBulkConfigField,
 } from "./AgentBulkConfigPanel";
 import { type AgentBulkPromptTemplateOption } from "./AgentBulkOperationsPanel";
-import { AgentConfigPrimaryPanePanel } from "./AgentConfigPrimaryPanePanel";
 import { type AgentContextCompressionPolicyDraft } from "./AgentContextCompressionPanel";
 import {
   type AgentConfigDraft,
   type AgentCoreConfigLlmSlotView,
 } from "./AgentCoreConfigPanel";
-import { AgentConfigPolicyPanePanel } from "./AgentConfigPolicyPanePanel";
 import { type AgentCreateDraft } from "./AgentCreatePanel";
 import { type AgentResetOptions } from "./AgentDebugResetPanel";
-import { AgentDetailHeaderPanel } from "./AgentDetailHeaderPanel";
-import { AgentDetailWorkspacePanel } from "./AgentDetailWorkspacePanel";
-import { AgentListWorkspacePanel } from "./AgentListWorkspacePanel";
 import { type AgentMemoryPolicyDraft } from "./AgentMemoryPolicyPanel";
-import { AgentConfigReferencesPanePanel } from "./AgentConfigReferencesPanePanel";
 import { type AgentModeMembershipDraft } from "./AgentModeMembershipPanel";
-import { AgentManagementBriefPanel } from "./AgentManagementBriefPanel";
 import { AgentManagementHeaderPanel } from "./AgentManagementHeaderPanel";
 import {
-  AgentOverviewPanel,
   type AgentOverviewFact,
   type AgentOverviewModeMembership,
   type AgentOverviewPanelPolicy,
@@ -87,9 +77,13 @@ import {
 } from "./AgentOverviewPanel";
 import { type AgentPersonaDraft } from "./AgentPersonaProfilePanel";
 import { type AgentReferenceItemView, type AgentReferenceRoomView } from "./AgentReferencesPanel";
-import { AgentSelectedDetailContentPanel } from "./AgentSelectedDetailContentPanel";
+import {
+  AgentSelectedDetailContentPanel,
+  type AgentSelectedDetailContentPanelProps,
+} from "./AgentSelectedDetailContentPanel";
 import { type AgentTaskDraft } from "./AgentTaskProfilePanel";
 import { governanceStatusLabel } from "./AgentToolGovernancePanel";
+import { AgentWorkspaceLayoutPanel } from "./AgentWorkspaceLayoutPanel";
 import {
   agentCenterMemoryRoute,
   agentCenterModelsRoute,
@@ -5638,6 +5632,361 @@ export function AgentsRoute() {
     };
   })() : null;
 
+  const selectedAgentDetailContent: AgentSelectedDetailContentPanelProps | null = selectedAgent ? {
+    activePane,
+    header: {
+      copy,
+      lang,
+      title: copy.routeHint,
+      agentName: agentLabel(selectedAgent),
+      roleLabel: agentFunctionalLabel(selectedAgent, lang),
+      roleTone: agentFunctionTone(selectedAgent, lang),
+      healthTitle: issueSummary(selectedAgent.health, lang),
+      healthTone: issueTone(selectedAgent.health),
+      healthLabel: issueLabel(selectedAgent.health, lang),
+      panes,
+      activePane,
+      isAvatarEditorOpen: avatarEditorOpen,
+      avatarImageUrl: selectedAgent.avatarImageUrl,
+      avatarImagePath: selectedAgent.avatarImagePath,
+      avatarInitials: avatarInitials(selectedAgent.agentCode, agentLabel(selectedAgent)),
+      avatarOptions: avatarOptionsQuery.data,
+      avatarOptionsPending: avatarOptionsQuery.isPending,
+      avatarUploadPending: selectedAgentAvatarUploadPending,
+      avatarUpdatePending: selectedAgentAvatarUpdatePending,
+      onAvatarEditorOpenChange: setAvatarEditorOpen,
+      onUploadAvatar: uploadSelectedAgentAvatar,
+      onResetAvatar: resetSelectedAgentAvatar,
+      onSelectAvatar: selectAgentAvatar,
+      onSelectPane: setActivePane,
+    },
+    brief: {
+      brief: managementBrief,
+      copy: {
+        managementBriefHint: copy.managementBriefHint,
+        managementBriefTitle: copy.managementBriefTitle,
+        nextActionsTitle: copy.nextActionsTitle,
+        nextAllReady: copy.nextAllReady,
+      },
+      onOpenRoute: (route: string) => {
+        void navigate(route);
+      },
+      onSelectPane: setActivePane,
+    },
+    overview: selectedAgentOverviewPanel,
+    configPrimary: {
+      coreConfig: {
+        copy,
+        lang,
+        agentName: agentLabel(selectedAgent),
+        draft: configDraft,
+        dirty: configDirty,
+        canSave: canSaveConfig,
+        pending: selectedAgentConfigPending,
+        notice,
+        title: copy.personaHint,
+        health: {
+          tone: issueTone(selectedAgent.health),
+          label: issuePanelLabel(selectedAgent.health, copy),
+          headline: `${issueLabel(selectedAgent.health, lang)} · ${issueSummary(selectedAgent.health, lang)}`,
+          nextStepLabel: copy.healthNextStep,
+          nextStep: issueNextStep(selectedAgent.health, lang),
+        },
+        llmSlots: coreConfigLlmSlots,
+        promptTemplateOptions: bulkPromptTemplateOptions,
+        toolPolicyOptions: coreConfigToolPolicyOptions,
+        toolPolicyTooltip: coreConfigToolPolicyTooltip,
+        memoryPolicyOptions: coreConfigMemoryPolicyOptions,
+        memoryPolicyTooltip: copy.memoryPolicyPickerHint,
+        contextCompressionTitle: contextCompressionPolicyLine,
+        onDraftChange: updateDraft,
+        onLlmSlotModelChange: (slot, modelId) => {
+          const nextBindings = updateAgentLlmSlotBinding(configDraft.llmBindings, slot, modelId);
+          updateDraft({
+            llmBindings: nextBindings,
+            reasoningEffortBySlot: pruneAgentReasoningEffortBySlot(
+              configDraft.reasoningEffortBySlot,
+              nextBindings,
+              workspace?.agentModelChoices ?? [],
+            ),
+          });
+        },
+        onReasoningEffortChange: (slot, reasoningEffort) => updateDraft({
+          reasoningEffortBySlot: updateAgentReasoningEffortBySlot(
+            configDraft.reasoningEffortBySlot,
+            slot,
+            reasoningEffort,
+          ),
+        }),
+        onContextCompressionChange: updateContextCompressionDraft,
+        onOpenModelConfig: () => navigate(selectedAgentModelConfigRoute),
+        onOpenPromptConfig: () => navigate(selectedAgentPromptConfigRoute),
+        onOpenContextConfig: () => navigate(selectedAgentContextConfigRoute),
+        onReset: () => setConfigDraft(draftFromAgent(selectedAgent)),
+        onSave: saveAgentConfig,
+      },
+      personaProfile: selectedAgentRequiresPersona ? {
+        copy,
+        lang,
+        summary: personaProfileSummary(selectedAgent, lang),
+        draft: personaDraft,
+        dirty: personaDirty,
+        canSave: canSavePersona,
+        pending: selectedAgentPersonaPending,
+        onDraftChange: updatePersonaDraft,
+        onReset: () => setPersonaDraft(personaDraftFromAgent(selectedAgent)),
+        onSave: savePersonaProfile,
+      } : null,
+      toolGovernance: {
+        copy,
+        lang,
+        requests: selectedAgent.toolGovernanceRequests ?? [],
+        pendingRequestId:
+          resolveToolGovernanceMutation.isPending
+          && resolveToolGovernanceMutation.variables?.agentId === selectedAgent.agentId
+            ? resolveToolGovernanceMutation.variables?.requestId ?? null
+            : null,
+        onResolve: resolveToolGovernanceRequest,
+        onConfigure: () => navigate(selectedAgentToolConfigRoute),
+      },
+      taskProfile: selectedAgentRequiresTask ? {
+        copy,
+        lang,
+        summary: taskProfileSummary(selectedAgent, lang),
+        draft: taskDraft,
+        dirty: taskDirty,
+        canSave: canSaveTask,
+        pending: selectedAgentTaskPending,
+        onDraftChange: updateTaskDraft,
+        onReset: () => setTaskDraft(taskDraftFromAgent(selectedAgent)),
+        onSave: saveTaskProfile,
+      } : null,
+      healthMaintenance: {
+        copy: {
+          handleInboxNow: copy.handleInboxNow,
+          maintenanceHint: copy.maintenanceHint,
+          maintenanceTitle: copy.maintenanceTitle,
+          noIssues: copy.noIssues,
+        },
+        health: {
+          title: issueNextStep(selectedAgent.health, lang),
+          label: issuePanelLabel(selectedAgent.health, copy),
+          headline: `${issueLabel(selectedAgent.health, lang)} · ${issueSummary(selectedAgent.health, lang)}`,
+          hasIssues: selectedAgent.health.length > 0,
+          issues: selectedAgent.health.map((issue) => ({
+            key: `${issue.code}:${issue.detail}`,
+            severity: issue.severity,
+            title: issueDisplayTitle(issue, lang),
+            detail: issue.detail,
+            showInboxAction: issue.code === "pending_inbox_messages",
+          })),
+        },
+        onOpenActivity: () => setActivePane("activity"),
+      },
+      archiveZone: {
+        copy,
+        status: selectedAgent.status,
+        isProtected: selectedAgentProtected,
+        canArchive: canArchiveAgent,
+        canPurge: canPurgeAgent,
+        isArchivePending: selectedAgentArchivePending,
+        isPurgePending: selectedAgentPurgePending,
+        onArchive: archiveSelectedAgent,
+        onPurge: purgeSelectedAgent,
+      },
+      debugReset: selectedAgent.status !== "archived" ? {
+        copy,
+        options: resetOptions,
+        canReset: canResetAgent,
+        pending: selectedAgentResetPending,
+        onOptionChange: updateResetOption,
+        onReset: resetSelectedAgent,
+      } : null,
+    },
+    configPolicies: {
+      toolSummary: {
+        copy,
+        lang,
+        policyId: selectedAgent.toolPolicyId,
+        allowedCount: selectedAgent.toolPolicy?.allowedTools?.length ?? 0,
+        preferredCount: selectedAgent.toolPolicy?.preferredTools?.length ?? 0,
+        blockedCount: selectedAgent.toolPolicy?.blockedTools?.length ?? 0,
+        toolCategoryCount: toolBundles.length,
+        onConfigure: () => navigate(selectedAgentToolConfigRoute),
+      },
+      memoryPolicy: {
+        copy,
+        lang,
+        policyId: selectedAgent.memoryPolicyId || "-",
+        rootPath: selectedAgent.memoryPolicy?.privateMemoryRoot || selectedAgent.workspacePath || "-",
+        draft: memoryPolicyDraft,
+        memoryGroupOptions,
+        dirty: memoryPolicyDirty,
+        pending: selectedAgentMemoryPolicyPending,
+        canSave: canSaveMemoryPolicy,
+        onDraftChange: updateMemoryDraftField,
+        onAddMemoryGroup: addMemoryGroup,
+        onRemoveMemoryGroup: removeMemoryGroup,
+        onAddKnowledgeBaseId: addKnowledgeBaseId,
+        onRemoveKnowledgeBaseId: removeKnowledgeBaseId,
+        onOpenMemoryPage: () => navigate(selectedAgentMemoryConfigRoute),
+        onReset: () => setMemoryPolicyDraft(memoryPolicyDraftFromAgent(selectedAgent)),
+        onSave: saveMemoryPolicy,
+      },
+    },
+    configReferences: {
+      modeMembership: selectedAgentRequiresTeamMembership ? {
+        copy,
+        lang,
+        modesLabel: uniqueModes(selectedAgent).map((mode) => modeLabel(mode, lang)).join(" / "),
+        draft: membershipDraft,
+        supervisedSlots: Object.keys(workspace?.modeBindings.supervised_evolution?.slots ?? {}),
+        selfEvolutionSlots: Object.keys(workspace?.modeBindings.self_evolution?.slots ?? {}),
+        dirty: membershipDirty,
+        canSave: canSaveMembership,
+        pending: selectedAgentMembershipPending,
+        onDraftChange: updateMembershipDraft,
+        onReset: () => setMembershipDraft(membershipDraftFromWorkspace(workspace, selectedAgent)),
+        onSave: saveModeMembership,
+      } : null,
+      references: selectedAgentReferencesPanel ? {
+        copy: {
+          chatRoomMembership: copy.chatRoomMembership,
+          references: copy.references,
+          noChatRooms: copy.noChatRooms,
+          selectAgent: copy.selectAgent,
+          readOnlyLabel: lang === "zh" ? "只读引用" : "Read-only",
+          membershipHelp: lang === "zh"
+            ? "群聊成员关系在对话页的群设置中维护；团队关联群聊由团队页同步。这里仅展示引用，避免多处写同一份成员状态。"
+            : "Group membership is edited from Chat group settings, while Team-owned rooms sync from Teams. This Agent view is read-only to avoid duplicate writers.",
+        },
+        showChatRoomMembership: selectedAgentRequiresTeamMembership,
+        chatRoomSummary: selectedAgentReferencesPanel.chatRoomSummary,
+        referenceCount: selectedAgent.references.length,
+        chatRooms: selectedAgentReferencesPanel.chatRooms,
+        references: selectedAgentReferencesPanel.references,
+        onOpenRoute: (route: string) => navigate(route),
+      } : null,
+    },
+    activity: {
+      runtimeFocus: {
+        copy: {
+          runtimeFocus: copy.runtimeFocus,
+          runtimeLatestRun: copy.runtimeLatestRun,
+          runtimeReason: copy.runtimeReason,
+          runtimeUpdated: copy.runtimeUpdated,
+          runtimeNextStep: copy.runtimeNextStep,
+          runtimeEvidence: copy.runtimeEvidence,
+          openSession: copy.openSession,
+          openLogs: copy.openLogs,
+        },
+        statusLabel: runtimeStatusLabel(selectedAgent, lang),
+        statusReason: selectedAgent.runtimeStatus?.reason || selectedAgent.status || "-",
+        tone: runtimeStatusTone(selectedAgent),
+        summary: selectedAgent.runtimeStatus?.summary || selectedAgent.directSessionId || selectedAgent.workspacePath || "-",
+        latestRunId: selectedAgent.runtimeStatus?.runId || "-",
+        runReason: selectedAgent.runtimeStatus?.runKind || selectedAgent.runtimeStatus?.state || "-",
+        updatedAt: formatTimestamp(selectedAgent.runtimeStatus?.updatedAt || selectedAgent.updatedAt, lang),
+        nextStep: runtimeNextStep(selectedAgent, lang),
+        evidenceReason: runtimeEvidenceReasonLabel(runtimeFocusEvidence.reason, lang),
+        evidenceSceneId: runtimeFocusEvidence.match?.runtimeSceneId || "-",
+        logsTargetLabel: runtimeFocusEvidence.match?.runtimeSceneId,
+        onOpenLogs: () => openAgentLogs(runtimeFocusEvidence.match),
+        onOpenSession: runtimeFocusSessionId ? () => openAgentSession(runtimeFocusSessionId) : undefined,
+      },
+      activityHistory: {
+        agent: selectedAgent,
+        copy: {
+          sessions: copy.sessions,
+          logs: copy.logs,
+          activityPane: copy.activityPane,
+          activityTimeline: copy.activityTimeline,
+          loading: copy.loading,
+          activityTimelineEmpty: copy.activityTimelineEmpty,
+          openSession: copy.openSession,
+          openLogs: copy.openLogs,
+          focusMessage: copy.focusMessage,
+          runHistoryTitle: copy.runHistoryTitle,
+          parentRuns: copy.parentRuns,
+          subAgentRuns: copy.subAgentRuns,
+          maxDepth: copy.maxDepth,
+          runHistoryLoading: copy.runHistoryLoading,
+          noRunHistory: copy.noRunHistory,
+          communication: copy.communication,
+          inboxTitle: copy.inboxTitle,
+          consumeAllMessages: copy.consumeAllMessages,
+          consumingMessage: copy.consumingMessage,
+          inboxLoading: copy.inboxLoading,
+          consumeMessage: copy.consumeMessage,
+          wakeStatus: copy.wakeStatus,
+          inboxEmpty: copy.inboxEmpty,
+        },
+        lang,
+        activityTimeline,
+        isActivityLoading: agentRunsQuery.isPending || agentMessagesQuery.isPending,
+        runHistory: agentRunsQuery.data,
+        isRunHistoryLoading: agentRunsQuery.isPending,
+        inboxMessages: agentMessagesQuery.data,
+        isInboxLoading: agentMessagesQuery.isPending,
+        inboxPendingCount: selectedAgentInboxPendingCount,
+        focusedMessageId,
+        pendingMessageId:
+          consumeMessageMutation.isPending && consumeMessageMutation.variables?.agentId === selectedAgent.agentId
+            ? consumeMessageMutation.variables?.messageId ?? ""
+            : "",
+        isConsumeAllPending: selectedAgentConsumeAllPending,
+        onOpenSession: openAgentSession,
+        onOpenLogs: openAgentLogs,
+        onFocusMessage: focusInboxMessage,
+        onConsumeAllMessages: consumeAllInboxMessages,
+        onConsumeInboxMessage: consumeInboxMessage,
+      },
+      runtimePolicy: {
+        copy: {
+          allowedContextModes: copy.allowedContextModes,
+          allowSubagents: copy.allowSubagents,
+          allowWakeMessages: copy.allowWakeMessages,
+          communication: copy.communication,
+          context: copy.context,
+          delegation: copy.delegation,
+          delegationPolicyTitle: copy.delegationPolicyTitle,
+          evidenceLevel: copy.evidenceLevel,
+          maxConcurrent: copy.maxConcurrent,
+          maxDepth: copy.maxDepth,
+          requiresReview: copy.requiresReview,
+          resetConfig: copy.resetConfig,
+          reviewMode: copy.reviewMode,
+          saveRuntimePolicy: copy.saveRuntimePolicy,
+          savingRuntimePolicy: copy.savingRuntimePolicy,
+          supervisionEnabled: copy.supervisionEnabled,
+          supervisionPolicyTitle: copy.supervisionPolicyTitle,
+        },
+        lang,
+        roleLabel: `${copy.supervisedRole}: ${metadataText(selectedAgent, "supervisedRole") || metadataText(selectedAgent, "selfEvolutionRole") || "-"}`,
+        dirtyLabel: lang === "zh" ? "未保存" : "Unsaved",
+        cleanLabel: lang === "zh" ? "已同步" : "Synced",
+        isDirty: runtimePolicyDirty,
+        isPending: selectedAgentRuntimePolicyPending,
+        canSave: canSaveRuntimePolicy,
+        notice,
+        delegationPolicyDraft,
+        supervisionPolicyDraft,
+        inboxPendingCount: selectedAgent.agentInboxPendingCount ?? 0,
+        groupContextEventCount: selectedAgent.groupContextEvents?.length ?? 0,
+        onUpdateDelegationPolicy: updateDelegationPolicyDraft,
+        onToggleDelegationContextMode: toggleDelegationContextMode,
+        onMaxConcurrentChange: (value) => updateDelegationPolicyDraft({ maxConcurrent: clampNumber(value, 0, 8, 0) }),
+        onMaxDepthChange: (value) => updateDelegationPolicyDraft({ maxDepth: clampNumber(value, 0, 4, 0) }),
+        onUpdateSupervisionPolicy: updateSupervisionPolicyDraft,
+        onReset: () => {
+          setDelegationPolicyDraft(delegationPolicyDraftFromAgent(selectedAgent));
+          setSupervisionPolicyDraft(supervisionPolicyDraftFromAgent(selectedAgent));
+        },
+        onSave: saveRuntimePolicy,
+      },
+    },
+  } : null;
+
   return (
     <section className={styles.route}>
       <AgentManagementHeaderPanel
@@ -5656,31 +6005,31 @@ export function AgentsRoute() {
         onRefresh={refresh}
       />
 
-      <div className={createOpen ? `${styles.workspace} ${styles.workspaceCreating}` : styles.workspace}>
-        <AgentFilterRail
-          ariaLabel={copy.agentFilters}
-          searchValue={searchText}
-          searchPlaceholder={copy.search}
-          onSearchChange={setSearchText}
-          sections={filterSections}
-          advancedSections={advancedFilterSections}
-          advancedLabel={copy.moreFilters}
-          advancedCount={advancedFilterCount}
-          activeGroupId={activeFilter}
-          onSelectGroup={handleSelectFilterGroup}
-          storageLabel={copy.readOnly}
-          storagePaths={agentStoragePaths}
-        />
-
-        <AgentListWorkspacePanel
-          createOpen={createOpen}
-          ariaLabel={activeGroupLabel}
-          headerEyebrow={copy.agentFilters}
-          headerTitle={activeGroupLabel}
-          createAgentLabel={copy.createAgent}
-          visibleAgentCount={visibleAgents.length}
-          onToggleCreate={() => setCreateOpen((value) => !value)}
-          createPanel={{
+      <AgentWorkspaceLayoutPanel
+        createOpen={createOpen}
+        filterRail={{
+          ariaLabel: copy.agentFilters,
+          searchValue: searchText,
+          searchPlaceholder: copy.search,
+          onSearchChange: setSearchText,
+          sections: filterSections,
+          advancedSections: advancedFilterSections,
+          advancedLabel: copy.moreFilters,
+          advancedCount: advancedFilterCount,
+          activeGroupId: activeFilter,
+          onSelectGroup: handleSelectFilterGroup,
+          storageLabel: copy.readOnly,
+          storagePaths: agentStoragePaths,
+        }}
+        listWorkspace={{
+          createOpen,
+          ariaLabel: activeGroupLabel,
+          headerEyebrow: copy.agentFilters,
+          headerTitle: activeGroupLabel,
+          createAgentLabel: copy.createAgent,
+          visibleAgentCount: visibleAgents.length,
+          onToggleCreate: () => setCreateOpen((value) => !value),
+          createPanel: {
             copy,
             draft: createDraft,
             selectedModelId: agentLlmSlotModelId(createDraft.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0]),
@@ -5716,8 +6065,8 @@ export function AgentsRoute() {
               setCreateDraft(createDraftFromWorkspace(workspace, toolBundles));
             },
             onCreate: createAgent,
-          }}
-          bulkOperations={{
+          },
+          bulkOperations: {
             copy,
             selectedCount: selectedBulkAgents.length,
             visibleCount: visibleAgents.length,
@@ -5731,8 +6080,8 @@ export function AgentsRoute() {
             onApplyPromptTemplate: bulkApplyPromptTemplate,
             onArchive: bulkArchiveAgents,
             onPurge: bulkPurgeAgents,
-          }}
-          listState={{
+          },
+          listState: {
             copy: {
               loadFailed: copy.loadFailed,
               loading: copy.loading,
@@ -5756,18 +6105,17 @@ export function AgentsRoute() {
               }
             },
             onToggleBulk: (rowId, checked, shiftKey) => toggleBulkAgent(rowId, checked, shiftKey),
-          }}
-        />
-
-        <AgentDetailWorkspacePanel
-          createOpen={createOpen}
-          ariaLabel={selectedAgent ? agentLabel(selectedAgent) : copy.title}
-          returnBanner={returnToPath ? {
+          },
+        }}
+        detailWorkspace={{
+          createOpen,
+          ariaLabel: selectedAgent ? agentLabel(selectedAgent) : copy.title,
+          returnBanner: returnToPath ? {
             copy,
             returnToLabel,
             onReturn: () => navigate(returnToPath),
-          } : null}
-          bulkConfig={selectedBulkAgents.length > 1 ? {
+          } : null,
+          bulkConfig: selectedBulkAgents.length > 1 ? {
             copy,
             selectedAgents: bulkSelectedAgentOptions,
             draft: bulkConfigDraft,
@@ -5786,378 +6134,11 @@ export function AgentsRoute() {
               setBulkConfigApply(DEFAULT_BULK_CONFIG_APPLY);
             },
             onSave: bulkApplyAgentConfig,
-          } : null}
-          selectedContent={selectedAgent ? (
-            <AgentSelectedDetailContentPanel
-              activePane={activePane}
-              header={(
-                <AgentDetailHeaderPanel
-                  copy={copy}
-                  lang={lang}
-                  title={copy.routeHint}
-                  agentName={agentLabel(selectedAgent)}
-                  roleLabel={agentFunctionalLabel(selectedAgent, lang)}
-                  roleTone={agentFunctionTone(selectedAgent, lang)}
-                  healthTitle={issueSummary(selectedAgent.health, lang)}
-                  healthTone={issueTone(selectedAgent.health)}
-                  healthLabel={issueLabel(selectedAgent.health, lang)}
-                  panes={panes}
-                  activePane={activePane}
-                  isAvatarEditorOpen={avatarEditorOpen}
-                  avatarImageUrl={selectedAgent.avatarImageUrl}
-                  avatarImagePath={selectedAgent.avatarImagePath}
-                  avatarInitials={avatarInitials(selectedAgent.agentCode, agentLabel(selectedAgent))}
-                  avatarOptions={avatarOptionsQuery.data}
-                  avatarOptionsPending={avatarOptionsQuery.isPending}
-                  avatarUploadPending={selectedAgentAvatarUploadPending}
-                  avatarUpdatePending={selectedAgentAvatarUpdatePending}
-                  onAvatarEditorOpenChange={setAvatarEditorOpen}
-                  onUploadAvatar={uploadSelectedAgentAvatar}
-                  onResetAvatar={resetSelectedAgentAvatar}
-                  onSelectAvatar={selectAgentAvatar}
-                  onSelectPane={setActivePane}
-                />
-              )}
-              brief={(
-                <AgentManagementBriefPanel
-                  brief={managementBrief}
-                  copy={{
-                    managementBriefHint: copy.managementBriefHint,
-                    managementBriefTitle: copy.managementBriefTitle,
-                    nextActionsTitle: copy.nextActionsTitle,
-                    nextAllReady: copy.nextAllReady,
-                  }}
-                  onOpenRoute={(route) => {
-                    void navigate(route);
-                  }}
-                  onSelectPane={setActivePane}
-                />
-              )}
-              overview={selectedAgentOverviewPanel ? <AgentOverviewPanel {...selectedAgentOverviewPanel} /> : null}
-              configPrimary={(
-                <AgentConfigPrimaryPanePanel
-                  coreConfig={{
-                    copy,
-                    lang,
-                    agentName: agentLabel(selectedAgent),
-                    draft: configDraft,
-                    dirty: configDirty,
-                    canSave: canSaveConfig,
-                    pending: selectedAgentConfigPending,
-                    notice,
-                    title: copy.personaHint,
-                    health: {
-                      tone: issueTone(selectedAgent.health),
-                      label: issuePanelLabel(selectedAgent.health, copy),
-                      headline: `${issueLabel(selectedAgent.health, lang)} · ${issueSummary(selectedAgent.health, lang)}`,
-                      nextStepLabel: copy.healthNextStep,
-                      nextStep: issueNextStep(selectedAgent.health, lang),
-                    },
-                    llmSlots: coreConfigLlmSlots,
-                    promptTemplateOptions: bulkPromptTemplateOptions,
-                    toolPolicyOptions: coreConfigToolPolicyOptions,
-                    toolPolicyTooltip: coreConfigToolPolicyTooltip,
-                    memoryPolicyOptions: coreConfigMemoryPolicyOptions,
-                    memoryPolicyTooltip: copy.memoryPolicyPickerHint,
-                    contextCompressionTitle: contextCompressionPolicyLine,
-                    onDraftChange: updateDraft,
-                    onLlmSlotModelChange: (slot, modelId) => {
-                      const nextBindings = updateAgentLlmSlotBinding(configDraft.llmBindings, slot, modelId);
-                      updateDraft({
-                        llmBindings: nextBindings,
-                        reasoningEffortBySlot: pruneAgentReasoningEffortBySlot(
-                          configDraft.reasoningEffortBySlot,
-                          nextBindings,
-                          workspace?.agentModelChoices ?? [],
-                        ),
-                      });
-                    },
-                    onReasoningEffortChange: (slot, reasoningEffort) => updateDraft({
-                      reasoningEffortBySlot: updateAgentReasoningEffortBySlot(
-                        configDraft.reasoningEffortBySlot,
-                        slot,
-                        reasoningEffort,
-                      ),
-                    }),
-                    onContextCompressionChange: updateContextCompressionDraft,
-                    onOpenModelConfig: () => navigate(selectedAgentModelConfigRoute),
-                    onOpenPromptConfig: () => navigate(selectedAgentPromptConfigRoute),
-                    onOpenContextConfig: () => navigate(selectedAgentContextConfigRoute),
-                    onReset: () => setConfigDraft(draftFromAgent(selectedAgent)),
-                    onSave: saveAgentConfig,
-                  }}
-                  personaProfile={selectedAgentRequiresPersona ? {
-                    copy,
-                    lang,
-                    summary: personaProfileSummary(selectedAgent, lang),
-                    draft: personaDraft,
-                    dirty: personaDirty,
-                    canSave: canSavePersona,
-                    pending: selectedAgentPersonaPending,
-                    onDraftChange: updatePersonaDraft,
-                    onReset: () => setPersonaDraft(personaDraftFromAgent(selectedAgent)),
-                    onSave: savePersonaProfile,
-                  } : null}
-                  toolGovernance={{
-                    copy,
-                    lang,
-                    requests: selectedAgent.toolGovernanceRequests ?? [],
-                    pendingRequestId:
-                      resolveToolGovernanceMutation.isPending
-                      && resolveToolGovernanceMutation.variables?.agentId === selectedAgent.agentId
-                        ? resolveToolGovernanceMutation.variables?.requestId ?? null
-                        : null,
-                    onResolve: resolveToolGovernanceRequest,
-                    onConfigure: () => navigate(selectedAgentToolConfigRoute),
-                  }}
-                  taskProfile={selectedAgentRequiresTask ? {
-                    copy,
-                    lang,
-                    summary: taskProfileSummary(selectedAgent, lang),
-                    draft: taskDraft,
-                    dirty: taskDirty,
-                    canSave: canSaveTask,
-                    pending: selectedAgentTaskPending,
-                    onDraftChange: updateTaskDraft,
-                    onReset: () => setTaskDraft(taskDraftFromAgent(selectedAgent)),
-                    onSave: saveTaskProfile,
-                  } : null}
-                  healthMaintenance={{
-                    copy: {
-                      handleInboxNow: copy.handleInboxNow,
-                      maintenanceHint: copy.maintenanceHint,
-                      maintenanceTitle: copy.maintenanceTitle,
-                      noIssues: copy.noIssues,
-                    },
-                    health: {
-                      title: issueNextStep(selectedAgent.health, lang),
-                      label: issuePanelLabel(selectedAgent.health, copy),
-                      headline: `${issueLabel(selectedAgent.health, lang)} · ${issueSummary(selectedAgent.health, lang)}`,
-                      hasIssues: selectedAgent.health.length > 0,
-                      issues: selectedAgent.health.map((issue) => ({
-                        key: `${issue.code}:${issue.detail}`,
-                        severity: issue.severity,
-                        title: issueDisplayTitle(issue, lang),
-                        detail: issue.detail,
-                        showInboxAction: issue.code === "pending_inbox_messages",
-                      })),
-                    },
-                    onOpenActivity: () => setActivePane("activity"),
-                  }}
-                  archiveZone={{
-                    copy,
-                    status: selectedAgent.status,
-                    isProtected: selectedAgentProtected,
-                    canArchive: canArchiveAgent,
-                    canPurge: canPurgeAgent,
-                    isArchivePending: selectedAgentArchivePending,
-                    isPurgePending: selectedAgentPurgePending,
-                    onArchive: archiveSelectedAgent,
-                    onPurge: purgeSelectedAgent,
-                  }}
-                  debugReset={selectedAgent.status !== "archived" ? {
-                    copy,
-                    options: resetOptions,
-                    canReset: canResetAgent,
-                    pending: selectedAgentResetPending,
-                    onOptionChange: updateResetOption,
-                    onReset: resetSelectedAgent,
-                  } : null}
-                  />
-              )}
-              configPolicies={(
-                <AgentConfigPolicyPanePanel
-                  toolSummary={{
-                    copy,
-                    lang,
-                    policyId: selectedAgent.toolPolicyId,
-                    allowedCount: selectedAgent.toolPolicy?.allowedTools?.length ?? 0,
-                    preferredCount: selectedAgent.toolPolicy?.preferredTools?.length ?? 0,
-                    blockedCount: selectedAgent.toolPolicy?.blockedTools?.length ?? 0,
-                    toolCategoryCount: toolBundles.length,
-                    onConfigure: () => navigate(selectedAgentToolConfigRoute),
-                  }}
-                  memoryPolicy={{
-                    copy,
-                    lang,
-                    policyId: selectedAgent.memoryPolicyId || "-",
-                    rootPath: selectedAgent.memoryPolicy?.privateMemoryRoot || selectedAgent.workspacePath || "-",
-                    draft: memoryPolicyDraft,
-                    memoryGroupOptions,
-                    dirty: memoryPolicyDirty,
-                    pending: selectedAgentMemoryPolicyPending,
-                    canSave: canSaveMemoryPolicy,
-                    onDraftChange: updateMemoryDraftField,
-                    onAddMemoryGroup: addMemoryGroup,
-                    onRemoveMemoryGroup: removeMemoryGroup,
-                    onAddKnowledgeBaseId: addKnowledgeBaseId,
-                    onRemoveKnowledgeBaseId: removeKnowledgeBaseId,
-                    onOpenMemoryPage: () => navigate(selectedAgentMemoryConfigRoute),
-                    onReset: () => setMemoryPolicyDraft(memoryPolicyDraftFromAgent(selectedAgent)),
-                    onSave: saveMemoryPolicy,
-                  }}
-                />
-              )}
-              configReferences={(
-                <AgentConfigReferencesPanePanel
-                  modeMembership={selectedAgentRequiresTeamMembership ? {
-                    copy,
-                    lang,
-                    modesLabel: uniqueModes(selectedAgent).map((mode) => modeLabel(mode, lang)).join(" / "),
-                    draft: membershipDraft,
-                    supervisedSlots: Object.keys(workspace?.modeBindings.supervised_evolution?.slots ?? {}),
-                    selfEvolutionSlots: Object.keys(workspace?.modeBindings.self_evolution?.slots ?? {}),
-                    dirty: membershipDirty,
-                    canSave: canSaveMembership,
-                    pending: selectedAgentMembershipPending,
-                    onDraftChange: updateMembershipDraft,
-                    onReset: () => setMembershipDraft(membershipDraftFromWorkspace(workspace, selectedAgent)),
-                    onSave: saveModeMembership,
-                  } : null}
-                  references={selectedAgentReferencesPanel ? {
-                    copy: {
-                      chatRoomMembership: copy.chatRoomMembership,
-                      references: copy.references,
-                      noChatRooms: copy.noChatRooms,
-                      selectAgent: copy.selectAgent,
-                      readOnlyLabel: lang === "zh" ? "只读引用" : "Read-only",
-                      membershipHelp: lang === "zh"
-                        ? "群聊成员关系在对话页的群设置中维护；团队关联群聊由团队页同步。这里仅展示引用，避免多处写同一份成员状态。"
-                        : "Group membership is edited from Chat group settings, while Team-owned rooms sync from Teams. This Agent view is read-only to avoid duplicate writers.",
-                    },
-                    showChatRoomMembership: selectedAgentRequiresTeamMembership,
-                    chatRoomSummary: selectedAgentReferencesPanel.chatRoomSummary,
-                    referenceCount: selectedAgent.references.length,
-                    chatRooms: selectedAgentReferencesPanel.chatRooms,
-                    references: selectedAgentReferencesPanel.references,
-                    onOpenRoute: (route) => navigate(route),
-                  } : null}
-                />
-              )}
-              activity={(
-                <AgentActivityPanePanel
-                  runtimeFocus={{
-                    copy: {
-                      runtimeFocus: copy.runtimeFocus,
-                      runtimeLatestRun: copy.runtimeLatestRun,
-                      runtimeReason: copy.runtimeReason,
-                      runtimeUpdated: copy.runtimeUpdated,
-                      runtimeNextStep: copy.runtimeNextStep,
-                      runtimeEvidence: copy.runtimeEvidence,
-                      openSession: copy.openSession,
-                      openLogs: copy.openLogs,
-                    },
-                    statusLabel: runtimeStatusLabel(selectedAgent, lang),
-                    statusReason: selectedAgent.runtimeStatus?.reason || selectedAgent.status || "-",
-                    tone: runtimeStatusTone(selectedAgent),
-                    summary: selectedAgent.runtimeStatus?.summary || selectedAgent.directSessionId || selectedAgent.workspacePath || "-",
-                    latestRunId: selectedAgent.runtimeStatus?.runId || "-",
-                    runReason: selectedAgent.runtimeStatus?.runKind || selectedAgent.runtimeStatus?.state || "-",
-                    updatedAt: formatTimestamp(selectedAgent.runtimeStatus?.updatedAt || selectedAgent.updatedAt, lang),
-                    nextStep: runtimeNextStep(selectedAgent, lang),
-                    evidenceReason: runtimeEvidenceReasonLabel(runtimeFocusEvidence.reason, lang),
-                    evidenceSceneId: runtimeFocusEvidence.match?.runtimeSceneId || "-",
-                    logsTargetLabel: runtimeFocusEvidence.match?.runtimeSceneId,
-                    onOpenLogs: () => openAgentLogs(runtimeFocusEvidence.match),
-                    onOpenSession: runtimeFocusSessionId ? () => openAgentSession(runtimeFocusSessionId) : undefined,
-                  }}
-                  activityHistory={{
-                    agent: selectedAgent,
-                    copy: {
-                      sessions: copy.sessions,
-                      logs: copy.logs,
-                      activityPane: copy.activityPane,
-                      activityTimeline: copy.activityTimeline,
-                      loading: copy.loading,
-                      activityTimelineEmpty: copy.activityTimelineEmpty,
-                      openSession: copy.openSession,
-                      openLogs: copy.openLogs,
-                      focusMessage: copy.focusMessage,
-                      runHistoryTitle: copy.runHistoryTitle,
-                      parentRuns: copy.parentRuns,
-                      subAgentRuns: copy.subAgentRuns,
-                      maxDepth: copy.maxDepth,
-                      runHistoryLoading: copy.runHistoryLoading,
-                      noRunHistory: copy.noRunHistory,
-                      communication: copy.communication,
-                      inboxTitle: copy.inboxTitle,
-                      consumeAllMessages: copy.consumeAllMessages,
-                      consumingMessage: copy.consumingMessage,
-                      inboxLoading: copy.inboxLoading,
-                      consumeMessage: copy.consumeMessage,
-                      wakeStatus: copy.wakeStatus,
-                      inboxEmpty: copy.inboxEmpty,
-                    },
-                    lang,
-                    activityTimeline,
-                    isActivityLoading: agentRunsQuery.isPending || agentMessagesQuery.isPending,
-                    runHistory: agentRunsQuery.data,
-                    isRunHistoryLoading: agentRunsQuery.isPending,
-                    inboxMessages: agentMessagesQuery.data,
-                    isInboxLoading: agentMessagesQuery.isPending,
-                    inboxPendingCount: selectedAgentInboxPendingCount,
-                    focusedMessageId,
-                    pendingMessageId:
-                      consumeMessageMutation.isPending && consumeMessageMutation.variables?.agentId === selectedAgent.agentId
-                        ? consumeMessageMutation.variables?.messageId ?? ""
-                        : "",
-                    isConsumeAllPending: selectedAgentConsumeAllPending,
-                    onOpenSession: openAgentSession,
-                    onOpenLogs: openAgentLogs,
-                    onFocusMessage: focusInboxMessage,
-                    onConsumeAllMessages: consumeAllInboxMessages,
-                    onConsumeInboxMessage: consumeInboxMessage,
-                  }}
-                  runtimePolicy={{
-                    copy: {
-                      allowedContextModes: copy.allowedContextModes,
-                      allowSubagents: copy.allowSubagents,
-                      allowWakeMessages: copy.allowWakeMessages,
-                      communication: copy.communication,
-                      context: copy.context,
-                      delegation: copy.delegation,
-                      delegationPolicyTitle: copy.delegationPolicyTitle,
-                      evidenceLevel: copy.evidenceLevel,
-                      maxConcurrent: copy.maxConcurrent,
-                      maxDepth: copy.maxDepth,
-                      requiresReview: copy.requiresReview,
-                      resetConfig: copy.resetConfig,
-                      reviewMode: copy.reviewMode,
-                      saveRuntimePolicy: copy.saveRuntimePolicy,
-                      savingRuntimePolicy: copy.savingRuntimePolicy,
-                      supervisionEnabled: copy.supervisionEnabled,
-                      supervisionPolicyTitle: copy.supervisionPolicyTitle,
-                    },
-                    lang,
-                    roleLabel: `${copy.supervisedRole}: ${metadataText(selectedAgent, "supervisedRole") || metadataText(selectedAgent, "selfEvolutionRole") || "-"}`,
-                    dirtyLabel: lang === "zh" ? "未保存" : "Unsaved",
-                    cleanLabel: lang === "zh" ? "已同步" : "Synced",
-                    isDirty: runtimePolicyDirty,
-                    isPending: selectedAgentRuntimePolicyPending,
-                    canSave: canSaveRuntimePolicy,
-                    notice,
-                    delegationPolicyDraft,
-                    supervisionPolicyDraft,
-                    inboxPendingCount: selectedAgent.agentInboxPendingCount ?? 0,
-                    groupContextEventCount: selectedAgent.groupContextEvents?.length ?? 0,
-                    onUpdateDelegationPolicy: updateDelegationPolicyDraft,
-                    onToggleDelegationContextMode: toggleDelegationContextMode,
-                    onMaxConcurrentChange: (value) => updateDelegationPolicyDraft({ maxConcurrent: clampNumber(value, 0, 8, 0) }),
-                    onMaxDepthChange: (value) => updateDelegationPolicyDraft({ maxDepth: clampNumber(value, 0, 4, 0) }),
-                    onUpdateSupervisionPolicy: updateSupervisionPolicyDraft,
-                    onReset: () => {
-                      setDelegationPolicyDraft(delegationPolicyDraftFromAgent(selectedAgent));
-                      setSupervisionPolicyDraft(supervisionPolicyDraftFromAgent(selectedAgent));
-                    },
-                    onSave: saveRuntimePolicy,
-                  }}
-                />
-              )}
-            />
-          ) : null}
-          emptySelectionTitle={copy.selectAgent}
-        />
-      </div>
+          } : null,
+          selectedContent: selectedAgentDetailContent ? <AgentSelectedDetailContentPanel {...selectedAgentDetailContent} /> : null,
+          emptySelectionTitle: copy.selectAgent,
+        }}
+      />
     </section>
   );
 }

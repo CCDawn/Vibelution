@@ -1,16 +1,36 @@
-import { type ReactNode } from "react";
+import { type ComponentProps } from "react";
 
-type AgentSelectedDetailPaneId = "overview" | "config" | "activity";
+import { AgentActivityPanePanel } from "./AgentActivityPanePanel";
+import { AgentConfigPrimaryPanePanel } from "./AgentConfigPrimaryPanePanel";
+import { AgentConfigPolicyPanePanel } from "./AgentConfigPolicyPanePanel";
+import { AgentConfigReferencesPanePanel } from "./AgentConfigReferencesPanePanel";
+import {
+  AgentDetailHeaderPanel,
+  type AgentDetailHeaderPaneView,
+} from "./AgentDetailHeaderPanel";
+import { AgentManagementBriefPanel } from "./AgentManagementBriefPanel";
+import { AgentOverviewPanel } from "./AgentOverviewPanel";
 
-type AgentSelectedDetailContentPanelProps = {
+export type AgentSelectedDetailPaneId = "overview" | "config" | "activity";
+
+type AgentSelectedDetailHeaderProps = Omit<
+  ComponentProps<typeof AgentDetailHeaderPanel>,
+  "activePane" | "onSelectPane" | "panes"
+> & {
   activePane: AgentSelectedDetailPaneId;
-  header: ReactNode;
-  brief: ReactNode;
-  overview: ReactNode;
-  configPrimary: ReactNode;
-  configPolicies: ReactNode;
-  configReferences: ReactNode;
-  activity: ReactNode;
+  onSelectPane: (pane: AgentSelectedDetailPaneId) => void;
+  panes: AgentDetailHeaderPaneView<AgentSelectedDetailPaneId>[];
+};
+
+export type AgentSelectedDetailContentPanelProps = {
+  activePane: AgentSelectedDetailPaneId;
+  header: AgentSelectedDetailHeaderProps;
+  brief: ComponentProps<typeof AgentManagementBriefPanel>;
+  overview: ComponentProps<typeof AgentOverviewPanel> | null;
+  configPrimary: ComponentProps<typeof AgentConfigPrimaryPanePanel>;
+  configPolicies: ComponentProps<typeof AgentConfigPolicyPanePanel>;
+  configReferences: ComponentProps<typeof AgentConfigReferencesPanePanel>;
+  activity: ComponentProps<typeof AgentActivityPanePanel>;
 };
 
 export function AgentSelectedDetailContentPanel({
@@ -25,17 +45,17 @@ export function AgentSelectedDetailContentPanel({
 }: AgentSelectedDetailContentPanelProps) {
   return (
     <>
-      {header}
-      {brief}
-      {activePane === "overview" ? overview : null}
+      <AgentDetailHeaderPanel {...header} />
+      <AgentManagementBriefPanel {...brief} />
+      {activePane === "overview" && overview ? <AgentOverviewPanel {...overview} /> : null}
       {activePane === "config" ? (
         <>
-          {configPrimary}
-          {configPolicies}
-          {configReferences}
+          <AgentConfigPrimaryPanePanel {...configPrimary} />
+          <AgentConfigPolicyPanePanel {...configPolicies} />
+          <AgentConfigReferencesPanePanel {...configReferences} />
         </>
       ) : null}
-      {activePane === "activity" ? activity : null}
+      {activePane === "activity" ? <AgentActivityPanePanel {...activity} /> : null}
     </>
   );
 }
