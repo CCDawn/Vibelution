@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 import type { AgentProjectMemoryUpdateProposal } from "../api/types";
 import { VButton, VNativeInput } from "../components/vui";
-import styles from "./MemoryRoute.styles";
+import styles from "./MemoryProjectMemoryQueuePanel.styles";
 
 export type MemoryProjectMemoryResolveStatus = "applied" | "rejected" | "conflict" | "superseded";
 
