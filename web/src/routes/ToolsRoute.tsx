@@ -23,9 +23,9 @@ import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { VButton, VIconButton, VNativeInput, VNativeSelect, VRouteHeader } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import { useAppI18n } from "../i18n/useAppI18n";
-import { AgentManagementNav } from "./AgentManagementNav";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { clampPaneWidth, keyboardPaneWidth, storedPaneWidth } from "./resizablePane";
+import { ToolsRouteAgentScopePanel } from "./ToolsRouteAgentScopePanel";
 import styles from "./ToolsRoute.styles";
 
 type ToolFilter = "all" | "built_in" | "generated" | "llm" | "enabled";
@@ -1294,6 +1294,16 @@ export function ToolsRoute() {
     requestedToolKey,
     toolsQuery.isPending,
   ]);
+  const toolSummaryMetrics = [
+    { id: "total", label: t("toolsTotal"), value: counts?.total ?? 0 },
+    { id: "built_in", label: t("toolsBuiltIn"), value: counts?.builtIn ?? 0 },
+    { id: "generated", label: t("toolsGenerated"), value: counts?.generated ?? 0 },
+    { id: "llm_visible", label: t("toolsLlmVisible"), value: counts?.llmVisible ?? 0 },
+  ];
+  const toolScopeOptions = (agentScopes.length ? agentScopes : [activeAgentScope]).map((scope) => ({
+    id: scope.id,
+    label: scopeLabel(scope, lang, t),
+  }));
   const webSearchHealthQuery = useQuery({
     queryKey: queryKeys.toolWebSearchHealth(),
     queryFn: () => fetchJson<ToolDependencyHealth>("/api/tools/web-search/health"),
@@ -1611,80 +1621,30 @@ export function ToolsRoute() {
         )}
       />
 
-      <div className={styles.controlStrip}>
-        <AgentManagementNav active="tools" className={styles.managementNav} />
-
-        <div className={styles.summaryGrid}>
-          <section className={styles.summaryCard}>
-            <span>{t("toolsTotal")}</span>
-            <strong>{counts?.total ?? 0}</strong>
-          </section>
-          <section className={styles.summaryCard}>
-            <span>{t("toolsBuiltIn")}</span>
-            <strong>{counts?.builtIn ?? 0}</strong>
-          </section>
-          <section className={styles.summaryCard}>
-            <span>{t("toolsGenerated")}</span>
-            <strong>{counts?.generated ?? 0}</strong>
-          </section>
-          <section className={styles.summaryCard}>
-            <span>{t("toolsLlmVisible")}</span>
-            <strong>{counts?.llmVisible ?? 0}</strong>
-          </section>
-        </div>
-      </div>
-
-      <section className={styles.agentScopeBar}>
-        <div className={styles.scopeCopy}>
-          <p className={styles.panelEyebrow}>{lang === "zh" ? "配置 Agent" : "Configure Agent"}</p>
-          <strong>{activePolicyAgent ? `${activePolicyAgent.agentCode || ""} ${activePolicyAgent.displayName || activePolicyAgent.agentId}`.trim() : "-"}</strong>
-          <span>{toolPolicyDirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}</span>
-        </div>
-        <label className={styles.scopeSelect}>
-          <span>{lang === "zh" ? "配置" : "Agent"}</span>
-          <VNativeSelect
-            value={activePolicyAgent?.agentId ?? ""}
-            disabled={!activeAgents.length}
-            aria-label={lang === "zh" ? "配置 Agent" : "Configure Agent"}
-            onChange={(event) => setActivePolicyAgentId(event.target.value)}
-          >
-            {!activeAgents.length ? (
-              <option value="">{agentsQuery.isPending ? t("loading") : "-"}</option>
-            ) : null}
-            {activeAgents.map((agent) => (
-              <option key={agent.agentId} value={agent.agentId}>
-                {agent.agentCode ? `${agent.agentCode} · ` : ""}{agent.displayName || agent.agentId}
-              </option>
-            ))}
-          </VNativeSelect>
-        </label>
-        <label className={styles.scopeSelect}>
-          <span>{t("toolsAgentScope")}</span>
-          <VNativeSelect
-            value={activeAgentScopeId}
-            aria-label={t("toolsAgentScope")}
-            onChange={(event) => setActiveAgentScopeId(event.target.value)}
-          >
-            {(agentScopes.length ? agentScopes : [activeAgentScope]).map((scope) => (
-              <option key={scope.id} value={scope.id}>
-                {scopeLabel(scope, lang, t)}
-              </option>
-            ))}
-          </VNativeSelect>
-        </label>
-        <div className={styles.scopeStats}>
-          <span>
-            {t("toolsScopeVisible")}: <strong>{activeAgentScope.counts.visible}</strong>
-          </span>
-          <span>
-            {t("toolsScopeCallable")}: <strong>{activeAgentScope.counts.callable}</strong>
-          </span>
-          <span>
-            {t("toolsScopeBlocked")}: <strong>{activeAgentScope.counts.blocked}</strong>
-          </span>
-        </div>
-        {deepLinkNotice ? <p className={styles.deepLinkNotice}>{deepLinkNotice}</p> : null}
-      </section>
+      <ToolsRouteAgentScopePanel
+        copy={{
+          blocked: t("toolsScopeBlocked"),
+          callable: t("toolsScopeCallable"),
+          configure: lang === "zh" ? "配置" : "Agent",
+          configureAgent: lang === "zh" ? "配置 Agent" : "Configure Agent",
+          loading: t("loading"),
+          scope: t("toolsAgentScope"),
+          synced: lang === "zh" ? "已同步" : "Synced",
+          unsaved: lang === "zh" ? "未保存" : "Unsaved",
+          visible: t("toolsScopeVisible"),
+        }}
+        summaryMetrics={toolSummaryMetrics}
+        activeAgents={activeAgents}
+        activeAgent={activePolicyAgent}
+        agentsLoading={agentsQuery.isPending}
+        activeAgentScopeId={activeAgentScopeId}
+        scopeOptions={toolScopeOptions}
+        scopeCounts={activeAgentScope.counts}
+        dirty={toolPolicyDirty}
+        deepLinkNotice={deepLinkNotice}
+        onAgentChange={setActivePolicyAgentId}
+        onScopeChange={setActiveAgentScopeId}
+      />
 
       <div className={styles.workspace} style={workspaceStyle}>
         <aside className={leftPanelCollapsed ? `${styles.listPanel} ${styles.paneCollapsed}` : styles.listPanel} aria-hidden={leftPanelCollapsed}>
