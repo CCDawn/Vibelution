@@ -1,6 +1,6 @@
 import { lazy, Suspense, type ReactNode } from "react";
 
-import type { ConversationViewProps } from "./ConversationView";
+import type { ConversationViewProps } from "./conversationViewTypes";
 
 const ConversationView = lazy(async () => {
   const module = await import("./ConversationView");
