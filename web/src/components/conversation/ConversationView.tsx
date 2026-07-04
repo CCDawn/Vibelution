@@ -124,8 +124,6 @@ import {
 import { VButton, VNativeInput, VNativeTextarea } from "../vui";
 import styles from "./ConversationView.styles";
 
-export type { TurnAvatarResolution } from "./conversationTurnAvatar";
-
 const RUNNING_OPERATION_STATUSES = new Set(["queued", "pending", "running", "thinking", "tooling", "answering"]);
 const DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT = 3;
 const INITIAL_VISIBLE_MESSAGE_COUNT = 14;
