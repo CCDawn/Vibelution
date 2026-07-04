@@ -392,44 +392,12 @@ const styles = {
     "relative h-full min-w-3 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none before:absolute before:inset-y-0 before:left-1/2 before:w-[3px] before:-translate-x-1/2 before:rounded-[var(--radius-control)] before:bg-[var(--surface-resize-track)] before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] hover:before:shadow-[var(--vui-shadow-soft)] focus-visible:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] focus-visible:before:shadow-[var(--vui-shadow-soft)] max-[1200px]:hidden",
   reviewLead:
     "[margin:0] [color:var(--fg-primary)_!important] [font-size:1.04rem] [line-height:1.55]",
-  runCardButton:
-    "grid w-full [gap:8px] [border:0] [padding:0] [background:transparent] [color:inherit] [text-align:left]",
   runControlReason:
     "[margin:0] [color:var(--fg-secondary)] [font-size:var(--vui-font-xs)] [line-height:1.45] [overflow-wrap:anywhere]",
   runControlSummaryBody:
     "grid [gap:4px] min-w-0",
-  runDetailOverview:
-    "grid [grid-template-columns:minmax(190px,_0.42fr)_minmax(0,_1fr)] [gap:10px] [align-items:start] [padding:10px] [border-radius:8px] [border:1px_solid_var(--border-hairline)] [background:var(--surface-card-subtle)] max-[900px]:[grid-template-columns:1fr]",
-  runDetailPanel:
-    "min-h-0 [padding:10px_12px] grid [align-content:start] [gap:10px] [overflow:auto]",
-  runItem:
-    "[&_p]:[margin:0] [&_p]:[color:var(--fg-secondary)] [&_p]:[line-height:1.6] [border:1px_solid_var(--border-hairline)] [border-radius:8px] [transition:border-color_140ms_ease,_background-color_140ms_ease,_color_140ms_ease] hover:[border-color:color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)] hover:[background:var(--surface-card-hover)] grid [gap:6px] [padding:9px_10px] [background:var(--surface-card-muted)] [color:var(--fg-primary)] [text-align:left]",
   runItemActive:
     "[border-color:color-mix(in_srgb,_var(--accent-warm)_28%,_transparent)] [background:color-mix(in_srgb,_var(--accent-warm)_8%,_transparent)]",
-  runListScrollable:
-    "grid [gap:6px] [max-height:min(620px,_58vh)] [overflow:auto] [padding-right:4px]",
-  runMonitor:
-    "grid [gap:14px]",
-  runQueuePanel:
-    "min-h-0 [padding:10px_12px] grid [align-content:start] [gap:10px] [overflow:auto]",
-  runRecordCard:
-    "[gap:10px]",
-  runRecordIdentity:
-    "grid [gap:3px] min-w-0 [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[color:var(--fg-primary)] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_span]:min-w-0 [&_span]:[overflow:hidden] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-family:var(--font-mono)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap]",
-  runRecordTitleRow:
-    "[align-items:flex-start]",
-  runRuntimeNote:
-    "grid [gap:4px] [padding:8px_10px] [border-radius:8px] [background:var(--surface-card-subtle)] [color:var(--fg-secondary)] [&_p]:[margin:0] [&_p]:[line-height:1.45]",
-  runScoreDiagnosis:
-    "grid [gap:3px] min-w-0 [padding:8px_10px] [border-radius:8px] [background:var(--surface-card-muted)] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_p]:[display:-webkit-box] [&_p]:[overflow:hidden] [&_p]:[color:var(--fg-primary)] [&_p]:[-webkit-line-clamp:2] [&_p]:[-webkit-box-orient:vertical]",
-  runScoreFacts:
-    "grid [grid-template-columns:repeat(3,_minmax(0,_1fr))] [gap:6px] [margin-top:4px] [&_span]:grid [&_span]:[gap:2px] [&_span]:min-w-0 [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_strong]:min-w-0 [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] max-[640px]:[grid-template-columns:1fr]",
-  runScorePanel:
-    "grid [align-content:center] [gap:6px] min-w-0 [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_p]:[margin:0] [&_p]:[color:var(--fg-secondary)] [&_p]:[line-height:1.45]",
-  runSignalGrid:
-    "grid [grid-template-columns:repeat(3,_minmax(0,_1fr))] [gap:8px] max-[900px]:[grid-template-columns:repeat(2,_minmax(0,_1fr))] max-[640px]:[grid-template-columns:1fr]",
-  runSignalStack:
-    "grid [align-content:start] [gap:8px] min-w-0",
   runsCommandHeader:
     "flex [flex-direction:column] [align-items:stretch] [justify-content:end] [gap:10px] min-w-0 max-[900px]:[flex-direction:column]",
   runsCommandMetrics:
