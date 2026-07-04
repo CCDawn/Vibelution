@@ -2,23 +2,24 @@ import { describe, expect, it } from "vitest";
 
 import routeSource from "./ConfigRoute.tsx?raw";
 import logHelperCenterPanelSource from "./ConfigLogHelperCenterPanel.tsx?raw";
+import placeholderPanelSource from "./ConfigWorkspacePlaceholderPanel.tsx?raw";
 import stylesSource from "./ConfigRoute.styles.ts?raw";
 
 describe("ConfigRoute layout contract", () => {
   it("uses a full workspace placeholder for initial loading and load failure states", () => {
-    expect(routeSource).toContain("function ConfigWorkspacePlaceholder");
-    expect(routeSource).toContain("<ConfigWorkspacePlaceholder title={copy.loading} />");
+    expect(routeSource).toContain("<ConfigWorkspacePlaceholderPanel title={copy.loading} />");
+    expect(placeholderPanelSource).toContain("export function ConfigWorkspacePlaceholderPanel");
     expect(routeSource).toContain('tone="error"');
-    expect(routeSource).toContain("styles.loadingShell");
-    expect(routeSource).toContain("styles.loadingBoard");
+    expect(placeholderPanelSource).toContain("styles.loadingShell");
+    expect(placeholderPanelSource).toContain("styles.loadingBoard");
     expect(routeSource).not.toContain("<section className={styles.loadingSurface}>");
   });
 
   it("keeps the config loading placeholder as a dense board with nav, metrics, and specs", () => {
-    expect(routeSource).toContain("styles.loadingNavPanel");
-    expect(routeSource).toContain("styles.loadingNavList");
-    expect(routeSource).toContain("styles.loadingMetricGrid");
-    expect(routeSource).toContain("styles.loadingSpecGrid");
+    expect(placeholderPanelSource).toContain("styles.loadingNavPanel");
+    expect(placeholderPanelSource).toContain("styles.loadingNavList");
+    expect(placeholderPanelSource).toContain("styles.loadingMetricGrid");
+    expect(placeholderPanelSource).toContain("styles.loadingSpecGrid");
   });
 
   it("moves supplemental config explanation into hover text instead of permanent helper copy", () => {
