@@ -2,7 +2,7 @@ import { CheckCircle2, Eye, Trash2, TriangleAlert } from "lucide-react";
 
 import type { MemoryCleanupExecuteResponse, MemoryCleanupPreviewResponse } from "../api/types";
 import { VButton, VNativeInput } from "../components/vui";
-import styles from "./MemoryRoute.styles";
+import styles from "./MemoryCleanupPanel.styles";
 
 export type MemoryCleanupTargetOptionView = {
   key: string;

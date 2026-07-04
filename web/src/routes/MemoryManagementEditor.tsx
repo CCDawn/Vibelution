@@ -1,7 +1,7 @@
 import { CheckCircle2, TriangleAlert, XCircle } from "lucide-react";
 
 import { VButton, VNativeInput, VNativeTextarea } from "../components/vui";
-import styles from "./MemoryRoute.styles";
+import styles from "./MemoryManagementEditor.styles";
 
 export type MemoryManagementEditorDraft = {
   mode: "create" | "edit";

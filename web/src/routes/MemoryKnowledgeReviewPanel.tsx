@@ -2,7 +2,7 @@ import { CheckCircle2, Eye, Pencil, Square, SquareCheckBig, XCircle } from "luci
 
 import type { KnowledgeRatingSuggestion, TeamKnowledgeBase } from "../api/types";
 import { VButton, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
-import styles from "./MemoryRoute.styles";
+import styles from "./MemoryKnowledgeReviewPanel.styles";
 
 export type MemoryKnowledgeProposalDraft = {
   proposedByAgentId: string;

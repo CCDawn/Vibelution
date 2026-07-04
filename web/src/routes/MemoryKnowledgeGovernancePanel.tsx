@@ -2,7 +2,7 @@ import { CheckCircle2, Eye } from "lucide-react";
 
 import type { KnowledgeGovernancePlanPayload, KnowledgeGovernanceTask, KnowledgeOperationsHealthPayload } from "../api/types";
 import { VButton } from "../components/vui";
-import styles from "./MemoryRoute.styles";
+import styles from "./MemoryKnowledgeGovernancePanel.styles";
 
 export type MemoryKnowledgeGovernancePanelCopy = {
   operationsHealth: string;
