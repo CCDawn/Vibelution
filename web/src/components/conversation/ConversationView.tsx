@@ -33,6 +33,7 @@ import type {
 import { fetchJson } from "../../api/client";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { AgentContextSectionsView } from "./AgentContextSectionsView";
+import { ConversationImageArtifactView } from "./ConversationImageArtifactView";
 import { AgentMessageTurnView } from "./AgentMessageTurnView";
 import { AgentResponseSectionView } from "./AgentResponseSectionView";
 import { AgentUserContentSectionView } from "./AgentUserContentSectionView";
@@ -2710,52 +2711,6 @@ export function ConversationView({
     });
   }
 
-  function renderImageArtifact(message: ConversationMessage) {
-    const artifact = imageArtifactForMessage(message);
-    if (!artifact) {
-      return null;
-    }
-    const downloadLabel = lang === "zh" ? "下载图片" : "Download image";
-    const previewLabel = lang === "zh" ? "预览图片" : "Preview image";
-    const imageAlt = artifact.prompt || (lang === "zh" ? "生成图片" : "Generated image");
-    const metaItems = [artifact.size, artifact.quality, artifact.model].filter(Boolean);
-    return (
-      <figure className={styles.imageArtifact}>
-        <VButton
-          type="button"
-          className={`${styles.imageArtifactFrame} ${styles.imagePreviewButton}`}
-          onClick={() =>
-            openImagePreview({
-              src: artifact.imageUrl,
-              alt: imageAlt,
-              downloadUrl: artifact.downloadUrl,
-              downloadName: artifact.artifactId || true,
-            })
-          }
-          aria-label={previewLabel}
-          title={previewLabel}
-        >
-          <img className={styles.imagePreview} src={artifact.imageUrl} alt={imageAlt} loading="lazy" />
-        </VButton>
-        <figcaption className={styles.imageArtifactFooter}>
-          <span className={styles.imageArtifactMeta}>
-            {artifact.prompt ? <span className={styles.imageArtifactPrompt}>{artifact.prompt}</span> : null}
-            {metaItems.length ? <span>{metaItems.join(" · ")}</span> : null}
-          </span>
-          <a
-            className={styles.imageDownloadButton}
-            href={artifact.downloadUrl}
-            download={artifact.artifactId || true}
-            title={downloadLabel}
-            aria-label={downloadLabel}
-          >
-            <Download size={15} />
-          </a>
-        </figcaption>
-      </figure>
-    );
-  }
-
   function isNonNullNode<T>(node: T | null): node is T {
     return node !== null;
   }
@@ -2934,6 +2889,7 @@ export function ConversationView({
             const hasFeedbackTimeline = agentSections.hasFeedbackTimeline;
             const showResponseBlock = shouldShowAgentResponseBlock(message, agentSections, hasFeedbackTimeline);
             const turnErrorMessage = isTurnErrorMessage(message);
+            const imageArtifact = imageArtifactForMessage(message);
             const agentInboxMessage = isAgentInboxMessage(message);
             const groupTranscriptMessage = isGroupRoomTranscriptMessage(message);
             const previousMessage = activeTimelineMessages[index - 1];
@@ -3207,7 +3163,13 @@ export function ConversationView({
                       </div>
                     </div>
                   ) : null}
-                  {renderImageArtifact(message)}
+                  {imageArtifact ? (
+                    <ConversationImageArtifactView
+                      artifact={imageArtifact}
+                      lang={lang}
+                      onPreviewImage={openImagePreview}
+                    />
+                  ) : null}
 
                   {!answerOnlyProcessMode ? responseSectionNode : null}
               </AgentMessageTurnView>
