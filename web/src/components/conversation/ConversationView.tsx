@@ -68,6 +68,22 @@ import {
   type AgentMessageReActOperationGroup,
 } from "./agentMessageOperations";
 import {
+  compactInternalProcessStateLabel,
+  compactVisibleTimelineOperations,
+  isLongLoopProgressOperation,
+  isRunningOperationStatus,
+  operationCollectionTone,
+  operationDisplayLabel,
+  operationStateLabel,
+  operationStatusTone,
+  processSummaryMeta,
+  processSummaryPreview,
+  processSummaryTitle,
+  reActGroupTone,
+  shouldShowTimelineOperation,
+  type OperationStateLabels,
+} from "./conversationOperationState";
+import {
   buildAgentMessageTimelineItems,
   type AgentMessageTimelineItem,
 } from "./agentMessageTimeline";
@@ -150,7 +166,6 @@ import {
 import { VButton, VNativeInput, VNativeTextarea } from "../vui";
 import styles from "./ConversationView.styles";
 
-const RUNNING_OPERATION_STATUSES = new Set(["queued", "pending", "running", "thinking", "tooling", "answering"]);
 const DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT = 3;
 const INITIAL_VISIBLE_MESSAGE_COUNT = 14;
 const INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT = 36;
@@ -589,6 +604,27 @@ export function ConversationView({
     }),
     [lang, t],
   );
+  const operationStateLabels = useMemo<OperationStateLabels>(
+    () => ({
+      running: lang === "zh" ? "执行中" : "Running",
+      failed: lang === "zh" ? "执行失败" : "Failed",
+      done: lang === "zh" ? "已完成" : "Done",
+      pending: lang === "zh" ? "待处理" : "Pending",
+      requesting: lang === "zh" ? "正在请求" : "Requesting",
+      requestFailed: lang === "zh" ? "请求失败" : "Request failed",
+      pendingRequest: lang === "zh" ? "等待请求" : "Pending request",
+      thinking: lang === "zh" ? "正在思考中" : "Thinking",
+      generating: lang === "zh" ? "生成中" : "Generating",
+      processFailed: lang === "zh" ? "过程失败" : "Process failed",
+      process: lang === "zh" ? "过程" : "Process",
+      processPending: lang === "zh" ? "过程待处理" : "Process pending",
+      thoughtProcess: t("thoughtProcess"),
+      toolProcess: t("toolProcess"),
+      mentalProcess: t("mentalProcess"),
+      status: lang === "zh" ? "状态" : "Status",
+    }),
+    [lang, t],
+  );
   function compactPreview(value: string, maxLength = 180) {
     const normalized = value.replace(/\s+/g, " ").trim();
     if (!normalized) {
@@ -984,41 +1020,8 @@ export function ConversationView({
     return <CircleDot size={14} />;
   }
 
-  function operationStatusTone(operation: AgentMessageOperation) {
-    const status = operation.status.trim().toLowerCase();
-    if (["failed", "error", "timeout"].includes(status)) {
-      return "failed";
-    }
-    if (isRunningOperationStatus(status)) {
-      return "running";
-    }
-    if (["done", "success", "completed", "succeeded"].includes(status)) {
-      return "done";
-    }
-    return "pending";
-  }
-
-  function isRunningOperationStatus(status: string) {
-    return RUNNING_OPERATION_STATUSES.has(status.trim().toLowerCase());
-  }
-
   function operationLabel(operation: AgentMessageOperation) {
-    if (operation.kind !== "tool") {
-      return operation.label;
-    }
-    const normalized = operation.label.trim();
-    if (!normalized) {
-      return t("toolProcess");
-    }
-    if (
-      normalized.startsWith("搜索")
-      || normalized.startsWith("访问")
-      || normalized.toLowerCase().startsWith("search ")
-      || normalized.toLowerCase().startsWith("open ")
-    ) {
-      return normalized;
-    }
-    return normalized;
+    return operationDisplayLabel(operation, operationStateLabels);
   }
 
   function operationGroupTitle(kind: AgentMessageOperationKind, count: number) {
@@ -1044,136 +1047,6 @@ export function ConversationView({
       mentalCount > 0 ? `${t("mentalProcess")} ${mentalCount}` : "",
     ].filter(Boolean);
     return parts.length > 0 ? parts.join(" · ") : `${t("toolProcess")} ${operations.length}`;
-  }
-
-  function operationCollectionTone(operations: AgentMessageOperation[]) {
-    if (operations.some((operation) => isLongLoopProgressOperation(operation) && operationStatusTone(operation) === "running")) {
-      return "running";
-    }
-    if (operations.some((operation) => operationStatusTone(operation) === "failed")) {
-      return "failed";
-    }
-    if (operations.some((operation) => operationStatusTone(operation) === "running")) {
-      return "running";
-    }
-    if (operations.length > 0 && operations.every((operation) => operationStatusTone(operation) === "done")) {
-      return "done";
-    }
-    return "pending";
-  }
-
-  function reActGroupTone(group: AgentMessageReActOperationGroup) {
-    return operationCollectionTone(group.operations);
-  }
-
-  function operationStateLabel(tone: string) {
-    const stateLabel = tone === "running"
-      ? lang === "zh" ? "执行中" : "Running"
-      : tone === "failed"
-        ? lang === "zh" ? "执行失败" : "Failed"
-        : tone === "done"
-          ? lang === "zh" ? "已完成" : "Done"
-          : lang === "zh" ? "待处理" : "Pending";
-    return stateLabel;
-  }
-
-  function compactRequestStateLabel(tone: string) {
-    if (tone === "running") {
-      return lang === "zh" ? "正在请求" : "Requesting";
-    }
-    if (tone === "failed") {
-      return lang === "zh" ? "请求失败" : "Request failed";
-    }
-    if (tone === "done") {
-      return lang === "zh" ? "已完成" : "Done";
-    }
-    return lang === "zh" ? "等待请求" : "Pending request";
-  }
-
-  function isCompactAnswerOnlyRequestProcess(operations: AgentMessageOperation[]) {
-    return operations.length > 0 && operations.every((operation) => !shouldShowTimelineOperation(operation));
-  }
-
-  function hasModelThinkingProcess(operations: AgentMessageOperation[]) {
-    return operations.some((operation) => operationMatchesAny(operation, [
-      "model_thinking",
-      "正在思考",
-      "reasoning",
-      "model thinking",
-    ]));
-  }
-
-  function compactInternalProcessStateLabel(tone: string, operations: AgentMessageOperation[]) {
-    if (tone === "running" && hasModelThinkingProcess(operations)) {
-      return lang === "zh" ? "正在思考中" : "Thinking";
-    }
-    return compactRequestStateLabel(tone);
-  }
-
-  function processSummaryTitle(tone: string, operations: AgentMessageOperation[]) {
-    if (isCompactAnswerOnlyRequestProcess(operations)) {
-      return compactInternalProcessStateLabel(tone, operations);
-    }
-    if (tone === "running") {
-      return lang === "zh" ? "生成中" : "Generating";
-    }
-    if (tone === "failed") {
-      return lang === "zh" ? "过程失败" : "Process failed";
-    }
-    if (tone === "done") {
-      return lang === "zh" ? "过程" : "Process";
-    }
-    return lang === "zh" ? "过程待处理" : "Process pending";
-  }
-
-  function processSummaryMeta(operations: AgentMessageOperation[]) {
-    if (isCompactAnswerOnlyRequestProcess(operations)) {
-      return "";
-    }
-    const thoughtCount = operations.filter((operation) => operation.kind === "thought").length;
-    const toolCount = operations.filter((operation) => operation.kind === "tool").length;
-    const mentalCount = operations.filter((operation) => operation.kind === "mental").length;
-    const visibleStatusCount = compactVisibleTimelineOperations(
-      operations.filter((operation) => operation.kind === "status" && shouldShowTimelineOperation(operation)),
-    ).length;
-    const parts = [
-      thoughtCount > 0 ? `${t("thoughtProcess")} ${thoughtCount}` : "",
-      toolCount > 0 ? `${t("toolProcess")} ${toolCount}` : "",
-      mentalCount > 0 ? `${t("mentalProcess")} ${mentalCount}` : "",
-      visibleStatusCount > 0 ? `${lang === "zh" ? "状态" : "Status"} ${visibleStatusCount}` : "",
-    ].filter(Boolean);
-    return parts.length > 0 ? parts.join(" · ") : compactInternalProcessStateLabel(operationCollectionTone(operations), operations);
-  }
-
-  function processSummaryPreview(operations: AgentMessageOperation[]) {
-    const tone = operationCollectionTone(operations);
-    const running = [...operations]
-      .reverse()
-      .find((operation) => isRunningOperationStatus(operation.status) && shouldShowTimelineOperation(operation));
-    const failed = operations.find((operation) => operationStatusTone(operation) === "failed");
-    if (tone !== "running" && tone !== "failed") {
-      return "";
-    }
-    const readable = tone === "failed"
-      ? operations.find((operation) => shouldShowTimelineOperation(operation) && operation.summary.trim())
-      : undefined;
-    const fallback = tone === "failed"
-      ? operations.find((operation) => operation.summary.trim() || operation.error?.trim())
-      : undefined;
-    const preview = tone === "running"
-      ? running?.summary.trim()
-        || running?.resultPreview?.trim()
-        || (running ? operationLabel(running).trim() : "")
-      : failed?.summary.trim()
-        || failed?.error?.trim()
-        || readable?.summary.trim()
-        || fallback?.error?.trim()
-        || fallback?.summary.trim()
-        || "";
-    if (running && isLongLoopProgressOperation(running) && preview.trim()) {
-      return compactPreview(`${operationLabel(running)} · ${preview}`, 120);
-    }
-    return compactPreview(preview || "", 120);
   }
 
   function isStreamingStatusPlaceholderContent(content: string) {
@@ -1210,87 +1083,6 @@ export function ConversationView({
       return <CheckCircle2 size={14} />;
     }
     return <CircleDot size={14} />;
-  }
-
-  function operationMatchesAny(operation: AgentMessageOperation, markers: string[]) {
-    const haystack = [
-      operation.rawLabel,
-      operation.label,
-      operation.summary,
-      operation.resultPreview,
-    ].map((item) => String(item ?? "").trim().toLowerCase()).join(" ");
-    return markers.some((marker) => haystack.includes(marker));
-  }
-
-  function isInternalPipelineOperation(operation: AgentMessageOperation) {
-    if (operation.kind !== "status") {
-      return false;
-    }
-    return operationMatchesAny(operation, [
-      "context_prepare",
-      "agent_prepare",
-      "model_request",
-      "prepare context",
-      "bind agent",
-      "request model",
-      "准备上下文",
-      "准备对话上下文",
-      "读取当前会话",
-      "绑定 agent",
-      "唤起对话 agent",
-      "请求模型",
-      "llm 调用",
-      "首个响应片段等待中",
-    ]);
-  }
-
-  function isLongLoopProgressOperation(operation: AgentMessageOperation) {
-    if (operation.kind !== "status") {
-      return false;
-    }
-    return operationMatchesAny(operation, [
-      "long_loop_progress",
-      "工具循环",
-      "尚未形成最终回答",
-    ]);
-  }
-
-  function shouldShowTimelineOperation(operation: AgentMessageOperation) {
-    if (operation.kind === "status") {
-      return isLongLoopProgressOperation(operation) || Boolean(operation.error?.trim());
-    }
-    return !isInternalPipelineOperation(operation) || Boolean(operation.error?.trim());
-  }
-
-  function visibleTimelineOperationDedupeKey(operation: AgentMessageOperation) {
-    if (operation.kind !== "status" || !isLongLoopProgressOperation(operation) || operation.error?.trim()) {
-      return "";
-    }
-    return [
-      operation.kind,
-      operation.rawLabel || operation.label,
-      operation.rawStatus || operation.status,
-    ].join(":");
-  }
-
-  function compactVisibleTimelineOperations(operations: AgentMessageOperation[]) {
-    const compacted: AgentMessageOperation[] = [];
-    const indexesByKey = new Map<string, number>();
-    for (const operation of operations) {
-      const key = visibleTimelineOperationDedupeKey(operation);
-      if (!key) {
-        compacted.push(operation);
-        continue;
-      }
-      const existingIndex = indexesByKey.get(key);
-      if (existingIndex === undefined) {
-        indexesByKey.set(key, compacted.length);
-        compacted.push(operation);
-        continue;
-      }
-      compacted[existingIndex] = operation;
-    }
-    return compacted;
   }
 
   function reActGroupDurationLabel(group: AgentMessageReActOperationGroup) {
@@ -1901,7 +1693,7 @@ export function ConversationView({
     const expanded = getExpansionState(messageId, sectionId, defaultExpanded);
     const groupTitle = group.title || operationLabel(group.operations[0]);
     const headerItems = [
-      operationStateLabel(tone),
+      operationStateLabel(tone, operationStateLabels),
       reActGroupDurationLabel(group),
     ].filter(Boolean);
     return (
@@ -1935,7 +1727,7 @@ export function ConversationView({
 
   function renderCompactRequestSummary(operations: AgentMessageOperation[]) {
     const tone = operationCollectionTone(operations);
-    const title = compactInternalProcessStateLabel(tone, operations);
+    const title = compactInternalProcessStateLabel(tone, operations, operationStateLabels);
     return (
       <section className={`${styles.operationGroup} ${styles.executionTraceGroup}`}>
         <div
@@ -2022,8 +1814,8 @@ export function ConversationView({
     const title = operationTimelineTitle(visibleOperations);
     const collectionTone = operationCollectionTone(operations);
     const stateLabel = operations.length > visibleOperations.length && collectionTone === "running"
-      ? compactInternalProcessStateLabel(collectionTone, operations)
-      : operationStateLabel(operationCollectionTone(visibleOperations));
+      ? compactInternalProcessStateLabel(collectionTone, operations, operationStateLabels)
+      : operationStateLabel(operationCollectionTone(visibleOperations), operationStateLabels);
     return (
       <section
         className={`${styles.operationGroup} ${styles.executionTraceGroup}`}
@@ -2069,9 +1861,9 @@ export function ConversationView({
     const tone = operationCollectionTone(operations);
     const toneStyle = styles[`answerOnlyProcessGroup_${tone}` as keyof typeof styles] ?? "";
     const expanded = getExpansionState(messageId, "process", defaultExpanded);
-    const preview = inlinePreview || processSummaryPreview(operations);
-    const title = processSummaryTitle(tone, operations);
-    const meta = processSummaryMeta(operations);
+    const preview = inlinePreview || processSummaryPreview(operations, operationStateLabels, compactPreview);
+    const title = processSummaryTitle(tone, operations, operationStateLabels);
+    const meta = processSummaryMeta(operations, operationStateLabels);
     const hasExpandableDetails = operations.some(shouldShowTimelineOperation);
     const summaryContent = (
       <>
