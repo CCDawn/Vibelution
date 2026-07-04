@@ -5391,6 +5391,82 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_launcher_restart_guard_ignores_stale_source_collection_local_snapshot(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($functionName in @(
+    "Get-ObjectPropertyValue",
+    "Test-LauncherWorkRunStatusBlocksLifecycle",
+    "Get-LauncherLocalActiveWorkRunCount",
+    "Get-LauncherStatusActiveWorkCount",
+    "Get-LauncherRestartActiveWorkProbeUrls",
+    "Test-LauncherRestartActiveWorkBlocked"
+)) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$script:url = "http://127.0.0.1:8000"
+$script:launcherControlUrl = "http://127.0.0.1:8765"
+$script:projectDir = Join-Path ([System.IO.Path]::GetTempPath()) ("vibelution-launcher-stale-source-work-" + [guid]::NewGuid().ToString("N"))
+$kindDir = Join-Path $script:projectDir ".runtime\\runtime-manager\\work_runs\\source_collection_run"
+$runDir = Join-Path $kindDir "runs"
+New-Item -ItemType Directory -Path $runDir -Force | Out-Null
+'{"version":1,"activeRunId":"dprun-stale-source","latestRunId":"dprun-stale-source","updatedAt":"2026-07-02T13:08:46Z"}' |
+    Set-Content -LiteralPath (Join-Path $kindDir "index.json") -Encoding utf8
+'{"runId":"dprun-stale-source","runKind":"source_collection_run","status":"running","currentPhase":"searching","startedAt":"2026-07-02T13:08:46Z","updatedAt":"2026-07-02T21:08:46Z"}' |
+    Set-Content -LiteralPath (Join-Path $runDir "dprun-stale-source.json") -Encoding utf8
+$script:notes = @()
+$script:events = @()
+function Test-WebHealthy { return $true }
+function Test-LauncherControlHealthy { return $true }
+function Write-Note { param([string]$Message) $script:notes += $Message }
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+    $script:events += ,@{ event = $Event; message = $Message; level = $Level; fields = $Fields }
+}
+function Invoke-WebRequest {
+    param([string]$Uri, [int]$TimeoutSec, [switch]$UseBasicParsing)
+    throw "status timeout"
+}
+
+$blocked = Test-LauncherRestartActiveWorkBlocked
+if ($blocked) { throw "stale source_collection_run local snapshot should not block restart when launcher status probes fail." }
+if ($script:notes.Count -ne 0) { throw "stale source_collection_run should not show active-work block note." }
+if ($script:events[0].event -ne "launcher.restart.active_work_probe_failed_local_clear") { throw "local clear event was not logged." }
+if ($script:events[0].fields.error -notmatch "status timeout") { throw "probe failure error was not logged." }
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
 def test_launcher_backend_candidates_include_tracked_launch_and_listener_pids(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
