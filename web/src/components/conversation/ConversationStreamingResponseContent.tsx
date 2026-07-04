@@ -1,6 +1,7 @@
 import React, { ReactNode, useMemo } from "react";
 
 import type { MarkdownBlock } from "./conversationMarkdownBlocks";
+import styles from "./ConversationStreamingResponseContent.styles";
 import { projectStreamingMarkdownBlocks } from "./streamingMarkdown";
 
 export type ConversationStreamingResponseContentClassNames = {
@@ -11,13 +12,13 @@ export type ConversationStreamingResponseContentClassNames = {
 
 type ConversationStreamingResponseContentProps = {
   content: string;
-  classNames: ConversationStreamingResponseContentClassNames;
+  classNames?: ConversationStreamingResponseContentClassNames;
   renderBlock: (block: MarkdownBlock, index: number) => ReactNode;
 };
 
 export function ConversationStreamingResponseContent({
   content,
-  classNames,
+  classNames = styles,
   renderBlock,
 }: ConversationStreamingResponseContentProps) {
   const visibleText = String(content ?? "");

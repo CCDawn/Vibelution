@@ -2,15 +2,16 @@ import { MessageSquarePlus } from "lucide-react";
 import React from "react";
 
 import type { TurnAvatarContent } from "./conversationTurnAvatar";
+import styles from "./ConversationTurnAvatarContent.styles";
 
 type ConversationTurnAvatarContentProps = {
   content: TurnAvatarContent;
-  imageClassName: string;
+  imageClassName?: string;
 };
 
 export function ConversationTurnAvatarContent({
   content,
-  imageClassName,
+  imageClassName = styles.turnAvatarImage,
 }: ConversationTurnAvatarContentProps) {
   if ("icon" in content) {
     return <MessageSquarePlus size={17} />;
