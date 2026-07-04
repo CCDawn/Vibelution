@@ -2599,8 +2599,19 @@ function Get-LauncherLocalActiveWorkRunCount {
         return 0
     }
 
+    $lifecycleBlockingKinds = @(
+        "chat_room_round",
+        "chat_turn",
+        "self_evolution_run",
+        "supervised_evolution_run",
+        "supervised_worktree_evolution_run"
+    )
     $count = 0
     foreach ($indexPath in @(Get-ChildItem -LiteralPath $workRunsDir -Recurse -Filter "index.json" -ErrorAction SilentlyContinue)) {
+        $runKind = [string](Split-Path -Leaf (Split-Path -Parent $indexPath.FullName))
+        if ($runKind -notin $lifecycleBlockingKinds) {
+            continue
+        }
         try {
             $indexPayload = Get-Content -LiteralPath $indexPath.FullName -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         } catch {
