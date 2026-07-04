@@ -2,15 +2,9 @@ import { Download } from "lucide-react";
 import React from "react";
 
 import type { ImageArtifactMessage } from "./conversationMessagePredicates";
+import type { ConversationImagePreviewRequest } from "./ConversationImagePreviewDialog";
 import { VButton } from "../vui";
 import styles from "./ConversationView.styles";
-
-export type ConversationImagePreviewRequest = {
-  src: string;
-  alt: string;
-  downloadUrl: string;
-  downloadName: string | true;
-};
 
 type ConversationImageArtifactViewProps = {
   artifact: ImageArtifactMessage;
