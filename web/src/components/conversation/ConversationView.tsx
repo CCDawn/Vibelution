@@ -37,6 +37,7 @@ import {
   ConversationImagePreviewDialog,
   type ConversationImagePreviewRequest,
 } from "./ConversationImagePreviewDialog";
+import { ConversationStreamingResponseContent } from "./ConversationStreamingResponseContent";
 import { AgentMessageTurnView } from "./AgentMessageTurnView";
 import { AgentResponseSectionView } from "./AgentResponseSectionView";
 import { AgentUserContentSectionView } from "./AgentUserContentSectionView";
@@ -78,7 +79,6 @@ import {
 } from "./agentMessageSections";
 import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
 import { parseConversationMarkdownBlocks, type MarkdownBlock } from "./conversationMarkdownBlocks";
-import { projectStreamingMarkdownBlocks } from "./streamingMarkdown";
 import { safeConversationMarkdownUrl } from "./conversationMarkdownUrl";
 import {
   addComparableConversationImageUrl,
@@ -144,35 +144,6 @@ const EMPTY_SECTION_EXPANSION: Record<string, boolean> = {};
 
 type OperationDetailKind = "thought" | "status" | "tool";
 type OperationDetailRow = { label: string; value: string };
-
-function StreamingResponseContent({
-  content,
-  renderBlock,
-}: {
-  content: string;
-  renderBlock: (block: MarkdownBlock, index: number) => ReactNode;
-}) {
-  const targetContent = String(content ?? "");
-  const visibleText = targetContent;
-  const markdownProjection = useMemo(() => projectStreamingMarkdownBlocks(visibleText), [visibleText]);
-  const blocks = markdownProjection.blocks;
-  const hasTable = blocks.some((block) => block.type === "table");
-
-  if (!visibleText || blocks.length === 0) {
-    return null;
-  }
-  return (
-    <div
-      className={[
-        styles.markdownBody,
-        styles.streamingResponseText,
-        hasTable ? styles.markdownBodyWithTable : "",
-      ].filter(Boolean).join(" ")}
-    >
-      {blocks.map((block, index) => renderBlock(block, index))}
-    </div>
-  );
-}
 
 function operationDetailsKind(operation: AgentMessageOperation): OperationDetailKind {
   if (operation.kind === "thought") {
@@ -2574,7 +2545,17 @@ export function ConversationView({
     if (!content) {
       return null;
     }
-    return <StreamingResponseContent content={content} renderBlock={renderMarkdownBlock} />;
+    return (
+      <ConversationStreamingResponseContent
+        content={content}
+        classNames={{
+          markdownBody: styles.markdownBody,
+          streamingResponseText: styles.streamingResponseText,
+          markdownBodyWithTable: styles.markdownBodyWithTable,
+        }}
+        renderBlock={renderMarkdownBlock}
+      />
+    );
   }
 
   function renderMarkdownBlock(block: MarkdownBlock, index: number, duplicateImageUrls?: Set<string>) {
