@@ -7,8 +7,11 @@ import agentManagementNavSource from "./AgentManagementNav.tsx?raw";
 import agentWorkspaceCacheSource from "./agentWorkspaceCache.ts?raw";
 import styles from "./AgentsRoute.styles";
 import stylesSource from "./AgentsRoute.styles.ts?raw";
+import archiveZoneStyles from "./AgentArchiveZonePanel.styles";
+import debugResetStyles from "./AgentDebugResetPanel.styles";
 import emptySelectionStyles from "./AgentEmptySelectionPanel.styles";
 import activityHistoryStyles from "./AgentActivityHistoryPanel.styles";
+import healthMaintenanceStyles from "./AgentHealthMaintenancePanel.styles";
 import managementBriefStyles from "./AgentManagementBriefPanel.styles";
 import memoryPolicyStyles from "./AgentMemoryPolicyPanel.styles";
 import modeMembershipStyles from "./AgentModeMembershipPanel.styles";
@@ -493,6 +496,9 @@ describe("AgentsRoute layout contract", () => {
     expect(archiveZonePanelSource).toContain("onPress={onArchive}");
     expect(archiveZonePanelSource).toContain("onPress={onPurge}");
     expect(archiveZonePanelSource).toContain('variant="danger"');
+    expect(archiveZonePanelSource).toContain('from "./AgentArchiveZonePanel.styles"');
+    expect(archiveZonePanelSource).not.toContain("AgentsRoute.styles");
+    expect(archiveZoneStyles.dangerZone).toBeTruthy();
     expect(routeSource).toContain("已彻底删除归档 Agent");
     expect(routeSource).not.toContain("const canPurgeAgent = Boolean(selectedAgent?.agentId && !selectedAgentProtected)");
   });
@@ -690,7 +696,13 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("issueNextStep(selectedAgent.health, lang)");
     expect(configPrimaryPanePanelSource).toContain("<AgentHealthMaintenancePanel");
     expect(healthMaintenancePanelSource).toContain("styles.issueList");
+    expect(healthMaintenancePanelSource).toContain("function issueItemToneClass");
+    expect(healthMaintenancePanelSource).toContain("issueItemToneClass(issue.severity)");
     expect(healthMaintenancePanelSource).toContain("issue.showInboxAction");
+    expect(healthMaintenancePanelSource).toContain('from "./AgentHealthMaintenancePanel.styles"');
+    expect(healthMaintenancePanelSource).not.toContain("AgentsRoute.styles");
+    expect(healthMaintenanceStyles.issueList).toBeTruthy();
+    expect(healthMaintenanceStyles.issueItem_warning).toBeTruthy();
     expect(styles.healthCell).toBeTruthy();
     expect(styles.detailHealthStatus).toBeTruthy();
   });
@@ -1160,7 +1172,7 @@ describe("AgentsRoute layout contract", () => {
     expect(configPrimaryPanePanelSource).toContain("<AgentArchiveZonePanel");
     expect(archiveZonePanelSource).toContain("styles.dangerZone");
     expect(archiveZonePanelSource).toContain('variant="danger"');
-    expect(styles.maintenanceIntro).toBeTruthy();
+    expect(healthMaintenanceStyles.maintenanceIntro).toBeTruthy();
   });
 
   it("optimistically removes single-Agent archive and purge actions before backend confirmation", () => {
@@ -1208,14 +1220,16 @@ describe("AgentsRoute layout contract", () => {
     expect(debugResetPanelSource).toContain("resetRuntimePolicy");
     expect(debugResetPanelSource).toContain("resetRuntimePolicyHint");
     expect(debugResetPanelSource).toContain("styles.resetOptionField");
+    expect(debugResetPanelSource).toContain('from "./AgentDebugResetPanel.styles"');
+    expect(debugResetPanelSource).not.toContain("AgentsRoute.styles");
     expect(routeSource).toContain("queryKeys.agentRuntimeEvidence(agent.agentId)");
     expect(routeSource).toContain("selectedAgent.status !== \"archived\"");
     expect(debugResetPanelSource).toContain("isDisabled={!canReset || pending}");
     expect(debugResetPanelSource).toContain("pending ? copy.resettingAgent : copy.resetAgent");
     expect(routeSource).not.toContain("!canResetAgent || resetAgentMutation.isPending");
-    expect(styles.resetZone).toBeTruthy();
-    expect(styles.resetOptionGrid).toBeTruthy();
-    expect(styles.resetOptionField).toBeTruthy();
+    expect(debugResetStyles.resetZone).toBeTruthy();
+    expect(debugResetStyles.resetOptionGrid).toBeTruthy();
+    expect(debugResetStyles.resetOptionField).toBeTruthy();
   });
 
   it("reconciles stale direct-session caches after resetting an Agent session", () => {
@@ -1256,7 +1270,7 @@ describe("AgentsRoute layout contract", () => {
     expect(archiveZonePanelSource).toContain("isProtected ? styles.protectedZone : styles.dangerZone");
     expect(archiveZonePanelSource).toContain("isProtected ? <ShieldCheck");
     expect(routeSource).toContain("summary?.archivedAgentCount");
-    expect(styles.protectedZone).toBeTruthy();
+    expect(archiveZoneStyles.protectedZone).toBeTruthy();
   });
 
   it("keeps the desktop workspace as three scan-friendly columns", () => {
