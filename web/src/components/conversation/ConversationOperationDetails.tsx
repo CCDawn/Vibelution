@@ -1,6 +1,7 @@
 import React, { useDeferredValue } from "react";
 
 import type { AgentMessageOperation } from "./agentMessageOperations";
+import styles from "./ConversationOperationDetails.styles";
 
 export type OperationDetailKind = "thought" | "status" | "tool";
 export type OperationDetailRow = { label: string; value: string };
@@ -28,7 +29,7 @@ type DeferredOperationDetailsProps = {
   detailsId: string;
   kind: OperationDetailKind;
   buildDetailRows: (operation: AgentMessageOperation) => OperationDetailRow[];
-  classNames: ConversationOperationDetailsClassNames;
+  classNames?: ConversationOperationDetailsClassNames;
   className?: string;
 };
 
@@ -186,7 +187,7 @@ export function DeferredOperationDetails({
   detailsId,
   kind,
   buildDetailRows,
-  classNames,
+  classNames = styles,
   className,
 }: DeferredOperationDetailsProps) {
   const deferredExpanded = useDeferredValue(expanded);

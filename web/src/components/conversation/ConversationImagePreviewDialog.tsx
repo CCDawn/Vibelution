@@ -2,7 +2,7 @@ import { Download, X } from "lucide-react";
 import React from "react";
 
 import { VButton } from "../vui";
-import styles from "./ConversationView.styles";
+import styles from "./ConversationImagePreviewDialog.styles";
 
 export type ConversationImagePreviewRequest = {
   src: string;

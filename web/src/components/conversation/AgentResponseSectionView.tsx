@@ -2,7 +2,7 @@ import { ChevronDown, ChevronRight, LoaderCircle } from "lucide-react";
 import React, { ReactNode } from "react";
 
 import { VButton } from "../vui";
-import styles from "./ConversationView.styles";
+import styles from "./AgentResponseSectionView.styles";
 
 type AgentResponseSectionViewProps = {
   answerKey: string;

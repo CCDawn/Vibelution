@@ -180,13 +180,6 @@ const RESPONSE_PARSE_CACHE_LIMIT = 80;
 const MARKDOWN_PARSE_CACHE_LIMIT = 160;
 const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
 const EMPTY_SECTION_EXPANSION: Record<string, boolean> = {};
-const OPERATION_DETAILS_CLASS_NAMES = {
-  operationDetails: styles.operationDetails,
-  operationDetailsThought: styles.operationDetails_thought,
-  operationDetailRow: styles.operationDetailRow,
-  operationDetailLabel: styles.operationDetailLabel,
-  operationDetailValue: styles.operationDetailValue,
-};
 
 type ConversationTurnRowProps = {
   message: ConversationMessage;
@@ -1231,7 +1224,6 @@ export function ConversationView({
                   expanded={detailsExpanded}
                   detailsId={detailsId}
                   kind={operationDetailsKind(operation)}
-                  classNames={OPERATION_DETAILS_CLASS_NAMES}
                   buildDetailRows={(detailOperation) => buildOperationDetailRows(detailOperation, operationDetailLabels)}
                 />
               ) : null}
@@ -1446,7 +1438,6 @@ export function ConversationView({
             expanded={detailsExpanded}
             detailsId={detailsId}
             kind={operationDetailsKind(operation)}
-            classNames={OPERATION_DETAILS_CLASS_NAMES}
             buildDetailRows={(detailOperation) => buildOperationDetailRows(detailOperation, operationDetailLabels)}
           />
         ) : null}
@@ -1502,7 +1493,6 @@ export function ConversationView({
                     expanded={detailsExpanded}
                     detailsId={detailsId}
                     kind="tool"
-                    classNames={OPERATION_DETAILS_CLASS_NAMES}
                     buildDetailRows={(detailOperation) => buildOperationDetailRows(detailOperation, operationDetailLabels)}
                   />
                 ) : null}
@@ -1988,11 +1978,6 @@ export function ConversationView({
     return (
       <ConversationStreamingResponseContent
         content={content}
-        classNames={{
-          markdownBody: styles.markdownBody,
-          streamingResponseText: styles.streamingResponseText,
-          markdownBodyWithTable: styles.markdownBodyWithTable,
-        }}
         renderBlock={renderMarkdownBlock}
       />
     );
@@ -2125,11 +2110,7 @@ export function ConversationView({
   }
 
   function renderInlineContent(content: string) {
-    return renderConversationInlineMarkdown(content, {
-      inlineCode: styles.inlineCode,
-      inlineLink: styles.inlineLink,
-      inlineStrong: styles.inlineStrong,
-    });
+    return renderConversationInlineMarkdown(content);
   }
 
   function isNonNullNode<T>(node: T | null): node is T {
@@ -2487,7 +2468,6 @@ export function ConversationView({
                           agentInboxMessage,
                           groupTranscriptMessage,
                         })}
-                        imageClassName={styles.turnAvatarImage}
                       />
                     )
                 }

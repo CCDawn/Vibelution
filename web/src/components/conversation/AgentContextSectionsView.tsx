@@ -6,7 +6,7 @@ import type {
   AgentReferencePart,
 } from "../../agent-thread/types";
 import type { AgentMessageContextSection } from "./agentMessageSections";
-import styles from "./ConversationView.styles";
+import styles from "./AgentContextSectionsView.styles";
 
 type AgentContextSectionsViewProps = {
   sections: AgentMessageContextSection[];

@@ -5,6 +5,7 @@ import {
   isLikelyConversationImageUrl,
 } from "./conversationImagePreview";
 import { safeConversationMarkdownUrl } from "./conversationMarkdownUrl";
+import styles from "./conversationInlineMarkdown.styles";
 
 export type ConversationInlineMarkdownClassNames = {
   inlineCode: string;
@@ -14,7 +15,7 @@ export type ConversationInlineMarkdownClassNames = {
 
 export function renderConversationInlineMarkdown(
   content: string,
-  classNames: ConversationInlineMarkdownClassNames,
+  classNames: ConversationInlineMarkdownClassNames = styles,
   partIndex: number | string = "inline",
 ): ReactNode {
   const nodes: ReactNode[] = [];
