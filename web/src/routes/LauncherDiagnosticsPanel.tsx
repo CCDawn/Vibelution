@@ -1,7 +1,7 @@
 import { LoaderCircle, RefreshCw } from "lucide-react";
 
 import { VButton } from "../components/vui";
-import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
+import styles from "./LauncherDiagnosticsPanel.styles";
 
 export type LauncherDiagnosticsSpecItem = {
   label: string;
