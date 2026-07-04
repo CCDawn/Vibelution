@@ -222,6 +222,11 @@ def test_tool_registry_lists_unified_memory_search_tool_as_agent_facing(tmp_path
     assert "unified_search" in unified_tool["capabilityTags"]
     assert "rag_retrieval" in unified_tool["capabilityTags"]
     assert unified_tool["permissionPolicy"]["requiresExplicitAllow"] is _is_explicitly_allowed_tool("unified_memory_search_tool")
+    properties = unified_tool["argsSchema"]["properties"]
+    assert "include_user_content" in properties
+    assert properties["include_user_content"]["default"] is False
+    assert "user_content_space_ids" in properties
+    assert properties["user_content_space_ids"]["default"] == ""
 
 
 def test_tool_registry_marks_web_search_not_llm_visible_when_autoglm_unavailable(tmp_path, monkeypatch):

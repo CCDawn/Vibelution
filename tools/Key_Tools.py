@@ -1905,6 +1905,8 @@ def create_key_tools() -> List[BaseTool]:
         tags: str = "",
         limit: int = 8,
         max_context_chars: int = 1200,
+        include_user_content: bool = False,
+        user_content_space_ids: str = "",
     ) -> str:
         """
         【统一记忆搜索】只读检索已审核 Team/Agent 正式知识与记忆库内容。
@@ -1922,6 +1924,8 @@ def create_key_tools() -> List[BaseTool]:
             tags: 逗号分隔标签过滤
             limit: 最多返回结果数，范围 1-25
             max_context_chars: rag 模式单条上下文最大字符数
+            include_user_content: 是否额外包含导入的用户 Markdown Space 页面作为只读结果
+            user_content_space_ids: include_user_content=true 时可选，逗号分隔的用户 Markdown Space id 过滤
 
         Returns:
             JSON 格式的统一记忆搜索结果
@@ -1935,6 +1939,8 @@ def create_key_tools() -> List[BaseTool]:
             tags=tags,
             limit=limit,
             max_context_chars=max_context_chars,
+            include_user_content=include_user_content,
+            user_content_space_ids=user_content_space_ids,
         )
 
     @tool

@@ -494,6 +494,20 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "capabilityTags": ["agent_memory", "team_knowledge", "unified_search", "rag_retrieval", "citations", "read_only"],
         "riskTags": ["team_knowledge_access", "prompt_context_candidate"],
         "permissionTier": HIGH_PERMISSION_TIER,
+        "argDescriptors": [
+            {
+                "name": "include_user_content",
+                "type": "boolean",
+                "required": False,
+                "description": "Include imported user Markdown Space pages as read-only reference results.",
+            },
+            {
+                "name": "user_content_space_ids",
+                "type": "string",
+                "required": False,
+                "description": "Comma-separated imported user Markdown Space ids to search when include_user_content is true.",
+            },
+        ],
     },
     "knowledge_proposal_tool": {
         "category": "memory_context",
@@ -903,6 +917,7 @@ def metadata_for_tool(tool_name: str, *, source: str = "built_in") -> dict[str, 
         "capabilityTags": list(metadata.get("capabilityTags") or []),
         "riskTags": list(metadata.get("riskTags") or []),
         "permissionTier": str(metadata.get("permissionTier") or MEDIUM_PERMISSION_TIER),
+        "argDescriptors": list(metadata.get("argDescriptors") or []),
     }
 
 

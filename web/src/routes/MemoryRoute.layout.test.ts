@@ -44,6 +44,10 @@ import styles from "./MemoryRoute.styles";
 import stylesModuleSource from "./MemoryRoute.styles.ts?raw";
 import knowledgeGovernancePanelSource from "./MemoryKnowledgeGovernancePanel.tsx?raw";
 import knowledgeDetailPanelSource from "./MemoryKnowledgeDetailPanel.tsx?raw";
+import userContentPanelSource from "./MemoryUserContentPanel.tsx?raw";
+import userContentPanelStyles from "./MemoryUserContentPanel.styles";
+import queryKeysSource from "../api/queryKeys.ts?raw";
+import apiTypesSource from "../api/types.ts?raw";
 
 const memoryCssSource = [
   stylesModuleSource,
@@ -90,6 +94,35 @@ describe("MemoryRoute layout contract", () => {
     expect(agentMemoryPanelSource).not.toContain("useQuery");
     expect(agentMemoryPanelSource).not.toContain("useMutation");
     expect(agentMemoryPanelSource).not.toContain("fetchJson");
+  });
+
+  it("wires user Markdown content through dedicated panel and query keys", () => {
+    const userMarkdownSpaceSummaryBlock = apiTypesSource.slice(
+      apiTypesSource.indexOf("export interface UserMarkdownSpaceSummary"),
+      apiTypesSource.indexOf("export interface UserMarkdownPageSummary"),
+    );
+
+    expect(routeSource).toContain("MemoryUserContentPanel");
+    expect(userContentPanelSource).toContain("/api/user-content/markdown-spaces/import-preview");
+    expect(userContentPanelSource).toContain("/api/user-content/markdown-spaces/import");
+    expect(userContentPanelSource).toContain("queryKeys.userMarkdownSpaces(userId)");
+    expect(userContentPanelSource).toContain("queryKeys.userMarkdownSpacePages(userId, selectedSpaceId, searchQuery, tagFilter)");
+    expect(userContentPanelSource).toContain("queryKeys.userMarkdownSpacePage(userId, selectedSpaceId, selectedPageId)");
+    expect(userContentPanelSource).toContain("queryKeys.userMarkdownSpaceSearch(userId, searchQuery, selectedSpaceId, 10)");
+    expect(queryKeysSource).toContain("userMarkdownSpaces");
+    expect(queryKeysSource).toContain("userMarkdownSpaces: (userId: string)");
+    expect(queryKeysSource).toContain("[\"user-content\", \"markdown-spaces\", userId]");
+    expect(userContentPanelSource).not.toContain("MemoryRoute.styles");
+    expect(apiTypesSource).toContain("counts?: UserMarkdownSpaceCounts;");
+    expect(apiTypesSource).toContain("sourceRef?: Record<string, unknown>;");
+    expect(userMarkdownSpaceSummaryBlock).toContain("userId: string;");
+    expect(userMarkdownSpaceSummaryBlock).toContain("pageCount: number;");
+    expect(userContentPanelSource).toContain("type NormalizedSpaceSummary =");
+    expect(userContentPanelSource).toContain("function normalizeSpaceSummary(space: UserMarkdownSpaceSummary): NormalizedSpaceSummary");
+    expect(userContentPanelSource).toContain("pageCount: rawPageCount || counts.pageCount");
+    expect(userContentPanelStyles.meta).toContain("overflow-wrap:anywhere");
+    expect(userContentPanelStyles.meta).toContain("break-all");
+    expect(userContentPanelStyles.code).toContain("whitespace-pre-wrap");
   });
 
   it("supports returning from Agent Center deep links", () => {
