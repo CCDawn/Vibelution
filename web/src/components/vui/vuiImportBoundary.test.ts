@@ -25,6 +25,7 @@ const productSharedParentStyleConsumers = [
   "components/conversation/AgentMessageTurnView.tsx",
   "components/conversation/AgentResponseSectionView.tsx",
   "components/conversation/AgentUserContentSectionView.tsx",
+  "components/conversation/conversationInlineMarkdown.tsx",
   "routes/AgentArchiveZonePanel.tsx",
   "routes/AgentAvatarEditorPanel.tsx",
   "routes/AgentBulkConfigPanel.tsx",
