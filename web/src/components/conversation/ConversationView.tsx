@@ -10,7 +10,6 @@ import {
   ImagePlus,
   Link2,
   LoaderCircle,
-  MessageSquarePlus,
   Pencil,
   Square,
   X,
@@ -38,6 +37,7 @@ import {
   type ConversationImagePreviewRequest,
 } from "./ConversationImagePreviewDialog";
 import { ConversationStreamingResponseContent } from "./ConversationStreamingResponseContent";
+import { ConversationTurnAvatarContent } from "./ConversationTurnAvatarContent";
 import {
   DeferredOperationDetails,
   operationDetailsKind,
@@ -126,7 +126,6 @@ import { shouldCompactConversationTurnHeader } from "./conversationTurnHeaderCom
 import {
   resolveMessageTurnAvatar,
   userAvatarSymbol,
-  type TurnAvatarContent,
   type TurnAvatarResolution,
 } from "./conversationTurnAvatar";
 import type { ConversationViewProps } from "./conversationViewTypes";
@@ -153,16 +152,6 @@ const OPERATION_DETAILS_CLASS_NAMES = {
   operationDetailLabel: styles.operationDetailLabel,
   operationDetailValue: styles.operationDetailValue,
 };
-
-function renderTurnAvatarContent(resolution: TurnAvatarContent) {
-  if ("icon" in resolution) {
-    return <MessageSquarePlus size={17} />;
-  }
-  if (resolution.imageUrl) {
-    return <img src={resolution.imageUrl} alt="" className={styles.turnAvatarImage} />;
-  }
-  return resolution.fallback;
-}
 
 type ConversationTurnRowProps = {
   message: ConversationMessage;
@@ -2998,17 +2987,20 @@ export function ConversationView({
                 avatar={
                   compactTurnHeader
                     ? null
-                    : renderTurnAvatarContent(
-                      resolveMessageTurnAvatar(message, {
-                        resolveTurnAvatar,
-                        assistantAvatarImageUrl,
-                        assistantAvatarFallback,
-                        assistantLabel,
-                        userAvatarImageUrl,
-                        userAvatarLabel,
-                        agentInboxMessage,
-                        groupTranscriptMessage,
-                      }),
+                    : (
+                      <ConversationTurnAvatarContent
+                        content={resolveMessageTurnAvatar(message, {
+                          resolveTurnAvatar,
+                          assistantAvatarImageUrl,
+                          assistantAvatarFallback,
+                          assistantLabel,
+                          userAvatarImageUrl,
+                          userAvatarLabel,
+                          agentInboxMessage,
+                          groupTranscriptMessage,
+                        })}
+                        imageClassName={styles.turnAvatarImage}
+                      />
                     )
                 }
                 speakerLabel={speakerLabel}
