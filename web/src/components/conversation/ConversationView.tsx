@@ -20,11 +20,9 @@ import {
 } from "lucide-react";
 import React, { DragEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import {
-  ConversationMessage,
-  MentalStateSnapshot,
-} from "../../api/types";
+import type { ConversationMessage } from "../../api/types";
 import type {
+  AgentMentalSnapshot,
   AgentMessage,
   AgentMentalPart,
 } from "../../agent-thread/types";
@@ -45,6 +43,14 @@ import {
   readableOperationResult,
   type OperationDetailLabels,
 } from "./ConversationOperationDetails";
+import {
+  buildMentalBodyRows,
+  buildMentalMetaRows,
+  latestAgentMentalPart,
+  mentalSnapshotPreview,
+  type MentalStateFormatters,
+  type MentalStateLabels,
+} from "./conversationMentalState";
 import { AgentMessageTurnView } from "./AgentMessageTurnView";
 import { AgentResponseSectionView } from "./AgentResponseSectionView";
 import { AgentUserContentSectionView } from "./AgentUserContentSectionView";
@@ -82,7 +88,6 @@ import {
   researchOrgMessageChips,
 } from "./conversationMessagePredicates";
 import {
-  type AgentMessageProcessSection,
   type AgentMessageSectionState,
 } from "./agentMessageSections";
 import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
@@ -843,7 +848,7 @@ export function ConversationView({
     }
   }
 
-  function cognitiveStateLabel(snapshot: MentalStateSnapshot | undefined) {
+  function cognitiveStateLabel(snapshot: AgentMentalSnapshot | undefined) {
     const value = String(snapshot?.cognitiveState ?? "").trim().toLowerCase() || "unknown";
     const keyMap = {
       unknown: "mentalCognitiveState_unknown",
@@ -2121,43 +2126,6 @@ export function ConversationView({
       || operations.some((operation) => operation.kind === "tool" && (operation.rawLabel ?? operation.label) === COMPUTER_USE_TOOL_NAME);
   }
 
-  function mentalSnapshotPreview(snapshot: MentalStateSnapshot | undefined) {
-    if (!snapshot) {
-      return "";
-    }
-    return compactPreview(
-      [
-        snapshot.feeling,
-        snapshot.summary,
-        snapshot.whisper,
-        snapshot.intervention,
-        snapshot.cognitiveState ? cognitiveStateLabel(snapshot) : "",
-      ].map((item) => String(item ?? "").trim()).find(Boolean) ?? "",
-    );
-  }
-
-  function mentalFeelingSummaryRow(snapshot: MentalStateSnapshot | undefined) {
-    const feeling = String(snapshot?.feeling ?? "").trim();
-    const summary = String(snapshot?.summary ?? "").trim();
-    if (!feeling && !summary) {
-      return null;
-    }
-    if (!summary || feeling === summary) {
-      return { label: t("mentalFeeling"), value: feeling || summary };
-    }
-    if (!feeling) {
-      return { label: t("mentalSummary"), value: summary };
-    }
-    return { label: `${t("mentalFeeling")} / ${t("mentalSummary")}`, value: `${feeling}\n${summary}` };
-  }
-
-  function latestAgentMentalPart(sections: AgentMessageProcessSection[]) {
-    return sections
-      .flatMap((section) => section.parts)
-      .filter((part): part is AgentMentalPart => part.type === "mental")
-      .at(-1);
-  }
-
   function renderAgentMentalPanel(
     messageId: string,
     part: AgentMentalPart | undefined,
@@ -2170,21 +2138,28 @@ export function ConversationView({
     const snapshot = part.snapshot;
     const expanded = getExpansionState(messageId, "mental", defaultExpandedOverride ?? true);
     const toggleTitle = expanded ? t("mentalProcessVisible") : t("mentalProcessHidden");
-    const metaRows = [
-      snapshot.mood ? { label: t("mentalMood"), value: snapshot.mood } : null,
-      snapshot.cognitiveState ? { label: t("mentalCognitiveState"), value: cognitiveStateLabel(snapshot) } : null,
-      snapshot.source ? { label: t("mentalSource"), value: mentalSourceLabel(snapshot.source) } : null,
-      Number.isFinite(snapshot.confidence) && Number(snapshot.confidence) > 0
-        ? { label: t("mentalConfidence"), value: `${Math.round(Number(snapshot.confidence) * 100)}%` }
-        : null,
-      Number(snapshot.sampleSize) > 0 ? { label: t("mentalSamples"), value: String(snapshot.sampleSize) } : null,
-      snapshot.updatedAt ? { label: t("mentalLastUpdated"), value: formatTimestamp(snapshot.updatedAt) } : null,
-    ].filter(Boolean) as Array<{ label: string; value: string }>;
-    const bodyRows = [
-      mentalFeelingSummaryRow(snapshot),
-      snapshot.whisper ? { label: t("mentalWhisper"), value: snapshot.whisper } : null,
-      snapshot.intervention ? { label: t("mentalIntervention"), value: snapshot.intervention } : null,
-    ].filter(Boolean) as Array<{ label: string; value: string }>;
+    const mentalLabels: MentalStateLabels = {
+      feeling: t("mentalFeeling"),
+      summary: t("mentalSummary"),
+      feelingSummary: `${t("mentalFeeling")} / ${t("mentalSummary")}`,
+      mood: t("mentalMood"),
+      cognitiveState: t("mentalCognitiveState"),
+      source: t("mentalSource"),
+      confidence: t("mentalConfidence"),
+      samples: t("mentalSamples"),
+      lastUpdated: t("mentalLastUpdated"),
+      whisper: t("mentalWhisper"),
+      intervention: t("mentalIntervention"),
+    };
+    const mentalFormatters: MentalStateFormatters = {
+      compactPreview,
+      cognitiveStateLabel,
+      mentalSourceLabel,
+      formatTimestamp,
+    };
+    const metaRows = buildMentalMetaRows(snapshot, mentalLabels, mentalFormatters);
+    const bodyRows = buildMentalBodyRows(snapshot, mentalLabels);
+    const preview = mentalSnapshotPreview(snapshot, mentalFormatters);
     return (
       <section className={`${styles.auxiliaryBlock} ${styles.auxiliaryBlock_mental}`}>
         <VButton
@@ -2196,8 +2171,8 @@ export function ConversationView({
         >
           <BrainCircuit size={17} />
           <span>{t("mentalProcess")}</span>
-          {!expanded && mentalSnapshotPreview(snapshot) ? (
-            <span className={styles.operationSummaryPreview}>{mentalSnapshotPreview(snapshot)}</span>
+          {!expanded && preview ? (
+            <span className={styles.operationSummaryPreview}>{preview}</span>
           ) : null}
           {isRunning ? <LoaderCircle className={styles.statusSpinner} size={14} /> : null}
           {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
