@@ -57,8 +57,9 @@ import { AgentUserContentSectionView } from "./AgentUserContentSectionView";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
 import { buildAgentMessageRenderState, type AgentMessageRenderState } from "./agentMessageRenderState";
 import {
-  isInternalStreamingStatusContent,
-  messageHasInternalStreamingStatusContent,
+  compactStreamingStatusPlaceholder,
+  isNoFinalAnswerStatusContent,
+  isStreamingStatusPlaceholderContent,
 } from "./conversationInternalStatus";
 import {
   buildAgentMessageOperationGroups,
@@ -1054,29 +1055,6 @@ export function ConversationView({
       mentalCount > 0 ? `${t("mentalProcess")} ${mentalCount}` : "",
     ].filter(Boolean);
     return parts.length > 0 ? parts.join(" · ") : `${t("toolProcess")} ${operations.length}`;
-  }
-
-  function isStreamingStatusPlaceholderContent(content: string) {
-    return isInternalStreamingStatusContent(content);
-  }
-
-  function isNoFinalAnswerStatusContent(content: string) {
-    const normalized = String(content ?? "").replace(/\s+/g, " ").trim();
-    if (!normalized) {
-      return false;
-    }
-    const mentionsNoFinalAnswer =
-      normalized.startsWith("本轮还没有形成最终回答")
-      || normalized.startsWith("本轮尚未形成最终回答")
-      || normalized.startsWith("尚未形成最终回答");
-    return mentionsNoFinalAnswer && /继续|恢复|衔接|保留当前执行进度|工具循环/.test(normalized);
-  }
-
-  function compactStreamingStatusPlaceholder(content: string) {
-    if (isInternalStreamingStatusContent(content)) {
-      return "";
-    }
-    return compactPreview(String(content ?? "").replace(/\s+/g, " ").trim(), 92);
   }
 
   function processSummaryIcon(tone: string) {
@@ -2487,7 +2465,7 @@ export function ConversationView({
                 operationGroups.timeline,
                 processDefaultExpanded,
                 renderProcessDetails,
-                isStreamingStatusPlaceholder ? compactStreamingStatusPlaceholder(responseText) : undefined,
+                isStreamingStatusPlaceholder ? compactStreamingStatusPlaceholder(responseText, compactPreview) : undefined,
                 agentRenderState.processSectionIds,
               )
             ) : hasAgentMessageTimeline ? (
