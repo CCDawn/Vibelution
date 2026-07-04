@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import routeSource from "./LauncherRoute.tsx?raw";
+import startupSettingsPanelSource from "./LauncherStartupSettingsPanel.tsx?raw";
 import stylesSource from "./LauncherRoute.styles.ts?raw";
 import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
 import launcherApiSource from "../api/launcher.ts?raw";
@@ -23,13 +24,19 @@ const sourceSlice = (source: string, startMarker: string, endMarker: string): st
 describe("LauncherRoute layout contract", () => {
   it("routes launcher controls through VUI primitives", () => {
     expect(routeSource).toContain("from \"../components/vui\"");
+    expect(startupSettingsPanelSource).toContain("from \"../components/vui\"");
     expect(routeSource).toContain("<VButton");
-    expect(routeSource).toContain("<VNativeInput");
+    expect(startupSettingsPanelSource).toContain("<VButton");
+    expect(startupSettingsPanelSource).toContain("<VNativeInput");
     expect(routeSource).toContain("<VNativeSelect");
+    expect(startupSettingsPanelSource).toContain("<VNativeSelect");
     expect(routeSource).not.toMatch(/<button\b/);
-    expect(routeSource).not.toMatch(/<input\b/);
     expect(routeSource).not.toMatch(/<select\b/);
     expect(routeSource).not.toMatch(/<textarea\b/);
+    expect(startupSettingsPanelSource).not.toMatch(/<button\b/);
+    expect(startupSettingsPanelSource).not.toMatch(/<input\b/);
+    expect(startupSettingsPanelSource).not.toMatch(/<select\b/);
+    expect(startupSettingsPanelSource).not.toMatch(/<textarea\b/);
   });
 
   it("uses shell language state without loading the full app dictionary", () => {
@@ -128,12 +135,13 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("diagnosticsPanel");
     expect(routeSource).toContain("diagnosticsBody");
     expect(routeSource).toContain("diagnosticSection");
-    expect(routeSource).toContain("settingsStrip");
-    expect(routeSource).toContain("settingsHeader");
-    expect(routeSource).toContain("settingField");
-    expect(routeSource).toContain("settingToggle");
-    expect(routeSource).toContain("settingsSaveButton");
-    expect(routeSource).toContain("segmentedControl");
+    expect(routeSource).toContain("LauncherStartupSettingsPanel");
+    expect(startupSettingsPanelSource).toContain("settingsStrip");
+    expect(startupSettingsPanelSource).toContain("settingsHeader");
+    expect(startupSettingsPanelSource).toContain("settingField");
+    expect(startupSettingsPanelSource).toContain("settingToggle");
+    expect(startupSettingsPanelSource).toContain("settingsSaveButton");
+    expect(startupSettingsPanelSource).toContain("segmentedControl");
     expect(routeSource).toContain("DeveloperModePanel");
     expect(routeSource).toContain("developerPanel");
     expect(routeSource).toContain("cleanupPlan");
@@ -351,14 +359,14 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("<Power size={15} />");
     expect(routeSource).toContain("<RefreshCw size={15} />");
     expect(routeSource).toContain("<ExternalLink size={15} />");
-    expect(routeSource).toContain("<Maximize2 size={14} />");
-    expect(routeSource).toContain("<Minimize2 size={14} />");
+    expect(startupSettingsPanelSource).toContain("<Maximize2 size={14} />");
+    expect(startupSettingsPanelSource).toContain("<Minimize2 size={14} />");
     expect(routeSource).toContain('controlMutation.mutate("start")');
     expect(routeSource).toContain('controlMutation.mutate("stop")');
     expect(routeSource).toContain('controlMutation.mutate("force-stop")');
     expect(routeSource).toContain('controlMutation.mutate("restart")');
-    expect(routeSource).toContain('windowMode: "fullscreen"');
-    expect(routeSource).toContain('windowMode: "windowed"');
+    expect(startupSettingsPanelSource).toContain('windowMode: "fullscreen"');
+    expect(startupSettingsPanelSource).toContain('windowMode: "windowed"');
     expect(routeSource).toContain("supervisorMutation.mutate()");
   });
 
@@ -403,27 +411,28 @@ describe("LauncherRoute layout contract", () => {
 
   it("lets Launcher own startup settings without restarting immediately", () => {
     expect(routeSource).toContain("LauncherStartupSettingsPanel");
+    expect(startupSettingsPanelSource).toContain("export function LauncherStartupSettingsPanel");
     expect(routeSource).toContain("startupSettingsMutation");
     expect(routeSource).toContain("mutationFn: updateLauncherStartupSettings");
-    expect(routeSource).toContain("WorkbenchWindowModeUpdateRequest");
+    expect(startupSettingsPanelSource).toContain("WorkbenchWindowModeUpdateRequest");
     expect(routeSource).toContain("settings?.startup");
     expect(launcherApiSource).toContain("baseHash: setting.configHash");
     expect(launcherApiSource).toContain("WorkbenchWindowModeUpdateRequest");
-    expect(routeSource).toContain("onWindowModeChange({ mode, baseHash: current.configHash })");
+    expect(startupSettingsPanelSource).toContain("onWindowModeChange({ mode, baseHash: current.configHash })");
     expect(routeSource).toContain('onError: (error) => {\n      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error), source: "window-mode" });\n      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });');
     expect(routeSource).toContain("configHash");
-    expect(routeSource).toContain("runtimeProfile");
-    expect(routeSource).toContain("launcherControlPort");
-    expect(routeSource).toContain("backendPort");
-    expect(routeSource).toContain("frontendPort");
-    expect(routeSource).toContain("windowSize");
-    expect(routeSource).toContain("windowSizeOptions");
-    expect(routeSource).toContain("interfaceLanguage");
-    expect(routeSource).toContain("preflightDoctor");
-    expect(routeSource).toContain("requireVenv");
-    expect(routeSource).toContain("parsePortDraft");
-    expect(routeSource).toContain("setValidationError(copy.invalidPort)");
-    expect(routeSource).toContain('role="alert"');
+    expect(startupSettingsPanelSource).toContain("runtimeProfile");
+    expect(startupSettingsPanelSource).toContain("launcherControlPort");
+    expect(startupSettingsPanelSource).toContain("backendPort");
+    expect(startupSettingsPanelSource).toContain("frontendPort");
+    expect(startupSettingsPanelSource).toContain("windowSize");
+    expect(startupSettingsPanelSource).toContain("windowSizeOptions");
+    expect(startupSettingsPanelSource).toContain("interfaceLanguage");
+    expect(startupSettingsPanelSource).toContain("preflightDoctor");
+    expect(startupSettingsPanelSource).toContain("requireVenv");
+    expect(startupSettingsPanelSource).toContain("parsePortDraft");
+    expect(startupSettingsPanelSource).toContain("setValidationError(copy.invalidPort)");
+    expect(startupSettingsPanelSource).toContain('role="alert"');
     expect(routeSource).toContain("configuredWindowMode");
     expect(routeSource).toContain("effectiveWindowMode");
     expect(routeSource).toContain("envOverrideMode");
