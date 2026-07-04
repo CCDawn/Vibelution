@@ -7,6 +7,10 @@ import agentManagementNavSource from "./AgentManagementNav.tsx?raw";
 import agentWorkspaceCacheSource from "./agentWorkspaceCache.ts?raw";
 import styles from "./AgentsRoute.styles";
 import stylesSource from "./AgentsRoute.styles.ts?raw";
+import emptySelectionStyles from "./AgentEmptySelectionPanel.styles";
+import managementBriefStyles from "./AgentManagementBriefPanel.styles";
+import referencesPanelStyles from "./AgentReferencesPanel.styles";
+import returnBannerStyles from "./AgentReturnBannerPanel.styles";
 import routerSource from "../app/router.tsx?raw";
 import shellSource from "../app/AppShell.tsx?raw";
 
@@ -138,6 +142,10 @@ const returnBannerPanelSource = readFileSync(
   new URL("./AgentReturnBannerPanel.tsx", import.meta.url),
   "utf-8",
 );
+const referencesPanelSource = readFileSync(
+  new URL("./AgentReferencesPanel.tsx", import.meta.url),
+  "utf-8",
+);
 const toolSummaryPanelSource = readFileSync(
   new URL("./AgentToolSummaryPanel.tsx", import.meta.url),
   "utf-8",
@@ -254,13 +262,15 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("returnBannerTitle: \"返回跳转前页面\"");
     expect(detailWorkspacePanelSource).toContain("AgentReturnBannerPanel");
     expect(routeSource).toContain("onReturn: () => navigate(returnToPath)");
+    expect(returnBannerPanelSource).toContain('from "./AgentReturnBannerPanel.styles"');
+    expect(returnBannerPanelSource).not.toContain("AgentsRoute.styles");
     expect(returnBannerPanelSource).toContain("className={styles.returnBanner}");
     expect(returnBannerPanelSource).toContain("className={styles.returnBannerButton}");
     expect(routeSource).toContain("if (requestedAgentId && selectedAgent?.agentId === requestedAgentId)");
     expect(routeSource).not.toContain("className={styles.returnButton}");
-    expect(styles.returnBanner).toBeTruthy();
-    expect(styles.returnBannerCopy).toBeTruthy();
-    expect(styles.returnBannerButton).toBeTruthy();
+    expect(returnBannerStyles.returnBanner).toBeTruthy();
+    expect(returnBannerStyles.returnBannerCopy).toBeTruthy();
+    expect(returnBannerStyles.returnBannerButton).toBeTruthy();
   });
 
   it("uses filter, table, and detail panels instead of a card wall", () => {
@@ -763,8 +773,12 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("Read-only");
     expect(routeSource).toContain("selectedAgent.references.filter((reference) => reference.kind === \"chat_room\").length");
     expect(configReferencesPanePanelSource).toContain("AgentReferencesPanel");
+    expect(referencesPanelSource).toContain('from "./AgentReferencesPanel.styles"');
+    expect(referencesPanelSource).not.toContain("AgentsRoute.styles");
     expect(routeSource).not.toContain("className={styles.roomMembershipList}");
     expect(routeSource).not.toContain("className={styles.roomCheckField}");
+    expect(referencesPanelStyles.roomMembershipList).toBeTruthy();
+    expect(referencesPanelStyles.roomCheckField).toBeTruthy();
     expect(routeSource).toContain("compactProjectionRoute(room");
     expect(routeSource).toContain("`/chat?room=${encodeURIComponent(room.roomId)}`");
     expect(routeSource).toContain("打开群聊");
@@ -786,6 +800,10 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('`/teams?team=${encodeURIComponent(reference.sourceId)}`');
     expect(routeSource).toContain("onOpenRoute: (route) => navigate(route)");
     expect(routeSource).not.toContain("className={styles.referenceList}");
+    expect(referencesPanelStyles.referenceList).toBeTruthy();
+    expect(referencesPanelStyles.referenceItem).toBeTruthy();
+    expect(referencesPanelStyles.referenceStatusActive).toBeTruthy();
+    expect(referencesPanelStyles.referenceStatusStale).toBeTruthy();
   });
 
   it("routes detailed Agent tool permissions to the Tools page", () => {
@@ -902,8 +920,12 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("className={styles.factGrid}");
     expect(routeSource).not.toContain("className={styles.boundarySummaryGrid}");
     expect(routeSource).not.toContain("className={styles.policyGrid}");
+    expect(managementBriefPanelSource).toContain('from "./AgentManagementBriefPanel.styles"');
+    expect(managementBriefPanelSource).not.toContain("AgentsRoute.styles");
     expect(managementBriefPanelSource).toContain("styles.managementBriefPanel");
     expect(managementBriefPanelSource).toContain("styles.nextActionList");
+    expect(managementBriefPanelSource).toContain("styles.nextActionButton");
+    expect(managementBriefPanelSource).not.toContain('className="w-full"');
     expect(detailHeaderPanelSource).toContain("styles.detailTabs");
     expect(selectedDetailContentPanelSource).toContain("activePane === \"overview\"");
     expect(selectedDetailContentPanelSource).toContain("activePane === \"config\"");
@@ -920,8 +942,10 @@ describe("AgentsRoute layout contract", () => {
     expect(runtimeFocusPanelSource).toContain("styles.runtimePill");
     expect(runtimeFocusPanelSource).toContain("styles.runtimeFocusPanel");
     expect(activityHistoryPanelSource).toContain("styles.runHistoryList");
-    expect(styles.managementBriefPanel).toBeTruthy();
-    expect(styles.nextActionList).toBeTruthy();
+    expect(managementBriefStyles.managementBriefPanel).toBeTruthy();
+    expect(managementBriefStyles.managementChecklist).toBeTruthy();
+    expect(managementBriefStyles.nextActionList).toBeTruthy();
+    expect(managementBriefStyles.nextActionButton).toBe("w-full");
     expect(styles.boundarySummaryGrid).toBeTruthy();
     expect(styles.detailTabs).toBeTruthy();
   });
@@ -1224,12 +1248,14 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("keeps Agent empty states compact and left-aligned for dense workbench scanning", () => {
-    expect(styles.emptyState).toBeTruthy();
+    expect(emptySelectionPanelSource).toContain('from "./AgentEmptySelectionPanel.styles"');
+    expect(emptySelectionPanelSource).not.toContain("AgentsRoute.styles");
+    expect(emptySelectionStyles.emptyState).toBeTruthy();
     expect(detailWorkspacePanelSource).toContain("AgentEmptySelectionPanel");
     expect(emptySelectionPanelSource).toContain("className={styles.emptyState}");
-    expect(styles.emptyState).toContain("[place-items:start]");
-    expect(styles.emptyState).toContain("[min-height:72px]");
-    expect(styles.emptyState).toContain("[text-align:left]");
+    expect(emptySelectionStyles.emptyState).toContain("[place-items:start]");
+    expect(emptySelectionStyles.emptyState).toContain("[min-height:72px]");
+    expect(emptySelectionStyles.emptyState).toContain("[text-align:left]");
   });
 
   it("renders every Agent as a person name plus colored functional role tag", () => {

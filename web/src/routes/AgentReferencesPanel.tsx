@@ -1,7 +1,7 @@
 import { ExternalLink, Users } from "lucide-react";
 
 import { VButton } from "../components/vui";
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentReferencesPanel.styles";
 
 export type AgentReferenceStatusTone = "active" | "stale";
 
