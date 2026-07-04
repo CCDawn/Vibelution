@@ -1,6 +1,6 @@
 import { Bot } from "lucide-react";
 
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentEmptySelectionPanel.styles";
 
 type AgentEmptySelectionPanelProps = {
   title: string;

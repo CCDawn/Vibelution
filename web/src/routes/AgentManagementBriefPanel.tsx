@@ -1,7 +1,7 @@
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 
 import { VNativeButton } from "../components/vui";
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentManagementBriefPanel.styles";
 
 export type AgentManagementBriefPanelPane = "overview" | "config" | "activity";
 
@@ -69,7 +69,7 @@ export function AgentManagementBriefPanel({ brief, copy, onOpenRoute, onSelectPa
             <VNativeButton
               key={action.id}
               type="button"
-              className="w-full"
+              className={styles.nextActionButton}
               title={action.detail}
               onClick={() => {
                 if (action.route) {
