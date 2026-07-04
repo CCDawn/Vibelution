@@ -15,6 +15,7 @@ type TeamSourceCollectionCandidatePanelProps = {
   rangeText: ReactNode;
   filterBar: ReactNode;
   stats: TeamSourceCollectionCandidatePanelStat[];
+  loading: boolean;
   hasCandidates: boolean;
   listNeedsScrollHint: boolean;
   emptyMessage: ReactNode;
@@ -31,6 +32,7 @@ export function TeamSourceCollectionCandidatePanel({
   rangeText,
   filterBar,
   stats,
+  loading,
   hasCandidates,
   listNeedsScrollHint,
   emptyMessage,
@@ -72,6 +74,23 @@ export function TeamSourceCollectionCandidatePanel({
               <span>{lang === "zh" ? "向下滚动查看更多本页候选" : "Scroll down for more candidates on this page"}</span>
             </div>
           ) : null}
+        </div>
+      ) : loading && !hasCandidates ? (
+        <div
+          className={styles.sourceCollectionCandidateListShell}
+          role="region"
+          tabIndex={0}
+          aria-busy="true"
+          aria-label={lang === "zh" ? "资料提炼候选列表正在同步" : "Extracted candidate list is syncing"}
+        >
+          <div className={styles.sourceCollectionCandidateSkeletonList}>
+            {Array.from({ length: 4 }).map((_, index) => (
+              <div key={index} className={styles.sourceCollectionCandidateSkeletonRow}>
+                <span className={styles.sourceCollectionCandidateSkeletonTitle} />
+                <span className={styles.sourceCollectionCandidateSkeletonMeta} />
+              </div>
+            ))}
+          </div>
         </div>
       ) : (
         <div className={styles.empty}>{emptyMessage}</div>
