@@ -2,7 +2,7 @@ import { CheckCircle2, FileText } from "lucide-react";
 
 import type { KnowledgeItem, KnowledgeTracePayload, TeamKnowledgeBase } from "../api/types";
 import { VButton, VNativeInput, VNativeSelect } from "../components/vui";
-import styles from "./MemoryRoute.styles";
+import styles from "./MemoryKnowledgeDetailPanel.styles";
 
 export type MemoryKnowledgeRatingDraft = {
   actorAgentId: string;
