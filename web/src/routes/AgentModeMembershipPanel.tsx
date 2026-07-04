@@ -1,5 +1,5 @@
 import { VButton, VCheckbox, VFieldRow, VNativeSelect } from "../components/vui";
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentModeMembershipPanel.styles";
 
 export type AgentModeMembershipDraft = {
   chatDefault: boolean;

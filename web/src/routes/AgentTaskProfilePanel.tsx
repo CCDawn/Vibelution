@@ -1,6 +1,6 @@
 import { AgentTaskProfile } from "../api/types";
 import { VButton, VNativeInput, VNativeTextarea } from "../components/vui";
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentTaskProfilePanel.styles";
 
 export type AgentTaskDraft = Omit<AgentTaskProfile, "taskTypes"> & {
   taskTypes: string;
