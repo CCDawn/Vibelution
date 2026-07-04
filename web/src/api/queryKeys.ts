@@ -58,6 +58,13 @@ export const queryKeys = {
   memoryItemDetail: (sectionId: string, itemId: string) => ["memory", "item-detail", sectionId, itemId] as const,
   memoryUsageContract: () => ["memory", "usage-contract"] as const,
   memoryCleanupPreview: () => ["memory", "cleanup", "preview"] as const,
+  userMarkdownSpaces: (userId: string) => ["user-content", "markdown-spaces", userId] as const,
+  userMarkdownSpacePages: (userId: string, spaceId: string, query = "", tag = "") =>
+    ["user-content", "markdown-spaces", userId, spaceId, "pages", query, tag] as const,
+  userMarkdownSpacePage: (userId: string, spaceId: string, pageId: string) =>
+    ["user-content", "markdown-spaces", userId, spaceId, "pages", pageId] as const,
+  userMarkdownSpaceSearch: (userId: string, query = "", spaceId = "", limit = 10) =>
+    ["user-content", "markdown-spaces", userId, "search", query, spaceId, limit] as const,
   memoryKnowledgeGraph: (agentId = "", include = "", teamId = "", knowledgeBaseId = "", limit = 800) =>
     ["memory", "knowledge-graph", agentId, include, teamId, knowledgeBaseId, limit] as const,
   memoryKnowledgeGraphNodeDetail: (nodeId: string, agentId = "") => ["memory", "knowledge-graph", "node-detail", nodeId, agentId] as const,
