@@ -1,4 +1,4 @@
-export const launcherRouteStyles: Record<string, string> = {
+export const launcherRouteStyles = {
   route:
     "grid h-full min-h-full content-start overflow-y-auto overflow-x-hidden overscroll-contain bg-[var(--surface-page)] pb-[max(12px,env(safe-area-inset-bottom))] text-[var(--fg-primary)] [scrollbar-gutter:stable] [--accent-primary:var(--accent-warm)] [--danger:var(--state-error)]",
   header:
@@ -98,4 +98,4 @@ export const launcherRouteStyles: Record<string, string> = {
   diagnosticSection:
     "min-w-0 rounded-lg border border-[var(--border-soft)] bg-[color-mix(in_srgb,var(--surface-card)_65%,transparent)] p-2",
   spin: "animate-spin",
-};
+} as const;
