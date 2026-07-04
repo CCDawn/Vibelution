@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { LauncherStartupSettings } from "../api/launcher";
 import type { WorkbenchWindowMode, WorkbenchWindowModeUpdateRequest } from "../api/types";
 import { VButton, VNativeInput, VNativeSelect } from "../components/vui";
-import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
+import styles from "./LauncherStartupSettingsPanel.styles";
 
 type LauncherStartupSettingsCopy = {
   invalidPort: string;

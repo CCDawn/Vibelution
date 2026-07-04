@@ -7,7 +7,7 @@ import type {
   LauncherDeveloperNoiseOverview,
 } from "../api/types";
 import { VButton, VNativeSelect } from "../components/vui";
-import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
+import styles from "./LauncherDeveloperModePanel.styles";
 
 type LauncherDeveloperModeCopy = {
   cleanupApply: string;
