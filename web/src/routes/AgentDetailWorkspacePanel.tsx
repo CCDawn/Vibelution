@@ -4,7 +4,7 @@ import { AgentWorkspacePanel } from "../components/vui/product/agent-management"
 import { AgentBulkConfigPanel } from "./AgentBulkConfigPanel";
 import { AgentEmptySelectionPanel } from "./AgentEmptySelectionPanel";
 import { AgentReturnBannerPanel } from "./AgentReturnBannerPanel";
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentDetailWorkspacePanel.styles";
 
 type AgentDetailWorkspacePanelProps = {
   createOpen: boolean;

@@ -6,7 +6,7 @@ import { VButton, VChip, VPanelHeader } from "../components/vui";
 import { AgentBulkOperationsPanel } from "./AgentBulkOperationsPanel";
 import { AgentCreatePanel } from "./AgentCreatePanel";
 import { AgentListStatePanel } from "./AgentListStatePanel";
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentListWorkspacePanel.styles";
 
 type AgentListWorkspacePanelProps = {
   createOpen: boolean;

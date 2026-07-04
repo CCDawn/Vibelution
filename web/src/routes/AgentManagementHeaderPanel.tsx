@@ -6,7 +6,7 @@ import {
   type AgentSummaryMetric,
 } from "../components/vui/product/agent-management";
 import { AgentManagementNav } from "./AgentManagementNav";
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentManagementHeaderPanel.styles";
 
 type AgentManagementHeaderPanelCopy = {
   eyebrow: string;
