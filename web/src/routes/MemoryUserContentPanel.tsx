@@ -109,7 +109,7 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
   const [tagFilter, setTagFilter] = useState("");
 
   const spacesQuery = useQuery({
-    queryKey: queryKeys.userMarkdownSpaces(),
+    queryKey: queryKeys.userMarkdownSpaces(userId),
     queryFn: () => fetchJson<UserMarkdownSpaceListPayload>(endpointWithUserId("/api/user-content/markdown-spaces", userId)),
   });
 
@@ -130,7 +130,7 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
 
   const pagesQuery = useQuery({
     enabled: Boolean(selectedSpaceId),
-    queryKey: queryKeys.userMarkdownSpacePages(selectedSpaceId, searchQuery, tagFilter),
+    queryKey: queryKeys.userMarkdownSpacePages(userId, selectedSpaceId, searchQuery, tagFilter),
     queryFn: () =>
       fetchJson<UserMarkdownSpacePageListPayload>(
         endpointWithUserId(
@@ -158,7 +158,7 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
 
   const pageQuery = useQuery({
     enabled: Boolean(selectedSpaceId && selectedPageId),
-    queryKey: queryKeys.userMarkdownSpacePage(selectedSpaceId, selectedPageId),
+    queryKey: queryKeys.userMarkdownSpacePage(userId, selectedSpaceId, selectedPageId),
     queryFn: () =>
       fetchJson<UserMarkdownSpacePagePayload>(
         endpointWithUserId(
@@ -170,7 +170,7 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
 
   const searchResultsQuery = useQuery({
     enabled: Boolean(searchQuery.trim()),
-    queryKey: queryKeys.userMarkdownSpaceSearch(searchQuery, selectedSpaceId, 10),
+    queryKey: queryKeys.userMarkdownSpaceSearch(userId, searchQuery, selectedSpaceId, 10),
     queryFn: () =>
       fetchJson<UserMarkdownSpaceSearchPayload>(
         endpointWithUserId("/api/user-content/markdown-spaces/search", userId, {
@@ -205,7 +205,7 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
         }),
       }),
     onSuccess: async (payload) => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.userMarkdownSpaces() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.userMarkdownSpaces(userId) });
       setSelectedSpaceId(payload.space.spaceId);
       setSelectedPageId("");
       if (!spaceName.trim()) {

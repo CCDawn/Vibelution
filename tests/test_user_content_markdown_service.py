@@ -15,6 +15,13 @@ def _write_note(root: Path, relative: str, text: str) -> Path:
     return path
 
 
+def _symlink_or_skip(link: Path, target: Path, *, target_is_directory: bool = False) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlink creation unsupported in this environment: {exc}")
+
+
 @pytest.fixture()
 def routed_workspace(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
@@ -131,3 +138,41 @@ def test_import_assigns_distinct_page_ids_for_distinct_relative_paths(routed_wor
     assert "nested path" in nested_content["page"]["content"]
     assert flat_content["page"]["relativePath"] == "a-b.md"
     assert "flat path" in flat_content["page"]["content"]
+
+
+def test_import_skips_symlinked_markdown_file_pointing_outside_source(routed_workspace, tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    outside = tmp_path / "outside"
+    leaked = _write_note(outside, "Leaked.md", "# Leaked\noutside secret phrase\n")
+    _write_note(source, "Inside.md", "# Inside\nsafe phrase\n")
+    _symlink_or_skip(source / "Leaked.md", leaked)
+
+    preview = service.preview_markdown_space_import(str(source))
+    imported = service.import_markdown_space(str(source), space_name="Boundary Notes")
+
+    assert preview["summary"]["markdownFileCount"] == 1
+    assert any(row["relativePath"] == "Leaked.md" and row["reason"] == "symlink" for row in preview["ignoredFiles"])
+
+    search = service.search_user_markdown_spaces(query="outside secret phrase", space_id=imported["space"]["spaceId"])
+    assert search["summary"]["resultCount"] == 0
+    pages_payload = service.list_markdown_space_pages(imported["space"]["spaceId"])
+    assert [page["relativePath"] for page in pages_payload["pages"]] == ["Inside.md"]
+
+
+def test_import_does_not_traverse_symlinked_directory_outside_source(routed_workspace, tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    outside = tmp_path / "outside-dir"
+    _write_note(source, "Inside.md", "# Inside\nsafe phrase\n")
+    _write_note(outside, "Nested.md", "# Nested\noutside directory phrase\n")
+    _symlink_or_skip(source / "linked", outside, target_is_directory=True)
+
+    preview = service.preview_markdown_space_import(str(source))
+    imported = service.import_markdown_space(str(source), space_name="Directory Boundary")
+
+    assert preview["summary"]["markdownFileCount"] == 1
+    assert any(row["relativePath"] == "linked" and row["reason"] == "symlink_directory" for row in preview["ignoredFiles"])
+
+    search = service.search_user_markdown_spaces(query="outside directory phrase", space_id=imported["space"]["spaceId"])
+    assert search["summary"]["resultCount"] == 0
