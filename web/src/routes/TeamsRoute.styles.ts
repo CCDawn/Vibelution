@@ -656,76 +656,18 @@ const styles: Record<string, string> = {
     "workflowCandidateItemSelected min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
   workflowCandidateList:
     "workflowCandidateList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
-  workflowCoordinationBriefSummary:
-    "workflowCoordinationBriefSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
-  workflowCoordinationPanel:
-    "workflowCoordinationPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
-  workflowCoordinationQueue:
-    "workflowCoordinationQueue min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
-  workflowCoordinationQueues:
-    "workflowCoordinationQueues min-w-0",
-  workflowCoordinationStats:
-    "workflowCoordinationStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   workflowError:
     "workflowError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
-  workflowGraphBoundary:
-    "workflowGraphBoundary min-w-0",
-  workflowGraphCanvas:
-    "workflowGraphCanvas min-w-0 grid min-h-0 gap-2 p-2 relative h-full w-full",
-  workflowGraphEdge:
-    "workflowGraphEdge min-w-0",
-  workflowGraphFrame:
-    "workflowGraphFrame min-w-0 h-full min-h-[var(--workflow-graph-height,360px)] w-[var(--workflow-graph-width,720px)] max-w-full overflow-hidden",
-  workflowGraphHeader:
-    "workflowGraphHeader min-w-0 flex flex-wrap items-center gap-1.5",
-  workflowGraphIssues:
-    "workflowGraphIssues min-w-0",
-  workflowGraphNode:
-    "workflowGraphNode min-w-0 absolute left-[var(--workflow-graph-node-x,0px)] top-[var(--workflow-graph-node-y,0px)]",
-  workflowGraphNodeDanger:
-    "workflowGraphNodeDanger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
-  workflowGraphNodeNeutral:
-    "workflowGraphNodeNeutral min-w-0",
-  workflowGraphNodeReady:
-    "workflowGraphNodeReady min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
-  workflowGraphNodeWarning:
-    "workflowGraphNodeWarning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
-  workflowGraphPanel:
-    "workflowGraphPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
-  workflowGraphStats:
-    "workflowGraphStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
-  workflowGraphSvg:
-    "workflowGraphSvg min-w-0 absolute inset-0 h-full w-full overflow-visible",
   workflowIngestionActions:
     "workflowIngestionActions min-w-0 flex flex-wrap items-center gap-1.5",
   workflowIngestionBoundary:
     "workflowIngestionBoundary min-w-0",
   workflowIngestionHeader:
     "workflowIngestionHeader min-w-0 flex flex-wrap items-center gap-1.5",
-  workflowIngestionPanel:
-    "workflowIngestionPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
-  workflowIngestionStage:
-    "workflowIngestionStage min-w-0",
-  workflowIngestionStages:
-    "workflowIngestionStages min-w-0 !grid grid-cols-[repeat(5,minmax(58px,1fr))] gap-1",
-  workflowIngestionStats:
-    "workflowIngestionStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   workflowMeta:
     "workflowMeta min-w-0 flex flex-wrap items-center gap-1.5",
-  workflowModelEvidenceCoverage:
-    "workflowModelEvidenceCoverage min-w-0 !grid grid-cols-[repeat(auto-fit,minmax(118px,1fr))] gap-1.5",
-  workflowModelEvidencePanel:
-    "workflowModelEvidencePanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
-  workflowModelEvidenceStats:
-    "workflowModelEvidenceStats min-w-0 grid gap-2 !grid grid-cols-[repeat(auto-fit,minmax(118px,1fr))] gap-1.5",
   workflowPanel:
     "workflowPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
-  workflowPaperNoteChunkPanel:
-    "workflowPaperNoteChunkPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
-  workflowPaperNoteChunkPlans:
-    "workflowPaperNoteChunkPlans min-w-0 !grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[5px]",
-  workflowPaperNoteChunkStats:
-    "workflowPaperNoteChunkStats min-w-0 grid gap-2 !grid grid-cols-[repeat(4,minmax(86px,1fr))] gap-[5px]",
   workflowSourceCollectionAssignmentActive:
     "workflowSourceCollectionAssignmentActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   workflowSourceCollectionAssignments:
@@ -758,10 +700,6 @@ const styles: Record<string, string> = {
     "workflowSourceCollectionStorageError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   workflowSourceCollectionWide:
     "workflowSourceCollectionWide min-w-0",
-  workflowSourceQualityPanel:
-    "workflowSourceQualityPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
-  workflowSourceQualityQueue:
-    "workflowSourceQualityQueue min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[5px]",
   workflowSourceQualityStats:
     "workflowSourceQualityStats min-w-0 grid gap-2 !grid grid-cols-[repeat(5,minmax(72px,1fr))] gap-[5px]",
   workflowStageActive:

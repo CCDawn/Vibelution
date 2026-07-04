@@ -21,7 +21,11 @@ import teamSourceCollectionStandaloneStagePanelSource from "./TeamSourceCollecti
 import teamSourceCollectionStorageActionsPanelSource from "./TeamSourceCollectionStorageActionsPanel.tsx?raw";
 import teamWorkflowCandidatePreviewPanelSource from "./TeamWorkflowCandidatePreviewPanel.tsx?raw";
 import teamWorkflowCandidatePreviewPanelStylesSource from "./TeamWorkflowCandidatePreviewPanel.styles.ts?raw";
+import teamWorkflowStatusPanelsSource from "./TeamWorkflowStatusPanels.tsx?raw";
+import teamWorkflowStatusPanelStyles from "./TeamWorkflowStatusPanels.styles";
+import teamWorkflowStatusPanelStylesSource from "./TeamWorkflowStatusPanels.styles.ts?raw";
 import workflowGraphViewSource from "./TeamWorkflowGraphView.tsx?raw";
+import workflowGraphViewStyles from "./TeamWorkflowGraphView.styles";
 import teamCandidateCardSource from "../components/vui/product/team-management/TeamCandidateCard.tsx?raw";
 import teamSourceEmptyStateSource from "../components/vui/product/team-management/TeamSourceEmptyState.tsx?raw";
 import teamSourceFilterBarSource from "../components/vui/product/team-management/TeamSourceFilterBar.tsx?raw";
@@ -431,13 +435,19 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("workflowIngestionTone");
     expect(routeSource).toContain("styles.workflowPanel");
     expect(routeSource).toContain("styles.workflowStats");
-    expect(routeSource).toContain("styles.workflowIngestionPanel");
-    expect(routeSource).toContain("styles.workflowIngestionStages");
-    expect(routeSource).toContain("styles.workflowIngestionBoundary");
-    expect(routeSource).toContain("styles.workflowGraphPanel");
+    expect(routeSource).toContain("TeamWorkflowModelEvidenceStatusPanel");
+    expect(routeSource).toContain("TeamWorkflowCoordinationStatusPanel");
+    expect(routeSource).toContain("TeamWorkflowKnowledgeIngestionStatusPanel");
+    expect(routeSource).toContain("TeamWorkflowCandidateGraphStatusPanel");
+    expect(routeSource).toContain("TeamWorkflowSourceQualityStatusPanel");
+    expect(routeSource).toContain("TeamWorkflowPaperNoteChunkStatusPanel");
+    expect(teamWorkflowStatusPanelsSource).toContain("styles.workflowIngestionPanel");
+    expect(teamWorkflowStatusPanelsSource).toContain("styles.workflowIngestionStages");
+    expect(teamWorkflowStatusPanelsSource).toContain("styles.workflowIngestionBoundary");
+    expect(teamWorkflowStatusPanelsSource).toContain("styles.workflowGraphPanel");
     expect(workflowGraphViewSource).toContain("styles.workflowGraphFrame");
     expect(workflowGraphViewSource).toContain("styles.workflowGraphNode");
-    expect(routeSource).toContain("styles.workflowGraphBoundary");
+    expect(teamWorkflowStatusPanelsSource).toContain("styles.workflowGraphBoundary");
     expect(routeSource).toContain("styles.workflowCandidateList");
     expect(routeSource).toContain("styles.workflowValidation");
     expect(routeSource).toContain("RESEARCH_WORKSPACE_NAV_ITEMS");
@@ -1175,11 +1185,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("迭代优化工作台");
     expect(routeSource).toContain("renderResearchStageStandalonePage");
     expect(routeSource).toContain("不自动进入下一阶段。");
-    expect(routeSource).toContain("资料提炼 Agent");
-    expect(routeSource).toContain("入库审核状态");
-    expect(routeSource).toContain("模型调用证据链");
-    expect(routeSource).toContain("证据登记，不是正式知识");
-    expect(routeSource).toContain("CandidateStore、Team Knowledge 和正式同步边界");
+    expect(teamWorkflowStatusPanelsSource).toContain("资料提炼 Agent");
+    expect(teamWorkflowStatusPanelsSource).toContain("入库审核状态");
+    expect(teamWorkflowStatusPanelsSource).toContain("模型调用证据链");
+    expect(teamWorkflowStatusPanelsSource).toContain("证据登记，不是正式知识");
+    expect(teamWorkflowStatusPanelsSource).toContain("CandidateStore、Team Knowledge 和正式同步边界");
     expect(routeSource).toContain("资料搜索执行");
     expect(routeSource).toContain("TeamSourceCollectionRunSettingsPanel");
     expect(routeSource).toContain("onDraftChange={(patch) => setSourceCollectionDraft");
@@ -1195,15 +1205,15 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionManualWritebackPanelSource).toContain("回写并导入候选");
     expect(teamSourceCollectionManualWritebackPanelSource).toContain("原始位置");
     expect(routeSource).toContain("不触发外部搜索，不写正式知识/RAG/图谱");
-    expect(routeSource).toContain("正式知识写入关闭");
-    expect(routeSource).toContain("入库关系图");
+    expect(teamWorkflowStatusPanelsSource).toContain("正式知识写入关闭");
+    expect(teamWorkflowStatusPanelsSource).toContain("入库关系图");
     expect(routeSource).toContain("Agent 生成关系图");
-    expect(routeSource).toContain("CandidateStore 快照 · 正式知识/RAG/图谱写入关闭");
-    expect(routeSource).toContain("paper_note 分块计划");
-    expect(routeSource).toContain("资料提炼复核");
+    expect(teamWorkflowStatusPanelsSource).toContain("CandidateStore 快照 · 正式知识/RAG/图谱写入关闭");
+    expect(teamWorkflowStatusPanelsSource).toContain("paper_note 分块计划");
+    expect(teamWorkflowStatusPanelsSource).toContain("资料提炼复核");
     expect(routeSource).toContain("通过复核");
     expect(routeSource).toContain("退回补资料");
-    expect(routeSource).toContain("Source extraction Agent");
+    expect(teamWorkflowStatusPanelsSource).toContain("Source extraction Agent");
     expect(routeSource).toContain("TeamWorkflowCandidatePreviewPanel");
     expect(routeSource).toContain("teamWorkflowCandidatePreviewItems");
     expect(teamWorkflowCandidatePreviewPanelSource).toContain("候选仓库预览");
@@ -1213,7 +1223,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamWorkflowCandidatePreviewPanelStylesSource).toContain("workflowCandidateListScroll");
     expect(routeSource).toContain("生成分块计划");
     expect(routeSource).toContain("重建分块计划");
-    expect(routeSource).toContain("后续 paper_note draft 需带 chunkId");
+    expect(teamWorkflowStatusPanelsSource).toContain("后续 paper_note draft 需带 chunkId");
     expect(routeSource).toContain("选择 research-team / 挑战杯ai科研团队 后显示挑战杯科研流程。");
     expect(routeSource).toContain("团队广播");
     expect(routeSource).toContain("发送给团队");
@@ -1256,20 +1266,20 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.nodeSourceAuthority).toBeTypeOf("string");
     expect(routeStyles.workflowPanel).toBeTypeOf("string");
     expect(routeStyles.workflowStats).toBeTypeOf("string");
-    expect(routeStyles.workflowIngestionPanel).toBeTypeOf("string");
-    expect(routeStyles.workflowIngestionStages).toBeTypeOf("string");
+    expect(teamWorkflowStatusPanelStyles.workflowIngestionPanel).toBeTypeOf("string");
+    expect(teamWorkflowStatusPanelStyles.workflowIngestionStages).toBeTypeOf("string");
     expect(routeStyles.workflowIngestionBoundary).toBeTypeOf("string");
-    expect(routeStyles.workflowSourceQualityPanel).toBeTypeOf("string");
+    expect(teamWorkflowStatusPanelStyles.workflowSourceQualityPanel).toBeTypeOf("string");
     expect(routeStyles.workflowSourceQualityStats).toBeTypeOf("string");
-    expect(routeStyles.workflowSourceQualityQueue).toBeTypeOf("string");
-    expect(routeStyles.workflowPaperNoteChunkPanel).toBeTypeOf("string");
-    expect(routeStyles.workflowPaperNoteChunkStats).toBeTypeOf("string");
+    expect(teamWorkflowStatusPanelStyles.workflowSourceQualityQueue).toBeTypeOf("string");
+    expect(teamWorkflowStatusPanelStyles.workflowPaperNoteChunkPanel).toBeTypeOf("string");
+    expect(teamWorkflowStatusPanelStyles.workflowPaperNoteChunkStats).toBeTypeOf("string");
     expect(routeStyles.workflowSourceCollectionStorageActions).toBeTypeOf("string");
     expect(routeStyles.workflowSourceCollectionStorageButtons).toBeTypeOf("string");
-    expect(routeStyles.workflowPaperNoteChunkPlans).toBeTypeOf("string");
-    expect(routeStyles.workflowModelEvidencePanel).toBeTypeOf("string");
-    expect(routeStyles.workflowModelEvidenceStats).toBeTypeOf("string");
-    expect(routeStyles.workflowModelEvidenceCoverage).toBeTypeOf("string");
+    expect(teamWorkflowStatusPanelStyles.workflowPaperNoteChunkPlans).toBeTypeOf("string");
+    expect(teamWorkflowStatusPanelStyles.workflowModelEvidencePanel).toBeTypeOf("string");
+    expect(teamWorkflowStatusPanelStyles.workflowModelEvidenceStats).toBeTypeOf("string");
+    expect(teamWorkflowStatusPanelStyles.workflowModelEvidenceCoverage).toBeTypeOf("string");
     expect(routeStyles.workflowSourceCollectionPanel).toBeTypeOf("string");
     expect(routeStyles.workflowSourceCollectionForm).toBeTypeOf("string");
     expect(routeStyles.workflowSourceCollectionRuns).toBeTypeOf("string");
@@ -1491,11 +1501,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.researchStageActionPanel).toBeTypeOf("string");
     expect(routeStyles.researchStageModuleGrid).toBeTypeOf("string");
     expect(routeStyles.researchStageBoundaryPanel).toBeTypeOf("string");
-    expect(routeStyles.workflowGraphPanel).toBeTypeOf("string");
-    expect(routeStyles.workflowGraphFrame).toBeTypeOf("string");
-    expect(routeStyles.workflowGraphNode).toBeTypeOf("string");
-    expect(routeStyles.workflowGraphEdge).toBeTypeOf("string");
-    expect(routeStyles.workflowGraphBoundary).toBeTypeOf("string");
+    expect(teamWorkflowStatusPanelStyles.workflowGraphPanel).toBeTypeOf("string");
+    expect(workflowGraphViewStyles.workflowGraphFrame).toBeTypeOf("string");
+    expect(workflowGraphViewStyles.workflowGraphNode).toBeTypeOf("string");
+    expect(workflowGraphViewStyles.workflowGraphEdge).toBeTypeOf("string");
+    expect(teamWorkflowStatusPanelStyles.workflowGraphBoundary).toBeTypeOf("string");
     expect(routeStyles.workflowCandidateList).toBeTypeOf("string");
     expect(routeStylesSource).not.toContain("workflowCandidateListPanel");
     expect(routeStylesSource).not.toContain("workflowCandidateListHeader");
@@ -1506,6 +1516,18 @@ describe("TeamsRoute layout contract", () => {
     expect(teamWorkflowCandidatePreviewPanelStylesSource).toContain("workflowCandidateListHeader");
     expect(teamWorkflowCandidatePreviewPanelStylesSource).toContain("workflowCandidateListScroll");
     expect(teamWorkflowCandidatePreviewPanelStylesSource).toContain("workflowCandidateListScrollHint");
+    expect(routeStylesSource).not.toContain("workflowModelEvidencePanel");
+    expect(routeStylesSource).not.toContain("workflowCoordinationPanel");
+    expect(routeStylesSource).not.toContain("workflowIngestionPanel");
+    expect(routeStylesSource).not.toContain("workflowGraphPanel");
+    expect(routeStylesSource).not.toContain("workflowSourceQualityPanel");
+    expect(routeStylesSource).not.toContain("workflowPaperNoteChunkPanel");
+    expect(teamWorkflowStatusPanelStylesSource).toContain("workflowModelEvidencePanel");
+    expect(teamWorkflowStatusPanelStylesSource).toContain("workflowCoordinationPanel");
+    expect(teamWorkflowStatusPanelStylesSource).toContain("workflowIngestionPanel");
+    expect(teamWorkflowStatusPanelStylesSource).toContain("workflowGraphPanel");
+    expect(teamWorkflowStatusPanelStylesSource).toContain("workflowSourceQualityPanel");
+    expect(teamWorkflowStatusPanelStylesSource).toContain("workflowPaperNoteChunkPanel");
     expect(routeStyles.workflowValidation).toBeTypeOf("string");
     expect(routeStyles.workspaceResearch).toBeTypeOf("string");
     expect(routeStyles.workspaceResearchCanvas).toBeTypeOf("string");
@@ -1560,8 +1582,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.workspaceResearchCanvas).toContain("h-full");
     expect(routeStyles.workspaceResearchCanvas).toContain("grid-cols-[minmax(520px,1fr)_minmax(300px,380px)]");
     expect(routeStyles.workspaceResearchCanvas).toContain("overflow-hidden");
-    expect(routeStyles.workflowGraphFrame).toContain("h-full");
-    expect(routeStyles.workflowGraphFrame).toContain("overflow-hidden");
+    expect(workflowGraphViewStyles.workflowGraphFrame).toContain("h-full");
+    expect(workflowGraphViewStyles.workflowGraphFrame).toContain("overflow-hidden");
     expect(routeStyles.canvasPanel).toContain("!flex");
     expect(routeStyles.inspector).toContain("!flex");
     expect(routeStylesSource).toContain(".canvasLayoutModeSwitch");
@@ -1590,15 +1612,15 @@ describe("TeamsRoute layout contract", () => {
       [routeStyles.sourceCollectionSourceDetailFacts, "grid-cols-[repeat(auto-fit,minmax(180px,1fr))]"],
       [routeStyles.researchStageHeroStats, "grid-cols-[repeat(3,minmax(0,1fr))]"],
       [routeStyles.workflowStats, "grid-cols-[repeat(3,minmax(0,1fr))]"],
-      [routeStyles.workflowModelEvidenceStats, "grid-cols-[repeat(auto-fit,minmax(118px,1fr))]"],
-      [routeStyles.workflowModelEvidenceCoverage, "grid-cols-[repeat(auto-fit,minmax(118px,1fr))]"],
+      [teamWorkflowStatusPanelStyles.workflowModelEvidenceStats, "grid-cols-[repeat(auto-fit,minmax(118px,1fr))]"],
+      [teamWorkflowStatusPanelStyles.workflowModelEvidenceCoverage, "grid-cols-[repeat(auto-fit,minmax(118px,1fr))]"],
       [routeStyles.workflowSourceCollectionForm, "grid-cols-[repeat(2,minmax(0,1fr))]"],
       [routeStyles.workflowSourceCollectionOutputForm, "grid-cols-[repeat(2,minmax(0,1fr))]"],
-      [routeStyles.workflowIngestionStages, "grid-cols-[repeat(5,minmax(58px,1fr))]"],
-      [routeStyles.workflowSourceQualityStats, "grid-cols-[repeat(5,minmax(72px,1fr))]"],
-      [routeStyles.workflowSourceQualityQueue, "grid-cols-[repeat(3,minmax(0,1fr))]"],
-      [routeStyles.workflowPaperNoteChunkStats, "grid-cols-[repeat(4,minmax(86px,1fr))]"],
-      [routeStyles.workflowPaperNoteChunkPlans, "grid-cols-[repeat(2,minmax(0,1fr))]"],
+      [teamWorkflowStatusPanelStyles.workflowIngestionStages, "grid-cols-[repeat(5,minmax(58px,1fr))]"],
+      [teamWorkflowStatusPanelStyles.workflowSourceQualityStats, "grid-cols-[repeat(5,minmax(72px,1fr))]"],
+      [teamWorkflowStatusPanelStyles.workflowSourceQualityQueue, "grid-cols-[repeat(3,minmax(0,1fr))]"],
+      [teamWorkflowStatusPanelStyles.workflowPaperNoteChunkStats, "grid-cols-[repeat(4,minmax(86px,1fr))]"],
+      [teamWorkflowStatusPanelStyles.workflowPaperNoteChunkPlans, "grid-cols-[repeat(2,minmax(0,1fr))]"],
     ];
 
     for (const [className, gridTemplate] of restoredGridExpectations) {
@@ -1892,7 +1914,8 @@ describe("TeamsRoute layout contract", () => {
 
   it("keeps Teams dynamic layout values behind typed CSS variable helpers", () => {
     expect(routeSource).toContain("TeamWorkflowGraphView");
-    expect(routeSource.match(/<TeamWorkflowGraphView/g)?.length ?? 0).toBe(2);
+    expect(routeSource.match(/<TeamWorkflowGraphView/g)?.length ?? 0).toBe(1);
+    expect(teamWorkflowStatusPanelsSource.match(/<TeamWorkflowGraphView/g)?.length ?? 0).toBe(1);
     expect(routeSource).not.toContain("workflowGraphFrameStyle(visibleGraphLayout)");
     expect(routeSource).not.toContain("workflowGraphFrameStyle(teamWorkflowCandidateGraphLayout)");
     expect(routeSource).not.toContain("className={styles.workflowGraphSvg}");
@@ -1902,14 +1925,14 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("teamCanvasNodeStyle(node)");
     expect(routeSource).not.toContain("style={{");
     expect(workflowGraphViewSource).not.toContain("style={{");
-    expect(routeStyles.workflowGraphFrame).toContain("min-h-[var(--workflow-graph-height");
-    expect(routeStyles.workflowGraphFrame).toContain("w-[var(--workflow-graph-width");
-    expect(routeStyles.workflowGraphCanvas).toContain("relative");
-    expect(routeStyles.workflowGraphSvg).toContain("h-full");
-    expect(routeStyles.workflowGraphSvg).toContain("w-full");
-    expect(routeStyles.workflowGraphNode).toContain("absolute");
-    expect(routeStyles.workflowGraphNode).toContain("left-[var(--workflow-graph-node-x");
-    expect(routeStyles.workflowGraphNode).toContain("top-[var(--workflow-graph-node-y");
+    expect(workflowGraphViewStyles.workflowGraphFrame).toContain("min-h-[var(--workflow-graph-height");
+    expect(workflowGraphViewStyles.workflowGraphFrame).toContain("w-[var(--workflow-graph-width");
+    expect(workflowGraphViewStyles.workflowGraphCanvas).toContain("relative");
+    expect(workflowGraphViewStyles.workflowGraphSvg).toContain("h-full");
+    expect(workflowGraphViewStyles.workflowGraphSvg).toContain("w-full");
+    expect(workflowGraphViewStyles.workflowGraphNode).toContain("absolute");
+    expect(workflowGraphViewStyles.workflowGraphNode).toContain("left-[var(--workflow-graph-node-x");
+    expect(workflowGraphViewStyles.workflowGraphNode).toContain("top-[var(--workflow-graph-node-y");
   });
 
   it("keeps read-only research canvas auto layout visual-only and deterministic", () => {
