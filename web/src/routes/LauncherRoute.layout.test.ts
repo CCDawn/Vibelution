@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import routeSource from "./LauncherRoute.tsx?raw";
 import developerModePanelSource from "./LauncherDeveloperModePanel.tsx?raw";
+import projectMaintenancePanelSource from "./LauncherProjectMaintenancePanel.tsx?raw";
 import startupSettingsPanelSource from "./LauncherStartupSettingsPanel.tsx?raw";
 import stylesSource from "./LauncherRoute.styles.ts?raw";
 import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
@@ -477,7 +478,7 @@ describe("LauncherRoute layout contract", () => {
   });
 
   it("makes Launcher the owner of project reset and initialization maintenance", () => {
-    expect(routeSource).toContain("ProjectMaintenancePanel");
+    expect(routeSource).toContain("LauncherProjectMaintenancePanel");
     expect(routeSource).toContain("getLauncherMaintenanceSummary");
     expect(routeSource).toContain("previewLauncherMaintenancePlan");
     expect(routeSource).toContain("applyLauncherMaintenancePlan");
@@ -488,10 +489,10 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).not.toContain('useState<LauncherMaintenanceProfileId>("factory_runtime")');
     expect(routeSource).toContain("profileId: maintenanceProfile");
     expect(routeSource).toContain("launcherMaintenanceSummary()");
-    expect(routeSource).toContain("maintenance/reset/summary");
-    expect(routeSource).toContain("maintenance/reset/preview");
-    expect(routeSource).toContain("maintenance/reset/apply");
-    expect(routeSource).toContain("Launcher 维护中心");
+    expect(projectMaintenancePanelSource).toContain("maintenance/reset/summary");
+    expect(projectMaintenancePanelSource).toContain("maintenance/reset/preview");
+    expect(projectMaintenancePanelSource).toContain("maintenance/reset/apply");
+    expect(projectMaintenancePanelSource).toContain("Launcher 维护中心");
     expect(routeSource).toContain("恢复初始化");
     expect(routeSource).toContain("active work");
     expect(launcherApiSource).toContain("maintenance/reset/summary");
