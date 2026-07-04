@@ -9,7 +9,7 @@ import type {
 } from "../api/types";
 import { VNativeInput, VNativeSelect } from "../components/vui";
 import { MemoryKnowledgeRagPanel, type MemoryKnowledgeRagPanelCopy } from "./MemoryKnowledgeRagPanel";
-import styles from "./MemoryRoute.styles";
+import styles from "./MemoryKnowledgeSearchPanel.styles";
 
 export type MemoryKnowledgeSearchDraft = {
   query: string;

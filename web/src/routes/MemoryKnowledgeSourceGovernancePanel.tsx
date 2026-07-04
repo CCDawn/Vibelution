@@ -2,7 +2,7 @@ import { CheckCircle2, Copy as CopyIcon, Database, Eye, FileText, Link2, Pencil,
 
 import type { KnowledgeCentralSource, KnowledgeOwnerSource } from "../api/types";
 import { VButton, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
-import styles from "./MemoryRoute.styles";
+import styles from "./MemoryKnowledgeSourceGovernancePanel.styles";
 
 export type MemoryKnowledgeSourceOwnerType = "team" | "agent";
 export type MemoryKnowledgeSourceInboxStatusFilter = "pending" | "accepted" | "rejected" | "duplicate" | "needs_more_context" | "all";

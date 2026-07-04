@@ -1,7 +1,7 @@
 import { Database } from "lucide-react";
 
 import { VButton } from "../components/vui";
-import styles from "./MemoryRoute.styles";
+import styles from "./MemoryKnowledgeBaseSidebar.styles";
 
 export type MemoryKnowledgeBaseSidebarCopy = {
   teamKnowledge: string;

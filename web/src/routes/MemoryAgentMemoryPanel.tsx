@@ -1,7 +1,7 @@
 import { Brain, Database, FileText, Search } from "lucide-react";
 
 import { VButton, VNativeInput } from "../components/vui";
-import styles from "./MemoryRoute.styles";
+import styles from "./MemoryAgentMemoryPanel.styles";
 
 export type MemoryAgentMemorySummaryView = {
   agentCount: number;
