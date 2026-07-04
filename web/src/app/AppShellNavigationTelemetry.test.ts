@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { routeLocationKey, routerLocationDesyncRecoveryPlan, routerLocationDesyncTarget } from "./AppShell";
 import appShellSource from "./AppShell.tsx?raw";
 import utilityMenuSource from "./AppShellUtilityMenu.tsx?raw";
+import utilityMenuStylesSource from "./AppShellUtilityMenu.styles.ts?raw";
 
 function isWindowHistoryExpression(node: ts.Expression): boolean {
   return ts.isPropertyAccessExpression(node)
@@ -176,6 +177,9 @@ describe("AppShell navigation telemetry", () => {
     expect(appShellSource).toContain("LazyAppShellUtilityMenu");
     expect(appShellSource).not.toContain("filterUtilityFileTree");
     expect(appShellSource).not.toContain("renderUtilityFileTree");
+    expect(utilityMenuSource).toContain('from "./AppShellUtilityMenu.styles"');
+    expect(utilityMenuSource).not.toContain("AppShell.styles");
+    expect(utilityMenuStylesSource).toContain("utilityFileTree");
     expect(utilityMenuSource).toContain("filterUtilityFileTree");
     expect(utilityMenuSource).toContain("renderUtilityFileTree");
     expect(utilityMenuSource).toContain("utility-file-navigator");

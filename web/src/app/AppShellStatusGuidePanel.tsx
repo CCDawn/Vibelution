@@ -11,7 +11,7 @@ import {
   type RuntimeControllerState,
   type SystemStatusTone,
 } from "./systemStatus";
-import styles from "./AppShell.styles";
+import styles from "./AppShellStatusGuidePanel.styles";
 
 export type AppShellStatusSummaryCard = {
   id: "frontend" | "backend" | "runtime";

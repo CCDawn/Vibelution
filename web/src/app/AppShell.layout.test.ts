@@ -10,7 +10,11 @@ import launcherShellSource from "./LauncherShell.tsx?raw";
 import documentLanguageSource from "./documentLanguage.ts?raw";
 import useShellI18nSource from "../i18n/useShellI18n.ts?raw";
 import utilityMenuSource from "./AppShellUtilityMenu.tsx?raw";
+import utilityMenuStylesSource from "./AppShellUtilityMenu.styles.ts?raw";
+import utilityMenuStyles from "./AppShellUtilityMenu.styles";
 import statusGuideSource from "./AppShellStatusGuidePanel.tsx?raw";
+import statusGuideStylesSource from "./AppShellStatusGuidePanel.styles.ts?raw";
+import statusGuideStyles from "./AppShellStatusGuidePanel.styles";
 
 const shellStyles = readFileSync(fileURLToPath(new URL("../design/workbench-shell.css", import.meta.url)), "utf8");
 
@@ -30,6 +34,8 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("LazyAppShellStatusGuidePanel");
     expect(shellSource).toContain("statusGuideOpen ? (");
     expect(shellSource).not.toContain("statusGuidePanel");
+    expect(statusGuideSource).toContain('from "./AppShellStatusGuidePanel.styles"');
+    expect(statusGuideSource).not.toContain("AppShell.styles");
     expect(statusGuideSource).toContain("statusGuidePanel");
     expect(statusGuideSource).toContain("lifecycleProofCard");
     expect(statusGuideSource).toContain("lifecycleStateLabel");
@@ -40,6 +46,13 @@ describe("AppShell layout contract", () => {
     expect(statusGuideSource).toContain("title={state.detail}");
     expect(statusGuideSource).toContain("title={component.detail}");
     expect(statusGuideSource).not.toContain("statusGuideNote");
+    expect(statusGuideStyles.statusGuidePanel).toBeTypeOf("string");
+    expect(statusGuideStyles.lifecycleProofCard).toBeTypeOf("string");
+    expect(statusGuideStyles.statusGuideGrid).toBeTypeOf("string");
+    expect(statusGuideStyles.lifecycleProofMeta).toBeTypeOf("string");
+    expect(statusGuideStyles.lifecycleProofList).toBeTypeOf("string");
+    expect(statusGuideStylesSource).toContain("statusGuideGrid");
+    expect(statusGuideStylesSource).toContain("lifecycleProofCard");
     expect(shellSource).not.toContain("rightStatusCards.map((item) => (\n                <span key={item.id} className={styles.statusBadge}>");
   });
 
@@ -47,9 +60,9 @@ describe("AppShell layout contract", () => {
     expect(styles.statusSummaryChip).toBeTypeOf("string");
     expect(styles.statusSummaryCount).toBeTypeOf("string");
     expect(styles.returnButton).toBeTypeOf("string");
-    expect(styles.statusGuideGrid).toBeTypeOf("string");
-    expect(styles.lifecycleProofMeta).toBeTypeOf("string");
-    expect(styles.lifecycleProofList).toBeTypeOf("string");
+    expect(statusGuideStyles.statusGuideGrid).toBeTypeOf("string");
+    expect(statusGuideStyles.lifecycleProofMeta).toBeTypeOf("string");
+    expect(statusGuideStyles.lifecycleProofList).toBeTypeOf("string");
     expect(shellStyles).toContain("width: min(640px, calc(100vw - 40px))");
     expect(shellStyles).toContain("grid-template-columns: repeat(3, minmax(0, 1fr))");
     expect(shellStyles).toContain(".statusGuideListItem[data-current=\"true\"]");
@@ -238,6 +251,8 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("utilityOpen ? (");
     expect(shellSource).not.toContain("queryKeys.gitStatus()");
     expect(shellSource).not.toContain("queryKeys.fileTree()");
+    expect(utilityMenuSource).toContain('from "./AppShellUtilityMenu.styles"');
+    expect(utilityMenuSource).not.toContain("AppShell.styles");
     expect(utilityMenuSource).toContain("utilityPanel");
     expect(utilityMenuSource).toContain("<VNativeInput");
     expect(utilityMenuSource).not.toMatch(/<input\b/);
@@ -258,13 +273,15 @@ describe("AppShell layout contract", () => {
     expect(utilityMenuSource).toContain("gitPendingWorktrees");
     expect(shellSource).toContain('data-browser-role="workbench"');
     expect(styles.utilityTrigger).toBeTypeOf("string");
-    expect(styles.utilityPanel).toBeTypeOf("string");
     expect(styles.utilityClusterOpen).toBeTypeOf("string");
-    expect(styles.utilityButtonGrid).toBeTypeOf("string");
-    expect(styles.gitSignalGrid).toBeTypeOf("string");
-    expect(styles.gitSectionHeader).toBeTypeOf("string");
-    expect(styles.gitCommitList).toBeTypeOf("string");
-    expect(styles.gitWorktreeList).toBeTypeOf("string");
+    expect(utilityMenuStyles.utilityPanel).toBeTypeOf("string");
+    expect(utilityMenuStyles.utilityButtonGrid).toBeTypeOf("string");
+    expect(utilityMenuStyles.gitSignalGrid).toBeTypeOf("string");
+    expect(utilityMenuStyles.gitSectionHeader).toBeTypeOf("string");
+    expect(utilityMenuStyles.gitCommitList).toBeTypeOf("string");
+    expect(utilityMenuStyles.gitWorktreeList).toBeTypeOf("string");
+    expect(utilityMenuStylesSource).toContain("utilityFileButton");
+    expect(utilityMenuStylesSource).toContain("gitSignalGrid");
   });
 
   it("keeps active work details out of the primary top bar chip", () => {
