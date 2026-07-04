@@ -1,7 +1,7 @@
 import { ExternalLink } from "lucide-react";
 
 import { VButton, VCheckbox, VFieldRow, VNativeInput, VNativeSelect } from "../components/vui";
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentContextCompressionPanel.styles";
 
 export type AgentContextCompressionPolicyDraft = {
   mode: "inherit" | "custom";

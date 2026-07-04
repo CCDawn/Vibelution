@@ -9,6 +9,10 @@ import styles from "./AgentsRoute.styles";
 import stylesSource from "./AgentsRoute.styles.ts?raw";
 import archiveZoneStyles from "./AgentArchiveZonePanel.styles";
 import avatarEditorStyles from "./AgentAvatarEditorPanel.styles";
+import bulkConfigStyles from "./AgentBulkConfigPanel.styles";
+import contextCompressionStyles from "./AgentContextCompressionPanel.styles";
+import coreConfigStyles from "./AgentCoreConfigPanel.styles";
+import createPanelStyles from "./AgentCreatePanel.styles";
 import debugResetStyles from "./AgentDebugResetPanel.styles";
 import detailHeaderStyles from "./AgentDetailHeaderPanel.styles";
 import detailWorkspaceStyles from "./AgentDetailWorkspacePanel.styles";
@@ -453,9 +457,11 @@ describe("AgentsRoute layout contract", () => {
     expect(contextCompressionPanelSource).toContain("styles.compressionPolicyGrid");
     expect(contextCompressionPanelSource).toContain("styles.compressionPolicySubgrid");
     expect(contextCompressionPanelSource).toContain("styles.compressionPolicyFooter");
-    expect(styles.compressionPolicyGrid).toBeTruthy();
-    expect(styles.compressionPolicySubgrid).toBeTruthy();
-    expect(styles.compressionPolicyFooter).toBeTruthy();
+    expect(contextCompressionPanelSource).toContain('from "./AgentContextCompressionPanel.styles"');
+    expect(contextCompressionPanelSource).not.toContain("AgentsRoute.styles");
+    expect(contextCompressionStyles.compressionPolicyGrid).toBeTruthy();
+    expect(contextCompressionStyles.compressionPolicySubgrid).toBeTruthy();
+    expect(contextCompressionStyles.compressionPolicyFooter).toBeTruthy();
   });
 
   it("shows LLM names in model selectors instead of role-prefixed profile labels", () => {
@@ -482,10 +488,15 @@ describe("AgentsRoute layout contract", () => {
     expect(createPanelSource).toContain("value={selectedModelId}");
     expect(coreConfigPanelSource).toContain("value={selectedModelId}");
     expect(coreConfigPanelSource).toContain("styles.llmSlotGrid");
+    expect(coreConfigPanelSource).toContain('from "./AgentCoreConfigPanel.styles"');
+    expect(coreConfigPanelSource).not.toContain("AgentsRoute.styles");
+    expect(coreConfigPanelSource).toContain("function healthGuideToneClass");
     expect(coreConfigPanelSource).toContain("copy.llmSlotsHint");
     expect(routeSource).toContain("按 Agent 自己配置对话、心智模型、摘要、子 Agent 和视觉等 LLM 槽位");
     expect(routeSource).toContain("设置页只维护模型库资产");
     expect(createPanelSource).toContain("title={model.modelLabel || model.modelId}");
+    expect(createPanelSource).toContain('from "./AgentCreatePanel.styles"');
+    expect(createPanelSource).not.toContain("AgentsRoute.styles");
     expect(createPanelSource).toContain("{model.label}");
     expect(routeSource).toContain("title: model.modelLabel || model.modelId");
     expect(coreConfigPanelSource).toContain("title={model.title}");
@@ -660,7 +671,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("status: payload.draft.status");
     expect(routeSource).toContain("method: \"PATCH\"");
     expect(routeSource).toContain("queryKeys.agentConfigWorkspace()");
-    expect(styles.healthGuidePanel).toBeTruthy();
+    expect(coreConfigStyles.healthGuidePanel).toBeTruthy();
+    expect(coreConfigStyles.healthGuide_warning).toBeTruthy();
   });
 
   it("keeps Agent Center helper copy in hover text instead of permanent explanatory blocks", () => {
@@ -762,9 +774,9 @@ describe("AgentsRoute layout contract", () => {
     expect(personaProfileStyles.editorGrid).toBeTruthy();
     expect(personaProfileStyles.editorActions).toBeTruthy();
     expect(coreConfigPanelSource).toContain("styles.fieldWide");
+    expect(coreConfigStyles.fieldWide).toBeTruthy();
     expect(routeSource).toContain("updatePersonaMutation");
     expect(routeSource).not.toContain("recommendAgents");
-    expect(styles.fieldWide).toBeTruthy();
   });
 
   it("protects unsaved Agent drafts from workspace polling refreshes", () => {
@@ -1184,6 +1196,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("onCreate: createAgent");
     expect(createPanelSource).toContain("styles.createAgentPanel");
     expect(createPanelSource).toContain("styles.createAgentGrid");
+    expect(createPanelStyles.createAgentPanel).toBeTruthy();
+    expect(createPanelStyles.createAgentGrid).toBeTruthy();
     expect(routeSource).toContain("archiveAgentMutation");
     expect(routeSource).toContain("method: \"DELETE\"");
     expect(routeSource).toContain("window.confirm");
@@ -1376,6 +1390,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.bulkPurgeConfirm");
     expect(routeSource).toContain("copy.bulkPurgeResult");
     expect(bulkConfigPanelSource).toContain("copy.bulkEditMixed");
+    expect(bulkConfigPanelSource).toContain('from "./AgentBulkConfigPanel.styles"');
+    expect(bulkConfigPanelSource).not.toContain("AgentsRoute.styles");
     expect(routeSource).toContain('"/api/agents/bulk-prompt-template"');
     expect(routeSource).toContain('"/api/agents/bulk-config"');
     expect(routeSource).toContain("applyFields: bulkConfigApplyFields(bulkConfigApply)");
@@ -1413,6 +1429,8 @@ describe("AgentsRoute layout contract", () => {
     expect(bulkConfigPanelSource).toContain("onPress={onReset}");
     expect(bulkConfigPanelSource).toContain("styles.bulkSelectionList");
     expect(bulkConfigPanelSource).toContain("styles.bulkFieldHeader");
+    expect(bulkConfigStyles.bulkSelectionList).toBeTruthy();
+    expect(bulkConfigStyles.bulkFieldHeader).toBeTruthy();
     expect(bulkConfigPanelSource).toContain("<VNativeSelect");
     expect(bulkConfigPanelSource).toContain("<VNativeInput");
     expect(routeSource).toContain("bulkSelected: selectedBulkAgentIds.has(agent.agentId)");
