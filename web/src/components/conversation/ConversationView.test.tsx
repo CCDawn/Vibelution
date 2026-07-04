@@ -7,6 +7,7 @@ import { ChatNextStateSignalSummary, ConversationMessage, SessionTurnError } fro
 import styles from "./ConversationView.styles";
 import agentMessageRenderStateSource from "./agentMessageRenderState.ts?raw";
 import conversationViewStylesModuleSource from "./ConversationView.styles.ts?raw";
+import conversationOperationDetailsSource from "./ConversationOperationDetails.tsx?raw";
 import conversationStreamingResponseContentSource from "./ConversationStreamingResponseContent.tsx?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
 import { ConversationView } from "./ConversationView";
@@ -428,11 +429,15 @@ describe("ConversationView edit resend affordance", () => {
   });
 
   it("keeps tool detail expansion work off collapsed renders", () => {
-    expect(conversationViewSource).toContain("function DeferredOperationDetails");
-    expect(conversationViewSource).toContain("const deferredExpanded = useDeferredValue(expanded)");
-    expect(conversationViewSource).toContain("const detailRows = deferredExpanded ? buildDetailRows(operation) : []");
+    expect(conversationViewSource).toContain('from "./ConversationOperationDetails"');
+    expect(conversationViewSource).not.toContain("function DeferredOperationDetails");
+    expect(conversationViewSource).not.toContain("useDeferredValue");
+    expect(conversationOperationDetailsSource).toContain("export function DeferredOperationDetails");
+    expect(conversationOperationDetailsSource).toContain("const deferredExpanded = useDeferredValue(expanded)");
+    expect(conversationOperationDetailsSource).toContain("const detailRows = deferredExpanded ? buildDetailRows(operation) : []");
     expect(conversationViewSource).toContain("const canExpandDetails = hasOperationDetails(operation)");
     expect(conversationViewSource).toContain("<DeferredOperationDetails");
+    expect(conversationViewSource).toContain("classNames={OPERATION_DETAILS_CLASS_NAMES}");
     expect(conversationViewSource).toContain("buildDetailRows={operationDetailRows}");
     expect(conversationViewSource).not.toContain("const detailRows = detailsExpanded ? operationDetailRows(operation) : []");
   });
