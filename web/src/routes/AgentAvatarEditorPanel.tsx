@@ -2,7 +2,7 @@ import { useRef } from "react";
 
 import type { AgentAvatarOptionsPayload } from "../api/types";
 import { VButton, VNativeButton, VNativeInput } from "../components/vui";
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentAvatarEditorPanel.styles";
 
 export type AgentAvatarEditorPanelCopy = {
   editAvatar: string;

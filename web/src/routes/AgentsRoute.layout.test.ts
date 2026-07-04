@@ -8,7 +8,9 @@ import agentWorkspaceCacheSource from "./agentWorkspaceCache.ts?raw";
 import styles from "./AgentsRoute.styles";
 import stylesSource from "./AgentsRoute.styles.ts?raw";
 import archiveZoneStyles from "./AgentArchiveZonePanel.styles";
+import avatarEditorStyles from "./AgentAvatarEditorPanel.styles";
 import debugResetStyles from "./AgentDebugResetPanel.styles";
+import detailHeaderStyles from "./AgentDetailHeaderPanel.styles";
 import detailWorkspaceStyles from "./AgentDetailWorkspacePanel.styles";
 import emptySelectionStyles from "./AgentEmptySelectionPanel.styles";
 import activityHistoryStyles from "./AgentActivityHistoryPanel.styles";
@@ -315,6 +317,10 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("agent.avatarImageUrl");
     expect(routeSource).toContain("<AgentSelectedDetailContentPanel");
     expect(routeSource).toContain("<AgentDetailHeaderPanel");
+    expect(detailHeaderPanelSource).toContain('from "./AgentDetailHeaderPanel.styles"');
+    expect(detailHeaderPanelSource).not.toContain("AgentsRoute.styles");
+    expect(detailHeaderPanelSource).toContain("function roleToneClass");
+    expect(detailHeaderPanelSource).toContain("function issueToneClass");
     expect(selectedDetailContentPanelSource).toContain('activePane === "overview"');
     expect(selectedDetailContentPanelSource).toContain('activePane === "config"');
     expect(selectedDetailContentPanelSource).toContain('activePane === "activity"');
@@ -322,12 +328,16 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain('activePane === "config" ? (');
     expect(routeSource).not.toContain('activePane === "activity" ? (');
     expect(detailHeaderPanelSource).toContain("AgentAvatarEditorPanel");
+    expect(avatarEditorPanelSource).toContain('from "./AgentAvatarEditorPanel.styles"');
+    expect(avatarEditorPanelSource).not.toContain("AgentsRoute.styles");
     expect(avatarEditorPanelSource).toContain("styles.agentAvatarImage");
     expect(routeSource).toContain("/api/agents/avatar-options");
     expect(routeSource).toContain("/avatar-image");
     expect(routeSource).toContain("/avatar");
     expect(routeSource).not.toContain("styles.avatarEditorPanel");
     expect(avatarEditorPanelSource).toContain("styles.avatarEditorPanel");
+    expect(avatarEditorStyles.avatarEditorPanel).toBeTruthy();
+    expect(avatarEditorStyles.contextLine).toBeTruthy();
     expect(avatarEditorPanelSource).not.toContain("useQuery");
     expect(avatarEditorPanelSource).not.toContain("useMutation");
     expect(avatarEditorPanelSource).not.toContain("fetchJson");
@@ -722,7 +732,7 @@ describe("AgentsRoute layout contract", () => {
     expect(healthMaintenanceStyles.issueList).toBeTruthy();
     expect(healthMaintenanceStyles.issueItem_warning).toBeTruthy();
     expect(styles.healthCell).toBeTruthy();
-    expect(styles.detailHealthStatus).toBeTruthy();
+    expect(detailHeaderStyles.detailHealthStatus).toBeTruthy();
   });
 
   it("edits Agent persona profile from AgentDirectory without recommendation automation", () => {
@@ -1017,7 +1027,7 @@ describe("AgentsRoute layout contract", () => {
     expect(managementBriefStyles.nextActionList).toBeTruthy();
     expect(managementBriefStyles.nextActionButton).toBe("w-full");
     expect(overviewStyles.boundarySummaryGrid).toBeTruthy();
-    expect(styles.detailTabs).toBeTruthy();
+    expect(detailHeaderStyles.detailTabs).toBeTruthy();
   });
 
   it("includes work-session Agent setup copy for model instructions and workspace boundaries", () => {
