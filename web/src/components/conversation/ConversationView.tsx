@@ -75,6 +75,13 @@ import {
 import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
 import { projectStreamingMarkdownBlocks, type MarkdownBlock } from "./streamingMarkdown";
 import { safeConversationMarkdownUrl } from "./conversationMarkdownUrl";
+import {
+  addComparableConversationImageUrl,
+  comparableConversationImageUrl,
+  conversationImageDownloadName,
+  conversationImagePreviewUrl,
+  isLikelyConversationImageUrl,
+} from "./conversationImagePreview";
 import { shouldShowNextStateSignalInConversation } from "./conversationNextStateSignal";
 import {
   captureTimelineRowKeyAnchor,
@@ -579,8 +586,8 @@ export function ConversationView({
       if (!artifact) {
         continue;
       }
-      addComparableImageUrl(seenImageUrls, artifact.imageUrl);
-      addComparableImageUrl(seenImageUrls, artifact.downloadUrl);
+      addComparableConversationImageUrl(seenImageUrls, artifact.imageUrl);
+      addComparableConversationImageUrl(seenImageUrls, artifact.downloadUrl);
     }
     return urlsByMessageId;
   }, [displayMessages]);
@@ -662,17 +669,6 @@ export function ConversationView({
       return normalized;
     }
     return `${normalized.slice(0, maxLength - 1).trimEnd()}...`;
-  }
-
-  function addComparableImageUrl(target: Set<string>, url: string) {
-    const normalized = comparableImageUrl(url);
-    if (normalized) {
-      target.add(normalized);
-    }
-  }
-
-  function comparableImageUrl(url: string) {
-    return previewUrlForImage(url).trim();
   }
 
   function openImagePreview(image: PreviewImageState) {
@@ -2599,8 +2595,8 @@ export function ConversationView({
       if (!safeUrl) {
         return null;
       }
-      const previewUrl = previewUrlForImage(safeUrl);
-      if (duplicateImageUrls?.has(comparableImageUrl(safeUrl))) {
+      const previewUrl = conversationImagePreviewUrl(safeUrl);
+      if (duplicateImageUrls?.has(comparableConversationImageUrl(safeUrl))) {
         return null;
       }
       const imageAlt = block.alt || (lang === "zh" ? "生成图片" : "Generated image");
@@ -2615,7 +2611,7 @@ export function ConversationView({
                 src: previewUrl,
                 alt: imageAlt,
                 downloadUrl: safeUrl,
-                downloadName: downloadNameFromUrl(safeUrl) || true,
+                downloadName: conversationImageDownloadName(safeUrl) || true,
               })
             }
             aria-label={previewLabel}
@@ -2628,7 +2624,7 @@ export function ConversationView({
             <a
               className={styles.markdownImageLink}
               href={safeUrl}
-              download={downloadNameFromUrl(safeUrl) || true}
+              download={conversationImageDownloadName(safeUrl) || true}
             >
               {lang === "zh" ? "下载图片" : "Download image"}
             </a>
@@ -2734,7 +2730,9 @@ export function ConversationView({
               key={`link-${partIndex}-${match.index}`}
               className={styles.inlineLink}
               href={safeHref}
-              download={isLikelyImageUrl(safeHref) ? downloadNameFromUrl(safeHref) || true : undefined}
+              download={
+                isLikelyConversationImageUrl(safeHref) ? conversationImageDownloadName(safeHref) || true : undefined
+              }
             >
               {label}
             </a>,
@@ -2932,29 +2930,6 @@ export function ConversationView({
       .replace(/\|$/, "")
       .split("|")
       .map((cell) => cell.trim());
-  }
-
-  function isLikelyImageUrl(url: string) {
-    const normalized = String(url ?? "").toLowerCase();
-    return /\.(png|jpe?g|webp|gif)(?:[?#].*)?$/.test(normalized) || normalized.includes("/artifacts/image");
-  }
-
-  function previewUrlForImage(url: string) {
-    const trimmed = String(url ?? "").trim();
-    const [withoutHash, hash = ""] = trimmed.split("#", 2);
-    const [path, query = ""] = withoutHash.split("?", 2);
-    if (!query) {
-      return trimmed;
-    }
-    const kept = query
-      .split("&")
-      .filter((param) => !/^download=(1|true)$/i.test(param));
-    return `${path}${kept.length ? `?${kept.join("&")}` : ""}${hash ? `#${hash}` : ""}`;
-  }
-
-  function downloadNameFromUrl(url: string) {
-    const path = String(url ?? "").split(/[?#]/, 1)[0] ?? "";
-    return path.split("/").filter(Boolean).pop() ?? "";
   }
 
   return (
