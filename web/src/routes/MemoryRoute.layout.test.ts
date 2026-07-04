@@ -48,6 +48,8 @@ import userContentPanelSource from "./MemoryUserContentPanel.tsx?raw";
 import userContentPanelStyles from "./MemoryUserContentPanel.styles";
 import queryKeysSource from "../api/queryKeys.ts?raw";
 import apiTypesSource from "../api/types.ts?raw";
+import knowledgeItemRatingCardSource from "./MemoryKnowledgeItemRatingCard.tsx?raw";
+import knowledgeItemRatingCardStyles from "./MemoryKnowledgeItemRatingCard.styles";
 
 const memoryCssSource = [
   stylesModuleSource,
@@ -604,7 +606,16 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgeDetailPanelSource).toContain("copy.sourceChain");
     expect(knowledgeDetailPanelSource).toContain("copy.traceability");
     expect(knowledgeDetailPanelSource).toContain("styles.knowledgeItems");
-    expect(knowledgeDetailPanelSource).toContain("styles.ratingControls");
+    expect(knowledgeDetailPanelSource).toContain('from "./MemoryKnowledgeItemRatingCard"');
+    expect(knowledgeDetailPanelSource).toContain("<MemoryKnowledgeItemRatingCard");
+    expect(knowledgeDetailPanelSource).not.toContain("styles.ratingControls");
+    expect(knowledgeItemRatingCardSource).toContain("export function MemoryKnowledgeItemRatingCard");
+    expect(knowledgeItemRatingCardSource).toContain("styles.ratingControls");
+    expect(knowledgeItemRatingCardSource).toContain("styles.detailActionButton");
+    expect(knowledgeItemRatingCardSource).not.toContain("useQuery");
+    expect(knowledgeItemRatingCardSource).not.toContain("useMutation");
+    expect(knowledgeItemRatingCardSource).not.toContain("fetchJson");
+    expect(knowledgeItemRatingCardStyles.detailActionButton).toContain("min-h-[var(--vui-control-height-sm)]");
     expect(knowledgeDetailPanelSource).not.toContain("useQuery");
     expect(knowledgeDetailPanelSource).not.toContain("useMutation");
     expect(knowledgeDetailPanelSource).not.toContain("fetchJson");
@@ -677,7 +688,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("queryKeys.knowledgeRatingSuggestions(");
     expect(routeSource).toContain("/rating-suggestions/review-batch");
     expect(routeSource).toContain("/api/knowledge/permissions/audit?agentId=");
-    expect(knowledgeDetailPanelSource).toContain("copy.submitRatingSuggestion");
+    expect(knowledgeItemRatingCardSource).toContain("copy.submitRatingSuggestion");
     expect(routeSource).toContain("selectedRatingSuggestionIds");
     expect(routeSource).toContain("toggleVisibleRatingSuggestions");
     expect(routeSource).toContain('from "./MemoryKnowledgeReviewPanel"');
@@ -1181,7 +1192,7 @@ describe("MemoryRoute layout contract", () => {
   });
 
   it("routes Memory controls through VUI primitives", () => {
-    const memoryControlSource = [routeSource, knowledgeReviewPanelSource, knowledgeSourceGovernancePanelSource].join("\n");
+    const memoryControlSource = [routeSource, knowledgeReviewPanelSource, knowledgeSourceGovernancePanelSource, knowledgeItemRatingCardSource].join("\n");
 
     expect(routeSource).toContain('from "../components/vui"');
     expect(memoryControlSource).toContain("<VButton");
