@@ -668,38 +668,8 @@ const styles: Record<string, string> = {
     "workflowMeta min-w-0 flex flex-wrap items-center gap-1.5",
   workflowPanel:
     "workflowPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
-  workflowSourceCollectionAssignmentActive:
-    "workflowSourceCollectionAssignmentActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
-  workflowSourceCollectionAssignments:
-    "workflowSourceCollectionAssignments min-w-0",
   workflowSourceCollectionDetails:
     "workflowSourceCollectionDetails min-w-0",
-  workflowSourceCollectionForm:
-    "workflowSourceCollectionForm min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full !grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[5px]",
-  workflowSourceCollectionOutputForm:
-    "workflowSourceCollectionOutputForm min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full !grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[5px]",
-  workflowSourceCollectionOutputHeader:
-    "workflowSourceCollectionOutputHeader min-w-0 flex flex-wrap items-center gap-1.5",
-  workflowSourceCollectionPanel:
-    "workflowSourceCollectionPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
-  workflowSourceCollectionPlan:
-    "workflowSourceCollectionPlan min-w-0",
-  workflowSourceCollectionQueries:
-    "workflowSourceCollectionQueries min-w-0",
-  workflowSourceCollectionRuns:
-    "workflowSourceCollectionRuns min-w-0",
-  workflowSourceCollectionStats:
-    "workflowSourceCollectionStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
-  workflowSourceCollectionStorageActions:
-    "workflowSourceCollectionStorageActions min-w-0 !grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color:var(--source-workbench-card)] p-1.5 text-[var(--vui-font-xs)] max-[760px]:grid-cols-[1fr] [&>div:first-child]:min-w-0 [&>div:first-child_strong]:text-[var(--fg-primary)]",
-  workflowSourceCollectionStorageButtons:
-    "workflowSourceCollectionStorageButtons min-w-0 flex flex-wrap items-center justify-end gap-1.5 max-[760px]:justify-start [&_[data-vui=native-button]]:w-fit [&_[data-vui=native-button]]:max-w-full [&_[data-vui=native-button]]:min-h-[26px] [&_[data-vui=native-button]]:px-2",
-  workflowSourceCollectionStorageDetails:
-    "workflowSourceCollectionStorageDetails min-w-0 col-span-2 grid gap-1 max-[760px]:col-span-1 [&_summary]:inline-flex [&_summary]:w-fit [&_summary]:cursor-pointer [&_summary]:items-center [&_summary]:gap-1.5 [&_summary]:font-[780] [&_small]:block [&_small]:min-w-0 [&_small]:truncate [&_small]:text-[var(--fg-muted)]",
-  workflowSourceCollectionStorageError:
-    "workflowSourceCollectionStorageError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
-  workflowSourceCollectionWide:
-    "workflowSourceCollectionWide min-w-0",
   workflowSourceQualityStats:
     "workflowSourceQualityStats min-w-0 grid gap-2 !grid grid-cols-[repeat(5,minmax(72px,1fr))] gap-[5px]",
   workflowStageActive:
