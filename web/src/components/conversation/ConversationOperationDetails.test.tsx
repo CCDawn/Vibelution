@@ -4,6 +4,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import type { AgentMessageOperation } from "./agentMessageOperations";
+import {
+  buildOperationDetailRows,
+  readableOperationResult,
+} from "./ConversationOperationDetails";
 import conversationViewSource from "./ConversationView.tsx?raw";
 
 const classNames = {
@@ -24,6 +28,16 @@ const thoughtOperation: AgentMessageOperation = {
   resultPreview: "Detailed reasoning",
 };
 
+const detailLabels = {
+  rawName: "Raw name",
+  fullStatus: "Full status",
+  toolCallArguments: "Arguments",
+  thoughtProcess: "Thought",
+  toolCallResult: "Result",
+  toolCallError: "Error",
+  structuredResultFallback: "Structured result returned; expand details to inspect.",
+};
+
 describe("ConversationOperationDetails", () => {
   it("keeps deferred operation details out of the heavy ConversationView module", () => {
     expect(existsSync(new URL("./ConversationOperationDetails.tsx", import.meta.url))).toBe(true);
@@ -31,6 +45,10 @@ describe("ConversationOperationDetails", () => {
     expect(conversationViewSource).toContain("<DeferredOperationDetails");
     expect(conversationViewSource).not.toContain("function DeferredOperationDetails");
     expect(conversationViewSource).not.toContain("function operationDetailsKind");
+    expect(conversationViewSource).not.toContain("function operationDetailRows(");
+    expect(conversationViewSource).not.toContain("function readableOperationResult(");
+    expect(conversationViewSource).not.toContain("function structuredResultSummary(");
+    expect(conversationViewSource).not.toContain("function naturalRecordText(");
     expect(conversationViewSource).not.toContain("type OperationDetailKind");
   });
 
@@ -84,5 +102,86 @@ describe("ConversationOperationDetails", () => {
     expect(operationDetailsKind({ ...thoughtOperation, kind: "status" })).toBe("status");
     expect(operationDetailsKind({ ...thoughtOperation, kind: "tool" })).toBe("tool");
     expect(operationDetailsKind({ ...thoughtOperation, kind: "mental" })).toBe("tool");
+  });
+
+  it("builds localized operation detail rows from tool metadata", () => {
+    const rows = buildOperationDetailRows({
+      id: "tool-1",
+      kind: "tool",
+      label: "Custom tool",
+      rawLabel: "custom_tool",
+      status: "done",
+      summary: "Read project file",
+      durationSeconds: 1.2,
+      arguments: {
+        path: "README.md",
+        options: { encoding: "utf8" },
+      },
+      resultPreview: JSON.stringify({ summary: "Loaded README" }),
+      error: "partial warning",
+    }, detailLabels);
+
+    expect(rows).toEqual([
+      { label: "Raw name", value: "custom_tool" },
+      { label: "Arguments", value: "path: README.md\noptions: encoding: utf8" },
+      { label: "Result", value: "Loaded README" },
+      { label: "Error", value: "partial warning" },
+    ]);
+  });
+
+  it("builds status and thought rows with the same detail-row helper", () => {
+    expect(buildOperationDetailRows({
+      id: "status-1",
+      kind: "status",
+      label: "Status",
+      rawLabel: "runtime_status",
+      status: "running",
+      summary: "Working",
+      durationSeconds: null,
+      resultPreview: "Still running",
+    }, detailLabels)).toEqual([
+      { label: "Full status", value: "Still running" },
+    ]);
+
+    expect(buildOperationDetailRows(thoughtOperation, detailLabels)).toEqual([
+      { label: "Thought", value: "Detailed reasoning" },
+    ]);
+  });
+
+  it("summarizes structured operation results for compact ReAct previews", () => {
+    expect(readableOperationResult({
+      id: "tool-2",
+      kind: "tool",
+      label: "tool",
+      rawLabel: "tool",
+      status: "done",
+      summary: "",
+      durationSeconds: null,
+      resultPreview: JSON.stringify({ message: "Created file" }),
+    }, detailLabels.structuredResultFallback)).toBe("Created file");
+
+    expect(readableOperationResult({
+      id: "tool-3",
+      kind: "tool",
+      label: "tool",
+      rawLabel: "tool",
+      status: "done",
+      summary: "",
+      durationSeconds: null,
+      resultPreview: JSON.stringify({ data: { id: 1 } }),
+    }, detailLabels.structuredResultFallback)).toBe(detailLabels.structuredResultFallback);
+  });
+
+  it("keeps long command-like tool output in expanded details only", () => {
+    expect(readableOperationResult({
+      id: "tool-4",
+      kind: "tool",
+      label: "cli_tool",
+      rawLabel: "cli_tool",
+      status: "done",
+      summary: "",
+      durationSeconds: null,
+      resultPreview: ["line 1", "line 2", "line 3", "line 4"].join("\n"),
+    }, detailLabels.structuredResultFallback)).toBe("");
   });
 });
