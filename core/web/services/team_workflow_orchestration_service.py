@@ -1379,6 +1379,10 @@ def writeback_source_collection_stage_session_task(
         task,
         writeback,
     )
+    if status == "completed" and _source_collection_count(materialized_content_extraction.get("missingEvidenceAnchorCount")):
+        status = "needs_review"
+        writeback["status"] = status
+        writeback["evidenceReviewRequiredReason"] = "missing_evidence_anchor"
     closure_summary = _source_collection_stage_writeback_closure_summary(
         task,
         writeback,
@@ -3351,11 +3355,12 @@ def _source_collection_stage_writeback_content_extraction_summary(
     extracted: list[dict[str, Any]] | None = None,
     skipped: list[dict[str, Any]] | None = None,
     failed: list[dict[str, Any]] | None = None,
+    evidence_ledgers: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     extracted_items = [item for item in list(extracted or []) if isinstance(item, dict)]
     skipped_items = [item for item in list(skipped or []) if isinstance(item, dict)]
     failed_items = [item for item in list(failed or []) if isinstance(item, dict)]
-    return {
+    summary = {
         "status": status,
         "extractedCandidateCount": len(extracted_items),
         "extractedCandidateIds": [
@@ -3368,6 +3373,25 @@ def _source_collection_stage_writeback_content_extraction_summary(
         "skipped": skipped_items[:24],
         "failed": failed_items[:24],
     }
+    if evidence_ledgers is not None:
+        ledger_items = [item for item in list(evidence_ledgers or []) if isinstance(item, dict)]
+        summary.update(
+            {
+                "evidenceLedgerCandidateCount": len(ledger_items),
+                "evidenceReadyCandidateCount": sum(
+                    1 for item in ledger_items if _trim_text(item.get("evidenceStatus"), max_length=80) == "evidence_ready"
+                ),
+                "missingEvidenceAnchorCount": sum(
+                    1 for item in ledger_items if _trim_text(item.get("evidenceStatus"), max_length=80) == "missing_evidence_anchor"
+                ),
+                "evidenceLedgerCandidateIds": [
+                    _trim_text(item.get("candidateId"), max_length=160)
+                    for item in ledger_items
+                    if _trim_text(item.get("candidateId"), max_length=160)
+                ][:120],
+            }
+        )
+    return summary
 
 
 def _source_collection_stage_writeback_record_extraction_decision(extraction: dict[str, Any]) -> str:
@@ -3484,6 +3508,159 @@ def _source_collection_record_extraction_kept_status(extraction: dict[str, Any])
     return "kept"
 
 
+def _source_collection_extraction_key_finding_texts(extraction: dict[str, Any]) -> list[str]:
+    raw_findings = extraction.get("keyFindings") or extraction.get("key_findings") or extraction.get("findings")
+    if not isinstance(raw_findings, list):
+        return []
+    findings: list[str] = []
+    for item in raw_findings[:12]:
+        if isinstance(item, dict):
+            text = _trim_text(
+                item.get("finding")
+                or item.get("claim")
+                or item.get("summary")
+                or item.get("text"),
+                max_length=240,
+            )
+        else:
+            text = _trim_text(item, max_length=240)
+        if text and text not in findings:
+            findings.append(text)
+    return findings
+
+
+def _source_collection_extraction_claim_items(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    claims: list[dict[str, str]] = []
+    for item in value[:24]:
+        if isinstance(item, dict):
+            claim = _trim_text(item.get("claim") or item.get("finding") or item.get("summary") or item.get("text"), max_length=600)
+            normalized = {
+                "claim": claim,
+                "sourceRef": _trim_text(item.get("sourceRef") or item.get("sourceRefId") or item.get("sourceId"), max_length=240),
+                "page": _trim_text(item.get("page") or item.get("pageAnchor") or item.get("pageRange"), max_length=120),
+                "citation": _trim_text(item.get("citation") or item.get("citationAnchor"), max_length=300),
+                "evidenceRef": _trim_text(item.get("evidenceRef") or item.get("evidenceRefId"), max_length=240),
+                "supportLevel": _trim_text(item.get("supportLevel") or item.get("support") or item.get("confidence"), max_length=80),
+            }
+        else:
+            normalized = {
+                "claim": _trim_text(item, max_length=600),
+                "sourceRef": "",
+                "page": "",
+                "citation": "",
+                "evidenceRef": "",
+                "supportLevel": "",
+            }
+        compact = {key: item_value for key, item_value in normalized.items() if item_value}
+        if compact:
+            claims.append(compact)
+    return claims
+
+
+def _source_collection_extraction_key_finding_items(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    findings: list[dict[str, str]] = []
+    for item in value[:24]:
+        if isinstance(item, dict):
+            finding = _trim_text(item.get("finding") or item.get("claim") or item.get("summary") or item.get("text"), max_length=600)
+            normalized = {
+                "finding": finding,
+                "sourceRef": _trim_text(item.get("sourceRef") or item.get("sourceRefId") or item.get("sourceId"), max_length=240),
+                "page": _trim_text(item.get("page") or item.get("pageAnchor") or item.get("pageRange"), max_length=120),
+                "citation": _trim_text(item.get("citation") or item.get("citationAnchor"), max_length=300),
+                "evidenceRef": _trim_text(item.get("evidenceRef") or item.get("evidenceRefId"), max_length=240),
+                "supportLevel": _trim_text(item.get("supportLevel") or item.get("support") or item.get("confidence"), max_length=80),
+            }
+        else:
+            normalized = {
+                "finding": _trim_text(item, max_length=600),
+                "sourceRef": "",
+                "page": "",
+                "citation": "",
+                "evidenceRef": "",
+                "supportLevel": "",
+            }
+        compact = {key: item_value for key, item_value in normalized.items() if item_value}
+        if compact:
+            findings.append(compact)
+    return findings
+
+
+def _source_collection_extraction_citation_items(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    citations: list[dict[str, str]] = []
+    for item in value[:24]:
+        if isinstance(item, dict):
+            normalized = {
+                "sourceRef": _trim_text(item.get("sourceRef") or item.get("sourceRefId") or item.get("sourceId"), max_length=240),
+                "page": _trim_text(item.get("page") or item.get("pageAnchor") or item.get("pageRange"), max_length=120),
+                "citation": _trim_text(item.get("citation") or item.get("citationAnchor") or item.get("text"), max_length=300),
+                "evidenceRef": _trim_text(item.get("evidenceRef") or item.get("evidenceRefId"), max_length=240),
+            }
+        else:
+            normalized = {
+                "sourceRef": "",
+                "page": "",
+                "citation": _trim_text(item, max_length=300),
+                "evidenceRef": "",
+            }
+        compact = {key: item_value for key, item_value in normalized.items() if item_value}
+        if compact:
+            citations.append(compact)
+    return citations
+
+
+def _source_collection_extraction_has_evidence_anchor(ledger: dict[str, Any]) -> bool:
+    if _normalize_ref_list(ledger.get("evidenceRefs"), max_items=24):
+        return True
+    for key in ("claims", "keyFindings", "citations"):
+        for item in list(ledger.get(key) or []):
+            if isinstance(item, dict) and _has_citation_anchor(item):
+                return True
+    return False
+
+
+def _source_collection_extraction_evidence_ledger(
+    extraction: dict[str, Any],
+    *,
+    fallback_evidence_refs: Any = None,
+) -> dict[str, Any]:
+    key_findings_value = extraction.get("keyFindings") or extraction.get("key_findings") or extraction.get("findings")
+    evidence_refs = _normalize_ref_list(
+        extraction.get("evidenceRefs") or extraction.get("evidence_refs") or fallback_evidence_refs,
+        max_items=24,
+    )
+    ledger = {
+        "sourceRefs": _normalize_ref_list(extraction.get("sourceRefs") or extraction.get("source_refs"), max_items=24),
+        "evidenceRefs": evidence_refs,
+        "claims": _source_collection_extraction_claim_items(extraction.get("claims")),
+        "keyFindings": _source_collection_extraction_key_finding_items(key_findings_value),
+        "citations": _source_collection_extraction_citation_items(extraction.get("citations")),
+        "limitations": _normalize_text_list(
+            extraction.get("limitations") or extraction.get("defects"),
+            max_items=12,
+            max_length=240,
+        ),
+        "uncertainty": _normalize_text_list(extraction.get("uncertainty"), max_items=12, max_length=240),
+        "riskFlags": _normalize_text_list(
+            extraction.get("riskFlags") or extraction.get("risk_flags") or extraction.get("risks"),
+            max_items=12,
+            max_length=120,
+        ),
+        "supportLevel": _trim_text(extraction.get("supportLevel") or extraction.get("support") or extraction.get("confidence"), max_length=80),
+        "nextAction": _trim_text(extraction.get("nextAction") or extraction.get("next_action") or extraction.get("followUpSuggestion"), max_length=240),
+    }
+    compact = {key: value for key, value in ledger.items() if value not in ("", [], {})}
+    if not compact:
+        return {}
+    compact["status"] = "evidence_ready" if _source_collection_extraction_has_evidence_anchor(compact) else "missing_evidence_anchor"
+    return compact
+
+
 def _materialize_source_collection_stage_writeback_content_extraction(
     team_id: str,
     run_id: str,
@@ -3515,6 +3692,7 @@ def _materialize_source_collection_stage_writeback_content_extraction(
     )
     extracted: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
+    evidence_ledgers: list[dict[str, Any]] = []
     seen: set[str] = set()
     now = utc_now_iso()
     with _WORKFLOW_LOCK:
@@ -3552,7 +3730,8 @@ def _materialize_source_collection_stage_writeback_content_extraction(
                     or extraction.get("reason"),
                     max_length=2000,
                 ),
-                "keyFindings": _normalize_text_list(
+                "keyFindings": _source_collection_extraction_key_finding_texts(extraction)
+                or _normalize_text_list(
                     extraction.get("keyFindings") or extraction.get("key_findings") or extraction.get("findings"),
                     max_items=12,
                     max_length=240,
@@ -3572,6 +3751,14 @@ def _materialize_source_collection_stage_writeback_content_extraction(
                 "recordedByAgent": recorded_by_agent,
                 "recordedAt": now,
             }
+            evidence_ledger = _source_collection_extraction_evidence_ledger(
+                extraction,
+                fallback_evidence_refs=writeback.get("evidenceRefs"),
+            )
+            if evidence_ledger:
+                normalized_extraction["evidenceLedger"] = evidence_ledger
+                normalized_extraction["evidenceStatus"] = evidence_ledger["status"]
+                evidence_ledgers.append({"candidateId": candidate_id, "evidenceStatus": evidence_ledger["status"]})
             metadata["contentExtraction"] = normalized_extraction
             candidate["metadata"] = metadata
             candidate["updatedAt"] = now
@@ -3584,6 +3771,7 @@ def _materialize_source_collection_stage_writeback_content_extraction(
         status="completed" if extracted else "no_valid_candidate_extractions",
         extracted=extracted,
         skipped=skipped,
+        evidence_ledgers=evidence_ledgers,
     )
     if extracted or skipped:
         _record_workflow_event(
@@ -3630,7 +3818,7 @@ def _source_collection_record_extraction_metadata(
         max_length=600,
     )
     decision = _source_collection_stage_writeback_record_extraction_decision(extraction)
-    return {
+    content_extraction = {
         "status": _source_collection_record_extraction_kept_status(extraction),
         "decision": decision,
         "valueSummary": value_summary,
@@ -3644,7 +3832,8 @@ def _source_collection_record_extraction_metadata(
             or extraction.get("reason"),
             max_length=2000,
         ),
-        "keyFindings": _normalize_text_list(
+        "keyFindings": _source_collection_extraction_key_finding_texts(extraction)
+        or _normalize_text_list(
             extraction.get("keyFindings") or extraction.get("key_findings") or extraction.get("findings"),
             max_items=12,
             max_length=240,
@@ -3665,6 +3854,11 @@ def _source_collection_record_extraction_metadata(
         "recordedByAgent": recorded_by_agent,
         "recordedAt": utc_now_iso(),
     }
+    evidence_ledger = _source_collection_extraction_evidence_ledger(extraction)
+    if evidence_ledger:
+        content_extraction["evidenceLedger"] = evidence_ledger
+        content_extraction["evidenceStatus"] = evidence_ledger["status"]
+    return content_extraction
 
 
 def _update_source_candidate_content_extraction(
