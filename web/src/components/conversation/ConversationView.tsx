@@ -19,7 +19,7 @@ import {
   TerminalSquare,
   Wrench,
 } from "lucide-react";
-import React, { DragEvent, ReactNode, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { DragEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
   ConversationMessage,
@@ -38,6 +38,11 @@ import {
   type ConversationImagePreviewRequest,
 } from "./ConversationImagePreviewDialog";
 import { ConversationStreamingResponseContent } from "./ConversationStreamingResponseContent";
+import {
+  DeferredOperationDetails,
+  operationDetailsKind,
+  type OperationDetailRow,
+} from "./ConversationOperationDetails";
 import { AgentMessageTurnView } from "./AgentMessageTurnView";
 import { AgentResponseSectionView } from "./AgentResponseSectionView";
 import { AgentUserContentSectionView } from "./AgentUserContentSectionView";
@@ -141,58 +146,13 @@ const RESPONSE_PARSE_CACHE_LIMIT = 80;
 const MARKDOWN_PARSE_CACHE_LIMIT = 160;
 const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
 const EMPTY_SECTION_EXPANSION: Record<string, boolean> = {};
-
-type OperationDetailKind = "thought" | "status" | "tool";
-type OperationDetailRow = { label: string; value: string };
-
-function operationDetailsKind(operation: AgentMessageOperation): OperationDetailKind {
-  if (operation.kind === "thought") {
-    return "thought";
-  }
-  if (operation.kind === "status") {
-    return "status";
-  }
-  return "tool";
-}
-
-function DeferredOperationDetails({
-  operation,
-  expanded,
-  detailsId,
-  kind,
-  buildDetailRows,
-  className,
-}: {
-  operation: AgentMessageOperation;
-  expanded: boolean;
-  detailsId: string;
-  kind: OperationDetailKind;
-  buildDetailRows: (operation: AgentMessageOperation) => OperationDetailRow[];
-  className?: string;
-}) {
-  const deferredExpanded = useDeferredValue(expanded);
-  const detailRows = deferredExpanded ? buildDetailRows(operation) : [];
-  if (!deferredExpanded) {
-    return null;
-  }
-  return (
-    <div
-      id={detailsId}
-      className={
-        kind === "thought"
-          ? `${styles.operationDetails} ${styles.operationDetails_thought} ${className || ""}`.trim()
-          : `${styles.operationDetails} ${className || ""}`.trim()
-      }
-    >
-      {detailRows.map((row) => (
-        <div key={`${operation.id}-${row.label}`} className={styles.operationDetailRow}>
-          <span className={styles.operationDetailLabel}>{row.label}</span>
-          <pre className={styles.operationDetailValue}>{row.value}</pre>
-        </div>
-      ))}
-    </div>
-  );
-}
+const OPERATION_DETAILS_CLASS_NAMES = {
+  operationDetails: styles.operationDetails,
+  operationDetailsThought: styles.operationDetails_thought,
+  operationDetailRow: styles.operationDetailRow,
+  operationDetailLabel: styles.operationDetailLabel,
+  operationDetailValue: styles.operationDetailValue,
+};
 
 function renderTurnAvatarContent(resolution: TurnAvatarContent) {
   if ("icon" in resolution) {
@@ -1764,6 +1724,7 @@ export function ConversationView({
                   expanded={detailsExpanded}
                   detailsId={detailsId}
                   kind={operationDetailsKind(operation)}
+                  classNames={OPERATION_DETAILS_CLASS_NAMES}
                   buildDetailRows={operationDetailRows}
                 />
               ) : null}
@@ -1989,6 +1950,7 @@ export function ConversationView({
             expanded={detailsExpanded}
             detailsId={detailsId}
             kind={operationDetailsKind(operation)}
+            classNames={OPERATION_DETAILS_CLASS_NAMES}
             buildDetailRows={operationDetailRows}
           />
         ) : null}
@@ -2044,6 +2006,7 @@ export function ConversationView({
                     expanded={detailsExpanded}
                     detailsId={detailsId}
                     kind="tool"
+                    classNames={OPERATION_DETAILS_CLASS_NAMES}
                     buildDetailRows={operationDetailRows}
                   />
                 ) : null}
