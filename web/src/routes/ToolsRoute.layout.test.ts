@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import styles from "./ToolsRoute.styles";
+import agentScopeStyles from "./ToolsRouteAgentScopePanel.styles";
 import stylesModuleSource from "./ToolsRoute.styles.ts?raw";
+import agentScopeStylesModuleSource from "./ToolsRouteAgentScopePanel.styles.ts?raw";
 import routeSource from "./ToolsRoute.tsx?raw";
 import agentScopePanelSource from "./ToolsRouteAgentScopePanel.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
@@ -9,6 +11,10 @@ import routerSource from "../app/router.tsx?raw";
 const stylesSource = [
   stylesModuleSource,
   ...Object.keys(styles).map((key) => `.${key}`),
+].join("\n");
+const agentScopeStylesSource = [
+  agentScopeStylesModuleSource,
+  ...Object.keys(agentScopeStyles).map((key) => `.${key}`),
 ].join("\n");
 
 describe("ToolsRoute layout contract", () => {
@@ -30,6 +36,8 @@ describe("ToolsRoute layout contract", () => {
     expect(routerSource).not.toContain('path: "tools"');
     expect(routerSource).not.toContain('to="/agents/tools" replace');
     expect(routeSource).toContain("<ToolsRouteAgentScopePanel");
+    expect(agentScopePanelSource).toContain('from "./ToolsRouteAgentScopePanel.styles"');
+    expect(agentScopePanelSource).not.toContain('from "./ToolsRoute.styles"');
     expect(agentScopePanelSource).toContain('<AgentManagementNav active="tools" className={styles.managementNav} />');
     const controlStrip = agentScopePanelSource.slice(agentScopePanelSource.indexOf("<div className={styles.controlStrip}>"));
     expect(controlStrip.indexOf('<AgentManagementNav active="tools" className={styles.managementNav} />')).toBeLessThan(
@@ -101,6 +109,8 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("toolsQuery.data?.agentScopes");
     expect(routeSource).toContain("toolScopeOptions");
     expect(agentScopePanelSource).toContain("styles.agentScopeBar");
+    expect(agentScopeStylesSource).toContain(".agentScopeBar");
+    expect(agentScopeStyles.agentScopeBar).toContain("grid-cols-[minmax(170px,1fr)_minmax(180px,230px)");
     expect(routeSource).toContain("scopeStateForTool(tool, activeAgentScopeId)");
     expect(routeSource).toContain("JSON.stringify({ args: {}, agentScope: payload.agentScopeId, agentId: payload.agentId })");
     expect(routeSource).toContain("agentId: activePolicyAgent.agentId");

@@ -1,7 +1,7 @@
 import type { AgentInstance } from "../api/types";
 import { VNativeSelect } from "../components/vui";
 import { AgentManagementNav } from "./AgentManagementNav";
-import styles from "./ToolsRoute.styles";
+import styles from "./ToolsRouteAgentScopePanel.styles";
 
 export type ToolsRouteSummaryMetric = {
   id: string;
