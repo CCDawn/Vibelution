@@ -19,8 +19,6 @@ const routeVisualUtilityPattern =
 const localVisualClassConstantPattern = /const\s+[A-Za-z0-9_]+Class\s*=/;
 const localStylesObjectPattern = /const\s+styles\s*=/;
 const productSharedParentStyleConsumers = [
-  "app/AppShellStatusGuidePanel.tsx",
-  "app/AppShellUtilityMenu.tsx",
   "components/conversation/AgentContextSectionsView.tsx",
   "components/conversation/AgentMessageTurnView.tsx",
   "components/conversation/AgentResponseSectionView.tsx",

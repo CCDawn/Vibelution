@@ -11,7 +11,7 @@ import type { Language, ShellTranslationKey } from "../i18n/shellDictionary";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
 import { resolvePollingInterval } from "./pollingPolicy";
 import type { SystemStatusTone } from "./systemStatus";
-import styles from "./AppShell.styles";
+import styles from "./AppShellUtilityMenu.styles";
 
 export type AppShellUtilityMenuProps = {
   lang: Language;
