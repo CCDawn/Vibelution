@@ -30,7 +30,7 @@ import { VButton, VIconButton, VNativeInput } from "../components/vui";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { TranslationKey } from "../i18n/dictionary";
 import { classifyRuntimeSceneEvent, type LogSeverityFilter, matchesSeverityFilter } from "../logs/logSeverity";
-import styles from "./LogsRoute.styles";
+import styles from "./RuntimeScenesPane.styles";
 import { runtimeScenePackageFiles, runtimeScenePackageSections } from "./runtimeScenePackageSections";
 
 type ActionNotice = {
