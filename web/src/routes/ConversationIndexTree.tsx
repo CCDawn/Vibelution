@@ -17,7 +17,7 @@ import {
   GroupConversationIndexItem,
   TeamConversationIndexItem,
 } from "./GroupSessionIndexItems";
-import styles from "./ChatCodingRoute.styles";
+import styles from "./ConversationIndexTree.styles";
 
 type ConversationIndexTreeProps = {
   activeGroupRoomId: string;
