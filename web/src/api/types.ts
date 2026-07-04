@@ -260,7 +260,7 @@ export interface UserMarkdownSpaceSummary {
   indexRoot: string;
   pageCount: number;
   updatedAt: string;
-  userId?: string;
+  userId: string;
   sourceRef?: Record<string, unknown>;
   counts?: UserMarkdownSpaceCounts;
 }
@@ -372,6 +372,7 @@ export interface UserMarkdownSearchResult {
 export interface UserMarkdownSpaceSearchPayload {
   ok: boolean;
   summary: { resultCount: number };
+  spaces: UserMarkdownSpaceSummary[];
   results: UserMarkdownSearchResult[];
 }
 

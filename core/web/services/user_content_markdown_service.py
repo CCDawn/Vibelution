@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 from pathlib import Path
@@ -89,9 +90,12 @@ def import_markdown_space(
 
     for row in scan["pageRows"]:
         relative_path = row["relativePath"]
+        source_file = _validated_source_file(row["sourcePath"], resolved_source)
+        if source_file is None:
+            continue
         target_path = pages_root / relative_path
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(row["sourcePath"], target_path)
+        shutil.copy2(source_file, target_path)
 
         page = _page_payload(relative_path, row, indexed_at=indexed_at)
         pages.append(page)
@@ -279,11 +283,13 @@ def search_user_markdown_spaces(
     normalized_query = str(query or "").strip()
     terms = [item for item in re.split(r"\s+", normalized_query.lower()) if item]
     results = []
+    space_summaries: dict[str, dict[str, Any]] = {}
 
     for manifest in _iter_active_space_manifests(normalized_user_id):
         current_space_id = str(manifest.get("spaceId") or "").strip()
         if space_id and current_space_id != str(space_id).strip():
             continue
+        space_summaries[current_space_id] = _space_summary(manifest)
         page_index = _read_json(Path(str(manifest.get("indexRoot") or "")) / "page_index.json")
         for page in list(page_index.get("pages") or []):
             page_id_value = str(page.get("pageId") or "").strip()
@@ -333,6 +339,11 @@ def search_user_markdown_spaces(
         next_result = dict(result)
         next_result["rank"] = rank
         selected.append(next_result)
+    selected_space_ids = []
+    for result in selected:
+        result_space_id = str(result.get("spaceId") or "")
+        if result_space_id and result_space_id not in selected_space_ids:
+            selected_space_ids.append(result_space_id)
 
     return {
         "ok": True,
@@ -340,6 +351,7 @@ def search_user_markdown_spaces(
         "userId": normalized_user_id,
         "query": normalized_query,
         "results": selected,
+        "spaces": [space_summaries[space_id] for space_id in selected_space_ids if space_id in space_summaries],
         "summary": {"resultCount": len(selected)},
         "updatedAt": utc_now_iso(),
     }
@@ -373,15 +385,21 @@ def _scan_markdown_tree(source_root: Path) -> dict[str, Any]:
     ignored_files = []
     seen_count = 0
 
-    for path in sorted(source_root.rglob("*")):
-        if any(part in SKIPPED_DIRS for part in path.parts[len(source_root.parts) :]):
+    for item in _walk_source_tree_no_follow(source_root):
+        path = item["path"]
+        relative_path = item["relativePath"]
+        item_kind = item["kind"]
+        if item_kind in {"symlink", "symlink_directory", "junction_directory"}:
+            ignored_files.append({"relativePath": relative_path, "reason": item_kind})
             continue
-        if path.is_dir():
+        if item_kind != "file":
             continue
-        relative_path = path.relative_to(source_root).as_posix()
         suffix = path.suffix.lower()
         if suffix not in MARKDOWN_SUFFIXES:
             ignored_files.append({"relativePath": relative_path, "reason": "non_markdown"})
+            continue
+        if _validated_source_file(path, source_root) is None:
+            ignored_files.append({"relativePath": relative_path, "reason": "outside_source"})
             continue
         if path.stat().st_size > MAX_FILE_BYTES:
             ignored_files.append({"relativePath": relative_path, "reason": "file_too_large"})
@@ -427,6 +445,64 @@ def _scan_markdown_tree(source_root: Path) -> dict[str, Any]:
         "pages": pages,
         "ignoredFiles": ignored_files,
     }
+
+
+def _walk_source_tree_no_follow(source_root: Path) -> list[dict[str, Any]]:
+    root = source_root.resolve()
+    pending = [root]
+    rows: list[dict[str, Any]] = []
+    while pending:
+        current = pending.pop()
+        try:
+            with os.scandir(current) as scan_entries:
+                entries = sorted(scan_entries, key=lambda entry: entry.name.lower())
+        except OSError:
+            continue
+        for entry in entries:
+            path = Path(entry.path)
+            relative_path = path.relative_to(root).as_posix()
+            if entry.is_symlink():
+                reason = "symlink_directory" if entry.is_dir(follow_symlinks=True) else "symlink"
+                rows.append({"path": path, "relativePath": relative_path, "kind": reason})
+                continue
+            if _is_junction(path):
+                rows.append({"path": path, "relativePath": relative_path, "kind": "junction_directory"})
+                continue
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    if entry.name in SKIPPED_DIRS:
+                        continue
+                    pending.append(path)
+                    continue
+                if entry.is_file(follow_symlinks=False):
+                    rows.append({"path": path, "relativePath": relative_path, "kind": "file"})
+            except OSError:
+                continue
+    rows.sort(key=lambda item: str(item["relativePath"]).lower())
+    return rows
+
+
+def _validated_source_file(path: Path, source_root: Path) -> Path | None:
+    try:
+        if path.is_symlink() or not path.is_file():
+            return None
+        resolved_file = path.resolve()
+        resolved_root = source_root.resolve()
+    except OSError:
+        return None
+    if not _is_relative_to(resolved_file, resolved_root):
+        return None
+    return resolved_file
+
+
+def _is_junction(path: Path) -> bool:
+    is_junction = getattr(path, "is_junction", None)
+    if not callable(is_junction):
+        return False
+    try:
+        return bool(is_junction())
+    except OSError:
+        return False
 
 
 def _parse_markdown_metadata(content: str) -> dict[str, Any]:
@@ -518,13 +594,42 @@ def _sha256_for_directory(page_rows: list[dict[str, Any]]) -> str:
 
 
 def _space_summary(manifest: dict[str, Any]) -> dict[str, Any]:
+    page_count = int(manifest.get("pageCount") or 0)
     return {
         "spaceId": str(manifest.get("spaceId") or "").strip(),
         "spaceName": str(manifest.get("spaceName") or "").strip(),
+        "userId": str(manifest.get("userId") or "default").strip() or "default",
         "canonicalPagesRoot": str(manifest.get("canonicalPagesRoot") or "").strip(),
         "indexRoot": str(manifest.get("indexRoot") or "").strip(),
-        "pageCount": int(manifest.get("pageCount") or 0),
+        "sourceRef": _bounded_source_ref(manifest.get("sourceRef")),
+        "counts": _space_counts(manifest, page_count=page_count),
+        "pageCount": page_count,
         "updatedAt": str(manifest.get("updatedAt") or "").strip(),
+    }
+
+
+def _bounded_source_ref(source_ref: Any) -> dict[str, str]:
+    if not isinstance(source_ref, dict):
+        return {}
+    bounded = {}
+    path = str(source_ref.get("path") or "").strip()
+    sha256 = str(source_ref.get("sha256") or "").strip()
+    if path:
+        bounded["path"] = path[:2000]
+    if sha256:
+        bounded["sha256"] = sha256[:160]
+    return bounded
+
+
+def _space_counts(manifest: dict[str, Any], *, page_count: int) -> dict[str, int]:
+    summary = manifest.get("summary")
+    summary = summary if isinstance(summary, dict) else {}
+    return {
+        "markdownFileCount": int(summary.get("markdownFileCount") or page_count),
+        "pageCount": page_count,
+        "linkCount": int(summary.get("linkCount") or summary.get("wikilinkCount") or 0),
+        "taskCount": int(summary.get("taskCount") or 0),
+        "tagCount": int(summary.get("tagCount") or 0),
     }
 
 
