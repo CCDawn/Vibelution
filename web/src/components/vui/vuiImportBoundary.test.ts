@@ -19,12 +19,7 @@ const routeVisualUtilityPattern =
 const localVisualClassConstantPattern = /const\s+[A-Za-z0-9_]+Class\s*=/;
 const localStylesObjectPattern = /const\s+styles\s*=/;
 const parentRouteStyleImportPattern = /from\s+["']\.\/([A-Za-z0-9]+Route)\.styles["']/g;
-const productSharedParentStyleConsumers = [
-  "routes/AgentBulkOperationsPanel.tsx",
-  "routes/AgentListStatePanel.tsx",
-  "routes/RuntimeScenesPane.tsx",
-  "routes/chat/CliAgentRunTerminalPanel.tsx",
-] as const;
+const productSharedParentStyleConsumers = [] as const;
 
 function walkFiles(dir: string): string[] {
   const entries = readdirSync(dir);
