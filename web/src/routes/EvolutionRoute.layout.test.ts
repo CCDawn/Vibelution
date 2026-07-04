@@ -6,6 +6,9 @@ import routeSource from "./EvolutionRoute.tsx?raw";
 import activeRunMonitorPanelSource from "./EvolutionActiveRunMonitorPanel.tsx?raw";
 import activeRunMonitorStyles from "./EvolutionActiveRunMonitorPanel.styles";
 import activeRunMonitorStylesSource from "./EvolutionActiveRunMonitorPanel.styles.ts?raw";
+import runRecordsPanelSource from "./EvolutionRunRecordsPanel.tsx?raw";
+import runRecordsPanelStyles from "./EvolutionRunRecordsPanel.styles";
+import runRecordsPanelStylesSource from "./EvolutionRunRecordsPanel.styles.ts?raw";
 import routeStyles from "./EvolutionRoute.styles";
 import stylesSource from "./EvolutionRoute.styles.ts?raw";
 
@@ -164,14 +167,43 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("decision\\s*=\\s*REJECT");
     expect(routeSource).toContain("agent_judgment\\s+fail");
     expect(routeSource).toContain("风险 gate");
-    expect(routeSource).toContain('title={run.nextAction || ""}');
-    expect(routeSource).toContain('title={selectedRun.outcomeSemantics.runtimeExplanation}');
-    expect(routeSource).toContain('title={selectedRun.riskReasons.join(" / ")}');
+    expect(runRecordsPanelSource).toContain('title={run.nextAction || ""}');
+    expect(runRecordsPanelSource).toContain('title={selectedRun.outcomeSemantics.runtimeExplanation}');
+    expect(runRecordsPanelSource).toContain('title={selectedRun.riskReasons.join(" / ")}');
     expect(routeSource).toContain("proposalDetailQuery.data.supervised.riskReasons.join");
     expect(dictionarySource).toContain('supervisedFlowRunsHint: "同一改良 Agent 提建议并改候选"');
     expect(dictionarySource).toContain('decision: "治理结论"');
     expect(dictionarySource).toContain('diagnosis: "治理结论说明"');
     expect(dictionarySource).not.toContain('retrySupervisedRun: "重跑失败项"');
+  });
+
+  it("keeps supervised run records queue and detail composition in the extracted panel", () => {
+    expect(routeSource).toContain('import { EvolutionRunRecordsPanel } from "./EvolutionRunRecordsPanel";');
+    expect(routeSource).toContain("<EvolutionRunRecordsPanel");
+    expect(routeSource).toContain("filteredRuns={filteredRuns}");
+    expect(routeSource).toContain("selectedRun={selectedRun}");
+    expect(routeSource).toContain("onRunAction={triggerRunAction}");
+    expect(routeSource).toContain("onDeleteRunRecord={triggerRunRecordDelete}");
+    expect(routeSource).toContain("bulkDeleteRunRecordsMutation");
+    expect(routeSource).not.toContain("styles.runQueuePanel");
+    expect(routeSource).not.toContain("styles.runDetailPanel");
+    expect(routeSource).not.toContain("styles.runListScrollable");
+    expect(routeSource).not.toContain("styles.runRecordIdentity");
+    expect(routeSource).not.toContain("styles.runDetailOverview");
+    expect(runRecordsPanelSource).toContain("export function EvolutionRunRecordsPanel");
+    expect(runRecordsPanelSource).toContain("buildSupervisedRunRecordDisplay");
+    expect(runRecordsPanelSource).toContain("styles.runQueuePanel");
+    expect(runRecordsPanelSource).toContain("styles.runDetailPanel");
+    expect(runRecordsPanelSource).toContain("styles.runRuntimeNote");
+    expect(runRecordsPanelSource).not.toContain("useQuery");
+    expect(runRecordsPanelSource).not.toContain("useMutation");
+    expect(runRecordsPanelSource).not.toContain("queryClient");
+    expect(runRecordsPanelStyles.runDetailOverview).toContain("grid-template-columns");
+    expect(runRecordsPanelStylesSource).toContain("runQueuePanel");
+    expect(runRecordsPanelStylesSource).toContain("runDetailOverview");
+    expect(stylesSource).not.toContain("runQueuePanel");
+    expect(stylesSource).not.toContain("runDetailOverview");
+    expect(stylesSource).not.toContain("runRecordIdentity");
   });
 
   it("keeps the latest finished supervised run out of the live monitor and into the closed-loop ledger", () => {
