@@ -245,6 +245,134 @@ export type MemoryUsageContractPayload = {
   };
 };
 
+export interface UserMarkdownSpaceSummary {
+  spaceId: string;
+  spaceName: string;
+  userId: string;
+  canonicalPagesRoot: string;
+  indexRoot: string;
+  sourceRef: Record<string, unknown>;
+  counts: {
+    markdownFileCount: number;
+    pageCount: number;
+    linkCount: number;
+    taskCount: number;
+    tagCount: number;
+  };
+  updatedAt: string;
+  pageCount?: number;
+}
+
+export interface UserMarkdownPageSummary {
+  pageId: string;
+  relativePath: string;
+  title: string;
+  tags: string[];
+  wikilinks: string[];
+  taskCounts: { open: number; done: number; total: number };
+  contentHash: string;
+  byteSize: number;
+  updatedAt: string;
+  content?: string;
+}
+
+export interface UserMarkdownImportPreviewPage {
+  relativePath: string;
+  title: string;
+  tags: string[];
+  wikilinkCount: number;
+  taskCount: number;
+}
+
+export interface UserMarkdownImportPreviewIgnoredFile {
+  relativePath: string;
+  reason: string;
+}
+
+export interface UserMarkdownSpaceImportPreviewPayload {
+  ok: boolean;
+  schemaVersion: number;
+  userId: string;
+  source: {
+    path: string;
+    managedRoot: string;
+  };
+  summary: {
+    markdownFileCount: number;
+    ignoredFileCount: number;
+    wikilinkCount: number;
+    taskCount: number;
+    tagCount: number;
+  };
+  pages: UserMarkdownImportPreviewPage[];
+  ignoredFiles: UserMarkdownImportPreviewIgnoredFile[];
+  updatedAt: string;
+}
+
+export interface UserMarkdownSpaceImportPayload {
+  ok: boolean;
+  schemaVersion: number;
+  userId: string;
+  space: {
+    spaceId: string;
+    spaceName: string;
+    canonicalPagesRoot: string;
+    indexRoot: string;
+    manifestPath: string;
+  };
+  summary: {
+    markdownFileCount: number;
+    ignoredFileCount: number;
+    wikilinkCount: number;
+    taskCount: number;
+    tagCount: number;
+    importedPageCount: number;
+  };
+  updatedAt: string;
+}
+
+export interface UserMarkdownSpaceListPayload {
+  ok: boolean;
+  summary: { spaceCount: number };
+  spaces: UserMarkdownSpaceSummary[];
+}
+
+export interface UserMarkdownSpacePageListPayload {
+  ok: boolean;
+  space: UserMarkdownSpaceSummary;
+  summary: { pageCount: number };
+  pages: UserMarkdownPageSummary[];
+}
+
+export interface UserMarkdownSpacePagePayload {
+  ok: boolean;
+  space: UserMarkdownSpaceSummary;
+  page: UserMarkdownPageSummary;
+  content: string;
+}
+
+export interface UserMarkdownSearchResult {
+  resultId: string;
+  resultType: "user_markdown_page";
+  sourceDomain: "user_content";
+  title: string;
+  excerpt: string;
+  score: number;
+  rank: number;
+  userId: string;
+  spaceId: string;
+  spaceName: string;
+  pageId: string;
+  pageRelativePath: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface UserMarkdownSpaceSearchPayload {
+  ok: boolean;
+  summary: { resultCount: number };
+  results: UserMarkdownSearchResult[];
+}
+
 export type MemoryCleanupTargetRequest = {
   targetType:
     | "global_runtime_memory"

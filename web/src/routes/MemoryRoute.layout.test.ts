@@ -44,6 +44,8 @@ import styles from "./MemoryRoute.styles";
 import stylesModuleSource from "./MemoryRoute.styles.ts?raw";
 import knowledgeGovernancePanelSource from "./MemoryKnowledgeGovernancePanel.tsx?raw";
 import knowledgeDetailPanelSource from "./MemoryKnowledgeDetailPanel.tsx?raw";
+import userContentPanelSource from "./MemoryUserContentPanel.tsx?raw";
+import queryKeysSource from "../api/queryKeys.ts?raw";
 
 const memoryCssSource = [
   stylesModuleSource,
@@ -90,6 +92,15 @@ describe("MemoryRoute layout contract", () => {
     expect(agentMemoryPanelSource).not.toContain("useQuery");
     expect(agentMemoryPanelSource).not.toContain("useMutation");
     expect(agentMemoryPanelSource).not.toContain("fetchJson");
+  });
+
+  it("wires user Markdown content through dedicated panel and query keys", () => {
+    expect(routeSource).toContain("MemoryUserContentPanel");
+    expect(userContentPanelSource).toContain("/api/user-content/markdown-spaces/import-preview");
+    expect(userContentPanelSource).toContain("/api/user-content/markdown-spaces/import");
+    expect(userContentPanelSource).toContain("queryKeys.userMarkdownSpaces()");
+    expect(queryKeysSource).toContain("userMarkdownSpaces");
+    expect(userContentPanelSource).not.toContain("MemoryRoute.styles");
   });
 
   it("supports returning from Agent Center deep links", () => {
