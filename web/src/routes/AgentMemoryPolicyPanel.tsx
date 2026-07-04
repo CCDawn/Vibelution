@@ -1,7 +1,7 @@
 import { ExternalLink, X } from "lucide-react";
 
 import { VButton, VNativeInput } from "../components/vui";
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentMemoryPolicyPanel.styles";
 
 export type AgentMemoryPolicyDraft = {
   readSharedGroups: string[];

@@ -1,6 +1,6 @@
 import { AgentPersonaProfile } from "../api/types";
 import { VButton, VFieldRow, VNativeInput, VNativeTextarea } from "../components/vui";
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentPersonaProfilePanel.styles";
 
 export type AgentPersonaDraft = Omit<AgentPersonaProfile, "expertise"> & {
   expertise: string;

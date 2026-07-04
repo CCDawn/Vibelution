@@ -1,6 +1,6 @@
 import type { AgentDelegationPolicy, AgentSupervisionPolicy } from "../api/types";
 import { VButton, VCheckbox, VFieldRow, VNativeInput, VNativeSelect } from "../components/vui";
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentRuntimePolicyPanel.styles";
 
 export type AgentRuntimePolicyPanelCopy = {
   allowedContextModes: string;
