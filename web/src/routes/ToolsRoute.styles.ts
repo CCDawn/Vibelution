@@ -4,12 +4,9 @@
 // explicit Tailwind class string; there are no name-based defaults. Edit
 // values directly. This file is transitional: it is deleted in the wave that
 // componentizes ToolsRoute.
-// Includes phantom keys (accessed by consumers but never declared in the old
-// styleKeys — the Proxy synthesized them on demand) and prefix×tone-vocabulary
-// coverage for dynamic `styles[`prefix_${tone}`]` lookups. Typed loosely as
-// Record<string, string> because those dynamic template indexes cannot index a
-// literal-keyed map; tightening is a follow-up, not Phase 0.
-const styles: Record<string, string> = {
+// Includes phantom keys accessed by consumers but never declared in the old
+// styleKeys; the Proxy synthesized them on demand.
+const styles = {
   agentBulkPolicyPanel:
     "agentBulkPolicyPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentCompatibility:
@@ -432,6 +429,6 @@ const styles: Record<string, string> = {
     "workspace min-w-0 grid h-full min-h-0 gap-2 p-2 !grid grid-cols-[var(--tools-left-panel-width)_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden",
   workspaceScopePanel:
     "workspaceScopePanel min-w-0 grid min-h-0 gap-2 p-2 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[7px] p-2 rounded-[7px] border border-[var(--border-soft)] bg-[var(--surface-card)] max-[900px]:grid-cols-[repeat(2,minmax(0,1fr))]",
-};
+} as const;
 
 export default styles;
