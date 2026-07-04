@@ -6,7 +6,6 @@ import {
   ChevronDown,
   ChevronRight,
   CircleDot,
-  Download,
   ExternalLink,
   ImagePlus,
   Link2,
@@ -34,6 +33,10 @@ import { fetchJson } from "../../api/client";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { AgentContextSectionsView } from "./AgentContextSectionsView";
 import { ConversationImageArtifactView } from "./ConversationImageArtifactView";
+import {
+  ConversationImagePreviewDialog,
+  type ConversationImagePreviewRequest,
+} from "./ConversationImagePreviewDialog";
 import { AgentMessageTurnView } from "./AgentMessageTurnView";
 import { AgentResponseSectionView } from "./AgentResponseSectionView";
 import { AgentUserContentSectionView } from "./AgentUserContentSectionView";
@@ -230,13 +233,6 @@ function renderTurnAvatarContent(resolution: TurnAvatarContent) {
   return resolution.fallback;
 }
 
-type PreviewImageState = {
-  src: string;
-  alt: string;
-  downloadUrl: string;
-  downloadName: string | true;
-};
-
 type ConversationTurnRowProps = {
   message: ConversationMessage;
   previousMessage?: ConversationMessage;
@@ -410,7 +406,7 @@ export function ConversationView({
   const markdownBlockCacheRef = useRef<Map<string, MarkdownBlock[]>>(new Map());
   const [sectionExpansion, setSectionExpansion] = useState<Record<string, Record<string, boolean>>>({});
   const [isAtBottom, setIsAtBottom] = useState(true);
-  const [previewImage, setPreviewImage] = useState<PreviewImageState | null>(null);
+  const [previewImage, setPreviewImage] = useState<ConversationImagePreviewRequest | null>(null);
   const [composerDragActive, setComposerDragActive] = useState(false);
   const [allMessagesVisible, setAllMessagesVisible] = useState(false);
   const [computerUseSessionResults, setComputerUseSessionResults] = useState<Record<string, ComputerUseResult>>({});
@@ -673,8 +669,12 @@ export function ConversationView({
     return `${normalized.slice(0, maxLength - 1).trimEnd()}...`;
   }
 
-  function openImagePreview(image: PreviewImageState) {
+  function openImagePreview(image: ConversationImagePreviewRequest) {
     setPreviewImage(image);
+  }
+
+  function closeImagePreview() {
+    setPreviewImage(null);
   }
 
   function scrollTimelineToBottom(
@@ -3400,40 +3400,7 @@ export function ConversationView({
       </div>
       ) : null}
       {previewImage ? (
-        <div
-          className={styles.imagePreviewOverlay}
-          role="dialog"
-          aria-modal="true"
-          aria-label={previewImage.alt}
-          onClick={() => setPreviewImage(null)}
-        >
-          <div className={styles.imagePreviewDialog} onClick={(event) => event.stopPropagation()}>
-            <div className={styles.imagePreviewToolbar}>
-              <span title={previewImage.alt}>{previewImage.alt}</span>
-              <div className={styles.imagePreviewActions}>
-                <a
-                  className={styles.imageDownloadButton}
-                  href={previewImage.downloadUrl}
-                  download={previewImage.downloadName}
-                  title={lang === "zh" ? "下载图片" : "Download image"}
-                  aria-label={lang === "zh" ? "下载图片" : "Download image"}
-                >
-                  <Download size={15} />
-                </a>
-                <VButton
-                  type="button"
-                  className={styles.imagePreviewCloseButton}
-                  onClick={() => setPreviewImage(null)}
-                  title={lang === "zh" ? "关闭预览" : "Close preview"}
-                  aria-label={lang === "zh" ? "关闭预览" : "Close preview"}
-                >
-                  <X size={16} />
-                </VButton>
-              </div>
-            </div>
-            <img className={styles.imagePreviewLarge} src={previewImage.src} alt={previewImage.alt} />
-          </div>
-        </div>
+        <ConversationImagePreviewDialog image={previewImage} lang={lang} onClose={closeImagePreview} />
       ) : null}
     </div>
   );
