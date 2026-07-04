@@ -9,7 +9,7 @@ from typing import Any
 from core.chat.chat_task_types import trim_lines
 from core.chatroom.store import utc_now_iso
 
-from . import rag_retrieval_service, team_knowledge_service
+from . import rag_retrieval_service, team_knowledge_service, user_content_markdown_service
 
 
 SCHEMA_VERSION = 1
@@ -32,6 +32,9 @@ def search_unified_memory(
     knowledge_base_id: str = "",
     tags: list[str] | None = None,
     allowed_knowledge_base_ids: list[str] | set[str] | tuple[str, ...] | None = None,
+    include_user_content: bool = False,
+    allowed_user_content_space_ids: list[str] | set[str] | tuple[str, ...] | None = None,
+    user_id: str = "default",
     limit: int = 8,
     max_context_chars: int = 1200,
 ) -> dict[str, Any]:
@@ -46,7 +49,9 @@ def search_unified_memory(
     bounded_limit = _clamp_limit(limit)
     normalized_tags = [str(tag or "").strip() for tag in list(tags or []) if str(tag or "").strip()]
     normalized_allowed_base_ids = _unique_strings(allowed_knowledge_base_ids or [])
+    normalized_user_content_space_ids = _unique_strings(allowed_user_content_space_ids or [])
     normalized_base_id = str(knowledge_base_id or "").strip()
+    normalized_user_id = str(user_id or "default").strip() or "default"
     if normalized_base_id and normalized_allowed_base_ids and not _policy_allows_knowledge_base(normalized_base_id, normalized_allowed_base_ids):
         raise UnifiedMemorySearchError("Knowledge base is not allowed by the active memory policy.")
 
@@ -61,6 +66,9 @@ def search_unified_memory(
             knowledge_base_id=normalized_base_id,
             tags=normalized_tags,
             allowed_knowledge_base_ids=normalized_allowed_base_ids,
+            include_user_content=bool(include_user_content),
+            allowed_user_content_space_ids=normalized_user_content_space_ids,
+            user_id=normalized_user_id,
             limit=bounded_limit,
             max_context_chars=max_context_chars,
         )
@@ -76,6 +84,9 @@ def search_unified_memory(
             knowledge_base_id=normalized_base_id,
             tags=normalized_tags,
             allowed_knowledge_base_ids=normalized_allowed_base_ids,
+            include_user_content=bool(include_user_content),
+            allowed_user_content_space_ids=normalized_user_content_space_ids,
+            user_id=normalized_user_id,
             limit=bounded_limit,
         )
 
@@ -108,10 +119,19 @@ def search_unified_memory(
         key=lambda item: (float(item.get("semanticScore") or 0.0), str(item.get("updatedAt") or item.get("createdAt") or "")),
         reverse=True,
     )
-    results = [
+    formal_results = [
         _result_from_knowledge_item(item, rank=index + 1, backend=_backend_for_mode(effective_mode))
         for index, item in enumerate(matched_items[:bounded_limit])
     ]
+    user_results = _user_content_results(
+        include_user_content=bool(include_user_content),
+        user_id=normalized_user_id,
+        query=normalized_query,
+        limit=bounded_limit,
+        max_excerpt_chars=max_context_chars,
+        allowed_space_ids=normalized_user_content_space_ids,
+    )
+    results = _merge_ranked_results(formal_results, user_results, limit=bounded_limit)
     return _payload(
         agent_id=normalized_agent_id,
         query=normalized_query,
@@ -124,11 +144,14 @@ def search_unified_memory(
         tags=normalized_tags,
         limit=bounded_limit,
         results=results,
-        summary={
-            "resultCount": len(results),
-            "candidateCount": sum(int((payload.get("summary") or {}).get("resultCount") or 0) for payload in payloads),
-            "scannedKnowledgeBaseCount": sum(int((payload.get("summary") or {}).get("scannedKnowledgeBaseCount") or 0) for payload in payloads),
-        },
+        summary=_summary_with_user_content(
+            base_summary={
+                "candidateCount": sum(int((payload.get("summary") or {}).get("resultCount") or 0) for payload in payloads),
+                "scannedKnowledgeBaseCount": sum(int((payload.get("summary") or {}).get("scannedKnowledgeBaseCount") or 0) for payload in payloads),
+            },
+            results=results,
+        ),
+        citations=_citations_for_results(results),
     )
 
 
@@ -143,6 +166,9 @@ def _rag_search(
     knowledge_base_id: str,
     tags: list[str],
     allowed_knowledge_base_ids: list[str],
+    include_user_content: bool,
+    allowed_user_content_space_ids: list[str],
+    user_id: str,
     limit: int,
     max_context_chars: int,
 ) -> dict[str, Any]:
@@ -164,10 +190,19 @@ def _rag_search(
     ]
     contexts.sort(key=lambda context: float(context.get("score") or 0.0), reverse=True)
     selected_contexts = contexts[:limit]
-    results = [
+    formal_results = [
         _result_from_rag_context(context, rank=index + 1)
         for index, context in enumerate(selected_contexts)
     ]
+    user_results = _user_content_results(
+        include_user_content=include_user_content,
+        user_id=user_id,
+        query=query,
+        limit=limit,
+        max_excerpt_chars=max_context_chars,
+        allowed_space_ids=allowed_user_content_space_ids,
+    )
+    results = _merge_ranked_results(formal_results, user_results, limit=limit)
     return _payload(
         agent_id=agent_id,
         query=query,
@@ -180,14 +215,16 @@ def _rag_search(
         tags=tags,
         limit=limit,
         results=results,
-        summary={
-            "resultCount": len(results),
-            "candidateCount": sum(int((payload.get("summary") or {}).get("candidateCount") or 0) for payload in payloads),
-            "contextCount": len(selected_contexts),
-            "citationCount": len(selected_contexts),
-            "scannedKnowledgeBaseCount": sum(int((payload.get("summary") or {}).get("scannedKnowledgeBaseCount") or 0) for payload in payloads),
-        },
-        citations=[_citation_from_rag_context(context, rank=index + 1) for index, context in enumerate(selected_contexts)],
+        summary=_summary_with_user_content(
+            base_summary={
+                "candidateCount": sum(int((payload.get("summary") or {}).get("candidateCount") or 0) for payload in payloads),
+                "contextCount": len(selected_contexts),
+                "citationCount": len(_citations_for_results(results)),
+                "scannedKnowledgeBaseCount": sum(int((payload.get("summary") or {}).get("scannedKnowledgeBaseCount") or 0) for payload in payloads),
+            },
+            results=results,
+        ),
+        citations=_citations_for_results(results),
         retrieval_policy=_read_only_policy("local_rag"),
     )
 
@@ -203,6 +240,9 @@ def _regex_search(
     knowledge_base_id: str,
     tags: list[str],
     allowed_knowledge_base_ids: list[str],
+    include_user_content: bool,
+    allowed_user_content_space_ids: list[str],
+    user_id: str,
     limit: int,
 ) -> dict[str, Any]:
     if not query:
@@ -234,10 +274,19 @@ def _regex_search(
                 break
         if len(matched) >= limit:
             break
-    results = [
+    formal_results = [
         _result_from_knowledge_item(item, rank=index + 1, backend="local_regex")
         for index, item in enumerate(matched)
     ]
+    user_results = _user_content_results(
+        include_user_content=include_user_content,
+        user_id=user_id,
+        query=query,
+        limit=limit,
+        max_excerpt_chars=900,
+        allowed_space_ids=allowed_user_content_space_ids,
+    )
+    results = _merge_ranked_results(formal_results, user_results, limit=limit)
     return _payload(
         agent_id=agent_id,
         query=query,
@@ -250,11 +299,14 @@ def _regex_search(
         tags=tags,
         limit=limit,
         results=results,
-        summary={
-            "resultCount": len(results),
-            "candidateCount": sum(int((payload.get("summary") or {}).get("resultCount") or 0) for payload in payloads),
-            "scannedKnowledgeBaseCount": sum(int((payload.get("summary") or {}).get("scannedKnowledgeBaseCount") or 0) for payload in payloads),
-        },
+        summary=_summary_with_user_content(
+            base_summary={
+                "candidateCount": sum(int((payload.get("summary") or {}).get("resultCount") or 0) for payload in payloads),
+                "scannedKnowledgeBaseCount": sum(int((payload.get("summary") or {}).get("scannedKnowledgeBaseCount") or 0) for payload in payloads),
+            },
+            results=results,
+        ),
+        citations=_citations_for_results(results),
     )
 
 
@@ -333,6 +385,7 @@ def _result_from_knowledge_item(item: dict[str, Any], *, rank: int, backend: str
 
 def _result_from_rag_context(context: dict[str, Any], *, rank: int) -> dict[str, Any]:
     source = context.get("source") if isinstance(context.get("source"), dict) else {}
+    metadata = context.get("metadata") if isinstance(context.get("metadata"), dict) else {}
     knowledge_item_id = str(source.get("knowledgeItemId") or "").strip()
     return {
         "resultId": str(context.get("contextId") or _result_id("rag_context", knowledge_item_id, rank)).strip(),
@@ -354,8 +407,124 @@ def _result_from_rag_context(context: dict[str, Any], *, rank: int) -> dict[str,
         "centralSourceIds": [str(value or "").strip() for value in list(source.get("centralSourceIds") or []) if str(value or "").strip()],
         "searchBackend": "local_rag",
         "matchReason": str(context.get("matchReason") or "").strip(),
-        "metadata": context.get("metadata") if isinstance(context.get("metadata"), dict) else {},
+        "metadata": {
+            **metadata,
+            "provider": str(context.get("provider") or "").strip(),
+            "retrievalMode": str(context.get("retrievalMode") or "").strip(),
+        },
     }
+
+
+def _user_content_results(
+    *,
+    include_user_content: bool,
+    user_id: str,
+    query: str,
+    limit: int,
+    max_excerpt_chars: int,
+    allowed_space_ids: list[str],
+) -> list[dict[str, Any]]:
+    if not include_user_content:
+        return []
+    payloads = []
+    for current_space_id in allowed_space_ids or [""]:
+        payloads.append(
+            user_content_markdown_service.search_user_markdown_spaces(
+                user_id=user_id,
+                query=query,
+                space_id=current_space_id,
+                limit=limit,
+                max_excerpt_chars=max_excerpt_chars,
+            )
+        )
+    merged = [
+        dict(item)
+        for payload in payloads
+        for item in list(payload.get("results") or [])
+    ]
+    merged.sort(key=lambda item: (_result_score(item), _result_updated_at(item), str(item.get("title") or "")), reverse=True)
+    return [
+        {**item, "rank": index + 1}
+        for index, item in enumerate(merged[:limit])
+    ]
+
+
+def _merge_ranked_results(formal_results: list[dict[str, Any]], user_results: list[dict[str, Any]], *, limit: int) -> list[dict[str, Any]]:
+    merged = [dict(item) for item in list(formal_results or [])] + [dict(item) for item in list(user_results or [])]
+    merged.sort(key=lambda item: (_result_score(item), _result_updated_at(item), str(item.get("title") or "")), reverse=True)
+    ranked = []
+    for index, item in enumerate(merged[:limit], start=1):
+        next_item = _rerank_result(item, rank=index)
+        ranked.append(next_item)
+    return ranked
+
+
+def _rerank_result(item: dict[str, Any], *, rank: int) -> dict[str, Any]:
+    next_item = dict(item)
+    next_item["rank"] = rank
+    if str(next_item.get("resultType") or "") == "knowledge_item":
+        next_item["resultId"] = _result_id("knowledge_item", str(next_item.get("knowledgeItemId") or "").strip(), rank)
+    return next_item
+
+
+def _summary_with_user_content(*, base_summary: dict[str, Any], results: list[dict[str, Any]]) -> dict[str, Any]:
+    summary = dict(base_summary)
+    summary["formalResultCount"] = sum(1 for item in results if str(item.get("resultType") or "") != "user_markdown_page")
+    summary["userContentResultCount"] = sum(1 for item in results if str(item.get("resultType") or "") == "user_markdown_page")
+    summary["resultCount"] = len(results)
+    return summary
+
+
+def _citations_for_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    citations = []
+    for result in results:
+        rank = int(result.get("rank") or 0)
+        result_type = str(result.get("resultType") or "")
+        if result_type == "rag_context":
+            citations.append(
+                _citation_from_rag_result(result, rank=rank)
+            )
+            continue
+        citation = result.get("citation") if isinstance(result.get("citation"), dict) else {}
+        if citation:
+            citations.append({**citation, "rank": rank, "title": str(result.get("title") or "").strip()})
+    return citations
+
+
+def _citation_from_rag_result(result: dict[str, Any], *, rank: int) -> dict[str, Any]:
+    metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+    return {
+        "contextId": str(result.get("resultId") or "").strip(),
+        "rank": rank,
+        "title": str(result.get("title") or "").strip(),
+        "ownerType": str(result.get("ownerType") or "team").strip(),
+        "ownerId": str(result.get("ownerId") or "").strip(),
+        "teamId": str(result.get("teamId") or "").strip(),
+        "teamName": str(result.get("teamName") or "").strip(),
+        "agentId": str(result.get("agentId") or "").strip(),
+        "agentName": str(result.get("agentName") or "").strip(),
+        "knowledgeBaseId": str(result.get("knowledgeBaseId") or "").strip(),
+        "knowledgeBaseName": str(result.get("knowledgeBaseName") or "").strip(),
+        "knowledgeItemId": str(result.get("knowledgeItemId") or "").strip(),
+        "sourceArtifactIds": list(result.get("sourceArtifactIds") or []),
+        "centralSourceIds": list(result.get("centralSourceIds") or []),
+        "provider": str(metadata.get("provider") or "").strip(),
+        "retrievalMode": str(metadata.get("retrievalMode") or "").strip(),
+    }
+
+
+def _result_score(item: dict[str, Any]) -> float:
+    return float(item.get("score") or item.get("semanticScore") or 0.0)
+
+
+def _result_updated_at(item: dict[str, Any]) -> str:
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    return str(
+        item.get("updatedAt")
+        or item.get("createdAt")
+        or metadata.get("updatedAt")
+        or ""
+    )
 
 
 def _citation_from_rag_context(context: dict[str, Any], *, rank: int) -> dict[str, Any]:
@@ -514,7 +683,9 @@ def _read_only_policy(backend: str) -> dict[str, Any]:
         "backend": backend,
         "honorsKnowledgeAcl": True,
         "honorsMemoryPolicy": True,
+        "honorsUserContentPolicy": True,
         "mutatesFormalKnowledge": False,
+        "mutatesUserContent": False,
         "injectsPromptByDefault": False,
     }
 
