@@ -434,8 +434,6 @@ const styles = {
     "flex [align-items:center] [justify-content:space-between] [gap:10px] [flex-wrap:wrap]",
   selectionSummary:
     "inline-flex [align-items:center] [gap:8px] [color:var(--fg-secondary)]",
-  selfModeStack:
-    "grid [grid-template-rows:minmax(0,_1fr)] [gap:8px] min-h-0 [height:100%] [overflow:hidden] [padding-right:4px] max-[900px]:[grid-template-rows:minmax(0,_1fr)] max-[900px]:[height:100%] max-[900px]:[overflow:auto]",
   selfPage:
     "[grid-template-rows:minmax(0,_1fr)] [gap:0] max-[900px]:[grid-template-rows:minmax(0,_1fr)] max-[900px]:[gap:0]",
   sourceHero:
