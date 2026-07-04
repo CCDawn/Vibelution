@@ -84,7 +84,6 @@ import { COMPOSER_SESSION_REFERENCE_MIME } from "../components/conversation/conv
 import type { ConversationStreamingFramePaintMetrics } from "../components/conversation/conversationStreamingMetrics";
 import { shouldShowNextStateSignalInConversation } from "../components/conversation/conversationNextStateSignal";
 import type { TurnAvatarResolution } from "../components/conversation/conversationTurnAvatar";
-import { LazyConversationView } from "../components/conversation/LazyConversationView";
 import { isAgentInboxMessage, isTurnErrorMessage } from "../components/conversation/conversationMessagePredicates";
 import { VButton, VNativeInput, VNativeSelect } from "../components/vui";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../app/browserTelemetry";
@@ -180,6 +179,10 @@ import {
   type ChatMentionTarget,
 } from "./chatMentionTokens";
 import { CacheDetailDialog, type CacheDonutSegment } from "./chat/CacheDetailDialog";
+import {
+  buildConversationComposerBridgeState,
+  ChatConversationComposerBridge,
+} from "./chat/ChatConversationComposerBridge";
 import { ChatFilePreviewPanel } from "./chat/ChatFilePreviewPanel";
 import { ChatFileWorkspaceTabs } from "./chat/ChatFileWorkspaceTabs";
 import { TokenCoreStatusPanel, type TokenCoreStatusMetric } from "./chat/TokenCoreStatusPanel";
@@ -4554,10 +4557,7 @@ export function ChatCodingRoute() {
   const sessionRunning = isRunningPhase(detail?.currentPhase);
   const sessionStopping = isStoppingPhase(detail?.currentPhase) || Boolean(detail?.stopRequested);
   const sessionBusy = isBusyPhase(detail?.currentPhase);
-  const composerStopMode = sessionBusy;
-  const composerGuidance = "";
-  const composerPending =
-    composerStopMode ? (stopTurnMutation.isPending && stopMutationMatchesActiveSession) || sessionStopping : submitPending;
+  const composerStopPending = (stopTurnMutation.isPending && stopMutationMatchesActiveSession) || sessionStopping;
   const composerSafeGuidancePending =
     sessionGuidanceMutation.isPending
     && guidanceMutationMatchesActiveSession
@@ -4566,20 +4566,47 @@ export function ChatCodingRoute() {
     sessionGuidanceMutation.isPending
     && guidanceMutationMatchesActiveSession
     && sessionGuidanceMutation.variables?.mode === "interrupt";
-  const composerDisabled = !activeSessionId || submitPending;
-  const composerActionDisabled = !activeSessionId || (
-    composerStopMode
-      ? composerPending
-      : submitPending || (!activeDraftEffective.trim() && !activeImageAttachments.length && !activeReferenceAttachments.length)
+  const conversationComposer = useMemo(
+    () => buildConversationComposerBridgeState({
+      editTargetMessageId: resolvedEditTarget?.messageId,
+      error: activeComposerError,
+      guidance: "",
+      imageAttachments: activeImageAttachments,
+      imageInputUnsupported: activeAgentImageInputUnsupported,
+      interruptGuidancePending: composerInterruptGuidancePending,
+      labels: {
+        editMessageModeNotice: t("editMessageModeNotice"),
+        editMessagePlaceholder: t("editMessagePlaceholder"),
+        loadingSession: t("loadingSession"),
+        messageInputPlaceholder: t("messageInputPlaceholder"),
+      },
+      references: activeReferenceAttachments,
+      safeGuidancePending: composerSafeGuidancePending,
+      sessionBusy,
+      sessionId: activeSessionId,
+      sessionStopping,
+      stopPending: composerStopPending,
+      submitPending,
+      value: activeDraftEffective,
+    }),
+    [
+      activeAgentImageInputUnsupported,
+      activeComposerError,
+      activeDraftEffective,
+      activeImageAttachments,
+      activeReferenceAttachments,
+      activeSessionId,
+      composerInterruptGuidancePending,
+      composerSafeGuidancePending,
+      composerStopPending,
+      resolvedEditTarget?.messageId,
+      sessionBusy,
+      sessionStopping,
+      submitPending,
+      t,
+    ],
   );
-  const composerPlaceholder =
-    !activeSessionId
-      ? t("loadingSession")
-      : sessionStopping || sessionBusy
-        ? ""
-          : resolvedEditTarget
-            ? t("editMessagePlaceholder")
-          : t("messageInputPlaceholder");
+  const composerDisabled = conversationComposer.disabled;
 
   useEffect(() => {
     if (!activeSessionId || !activeAgentImageInputUnsupported || !activeImageAttachments.length) {
@@ -7270,7 +7297,7 @@ export function ChatCodingRoute() {
                     </section>
                   </div>
                 ) : null}
-                <LazyConversationView
+                <ChatConversationComposerBridge
                   sessionId={activeSessionId ?? detail.id}
                   title={detail.title}
                   phase={detail.currentPhase}
@@ -7289,26 +7316,7 @@ export function ChatCodingRoute() {
                   showHeader={false}
                   showSessionOverview={false}
                   showMentalSnapshots={mentalModelEnabledForNextTurn}
-                  composerValue={activeDraftEffective}
-                  composerPlaceholder={composerPlaceholder}
-                  composerDisabled={composerDisabled}
-                  composerActionDisabled={composerActionDisabled}
-                  composerActionMode={composerStopMode ? "stop" : "send"}
-                  composerPending={composerPending}
-                  composerSafeGuidancePending={composerSafeGuidancePending}
-                  composerInterruptGuidancePending={composerInterruptGuidancePending}
-                  composerError={activeComposerError}
-                  composerGuidance={composerGuidance}
-                  composerAttachments={activeImageAttachments.map((attachment) => ({
-                    id: attachment.id,
-                    filename: attachment.filename,
-                    previewUrl: attachment.previewUrl,
-                    sizeBytes: attachment.sizeBytes,
-                    contentType: attachment.contentType,
-                  }))}
-                  composerReferences={activeReferenceAttachments}
-                  composerAttachmentInputDisabled={composerDisabled || Boolean(resolvedEditTarget) || activeAgentImageInputUnsupported}
-                  composerModeNotice={resolvedEditTarget ? t("editMessageModeNotice") : ""}
+                  composer={conversationComposer}
                   cancelComposerModeLabel={t("cancelEditMessage")}
                   turnError={detail.lastTurnError}
                   stopLabel={t("stop")}
@@ -7317,9 +7325,7 @@ export function ChatCodingRoute() {
                   safeGuidancePendingLabel={t("safeGuidancePending")}
                   interruptGuidanceLabel={t("interruptGuidance")}
                   interruptGuidancePendingLabel={t("interruptGuidancePending")}
-                  editingMessageId={resolvedEditTarget?.messageId}
                   editUserMessageLabel={t("editAndResendMessage")}
-                  editUserMessageDisabled={submitPending}
                   onComposerChange={handleComposerChange}
                   onAddComposerAttachments={handleAddComposerAttachments}
                   onRemoveComposerAttachment={handleRemoveComposerAttachment}
