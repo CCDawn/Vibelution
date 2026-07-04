@@ -18,6 +18,10 @@ const bulkConfigPanelSource = readFileSync(
   new URL("./AgentBulkConfigPanel.tsx", import.meta.url),
   "utf-8",
 );
+const bulkOperationsPanelSource = readFileSync(
+  new URL("./AgentBulkOperationsPanel.tsx", import.meta.url),
+  "utf-8",
+);
 const contextCompressionPanelSource = readFileSync(
   new URL("./AgentContextCompressionPanel.tsx", import.meta.url),
   "utf-8",
@@ -1266,19 +1270,25 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("onToggleApply: toggleBulkConfigApply");
     expect(routeSource).toContain("onDraftChange: updateBulkConfigDraft");
     expect(routeSource).toContain("onSave: bulkApplyAgentConfig");
-    expect(listWorkspacePanelSource).toContain("AgentBulkActionBar");
+    expect(listWorkspacePanelSource).toContain("AgentBulkOperationsPanel");
+    expect(bulkOperationsPanelSource).toContain("AgentBulkActionBar");
     expect(routeSource).toContain("VButton");
-    expect(routeSource).toContain("summary: bulkActionSummary");
-    expect(routeSource).toContain("selectionActions: bulkSelectionActions");
-    expect(routeSource).toContain("promptPicker: bulkPromptPicker");
-    expect(routeSource).toContain("mutationActions: bulkMutationActions");
-    expect(routeSource).toContain("destructiveActions: bulkDestructiveActions");
+    expect(routeSource).toContain("bulkOperations={{");
+    expect(routeSource).toContain("selectedCount: selectedBulkAgents.length");
+    expect(routeSource).toContain("visibleCount: visibleAgents.length");
+    expect(routeSource).toContain("onSelectVisible: selectVisibleBulkAgents");
+    expect(routeSource).toContain("onClearSelection: clearBulkAgents");
+    expect(routeSource).toContain("onPromptTemplateChange: setBulkPromptTemplateId");
+    expect(routeSource).toContain("onApplyPromptTemplate: bulkApplyPromptTemplate");
+    expect(routeSource).toContain("onArchive: bulkArchiveAgents");
+    expect(routeSource).toContain("onPurge: bulkPurgeAgents");
     expect(routeSource).not.toContain("const archivedAgent = await fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(agent.agentId)}`");
     expect(routeSource).not.toContain("const updatedAgent = await fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(agent.agentId)}`");
     expect(routeSource).not.toContain("for (const agent of selectedBulkAgents) {\n      if (agentArchiveProtected(agent))");
     expect(routeSource).not.toContain("`/api/agents/${encodeURIComponent(agent.agentId)}/purge`");
     expect(routeSource).toContain('method: "DELETE"');
-    expect(routeSource).toContain("onPress={bulkPurgeAgents}");
+    expect(routeSource).toContain("onPurge: bulkPurgeAgents");
+    expect(bulkOperationsPanelSource).toContain("onPress={onPurge}");
     expect(bulkConfigPanelSource).toContain("onPress={onSave}");
     expect(bulkConfigPanelSource).toContain("onPress={onReset}");
     expect(bulkConfigPanelSource).toContain("styles.bulkSelectionList");
@@ -1298,22 +1308,22 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("renders bulk action controls through VUI buttons instead of page-owned button CSS", () => {
-    const bulkSelectionSource = routeSource.slice(
-      routeSource.indexOf("const bulkSelectionActions"),
-      routeSource.indexOf("const bulkPromptPicker"),
+    const bulkSelectionSource = bulkOperationsPanelSource.slice(
+      bulkOperationsPanelSource.indexOf("const selectionActions"),
+      bulkOperationsPanelSource.indexOf("const promptPicker"),
     );
-    const bulkMutationSource = routeSource.slice(
-      routeSource.indexOf("const bulkMutationActions"),
-      routeSource.indexOf("const bulkDestructiveActions"),
+    const bulkMutationSource = bulkOperationsPanelSource.slice(
+      bulkOperationsPanelSource.indexOf("const mutationActions"),
+      bulkOperationsPanelSource.indexOf("const destructiveActions"),
     );
-    const bulkDestructiveStart = routeSource.indexOf("const bulkDestructiveActions");
-    const bulkDestructiveSource = routeSource.slice(
+    const bulkDestructiveStart = bulkOperationsPanelSource.indexOf("const destructiveActions");
+    const bulkDestructiveSource = bulkOperationsPanelSource.slice(
       bulkDestructiveStart,
-      routeSource.indexOf("return (", bulkDestructiveStart),
+      bulkOperationsPanelSource.indexOf("return (", bulkDestructiveStart),
     );
-    const bulkPromptSource = routeSource.slice(
-      routeSource.indexOf("const bulkPromptPicker"),
-      routeSource.indexOf("const bulkMutationActions"),
+    const bulkPromptSource = bulkOperationsPanelSource.slice(
+      bulkOperationsPanelSource.indexOf("const promptPicker"),
+      bulkOperationsPanelSource.indexOf("const mutationActions"),
     );
 
     expect(bulkPromptSource).toContain("<VNativeSelect");
