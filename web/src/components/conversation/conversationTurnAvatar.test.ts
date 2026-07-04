@@ -84,5 +84,6 @@ describe("conversation turn avatar identity helpers", () => {
     expect(conversationViewSource).not.toContain("function userAvatarSymbol");
     expect(conversationViewSource).not.toContain("function resolveMessageTurnAvatar");
     expect(conversationViewSource).not.toContain("export type TurnAvatarResolution =");
+    expect(conversationViewSource).not.toContain("export type { TurnAvatarResolution }");
   });
 });
