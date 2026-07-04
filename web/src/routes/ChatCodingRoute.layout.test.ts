@@ -27,6 +27,10 @@ import chatFilePreviewPanelStyles from "./chat/ChatFilePreviewPanel.styles";
 import chatFilePreviewPanelSource from "./chat/ChatFilePreviewPanel.tsx?raw";
 import chatFileWorkspaceTabsStyles from "./chat/ChatFileWorkspaceTabs.styles";
 import chatFileWorkspaceTabsSource from "./chat/ChatFileWorkspaceTabs.tsx?raw";
+import chatRuntimeNoticeStackStyles from "./chat/ChatRuntimeNoticeStack.styles";
+import chatRuntimeNoticeStackSource from "./chat/ChatRuntimeNoticeStack.tsx?raw";
+import chatToolApprovalDialogStyles from "./chat/ChatToolApprovalDialog.styles";
+import chatToolApprovalDialogSource from "./chat/ChatToolApprovalDialog.tsx?raw";
 import tokenCoreStatusPanelSource from "./chat/TokenCoreStatusPanel.tsx?raw";
 
 const appShellCssSource = readFileSync(new URL("../design/workbench-shell.css", import.meta.url), "utf-8");
@@ -143,29 +147,37 @@ describe("ChatCodingRoute layout contract", () => {
   it("renders runtime notices outside the Agent reply timeline", () => {
     expect(routeSource).toContain("detail?.runtimeNotices");
     expect(routeSource).toContain(".slice(-1)");
-    expect(routeSource).toContain("styles.runtimeNoticeStack");
-    expect(routeSource).toContain("styles.runtimeNoticeMessage");
-    expect(routeSource.indexOf("styles.runtimeNoticeStack")).toBeLessThan(
+    expect(routeSource).toContain("<ChatRuntimeNoticeStack");
+    expect(routeSource).toContain("notices={activeRuntimeNotices}");
+    expect(routeSource.indexOf("<ChatRuntimeNoticeStack")).toBeLessThan(
       routeSource.indexOf("<ChatConversationComposerBridge"),
     );
-    expect(routeStyles.runtimeNoticeStack).toBeTypeOf("string");
-    expect(routeStyles.runtimeNotice).toBeTypeOf("string");
-    expect(routeStyles.runtimeNotice_warning).toBeTypeOf("string");
-    expect(routeStyles.runtimeNoticeMessage).toBeTypeOf("string");
+    expect(routeStylesModuleSource).not.toContain("runtimeNoticeStack:");
+    expect(routeStylesModuleSource).not.toContain("runtimeNoticeMessage:");
+    expect(chatRuntimeNoticeStackSource).toContain("role=\"status\"");
+    expect(chatRuntimeNoticeStackSource).toContain("runtimeNoticeToneClassName");
+    expect(chatRuntimeNoticeStackStyles.stack).toBeTypeOf("string");
+    expect(chatRuntimeNoticeStackStyles.notice).toContain("grid-cols-[16px_minmax(0,1fr)]");
+    expect(chatRuntimeNoticeStackStyles.message).toBeTypeOf("string");
+    expect(chatRuntimeNoticeStackStyles.toneWarning).toContain("var(--state-warning)");
   });
 
   it("surfaces pending tool approvals as an in-session dialog", () => {
     expect(routeSource).toContain("pendingToolGovernanceRequests");
     expect(routeSource).toContain("resolveToolApprovalMutation");
-    expect(routeSource).toContain("styles.toolApprovalOverlay");
-    expect(routeSource).toContain("role=\"dialog\"");
     expect(routeSource).toContain("/tool-governance-requests/");
-    expect(routeSource.indexOf("styles.toolApprovalOverlay")).toBeLessThan(
+    expect(routeSource).toContain("<ChatToolApprovalDialog");
+    expect(routeSource).toContain("onApprove={() => resolveToolApprovalMutation.mutate({ request: pendingToolApproval, decision: \"approve\" })}");
+    expect(routeSource).toContain("onReject={() => resolveToolApprovalMutation.mutate({ request: pendingToolApproval, decision: \"reject\" })}");
+    expect(routeSource.indexOf("<ChatToolApprovalDialog")).toBeLessThan(
       routeSource.indexOf("<ChatConversationComposerBridge"),
     );
-    expect(routeStyles.toolApprovalOverlay).toBeTypeOf("string");
-    expect(routeStyles.toolApprovalDialog).toBeTypeOf("string");
-    expect(routeStyles.toolApprovalActions).toBeTypeOf("string");
+    expect(routeStylesModuleSource).not.toContain("toolApprovalOverlay:");
+    expect(routeStylesModuleSource).not.toContain("toolApprovalDialog:");
+    expect(chatToolApprovalDialogSource).toContain("role=\"dialog\"");
+    expect(chatToolApprovalDialogSource).toContain("Tool permission approval");
+    expect(chatToolApprovalDialogStyles.dialog).toContain("grid-cols-[34px_minmax(0,1fr)_auto]");
+    expect(chatToolApprovalDialogStyles.actions).toContain("flex");
   });
 
   it("loads the heavy conversation renderer through a lazy bridge", () => {
@@ -1220,8 +1232,8 @@ describe("ChatCodingRoute layout contract", () => {
       [routeStyles.inlineStat, "grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]"],
       [routeStyles.petShowcaseActions, "grid-cols-[repeat(3,minmax(0,1fr))]"],
       [routeStyles.cliAgentTerminalCommand, "grid-cols-[auto_minmax(0,1fr)_auto]"],
-      [routeStyles.runtimeNotice, "grid-cols-[16px_minmax(0,1fr)]"],
-      [routeStyles.toolApprovalDialog, "grid-cols-[34px_minmax(0,1fr)_auto]"],
+      [chatRuntimeNoticeStackStyles.notice, "grid-cols-[16px_minmax(0,1fr)]"],
+      [chatToolApprovalDialogStyles.dialog, "grid-cols-[34px_minmax(0,1fr)_auto]"],
       [routeStyles.cacheDetailCalibrationNote, "grid-cols-[auto_minmax(0,1fr)_auto]"],
       [routeStyles.rightIndexTabs, "grid-cols-[repeat(2,minmax(0,1fr))]"],
       [routeStyles.memberIndexSummary, "grid-cols-[auto_minmax(0,1fr)_auto]"],
