@@ -8,10 +8,8 @@ import styles from "./ConversationView.styles";
 import agentMessageRenderStateSource from "./agentMessageRenderState.ts?raw";
 import conversationViewStylesModuleSource from "./ConversationView.styles.ts?raw";
 import conversationViewSource from "./ConversationView.tsx?raw";
-import {
-  ConversationView,
-  type ConversationProcessDisplayMode,
-} from "./ConversationView";
+import { ConversationView } from "./ConversationView";
+import type { ConversationProcessDisplayMode } from "./conversationViewTypes";
 import { shouldShowNextStateSignalInConversation } from "./conversationNextStateSignal";
 import { isAgentInboxMessage } from "./conversationMessagePredicates";
 
