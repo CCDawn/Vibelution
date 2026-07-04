@@ -2,7 +2,7 @@ import { Archive, CheckCircle2, CheckSquare, Square, Trash2 } from "lucide-react
 
 import { AgentBulkActionBar } from "../components/vui/product/agent-management";
 import { VButton, VHStack, VNativeSelect } from "../components/vui";
-import { vuiFormLabelClass } from "../components/vui/forms/formClasses";
+import styles from "./AgentBulkOperationsPanel.styles";
 
 export type AgentBulkPromptTemplateOption = {
   value: string;
@@ -86,7 +86,7 @@ export function AgentBulkOperationsPanel({
   );
   const promptPicker = (
     <VHStack>
-      <label className={vuiFormLabelClass} htmlFor="agents-bulk-prompt">
+      <label className={styles.bulkPromptLabel} htmlFor="agents-bulk-prompt">
         {copy.bulkPromptLabel}
       </label>
       <VNativeSelect
