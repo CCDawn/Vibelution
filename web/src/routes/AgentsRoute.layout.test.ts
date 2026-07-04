@@ -33,6 +33,7 @@ import taskProfileStyles from "./AgentTaskProfilePanel.styles";
 import toolGovernanceStyles from "./AgentToolGovernancePanel.styles";
 import toolSummaryStyles from "./AgentToolSummaryPanel.styles";
 import returnBannerStyles from "./AgentReturnBannerPanel.styles";
+import workspaceLayoutStyles from "./AgentWorkspaceLayoutPanel.styles";
 import routerSource from "../app/router.tsx?raw";
 import shellSource from "../app/AppShell.tsx?raw";
 
@@ -168,6 +169,10 @@ const listWorkspacePanelSource = readFileSync(
   new URL("./AgentListWorkspacePanel.tsx", import.meta.url),
   "utf-8",
 );
+const workspaceLayoutPanelSource = readFileSync(
+  new URL("./AgentWorkspaceLayoutPanel.tsx", import.meta.url),
+  "utf-8",
+);
 const returnBannerPanelSource = readFileSync(
   new URL("./AgentReturnBannerPanel.tsx", import.meta.url),
   "utf-8",
@@ -255,14 +260,17 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("uses the VUI product panel surface for the Agent workspace columns", () => {
+    expect(routeSource).toContain("<AgentWorkspaceLayoutPanel");
+    expect(workspaceLayoutPanelSource).toContain("AgentFilterRail");
+    expect(workspaceLayoutPanelSource).toContain("AgentListWorkspacePanel");
+    expect(workspaceLayoutPanelSource).toContain("AgentDetailWorkspacePanel");
     expect(detailWorkspacePanelSource).toContain("AgentWorkspacePanel");
-    expect(routeSource).toContain("<AgentFilterRail");
-    expect(routeSource).toContain("ariaLabel={copy.agentFilters}");
+    expect(routeSource).toContain("ariaLabel: copy.agentFilters");
     expect(filterRailSource).toContain('as="aside"');
     expect(listWorkspacePanelSource).toContain('as="main"');
     expect(detailWorkspacePanelSource).toContain('as="aside"');
-    expect(routeSource).toContain("ariaLabel={activeGroupLabel}");
-    expect(routeSource).toContain("ariaLabel={selectedAgent ? agentLabel(selectedAgent) : copy.title}");
+    expect(routeSource).toContain("ariaLabel: activeGroupLabel");
+    expect(routeSource).toContain("ariaLabel: selectedAgent ? agentLabel(selectedAgent) : copy.title");
     expect(stylesSource).not.toContain("0 14px 34px");
   });
 
@@ -308,8 +316,10 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("uses filter, table, and detail panels instead of a card wall", () => {
-    expect(routeSource).toContain("<AgentFilterRail");
-    expect(routeSource).toContain("<AgentListWorkspacePanel");
+    expect(workspaceLayoutPanelSource).toContain("<AgentFilterRail");
+    expect(workspaceLayoutPanelSource).toContain("<AgentListWorkspacePanel");
+    expect(routeSource).not.toContain("<AgentFilterRail");
+    expect(routeSource).not.toContain("<AgentListWorkspacePanel");
     expect(listWorkspacePanelSource).toContain("styles.agentPanel");
     expect(detailWorkspacePanelSource).toContain("styles.detailPanel");
     expect(listWorkspacePanelSource).toContain('from "./AgentListWorkspacePanel.styles"');
@@ -320,7 +330,8 @@ describe("AgentsRoute layout contract", () => {
     expect(listStatePanelSource).toContain("<AgentDenseList");
     expect(routeSource).toContain("agent.avatarImageUrl");
     expect(routeSource).toContain("<AgentSelectedDetailContentPanel");
-    expect(routeSource).toContain("<AgentDetailHeaderPanel");
+    expect(selectedDetailContentPanelSource).toContain("<AgentDetailHeaderPanel");
+    expect(routeSource).not.toContain("<AgentDetailHeaderPanel");
     expect(detailHeaderPanelSource).toContain('from "./AgentDetailHeaderPanel.styles"');
     expect(detailHeaderPanelSource).not.toContain("AgentsRoute.styles");
     expect(detailHeaderPanelSource).toContain("function roleToneClass");
@@ -370,8 +381,8 @@ describe("AgentsRoute layout contract", () => {
     expect(agentWorkspaceCacheSource).toContain("teamIndexesWithoutAgentIds");
     expect(routeSource).toContain('section === "boundary"');
     expect(routeSource).toContain("managementSection,");
-    expect(routeSource).toContain("sections={filterSections}");
-    expect(routeSource).toContain("advancedSections={advancedFilterSections}");
+    expect(routeSource).toContain("sections: filterSections");
+    expect(routeSource).toContain("advancedSections: advancedFilterSections");
     expect(routeSource).toContain("groupDisplayLabel(group, copy)");
     expect(filterRailSource).toContain("<details");
     expect(filterRailSource).toContain("agent-filter-advanced");
@@ -442,7 +453,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("function contextCompressionPolicyFromDraft");
     expect(routeSource).toContain("contextCompressionPolicy: contextCompressionPolicyFromDraft(payload.draft.contextCompressionPolicy)");
     expect(routeSource).toContain("updateContextCompressionDraft");
-    expect(routeSource).toContain("<AgentConfigPrimaryPanePanel");
+    expect(selectedDetailContentPanelSource).toContain("<AgentConfigPrimaryPanePanel");
     expect(configPrimaryPanePanelSource).toContain("<AgentCoreConfigPanel");
     expect(routeSource).toContain("onContextCompressionChange: updateContextCompressionDraft");
     expect(coreConfigPanelSource).toContain("<AgentContextCompressionPanel");
@@ -553,7 +564,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("route: agent?.agentId ? `/teams?agent=${encodeURIComponent(agent.agentId)}` : \"/teams\"");
     expect(routeSource).toContain("void navigate(route)");
     expect(managementBriefPanelSource).toContain("onOpenRoute(action.route)");
-    expect(routeSource).toContain("onSelectPane={setActivePane}");
+    expect(routeSource).toContain("onSelectPane: setActivePane");
+    expect(selectedDetailContentPanelSource).toContain("<AgentManagementBriefPanel");
     expect(managementBriefPanelSource).toContain("onSelectPane(action.pane)");
     expect(routeSource).toContain("copy.nextSetupMembership");
   });
@@ -602,14 +614,14 @@ describe("AgentsRoute layout contract", () => {
     expect(createPanelSource).toContain("copy.createAgentToolBundlePreview");
     expect(routeSource).toContain("creationToolBundleIds: sortedIds(draft.selectedToolBundleIds)");
     expect(routeSource).toContain("toolPolicy: {");
-    expect(routeSource).toContain("styles.workspaceCreating");
+    expect(workspaceLayoutPanelSource).toContain("styles.workspaceCreating");
     expect(listWorkspacePanelSource).toContain("styles.agentPanelCreating");
     expect(routeSource).not.toContain("toolPolicy: workSession ? {} : {");
     expect(styles.createToolBundleGrid).toBeTruthy();
     expect(styles.createToolBundleOption).toBeTruthy();
     expect(styles.createToolBundleSelected).toBeTruthy();
     expect(styles.createToolBundlePreview).toBeTruthy();
-    expect(styles.workspaceCreating).toBeTruthy();
+    expect(workspaceLayoutStyles.workspaceCreating).toBeTruthy();
     expect(listWorkspaceStyles.agentPanelCreating).toBeTruthy();
   });
 
@@ -686,7 +698,7 @@ describe("AgentsRoute layout contract", () => {
     expect(createPanelSource).toContain("title={toolBundleSummary.meta || copy.createAgentToolBundleEmpty}");
     expect(routeSource).not.toContain("<small>{createToolBundleSummaryValue.meta || copy.createAgentToolBundleEmpty}</small>");
     expect(routeSource).not.toContain("<small>{toolBundleMeta(bundle, lang)}</small>");
-    expect(routeSource).toContain("healthTitle={issueSummary(selectedAgent.health, lang)}");
+    expect(routeSource).toContain("healthTitle: issueSummary(selectedAgent.health, lang)");
     expect(detailHeaderPanelSource).toContain("className={styles.detailHealthStatus}");
     expect(routeSource).not.toContain("<small>{issueSummary(selectedAgent.health, lang)}</small>");
     expect(coreConfigPanelSource).toContain("title={`${slot.required ? copy.requiredSlot : copy.optionalSlot} · ${slot.description}`}");
@@ -698,7 +710,7 @@ describe("AgentsRoute layout contract", () => {
     expect(createPanelSource).toContain("title={copy.createAgentToolBundlesHint}");
     expect(returnBannerPanelSource).toContain("title={copy.returnBannerHint}");
     expect(avatarEditorPanelSource).toContain("title={copy.avatarEditorHint}");
-    expect(routeSource).toContain("title={copy.routeHint}");
+    expect(routeSource).toContain("title: copy.routeHint");
     expect(detailHeaderPanelSource).toContain("className={styles.detailHeader}");
     expect(managementBriefPanelSource).toContain("title={copy.managementBriefHint}");
     expect(routeSource).toContain("title: copy.personaHint");
@@ -826,7 +838,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("AgentModeMembershipDraft");
     expect(routeSource).toContain("membershipDraftFromWorkspace");
     expect(routeSource).toContain("/mode-membership");
-    expect(routeSource).toContain("<AgentConfigReferencesPanePanel");
+    expect(selectedDetailContentPanelSource).toContain("<AgentConfigReferencesPanePanel");
     expect(configReferencesPanePanelSource).toContain("<AgentModeMembershipPanel");
     expect(modeMembershipPanelSource).toContain('from "./AgentModeMembershipPanel.styles"');
     expect(modeMembershipPanelSource).not.toContain("AgentsRoute.styles");
@@ -878,7 +890,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("reference.projectionEdit?.canonicalEditRoute || reference.sourceRef?.canonicalEditRoute");
     expect(routeSource).toContain("compactProjectionRoute(room");
     expect(routeSource).toContain('`/teams?team=${encodeURIComponent(reference.sourceId)}`');
-    expect(routeSource).toContain("onOpenRoute: (route) => navigate(route)");
+    expect(routeSource).toContain("onOpenRoute: (route: string) => navigate(route)");
     expect(routeSource).not.toContain("className={styles.referenceList}");
     expect(referencesPanelStyles.referenceList).toBeTruthy();
     expect(referencesPanelStyles.referenceItem).toBeTruthy();
@@ -895,7 +907,7 @@ describe("AgentsRoute layout contract", () => {
     expect(toolSummaryPanelSource).toContain("copy.toolPolicyTitle");
     expect(routeSource).toContain("toolPolicySourceLine");
     expect(routeSource).toContain("toolPolicySource?.description");
-    expect(routeSource).toContain("<AgentConfigPolicyPanePanel");
+    expect(selectedDetailContentPanelSource).toContain("<AgentConfigPolicyPanePanel");
     expect(configPolicyPanePanelSource).toContain("<AgentToolSummaryPanel");
     expect(routeSource).toContain("onConfigure: () => navigate(selectedAgentToolConfigRoute)");
     expect(toolSummaryPanelSource).toContain("工具能力已迁移到 Agent 管理的工具页集中配置");
@@ -1004,8 +1016,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("agentConfigPanes(copy, selectedAgent)");
     expect(routeSource).toContain("AgentManagementBrief");
     expect(routeSource).toContain("buildAgentManagementBrief(selectedAgent, copy, lang)");
-    expect(routeSource).toContain("AgentManagementBriefPanel");
-    expect(routeSource).toContain("AgentOverviewPanel");
+    expect(selectedDetailContentPanelSource).toContain("AgentManagementBriefPanel");
+    expect(selectedDetailContentPanelSource).toContain("AgentOverviewPanel");
     expect(routeSource).toContain("copy.managementBriefTitle");
     expect(routeSource).toContain("copy.nextActionsTitle");
     expect(routeSource).not.toContain("className={styles.managementBriefPanel}");
@@ -1078,9 +1090,9 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("selectedAgentRequiresPersona");
     expect(routeSource).toContain("selectedAgentRequiresTask");
     expect(routeSource).toContain("selectedAgentRequiresTeamMembership");
-    expect(routeSource).toContain("personaProfile={selectedAgentRequiresPersona ? {");
-    expect(routeSource).toContain("taskProfile={selectedAgentRequiresTask ? {");
-    expect(routeSource).toContain("modeMembership={selectedAgentRequiresTeamMembership ? {");
+    expect(routeSource).toContain("personaProfile: selectedAgentRequiresPersona ? {");
+    expect(routeSource).toContain("taskProfile: selectedAgentRequiresTask ? {");
+    expect(routeSource).toContain("modeMembership: selectedAgentRequiresTeamMembership ? {");
     expect(routeSource).toContain("isWorkSession: createDraftIsWorkSession");
     expect(createPanelSource).toContain("{!isWorkSession ? (");
     expect(routeSource).toContain("const roleKey = workSession ? \"\" : draft.roleKey.trim()");
@@ -1113,7 +1125,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.consumeAllMessages");
     expect(routeSource).toContain("copy.inboxTitle");
     expect(routeSource).toContain("const selectedAgentInboxPendingCount = selectedAgent?.agentInboxPendingCount ?? agentMessagesQuery.data?.length ?? 0");
-    expect(routeSource).toContain("AgentActivityPanePanel");
+    expect(selectedDetailContentPanelSource).toContain("AgentActivityPanePanel");
     expect(activityPanePanelSource).toContain("AgentActivityHistoryPanel");
     expect(routeSource).toContain("showInboxAction: issue.code === \"pending_inbox_messages\"");
     expect(healthMaintenancePanelSource).toContain("copy.handleInboxNow");
@@ -1316,15 +1328,17 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("keeps the desktop workspace as three scan-friendly columns", () => {
-    expect(routeSource).toContain("styles.workspace");
+    expect(routeSource).toContain("<AgentWorkspaceLayoutPanel");
+    expect(routeSource).not.toContain("styles.workspace");
+    expect(workspaceLayoutPanelSource).toContain("styles.workspace");
     expect(denseListSource).toContain("max-[860px]:hidden");
     expect(denseListSource).toContain('data-vui="agent-row"');
     expect(detailWorkspacePanelSource).toContain("styles.detailPanel");
-    expect(styles.workspace).toBeTruthy();
-    expect(styles.workspace).toContain("[grid-template-columns:minmax(214px,_268px)_minmax(430px,_1.08fr)_minmax(330px,_0.86fr)]");
-    expect(styles.workspace).toContain("max-[1040px]:[grid-template-columns:minmax(220px,_270px)_minmax(0,_1fr)]");
+    expect(workspaceLayoutStyles.workspace).toBeTruthy();
+    expect(workspaceLayoutStyles.workspace).toContain("[grid-template-columns:minmax(214px,_268px)_minmax(430px,_1.08fr)_minmax(330px,_0.86fr)]");
+    expect(workspaceLayoutStyles.workspace).toContain("max-[1040px]:[grid-template-columns:minmax(220px,_270px)_minmax(0,_1fr)]");
     expect(stylesSource).not.toContain("max-[1280px]");
-    expect(styles.workspace).toContain("max-[1040px]:[grid-auto-rows:minmax(180px,_auto)]");
+    expect(workspaceLayoutStyles.workspace).toContain("max-[1040px]:[grid-auto-rows:minmax(180px,_auto)]");
     expect(listWorkspaceStyles.agentPanel).toContain("[grid-template-rows:auto_auto_minmax(0,_1fr)]");
     expect(detailWorkspaceStyles.detailPanel).toContain("[overflow:auto]");
     expect(detailWorkspaceStyles.detailPanel).toContain("max-[1040px]:[min-height:220px]");
@@ -1348,8 +1362,8 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("keeps the 1024px Agent management stack compact enough to show list and detail context", () => {
-    expect(styles.workspace).toContain("max-[860px]:[grid-auto-rows:auto]");
-    expect(styles.workspace).toContain("max-[860px]:[align-content:start]");
+    expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:[grid-auto-rows:auto]");
+    expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:[align-content:start]");
     expect(styles.filterPanel).toContain("max-[860px]:[min-height:150px]");
     expect(listWorkspaceStyles.agentPanel).toContain("max-[860px]:[min-height:240px]");
     expect(detailWorkspaceStyles.detailPanel).toContain("max-[860px]:[min-height:420px]");
@@ -1401,7 +1415,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('"/api/agents/bulk-archive"');
     expect(routeSource).toContain('"/api/agents/bulk-purge"');
     expect(routeSource).toContain("bulkPurgeWorkspaceCache");
-    expect(routeSource).toContain("bulkConfig={selectedBulkAgents.length > 1 ? {");
+    expect(routeSource).toContain("bulkConfig: selectedBulkAgents.length > 1 ? {");
     expect(detailWorkspacePanelSource).toContain("<AgentBulkConfigPanel");
     expect(routeSource).toContain("onToggleApply: toggleBulkConfigApply");
     expect(routeSource).toContain("onDraftChange: updateBulkConfigDraft");
@@ -1409,7 +1423,7 @@ describe("AgentsRoute layout contract", () => {
     expect(listWorkspacePanelSource).toContain("AgentBulkOperationsPanel");
     expect(bulkOperationsPanelSource).toContain("AgentBulkActionBar");
     expect(routeSource).toContain("VButton");
-    expect(routeSource).toContain("bulkOperations={{");
+    expect(routeSource).toContain("bulkOperations: {");
     expect(routeSource).toContain("selectedCount: selectedBulkAgents.length");
     expect(routeSource).toContain("visibleCount: visibleAgents.length");
     expect(routeSource).toContain("onSelectVisible: selectVisibleBulkAgents");
@@ -1565,7 +1579,7 @@ describe("AgentsRoute layout contract", () => {
 
     expect(routeSource).not.toContain("styles.referenceRouteButton");
     expect(configReferencesPanePanelSource).toContain("AgentReferencesPanel");
-    expect(routeSource).toContain("onOpenRoute: (route) => navigate(route)");
+    expect(routeSource).toContain("onOpenRoute: (route: string) => navigate(route)");
 
     for (const block of timelineActionBlocks) {
       expect(block).toContain("<VButton");
