@@ -73,6 +73,7 @@ import {
   type EvolutionActiveRunMonitorMetric,
   type EvolutionActiveRunMonitorRunView,
 } from "./EvolutionActiveRunMonitorPanel";
+import { EvolutionProposalActionBandsPanel } from "./EvolutionProposalActionBandsPanel";
 import { EvolutionRunRecordsPanel } from "./EvolutionRunRecordsPanel";
 import { createEvolutionWorkspaceCache } from "./evolutionWorkspaceCache";
 import { modelDisplayLabel } from "./agentDisplay";
@@ -4279,58 +4280,18 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       ) : null}
                     </div>
 
-                    <div className={styles.detailSection}>
-                      <h3>{t("availableActions")}</h3>
-                      <p>{formatAvailableActions(proposalDetailQuery.data.availableActions)}</p>
-                      {proposalDetailQuery.data.availableActions.length > 0 ? (
-                        <div className={styles.actionRow}>
-                          {proposalDetailQuery.data.availableActions.map((action) => (
-                            <VNativeButton
-                              key={action}
-                              type="button"
-                              className={styles.inlineAction}
-                              disabled={runLocked || actionMutation.isPending}
-                              onClick={() => triggerRunAction(proposalDetailQuery.data.sourceRun, action)}
-                            >
-                              <Sparkles size={15} />
-                              {proposalActionLabel(action)}
-                            </VNativeButton>
-                          ))}
-                        </div>
-                      ) : null}
-                      {actionFeedback ? <p className={styles.feedbackText}>{actionFeedback}</p> : null}
-                      {actionMutation.error ? <p className={styles.errorText}>{actionMutation.error.message}</p> : null}
-                    </div>
-
-                    <div className={styles.detailSection}>
-                      <h3>{t("deleteAndCleanup")}</h3>
-                      <div className={styles.relatedList}>
-                        <article className={styles.relatedRow}>
-                          <strong>{proposalDetailQuery.data.canDelete ? t("deletionAllowed") : t("deletionBlocked")}</strong>
-                          <span>
-                            {proposalDetailQuery.data.canDelete
-                              ? t("deleteProposal")
-                              : proposalDetailQuery.data.deleteBlockReason || "--"}
-                          </span>
-                        </article>
-                      </div>
-                      <p>{proposalDetailQuery.data.review.deleteImpact}</p>
-                      {proposalDetailQuery.data.review.evidenceNotes.length > 0
-                        ? renderReviewList(proposalDetailQuery.data.review.evidenceNotes)
-                        : null}
-                      <div className={styles.actionRow}>
-                        <VNativeButton
-                          type="button"
-                          className={styles.inlineAction}
-                          disabled={!proposalDetailQuery.data.canDelete || deleteProposalMutation.isPending}
-                          onClick={() => triggerProposalDelete(proposalDetailQuery.data.sourceRun)}
-                        >
-                          <Trash2 size={15} />
-                          {t("deleteProposal")}
-                        </VNativeButton>
-                      </div>
-                      {deleteProposalMutation.error ? <p className={styles.errorText}>{deleteProposalMutation.error.message}</p> : null}
-                    </div>
+                    <EvolutionProposalActionBandsPanel
+                      proposal={proposalDetailQuery.data}
+                      labels={{ t, proposalActionLabel }}
+                      runLocked={runLocked}
+                      actionFeedback={actionFeedback}
+                      actionError={actionMutation.error?.message ?? ""}
+                      actionPending={actionMutation.isPending}
+                      deleteProposalError={deleteProposalMutation.error?.message ?? ""}
+                      deleteProposalPending={deleteProposalMutation.isPending}
+                      onRunAction={triggerRunAction}
+                      onDeleteProposal={triggerProposalDelete}
+                    />
 
                     <div className={styles.detailSection}>
                       <h3>{t("evidencePaths")}</h3>
