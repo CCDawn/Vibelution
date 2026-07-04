@@ -13,7 +13,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentOverviewPanel.styles";
 
 export type AgentOverviewIcon =
   | "model"

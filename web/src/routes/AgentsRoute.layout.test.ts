@@ -9,14 +9,18 @@ import styles from "./AgentsRoute.styles";
 import stylesSource from "./AgentsRoute.styles.ts?raw";
 import archiveZoneStyles from "./AgentArchiveZonePanel.styles";
 import debugResetStyles from "./AgentDebugResetPanel.styles";
+import detailWorkspaceStyles from "./AgentDetailWorkspacePanel.styles";
 import emptySelectionStyles from "./AgentEmptySelectionPanel.styles";
 import activityHistoryStyles from "./AgentActivityHistoryPanel.styles";
 import healthMaintenanceStyles from "./AgentHealthMaintenancePanel.styles";
+import listWorkspaceStyles from "./AgentListWorkspacePanel.styles";
+import managementHeaderStyles from "./AgentManagementHeaderPanel.styles";
 import managementBriefStyles from "./AgentManagementBriefPanel.styles";
 import memoryPolicyStyles from "./AgentMemoryPolicyPanel.styles";
 import modeMembershipStyles from "./AgentModeMembershipPanel.styles";
 import personaProfileStyles from "./AgentPersonaProfilePanel.styles";
 import referencesPanelStyles from "./AgentReferencesPanel.styles";
+import overviewStyles from "./AgentOverviewPanel.styles";
 import runtimeFocusStyles from "./AgentRuntimeFocusPanel.styles";
 import runtimePolicyStyles from "./AgentRuntimePolicyPanel.styles";
 import taskProfileStyles from "./AgentTaskProfilePanel.styles";
@@ -142,6 +146,10 @@ const selectedDetailContentPanelSource = readFileSync(
   new URL("./AgentSelectedDetailContentPanel.tsx", import.meta.url),
   "utf-8",
 );
+const overviewPanelSource = readFileSync(
+  new URL("./AgentOverviewPanel.tsx", import.meta.url),
+  "utf-8",
+);
 const emptySelectionPanelSource = readFileSync(
   new URL("./AgentEmptySelectionPanel.tsx", import.meta.url),
   "utf-8",
@@ -217,6 +225,8 @@ describe("AgentsRoute layout contract", () => {
     expect(shellSource).toContain('to="/agents"');
     expect(shellSource).toContain('t("navAgents")');
     expect(routeSource).toContain("<AgentManagementHeaderPanel");
+    expect(managementHeaderPanelSource).toContain('from "./AgentManagementHeaderPanel.styles"');
+    expect(managementHeaderPanelSource).not.toContain("AgentsRoute.styles");
     expect(managementHeaderPanelSource).toContain('<AgentManagementNav active="agents" className={styles.managementNav} />');
     expect(managementHeaderPanelSource.indexOf('<AgentManagementNav active="agents" className={styles.managementNav} />')).toBeGreaterThan(
       managementHeaderPanelSource.indexOf("<AgentPageHeader"),
@@ -224,6 +234,8 @@ describe("AgentsRoute layout contract", () => {
     expect(managementHeaderPanelSource.indexOf('<AgentManagementNav active="agents" className={styles.managementNav} />')).toBeLessThan(
       managementHeaderPanelSource.indexOf("<AgentSummaryStrip"),
     );
+    expect(managementHeaderStyles.managementNav).toBeTruthy();
+    expect(managementHeaderStyles.controlStrip).toBeTruthy();
   });
 
   it("uses VUI product components for the Agent management header and summary strip", () => {
@@ -294,6 +306,10 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("<AgentListWorkspacePanel");
     expect(listWorkspacePanelSource).toContain("styles.agentPanel");
     expect(detailWorkspacePanelSource).toContain("styles.detailPanel");
+    expect(listWorkspacePanelSource).toContain('from "./AgentListWorkspacePanel.styles"');
+    expect(listWorkspacePanelSource).not.toContain("AgentsRoute.styles");
+    expect(detailWorkspacePanelSource).toContain('from "./AgentDetailWorkspacePanel.styles"');
+    expect(detailWorkspacePanelSource).not.toContain("AgentsRoute.styles");
     expect(listWorkspacePanelSource).toContain("<AgentListStatePanel");
     expect(listStatePanelSource).toContain("<AgentDenseList");
     expect(routeSource).toContain("agent.avatarImageUrl");
@@ -398,9 +414,11 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.delegation");
     expect(routeSource).toContain("copy.modeMembership");
     expect(routeSource).toContain("copy.references");
-    expect(styles.factGrid).toContain("[grid-template-columns:repeat(auto-fit,_minmax(190px,_1fr))]");
-    expect(styles.factGrid).toContain("[&_section]:[grid-template-columns:18px_minmax(0,_1fr)]");
-    expect(styles.factGrid).toContain("[&_strong]:[text-overflow:ellipsis]");
+    expect(overviewPanelSource).toContain('from "./AgentOverviewPanel.styles"');
+    expect(overviewPanelSource).not.toContain("AgentsRoute.styles");
+    expect(overviewStyles.factGrid).toContain("[grid-template-columns:repeat(auto-fit,_minmax(190px,_1fr))]");
+    expect(overviewStyles.factGrid).toContain("[&_section]:[grid-template-columns:18px_minmax(0,_1fr)]");
+    expect(overviewStyles.factGrid).toContain("[&_strong]:[text-overflow:ellipsis]");
   });
 
   it("lets each Agent inherit or override its context compression policy", () => {
@@ -571,7 +589,7 @@ describe("AgentsRoute layout contract", () => {
     expect(styles.createToolBundleSelected).toBeTruthy();
     expect(styles.createToolBundlePreview).toBeTruthy();
     expect(styles.workspaceCreating).toBeTruthy();
-    expect(styles.agentPanelCreating).toBeTruthy();
+    expect(listWorkspaceStyles.agentPanelCreating).toBeTruthy();
   });
 
   it("keeps disabled tool-query fallbacks referentially stable so Agent navigation can settle", () => {
@@ -998,7 +1016,7 @@ describe("AgentsRoute layout contract", () => {
     expect(managementBriefStyles.managementChecklist).toBeTruthy();
     expect(managementBriefStyles.nextActionList).toBeTruthy();
     expect(managementBriefStyles.nextActionButton).toBe("w-full");
-    expect(styles.boundarySummaryGrid).toBeTruthy();
+    expect(overviewStyles.boundarySummaryGrid).toBeTruthy();
     expect(styles.detailTabs).toBeTruthy();
   });
 
@@ -1283,20 +1301,20 @@ describe("AgentsRoute layout contract", () => {
     expect(styles.workspace).toContain("max-[1040px]:[grid-template-columns:minmax(220px,_270px)_minmax(0,_1fr)]");
     expect(stylesSource).not.toContain("max-[1280px]");
     expect(styles.workspace).toContain("max-[1040px]:[grid-auto-rows:minmax(180px,_auto)]");
-    expect(styles.agentPanel).toContain("[grid-template-rows:auto_auto_minmax(0,_1fr)]");
-    expect(styles.detailPanel).toContain("[overflow:auto]");
-    expect(styles.detailPanel).toContain("max-[1040px]:[min-height:220px]");
-    expect(styles.detailPanel).not.toContain("max-[1040px]:hidden");
-    expect(styles.detailPanelCreating).toContain("max-[1040px]:hidden");
+    expect(listWorkspaceStyles.agentPanel).toContain("[grid-template-rows:auto_auto_minmax(0,_1fr)]");
+    expect(detailWorkspaceStyles.detailPanel).toContain("[overflow:auto]");
+    expect(detailWorkspaceStyles.detailPanel).toContain("max-[1040px]:[min-height:220px]");
+    expect(detailWorkspaceStyles.detailPanel).not.toContain("max-[1040px]:hidden");
+    expect(detailWorkspaceStyles.detailPanelCreating).toContain("max-[1040px]:hidden");
   });
 
   it("keeps Agent card subgrids away from invalid quoted Tailwind grid areas", () => {
-    expect(styles.policyGrid).not.toContain("grid-template-areas");
-    expect(styles.policyGrid).toContain("[&_div]:[grid-template-rows:auto_auto]");
-    expect(styles.policyGrid).toContain("[&_svg]:[grid-column:1]");
-    expect(styles.policyGrid).toContain("[&_svg]:[grid-row:1_/_3]");
-    expect(styles.policyGrid).toContain("[&_span]:[grid-column:2]");
-    expect(styles.policyGrid).toContain("[&_strong]:[grid-row:2]");
+    expect(overviewStyles.policyGrid).not.toContain("grid-template-areas");
+    expect(overviewStyles.policyGrid).toContain("[&_div]:[grid-template-rows:auto_auto]");
+    expect(overviewStyles.policyGrid).toContain("[&_svg]:[grid-column:1]");
+    expect(overviewStyles.policyGrid).toContain("[&_svg]:[grid-row:1_/_3]");
+    expect(overviewStyles.policyGrid).toContain("[&_span]:[grid-column:2]");
+    expect(overviewStyles.policyGrid).toContain("[&_strong]:[grid-row:2]");
     expect(styles.toolBundleItem).not.toContain("grid-template-areas");
     expect(styles.toolBundleItem).toContain("[grid-template-rows:auto_auto]");
     expect(styles.toolBundleItem).toContain("[&_span]:[grid-column:1]");
@@ -1309,8 +1327,8 @@ describe("AgentsRoute layout contract", () => {
     expect(styles.workspace).toContain("max-[860px]:[grid-auto-rows:auto]");
     expect(styles.workspace).toContain("max-[860px]:[align-content:start]");
     expect(styles.filterPanel).toContain("max-[860px]:[min-height:150px]");
-    expect(styles.agentPanel).toContain("max-[860px]:[min-height:240px]");
-    expect(styles.detailPanel).toContain("max-[860px]:[min-height:420px]");
+    expect(listWorkspaceStyles.agentPanel).toContain("max-[860px]:[min-height:240px]");
+    expect(detailWorkspaceStyles.detailPanel).toContain("max-[860px]:[min-height:420px]");
   });
 
   it("keeps Agent empty states compact and left-aligned for dense workbench scanning", () => {
@@ -1389,7 +1407,7 @@ describe("AgentsRoute layout contract", () => {
     expect(bulkConfigPanelSource).toContain("<VNativeInput");
     expect(routeSource).toContain("bulkSelected: selectedBulkAgentIds.has(agent.agentId)");
     expect(denseListSource).toContain("onToggleBulk");
-    expect(styles.agentPanel).toContain("[grid-template-rows:auto_auto_minmax(0,_1fr)]");
+    expect(listWorkspaceStyles.agentPanel).toContain("[grid-template-rows:auto_auto_minmax(0,_1fr)]");
     expect(routeSource).not.toContain("styles.bulkActionBar");
     expect(stylesSource).not.toContain(".bulkActionBar {");
     expect(stylesSource).not.toContain(".bulkSummary");
