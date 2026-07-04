@@ -2,16 +2,29 @@ import { describe, expect, it } from "vitest";
 
 import routeSource from "./ConfigRoute.tsx?raw";
 import logHelperCenterPanelSource from "./ConfigLogHelperCenterPanel.tsx?raw";
+import logHelperCenterPanelStylesSource from "./ConfigLogHelperCenterPanel.styles.ts?raw";
+import logHelperCenterPanelStyles from "./ConfigLogHelperCenterPanel.styles";
 import placeholderPanelSource from "./ConfigWorkspacePlaceholderPanel.tsx?raw";
+import placeholderPanelStylesSource from "./ConfigWorkspacePlaceholderPanel.styles.ts?raw";
+import placeholderPanelStyles from "./ConfigWorkspacePlaceholderPanel.styles";
 import stylesSource from "./ConfigRoute.styles.ts?raw";
+
+const extractedPanelStylesSource = [
+  logHelperCenterPanelStylesSource,
+  placeholderPanelStylesSource,
+].join("\n");
 
 describe("ConfigRoute layout contract", () => {
   it("uses a full workspace placeholder for initial loading and load failure states", () => {
     expect(routeSource).toContain("<ConfigWorkspacePlaceholderPanel title={copy.loading} />");
     expect(placeholderPanelSource).toContain("export function ConfigWorkspacePlaceholderPanel");
+    expect(placeholderPanelSource).toContain('from "./ConfigWorkspacePlaceholderPanel.styles"');
+    expect(placeholderPanelSource).not.toContain("ConfigRoute.styles");
     expect(routeSource).toContain('tone="error"');
     expect(placeholderPanelSource).toContain("styles.loadingShell");
     expect(placeholderPanelSource).toContain("styles.loadingBoard");
+    expect(placeholderPanelStyles.loadingShell).toBeTypeOf("string");
+    expect(placeholderPanelStyles.loadingBoard).toBeTypeOf("string");
     expect(routeSource).not.toContain("<section className={styles.loadingSurface}>");
   });
 
@@ -20,6 +33,9 @@ describe("ConfigRoute layout contract", () => {
     expect(placeholderPanelSource).toContain("styles.loadingNavList");
     expect(placeholderPanelSource).toContain("styles.loadingMetricGrid");
     expect(placeholderPanelSource).toContain("styles.loadingSpecGrid");
+    expect(placeholderPanelStyles.loadingNavPanel).toBeTypeOf("string");
+    expect(placeholderPanelStyles.loadingMetricGrid).toBeTypeOf("string");
+    expect(extractedPanelStylesSource).toContain("loadingMetricGrid");
   });
 
   it("moves supplemental config explanation into hover text instead of permanent helper copy", () => {
@@ -99,7 +115,12 @@ describe("ConfigRoute layout contract", () => {
   it("routes cleanup diagnostics to Launcher maintenance instead of Web Reset", () => {
     expect(routeSource).toContain("healthOpenLauncher");
     expect(routeSource).toContain("<ConfigLogHelperCenterPanel");
+    expect(logHelperCenterPanelSource).toContain('from "./ConfigLogHelperCenterPanel.styles"');
+    expect(logHelperCenterPanelSource).not.toContain("ConfigRoute.styles");
     expect(logHelperCenterPanelSource).toContain('href="/launcher"');
+    expect(logHelperCenterPanelStyles.sectionSurface).toBeTypeOf("string");
+    expect(logHelperCenterPanelStyles.logHelperGrid).toBeTypeOf("string");
+    expect(extractedPanelStylesSource).toContain("logHelperGrid");
     expect(routeSource).toContain("queryKeys.launcherMaintenanceSummary()");
     expect(routeSource).not.toContain("healthOpenReset");
     expect(logHelperCenterPanelSource).not.toContain("healthOpenReset");
