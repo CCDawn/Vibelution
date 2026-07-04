@@ -84,3 +84,50 @@ def test_search_returns_ranked_excerpts_and_citations(routed_workspace, tmp_path
     assert result["spaceId"] == imported["space"]["spaceId"]
     assert "Agent can use" in result["excerpt"]
     assert result["citation"]["pageRelativePath"] == "Plan.md"
+
+
+def test_overwrite_keeps_backup_hidden_from_lists_and_search(routed_workspace, tmp_path):
+    first_source = tmp_path / "source-first"
+    second_source = tmp_path / "source-second"
+    _write_note(first_source, "Plan.md", "# Plan\nlegacy backup phrase only\n")
+    _write_note(second_source, "Plan.md", "# Plan\nfresh canonical phrase only\n")
+
+    first_import = service.import_markdown_space(str(first_source), space_name="Team Notes")
+    second_import = service.import_markdown_space(str(second_source), space_name="Team Notes", overwrite=True)
+
+    assert first_import["space"]["spaceId"] == second_import["space"]["spaceId"]
+
+    listed = service.list_markdown_spaces()
+
+    assert listed["summary"]["spaceCount"] == 1
+    assert [space["spaceId"] for space in listed["spaces"]] == [second_import["space"]["spaceId"]]
+
+    old_search = service.search_user_markdown_spaces(query="legacy backup phrase", space_id=second_import["space"]["spaceId"], limit=5)
+    new_search = service.search_user_markdown_spaces(query="fresh canonical phrase", space_id=second_import["space"]["spaceId"], limit=5)
+
+    assert old_search["summary"]["resultCount"] == 0
+    assert new_search["summary"]["resultCount"] == 1
+    assert "fresh canonical phrase" in new_search["results"][0]["excerpt"]
+
+
+def test_import_assigns_distinct_page_ids_for_distinct_relative_paths(routed_workspace, tmp_path):
+    source = tmp_path / "source"
+    _write_note(source, "a/b.md", "# Nested Page\ncontent from nested path\n")
+    _write_note(source, "a-b.md", "# Flat Page\ncontent from flat path\n")
+
+    imported = service.import_markdown_space(str(source), space_name="Collision Check")
+    pages_payload = service.list_markdown_space_pages(imported["space"]["spaceId"])
+    page_by_path = {page["relativePath"]: page for page in pages_payload["pages"]}
+
+    nested_page = page_by_path["a/b.md"]
+    flat_page = page_by_path["a-b.md"]
+
+    assert nested_page["pageId"] != flat_page["pageId"]
+
+    nested_content = service.get_markdown_space_page(imported["space"]["spaceId"], nested_page["pageId"])
+    flat_content = service.get_markdown_space_page(imported["space"]["spaceId"], flat_page["pageId"])
+
+    assert nested_content["page"]["relativePath"] == "a/b.md"
+    assert "nested path" in nested_content["page"]["content"]
+    assert flat_content["page"]["relativePath"] == "a-b.md"
+    assert "flat path" in flat_content["page"]["content"]

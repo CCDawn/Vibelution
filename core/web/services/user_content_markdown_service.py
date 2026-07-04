@@ -211,10 +211,8 @@ def import_markdown_space(
 def list_markdown_spaces(*, user_id: str = "default") -> dict[str, Any]:
     normalized_user_id = _safe_id(user_id or "default", default="default")
     spaces = []
-    for manifest_path in sorted(_user_content_root(normalized_user_id).glob("*/manifest.json")):
-        manifest = _read_json(manifest_path)
-        if manifest:
-            spaces.append(_space_summary(manifest))
+    for manifest in _iter_active_space_manifests(normalized_user_id):
+        spaces.append(_space_summary(manifest))
     return {
         "ok": True,
         "schemaVersion": SCHEMA_VERSION,
@@ -282,11 +280,8 @@ def search_user_markdown_spaces(
     terms = [item for item in re.split(r"\s+", normalized_query.lower()) if item]
     results = []
 
-    for manifest_path in sorted(_user_content_root(normalized_user_id).glob("*/manifest.json")):
-        manifest = _read_json(manifest_path)
-        if not manifest:
-            continue
-        current_space_id = str(manifest.get("spaceId") or manifest_path.parent.name).strip()
+    for manifest in _iter_active_space_manifests(normalized_user_id):
+        current_space_id = str(manifest.get("spaceId") or "").strip()
         if space_id and current_space_id != str(space_id).strip():
             continue
         page_index = _read_json(Path(str(manifest.get("indexRoot") or "")) / "page_index.json")
@@ -494,8 +489,10 @@ def _page_payload(relative_path: str, row: dict[str, Any], *, indexed_at: str) -
 
 
 def _page_id_for_relative_path(relative_path: str) -> str:
-    cleaned = _safe_id(Path(relative_path).with_suffix("").as_posix().replace("/", "-"), default="page")
-    return f"page-{cleaned}"
+    normalized_path = Path(relative_path).as_posix().strip("/")
+    cleaned = _safe_id(Path(normalized_path).with_suffix("").as_posix().replace("/", "-"), default="page")
+    path_hash = hashlib.sha256(normalized_path.encode("utf-8")).hexdigest()[:12]
+    return f"page-{cleaned}-{path_hash}"
 
 
 def _safe_id(value: Any, *, default: str) -> str:
@@ -529,6 +526,22 @@ def _space_summary(manifest: dict[str, Any]) -> dict[str, Any]:
         "pageCount": int(manifest.get("pageCount") or 0),
         "updatedAt": str(manifest.get("updatedAt") or "").strip(),
     }
+
+
+def _iter_active_space_manifests(normalized_user_id: str) -> list[dict[str, Any]]:
+    manifests = []
+    root = _user_content_root(normalized_user_id)
+    if not root.exists():
+        return manifests
+    for space_root in sorted(path for path in root.iterdir() if path.is_dir()):
+        manifest = _read_json(space_root / "manifest.json")
+        if not manifest:
+            continue
+        manifest_space_id = str(manifest.get("spaceId") or "").strip()
+        if not manifest_space_id or space_root.name != manifest_space_id:
+            continue
+        manifests.append(manifest)
+    return manifests
 
 
 def _load_space(*, normalized_user_id: str, space_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
