@@ -4,7 +4,7 @@ import {
   AgentAvatarEditorPanel,
   type AgentAvatarEditorPanelCopy,
 } from "./AgentAvatarEditorPanel";
-import styles from "./AgentsRoute.styles";
+import styles from "./AgentDetailHeaderPanel.styles";
 
 export type AgentDetailHeaderPaneView<TPane extends string = string> = {
   id: TPane;
@@ -38,6 +38,16 @@ type AgentDetailHeaderPanelProps<TPane extends string> = {
   onSelectAvatar: (avatarImagePath: string) => void;
   onSelectPane: (pane: TPane) => void;
 };
+
+function roleToneClass(tone: string) {
+  const toneKey = `agentRoleTag_${tone}` as keyof typeof styles;
+  return styles[toneKey] || styles.agentRoleTag_general;
+}
+
+function issueToneClass(tone: string) {
+  const toneKey = `issue_${tone}` as keyof typeof styles;
+  return styles[toneKey] || styles.issue_info;
+}
 
 export function AgentDetailHeaderPanel<TPane extends string>({
   copy,
@@ -87,13 +97,13 @@ export function AgentDetailHeaderPanel<TPane extends string>({
         <div>
           <p className={styles.panelEyebrow}>{roleLabel}</p>
           <h2>{agentName}</h2>
-          <span className={`${styles.agentRoleTag} ${styles[`agentRoleTag_${roleTone}`]}`}>
+          <span className={`${styles.agentRoleTag} ${roleToneClass(roleTone)}`}>
             {roleLabel}
           </span>
         </div>
         <div className={styles.detailHeaderActions}>
           <span className={styles.detailHealthStatus} title={healthTitle}>
-            <span className={`${styles.issuePill} ${styles[`issue_${healthTone}`]}`}>
+            <span className={`${styles.issuePill} ${issueToneClass(healthTone)}`}>
               {healthLabel}
             </span>
           </span>
