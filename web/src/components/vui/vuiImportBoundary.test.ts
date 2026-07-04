@@ -110,6 +110,7 @@ const productSharedParentStyleConsumers = [
   "routes/TeamSourceCollectionSourceDetailPanel.tsx",
   "routes/TeamSourceCollectionStandaloneStagePanel.tsx",
   "routes/TeamSourceCollectionStorageActionsPanel.tsx",
+  "routes/LauncherDiagnosticsPanel.tsx",
   "routes/LauncherDeveloperModePanel.tsx",
   "routes/LauncherProjectMaintenancePanel.tsx",
   "routes/LauncherStartupSettingsPanel.tsx",

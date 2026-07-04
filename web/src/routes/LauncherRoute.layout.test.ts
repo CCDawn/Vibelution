@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import routeSource from "./LauncherRoute.tsx?raw";
 import developerModePanelSource from "./LauncherDeveloperModePanel.tsx?raw";
+import diagnosticsPanelSource from "./LauncherDiagnosticsPanel.tsx?raw";
 import projectMaintenancePanelSource from "./LauncherProjectMaintenancePanel.tsx?raw";
 import startupSettingsPanelSource from "./LauncherStartupSettingsPanel.tsx?raw";
 import stylesSource from "./LauncherRoute.styles.ts?raw";
@@ -127,7 +128,8 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("guardStrip");
     expect(routeSource).toContain("statusTable");
     expect(routeSource).toContain("matrixPanel");
-    expect(routeSource).toContain("specGrid");
+    expect(routeSource).toContain("LauncherDiagnosticsPanel");
+    expect(diagnosticsPanelSource).toContain("specGrid");
     expect(routeSource).toContain("projectBundle");
     expect(routeSource).toContain("StatusRow");
     expect(routeSource).toContain("statusRows");
@@ -138,11 +140,13 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("guardianAdapter");
     expect(routeSource).toContain("recoveryLine");
     expect(routeSource).toContain("evidence?.recovery");
-    expect(routeSource).toContain("CompactList");
-    expect(routeSource).toContain("guardianTable");
-    expect(routeSource).toContain("diagnosticsPanel");
-    expect(routeSource).toContain("diagnosticsBody");
-    expect(routeSource).toContain("diagnosticSection");
+    expect(routeSource).toContain("diagnosticQueueItems");
+    expect(routeSource).toContain("guardianResponsibilityRows");
+    expect(diagnosticsPanelSource).toContain("CompactList");
+    expect(diagnosticsPanelSource).toContain("guardianTable");
+    expect(diagnosticsPanelSource).toContain("diagnosticsPanel");
+    expect(diagnosticsPanelSource).toContain("diagnosticsBody");
+    expect(diagnosticsPanelSource).toContain("diagnosticSection");
     expect(routeSource).toContain("LauncherStartupSettingsPanel");
     expect(startupSettingsPanelSource).toContain("settingsStrip");
     expect(startupSettingsPanelSource).toContain("settingsHeader");
@@ -303,8 +307,9 @@ describe("LauncherRoute layout contract", () => {
   });
 
   it("keeps command streams and guardian details collapsed by default", () => {
-    expect(routeSource).toContain("<details className={`${styles.panel} ${styles.diagnosticsPanel}`}>");
-    expect(routeSource).not.toContain("<details open");
+    expect(routeSource).toContain("LauncherDiagnosticsPanel");
+    expect(diagnosticsPanelSource).toContain("<details className={`${styles.panel} ${styles.diagnosticsPanel}`}>");
+    expect(diagnosticsPanelSource).not.toContain("<details open");
     expect(routeSource).toContain("queueAndEvents");
     expect(routeSource).toContain("diagnosticsCollapsedHint");
     expect(routeSource).toContain("recoveryIdle");
@@ -312,7 +317,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("maintenanceDetails");
     expect(routeSource).toContain("recentResults.map");
     expect(routeSource).toContain("guardian?.responsibilities");
-    expect(routeSource).toContain("diagnosticsGrid");
+    expect(diagnosticsPanelSource).toContain("diagnosticsGrid");
   });
 
   it("promotes the final queued command result to the main notice", () => {
@@ -357,8 +362,9 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("lastRequestEndpoint");
     expect(routeSource).toContain("requestTrigger");
     expect(routeSource).toContain("requestEndpoint");
-    expect(routeSource).toContain("<Spec label={copy.requestTrigger} value={lastRequestTrigger} />");
-    expect(routeSource).toContain("<Spec label={copy.requestEndpoint} value={lastRequestEndpoint} />");
+    expect(routeSource).toContain("{ label: copy.requestTrigger, value: lastRequestTrigger }");
+    expect(routeSource).toContain("{ label: copy.requestEndpoint, value: lastRequestEndpoint }");
+    expect(diagnosticsPanelSource).toContain("<Spec key={item.label} {...item} />");
   });
 
   it("keeps lifecycle actions icon-backed and compact", () => {
