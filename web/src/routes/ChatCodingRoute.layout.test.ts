@@ -21,6 +21,8 @@ import sessionContextMenuSource from "./SessionContextMenu.tsx?raw";
 import routeStyles from "./ChatCodingRoute.styles";
 import routeStylesModuleSource from "./ChatCodingRoute.styles.ts?raw";
 import cacheDetailDialogSource from "./chat/CacheDetailDialog.tsx?raw";
+import chatConversationComposerBridgeSource from "./chat/ChatConversationComposerBridge.tsx?raw";
+import chatConversationComposerBridgeTestSource from "./chat/ChatConversationComposerBridge.test.ts?raw";
 import chatFilePreviewPanelStyles from "./chat/ChatFilePreviewPanel.styles";
 import chatFilePreviewPanelSource from "./chat/ChatFilePreviewPanel.tsx?raw";
 import chatFileWorkspaceTabsStyles from "./chat/ChatFileWorkspaceTabs.styles";
@@ -144,7 +146,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("styles.runtimeNoticeStack");
     expect(routeSource).toContain("styles.runtimeNoticeMessage");
     expect(routeSource.indexOf("styles.runtimeNoticeStack")).toBeLessThan(
-      routeSource.indexOf("<LazyConversationView"),
+      routeSource.indexOf("<ChatConversationComposerBridge"),
     );
     expect(routeStyles.runtimeNoticeStack).toBeTypeOf("string");
     expect(routeStyles.runtimeNotice).toBeTypeOf("string");
@@ -159,7 +161,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("role=\"dialog\"");
     expect(routeSource).toContain("/tool-governance-requests/");
     expect(routeSource.indexOf("styles.toolApprovalOverlay")).toBeLessThan(
-      routeSource.indexOf("<LazyConversationView"),
+      routeSource.indexOf("<ChatConversationComposerBridge"),
     );
     expect(routeStyles.toolApprovalOverlay).toBeTypeOf("string");
     expect(routeStyles.toolApprovalDialog).toBeTypeOf("string");
@@ -167,10 +169,39 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("loads the heavy conversation renderer through a lazy bridge", () => {
-    expect(routeSource).toContain("LazyConversationView");
+    expect(routeSource).toContain("ChatConversationComposerBridge");
+    expect(routeSource).not.toContain("<LazyConversationView");
+    expect(chatConversationComposerBridgeSource).toContain("LazyConversationView");
+    expect(chatConversationComposerBridgeSource).toContain("composerValue={composer.value}");
+    expect(chatConversationComposerBridgeSource).toContain("composerAttachments={composer.attachments}");
     expect(routeSource).toContain("conversationConstants");
     expect(routeSource).toContain("fallback={<div className={styles.emptySurface}>{t(\"loadingSession\")}</div>}");
     expect(routeSource).not.toContain('import { COMPOSER_SESSION_REFERENCE_MIME, ConversationView } from "../components/conversation/ConversationView"');
+  });
+
+  it("moves composer attachment and active-send display wiring into a route-local bridge", () => {
+    expect(routeSource).toContain('from "./chat/ChatConversationComposerBridge"');
+    expect(routeSource).toContain("buildConversationComposerBridgeState({");
+    expect(routeSource).toContain("const composerDisabled = conversationComposer.disabled");
+    expect(routeSource).toContain("<ChatConversationComposerBridge");
+    expect(routeSource).toContain("composer={conversationComposer}");
+    expect(routeSource).toContain("submitTurnMutation");
+    expect(routeSource).toContain("editResubmitMutation");
+    expect(routeSource).toContain("stopTurnMutation");
+    expect(routeSource).toContain("sessionGuidanceMutation");
+    expect(routeSource).toContain("submitTurnWithAttachments");
+    expect(routeSource).not.toContain("composerActionDisabled={composerActionDisabled}");
+    expect(routeSource).not.toContain("composerActionMode={composerStopMode ? \"stop\" : \"send\"}");
+    expect(routeSource).not.toContain("composerAttachments={activeImageAttachments.map");
+    expect(chatConversationComposerBridgeSource).toContain("export function buildConversationComposerBridgeState");
+    expect(chatConversationComposerBridgeSource).toContain("export function mapChatComposerImageAttachments");
+    expect(chatConversationComposerBridgeSource).toContain("attachmentInputDisabled: disabled || Boolean(input.editTargetMessageId) || input.imageInputUnsupported");
+    expect(chatConversationComposerBridgeSource).not.toContain("useMutation");
+    expect(chatConversationComposerBridgeSource).not.toContain("useQuery");
+    expect(chatConversationComposerBridgeSource).not.toContain("queryClient");
+    expect(chatConversationComposerBridgeSource).not.toContain("fetchJson");
+    expect(chatConversationComposerBridgeTestSource).toContain("keeps send disabled until text, image attachments, or references exist");
+    expect(chatConversationComposerBridgeTestSource).toContain("switches active-send controls into stop mode");
   });
 
   it("keeps live assistant output in an active turn layer outside committed session messages", () => {
@@ -204,7 +235,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("imageInputModelIdForAgent(activeSessionAgent, detail?.dialogueModelId)");
     expect(routeSource).toContain("activeAgentImageInputSupported === false");
     expect(routeSource).toContain("const visionModelId = String(agent?.llmBindings?.vision?.modelId ?? \"\").trim()");
-    expect(routeSource).toContain("composerAttachmentInputDisabled={composerDisabled || Boolean(resolvedEditTarget) || activeAgentImageInputUnsupported}");
+    expect(routeSource).toContain("imageInputUnsupported: activeAgentImageInputUnsupported");
+    expect(chatConversationComposerBridgeSource).toContain("attachmentInputDisabled: disabled || Boolean(input.editTargetMessageId) || input.imageInputUnsupported");
     expect(routeSource).toContain("clearSessionImageAttachments(current, activeSessionId)");
   });
 
