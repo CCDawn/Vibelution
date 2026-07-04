@@ -84,6 +84,7 @@ import { MemoryProjectMemoryQueuePanel } from "./MemoryProjectMemoryQueuePanel";
 import { MemoryReviewQueuePanel } from "./MemoryReviewQueuePanel";
 import { MemorySelectedConfigPanel } from "./MemorySelectedConfigPanel";
 import { MemorySourceAndItemPanels } from "./MemorySourceAndItemPanels";
+import { MemoryUserContentPanel } from "./MemoryUserContentPanel";
 import { MemoryWarningStrip } from "./MemoryWarningStrip";
 import styles from "./MemoryRoute.styles";
 
@@ -4198,6 +4199,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         batchCount={knowledgeBases.reduce((total, base) => total + base.stats.batchCount, 0)}
         pendingRatingSuggestionCount={ratingSuggestionsQuery.data?.summary.pendingSuggestionCount ?? knowledgeItems.filter((item) => item.markedAt).length}
       />
+      <MemoryUserContentPanel defaultUserId="default" />
       <div className={styles.knowledgeGovernanceDeck}>
         <MemoryKnowledgeUsageContractPanel
           copy={copy}
