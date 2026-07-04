@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import styles from "./ToolsRoute.styles";
 import stylesModuleSource from "./ToolsRoute.styles.ts?raw";
 import routeSource from "./ToolsRoute.tsx?raw";
+import agentScopePanelSource from "./ToolsRouteAgentScopePanel.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
 
 const stylesSource = [
@@ -28,8 +29,9 @@ describe("ToolsRoute layout contract", () => {
     expect(routerSource).toContain("<ToolsRoute />");
     expect(routerSource).not.toContain('path: "tools"');
     expect(routerSource).not.toContain('to="/agents/tools" replace');
-    expect(routeSource).toContain('<AgentManagementNav active="tools" className={styles.managementNav} />');
-    const controlStrip = routeSource.slice(routeSource.indexOf("<div className={styles.controlStrip}>"));
+    expect(routeSource).toContain("<ToolsRouteAgentScopePanel");
+    expect(agentScopePanelSource).toContain('<AgentManagementNav active="tools" className={styles.managementNav} />');
+    const controlStrip = agentScopePanelSource.slice(agentScopePanelSource.indexOf("<div className={styles.controlStrip}>"));
     expect(controlStrip.indexOf('<AgentManagementNav active="tools" className={styles.managementNav} />')).toBeLessThan(
       controlStrip.indexOf("styles.summaryGrid"),
     );
@@ -97,7 +99,8 @@ describe("ToolsRoute layout contract", () => {
   it("supports agent-scoped tool lists and test requests", () => {
     expect(routeSource).toContain("activeAgentScopeId");
     expect(routeSource).toContain("toolsQuery.data?.agentScopes");
-    expect(routeSource).toContain("styles.agentScopeBar");
+    expect(routeSource).toContain("toolScopeOptions");
+    expect(agentScopePanelSource).toContain("styles.agentScopeBar");
     expect(routeSource).toContain("scopeStateForTool(tool, activeAgentScopeId)");
     expect(routeSource).toContain("JSON.stringify({ args: {}, agentScope: payload.agentScopeId, agentId: payload.agentId })");
     expect(routeSource).toContain("agentId: activePolicyAgent.agentId");
