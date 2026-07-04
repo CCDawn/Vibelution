@@ -136,6 +136,7 @@ import {
 import type { ConversationViewProps } from "./conversationViewTypes";
 import {
   buildComputerUseStateForMessage,
+  computerUseResultForOperation,
   COMPUTER_USE_TOOL_NAME,
   type ComputerUseResult,
 } from "./conversationComputerUseState";
@@ -1486,37 +1487,8 @@ export function ConversationView({
       .join("\n");
   }
 
-  function computerUseResultForOperation(operation: AgentMessageOperation): ComputerUseResult | null {
-    if (operation.kind !== "tool" || (operation.rawLabel ?? operation.label) !== COMPUTER_USE_TOOL_NAME) {
-      return null;
-    }
-    const preview = String(operation.resultPreview ?? "").trim();
-    if (!preview || !preview.startsWith("{")) {
-      return null;
-    }
-    try {
-      const payload = JSON.parse(preview) as Partial<ComputerUseResult>;
-      const sessionId = String(payload.sessionId ?? "").trim();
-      if (!sessionId) {
-        return null;
-      }
-      const parsedResult = {
-        status: String(payload.status ?? ""),
-        sessionId,
-        summary: String(payload.summary ?? ""),
-        steps: Array.isArray(payload.steps) ? payload.steps : [],
-        screenshotUrl: String(payload.screenshotUrl ?? ""),
-        needsConfirmation: Boolean(payload.needsConfirmation),
-        error: String(payload.error ?? ""),
-      };
-      return computerUseSessionResults[sessionId] ?? parsedResult;
-    } catch {
-      return null;
-    }
-  }
-
   function renderComputerUseResult(operation: AgentMessageOperation) {
-    const result = computerUseResultForOperation(operation);
+    const result = computerUseResultForOperation(operation, computerUseSessionResults);
     if (!result) {
       return null;
     }
