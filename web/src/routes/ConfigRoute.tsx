@@ -70,6 +70,7 @@ import { LazyJsonCodeMirror } from "../components/editor/LazyJsonCodeMirror";
 import { VButton, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { ConfigLogHelperCenterPanel } from "./ConfigLogHelperCenterPanel";
+import { ConfigWorkspacePlaceholderPanel } from "./ConfigWorkspacePlaceholderPanel";
 import styles from "./ConfigRoute.styles";
 
 type ConfigLanguage = "zh" | "en";
@@ -193,58 +194,6 @@ function defaultSectionUiState(): ConfigSectionUiState {
     editing: false,
     expandedPaths: {},
   };
-}
-
-function ConfigWorkspacePlaceholder({
-  title,
-  subtitle,
-  tone = "loading",
-}: {
-  title: string;
-  subtitle?: string;
-  tone?: "loading" | "error";
-}) {
-  const navLabels = ["Source", "Runtime", "Models", "Diagnostics", "Tools"];
-  const matrixLabels = ["operator config", "providers", "models", "runtime"];
-  return (
-    <div className={`${styles.loadingShell} ${tone === "error" ? styles.loadingShellError : ""}`}>
-      <aside className={styles.loadingNavPanel}>
-        <p className={styles.eyebrow}>Config</p>
-        <h1 className={styles.title}>{title}</h1>
-        {subtitle ? <p className={styles.subtitle}>{subtitle}</p> : null}
-        <div className={styles.loadingNavList} aria-hidden="true">
-          {navLabels.map((label, index) => (
-            <span key={label} className={index === 0 ? styles.loadingNavActive : undefined}>
-              {label}
-            </span>
-          ))}
-        </div>
-      </aside>
-      <section className={styles.loadingBoard} aria-hidden="true">
-        <div className={styles.loadingBoardHeader}>
-          <span />
-          <span />
-          <span />
-        </div>
-        <div className={styles.loadingMetricGrid}>
-          {matrixLabels.map((label) => (
-            <span key={label}>
-              <small>{label}</small>
-              <strong />
-            </span>
-          ))}
-        </div>
-        <div className={styles.loadingSpecGrid}>
-          <span />
-          <span />
-          <span />
-          <span />
-          <span />
-          <span />
-        </div>
-      </section>
-    </div>
-  );
 }
 
 export const CONFIG_COPY = {
@@ -2986,7 +2935,7 @@ export function ConfigRoute() {
   if (!draftConfig && workspaceQuery.isLoading) {
     return (
       <div className={styles.page}>
-        <ConfigWorkspacePlaceholder title={copy.loading} />
+        <ConfigWorkspacePlaceholderPanel title={copy.loading} />
       </div>
     );
   }
@@ -2994,7 +2943,7 @@ export function ConfigRoute() {
   if (!draftConfig || !workspace) {
     return (
       <div className={styles.page}>
-        <ConfigWorkspacePlaceholder
+        <ConfigWorkspacePlaceholderPanel
           title={copy.loadFailed}
           subtitle={workspaceQuery.error instanceof Error ? workspaceQuery.error.message : ""}
           tone="error"
