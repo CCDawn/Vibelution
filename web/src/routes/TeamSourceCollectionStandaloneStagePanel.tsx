@@ -9,7 +9,7 @@ import {
   type TeamStageStat,
   type TeamStageTone,
 } from "../components/vui/product/team-management";
-import styles from "./TeamsRoute.styles";
+import styles from "./TeamSourceCollectionStandaloneStagePanel.styles";
 
 export type TeamSourceCollectionStandaloneStageIcon = "play" | "search" | "check" | "archive" | "refresh";
 

@@ -1,7 +1,7 @@
 import { Bot, Eye, Link2 } from "lucide-react";
 import { Link } from "react-router-dom";
 
-import styles from "./TeamsRoute.styles";
+import styles from "./TeamMemoryIndexPanel.styles";
 
 type TeamMemoryIndexLang = "zh" | "en";
 

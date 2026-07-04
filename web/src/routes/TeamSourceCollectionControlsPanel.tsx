@@ -1,6 +1,6 @@
 import { forwardRef, type ReactNode } from "react";
 
-import styles from "./TeamsRoute.styles";
+import styles from "./TeamSourceCollectionControlsPanel.styles";
 
 type TeamSourceCollectionControlsPanelProps = {
   lang: "zh" | "en";
