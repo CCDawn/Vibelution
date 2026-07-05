@@ -8671,7 +8671,6 @@ export function TeamsRoute({
         className={sourceCollectionPanelClassName("source-collection-graph-panel")}
         open={
           selectedSourceCollectionStageId === "relations"
-          || selectedSourceCollectionStageId === "ingestion"
           || sourceCollectionExpandedPanelId === "source-collection-graph-panel"
           || sourceCollectionGraphStepState === "active"
         }
@@ -8698,46 +8697,53 @@ export function TeamsRoute({
           />
         ) : null}
         nodeList={visibleGraph?.nodes.length ? (
-          <div className={styles.workflowCandidateList}>
-            {pagedGraphNodes.items.map((node) => {
-              const candidate = teamWorkflowCandidatesById.get(node.candidateId) ?? null;
-              const provenance = candidate ? sourceCollectionCandidateProvenance(candidate, lang) : null;
-              const evidenceLedgerSummary = candidate ? sourceCollectionEvidenceLedgerSummary(candidate) : null;
-              const selected = candidate ? selectedSourceCollectionCandidateId === candidate.candidateId : false;
-              return (
-                <TeamCandidateCard
-                  key={`graph-node-${node.candidateId}`}
-                  tone={evidenceLedgerSummary ? sourceCollectionEvidenceLedgerTone(evidenceLedgerSummary) : sourceCollectionResultTone(node.qualityStatus || node.currentState)}
-                  statusLabel={workflowStateLabel(node.currentState, lang)}
-                  title={node.title || node.candidateId}
-                  summary={node.candidateId}
-                  meta={[
-                    { key: "type", label: sourceCollectionSourceTypeLabel(node.candidateType, lang) },
-                    { key: "node", label: node.currentWorkflowNode },
-                    ...(candidate
-                      ? [{ key: "category", label: sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang) }]
-                      : []),
-                    ...(evidenceLedgerSummary
-                      ? [
-                          { key: "evidence-ledger", label: sourceCollectionEvidenceLedgerCardLabel(evidenceLedgerSummary, lang) },
-                          ...(evidenceLedgerSummary.missingAnchor
-                            ? [{ key: "evidence-action", label: sourceCollectionEvidenceLedgerActionLabel(evidenceLedgerSummary, lang) }]
-                            : []),
-                        ]
-                      : []),
-                  ]}
-                  source={provenance ? {
-                    label: provenance.label,
-                    value: provenance.value,
-                    href: provenance.href,
-                    title: provenance.href || provenance.value,
-                    missing: provenance.kind === "missing",
-                  } : undefined}
-                  selected={selected}
-                  onActivate={candidate ? () => selectSourceCollectionCandidate(candidate) : undefined}
-                />
-              );
-            })}
+          <div
+            className={styles.sourceCollectionGraphNodeListShell}
+            role="region"
+            tabIndex={0}
+            aria-label={lang === "zh" ? "入库关系节点列表，可滚动查看" : "Ingestion map nodes, scroll to review"}
+          >
+            <div className={styles.workflowCandidateList}>
+              {pagedGraphNodes.items.map((node) => {
+                const candidate = teamWorkflowCandidatesById.get(node.candidateId) ?? null;
+                const provenance = candidate ? sourceCollectionCandidateProvenance(candidate, lang) : null;
+                const evidenceLedgerSummary = candidate ? sourceCollectionEvidenceLedgerSummary(candidate) : null;
+                const selected = candidate ? selectedSourceCollectionCandidateId === candidate.candidateId : false;
+                return (
+                  <TeamCandidateCard
+                    key={`graph-node-${node.candidateId}`}
+                    tone={evidenceLedgerSummary ? sourceCollectionEvidenceLedgerTone(evidenceLedgerSummary) : sourceCollectionResultTone(node.qualityStatus || node.currentState)}
+                    statusLabel={workflowStateLabel(node.currentState, lang)}
+                    title={node.title || node.candidateId}
+                    summary={node.candidateId}
+                    meta={[
+                      { key: "type", label: sourceCollectionSourceTypeLabel(node.candidateType, lang) },
+                      { key: "node", label: node.currentWorkflowNode },
+                      ...(candidate
+                        ? [{ key: "category", label: sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang) }]
+                        : []),
+                      ...(evidenceLedgerSummary
+                        ? [
+                            { key: "evidence-ledger", label: sourceCollectionEvidenceLedgerCardLabel(evidenceLedgerSummary, lang) },
+                            ...(evidenceLedgerSummary.missingAnchor
+                              ? [{ key: "evidence-action", label: sourceCollectionEvidenceLedgerActionLabel(evidenceLedgerSummary, lang) }]
+                              : []),
+                          ]
+                        : []),
+                    ]}
+                    source={provenance ? {
+                      label: provenance.label,
+                      value: provenance.value,
+                      href: provenance.href,
+                      title: provenance.href || provenance.value,
+                      missing: provenance.kind === "missing",
+                    } : undefined}
+                    selected={selected}
+                    onActivate={candidate ? () => selectSourceCollectionCandidate(candidate) : undefined}
+                  />
+                );
+              })}
+            </div>
           </div>
         ) : null}
         pagination={visibleGraph ? renderSourceCollectionPagination("relations", visibleGraph.nodes.length) : null}
@@ -9125,10 +9131,10 @@ export function TeamsRoute({
         ? renderSourceCollectionGraphPanel()
         : selectedSourceCollectionStageId === "ingestion"
           ? (
-              <>
+              <div className={styles.sourceCollectionIngestionPanels}>
                 {renderSourceCollectionGraphPanel()}
                 {renderSourceCollectionMemoryPanel()}
-              </>
+              </div>
             )
           : renderSourceCollectionConversation();
     return (
