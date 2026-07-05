@@ -244,6 +244,111 @@ def test_run_session_turn_prefers_agent_instance_profile_over_legacy_profile(tmp
     assert "agent_profile_id" not in repaired_state["conversations"][0]
 
 
+def test_run_session_turn_restores_persisted_llm_key_env_before_agent_create(tmp_path, monkeypatch):
+    _seed_session(tmp_path, "session-live")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Env Restore Agent",
+        llm_bindings={"dialogue": {"modelId": "agent-dialogue-model"}},
+        direct_session_id="session-live",
+        primary_mode="chat",
+        prompt_template_id="prompt-chat-default",
+    )
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["agent_id"] = agent["agentId"]
+    state["conversations"][0]["agentId"] = agent["agentId"]
+    save_chat_state(tmp_path, state)
+
+    model_env = "VIBELUTION_LLM_MODEL_AGENT_DIALOGUE_API_KEY"
+    provider_env = "OPENAI_API_KEY"
+    fake_key = "unit-chat-turn-secret"
+    monkeypatch.delenv(model_env, raising=False)
+    monkeypatch.delenv(provider_env, raising=False)
+
+    base_config = session_service.get_config().model_copy(deep=True)
+    provider_id = base_config.llm.profiles["primary"].provider_id
+    base_config.llm.providers[provider_id].kind = "openai"
+    base_config.llm.providers[provider_id].requires_api_key = True
+    base_config.llm.providers[provider_id].api_key = ""
+    base_config.llm.providers[provider_id].api_key_env = ""
+    base_config.llm.model_library["agent-dialogue-model"] = {
+        "provider_id": provider_id,
+        "model": "agent-dialogue-runtime",
+        "api_key_env": model_env,
+        "streaming": False,
+        "tool_calling_mode": "disabled",
+    }
+    monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+    from config import llm_key_env
+
+    monkeypatch.setattr(
+        llm_key_env,
+        "load_public_config",
+        lambda: {
+            "llm": {
+                "model_library": {
+                    "agent-dialogue-model": {
+                        "api_key_env": model_env,
+                    }
+                },
+                "providers": {
+                    provider_id: {
+                        "kind": "openai",
+                        "api_key_env": "",
+                    }
+                },
+            }
+        },
+    )
+    monkeypatch.setattr(
+        llm_key_env,
+        "read_persisted_user_env_var",
+        lambda name: fake_key if name == model_env else "",
+    )
+    lifecycle_events = []
+
+    def capture_lifecycle_event(session_id, phase, *, fields=None, **kwargs):
+        lifecycle_events.append(
+            {
+                "session_id": session_id,
+                "phase": phase,
+                "fields": dict(fields or {}),
+            }
+        )
+
+    monkeypatch.setattr(session_service, "_record_session_turn_lifecycle_event", capture_lifecycle_event)
+    captured = {}
+
+    class KeyAwareAgent:
+        def __init__(self, workspace_path=None, config=None):
+            captured["api_key"] = config.get_api_key_for_profile(profile_id="primary")
+
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            return {
+                "status": "completed",
+                "summary": "done",
+                "raw_output": "done",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", KeyAwareAgent)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: session_service._run_session_turn(context))
+
+    session_service.submit_session_message("session-live", "do it", mental_model_enabled=False)
+
+    assert captured["api_key"] == fake_key
+    assert llm_key_env.os.environ[model_env] == fake_key
+    sync_event = next(event for event in lifecycle_events if event["phase"] == "llm_key_env_synced")
+    assert sync_event["fields"]["syncedCount"] == 1
+    assert model_env in sync_event["fields"]["syncedEnvNames"]
+    assert fake_key not in json.dumps(sync_event, ensure_ascii=False)
+
+
 def test_session_detail_repairs_stale_legacy_profile_from_agent_instance(tmp_path, monkeypatch):
     _seed_session(tmp_path, "session-live")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)

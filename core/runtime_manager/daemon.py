@@ -17,7 +17,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from config.models import PROVIDER_API_KEY_ENV_ALIASES, get_provider_api_key_env
+from config.llm_key_env import (
+    configured_llm_key_env_names,
+    sync_llm_key_env_from_persisted_user_env,
+)
 from config.public_config import load_public_config, read_persisted_user_env_var
 from core.runtime_manager.evolution_store import build_evolution_summary
 from core.web.services import self_evolution_control_service, supervised_control_service
@@ -514,33 +517,7 @@ def _require_fresh_source_for_supervised_run() -> dict[str, Any]:
 
 
 def _configured_llm_key_env_names(public_config: dict[str, Any]) -> set[str]:
-    llm = public_config.get("llm") if isinstance(public_config.get("llm"), dict) else {}
-    model_library = llm.get("model_library") if isinstance(llm.get("model_library"), dict) else {}
-    providers = llm.get("providers") if isinstance(llm.get("providers"), dict) else {}
-    env_names: set[str] = set()
-
-    for item in model_library.values():
-        if isinstance(item, dict):
-            env_name = str(item.get("api_key_env") or "").strip()
-            if env_name:
-                env_names.add(env_name)
-
-    for provider in providers.values():
-        if not isinstance(provider, dict):
-            continue
-        provider_env = str(provider.get("api_key_env") or "").strip()
-        if provider_env:
-            env_names.add(provider_env)
-        provider_kind = str(provider.get("kind") or "").strip().lower()
-        canonical_env = get_provider_api_key_env(provider_kind)
-        if canonical_env:
-            env_names.add(canonical_env)
-        for alias in PROVIDER_API_KEY_ENV_ALIASES.get(provider_kind, []):
-            alias_env = str(alias or "").strip()
-            if alias_env:
-                env_names.add(alias_env)
-
-    return env_names
+    return configured_llm_key_env_names(public_config)
 
 
 def _sync_llm_key_env_from_persisted_user_env(*, command_type: str) -> dict[str, Any]:
@@ -550,6 +527,7 @@ def _sync_llm_key_env_from_persisted_user_env(*, command_type: str) -> dict[str,
         public_config = load_public_config()
     except Exception as exc:
         payload = {
+            "context": command_type,
             "commandType": command_type,
             "ok": False,
             "errorType": type(exc).__name__,
@@ -562,31 +540,19 @@ def _sync_llm_key_env_from_persisted_user_env(*, command_type: str) -> dict[str,
         )
         return payload
 
-    env_names = sorted(_configured_llm_key_env_names(public_config))
-    synced: list[str] = []
-    already_present = 0
-    missing: list[str] = []
-    for env_name in env_names:
-        if os.environ.get(env_name):
-            already_present += 1
-            continue
-        persisted_value = read_persisted_user_env_var(env_name)
-        if persisted_value:
-            os.environ[env_name] = persisted_value
-            synced.append(env_name)
-        else:
-            missing.append(env_name)
-
-    payload = {
-        "commandType": command_type,
-        "ok": True,
-        "envCount": len(env_names),
-        "alreadyPresentCount": already_present,
-        "syncedCount": len(synced),
-        "syncedEnvNames": synced[:20],
-        "missingCount": len(missing),
-        "missingEnvNames": missing[:20],
-    }
+    payload = sync_llm_key_env_from_persisted_user_env(
+        context=command_type,
+        public_config=public_config,
+        persisted_reader=read_persisted_user_env_var,
+    )
+    payload["commandType"] = command_type
+    if not payload.get("ok"):
+        record_runtime_manager_scene_event(
+            "supervised_run.preflight.llm_key_env_sync_failed",
+            payload,
+            phase="supervised_preflight",
+        )
+        return payload
     record_runtime_manager_scene_event(
         "supervised_run.preflight.llm_key_env_synced",
         payload,

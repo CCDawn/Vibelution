@@ -251,6 +251,60 @@ def test_supervised_llm_key_env_sync_patches_stale_runtime_manager_env(monkeypat
     assert canonical_secret not in json.dumps(payload)
 
 
+def test_shared_llm_key_env_sync_uses_public_config_without_leaking_values(monkeypatch):
+    from config import llm_key_env
+
+    model_env = "VIBELUTION_LLM_MODEL_CHAT_UNIT_API_KEY"
+    provider_env = "VIBELUTION_LLM_PROVIDER_OPENAI_UNIT_API_KEY"
+    canonical_env = "OPENAI_API_KEY"
+    secret = "unit-chat-model-secret"
+    canonical_secret = "unit-chat-provider-secret"
+
+    monkeypatch.delenv(model_env, raising=False)
+    monkeypatch.delenv(provider_env, raising=False)
+    monkeypatch.delenv(canonical_env, raising=False)
+    monkeypatch.setattr(
+        llm_key_env,
+        "read_persisted_user_env_var",
+        lambda name: {
+            model_env: secret,
+            canonical_env: canonical_secret,
+        }.get(name, ""),
+    )
+
+    payload = llm_key_env.sync_llm_key_env_from_persisted_user_env(
+        public_config={
+            "llm": {
+                "model_library": {
+                    "chat_unit_model": {
+                        "api_key_env": model_env,
+                    }
+                },
+                "providers": {
+                    "openai_unit": {
+                        "kind": "openai",
+                        "api_key_env": provider_env,
+                    }
+                },
+            }
+        },
+        context="chat_turn",
+    )
+
+    assert payload["ok"] is True
+    assert payload["envCount"] == 3
+    assert payload["alreadyPresentCount"] == 0
+    assert payload["syncedCount"] == 2
+    assert payload["missingCount"] == 1
+    assert model_env in payload["syncedEnvNames"]
+    assert canonical_env in payload["syncedEnvNames"]
+    assert provider_env in payload["missingEnvNames"]
+    assert llm_key_env.os.environ[model_env] == secret
+    assert llm_key_env.os.environ[canonical_env] == canonical_secret
+    assert secret not in json.dumps(payload)
+    assert canonical_secret not in json.dumps(payload)
+
+
 def test_start_supervised_run_syncs_llm_key_env_before_launch(monkeypatch):
     calls: list[object] = []
     monkeypatch.setattr(
