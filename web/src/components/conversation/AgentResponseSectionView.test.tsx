@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { AgentResponseSectionView } from "./AgentResponseSectionView";
+import styles from "./AgentResponseSectionView.styles";
 
 describe("AgentResponseSectionView", () => {
   it("renders the response section shell with stable AgentMessage metadata", () => {
@@ -25,6 +26,8 @@ describe("AgentResponseSectionView", () => {
     expect(html).toContain('data-agent-content-section-ids="assistant-1-section-content-0"');
     expect(html).toContain('data-agent-content-channel="answer"');
     expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain('aria-controls="agent-response-assistant-1-answer"');
+    expect(html).toContain('id="agent-response-assistant-1-answer"');
     expect(html).toContain('title="收起回答"');
     expect(html).toContain("回答");
     expect(html).toContain("最终回答内容");
@@ -51,6 +54,8 @@ describe("AgentResponseSectionView", () => {
     expect(html).toContain('data-conversation-part-key="assistant-2-answer"');
     expect(html).not.toContain("data-agent-content-channel");
     expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('aria-controls="agent-response-assistant-2-answer"');
+    expect(html).not.toContain('id="agent-response-assistant-2-answer"');
     expect(html).toContain('title="Show response"');
     expect(html).not.toContain("Hidden response body");
   });
@@ -76,6 +81,16 @@ describe("AgentResponseSectionView", () => {
     expect(html).toContain('title="展开回答"');
     expect(html).toContain("正在实时输出的回答");
     expect(html).toContain("responseBody");
+    expect(html).toContain('id="agent-response-assistant-live-answer"');
     expect(html).toContain("statusSpinner");
+  });
+
+  it("keeps the response control styled as a bounded slot button", () => {
+    expect(styles.responseToggle).toContain("grid-cols-[auto_auto_minmax(0,1fr)]");
+    expect(styles.responseToggle).toContain("max-w-full");
+    expect(styles.responseToggle).toContain("overflow-hidden");
+    expect(styles.responseToggle).toContain("[&_[data-slot=vui-button-content]]:contents");
+    expect(styles.responseToggle).toContain("[&_[data-slot=vui-button-label]]:contents");
+    expect(styles.responseBody).toContain("[overflow-wrap:anywhere]");
   });
 });

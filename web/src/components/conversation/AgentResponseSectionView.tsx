@@ -30,6 +30,7 @@ export function AgentResponseSectionView({
   children,
 }: AgentResponseSectionViewProps) {
   const bodyVisible = expanded || forceBodyVisible;
+  const responseBodyId = `agent-response-${answerKey}`;
   return (
     <section
       className={styles.responseSection}
@@ -41,6 +42,7 @@ export function AgentResponseSectionView({
         type="button"
         className={styles.responseToggle}
         aria-expanded={expanded}
+        aria-controls={responseBodyId}
         onClick={onToggle}
         title={expanded ? expandedTitle : collapsedTitle}
       >
@@ -48,7 +50,7 @@ export function AgentResponseSectionView({
         <span>{label}</span>
         {showSpinner ? <LoaderCircle className={styles.statusSpinner} size={14} /> : null}
       </VButton>
-      {bodyVisible ? <div className={styles.responseBody}>{children}</div> : null}
+      {bodyVisible ? <div id={responseBodyId} className={styles.responseBody}>{children}</div> : null}
     </section>
   );
 }

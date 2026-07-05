@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { AgentContextSectionsView } from "./AgentContextSectionsView";
 import type { AgentMessageContextSection } from "./agentMessageSections";
+import styles from "./AgentContextSectionsView.styles";
 
 describe("AgentContextSectionsView", () => {
   it("renders attachment and reference context sections with stable AgentMessage metadata", () => {
@@ -56,5 +57,18 @@ describe("AgentContextSectionsView", () => {
     expect(html).toContain("下载图片");
     expect(html).toContain("旧会话摘录");
     expect(html).toContain("前端代理");
+  });
+
+  it("keeps attachments and reference chips bounded for dense conversation rows", () => {
+    expect(styles.userAttachmentGrid).toContain("grid-cols-[repeat(auto-fit,minmax(min(12rem,100%),1fr))]");
+    expect(styles.userAttachment).toContain("overflow-hidden");
+    expect(styles.userAttachmentImage).toContain("aspect-[16/9]");
+    expect(styles.userAttachmentImage).toContain("object-cover");
+    expect(styles.userAttachmentImage).toContain("max-h-44");
+    expect(styles.userAttachmentMeta).toContain("minmax(0,1fr)");
+    expect(styles.userAttachmentMeta).toContain("[&>span]:truncate");
+    expect(styles.composerReferenceChip).toContain("max-w-[min(100%,32rem)]");
+    expect(styles.composerReferenceCopy).toContain("truncate");
+    expect(styles.composerReferenceCopy).toContain("[overflow-wrap:anywhere]");
   });
 });
