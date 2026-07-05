@@ -33,6 +33,7 @@ from .routes.team_workflows import router as team_workflows_router
 from .routes.teams import router as teams_router
 from .routes.tools import router as tools_router
 from .routes.user_content import router as user_content_router
+from .routes.usage import router as usage_router
 
 
 def register_web_routers(app: FastAPI) -> None:
@@ -56,6 +57,7 @@ def register_web_routers(app: FastAPI) -> None:
     app.include_router(data_processing_router, prefix="/api")
     app.include_router(knowledge_router, prefix="/api")
     app.include_router(logs_router, prefix="/api")
+    app.include_router(usage_router, prefix="/api")
     app.include_router(memory_router, prefix="/api")
     app.include_router(user_content_router, prefix="/api")
     app.include_router(research_router, prefix="/api")
