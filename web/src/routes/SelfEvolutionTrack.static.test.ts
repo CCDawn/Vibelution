@@ -18,13 +18,17 @@ import selfEvolutionSource from "./SelfEvolutionTrack.tsx?raw";
 import selfEvolutionStylesSource from "./SelfEvolutionTrack.styles.ts?raw";
 
 const backgroundTokens = (className: string) =>
-  className.split(/\s+/).filter((token) => token.startsWith("bg-[") || token.startsWith("[background:"));
+  className.split(/\s+/).filter((token) =>
+    token.startsWith("bg-[") || token.startsWith("bg-vui-") || token.startsWith("[background:"),
+  );
 
 const expectBackgroundAware = (className: string) => {
   const tokens = backgroundTokens(className);
 
   expect(tokens.length).toBeGreaterThan(0);
-  expect(tokens.some((token) => token.includes("color-mix") && token.includes("transparent"))).toBe(true);
+  expect(tokens.some((token) =>
+    (token.includes("color-mix") && token.includes("transparent")) || token.includes("bg-vui-surface"),
+  )).toBe(true);
   expect(className).not.toContain("bg-[var(--surface-card)]");
   expect(className).not.toContain("bg-[var(--surface-panel)]");
   expect(className).not.toContain("shadow-[0_12px");
