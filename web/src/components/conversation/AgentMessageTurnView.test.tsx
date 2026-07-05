@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { AgentMessageTurnView } from "./AgentMessageTurnView";
+import styles from "./AgentMessageTurnView.styles";
 
 describe("AgentMessageTurnView", () => {
   it("renders the turn shell with stable AgentMessage metadata and header slots", () => {
@@ -67,5 +68,16 @@ describe("AgentMessageTurnView", () => {
     expect(html).not.toContain("Hidden speaker");
     expect(html).not.toContain("hidden-meta");
     expect(html).toContain("continued body");
+  });
+
+  it("keeps turn header slots bounded on narrow conversation surfaces", () => {
+    expect(styles.turnMeta).toContain("max-w-full");
+    expect(styles.turnMeta).toContain("flex-wrap");
+    expect(styles.turnMeta).toContain("gap-x-2");
+    expect(styles.turnMetaIdentity).toContain("minmax(0,auto)");
+    expect(styles.turnMetaIdentity).toContain("max-w-full");
+    expect(styles.turnMetaActions).toContain("shrink-0");
+    expect(styles.turnSpeaker).toContain("max-w-full");
+    expect(styles.turnSpeaker).toContain("[overflow-wrap:anywhere]");
   });
 });
