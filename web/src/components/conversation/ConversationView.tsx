@@ -181,6 +181,10 @@ const MARKDOWN_PARSE_CACHE_LIMIT = 160;
 const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
 const EMPTY_SECTION_EXPANSION: Record<string, boolean> = {};
 
+function conversationPerformanceNowMs() {
+  return typeof performance === "undefined" ? Date.now() : performance.now();
+}
+
 type ConversationTurnRowProps = {
   message: ConversationMessage;
   previousMessage?: ConversationMessage;
@@ -724,6 +728,7 @@ export function ConversationView({
     }
     onStreamingFramePaint?.({
       sessionId,
+      paintedAtMs: conversationPerformanceNowMs(),
       streamingMessageCount: streamingTimelineMessages.length,
       renderedTextLength: streamingTimelineMessages.reduce(
         (total, message) => total + (agentRenderStatesByMessageId.get(message.id)?.renderedTextLength ?? 0),

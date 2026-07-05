@@ -1394,13 +1394,16 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("committedAssistantDeltaLayer = pendingLayer");
     expect(routeSource).toContain("pendingTextLength: activeTurnLayerTextLength(pendingLayer)");
     expect(routeSource).toContain("let pendingAssistantDeltaPayloads: Array<{");
+    expect(routeSource).toContain("receivedAtMs: number;");
+    expect(routeSource).toContain("frameScheduledAtMs: number;");
     expect(routeSource).toContain("let assistantDeltaApplyFrame: number | null = null");
     expect(routeSource).toContain("function applyPendingAssistantDeltas(reason: \"frame\" | \"close\" | \"final\")");
     expect(routeSource).toContain("function scheduleAssistantDeltaFrame()");
     expect(routeSource).toContain("window.requestAnimationFrame");
     expect(routeSource).toContain("window.cancelAnimationFrame");
     expect(routeSource).toContain("function queueAssistantDelta(");
-    expect(routeSource).toContain("pendingAssistantDeltaPayloads.push({ payload, payloadLength })");
+    expect(routeSource).toContain("pendingAssistantDeltaPayloads.push({ payload, payloadLength, receivedAtMs })");
+    expect(routeSource).toContain("const applyStartedAtMs = chatStreamPerformanceNowMs()");
     expect(routeSource).toContain("applyPendingAssistantDeltas(\"final\")");
     expect(routeSource).toContain("browser.session_stream.assistant_delta_frame_scheduled");
     expect(routeSource).toContain("browser.session_stream.initial_received");
@@ -1418,6 +1421,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("browser.session_stream.assistant_delta_applied");
     expect(routeSource).toContain("pendingTextLength");
     expect(routeSource).toContain("batchSize");
+    expect(routeSource).toContain("oldestReceivedAtMs");
+    expect(routeSource).toContain("newestReceivedAtMs");
+    expect(routeSource).toContain("receivedToApplyMs");
+    expect(routeSource).toContain("queuedForMs");
+    expect(routeSource).toContain("frameLagMs");
+    expect(routeSource).toContain("applyElapsedMs");
     expect(routeSource).not.toContain("pendingTextLength: String(projectedLayer?.content ?? \"\").length + String(projectedLayer?.thought ?? \"\").length");
     const queueAssistantDeltaStart = routeSource.indexOf("function queueAssistantDelta(");
     const handleSessionInitialStart = routeSource.indexOf("function handleSessionInitial", queueAssistantDeltaStart);
@@ -1451,8 +1460,12 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("records stream render-frame telemetry after ConversationView commits live text", () => {
     expect(routeSource).toContain("lastConversationStreamingFrameTelemetryAtRef");
+    expect(routeSource).toContain("lastAssistantDeltaAppliedAtRef");
     expect(routeSource).toContain("const handleConversationStreamingFramePaint = useCallback");
     expect(routeSource).toContain("browser.conversation_stream.frame_painted");
+    expect(routeSource).toContain("paintedAtMs");
+    expect(routeSource).toContain("lastAssistantDeltaAppliedAtMs");
+    expect(routeSource).toContain("applyToPaintMs");
     expect(routeSource).toContain("renderedTextLength");
     expect(routeSource).toContain("onStreamingFramePaint={handleConversationStreamingFramePaint}");
   });
