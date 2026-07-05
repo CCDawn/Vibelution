@@ -3,6 +3,24 @@ import { describe, expect, it } from "vitest";
 import routeSource from "./ResetRoute.tsx?raw";
 import styles from "./ResetRoute.styles";
 
+function hasRealBackgroundToken(className: string) {
+  return className
+    .split(/\s+/)
+    .some((token) => token.startsWith("bg-[") || token.startsWith("[background:"));
+}
+
+function expectBackgroundAware(className: string) {
+  expect(hasRealBackgroundToken(className)).toBe(true);
+  const backgroundTokens = className
+    .split(/\s+/)
+    .filter((token) => token.startsWith("bg-[") || token.startsWith("[background:"));
+  expect(backgroundTokens.some((token) => token.includes("color-mix(in_srgb") && token.includes("transparent"))).toBe(true);
+}
+
+function classTokens(className: string) {
+  return className.split(/\s+/).filter(Boolean);
+}
+
 describe("ResetRoute layout contract", () => {
   it("uses shell language state without loading the full app dictionary", () => {
     expect(routeSource).toContain("useShellI18n");
@@ -23,6 +41,29 @@ describe("ResetRoute layout contract", () => {
   it("keeps the retired route root background-aware", () => {
     expect(styles.routeClass).not.toContain("bg-[var(--surface-page)]");
     expect(styles.routeClass).toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(styles.routeClass).toContain("min-w-0");
+    expect(styles.routeClass).toContain("max-w-full");
+    expect(styles.routeClass).toContain("overflow-x-hidden");
+    expectBackgroundAware(styles.headerClass);
+    expect(styles.headerClass).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+  });
+
+  it("keeps retired Reset panels light and background-aware", () => {
+    expectBackgroundAware(styles.cardClass);
+    expect(styles.cardClass).not.toContain("bg-[var(--surface-panel)]");
+    expect(styles.cardClass).not.toContain("bg-[var(--surface-card)]");
+    expect(styles.cardClass).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+    expect(styles.workspaceClass).toContain("min-w-0");
+    expect(styles.workspaceClass).toContain("max-w-full");
+    expect(styles.workspaceClass).toContain("overflow-x-hidden");
+    expect(styles.cardClass).toContain("min-w-0");
+  });
+
+  it("keeps the Launcher action content-sized outside mobile full-width contexts", () => {
+    expect(styles.headerActionsClass).toContain("flex-wrap");
+    expect(styles.secondaryButtonClass).toContain("w-fit");
+    expect(styles.secondaryButtonClass).toContain("max-w-full");
+    expect(classTokens(styles.secondaryButtonClass)).not.toContain("w-full");
   });
 
   it("keeps destructive reset execution out of the Web workbench", () => {
