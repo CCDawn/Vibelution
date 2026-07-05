@@ -20,8 +20,8 @@ describe("conversation process trace styles", () => {
   });
 
   it("keeps compact chat surface readable over the page background", () => {
-    expect(styles.surfaceCompact).toContain("var(--surface-panel)_88%");
-    expect(styles.surfaceCompact).not.toContain("var(--surface-panel)_72%");
+    expect(styles.surfaceCompact).toContain("var(--vui-surface-panel)_72%");
+    expect(styles.surfaceCompact).not.toContain("var(--surface-panel)");
     expect(styles.surfaceCompact).not.toContain("backdrop-blur");
 
     expect(styles.timelineCellPreview).toContain("line-clamp-1");
