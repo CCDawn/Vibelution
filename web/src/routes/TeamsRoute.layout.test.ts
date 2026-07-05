@@ -1888,6 +1888,41 @@ describe("TeamsRoute layout contract", () => {
     expect(candidatePanelSource).not.toContain("blockingReasons");
   });
 
+  it("surfaces source extraction Evidence Ledger in cards, details, and relation mapping", () => {
+    expect(routeSource).toContain("sourceCollectionEvidenceLedgerSummary");
+    expect(routeSource).toContain("metadata.contentExtraction");
+    expect(routeSource).toContain("extraction.evidenceLedger");
+    expect(routeSource).toContain("Evidence Ledger ${summary.status}");
+    expect(routeSource).toContain("evidence_ready");
+    expect(routeSource).toContain("missing_evidence_anchor");
+    expect(routeSource).toContain("sourceCollectionEvidenceReadyCandidateCount");
+    expect(routeSource).toContain("sourceCollectionMissingEvidenceAnchorCount");
+
+    const selectedSourceDetailSource = routeSource.slice(
+      routeSource.indexOf("function renderSourceCollectionSelectedSourcePanel"),
+      routeSource.indexOf("function renderSourceCollectionScreeningPanel"),
+    );
+    expect(selectedSourceDetailSource).toContain("sourceCollectionEvidenceLedgerDetailItems");
+    expect(selectedSourceDetailSource).toContain("evidenceLedger={evidenceLedgerSummary");
+    expect(teamSourceCollectionSourceDetailPanelSource).toContain("Evidence Ledger");
+    expect(teamSourceCollectionSourceDetailPanelSource).toContain("evidenceLedger.map");
+
+    const candidatePanelSource = routeSource.slice(
+      routeSource.indexOf("function renderSourceCollectionCandidatePanel"),
+      routeSource.indexOf("function renderSourceCollectionGraphPanel"),
+    );
+    expect(candidatePanelSource).toContain("sourceCollectionEvidenceLedgerCardLabel");
+    expect(candidatePanelSource).toContain("sourceCollectionEvidenceLedgerTone");
+
+    const graphPanelSource = routeSource.slice(
+      routeSource.indexOf("function renderSourceCollectionGraphPanel"),
+      routeSource.indexOf("function renderSourceCollectionMemoryPanel"),
+    );
+    expect(graphPanelSource).toContain("visibleGraphMissingEvidenceAnchorCount");
+    expect(graphPanelSource).toContain("sourceCollectionEvidenceLedgerActionLabel");
+    expect(graphPanelSource).toContain("待补证据");
+  });
+
   it("keeps Team actions scoped to the selected Team or message event", () => {
     expect(routeSource).toContain("canvasSavePendingForTeam");
     expect(routeSource).toContain("saveCanvasMutation.variables?.teamId === teamId");

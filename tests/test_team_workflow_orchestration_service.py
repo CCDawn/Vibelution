@@ -4492,6 +4492,188 @@ def test_content_extraction_writeback_requires_candidate_coverage_and_materializ
     assert complete["writeback"]["coverageSummary"]["missing"] == 0
 
 
+def test_content_extraction_writeback_materializes_candidate_evidence_ledger(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经预测编码资料提炼",
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": agent["agentId"]},
+            "querySeeds": ["predictive coding neural algorithm"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    candidate = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding source with anchored finding",
+            "sourceUrl": "https://doi.org/10.0000/evidence-ledger",
+            "sourceKind": "paper",
+            "summary": "Predictive coding evidence for an anchored extraction ledger.",
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/evidence-ledger"},
+            "createdByAgent": "content-extraction-agent",
+        },
+    )["candidate"]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-ledger", "status": "running"},
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
+    )
+    _append_stage_task_tool_trace(tmp_path, task["task"])
+
+    response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "完成带引用锚点的资料提炼。",
+            "result": {
+                "candidateExtractions": [
+                    {
+                        "candidateId": candidate["candidateId"],
+                        "decision": "keep",
+                        "summary": "预测编码层级误差传播可启发多层控制结构。",
+                        "claims": [
+                            {
+                                "claim": "Predictive coding uses hierarchical prediction errors.",
+                                "sourceRef": "source-1",
+                                "supportLevel": "strong",
+                            }
+                        ],
+                        "keyFindings": [
+                            {
+                                "finding": "层级预测误差支持跨层控制结构设计。",
+                                "sourceRef": "source-1",
+                                "page": "3",
+                                "citation": "Predictive Coding Source, p.3",
+                            }
+                        ],
+                        "citations": [
+                            {"sourceRef": "source-1", "page": "3", "citation": "Predictive Coding Source, p.3"}
+                        ],
+                        "sourceRefs": [{"type": "paper", "id": "source-1", "label": "Predictive Coding Source"}],
+                        "evidenceRefs": [{"type": "page_anchor", "id": "source-1-p3", "label": "p.3"}],
+                        "limitations": ["样本来源需要后续复核"],
+                        "uncertainty": ["机制迁移到算法仍需实验验证"],
+                        "riskFlags": ["analogy_risk"],
+                        "supportLevel": "strong",
+                        "nextAction": "draft_paper_note",
+                    }
+                ]
+            },
+            "recordedByAgent": agent["agentId"],
+        },
+    )
+
+    refreshed = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")["candidates"][0]
+    extraction = refreshed["metadata"]["contentExtraction"]
+    ledger = extraction["evidenceLedger"]
+    assert response["writeback"]["materializedContentExtraction"]["evidenceLedgerCandidateCount"] == 1
+    assert response["writeback"]["materializedContentExtraction"]["evidenceReadyCandidateCount"] == 1
+    assert extraction["evidenceStatus"] == "evidence_ready"
+    assert ledger["status"] == "evidence_ready"
+    assert ledger["sourceRefs"] == [{"type": "paper", "id": "source-1", "label": "Predictive Coding Source"}]
+    assert ledger["claims"][0]["claim"] == "Predictive coding uses hierarchical prediction errors."
+    assert ledger["keyFindings"][0]["citation"] == "Predictive Coding Source, p.3"
+    assert ledger["citations"][0]["page"] == "3"
+    assert ledger["evidenceRefs"] == [{"type": "page_anchor", "id": "source-1-p3", "label": "p.3"}]
+    assert ledger["limitations"] == ["样本来源需要后续复核"]
+    assert ledger["uncertainty"] == ["机制迁移到算法仍需实验验证"]
+    assert ledger["riskFlags"] == ["analogy_risk"]
+    assert ledger["supportLevel"] == "strong"
+    assert ledger["nextAction"] == "draft_paper_note"
+
+
+def test_content_extraction_writeback_downgrades_unanchored_evidence_ledger(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经预测编码资料提炼",
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": agent["agentId"]},
+            "querySeeds": ["predictive coding neural algorithm"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    candidate = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding source missing citation anchor",
+            "sourceUrl": "https://doi.org/10.0000/missing-anchor",
+            "sourceKind": "paper",
+            "summary": "Predictive coding evidence with missing anchor.",
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/missing-anchor"},
+            "createdByAgent": "content-extraction-agent",
+        },
+    )["candidate"]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-missing-anchor", "status": "running"},
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
+    )
+    _append_stage_task_tool_trace(tmp_path, task["task"])
+
+    response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "错误地把缺少引用锚点的提炼声明为完成。",
+            "result": {
+                "candidateExtractions": [
+                    {
+                        "candidateId": candidate["candidateId"],
+                        "decision": "keep",
+                        "summary": "预测编码可启发控制结构，但尚未写页码或 citation。",
+                        "claims": [{"claim": "Predictive coding supports a hierarchy analogy.", "sourceRef": "source-1"}],
+                        "keyFindings": [{"finding": "层级误差可用于控制结构类比。", "sourceRef": "source-1"}],
+                        "sourceRefs": [{"type": "paper", "id": "source-1", "label": "Missing Anchor Source"}],
+                    }
+                ]
+            },
+            "recordedByAgent": agent["agentId"],
+        },
+    )
+
+    refreshed = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")["candidates"][0]
+    extraction = refreshed["metadata"]["contentExtraction"]
+    assert response["writeback"]["status"] == "needs_review"
+    assert response["task"]["status"] == "needs_review"
+    assert response["writeback"]["materializedContentExtraction"]["missingEvidenceAnchorCount"] == 1
+    assert extraction["evidenceStatus"] == "missing_evidence_anchor"
+    assert extraction["evidenceLedger"]["status"] == "missing_evidence_anchor"
+
+
 def test_content_extraction_writeback_accumulates_partial_candidate_batches(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
@@ -5024,6 +5206,108 @@ def test_content_extraction_writeback_materializes_record_extractions_and_report
     assert "提炼 1/3" in submitted_messages[-1]
     assert "完整 recordId" in submitted_messages[-1]
     assert "missing-record-id" in submitted_messages[-1]
+
+
+def test_record_extraction_writeback_materializes_evidence_ledger_on_imported_candidate(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料提炼")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "source_extractor", "agentName": "资料提炼"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经预测编码资料提炼",
+            "agentRoles": ["source_extractor"],
+            "agentIds": {"source_extractor": agent["agentId"]},
+            "querySeeds": ["predictive coding neural algorithm"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    record = data_processing_service.add_record(
+        run_id,
+        {
+            "sourceType": "paper",
+            "sourceRef": "https://doi.org/10.0000/record-ledger",
+            "title": "Predictive coding raw record with anchored evidence",
+            "summary": "A raw DataRecord to be promoted into a source_manifest candidate with evidence ledger.",
+            "metadata": {"doi": "10.0000/record-ledger"},
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-record-ledger", "status": "running"},
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "extraction", "agentId": agent["agentId"], "agentRole": "source_extractor"},
+    )
+
+    response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "完成 DataRecord 提炼。",
+            "result": {
+                "recordExtractions": [
+                    {
+                        "recordId": record["recordId"],
+                        "decision": "keep",
+                        "valueSummary": "原始记录可作为预测编码机制候选来源。",
+                        "claims": [
+                            {
+                                "claim": "Predictive coding raw record supports hierarchical control analogy.",
+                                "sourceRef": "record-source-1",
+                                "supportLevel": "medium",
+                            }
+                        ],
+                        "keyFindings": [
+                            {
+                                "finding": "原始记录包含可追溯层级误差控制线索。",
+                                "sourceRef": "record-source-1",
+                                "page": "abstract",
+                                "citation": "Record Ledger Source, abstract",
+                            }
+                        ],
+                        "citations": [
+                            {"sourceRef": "record-source-1", "page": "abstract", "citation": "Record Ledger Source, abstract"}
+                        ],
+                        "sourceRefs": [{"type": "record", "id": "record-source-1", "label": "Record Ledger Source"}],
+                        "evidenceRefs": [{"type": "record_anchor", "id": "record-source-1-abstract", "label": "abstract"}],
+                        "limitations": ["只有摘要级证据"],
+                        "uncertainty": ["后续需要全文复核"],
+                        "riskFlags": ["abstract_only"],
+                        "supportLevel": "medium",
+                        "nextAction": "source_quality_review",
+                    }
+                ]
+            },
+            "recordedByAgent": agent["agentId"],
+        },
+    )
+
+    assert response["writeback"]["materializedSources"]["importedCandidateCount"] == 1
+    candidates = team_workflow_orchestration_service.list_candidate_store(team["teamId"], candidate_type="source_manifest")["candidates"]
+    extraction = candidates[0]["metadata"]["contentExtraction"]
+    ledger = extraction["evidenceLedger"]
+    assert extraction["evidenceStatus"] == "evidence_ready"
+    assert ledger["status"] == "evidence_ready"
+    assert ledger["sourceRefs"] == [{"type": "record", "id": "record-source-1", "label": "Record Ledger Source"}]
+    assert ledger["claims"][0]["supportLevel"] == "medium"
+    assert ledger["keyFindings"][0]["page"] == "abstract"
+    assert ledger["citations"][0]["citation"] == "Record Ledger Source, abstract"
+    assert ledger["evidenceRefs"] == [{"type": "record_anchor", "id": "record-source-1-abstract", "label": "abstract"}]
+    assert ledger["limitations"] == ["只有摘要级证据"]
+    assert ledger["uncertainty"] == ["后续需要全文复核"]
+    assert ledger["riskFlags"] == ["abstract_only"]
+    assert ledger["nextAction"] == "source_quality_review"
 
 
 def test_content_extraction_writeback_reports_no_effect_closure_for_invalid_raw_record_ids(tmp_path, monkeypatch):

@@ -371,6 +371,26 @@ type SourceCollectionCandidateProvenance = {
   href: string;
 };
 
+type SourceCollectionEvidenceLedgerSummary = {
+  status: string;
+  missingAnchor: boolean;
+  sourceRefCount: number;
+  evidenceRefCount: number;
+  claimCount: number;
+  keyFindingCount: number;
+  citationCount: number;
+  limitations: string[];
+  uncertainty: string[];
+  riskFlags: string[];
+  supportLevel: string;
+  nextAction: string;
+  claims: unknown[];
+  keyFindings: unknown[];
+  citations: unknown[];
+  sourceRefs: unknown[];
+  evidenceRefs: unknown[];
+};
+
 type SourceCollectionSourceFilter = "all" | "pdf" | "paper_web" | "dataset" | "local_file" | "missing";
 
 const SOURCE_COLLECTION_SOURCE_FILTERS: SourceCollectionSourceFilter[] = ["all", "pdf", "paper_web", "dataset", "local_file", "missing"];
@@ -2667,6 +2687,159 @@ function sourceCollectionFilterCounts(kinds: SourceCollectionSourceFilter[]) {
 function metadataString(metadata: Record<string, unknown>, key: string) {
   const value = metadata[key];
   return typeof value === "string" ? value.trim() : "";
+}
+
+function evidenceLedgerArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function evidenceLedgerText(value: unknown) {
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value).trim();
+  }
+  if (!isRecord(value)) {
+    return "";
+  }
+  const primary = [
+    value.claim,
+    value.finding,
+    value.citation,
+    value.text,
+    value.title,
+    value.label,
+    value.id,
+  ]
+    .map((item) => (typeof item === "string" || typeof item === "number" ? String(item).trim() : ""))
+    .find(Boolean);
+  const anchors = [
+    typeof value.sourceRef === "string" ? value.sourceRef.trim() : "",
+    typeof value.page === "string" || typeof value.page === "number" ? `p.${String(value.page).trim()}` : "",
+    typeof value.evidenceRef === "string" ? value.evidenceRef.trim() : "",
+  ].filter(Boolean);
+  return [primary, anchors.length ? anchors.join(" · ") : ""].filter(Boolean).join(" · ");
+}
+
+function evidenceLedgerTextList(value: unknown): string[] {
+  return evidenceLedgerArray(value)
+    .map((item) => evidenceLedgerText(item))
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
+function sourceCollectionEvidenceLedgerSummary(candidate: TeamWorkflowCandidate): SourceCollectionEvidenceLedgerSummary | null {
+  const metadata = isRecord(candidate.metadata) ? candidate.metadata : {};
+  const extraction = isRecord(metadata.contentExtraction) ? metadata.contentExtraction : {};
+  const ledger = isRecord(extraction.evidenceLedger) ? extraction.evidenceLedger : null;
+  if (!ledger) {
+    return null;
+  }
+  const claims = evidenceLedgerArray(ledger.claims);
+  const keyFindings = evidenceLedgerArray(ledger.keyFindings);
+  const citations = evidenceLedgerArray(ledger.citations);
+  const sourceRefs = evidenceLedgerArray(ledger.sourceRefs);
+  const evidenceRefs = evidenceLedgerArray(ledger.evidenceRefs);
+  const status = String(ledger.status || extraction.evidenceStatus || "").trim() || "evidence_ready";
+  return {
+    status,
+    missingAnchor: status === "missing_evidence_anchor",
+    sourceRefCount: sourceRefs.length,
+    evidenceRefCount: evidenceRefs.length,
+    claimCount: claims.length,
+    keyFindingCount: keyFindings.length,
+    citationCount: citations.length,
+    limitations: evidenceLedgerTextList(ledger.limitations),
+    uncertainty: evidenceLedgerTextList(ledger.uncertainty),
+    riskFlags: evidenceLedgerTextList(ledger.riskFlags),
+    supportLevel: typeof ledger.supportLevel === "string" ? ledger.supportLevel.trim() : "",
+    nextAction: typeof ledger.nextAction === "string" ? ledger.nextAction.trim() : "",
+    claims,
+    keyFindings,
+    citations,
+    sourceRefs,
+    evidenceRefs,
+  };
+}
+
+function sourceCollectionEvidenceLedgerCardLabel(summary: SourceCollectionEvidenceLedgerSummary, lang: "zh" | "en") {
+  const contentCount = summary.claimCount + summary.keyFindingCount + summary.citationCount;
+  const countLabel = lang === "zh" ? `${contentCount} 条` : `${contentCount} items`;
+  return `Evidence Ledger ${summary.status} · ${countLabel}`;
+}
+
+function sourceCollectionEvidenceLedgerActionLabel(summary: SourceCollectionEvidenceLedgerSummary, lang: "zh" | "en") {
+  if (summary.missingAnchor) {
+    return lang === "zh" ? "补证据锚点" : "add evidence anchor";
+  }
+  return lang === "zh" ? "证据可用" : "evidence ready";
+}
+
+function sourceCollectionEvidenceLedgerTone(summary: SourceCollectionEvidenceLedgerSummary): TeamSourceResultTone {
+  return summary.missingAnchor ? "warning" : "ready";
+}
+
+function sourceCollectionEvidenceLedgerDetailItems(
+  summary: SourceCollectionEvidenceLedgerSummary,
+  lang: "zh" | "en",
+): TeamSourceCollectionSourceDetailEvidence[] {
+  const items: TeamSourceCollectionSourceDetailEvidence[] = [
+    {
+      id: "status",
+      label: lang === "zh" ? "账本状态" : "Ledger status",
+      value: `${summary.status} · ${sourceCollectionEvidenceLedgerActionLabel(summary, lang)}`,
+      title: summary.status,
+    },
+  ];
+  if (summary.supportLevel) {
+    items.push({
+      id: "support",
+      label: lang === "zh" ? "支持度" : "Support",
+      value: summary.supportLevel,
+      title: summary.supportLevel,
+    });
+  }
+  [
+    ["claim", lang === "zh" ? "Claim" : "Claim", summary.claims],
+    ["finding", lang === "zh" ? "Key finding" : "Key finding", summary.keyFindings],
+    ["citation", lang === "zh" ? "Citation" : "Citation", summary.citations],
+    ["source-ref", lang === "zh" ? "来源锚点" : "Source ref", summary.sourceRefs],
+    ["evidence-ref", lang === "zh" ? "证据锚点" : "Evidence ref", summary.evidenceRefs],
+  ].forEach(([key, label, values]) => {
+    (values as unknown[]).slice(0, 4).forEach((value, index) => {
+      const text = evidenceLedgerText(value);
+      if (!text) {
+        return;
+      }
+      items.push({
+        id: `${key}-${index}`,
+        label: `${label} ${index + 1}`,
+        value: text,
+        title: text,
+      });
+    });
+  });
+  [
+    ["risk", lang === "zh" ? "风险" : "Risk", summary.riskFlags],
+    ["limitation", lang === "zh" ? "限制" : "Limitation", summary.limitations],
+    ["uncertainty", lang === "zh" ? "不确定性" : "Uncertainty", summary.uncertainty],
+  ].forEach(([key, label, values]) => {
+    (values as string[]).slice(0, 3).forEach((value, index) => {
+      items.push({
+        id: `${key}-${index}`,
+        label: `${label} ${index + 1}`,
+        value,
+        title: value,
+      });
+    });
+  });
+  if (summary.nextAction) {
+    items.push({
+      id: "next-action",
+      label: lang === "zh" ? "下一步" : "Next action",
+      value: summary.nextAction,
+      title: summary.nextAction,
+    });
+  }
+  return items;
 }
 
 function normalizedDoi(value: string | undefined | null) {
@@ -7863,6 +8036,7 @@ export function TeamsRoute({
     const provenance = sourceCollectionCandidateProvenance(selectedSourceCollectionCandidate, lang);
     const trace = selectedSourceCollectionCandidateTrace ?? sourceCollectionCandidateTrace(selectedSourceCollectionCandidate);
     const sourceQualitySummary = candidateSourceQualityAssessmentSummary(selectedSourceCollectionCandidate);
+    const evidenceLedgerSummary = sourceCollectionEvidenceLedgerSummary(selectedSourceCollectionCandidate);
     const runId = trace.runId || selectedSourceCollectionRunEffectiveId;
     const fileStorageTarget = provenance.kind === "file" && selectedSourceCollectionCandidateStorageArtifacts
       ? sourceCollectionStorageTargetForRef(provenance.value, selectedSourceCollectionCandidateStorageArtifacts)
@@ -7935,6 +8109,12 @@ export function TeamsRoute({
       [lang === "zh" ? "批次" : "Run", runId ? sourceCollectionRunLabel(runId) : ""],
       [lang === "zh" ? "分工" : "Assignment", trace.assignmentId],
       [lang === "zh" ? "搜索源" : "Provider", trace.searchProvider],
+      [
+        "Evidence Ledger",
+        evidenceLedgerSummary
+          ? sourceCollectionEvidenceLedgerCardLabel(evidenceLedgerSummary, lang)
+          : "",
+      ],
     ]
       .filter(([, value]) => Boolean(value))
       .map(([label, value]) => ({ label: String(label), value: String(value) }));
@@ -7952,6 +8132,7 @@ export function TeamsRoute({
         actions={[...sourceActions, ...storageActions]}
         noticeMessage={noticeMessage}
         searchEvidence={hasSearchEvidence ? searchEvidence : []}
+        evidenceLedger={evidenceLedgerSummary ? sourceCollectionEvidenceLedgerDetailItems(evidenceLedgerSummary, lang) : []}
         facts={facts}
         pending={selectedSourceCollectionStorageOpenPending}
         onOpenTarget={(target, targetRunId) => openSourceCollectionStorageTarget(target as SourceCollectionStorageOpenTarget, targetRunId)}
@@ -8000,6 +8181,8 @@ export function TeamsRoute({
           { key: "reviewed", label: lang === "zh" ? "已审查" : "reviewed", value: sourceCollectionProjectedAssessedCountText },
           { key: "approved", label: lang === "zh" ? "通过" : "approved", value: sourceCollectionProjectedApprovedCountText },
           { key: "pending", label: lang === "zh" ? "待 Agent 复核" : "pending agent review", value: sourceCollectionRunPendingScreeningCountText },
+          { key: "evidence-ready", label: "evidence_ready", value: sourceCollectionEvidenceReadyCandidateCount },
+          { key: "missing-evidence-anchor", label: "missing_evidence_anchor", value: sourceCollectionMissingEvidenceAnchorCount },
         ]}
         actions={<>
           <VButton
@@ -8371,6 +8554,8 @@ export function TeamsRoute({
           { key: "reviewed", label: lang === "zh" ? "已审查" : "reviewed", value: sourceCollectionProjectedAssessedCountText },
           { key: "approved", label: lang === "zh" ? "通过" : "approved", value: sourceCollectionProjectedApprovedCountText },
           { key: "pending", label: lang === "zh" ? "待 Agent 复核" : "pending agent review", value: sourceCollectionRunPendingScreeningCountText },
+          { key: "evidence-ready", label: "evidence_ready", value: sourceCollectionEvidenceReadyCandidateCount },
+          { key: "missing-evidence-anchor", label: "missing_evidence_anchor", value: sourceCollectionMissingEvidenceAnchorCount },
         ]}
         loading={sourceCollectionPrimaryDataLoading}
         hasCandidates={Boolean(visibleCandidates.length)}
@@ -8389,6 +8574,7 @@ export function TeamsRoute({
       >
         {visibleCandidates.map((candidate) => {
                 const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
+                const evidenceLedgerSummary = sourceCollectionEvidenceLedgerSummary(candidate);
                 const provenance = sourceCollectionCandidateProvenance(candidate, lang);
                 const qualityText = sourceCollectionSimpleCandidateStatusLabel(candidate, lang);
                 const scoreText = sourceQualitySummary
@@ -8398,7 +8584,7 @@ export function TeamsRoute({
                 return (
                   <TeamCandidateCard
                     key={candidate.candidateId}
-                    tone={sourceCollectionResultTone(candidate.qualityStatus)}
+                    tone={evidenceLedgerSummary ? sourceCollectionEvidenceLedgerTone(evidenceLedgerSummary) : sourceCollectionResultTone(candidate.qualityStatus)}
                     statusLabel={qualityText}
                     title={
                       <span title={[candidate.title || candidate.candidateId, candidate.summary || ""].filter(Boolean).join("\n")}>
@@ -8408,6 +8594,9 @@ export function TeamsRoute({
                     meta={[
                       { key: "category", label: sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang) },
                       { key: "score", label: scoreText },
+                      ...(evidenceLedgerSummary
+                        ? [{ key: "evidence-ledger", label: sourceCollectionEvidenceLedgerCardLabel(evidenceLedgerSummary, lang) }]
+                        : []),
                     ]}
                     source={{
                       label: provenance.label,
@@ -8466,6 +8655,12 @@ export function TeamsRoute({
           unreviewedNodeCount: visibleGraph.unreviewedNodes.length,
         }
       : null;
+    const visibleGraphMissingEvidenceAnchorCount = visibleGraph
+      ? visibleGraph.nodes.filter((node) => {
+          const candidate = teamWorkflowCandidatesById.get(node.candidateId);
+          return candidate ? Boolean(sourceCollectionEvidenceLedgerSummary(candidate)?.missingAnchor) : false;
+        }).length
+      : 0;
     const visibleGraphLayout = visibleGraph && visibleGraphSummary
       ? workflowGraphLayout({ ...visibleGraph, summary: { ...visibleGraph.summary, ...visibleGraphSummary } })
       : null;
@@ -8492,6 +8687,7 @@ export function TeamsRoute({
           { key: "edges", label: lang === "zh" ? "当前关系" : "visible edges", value: visibleGraphSummary?.edgeCount ?? 0 },
           { key: "missing", label: lang === "zh" ? "缺口" : "missing", value: visibleGraphSummary?.missingLinkCount ?? 0 },
           { key: "review", label: lang === "zh" ? "待审" : "review", value: visibleGraphSummary?.unreviewedNodeCount ?? 0 },
+          { key: "evidence-anchor", label: lang === "zh" ? "待补证据" : "missing evidence", value: visibleGraphMissingEvidenceAnchorCount },
         ]}
         hasGraph={Boolean(visibleGraph && visibleGraphLayout && visibleGraphSummary && visibleGraph.nodes.length)}
         graphView={visibleGraphLayout ? (
@@ -8506,11 +8702,12 @@ export function TeamsRoute({
             {pagedGraphNodes.items.map((node) => {
               const candidate = teamWorkflowCandidatesById.get(node.candidateId) ?? null;
               const provenance = candidate ? sourceCollectionCandidateProvenance(candidate, lang) : null;
+              const evidenceLedgerSummary = candidate ? sourceCollectionEvidenceLedgerSummary(candidate) : null;
               const selected = candidate ? selectedSourceCollectionCandidateId === candidate.candidateId : false;
               return (
                 <TeamCandidateCard
                   key={`graph-node-${node.candidateId}`}
-                  tone={sourceCollectionResultTone(node.qualityStatus || node.currentState)}
+                  tone={evidenceLedgerSummary ? sourceCollectionEvidenceLedgerTone(evidenceLedgerSummary) : sourceCollectionResultTone(node.qualityStatus || node.currentState)}
                   statusLabel={workflowStateLabel(node.currentState, lang)}
                   title={node.title || node.candidateId}
                   summary={node.candidateId}
@@ -8519,6 +8716,14 @@ export function TeamsRoute({
                     { key: "node", label: node.currentWorkflowNode },
                     ...(candidate
                       ? [{ key: "category", label: sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang) }]
+                      : []),
+                    ...(evidenceLedgerSummary
+                      ? [
+                          { key: "evidence-ledger", label: sourceCollectionEvidenceLedgerCardLabel(evidenceLedgerSummary, lang) },
+                          ...(evidenceLedgerSummary.missingAnchor
+                            ? [{ key: "evidence-action", label: sourceCollectionEvidenceLedgerActionLabel(evidenceLedgerSummary, lang) }]
+                            : []),
+                        ]
                       : []),
                   ]}
                   source={provenance ? {
@@ -10753,6 +10958,14 @@ export function TeamsRoute({
   const sourceCollectionCandidateFilterCounts = sourceCollectionFilterCounts(sourceCollectionRunCandidateSourceCategories);
   const sourceCollectionRunAssessedCount = sourceCollectionRunCandidates.filter((candidate) => sourceCollectionCandidateQualityState(candidate).assessed).length;
   const sourceCollectionRunApprovedCount = sourceCollectionRunCandidates.filter((candidate) => sourceCollectionCandidateQualityState(candidate).approved).length;
+  const sourceCollectionEvidenceLedgerSummaries = useMemo(
+    () => sourceCollectionRunCandidates
+      .map((candidate) => sourceCollectionEvidenceLedgerSummary(candidate))
+      .filter((summary): summary is SourceCollectionEvidenceLedgerSummary => Boolean(summary)),
+    [sourceCollectionRunCandidates],
+  );
+  const sourceCollectionEvidenceReadyCandidateCount = sourceCollectionEvidenceLedgerSummaries.filter((summary) => !summary.missingAnchor).length;
+  const sourceCollectionMissingEvidenceAnchorCount = sourceCollectionEvidenceLedgerSummaries.filter((summary) => summary.missingAnchor).length;
   const sourceCollectionCollectedCount = sourceCollectionRawRecordCount;
   const sourceCollectionRunSummaryHasRecordCount = typeof sourceCollectionRunSummary?.recordCount === "number";
   const sourceCollectionSummaryHasRecordCount = typeof sourceCollectionSummaryCounts.recordCount === "number";
@@ -12097,6 +12310,7 @@ export function TeamsRoute({
   const teamWorkflowCandidatePreviewItems: TeamWorkflowCandidatePreviewItem[] = teamWorkflowCandidates.map((candidate) => {
     const chunkPlanSummary = candidatePaperNoteChunkPlanSummary(candidate);
     const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
+    const evidenceLedgerSummary = sourceCollectionEvidenceLedgerSummary(candidate);
     const canPlanPaperNoteChunks = sourceCandidateHasCompletedExtraction(candidate);
     const candidateQualityPending =
       selectedTeamAssessSourceQualityPending
@@ -12106,7 +12320,7 @@ export function TeamsRoute({
       && planPaperNoteChunksMutation.variables?.candidateId === candidate.candidateId;
     return {
       id: candidate.candidateId,
-      tone: sourceCollectionResultTone(candidate.qualityStatus),
+      tone: evidenceLedgerSummary?.missingAnchor ? "warning" : sourceCollectionResultTone(candidate.qualityStatus),
       statusLabel: workflowStateLabel(candidate.currentState, lang),
       title: candidate.title || candidate.candidateId,
       summary: candidate.summary || candidate.candidateType,
@@ -12122,8 +12336,11 @@ export function TeamsRoute({
         ...(chunkPlanSummary
           ? [{ key: "chunks", label: `paper_note chunks ${chunkPlanSummary.completedChunkCount}/${chunkPlanSummary.chunkCount}` }]
           : canPlanPaperNoteChunks
-            ? [{ key: "chunks", label: lang === "zh" ? "可生成 paper_note 分块" : "ready for paper_note chunks" }]
-            : []),
+          ? [{ key: "chunks", label: lang === "zh" ? "可生成 paper_note 分块" : "ready for paper_note chunks" }]
+          : []),
+        ...(evidenceLedgerSummary
+          ? [{ key: "evidence-ledger", label: sourceCollectionEvidenceLedgerCardLabel(evidenceLedgerSummary, lang) }]
+          : []),
       ],
       actions: candidate.candidateType === "source_manifest" ? (
         <>
