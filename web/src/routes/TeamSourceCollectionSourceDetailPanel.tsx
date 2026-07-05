@@ -1,4 +1,4 @@
-import { Link2, Search } from "lucide-react";
+import { CheckCircle2, Link2, Search } from "lucide-react";
 
 import { VNativeButton } from "../components/vui";
 import styles from "./TeamSourceCollectionSourceDetailPanel.styles";
@@ -43,6 +43,7 @@ type TeamSourceCollectionSourceDetailPanelProps = {
   actions: TeamSourceCollectionSourceDetailAction[];
   noticeMessage: string;
   searchEvidence: TeamSourceCollectionSourceDetailEvidence[];
+  evidenceLedger: TeamSourceCollectionSourceDetailEvidence[];
   facts: TeamSourceCollectionSourceDetailFact[];
   pending: boolean;
   onOpenTarget: (target: string, runId?: string) => void;
@@ -58,6 +59,7 @@ export function TeamSourceCollectionSourceDetailPanel({
   actions,
   noticeMessage,
   searchEvidence,
+  evidenceLedger,
   facts,
   pending,
   onOpenTarget,
@@ -114,6 +116,22 @@ export function TeamSourceCollectionSourceDetailPanel({
                 ) : (
                   <code title={item.title}>{item.value}</code>
                 )}
+              </span>
+            ))}
+          </div>
+        </details>
+      ) : null}
+      {evidenceLedger.length ? (
+        <details className={styles.sourceCollectionSearchEvidence} open>
+          <summary>
+            <CheckCircle2 size={12} />
+            Evidence Ledger
+          </summary>
+          <div className={styles.sourceCollectionSearchEvidenceBody}>
+            {evidenceLedger.map((item) => (
+              <span key={item.id}>
+                <b>{item.label}</b>
+                <code title={item.title}>{item.value}</code>
               </span>
             ))}
           </div>
