@@ -1,7 +1,7 @@
 const panelSurface =
-  "rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_62%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_42%,transparent)] p-2";
+  "rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--vui-border-subtle)_62%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_42%,transparent)] p-2";
 const rowSurface =
-  "rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_38%,transparent)]";
+  "rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-row)_64%,transparent)]";
 const coolSurface =
   "rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_20%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_5%,transparent)] p-2";
 
@@ -23,7 +23,7 @@ const styles = {
   scopeSelect:
     "grid min-w-0 gap-[3px] text-[var(--vui-font-xs)] font-semibold text-vui-fg-tertiary [&_[data-vui=native-select]]:w-full",
   scopeStats:
-    "flex min-w-0 flex-wrap items-center justify-end gap-1.5 text-[var(--vui-font-xs)] font-semibold text-vui-fg-tertiary max-[700px]:justify-start [&>span]:inline-grid [&>span]:min-h-7 [&>span]:grid-cols-[auto_auto] [&>span]:items-center [&>span]:gap-1 [&>span]:rounded-[var(--radius-control)] [&>span]:border [&>span]:border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] [&>span]:bg-[color:color-mix(in_srgb,var(--surface-panel)_38%,transparent)] [&>span]:px-2 [&_strong]:text-vui-fg-primary",
+    "flex min-w-0 flex-wrap items-center justify-end gap-1.5 text-[var(--vui-font-xs)] font-semibold text-vui-fg-tertiary max-[700px]:justify-start [&>span]:inline-grid [&>span]:min-h-7 [&>span]:grid-cols-[auto_auto] [&>span]:items-center [&>span]:gap-1 [&>span]:rounded-[var(--radius-control)] [&>span]:border [&>span]:border-[color:color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] [&>span]:bg-[color:color-mix(in_srgb,var(--vui-surface-row)_64%,transparent)] [&>span]:px-2 [&_strong]:text-vui-fg-primary",
   deepLinkNotice:
     "col-span-full m-0 min-w-0 rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-cool)_32%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_9%,transparent)] px-2 py-1.5 text-[var(--vui-font-xs)] font-semibold leading-[var(--vui-line-readable)] text-vui-accent-cool",
 } as const;

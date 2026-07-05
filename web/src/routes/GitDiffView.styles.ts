@@ -1,4 +1,4 @@
-const surfaceClass = "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-lg border border-vui-border-subtle bg-vui-surface-panel/82";
+const surfaceClass = "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-panel/82";
 const headerClass = "flex items-start justify-between gap-4 border-b border-vui-border-hairline px-5 pb-3.5 pt-[18px]";
 const headerCopyClass = "min-w-0";
 const eyebrowClass = "m-0 mb-1 text-[var(--vui-font-xs)] uppercase tracking-[0.08em] text-vui-fg-tertiary";
