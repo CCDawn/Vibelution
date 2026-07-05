@@ -422,6 +422,35 @@ def test_standalone_launcher_runtime_scene_event_route_requires_control_token(mo
     ]
 
 
+def test_standalone_launcher_browser_telemetry_route_requires_control_token(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        launcher_app.runtime_scene_service,
+        "record_browser_telemetry",
+        lambda payload: calls.append(payload) or {"accepted": True, "runtimeSceneId": "scene-1"},
+    )
+    client = TestClient(launcher_app.create_launcher_app())
+    payload = {
+        "phase": "stream",
+        "eventCode": "browser.session_stream.assistant_delta_applied",
+        "message": "assistant delta applied",
+        "level": "info",
+        "fields": {"sessionId": "session-1", "deltaLength": 128},
+    }
+
+    rejected = client.post("/api/runtime/browser-telemetry", json=payload)
+    token = client.get("/api/control-token").json()["controlToken"]
+    accepted = client.post(
+        "/api/runtime/browser-telemetry",
+        headers={"X-Vibelution-Control-Token": token},
+        json=payload,
+    )
+
+    assert rejected.status_code == 403
+    assert accepted.status_code == 202
+    assert calls == [payload]
+
+
 def test_standalone_launcher_app_exposes_workbench_window_setting(monkeypatch):
     calls = []
     monkeypatch.setattr(

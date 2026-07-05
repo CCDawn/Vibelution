@@ -487,7 +487,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeStyles.supervisedWorkflowPanel).toContain("[overflow:hidden]");
     expect(routeStyles.workflowStepRail).toContain("[max-height:min(196px,_30vh)]");
     expect(routeStyles.workflowStepButton).toContain("hover:[border-color:");
-    expect(routeStyles.workflowStepButton).toContain("[background:var(--surface-panel)]");
+    expect(routeStyles.workflowStepButton).toContain("[background:var(--vui-surface-row)]");
     expect(routeStyles.workflowStepButton).toContain("w-full");
     expect(routeStyles.workflowStepButtonActive).toContain("[border-color:");
     expect(routeStyles.workflowStepPreview).toContain("[-webkit-line-clamp:2]");

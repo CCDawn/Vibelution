@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
+import canvasDataSource from "./TeamsRoute.canvasData.ts?raw";
 import routeSource from "./TeamsRoute.tsx?raw";
 import teamMemoryIndexPanelSource from "./TeamMemoryIndexPanel.tsx?raw";
 import teamMemoryIndexPanelStyles from "./TeamMemoryIndexPanel.styles";
@@ -124,7 +125,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("/api/team-templates/${encodeURIComponent(templateId)}/instantiate");
     expect(routeSource).not.toContain("instantiateTeamTemplateMutation");
     expect(routeSource).toContain("TEAM_PICKER_TEAM_IDS");
-    expect(routeSource).toContain("const TEAM_PICKER_TEAM_IDS = [AI_SEARCH_TEAM_ID, KNOWLEDGE_EXPANSION_TEAM_ID, RESEARCH_TEAM_ID] as const");
+    expect(canvasDataSource).toContain("const TEAM_PICKER_TEAM_IDS = [AI_SEARCH_TEAM_ID, KNOWLEDGE_EXPANSION_TEAM_ID, RESEARCH_TEAM_ID] as const");
     expect(routeSource).toContain("fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`)");
     expect(routeSource).toContain("queryKeys.agentSummary(true)");
     expect(routeSource).toContain('fetchJson<AgentConfigWorkspaceAgent[]>("/api/agents?includeArchived=true&detail=summary")');
@@ -303,7 +304,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("delete writableNode.agentSourceRef");
     expect(routeSource).toContain("delete writableNode.agentProjectionEdit");
     expect(routeSource).toContain("delete writableNode.agentProjectionCanWrite");
-    expect(routeSource).toContain("team_organization_canvas");
+    expect(routeSource).toContain("TEAM_ORGANIZATION_CANVAS_KIND");
+    expect(canvasDataSource).toContain("team_organization_canvas");
     expect(routeSource).not.toContain("/api/research/flow-canvas");
   });
 
@@ -368,9 +370,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("EVOLUTION_SYSTEM_TEAM_IDS");
     expect(routeSource).toContain('"self-evolution-team"');
     expect(routeSource).toContain('"supervised-evolution-team"');
-    expect(routeSource).toContain('const RESEARCH_TEAM_ID = "research-team"');
-    expect(routeSource).toContain('const AI_SEARCH_TEAM_ID = "ai-search-team"');
-    expect(routeSource).toContain('const KNOWLEDGE_EXPANSION_TEAM_ID = "knowledge-expansion-team"');
+    expect(canvasDataSource).toContain('RESEARCH_TEAM_ID = "research-team"');
+    expect(canvasDataSource).toContain('AI_SEARCH_TEAM_ID = "ai-search-team"');
+    expect(canvasDataSource).toContain('KNOWLEDGE_EXPANSION_TEAM_ID = "knowledge-expansion-team"');
     expect(routeSource).toContain("TEAM_PICKER_TEAM_IDS.map((teamId) => teamsById.get(teamId))");
     expect(routeSource).toContain("isEvolutionSystemTeam");
     expect(routeSource).toContain("team.teamKind === \"self_evolution\"");
@@ -1359,7 +1361,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("styles.teamHistoryPanel");
     expect(routeStyles.kernelTraceLink).toBeTypeOf("string");
     expect(routeSource).toContain("interrupt_targets");
-    expect(routeSource).toContain("edges: canvas.edges.filter((edge) => edge.source !== deletedNodeId && edge.target !== deletedNodeId)");
+    expect(routeSource).toContain("edges: durableCanvas.edges.filter((edge) => edge.source !== deletedNodeId && edge.target !== deletedNodeId)");
+    expect(routeSource).toContain("disabled={!hasWritableCanvas");
     expect(routeStyles.teamContextBar).toBeTypeOf("string");
     expect(routeStyles.teamTitleBlock).toBeTypeOf("string");
     expect(routeStyles.teamSelectField).toBeTypeOf("string");
@@ -2258,7 +2261,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("commitNodeDragPosition(dragState)");
     expect(routeSource).toContain("setPointerCapture(event.pointerId)");
     expect(routeSource).toContain("releasePointerCapture(event.pointerId)");
-    expect(routeSource).toContain("nodes: canvas.nodes.map((node) => (node.id === dragState.nodeId");
+    expect(routeSource).toContain("nodes: durableCanvas.nodes.map((node) => (node.id === dragState.nodeId");
     expect(routeSource).toContain("onPointerDown={researchCanvasReadOnly ? undefined : (event) => startNodeDrag(event, node)}");
     expect(routeSource).toContain("onPointerMove={researchCanvasReadOnly ? undefined : moveNodeDrag}");
     expect(routeSource).toContain("onPointerUp={researchCanvasReadOnly ? undefined : finishNodeDrag}");

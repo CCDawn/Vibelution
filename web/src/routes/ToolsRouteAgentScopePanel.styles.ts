@@ -1,14 +1,21 @@
+const panelSurface =
+  "rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_62%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_42%,transparent)] p-2";
+const rowSurface =
+  "rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_38%,transparent)]";
+const coolSurface =
+  "rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_20%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_5%,transparent)] p-2";
+
 const styles = {
   controlStrip:
-    "grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] items-center gap-[7px] rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_62%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_42%,transparent)] p-2 max-[980px]:grid-cols-[1fr]",
+    `grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] items-center gap-[7px] ${panelSurface} max-[980px]:grid-cols-[1fr]`,
   managementNav:
     "!mx-0 !mt-0 min-w-0 self-start max-[980px]:w-full",
   summaryGrid:
     "grid min-w-0 grid-cols-[repeat(3,minmax(0,1fr))] gap-[5px] max-[720px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[520px]:grid-cols-[1fr]",
   summaryCard:
-    "grid min-w-0 gap-[2px] rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_38%,transparent)] px-2 py-1.5 [&>span]:truncate [&>span]:text-[var(--vui-font-xs)] [&>span]:font-semibold [&>span]:text-vui-fg-tertiary [&>strong]:truncate [&>strong]:text-[var(--vui-font-md)] [&>strong]:font-extrabold [&>strong]:leading-tight [&>strong]:text-vui-fg-primary",
+    `grid min-w-0 gap-[2px] ${rowSurface} px-2 py-1.5 [&>span]:truncate [&>span]:text-[var(--vui-font-xs)] [&>span]:font-semibold [&>span]:text-vui-fg-tertiary [&>strong]:truncate [&>strong]:text-[var(--vui-font-md)] [&>strong]:font-extrabold [&>strong]:leading-tight [&>strong]:text-vui-fg-primary`,
   agentScopeBar:
-    "grid min-w-0 grid-cols-[minmax(170px,1fr)_minmax(180px,230px)_minmax(150px,190px)_minmax(180px,auto)] items-center gap-[7px] rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_20%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_5%,transparent)] p-2 max-[1120px]:grid-cols-[minmax(0,1fr)_minmax(180px,230px)] max-[700px]:grid-cols-[1fr]",
+    `grid min-w-0 grid-cols-[minmax(170px,1fr)_minmax(180px,230px)_minmax(150px,190px)_minmax(180px,auto)] items-center gap-[7px] ${coolSurface} max-[1120px]:grid-cols-[minmax(0,1fr)_minmax(180px,230px)] max-[700px]:grid-cols-[1fr]`,
   scopeCopy:
     "grid min-w-0 gap-[2px] [&>strong]:truncate [&>strong]:text-[var(--vui-font-sm)] [&>strong]:font-extrabold [&>strong]:text-vui-fg-primary [&>span]:truncate [&>span]:text-[var(--vui-font-xs)] [&>span]:font-semibold [&>span]:text-vui-fg-tertiary",
   panelEyebrow:

@@ -164,6 +164,75 @@ describe("conversation operation state helpers", () => {
       .toBe("120:Tool loop · still collecting evidence");
   });
 
+  it("summarizes failed structured tool output without exposing raw JSON", () => {
+    const preview = processSummaryPreview([
+      operation({
+        id: "git-status",
+        kind: "tool",
+        label: "Git 状态",
+        rawLabel: "get_git_status_summary_tool",
+        status: "error",
+        summary: '{"dirty_summary":"有 unstaged 改动，有 untracked 文件，共 12 个变化文件"}',
+      }),
+    ], labels, (value) => value);
+
+    expect(preview).toBe("Git 状态 · 有 unstaged 改动，有 untracked 文件，共 12 个变化文件");
+    expect(preview).not.toContain("{");
+    expect(preview).not.toContain("dirty_summary");
+  });
+
+  it("does not prefix readable structured failures with unmapped raw tool names", () => {
+    const preview = processSummaryPreview([
+      operation({
+        id: "writeback",
+        kind: "tool",
+        label: "source_collection_stage_writeback_tool",
+        rawLabel: "source_collection_stage_writeback_tool",
+        status: "error",
+        summary: '{"summary":"资料写回失败，任务已保留"}',
+      }),
+    ], labels, (value) => value);
+
+    expect(preview).toBe("资料写回失败，任务已保留");
+    expect(preview).not.toContain("source_collection_stage_writeback_tool");
+    expect(preview).not.toContain("{");
+  });
+
+  it("falls back to the operation label for truncated structured failure snippets", () => {
+    const preview = processSummaryPreview([
+      operation({
+        id: "code-graph",
+        kind: "tool",
+        label: "代码图谱",
+        rawLabel: "code_graph_tool",
+        status: "error",
+        summary: '{ "status": "error",',
+      }),
+    ], labels, (value) => value);
+
+    expect(preview).toBe("代码图谱");
+    expect(preview).not.toContain("{");
+    expect(preview).not.toContain("status");
+  });
+
+  it("keeps bracketed human failure summaries instead of treating them as JSON arrays", () => {
+    const preview = processSummaryPreview([
+      operation({
+        id: "edit-failure",
+        kind: "tool",
+        label: "apply_diff_edit_tool",
+        rawLabel: "apply_diff_edit_tool",
+        status: "failed",
+        summary: "[编辑] 修改 config/public_config.py 失败",
+        error: "patch context not found",
+      }),
+    ], labels, (value) => value);
+
+    expect(preview).toBe("[编辑] 修改 config/public_config.py 失败");
+    expect(preview).not.toContain("apply_diff_edit_tool");
+    expect(preview).not.toContain("patch context not found");
+  });
+
   it("computes ReAct group tone from grouped operations", () => {
     const group: AgentMessageReActOperationGroup = {
       id: "react",

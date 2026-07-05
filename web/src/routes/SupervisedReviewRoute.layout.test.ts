@@ -11,9 +11,13 @@ const routeStylesSource = readFileSync(new URL("./SupervisedReviewRoute.styles.t
 const worktreePanelStylesSource = readFileSync(new URL("./SupervisedWorktreeReviewPanel.styles.ts", import.meta.url), "utf-8");
 
 function routeStyle(name: string) {
-  const match = routeStylesSource.match(new RegExp(`${name}:\\s*"([^"]+)"`));
+  const exportedStyle = (styles as Record<string, string>)[name];
+  if (exportedStyle) {
+    return exportedStyle;
+  }
+  const match = routeStylesSource.match(new RegExp(`${name}:\\s*(?:"([^"]+)"|` + "`([^`]+)`" + ")"));
   expect(match, `${name} style exists`).not.toBeNull();
-  return match?.[1] ?? "";
+  return match?.[1] ?? match?.[2] ?? "";
 }
 
 describe("SupervisedReviewRoute layout contract", () => {
@@ -62,8 +66,10 @@ describe("SupervisedReviewRoute layout contract", () => {
     expect(pageClass).not.toContain("bg-[var(--surface-page)]");
     for (const panelClass of primaryPanelClasses) {
       expect(panelClass).not.toMatch(/bg-\[var\(--surface-panel(?:-strong)?\)\]/);
-      expect(panelClass).toContain("color-mix");
+      expect(panelClass).toContain("vui-");
     }
+    expect(styles.queuePanel).toContain("shadow-none");
+    expect(styles.detailPanel).toContain("shadow-none");
     expect(styles.queuePanel).toContain("min-w-0");
     expect(styles.detailPanel).toContain("min-w-0");
   });
@@ -81,14 +87,16 @@ describe("SupervisedReviewRoute layout contract", () => {
     ];
 
     for (const surface of repeatedSurfaces) {
-      expect(surface).toContain("border-[var(--border-hairline)]");
+      expect(surface).toContain("border-vui-border-subtle");
+      expect(surface).toContain("vui-surface-row");
       expect(surface).not.toContain("bg-[var(--surface-panel-strong)]");
+      expect(surface).not.toContain("border-[var(--border-hairline)]");
     }
 
     expect(styles.factCard).toContain("min-w-0");
     expect(styles.metricCard).toContain("min-w-0");
-    expect(styles.evidenceCard).toContain("bg-[color-mix(in_srgb,var(--surface-card)_");
-    expect(styles.transcriptCard).toContain("bg-[color-mix(in_srgb,var(--surface-card)_");
+    expect(styles.evidenceCard).toContain("bg-[color-mix(in_srgb,var(--vui-surface-row)_");
+    expect(styles.transcriptCard).toContain("bg-[color-mix(in_srgb,var(--vui-surface-row)_");
   });
 
   it("keeps review actions content-sized while preserving danger emphasis", () => {
@@ -140,6 +148,9 @@ describe("SupervisedReviewRoute layout contract", () => {
   it("keeps repeated review controls as named Tailwind slices", () => {
     expect(routeStylesSource).toContain("const reviewControlButton");
     expect(routeStylesSource).toContain("const reviewControlButtonActive");
+    expect(routeStylesSource).toContain("const reviewControlSurface");
+    expect(routeStylesSource).toContain("const reviewPanelSurface");
+    expect(routeStylesSource).toContain("const reviewRowSurface");
     expect(routeStylesSource).toContain("const reviewPrimaryActionButton");
     expect(routeStylesSource).toContain("const reviewFormLabel");
     expect(routeStylesSource).toContain("const reviewInputTargets");
