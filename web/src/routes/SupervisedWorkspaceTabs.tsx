@@ -70,12 +70,17 @@ export function SupervisedWorkspaceTabs({
         const selected = normalizedActiveWorkflowStepId
           ? step.key === normalizedActiveWorkflowStepId
           : step.view === activeView;
+        const tabDescription = [label, summary?.status, summary?.detail]
+          .filter(Boolean)
+          .join(" ");
         return (
           <VButton
             key={step.key}
             type="button"
             role="tab"
+            aria-label={tabDescription}
             aria-selected={selected}
+            title={tabDescription}
             className={selected ? `${styles.flowTabClass} ${styles.flowTabActiveClass}` : styles.flowTabClass}
             onClick={() => onWorkflowStepSelect?.(step.key)}
           >
