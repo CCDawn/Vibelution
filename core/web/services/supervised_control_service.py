@@ -27,6 +27,7 @@ from core.evaluation import (
     resolve_workbench_bundle_path,
     run_workbench_session,
     save_workbench_state,
+    supervised_evidence_storage_metadata,
 )
 from core.evaluation.supervised_evolution import (
     normalize_supervised_mental_model_mode,
@@ -244,9 +245,12 @@ def get_supervised_workbench(
             catalog_payloads,
             dataset_payloads,
         )
+    storage = supervised_evidence_storage_metadata(PROJECT_ROOT)
+    state_payload = _workbench_saved_state_with_storage(state_payload, storage)
     return {
         "defaultBundleName": default_bundle_name(),
         "savedState": state_payload,
+        "storage": storage,
         "bundles": list_available_workbench_bundles(data_root) if include_catalog else [],
         "datasets": dataset_payloads,
         "datasetCatalog": catalog_payloads,
@@ -2938,6 +2942,12 @@ def _workbench_saved_state_with_catalog_counts(
     return state
 
 
+def _workbench_saved_state_with_storage(saved_state: dict[str, Any], storage: dict[str, Any]) -> dict[str, Any]:
+    state = dict(saved_state or {})
+    state["storage"] = dict(storage or {})
+    return state
+
+
 def _lifecycle_payload(lifecycle) -> dict[str, Any]:
     return {
         "status": lifecycle.status,
@@ -3715,9 +3725,12 @@ def get_supervised_workbench(
                 catalog_payloads,
                 dataset_payloads,
             )
+        storage = supervised_evidence_storage_metadata(PROJECT_ROOT)
+        state_payload = _workbench_saved_state_with_storage(state_payload, storage)
         return {
             "defaultBundleName": default_bundle_name(),
             "savedState": state_payload,
+            "storage": storage,
             "bundles": list_available_workbench_bundles(data_root) if include_catalog else [],
             "datasets": dataset_payloads,
             "datasetCatalog": catalog_payloads,
