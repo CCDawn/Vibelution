@@ -67,6 +67,10 @@ export type UsageSummaryResponse = {
     provider: string;
     model: string;
   };
+  rollupFilters: {
+    sessionId: string;
+    agentId: string;
+  };
   lastTokenUsage: TokenUsageSample;
   sessionTokenUsage: TokenUsageRollup;
   agentTokenUsage: TokenUsageRollup;

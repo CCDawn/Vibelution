@@ -699,7 +699,7 @@ def _usage_missing_reason(usage: UsageStats) -> str:
 def record_usage_event(event: Any) -> Any:
     from .usage_ledger import record_usage_event as write_usage_event
 
-    return write_usage_event(event)
+    return write_usage_event(event, timeout_seconds=0.05)
 
 
 def _usage_ledger_event(**kwargs: Any) -> Any:

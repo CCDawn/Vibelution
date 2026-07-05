@@ -16,6 +16,7 @@ from core.infrastructure import developer_sandbox
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 USAGE_SCHEMA_VERSION = 1
+DEFAULT_LEDGER_TIMEOUT_SECONDS = 5.0
 UsageSource = Literal["provider_usage", "estimated", "missing", "not_called"]
 VALID_SOURCES = {"provider_usage", "estimated", "missing", "not_called"}
 NUMERIC_EVENT_FIELDS = (
@@ -104,6 +105,7 @@ class UsageRollup:
 class UsageSummary:
     scope: str
     filters: dict[str, str]
+    rollup_filters: dict[str, str]
     last_token_usage: dict[str, Any]
     session_token_usage: UsageRollup
     agent_token_usage: UsageRollup
@@ -118,6 +120,7 @@ class UsageSummary:
         return {
             "scope": self.scope,
             "filters": dict(self.filters),
+            "rollupFilters": dict(self.rollup_filters),
             "lastTokenUsage": dict(self.last_token_usage),
             "sessionTokenUsage": self.session_token_usage.to_dict(),
             "agentTokenUsage": self.agent_token_usage.to_dict(),
@@ -147,9 +150,14 @@ def usage_ledger_path(project_root: Path | None = None) -> Path:
     )
 
 
-def record_usage_event(event: UsageLedgerEvent, project_root: Path | None = None) -> UsageLedgerEvent:
+def record_usage_event(
+    event: UsageLedgerEvent,
+    project_root: Path | None = None,
+    *,
+    timeout_seconds: float = DEFAULT_LEDGER_TIMEOUT_SECONDS,
+) -> UsageLedgerEvent:
     normalized = _normalize_event(event)
-    with _connect(project_root) as conn:
+    with _connect(project_root, timeout_seconds=timeout_seconds) as conn:
         conn.execute(
             """
             INSERT OR IGNORE INTO usage_events (
@@ -218,19 +226,29 @@ def build_usage_summary(
         provider=filters["provider"],
         model=filters["model"],
     )
-    session_rows = _filter_rows(
-        rows,
-        "session",
-        session_id=filters["sessionId"],
-        provider=filters["provider"],
-        model=filters["model"],
+    last_row = _last_valid_row(scoped_rows)
+    rollup_filters = _derive_rollup_filters(filters, last_row)
+    session_rows = (
+        _filter_rows(
+            rows,
+            "session",
+            session_id=rollup_filters["sessionId"],
+            provider=filters["provider"],
+            model=filters["model"],
+        )
+        if rollup_filters["sessionId"]
+        else []
     )
-    agent_rows = _filter_rows(
-        rows,
-        "agent",
-        agent_id=filters["agentId"],
-        provider=filters["provider"],
-        model=filters["model"],
+    agent_rows = (
+        _filter_rows(
+            rows,
+            "agent",
+            agent_id=rollup_filters["agentId"],
+            provider=filters["provider"],
+            model=filters["model"],
+        )
+        if rollup_filters["agentId"]
+        else []
     )
     global_rows = _filter_rows(rows, "global", provider=filters["provider"], model=filters["model"])
     today_rows, last7_days_rows = _time_window_rows(global_rows)
@@ -240,10 +258,10 @@ def build_usage_summary(
     session_rollup, _ = _rollup_rows(session_rows)
     agent_rollup, _ = _rollup_rows(agent_rows)
     scoped_rollup, _ = _rollup_rows(scoped_rows)
-    last_row = _last_valid_row(scoped_rows)
     summary = UsageSummary(
         scope=normalized_scope,
         filters=filters,
+        rollup_filters=rollup_filters,
         last_token_usage=_row_to_last_usage(last_row),
         session_token_usage=session_rollup,
         agent_token_usage=agent_rollup,
@@ -258,13 +276,18 @@ def build_usage_summary(
     return summary
 
 
-def _connect(project_root: Path | None = None) -> sqlite3.Connection:
+def _connect(
+    project_root: Path | None = None,
+    *,
+    timeout_seconds: float = DEFAULT_LEDGER_TIMEOUT_SECONDS,
+) -> sqlite3.Connection:
     path = usage_ledger_path(project_root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), timeout=5.0)
+    timeout = _coerce_nonnegative_float(timeout_seconds, default=DEFAULT_LEDGER_TIMEOUT_SECONDS)
+    conn = sqlite3.connect(str(path), timeout=timeout)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute(f"PRAGMA busy_timeout={int(timeout * 1000)}")
     _ensure_schema(conn)
     return conn
 
@@ -429,6 +452,20 @@ def _filter_rows(
     return filtered
 
 
+def _derive_rollup_filters(filters: dict[str, str], last_row: sqlite3.Row | None) -> dict[str, str]:
+    rollup_filters = {
+        "sessionId": str(filters.get("sessionId") or "").strip(),
+        "agentId": str(filters.get("agentId") or "").strip(),
+    }
+    if last_row is None:
+        return rollup_filters
+    if not rollup_filters["sessionId"]:
+        rollup_filters["sessionId"] = str(last_row["session_id"] or "").strip()
+    if not rollup_filters["agentId"]:
+        rollup_filters["agentId"] = str(last_row["agent_id"] or "").strip()
+    return rollup_filters
+
+
 def _time_window_rows(rows: list[sqlite3.Row]) -> tuple[list[sqlite3.Row], list[sqlite3.Row]]:
     now = datetime.now(timezone.utc)
     today_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
@@ -561,6 +598,14 @@ def _coerce_nonnegative_int(value: Any) -> int:
         return max(0, int(value or 0))
     except (TypeError, ValueError):
         return 0
+
+
+def _coerce_nonnegative_float(value: Any, *, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return max(0.0, parsed)
 
 
 def _utcnow() -> str:

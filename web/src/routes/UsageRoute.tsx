@@ -158,6 +158,8 @@ export function UsageRoute() {
   const sessionUsage = rollupOrEmpty(summary?.sessionTokenUsage);
   const agentUsage = rollupOrEmpty(summary?.agentTokenUsage);
   const scopeUsage = rollupOrEmpty(summary?.scopeTokenUsage);
+  const sessionRollupLabel = summary?.rollupFilters?.sessionId || "-";
+  const agentRollupLabel = summary?.rollupFilters?.agentId || "-";
   const totalTokens = allTime.totalTokens;
   const lastSource = lastTokenUsage?.source ?? "not_called";
   const observedRatio = allTime.callCount > 0 ? allTime.observedCallCount / allTime.callCount : 0;
@@ -176,7 +178,7 @@ export function UsageRoute() {
         className={styles.header}
         eyebrow="Token"
         title={label(lang, "全局 Token 用量", "Global token usage")}
-        meta={label(lang, "按 Codex 风格展示最近一次、会话、Agent、今日、七日和全局累计。", "Codex-style latest, session, agent, today, seven-day, and all-time usage.")}
+        meta={label(lang, "按 Codex 风格展示最近一次、最近会话、最近 Agent、今日、七日和全局累计。", "Codex-style latest, latest session, latest agent, today, seven-day, and all-time usage.")}
         actions={(
           <VStatusStrip
             className={styles.headerMeta}
@@ -264,14 +266,14 @@ export function UsageRoute() {
               <code>{summary?.scope ?? "global"}</code>
             </div>
             <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
-              <span>{label(lang, "会话", "Session")}</span>
+              <span>{label(lang, "最近会话", "Latest session")}</span>
               <strong>{numberText(sessionUsage.totalTokens)}</strong>
-              <code>{sessionUsage.callCount} {label(lang, "次", "calls")}</code>
+              <code>{sessionRollupLabel}</code>
             </div>
             <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
-              <span>Agent</span>
+              <span>{label(lang, "最近 Agent", "Latest agent")}</span>
               <strong>{numberText(agentUsage.totalTokens)}</strong>
-              <code>{agentUsage.callCount} {label(lang, "次", "calls")}</code>
+              <code>{agentRollupLabel}</code>
             </div>
             <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
               <span>{label(lang, "上下文窗口", "Context window")}</span>
