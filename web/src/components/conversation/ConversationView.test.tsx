@@ -582,6 +582,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("function scrollTimelineToBottom");
     expect(conversationViewSource).toContain("if (!wasAtBottom) {");
     expect(conversationViewSource).toContain("onStreamingFramePaint?.({");
+    expect(conversationViewSource).toContain("paintedAtMs: conversationPerformanceNowMs()");
     expect(conversationViewSource).not.toContain("const frameId = window.requestAnimationFrame");
   });
 
