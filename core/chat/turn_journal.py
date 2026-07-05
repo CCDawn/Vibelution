@@ -499,7 +499,20 @@ def model_messages_from_events(events: Iterable[TurnJournalEvent]) -> list[dict[
     have a single, protocol-valid source.
     """
 
-    return normalize_model_messages(model_visible_messages_from_events(events))
+    event_list = list(events or [])
+    event_by_id = {event.event_id: event for event in event_list if event.event_id}
+    messages: list[dict[str, Any]] = []
+    for message in model_visible_messages_from_events(event_list):
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        if metadata.get("kind") == "context_compression_marker":
+            checkpoint_message = _checkpoint_model_message_from_event(
+                event_by_id.get(str(metadata.get("eventId") or ""))
+            )
+            if checkpoint_message:
+                messages.append(checkpoint_message)
+            continue
+        messages.append(message)
+    return normalize_model_messages(messages)
 
 
 def _assistant_message_from_payload(
@@ -672,6 +685,75 @@ def _tool_call_has_result_payload(tool_call: dict[str, Any]) -> bool:
 
 def _checkpoint_message_from_event(event: TurnJournalEvent) -> dict[str, Any]:
     payload = dict(event.payload or {})
+    legacy_message = _legacy_history_checkpoint_message_from_event(event, payload)
+    if legacy_message:
+        return legacy_message
+    metadata = _context_compression_marker_metadata(event, payload)
+    if not metadata:
+        return {}
+    return {
+        "role": "assistant",
+        "content": "",
+        "timestamp": event.timestamp,
+        "metadata": metadata,
+    }
+
+
+def _context_compression_marker_metadata(
+    event: TurnJournalEvent,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    summary = str(payload.get("summary") or payload.get("content") or "").strip()
+    summary_written = bool(payload.get("summaryWritten", bool(summary)))
+    effective = bool(payload.get("effective", True))
+    status = "applied" if effective and summary_written else "skipped_low_savings"
+    title = "上下文已压缩" if status == "applied" else "压缩未应用 · 收益不足"
+    before_tokens = _safe_int(payload.get("beforeTokens"))
+    after_tokens = _safe_int(payload.get("afterTokens"))
+    saved_tokens = _safe_int(payload.get("savedTokens"))
+    if saved_tokens <= 0 and before_tokens > after_tokens:
+        saved_tokens = before_tokens - after_tokens
+    trigger_source = str(payload.get("triggerSource") or "").strip()
+    level = str(payload.get("level") or "").strip()
+    detail_parts = [
+        level,
+        f"节省 {saved_tokens:,} tokens" if saved_tokens > 0 else "",
+        _context_compression_trigger_label(trigger_source),
+    ]
+    metadata = {
+        "kind": "context_compression_marker",
+        "turnId": event.turn_id,
+        "eventId": event.event_id,
+        "status": status,
+        "title": title,
+        "detail": " · ".join(part for part in detail_parts if part),
+        "level": level,
+        "triggerSource": trigger_source,
+        "beforeTokens": before_tokens,
+        "afterTokens": after_tokens,
+        "savedTokens": max(0, saved_tokens),
+        "effectivenessRatio": _safe_float(payload.get("effectivenessRatio")),
+        "effectivenessThreshold": _safe_float(payload.get("effectivenessThreshold")),
+        "summaryHash": str(payload.get("summaryHash") or "").strip(),
+        "summaryAvailable": bool(summary),
+        "summaryPreview": summary[:1200],
+        "schema": "context_compression_marker.v1",
+    }
+    if "sourceMessageCount" in payload:
+        metadata["sourceMessageCount"] = _safe_int(payload.get("sourceMessageCount"))
+    if "coveredEventSeqStart" in payload:
+        metadata["coveredEventSeqStart"] = _safe_int(payload.get("coveredEventSeqStart"))
+    if "coveredEventSeqEnd" in payload:
+        metadata["coveredEventSeqEnd"] = _safe_int(payload.get("coveredEventSeqEnd"))
+    return metadata
+
+
+def _legacy_history_checkpoint_message_from_event(
+    event: TurnJournalEvent,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    if str(payload.get("level") or "").strip() != "history":
+        return {}
     summary = str(payload.get("summary") or payload.get("content") or "").strip()
     if not summary:
         return {}
@@ -685,6 +767,51 @@ def _checkpoint_message_from_event(event: TurnJournalEvent) -> dict[str, Any]:
             "eventId": event.event_id,
         },
     }
+
+
+def _checkpoint_model_message_from_event(event: TurnJournalEvent | None) -> dict[str, Any]:
+    if event is None:
+        return {}
+    payload = dict(event.payload or {})
+    summary = str(payload.get("summary") or payload.get("content") or "").strip()
+    if not summary:
+        return {}
+    return {
+        "role": "assistant",
+        "content": summary,
+        "timestamp": event.timestamp,
+        "metadata": {
+            "kind": EVENT_COMPACTION_CHECKPOINT,
+            "turnId": event.turn_id,
+            "eventId": event.event_id,
+        },
+    }
+
+
+def _context_compression_trigger_label(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    labels = {
+        "automatic_threshold": "自动阈值",
+        "auto": "自动阈值",
+        "tool_request": "工具请求",
+        "provider_context_length": "上下文长度恢复",
+        "context_length_error": "上下文长度恢复",
+    }
+    return labels.get(normalized, normalized)
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _safe_float(value: Any) -> float:
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _lifecycle_message_from_event(event: TurnJournalEvent) -> dict[str, Any]:
@@ -758,6 +885,9 @@ def _normalize_tool_payload(value: Any) -> list[dict[str, Any]]:
 
 
 def _message_has_visible_payload(message: dict[str, Any]) -> bool:
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    if metadata.get("kind") == "context_compression_marker":
+        return True
     return bool(
         str(message.get("content") or "").strip()
         or str(message.get("thought") or "").strip()
