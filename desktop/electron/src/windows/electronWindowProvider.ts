@@ -35,6 +35,7 @@ export type ElectronWindowProviderOptions = {
   reportState?: (state: ManagedWindowState) => void | Promise<void>;
   shouldInterceptLauncherClose?: () => boolean;
   onLauncherCloseRequest?: () => void;
+  onWorkbenchFocusAttentionClear?: () => void;
 };
 
 export class ElectronWindowProvider {
@@ -45,6 +46,7 @@ export class ElectronWindowProvider {
   private readonly reportState: (state: ManagedWindowState) => void | Promise<void>;
   private readonly shouldInterceptLauncherClose: () => boolean;
   private readonly onLauncherCloseRequest: () => void;
+  private readonly onWorkbenchFocusAttentionClear: () => void;
 
   constructor(
     private readonly paths: DesktopPaths,
@@ -57,6 +59,7 @@ export class ElectronWindowProvider {
     this.reportState = options.reportState ?? (() => undefined);
     this.shouldInterceptLauncherClose = options.shouldInterceptLauncherClose ?? (() => false);
     this.onLauncherCloseRequest = options.onLauncherCloseRequest ?? (() => undefined);
+    this.onWorkbenchFocusAttentionClear = options.onWorkbenchFocusAttentionClear ?? (() => undefined);
   }
 
   async openLauncher(): Promise<ManagedWindowState> {
@@ -148,6 +151,7 @@ export class ElectronWindowProvider {
     });
     window.on("focus", () => {
       if (role === "workbench") {
+        this.onWorkbenchFocusAttentionClear();
         this.setWorkbenchAttention({ unreadCount: 0 });
       }
       void this.reportState(this.stateFor(role));

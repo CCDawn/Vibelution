@@ -26,6 +26,9 @@ type NotificationContext = {
   sessionTitle?: string;
 };
 
+const SAFE_NOTIFICATION_TITLE = "对话已完成";
+const SAFE_NOTIFICATION_BODY = "Vibelution 已完成一轮回复。";
+
 export type DesktopConversationNotifier = {
   handleAssistantDelta(
     payload: Extract<SessionStreamEvent, { type: "assistant_delta" }>,
@@ -76,11 +79,6 @@ function latestAssistantTurnMessage(detail: SessionDetail): ConversationMessage 
 function messageTurnId(message: ConversationMessage | undefined): string {
   const raw = normalizeText(message?.metadata?.turnId);
   return raw.startsWith("live:") ? raw.slice("live:".length) : raw;
-}
-
-function notificationBody(context?: NotificationContext): string {
-  const subject = normalizeText(context?.sessionTitle) || "Vibelution";
-  return `${subject} 已完成一轮回复。`;
 }
 
 export function browserDesktopNotificationBridge(globalLike: unknown = globalThis): DesktopBridge | undefined {
@@ -170,8 +168,8 @@ export function createDesktopConversationNotifier(
         notificationKey: `${sessionId}:${turnId}:completed`,
         sessionId,
         turnId,
-        title: "对话已完成",
-        body: notificationBody(context),
+        title: SAFE_NOTIFICATION_TITLE,
+        body: SAFE_NOTIFICATION_BODY,
         completedAt: normalizeText(payload.updatedAt) || undefined,
         terminalStatus: "completed",
       });
@@ -203,8 +201,8 @@ export function createDesktopConversationNotifier(
         notificationKey: `${sessionId}:${turnId}:completed`,
         sessionId,
         turnId,
-        title: "对话已完成",
-        body: notificationBody(context),
+        title: SAFE_NOTIFICATION_TITLE,
+        body: SAFE_NOTIFICATION_BODY,
         completedAt: normalizeText(latest?.timestamp) || undefined,
         terminalStatus: "completed",
       });

@@ -74,7 +74,7 @@ describe("desktop conversation notifier", () => {
         sessionId: "session-1",
         turnId: "turn-1",
         title: "对话已完成",
-        body: "测试会话 已完成一轮回复。",
+        body: "Vibelution 已完成一轮回复。",
         terminalStatus: "completed",
       }),
     );
@@ -179,6 +179,30 @@ describe("desktop conversation notifier", () => {
     expect(JSON.stringify(telemetryPayload)).not.toContain("answer body should stay private");
     expect(JSON.stringify(telemetryPayload)).not.toContain("sensitive thought text");
     expect(JSON.stringify(telemetryPayload)).not.toContain("C:\\Users\\17533\\secret.txt");
+  });
+
+  it("uses generic safe notification copy even when sessionTitle contains secrets or paths", () => {
+    const notify = vi.fn();
+    const telemetry = vi.fn();
+    const notifier = createDesktopConversationNotifier({
+      bridge: { notifyConversationCompleted: notify },
+      postTelemetry: telemetry,
+    });
+    const maliciousTitle = "sk-live-secret from C:\\Users\\17533\\Desktop\\prompt.txt";
+
+    notifier.handleAssistantDelta(assistantDelta(), { sessionTitle: maliciousTitle });
+
+    const notifyPayload = notify.mock.calls[0]?.[0];
+    const telemetryPayload = telemetry.mock.calls[0]?.[0];
+
+    expect(notifyPayload).toMatchObject({
+      title: "对话已完成",
+      body: "Vibelution 已完成一轮回复。",
+    });
+    expect(JSON.stringify(notifyPayload)).not.toContain("sk-live-secret");
+    expect(JSON.stringify(notifyPayload)).not.toContain("C:\\Users\\17533\\Desktop\\prompt.txt");
+    expect(JSON.stringify(telemetryPayload)).not.toContain("sk-live-secret");
+    expect(JSON.stringify(telemetryPayload)).not.toContain("C:\\Users\\17533\\Desktop\\prompt.txt");
   });
 
   it("returns no bridge when the launcher API is unavailable", () => {

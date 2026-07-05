@@ -207,4 +207,54 @@ describe("conversation notification service", () => {
     );
     expect(afterClear.unreadCount).toBe(1);
   });
+
+  it("resets unread count to 1 for the next background completion after focus-driven clear", async () => {
+    let focused = false;
+    const notifications: Array<{ title: string; body: string; clicked: () => void; shown: boolean }> = [];
+    const provider = {
+      isWorkbenchFocused: vi.fn(() => focused),
+      focusWorkbench: vi.fn(async () => ({
+        role: "workbench",
+        provider: "electron",
+        open: true,
+        focused: true,
+        windowId: 1,
+        rendererProcessId: 2,
+        url: "http://127.0.0.1:8000/"
+      })),
+      setWorkbenchAttention: vi.fn()
+    };
+    const service = createConversationNotificationService({
+      windowProvider: provider,
+      notificationSupported: () => true,
+      createNotification: ({ title, body, onClick }) => {
+        const record = { title, body, clicked: onClick, shown: false };
+        notifications.push(record);
+        return {
+          show: () => {
+            record.shown = true;
+          }
+        };
+      },
+      createBadgeIcon: (count) => ({ badgeCount: count }),
+      recordEvent: vi.fn(async () => undefined)
+    });
+
+    const first = await service.notify(completion());
+    expect(first.unreadCount).toBe(1);
+
+    focused = true;
+    service.clearAttention();
+
+    focused = false;
+    const second = await service.notify(
+      completion({
+        notificationKey: "session-1:turn-2:completed",
+        turnId: "turn-2"
+      })
+    );
+
+    expect(second.status).toBe("notified");
+    expect(second.unreadCount).toBe(1);
+  });
 });
