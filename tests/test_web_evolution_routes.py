@@ -149,6 +149,38 @@ def _real_runtime_manager_evolution_paths(kind: str, run_id: str) -> tuple[Path,
     root = runtime_manager_constants.PROJECT_ROOT / ".runtime" / "runtime-manager" / "evolution" / kind
     return root / "runs" / f"{run_id}.json", root / "index.json"
 
+def _use_test_supervised_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    workspace_root = tmp_path / "workspace"
+    monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: workspace_root)
+    monkeypatch.setattr(workspace_manager, "get_workspace", lambda: SimpleNamespace(root=workspace_root))
+    return workspace_root
+
+def _use_test_supervised_agent_bindings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        supervised_control_service,
+        "supervised_agent_bindings",
+        lambda: {
+            "baseline": {
+                "agentId": "agent-baseline",
+                "displayName": "Baseline",
+                "profileId": "primary",
+                "dialogueModelId": "model-test-baseline",
+                "llmBindings": {"dialogue": {"modelId": "model-test-baseline"}},
+                "role": "baseline",
+                "roleLabel": "Baseline",
+            },
+            "candidate": {
+                "agentId": "agent-candidate",
+                "displayName": "Candidate",
+                "profileId": "primary",
+                "dialogueModelId": "model-test-candidate",
+                "llmBindings": {"dialogue": {"modelId": "model-test-candidate"}},
+                "role": "candidate",
+                "roleLabel": "Candidate",
+            },
+        },
+    )
+
 def _read_optional_text(path: Path) -> str | None:
     return path.read_text(encoding="utf-8") if path.exists() else None
 
@@ -1796,6 +1828,7 @@ def test_workbench_dataset_list_backfills_new_builtin_datasets(tmp_path, monkeyp
     assert core_row["officialScoreAvailable"] is False
 
 def test_start_supervised_run_from_dataset_exposes_active_snapshot_and_sse(tmp_path, monkeypatch):
+    _use_test_supervised_workspace(tmp_path, monkeypatch)
     dataset_path = tmp_path / "workspace" / "evaluation" / "datasets" / "custom_prompt_tasks.jsonl"
     dataset_path.parent.mkdir(parents=True, exist_ok=True)
     dataset_path.write_text(
@@ -1814,6 +1847,7 @@ def test_start_supervised_run_from_dataset_exposes_active_snapshot_and_sse(tmp_p
         "submit",
         lambda fn, *args, **kwargs: object(),
     )
+    _use_test_supervised_agent_bindings(monkeypatch)
 
     response = client.post(
         "/api/evolution/runs",
@@ -2058,6 +2092,7 @@ def test_start_supervised_run_reports_stale_agent_slot_as_validation_error(tmp_p
     assert replacement["agentId"] in detail
 
 def test_start_supervised_run_from_web_does_not_write_real_runtime_manager_store(tmp_path, monkeypatch):
+    _use_test_supervised_workspace(tmp_path, monkeypatch)
     bundle_path = tmp_path / "workspace" / "evaluation" / "bundles" / "manual_bundle.json"
     bundle_path.parent.mkdir(parents=True, exist_ok=True)
     bundle_path.write_text(
@@ -2072,6 +2107,7 @@ def test_start_supervised_run_from_web_does_not_write_real_runtime_manager_store
         lambda fn, *args, **kwargs: object(),
     )
     monkeypatch.setattr(supervised_control_service, "_publish_run_snapshot", lambda run_id, terminal=False: None)
+    _use_test_supervised_agent_bindings(monkeypatch)
 
     response = client.post(
         "/api/evolution/runs",
@@ -2187,6 +2223,7 @@ def test_supervised_run_command_status_rejects_invalid_command_id(tmp_path, monk
     assert response.status_code == 422
 
 def test_start_supervised_run_from_bundle_uses_launchable_file_stem(tmp_path, monkeypatch):
+    _use_test_supervised_workspace(tmp_path, monkeypatch)
     bundle_path = tmp_path / "workspace" / "evaluation" / "bundles" / "launchable_bundle.json"
     bundle_path.parent.mkdir(parents=True, exist_ok=True)
     bundle_path.write_text(
@@ -2200,6 +2237,7 @@ def test_start_supervised_run_from_bundle_uses_launchable_file_stem(tmp_path, mo
         "submit",
         lambda fn, *args, **kwargs: object(),
     )
+    _use_test_supervised_agent_bindings(monkeypatch)
 
     response = client.post(
         "/api/evolution/runs",
@@ -2220,6 +2258,7 @@ def test_start_supervised_run_from_bundle_uses_launchable_file_stem(tmp_path, mo
     _reset_supervised_live_state()
 
 def test_start_supervised_run_rejects_second_active_run(tmp_path, monkeypatch):
+    _use_test_supervised_workspace(tmp_path, monkeypatch)
     bundle_path = tmp_path / "workspace" / "evaluation" / "bundles" / "manual_bundle.json"
     bundle_path.parent.mkdir(parents=True, exist_ok=True)
     bundle_path.write_text(json.dumps({"bundle_name": "manual_bundle", "cases": [{"case_id": "case_1"}]}), encoding="utf-8")
@@ -2230,6 +2269,7 @@ def test_start_supervised_run_rejects_second_active_run(tmp_path, monkeypatch):
         "submit",
         lambda fn, *args, **kwargs: object(),
     )
+    _use_test_supervised_agent_bindings(monkeypatch)
 
     first = client.post(
         "/api/evolution/runs",
@@ -2269,6 +2309,7 @@ def test_retry_supervised_run_route_returns_new_retry_snapshot(monkeypatch):
     assert payload["retryOfRunId"] == "web-supervised-old"
 
 def test_start_supervised_run_rejects_when_self_evolution_lease_active(tmp_path, monkeypatch):
+    _use_test_supervised_workspace(tmp_path, monkeypatch)
     bundle_path = tmp_path / "workspace" / "evaluation" / "bundles" / "manual_bundle.json"
     bundle_path.parent.mkdir(parents=True, exist_ok=True)
     bundle_path.write_text(json.dumps({"bundle_name": "manual_bundle", "cases": [{"case_id": "case_1"}]}), encoding="utf-8")
@@ -2284,6 +2325,7 @@ def test_start_supervised_run_rejects_when_self_evolution_lease_active(tmp_path,
         "updatedAt": "2026-05-21T00:00:00",
     }
     self_evolution_control_service.persist_manager_run_snapshot("self", self_snapshot, active_run_id=self_snapshot["runId"])
+    _use_test_supervised_agent_bindings(monkeypatch)
 
     run_path, index_path = _real_runtime_manager_evolution_paths("self", self_snapshot["runId"])
     original_index_text = _read_optional_text(index_path)
@@ -2306,6 +2348,7 @@ def test_start_supervised_run_rejects_when_self_evolution_lease_active(tmp_path,
         _reset_self_evolution_live_state()
 
 def test_supervised_run_control_routes_pause_resume_and_terminate(tmp_path, monkeypatch):
+    _use_test_supervised_workspace(tmp_path, monkeypatch)
     bundle_path = tmp_path / "workspace" / "evaluation" / "bundles" / "manual_bundle.json"
     bundle_path.parent.mkdir(parents=True, exist_ok=True)
     bundle_path.write_text(json.dumps({"bundle_name": "manual_bundle", "cases": [{"case_id": "case_1"}]}), encoding="utf-8")
@@ -2316,6 +2359,7 @@ def test_supervised_run_control_routes_pause_resume_and_terminate(tmp_path, monk
         "submit",
         lambda fn, *args, **kwargs: object(),
     )
+    _use_test_supervised_agent_bindings(monkeypatch)
 
     start_response = client.post(
         "/api/evolution/runs",
@@ -2360,6 +2404,7 @@ def test_supervised_run_control_routes_pause_resume_and_terminate(tmp_path, monk
     _reset_supervised_live_state()
 
 def test_supervised_run_delete_route_clears_queued_run_and_unlocks_start(tmp_path, monkeypatch):
+    _use_test_supervised_workspace(tmp_path, monkeypatch)
     bundle_path = tmp_path / "workspace" / "evaluation" / "bundles" / "manual_bundle.json"
     bundle_path.parent.mkdir(parents=True, exist_ok=True)
     bundle_path.write_text(json.dumps({"bundle_name": "manual_bundle", "cases": [{"case_id": "case_1"}]}), encoding="utf-8")
@@ -2370,6 +2415,7 @@ def test_supervised_run_delete_route_clears_queued_run_and_unlocks_start(tmp_pat
         "submit",
         lambda fn, *args, **kwargs: object(),
     )
+    _use_test_supervised_agent_bindings(monkeypatch)
 
     start_response = client.post(
         "/api/evolution/runs",
@@ -2469,6 +2515,7 @@ def test_supervised_run_delete_route_rejects_running_run():
     _reset_supervised_live_state()
 
 def test_supervised_run_action_route_executes_and_respects_active_lock(tmp_path, monkeypatch):
+    _use_test_supervised_workspace(tmp_path, monkeypatch)
     pending_result = run_gym_collection_episode(
         collection_id="foundation_local_stability",
         project_root=tmp_path,
@@ -2518,6 +2565,7 @@ def test_supervised_run_action_route_executes_and_respects_active_lock(tmp_path,
         "submit",
         lambda fn, *args, **kwargs: object(),
     )
+    _use_test_supervised_agent_bindings(monkeypatch)
     start_response = client.post(
         "/api/evolution/runs",
         json={
