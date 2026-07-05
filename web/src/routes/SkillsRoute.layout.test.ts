@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import appShellSource from "../app/AppShell.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
 import routeSource from "./SkillsRoute.tsx?raw";
+import styles from "./SkillsRoute.styles";
 import stylesSource from "./SkillsRoute.styles.ts?raw";
 
 function extractConstClass(name: string) {
@@ -111,8 +112,8 @@ describe("SkillsRoute layout contract", () => {
 
   it("keeps toolbar buttons sized to their content while full-row skill buttons remain explicit", () => {
     const compactButtonClasses = [
-      extractConstClass("filterButtonClass"),
-      extractConstClass("primaryButtonClass"),
+      styles.filterButtonClass,
+      styles.primaryButtonClass,
     ];
     const skillButtonBaseClass = stylesSource.match(/const skillButtonBaseClass = \[([\s\S]*?)\]\.join/)?.[1] ?? "";
 
@@ -129,7 +130,7 @@ describe("SkillsRoute layout contract", () => {
   it("keeps detail chrome and command rows responsive on narrow viewports", () => {
     expect(extractConstClass("detailHeaderClass")).toContain("max-[720px]:flex-wrap");
     expect(extractConstClass("contentHeaderClass")).toContain("max-[720px]:flex-wrap");
-    expect(extractConstClass("commandPanelClass")).toContain("max-[720px]:grid-cols-[auto_minmax(0,1fr)]");
+    expect(styles.commandPanelClass).toContain("max-[720px]:grid-cols-[auto_minmax(0,1fr)]");
     expect(extractConstClass("rootRowClass")).toContain("max-[720px]:grid-cols-1");
   });
 
