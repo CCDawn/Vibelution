@@ -105,19 +105,25 @@ describe("agentMessageTimeline", () => {
       { lang: "zh" },
     );
 
-    expect(items.map((item) => item.kind)).toEqual(["thought", "command_group", "assistant_text"]);
+    expect(items.map((item) => item.kind)).toEqual(["thought", "operation", "operation", "assistant_text"]);
     expect(items[0]).toMatchObject({
       kind: "thought",
       text: "先检查 timeline 入口",
       defaultExpanded: false,
     });
     expect(items[1]).toMatchObject({
-      kind: "command_group",
-      status: "running",
-      title: "正在运行 2 条命令",
-      summary: "搜索 timeline 调用；读取 agentMessageTimeline.ts",
+      kind: "operation",
+      status: "completed",
+      title: "搜索",
+      summary: "搜索 timeline 调用",
     });
     expect(items[2]).toMatchObject({
+      kind: "operation",
+      status: "running",
+      title: "读取文件",
+      summary: "读取 agentMessageTimeline.ts",
+    });
+    expect(items[3]).toMatchObject({
       kind: "assistant_text",
       status: "running",
       text: "正在收束 timeline 迁移",
@@ -209,7 +215,7 @@ describe("agentMessageTimeline", () => {
     });
   });
 
-  it("collapses consecutive command-like tools into one readable command group", () => {
+  it("renders consecutive command-like tools as individual timeline rows", () => {
     const message: ConversationMessage = {
       id: "message-tools",
       role: "assistant",
@@ -242,15 +248,22 @@ describe("agentMessageTimeline", () => {
 
     const items = timelineItemsForConversationMessage(message, { lang: "zh" });
 
-    expect(items.map((item) => item.kind)).toEqual(["command_group", "operation", "assistant_text"]);
+    expect(items.map((item) => item.kind)).toEqual(["operation", "operation", "operation", "assistant_text"]);
     expect(items[0]).toMatchObject({
-      kind: "command_group",
+      kind: "operation",
       status: "completed",
-      title: "已运行 2 条命令",
-      summary: "搜索 conversation timeline；读取 ConversationView.tsx",
+      title: "搜索",
+      summary: "搜索 conversation timeline",
     });
     expect(items[1]).toMatchObject({
       kind: "operation",
+      status: "completed",
+      title: "读取文件",
+      summary: "读取 ConversationView.tsx",
+    });
+    expect(items[2]).toMatchObject({
+      kind: "operation",
+      status: "completed",
       title: "apply_diff_edit_tool",
       summary: "编辑 1 个文件",
     });

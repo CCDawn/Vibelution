@@ -134,24 +134,9 @@ function timelineItemsFromOperations(
 ): AgentMessageTimelineItem[] {
   const items: AgentMessageTimelineItem[] = [];
   const sortedOperations = [...operations].sort((left, right) => (left.sequence ?? 0) - (right.sequence ?? 0));
-  const commandBuffer: AgentMessageOperation[] = [];
-
-  const flushCommandBuffer = () => {
-    if (commandBuffer.length === 0) {
-      return;
-    }
-    if (commandBuffer.length === 1) {
-      const operation = commandBuffer[0];
-      items.push(operationTimelineItem(operation));
-    } else {
-      items.push(commandGroupTimelineItem(messageId, commandBuffer, options.lang));
-    }
-    commandBuffer.length = 0;
-  };
 
   for (const operation of sortedOperations) {
     if (operation.kind === "thought") {
-      flushCommandBuffer();
       const text = operationText(operation);
       if (text) {
         items.push({
@@ -169,17 +154,11 @@ function timelineItemsFromOperations(
     if (operation.kind === "mental") {
       continue;
     }
-    if (isCommandLikeOperation(operation)) {
-      commandBuffer.push(operation);
-      continue;
-    }
-    flushCommandBuffer();
     if (operation.kind === "status" && !operation.error?.trim() && normalizeTimelineStatus(operation.status) !== "failed") {
       continue;
     }
     items.push(operationTimelineItem(operation));
   }
-  flushCommandBuffer();
 
   if (options.includeAssistantText !== false) {
     const text = assistantText.trim();
