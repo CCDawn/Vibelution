@@ -4,13 +4,19 @@ import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
 import routeSource from "./TeamsRoute.tsx?raw";
 import teamMemoryIndexPanelSource from "./TeamMemoryIndexPanel.tsx?raw";
 import teamSourceCollectionActiveStagePanelSource from "./TeamSourceCollectionActiveStagePanel.tsx?raw";
+import teamSourceCollectionActiveStagePanelStyles from "./TeamSourceCollectionActiveStagePanel.styles";
 import teamSourceCollectionCandidatePanelSource from "./TeamSourceCollectionCandidatePanel.tsx?raw";
+import teamSourceCollectionCandidatePanelStyles from "./TeamSourceCollectionCandidatePanel.styles";
 import teamSourceCollectionConversationPanelSource from "./TeamSourceCollectionConversationPanel.tsx?raw";
+import teamSourceCollectionConversationPanelStyles from "./TeamSourceCollectionConversationPanel.styles";
 import teamSourceCollectionControlsPanelSource from "./TeamSourceCollectionControlsPanel.tsx?raw";
+import teamSourceCollectionControlsPanelStyles from "./TeamSourceCollectionControlsPanel.styles";
 import teamSourceCollectionExtractionRecoveryPanelSource from "./TeamSourceCollectionExtractionRecoveryPanel.tsx?raw";
+import teamSourceCollectionExtractionRecoveryPanelStyles from "./TeamSourceCollectionExtractionRecoveryPanel.styles";
 import teamSourceCollectionFindingDetailsPanelSource from "./TeamSourceCollectionFindingDetailsPanel.tsx?raw";
 import teamSourceCollectionFindingDetailsPanelStyles from "./TeamSourceCollectionFindingDetailsPanel.styles";
 import teamSourceCollectionGraphPanelSource from "./TeamSourceCollectionGraphPanel.tsx?raw";
+import teamSourceCollectionGraphPanelStyles from "./TeamSourceCollectionGraphPanel.styles";
 import teamSourceCollectionManualWritebackPanelSource from "./TeamSourceCollectionManualWritebackPanel.tsx?raw";
 import teamSourceCollectionManualWritebackPanelStyles from "./TeamSourceCollectionManualWritebackPanel.styles";
 import teamSourceCollectionMemoryPanelSource from "./TeamSourceCollectionMemoryPanel.tsx?raw";
@@ -18,12 +24,19 @@ import teamSourceCollectionMemoryPanelStyles from "./TeamSourceCollectionMemoryP
 import teamSourceCollectionOverviewPanelSource from "./TeamSourceCollectionOverviewPanel.tsx?raw";
 import teamSourceCollectionOverviewPanelStyles from "./TeamSourceCollectionOverviewPanel.styles";
 import teamSourceCollectionOverviewPanelStylesSource from "./TeamSourceCollectionOverviewPanel.styles.ts?raw";
+import teamSourceCollectionPanelFrameStyles from "./TeamSourceCollectionPanelFrame.styles";
+import teamSourceCollectionPanelFrameStylesSource from "./TeamSourceCollectionPanelFrame.styles.ts?raw";
+import teamSourceCollectionResultControlsSource from "./TeamSourceCollectionResultControls.tsx?raw";
 import teamSourceCollectionRunSettingsPanelSource from "./TeamSourceCollectionRunSettingsPanel.tsx?raw";
 import teamSourceCollectionRunSettingsPanelStyles from "./TeamSourceCollectionRunSettingsPanel.styles";
 import teamSourceCollectionScreeningPanelSource from "./TeamSourceCollectionScreeningPanel.tsx?raw";
+import teamSourceCollectionScreeningPanelStyles from "./TeamSourceCollectionScreeningPanel.styles";
 import teamSourceCollectionStageAgentsPanelSource from "./TeamSourceCollectionStageAgentsPanel.tsx?raw";
+import teamSourceCollectionStageAgentsPanelStyles from "./TeamSourceCollectionStageAgentsPanel.styles";
 import teamSourceCollectionRunSwitcherPanelSource from "./TeamSourceCollectionRunSwitcherPanel.tsx?raw";
+import teamSourceCollectionRunSwitcherPanelStyles from "./TeamSourceCollectionRunSwitcherPanel.styles";
 import teamSourceCollectionSourceDetailPanelSource from "./TeamSourceCollectionSourceDetailPanel.tsx?raw";
+import teamSourceCollectionSourceDetailPanelStyles from "./TeamSourceCollectionSourceDetailPanel.styles";
 import teamSourceCollectionStandaloneStagePanelSource from "./TeamSourceCollectionStandaloneStagePanel.tsx?raw";
 import teamSourceCollectionStorageActionsPanelSource from "./TeamSourceCollectionStorageActionsPanel.tsx?raw";
 import teamSourceCollectionStorageActionsPanelStyles from "./TeamSourceCollectionStorageActionsPanel.styles";
@@ -39,16 +52,38 @@ import teamSourceEmptyStateSource from "../components/vui/product/team-managemen
 import teamSourceFilterBarSource from "../components/vui/product/team-management/TeamSourceFilterBar.tsx?raw";
 import teamSourcePaginationSource from "../components/vui/product/team-management/TeamSourcePagination.tsx?raw";
 import teamStageCardSource from "../components/vui/product/team-management/TeamStageCard.tsx?raw";
+import teamStageCommandBarSource from "../components/vui/product/team-management/TeamStageCommandBar.tsx?raw";
 import teamStagePipelineSource from "../components/vui/product/team-management/TeamStagePipeline.tsx?raw";
 import teamSourceResultListSource from "../components/vui/product/team-management/TeamSourceResultList.tsx?raw";
-import routeStyles from "./TeamsRoute.styles";
+import teamSourceResultStatsSource from "../components/vui/product/team-management/TeamSourceResultStats.tsx?raw";
+import routeStylesBase from "./TeamsRoute.styles";
 import routeStylesModuleSource from "./TeamsRoute.styles.ts?raw";
 import routerSource from "../app/router.tsx?raw";
 
+const sourceCollectionLocalStyles = {
+  ...teamSourceCollectionActiveStagePanelStyles,
+  ...teamSourceCollectionCandidatePanelStyles,
+  ...teamSourceCollectionConversationPanelStyles,
+  ...teamSourceCollectionControlsPanelStyles,
+  ...teamSourceCollectionExtractionRecoveryPanelStyles,
+  ...teamSourceCollectionGraphPanelStyles,
+  ...teamSourceCollectionMemoryPanelStyles,
+  ...teamSourceCollectionPanelFrameStyles,
+  ...teamSourceCollectionRunSwitcherPanelStyles,
+  ...teamSourceCollectionScreeningPanelStyles,
+  ...teamSourceCollectionSourceDetailPanelStyles,
+  ...teamSourceCollectionStageAgentsPanelStyles,
+};
+
+const routeStyles = {
+  ...routeStylesBase,
+  ...sourceCollectionLocalStyles,
+};
+
 const routeStylesSource = [
   routeStylesModuleSource,
-  ...Object.keys(routeStyles).map((key) => `.${key}`),
-  ...Object.values(routeStyles),
+  ...Object.keys(routeStylesBase).map((key) => `.${key}`),
+  ...Object.values(routeStylesBase),
 ].join("\n");
 
 describe("TeamsRoute layout contract", () => {
@@ -456,7 +491,9 @@ describe("TeamsRoute layout contract", () => {
     expect(workflowGraphViewSource).toContain("styles.workflowGraphFrame");
     expect(workflowGraphViewSource).toContain("styles.workflowGraphNode");
     expect(teamWorkflowStatusPanelsSource).toContain("styles.workflowGraphBoundary");
-    expect(routeSource).toContain("styles.workflowCandidateList");
+    expect(routeSource).not.toContain("styles.workflowCandidateList");
+    expect(teamWorkflowCandidatePreviewPanelStylesSource).toContain("workflowCandidateList");
+    expect(teamSourceCollectionGraphPanelStyles.workflowCandidateList).toContain("overflow-auto");
     expect(routeSource).toContain("styles.workflowValidation");
     expect(routeSource).toContain("RESEARCH_WORKSPACE_NAV_ITEMS");
     expect(routeSource).toContain("ResearchWorkspaceView");
@@ -580,7 +617,9 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionManualWritebackPanelSource).toContain("sourceTypeLabel(sourceType)");
     expect(teamSourceCollectionManualWritebackPanelSource).toContain("回写并导入候选");
     expect(teamSourceCollectionManualWritebackPanelSource).toContain("wrapInDetails");
-    expect(routeSource).toContain("sourceCollectionPanelClassName");
+    expect(routeSource).not.toContain("sourceCollectionPanelClassName");
+    expect(teamSourceCollectionPanelFrameStylesSource).toContain("workflowSourceCollectionDetails");
+    expect(teamSourceCollectionPanelFrameStylesSource).toContain("sourceCollectionFocusedPanel");
     expect(teamSourceCollectionStandaloneStagePanelSource).toContain("TeamStagePipeline");
     expect(routeSource).toContain("container.scrollTo");
     expect(routeSource).toContain("HTMLDetailsElement");
@@ -631,8 +670,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionStageCard");
     expect(routeSource).toContain("detailLabel");
     expect(teamSourceCollectionStandaloneStagePanelSource).toContain("onActivate={module.onDetail}");
-    expect(routeSource).toContain("sourceCollectionStagePrimaryAction");
-    expect(routeSource).toContain("sourceCollectionStageSecondaryAction");
+    expect(teamSourceCollectionActiveStagePanelSource).toContain("sourceCollectionStagePrimaryAction");
+    expect(teamSourceCollectionActiveStagePanelSource).toContain("sourceCollectionStageSecondaryAction");
+    expect(routeSource).not.toContain("styles.sourceCollectionStagePrimaryAction");
+    expect(routeSource).not.toContain("styles.sourceCollectionStageSecondaryAction");
     expect(routeSource).not.toContain("sourceCollectionStageActionRow");
     expect(routeSource).not.toContain("module.onAgentChat");
     expect(routeSource).toContain("SourceCollectionStepState");
@@ -926,29 +967,33 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionCandidatePanelSource).toContain("sourceCollectionCandidateListShell");
     expect(teamSourceCollectionCandidatePanelSource).toContain("loading && !hasCandidates");
     expect(teamSourceCollectionCandidatePanelSource).toContain("sourceCollectionCandidateSkeletonRow");
-    const sourceCollectionResultPanelSource = routeSource.slice(
-      routeSource.indexOf("const resultPanel = selectedSourceCollectionStageId"),
-      routeSource.indexOf("<TeamSourceCollectionActiveStagePanel"),
-    );
-    const ingestionResultSource = sourceCollectionResultPanelSource.slice(
-      sourceCollectionResultPanelSource.indexOf('selectedSourceCollectionStageId === "ingestion"'),
-      sourceCollectionResultPanelSource.indexOf(": renderSourceCollectionConversation"),
-    );
-    expect(ingestionResultSource).toContain("styles.sourceCollectionIngestionPanels");
-    expect(ingestionResultSource).toContain("{renderSourceCollectionGraphPanel()}");
-    expect(ingestionResultSource).toContain("{renderSourceCollectionMemoryPanel()}");
+    expect(routeSource).not.toContain("const resultPanel = selectedSourceCollectionStageId");
+    expect(teamSourceCollectionActiveStagePanelSource).toContain('stageId === "ingestion"');
+    expect(teamSourceCollectionActiveStagePanelSource).toContain("styles.sourceCollectionIngestionPanels");
+    expect(teamSourceCollectionActiveStagePanelSource).toContain("renderGraphPanel()");
+    expect(teamSourceCollectionActiveStagePanelSource).toContain("renderMemoryPanel()");
+    expect(teamSourceCollectionActiveStagePanelSource).toContain('stageId === "extraction"');
+    expect(teamSourceCollectionActiveStagePanelSource).toContain("styles.sourceCollectionExtractionPanels");
+    expect(teamSourceCollectionActiveStagePanelSource).toContain("renderCandidatePanel()");
+    expect(teamSourceCollectionActiveStagePanelSource).toContain("renderScreeningPanel()");
+    expect(routeSource).toContain("renderGraphPanel={renderSourceCollectionGraphPanel}");
+    expect(routeSource).toContain("renderMemoryPanel={renderSourceCollectionMemoryPanel}");
+    expect(routeSource).toContain("renderCandidatePanel={renderSourceCollectionCandidatePanel}");
+    expect(routeSource).toContain("renderScreeningPanel={renderSourceCollectionScreeningPanel}");
     const graphPanelOpenSource = routeSource.slice(
       routeSource.indexOf("<TeamSourceCollectionGraphPanel"),
       routeSource.indexOf("onToggle={(event) =>", routeSource.indexOf("<TeamSourceCollectionGraphPanel")),
     );
     expect(graphPanelOpenSource).toContain('selectedSourceCollectionStageId === "relations"');
     expect(graphPanelOpenSource).not.toContain('selectedSourceCollectionStageId === "ingestion"');
-    expect(routeStyles.sourceCollectionIngestionPanels).toContain("grid-rows-[auto_minmax(0,1fr)]");
-    expect(routeStyles.sourceCollectionIngestionPanels).toContain("overflow-hidden");
-    expect(routeStyles.sourceCollectionIngestionPanels).toContain("min-h-0");
-    expect(routeStyles.sourceCollectionIngestionPanels).toContain("max-[860px]:min-h-[560px]");
-    expect(routeStyles.sourceCollectionGraphNodeListShell).toContain("max-h-[28vh]");
-    expect(routeStyles.sourceCollectionGraphNodeListShell).toContain("[scrollbar-gutter:stable]");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionIngestionPanels).toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionIngestionPanels).toContain("overflow-hidden");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionIngestionPanels).toContain("min-h-0");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionIngestionPanels).toContain("max-[860px]:min-h-[560px]");
+    expect(teamSourceCollectionGraphPanelStyles.sourceCollectionGraphNodeListShell).toContain("max-h-[28vh]");
+    expect(teamSourceCollectionGraphPanelStyles.sourceCollectionGraphNodeListShell).toContain("[scrollbar-gutter:stable]");
+    expect(routeStylesSource).not.toContain(".sourceCollectionIngestionPanels");
+    expect(routeStylesSource).not.toContain(".sourceCollectionGraphNodeListShell");
     expect(teamSourceCollectionMemoryPanelSource).toContain("sourceCollectionMemoryListShell");
     expect(teamSourceCollectionMemoryPanelStyles.sourceCollectionMemoryListShell).toContain("max-h-[44vh]");
     expect(teamSourceCollectionMemoryPanelStyles.sourceCollectionMemoryListShell).toContain("max-[860px]:max-h-[58vh]");
@@ -1343,78 +1388,75 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.workflowError).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionPage).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionPageGrid).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionExtractionPanels).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionRunBadge).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionConversationPanel).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionTraceMessage).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionTrace_cache).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionTraceStorage).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionResultsPanel).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionResultsHeader).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionFilterBar).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionFilterActive).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionResultStats).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionResultList).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionCandidateListShell).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionResultItem).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionResultContent).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionResultWarning).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionResultMeta).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionResultSource).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionResultSourceMissing).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionResultStatus).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionResultItemSelected).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionRunSwitcher).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionRunSwitcherMain).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionRunSwitcherStats).toBeTypeOf("string");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionExtractionPanels).toBeTypeOf("string");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionConversationPanel).toBeTypeOf("string");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultsPanel).toBeTypeOf("string");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultsHeader).toBeTypeOf("string");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultWarning).toBeTypeOf("string");
+    expect(teamSourceCollectionRunSwitcherPanelStyles.sourceCollectionRunSwitcher).toBeTypeOf("string");
+    expect(teamSourceCollectionRunSwitcherPanelStyles.sourceCollectionRunSwitcherMain).toBeTypeOf("string");
+    expect(teamSourceCollectionRunSwitcherPanelStyles.sourceCollectionRunSwitcherStats).toBeTypeOf("string");
+    expect(teamSourceCollectionCandidatePanelStyles.sourceCollectionCandidateListShell).toBeTypeOf("string");
+    expect(teamSourceCollectionResultControlsSource).toContain("TeamSourceFilterBar");
+    expect(teamSourceCollectionResultControlsSource).toContain("TeamSourcePagination");
+    expect(teamSourceFilterBarSource).toContain("const BAR");
+    expect(teamSourceFilterBarSource).toContain("const CHIP_ACTIVE");
+    expect(teamSourceResultStatsSource).toContain('data-vui-product="team-source-result-stats"');
+    expect(teamSourceResultListSource).toContain('data-vui-product="team-source-result-list"');
+    expect(teamSourceResultListSource).toContain('data-vui-product="team-source-result-item"');
+    expect(teamSourceResultListSource).toContain("ROW_SELECTED");
+    expect(routeStylesSource).not.toContain(".sourceCollectionTraceMessage");
+    expect(routeStylesSource).not.toContain(".sourceCollectionTrace_cache");
+    expect(routeStylesSource).not.toContain(".sourceCollectionTraceStorage");
     expect(teamSourceEmptyStateSource).toContain('data-vui-product="team-source-empty-state"');
     expect(teamSourceEmptyStateSource).toContain('data-slot="source-empty-facts"');
     expect(teamSourceEmptyStateSource).toContain("actions");
     expect(teamSourceEmptyStateSource).toContain("border-dashed");
     expect(teamSourceEmptyStateSource).toContain("self-start");
     expect(teamSourceEmptyStateSource).toContain("max-[560px]:grid-cols-[repeat(2,minmax(0,1fr))]");
-    expect(routeStyles.sourceCollectionSourceDetailPanel).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionSourceDetailActions).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionSourceDetailFacts).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionSourceDetailNotice).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionSearchEvidence).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionSearchEvidenceBody).toBeTypeOf("string");
+    expect(teamSourceCollectionSourceDetailPanelStyles.sourceCollectionSourceDetailPanel).toBeTypeOf("string");
+    expect(teamSourceCollectionSourceDetailPanelStyles.sourceCollectionSourceDetailActions).toBeTypeOf("string");
+    expect(teamSourceCollectionSourceDetailPanelStyles.sourceCollectionSourceDetailFacts).toBeTypeOf("string");
+    expect(teamSourceCollectionSourceDetailPanelStyles.sourceCollectionSourceDetailNotice).toBeTypeOf("string");
+    expect(teamSourceCollectionSourceDetailPanelStyles.sourceCollectionSearchEvidence).toBeTypeOf("string");
+    expect(teamSourceCollectionSourceDetailPanelStyles.sourceCollectionSearchEvidenceBody).toBeTypeOf("string");
     expect(routeStyles.workflowCandidateItemSelected).toBeTypeOf("string");
-    expect(routeStylesSource).toContain(".sourceCollectionResultStatus");
-    expect(routeStylesSource).toContain(".sourceCollectionResultSource");
-    expect(routeStylesSource).toContain(".sourceCollectionResultSourceMissing");
-    expect(routeStylesSource).toContain(".sourceCollectionFilterBar");
-    expect(routeStylesSource).toContain(".sourceCollectionFilterActive");
-    expect(routeStyles.sourceCollectionResultItem).toContain(
+    expect(routeStylesSource).not.toContain(".sourceCollectionResultStatus");
+    expect(routeStylesSource).not.toContain(".sourceCollectionResultSource");
+    expect(routeStylesSource).not.toContain(".sourceCollectionResultSourceMissing");
+    expect(routeStylesSource).not.toContain(".sourceCollectionFilterBar");
+    expect(routeStylesSource).not.toContain(".sourceCollectionFilterActive");
+    expect(teamSourceResultListSource).toContain(
       "grid-cols-[max-content_minmax(0,1fr)_minmax(70px,max-content)_minmax(8rem,16rem)]",
     );
-    expect(routeStyles.sourceCollectionResultItem).not.toContain("minmax(120px,220px)");
-    expect(routeStyles.sourceCollectionRunSwitcher).toContain("grid-cols-[minmax(0,1fr)_auto]");
-    expect(routeStyles.sourceCollectionRunSwitcherMain).toContain("grid-cols-[max-content_minmax(220px,360px)_minmax(0,1fr)]");
-    expect(routeStyles.sourceCollectionRunSwitcherStats).toContain("flex flex-wrap items-center justify-end");
-    expect(routeStyles.sourceCollectionResultItem).toContain("min-h-[36px]");
-    expect(routeStyles.sourceCollectionResultStatus).toContain("whitespace-nowrap");
-    expect(routeStyles.sourceCollectionResultStatus).not.toContain("grid-rows-[auto_auto_auto]");
-    expect(routeStylesSource).toContain(".sourceCollectionCandidateListShell");
-    expect(routeStyles.sourceCollectionCandidateListShell).toContain("overflow-auto");
-    expect(routeStyles.sourceCollectionCandidateListShell).toContain("[scrollbar-gutter:stable]");
-    expect(routeStyles.sourceCollectionCandidateListShell).toContain("items-start");
-    expect(routeStyles.sourceCollectionCandidateListShell).toContain("content-start");
-    expect(routeStyles.sourceCollectionCandidateListShell).toContain("self-start");
-    expect(routeStyles.sourceCollectionExtractionRecoveryPanel).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionExtractionRecoveryBody).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionExtractionRecoveryBody).toContain("[&_p]:m-0");
-    expect(routeStyles.sourceCollectionExtractionRecoveryPanel).toContain("grid-cols-[minmax(0,1fr)_auto]");
-    expect(routeStyles.sourceCollectionExtractionRecoveryPanel).toContain("state-error");
-    expect(routeStyles.sourceCollectionExtractionRecoveryPanel).toContain("max-[760px]:grid-cols-[1fr]");
-    expect(routeStyles.sourceCollectionExtractionRecoveryStats).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionExtractionRecoveryStats).toContain("repeat(auto-fit,minmax(7rem,1fr))");
-    expect(routeStyles.sourceCollectionExtractionRecoveryActions).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionExtractionRecoveryActions).toContain("[&_[data-vui=native-button]]:w-fit");
-    expect(routeStyles.sourceCollectionCandidateListShell).toContain("max-h-[44vh]");
-    expect(routeStyles.sourceCollectionCandidateListShell).toContain("min-h-[220px]");
-    expect(routeStyles.sourceCollectionScreeningListShell).toContain("max-h-[44vh]");
-    expect(routeStyles.sourceCollectionScreeningListShell).toContain("[scrollbar-gutter:stable]");
+    expect(teamSourceResultListSource).not.toContain("minmax(120px,220px)");
+    expect(teamSourceCollectionRunSwitcherPanelStyles.sourceCollectionRunSwitcher).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(teamSourceCollectionRunSwitcherPanelStyles.sourceCollectionRunSwitcherMain).toContain("grid-cols-[max-content_minmax(220px,360px)_minmax(0,1fr)]");
+    expect(teamSourceCollectionRunSwitcherPanelStyles.sourceCollectionRunSwitcherStats).toContain("flex flex-wrap items-center justify-end");
+    expect(teamSourceResultListSource).toContain("min-h-[36px]");
+    expect(teamSourceResultListSource).toContain("whitespace-nowrap");
+    expect(teamSourceResultListSource).not.toContain("grid-rows-[auto_auto_auto]");
+    expect(routeStylesSource).not.toContain(".sourceCollectionCandidateListShell");
+    expect(teamSourceCollectionCandidatePanelStyles.sourceCollectionCandidateListShell).toContain("overflow-auto");
+    expect(teamSourceCollectionCandidatePanelStyles.sourceCollectionCandidateListShell).toContain("[scrollbar-gutter:stable]");
+    expect(teamSourceCollectionCandidatePanelStyles.sourceCollectionCandidateListShell).toContain("items-start");
+    expect(teamSourceCollectionCandidatePanelStyles.sourceCollectionCandidateListShell).toContain("content-start");
+    expect(teamSourceCollectionCandidatePanelStyles.sourceCollectionCandidateListShell).toContain("self-start");
+    expect(teamSourceCollectionExtractionRecoveryPanelStyles.sourceCollectionExtractionRecoveryPanel).toBeTypeOf("string");
+    expect(teamSourceCollectionExtractionRecoveryPanelStyles.sourceCollectionExtractionRecoveryBody).toBeTypeOf("string");
+    expect(teamSourceCollectionExtractionRecoveryPanelStyles.sourceCollectionExtractionRecoveryBody).toContain("[&_p]:m-0");
+    expect(teamSourceCollectionExtractionRecoveryPanelStyles.sourceCollectionExtractionRecoveryPanel).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(teamSourceCollectionExtractionRecoveryPanelStyles.sourceCollectionExtractionRecoveryPanelDanger).toContain("state-error");
+    expect(teamSourceCollectionExtractionRecoveryPanelStyles.sourceCollectionExtractionRecoveryPanel).toContain("max-[760px]:grid-cols-[1fr]");
+    expect(teamSourceCollectionExtractionRecoveryPanelStyles.sourceCollectionExtractionRecoveryStats).toBeTypeOf("string");
+    expect(teamSourceCollectionExtractionRecoveryPanelStyles.sourceCollectionExtractionRecoveryStats).toContain("repeat(auto-fit,minmax(7rem,1fr))");
+    expect(teamSourceCollectionExtractionRecoveryPanelStyles.sourceCollectionExtractionRecoveryActions).toBeTypeOf("string");
+    expect(teamSourceCollectionExtractionRecoveryPanelStyles.sourceCollectionExtractionRecoveryActions).toContain("[&_[data-vui=native-button]]:w-fit");
+    expect(teamSourceCollectionCandidatePanelStyles.sourceCollectionCandidateListShell).toContain("max-h-[44vh]");
+    expect(teamSourceCollectionCandidatePanelStyles.sourceCollectionCandidateListShell).toContain("min-h-[220px]");
+    expect(teamSourceCollectionScreeningPanelStyles.sourceCollectionScreeningListShell).toContain("max-h-[44vh]");
+    expect(teamSourceCollectionScreeningPanelStyles.sourceCollectionScreeningListShell).toContain("[scrollbar-gutter:stable]");
     expect(routeStylesSource).not.toContain("grid-template-rows: auto minmax(0, 1fr) auto auto");
     expect(workflowGraphViewStyles.workflowGraphFrame).toContain("h-[var(--workflow-graph-height,360px)]");
     expect(workflowGraphViewStyles.workflowGraphFrame).not.toContain("h-full");
@@ -1423,17 +1465,17 @@ describe("TeamsRoute layout contract", () => {
     expect(workflowGraphViewStyles.workflowGraphNode).toContain("overflow-hidden");
     expect(workflowGraphViewStyles.workflowGraphNode).toContain("[&_strong]:truncate");
     expect(workflowGraphViewStyles.workflowGraphNode).toContain("[&_span]:truncate");
-    expect(routeStyles.sourceCollectionFilterBar).toContain("[&_[data-vui=native-button]]:flex-none");
+    expect(teamSourceFilterBarSource).toContain("min-w-[76px]");
+    expect(teamSourceFilterBarSource).toContain("flex-none");
     expect(routeStylesSource).not.toContain("min-height: 122px");
     expect(routeStylesSource).not.toContain("min-height: 96px");
-    expect(routeStyles.sourceCollectionTraceBody).toContain("grid-cols-[44px_minmax(0,1fr)]");
-    expect(routeStyles.sourceCollectionTraceBody).toContain("[&_p]:line-clamp-2");
-    expect(routeStyles.sourceCollectionTraceBody).not.toContain("grid-cols-[58px_minmax(0,1fr)]");
+    expect(routeStylesSource).not.toContain(".sourceCollectionTraceBody");
+    expect(routeStylesSource).not.toContain("grid-cols-[58px_minmax(0,1fr)]");
     expect(routeStylesSource).not.toMatch(/\.sourceCollectionTraceBody p \{[\s\S]*?-webkit-line-clamp: 3/);
-    expect(routeStyles.sourceCollectionFocusedPanel).toContain(
+    expect(teamSourceCollectionPanelFrameStyles.sourceCollectionFocusedPanel).toContain(
       "grid-cols-[minmax(0,1fr)_minmax(320px,380px)]",
     );
-    expect(routeStyles.sourceCollectionFocusedPanel).toContain("isolate");
+    expect(teamSourceCollectionPanelFrameStyles.sourceCollectionFocusedPanel).toContain("isolate");
     expect(routeStyles.route).toContain("[--team-workbench-gap:4px]");
     expect(routeStyles.sourceCollectionPage).toContain("h-full");
     expect(routeStyles.sourceCollectionPage).toContain("flex-1");
@@ -1445,16 +1487,16 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionPageHeader).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(routeStyles.sourceCollectionPageHeader).toContain("gap-[var(--team-workbench-gap)]");
     expect(routeStyles.sourceCollectionPageHeader).toContain("px-[var(--team-workbench-gap)]");
-    expect(routeStyles.sourceCollectionStageWorkspace).toContain("grid-rows-[auto_minmax(0,1fr)]");
-    expect(routeStyles.sourceCollectionStageWorkspace).toContain("h-full");
-    expect(routeStyles.sourceCollectionStageWorkspace).toContain("min-h-[360px]");
-    expect(routeStyles.sourceCollectionStageWorkspace).toContain("overflow-hidden");
-    expect(routeStyles.sourceCollectionStageWorkspace).toContain("gap-[var(--team-workbench-gap)]");
-    expect(routeStyles.sourceCollectionStageWorkspace).toContain("p-[var(--team-workbench-gap)]");
-    expect(routeStyles.sourceCollectionStageWorkspace).toContain("max-[760px]:h-auto");
-    expect(routeStyles.sourceCollectionStageWorkspace).toContain("max-[760px]:grid-rows-[auto_auto]");
-    expect(routeStyles.sourceCollectionStageWorkspace).toContain("max-[760px]:overflow-visible");
-    expect(routeStyles.sourceCollectionStageWorkspaceHeader).toContain("grid-cols-[minmax(0,1fr)_minmax(260px,0.7fr)_max-content]");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspace).toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspace).toContain("h-full");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspace).toContain("min-h-[360px]");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspace).toContain("overflow-hidden");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspace).toContain("gap-[var(--team-workbench-gap)]");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspace).toContain("p-[var(--team-workbench-gap)]");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspace).toContain("max-[760px]:h-auto");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspace).toContain("max-[760px]:grid-rows-[auto_auto]");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspace).toContain("max-[760px]:overflow-visible");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspaceHeader).toContain("grid-cols-[minmax(0,1fr)_minmax(260px,0.7fr)_max-content]");
     expect(routeStyles.sourceCollectionPageBody).toContain("!grid");
     expect(routeStyles.sourceCollectionPageBody).toContain("h-full");
     expect(routeStyles.sourceCollectionPageBody).toContain("grid-rows-[auto_auto_auto_minmax(0,1fr)]");
@@ -1465,37 +1507,34 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.sourceCollectionPageBody).not.toContain("max-w-[1480px]");
     expect(routeStyles.sourceCollectionPageBody).toContain("gap-[var(--team-workbench-gap)]");
     expect(routeStyles.sourceCollectionPageBody).toContain("p-[var(--team-workbench-gap)]");
-    expect(routeStyles.sourceCollectionConversationPanel).toContain("h-full");
-    expect(routeStyles.sourceCollectionConversationPanel).toContain("grid-rows-[auto_minmax(0,1fr)]");
-    expect(routeStyles.sourceCollectionConversationPanel).toContain("overflow-hidden");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionConversationPanel).toContain("h-full");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionConversationPanel).toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionConversationPanel).toContain("overflow-hidden");
     expect(routeStyles.sourceCollectionPageGrid).toContain("min-h-0");
     expect(routeStyles.sourceCollectionPageGrid).toContain("h-full");
     expect(routeStyles.sourceCollectionPageGrid).toContain("gap-[var(--team-workbench-gap)]");
     expect(routeStyles.sourceCollectionPageGrid).toContain("max-[760px]:content-start");
-    expect(routeStyles.sourceCollectionResultsPanel).toContain("min-h-0");
-    expect(routeStyles.sourceCollectionResultsPanel).toContain("!flex");
-    expect(routeStyles.sourceCollectionResultsPanel).toContain("flex-col");
-    expect(routeStyles.sourceCollectionResultsPanel).toContain("overflow-hidden");
-    expect(routeStyles.sourceCollectionResultsPanel).toContain("max-[760px]:min-h-0");
-    expect(routeStyles.sourceCollectionResultsPanel).not.toContain("min-h-[260px]");
-    expect(routeStyles.sourceCollectionResultsPanel).not.toContain("min-h-[210px]");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultsPanel).toContain("min-h-0");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultsPanel).toContain("!flex");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultsPanel).toContain("flex-col");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultsPanel).toContain("overflow-hidden");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultsPanel).toContain("max-[760px]:min-h-0");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultsPanel).not.toContain("min-h-[260px]");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultsPanel).not.toContain("min-h-[210px]");
     expect(teamSourceResultListSource).toContain("flex-1");
-    expect(routeStyles.sourceCollectionResultList).toContain("min-h-[180px]");
-    expect(routeStyles.sourceCollectionExtractionPanels).toContain("grid-cols-[minmax(0,1fr)]");
-    expect(routeStyles.sourceCollectionCommandBar).toContain("!grid");
-    expect(routeStyles.sourceCollectionStageCard).toContain("border-l-[4px]");
-    expect(routeStyles.sourceCollectionStageCard).toContain("!grid");
-    expect(routeStyles.sourceCollectionStageCard).toContain("min-h-[118px]");
-    expect(routeStyles.sourceCollectionStageCardHead).toContain("grid-cols-[max-content_1fr]");
-    expect(routeStyles.sourceCollectionStageCardHead).not.toContain("sourceCollectionStageProjection");
-    expect(routeStyles.sourceCollectionStageCardActions).toContain("flex-nowrap");
-    expect(routeStyles.sourceCollectionStageCardActions).toContain("justify-between");
-    expect(routeStyles.sourceCollectionStageCardActions).toContain("[&_[data-vui=native-button]]:w-fit");
-    expect(routeStyles.sourceCollectionStageCardActions).not.toContain("[&_[data-vui=native-button]]:min-w-[92px]");
+    expect(teamSourceResultListSource).toContain("overflow-auto");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionExtractionPanels).toContain("grid-cols-[minmax(0,1fr)]");
+    expect(teamStageCommandBarSource).toContain('data-vui-product="team-stage-command-bar"');
+    expect(teamStageCommandBarSource).toContain("flex flex-wrap items-center justify-between");
+    expect(teamStageCardSource).toContain('data-vui-product="team-stage-card"');
+    expect(teamStageCardSource).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(teamStageCardSource).toContain("ACTION_ROW");
+    expect(teamStageCardSource).toContain("ACTION_BUTTON");
+    expect(teamStageCardSource).not.toContain("sourceCollectionStageProjection");
     expect(routeStyles.canvasLayoutModeSwitch).toContain("grid-cols-[repeat(auto-fit,minmax(86px,max-content))]");
     expect(routeStyles.toolbarActions).toContain("flex-wrap");
-    expect(routeStyles.sourceCollectionStageModules).toContain("grid-cols-[repeat(auto-fit,minmax(220px,1fr))]");
-    expect(routeStyles.sourceCollectionStageModules).not.toContain("repeat(4");
+    expect(teamStagePipelineSource).toContain("grid-cols-[repeat(auto-fit,minmax(220px,1fr))]");
+    expect(teamStagePipelineSource).not.toContain("repeat(4");
     expect(teamStagePipelineSource).toContain("repeat(auto-fit,minmax(220px,1fr))");
     expect(teamStagePipelineSource).not.toContain("repeat(5");
     expect(teamSourceResultListSource).toContain("minmax(8rem,16rem)");
@@ -1513,40 +1552,33 @@ describe("TeamsRoute layout contract", () => {
     expect(teamStageCardSource).toContain("ACTION_ROW");
     expect(teamStageCardSource).toContain("ACTION_BUTTON");
     expect(teamStageCardSource).toContain("text-[0.72rem]");
-    expect(routeStyles.sourceCollectionPagination).toContain("select-none");
-    expect(routeStyles.sourceCollectionPagination).toContain("whitespace-nowrap");
-    expect(routeStyles.sourceCollectionPagination).toContain("[writing-mode:horizontal-tb]");
+    expect(teamSourcePaginationSource).toContain("select-none");
+    expect(teamSourcePaginationSource).toContain("whitespace-nowrap");
+    expect(teamSourcePaginationSource).not.toContain("writing-mode:vertical");
     expect(teamSourceCollectionStorageActionsPanelStyles.workflowSourceCollectionStorageActions).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(teamSourceCollectionStorageActionsPanelStyles.workflowSourceCollectionStorageButtons).toContain("justify-end");
     expect(teamSourceCollectionStorageActionsPanelStyles.workflowSourceCollectionStorageDetails).toContain("col-span-2");
-    expect(routeStyles.sourceCollectionControlPanel).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionStageModules).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionStageCard).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionStageCardActions).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionStageCardSelected).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionStageCardHead).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionStageProjection).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionStageTaskSummary).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionStageBlockers).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionStageMiniFlow).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionStageWorkspace).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionStageWorkspaceHeader).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionStageHandoff).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionStageHandoffNext).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionStageChatActions).toBeTypeOf("string");
+    expect(teamSourceCollectionControlsPanelStyles.sourceCollectionControlPanel).toBeTypeOf("string");
+    expect(teamStagePipelineSource).toContain("TeamStagePipeline");
+    expect(teamStageCardSource).toContain("TeamStageCard");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspace).toBeTypeOf("string");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspaceHeader).toBeTypeOf("string");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageHandoff).toBeTypeOf("string");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageHandoffNext).toBeTypeOf("string");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageChatActions).toBeTypeOf("string");
     expect(routeStylesSource).not.toContain(".sourceCollectionStageTabs");
     expect(routeStylesSource).not.toContain(".sourceCollectionStageTabActive");
-    expect(routeStyles.sourceCollectionTraceHandoff).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionPagination).toBeTypeOf("string");
+    expect(routeStylesSource).not.toContain(".sourceCollectionTraceHandoff");
+    expect(teamSourcePaginationSource).toContain("TeamSourcePagination");
     expect(routeStylesSource).not.toContain(".sourceCollectionStageActionRow");
     expect(routeStylesSource).not.toContain(".sourceCollectionStageOperationPanel");
-    expect(routeStyles.sourceCollectionPanelActions).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionScreeningListShell).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionScreeningList).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionScreeningScrollHint).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionStagePrimaryAction).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionStageSecondaryAction).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionFocusedPanel).toBeTypeOf("string");
+    expect(teamSourceCollectionScreeningPanelStyles.sourceCollectionPanelActions).toBeTypeOf("string");
+    expect(teamSourceCollectionScreeningPanelStyles.sourceCollectionScreeningListShell).toBeTypeOf("string");
+    expect(teamSourceCollectionScreeningPanelStyles.sourceCollectionScreeningList).toBeTypeOf("string");
+    expect(teamSourceCollectionScreeningPanelStyles.sourceCollectionScreeningScrollHint).toBeTypeOf("string");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStagePrimaryAction).toBeTypeOf("string");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageSecondaryAction).toBeTypeOf("string");
+    expect(teamSourceCollectionPanelFrameStyles.sourceCollectionFocusedPanel).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStepActive).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStepDone).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionStepFailed).toBeTypeOf("string");
@@ -1567,7 +1599,8 @@ describe("TeamsRoute layout contract", () => {
     expect(workflowGraphViewStyles.workflowGraphNode).toBeTypeOf("string");
     expect(workflowGraphViewStyles.workflowGraphEdge).toBeTypeOf("string");
     expect(teamWorkflowStatusPanelStyles.workflowGraphBoundary).toBeTypeOf("string");
-    expect(routeStyles.workflowCandidateList).toBeTypeOf("string");
+    expect(routeStylesSource).not.toContain("workflowCandidateList:");
+    expect(teamSourceCollectionCandidatePanelStyles.workflowCandidateList).toBeTypeOf("string");
     expect(routeStylesSource).not.toContain("workflowCandidateListPanel");
     expect(routeStylesSource).not.toContain("workflowCandidateListHeader");
     expect(routeStylesSource).not.toContain("workflowCandidateListScroll");
@@ -1618,12 +1651,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.researchStageAgentCard_warning).toBeTypeOf("string");
     expect(routeStyles.researchStageAgentCard_blocked).toBeTypeOf("string");
     expect(routeStyles.researchStageAgentCard_missing).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionStageAgentPanel).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionStageAgentHeader).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionStageAgentList).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionStageAgentCard).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionStageAgentCardBody).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionStageAgentCardActions).toBeTypeOf("string");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentPanel).toBeTypeOf("string");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentHeader).toBeTypeOf("string");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentList).toBeTypeOf("string");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCard).toBeTypeOf("string");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCardBody).toBeTypeOf("string");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCardActions).toBeTypeOf("string");
     expect(routeStyles.researchInspector).toBeTypeOf("string");
     expect(routeStyles.researchCanvasPanelHidden).toBeTypeOf("string");
     expect(routeStyles.canvasReadOnlyBadge).toBeTypeOf("string");
@@ -1678,9 +1711,9 @@ describe("TeamsRoute layout contract", () => {
       [routeStyles.researchStageCardHead, "grid-cols-[auto_1fr]"],
       [routeStyles.researchStageCardMetrics, "grid-cols-[repeat(4,minmax(0,1fr))]"],
       [routeStyles.researchStageAgentGrid, "grid-cols-[repeat(auto-fit,minmax(210px,1fr))]"],
-      [routeStyles.sourceCollectionStageAgentCard, "grid-cols-[minmax(0,1fr)_auto]"],
-      [routeStyles.sourceCollectionStageAgentCardBody, "grid-cols-[repeat(3,minmax(0,1fr))]"],
-      [routeStyles.sourceCollectionSourceDetailFacts, "grid-cols-[repeat(auto-fit,minmax(180px,1fr))]"],
+      [teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCard, "grid-cols-[minmax(0,1fr)_auto]"],
+      [teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCardBody, "grid-cols-[repeat(3,minmax(0,1fr))]"],
+      [teamSourceCollectionSourceDetailPanelStyles.sourceCollectionSourceDetailFacts, "grid-cols-[repeat(auto-fit,minmax(180px,1fr))]"],
       [routeStyles.researchStageHeroStats, "grid-cols-[repeat(3,minmax(0,1fr))]"],
       [routeStyles.workflowStats, "grid-cols-[repeat(3,minmax(0,1fr))]"],
       [teamWorkflowStatusPanelStyles.workflowModelEvidenceStats, "grid-cols-[repeat(auto-fit,minmax(118px,1fr))]"],
@@ -1699,8 +1732,8 @@ describe("TeamsRoute layout contract", () => {
       expect(className).toContain(gridTemplate);
     }
 
-    expect(routeStyles.sourceCollectionStageAgentCard).toContain("[&_a]:inline-flex");
-    expect(routeStyles.sourceCollectionStageAgentCard).toContain("[&_[data-vui=native-button]]:inline-flex");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCard).toContain("[&_a]:inline-flex");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCard).toContain("[&_[data-vui=native-button]]:inline-flex");
   });
 
   it("uses a subtle mesh canvas background instead of repeated horizontal route stripes", () => {

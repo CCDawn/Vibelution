@@ -1,5 +1,6 @@
 import { type ReactNode, type SyntheticEvent } from "react";
 
+import panelFrameStyles from "./TeamSourceCollectionPanelFrame.styles";
 import styles from "./TeamSourceCollectionScreeningPanel.styles";
 
 export type TeamSourceCollectionScreeningPanelStat = {
@@ -10,7 +11,7 @@ export type TeamSourceCollectionScreeningPanelStat = {
 
 type TeamSourceCollectionScreeningPanelProps = {
   lang: "zh" | "en";
-  className: string;
+  focused: boolean;
   open: boolean;
   rangeText: ReactNode;
   filterBar: ReactNode;
@@ -28,7 +29,7 @@ type TeamSourceCollectionScreeningPanelProps = {
 
 export function TeamSourceCollectionScreeningPanel({
   lang,
-  className,
+  focused,
   open,
   rangeText,
   filterBar,
@@ -43,6 +44,11 @@ export function TeamSourceCollectionScreeningPanel({
   children,
   onToggle,
 }: TeamSourceCollectionScreeningPanelProps) {
+  const className = [
+    panelFrameStyles.workflowSourceCollectionDetails,
+    focused ? panelFrameStyles.sourceCollectionFocusedPanel : "",
+  ].filter(Boolean).join(" ");
+
   return (
     <details
       id="source-collection-screening-panel"

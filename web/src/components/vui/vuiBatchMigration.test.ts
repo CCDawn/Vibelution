@@ -8,6 +8,8 @@ import agentStyles from "../../routes/AgentsRoute.styles";
 import evolutionStyles from "../../routes/EvolutionRoute.styles";
 import evolutionRunRecordsStyles from "../../routes/EvolutionRunRecordsPanel.styles";
 import petStyles from "../../routes/PetRoute.styles";
+import teamSourceCollectionActiveStagePanelStyles from "../../routes/TeamSourceCollectionActiveStagePanel.styles";
+import teamSourceCollectionScreeningPanelStyles from "../../routes/TeamSourceCollectionScreeningPanel.styles";
 import teamStyles from "../../routes/TeamsRoute.styles";
 
 const sourceRoot = resolve(import.meta.dirname, "../..");
@@ -347,17 +349,21 @@ describe("VUI batch migration", () => {
 
   it("keeps Teams source-collection stage actions compact by default", () => {
     const source = readTargetSource("routes/TeamsRoute.styles.ts");
+    const activeStageSource = readTargetSource("routes/TeamSourceCollectionActiveStagePanel.styles.ts");
+    const screeningSource = readTargetSource("routes/TeamSourceCollectionScreeningPanel.styles.ts");
 
     expect(source).toContain("researchStageActions");
-    expect(source).toContain("sourceCollectionStagePrimaryAction");
-    expect(source).toContain("sourceCollectionPanelActions");
+    expect(source).not.toContain("sourceCollectionStagePrimaryAction");
+    expect(source).not.toContain("sourceCollectionPanelActions");
+    expect(activeStageSource).toContain("sourceCollectionStagePrimaryAction");
+    expect(screeningSource).toContain("sourceCollectionPanelActions");
     expect(teamStyles.researchStageActions).toContain("flex");
     expect(teamStyles.researchStageActions).toContain("flex-wrap");
     expect(teamStyles.researchStageActions).not.toContain("grid-template-columns");
-    expect(teamStyles.sourceCollectionStagePrimaryAction).toContain("w-fit");
-    expect(teamStyles.sourceCollectionStagePrimaryAction).not.toMatch(/(^|\s)w-full(\s|$)/);
-    expect(teamStyles.sourceCollectionPanelActions).toContain("flex");
-    expect(teamStyles.sourceCollectionPanelActions).toContain("flex-wrap");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStagePrimaryAction).toContain("w-fit");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStagePrimaryAction).not.toMatch(/(^|\s)w-full(\s|$)/);
+    expect(teamSourceCollectionScreeningPanelStyles.sourceCollectionPanelActions).toContain("flex");
+    expect(teamSourceCollectionScreeningPanelStyles.sourceCollectionPanelActions).toContain("flex-wrap");
   });
 
   it("keeps PetRoute progress width in Tailwind instead of raw inline width", () => {

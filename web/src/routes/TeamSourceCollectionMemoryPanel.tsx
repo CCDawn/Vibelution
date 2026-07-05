@@ -1,5 +1,6 @@
 import { type ReactNode, type SyntheticEvent } from "react";
 
+import panelFrameStyles from "./TeamSourceCollectionPanelFrame.styles";
 import styles from "./TeamSourceCollectionMemoryPanel.styles";
 
 export type TeamSourceCollectionMemoryPanelStat = {
@@ -10,7 +11,7 @@ export type TeamSourceCollectionMemoryPanelStat = {
 
 type TeamSourceCollectionMemoryPanelProps = {
   lang: "zh" | "en";
-  className: string;
+  focused: boolean;
   open: boolean;
   rangeText: ReactNode;
   filterBar: ReactNode;
@@ -26,7 +27,7 @@ type TeamSourceCollectionMemoryPanelProps = {
 
 export function TeamSourceCollectionMemoryPanel({
   lang,
-  className,
+  focused,
   open,
   rangeText,
   filterBar,
@@ -39,6 +40,11 @@ export function TeamSourceCollectionMemoryPanel({
   children,
   onToggle,
 }: TeamSourceCollectionMemoryPanelProps) {
+  const className = [
+    panelFrameStyles.workflowSourceCollectionDetails,
+    focused ? panelFrameStyles.sourceCollectionFocusedPanel : "",
+  ].filter(Boolean).join(" ");
+
   return (
     <details
       id="source-collection-memory-panel"
