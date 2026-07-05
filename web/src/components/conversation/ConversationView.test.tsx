@@ -1541,7 +1541,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("Agent 私信 · A014 · 能力管家");
   });
 
-  it("keeps completed feedback timelines collapsed without step counters by default", () => {
+  it("renders completed feedback tool timelines as individual rows without aggregate counters", () => {
     const feedbackEvents = Array.from({ length: 40 }, (_, index) => ({
       sequence: index + 1,
       kind: "tool" as const,
@@ -1559,13 +1559,15 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("已运行 40 条命令");
+    expect(html).not.toContain("已运行 40 条命令");
     expect(html).not.toContain("40 步");
     expect(html).not.toContain("40/40");
     expect(html).not.toContain("+33");
-    expect(html).not.toContain("tool_40");
+    expect(html).toContain("step 40");
+    expect(html).toContain("tool_40");
     expect(html).not.toContain("已折叠更早 4 步执行记录");
-    expect(html).not.toContain("step 5");
+    expect(html).toContain("step 1");
+    expect(html).toContain("step 5");
   });
 
   it("hides completed execution rail details until the trace is expanded", () => {
@@ -1595,12 +1597,14 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("已运行 8 条命令");
+    expect(html).not.toContain("已运行 8 条命令");
+    expect(html).toContain("命令 1");
+    expect(html).toContain("命令 5");
+    expect(html).toContain("命令 8");
     expect(html).not.toContain("+");
     expect(html).not.toContain("9 步");
     expect(html).not.toContain("9/9");
     expect(html).not.toContain("准备上下文");
-    expect(html).not.toContain("命令 5");
     expect(html.match(/title="命令 · 已完成"/g)?.length ?? 0).toBe(0);
   });
 
