@@ -113,6 +113,19 @@ describe("ConfigRoute layout contract", () => {
     expect(stylesSource).toContain("configDiscoverySection:");
   });
 
+  it("converges the model library panel into a compact VUI row-panel contract", () => {
+    expect(modelLibraryPanelStylesSource).not.toContain("surface-card");
+    expect(modelLibraryPanelStylesSource).not.toContain("var(--radius-panel)");
+    expect(modelLibraryPanelStyles.sectionSurface).toContain("[border-radius:8px]");
+    expect(modelLibraryPanelStyles.formSurface).toContain("[max-height:min(360px,_44vh)]");
+    expect(modelLibraryPanelStyles.formSurface).toContain("[overflow:auto]");
+    expect(modelLibraryPanelStyles.formGridWide).toContain("repeat(auto-fit,minmax(176px,1fr))");
+    expect(modelLibraryPanelStyles.modelLibrarySection).toContain("[grid-template-rows:auto_auto_auto_auto_minmax(0,0.58fr)_minmax(0,1fr)]");
+    expect(modelLibraryPanelStyles.modelLibraryTestBar).toContain("[padding:6px_8px]");
+    expect(modelLibraryPanelStyles.profileTableWrap).toContain("[min-height:min(240px,_34vh)]");
+    expect(modelLibraryPanelStyles.profileTableActions).toContain("[flex-wrap:nowrap]");
+  });
+
   it("keeps the tablet config sidebar compact instead of stretching every control full width", () => {
     expect(stylesSource).toContain("sidebarStatus:");
     expect(stylesSource).toContain("buttonBlock:");
