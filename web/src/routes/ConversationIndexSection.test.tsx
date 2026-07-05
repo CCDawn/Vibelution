@@ -18,6 +18,8 @@ describe("ConversationIndexSection", () => {
     );
 
     expect(markup).toContain("aria-expanded=\"true\"");
+    expect(markup).toContain('data-vui="native-button"');
+    expect(markup).not.toContain('data-vui="button"');
     expect(markup).toContain("用户会话");
     expect(markup).toContain("<strong>3</strong>");
     expect(markup).toContain("会话 A");
