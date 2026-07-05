@@ -7,11 +7,11 @@
 // Includes phantom keys accessed by consumers but never declared in the old
 // styleKeys; the Proxy synthesized them on demand.
 const panelSurface =
-  "rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_58%,transparent)] p-2";
+  "rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_58%,transparent)] p-2";
 const quietPanelSurface =
-  "rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_62%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_46%,transparent)] p-2";
+  "rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_62%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_46%,transparent)] p-2";
 const rowSurface =
-  "rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_62%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_42%,transparent)]";
+  "rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_62%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-row)_64%,transparent)]";
 const warmRowSurface =
   "rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-warm)_18%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_5%,transparent)]";
 const buttonBase =
@@ -44,13 +44,13 @@ const styles = {
   agentScopeBar:
     "agentScopeBar min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   bulkActionBar:
-    "bulkActionBar min-w-0 max-w-full flex flex-wrap items-center gap-1.5 !grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-[5px] p-[5px] rounded-lg border border-[color:color-mix(in_srgb,var(--border-soft)_62%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_46%,transparent)]",
+    "bulkActionBar min-w-0 max-w-full flex flex-wrap items-center gap-1.5 !grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-[5px] p-[5px] rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_62%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-row)_58%,transparent)]",
   bulkPolicyActions:
     "bulkPolicyActions min-w-0 flex flex-wrap items-center gap-1.5",
   bulkPolicyToolRow:
     "bulkPolicyToolRow min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
   bulkSummary:
-    "bulkSummary min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_58%,transparent)] p-2",
+    "bulkSummary min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_58%,transparent)] p-2",
   controlStrip:
     "controlStrip min-w-0 flex flex-wrap items-center gap-1.5",
   countPill:
@@ -62,7 +62,7 @@ const styles = {
   deepLinkNotice:
     "deepLinkNotice min-w-0 rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_30%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,transparent)] p-2",
   dependencyHealthPanel:
-    "dependencyHealthPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_58%,transparent)] p-2",
+    "dependencyHealthPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_58%,transparent)] p-2",
   detailActions:
     "detailActions min-w-0 flex flex-wrap items-center gap-1.5 border-t border-[color:color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] pt-2",
   detailHeader:
@@ -396,13 +396,13 @@ const styles = {
   status_warning:
     "status_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   summaryCard:
-    "summaryCard min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_42%,transparent)] !grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-[5px] min-h-[26px] px-2 py-[3px]",
+    "summaryCard min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-row)_64%,transparent)] !grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-[5px] min-h-[26px] px-2 py-[3px]",
   summaryGrid:
     "summaryGrid min-w-0 grid gap-2 flex-1 grid-cols-[repeat(auto-fit,minmax(6.5rem,1fr))]",
   testArgs:
     "testArgs min-w-0 font-mono text-[var(--vui-font-xs)]",
   testPanel:
-    "testPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_58%,transparent)] p-2",
+    "testPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_58%,transparent)] p-2",
   toolAgentFitPanel:
     "toolAgentFitPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,transparent)] p-2 text-[var(--accent-cool)]",
   toolBadges:
@@ -446,13 +446,13 @@ const styles = {
   toolPermissionMeta:
     "toolPermissionMeta min-w-0 flex flex-wrap items-center gap-1.5",
   toolPermissionRow:
-    "toolPermissionRow min-w-0 max-w-full rounded-[7px] border border-[color:color-mix(in_srgb,var(--border-soft)_62%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_42%,transparent)] !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 px-[7px] py-[7px]",
+    "toolPermissionRow min-w-0 max-w-full rounded-[7px] border border-[color:color-mix(in_srgb,var(--border-soft)_62%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-row)_64%,transparent)] !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 px-[7px] py-[7px]",
   ts:
     "ts min-w-0",
   workspace:
     "workspace min-w-0 max-w-full grid h-full min-h-0 gap-2 p-2 !grid grid-cols-[minmax(0,var(--tools-left-panel-width))_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:grid-rows-[minmax(180px,34vh)_minmax(360px,1fr)] max-[760px]:overflow-y-auto max-[760px]:overflow-x-hidden",
   workspaceScopePanel:
-    "workspaceScopePanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_62%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_42%,transparent)] !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[7px] p-2 max-[900px]:grid-cols-[repeat(2,minmax(0,1fr))]",
+    "workspaceScopePanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_62%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-row)_64%,transparent)] !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[7px] p-2 max-[900px]:grid-cols-[repeat(2,minmax(0,1fr))]",
 } as const;
 
 export default styles;
