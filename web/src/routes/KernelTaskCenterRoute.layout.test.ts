@@ -90,6 +90,12 @@ describe("KernelTaskCenterRoute layout contract", () => {
     });
   });
 
+  it("keeps Kernel panel surface tokens centralized in route-local constants", () => {
+    expect(stylesSource).toContain("const panelSurface");
+    expect(stylesSource).toContain("const cardSurface");
+    expect(stylesSource).toContain("const rowSurface");
+  });
+
   it("keeps Kernel mobile layout bounded without horizontal page overflow", () => {
     expect(styles.workspaceClass).toContain("min-w-0");
     expect(styles.workspaceClass).toContain("max-w-full");
