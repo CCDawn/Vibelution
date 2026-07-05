@@ -245,9 +245,15 @@ const styles: Record<string, string> = {
     "vui-components-conversationview cliAgentLifecycleTurn min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] bg-[color-mix(in_srgb,var(--surface-panel)_72%,transparent)]",
   composer: conversationComposerShell,
   composerAttachmentChip:
-    "vui-components-conversationview composerAttachmentChip min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    "vui-components-conversationview composerAttachmentChip min-w-0 inline-flex min-h-7 w-fit max-w-full items-center justify-start gap-1.5 overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-1.5 pr-1 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+  composerAttachmentName:
+    "vui-components-conversationview composerAttachmentName min-w-0 max-w-[14rem] truncate",
+  composerAttachmentRemoveButton:
+    "vui-components-conversationview composerAttachmentRemoveButton !h-6 !min-h-6 !w-6 !min-w-6 shrink-0 !rounded-full !p-0",
+  composerAttachmentThumb:
+    "vui-components-conversationview composerAttachmentThumb block h-5 max-h-5 w-5 max-w-5 shrink-0 rounded-[var(--radius-control)] object-cover",
   composerAttachmentTray:
-    "vui-components-conversationview composerAttachmentTray min-w-0",
+    "vui-components-conversationview composerAttachmentTray min-w-0 max-w-full overflow-hidden flex flex-wrap items-center gap-1.5",
   composerError:
     "vui-components-conversationview composerError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   composerField: composerFieldShell,

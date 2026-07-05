@@ -2642,10 +2642,12 @@ export function ConversationView({
             <div className={styles.composerAttachmentTray} aria-label={lang === "zh" ? "待发送图片" : "Images to send"}>
               {composerAttachments.map((attachment) => (
                 <div key={attachment.id} className={styles.composerAttachmentChip}>
-                  <img src={attachment.previewUrl} alt={attachment.filename} />
-                  <span title={attachment.filename}>{attachment.filename}</span>
+                  <img className={styles.composerAttachmentThumb} src={attachment.previewUrl} alt={attachment.filename} />
+                  <span className={styles.composerAttachmentName} title={attachment.filename}>{attachment.filename}</span>
                   {onRemoveComposerAttachment ? (
                     <VButton
+                      className={styles.composerAttachmentRemoveButton}
+                      isIconOnly
                       type="button"
                       onClick={() => onRemoveComposerAttachment(attachment.id)}
                       title={lang === "zh" ? "移除图片" : "Remove image"}
