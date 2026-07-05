@@ -10,6 +10,7 @@ import stylesSource from "./AgentsRoute.styles.ts?raw";
 import archiveZoneStyles from "./AgentArchiveZonePanel.styles";
 import avatarEditorStyles from "./AgentAvatarEditorPanel.styles";
 import bulkConfigStyles from "./AgentBulkConfigPanel.styles";
+import bulkOperationsStyles from "./AgentBulkOperationsPanel.styles";
 import contextCompressionStyles from "./AgentContextCompressionPanel.styles";
 import coreConfigStyles from "./AgentCoreConfigPanel.styles";
 import createPanelStyles from "./AgentCreatePanel.styles";
@@ -254,6 +255,12 @@ function expectContentSizedVuiButtons(className: string, label: string): void {
   expect(className, `${label} should keep VUI buttons content-sized by default`).toContain("[&_[data-vui=\"button\"]]:w-fit");
   expect(tokens, `${label} should not stretch compact VUI actions across the row`).not.toContain("[&_[data-vui=\"button\"]]:w-full");
   expect(tokens, `${label} should not stretch compact VUI actions across the row`).not.toContain("[&_[data-vui=\"button\"]]:[width:100%]");
+}
+
+function expectLongTextWraps(className: string, label: string): void {
+  expect(className, `${label} should allow long Chinese and English labels to wrap`).toContain("[overflow-wrap:anywhere]");
+  expect(className, `${label} should not hide primary text behind ellipsis`).not.toContain("[text-overflow:ellipsis]");
+  expect(className, `${label} should not force long labels onto one line`).not.toContain("[white-space:nowrap]");
 }
 
 describe("AgentsRoute layout contract", () => {
@@ -1460,6 +1467,12 @@ describe("AgentsRoute layout contract", () => {
       [coreConfigStyles.configEditor, "AgentCoreConfig.configEditor"],
       [coreConfigStyles.healthGuidePanel, "AgentCoreConfig.healthGuidePanel"],
       [coreConfigStyles.llmSlotField, "AgentCoreConfig.llmSlotField"],
+      [healthMaintenanceStyles.detailSection, "AgentHealthMaintenance.detailSection"],
+      [toolSummaryStyles.configEditor, "AgentToolSummary.configEditor"],
+      [toolGovernanceStyles.configEditor, "AgentToolGovernance.configEditor"],
+      [toolGovernanceStyles.toolGovernanceItem, "AgentToolGovernance.toolGovernanceItem"],
+      [bulkConfigStyles.configEditor, "AgentBulkConfig.configEditor"],
+      [bulkConfigStyles.bulkSelectionList, "AgentBulkConfig.bulkSelectionList"],
       [referencesPanelStyles.configEditor, "AgentReferences.configEditor"],
       [referencesPanelStyles.detailSection, "AgentReferences.detailSection"],
       [referencesPanelStyles.referenceItem, "AgentReferences.referenceItem"],
@@ -1497,6 +1510,10 @@ describe("AgentsRoute layout contract", () => {
       [coreConfigStyles.configDeepLinkRow, "AgentCoreConfig.configDeepLinkRow"],
       [coreConfigStyles.promptConfigRow, "AgentCoreConfig.promptConfigRow"],
       [coreConfigStyles.editorActions, "AgentCoreConfig.editorActions"],
+      [toolSummaryStyles.editorActions, "AgentToolSummary.editorActions"],
+      [toolGovernanceStyles.editorActions, "AgentToolGovernance.editorActions"],
+      [toolGovernanceStyles.governanceActions, "AgentToolGovernance.governanceActions"],
+      [bulkConfigStyles.editorActions, "AgentBulkConfig.editorActions"],
       [referencesPanelStyles.referenceMetaRow, "AgentReferences.referenceMetaRow"],
       [referencesPanelStyles.roomCheckField, "AgentReferences.roomCheckField"],
     ] as const) {
@@ -1514,6 +1531,12 @@ describe("AgentsRoute layout contract", () => {
       [coreConfigStyles.configEditor, "AgentCoreConfig.configEditor"],
       [coreConfigStyles.editorGrid, "AgentCoreConfig.editorGrid"],
       [coreConfigStyles.llmSlotGrid, "AgentCoreConfig.llmSlotGrid"],
+      [healthMaintenanceStyles.maintenanceIntro, "AgentHealthMaintenance.maintenanceIntro"],
+      [toolSummaryStyles.policySummaryGrid, "AgentToolSummary.policySummaryGrid"],
+      [toolGovernanceStyles.toolGovernanceList, "AgentToolGovernance.toolGovernanceList"],
+      [toolGovernanceStyles.toolGovernanceItem, "AgentToolGovernance.toolGovernanceItem"],
+      [bulkConfigStyles.configEditor, "AgentBulkConfig.configEditor"],
+      [bulkConfigStyles.editorGrid, "AgentBulkConfig.editorGrid"],
       [referencesPanelStyles.configEditor, "AgentReferences.configEditor"],
       [referencesPanelStyles.detailSection, "AgentReferences.detailSection"],
       [referencesPanelStyles.roomMembershipList, "AgentReferences.roomMembershipList"],
@@ -1526,6 +1549,11 @@ describe("AgentsRoute layout contract", () => {
       [createPanelStyles.createToolBundleOption, "AgentCreate.createToolBundleOption"],
       [createPanelStyles.createToolBundleSelected, "AgentCreate.createToolBundleSelected"],
       [debugResetStyles.resetOptionField, "AgentDebugReset.resetOptionField"],
+      [healthMaintenanceStyles.issueItem, "AgentHealthMaintenance.issueItem"],
+      [healthMaintenanceStyles.maintenanceIntro, "AgentHealthMaintenance.maintenanceIntro"],
+      [toolSummaryStyles.policySummaryGrid, "AgentToolSummary.policySummaryGrid"],
+      [toolGovernanceStyles.toolGovernanceItem, "AgentToolGovernance.toolGovernanceItem"],
+      [bulkConfigStyles.bulkSelectionList, "AgentBulkConfig.bulkSelectionList"],
       [referencesPanelStyles.roomCheckField, "AgentReferences.roomCheckField"],
       [referencesPanelStyles.referenceItem, "AgentReferences.referenceItem"],
       [overviewStyles.boundarySummaryGrid, "AgentOverview.boundarySummaryGrid"],
@@ -1536,10 +1564,39 @@ describe("AgentsRoute layout contract", () => {
     }
 
     expect(coreConfigStyles.llmSlotGrid).toContain("max-[860px]:[grid-template-columns:1fr]");
+    expect(healthMaintenanceStyles.maintenanceIntro).toContain("max-[860px]:[grid-template-columns:1fr]");
+    expect(toolSummaryStyles.policySummaryGrid).toContain("max-[860px]:[grid-template-columns:1fr]");
+    expect(toolGovernanceStyles.toolGovernanceItem).toContain("max-[860px]:[grid-template-columns:1fr]");
+    expect(bulkConfigStyles.editorGrid).toContain("max-[860px]:[grid-template-columns:1fr]");
     expect(overviewStyles.boundarySummaryGrid).toContain("max-[860px]:[grid-template-columns:1fr]");
     expect(referencesPanelStyles.referenceHeader).toContain("max-[860px]:[grid-template-columns:1fr]");
     expect(referencesPanelStyles.referenceMetaRow).toContain("max-[860px]:[grid-template-columns:1fr]");
     expect(referencesPanelStyles.roomCheckField).toContain("max-[860px]:[grid-template-columns:auto_minmax(0,_1fr)]");
+  });
+
+  it("keeps Agent operations panel text readable and short actions bounded", () => {
+    for (const [className, label] of [
+      [healthMaintenanceStyles.issueItem, "AgentHealthMaintenance.issueItem"],
+      [healthMaintenanceStyles.maintenanceIntro, "AgentHealthMaintenance.maintenanceIntro"],
+      [toolSummaryStyles.policySummaryGrid, "AgentToolSummary.policySummaryGrid"],
+      [toolGovernanceStyles.toolGovernanceItem, "AgentToolGovernance.toolGovernanceItem"],
+      [bulkConfigStyles.bulkSelectionList, "AgentBulkConfig.bulkSelectionList"],
+    ] as const) {
+      expectLongTextWraps(className, label);
+    }
+
+    for (const [className, label] of [
+      [toolSummaryStyles.editorActions, "AgentToolSummary.editorActions"],
+      [toolGovernanceStyles.editorActions, "AgentToolGovernance.editorActions"],
+      [toolGovernanceStyles.governanceActions, "AgentToolGovernance.governanceActions"],
+      [bulkConfigStyles.editorActions, "AgentBulkConfig.editorActions"],
+    ] as const) {
+      expectContentSizedVuiButtons(className, label);
+    }
+
+    expect(bulkOperationsStyles.bulkPromptLabel).toContain("max-w-full");
+    expect(bulkOperationsStyles.bulkPromptLabel).toContain("break-words");
+    expect(bulkOperationsStyles.bulkPromptLabel.split(/\s+/)).not.toContain("w-full");
   });
 
   it("keeps Agent card subgrids away from invalid quoted Tailwind grid areas", () => {
