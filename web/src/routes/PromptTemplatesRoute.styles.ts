@@ -5,12 +5,11 @@ const refreshButtonClass = "h-[var(--vui-control-height-sm)] w-[var(--vui-contro
 const returnButtonClass = "inline-flex min-h-[26px] w-fit max-w-full items-center justify-center gap-[5px] rounded-[var(--radius-control)] border border-vui-border-soft bg-[var(--surface-card)] px-2 py-[3px] text-[var(--accent-cool)] no-underline hover:border-[var(--border-strong)] hover:bg-[var(--surface-panel-hover)] hover:text-vui-fg-primary";
 const controlStripClass = "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-1.5 px-3 pt-1 max-[980px]:grid-cols-1";
 const managementNavClass = "m-0";
-const summaryGridClass = "grid min-w-0 grid-cols-4 overflow-hidden rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--border-soft)_78%,transparent)] bg-[color-mix(in_srgb,var(--surface-panel)_76%,transparent)] max-[980px]:grid-cols-1";
-const summaryCardClass = "grid min-h-[26px] min-w-0 grid-cols-[auto_minmax(0,1fr)] items-baseline gap-[5px] border-0 border-r border-[color-mix(in_srgb,var(--border-soft)_58%,transparent)] bg-transparent px-2 py-[3px] last:border-r-0";
+const summaryStripClass = "min-w-0 overflow-hidden rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] bg-vui-surface-toolbar p-1 [&_[data-vui=status-strip-item]]:min-w-0 [&_[data-vui=status-strip-item]]:grid-cols-[auto_minmax(0,1fr)] [&_[data-vui=status-strip-item]]:rounded-[var(--radius-control)] [&_[data-vui=status-strip-item]]:bg-transparent [&_[data-vui=status-strip-item]]:font-normal [&_[data-vui=status-strip-item]]:shadow-none [&_[data-vui=status-strip-item]_span:last-child]:min-w-0 [&_[data-vui=status-strip-item]_span:last-child]:truncate";
 const summaryLabelClass = "text-[var(--vui-font-xs)] text-vui-fg-tertiary";
 const summaryValueClass = "min-w-0 truncate text-[var(--vui-font-xs)] text-vui-fg-primary";
 const workspaceClass = "grid h-full min-h-0 min-w-0 grid-cols-[minmax(300px,392px)_minmax(500px,1fr)] gap-1.5 overflow-hidden px-2.5 pb-2 pt-1.5 max-[980px]:grid-cols-1 max-[980px]:content-start max-[980px]:overflow-auto";
-const panelBaseClass = "grid min-h-0 min-w-0 content-start gap-2 overflow-hidden rounded-lg border border-vui-border-soft bg-[color-mix(in_srgb,var(--surface-panel)_68%,transparent)] p-2";
+const panelBaseClass = "grid min-h-0 min-w-0 content-start gap-2 overflow-hidden";
 const listPanelClass = `${panelBaseClass} grid-rows-[auto_auto_auto_auto_minmax(0,1fr)] max-[980px]:max-h-[44vh]`;
 const editorPanelClass = `${panelBaseClass} grid-rows-[auto_auto_auto_minmax(260px,1fr)_minmax(112px,auto)_auto] content-stretch max-[980px]:grid-rows-[auto_auto_auto_minmax(180px,0.8fr)_auto_auto] max-[980px]:overflow-auto`;
 const editorPanelFocusedClass = "border-[color-mix(in_srgb,var(--accent-cool)_40%,var(--border-soft))]";
@@ -25,7 +24,7 @@ const filterButtonClass = "inline-flex min-h-[26px] w-fit max-w-full items-cente
 const filterButtonActiveClass = `${filterButtonClass} border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_14%,transparent)] text-[var(--accent-warm-2)]`;
 const primaryButtonClass = "inline-flex min-h-[26px] w-fit max-w-full items-center justify-center rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_34%,var(--border-soft))] bg-[var(--surface-card)] px-2 py-[3px] text-[var(--accent-warm-2)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-panel-hover)] hover:text-vui-fg-primary disabled:opacity-55";
 const secondaryButtonClass = "inline-flex min-h-[26px] w-fit max-w-full items-center justify-center rounded-[var(--radius-control)] border border-vui-border-soft bg-[var(--surface-card)] px-2 py-[3px] text-vui-fg-secondary hover:border-[var(--border-strong)] hover:bg-[var(--surface-panel-hover)] hover:text-vui-fg-primary disabled:opacity-55";
-const bulkActionBarClass = "grid min-w-0 grid-cols-[auto_auto_minmax(118px,1fr)] items-center justify-items-start gap-[5px] rounded-lg border border-vui-border-soft bg-[color-mix(in_srgb,var(--surface-panel)_58%,transparent)] p-[5px] max-[980px]:grid-cols-1";
+const bulkActionBarClass = "grid min-w-0 grid-cols-[auto_auto_minmax(118px,1fr)] items-center justify-items-start gap-[5px] max-[980px]:grid-cols-1";
 const bulkSummaryClass = "inline-flex min-h-[26px] min-w-0 items-center gap-1.5 text-[var(--vui-font-xs)] text-vui-fg-secondary";
 const bulkSummaryTitleClass = "text-vui-fg-primary";
 const bulkSelectFieldClass = "inline-flex min-h-[26px] w-fit max-w-full min-w-0 items-center gap-1.5 text-[var(--vui-font-xs)] text-vui-fg-secondary";
@@ -45,7 +44,6 @@ const templateButtonActiveClass = "border-[color-mix(in_srgb,var(--accent-warm)_
 const templateMainClass = "grid min-w-0 gap-0.5 [&_*]:min-w-0 [&_*]:truncate";
 const templateMetaClass = "flex flex-wrap gap-1 [&_span]:inline-flex [&_span]:min-h-5 [&_span]:max-w-full [&_span]:items-center [&_span]:justify-center [&_span]:rounded-full [&_span]:border [&_span]:border-vui-border-soft [&_span]:bg-[var(--surface-card)] [&_span]:px-1.5 [&_span]:text-[var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary";
 const categoryPillClass = "inline-flex min-h-5 max-w-full items-center justify-center rounded-full border border-vui-border-soft bg-[var(--surface-card)] px-1.5 text-[var(--accent-cool-2)]";
-const statePillClass = "inline-flex min-h-5 max-w-full items-center justify-center rounded-full border border-vui-border-soft bg-[var(--surface-card)] px-1.5 text-[var(--state-success)]";
 const editorHeaderClass = "flex min-w-0 items-start justify-between gap-3";
 const editorMetaClass = "grid grid-cols-3 gap-1.5 max-[980px]:grid-cols-1";
 const detailRowClass = "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-2 gap-y-0 border-0 border-b border-[color-mix(in_srgb,var(--border-soft)_62%,transparent)] bg-transparent px-0 py-[5px] last:border-b-0";
@@ -83,8 +81,7 @@ const styles = {
   returnButtonClass,
   controlStripClass,
   managementNavClass,
-  summaryGridClass,
-  summaryCardClass,
+  summaryStripClass,
   summaryLabelClass,
   summaryValueClass,
   workspaceClass,
@@ -119,7 +116,6 @@ const styles = {
   templateMainClass,
   templateMetaClass,
   categoryPillClass,
-  statePillClass,
   editorHeaderClass,
   editorMetaClass,
   detailRowClass,

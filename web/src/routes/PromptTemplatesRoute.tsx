@@ -6,7 +6,19 @@ import { Link, useSearchParams } from "react-router-dom";
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import { AgentInstance, PromptTemplate, PromptTemplateWorkspace } from "../api/types";
-import { VButton, VIconButton, VNativeInput, VNativeSelect, VNativeTextarea, VRouteHeader } from "../components/vui";
+import {
+  VButton,
+  VDenseToolbar,
+  VIconButton,
+  VNativeInput,
+  VNativeSelect,
+  VNativeTextarea,
+  VPanelHeader,
+  VRouteHeader,
+  VStatusChip,
+  VStatusStrip,
+  VSurface,
+} from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
@@ -511,35 +523,25 @@ export function PromptTemplatesRoute() {
       <div className={styles.controlStripClass}>
         <AgentManagementNav active="prompts" className={styles.managementNavClass} />
 
-        <div className={styles.summaryGridClass}>
-          <section className={styles.summaryCardClass}>
-            <span className={styles.summaryLabelClass}>{copy.templates}</span>
-            <strong className={styles.summaryValueClass}>{templates.length}</strong>
-          </section>
-          <section className={styles.summaryCardClass}>
-            <span className={styles.summaryLabelClass}>{copy.linkedAgents}</span>
-            <strong className={styles.summaryValueClass}>{agents.filter((agent) => agent.promptTemplateId).length}</strong>
-          </section>
-          <section className={styles.summaryCardClass}>
-            <span className={styles.summaryLabelClass}>{copy.category}</span>
-            <strong className={styles.summaryValueClass}>{visibleFilters.length - 1}</strong>
-          </section>
-          <section className={styles.summaryCardClass}>
-            <span className={styles.summaryLabelClass}>{copy.source}</span>
-            <strong className={styles.summaryValueClass}>{templatesQuery.data?.storagePath ?? templatesQuery.data?.path ?? "-"}</strong>
-          </section>
-        </div>
+        <VStatusStrip
+          className={styles.summaryStripClass}
+          items={[
+            { label: copy.templates, value: <strong className={styles.summaryValueClass}>{templates.length}</strong> },
+            { label: copy.linkedAgents, value: <strong className={styles.summaryValueClass}>{agents.filter((agent) => agent.promptTemplateId).length}</strong> },
+            { label: copy.category, value: <strong className={styles.summaryValueClass}>{visibleFilters.length - 1}</strong> },
+            { label: copy.source, value: <strong className={styles.summaryValueClass}>{templatesQuery.data?.storagePath ?? templatesQuery.data?.path ?? "-"}</strong> },
+          ]}
+        />
       </div>
 
       <main className={styles.workspaceClass}>
-        <aside className={styles.listPanelClass}>
-          <div className={styles.panelHeaderClass}>
-            <div>
-              <p className={styles.panelEyebrowClass}>{copy.templates}</p>
-              <h2 className={styles.panelTitleClass}>{filteredTemplates.length} / {templates.length}</h2>
-            </div>
-            <FileText size={17} />
-          </div>
+        <VSurface as="aside" className={styles.listPanelClass} ariaLabel={copy.templates} tone="panel" padding="compact">
+          <VPanelHeader
+            className={styles.panelHeaderClass}
+            eyebrow={copy.templates}
+            title={`${filteredTemplates.length} / ${templates.length}`}
+            actions={<FileText size={17} />}
+          />
 
           <label className={styles.searchBoxClass}>
             <Search size={14} />
@@ -559,7 +561,7 @@ export function PromptTemplatesRoute() {
             ))}
           </div>
 
-          <section className={styles.bulkActionBarClass} aria-label={copy.bulkSelected}>
+          <VDenseToolbar className={styles.bulkActionBarClass} ariaLabel={copy.bulkSelected}>
             <div className={styles.bulkSummaryClass}>
               <CheckSquare size={15} />
               <strong className={styles.bulkSummaryTitleClass}>{copy.bulkSelected}</strong>
@@ -612,7 +614,7 @@ export function PromptTemplatesRoute() {
             >
               {bulkPromptPending ? copy.bulkWorking : copy.bulkDeactivate}
             </VButton>
-          </section>
+          </VDenseToolbar>
 
           <div className={styles.templateListClass}>
             {templatesQuery.isError ? (
@@ -667,19 +669,18 @@ export function PromptTemplatesRoute() {
               })
             )}
           </div>
-        </aside>
+        </VSurface>
 
-        <section className={`${styles.editorPanelClass} ${focusTarget === "editor" ? styles.editorPanelFocusedClass : ""}`}>
+        <VSurface as="section" className={`${styles.editorPanelClass} ${focusTarget === "editor" ? styles.editorPanelFocusedClass : ""}`} ariaLabel={copy.editor} tone="panel" padding="compact">
           {editor && editableTemplate ? (
             <>
-              <div className={styles.editorHeaderClass}>
-                <div>
-                  <p className={styles.panelEyebrowClass}>{copy.editor}</p>
-                  <h2 className={styles.panelTitleClass}>{editableTemplate.promptTemplateId}</h2>
-                  <p className={styles.panelDescriptionClass}>{editableTemplate.sourcePath || editableTemplate.category}</p>
-                </div>
-                <SquarePen size={18} />
-              </div>
+              <VPanelHeader
+                className={styles.editorHeaderClass}
+                eyebrow={copy.editor}
+                title={editableTemplate.promptTemplateId}
+                actions={<SquarePen size={18} />}
+              />
+              <p className={styles.panelDescriptionClass}>{editableTemplate.sourcePath || editableTemplate.category}</p>
 
               <div className={styles.editorMetaClass}>
                 <section className={styles.detailRowClass}>
@@ -718,7 +719,7 @@ export function PromptTemplatesRoute() {
                 <section className={styles.detailCardClass}>
                   <div className={styles.contentHeaderClass}>
                     <h3 className={styles.cardTitleClass}>{copy.defaultPreview}</h3>
-                    <span className={hasDefault ? styles.statePillClass : styles.templateMetaClass}>{hasDefault ? copy.yes : copy.no}</span>
+                    <VStatusChip tone={hasDefault ? "success" : "neutral"}>{hasDefault ? copy.yes : copy.no}</VStatusChip>
                   </div>
                   <p className={styles.detailCardHelperClass}>{clip(editableTemplate.defaultContent || editableTemplate.defaultContentPreview || copy.resetUnavailable)}</p>
                   <section className={styles.detailRowClass}>
@@ -773,7 +774,7 @@ export function PromptTemplatesRoute() {
           ) : (
             <p className={styles.emptyStateClass}>{templatesQuery.isPending ? copy.loading : copy.emptyEditor}</p>
           )}
-        </section>
+        </VSurface>
       </main>
     </section>
   );
