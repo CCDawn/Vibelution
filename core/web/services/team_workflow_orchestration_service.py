@@ -7089,6 +7089,18 @@ def draft_paper_note_from_source_candidate(
         )
         if not evidence_refs:
             raise TeamWorkflowOrchestrationError("Source extraction does not include page anchors for paper_note drafting.")
+        evidence_ledger = _ready_content_extraction_evidence_ledger(source_candidate)
+        if evidence_ledger:
+            source_refs = _merge_local_research_refs(
+                source_refs,
+                _normalize_ref_list(evidence_ledger.get("sourceRefs"), max_items=24),
+                max_items=32,
+            )
+            evidence_refs = _merge_local_research_refs(
+                evidence_refs,
+                _normalize_ref_list(evidence_ledger.get("evidenceRefs"), max_items=24),
+                max_items=32,
+            )
         candidate_refs = [
             {
                 "type": "source_manifest",
@@ -7117,6 +7129,7 @@ def draft_paper_note_from_source_candidate(
             "evidenceRefs": evidence_refs,
             "candidateRefs": candidate_refs,
             "excerpt": excerpt,
+            "evidenceLedger": evidence_ledger,
             "title": paper_note_title,
             "summary": paper_note_summary,
             "createdByAgent": created_by_agent,
@@ -9647,8 +9660,11 @@ def build_local_research_model_task(team_id: str, payload: dict[str, Any]) -> di
     evidence_refs = _normalize_ref_list(payload.get("evidenceRefs"), max_items=32)
     candidate_refs = _normalize_ref_list(payload.get("candidateRefs"), max_items=24)
     excerpt = _trim_text(payload.get("excerpt"), max_length=24_000)
-    if not (source_refs or evidence_refs or candidate_refs or excerpt):
-        raise TeamWorkflowOrchestrationError("Local research model task requires sourceRefs, evidenceRefs, candidateRefs, or excerpt.")
+    evidence_ledger = _normalize_local_research_evidence_ledger(payload.get("evidenceLedger"))
+    if not (source_refs or evidence_refs or candidate_refs or excerpt or evidence_ledger):
+        raise TeamWorkflowOrchestrationError(
+            "Local research model task requires sourceRefs, evidenceRefs, candidateRefs, excerpt, or evidenceLedger."
+        )
     task_spec = LOCAL_RESEARCH_TASKS[task_type]
     with _WORKFLOW_LOCK:
         workflow = _load_or_create_workflow(normalized_team_id)
@@ -9680,6 +9696,7 @@ def build_local_research_model_task(team_id: str, payload: dict[str, Any]) -> di
         "evidenceRefs": evidence_refs,
         "candidateRefs": candidate_refs,
         "excerpt": excerpt,
+        "evidenceLedger": evidence_ledger,
         "instruction": _local_research_model_instruction(task_type),
         "outputContract": {
             "format": "json_object",
@@ -13174,6 +13191,15 @@ def _ready_source_extraction(candidate: dict[str, Any]) -> dict[str, Any]:
     return extraction
 
 
+def _ready_content_extraction_evidence_ledger(candidate: dict[str, Any]) -> dict[str, Any]:
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    content_extraction = metadata.get("contentExtraction") if isinstance(metadata.get("contentExtraction"), dict) else {}
+    ledger = content_extraction.get("evidenceLedger") if isinstance(content_extraction.get("evidenceLedger"), dict) else {}
+    if _trim_text(ledger.get("status"), max_length=80) != "evidence_ready":
+        return {}
+    return _normalize_local_research_evidence_ledger(ledger)
+
+
 def _source_extraction_evidence_refs(candidate: dict[str, Any], extraction: dict[str, Any], *, anchor_ids: set[str] | None = None) -> list[dict[str, str]]:
     source_label = _source_manifest_label(candidate)
     refs: list[dict[str, str]] = []
@@ -13194,6 +13220,28 @@ def _source_extraction_evidence_refs(candidate: dict[str, Any], extraction: dict
                 }
             )
     return refs
+
+
+def _merge_local_research_refs(*groups: list[dict[str, str]], max_items: int) -> list[dict[str, str]]:
+    merged: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for group in groups:
+        for ref in group:
+            if not isinstance(ref, dict):
+                continue
+            normalized = {
+                "type": _trim_text(ref.get("type"), max_length=80),
+                "id": _trim_text(ref.get("id"), max_length=240),
+                "label": _trim_text(ref.get("label"), max_length=240),
+            }
+            key = (normalized["type"], normalized["id"], normalized["label"])
+            if key in seen or not any(key):
+                continue
+            seen.add(key)
+            merged.append(normalized)
+            if len(merged) >= max_items:
+                return merged
+    return merged
 
 
 def _build_paper_note_chunks(
@@ -21905,6 +21953,7 @@ def _local_research_model_messages(task: dict[str, Any]) -> list[dict[str, str]]
         "evidenceRefs": task.get("evidenceRefs", []),
         "candidateRefs": task.get("candidateRefs", []),
         "excerpt": task.get("excerpt", ""),
+        "evidenceLedger": task.get("evidenceLedger", {}),
         "outputContract": task.get("outputContract", {}),
     }
     return [
@@ -22030,6 +22079,33 @@ def _normalize_ref_list(value: Any, *, max_items: int) -> list[dict[str, str]]:
             if label:
                 refs.append({"type": "text", "id": "", "label": label})
     return refs
+
+
+def _normalize_local_research_evidence_ledger(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    status = _trim_text(value.get("status"), max_length=80)
+    if status != "evidence_ready":
+        return {}
+    return {
+        "status": status,
+        "claims": _normalize_metadata_list(value.get("claims"), max_items=12),
+        "keyFindings": _normalize_metadata_list(value.get("keyFindings") or value.get("key_findings"), max_items=12),
+        "citations": _normalize_metadata_list(value.get("citations"), max_items=12),
+        "sourceRefs": _normalize_ref_list(value.get("sourceRefs") or value.get("source_refs"), max_items=24),
+        "evidenceRefs": _normalize_ref_list(value.get("evidenceRefs") or value.get("evidence_refs"), max_items=24),
+        "limitations": _normalize_text_list(value.get("limitations"), max_items=12, max_length=500),
+        "uncertainty": _normalize_text_list(value.get("uncertainty"), max_items=12, max_length=500),
+        "riskFlags": _normalize_text_list(value.get("riskFlags") or value.get("risk_flags"), max_items=12, max_length=120),
+        "supportLevel": _trim_text(value.get("supportLevel") or value.get("support_level"), max_length=80),
+        "nextAction": _trim_text(value.get("nextAction") or value.get("next_action"), max_length=120),
+    }
+
+
+def _normalize_metadata_list(value: Any, *, max_items: int) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [_normalize_metadata(item) for item in value[:max_items] if isinstance(item, dict)]
 
 
 def _normalize_text_list(value: Any, *, max_items: int, max_length: int) -> list[str]:
