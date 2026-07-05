@@ -7,6 +7,9 @@ import draftPanelStyles from "./ConfigDraftPanel.styles";
 import logHelperCenterPanelSource from "./ConfigLogHelperCenterPanel.tsx?raw";
 import logHelperCenterPanelStylesSource from "./ConfigLogHelperCenterPanel.styles.ts?raw";
 import logHelperCenterPanelStyles from "./ConfigLogHelperCenterPanel.styles";
+import modelLibraryPanelSource from "./ConfigModelLibraryPanel.tsx?raw";
+import modelLibraryPanelStylesSource from "./ConfigModelLibraryPanel.styles.ts?raw";
+import modelLibraryPanelStyles from "./ConfigModelLibraryPanel.styles";
 import overviewPanelSource from "./ConfigOverviewPanel.tsx?raw";
 import overviewPanelStylesSource from "./ConfigOverviewPanel.styles.ts?raw";
 import overviewPanelStyles from "./ConfigOverviewPanel.styles";
@@ -21,6 +24,7 @@ import stylesSource from "./ConfigRoute.styles.ts?raw";
 const extractedPanelStylesSource = [
   draftPanelStylesSource,
   logHelperCenterPanelStylesSource,
+  modelLibraryPanelStylesSource,
   overviewPanelStylesSource,
   placeholderPanelStylesSource,
   runtimePanelStylesSource,
@@ -44,20 +48,26 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("<ConfigOverviewPanel");
     expect(routeSource).toContain("<ConfigRuntimePanel");
     expect(routeSource).toContain("<ConfigDraftPanel");
+    expect(routeSource).toContain("<ConfigModelLibraryPanel");
     expect(routeSource).not.toContain('<section id="config-overview"');
     expect(routeSource).not.toContain('<section id="config-shell"');
     expect(routeSource).not.toContain('<section id="config-draft"');
+    expect(routeSource).not.toContain('<section id="config-models"');
 
     expect(overviewPanelSource).toContain('from "./ConfigOverviewPanel.styles"');
     expect(runtimePanelSource).toContain('from "./ConfigRuntimePanel.styles"');
     expect(draftPanelSource).toContain('from "./ConfigDraftPanel.styles"');
+    expect(modelLibraryPanelSource).toContain('from "./ConfigModelLibraryPanel.styles"');
     expect(overviewPanelSource).not.toContain("ConfigRoute.styles");
     expect(runtimePanelSource).not.toContain("ConfigRoute.styles");
     expect(draftPanelSource).not.toContain("ConfigRoute.styles");
+    expect(modelLibraryPanelSource).not.toContain("ConfigRoute.styles");
 
     expect(overviewPanelStyles.sectionSurface).toBeTypeOf("string");
     expect(runtimePanelStyles.sectionSurface).toBeTypeOf("string");
     expect(draftPanelStyles.sectionSurface).toBeTypeOf("string");
+    expect(modelLibraryPanelStyles.sectionSurface).toBeTypeOf("string");
+    expect(modelLibraryPanelStyles.modelLibrarySection).toBeTypeOf("string");
     expect(draftPanelSource).toContain("<LazyJsonCodeMirror");
     expect(routeSource).toContain("onIntakeModeChange");
   });
@@ -76,9 +86,9 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("subtitleHint");
     expect(routeSource).toContain('title={copy.subtitleHint}');
     expect(overviewPanelSource).toContain("sourceBodyShort");
-    expect(routeSource).toContain("modelsBodyShort");
+    expect(modelLibraryPanelSource).toContain("modelsBodyShort");
     expect(overviewPanelSource).toContain('title={copy.sourceBody}');
-    expect(routeSource).toContain('title={copy.modelsBody}');
+    expect(modelLibraryPanelSource).toContain('title={copy.modelsBody}');
     expect(overviewPanelSource).toContain('title={copy.openEnvironmentHint}');
     expect(routeSource).not.toContain('<span className={styles.helperText}>{copy.openEnvironmentHint}</span>');
   });
@@ -86,14 +96,18 @@ describe("ConfigRoute layout contract", () => {
   it("keeps the model settings group dense enough to use the bottom viewport", () => {
     expect(routeSource).toContain('activeSection?.id === "models-profiles"');
     expect(routeSource).toContain("styles.contentModels");
-    expect(routeSource).toContain("styles.modelLibrarySection");
+    expect(routeSource).toContain("<ConfigModelLibraryPanel");
+    expect(modelLibraryPanelSource).toContain('id="config-models"');
+    expect(modelLibraryPanelSource).toContain("styles.modelLibrarySection");
+    expect(modelLibraryPanelSource).toContain("styles.modelInventoryTable");
     expect(routeSource).toContain("styles.configEditorSection");
     expect(routeSource).toContain('section.id === "llm-discovery" ? styles.configDiscoverySection : ""');
     expect(routeSource).toContain("styles.notice");
-    expect(routeSource).toContain("styles.profileTableWrap");
-    expect(routeSource).toContain("styles.profileTaskCell");
+    expect(modelLibraryPanelSource).toContain("styles.profileTableWrap");
+    expect(modelLibraryPanelSource).toContain("styles.profileTaskCell");
     expect(stylesSource).toContain("contentModels:");
-    expect(stylesSource).toContain("modelLibrarySection:");
+    expect(modelLibraryPanelStylesSource).toContain("modelLibrarySection:");
+    expect(modelLibraryPanelStylesSource).toContain("modelInventoryTable:");
     expect(stylesSource).toContain("configEditorSection:");
     expect(stylesSource).toContain("configDiscoverySection:");
   });
@@ -130,10 +144,10 @@ describe("ConfigRoute layout contract", () => {
   it("splits model creation into vendor templates and concrete model discovery", () => {
     expect(routeSource).toContain("providerVendorGroups");
     expect(routeSource).toContain("selectedProviderVendorTemplates");
-    expect(routeSource).toContain("copy.providerVendor");
-    expect(routeSource).toContain("copy.providerTemplate");
+    expect(modelLibraryPanelSource).toContain("copy.providerVendor");
+    expect(modelLibraryPanelSource).toContain("copy.providerTemplate");
     expect(routeSource).toContain("applyProviderTemplate");
-    expect(routeSource).not.toContain("modelPresetGroups.map");
+    expect(modelLibraryPanelSource).not.toContain("modelPresetGroups.map");
   });
 
   it("shows developer mode as launcher-owned read-only state", () => {
@@ -255,7 +269,7 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("routes Config controls through VUI primitives", () => {
-    const configSources = [routeSource, overviewPanelSource, runtimePanelSource, draftPanelSource].join("\n");
+    const configSources = [routeSource, overviewPanelSource, runtimePanelSource, draftPanelSource, modelLibraryPanelSource].join("\n");
     expect(routeSource).toContain('from "../components/vui"');
     expect(configSources).toContain("<VButton");
     expect(routeSource).toContain("<VNativeInput");
