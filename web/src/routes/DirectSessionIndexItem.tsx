@@ -2,7 +2,7 @@ import { Bot, Check, Clock3, Cpu, LoaderCircle, MessageCircle, X } from "lucide-
 import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
 
 import type { AgentInstance, SessionSummary } from "../api/types";
-import { VButton, VIconButton, VNativeInput } from "../components/vui";
+import { VIconButton, VNativeButton, VNativeInput } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import {
   sessionAgentDisplayInfo,
@@ -40,6 +40,13 @@ function hasCjkText(value: string) {
   return /[\u3400-\u9fff]/.test(value);
 }
 
+const genericSessionFunctionLabels = new Set(["会话入口", "默认对话"]);
+const genericSessionFunctionLabelKeys = new Set(["chat entry", "default chat"]);
+
+function isGenericSessionFunctionLabel(label: string) {
+  return genericSessionFunctionLabels.has(label) || genericSessionFunctionLabelKeys.has(label.toLowerCase());
+}
+
 export function sessionAgentMetaLabel(session: Pick<SessionSummary, "agentCode" | "agentId">) {
   void session;
   return "";
@@ -48,6 +55,9 @@ export function sessionAgentMetaLabel(session: Pick<SessionSummary, "agentCode" 
 export function showSessionFunctionLabel(display: AgentDisplayInfo, lang: "zh" | "en" = "zh") {
   const label = String(display.functionLabel ?? "").trim();
   if (!label) {
+    return false;
+  }
+  if (isGenericSessionFunctionLabel(label)) {
     return false;
   }
   if (lang === "zh" && (hasAsciiLetter(label) || !hasCjkText(label))) {
@@ -363,9 +373,11 @@ export function DirectSessionIndexItem({
             ) : null}
             <span className={styles.conversationMetaRow}>
               <span className={styles.conversationMetaMain}>
-                <span className={`${styles.conversationKindBadge} ${sessionIsChild ? styles.conversationKindBadgeChild : styles.conversationKindBadgeDirect}`} title={kindLabel} aria-label={kindLabel}>
-                  <MessageCircle size={10} aria-hidden="true" />
-                </span>
+                {sessionIsChild ? (
+                  <span className={`${styles.conversationKindBadge} ${styles.conversationKindBadgeChild}`} title={kindLabel} aria-label={kindLabel}>
+                    <MessageCircle size={10} aria-hidden="true" />
+                  </span>
+                ) : null}
                 {sessionAgentMeta ? <span>{sessionAgentMeta}</span> : null}
                 {sessionFunctionVisible ? (
                   <span className={`${styles.agentRoleTag} ${agentRoleToneClass(sessionDisplay.tone)}`} title={sessionDisplay.functionLabel}>
@@ -383,11 +395,11 @@ export function DirectSessionIndexItem({
           </span>
         </div>
       ) : (
-        <VButton
+        <VNativeButton
           type="button"
           className={styles.sessionItemMain}
           {...dragSessionProps}
-          onPress={() => onOpen(session.id)}
+          onClick={() => onOpen(session.id)}
           aria-current={active ? "true" : undefined}
         >
           {renderSessionAvatar(avatarClassName, sessionAvatarImageUrl, sessionAvatarFallback)}
@@ -411,9 +423,11 @@ export function DirectSessionIndexItem({
             ) : null}
             <span className={styles.conversationMetaRow}>
               <span className={styles.conversationMetaMain}>
-                <span className={`${styles.conversationKindBadge} ${sessionIsChild ? styles.conversationKindBadgeChild : styles.conversationKindBadgeDirect}`} title={kindLabel} aria-label={kindLabel}>
-                  <MessageCircle size={10} aria-hidden="true" />
-                </span>
+                {sessionIsChild ? (
+                  <span className={`${styles.conversationKindBadge} ${styles.conversationKindBadgeChild}`} title={kindLabel} aria-label={kindLabel}>
+                    <MessageCircle size={10} aria-hidden="true" />
+                  </span>
+                ) : null}
                 {sessionAgentMeta ? <span>{sessionAgentMeta}</span> : null}
                 {sessionFunctionVisible ? (
                   <span className={`${styles.agentRoleTag} ${agentRoleToneClass(sessionDisplay.tone)}`} title={sessionDisplay.functionLabel}>
@@ -429,7 +443,7 @@ export function DirectSessionIndexItem({
             </span>
             {missingAgentMessage ? <span className={styles.agentMissingLine}>{missingAgentMessage}</span> : null}
           </span>
-        </VButton>
+        </VNativeButton>
       )}
       {editing ? (
         <div className={styles.sessionActionStack}>

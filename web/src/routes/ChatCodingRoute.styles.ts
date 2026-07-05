@@ -331,7 +331,7 @@ const styles: Record<string, string> = {
   conversationGroup:
     "vui-routes-chatcodingroute conversationGroup grid min-w-0 gap-0.5",
   conversationGroupHeader:
-    "vui-routes-chatcodingroute conversationGroupHeader !grid !w-full min-h-[28px] grid-cols-[14px_minmax(0,1fr)_auto] items-center gap-1 rounded-none border-0 bg-transparent px-1.5 py-0 text-left text-[var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-secondary)] shadow-none hover:border-transparent hover:bg-[color-mix(in_srgb,var(--surface-card)_36%,transparent)] [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents [&_span]:min-w-0 [&_span]:truncate [&_strong]:text-[var(--vui-font-xs)] [&_strong]:font-semibold",
+    "vui-routes-chatcodingroute conversationGroupHeader !grid !w-full min-h-[28px] grid-cols-[14px_minmax(0,1fr)_auto] items-center gap-1 rounded-none border-0 bg-transparent px-1.5 py-0 text-left text-[var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-secondary)] shadow-none hover:border-transparent hover:bg-[color-mix(in_srgb,var(--surface-card)_36%,transparent)] [&_span]:min-w-0 [&_span]:truncate [&_strong]:text-[var(--vui-font-xs)] [&_strong]:font-semibold",
   conversationGroupList:
     "vui-routes-chatcodingroute conversationGroupList grid min-w-0 gap-1",
   conversationKindBadge:
@@ -629,7 +629,7 @@ const styles: Record<string, string> = {
   newGroupButton:
     "vui-routes-chatcodingroute newGroupButton !inline-flex !h-[32px] !min-h-[32px] !w-auto items-center gap-1 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-0 !text-[var(--vui-font-xs)] font-semibold !leading-none text-[var(--fg-secondary)] shadow-none hover:bg-[var(--vui-control-muted-hover)] [&_[data-slot=vui-button-content]]:!leading-none [&_[data-slot=vui-button-label]]:!leading-none",
   newSessionButton:
-    "vui-routes-chatcodingroute newSessionButton !inline-flex !h-[32px] !min-h-[32px] !w-auto items-center gap-1 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-0 !text-[var(--vui-font-xs)] font-semibold !leading-none text-[var(--fg-secondary)] shadow-none hover:bg-[var(--vui-control-muted-hover)] [&_[data-slot=vui-button-content]]:!leading-none [&_[data-slot=vui-button-label]]:!leading-none",
+    "vui-routes-chatcodingroute newSessionButton !inline-flex !h-[32px] !min-h-[32px] !w-auto items-center gap-1 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_34%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] px-2 py-0 !text-[var(--vui-font-xs)] font-semibold !leading-none text-[var(--accent-cool)] shadow-none hover:bg-[color-mix(in_srgb,var(--accent-cool)_14%,var(--vui-surface-row))] [&_[data-slot=vui-button-content]]:!leading-none [&_[data-slot=vui-button-label]]:!leading-none",
   oneLineValue:
     "vui-routes-chatcodingroute oneLineValue min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_68%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_42%,transparent)] px-1.5 py-1 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] [&_span]:mr-1.5 [&_span]:font-semibold [&_span]:text-[var(--fg-tertiary)]",
   paneCollapsed:
@@ -639,9 +639,9 @@ const styles: Record<string, string> = {
   panelNotice:
     "vui-routes-chatcodingroute panelNotice grid min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_22%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_5%,var(--vui-surface-row))] px-2 py-1.5 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)]",
   panelSearch:
-    "vui-routes-chatcodingroute panelSearch min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "vui-routes-chatcodingroute panelSearch grid min-w-0 grid-cols-[16px_minmax(0,1fr)] items-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,transparent)] px-2 py-1 text-[var(--fg-tertiary)] shadow-none",
   panelSearchInput:
-    "vui-routes-chatcodingroute panelSearchInput min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+    "vui-routes-chatcodingroute panelSearchInput min-w-0 h-8 min-h-8 w-full !border-0 !bg-transparent px-0 py-0 text-[var(--vui-font-sm)] text-[var(--fg-primary)] !shadow-none placeholder:text-[var(--fg-tertiary)] focus-visible:ring-0",
   panelState:
     "vui-routes-chatcodingroute panelState grid min-h-[42px] min-w-0 place-items-center rounded-[var(--radius-control)] border border-dashed border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-row)_66%,transparent)] px-2 py-2 text-center text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-tertiary)]",
   petMiniAvatar:
@@ -865,7 +865,7 @@ const styles: Record<string, string> = {
   sessionItemError:
     "vui-routes-chatcodingroute sessionItemError min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   sessionItemMain:
-    "vui-routes-chatcodingroute sessionItemMain !grid !w-full min-w-0 grid-cols-[27px_minmax(0,1fr)] items-center justify-stretch gap-1.5 rounded-none border-0 bg-transparent !p-0 text-left text-[var(--fg-primary)] shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+    "vui-routes-chatcodingroute sessionItemMain !grid !w-full min-w-0 grid-cols-[27px_minmax(0,1fr)] items-center justify-stretch gap-1.5 rounded-none border-0 bg-transparent !p-0 text-left text-[var(--fg-primary)] shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none",
   sessionItemNotice:
     "vui-routes-chatcodingroute sessionItemNotice min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 rounded-[var(--radius-control)] bg-[var(--vui-surface-row)]",
   sessionItemSummary:

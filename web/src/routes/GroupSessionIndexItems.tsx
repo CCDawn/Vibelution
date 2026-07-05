@@ -1,7 +1,7 @@
 import { CircleDot, Clock3, MessageCircleHeart, UsersRound } from "lucide-react";
 
 import type { ConversationSummary, Team } from "../api/types";
-import { VButton } from "../components/vui";
+import { VNativeButton } from "../components/vui";
 import type { ConversationIndexTeam } from "./conversationIndexModel";
 import { conversationIndexTeamMemberCount } from "./conversationIndexModel";
 import styles from "./GroupSessionIndexItems.styles";
@@ -72,10 +72,10 @@ export function GroupConversationIndexItem({
       aria-current={active ? "true" : undefined}
       className={itemClassName}
     >
-      <VButton
+      <VNativeButton
         type="button"
         className={styles.sessionItemMain}
-        onPress={() => onOpen(roomId)}
+        onClick={() => onOpen(roomId)}
       >
         <span className={`${styles.conversationAvatar} ${styles.conversationAvatarGroup}`} aria-hidden="true">
           <UsersRound size={18} />
@@ -99,7 +99,7 @@ export function GroupConversationIndexItem({
             <time>{formatTime(conversation.updatedAt)}</time>
           </span>
         </span>
-      </VButton>
+      </VNativeButton>
     </div>
   );
 }
@@ -140,11 +140,11 @@ export function TeamConversationIndexItem({
       aria-current={active ? "true" : undefined}
       className={itemClassName}
     >
-      <VButton
+      <VNativeButton
         type="button"
         className={styles.sessionItemMain}
-        isDisabled={!roomId}
-        onPress={() => onOpen(roomId)}
+        disabled={!roomId}
+        onClick={() => onOpen(roomId)}
       >
         <span className={`${styles.conversationAvatar} ${styles.conversationAvatarGroup}`} aria-hidden="true">
           <UsersRound size={18} />
@@ -174,7 +174,7 @@ export function TeamConversationIndexItem({
             ) : null}
           </span>
         </span>
-      </VButton>
+      </VNativeButton>
     </div>
   );
 }

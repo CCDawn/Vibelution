@@ -92,6 +92,20 @@ describe("DirectSessionIndexItem helpers", () => {
     expect(markup).toContain("模型：mimo-v2.5");
   });
 
+  it("renders the compact row action through a native VUI button instead of generic HeroUI button chrome", () => {
+    const markup = renderDirectItem();
+
+    expect(markup).toContain('data-vui="native-button"');
+    expect(markup).not.toContain('data-vui="button"');
+  });
+
+  it("keeps root direct sessions free of the redundant chat-kind bubble", () => {
+    const markup = renderDirectItem();
+
+    expect(markup).not.toContain("conversationKindBadgeDirect");
+    expect(markup).not.toContain("会话入口");
+  });
+
   it("renders rename input through the VUI native input boundary", () => {
     const markup = renderDirectItem({
       editing: true,
@@ -152,8 +166,9 @@ describe("DirectSessionIndexItem helpers", () => {
   });
 
   it("shows readable function labels while keeping raw English role ids out of Chinese cards", () => {
-    expect(showSessionFunctionLabel(display({ tone: "chat", functionLabel: "会话入口" }))).toBe(true);
-    expect(showSessionFunctionLabel(display({ tone: "chat", functionLabel: "Chat entry" }), "en")).toBe(true);
+    expect(showSessionFunctionLabel(display({ tone: "chat", functionLabel: "会话入口" }))).toBe(false);
+    expect(showSessionFunctionLabel(display({ tone: "chat", functionLabel: "默认对话" }))).toBe(false);
+    expect(showSessionFunctionLabel(display({ tone: "chat", functionLabel: "Chat entry" }), "en")).toBe(false);
     expect(showSessionFunctionLabel(display({ tone: "chat", functionLabel: "agent-center-review-session" }))).toBe(false);
     expect(showSessionFunctionLabel(display({ tone: "memory", functionLabel: "知识管理员" }))).toBe(true);
   });
