@@ -87,6 +87,36 @@ describe("conversation notification service", () => {
     });
   });
 
+  it("shows a native notification for a failed terminal conversation status", async () => {
+    const { service, notifications, recordEvent } = makeService({ focused: false });
+
+    const result = await service.notify(
+      completion({
+        notificationKey: "session-1:turn-1:failed",
+        terminalStatus: "failed"
+      })
+    );
+
+    expect(result.status).toBe("notified");
+    expect(result.unreadCount).toBe(1);
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]).toMatchObject({
+      title: "对话已完成",
+      body: "Vibelution 已完成一轮回复。",
+      shown: true
+    });
+    expect(recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventCode: "electron.conversation_notification.notified",
+        fields: expect.objectContaining({
+          notificationKey: "session-1:turn-1:failed",
+          terminalStatus: "failed",
+          status: "notified"
+        })
+      })
+    );
+  });
+
   it("dedupes repeated completion keys", async () => {
     const { service, provider, notifications } = makeService({ focused: false });
 
