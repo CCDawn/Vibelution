@@ -492,6 +492,9 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeStyles.workflowStepButtonActive).toContain("[border-color:");
     expect(routeStyles.workflowStepPreview).toContain("[-webkit-line-clamp:2]");
     expect(routeStyles.caseOverviewWorkspace).toContain("[grid-template-rows:auto_minmax(120px,_1fr)]");
+    expect(routeStyles.caseOverviewWorkspace).toContain("[background-image:linear-gradient(to_right");
+    expect(routeStyles.caseOverviewWorkspace).toContain("linear-gradient(to_bottom");
+    expect(routeStyles.caseOverviewWorkspace).toContain("[background-size:40px_40px]");
     expect(routeStyles.caseOverviewItem).toContain("grid");
     expect(routeStyles.caseOverviewEvidence).toContain("[grid-template-rows:auto_minmax(120px,_1fr)_auto]");
     expect(routeStyles.caseOverviewEvidenceGrid).toContain("[grid-template-columns:repeat(4,_minmax(0,_1fr))]");
@@ -721,6 +724,9 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("styles.caseConversationShell");
     expect(routeSource).toContain("styles.caseConversationTranscript");
     expect(routeStyles.caseConversationShell).toContain("[flex:1_1_0]");
+    expect(routeStyles.caseConversationShell).toContain("[background-image:linear-gradient(to_right");
+    expect(routeStyles.caseConversationShell).toContain("linear-gradient(to_bottom");
+    expect(routeStyles.caseConversationShell).toContain("[background-size:40px_40px]");
     expect(routeStyles.caseConversationTranscript).toContain("[height:100%]");
     expect(routeStyles.caseConversationFallback).toContain("[place-items:center]");
     expect(routeStyles.supervisedConversationEvidence).toContain("[width:100%]");
