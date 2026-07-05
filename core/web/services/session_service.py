@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from config.llm_key_env import sync_llm_key_env_from_persisted_user_env
 from config.settings import get_config
 from config.settings import get_web_chat_config
 from core.context.segments import (
@@ -12312,6 +12313,30 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         tool_workspace = agent_workspace_path if not workspace_decision or workspace_decision.allowed else session_workspace
     prepare_timings["workspacePolicyMs"] = _elapsed_ms(stage_started_at)
     prepare_timings["supervisedWorkspaceOverride"] = str(supervised_workspace_override or "")
+    stage_started_at = _perf_counter()
+    llm_key_env_sync = sync_llm_key_env_from_persisted_user_env(context="chat_turn")
+    prepare_timings["llmKeyEnvSyncMs"] = _elapsed_ms(stage_started_at)
+    prepare_timings["llmKeyEnvSyncOk"] = bool(llm_key_env_sync.get("ok"))
+    prepare_timings["llmKeyEnvSyncedCount"] = int(llm_key_env_sync.get("syncedCount") or 0)
+    prepare_timings["llmKeyEnvAlreadyPresentCount"] = int(llm_key_env_sync.get("alreadyPresentCount") or 0)
+    prepare_timings["llmKeyEnvMissingCount"] = int(llm_key_env_sync.get("missingCount") or 0)
+    if llm_key_env_sync.get("ok"):
+        _record_session_turn_lifecycle_event(
+            session_id,
+            "llm_key_env_synced",
+            turn_id=turn_id,
+            outcome="synced",
+            fields=llm_key_env_sync,
+        )
+    else:
+        _record_session_turn_lifecycle_event(
+            session_id,
+            "llm_key_env_sync_failed",
+            turn_id=turn_id,
+            level="warning",
+            outcome="failed",
+            fields=llm_key_env_sync,
+        )
     resolved_agent_llm = None
     if agent_instance:
         stage_started_at = _perf_counter()
