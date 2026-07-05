@@ -37,7 +37,7 @@ const styles: Record<string, string> = {
   canvasScroller:
     "canvasScroller min-w-0 grid h-full min-h-0 gap-2 overflow-auto p-2",
   canvasShell:
-    "canvasShell min-w-0 grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)] gap-2 p-2",
+    "canvasShell min-w-0 grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden bg-[var(--vui-gradient-route-soft)] text-[var(--fg-primary)] gap-2 p-2",
   canvasViewport:
     "canvasViewport min-w-0 grid min-h-full gap-2 p-2 w-[var(--research-flow-canvas-viewport-width)] h-[var(--research-flow-canvas-viewport-height)]",
   edge:
@@ -373,7 +373,7 @@ const styles: Record<string, string> = {
   reconnectHint:
     "reconnectHint min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   route:
-    "route min-w-0 grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)]",
+    "route min-w-0 grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden text-[var(--fg-primary)]",
   saveStatusError:
     "saveStatusError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   saveStatusIdle:
