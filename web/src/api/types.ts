@@ -12,6 +12,85 @@ export type DomainAvailability = {
   config: boolean;
 };
 
+export type UsageSource = "provider_usage" | "estimated" | "missing" | "not_called" | string;
+
+export type TokenUsageRollup = {
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheReadInputTokens: number;
+  cacheCreationInputTokens: number;
+  uncachedInputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+  totalTokens: number;
+  callCount: number;
+  observedCallCount: number;
+  estimatedCallCount: number;
+  missingCallCount: number;
+  notCalledCount: number;
+  latencyMs: number;
+  cacheHitRate: number;
+};
+
+export type TokenUsageSample = Partial<TokenUsageRollup> & {
+  eventId?: string;
+  recordedAt?: string;
+  source: UsageSource;
+  scopeKind?: string;
+  sessionId?: string;
+  conversationId?: string;
+  turnId?: string;
+  agentId?: string;
+  teamId?: string;
+  provider?: string;
+  model?: string;
+  profileId?: string;
+  transport?: string;
+  contextWindow?: number;
+  runtimeSceneId?: string;
+  providerUsageKeys?: string[];
+};
+
+export type TokenUsageBreakdownItem = Partial<TokenUsageRollup> & {
+  key: string;
+  label: string;
+  provider?: string;
+  model?: string;
+  source?: UsageSource;
+};
+
+export type UsageSummaryResponse = {
+  scope: "global" | "session" | "agent" | "model" | string;
+  filters: {
+    sessionId: string;
+    agentId: string;
+    provider: string;
+    model: string;
+  };
+  lastTokenUsage: TokenUsageSample;
+  sessionTokenUsage: TokenUsageRollup;
+  agentTokenUsage: TokenUsageRollup;
+  scopeTokenUsage: TokenUsageRollup;
+  globalTokenUsage: {
+    today: TokenUsageRollup;
+    last7Days: TokenUsageRollup;
+    allTime: TokenUsageRollup;
+  };
+  modelContextWindow: number;
+  diagnostics: {
+    source: string;
+    skippedRecordCount: number;
+    ledgerPath: string;
+    schemaVersion: number;
+  };
+  updatedAt: string;
+  breakdowns: {
+    models: TokenUsageBreakdownItem[];
+    providers: TokenUsageBreakdownItem[];
+    sources: TokenUsageBreakdownItem[];
+  };
+};
+
 export type MemoryItem = {
   id: string;
   title: string;

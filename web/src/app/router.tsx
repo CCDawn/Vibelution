@@ -60,6 +60,7 @@ const SkillsRoute = lazyRoute(() => import("../routes/SkillsRoute").then((module
 const SupervisedReviewRoute = lazyRoute(() => import("../routes/SupervisedReviewRoute").then((module) => ({ default: module.SupervisedReviewRoute })));
 const TeamsRoute = lazyRoute(() => import("../routes/TeamsRoute").then((module) => ({ default: module.TeamsRoute })));
 const ToolsRoute = lazyRoute(() => import("../routes/ToolsRoute").then((module) => ({ default: module.ToolsRoute })));
+const UsageRoute = lazyRoute(() => import("../routes/UsageRoute").then((module) => ({ default: module.UsageRoute })));
 
 function lazyRoute<T extends ComponentType<any>>(loader: () => Promise<{ default: T }>) {
   return lazy(() =>
@@ -210,6 +211,7 @@ export const router = createBrowserRouter([
       { path: "teams", ...guardedLazyElement(<TeamsRoute />) },
       { path: "kernel", ...guardedLazyElement(<KernelTaskCenterRoute />) },
       { path: "git", ...guardedLazyElement(<GitRoute />) },
+      { path: "usage", ...guardedLazyElement(<UsageRoute />) },
       { path: "logs", ...guardedLazyElement(<LogsRoute />) },
       { path: "research", element: <LegacyTeamsRedirect /> },
       { path: "research/flow-canvas", ...guardedLazyElement(<ResearchFlowCanvasRoute />) },

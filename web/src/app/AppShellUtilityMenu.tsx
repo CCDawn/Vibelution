@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import { ExternalLink, FolderTree, GitBranch, ScrollText, Search } from "lucide-react";
+import { Activity, ExternalLink, FolderTree, GitBranch, ScrollText, Search } from "lucide-react";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -182,6 +182,10 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
           <ExternalLink size={16} />
           <span>{lang === "zh" ? "启动器" : "Launcher"}</span>
         </a>
+        <NavLink to="/usage" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={onClose} title={t("usageUtilityTitle")}>
+          <Activity size={16} />
+          <span>{t("navUsage")}</span>
+        </NavLink>
         <NavLink to="/logs" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={onClose}>
           <ScrollText size={16} />
           <span>{t("navLogs")}</span>
