@@ -1263,6 +1263,7 @@ def test_runtime_llm_probe_uses_real_backend_with_small_payload(monkeypatch):
 
     monkeypatch.setenv("VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY", "relay-secret")
     monkeypatch.setattr("core.llm.client._default_completion_backend", fake_backend)
+    monkeypatch.setattr("core.llm.client._default_responses_backend", fake_backend)
 
     result = _probe_llm_runtime(provider, profile, "relay-secret")
 
@@ -1270,7 +1271,9 @@ def test_runtime_llm_probe_uses_real_backend_with_small_payload(monkeypatch):
     assert result["probe"] == "runtime_provider"
     assert result["runtime_route"] == captured["model"]
     assert result["max_tokens"] == 1
-    assert captured["max_tokens"] == 1
+    assert result["max_output_tokens"] == 1
+    assert captured["max_output_tokens"] == 1
+    assert "max_tokens" not in captured
     assert captured["stream"] is False
     assert captured["api_key"] == "relay-secret"
 
@@ -1607,16 +1610,19 @@ def test_inspect_public_config_summarizes_effective_state():
 
 def test_inspect_public_config_warns_when_profiles_bypass_matching_relay_responses_route():
     public_config = load_public_config()
+    public_config["llm"]["model_library"].pop("relay_openai_gpt_5_5", None)
+    public_config = apply_llm_model_preset(public_config, "relay_openai_gpt_5_5")
+    relay_model = public_config["llm"]["model_library"]["relay_openai_gpt_5_5"]
     public_config["llm"]["profiles"]["primary"] = {
         "provider": {
             "kind": "openai_compatible",
             "api_key_env": "OPENAI_API_KEY",
-            "base_url": "https://ai-pixel.online",
+            "base_url": relay_model["provider"]["base_url"],
             "compat_mode": "openai",
             "requires_api_key": True,
             "context_window": 128000,
         },
-        "model": "gpt-5.5",
+        "model": relay_model["model"],
         "api_key_env": "VIBELUTION_LLM_MODEL_CUSTOM_OPENAI_COMPATIBLE_RELAY_API_KEY",
         "transport": "chat_completions",
         "contract": "tool_chat",

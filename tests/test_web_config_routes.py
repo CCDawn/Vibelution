@@ -994,7 +994,19 @@ def test_config_workspace_test_llm_ignores_forged_pending_draft_key(monkeypatch)
 def test_config_workspace_test_llm_reports_local_draft_route_clearly(monkeypatch):
     saved_config = copy.deepcopy(load_public_config())
     draft_config = copy.deepcopy(saved_config)
-    draft_config.setdefault("runtime", {})["profile"] = "safe_local"
+    draft_config.setdefault("llm", {}).setdefault("profiles", {})["primary"] = {
+        "provider": {
+            "kind": "local",
+            "base_url": "http://localhost:11434/v1",
+            "compat_mode": "openai",
+            "requires_api_key": False,
+            "context_window": 128000,
+        },
+        "model": "local-test-model",
+        "transport": "chat_completions",
+        "contract": "tool_chat",
+        "strict_compatibility": False,
+    }
     monkeypatch.delenv("VIBELUTION_LLM_DEEPSEEK_V4_PRO_API_KEY", raising=False)
 
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(saved_config))

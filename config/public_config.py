@@ -1767,7 +1767,7 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
         return {"ok": False, "message": str(exc)}
 
     try:
-        from core.llm.client import LLMClient, _default_completion_backend
+        from core.llm.client import LLMClient, _default_completion_backend, _default_responses_backend
     except Exception:
         return _probe_llm_http(provider, profile, api_key)
 
@@ -1822,15 +1822,20 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
     captured_payload: dict[str, Any] = {}
 
     def real_backend(payload: dict[str, Any]) -> dict[str, Any]:
+        max_output_tokens = payload.get("max_output_tokens")
+        max_tokens = payload.get("max_tokens") if "max_tokens" in payload else max_output_tokens
         captured_payload.update(
             {
                 "model": payload.get("model"),
                 "base_url": payload.get("base_url"),
                 "stream": payload.get("stream"),
-                "max_tokens": payload.get("max_tokens"),
+                "max_tokens": max_tokens,
+                "max_output_tokens": max_output_tokens,
                 "timeout": payload.get("timeout"),
             }
         )
+        if "input" in payload and "messages" not in payload:
+            return _default_responses_backend(payload)
         return _default_completion_backend(payload)
 
     try:
@@ -1861,6 +1866,7 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
         "probe": "runtime_provider",
         "stream": bool(captured_payload.get("stream")),
         "max_tokens": captured_payload.get("max_tokens"),
+        "max_output_tokens": captured_payload.get("max_output_tokens"),
         "transport": profile.transport,
     }
 

@@ -28,7 +28,7 @@ from .payload_builder import PayloadBuildInput, build_llm_payload
 from .payload_validator import payload_protocol_summary
 from .protocol_resolver import resolve_model_protocol
 from .reasoning_extractor import extract_reasoning_text, strip_think_tag_reasoning
-from .streaming import extract_message_tool_calls, extract_text_content
+from .streaming import ResponsesStreamNormalizer, extract_message_tool_calls, extract_text_content
 from .types import LLMCapabilities, LLMError, StreamChunk, UsageStats
 from .usage import read_usage_int as _read_provider_usage_int
 from .usage import usage_stats_from_payload, usage_to_dict
@@ -357,6 +357,14 @@ def _safe_message_role_summary(messages: List[Any]) -> Dict[str, Any]:
     }
 
 
+def _payload_conversation_items(payload: Dict[str, Any]) -> List[Any]:
+    for key in ("messages", "input"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return value
+    return []
+
+
 def _message_role_and_content(message: Any) -> tuple[str, Any]:
     def normalize_role(value: str) -> str:
         role = str(value or "user").strip().lower() or "user"
@@ -619,7 +627,7 @@ def _safe_prompt_cache_payload_summary(payload: Dict[str, Any]) -> Dict[str, Any
             cache_key = value.strip()
             break
     retention = payload.get("prompt_cache_retention") or payload.get("promptCacheRetention") or ""
-    messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+    messages = _payload_conversation_items(payload)
     cache_control_blocks = 0
     for message in messages:
         if not isinstance(message, dict):
@@ -714,7 +722,7 @@ def _strip_cache_control_from_messages(messages: List[Dict[str, Any]]) -> List[D
 
 
 def _safe_payload_shape_summary(payload: Dict[str, Any]) -> Dict[str, Any]:
-    messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+    messages = _payload_conversation_items(payload)
     role_text_chars: Dict[str, int] = {}
     system_text_chars = 0
     non_system_text_chars = 0
@@ -783,7 +791,7 @@ def _safe_payload_route_summary(payload: Dict[str, Any], profile: Any, provider:
         "contract": str(getattr(profile, "contract", "") or ""),
         "baseUrlHost": host,
         "stream": bool(payload.get("stream")),
-        "maxTokens": payload.get("max_tokens"),
+        "maxTokens": payload.get("max_tokens") if "max_tokens" in payload else payload.get("max_output_tokens"),
         "timeout": payload.get("timeout"),
     }
 
@@ -929,6 +937,24 @@ def _default_completion_backend(payload: Dict[str, Any]) -> Any:
     return completion(**payload)
 
 
+def _default_responses_backend(payload: Dict[str, Any]) -> Any:
+    _raise_if_llm_cancelled()
+    try:
+        from litellm import responses
+    except Exception as exc:  # pragma: no cover
+        raise LLMError(
+            "configuration_error",
+            "LiteLLM 未安装或不支持 Responses API，无法执行模型调用；请安装支持 responses 的 litellm",
+            retryable=False,
+        ) from exc
+    _ensure_no_proxy_for_local_base_url(payload.get("base_url"))
+    return responses(**payload)
+
+
+def _payload_uses_responses(payload: Dict[str, Any]) -> bool:
+    return "input" in payload and "messages" not in payload
+
+
 def _normalize_tool_calls(tool_calls: Any) -> List[Dict[str, Any]]:
     normalized: List[Dict[str, Any]] = []
     for index, raw_tool in enumerate(tool_calls or []):
@@ -1053,6 +1079,7 @@ class LLMClient:
         profile_id: Optional[str] = None,
         bound_tools: Optional[List[Any]] = None,
         backend: Any = None,
+        responses_backend: Any = None,
     ) -> None:
         self.config = config or get_config()
         self.role = role
@@ -1061,6 +1088,7 @@ class LLMClient:
         self.provider = self.config.llm.get_provider(self.profile.provider_id)
         self.bound_tools = list(bound_tools or [])
         self._backend = backend or _default_completion_backend
+        self._responses_backend = responses_backend or backend or _default_responses_backend
         self.adapter = get_provider_adapter(self.provider, self.profile)
         self._resolved_spec = discover_model(self.config, self.profile_id)
         _model_id, model_entry = self.config.llm.get_model_library_entry_for_profile(self.profile)
@@ -1086,6 +1114,7 @@ class LLMClient:
             profile_id=self.profile_id,
             bound_tools=list(tools or []),
             backend=self._backend,
+            responses_backend=self._responses_backend,
         )
 
     def _build_payload(self, messages: List[Any], *, tools: Optional[List[Any]] = None, stream: bool = False) -> Dict[str, Any]:
@@ -1160,11 +1189,58 @@ class LLMClient:
             }
         return {}
 
+    def _responses_message(self, response: Any) -> Dict[str, Any]:
+        text = self._responses_text(response)
+        return {"role": "assistant", "content": text, "tool_calls": []}
+
+    def _responses_text(self, response: Any) -> str:
+        if isinstance(response, dict):
+            output_text = response.get("output_text")
+            if isinstance(output_text, str):
+                return output_text
+            return self._responses_text_from_output(response.get("output"))
+        output_text = getattr(response, "output_text", None)
+        if isinstance(output_text, str):
+            return output_text
+        return self._responses_text_from_output(getattr(response, "output", None))
+
+    def _responses_text_from_output(self, output: Any) -> str:
+        parts: List[str] = []
+        for item in list(output or []):
+            item_dict = self._provider_object_to_dict(item)
+            if not isinstance(item_dict, dict):
+                continue
+            if isinstance(item_dict.get("text"), str):
+                parts.append(item_dict.get("text") or "")
+            content = item_dict.get("content")
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                block_dict = self._provider_object_to_dict(block)
+                if not isinstance(block_dict, dict):
+                    continue
+                text = block_dict.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "".join(parts)
+
+    @staticmethod
+    def _provider_object_to_dict(value: Any) -> Dict[str, Any] | None:
+        if isinstance(value, dict):
+            return value
+        if hasattr(value, "model_dump"):
+            dumped = value.model_dump()
+            return dumped if isinstance(dumped, dict) else None
+        if value is not None and hasattr(value, "__dict__"):
+            return dict(getattr(value, "__dict__", {}) or {})
+        return None
+
     def invoke(self, messages: List[Any], *, tools: Optional[List[Any]] = None, metadata: Optional[Dict[str, Any]] = None) -> AIMessage:
         start = time.time()
         payload = self._build_payload(messages, tools=tools, stream=False)
-        message_role_summary = _safe_message_role_summary(payload.get("messages") or messages)
-        message_order_summary = _safe_message_order_cache_summary(payload.get("messages") or messages)
+        provider_conversation_items = _payload_conversation_items(payload) or messages
+        message_role_summary = _safe_message_role_summary(provider_conversation_items)
+        message_order_summary = _safe_message_order_cache_summary(provider_conversation_items)
         route_summary = _safe_payload_route_summary(payload, self.profile, self.provider)
         payload_shape_summary = _safe_payload_shape_summary(payload)
         prompt_cache_design_summary = _safe_prompt_cache_design_summary(
@@ -1195,7 +1271,7 @@ class LLMClient:
             },
         )
         latency_ms = int((time.time() - start) * 1000)
-        message = self._choice_message(response)
+        message = self._responses_message(response) if _payload_uses_responses(payload) else self._choice_message(response)
         tool_calls = extract_message_tool_calls(message)
         usage = self._usage_from_response(response, latency_ms)
         additional_kwargs = {"tool_calls_raw": [call.provider_payload for call in tool_calls]}
@@ -1274,7 +1350,10 @@ class LLMClient:
     def _invoke_payload_once(self, payload: Dict[str, Any]) -> Any:
         _raise_if_llm_cancelled()
         with _llm_provider_proxy_env(self.config, payload.get("base_url")):
-            return self._backend(payload)
+            return self._backend_for_payload(payload)(payload)
+
+    def _backend_for_payload(self, payload: Dict[str, Any]):
+        return self._responses_backend if _payload_uses_responses(payload) else self._backend
 
     def _invoke_backend_with_retry(
         self,
@@ -1304,7 +1383,7 @@ class LLMClient:
                 ):
                     _raise_if_llm_cancelled()
                     with _llm_provider_proxy_env(self.config, payload.get("base_url")):
-                        return self._backend(payload)
+                        return self._backend_for_payload(payload)(payload)
             except LLMCancelledError as exc:
                 raise _llm_cancelled_error(exc.reason) from exc
             except Exception as exc:
@@ -1435,8 +1514,13 @@ class LLMClient:
             iterator: Any = None
             normalized_iterator: Any = None
             with _llm_provider_proxy_env(self.config, payload.get("base_url")):
-                iterator = self._backend(payload)
-                normalized_iterator = self.adapter.stream_normalizer().events(iterator)
+                iterator = self._backend_for_payload(payload)(payload)
+                stream_normalizer = (
+                    ResponsesStreamNormalizer()
+                    if _payload_uses_responses(payload)
+                    else self.adapter.stream_normalizer()
+                )
+                normalized_iterator = stream_normalizer.events(iterator)
                 try:
                     for event in normalized_iterator:
                         _raise_if_llm_cancelled()
@@ -1465,8 +1549,9 @@ class LLMClient:
         payload = self._build_payload(messages, tools=tools, stream=True)
         message_count = len(messages or [])
         tool_count = len(tools or self.bound_tools or [])
-        message_role_summary = _safe_message_role_summary(payload.get("messages") or messages)
-        message_order_summary = _safe_message_order_cache_summary(payload.get("messages") or messages)
+        provider_conversation_items = _payload_conversation_items(payload) or messages
+        message_role_summary = _safe_message_role_summary(provider_conversation_items)
+        message_order_summary = _safe_message_order_cache_summary(provider_conversation_items)
         route_summary = _safe_payload_route_summary(payload, self.profile, self.provider)
         payload_shape_summary = _safe_payload_shape_summary(payload)
         prompt_cache_design_summary = _safe_prompt_cache_design_summary(

@@ -570,7 +570,86 @@ def test_responses_transport_routes_openai_compatible_model_through_responses_br
     payload = client._build_payload([{"role": "user", "content": "ping"}])
 
     assert payload["model"] == "openai/responses/gpt-5.5"
-    assert payload["messages"][0]["content"] == "ping"
+    assert "messages" not in payload
+    assert "max_tokens" not in payload
+    assert payload["max_output_tokens"] == config.llm.get_profile("primary").max_output_tokens
+    assert payload["input"] == [
+        {
+            "role": "user",
+            "content": [{"type": "input_text", "text": "ping"}],
+        }
+    ]
+
+
+def test_responses_transport_invokes_responses_backend():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.5",
+            "llm.profiles.primary.transport": "responses",
+        }
+    )
+    calls = []
+
+    def chat_backend(payload):
+        calls.append(("chat", payload))
+        return {"choices": [{"message": {"role": "assistant", "content": "chat"}}]}
+
+    def responses_backend(payload):
+        calls.append(("responses", payload))
+        return {"output_text": "responses ok", "usage": {}}
+
+    client = LLMClient(config=config, backend=chat_backend, responses_backend=responses_backend)
+    message = client.invoke([{"role": "user", "content": "ping"}])
+
+    assert message.content == "responses ok"
+    assert [kind for kind, _payload in calls] == ["responses"]
+    assert "input" in calls[0][1]
+    assert "messages" not in calls[0][1]
+
+
+def test_responses_transport_streams_with_responses_normalizer(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.5",
+            "llm.profiles.primary.transport": "responses",
+            "llm.profiles.primary.streaming": True,
+        }
+    )
+    calls = []
+
+    def default_responses_backend(payload):
+        calls.append(payload)
+        return iter(
+            [
+                {"type": "response.output_text.delta", "delta": "res"},
+                {"type": "response.output_text.delta", "delta": "ponses"},
+                {
+                    "type": "response.completed",
+                    "response": {"usage": {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5}},
+                },
+            ]
+        )
+
+    monkeypatch.setattr("core.llm.client._default_responses_backend", default_responses_backend)
+    client = LLMClient(config=config)
+
+    events = list(client.stream_events([{"role": "user", "content": "ping"}]))
+
+    assert [event.type for event in events] == ["text_delta", "text_delta", "done"]
+    assert [event.text for event in events[:2]] == ["res", "ponses"]
+    assert events[-1].usage.total_tokens == 5
+    assert "input" in calls[0]
+    assert "messages" not in calls[0]
 
 
 def test_responses_transport_preserves_existing_provider_prefix():
@@ -1897,9 +1976,10 @@ def test_openai_compatible_automatic_prompt_cache_strips_cache_control_and_keeps
     assert payload["model"] == "openai/responses/gpt-5.5"
     assert payload["prompt_cache_key"] == "vibelution-primary"
     assert payload["prompt_cache_retention"] == "24h"
-    assert payload["messages"][0]["content"] == [
-        {"type": "text", "text": "stable"},
-        {"type": "text", "text": "dynamic"},
+    assert "messages" not in payload
+    assert payload["input"][0]["content"] == [
+        {"type": "input_text", "text": "stable"},
+        {"type": "input_text", "text": "dynamic"},
     ]
     assert client._last_payload_protocol_summary["promptCacheProviderStrategy"] == "openai_automatic_key"
 
@@ -2179,9 +2259,10 @@ def test_automatic_prompt_cache_logs_design_even_when_payload_strips_cache_contr
     client = LLMClient(config=config, backend=backend)
     client.invoke([{"role": "system", "content": content}])
 
-    assert captured_payload["messages"][0]["content"] == [
-        {"type": "text", "text": "stable-prefix"},
-        {"type": "text", "text": "dynamic-suffix"},
+    assert "messages" not in captured_payload
+    assert captured_payload["input"][0]["content"] == [
+        {"type": "input_text", "text": "stable-prefix"},
+        {"type": "input_text", "text": "dynamic-suffix"},
     ]
     fields = next(item for item in recorded if item[0][1] == "llm.invoke.succeeded")[1]["fields"]
     assert fields["payloadShape"]["firstSystemCacheControlBlockCount"] == 0
@@ -2423,7 +2504,8 @@ def test_responses_transport_converts_image_blocks_to_input_image():
     )
 
     assert payload["model"] == "openai/responses/gpt-5.5"
-    assert payload["messages"][0]["content"] == [
+    assert "messages" not in payload
+    assert payload["input"][0]["content"] == [
         {"type": "input_text", "text": "看看这张图"},
         {"type": "input_image", "image_url": "data:image/png;base64,AAAA"},
     ]

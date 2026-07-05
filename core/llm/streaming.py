@@ -213,9 +213,90 @@ class LiteLLMStreamNormalizer:
         return stats
 
 
+class ResponsesStreamNormalizer:
+    """Normalizes OpenAI Responses stream events into internal events."""
+
+    def __init__(self) -> None:
+        self._usage: UsageStats | None = None
+        self._text_emitted = False
+
+    def events(self, raw_chunks: Iterable[Any]) -> Iterator[StreamChunk]:
+        for raw_chunk in raw_chunks:
+            event = _as_dict(raw_chunk)
+            if not isinstance(event, dict):
+                continue
+            usage = self._extract_usage(event)
+            if usage is not None:
+                self._usage = usage
+            event_type = str(event.get("type") or "").strip()
+            reasoning_delta = self._extract_reasoning_delta(event_type, event)
+            if reasoning_delta:
+                yield StreamChunk(type="reasoning_delta", text=reasoning_delta, provider_payload=event)
+            text_delta = self._extract_text_delta(event_type, event)
+            if text_delta:
+                self._text_emitted = True
+                yield StreamChunk(type="text_delta", text=text_delta, provider_payload=event)
+            if event_type in {"response.completed", "response.done"} and not self._text_emitted:
+                completed_text = self._extract_completed_text(event)
+                if completed_text:
+                    self._text_emitted = True
+                    yield StreamChunk(type="text_delta", text=completed_text, provider_payload=event)
+        yield StreamChunk(type="done", usage=self._usage)
+
+    @staticmethod
+    def _extract_text_delta(event_type: str, event: Dict[str, Any]) -> str:
+        if event_type in {"response.output_text.delta", "response.refusal.delta"}:
+            return str(event.get("delta") or "")
+        chat_delta = LiteLLMStreamNormalizer._extract_delta(event)
+        if isinstance(chat_delta, dict) and chat_delta.get("content"):
+            return extract_text_content(chat_delta.get("content"))
+        delta = _as_dict(event.get("delta"))
+        if isinstance(delta, dict):
+            if isinstance(delta.get("text"), str):
+                return delta.get("text") or ""
+            if isinstance(delta.get("content"), str):
+                return delta.get("content") or ""
+        part = _as_dict(event.get("part"))
+        if isinstance(part, dict) and str(part.get("type") or "") in {"output_text", "text"}:
+            return str(part.get("text") or "")
+        return ""
+
+    @staticmethod
+    def _extract_reasoning_delta(event_type: str, event: Dict[str, Any]) -> str:
+        if event_type in {
+            "response.reasoning_text.delta",
+            "response.reasoning_summary_text.delta",
+            "response.output_text.annotation.added",
+        }:
+            return str(event.get("delta") or event.get("text") or "")
+        return ""
+
+    @staticmethod
+    def _extract_completed_text(event: Dict[str, Any]) -> str:
+        response = _as_dict(event.get("response"))
+        if isinstance(response, dict) and isinstance(response.get("output_text"), str):
+            return response.get("output_text") or ""
+        return ""
+
+    @staticmethod
+    def _extract_usage(event: Dict[str, Any]) -> UsageStats | None:
+        usage = event.get("usage")
+        if usage is None:
+            response = _as_dict(event.get("response"))
+            usage = response.get("usage") if isinstance(response, dict) else None
+        if usage is None:
+            return None
+        stats = usage_stats_from_payload(usage)
+        if not stats.provider_raw_usage:
+            return None
+        return stats
+
+
 def _as_dict(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         return value.model_dump()
+    if value is not None and hasattr(value, "__dict__"):
+        return dict(getattr(value, "__dict__", {}) or {})
     return value
 
 
@@ -228,6 +309,7 @@ def _safe_int(value: Any, default: int) -> int:
 
 __all__ = [
     "LiteLLMStreamNormalizer",
+    "ResponsesStreamNormalizer",
     "ToolCallAccumulator",
     "extract_message_tool_calls",
     "extract_text_content",
