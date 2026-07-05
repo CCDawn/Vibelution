@@ -1547,7 +1547,9 @@ def test_runtime_manager_workbench_can_skip_catalog_scan(monkeypatch):
     )
 
     assert payload["defaultBundleName"] == "default_bundle"
-    assert payload["savedState"] == {"source": "bundle"}
+    assert payload["savedState"]["source"] == "bundle"
+    assert payload["savedState"]["storage"]["relativeEvidenceRoot"] == "workspace/supervised_evolution"
+    assert payload["storage"]["relativeEvidenceRoot"] == "workspace/supervised_evolution"
     assert payload["bundles"] == []
     assert payload["datasets"] == []
     assert payload["activeRun"]["runId"] == "active-1"
@@ -1568,7 +1570,9 @@ def test_local_workbench_can_skip_catalog_scan(monkeypatch):
     )
 
     assert payload["defaultBundleName"] == "default_bundle"
-    assert payload["savedState"] == {"source": "bundle"}
+    assert payload["savedState"]["source"] == "bundle"
+    assert payload["savedState"]["storage"]["relativeEvidenceRoot"] == "workspace/supervised_evolution"
+    assert payload["storage"]["relativeEvidenceRoot"] == "workspace/supervised_evolution"
     assert payload["bundles"] == []
     assert payload["datasets"] == []
     assert payload["activeRun"]["runId"] == "active-local"
