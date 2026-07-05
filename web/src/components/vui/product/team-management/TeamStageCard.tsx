@@ -54,7 +54,7 @@ const CARD_SELECTED =
 
 const HEADER = "flex min-w-0 items-center gap-2";
 const STEP_INDEX =
-  "flex h-[22px] min-w-[26px] items-center justify-center rounded-[6px] border border-[color:color-mix(in_srgb,var(--accent-cool)_26%,var(--border-soft))] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,var(--surface-card))] text-[0.62rem] font-[860] text-[color:color-mix(in_srgb,var(--accent-cool)_78%,var(--fg-primary))]";
+  "flex h-[22px] min-w-[26px] items-center justify-center rounded-[6px] border border-[color:color-mix(in_srgb,var(--accent-cool)_26%,var(--border-soft))] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,var(--vui-surface-row))] text-[0.62rem] font-[860] text-[color:color-mix(in_srgb,var(--accent-cool)_78%,var(--fg-primary))]";
 const STATUS_BADGE =
   "max-w-[58%] rounded-full border border-[color:color-mix(in_srgb,var(--source-step-fg,var(--fg-muted))_28%,var(--border-soft))] bg-[color:color-mix(in_srgb,var(--source-step-fg,var(--fg-muted))_8%,transparent)] px-2 py-[2px] text-[0.58rem] font-[840] text-[color:var(--source-step-fg,var(--fg-muted))]";
 const BODY = "grid min-w-0 content-start gap-1";

@@ -21,11 +21,11 @@ const CHIP_BASE =
   "min-w-[76px] min-h-[28px] flex-none justify-between gap-2 rounded-[7px] border px-2 " +
   "text-[0.64rem] font-[820] bg-[color:var(--source-workbench-card)] " +
   "border-[var(--border-soft)] text-[var(--fg-muted)] " +
-  "hover:border-[color:color-mix(in_srgb,var(--accent-primary)_48%,var(--border-soft))] hover:bg-[color:color-mix(in_srgb,var(--accent-primary)_9%,var(--surface-card))] hover:text-[var(--fg-primary)] " +
-  "focus-visible:outline-none focus-visible:border-[color:color-mix(in_srgb,var(--accent-primary)_48%,var(--border-soft))] focus-visible:bg-[color:color-mix(in_srgb,var(--accent-primary)_9%,var(--surface-card))] focus-visible:text-[var(--fg-primary)]";
+  "hover:border-[color:color-mix(in_srgb,var(--accent-primary)_48%,var(--border-soft))] hover:bg-[color:color-mix(in_srgb,var(--accent-primary)_9%,var(--vui-surface-row))] hover:text-[var(--fg-primary)] " +
+  "focus-visible:outline-none focus-visible:border-[color:color-mix(in_srgb,var(--accent-primary)_48%,var(--border-soft))] focus-visible:bg-[color:color-mix(in_srgb,var(--accent-primary)_9%,var(--vui-surface-row))] focus-visible:text-[var(--fg-primary)]";
 
 const CHIP_ACTIVE =
-  "border-[color:color-mix(in_srgb,var(--accent-primary)_48%,var(--border-soft))] bg-[color:color-mix(in_srgb,var(--accent-primary)_9%,var(--surface-card))] text-[var(--fg-primary)]";
+  "border-[color:color-mix(in_srgb,var(--accent-primary)_48%,var(--border-soft))] bg-[color:color-mix(in_srgb,var(--accent-primary)_9%,var(--vui-surface-row))] text-[var(--fg-primary)]";
 
 const CHIP_COUNT = "text-[var(--fg-primary)] text-[0.68rem]";
 
