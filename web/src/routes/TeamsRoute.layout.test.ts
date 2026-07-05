@@ -1783,6 +1783,48 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCard).toContain("[&_[data-vui=native-button]]:inline-flex");
   });
 
+  it("keeps source collection subpanels compact, text-safe, and mobile-safe", () => {
+    expect(teamSourceCollectionPanelFrameStyles.sourceCollectionFocusedPanel).toContain("max-[960px]:grid-cols-[minmax(0,1fr)]");
+    expect(teamSourceCollectionControlsPanelStyles.sourceCollectionControlPanel).toContain("!grid");
+    expect(teamSourceCollectionControlsPanelStyles.sourceCollectionControlPanel).toContain("grid-cols-[minmax(0,1fr)]");
+    expect(teamSourceCollectionControlsPanelStyles.workflowIngestionHeader).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(teamSourceCollectionControlsPanelStyles.workflowTag).toContain("truncate");
+
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspaceHeader).toContain("max-[760px]:grid-cols-[minmax(0,1fr)]");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspaceHeader).toContain("[&>div>strong]:truncate");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageHandoff).toContain("[&>span]:min-w-0");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageHandoff).toContain("[&>span]:break-words");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageChatActions).toContain("[&_[data-vui=native-button]]:w-fit");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageChatActions).not.toContain("max-[720px]:grid-cols-[1fr]");
+
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentPanel).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCard).toContain("bg-[var(--vui-surface-row)]");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCard).toContain("max-[720px]:grid-cols-[minmax(0,1fr)]");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCardBody).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCardBody).toContain("max-[680px]:grid-cols-[minmax(0,1fr)]");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCardBody).toContain("[&_strong]:truncate");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCardActions).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCardActions).toContain("justify-end");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCardActions).toContain("max-[720px]:justify-start");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCardActions).toContain("[&_a]:w-fit");
+
+    for (const className of [
+      teamWorkflowStatusPanelStyles.workflowIngestionStages,
+      teamWorkflowStatusPanelStyles.workflowSourceQualityStats,
+      teamWorkflowStatusPanelStyles.workflowSourceQualityQueue,
+      teamWorkflowStatusPanelStyles.workflowPaperNoteChunkStats,
+      teamWorkflowStatusPanelStyles.workflowPaperNoteChunkPlans,
+    ]) {
+      expect(className).toContain("max-[760px]:grid-cols-[minmax(0,1fr)]");
+    }
+
+    expect(teamWorkflowStatusPanelStyles.workflowIngestionStage).toContain("[&_strong]:truncate");
+    expect(teamWorkflowStatusPanelStyles.workflowSourceQualityQueue).toContain("[&_strong]:truncate");
+    expect(teamWorkflowStatusPanelStyles.workflowPaperNoteChunkPlans).toContain("[&_small]:break-words");
+    expect(teamWorkflowStatusPanelStyles.workflowIngestionHeader).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(teamWorkflowStatusPanelStyles.workflowIngestionActions).toContain("[&_span]:break-words");
+  });
+
   it("uses a subtle mesh canvas background instead of repeated horizontal route stripes", () => {
     for (const className of [routeStyles.canvas, routeStyles.emptyCanvasPanel]) {
       expect(className).toContain("[background-image:linear-gradient(to_right");

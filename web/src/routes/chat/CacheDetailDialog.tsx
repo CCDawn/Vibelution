@@ -403,7 +403,14 @@ export function CacheDetailDialog({
                 role="img"
                 aria-label={cacheCompositionTitle}
               >
-                <circle className={`${styles.cacheDonutTrack} ${styles.cacheDonutOuterTrack}`} cx="50" cy="50" r="42" pathLength={100} />
+                <circle
+                  className={`${styles.cacheDonutTrack} ${styles.cacheDonutOuterTrack}`}
+                  cx="50"
+                  cy="50"
+                  r="42"
+                  pathLength={100}
+                  fill="none"
+                />
                 {cachePromptDonutSegments.map((segment, index) => (
                   <circle
                     key={`detail-computed-${segment.key}-${segment.status}-${index}`}
@@ -412,12 +419,20 @@ export function CacheDetailDialog({
                     cy="50"
                     r="42"
                     pathLength={100}
+                    fill="none"
                     style={cacheDonutSegmentStyle(segment, cachePromptDonutSegments.length > 1 ? 0.55 : 0)}
                   >
                     <title>{cachePromptSegmentHoverTitle(segment, cachePromptCompositionTotalTokens, numberFormatter, lang, missingSegmentLabel)}</title>
                   </circle>
                 ))}
-                <circle className={`${styles.cacheDonutTrack} ${styles.cacheDonutInnerTrack}`} cx="50" cy="50" r="31" pathLength={100} />
+                <circle
+                  className={`${styles.cacheDonutTrack} ${styles.cacheDonutInnerTrack}`}
+                  cx="50"
+                  cy="50"
+                  r="31"
+                  pathLength={100}
+                  fill="none"
+                />
                 {trueCacheDonutSegments.map((segment, index) => (
                   <circle
                     key={`detail-true-${segment.key}-${segment.status}-${index}`}
@@ -426,6 +441,7 @@ export function CacheDetailDialog({
                     cy="50"
                     r="31"
                     pathLength={100}
+                    fill="none"
                     style={cacheDonutSegmentStyle(segment, trueCacheDonutSegments.length > 1 ? 0.4 : 0)}
                   >
                     <title>{cacheDonutSegmentTitle(segment, providerCacheInputTokens, numberFormatter, lang)}</title>
