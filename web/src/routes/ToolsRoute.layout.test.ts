@@ -45,6 +45,40 @@ const backgroundAwarePanelStyles = [
   "toolDetailPanel",
 ] as const;
 
+const backgroundAwareRepeatedStyles = [
+  "bulkActionBar",
+  "policyDraftSummary",
+  "selectableToolRow",
+  "summaryCard",
+  "toolBundleApplyBar",
+  "toolBundleGroup",
+  "toolBundleSummary",
+  "toolPermissionGroup",
+  "toolPermissionRow",
+  "workspaceScopePanel",
+] as const;
+
+const surfaceFreeRepeatedLayoutStyles = [
+  "toolBadges",
+  "toolBundleApplyActions",
+  "toolBundleHeader",
+  "toolBundleItems",
+  "toolBundleSelect",
+  "toolCopy",
+  "toolList",
+  "toolPermissionGroupHeader",
+  "toolPermissionGroupList",
+  "toolPermissionList",
+  "toolPermissionMeta",
+] as const;
+
+const backgroundAwareAgentScopeStyles = [
+  "agentScopeBar",
+  "controlStrip",
+  "scopeStats",
+  "summaryCard",
+] as const;
+
 const contentSizedActionStyles = [
   "dangerButton",
   "filterButton",
@@ -58,6 +92,30 @@ const contentSizedActionStyles = [
 
 function classTokens(className: string): string[] {
   return className.split(/\s+/).filter(Boolean);
+}
+
+function expectBackgroundAwareHairlineSurface(className: string) {
+  expect(className).toContain("border");
+  expect(className).toContain("border-[color:color-mix(in_srgb");
+  expect(className).toContain("bg-[color:color-mix(in_srgb");
+  expect(className).toContain("transparent");
+  expect(className).not.toContain("bg-vui-surface-glass");
+  expect(className).not.toContain("bg-vui-surface-row");
+  expect(className).not.toContain("bg-[var(--surface-card)]");
+  expect(className).not.toContain("bg-[var(--surface-panel)]");
+  expect(className).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+}
+
+function expectNoRepeatedSurfaceTokens(className: string) {
+  expect(className).not.toContain("border-[color-mix");
+  expect(className).not.toContain("border-[color:color-mix");
+  expect(className).not.toContain("border-[var(");
+  expect(className).not.toContain("border-vui-border-subtle");
+  expect(className).not.toContain("bg-[color-mix");
+  expect(className).not.toContain("bg-[color:color-mix");
+  expect(className).not.toContain("bg-[var(");
+  expect(className).not.toContain("bg-vui-surface");
+  expect(className).not.toContain("bg-vui-control");
 }
 
 describe("ToolsRoute layout contract", () => {
@@ -368,11 +426,25 @@ describe("ToolsRoute layout contract", () => {
 
   it("keeps major panels background-aware without route-owned shadow shells", () => {
     for (const key of backgroundAwarePanelStyles) {
-      expect(styles[key]).toContain("border-[color:color-mix(in_srgb");
-      expect(styles[key]).toContain("bg-[color:color-mix(in_srgb");
-      expect(styles[key]).toContain("transparent");
-      expect(styles[key]).not.toContain("bg-[var(--vui-surface-glass)]");
-      expect(styles[key]).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+      expectBackgroundAwareHairlineSurface(styles[key]);
+    }
+  });
+
+  it("keeps repeated tool cards, bundles, and policy rows light instead of stacked opaque cards", () => {
+    for (const key of backgroundAwareRepeatedStyles) {
+      expectBackgroundAwareHairlineSurface(styles[key]);
+    }
+  });
+
+  it("keeps nested tool bundle and policy wrappers as layout instead of extra surfaces", () => {
+    for (const key of surfaceFreeRepeatedLayoutStyles) {
+      expectNoRepeatedSurfaceTokens(styles[key]);
+    }
+  });
+
+  it("keeps Agent scope repeated surfaces light without glass or route-owned shadows", () => {
+    for (const key of backgroundAwareAgentScopeStyles) {
+      expectBackgroundAwareHairlineSurface(agentScopeStyles[key]);
     }
   });
 
@@ -391,8 +463,7 @@ describe("ToolsRoute layout contract", () => {
     expect(styles.policyDraftSummary).toContain("grid-cols-[repeat(4,minmax(0,1fr))]");
     expect(styles.policyDraftSummary).toContain("gap-[7px]");
     expect(styles.policyDraftSummary).toContain("p-2");
-    expect(styles.policyDraftSummary).toContain("border");
-    expect(styles.policyDraftSummary).toContain("bg-[color:color-mix(in_srgb,var(--surface-card)_68%,transparent)]");
+    expectBackgroundAwareHairlineSurface(styles.policyDraftSummary);
     expect(styles.policyDraftSummary).toContain("max-[900px]:grid-cols-[repeat(2,minmax(0,1fr))]");
   });
 
