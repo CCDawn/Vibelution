@@ -27,9 +27,11 @@ import managementActionPreviewPanelSource from "./MemoryManagementEditorActionPr
 import managementActionPreviewPanelStyles from "./MemoryManagementEditorActionPreviewPanel.styles";
 import managementEditorSource from "./MemoryManagementEditor.tsx?raw";
 import managePanelSource from "./MemoryManagePanel.tsx?raw";
+import managePanelStyles from "./MemoryManagePanel.styles";
 import matrixPanelSource from "./MemoryMatrixPanel.tsx?raw";
 import matrixPanelStyles from "./MemoryMatrixPanel.styles";
 import itemListPanelSource from "./MemoryItemListPanel.tsx?raw";
+import itemListPanelStyles from "./MemoryItemListPanel.styles";
 import overviewPanelSource from "./MemoryOverviewPanel.tsx?raw";
 import overviewPanelStyles from "./MemoryOverviewPanel.styles";
 import projectMemoryQueuePanelSource from "./MemoryProjectMemoryQueuePanel.tsx?raw";
@@ -37,6 +39,7 @@ import reviewQueuePanelSource from "./MemoryReviewQueuePanel.tsx?raw";
 import selectedConfigPanelSource from "./MemorySelectedConfigPanel.tsx?raw";
 import selectedConfigPanelStyles from "./MemorySelectedConfigPanel.styles";
 import sourceAndItemPanelsSource from "./MemorySourceAndItemPanels.tsx?raw";
+import sourceAndItemPanelStyles from "./MemorySourceAndItemPanels.styles";
 import warningStripSource from "./MemoryWarningStrip.tsx?raw";
 import warningStripStyles from "./MemoryWarningStrip.styles";
 import routerSource from "../app/router.tsx?raw";
@@ -45,6 +48,8 @@ import graphCanvasSource from "./MemoryGraphCanvas.tsx?raw";
 import graphNodeInspectorPanelSource from "./MemoryGraphNodeInspectorPanel.tsx?raw";
 import graphNodeInspectorPanelStyles from "./MemoryGraphNodeInspectorPanel.styles";
 import graphViewPanelSource from "./MemoryGraphViewPanel.tsx?raw";
+import graphViewPanelStyles from "./MemoryGraphViewPanel.styles";
+import detailPanelStyles from "./MemoryDetailPanel.styles";
 import styles from "./MemoryRoute.styles";
 import stylesModuleSource from "./MemoryRoute.styles.ts?raw";
 import knowledgeGovernancePanelSource from "./MemoryKnowledgeGovernancePanel.tsx?raw";
@@ -299,6 +304,80 @@ describe("MemoryRoute layout contract", () => {
     expect(matrixPanelStyles.matrixCardButton).not.toContain("w-fit");
     expect(matrixPanelStyles.matrixCardActive).not.toContain("bg-[var(--vui-surface-glass)]");
     expect(matrixPanelStyles.matrixCardActive).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+  });
+
+  it("tightens Memory detail, manage, source, and graph surfaces without glass card walls", () => {
+    const secondWavePanelClasses = [
+      detailPanelStyles.detailPanel,
+      detailPanelStyles.impactPanel,
+      detailPanelStyles.visibilityPanel,
+      detailPanelStyles.sectionPanel,
+      detailPanelStyles.rawPanel,
+      managePanelStyles.manageListPanel,
+      managePanelStyles.manageFilterPanel,
+      managePanelStyles.manageFormPanel,
+      sourceAndItemPanelStyles.sourcePanel,
+      sourceAndItemPanelStyles.itemPanel,
+      graphViewPanelStyles.sourcePanel,
+      graphViewPanelStyles.managementPanel,
+      graphViewPanelStyles.graphCanvasPanel,
+      graphNodeInspectorPanelStyles.detailPanel,
+      graphNodeInspectorPanelStyles.graphRelationPanel,
+      graphNodeInspectorPanelStyles.graphKnowledgePanel,
+      graphNodeInspectorPanelStyles.rawPanel,
+    ];
+
+    for (const className of secondWavePanelClasses) {
+      expect(className).toContain("bg-[var(--vui-surface-panel)]");
+      expect(className).not.toContain("bg-[var(--vui-surface-glass)]");
+      expect(className).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+    }
+
+    for (const className of [
+      detailPanelStyles.copyNotice,
+      detailPanelStyles.detailActions,
+      detailPanelStyles.emptyDetail,
+      managePanelStyles.emptyDetail,
+      sourceAndItemPanelStyles.panelNotice,
+      graphNodeInspectorPanelStyles.emptyDetail,
+      graphNodeInspectorPanelStyles.selectedConfigSummary,
+    ]) {
+      expect(className).toContain("bg-[var(--vui-surface-row)]");
+      expect(className).not.toContain("bg-[var(--vui-surface-glass)]");
+      expect(className).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+    }
+
+    expect(detailPanelStyles.detailActions).toContain("w-fit");
+    expect(detailPanelStyles.detailActions).toContain("max-w-full");
+    expect(detailPanelStyles.detailActionButton).toContain("w-fit");
+    expect(managePanelStyles.primaryActionButton).toContain("w-fit");
+    expect(managePanelStyles.bulkActionBar).toContain("[&_[data-vui=\"button\"]]:w-fit");
+    expect(itemListPanelStyles.itemContentButton).not.toContain("w-fit");
+    expect(itemListPanelStyles.itemButton).not.toContain("w-fit");
+    expect(itemListPanelStyles.itemButton).toContain("w-full");
+    expect(sourceAndItemPanelStyles.sourceButton).not.toContain("w-fit");
+    expect(sourceAndItemPanelStyles.sourceButton).toContain("w-full");
+    expect(graphViewPanelStyles.itemButton).not.toContain("w-fit");
+    expect(graphViewPanelStyles.itemButton).toContain("w-full");
+
+    expect(graphViewPanelStyles.graphWorkspace).toContain("grid-cols-[minmax(190px,240px)_minmax(0,1fr)_minmax(230px,0.34fr)]");
+    expect(graphViewPanelStyles.graphWorkspace).toContain("max-[1180px]:grid-cols-[minmax(180px,220px)_minmax(0,1fr)]");
+    expect(graphViewPanelStyles.graphWorkspace).toContain("max-[1180px]:[&_.detailPanel]:col-span-2");
+    expect(graphViewPanelStyles.graphWorkspace).toContain("max-[860px]:grid-cols-[minmax(0,1fr)]");
+    expect(graphViewPanelStyles.summaryGrid).toContain("grid-cols-[repeat(auto-fit,minmax(138px,max-content))]");
+    expect(graphViewPanelStyles.summaryGrid).toContain("justify-start");
+    expect(graphViewPanelStyles.summaryCard).toContain("bg-[var(--vui-surface-row)]");
+
+    expect(detailPanelStyles.detailHeader).toContain("[&_h2]:break-words");
+    expect(detailPanelStyles.detailHeader).toContain("[&_p]:line-clamp-2");
+    expect(detailPanelStyles.factGrid).toContain("[&_strong]:break-all");
+    expect(itemListPanelStyles.compactItemPrimary).toContain("[&>strong]:truncate");
+    expect(itemListPanelStyles.itemPath).toContain("break-all");
+    expect(itemListPanelStyles.manageItemSummary).toContain("line-clamp-2");
+    expect(sourceAndItemPanelStyles.sourceCopy).toContain("[&_strong]:truncate");
+    expect(graphViewPanelStyles.graphNodeList).toContain("[&_[data-vui=\"button\"]]:w-full");
+    expect(graphNodeInspectorPanelStyles.graphKnowledgeContent).toContain("whitespace-pre-wrap");
+    expect(graphNodeInspectorPanelStyles.graphKnowledgeContent).toContain("break-words");
   });
 
   it("delegates the dense overview body to a dedicated panel component", () => {

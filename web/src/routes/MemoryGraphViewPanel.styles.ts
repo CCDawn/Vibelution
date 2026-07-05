@@ -4,41 +4,41 @@ const styles = {
   graphCanvasFallback:
     "graphCanvasFallback min-w-0 grid min-h-0 gap-2 p-2",
   graphCanvasPanel:
-    "graphCanvasPanel min-w-0 grid h-full min-h-0 gap-2 p-2 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)]",
+    "graphCanvasPanel min-w-0 grid h-full min-h-0 gap-2 p-2 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)]",
   graphCanvasToolbar:
-    "graphCanvasToolbar min-w-0 grid min-h-0 gap-2 p-2 flex flex-wrap items-center gap-1.5",
+    "graphCanvasToolbar min-w-0 flex flex-wrap items-center justify-between gap-1.5 px-1 py-0.5 [&>div]:min-w-0 [&_strong]:break-words",
   graphClearFocusButton:
     "graphClearFocusButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
   graphInteractionHint:
     "graphInteractionHint min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   graphNodeList:
-    "graphNodeList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+    "graphNodeList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto [&_[data-vui=\"button\"]]:w-full",
   graphNodeTypeMark:
     "graphNodeTypeMark min-w-0",
   graphTypeList:
     "graphTypeList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto [&_button]:w-full [&_[data-active=true]]:border-[var(--accent-cool)]",
   graphWorkspace:
-    "graphWorkspace min-w-0 grid h-full min-h-0 gap-2 p-2 grid-cols-[minmax(210px,250px)_minmax(760px,1fr)_minmax(260px,0.34fr)] overflow-hidden max-[1280px]:grid-cols-[minmax(200px,240px)_minmax(560px,1fr)_minmax(240px,0.42fr)] max-[980px]:grid-cols-1 max-[980px]:overflow-auto",
+    "graphWorkspace min-w-0 grid h-full min-h-0 gap-2 p-2 grid-cols-[minmax(190px,240px)_minmax(0,1fr)_minmax(230px,0.34fr)] overflow-hidden max-[1180px]:grid-cols-[minmax(180px,220px)_minmax(0,1fr)] max-[1180px]:overflow-auto max-[1180px]:[&_.detailPanel]:col-span-2 max-[860px]:grid-cols-[minmax(0,1fr)] max-[860px]:[&_.detailPanel]:col-span-1",
   itemButton:
-    "itemButton min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+    "itemButton min-w-0 w-full max-w-full rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 text-left text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5 [&_strong]:min-w-0 [&_strong]:truncate [&_small]:min-w-0 [&_small]:truncate",
   itemButtonActive:
     "itemButtonActive min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   managementHeader:
     "managementHeader min-w-0 flex flex-wrap items-center gap-1.5",
   managementPanel:
-    "managementPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "managementPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
   panelEyebrow:
     "panelEyebrow min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   panelHeader:
     "panelHeader min-w-0 flex flex-wrap items-center gap-1.5 px-1 py-0.5",
   searchBox:
-    "searchBox min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "searchBox min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-1.5",
   sourcePanel:
-    "sourcePanel min-w-0 min-h-0 overflow-auto rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "sourcePanel min-w-0 min-h-0 overflow-auto rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
   summaryCard:
-    "summaryCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid min-h-[54px] grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-2 py-1.5 [&>span]:text-[var(--vui-font-xs)] [&>strong]:text-[var(--vui-font-title)]",
+    "summaryCard min-w-[138px] max-w-[210px] rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] grid min-h-[54px] grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-2 py-1.5 [&>span]:min-w-0 [&>span]:truncate [&>span]:text-[var(--vui-font-xs)] [&>strong]:text-[var(--vui-font-title)] [&>small]:col-span-2 [&>small]:min-w-0 [&>small]:truncate",
   summaryGrid:
-    "summaryGrid min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid gap-2 grid-cols-[repeat(6,minmax(118px,1fr))] gap-1.5 max-[1180px]:grid-cols-3 max-[720px]:grid-cols-2",
+    "summaryGrid min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 grid grid-cols-[repeat(auto-fit,minmax(138px,max-content))] justify-start gap-1.5",
   workspace:
     "workspace min-w-0 grid h-full min-h-0 flex-1 gap-2 p-2 grid-rows-[minmax(0,1fr)] overflow-auto",
 } as const;
