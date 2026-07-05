@@ -1,10 +1,10 @@
 const styles = {
   sourceCollectionControlPanel:
-    "sourceCollectionControlPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
+    "sourceCollectionControlPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 !grid grid-cols-[minmax(0,1fr)] content-start gap-1.5 [&>*]:min-w-0",
   workflowIngestionHeader:
-    "workflowIngestionHeader min-w-0 flex flex-wrap items-center gap-1.5",
+    "workflowIngestionHeader min-w-0 !grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 max-[520px]:grid-cols-[minmax(0,1fr)] [&>div]:min-w-0 [&_strong]:block [&_strong]:truncate [&_span]:min-w-0 [&_span]:break-words",
   workflowTag:
-    "workflowTag min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    "workflowTag min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 truncate rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
 } as const;
 
 export default styles;
