@@ -164,6 +164,57 @@ describe("agentMessageOperations", () => {
     ]);
   });
 
+  it("keeps raw tool payloads out of main timeline summaries while preserving details", () => {
+    const message: AgentMessage = {
+      id: "agent-tool-summary-noise",
+      role: "assistant",
+      createdAt: "2026-07-05T23:12:00Z",
+      streaming: true,
+      source: { kind: "conversation-message", id: "agent-tool-summary-noise" },
+      parts: [
+        {
+          id: "agent-tool-summary-git",
+          type: "tool-call",
+          source: "feedback-event",
+          name: "get_git_status_summary_tool",
+          status: "done",
+          summary: JSON.stringify({
+            dirty_summary: "有 unstaged 改动，有 untracked 文件，共 17 个变化文件",
+          }),
+          resultPreview: JSON.stringify({
+            dirty_summary: "有 unstaged 改动，有 untracked 文件，共 17 个变化文件",
+            files: ["DEVELOPMENT_STANDARD.md", "README.md"],
+          }),
+        },
+        {
+          id: "agent-tool-summary-code",
+          type: "tool-call",
+          source: "feedback-event",
+          name: "code_symbol_tool",
+          status: "failed",
+          summary: JSON.stringify({ status: "error", reason: "parse failed" }),
+          resultPreview: "749- if len(self._thought_history) > self._thought_history_max:\n750- self._thought_history =",
+        },
+      ],
+    };
+
+    const operations = buildAgentMessageOperations(message, labels);
+
+    expect(operations[0]).toMatchObject({
+      label: "Git 状态",
+      summary: "有 unstaged 改动，有 untracked 文件，共 17 个变化文件",
+      resultPreview: expect.stringContaining("dirty_summary"),
+    });
+    expect(operations[1]).toMatchObject({
+      label: "代码图谱",
+      status: "failed",
+      summary: "执行失败",
+      resultPreview: expect.stringContaining("749- if len"),
+    });
+    expect(operations.map((operation) => operation.summary).join("\n")).not.toContain("{");
+    expect(operations.map((operation) => operation.summary).join("\n")).not.toContain("self._thought_history");
+  });
+
   it("prefers ordered feedback events over legacy thought and tool buckets", () => {
     const message: ConversationMessage = {
       id: "message-feedback",
