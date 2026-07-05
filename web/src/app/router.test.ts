@@ -94,6 +94,12 @@ describe("router route contracts", () => {
     });
   });
 
+  it("guards the usage route with workbench fallback and error boundary elements", () => {
+    const route = findWorkbenchRoute("usage");
+    expectRouteErrorSurface(route, "workbench");
+    expectLazyFallback(route, "正在打开工作台", "workbench");
+  });
+
   it("guards the chat route while timing the chat chunk loader itself", async () => {
     const chatRoute = findWorkbenchRoute("chat");
     expectRouteErrorSurface(chatRoute, "workbench");

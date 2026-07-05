@@ -266,6 +266,7 @@ describe("AppShell layout contract", () => {
     );
 
     expect(primaryNav).not.toContain('to="/logs"');
+    expect(primaryNav).not.toContain('to="/usage"');
     expect(primaryNav).not.toContain('to="/tools"');
     expect(primaryNav).not.toContain('to="/agents/tools"');
     expect(primaryNav).not.toContain('to="/git"');
@@ -283,6 +284,12 @@ describe("AppShell layout contract", () => {
     expect(utilityMenuSource).not.toMatch(/<input\b/);
     expect(utilityMenuSource).not.toContain("hidden={!utilityOpen}");
     expect(shellSource).toContain('event.key === "Escape"');
+    expect(utilityMenuSource).toContain('to="/usage"');
+    expect(utilityMenuSource).toContain('t("navUsage")');
+    expect(utilityMenuSource).toContain('title={t("usageUtilityTitle")}');
+    expect(utilityMenuSource).toContain("Activity");
+    expect(utilityMenuSource.indexOf('href="/launcher"')).toBeLessThan(utilityMenuSource.indexOf('to="/usage"'));
+    expect(utilityMenuSource.indexOf('to="/usage"')).toBeLessThan(utilityMenuSource.indexOf('to="/logs"'));
     expect(utilityMenuSource).toContain('to="/logs"');
     expect(shellSource).not.toContain('to="/agents/tools"');
     expect(shellSource).not.toContain('to="/tools"');
