@@ -1,8 +1,8 @@
 export const launcherRouteStyles = {
   route:
-    "grid h-full min-h-full content-start overflow-y-auto overflow-x-hidden overscroll-contain bg-[var(--surface-page)] pb-[max(12px,env(safe-area-inset-bottom))] text-[var(--fg-primary)] [scrollbar-gutter:stable] [--accent-primary:var(--accent-warm)] [--danger:var(--state-error)]",
+    "grid h-full min-h-full content-start overflow-y-auto overflow-x-hidden overscroll-contain pb-[max(12px,env(safe-area-inset-bottom))] text-[var(--fg-primary)] [scrollbar-gutter:stable] [--accent-primary:var(--accent-warm)] [--danger:var(--state-error)]",
   header:
-    "mx-2.5 mt-2 min-w-0 border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--surface-panel)_86%,transparent)] shadow-[var(--vui-shadow-hairline)]",
+    "mx-2.5 mt-2 min-w-0 border-[var(--vui-border-subtle)] !bg-transparent !shadow-none !backdrop-blur-none",
   panelEyebrow: "m-0 text-[var(--vui-font-xs)] uppercase tracking-[0.08em] text-[var(--fg-tertiary)]",
   statusBar:
     "grid w-[min(760px,58vw)] min-w-0 grid-cols-[minmax(220px,1fr)_max-content] items-center gap-2 max-[1200px]:w-full max-[1200px]:max-w-none max-[1200px]:grid-cols-[minmax(0,1fr)] max-[1200px]:justify-items-stretch",
@@ -63,7 +63,7 @@ export const launcherRouteStyles = {
     "mx-3 mt-1.5 grid gap-0.5 rounded-[7px] border border-[var(--border-soft)] bg-[color-mix(in_srgb,var(--surface-panel)_92%,transparent)] px-2 py-1.5 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] data-[tone=success]:border-[color-mix(in_srgb,var(--state-success)_34%,transparent)] data-[tone=success]:text-[var(--state-success)] data-[tone=warning]:border-[color-mix(in_srgb,var(--state-warning)_34%,transparent)] data-[tone=warning]:text-[var(--state-warning)] data-[tone=error]:border-[color-mix(in_srgb,var(--state-error)_34%,transparent)] data-[tone=error]:text-[var(--state-error)] [&_span]:min-w-0 [&_span]:truncate [&_span]:text-[var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)]",
   workspace:
     "grid min-h-0 grid-cols-[minmax(0,1fr)] auto-rows-auto gap-1.5 overflow-visible px-3 pb-[max(14px,env(safe-area-inset-bottom))] pt-1.5 max-[1200px]:flex max-[1200px]:flex-col",
-  panel: "block min-h-0 min-w-0 rounded-[7px] border border-[var(--border-soft)] bg-[var(--surface-panel)] px-[9px] py-[7px] max-[1200px]:flex-none",
+  panel: "block min-h-0 min-w-0 rounded-[7px] border border-[var(--border-soft)] bg-[color-mix(in_srgb,var(--surface-panel)_86%,transparent)] px-[9px] py-[7px] max-[1200px]:flex-none",
   matrixPanel: "col-auto",
   panelHeader:
     "flex min-w-0 items-baseline justify-between gap-2.5 border-b border-[var(--border-soft)] pb-1.5 [&>*]:min-w-0 [&_strong]:flex-auto [&_strong]:truncate [&_strong]:text-right [&_strong]:text-[var(--fg-primary)]",
