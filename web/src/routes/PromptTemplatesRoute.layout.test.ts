@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import routerSource from "../app/router.tsx?raw";
 import routeSource from "./PromptTemplatesRoute.tsx?raw";
+import styles from "./PromptTemplatesRoute.styles";
 import stylesSource from "./PromptTemplatesRoute.styles.ts?raw";
 
 describe("PromptTemplatesRoute layout contract", () => {
@@ -22,6 +23,20 @@ describe("PromptTemplatesRoute layout contract", () => {
     expect(routeSource).toContain("useShellI18n");
     expect(routeSource).toContain("const { lang } = useShellI18n()");
     expect(routeSource).not.toContain("useAppI18n");
+  });
+
+  it("keeps route and header chrome light enough for AppShell/VUI backgrounds", () => {
+    const routeClass = stylesSource.match(/const routeClass = "([^"]+)"/)?.[1] ?? "";
+    const headerClass = stylesSource.match(/const headerClass = "([^"]+)"/)?.[1] ?? "";
+
+    expect(routeClass).not.toContain("surface-page");
+    expect(routeClass).not.toMatch(/\bbg-\[/);
+    expect(headerClass).not.toContain("gradient");
+    expect(headerClass).not.toContain("shadow-[");
+    expect(headerClass).not.toContain("vui-shadow");
+    expect(headerClass).toContain("!bg-transparent");
+    expect(headerClass).toContain("!shadow-none");
+    expect(headerClass).toContain("!backdrop-blur-none");
   });
 
   it("loads prompt templates and linked Agents through the existing APIs", () => {
@@ -123,6 +138,19 @@ describe("PromptTemplatesRoute layout contract", () => {
     expect(stylesSource).toContain("max-[980px]:grid-cols-1");
     expect(stylesSource).toContain("max-[980px]:content-start");
     expect(stylesSource).toContain("max-[980px]:overflow-auto");
-    expect(stylesSource).toContain("max-[980px]:grid-rows-[auto_auto_minmax(180px,0.8fr)_auto_auto]");
+    expect(stylesSource).toContain("max-[980px]:grid-rows-[auto_auto_auto_minmax(180px,0.8fr)_auto_auto]");
+  });
+
+  it("keeps prompt controls content-sized and detail metadata row-like", () => {
+    expect(styles.primaryButtonClass).toContain("w-fit");
+    expect(styles.primaryButtonClass).toContain("max-w-full");
+    expect(styles.secondaryButtonClass).toContain("w-fit");
+    expect(styles.filterButtonClass).toContain("w-fit");
+    expect(styles.panelBaseClass).not.toContain("bg-[var(--surface-panel)]");
+    expect(styles.detailRowClass).toContain("grid-cols-[auto_minmax(0,1fr)]");
+    expect(styles.detailRowClass).toContain("border-b");
+    expect(styles.detailRowClass).not.toContain("bg-[var(--surface-card)]");
+    expect(styles.detailCardClass).not.toContain("bg-[var(--surface-panel)]");
+    expect(styles.agentListClass).not.toContain("bg-[var(--surface-panel)]");
   });
 });
