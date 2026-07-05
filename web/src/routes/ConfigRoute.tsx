@@ -55,7 +55,7 @@ import {
 import { VButton, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { ConfigDraftPanel } from "./ConfigDraftPanel";
-import { ConfigLogHelperCenterPanel } from "./ConfigLogHelperCenterPanel";
+import { ConfigHealthDiagnosticsPanel, type ConfigHealthDiagnosticsPanelCopy } from "./ConfigHealthDiagnosticsPanel";
 import { ConfigModelLibraryPanel } from "./ConfigModelLibraryPanel";
 import { ConfigOverviewPanel } from "./ConfigOverviewPanel";
 import { ConfigRuntimePanel } from "./ConfigRuntimePanel";
@@ -121,6 +121,8 @@ type ConfigSidebarGroup = {
   summary: string;
   memberSectionIds: string[];
 };
+
+type LogHelperCopy = ConfigHealthDiagnosticsPanelCopy;
 
 const SIDEBAR_WIDTH_STORAGE_KEY = "vibelution.config.sidebar.width";
 const SIDEBAR_HEIGHT_STORAGE_KEY = "vibelution.config.sidebar.height";
@@ -3247,7 +3249,7 @@ export function ConfigRoute() {
         ) : null}
 
         {isSectionVisible("health-diagnostics") ? (
-          <ConfigLogHelperCenterPanel
+          <ConfigHealthDiagnosticsPanel
             diagnostics={healthDiagnosticsQuery.data}
             loading={healthDiagnosticsQuery.isLoading || healthDiagnosticsQuery.isFetching}
             lang={currentLanguage}

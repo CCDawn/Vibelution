@@ -1,12 +1,12 @@
 import { ExternalLink, RefreshCw } from "lucide-react";
 
-import type { HealthDiagnostics, HealthFinding, HealthQuickAction, LogHelper, SessionHelper } from "../api/types";
+import { type HealthDiagnostics, type HealthFinding, type HealthQuickAction, type LogHelper, type SessionHelper } from "../api/types";
 import { VButton } from "../components/vui";
-import styles from "./ConfigLogHelperCenterPanel.styles";
+import styles from "./ConfigHealthDiagnosticsPanel.styles";
 
-type ConfigLogHelperLanguage = "zh" | "en";
+export type ConfigLanguage = "zh" | "en";
 
-export type ConfigLogHelperCopy = {
+export type ConfigHealthDiagnosticsPanelCopy = {
   healthTitle: string;
   healthBody: string;
   healthLoading: string;
@@ -41,11 +41,11 @@ export type ConfigLogHelperCopy = {
   healthNotRecorded: string;
 };
 
-type ConfigLogHelperCenterPanelProps = {
+type ConfigHealthDiagnosticsPanelProps = {
   diagnostics: HealthDiagnostics | undefined;
   loading: boolean;
-  lang: ConfigLogHelperLanguage;
-  copy: ConfigLogHelperCopy;
+  lang: ConfigLanguage;
+  copy: ConfigHealthDiagnosticsPanelCopy;
   onRefresh: () => void;
 };
 
@@ -63,7 +63,7 @@ function formatBytes(size: number) {
   return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
-function formatTimestamp(value: string, lang: ConfigLogHelperLanguage, emptyLabel: string) {
+function formatTimestamp(value: string, lang: ConfigLanguage, emptyLabel: string) {
   const text = String(value || "").trim();
   if (!text) {
     return emptyLabel;
@@ -81,7 +81,7 @@ function formatTimestamp(value: string, lang: ConfigLogHelperLanguage, emptyLabe
   }).format(parsed);
 }
 
-function healthStatusLabel(status: string, copy: ConfigLogHelperCopy) {
+function healthStatusLabel(status: string, copy: ConfigHealthDiagnosticsPanelCopy) {
   if (status === "blocked") {
     return copy.healthStatusBlocked;
   }
@@ -115,13 +115,13 @@ function formatFindingId(id: string) {
   return id ? `#${id.replace(/_/g, "-")}` : "";
 }
 
-export function ConfigLogHelperCenterPanel({
+export function ConfigHealthDiagnosticsPanel({
   diagnostics,
   loading,
   lang,
   copy,
   onRefresh,
-}: ConfigLogHelperCenterPanelProps) {
+}: ConfigHealthDiagnosticsPanelProps) {
   const sessionHelpers = diagnostics?.sessionHelpers ?? [];
   const helpers = diagnostics?.logHelpers ?? [];
   const findings = diagnostics?.findings ?? [];
@@ -219,7 +219,7 @@ export function ConfigLogHelperCenterPanel({
   );
 }
 
-function HealthFindingCard({ finding, copy }: { finding: HealthFinding; copy: ConfigLogHelperCopy }) {
+function HealthFindingCard({ finding, copy }: { finding: HealthFinding; copy: ConfigHealthDiagnosticsPanelCopy }) {
   return (
     <article className={styles.findingCard}>
       <div className={styles.findingHeader}>
@@ -264,7 +264,7 @@ function HealthFindingCard({ finding, copy }: { finding: HealthFinding; copy: Co
   );
 }
 
-function HealthQuickActionLink({ action, copy }: { action: HealthQuickAction; copy: ConfigLogHelperCopy }) {
+function HealthQuickActionLink({ action, copy }: { action: HealthQuickAction; copy: ConfigHealthDiagnosticsPanelCopy }) {
   const href = action.resetItemId ? "/launcher" : action.route || "/logs";
   return (
     <a className={styles.quickActionItem} href={href}>
@@ -280,15 +280,7 @@ function HealthQuickActionLink({ action, copy }: { action: HealthQuickAction; co
   );
 }
 
-function SessionHelperCard({
-  helper,
-  lang,
-  copy,
-}: {
-  helper: SessionHelper;
-  lang: ConfigLogHelperLanguage;
-  copy: ConfigLogHelperCopy;
-}) {
+function SessionHelperCard({ helper, lang, copy }: { helper: SessionHelper; lang: ConfigLanguage; copy: ConfigHealthDiagnosticsPanelCopy }) {
   const updatedLabel = formatTimestamp(helper.updatedAt, lang, copy.healthNotRecorded);
   return (
     <article className={styles.logHelperCard}>
@@ -352,15 +344,7 @@ function SessionHelperCard({
   );
 }
 
-function LogHelperCard({
-  helper,
-  lang,
-  copy,
-}: {
-  helper: LogHelper;
-  lang: ConfigLogHelperLanguage;
-  copy: ConfigLogHelperCopy;
-}) {
+function LogHelperCard({ helper, lang, copy }: { helper: LogHelper; lang: ConfigLanguage; copy: ConfigHealthDiagnosticsPanelCopy }) {
   const updatedLabel = formatTimestamp(helper.lastModifiedAt, lang, copy.healthNotRecorded);
   const latestSignal = helper.latestSignal || helper.latestPath || copy.healthMissing;
   return (
