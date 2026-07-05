@@ -331,6 +331,21 @@ describe("ConfigRoute layout contract", () => {
     expect(stylesSource).toContain("treeGrid:");
   });
 
+  it("keeps extracted Config panels on local VUI/Tailwind surface contracts", () => {
+    expect(extractedPanelStylesSource).toContain("const panelSurface");
+    expect(extractedPanelStylesSource).toContain("var(--vui-surface-panel)");
+    expect(extractedPanelStylesSource).toContain("var(--vui-surface-row)");
+    expect(extractedPanelStylesSource).toContain("var(--vui-control-muted)");
+    expect(extractedPanelStylesSource).toContain("var(--vui-border-subtle)");
+    expect(overviewPanelStyles.sectionSurface).toContain("var(--vui-surface-panel)");
+    expect(runtimePanelStyles.segmented).toContain("[background:var(--vui-surface-toolbar)]");
+    expect(draftPanelStyles.actionButton).toContain("var(--vui-control-muted)");
+    expect(modelLibraryPanelStyles.formSurface).toContain("var(--vui-surface-panel)");
+    expect(healthDiagnosticsPanelStyles.findingCard).toContain("var(--vui-surface-row)");
+    expect(placeholderPanelStyles.loadingBoard).toContain("var(--vui-surface-panel)");
+    expect(extractedPanelStylesSource).not.toContain("[background:var(--vui-gradient-route-soft),var(--surface-panel)]");
+  });
+
   it("routes Config controls through VUI primitives", () => {
     const configSources = [routeSource, overviewPanelSource, runtimePanelSource, draftPanelSource, modelLibraryPanelSource].join("\n");
     expect(routeSource).toContain('from "../components/vui"');
