@@ -1,6 +1,31 @@
 import { describe, expect, it } from "vitest";
 
+import styles from "./RuntimeScenesPane.styles";
 import paneSource from "./RuntimeScenesPane.tsx?raw";
+
+const backgroundTokens = (className: string) =>
+  className.split(/\s+/).filter((token) => token.startsWith("bg-[") || token.startsWith("[background:"));
+
+const expectBackgroundAware = (className: string) => {
+  const tokens = backgroundTokens(className);
+
+  expect(tokens.length).toBeGreaterThan(0);
+  expect(tokens.some((token) => token.includes("color-mix") && token.includes("transparent"))).toBe(true);
+  expect(className).not.toContain("bg-[var(--vui-surface-glass)]");
+  expect(className).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+};
+
+const expectControlOnlyAction = (className: string) => {
+  expect(className).toContain("inline-flex");
+  expect(className).toContain("w-fit");
+  expect(className).toContain("max-w-full");
+  expect(className).toContain("min-w-0");
+  expect(className).toContain("rounded-[var(--radius-control)]");
+  expect(className).toContain("bg-[var(--vui-control-muted)]");
+  expect(className).not.toContain("rounded-[var(--radius-panel)]");
+  expect(className).not.toContain("var(--vui-surface-panel)");
+  expect(className).not.toContain("var(--vui-surface-row)");
+};
 
 describe("RuntimeScenesPane layout contract", () => {
   it("routes runtime scene controls through VUI primitives", () => {
@@ -124,5 +149,60 @@ describe("RuntimeScenesPane layout contract", () => {
     expect(paneSource).toContain("initialSceneId && initialPath ? { [initialSceneId]: initialPath } : {}");
     expect(paneSource).toContain("setActiveSceneId(initialSceneId)");
     expect(paneSource).toContain("[initialPath, initialSceneId]");
+  });
+
+  it("keeps repeated runtime scene panels background-aware instead of stacked glass cards", () => {
+    [
+      styles.diagnosticsPanel,
+      styles.packageDiagnosisPanel,
+      styles.packageWorkRunPanel,
+      styles.panelSearch,
+      styles.previewPane,
+      styles.sceneCard,
+      styles.sceneDetailSurface,
+      styles.startupTracePanel,
+    ].forEach(expectBackgroundAware);
+  });
+
+  it("keeps nested runtime rows quieter than their parent panels", () => {
+    [
+      styles.packageClusterItem,
+      styles.packageDiagnosisSummaryRow,
+      styles.packageWorkRunItem,
+      styles.sceneCardHeaderRow,
+      styles.scenePillRow,
+      styles.timelineItem,
+    ].forEach((className) => {
+      expectBackgroundAware(className);
+      expect(className).toContain("rounded-[var(--radius-control)]");
+    });
+  });
+
+  it("keeps runtime scene actions content-sized and mobile overflow guarded", () => {
+    [
+      styles.copyButton,
+      styles.deleteButton,
+      styles.filterButton,
+      styles.rawFileButton,
+      styles.toolbarButton,
+      styles.packageKeyEntryButton,
+      styles.sceneCardButton,
+    ].forEach(expectControlOnlyAction);
+
+    [
+      styles.previewPane,
+      styles.packageList,
+      styles.timelineList,
+      styles.railText,
+    ].forEach((className) => {
+      expect(className).toContain("min-w-0");
+      expect(className).toContain("overflow");
+    });
+
+    expect(styles.resizableLayout).toContain("min-w-0");
+    expect(styles.resizableLayout).toContain("max-w-full");
+    expect(styles.resizableLayout).toContain("overflow-x-hidden");
+    expect(styles.resizableLayout).toContain("max-[900px]:grid-cols-[minmax(0,1fr)]");
+    expect(styles.resizableLayout).toContain("max-[900px]:grid-rows-[max-content_minmax(0,1fr)]");
   });
 });
