@@ -168,6 +168,8 @@ class UIManager:
         self._current_thought_stream = ""
         self._current_response_stream = ""
         self._current_subagent_thought_stream = ""
+        self._last_live_refresh_at = 0.0
+        self._live_refresh_min_interval_seconds = 1 / 12
 
         self._conversation_max = 400
         self._chat_messages_max = 400
@@ -489,7 +491,7 @@ class UIManager:
     def get_chat_messages(self) -> List[Dict[str, Any]]:
         return [dict(item) for item in self._chat_messages]
 
-    def _append_conversation(self, text: str):
+    def _append_conversation(self, text: str, *, refresh: bool = True):
         if UIManager._test_mode:
             plain = re.sub(r"\[/?[^\]]+\]", "", text)
             sys.__stdout__.write(plain + "\n")
@@ -503,7 +505,8 @@ class UIManager:
         self._conversation_events.append(text)
         if len(self._conversation_events) > self._conversation_max:
             self._conversation_events = self._conversation_events[-self._conversation_max :]
-        self._update_status_line()
+        if refresh:
+            self._update_status_line()
 
     def _append_tool_activity(self, text: str):
         cleaned = (text or "").strip()
@@ -563,9 +566,9 @@ class UIManager:
             lines.append(f"{prefix}{line}")
         return lines
 
-    def _append_agent_block(self, source: str, text: str):
+    def _append_agent_block(self, source: str, text: str, *, refresh: bool = True):
         for line in self._prefixed_agent_lines(source, text):
-            self._append_conversation(line)
+            self._append_conversation(line, refresh=refresh)
 
     def add_delegation_evidence(self, summary: str, next_action: str = "", confidence: str = ""):
         text = (summary or "").strip()
@@ -745,7 +748,7 @@ class UIManager:
             self._thought_history.append(cleaned)
             if len(self._thought_history) > self._thought_history_max:
                 self._thought_history = self._thought_history[-self._thought_history_max :]
-        self._update_status_line()
+        self._update_status_line(throttle=not done)
 
     def clear_thought_stream(self):
         self._current_thought_stream = ""
@@ -755,9 +758,9 @@ class UIManager:
         cleaned = str(text or "").strip()
         self._current_response_stream = cleaned
         if done and cleaned:
-            self._append_agent_block("main", cleaned)
+            self._append_agent_block("main", cleaned, refresh=False)
             self._current_response_stream = ""
-        self._update_status_line()
+        self._update_status_line(throttle=not done)
 
     def clear_response_stream(self):
         self._current_response_stream = ""
@@ -2904,10 +2907,18 @@ class UIManager:
             self._live.stop()
             self._live = None
 
-    def _update_status_line(self):
+    def _update_status_line(self, *, throttle: bool = False):
         if self._live and not UIManager._test_mode:
+            now = time.monotonic()
+            if (
+                throttle
+                and self._last_live_refresh_at > 0
+                and now - self._last_live_refresh_at < self._live_refresh_min_interval_seconds
+            ):
+                return
             try:
                 self._live.update(self._status_renderable(), refresh=True)
+                self._last_live_refresh_at = now
             except Exception as exc:
                 _debug_logger.warning(f"Failed to update live ui status line. error={exc}")
 
