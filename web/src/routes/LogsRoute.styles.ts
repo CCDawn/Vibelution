@@ -236,7 +236,7 @@ const styles = {
   rootStateMissing:
     "rootStateMissing min-w-0",
   route:
-    "route min-w-0 grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] content-start overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)]",
+    "route min-w-0 grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] content-start overflow-hidden text-[var(--fg-primary)]",
   sceneCard:
     "sceneCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   sceneCardActive:
