@@ -263,6 +263,7 @@ describe("IPC channels", () => {
       "focusWorkbenchWindow",
       "getDesktopShellSummary",
       "getVersion",
+      "notifyConversationCompleted",
       "requestDesktopShellExit"
     ]);
   });
