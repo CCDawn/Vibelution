@@ -4340,12 +4340,7 @@ def load_state() -> dict[str, Any]:
         path = registry_path()
         if not path.exists():
             return default_state()
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return default_state()
-        if not isinstance(payload, dict):
-            return default_state()
+        payload = _load_existing_registry_payload_or_raise(path)
         state = default_state()
         state.update(payload)
         state["agents"] = list(state.get("agents") or []) if isinstance(state.get("agents"), list) else []
@@ -4367,12 +4362,7 @@ def _guard_against_suspicious_registry_shrink(next_payload: dict[str, Any]) -> N
     path = registry_path()
     if not path.exists():
         return
-    try:
-        previous_payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return
-    if not isinstance(previous_payload, dict):
-        return
+    previous_payload = _load_existing_registry_payload_or_raise(path)
     previous_agents = [item for item in previous_payload.get("agents") or [] if isinstance(item, dict)]
     next_agents = [item for item in next_payload.get("agents") or [] if isinstance(item, dict)]
     previous_count = len(previous_agents)
@@ -4417,6 +4407,53 @@ def _guard_against_suspicious_registry_shrink(next_payload: dict[str, Any]) -> N
         "Refused suspicious Agent registry shrink: "
         f"{previous_count} agents would become {next_count}, "
         f"removing {len(removed_direct_agents)} active direct-session Agents."
+    )
+
+
+def _load_existing_registry_payload_or_raise(path: Path) -> dict[str, Any]:
+    try:
+        raw_payload = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        _record_agent_registry_load_failure(
+            "agent_directory.state_read_rejected_unreadable_registry",
+            path,
+            reason="unreadable",
+            error_type=type(exc).__name__,
+        )
+        raise AgentDirectoryError(f"Agent registry could not be loaded: {type(exc).__name__}.") from exc
+    try:
+        payload = json.loads(raw_payload)
+    except json.JSONDecodeError as exc:
+        _record_agent_registry_load_failure(
+            "agent_directory.state_read_rejected_corrupt_registry",
+            path,
+            reason="invalid_json",
+            error_type=type(exc).__name__,
+        )
+        raise AgentDirectoryError("Agent registry could not be loaded: invalid JSON.") from exc
+    if not isinstance(payload, dict):
+        _record_agent_registry_load_failure(
+            "agent_directory.state_read_rejected_invalid_registry",
+            path,
+            reason="invalid_payload_type",
+            error_type=type(payload).__name__,
+        )
+        raise AgentDirectoryError("Agent registry could not be loaded: payload must be a JSON object.")
+    return payload
+
+
+def _record_agent_registry_load_failure(
+    event_code: str,
+    path: Path,
+    *,
+    reason: str,
+    error_type: str,
+) -> None:
+    _record_state_write_event(
+        event_code,
+        level="error",
+        outcome="blocked",
+        fields={"pathName": path.name, "reason": reason, "errorType": error_type},
     )
 
 

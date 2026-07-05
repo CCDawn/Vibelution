@@ -137,6 +137,8 @@ python tests/test_runner.py --fast --parallel --workers 4
 python tests/test_runner.py --per-file
 ```
 
+`test_runner.py` 面向健康审计，会在构造 pytest 命令时显式覆盖项目默认的遇错即停设置，尽量收集同一批次里的多个失败；需要快速停在首个失败时，直接使用 `pytest ... -x`。
+
 ### 3.4 进程级并行策略
 
 Vibelution 支持通过 `pytest-xdist` 做进程级并行，但默认测试命令仍保持串行，避免全局状态、真实工作区、端口和后台进程类测试被误并发执行。

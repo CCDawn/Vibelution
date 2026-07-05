@@ -91,11 +91,11 @@ const styles: Record<string, string> = {
   aiSearchWorkflowSummary:
     "aiSearchWorkflowSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   canvas:
-    "canvas min-w-0 grid min-h-0 gap-2 p-2 relative flex-1 overflow-auto bg-[color-mix(in_srgb,var(--vui-surface-glass)_94%,white_6%)] [background-image:linear-gradient(to_right,color-mix(in_srgb,var(--vui-border-subtle)_45%,transparent)_1px,transparent_1px),linear-gradient(to_bottom,color-mix(in_srgb,var(--vui-border-subtle)_32%,transparent)_1px,transparent_1px)] [background-size:32px_32px]",
+    "canvas min-w-0 grid min-h-0 gap-2 p-2 relative flex-1 overflow-auto bg-[var(--vui-surface-base)] [background-image:linear-gradient(to_right,color-mix(in_srgb,var(--vui-border-subtle)_24%,transparent)_1px,transparent_1px),linear-gradient(to_bottom,color-mix(in_srgb,var(--vui-border-subtle)_18%,transparent)_1px,transparent_1px)] [background-size:40px_40px]",
   canvasLayoutModeSwitch:
     "canvasLayoutModeSwitch min-w-0 grid min-h-0 gap-2 p-2 grid-cols-[repeat(auto-fit,minmax(86px,max-content))]",
   canvasPanel:
-    "canvasPanel min-w-0 grid min-h-0 gap-2 p-2 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] !flex min-h-0 flex-col overflow-hidden p-0",
+    "canvasPanel min-w-0 grid min-h-0 gap-2 p-2 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] !flex min-h-0 flex-col overflow-hidden p-0",
   canvasReadOnlyBadge:
     "canvasReadOnlyBadge min-w-0 grid min-h-0 gap-2 p-2 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] min-h-[26px] border-[color-mix(in_srgb,var(--accent-cool)_36%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] px-2 text-[var(--accent-cool)]",
   canvasReadOnlyNode:
@@ -129,7 +129,7 @@ const styles: Record<string, string> = {
   emptyCanvasKicker:
     "emptyCanvasKicker min-w-0 grid min-h-0 gap-2 p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   emptyCanvasPanel:
-    "emptyCanvasPanel min-w-0 grid min-h-0 gap-2 p-2 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] flex-1 content-start overflow-auto p-2 bg-[color-mix(in_srgb,var(--vui-surface-glass)_94%,white_6%)] [background-image:linear-gradient(to_right,color-mix(in_srgb,var(--vui-border-subtle)_45%,transparent)_1px,transparent_1px),linear-gradient(to_bottom,color-mix(in_srgb,var(--vui-border-subtle)_32%,transparent)_1px,transparent_1px)] [background-size:32px_32px]",
+    "emptyCanvasPanel min-w-0 grid min-h-0 gap-2 p-2 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] flex-1 content-start overflow-auto p-2 bg-[var(--vui-surface-base)] [background-image:linear-gradient(to_right,color-mix(in_srgb,var(--vui-border-subtle)_24%,transparent)_1px,transparent_1px),linear-gradient(to_bottom,color-mix(in_srgb,var(--vui-border-subtle)_18%,transparent)_1px,transparent_1px)] [background-size:40px_40px]",
   emptyCanvasSteps:
     "emptyCanvasSteps min-w-0 grid min-h-0 gap-2 p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] !flex flex-wrap gap-1.5",
   experimentBaselineArtifact:
@@ -463,7 +463,7 @@ const styles: Record<string, string> = {
   teamHistoryMeta:
     "teamHistoryMeta min-w-0 flex flex-wrap items-center gap-1.5",
   teamHistoryPanel:
-    "teamHistoryPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "teamHistoryPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
   teamMemoryActionRail:
     "teamMemoryActionRail min-w-0 flex flex-wrap items-center gap-1.5 grid min-h-0 content-start overflow-auto !flex min-w-0 items-center justify-end gap-[5px] [&_a]:inline-flex [&_a]:min-h-[24px] [&_a]:items-center [&_a]:justify-center [&_a]:gap-1 [&_a]:px-[7px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_30%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--surface-panel)_88%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[820] [&_a]:no-underline [&_a]:whitespace-nowrap [&_a:hover]:border-[color:color-mix(in_srgb,var(--accent-cool)_46%,var(--border-soft))] [&_a:hover]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel))]",
   teamMemoryIndex:
@@ -473,13 +473,13 @@ const styles: Record<string, string> = {
   teamMemoryMemberActions:
     "teamMemoryMemberActions min-w-0 flex flex-wrap items-center gap-1.5 !flex items-center justify-end gap-[5px] min-w-0 [&_a_span]:hidden [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:w-[26px] [&_a]:min-w-[26px] [&_a]:min-h-[24px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_30%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--surface-panel)_88%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:no-underline",
   teamMemoryMemberCard:
-    "teamMemoryMemberCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "teamMemoryMemberCard min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
   teamMemoryMemberHeading:
     "teamMemoryMemberHeading min-w-0 hidden",
   teamMemoryMemberIdentity:
     "teamMemoryMemberIdentity min-w-0 grid gap-1",
   teamMemoryMemberTable:
-    "teamMemoryMemberTable min-w-0 min-h-0 !grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] content-start auto-rows-max gap-2 overflow-auto",
+    "teamMemoryMemberTable min-w-0 min-h-0 !grid grid-cols-[repeat(auto-fit,minmax(260px,max-content))] justify-start content-start auto-rows-max gap-2 overflow-auto",
   teamMemoryRole:
     "teamMemoryRole min-w-0",
   teamMemoryStatusBadge:
@@ -493,7 +493,7 @@ const styles: Record<string, string> = {
   teamRoundMeta:
     "teamRoundMeta min-w-0 flex flex-wrap items-center gap-1.5",
   teamRoundPanel:
-    "teamRoundPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "teamRoundPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
   teamSelectField:
     "teamSelectField min-w-0 grid grid-cols-[max-content_minmax(210px,300px)] items-center gap-1.5 text-[var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)] [&_[data-vui=select]]:min-w-0 [&_[data-vui=select-trigger]]:!inline-flex [&_[data-vui=select-trigger]]:!h-8 [&_[data-vui=select-trigger]]:!min-h-8 [&_[data-vui=select-trigger]]:items-center [&_[data-vui=select-trigger]]:justify-between [&_[data-vui=select-trigger]]:gap-2 [&_[data-vui=select-trigger]]:rounded-[7px] [&_[data-vui=select-trigger]]:px-2.5 [&_[data-vui=select-trigger]]:text-left [&_[data-vui=select-trigger]]:shadow-none",
   teamSelectControl:
@@ -531,7 +531,7 @@ const styles: Record<string, string> = {
   workflowMeta:
     "workflowMeta min-w-0 flex flex-wrap items-center gap-1.5",
   workflowPanel:
-    "workflowPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "workflowPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
   workflowSourceQualityStats:
     "workflowSourceQualityStats min-w-0 grid gap-2 !grid grid-cols-[repeat(5,minmax(72px,1fr))] gap-[5px]",
   workflowStageActive:
@@ -555,11 +555,11 @@ const styles: Record<string, string> = {
   workflowValidation:
     "workflowValidation min-w-0",
   workspace:
-    "workspace min-w-0 flex-1 grid min-h-0 gap-[var(--team-workbench-gap)] p-[var(--team-workbench-gap)] !grid min-h-0 grid-cols-[minmax(520px,1fr)_minmax(300px,380px)] gap-[var(--team-workbench-gap)] overflow-hidden",
+    "workspace min-w-0 flex-1 grid min-h-0 gap-[var(--team-workbench-gap)] p-[var(--team-workbench-gap)] !grid min-h-0 grid-cols-[minmax(520px,1fr)_minmax(300px,380px)] gap-[var(--team-workbench-gap)] overflow-hidden max-[760px]:h-auto max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:content-start max-[760px]:overflow-auto",
   workspaceResearch:
     "workspaceResearch min-w-0 grid min-h-0 gap-[var(--team-workbench-gap)] p-[var(--team-workbench-gap)] !grid-cols-[minmax(0,1fr)]",
   workspaceResearchCanvas:
-    "workspaceResearchCanvas min-w-0 grid min-h-0 gap-[var(--team-workbench-gap)] p-[var(--team-workbench-gap)] !grid h-full grid-cols-[minmax(520px,1fr)_minmax(300px,380px)] overflow-hidden",
+    "workspaceResearchCanvas min-w-0 grid min-h-0 gap-[var(--team-workbench-gap)] p-[var(--team-workbench-gap)] !grid h-full grid-cols-[minmax(520px,1fr)_minmax(300px,380px)] overflow-hidden max-[760px]:h-auto max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:content-start max-[760px]:overflow-auto",
 };
 
 export default styles;

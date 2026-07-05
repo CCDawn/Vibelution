@@ -121,6 +121,7 @@ from .supervised_workbench import (
     save_workbench_state,
     select_dataset_by_input,
     select_decision_record,
+    supervised_evidence_storage_metadata,
     workbench_state_path,
 )
 from .self_evolution_workbench import (
@@ -237,6 +238,7 @@ __all__ = [
     "save_workbench_state",
     "select_dataset_by_input",
     "select_decision_record",
+    "supervised_evidence_storage_metadata",
     "workbench_state_path",
     "resolve_supervised_bundle_path",
     "run_supervised_evolution_session",

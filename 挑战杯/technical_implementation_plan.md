@@ -277,7 +277,7 @@ source_registered
 | PUT | `/api/teams/{team_id}/workflow-orchestration` | 确保 `challenge_cup_research` 编排与 `ownerAgentId` |
 | POST | `/api/teams/{team_id}/workflow-orchestration/candidates/source` | 登记 `source_manifest` 候选 |
 | POST | `/api/teams/{team_id}/workflow-orchestration/candidates/{candidate_id}/source-extraction` | 对本地 PDF `source_manifest` 计算 `sha256`、抽取 `metadata.sourceExtraction.pageAnchors` / `excerpt`，并重新校验候选；抽取失败停在 `source_needs_confirmation` |
-| POST | `/api/teams/{team_id}/workflow-orchestration/candidates/{candidate_id}/paper-note-draft` | 将已完成的 `sourceExtraction.excerpt/pageAnchors` 转为本地研究模型 `paper_note_draft` 任务，记录 `paper_note` 候选，并回写 source candidate 的 `metadata.paperNoteDrafts` trace；`contentExtraction.evidenceLedger` 已作为下一轮 paper_note 输入来源登记 |
+| POST | `/api/teams/{team_id}/workflow-orchestration/candidates/{candidate_id}/paper-note-draft` | 将已完成的 `sourceExtraction.excerpt/pageAnchors` 转为本地研究模型 `paper_note_draft` 任务，合并 `contentExtraction.evidenceLedger` 中的 `evidence_ready` 条目作为补充证据输入，记录 `paper_note` 候选，并回写 source candidate 的 `metadata.paperNoteDrafts` trace |
 | GET | `/api/teams/{team_id}/workflow-orchestration/candidates` | 按 `candidateType`、`currentState`、`qualityStatus` 查询 CandidateStore，并返回 `validationSummary` |
 | GET | `/api/teams/{team_id}/workflow-orchestration/candidates/validation` | 生成 CandidateStore 校验报告，统计 valid/invalid/error/warning 并列出每个候选的问题 |
 | POST | `/api/teams/{team_id}/workflow-orchestration/transfers` | 功能 Agent 提交流程转移请求 |
@@ -316,11 +316,11 @@ workspace/teams/<teamId>/
 - 阶段任务结构化回写已支持资料提炼 Evidence Ledger：`source_collection_stage_writeback_tool` 接收 `candidateExtractions[]` 或 `recordExtractions[]` 后，会把 `claims`、`keyFindings`、`citations`、`sourceRefs`、`evidenceRefs`、`limitations`、`uncertainty`、`riskFlags`、`supportLevel` 和 `nextAction` 物化到 `metadata.contentExtraction.evidenceLedger`。
 - Evidence Ledger 每条记录带 `evidenceStatus`：有 `sourceRef`、`page`、`citation` 或 `evidenceRef` 锚点时为 `evidence_ready`；结构化内容存在但缺锚点时为 `missing_evidence_anchor`，并会让候选回写降级为 `needs_review`。
 - 阶段任务回写摘要会统计 `evidenceLedgerCandidateCount`、`evidenceReadyCandidateCount`、`missingEvidenceAnchorCount` 和相关 candidate ids，供前端资料提炼页、资料关系整理和后续治理门禁展示。
-- `paper-note-draft` 自动草稿桥已落地：读取完成状态的 `metadata.sourceExtraction`，把 `excerpt/pageAnchors` 组装为 `sourceRefs/evidenceRefs/excerpt`，随后复用 `invoke_local_research_model` 调用本地研究模型，并通过 `record_local_research_model_output` 写入 `paper_note` 候选；`contentExtraction.evidenceLedger` 接入草稿输入仍是下一轮工作。
+- `paper-note-draft` 自动草稿桥已落地：读取完成状态的 `metadata.sourceExtraction`，把 `excerpt/pageAnchors` 组装为 `sourceRefs/evidenceRefs/excerpt`，并合并 `contentExtraction.evidenceLedger` 中 `status=evidence_ready` 的 claims、keyFindings、citations、sourceRefs 和 evidenceRefs，随后复用 `invoke_local_research_model` 调用本地研究模型，并通过 `record_local_research_model_output` 写入 `paper_note` 候选。
 - 成功或需修订的 `paper_note` 都停留在 CandidateStore，不写正式 Team Knowledge、RAG 或正式图谱；source candidate 会追加 `metadata.paperNoteDrafts` trace，保留 source -> paper_note 的可追溯关系。
 - 新增运行事件日志：`candidate_store.validated`，只记录候选数、invalid 数、error/warning 数和 workflowId。
 - `paper_note_draft` 输出契约已补齐 `keyFindings`、`methods`、`limitations`、`citations`；每条 `keyFinding` 必须带 `sourceRef` 和 `page` / `citation` / `evidenceRef` 锚点。
-- 合格 `paper_note` 本地模型输出进入 `paper_note_draft`；缺 citation/page anchor 或 Evidence Ledger 锚点不足时进入 `paper_note_needs_revision` / `missing_evidence_anchor`，不能自然推进到 `mechanism_candidate`。长文多 chunk 汇总、多草稿合并和 Evidence Ledger 接入 paper_note 草稿输入仍待接。
+- 合格 `paper_note` 本地模型输出进入 `paper_note_draft`；缺 citation/page anchor 或 Evidence Ledger 锚点不足时进入 `paper_note_needs_revision` / `missing_evidence_anchor`，不能自然推进到 `mechanism_candidate`。长文多 chunk 汇总和多草稿合并仍待接。
 - `neuro_mechanism_extract` 输出契约已补齐 `paperNoteIds`、`description`、`brainSystems`、`cognitiveFunctions`、`experimentalPhenomena`、`authorInterpretation`、`projectInterpretation`。
 - 合格 `neuro_mechanism` 本地模型输出进入 `mechanism_candidate`；缺机制证据或神经术语不确定但未标记 `terminology_uncertain` 时进入 `mechanism_needs_revision`，不能自然推进到机制映射。
 - `mechanism_mapping` 输出契约已补齐 `neuroMechanismIds`、`computationalAbstraction`、`factLayer`、`inferenceLayer`、`overAnalogyRisk`、`engineeringImplication`。
@@ -708,6 +708,7 @@ Agent 创建策略：
 - 缺 citation/page anchor 的 paper_note 会进入 `paper_note_needs_revision`。
 - 本地 PDF 页码摘录已可由 `source-extraction` 提供，并已通过 `/paper-note-draft` 自动组装成本地模型调用输入。
 - 资料提炼阶段回写已可生成 `metadata.contentExtraction.evidenceLedger`，保留 `claims`、`keyFindings`、`citations`、`sourceRefs`、`evidenceRefs`、`limitations`、`uncertainty`、`riskFlags`、`supportLevel` 和 `nextAction`。
+- `paper-note-draft` 已接入 `metadata.contentExtraction.evidenceLedger`：只把 `status=evidence_ready` 的账本作为补充输入，缺锚点的 `missing_evidence_anchor` 不进入草稿输入。
 - Evidence Ledger 缺 `sourceRef` / `page` / `citation` / `evidenceRef` 锚点时会被标记 `missing_evidence_anchor`，并阻止无来源结构化结论自然进入后续机制提取。
 - `paper_note` 候选写入后会在 source candidate 的 `metadata.paperNoteDrafts` 中留下 trace，便于后续候选图谱和治理入库追踪。
 
@@ -717,7 +718,8 @@ Agent 创建策略：
 - 已覆盖：缺 citation 的 finding 不能进入 mechanism_candidate，只能停在 `paper_note_needs_revision`。
 - 已覆盖：从本地 PDF `sourceExtraction.excerpt/pageAnchors` 自动生成 paper_note，并回写 source candidate trace。
 - 已覆盖：candidateExtractions / recordExtractions 会物化 Evidence Ledger；缺锚点结构化证据会进入 `missing_evidence_anchor` / `needs_review`。
-- 待覆盖：长文 chunk、多草稿合并、Evidence Ledger 前端展示和真实 Qwen 模型质量评估。
+- 已覆盖：`evidence_ready` Evidence Ledger 会进入 paper_note 草稿模型输入，`missing_evidence_anchor` 不进入草稿输入。
+- 待覆盖：长文 chunk、多草稿合并、Evidence Ledger 前端展示细节和真实 Qwen 模型质量评估。
 
 ### M3：机制与算法假设
 

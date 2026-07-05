@@ -161,12 +161,13 @@ describe("route aesthetic contract", () => {
     const offenders = Array.from(new Set([
       resolve(routeRoot, "ChatCodingRoute.styles.ts"),
       resolve(routeRoot, "MemoryRoute.styles.ts"),
+      resolve(routeRoot, "ResearchFlowCanvasRoute.styles.ts"),
       resolve(routeRoot, "TeamsRoute.styles.ts"),
       ...MEMORY_STYLE_FILES,
     ]))
       .flatMap((file) => {
         const source = readSource(file);
-        return ["route", "graphCanvasShell", "cacheDonutShell", "cacheDetailDonutShell"]
+        return ["route", "canvasShell", "graphCanvasShell", "cacheDonutShell", "cacheDetailDonutShell"]
           .map((key) => ({ file, key, value: extractStyleValue(source, key) }))
           .filter((entry) => entry.value.includes("bg-[var(--surface-page)]"))
           .map((entry) => `${entry.file.split(/[/\\\\]/).pop()}:${entry.key}`);

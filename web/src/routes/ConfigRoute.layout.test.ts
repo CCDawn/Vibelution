@@ -19,6 +19,7 @@ import placeholderPanelStyles from "./ConfigWorkspacePlaceholderPanel.styles";
 import runtimePanelSource from "./ConfigRuntimePanel.tsx?raw";
 import runtimePanelStylesSource from "./ConfigRuntimePanel.styles.ts?raw";
 import runtimePanelStyles from "./ConfigRuntimePanel.styles";
+import styles from "./ConfigRoute.styles";
 import stylesSource from "./ConfigRoute.styles.ts?raw";
 
 const extractedPanelStylesSource = [
@@ -114,8 +115,12 @@ describe("ConfigRoute layout contract", () => {
 
   it("keeps the tablet config sidebar compact instead of stretching every control full width", () => {
     expect(stylesSource).toContain("sidebarStatus:");
+    expect(stylesSource).toContain("buttonBlock:");
+    expect(styles.buttonBlock).toContain("[width:auto]");
+    expect(stylesSource).not.toContain("buttonBlock [width:100%]");
     expect(stylesSource).toContain("max-[1120px]:[grid-template-columns:minmax(150px,0.7fr)_minmax(180px,1fr)_max-content]");
     expect(stylesSource).toContain("max-[1120px]:[&_.buttonBlock]:[width:auto]");
+    expect(stylesSource).toContain("max-[1120px]:[&_.buttonBlock]:[justify-self:end]");
     expect(stylesSource).toContain("max-[1120px]:[&:not(.sidebarNavPanelCollapsed)]:[display:grid]");
     expect(stylesSource).toContain("max-[1120px]:[&:not(.sidebarNavPanelCollapsed)]:[grid-template-columns:minmax(170px,0.32fr)_minmax(0,1fr)]");
     expect(stylesSource).toContain("max-[1120px]:[display:flex]");
@@ -124,6 +129,32 @@ describe("ConfigRoute layout contract", () => {
     expect(stylesSource).toContain("max-[720px]:[&_.buttonBlock]:[width:100%]");
     expect(stylesSource).toContain("max-[720px]:[display:grid]");
     expect(stylesSource).toContain("max-[720px]:[grid-template-columns:1fr]");
+  });
+
+  it("keeps Config image editors and model content constrained on narrow screens", () => {
+    expect(stylesSource).toContain("contentModels:");
+    expect(styles.contentModels).toContain("max-[720px]:[max-height:none]");
+    expect(styles.contentModels).toContain("max-[720px]:[overflow:visible]");
+
+    expect(stylesSource).toContain("avatarCropWorkspace:");
+    expect(styles.avatarCropWorkspace).toContain("[display:grid]");
+    expect(styles.avatarCropWorkspace).toContain("[min-width:0]");
+    expect(styles.avatarCropWorkspace).toContain("max-[720px]:[grid-template-columns:1fr]");
+
+    expect(stylesSource).toContain("avatarImageEditor:");
+    expect(styles.avatarImageEditor).toContain("[display:grid]");
+    expect(styles.avatarImageEditor).toContain("[min-width:0]");
+    expect(styles.avatarImageValue).toContain("[display:flex]");
+    expect(styles.avatarImageValue).toContain("[max-width:100%]");
+
+    expect(stylesSource).toContain("themeBackgroundImageEditor:");
+    expect(styles.themeBackgroundImageEditor).toContain("[display:grid]");
+    expect(styles.themeBackgroundImageEditor).toContain("[min-width:0]");
+    expect(styles.themeBackgroundImageValue).toContain("[min-width:0]");
+    expect(styles.themeBackgroundImageValue).toContain("[max-width:100%]");
+
+    expect(stylesSource).toContain("userProfileAvatarFields:");
+    expect(styles.userProfileAvatarFields).toContain("max-[900px]:[grid-template-columns:1fr]");
   });
 
   it("supports Agent Center return links and section deep links", () => {

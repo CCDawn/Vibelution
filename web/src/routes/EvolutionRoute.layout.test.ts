@@ -133,6 +133,14 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("primaryDatasets.map((item)");
   });
 
+  it("surfaces the supervised evidence root from workbench storage metadata", () => {
+    expect(apiTypesSource).toContain("export type EvolutionWorkbenchStorage");
+    expect(apiTypesSource).toContain("storage?: EvolutionWorkbenchStorage");
+    expect(routeSource).toContain("const workbenchStorage");
+    expect(routeSource).toContain("workbenchStorage?.relativeEvidenceRoot");
+    expect(routeSource).toContain("workbenchStorage?.activeEvidenceRoot");
+  });
+
   it("keeps the runnable source picker separate from the full supervised benchmark catalog", () => {
     expect(apiTypesSource).toContain("datasetCatalog: EvolutionDatasetOption[]");
     expect(routeSource).toContain("const datasetCatalog = workbenchControl?.datasetCatalog");
@@ -479,6 +487,8 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeStyles.supervisedWorkflowPanel).toContain("[overflow:hidden]");
     expect(routeStyles.workflowStepRail).toContain("[max-height:min(196px,_30vh)]");
     expect(routeStyles.workflowStepButton).toContain("hover:[border-color:");
+    expect(routeStyles.workflowStepButton).toContain("[background:var(--surface-panel)]");
+    expect(routeStyles.workflowStepButton).toContain("w-full");
     expect(routeStyles.workflowStepButtonActive).toContain("[border-color:");
     expect(routeStyles.workflowStepPreview).toContain("[-webkit-line-clamp:2]");
     expect(routeStyles.caseOverviewWorkspace).toContain("[grid-template-rows:auto_minmax(120px,_1fr)]");
@@ -690,9 +700,11 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeStyles.toolbarControls).toContain("[justify-content:flex-end]");
     expect(routeStyles.toolbarControls).toContain("max-[900px]:[justify-content:stretch]");
     expect(routeStyles.toolbarControls).not.toContain("[flex:1_1_100%]");
-    expect(routeStyles.toolbarControlsSupervisedFocus).toContain("[align-items:stretch]");
-    expect(routeStyles.toolbarControlsSupervisedFocus).toContain("[flex:1_1_100%]");
-    expect(routeStyles.toolbarControlsSupervisedFocus).toContain("[width:100%]");
+    expect(routeStyles.toolbarControlsSupervisedFocus).toContain("[align-items:center]");
+    expect(routeStyles.toolbarControlsSupervisedFocus).toContain("[flex:0_1_auto]");
+    expect(routeStyles.toolbarControlsSupervisedFocus).toContain("[max-width:100%]");
+    expect(routeStyles.toolbarControlsSupervisedFocus).not.toContain("[flex:1_1_100%]");
+    expect(routeStyles.toolbarControlsSupervisedFocus).not.toContain("[width:100%]");
     expect(routeStyles.toolbarControlsSupervisedFocus).toContain("[justify-content:flex-end]");
   });
 

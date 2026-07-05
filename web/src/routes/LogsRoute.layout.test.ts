@@ -3,6 +3,32 @@ import { describe, expect, it } from "vitest";
 import styles from "./LogsRoute.styles";
 import routeSource from "./LogsRoute.tsx?raw";
 
+const logSurfaceKeys = [
+  "diagnosticsPanel",
+  "diagnosticsSummary",
+  "diagnosticsSummaryRow",
+  "diagnosticsSummaryText",
+  "logPreviewStack",
+  "packageDiagnosisPanel",
+  "packageDiagnosisSummary",
+  "packageDiagnosisSummaryRow",
+  "packageFilesPanel",
+  "panelSearch",
+  "panelSearchInput",
+  "previewActions",
+  "previewPane",
+  "previewStateCard",
+  "previewStateFlow",
+  "previewStateSurface",
+  "sceneCard",
+  "sceneCardMeta",
+  "sceneCardStatus",
+  "sceneDetailSurface",
+  "sceneRawPreview",
+  "startupTracePanel",
+  "packageWorkRunPanel",
+] as const satisfies readonly (keyof typeof styles)[];
+
 describe("LogsRoute layout contract", () => {
   it("routes Logs page controls through VUI primitives", () => {
     expect(routeSource).toContain("from \"../components/vui\"");
@@ -55,6 +81,37 @@ describe("LogsRoute layout contract", () => {
     expect(styles.workspace).toContain("grid-cols-[minmax(0,1fr)_10px_var(--logs-right-rail-width,250px)]");
     expect(styles.workspace).toContain("grid-rows-[minmax(0,1fr)]");
     expect(styles.workspace).toContain("overflow-hidden");
+  });
+
+  it("prevents the logs route and workspace from forcing horizontal page overflow", () => {
+    for (const className of [styles.route, styles.workspace, styles.resizableLayout, styles.previewPane]) {
+      expect(className).toContain("min-w-0");
+      expect(className).toContain("max-w-full");
+      expect(className).toContain("overflow-x-hidden");
+    }
+  });
+
+  it("lets the three-column logs workspace converge to one column on mobile widths", () => {
+    expect(styles.workspace).toContain("max-[760px]:grid-cols-[minmax(0,1fr)]");
+    expect(styles.workspace).toContain("max-[760px]:overflow-y-auto");
+    expect(styles.workspace).toContain("max-[760px]:overflow-x-hidden");
+    expect(styles.resizableLayout).toContain("max-[760px]:grid-cols-[minmax(0,1fr)]");
+    expect(styles.resizableLayout).toContain("max-[760px]:overflow-y-auto");
+    expect(styles.resizableLayout).toContain("max-[760px]:overflow-x-hidden");
+    expect(styles.sidebar).toContain("max-[760px]:max-h-[34vh]");
+    expect(styles.rightRail).toContain("max-[760px]:max-h-[34vh]");
+    expect(styles.resizeHandle).toContain("max-[760px]:hidden");
+    expect(styles.previewStateFlow).toContain("max-[560px]:grid-cols-[repeat(2,minmax(0,1fr))]");
+    expect(styles.stateFactRow).toContain("max-[560px]:grid-cols-[minmax(0,1fr)]");
+  });
+
+  it("keeps preview diagnostics and runtime evidence surfaces background-aware", () => {
+    for (const key of logSurfaceKeys) {
+      expect(styles[key]).toContain("border-[color-mix(in_srgb");
+      expect(styles[key]).toContain("bg-[color-mix(in_srgb");
+      expect(styles[key]).not.toContain("bg-[var(--vui-surface-glass)]");
+      expect(styles[key]).not.toContain("shadow-[var(--vui-shadow");
+    }
   });
 
   it("allocates the remaining route height to the logs workspace", () => {

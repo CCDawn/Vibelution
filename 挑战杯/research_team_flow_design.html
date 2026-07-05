@@ -47,7 +47,7 @@
           <div class="focus-list">
             <div class="focus-item"><b>优先看</b><span>知识搜集页是否能一眼判断是否进行中、下一步按钮是什么、结果存在哪里，以及详情里能否追溯原始证据与 Evidence Ledger。</span></div>
             <div class="focus-item"><b>不能做</b><span>当前执行器只取元数据引用，不抓全文、不审批入库、不把资料关系整理当作正式事实。</span></div>
-            <div class="focus-item"><b>下一步</b><span>把 Evidence Ledger 接入 paper_note 草稿输入；继续扩展全文下载/网页抽取、质量评分和 cache hit/miss 运行证据。</span></div>
+            <div class="focus-item"><b>下一步</b><span>收口阶段状态投影和 paper_note 多 chunk 草稿合并；继续扩展全文下载/网页抽取、质量评分和 cache hit/miss 运行证据。</span></div>
           </div>
         </aside>
       </section>
@@ -452,7 +452,7 @@
           <h2 style="margin-top: 14px;">下一步</h2>
           <div class="checklist">
             <span>资料提炼 Agent 对 source_manifest 做可靠性、可访问性、相关性和抽取风险审查。</span>
-<span>资料提炼 Agent 为 source_quality_approved 来源补 page/citation anchors 和 contentExtraction.evidenceLedger；Paper Note Extraction Agent 先生成 paperNoteChunkPlan，再按 chunkId 生成 paper_note 草稿，后续再把 Evidence Ledger 接入草稿输入。</span>
+<span>资料提炼 Agent 为 source_quality_approved 来源补 page/citation anchors 和 contentExtraction.evidenceLedger；Paper Note Extraction Agent 先生成 paperNoteChunkPlan，再按 chunkId 生成 paper_note 草稿，并把 evidence_ready Evidence Ledger 作为补充证据输入。</span>
 <span>资料关系整理需要修复 missing links；当前 status actionItems 指向 repair_candidate_graph_links 与 run_review_prefilter。</span>
 <span>知识治理 Agent 只能在 review/steward pack 完成后生成待审入库包，不能直接正式入库。</span>
           </div>
@@ -1451,7 +1451,7 @@
                 </div>
 <div class="service-row">
                   <b>paper_note_chunk_planner</b>
-                  <span>已接入后端/API/Teams 候选资料页：对已完成 sourceExtraction 的 source_manifest 生成 paperNoteChunkPlan，并支持按 chunkId 调用 paper-note-draft；Evidence Ledger 可作为下一轮 paper_note keyFindings 的候选证据输入。</span>
+                  <span>已接入后端/API/Teams 候选资料页：对已完成 sourceExtraction 的 source_manifest 生成 paperNoteChunkPlan，并支持按 chunkId 调用 paper-note-draft；evidence_ready Evidence Ledger 可作为 paper_note 草稿的补充证据输入。</span>
                 </div>
 <div class="service-row">
                   <b>candidate_validator</b>
@@ -2039,8 +2039,8 @@
 <div class="blueprint-row">
               <b>M2</b>
               <strong>paper_note 与 PDF 锚点</strong>
-              <span>已新增 paper_note 输出契约与 Citation Anchor 校验，并接入 sourceExtraction -&gt; paper_note_draft 自动草稿桥：本地 PDF pageAnchors/excerpt 会被转为 sourceRefs/evidenceRefs/excerpt 后调用本地模型；contentExtraction.evidenceLedger 会保留 candidateExtractions/recordExtractions 的 claims、keyFindings、citations、sourceRefs 和 evidenceRefs，供下一轮 paper_note 输入和资料关系整理使用；paperNoteChunkPlan 可把长文切成可追踪 chunk seeds。</span>
-              <span>合格本地模型输出进入 paper_note_draft；Evidence Ledger 缺 sourceRef/page/citation/evidenceRef 锚点时进入 missing_evidence_anchor / needs_review，不能自然推进到 mechanism_candidate；Evidence Ledger 接入 paper_note 草稿输入和多 chunk 草稿合并仍待接。</span>
+              <span>已新增 paper_note 输出契约与 Citation Anchor 校验，并接入 sourceExtraction -&gt; paper_note_draft 自动草稿桥：本地 PDF pageAnchors/excerpt 会被转为 sourceRefs/evidenceRefs/excerpt 后调用本地模型；contentExtraction.evidenceLedger 会保留 candidateExtractions/recordExtractions 的 claims、keyFindings、citations、sourceRefs 和 evidenceRefs，evidence_ready 条目已作为 paper_note 草稿补充输入，资料关系整理继续可读；paperNoteChunkPlan 可把长文切成可追踪 chunk seeds。</span>
+              <span>合格本地模型输出进入 paper_note_draft；Evidence Ledger 缺 sourceRef/page/citation/evidenceRef 锚点时进入 missing_evidence_anchor / needs_review，不能自然推进到 mechanism_candidate；多个 chunk 草稿合并/去重仍待接。</span>
             </div>
 <div class="blueprint-row">
               <b>M3</b>
