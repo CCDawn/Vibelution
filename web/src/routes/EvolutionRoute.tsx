@@ -1042,6 +1042,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const overview = workspaceSnapshot?.overview;
   const workbenchControl = workbenchCatalogQuery.data;
   const workbenchState = overview?.workbench ?? workbenchControl?.savedState ?? workspaceSnapshot?.workbench?.savedState;
+  const workbenchStorage = workbenchControl?.storage ?? workbenchState?.storage ?? workspaceSnapshot?.workbench?.storage;
+  const supervisedEvidenceRootLabel = workbenchStorage?.relativeEvidenceRoot || "workspace/supervised_evolution";
+  const supervisedEvidenceRootTitle = workbenchStorage?.activeEvidenceRoot || workbenchStorage?.formalEvidenceRoot || supervisedEvidenceRootLabel;
   const activeRunSnapshot = selectRunSnapshotWithRunId(workspaceSnapshot?.activeRun);
   const latestSupervisedRunSnapshot = selectRunSnapshotWithRunId(workspaceSnapshot?.latestRun);
   const currentSupervisedAgentBindings = workspaceSnapshot?.currentAgentBindings ?? EMPTY_AGENT_BINDINGS;
@@ -3010,6 +3013,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               <div className={styles.sourceInventoryBar}>
                 <span>{lang === "zh" ? "数据集" : "Datasets"} <strong>{workbenchCatalogLoading ? "--" : primaryDatasets.length}</strong></span>
                 <span>{lang === "zh" ? "评测包" : "Bundles"} <strong>{workbenchCatalogLoading ? "--" : availableBundles.length}</strong></span>
+                <span title={supervisedEvidenceRootTitle}>{lang === "zh" ? "证据根" : "Evidence"} <strong>{supervisedEvidenceRootLabel}</strong></span>
                 {hiddenDatasetCount > 0 ? (
                   <span>{lang === "zh" ? "隐藏" : "Hidden"} <strong>{hiddenDatasetCount}</strong></span>
                 ) : null}

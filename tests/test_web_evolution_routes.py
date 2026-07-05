@@ -1178,6 +1178,64 @@ def test_evolution_workbench_catalog_uses_same_formal_workspace_as_worktree_star
     assert response.json()["savedState"]["bundleName"] == "formal_launchable_bundle"
 
 
+def test_evolution_workbench_exposes_formal_supervised_evidence_root(tmp_path, monkeypatch):
+    project_root = tmp_path / "project"
+    repo_evidence_root = project_root / "workspace" / "supervised_evolution"
+    formal_workspace = tmp_path / "external_data" / "workspace"
+    formal_evidence_root = formal_workspace / "supervised_evolution"
+    formal_bundle_dir = formal_workspace / "evaluation" / "bundles"
+    repo_evidence_root.mkdir(parents=True, exist_ok=True)
+    formal_evidence_root.mkdir(parents=True, exist_ok=True)
+    formal_bundle_dir.mkdir(parents=True, exist_ok=True)
+    (formal_bundle_dir / "formal_launchable_bundle.json").write_text(
+        json.dumps(
+            {
+                "bundle_name": "formal_launchable_bundle",
+                "benchmark": "formal",
+                "cases": [{"case_id": "formal", "prompt": "formal launch"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (formal_evidence_root / "history.jsonl").write_text(
+        json.dumps({"session_id": "formal-history"}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    (formal_evidence_root / "workbench_state.json").write_text(
+        json.dumps(
+            {
+                "source": "bundle",
+                "bundle_name": "formal_launchable_bundle",
+                "keep_worktree": False,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: formal_workspace)
+    monkeypatch.setattr(workspace_manager, "get_workspace", lambda: SimpleNamespace(root=formal_workspace))
+    monkeypatch.setattr(evolution_service, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(evolution_service, "SOURCE_PROJECT_ROOT", project_root)
+    monkeypatch.setattr(supervised_control_service, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(supervised_control_service, "SOURCE_PROJECT_ROOT", project_root)
+
+    response = client.get("/api/evolution/workbench")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["storage"]["relativeEvidenceRoot"] == "workspace/supervised_evolution"
+    assert payload["storage"]["formalWorkspaceRoot"] == str(formal_workspace.resolve())
+    assert payload["storage"]["formalEvidenceRoot"] == str(formal_evidence_root.resolve())
+    assert payload["storage"]["activeEvidenceRoot"] == str(formal_evidence_root.resolve())
+    assert payload["storage"]["activeEvidenceRootExists"] is True
+    assert payload["storage"]["formalEvidenceRootExists"] is True
+    assert payload["storage"]["usesExternalDataWorkspace"] is True
+    assert payload["storage"]["activeEvidenceRoot"] != str(repo_evidence_root.resolve())
+    assert payload["savedState"]["storage"]["formalEvidenceRoot"] == str(formal_evidence_root.resolve())
+    assert payload["savedState"]["bundleName"] == "formal_launchable_bundle"
+
+
 def test_supervised_worktree_run_route_returns_validation_error_for_missing_bundle(tmp_path, monkeypatch):
     formal_workspace = tmp_path / "formal_workspace"
     monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: formal_workspace)

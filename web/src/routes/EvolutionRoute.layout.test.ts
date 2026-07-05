@@ -133,6 +133,14 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("primaryDatasets.map((item)");
   });
 
+  it("surfaces the supervised evidence root from workbench storage metadata", () => {
+    expect(apiTypesSource).toContain("export type EvolutionWorkbenchStorage");
+    expect(apiTypesSource).toContain("storage?: EvolutionWorkbenchStorage");
+    expect(routeSource).toContain("const workbenchStorage");
+    expect(routeSource).toContain("workbenchStorage?.relativeEvidenceRoot");
+    expect(routeSource).toContain("workbenchStorage?.activeEvidenceRoot");
+  });
+
   it("keeps the runnable source picker separate from the full supervised benchmark catalog", () => {
     expect(apiTypesSource).toContain("datasetCatalog: EvolutionDatasetOption[]");
     expect(routeSource).toContain("const datasetCatalog = workbenchControl?.datasetCatalog");
