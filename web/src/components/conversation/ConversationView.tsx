@@ -2349,9 +2349,10 @@ export function ConversationView({
             const showResponseSpinner = isResponseStreaming && !hasActiveProcess;
             const defaultResponseExpanded = Boolean(message.streaming) || defaultExpandedResponseIds.has(message.id);
             const responseExpanded = getExpansionState(message.id, "response", defaultResponseExpanded);
-            const responseSegments = showResponseBlock && !isStreamingStatusPlaceholder && responseExpanded && !isResponseStreaming
+            const responseSegments = showResponseBlock && !isStreamingStatusPlaceholder && !isResponseStreaming
               ? getCachedResponseSegments(responseText)
               : [];
+            const shouldForceResponseBodyVisible = showResponseBlock && !isStreamingStatusPlaceholder && defaultResponseExpanded;
             const isEditingMessage = userAuthoredMessage && message.id === editingMessageId;
             const agentInboxExpanded = getExpansionState(message.id, "agentInbox", false);
             const agentInboxPreview = agentInboxMessage ? compactPreview(agentInboxSummary(message), 140) : "";
@@ -2426,6 +2427,7 @@ export function ConversationView({
                 expandedTitle={t("responseHidden")}
                 collapsedTitle={t("responseVisible")}
                 showSpinner={showResponseSpinner}
+                forceBodyVisible={shouldForceResponseBodyVisible}
                 onToggle={() => toggleSection(message.id, "response", defaultResponseExpanded)}
               >
                 {isResponseStreaming

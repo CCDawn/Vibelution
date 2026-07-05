@@ -12,6 +12,7 @@ type AgentResponseSectionViewProps = {
   expandedTitle: string;
   collapsedTitle: string;
   showSpinner: boolean;
+  forceBodyVisible?: boolean;
   onToggle: () => void;
   children: ReactNode;
 };
@@ -24,9 +25,11 @@ export function AgentResponseSectionView({
   expandedTitle,
   collapsedTitle,
   showSpinner,
+  forceBodyVisible = false,
   onToggle,
   children,
 }: AgentResponseSectionViewProps) {
+  const bodyVisible = expanded || forceBodyVisible;
   return (
     <section
       className={styles.responseSection}
@@ -45,7 +48,7 @@ export function AgentResponseSectionView({
         <span>{label}</span>
         {showSpinner ? <LoaderCircle className={styles.statusSpinner} size={14} /> : null}
       </VButton>
-      {expanded ? <div className={styles.responseBody}>{children}</div> : null}
+      {bodyVisible ? <div className={styles.responseBody}>{children}</div> : null}
     </section>
   );
 }
