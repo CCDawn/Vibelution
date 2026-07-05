@@ -72,7 +72,7 @@ const styles = {
   contractStateGrid:
     "contractStateGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] hidden",
   controlStrip:
-    "controlStrip min-w-0 flex flex-wrap items-center gap-1.5",
+    "controlStrip min-w-0 flex items-center gap-1.5 overflow-hidden px-2 pb-1",
   copyNotice:
     "copyNotice min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   countPill:
@@ -166,7 +166,7 @@ const styles = {
   header:
     "header min-w-0 flex flex-wrap items-center gap-1.5",
   headerActions:
-    "headerActions min-w-0 flex flex-wrap items-center gap-1.5 justify-end",
+    "headerActions min-w-0 flex flex-wrap items-center gap-1.5 justify-end [&>a]:shrink-0 [&>button]:shrink-0",
   healthStrip:
     "healthStrip min-w-0 flex flex-wrap items-center gap-1.5",
   iconButton:
@@ -216,7 +216,7 @@ const styles = {
   knowledgeItems:
     "knowledgeItems min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   knowledgeMain:
-    "knowledgeMain min-w-0 [&_.managementPanel]:content-start",
+    "knowledgeMain min-w-0 grid min-h-0 content-start gap-1.5 overflow-hidden [&_.managementPanel]:content-start",
   knowledgeModeTab:
     "knowledgeModeTab min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1 min-w-0 min-h-[28px] px-1.5 rounded-[7px] border border-[var(--border-soft)] bg-[color:color-mix(in_srgb,var(--surface-panel)_88%,transparent)] text-[var(--fg-secondary)] text-left cursor-pointer [&_span]:min-w-0 [&_span]:truncate",
   knowledgeModeTabActive:
@@ -230,9 +230,9 @@ const styles = {
   knowledgeStewardPanel:
     "knowledgeStewardPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
   knowledgeViewStack:
-    "knowledgeViewStack min-w-0 grid !flex h-full flex-col min-h-0 overflow-hidden [&>.summaryGrid]:[grid-template-columns:repeat(4,minmax(0,1fr))] [&>.knowledgeWorkspace]:flex-1 [&>.knowledgeGovernanceDeck]:hidden",
+    "knowledgeViewStack min-w-0 grid !flex h-full flex-col min-h-0 overflow-hidden [&>.summaryGrid]:[grid-template-columns:repeat(4,minmax(0,1fr))] max-[720px]:[&>.summaryGrid]:[grid-template-columns:repeat(2,minmax(0,1fr))] max-[460px]:[&>.summaryGrid]:[grid-template-columns:minmax(0,1fr)] [&>.knowledgeWorkspace]:flex-1 [&>.knowledgeGovernanceDeck]:hidden",
   knowledgeWorkspace:
-    "knowledgeWorkspace min-w-0 grid h-full min-h-0 gap-2 p-2 grid-cols-[minmax(170px,205px)_minmax(0,1.24fr)_minmax(260px,0.62fr)] overflow-hidden max-[1180px]:grid-cols-[minmax(180px,220px)_minmax(0,1fr)] max-[1180px]:[&_.detailPanel]:col-span-2 max-[820px]:grid-cols-1 max-[820px]:overflow-auto",
+    "knowledgeWorkspace min-w-0 grid h-full min-h-0 gap-2 p-2 grid-cols-[minmax(170px,205px)_minmax(0,1.24fr)_minmax(260px,0.62fr)] overflow-hidden max-[1180px]:grid-cols-[minmax(180px,220px)_minmax(0,1fr)] max-[1180px]:[&_.detailPanel]:col-span-2 max-[820px]:grid-cols-1 max-[820px]:overflow-auto max-[820px]:[&_.detailPanel]:col-span-1",
   manageDetailPanel:
     "manageDetailPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
   manageFilterHeader:
@@ -458,11 +458,11 @@ const styles = {
   stewardWorkbench:
     "stewardWorkbench min-w-0 hidden",
   subnav:
-    "subnav min-w-0 inline-flex items-center justify-self-start gap-[3px] min-w-0 p-[3px] rounded-[7px] border border-[var(--border-soft)] bg-[color:var(--surface-panel-muted)]",
+    "subnav min-w-0 inline-flex max-w-full items-center justify-self-start gap-[3px] overflow-auto p-[3px] rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)]",
   subnavLink:
-    "subnavLink min-w-0 inline-flex items-center justify-center min-h-[24px] min-w-[74px] px-[9px] rounded-[7px] text-[var(--fg-secondary)] font-[700] no-underline whitespace-nowrap hover:text-[var(--fg-primary)] hover:bg-[color:var(--surface-card-hover)]",
+    "subnavLink min-w-0 inline-flex items-center justify-center min-h-[24px] w-fit min-w-[74px] max-w-[9.5rem] px-[9px] rounded-[var(--radius-control)] text-[var(--vui-font-xs)] text-[var(--fg-secondary)] font-[700] no-underline whitespace-nowrap hover:text-[var(--fg-primary)] hover:bg-[var(--vui-control-muted-hover)]",
   subnavLinkActive:
-    "subnavLinkActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] !bg-[color:color-mix(in_srgb,var(--accent-warm)_18%,transparent)] !text-[var(--accent-warm-2)]",
+    "subnavLinkActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]",
   subtitle:
     "subtitle min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   summaryCard:
