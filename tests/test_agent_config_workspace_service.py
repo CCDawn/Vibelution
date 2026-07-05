@@ -1728,6 +1728,42 @@ def test_agent_registry_rejects_suspicious_direct_session_agent_shrink(tmp_path,
     assert {item["agentId"] for item in after["agents"]} == {item["agentId"] for item in before["agents"]}
 
 
+def test_agent_registry_rejects_corrupt_existing_registry_before_default_overwrite(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    events = []
+
+    def capture_runtime_scene_event(component, phase, event_code, **kwargs):
+        events.append((component, phase, event_code, kwargs))
+
+    monkeypatch.setattr(agent_directory_service, "record_runtime_scene_event", capture_runtime_scene_event)
+    registry_path = tmp_path / "workspace" / "agents" / "agents.json"
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    corrupt_payload = '{"agents": ['
+    registry_path.write_text(corrupt_payload, encoding="utf-8")
+
+    with pytest.raises(agent_directory_service.AgentDirectoryError, match="Agent registry could not be loaded"):
+        agent_directory_service.load_state()
+
+    with pytest.raises(agent_directory_service.AgentDirectoryError, match="Agent registry could not be loaded"):
+        agent_directory_service.save_state(agent_directory_service.default_state())
+
+    assert registry_path.read_text(encoding="utf-8") == corrupt_payload
+    assert [event[2] for event in events] == [
+        "agent_directory.state_read_rejected_corrupt_registry",
+        "agent_directory.state_read_rejected_corrupt_registry",
+    ]
+    for component, phase, _, kwargs in events:
+        assert component == "agent_directory"
+        assert phase == "state_write"
+        assert kwargs["level"] == "error"
+        assert kwargs["outcome"] == "blocked"
+        assert kwargs["fields"] == {
+            "pathName": "agents.json",
+            "reason": "invalid_json",
+            "errorType": "JSONDecodeError",
+        }
+
+
 def test_agent_config_workspace_uses_compact_room_and_team_indexes(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
