@@ -1,17 +1,29 @@
 import { describe, expect, it } from "vitest";
 
 import routeSource from "./ConfigRoute.tsx?raw";
+import draftPanelSource from "./ConfigDraftPanel.tsx?raw";
+import draftPanelStylesSource from "./ConfigDraftPanel.styles.ts?raw";
+import draftPanelStyles from "./ConfigDraftPanel.styles";
 import logHelperCenterPanelSource from "./ConfigLogHelperCenterPanel.tsx?raw";
 import logHelperCenterPanelStylesSource from "./ConfigLogHelperCenterPanel.styles.ts?raw";
 import logHelperCenterPanelStyles from "./ConfigLogHelperCenterPanel.styles";
+import overviewPanelSource from "./ConfigOverviewPanel.tsx?raw";
+import overviewPanelStylesSource from "./ConfigOverviewPanel.styles.ts?raw";
+import overviewPanelStyles from "./ConfigOverviewPanel.styles";
 import placeholderPanelSource from "./ConfigWorkspacePlaceholderPanel.tsx?raw";
 import placeholderPanelStylesSource from "./ConfigWorkspacePlaceholderPanel.styles.ts?raw";
 import placeholderPanelStyles from "./ConfigWorkspacePlaceholderPanel.styles";
+import runtimePanelSource from "./ConfigRuntimePanel.tsx?raw";
+import runtimePanelStylesSource from "./ConfigRuntimePanel.styles.ts?raw";
+import runtimePanelStyles from "./ConfigRuntimePanel.styles";
 import stylesSource from "./ConfigRoute.styles.ts?raw";
 
 const extractedPanelStylesSource = [
+  draftPanelStylesSource,
   logHelperCenterPanelStylesSource,
+  overviewPanelStylesSource,
   placeholderPanelStylesSource,
+  runtimePanelStylesSource,
 ].join("\n");
 
 describe("ConfigRoute layout contract", () => {
@@ -28,6 +40,28 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).not.toContain("<section className={styles.loadingSurface}>");
   });
 
+  it("extracts core Config sections into route-local display panels", () => {
+    expect(routeSource).toContain("<ConfigOverviewPanel");
+    expect(routeSource).toContain("<ConfigRuntimePanel");
+    expect(routeSource).toContain("<ConfigDraftPanel");
+    expect(routeSource).not.toContain('<section id="config-overview"');
+    expect(routeSource).not.toContain('<section id="config-shell"');
+    expect(routeSource).not.toContain('<section id="config-draft"');
+
+    expect(overviewPanelSource).toContain('from "./ConfigOverviewPanel.styles"');
+    expect(runtimePanelSource).toContain('from "./ConfigRuntimePanel.styles"');
+    expect(draftPanelSource).toContain('from "./ConfigDraftPanel.styles"');
+    expect(overviewPanelSource).not.toContain("ConfigRoute.styles");
+    expect(runtimePanelSource).not.toContain("ConfigRoute.styles");
+    expect(draftPanelSource).not.toContain("ConfigRoute.styles");
+
+    expect(overviewPanelStyles.sectionSurface).toBeTypeOf("string");
+    expect(runtimePanelStyles.sectionSurface).toBeTypeOf("string");
+    expect(draftPanelStyles.sectionSurface).toBeTypeOf("string");
+    expect(draftPanelSource).toContain("<LazyJsonCodeMirror");
+    expect(routeSource).toContain("onIntakeModeChange");
+  });
+
   it("keeps the config loading placeholder as a dense board with nav, metrics, and specs", () => {
     expect(placeholderPanelSource).toContain("styles.loadingNavPanel");
     expect(placeholderPanelSource).toContain("styles.loadingNavList");
@@ -41,11 +75,11 @@ describe("ConfigRoute layout contract", () => {
   it("moves supplemental config explanation into hover text instead of permanent helper copy", () => {
     expect(routeSource).toContain("subtitleHint");
     expect(routeSource).toContain('title={copy.subtitleHint}');
-    expect(routeSource).toContain("sourceBodyShort");
+    expect(overviewPanelSource).toContain("sourceBodyShort");
     expect(routeSource).toContain("modelsBodyShort");
-    expect(routeSource).toContain('title={copy.sourceBody}');
+    expect(overviewPanelSource).toContain('title={copy.sourceBody}');
     expect(routeSource).toContain('title={copy.modelsBody}');
-    expect(routeSource).toContain('title={copy.openEnvironmentHint}');
+    expect(overviewPanelSource).toContain('title={copy.openEnvironmentHint}');
     expect(routeSource).not.toContain('<span className={styles.helperText}>{copy.openEnvironmentHint}</span>');
   });
 
@@ -221,14 +255,15 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("routes Config controls through VUI primitives", () => {
+    const configSources = [routeSource, overviewPanelSource, runtimePanelSource, draftPanelSource].join("\n");
     expect(routeSource).toContain('from "../components/vui"');
-    expect(routeSource).toContain("<VButton");
+    expect(configSources).toContain("<VButton");
     expect(routeSource).toContain("<VNativeInput");
     expect(routeSource).toContain("<VNativeSelect");
     expect(routeSource).toContain("<VNativeTextarea");
-    expect(routeSource).not.toMatch(/<button\b/);
-    expect(routeSource).not.toMatch(/<input\b/);
-    expect(routeSource).not.toMatch(/<select\b/);
-    expect(routeSource).not.toMatch(/<textarea\b/);
+    expect(configSources).not.toMatch(/<button\b/);
+    expect(configSources).not.toMatch(/<input\b/);
+    expect(configSources).not.toMatch(/<select\b/);
+    expect(configSources).not.toMatch(/<textarea\b/);
   });
 });
