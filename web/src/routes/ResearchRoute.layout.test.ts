@@ -270,4 +270,17 @@ describe("ResearchRoute layout contract", () => {
     expect(styles.themeHeader).toContain("max-[640px]:grid-cols-[minmax(0,1fr)]");
     expect(styles.themeCompareHeader).toContain("max-[640px]:grid-cols-[minmax(0,1fr)]");
   });
+
+  it("keeps trace internals layout-only while the trace panel owns the surface", () => {
+    for (const key of ["agentTraceHeader", "agentTraceControls", "agentTraceContent", "agentTraceMeta", "agentTraceTimeline"] as const) {
+      expect(styles[key]).toContain("min-w-0");
+      expect(styles[key]).not.toContain("bg-[color-mix");
+      expect(styles[key]).not.toContain("border-[color-mix");
+    }
+
+    expect(styles.agentTracePanel).toContain("bg-[color:color-mix(in_srgb,var(--accent-cool)_6%,transparent)]");
+    expect(styles.agentTraceMeta).toContain("[&_strong]:text-[var(--fg-primary)]");
+    expect(styles.primaryButton).toContain("bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)]");
+    expect(styles.primaryButton).not.toContain("var(--vui-surface-row)");
+  });
 });
