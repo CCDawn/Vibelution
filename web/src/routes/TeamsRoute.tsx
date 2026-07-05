@@ -5429,7 +5429,8 @@ export function TeamsRoute({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(nextCanvas),
       }),
-    onSuccess: (_canvas, variables) => {
+    onSuccess: (canvas, variables) => {
+      queryClient.setQueryData(queryKeys.teamCanvas(variables.teamId), canvas);
       void chatWorkspaceCache.afterTeamChanged(variables.teamId);
     },
   });

@@ -16,9 +16,9 @@ const styles = {
   groupSessionItem:
     "vui-routes-chatcodingroute groupSessionItem pr-1 border-transparent bg-transparent shadow-none",
   sessionItem:
-    "vui-routes-chatcodingroute sessionItem relative grid min-w-0 grid-cols-[minmax(0,1fr)] gap-0 rounded-[var(--radius-control)] border border-transparent bg-transparent !px-1 !py-0.5 text-left transition-colors hover:bg-[color-mix(in_srgb,var(--surface-card)_58%,transparent)] hover:shadow-[var(--vui-shadow-inset-accent)] focus-within:bg-[color-mix(in_srgb,var(--surface-card)_58%,transparent)] focus-within:shadow-[var(--vui-shadow-inset-accent)]",
+    "vui-routes-chatcodingroute sessionItem relative grid min-w-0 grid-cols-[minmax(0,1fr)] gap-0 rounded-[var(--radius-control)] border border-transparent bg-transparent !px-1 !py-0.5 text-left transition-colors hover:bg-[color-mix(in_srgb,var(--vui-surface-row-hover)_58%,transparent)] hover:shadow-[var(--vui-shadow-inset-accent)] focus-within:bg-[color-mix(in_srgb,var(--vui-surface-row-hover)_58%,transparent)] focus-within:shadow-[var(--vui-shadow-inset-accent)]",
   sessionItemActive:
-    "vui-routes-chatcodingroute sessionItemActive border-[color-mix(in_srgb,var(--accent-cool)_20%,transparent)] bg-[color-mix(in_srgb,var(--surface-card)_68%,transparent)] shadow-[var(--vui-shadow-inset-accent)]",
+    "vui-routes-chatcodingroute sessionItemActive border-[color-mix(in_srgb,var(--accent-cool)_20%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row-hover)_68%,transparent)] shadow-[var(--vui-shadow-inset-accent)]",
   sessionItemMain:
     "vui-routes-chatcodingroute sessionItemMain !grid !w-full min-w-0 grid-cols-[27px_minmax(0,1fr)] items-center justify-stretch gap-1.5 rounded-none border-0 bg-transparent !p-0 text-left text-[var(--fg-primary)] shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none",
   sessionItemTitle:
