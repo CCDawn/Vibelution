@@ -1,4 +1,4 @@
-const routeClass = "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] bg-[var(--surface-page)]";
+const routeClass = "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)]";
 const headerClass = "mx-2.5 mt-2 min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-gradient-route-soft),color-mix(in_srgb,var(--surface-panel)_86%,transparent)] shadow-[var(--vui-shadow-hairline)]";
 const headerActionsClass = "flex items-center justify-end gap-2";
 const secondaryButtonClass = "inline-flex min-h-8 items-center justify-center gap-[7px] rounded-lg border border-vui-border-soft bg-[var(--surface-card)] px-2.5 py-1.5 text-[var(--vui-font-xs)] text-vui-fg-secondary hover:border-[var(--border-strong)] hover:bg-[var(--surface-panel-hover)] hover:text-vui-fg-primary";

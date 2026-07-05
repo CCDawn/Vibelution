@@ -167,11 +167,11 @@ const styles: Record<string, string> = {
   outputPanel:
     "outputPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   panelEyebrow:
-    "panelEyebrow min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "panelEyebrow min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   panelHeader:
-    "panelHeader min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
+    "panelHeader min-w-0 flex flex-wrap items-center gap-1.5",
   panelLead:
-    "panelLead min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    "panelLead min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   pipelinePanel:
     "pipelinePanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   primaryButton:
@@ -183,7 +183,7 @@ const styles: Record<string, string> = {
   riskText:
     "riskText min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   route:
-    "route min-w-0 grid h-full min-h-0 content-start overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)]",
+    "route min-w-0 grid h-full min-h-0 content-start overflow-hidden text-[var(--fg-primary)]",
   scoreStrip:
     "scoreStrip min-w-0 flex flex-wrap items-center gap-1.5",
   secondaryButton:
@@ -319,7 +319,7 @@ const styles: Record<string, string> = {
   summaryCard:
     "summaryCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 !grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-2 p-[var(--route-summary-padding)]",
   summaryGrid:
-    "summaryGrid min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+    "summaryGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   tagRow:
     "tagRow min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
   themeBody:

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import routeSource from "./ResetRoute.tsx?raw";
+import styles from "./ResetRoute.styles";
 
 describe("ResetRoute layout contract", () => {
   it("uses shell language state without loading the full app dictionary", () => {
@@ -17,6 +18,11 @@ describe("ResetRoute layout contract", () => {
     expect(routeSource).not.toContain('"/api/reset/summary"');
     expect(routeSource).not.toContain('"/api/reset/preview"');
     expect(routeSource).not.toContain('"/api/reset/execute"');
+  });
+
+  it("keeps the retired route root background-aware", () => {
+    expect(styles.routeClass).not.toContain("bg-[var(--surface-page)]");
+    expect(styles.routeClass).toContain("grid-rows-[auto_minmax(0,1fr)]");
   });
 
   it("keeps destructive reset execution out of the Web workbench", () => {
