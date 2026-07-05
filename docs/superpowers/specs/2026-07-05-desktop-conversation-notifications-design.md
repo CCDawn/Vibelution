@@ -261,4 +261,3 @@ Manual or smoke verification after merge should launch the Electron shell, run a
 ## Review Notes
 
 The design intentionally keeps canonical conversation state in the existing backend/session stream and treats desktop unread count as ephemeral shell attention. This prevents a second source of truth for session unread status while still matching the Codex-like desktop cue the user requested.
-
