@@ -4,6 +4,8 @@ import { dictionary } from "../i18n/dictionary";
 import routeSource from "./GitRoute.tsx?raw";
 import stylesSource from "./GitRoute.styles.ts?raw";
 import { gitRouteStyles } from "./GitRoute.styles";
+import diffStylesSource from "./GitDiffView.styles.ts?raw";
+import diffStyles from "./GitDiffView.styles";
 import diffViewSource from "./GitDiffView.tsx?raw";
 import logicSource from "./gitRouteLogic.ts?raw";
 import { gitRouteDictionary } from "./gitRouteI18n";
@@ -102,12 +104,25 @@ describe("GitRoute layout contract", () => {
 
     for (const key of largeSurfaceKeys) {
       expect(gitRouteStyles[key]).not.toContain("bg-[var(--surface-panel)]");
+      expect(gitRouteStyles[key]).toMatch(/bg-vui-surface-(panel|row|glass)/);
     }
     for (const key of actionControlKeys) {
-      expect(gitRouteStyles[key]).toContain("w-fit");
-      expect(gitRouteStyles[key]).toContain("max-w-full");
+      expect(gitRouteStyles[key]).toContain("h-[var(--vui-control-height-sm)]");
+      expect(gitRouteStyles[key]).not.toContain("bg-[var(--surface-card)]");
     }
     expect(gitRouteStyles.commitActions).toContain("grid-cols-[repeat(2,max-content)]");
+  });
+
+  it("keeps Git diff surfaces on lightweight VUI panels without losing code scroll semantics", () => {
+    expect(diffStyles.surfaceClass).toContain("bg-vui-surface-panel");
+    expect(diffStyles.surfaceClass).not.toContain("bg-[var(--surface-panel)]");
+    expect(diffStyles.headerClass).toContain("border-vui-border-hairline");
+    expect(diffStyles.diffWrapClass).toContain("overflow-auto");
+    expect(diffStyles.diffWrapClass).toContain("bg-[var(--surface-code)]");
+    expect(diffStyles.diffTableClass).toContain("w-max");
+    expect(diffStyles.lineContentClass).toContain("whitespace-pre");
+    expect(diffStyles.columnHeaderClass).toContain("sticky");
+    expect(diffStylesSource).toContain("grid-cols-[54px_54px_24px_minmax(0,1fr)]");
   });
 
   it("keeps commit actions scoped to selected files", () => {
@@ -185,11 +200,13 @@ describe("GitRoute layout contract", () => {
     const commitItemStyles = stylesSource.slice(stylesSource.indexOf("commitItem:"));
 
     expect(commitItemStyles).toContain("min-w-0");
-    expect(commitItemStyles).toContain("!grid");
-    expect(commitItemStyles).toContain("!h-auto");
-    expect(commitItemStyles).toContain("!min-h-[72px]");
-    expect(commitItemStyles).toContain("[&_[data-slot=vui-button-content]]:!grid");
-    expect(commitItemStyles).toContain("[&_[data-slot=vui-button-label]]:!grid");
+    expect(routeSource).toContain("<VNativeButton");
+    expect(commitItemStyles).toContain("grid");
+    expect(commitItemStyles).toContain("min-h-[72px]");
+    expect(commitItemStyles).not.toContain("!grid");
+    expect(commitItemStyles).not.toContain("data-slot=vui-button-content");
+    expect(commitItemStyles).not.toContain("data-slot=vui-button-label");
+    expect(gitRouteStyles.commitItem).toContain("bg-vui-surface-row");
     expect(commitItemStyles).toContain("[&_strong]:block");
     expect(commitItemStyles).toContain("[&_strong]:max-w-full");
     expect(commitItemStyles).toContain("[&_strong]:text-ellipsis");
