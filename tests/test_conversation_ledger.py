@@ -247,3 +247,89 @@ def test_conversation_ledger_checkpoint_replaces_covered_history_for_model(tmp_p
     assert "checkpoint 后的新请求应保留" in contents
     assert "旧请求不应再逐条进入模型" not in contents
     assert "旧工具结果" not in contents
+
+
+def test_conversation_ledger_projects_compression_checkpoint_as_visible_marker(tmp_path):
+    append_conversation_event(
+        tmp_path,
+        "session-marker",
+        "turn-old",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "旧请求会被 checkpoint 覆盖"},
+    )
+    event = append_context_compression_checkpoint(
+        tmp_path,
+        "session-marker",
+        turn_id="turn-checkpoint",
+        current_turn_id="turn-current",
+        summary="旧阶段已经压缩成摘要。",
+        level="standard",
+        reason="context_pressure",
+        before_tokens=10000,
+        after_tokens=4200,
+        iteration=2,
+        trigger_source="automatic_threshold",
+        effectiveness_threshold=0.0,
+        effectiveness_ratio=0.58,
+        effective=True,
+        source_message_count=1,
+    )
+
+    projection = project_conversation_ledger(
+        load_conversation_events(tmp_path, "session-marker"),
+        include_model_messages=True,
+        include_visible_messages=True,
+    )
+
+    assert event is not None
+    marker = next(
+        message
+        for message in projection.visible_messages
+        if message.get("metadata", {}).get("kind") == "context_compression_marker"
+    )
+    assert marker["content"] == ""
+    assert marker["metadata"]["status"] == "applied"
+    assert marker["metadata"]["title"] == "上下文已压缩"
+    assert marker["metadata"]["level"] == "standard"
+    assert marker["metadata"]["beforeTokens"] == 10000
+    assert marker["metadata"]["afterTokens"] == 4200
+    assert marker["metadata"]["savedTokens"] == 5800
+    assert marker["metadata"]["summaryAvailable"] is True
+    assert "旧阶段已经压缩成摘要" in marker["metadata"]["summaryPreview"]
+    assert "历史检查点" not in "\n".join(
+        str(message.get("content") or "") for message in projection.visible_messages
+    )
+
+
+def test_context_compression_marker_metadata_does_not_enter_model_messages(tmp_path):
+    append_conversation_event(
+        tmp_path,
+        "session-model-marker",
+        "turn-old",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "旧上下文明细"},
+    )
+    append_context_compression_checkpoint(
+        tmp_path,
+        "session-model-marker",
+        turn_id="turn-checkpoint",
+        current_turn_id="turn-current",
+        summary="旧上下文 summary for model only。",
+        level="standard",
+        reason="context_pressure",
+        before_tokens=9000,
+        after_tokens=3000,
+        trigger_source="automatic_threshold",
+    )
+
+    messages = conversation_model_messages_from_events(
+        load_conversation_events(tmp_path, "session-model-marker")
+    )
+    serialized = json.dumps(messages, ensure_ascii=False)
+
+    assert "旧上下文 summary for model only" in serialized
+    assert "context_compression_marker" not in serialized
+    assert "上下文已压缩" not in serialized
+    assert "历史检查点" not in serialized
