@@ -149,15 +149,15 @@ const styles: Record<string, string> = {
   cacheDetailDialog:
     "vui-routes-chatcodingroute cacheDetailDialog min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 w-[min(1120px,calc(100vw_-_44px))] max-h-[min(860px,calc(100dvh_-_52px))]",
   cacheDetailDonutCenter:
-    "vui-routes-chatcodingroute cacheDetailDonutCenter min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "vui-routes-chatcodingroute cacheDetailDonutCenter pointer-events-none absolute inset-0 m-auto grid size-[min(112px,40%)] min-w-0 place-self-center place-items-center rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] p-2 text-center shadow-[var(--vui-shadow-hairline)]",
   cacheDetailDonutLegend:
     "vui-routes-chatcodingroute cacheDetailDonutLegend min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   cacheDetailDonutPanel:
     "vui-routes-chatcodingroute cacheDetailDonutPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   cacheDetailDonutShell:
-    "vui-routes-chatcodingroute cacheDetailDonutShell min-w-0 grid h-full min-h-0 content-start overflow-hidden text-[var(--fg-primary)]",
+    "vui-routes-chatcodingroute cacheDetailDonutShell min-w-0 relative grid size-[min(280px,72vw)] place-items-center overflow-hidden text-[var(--fg-primary)]",
   cacheDetailDonutSvg:
-    "vui-routes-chatcodingroute cacheDetailDonutSvg min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "vui-routes-chatcodingroute cacheDetailDonutSvg min-w-0 size-full rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   cacheDetailEmpty:
     "vui-routes-chatcodingroute cacheDetailEmpty min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   cacheDetailHeader:
@@ -185,49 +185,49 @@ const styles: Record<string, string> = {
   cacheDonutCenter:
     "vui-routes-chatcodingroute cacheDonutCenter min-w-0",
   cacheDonutInnerSegment:
-    "vui-routes-chatcodingroute cacheDonutInnerSegment min-w-0",
+    "vui-routes-chatcodingroute cacheDonutInnerSegment min-w-0 [stroke-width:7px]",
   cacheDonutInnerTrack:
-    "vui-routes-chatcodingroute cacheDonutInnerTrack min-w-0",
+    "vui-routes-chatcodingroute cacheDonutInnerTrack min-w-0 [stroke-width:7px]",
   cacheDonutOuterSegment:
-    "vui-routes-chatcodingroute cacheDonutOuterSegment min-w-0",
+    "vui-routes-chatcodingroute cacheDonutOuterSegment min-w-0 [stroke-width:8px]",
   cacheDonutOuterTrack:
-    "vui-routes-chatcodingroute cacheDonutOuterTrack min-w-0",
+    "vui-routes-chatcodingroute cacheDonutOuterTrack min-w-0 [stroke-width:8px]",
   cacheDonutSegment:
-    "vui-routes-chatcodingroute cacheDonutSegment min-w-0",
+    "vui-routes-chatcodingroute cacheDonutSegment min-w-0 fill-none stroke-[currentColor] [stroke-linecap:round] [stroke-linejoin:round] [vector-effect:non-scaling-stroke] opacity-90",
   cacheDonutSegmentAgent:
-    "vui-routes-chatcodingroute cacheDonutSegmentAgent min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    "vui-routes-chatcodingroute cacheDonutSegmentAgent min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] stroke-[currentColor]",
   cacheDonutSegmentAttachments:
-    "vui-routes-chatcodingroute cacheDonutSegmentAttachments min-w-0",
+    "vui-routes-chatcodingroute cacheDonutSegmentAttachments min-w-0 text-[var(--accent-warm)] stroke-[currentColor]",
   cacheDonutSegmentCacheWrite:
-    "vui-routes-chatcodingroute cacheDonutSegmentCacheWrite min-w-0",
+    "vui-routes-chatcodingroute cacheDonutSegmentCacheWrite min-w-0 text-[var(--accent-warm)] stroke-[currentColor]",
   cacheDonutSegmentCached:
-    "vui-routes-chatcodingroute cacheDonutSegmentCached min-w-0",
+    "vui-routes-chatcodingroute cacheDonutSegmentCached min-w-0 text-[var(--state-success)] stroke-[currentColor]",
   cacheDonutSegmentGuidance:
-    "vui-routes-chatcodingroute cacheDonutSegmentGuidance min-w-0",
+    "vui-routes-chatcodingroute cacheDonutSegmentGuidance min-w-0 text-[var(--accent-warm)] stroke-[currentColor]",
   cacheDonutSegmentHistory:
-    "vui-routes-chatcodingroute cacheDonutSegmentHistory min-w-0",
+    "vui-routes-chatcodingroute cacheDonutSegmentHistory min-w-0 text-[var(--fg-secondary)] stroke-[currentColor]",
   cacheDonutSegmentMissing:
-    "vui-routes-chatcodingroute cacheDonutSegmentMissing min-w-0",
+    "vui-routes-chatcodingroute cacheDonutSegmentMissing min-w-0 text-[var(--fg-tertiary)] stroke-[currentColor]",
   cacheDonutSegmentOther:
-    "vui-routes-chatcodingroute cacheDonutSegmentOther min-w-0",
+    "vui-routes-chatcodingroute cacheDonutSegmentOther min-w-0 text-[var(--fg-secondary)] stroke-[currentColor]",
   cacheDonutSegmentProjectRules:
-    "vui-routes-chatcodingroute cacheDonutSegmentProjectRules min-w-0",
+    "vui-routes-chatcodingroute cacheDonutSegmentProjectRules min-w-0 text-[var(--accent-warm)] stroke-[currentColor]",
   cacheDonutSegmentProviderUnmapped:
-    "vui-routes-chatcodingroute cacheDonutSegmentProviderUnmapped min-w-0",
+    "vui-routes-chatcodingroute cacheDonutSegmentProviderUnmapped min-w-0 text-[var(--fg-tertiary)] stroke-[currentColor]",
   cacheDonutSegmentSkill:
-    "vui-routes-chatcodingroute cacheDonutSegmentSkill min-w-0",
+    "vui-routes-chatcodingroute cacheDonutSegmentSkill min-w-0 text-[var(--accent-cool)] stroke-[currentColor]",
   cacheDonutSegmentSystem:
-    "vui-routes-chatcodingroute cacheDonutSegmentSystem min-w-0",
+    "vui-routes-chatcodingroute cacheDonutSegmentSystem min-w-0 text-[var(--accent-cool)] stroke-[currentColor]",
   cacheDonutSegmentTask:
-    "vui-routes-chatcodingroute cacheDonutSegmentTask min-w-0",
+    "vui-routes-chatcodingroute cacheDonutSegmentTask min-w-0 text-[var(--state-warning)] stroke-[currentColor]",
   cacheDonutSegmentToolDescriptions:
     "vui-routes-chatcodingroute cacheDonutSegmentToolDescriptions min-w-0 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)] stroke-[var(--accent-warm)]",
   cacheDonutSegmentToolSchema:
     "vui-routes-chatcodingroute cacheDonutSegmentToolSchema min-w-0 font-mono text-[var(--vui-font-xs)] border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)] stroke-[var(--accent-warm)]",
   cacheDonutSegmentUncached:
-    "vui-routes-chatcodingroute cacheDonutSegmentUncached min-w-0",
+    "vui-routes-chatcodingroute cacheDonutSegmentUncached min-w-0 text-[var(--state-warning)] stroke-[currentColor]",
   cacheDonutSegmentUser:
-    "vui-routes-chatcodingroute cacheDonutSegmentUser min-w-0",
+    "vui-routes-chatcodingroute cacheDonutSegmentUser min-w-0 text-[var(--accent-cool)] stroke-[currentColor]",
   cacheDonutShell:
     "vui-routes-chatcodingroute cacheDonutShell min-w-0 grid h-full min-h-0 content-start overflow-hidden text-[var(--fg-primary)]",
   cacheDonutStats:
@@ -235,7 +235,7 @@ const styles: Record<string, string> = {
   cacheDonutSvg:
     "vui-routes-chatcodingroute cacheDonutSvg min-w-0",
   cacheDonutTrack:
-    "vui-routes-chatcodingroute cacheDonutTrack min-w-0",
+    "vui-routes-chatcodingroute cacheDonutTrack min-w-0 fill-none stroke-[color-mix(in_srgb,var(--vui-border-subtle)_82%,transparent)] [stroke-linecap:round] [vector-effect:non-scaling-stroke]",
   centerPane:
     "vui-routes-chatcodingroute centerPane min-w-0 grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[color-mix(in_srgb,var(--surface-page)_10%,transparent)]",
   centerSurface:
