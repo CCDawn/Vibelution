@@ -8,6 +8,7 @@ import {
   buildOperationDetailRows,
   readableOperationResult,
 } from "./ConversationOperationDetails";
+import detailStyles from "./ConversationOperationDetails.styles";
 import conversationViewSource from "./ConversationView.tsx?raw";
 
 const classNames = {
@@ -93,6 +94,14 @@ describe("ConversationOperationDetails", () => {
     expect(html).toContain('class="operation-detail-row"');
     expect(html).toContain("Result");
     expect(html).toContain("Detailed reasoning");
+  });
+
+  it("keeps expanded detail rows as inline metadata instead of nested cards", () => {
+    expect(detailStyles.operationDetailRow).not.toMatch(/radius-panel|surface-glass|shadow-/);
+    expect(detailStyles.operationDetailLabel).not.toMatch(/rounded-|border|bg-\[|shadow-|p-2/);
+    expect(detailStyles.operationDetailValue).not.toMatch(/radius-panel|surface-glass|shadow-/);
+    expect(detailStyles.operationDetailRow).toContain("grid");
+    expect(detailStyles.operationDetailValue).toContain("whitespace-pre-wrap");
   });
 
   it("classifies thought and status operations distinctly while treating other kinds as tool details", async () => {
