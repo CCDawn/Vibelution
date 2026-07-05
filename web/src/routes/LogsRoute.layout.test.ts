@@ -5,16 +5,12 @@ import routeSource from "./LogsRoute.tsx?raw";
 
 const logSurfaceKeys = [
   "diagnosticsPanel",
-  "diagnosticsSummary",
   "diagnosticsSummaryRow",
-  "diagnosticsSummaryText",
   "logPreviewStack",
   "packageDiagnosisPanel",
-  "packageDiagnosisSummary",
   "packageDiagnosisSummaryRow",
   "packageFilesPanel",
   "panelSearch",
-  "panelSearchInput",
   "previewActions",
   "previewPane",
   "previewStateCard",
@@ -28,6 +24,10 @@ const logSurfaceKeys = [
   "startupTracePanel",
   "packageWorkRunPanel",
 ] as const satisfies readonly (keyof typeof styles)[];
+
+function hasClassToken(className: string, token: string) {
+  return className.split(/\s+/).includes(token);
+}
 
 describe("LogsRoute layout contract", () => {
   it("routes Logs page controls through VUI primitives", () => {
@@ -110,6 +110,59 @@ describe("LogsRoute layout contract", () => {
       expect(styles[key]).toContain("border-[color-mix(in_srgb");
       expect(styles[key]).toContain("bg-[color-mix(in_srgb");
       expect(styles[key]).not.toContain("bg-[var(--vui-surface-glass)]");
+      expect(styles[key]).not.toContain("shadow-[var(--vui-shadow");
+    }
+  });
+
+  it("keeps short toolbar and picker controls content-sized unless the whole row is the target", () => {
+    for (const key of [
+      "clearButton",
+      "copyButton",
+      "deleteButton",
+      "filterButton",
+      "packageWorkRunPathButton",
+      "rawFileButton",
+      "sceneCardButton",
+      "toolbarButton",
+    ] as const satisfies readonly (keyof typeof styles)[]) {
+      expect(styles[key]).toContain("w-fit");
+      expect(hasClassToken(styles[key], "w-full")).toBe(false);
+    }
+
+    for (const key of ["packageButton", "packageFileButton", "rootButton"] as const) {
+      expect(hasClassToken(styles[key], "w-full")).toBe(true);
+      expect(styles[key]).toContain("text-left");
+    }
+
+    expect(styles.packageSelectButton).toContain("w-[var(--vui-control-height-sm)]");
+    expect(styles.packageSelectButton).toContain("h-[var(--vui-control-height-sm)]");
+  });
+
+  it("keeps nested diagnostic and runtime evidence details from becoming extra panel cards", () => {
+    for (const key of [
+      "diagnosticsSummary",
+      "diagnosticsSummaryText",
+      "packageDiagnosisSummary",
+      "packageDiagnosisSummaryText",
+      "previewStateHeader",
+      "sceneCardTop",
+    ] as const satisfies readonly (keyof typeof styles)[]) {
+      expect(styles[key]).not.toContain("rounded-[var(--radius-panel)]");
+      expect(styles[key]).not.toContain("bg-[color-mix(in_srgb,var(--surface-card)");
+    }
+  });
+
+  it("keeps list and evidence row targets compact and background-aware", () => {
+    for (const key of [
+      "packageButton",
+      "packageFileRow",
+      "rootButton",
+      "sceneCardMeta",
+      "sceneCardStatus",
+      "sceneCardSummary",
+    ] as const satisfies readonly (keyof typeof styles)[]) {
+      expect(styles[key]).toContain("bg-[color-mix(in_srgb,var(--vui-surface-row)");
+      expect(styles[key]).not.toContain("bg-[var(--vui-control-muted)]");
       expect(styles[key]).not.toContain("shadow-[var(--vui-shadow");
     }
   });
