@@ -220,6 +220,19 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(stylesSource).not.toContain("runRecordIdentity");
   });
 
+  it("keeps run records as a dense queue/detail work surface instead of a card wall", () => {
+    expect(runRecordsPanelStylesSource).not.toContain("surface-card");
+    expect(runRecordsPanelStyles.surface).toContain("[border-radius:8px]");
+    expect(runRecordsPanelStyles.runQueuePanel).toContain("[gap:8px]");
+    expect(runRecordsPanelStyles.runDetailPanel).toContain("[gap:8px]");
+    expect(runRecordsPanelStyles.runItem).toContain("[padding:7px_8px]");
+    expect(runRecordsPanelStyles.runListScrollable).toContain("[max-height:min(520px,_52vh)]");
+    expect(runRecordsPanelStyles.runDetailOverview).toContain("[grid-template-columns:minmax(168px,_0.36fr)_minmax(0,_1fr)]");
+    expect(runRecordsPanelStyles.relatedList).toContain("repeat(2,_minmax(0,_1fr))");
+    expect(runRecordsPanelStyles.inlineAction).toContain("[width:fit-content]");
+    expect(runRecordsPanelStyles.inlineAction).toContain("[min-height:30px]");
+  });
+
   it("keeps proposal action bands in the extracted panel while route owns mutations", () => {
     expect(routeSource).toContain('import { EvolutionProposalActionBandsPanel } from "./EvolutionProposalActionBandsPanel";');
     expect(routeSource).toContain("<EvolutionProposalActionBandsPanel");
@@ -569,6 +582,19 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(activeRunMonitorStylesSource).toContain("closedLoopLedgerEvidenceGrid");
     expect(stylesSource).not.toContain("runMonitorDense");
     expect(stylesSource).not.toContain("eventListScrollable");
+  });
+
+  it("keeps the extracted active-run monitor compact and background-aware", () => {
+    expect(activeRunMonitorStylesSource).not.toContain("surface-card");
+    expect(activeRunMonitorStyles.runMonitorDense).toContain("[gap:6px]");
+    expect(activeRunMonitorStyles.idleMonitor).toContain("[gap:6px]");
+    expect(activeRunMonitorStyles.metricTile).toContain("[min-height:32px]");
+    expect(activeRunMonitorStyles.metricTile).toContain("[padding:4px_6px]");
+    expect(activeRunMonitorStyles.eventListScrollable).toContain("[max-height:min(180px,_24vh)]");
+    expect(activeRunMonitorStyles.liveRunToolbar).toContain("[padding:6px]");
+    expect(activeRunMonitorStyles.compactTextAction).toContain("[width:fit-content]");
+    expect(activeRunMonitorStyles.compactTextAction).toContain("[max-width:160px]");
+    expect(activeRunMonitorStyles.closedLoopLedger).toContain("[background:color-mix(in_srgb,_var(--accent-cool)_7%,_var(--vui-surface-row))]");
   });
 
   it("explains closed-loop launch and dataset case limits without changing review actions", () => {
