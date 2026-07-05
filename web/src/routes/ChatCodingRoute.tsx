@@ -71,6 +71,7 @@ import {
   SessionReferenceAttachment,
   SessionTurnAcceptedResponse,
   SessionTurnError,
+  SkillLibraryPayload,
   TeamListPayload,
   ConversationMessage,
   ConversationAttachment,
@@ -2146,6 +2147,13 @@ export function ChatCodingRoute() {
     queryFn: () => fetchJson<AgentInstance[]>("/api/agents?detail=summary"),
     enabled: secondaryChatDataEnabled || groupComposerOpen || standardGroupRoomActive || Boolean(activeSessionId),
   });
+  const skillsQuery = useQuery({
+    queryKey: queryKeys.skills(),
+    queryFn: () => fetchJson<SkillLibraryPayload>("/api/skills"),
+    enabled: Boolean(activeSessionId),
+    staleTime: 60_000,
+  });
+  const slashCommandSuggestions = skillsQuery.data?.skills ?? [];
   const chatRoomModesQuery = useQuery({
     queryKey: queryKeys.chatRoomModes(),
     queryFn: () => fetchJson<ChatRoomMode[]>("/api/chat-rooms/modes"),
@@ -7326,6 +7334,7 @@ export function ChatCodingRoute() {
                   showSessionOverview={false}
                   showMentalSnapshots={mentalModelEnabledForNextTurn}
                   composer={conversationComposer}
+                  slashCommandSuggestions={slashCommandSuggestions}
                   cancelComposerModeLabel={t("cancelEditMessage")}
                   turnError={detail.lastTurnError}
                   stopLabel={t("stop")}

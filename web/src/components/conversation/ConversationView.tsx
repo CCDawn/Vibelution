@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import React, { DragEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import type { ConversationMessage } from "../../api/types";
+import type { ConversationMessage, SkillLibraryItem } from "../../api/types";
 import type {
   AgentMessage,
   AgentMentalPart,
@@ -54,6 +54,10 @@ import { AgentMessageTurnView } from "./AgentMessageTurnView";
 import { AgentResponseSectionView } from "./AgentResponseSectionView";
 import { AgentUserContentSectionView } from "./AgentUserContentSectionView";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
+import {
+  filterSlashCommandSuggestions,
+  insertSlashCommandSuggestion,
+} from "./conversationSlashCommandSuggestions";
 import { buildAgentMessageRenderState, type AgentMessageRenderState } from "./agentMessageRenderState";
 import {
   compactStreamingStatusPlaceholder,
@@ -313,6 +317,7 @@ export function ConversationView({
   composerGuidance,
   composerAttachments = [],
   composerReferences = [],
+  slashCommandSuggestions = [],
   composerAttachmentInputDisabled,
   turnError,
   submitLabel,
@@ -389,6 +394,11 @@ export function ConversationView({
   const showSafeGuidanceAction = runningGuidanceActionsEnabled && guidanceDraftReady;
   const composerCanAcceptImageDrop = Boolean(onAddComposerAttachments) && !attachmentInputDisabled;
   const composerCanAcceptReferenceDrop = Boolean(onAddComposerReference) && !composerDisabled;
+  const slashSuggestions = useMemo(
+    () => filterSlashCommandSuggestions(slashCommandSuggestions, composerValue),
+    [slashCommandSuggestions, composerValue],
+  );
+  const showSlashSuggestions = !composerDisabled && slashSuggestions.length > 0;
   const answerOnlyProcessMode = processDisplayMode === "answer";
   const timestampFormatter = useMemo(
     () =>
@@ -407,6 +417,11 @@ export function ConversationView({
       setComposerDragActive(false);
     }
   }, [composerCanAcceptImageDrop, composerCanAcceptReferenceDrop, composerDragActive]);
+
+  function handleSlashCommandSuggestion(skill: SkillLibraryItem) {
+    onComposerChange(insertSlashCommandSuggestion(composerValue, skill.command));
+    requestAnimationFrame(() => composerInputRef.current?.focus());
+  }
 
   function handleComposerDragEnter(event: DragEvent<HTMLDivElement>) {
     const acceptsImage = composerCanAcceptImageDrop && hasComposerImageDragPayload(event.dataTransfer);
@@ -2696,6 +2711,37 @@ export function ConversationView({
                         <X size={13} />
                       </VButton>
                     ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+          {showSlashSuggestions ? (
+            <div
+              role="listbox"
+              aria-label={lang === "zh" ? "斜杠指令" : "Slash commands"}
+              className="vui-components-conversationview slashCommandSuggestions min-w-0 overflow-hidden rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--surface-panel)] shadow-[var(--vui-shadow-hairline)]"
+            >
+              {slashSuggestions.map((skill) => {
+                const description = skill.description?.trim() || skill.name || skill.directoryName;
+                return (
+                  <div
+                    key={skill.command}
+                    role="option"
+                    aria-selected={false}
+                    className="min-w-0"
+                  >
+                    <VButton
+                      type="button"
+                      className="flex min-h-8 w-full min-w-0 items-center gap-2 px-2 py-1 text-left text-[var(--vui-font-xs)] text-[var(--fg-secondary)] hover:bg-[var(--vui-control-muted)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent-cool)]"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => handleSlashCommandSuggestion(skill)}
+                    >
+                      <code className="shrink-0 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-1.5 py-0.5 font-semibold text-[var(--fg-primary)]">
+                        {skill.command}
+                      </code>
+                      <span className="min-w-0 truncate">{description}</span>
+                    </VButton>
                   </div>
                 );
               })}

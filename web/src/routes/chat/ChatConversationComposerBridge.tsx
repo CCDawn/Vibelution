@@ -142,11 +142,13 @@ export function buildConversationComposerBridgeState(
 export function ChatConversationComposerBridge({
   composer,
   fallback,
+  slashCommandSuggestions,
   ...props
 }: ChatConversationComposerBridgeProps) {
   return (
     <LazyConversationView
       {...props}
+      slashCommandSuggestions={slashCommandSuggestions}
       composerValue={composer.value}
       composerPlaceholder={composer.placeholder}
       composerDisabled={composer.disabled}

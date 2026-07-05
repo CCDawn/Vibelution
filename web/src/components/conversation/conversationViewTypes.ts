@@ -5,6 +5,7 @@ import type {
   ConversationMessage,
   SessionReferenceAttachment,
   SessionTurnError,
+  SkillLibraryItem,
 } from "../../api/types";
 import type { TurnAvatarResolution } from "./conversationTurnAvatar";
 import type { ConversationStreamingFramePaintMetrics } from "./conversationStreamingMetrics";
@@ -66,6 +67,7 @@ export type ConversationViewProps = {
   composerGuidance?: string;
   composerAttachments?: ConversationComposerAttachment[];
   composerReferences?: SessionReferenceAttachment[];
+  slashCommandSuggestions?: SkillLibraryItem[];
   composerAttachmentInputDisabled?: boolean;
   turnError?: SessionTurnError | null;
   nextStateSignals?: ChatNextStateSignalSummary[];
