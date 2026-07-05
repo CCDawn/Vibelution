@@ -7516,20 +7516,20 @@ export function ChatCodingRoute() {
               <VButton
                 type="button"
                 className={styles.newSessionButton}
+                icon={<Plus size={15} />}
                 onClick={handleCreateSession}
                 isDisabled={createSessionMutation.isPending}
               >
-                <Plus size={15} />
                 <span>{createSessionMutation.isPending ? t("creatingSession") : t("newSession")}</span>
               </VButton>
               <VButton
                 type="button"
                 className={styles.newGroupButton}
+                icon={<UsersRound size={15} />}
                 onClick={handleToggleGroupComposer}
                 aria-expanded={groupComposerOpen}
                 isDisabled={createGroupRoomMutation.isPending}
               >
-                <UsersRound size={15} />
                 <span>{groupComposerOpen ? (lang === "zh" ? "收起" : "Close") : (lang === "zh" ? "新建群聊" : "New group")}</span>
               </VButton>
             </div>

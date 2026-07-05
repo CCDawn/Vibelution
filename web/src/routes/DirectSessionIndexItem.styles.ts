@@ -64,7 +64,7 @@ const styles = {
   sessionItemError:
     "vui-routes-chatcodingroute sessionItemError min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   sessionItemMain:
-    "vui-routes-chatcodingroute sessionItemMain !grid !w-full min-w-0 grid-cols-[27px_minmax(0,1fr)] items-center justify-stretch gap-1.5 rounded-none border-0 bg-transparent !p-0 text-left text-[var(--fg-primary)] shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+    "vui-routes-chatcodingroute sessionItemMain !grid !w-full min-w-0 grid-cols-[27px_minmax(0,1fr)] items-center justify-stretch gap-1.5 rounded-none border-0 bg-transparent !p-0 text-left text-[var(--fg-primary)] shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none",
   sessionItemNotice:
     "vui-routes-chatcodingroute sessionItemNotice min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 rounded-[var(--radius-control)] bg-[var(--vui-surface-row)]",
   sessionItemSummary:

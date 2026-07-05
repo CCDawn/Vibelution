@@ -20,7 +20,7 @@ const styles = {
   sessionItemActive:
     "vui-routes-chatcodingroute sessionItemActive border-[color-mix(in_srgb,var(--accent-cool)_20%,transparent)] bg-[color-mix(in_srgb,var(--surface-card)_68%,transparent)] shadow-[var(--vui-shadow-inset-accent)]",
   sessionItemMain:
-    "vui-routes-chatcodingroute sessionItemMain !grid !w-full min-w-0 grid-cols-[27px_minmax(0,1fr)] items-center justify-stretch gap-1.5 rounded-none border-0 bg-transparent !p-0 text-left text-[var(--fg-primary)] shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+    "vui-routes-chatcodingroute sessionItemMain !grid !w-full min-w-0 grid-cols-[27px_minmax(0,1fr)] items-center justify-stretch gap-1.5 rounded-none border-0 bg-transparent !p-0 text-left text-[var(--fg-primary)] shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none",
   sessionItemTitle:
     "vui-routes-chatcodingroute sessionItemTitle min-w-0 truncate text-[var(--vui-font-md)] font-semibold leading-tight text-[var(--fg-primary)]",
   sessionState:

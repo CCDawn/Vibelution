@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
-import type { Team } from "../api/types";
-import { teamCategoryLabel, teamMemberPreview, teamMemberStatusTitle, teamStatusLabel } from "./GroupSessionIndexItems";
+import type { ConversationSummary, Team } from "../api/types";
+import {
+  GroupConversationIndexItem,
+  TeamConversationIndexItem,
+  teamCategoryLabel,
+  teamMemberPreview,
+  teamMemberStatusTitle,
+  teamStatusLabel,
+} from "./GroupSessionIndexItems";
 
 function team(overrides: Partial<Team>): Team {
   return {
@@ -28,6 +37,52 @@ function team(overrides: Partial<Team>): Team {
 }
 
 describe("GroupSessionIndexItems helpers", () => {
+  it("renders group conversation rows through native VUI row buttons", () => {
+    const conversation: ConversationSummary = {
+      conversationId: "room-1",
+      roomId: "room-1",
+      title: "团队群聊",
+      type: "group_room",
+      status: "active",
+      updatedAt: "2026-06-09T00:00:00.000Z",
+      participantCount: 3,
+      summary: "",
+    };
+    const markup = renderToStaticMarkup(createElement(GroupConversationIndexItem, {
+      active: false,
+      conversation,
+      fallbackSummary: "群聊会话",
+      formatTime: () => "06/09 00:00",
+      kindLabel: "群聊",
+      lang: "zh",
+      onOpen: () => undefined,
+      roomId: "room-1",
+      statusLabel: () => "启用中",
+    }));
+
+    expect(markup).toContain('data-vui="native-button"');
+    expect(markup).not.toContain('data-vui="button"');
+  });
+
+  it("renders Team rows through native VUI row buttons", () => {
+    const markup = renderToStaticMarkup(createElement(TeamConversationIndexItem, {
+      active: false,
+      lang: "zh",
+      onOpen: () => undefined,
+      roomId: "room-1",
+      statusLabel: () => "启用中",
+      team: team({
+        linkedChatRoomId: "room-1",
+        memberCount: 2,
+        name: "科研团队",
+      }),
+      teamRoute: "/teams?team=team-1",
+    }));
+
+    expect(markup).toContain('data-vui="native-button"');
+    expect(markup).not.toContain('data-vui="button"');
+  });
+
   it("localizes known Team status labels and delegates unknown status to the route fallback", () => {
     const fallback = (status: string) => `status:${status}`;
 
