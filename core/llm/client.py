@@ -671,6 +671,7 @@ def _usage_observation_metadata(usage: UsageStats) -> Dict[str, Any]:
     return {
         "input_tokens": usage.input_tokens,
         "output_tokens": usage.output_tokens,
+        "reasoning_output_tokens": usage.reasoning_output_tokens,
         "total_tokens": usage.total_tokens,
         "cached_input_tokens": cache_fields["cacheReadInputTokens"],
         "cache_read_input_tokens": cache_fields["cacheReadInputTokens"],
@@ -693,6 +694,133 @@ def _usage_missing_reason(usage: UsageStats) -> str:
     if observed:
         return ""
     return "provider_usage_without_token_counts"
+
+
+def record_usage_event(event: Any) -> Any:
+    from .usage_ledger import record_usage_event as write_usage_event
+
+    return write_usage_event(event)
+
+
+def _usage_ledger_event(**kwargs: Any) -> Any:
+    from .usage_ledger import UsageLedgerEvent
+
+    return UsageLedgerEvent(**kwargs)
+
+
+def _estimate_messages_for_usage(messages: List[Any]) -> int:
+    try:
+        from tools.token_manager import estimate_messages_tokens
+
+        return max(0, int(estimate_messages_tokens(messages) or 0))
+    except Exception:
+        return 0
+
+
+def _estimate_text_for_usage(text: Any) -> int:
+    content = extract_text_content(text)
+    if not content:
+        return 0
+    try:
+        from tools.token_manager import estimate_tokens_precise
+
+        return max(0, int(estimate_tokens_precise(content) or 0))
+    except Exception:
+        return max(1, len(content) // 4)
+
+
+def _usage_scope_kind(metadata: Dict[str, Any]) -> str:
+    mode = str(metadata.get("mode") or metadata.get("runKind") or "").strip().lower()
+    if str(metadata.get("teamId") or metadata.get("team_id") or "").strip():
+        return "team_workflow"
+    if "evolution" in mode:
+        return "evolution"
+    if str(metadata.get("sessionId") or metadata.get("session_id") or "").strip():
+        return "chat_session"
+    if str(metadata.get("agentId") or metadata.get("agent_id") or "").strip():
+        return "agent_round"
+    return "unknown"
+
+
+def _usage_metadata_value(metadata: Dict[str, Any], camel_key: str, snake_key: str) -> str:
+    return str(metadata.get(camel_key) or metadata.get(snake_key) or "").strip()
+
+
+def _record_usage_ledger_event(
+    *,
+    usage: UsageStats,
+    metadata: Optional[Dict[str, Any]],
+    provider: str,
+    model: str,
+    profile_id: str,
+    transport: str,
+    context_window: int = 0,
+    estimated_input_tokens: int = 0,
+    estimated_output_tokens: int = 0,
+) -> None:
+    meta = metadata if isinstance(metadata, dict) else {}
+    provider_usage = getattr(usage, "provider_raw_usage", {}) if usage is not None else {}
+    provider_usage_keys = sorted(str(key) for key in provider_usage.keys()) if isinstance(provider_usage, dict) else []
+    input_tokens = max(0, int(getattr(usage, "input_tokens", 0) or 0))
+    output_tokens = max(0, int(getattr(usage, "output_tokens", 0) or 0))
+    total_tokens = max(0, int(getattr(usage, "total_tokens", 0) or 0))
+    if estimated_input_tokens or estimated_output_tokens:
+        source = "estimated"
+        input_tokens = max(input_tokens, max(0, int(estimated_input_tokens or 0)))
+        output_tokens = max(output_tokens, max(0, int(estimated_output_tokens or 0)))
+        total_tokens = input_tokens + output_tokens
+    elif provider_usage and (input_tokens or output_tokens or total_tokens):
+        source = "provider_usage"
+    else:
+        source = "missing"
+        total_tokens = total_tokens or input_tokens + output_tokens
+    cached_input_tokens = max(0, int(getattr(usage, "cached_input_tokens", 0) or 0))
+    cache_creation_tokens = max(0, int(getattr(usage, "cache_creation_input_tokens", 0) or 0))
+    if input_tokens:
+        cached_input_tokens = min(cached_input_tokens, input_tokens)
+        cache_creation_tokens = min(cache_creation_tokens, input_tokens)
+    event = _usage_ledger_event(
+        source=source,
+        scope_kind=_usage_scope_kind(meta),
+        session_id=_usage_metadata_value(meta, "sessionId", "session_id"),
+        conversation_id=_usage_metadata_value(meta, "conversationId", "conversation_id"),
+        turn_id=_usage_metadata_value(meta, "turnId", "turn_id"),
+        agent_id=_usage_metadata_value(meta, "agentId", "agent_id"),
+        team_id=_usage_metadata_value(meta, "teamId", "team_id"),
+        provider=str(provider or "").strip(),
+        model=str(model or "").strip(),
+        profile_id=str(profile_id or "").strip(),
+        transport=str(transport or "").strip(),
+        input_tokens=input_tokens,
+        cached_input_tokens=cached_input_tokens,
+        cache_read_input_tokens=cached_input_tokens,
+        cache_creation_input_tokens=cache_creation_tokens,
+        uncached_input_tokens=max(0, input_tokens - cached_input_tokens),
+        output_tokens=output_tokens,
+        reasoning_output_tokens=max(0, int(getattr(usage, "reasoning_output_tokens", 0) or 0)),
+        total_tokens=total_tokens or input_tokens + output_tokens,
+        context_window=max(0, int(context_window or 0)),
+        latency_ms=max(0, int(getattr(usage, "latency_ms", 0) or 0)),
+        runtime_scene_id=_usage_metadata_value(meta, "runtimeSceneId", "runtime_scene_id"),
+        provider_usage_keys=provider_usage_keys,
+    )
+    try:
+        record_usage_event(event)
+    except Exception as exc:
+        _record_llm_scene_event(
+            "usage",
+            "llm.usage_ledger.write_failed",
+            message="LLM usage ledger write failed.",
+            level="warning",
+            outcome="failed",
+            fields={
+                "errorType": type(exc).__name__,
+                "profileId": str(profile_id or "").strip(),
+                "provider": str(provider or "").strip(),
+                "model": str(model or "").strip(),
+            },
+            lifecycle=False,
+        )
 
 
 def _strip_cache_control_from_content(value: Any) -> Any:
@@ -1297,6 +1425,22 @@ class LLMClient:
         if reasoning_content.strip():
             additional_kwargs["reasoning_content"] = reasoning_content
         cache_observation_fields = _usage_cache_observation_fields(usage)
+        estimated_input_tokens = 0
+        estimated_output_tokens = 0
+        if not (usage.input_tokens or usage.output_tokens or usage.total_tokens):
+            estimated_input_tokens = _estimate_messages_for_usage(messages)
+            estimated_output_tokens = _estimate_text_for_usage(message.get("content") or "")
+        _record_usage_ledger_event(
+            usage=usage,
+            metadata=metadata,
+            provider=self.provider.kind,
+            model=self.profile.model,
+            profile_id=self.profile_id,
+            transport=str(protocol_summary.get("transport") or ""),
+            context_window=max(0, int(getattr(self._resolved_spec, "context_window", 0) or 0)),
+            estimated_input_tokens=estimated_input_tokens,
+            estimated_output_tokens=estimated_output_tokens,
+        )
         _record_llm_scene_event(
             "invoke",
             "llm.invoke.succeeded",
@@ -1321,6 +1465,7 @@ class LLMClient:
                 **capability_source_summary,
                 "inputTokens": usage.input_tokens,
                 "outputTokens": usage.output_tokens,
+                "reasoningOutputTokens": usage.reasoning_output_tokens,
                 "totalTokens": usage.total_tokens,
                 **cache_observation_fields,
                 "reasoningSource": reasoning.source,
@@ -1616,6 +1761,7 @@ class LLMClient:
             total_inter_chunk_ms = 0
             inter_chunk_count = 0
             usage_observation = UsageStats()
+            generated_text_parts: list[str] = []
             try:
                 _record_llm_scene_event(
                     "stream",
@@ -1667,6 +1813,7 @@ class LLMClient:
                         chunk_count += 1
                         if event.type == "text_delta":
                             text_delta_count += 1
+                            generated_text_parts.append(event.text or "")
                             if first_text_delta_ms is None and (event.text or ""):
                                 first_text_delta_ms = elapsed_ms
                         elif event.type == "reasoning_delta":
@@ -1685,6 +1832,26 @@ class LLMClient:
                         yield event
                         _raise_if_llm_cancelled()
                 usage_observation.latency_ms = int((time.time() - start) * 1000)
+                estimated_input_tokens = 0
+                estimated_output_tokens = 0
+                if not (
+                    usage_observation.input_tokens
+                    or usage_observation.output_tokens
+                    or usage_observation.total_tokens
+                ):
+                    estimated_input_tokens = _estimate_messages_for_usage(messages)
+                    estimated_output_tokens = _estimate_text_for_usage("".join(generated_text_parts))
+                _record_usage_ledger_event(
+                    usage=usage_observation,
+                    metadata=metadata,
+                    provider=self.provider.kind,
+                    model=self.profile.model,
+                    profile_id=self.profile_id,
+                    transport=str(event_metadata.get("transport") or ""),
+                    context_window=max(0, int(getattr(self._resolved_spec, "context_window", 0) or 0)),
+                    estimated_input_tokens=estimated_input_tokens,
+                    estimated_output_tokens=estimated_output_tokens,
+                )
                 usage_observed = (
                     bool(usage_observation.provider_raw_usage)
                     and (
@@ -1711,6 +1878,7 @@ class LLMClient:
                         "usageMissingReason": usage_missing_reason,
                         "inputTokens": usage_observation.input_tokens,
                         "outputTokens": usage_observation.output_tokens,
+                        "reasoningOutputTokens": usage_observation.reasoning_output_tokens,
                         "totalTokens": usage_observation.total_tokens,
                         **cache_observation_fields,
                         "latencyMs": usage_observation.latency_ms,
