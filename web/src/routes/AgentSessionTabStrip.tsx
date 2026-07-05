@@ -198,7 +198,10 @@ export function AgentSessionTabStrip({
               </span>
               <span className={styles.agentSessionTabTitle}>{sessionTitle}</span>
             </span>
-            <span className={styles.agentSessionTabMeta}>
+            <span
+              className={styles.agentSessionTabMeta}
+              title={[statusLabel(sessionStatus), sessionDisplay.modelLabel].filter(Boolean).join(" · ")}
+            >
               {statusLabel(sessionStatus)}
               {sessionDisplay.modelLabel ? ` · ${sessionDisplay.modelLabel}` : ""}
             </span>
@@ -232,7 +235,9 @@ export function AgentSessionTabStrip({
               <span className={`${styles.agentSessionTabCopy} ${styles.agentSessionTabCopyCompact}`}>
                 <span className={styles.agentSessionTabTitle}>{run.title}</span>
               </span>
-              <span className={styles.agentSessionTabMeta}>{statusLabel(run.status)}</span>
+              <span className={styles.agentSessionTabMeta} title={statusLabel(run.status)}>
+                {statusLabel(run.status)}
+              </span>
             </VButton>
             <VIconButton
               type="button"
