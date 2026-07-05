@@ -136,6 +136,44 @@ def test_usage_ledger_rolls_up_today_last7_days_and_all_time(tmp_path, monkeypat
     assert summary["globalTokenUsage"]["allTime"]["totalTokens"] == 150
 
 
+def test_global_summary_uses_latest_session_and_agent_rollups(tmp_path, monkeypatch):
+    monkeypatch.setattr("core.llm.usage_ledger.PROJECT_ROOT", tmp_path)
+    record_usage_event(
+        UsageLedgerEvent(
+            recorded_at=iso_at(-1),
+            source="provider_usage",
+            session_id="session-old",
+            agent_id="agent-old",
+            provider="openai",
+            model="gpt-5",
+            input_tokens=100,
+            total_tokens=100,
+        )
+    )
+    record_usage_event(
+        UsageLedgerEvent(
+            recorded_at=iso_at(),
+            source="provider_usage",
+            session_id="session-latest",
+            agent_id="agent-latest",
+            provider="openai",
+            model="gpt-5",
+            input_tokens=30,
+            total_tokens=30,
+        )
+    )
+
+    summary = build_usage_summary()
+
+    assert summary["globalTokenUsage"]["allTime"]["totalTokens"] == 130
+    assert summary["lastTokenUsage"]["sessionId"] == "session-latest"
+    assert summary["lastTokenUsage"]["agentId"] == "agent-latest"
+    assert summary["sessionTokenUsage"]["totalTokens"] == 30
+    assert summary["agentTokenUsage"]["totalTokens"] == 30
+    assert summary["rollupFilters"]["sessionId"] == "session-latest"
+    assert summary["rollupFilters"]["agentId"] == "agent-latest"
+
+
 def test_usage_ledger_skips_invalid_source_rows_in_diagnostics(tmp_path, monkeypatch):
     monkeypatch.setattr("core.llm.usage_ledger.PROJECT_ROOT", tmp_path)
     path = usage_ledger_path(tmp_path)

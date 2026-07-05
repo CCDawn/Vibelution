@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import sqlite3
+import time
+
 from core.llm.client import LLMClient
-from core.llm.usage_ledger import build_usage_summary
+from core.llm.usage_ledger import UsageLedgerEvent, build_usage_summary, record_usage_event, usage_ledger_path
 from tests.test_llm_client import make_config
 
 
@@ -134,6 +137,39 @@ def test_llm_client_usage_ledger_write_failure_does_not_fail_response(monkeypatc
     failure_event = next(item for item in recorded if item[0][1] == "llm.usage_ledger.write_failed")
     assert failure_event[1]["fields"]["errorType"] == "RuntimeError"
     assert "ledger locked" not in str(failure_event)
+
+
+def test_llm_client_usage_ledger_lock_does_not_slow_success_response(tmp_path, monkeypatch):
+    from core.infrastructure import developer_sandbox
+
+    _disable_developer_mode(monkeypatch)
+    monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: tmp_path / "workspace")
+    monkeypatch.setattr("core.llm.usage_ledger.PROJECT_ROOT", tmp_path)
+    recorded = []
+    monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+    record_usage_event(UsageLedgerEvent(source="provider_usage", total_tokens=1), project_root=tmp_path)
+    path = usage_ledger_path(tmp_path)
+
+    locked = sqlite3.connect(str(path), timeout=5.0, isolation_level=None)
+    try:
+        locked.execute("BEGIN EXCLUSIVE")
+        locked.execute(
+            "INSERT INTO usage_events(event_id, recorded_at, source, scope_kind, provider_usage_keys_json, usage_schema_version) VALUES (?, ?, ?, ?, ?, ?)",
+            ("held-lock", "2026-07-05T00:00:00Z", "provider_usage", "unknown", "[]", 1),
+        )
+        client = LLMClient(config=_usage_config(), backend=lambda _payload: _usage_response())
+
+        started = time.perf_counter()
+        message = client.invoke([{"role": "user", "content": "hi"}], metadata={"sessionId": "locked-session"})
+        elapsed = time.perf_counter() - started
+
+        assert message.content == "hello"
+        assert elapsed < 0.5
+        failure_event = next(item for item in recorded if item[0][1] == "llm.usage_ledger.write_failed")
+        assert failure_event[1]["fields"]["errorType"] == "OperationalError"
+    finally:
+        locked.rollback()
+        locked.close()
 
 
 def _usage_config():

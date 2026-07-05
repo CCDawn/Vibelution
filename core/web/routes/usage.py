@@ -30,8 +30,8 @@ def usage_summary(
         raise HTTPException(status_code=400, detail="sessionId is required when scope=session")
     if normalized_scope == "agent" and not agent_id:
         raise HTTPException(status_code=400, detail="agentId is required when scope=agent")
-    if normalized_scope == "model" and not (provider_id or model_id):
-        raise HTTPException(status_code=400, detail="provider or model is required when scope=model")
+    if normalized_scope == "model" and not (provider_id and model_id):
+        raise HTTPException(status_code=400, detail="provider and model are required when scope=model")
     summary = build_usage_summary(
         scope=normalized_scope,
         session_id=session_id,

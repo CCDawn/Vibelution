@@ -10,6 +10,11 @@ describe("UsageRoute layout contract", () => {
     expect(routeSource).toContain("queryKeys.usageSummary");
     expect(routeSource).toContain("globalTokenUsage");
     expect(routeSource).toContain("lastTokenUsage");
+    expect(routeSource).toContain("rollupFilters");
+    expect(routeSource).toContain("最近会话");
+    expect(routeSource).toContain("Latest session");
+    expect(routeSource).toContain("最近 Agent");
+    expect(routeSource).toContain("Latest agent");
     expect(routeSource).toContain("provider_usage");
     expect(routeSource).toContain("estimated");
     expect(routeSource).toContain("missing");

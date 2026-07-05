@@ -61,6 +61,67 @@ def test_usage_summary_route_filters_by_session(tmp_path, monkeypatch):
     assert response.json()["sessionTokenUsage"]["totalTokens"] == 22
 
 
+def test_usage_summary_route_filters_by_agent(tmp_path, monkeypatch):
+    _isolate_usage_workspace(tmp_path, monkeypatch)
+    client = _client()
+    record_usage_event(
+        UsageLedgerEvent(source="provider_usage", agent_id="agent-a", input_tokens=10, output_tokens=1, total_tokens=11),
+        project_root=tmp_path,
+    )
+    record_usage_event(
+        UsageLedgerEvent(source="provider_usage", agent_id="agent-b", input_tokens=20, output_tokens=2, total_tokens=22),
+        project_root=tmp_path,
+    )
+
+    response = client.get("/api/usage/summary?scope=agent&agentId=agent-b")
+
+    assert response.status_code == 200
+    assert response.json()["agentTokenUsage"]["totalTokens"] == 22
+
+
+def test_usage_summary_route_filters_by_provider_and_model(tmp_path, monkeypatch):
+    _isolate_usage_workspace(tmp_path, monkeypatch)
+    client = _client()
+    record_usage_event(
+        UsageLedgerEvent(
+            source="provider_usage",
+            provider="openai",
+            model="gpt-5",
+            input_tokens=10,
+            output_tokens=1,
+            total_tokens=11,
+        ),
+        project_root=tmp_path,
+    )
+    record_usage_event(
+        UsageLedgerEvent(
+            source="provider_usage",
+            provider="openai",
+            model="gpt-4.1",
+            input_tokens=20,
+            output_tokens=2,
+            total_tokens=22,
+        ),
+        project_root=tmp_path,
+    )
+    record_usage_event(
+        UsageLedgerEvent(
+            source="provider_usage",
+            provider="anthropic",
+            model="gpt-5",
+            input_tokens=30,
+            output_tokens=3,
+            total_tokens=33,
+        ),
+        project_root=tmp_path,
+    )
+
+    response = client.get("/api/usage/summary?scope=model&provider=openai&model=gpt-5")
+
+    assert response.status_code == 200
+    assert response.json()["scopeTokenUsage"]["totalTokens"] == 11
+
+
 def test_usage_summary_route_rejects_missing_session_id():
     client = _client()
 
@@ -70,13 +131,31 @@ def test_usage_summary_route_rejects_missing_session_id():
     assert "sessionId" in response.json()["detail"]
 
 
+def test_usage_summary_route_rejects_missing_agent_id():
+    client = _client()
+
+    response = client.get("/api/usage/summary?scope=agent")
+
+    assert response.status_code == 400
+    assert "agentId" in response.json()["detail"]
+
+
 def test_usage_summary_route_rejects_missing_model_filter():
     client = _client()
 
     response = client.get("/api/usage/summary?scope=model")
 
     assert response.status_code == 400
-    assert "provider or model" in response.json()["detail"]
+    assert "provider and model" in response.json()["detail"]
+
+
+def test_usage_summary_route_rejects_provider_only_model_scope():
+    client = _client()
+
+    response = client.get("/api/usage/summary?scope=model&provider=openai")
+
+    assert response.status_code == 400
+    assert "provider and model" in response.json()["detail"]
 
 
 def _client() -> TestClient:
