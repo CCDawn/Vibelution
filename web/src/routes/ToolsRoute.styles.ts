@@ -40,11 +40,11 @@ const styles = {
   dependencyHealthPanel:
     "dependencyHealthPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   detailActions:
-    "detailActions min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
+    "detailActions min-w-0 flex flex-wrap items-center gap-1.5 border-t border-[color:color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] pt-2",
   detailHeader:
-    "detailHeader min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
+    "detailHeader min-w-0 flex flex-wrap items-start justify-between gap-2",
   detailPanel:
-    "detailPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "detailPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 overflow-auto",
   emptyDetail:
     "emptyDetail min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   emptyState:
@@ -68,7 +68,7 @@ const styles = {
   image2ModelSummary:
     "image2ModelSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   listPanel:
-    "listPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid min-h-0 content-start gap-1.5 overflow-auto",
+    "listPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid min-h-0 content-start gap-1.5 overflow-auto max-[760px]:max-h-[34vh]",
   managementNav:
     "managementNav min-w-0",
   metaGrid:
@@ -84,13 +84,13 @@ const styles = {
   paneCollapsed:
     "paneCollapsed min-w-0 hidden",
   panelEyebrow:
-    "panelEyebrow min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "panelEyebrow min-w-0 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-tertiary)]",
   panelHeader:
-    "panelHeader min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-wrap items-center gap-1.5",
+    "panelHeader min-w-0 flex flex-wrap items-start justify-between gap-2",
   permissionSummaryCards:
-    "permissionSummaryCards min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+    "permissionSummaryCards min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   permissionSummaryGrid:
-    "permissionSummaryGrid min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+    "permissionSummaryGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   policyDraftPanel:
     "policyDraftPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   policyDraftSummary:
@@ -220,7 +220,7 @@ const styles = {
   refreshButton:
     "refreshButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
   resizeHandle:
-    "resizeHandle min-w-0",
+    "resizeHandle min-w-0 max-[760px]:hidden",
   resultCard:
     "resultCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
   resultSummaryGrid:
@@ -232,7 +232,7 @@ const styles = {
   returnButton:
     "returnButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
   route:
-    "route min-w-0 grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] content-start overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)]",
+    "route min-w-0 grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] content-start overflow-hidden text-[var(--fg-primary)]",
   rowSelect:
     "rowSelect min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   schemaDisclosure:
@@ -374,7 +374,7 @@ const styles = {
   summaryCard:
     "summaryCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 !grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-[5px] min-w-0 min-h-[26px] px-2 py-[3px] border-r border-r-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)]",
   summaryGrid:
-    "summaryGrid min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid gap-2 flex-1 grid-cols-[repeat(auto-fit,minmax(6.5rem,1fr))]",
+    "summaryGrid min-w-0 grid gap-2 flex-1 grid-cols-[repeat(auto-fit,minmax(6.5rem,1fr))]",
   testArgs:
     "testArgs min-w-0 font-mono text-[var(--vui-font-xs)]",
   testPanel:
@@ -426,9 +426,9 @@ const styles = {
   ts:
     "ts min-w-0",
   workspace:
-    "workspace min-w-0 grid h-full min-h-0 gap-2 p-2 !grid grid-cols-[var(--tools-left-panel-width)_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden",
+    "workspace min-w-0 grid h-full min-h-0 gap-2 p-2 !grid grid-cols-[var(--tools-left-panel-width)_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:grid-rows-[minmax(180px,34vh)_minmax(360px,1fr)] max-[760px]:overflow-auto",
   workspaceScopePanel:
-    "workspaceScopePanel min-w-0 grid min-h-0 gap-2 p-2 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[7px] p-2 rounded-[7px] border border-[var(--border-soft)] bg-[var(--surface-card)] max-[900px]:grid-cols-[repeat(2,minmax(0,1fr))]",
+    "workspaceScopePanel min-w-0 !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[7px] p-2 max-[900px]:grid-cols-[repeat(2,minmax(0,1fr))]",
 } as const;
 
 export default styles;

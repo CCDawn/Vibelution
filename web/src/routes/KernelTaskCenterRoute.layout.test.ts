@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import routeSource from "./KernelTaskCenterRoute.tsx?raw";
+import styles from "./KernelTaskCenterRoute.styles";
 import stylesSource from "./KernelTaskCenterRoute.styles.ts?raw";
 import routerSource from "../app/router.tsx?raw";
 
@@ -38,6 +39,11 @@ describe("KernelTaskCenterRoute layout contract", () => {
     expect(routeSource).not.toContain("useAppI18n");
   });
 
+  it("keeps the route root background-aware", () => {
+    expect(styles.routeClass).not.toContain("bg-[var(--surface-page)]");
+    expect(styles.routeClass).toContain("grid-rows-[auto_minmax(0,1fr)]");
+  });
+
   it("presents Kernel as a ledger-first task chain instead of a logs surface", () => {
     expect(routeSource).toContain("copy.taskChain");
     expect(routeSource).toContain("copy.evidenceRefs");
@@ -62,7 +68,8 @@ describe("KernelTaskCenterRoute layout contract", () => {
     expect(stylesSource).toContain("data-slot=vui-button-content");
     expect(stylesSource).toContain("data-slot=vui-button-label");
     expect(stylesSource).toContain("!h-auto");
-    expect(stylesSource).toContain("!min-h-[112px]");
+    expect(styles.taskRowClass).toContain("!min-h-[72px]");
+    expect(styles.taskRowClass).not.toContain("!min-h-[112px]");
     expect(stylesSource).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(stylesSource).toContain("whitespace-normal");
   });
