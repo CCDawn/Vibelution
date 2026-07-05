@@ -8,7 +8,13 @@ from concurrent.futures import ThreadPoolExecutor
 
 from core.llm.agent_runtime import config_for_agent_llm_model
 from core.orchestration.response_processor import ResponseProcessor
-from core.llm.client import LLMClient, _llm_provider_proxy_env, _ensure_no_proxy_for_local_base_url, llm_cancel_context
+from core.llm.client import (
+    LLMClient,
+    _default_responses_backend,
+    _llm_provider_proxy_env,
+    _ensure_no_proxy_for_local_base_url,
+    llm_cancel_context,
+)
 from core.llm.errors import classify_exception
 from core.llm.types import LLMError
 from core.llm.recovery import plan_recovery
@@ -135,7 +141,7 @@ def test_openai_responses_gpt_payload_includes_reasoning_effort():
     client = LLMClient(config=config, backend=lambda payload: payload)
     payload = client._build_payload([{"role": "user", "content": "ping"}])
 
-    assert payload["model"] == "openai/responses/gpt-5.5"
+    assert payload["model"] == "openai/gpt-5.5"
     assert payload["reasoning"] == {"effort": "high"}
 
 
@@ -569,7 +575,7 @@ def test_responses_transport_routes_openai_compatible_model_through_responses_br
     client = LLMClient(config=config, backend=lambda payload: payload)
     payload = client._build_payload([{"role": "user", "content": "ping"}])
 
-    assert payload["model"] == "openai/responses/gpt-5.5"
+    assert payload["model"] == "openai/gpt-5.5"
     assert "messages" not in payload
     assert "max_tokens" not in payload
     assert payload["max_output_tokens"] == config.llm.get_profile("primary").max_output_tokens
@@ -579,6 +585,25 @@ def test_responses_transport_routes_openai_compatible_model_through_responses_br
             "content": [{"type": "input_text", "text": "ping"}],
         }
     ]
+
+
+def test_responses_transport_does_not_add_responses_to_litellm_model_name():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://ai-pixel.online",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.5",
+            "llm.profiles.primary.transport": "responses",
+        }
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload = client._build_payload([{"role": "user", "content": "ping"}])
+
+    assert payload["model"] == "openai/gpt-5.5"
 
 
 def test_responses_transport_invokes_responses_backend():
@@ -610,6 +635,32 @@ def test_responses_transport_invokes_responses_backend():
     assert [kind for kind, _payload in calls] == ["responses"]
     assert "input" in calls[0][1]
     assert "messages" not in calls[0][1]
+
+
+def test_default_responses_backend_maps_internal_base_url_to_litellm_api_base(monkeypatch):
+    import litellm
+
+    calls = []
+
+    def responses(**kwargs):
+        calls.append(kwargs)
+        return {"output_text": "responses ok", "usage": {}}
+
+    monkeypatch.setattr(litellm, "responses", responses, raising=False)
+    payload = {
+        "model": "openai/gpt-5.5",
+        "api_key": "test-key",
+        "base_url": "https://ai-pixel.online",
+        "input": [{"role": "user", "content": [{"type": "input_text", "text": "ping"}]}],
+    }
+
+    response = _default_responses_backend(payload)
+
+    assert response["output_text"] == "responses ok"
+    assert calls[0]["api_base"] == "https://ai-pixel.online"
+    assert "base_url" not in calls[0]
+    assert payload["base_url"] == "https://ai-pixel.online"
+    assert "api_base" not in payload
 
 
 def test_responses_transport_streams_with_responses_normalizer(monkeypatch):
@@ -667,7 +718,7 @@ def test_responses_transport_preserves_existing_provider_prefix():
     client = LLMClient(config=config, backend=lambda payload: payload)
     payload = client._build_payload([{"role": "user", "content": "ping"}])
 
-    assert payload["model"] == "openai/responses/gpt-5.5"
+    assert payload["model"] == "openai/gpt-5.5"
 
 
 def test_openai_compatible_payload_prefixes_model_names_that_contain_slash():
@@ -1973,7 +2024,7 @@ def test_openai_compatible_automatic_prompt_cache_strips_cache_control_and_keeps
     client = LLMClient(config=config, backend=lambda payload: payload)
     payload = client._build_payload([{"role": "system", "content": content}])
 
-    assert payload["model"] == "openai/responses/gpt-5.5"
+    assert payload["model"] == "openai/gpt-5.5"
     assert payload["prompt_cache_key"] == "vibelution-primary"
     assert payload["prompt_cache_retention"] == "24h"
     assert "messages" not in payload
@@ -2503,7 +2554,7 @@ def test_responses_transport_converts_image_blocks_to_input_image():
         ]
     )
 
-    assert payload["model"] == "openai/responses/gpt-5.5"
+    assert payload["model"] == "openai/gpt-5.5"
     assert "messages" not in payload
     assert payload["input"][0]["content"] == [
         {"type": "input_text", "text": "看看这张图"},
