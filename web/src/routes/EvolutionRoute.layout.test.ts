@@ -488,7 +488,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeStyles.workflowStepRail).toContain("[max-height:min(196px,_30vh)]");
     expect(routeStyles.workflowStepButton).toContain("hover:[border-color:");
     expect(routeStyles.workflowStepButton).toContain("[background:var(--surface-panel)]");
-    expect(routeStyles.workflowStepButton).not.toContain("w-full");
+    expect(routeStyles.workflowStepButton).toContain("w-full");
     expect(routeStyles.workflowStepButtonActive).toContain("[border-color:");
     expect(routeStyles.workflowStepPreview).toContain("[-webkit-line-clamp:2]");
     expect(routeStyles.caseOverviewWorkspace).toContain("[grid-template-rows:auto_minmax(120px,_1fr)]");
