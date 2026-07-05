@@ -13,8 +13,22 @@ import {
   pruneSelectedHistoryTxnIds,
   SELF_TRANSACTION_COLLAPSED_LIMIT,
 } from "./SelfEvolutionTrack";
+import { selfEvolutionTrackStyles as styles } from "./SelfEvolutionTrack.styles";
 import selfEvolutionSource from "./SelfEvolutionTrack.tsx?raw";
 import selfEvolutionStylesSource from "./SelfEvolutionTrack.styles.ts?raw";
+
+const backgroundTokens = (className: string) =>
+  className.split(/\s+/).filter((token) => token.startsWith("bg-[") || token.startsWith("[background:"));
+
+const expectBackgroundAware = (className: string) => {
+  const tokens = backgroundTokens(className);
+
+  expect(tokens.length).toBeGreaterThan(0);
+  expect(tokens.some((token) => token.includes("color-mix") && token.includes("transparent"))).toBe(true);
+  expect(className).not.toContain("bg-[var(--surface-card)]");
+  expect(className).not.toContain("bg-[var(--surface-panel)]");
+  expect(className).not.toContain("shadow-[0_12px");
+};
 
 function transaction(overrides: Partial<SelfEvolutionTransaction> & { txnId: string }): SelfEvolutionTransaction {
   return {
@@ -337,6 +351,59 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("workspaceLayoutStyle");
     expect(selfEvolutionSource).toContain("petVitalFillStyle");
     expect(selfEvolutionSource).not.toContain("style={{");
+  });
+
+  it("keeps self-evolution route chrome background-aware and shadowless", () => {
+    [
+      styles.runActionBar,
+      styles.observationEvidenceRail,
+      styles.surface,
+      styles.observationPanel,
+      styles.approvalPanel,
+      styles.subsurface,
+      styles.petCompanionSurface,
+    ].forEach(expectBackgroundAware);
+  });
+
+  it("keeps repeated self-evolution panels and rows lighter than card walls", () => {
+    [
+      styles.agentCard,
+      styles.workflowCard,
+      styles.observationEventItem,
+      styles.loadingRail,
+      styles.loadingPanel,
+      styles.noticeBanner,
+      styles.listItem,
+      styles.stripItem,
+      styles.transactionDetailsPanel,
+    ].forEach(expectBackgroundAware);
+  });
+
+  it("keeps self-evolution actions content-sized with mobile overflow guards", () => {
+    [
+      styles.primaryAction,
+      styles.dangerAction,
+      styles.secondaryAction,
+      styles.paginationButton,
+      styles.transactionFilterButton,
+      styles.selectionToggle,
+    ].forEach((className) => {
+      expect(className).toContain("inline-flex");
+      expect(className).toContain("w-fit");
+      expect(className).toContain("max-w-full");
+    });
+
+    [
+      styles.pageStack,
+      styles.workspaceLayout,
+      styles.observationWorkspace,
+      styles.centerColumn,
+      styles.conversationShell,
+    ].forEach((className) => {
+      expect(className).toContain("min-w-0");
+      expect(className).toContain("max-w-full");
+      expect(className).toContain("overflow-x-hidden");
+    });
   });
 });
 

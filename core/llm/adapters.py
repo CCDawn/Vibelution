@@ -69,11 +69,6 @@ def _is_litellm_provider_qualified(model: str) -> bool:
     return bool(separator and prefix.strip().lower() in _LITELLM_PROVIDER_PREFIXES)
 
 
-def _is_responses_prefixed_model(model: str) -> bool:
-    parts = [part.strip().lower() for part in str(model or "").split("/") if part.strip()]
-    return "responses" in parts[:2]
-
-
 def _model_segments(model: str) -> List[str]:
     return [part.strip().lower() for part in str(model or "").split("/") if part.strip()]
 
@@ -130,15 +125,14 @@ class ProviderAdapter:
         return raw_model
 
     def _responses_litellm_model_name(self, raw_model: str) -> str:
-        if not raw_model or _is_responses_prefixed_model(raw_model):
+        if not raw_model:
+            return raw_model
+        if _is_litellm_provider_qualified(raw_model):
             return raw_model
         prefix = self._litellm_provider_prefix()
-        if _is_litellm_provider_qualified(raw_model):
-            model_prefix, _, model_name = raw_model.partition("/")
-            return f"{model_prefix}/responses/{model_name}"
         if prefix:
-            return f"{prefix}/responses/{raw_model}"
-        return f"responses/{raw_model}"
+            return f"{prefix}/{raw_model}"
+        return raw_model
 
     def _litellm_provider_prefix(self) -> str:
         if self.kind in _OPENAI_COMPAT_PROVIDER_KINDS:

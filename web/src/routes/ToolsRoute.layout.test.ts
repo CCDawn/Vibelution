@@ -17,6 +17,107 @@ const agentScopeStylesSource = [
   ...Object.keys(agentScopeStyles).map((key) => `.${key}`),
 ].join("\n");
 
+const routeOverflowGuardStyles = ["route", "workspace"] as const;
+
+const backgroundAwarePanelStyles = [
+  "agentPermissionSummaryPanel",
+  "bulkSummary",
+  "dependencyHealthPanel",
+  "detailPanel",
+  "emptyDetail",
+  "image2ModelPanel",
+  "image2ModelSummary",
+  "listPanel",
+  "notice",
+  "noticeError",
+  "noticeSuccess",
+  "policyDraftPanel",
+  "policyDraftSummary",
+  "policyPanel",
+  "readinessCard",
+  "readinessPanel",
+  "resultCard",
+  "resultSummaryGrid",
+  "searchBox",
+  "testPanel",
+  "toolAgentFitPanel",
+  "toolBundleSummary",
+  "toolDetailPanel",
+] as const;
+
+const backgroundAwareRepeatedStyles = [
+  "bulkActionBar",
+  "policyDraftSummary",
+  "selectableToolRow",
+  "summaryCard",
+  "toolBundleApplyBar",
+  "toolBundleGroup",
+  "toolBundleSummary",
+  "toolPermissionGroup",
+  "toolPermissionRow",
+  "workspaceScopePanel",
+] as const;
+
+const surfaceFreeRepeatedLayoutStyles = [
+  "toolBadges",
+  "toolBundleApplyActions",
+  "toolBundleHeader",
+  "toolBundleItems",
+  "toolBundleSelect",
+  "toolCopy",
+  "toolList",
+  "toolPermissionGroupHeader",
+  "toolPermissionGroupList",
+  "toolPermissionList",
+  "toolPermissionMeta",
+] as const;
+
+const backgroundAwareAgentScopeStyles = [
+  "agentScopeBar",
+  "controlStrip",
+  "scopeStats",
+  "summaryCard",
+] as const;
+
+const contentSizedActionStyles = [
+  "dangerButton",
+  "filterButton",
+  "primaryButton",
+  "refreshButton",
+  "returnButton",
+  "secondaryButton",
+  "segmentButton",
+  "toolButton",
+] as const;
+
+function classTokens(className: string): string[] {
+  return className.split(/\s+/).filter(Boolean);
+}
+
+function expectBackgroundAwareHairlineSurface(className: string) {
+  expect(className).toContain("border");
+  expect(className).toContain("border-[color:color-mix(in_srgb");
+  expect(className).toContain("bg-[color:color-mix(in_srgb");
+  expect(className).toContain("transparent");
+  expect(className).not.toContain("bg-vui-surface-glass");
+  expect(className).not.toContain("bg-vui-surface-row");
+  expect(className).not.toContain("bg-[var(--surface-card)]");
+  expect(className).not.toContain("bg-[var(--surface-panel)]");
+  expect(className).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+}
+
+function expectNoRepeatedSurfaceTokens(className: string) {
+  expect(className).not.toContain("border-[color-mix");
+  expect(className).not.toContain("border-[color:color-mix");
+  expect(className).not.toContain("border-[var(");
+  expect(className).not.toContain("border-vui-border-subtle");
+  expect(className).not.toContain("bg-[color-mix");
+  expect(className).not.toContain("bg-[color:color-mix");
+  expect(className).not.toContain("bg-[var(");
+  expect(className).not.toContain("bg-vui-surface");
+  expect(className).not.toContain("bg-vui-control");
+}
+
 describe("ToolsRoute layout contract", () => {
   it("routes Tools page controls through VUI primitives", () => {
     expect(routeSource).toContain("from \"../components/vui\"");
@@ -312,13 +413,57 @@ describe("ToolsRoute layout contract", () => {
     expect(styles.toolDetailPanel).toContain("panel");
   });
 
+  it("guards route and workspace against horizontal overflow", () => {
+    for (const key of routeOverflowGuardStyles) {
+      expect(styles[key]).toContain("min-w-0");
+      expect(styles[key]).toContain("max-w-full");
+      expect(styles[key]).toContain("overflow-x-hidden");
+    }
+
+    expect(styles.workspace).toContain("grid-cols-[minmax(0,var(--tools-left-panel-width))_auto_minmax(0,1fr)]");
+    expect(styles.workspace).toContain("max-[760px]:grid-cols-[minmax(0,1fr)]");
+  });
+
+  it("keeps major panels background-aware without route-owned shadow shells", () => {
+    for (const key of backgroundAwarePanelStyles) {
+      expectBackgroundAwareHairlineSurface(styles[key]);
+    }
+  });
+
+  it("keeps repeated tool cards, bundles, and policy rows light instead of stacked opaque cards", () => {
+    for (const key of backgroundAwareRepeatedStyles) {
+      expectBackgroundAwareHairlineSurface(styles[key]);
+    }
+  });
+
+  it("keeps nested tool bundle and policy wrappers as layout instead of extra surfaces", () => {
+    for (const key of surfaceFreeRepeatedLayoutStyles) {
+      expectNoRepeatedSurfaceTokens(styles[key]);
+    }
+  });
+
+  it("keeps Agent scope repeated surfaces light without glass or route-owned shadows", () => {
+    for (const key of backgroundAwareAgentScopeStyles) {
+      expectBackgroundAwareHairlineSurface(agentScopeStyles[key]);
+    }
+  });
+
+  it("keeps short action buttons sized to their content", () => {
+    for (const key of contentSizedActionStyles) {
+      const tokens = classTokens(styles[key]);
+      expect(styles[key]).toContain("inline-flex");
+      expect(tokens).toContain("w-fit");
+      expect(tokens).toContain("max-w-full");
+      expect(tokens).not.toContain("w-full");
+    }
+  });
+
   it("keeps the Agent policy draft summary in a four-column grid", () => {
     expect(routeSource).toContain("styles.policyDraftSummary");
     expect(styles.policyDraftSummary).toContain("grid-cols-[repeat(4,minmax(0,1fr))]");
     expect(styles.policyDraftSummary).toContain("gap-[7px]");
     expect(styles.policyDraftSummary).toContain("p-2");
-    expect(styles.policyDraftSummary).toContain("border");
-    expect(styles.policyDraftSummary).toContain("bg-[var(--surface-card)]");
+    expectBackgroundAwareHairlineSurface(styles.policyDraftSummary);
     expect(styles.policyDraftSummary).toContain("max-[900px]:grid-cols-[repeat(2,minmax(0,1fr))]");
   });
 
@@ -337,7 +482,8 @@ describe("ToolsRoute layout contract", () => {
   it("stacks the Tools workspace on narrow screens instead of clipping the detail panel", () => {
     expect(styles.workspace).toContain("max-[760px]:grid-cols-[minmax(0,1fr)]");
     expect(styles.workspace).toContain("max-[760px]:grid-rows-[minmax(180px,34vh)_minmax(360px,1fr)]");
-    expect(styles.workspace).toContain("max-[760px]:overflow-auto");
+    expect(styles.workspace).toContain("max-[760px]:overflow-y-auto");
+    expect(styles.workspace).toContain("max-[760px]:overflow-x-hidden");
     expect(styles.listPanel).toContain("max-[760px]:max-h-[34vh]");
     expect(styles.detailPanel).toContain("overflow-auto");
     expect(styles.resizeHandle).toContain("max-[760px]:hidden");

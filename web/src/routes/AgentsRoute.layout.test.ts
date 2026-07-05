@@ -210,6 +210,35 @@ function sourceBlocksForStyle(styleName: string, source = routeSource): string[]
   return blocks;
 }
 
+function expectBackgroundAwareSurface(styleName: keyof typeof styles): void {
+  const className = styles[styleName];
+
+  expect(className, `${String(styleName)} should keep a transparent, background-aware surface`).toContain("color-mix(in_srgb");
+  expect(className, `${String(styleName)} should not restack an opaque surface-card wall`).not.toContain("var(--surface-card)");
+  expect(className, `${String(styleName)} should not restack an opaque strong panel wall`).not.toContain("var(--surface-panel-strong)");
+  expect(className, `${String(styleName)} should not own route-level elevation`).not.toContain("box-shadow:var(--shadow");
+  expect(className, `${String(styleName)} should keep a hairline border`).toContain("[border:1px_solid");
+}
+
+function expectContentSizedAction(styleName: keyof typeof styles): void {
+  const className = styles[styleName];
+  const tokens = className.split(/\s+/);
+
+  expect(tokens, `${String(styleName)} should keep short actions content-sized`).toContain("w-fit");
+  expect(tokens, `${String(styleName)} should cap long labels inside the viewport`).toContain("max-w-full");
+  expect(tokens, `${String(styleName)} should not force compact actions across the full row`).not.toContain("w-full");
+  expect(tokens, `${String(styleName)} should not force compact actions across the full row`).not.toContain("[width:100%]");
+}
+
+function expectResponsiveActionRow(styleName: keyof typeof styles): void {
+  const className = styles[styleName];
+
+  expect(className, `${String(styleName)} should wrap dense action controls before overflowing`).toContain("[flex-wrap:wrap]");
+  expect(className, `${String(styleName)} should allow action rows to shrink in narrow panels`).toContain("min-w-0");
+  expect(className, `${String(styleName)} should keep VUI buttons inside the row`).toContain("[&_[data-vui=\"button\"]]:[max-width:100%]");
+  expect(className, `${String(styleName)} should keep VUI buttons content-sized`).toContain("[&_[data-vui=\"button\"]]:w-fit");
+}
+
 describe("AgentsRoute layout contract", () => {
   it("loads the read-only Agent config workspace endpoint", () => {
     expect(routeSource).toContain("fetchJson<AgentConfigWorkspaceWithTeamIndexes>(\"/api/agents/config-workspace?includeRuntime=false\")");
@@ -1346,6 +1375,72 @@ describe("AgentsRoute layout contract", () => {
     expect(detailWorkspaceStyles.detailPanelCreating).toContain("max-[1040px]:hidden");
   });
 
+  it("keeps Agent Center route chrome background-aware instead of restacking opaque page surfaces", () => {
+    expect(styles.route).toContain("max-w-full");
+    expect(styles.route).toContain("[overflow-x:hidden]");
+    expect(styles.route).not.toContain("[background:var(--bg-canvas)]");
+    expect(styles.route).not.toContain("[background:var(--surface-page)]");
+    expect(styles.route).not.toContain("[background:var(--surface-card)]");
+    expect(styles.route).not.toContain("var(--surface-panel-strong)");
+
+    expect(workspaceLayoutStyles.workspace).not.toContain("[background:");
+    expect(workspaceLayoutStyles.workspace).not.toContain("var(--surface-card)");
+    expect(workspaceLayoutStyles.workspace).not.toContain("var(--surface-panel-strong)");
+    expect(workspaceLayoutStyles.workspace).not.toContain("box-shadow");
+    expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:[grid-template-columns:1fr]");
+    expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:[overflow:auto]");
+  });
+
+  it("keeps route-level repeated Agent panels/cards transparent and hairline only", () => {
+    const repeatedSurfaceStyles: Array<keyof typeof styles> = [
+      "activityTimelineItem",
+      "advancedFilterSummary",
+      "agentRow",
+      "avatarEditorPanel",
+      "boundarySummaryGrid",
+      "checkField",
+      "configEditor",
+      "detailSection",
+      "groupButton",
+      "inboxMessageItem",
+      "policySummaryGrid",
+      "roomCheckField",
+      "runHistoryItem",
+      "runtimeEvidenceHint",
+      "runtimePolicyGrid",
+      "segmentedControl",
+      "storagePanel",
+      "toolBundleItem",
+      "toolGovernanceItem",
+      "toolPermissionGroup",
+      "toolPermissionRow",
+      "workspaceScopePanel",
+    ];
+
+    for (const styleName of repeatedSurfaceStyles) {
+      expectBackgroundAwareSurface(styleName);
+    }
+
+    expect(styles.agentRowActive).not.toContain("var(--surface-panel-strong)");
+    expect(styles.agentRowBulkSelected).not.toContain("var(--surface-panel-strong)");
+    expect(styles.groupButtonActive).not.toContain("var(--surface-panel-strong)");
+    expect(styles.inboxMessageItemFocused).not.toContain("var(--surface-panel-strong)");
+  });
+
+  it("keeps short route-level actions content-sized and mobile-safe", () => {
+    for (const styleName of ["primaryButton", "secondaryButton", "dangerButton", "returnBannerButton"] as const) {
+      expectContentSizedAction(styleName);
+    }
+
+    for (const styleName of ["avatarEditorActions", "configDeepLinkRow", "editorActions", "timelineActions"] as const) {
+      expectResponsiveActionRow(styleName);
+    }
+
+    expect(styles.returnBannerButton).toContain("max-[860px]:w-fit");
+    expect(styles.returnBannerButton).not.toContain("max-[860px]:w-full");
+    expect(styles.returnBannerButton).not.toContain("max-[860px]:[width:100%]");
+  });
+
   it("keeps Agent card subgrids away from invalid quoted Tailwind grid areas", () => {
     expect(overviewStyles.policyGrid).not.toContain("grid-template-areas");
     expect(overviewStyles.policyGrid).toContain("[&_div]:[grid-template-rows:auto_auto]");
@@ -1454,7 +1549,7 @@ describe("AgentsRoute layout contract", () => {
     expect(stylesSource).not.toContain(".bulkActionBar {");
     expect(stylesSource).not.toContain(".bulkSummary");
     expect(stylesSource).not.toContain(".bulkPromptPicker");
-    expect(styles.agentRowBulkSelected).toContain("[background:color-mix(in_srgb,_var(--accent-cool)_10%,_var(--surface-panel-strong))]");
+    expect(styles.agentRowBulkSelected).toContain("[background:color-mix(in_srgb,_var(--accent-cool)_10%,_transparent)]");
     expect(bulkActionBarSource).toContain("!flex-nowrap items-center overflow-x-auto");
     expect(bulkActionBarSource).not.toContain("!flex-wrap items-center overflow-visible");
   });
