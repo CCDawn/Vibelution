@@ -60,7 +60,14 @@ export function TeamSourceCollectionMemoryPanel({
         ))}
       </div>
       {hasCandidates ? (
-        <div className={styles.workflowCandidateList}>{children}</div>
+        <div
+          className={styles.sourceCollectionMemoryListShell}
+          role="region"
+          tabIndex={0}
+          aria-label={lang === "zh" ? "入库审核候选列表，可滚动查看" : "Knowledge ingestion candidates, scroll to review"}
+        >
+          <div className={styles.workflowCandidateList}>{children}</div>
+        </div>
       ) : (
         <div className={styles.empty}>{emptyMessage}</div>
       )}

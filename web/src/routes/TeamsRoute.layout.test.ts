@@ -14,6 +14,7 @@ import teamSourceCollectionGraphPanelSource from "./TeamSourceCollectionGraphPan
 import teamSourceCollectionManualWritebackPanelSource from "./TeamSourceCollectionManualWritebackPanel.tsx?raw";
 import teamSourceCollectionManualWritebackPanelStyles from "./TeamSourceCollectionManualWritebackPanel.styles";
 import teamSourceCollectionMemoryPanelSource from "./TeamSourceCollectionMemoryPanel.tsx?raw";
+import teamSourceCollectionMemoryPanelStyles from "./TeamSourceCollectionMemoryPanel.styles";
 import teamSourceCollectionOverviewPanelSource from "./TeamSourceCollectionOverviewPanel.tsx?raw";
 import teamSourceCollectionOverviewPanelStyles from "./TeamSourceCollectionOverviewPanel.styles";
 import teamSourceCollectionOverviewPanelStylesSource from "./TeamSourceCollectionOverviewPanel.styles.ts?raw";
@@ -925,6 +926,33 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionCandidatePanelSource).toContain("sourceCollectionCandidateListShell");
     expect(teamSourceCollectionCandidatePanelSource).toContain("loading && !hasCandidates");
     expect(teamSourceCollectionCandidatePanelSource).toContain("sourceCollectionCandidateSkeletonRow");
+    const sourceCollectionResultPanelSource = routeSource.slice(
+      routeSource.indexOf("const resultPanel = selectedSourceCollectionStageId"),
+      routeSource.indexOf("<TeamSourceCollectionActiveStagePanel"),
+    );
+    const ingestionResultSource = sourceCollectionResultPanelSource.slice(
+      sourceCollectionResultPanelSource.indexOf('selectedSourceCollectionStageId === "ingestion"'),
+      sourceCollectionResultPanelSource.indexOf(": renderSourceCollectionConversation"),
+    );
+    expect(ingestionResultSource).toContain("styles.sourceCollectionIngestionPanels");
+    expect(ingestionResultSource).toContain("{renderSourceCollectionGraphPanel()}");
+    expect(ingestionResultSource).toContain("{renderSourceCollectionMemoryPanel()}");
+    const graphPanelOpenSource = routeSource.slice(
+      routeSource.indexOf("<TeamSourceCollectionGraphPanel"),
+      routeSource.indexOf("onToggle={(event) =>", routeSource.indexOf("<TeamSourceCollectionGraphPanel")),
+    );
+    expect(graphPanelOpenSource).toContain('selectedSourceCollectionStageId === "relations"');
+    expect(graphPanelOpenSource).not.toContain('selectedSourceCollectionStageId === "ingestion"');
+    expect(routeStyles.sourceCollectionIngestionPanels).toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(routeStyles.sourceCollectionIngestionPanels).toContain("overflow-hidden");
+    expect(routeStyles.sourceCollectionIngestionPanels).toContain("min-h-0");
+    expect(routeStyles.sourceCollectionIngestionPanels).toContain("max-[860px]:min-h-[560px]");
+    expect(routeStyles.sourceCollectionGraphNodeListShell).toContain("max-h-[28vh]");
+    expect(routeStyles.sourceCollectionGraphNodeListShell).toContain("[scrollbar-gutter:stable]");
+    expect(teamSourceCollectionMemoryPanelSource).toContain("sourceCollectionMemoryListShell");
+    expect(teamSourceCollectionMemoryPanelStyles.sourceCollectionMemoryListShell).toContain("max-h-[44vh]");
+    expect(teamSourceCollectionMemoryPanelStyles.sourceCollectionMemoryListShell).toContain("max-[860px]:max-h-[58vh]");
+    expect(teamSourceCollectionMemoryPanelStyles.sourceCollectionMemoryListShell).toContain("[scrollbar-gutter:stable]");
     expect(routeSource).toContain("待 Agent 复核");
     expect(routeSource).not.toContain("待质检");
     expect(routeSource).not.toContain("workflowSourceCollectionPrimaryButton");
