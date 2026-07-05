@@ -981,6 +981,14 @@ class SelfEvolvingAgent:
             },
         )
 
+    def _automatic_context_compression_threshold(self) -> float:
+        levels = getattr(getattr(self.config, "context_compression", None), "levels", None)
+        try:
+            threshold = float(getattr(levels, "standard", 0.95))
+        except (TypeError, ValueError):
+            threshold = 0.95
+        return min(1.0, max(0.01, threshold))
+
     def _init_llm(self):
         """初始化统一 LLM client。"""
         llm = get_llm_client(role="primary", config=self.config)
@@ -2280,9 +2288,9 @@ class SelfEvolvingAgent:
 
                 # 硬限制：超出最大上下文时强制压缩
                 current_tokens = estimate_messages_tokens(messages)
-                if current_tokens > self._effective_max_token_limit * 0.95:
+                if current_tokens > self._effective_max_token_limit * self._automatic_context_compression_threshold():
                     messages, should_break = self._compress_messages(
-                        messages, iteration, reason="超出最大上下文限制"
+                        messages, iteration, reason="达到配置的上下文压缩阈值"
                     )
                     try:
                         ui.note_context_window(
