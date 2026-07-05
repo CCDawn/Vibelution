@@ -169,6 +169,7 @@ function agentToolCallPartToOperation(
   index: number,
 ): AgentMessageOperation {
   const rawLabel = part.name?.trim() || "tool";
+  const resultPreview = part.resultPreview || part.summary || "";
   return {
     id: part.id || `agent-tool-${index}`,
     kind: "tool",
@@ -176,7 +177,7 @@ function agentToolCallPartToOperation(
     rawLabel,
     preserveToolLabel: part.source === "legacy-tool-call",
     status: part.status || "done",
-    summary: compactPreview(part.summary || part.resultPreview || ""),
+    summary: toolSummaryPreview(rawLabel, part.status || "done", part.summary, resultPreview),
     durationSeconds: coerceAgentToolDurationSeconds(part),
     arguments: part.arguments,
     resultPreview: part.resultPreview,
@@ -189,6 +190,108 @@ function agentToolCallPartToOperation(
     timestamp: part.timestamp,
     relatedThoughtSequence: numberOrNull(part.relatedThoughtSequence) ?? undefined,
   };
+}
+
+function toolSummaryPreview(
+  rawLabel: string,
+  status: string,
+  summary?: string,
+  resultPreview?: string,
+) {
+  const rawSummary = String(summary ?? "").trim();
+  const rawResult = String(resultPreview ?? "").trim();
+  const normalizedStatus = normalizeDisplayStatus(status);
+  const structuredSummary = extractStructuredToolSummary(rawLabel, rawSummary);
+  if (structuredSummary) {
+    return compactPreview(structuredSummary, 96);
+  }
+  if (rawSummary && !looksLikeRawToolPayload(rawSummary)) {
+    return compactPreview(rawSummary, 96);
+  }
+  const structuredResult = extractStructuredToolSummary(rawLabel, rawResult);
+  if (structuredResult) {
+    return compactPreview(structuredResult, 96);
+  }
+  if (rawResult && !looksLikeRawToolPayload(rawResult)) {
+    return compactPreview(rawResult, 96);
+  }
+  const candidate = rawSummary || rawResult;
+  if (!candidate) {
+    return "";
+  }
+  if (normalizedStatus === "failed") {
+    return "执行失败";
+  }
+  if (isRunningStatus(normalizedStatus)) {
+    return "运行中";
+  }
+  return "执行完成";
+}
+
+function extractStructuredToolSummary(rawLabel: string, value: string) {
+  const parsed = parseJsonObject(value);
+  if (!parsed) {
+    return "";
+  }
+  const lower = String(rawLabel || "").trim().toLowerCase();
+  const summary = stringRecordValue(parsed, "dirty_summary")
+    || stringRecordValue(parsed, "summary")
+    || stringRecordValue(parsed, "message")
+    || stringRecordValue(parsed, "error");
+  if (summary) {
+    return summary;
+  }
+  if (lower.includes("git")) {
+    const changed = numberRecordValue(parsed, "changed_files")
+      ?? numberRecordValue(parsed, "changedFileCount")
+      ?? numberRecordValue(parsed, "dirty_count");
+    if (typeof changed === "number") {
+      return `工作区有 ${changed} 个变化文件`;
+    }
+  }
+  return "";
+}
+
+function parseJsonObject(value: string): Record<string, unknown> | null {
+  const trimmed = String(value || "").trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function stringRecordValue(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function numberRecordValue(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function looksLikeRawToolPayload(value: string) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return false;
+  }
+  if ((normalized.startsWith("{") && normalized.endsWith("}")) || (normalized.startsWith("[") && normalized.endsWith("]"))) {
+    return true;
+  }
+  if (/(^|\n)\s*\d+[-:]\s+/.test(normalized)) {
+    return true;
+  }
+  if (/\bSTDERR\b|\bSTDOUT\b|Exit Code|\bTraceback\b|self\._|\bdef\s+\w+\(/.test(normalized)) {
+    return true;
+  }
+  return false;
 }
 
 function agentRuntimeEventPartToOperation(
