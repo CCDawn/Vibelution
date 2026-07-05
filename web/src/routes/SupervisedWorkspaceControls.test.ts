@@ -53,9 +53,13 @@ describe("supervised workspace controls", () => {
     expect(controlsSource).toContain("controlsShellClass");
     expect(controlsSource).toContain("flowRegionClass");
     expect(controlsSource).toContain("modeRegionClass");
-    expect(tabsStylesSource).toContain("grid-cols-[repeat(4,minmax(118px,1fr))]");
-    expect(tabsStylesSource).toContain("flex-[1_1_auto]");
-    expect(tabsStylesSource).toContain("max-w-none");
+    expect(tabsStylesSource).toContain("inline-grid");
+    expect(tabsStylesSource).toContain("w-fit");
+    expect(tabsStylesSource).toContain("grid-cols-[repeat(4,minmax(132px,168px))]");
+    expect(tabsStylesSource).toContain("max-w-full");
+    expect(tabsStylesSource).not.toContain("grid-cols-[repeat(4,minmax(118px,1fr))]");
+    expect(tabsStylesSource).not.toContain("flex-[1_1_auto]");
+    expect(tabsStylesSource).not.toContain("max-w-none");
     expect(tabsStylesSource).not.toContain("grid-cols-[repeat(4,minmax(132px,1fr))]");
     expect(tabsStylesSource).not.toContain("flex-[0_1_620px]");
     expect(tabsStylesSource).not.toContain("max-w-[680px]");
@@ -63,20 +67,23 @@ describe("supervised workspace controls", () => {
     expect(tabsSource).not.toContain("segmentButton");
   });
 
-  it("lets the supervised flow fill the toolbar while keeping mode buttons content-sized", () => {
+  it("keeps the supervised flow content-sized while mode buttons stay compact", () => {
     expect(controlsStylesSource).toContain("controlsShellClass");
-    expect(controlsStylesSource).toContain("grid-cols-[minmax(0,1fr)_auto]");
-    expect(controlsStylesSource).toContain("w-full");
+    expect(controlsStylesSource).toContain("grid-cols-[minmax(0,max-content)_auto]");
+    expect(controlsStylesSource).toContain("w-fit");
+    expect(controlsStylesSource).toContain("max-w-full");
+    expect(controlsStylesSource).not.toContain("min-w-0 w-full grid-cols-[minmax(0,1fr)_auto]");
     expect(controlsStylesSource).toContain("justify-self-end");
     expect(controlsStylesSource).toContain("max-w-full");
-    expect(tabsStylesSource).toContain("w-full");
+    expect(tabsStylesSource).not.toContain("grid w-full min-w-0 flex-[1_1_auto]");
+    expect(tabsStylesSource).toContain("w-fit");
     expect(tabsStylesSource).toContain("min-w-0");
-    expect(tabsStylesSource).toContain("grid-cols-[repeat(4,minmax(118px,1fr))]");
+    expect(tabsStylesSource).toContain("grid-cols-[repeat(4,minmax(132px,168px))]");
     expect(tabsStylesSource).toContain("min-h-[36px]");
     expect(tabsStylesSource).toContain("h-5 w-5");
     expect(tabsStylesSource).toContain("min-w-6");
     expect(tabsStylesSource).toContain("hidden overflow-hidden");
-    expect(tabsStylesSource).toContain("max-[1120px]:grid-cols-[repeat(4,minmax(96px,1fr))]");
+    expect(tabsStylesSource).toContain("max-[1120px]:grid-cols-[repeat(4,minmax(112px,150px))]");
     expect(tabsSource).not.toContain("repeat(2");
     expect(controlsStylesSource).toContain("min-h-[34px]");
     expect(controlsStylesSource).toContain("min-h-[26px]");
