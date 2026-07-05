@@ -79,7 +79,7 @@ describe("supervised workspace controls", () => {
     expect(tabsStylesSource).toContain("w-fit");
     expect(tabsStylesSource).toContain("min-w-0");
     expect(tabsStylesSource).toContain("grid-cols-[repeat(4,minmax(132px,168px))]");
-    expect(tabsStylesSource).toContain("min-h-[36px]");
+    expect(tabsStylesSource).toContain("h-[34px]");
     expect(tabsStylesSource).toContain("h-5 w-5");
     expect(tabsStylesSource).toContain("min-w-6");
     expect(tabsStylesSource).toContain("hidden overflow-hidden");
@@ -89,6 +89,18 @@ describe("supervised workspace controls", () => {
     expect(controlsStylesSource).toContain("min-h-[26px]");
     expect(controlsStylesSource).toContain("flowRegionClass");
     expect(tabsStylesSource).toContain("min-w-0");
+  });
+
+  it("keeps workflow tabs from expanding into tall VButton cards", () => {
+    expect(tabsStylesSource).toContain("!inline-grid");
+    expect(tabsStylesSource).toContain("h-[34px]");
+    expect(tabsStylesSource).toContain("max-h-[34px]");
+    expect(tabsStylesSource).not.toContain("min-h-[36px]");
+    expect(tabsStylesSource).not.toContain("stepMetaClass = \"flex");
+    expect(tabsStylesSource).toContain("stepMetaClass = \"sr-only");
+    expect(tabsSource).toContain("const tabDescription");
+    expect(tabsSource).toContain("aria-label={tabDescription}");
+    expect(tabsSource).toContain("title={tabDescription}");
   });
 
   it("feeds workflow step summaries into the supervised flow tabs", () => {
