@@ -64,6 +64,9 @@ export type ConversationNotificationService = {
   clearAttention(): void;
 };
 
+const SAFE_NOTIFICATION_TITLE = "对话已完成";
+const SAFE_NOTIFICATION_BODY = "Vibelution 已完成一轮回复。";
+
 export function createConversationNotificationService(
   options: ConversationNotificationServiceOptions
 ): ConversationNotificationService {
@@ -165,8 +168,8 @@ export function createConversationNotificationService(
         notificationKey,
         sessionId,
         turnId: String(payload.turnId || "").trim() || undefined,
-        title: String(payload.title || "对话已完成").trim() || "对话已完成",
-        body: String(payload.body || "Vibelution 已完成一轮回复。").trim() || "Vibelution 已完成一轮回复。",
+        title: SAFE_NOTIFICATION_TITLE,
+        body: SAFE_NOTIFICATION_BODY,
         completedAt: String(payload.completedAt || "").trim() || undefined,
         terminalStatus: String(payload.terminalStatus || "").trim() || undefined
       };
