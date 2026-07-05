@@ -37,10 +37,10 @@ export type AgentFilterRailProps = {
 };
 
 const GROUP_BUTTON_BASE =
-  "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 w-full min-h-[34px] px-[9px] py-[6px] rounded-lg border border-[var(--border-soft)] bg-[var(--surface-card)] text-[var(--fg-secondary)] text-left transition-[border-color,background,color] duration-150 hover:border-[var(--border-strong)] hover:text-[var(--fg-primary)] hover:bg-[var(--surface-panel-hover)]";
+  "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 w-full min-h-[34px] px-[9px] py-[6px] rounded-[var(--radius-control)] border border-[var(--border-soft)] bg-[var(--vui-surface-row)] text-[var(--fg-secondary)] text-left transition-[border-color,background,color] duration-150 hover:border-[var(--border-strong)] hover:text-[var(--fg-primary)] hover:bg-[var(--vui-surface-row-hover)]";
 
 const GROUP_BUTTON_ACTIVE =
-  "border-[color-mix(in_srgb,var(--accent-warm)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_10%,var(--surface-panel-strong))] text-[var(--fg-primary)]";
+  "border-[color-mix(in_srgb,var(--accent-warm)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_10%,var(--vui-surface-panel))] text-[var(--fg-primary)]";
 
 const GROUP_LABEL =
   "inline-flex items-center gap-2 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap";
@@ -119,7 +119,7 @@ export function AgentFilterRail({
     >
       <label
         data-vui-product="agent-filter-search"
-        className="flex items-center gap-2 min-h-[32px] px-[9px] rounded-lg border border-[var(--border-soft)] bg-[color-mix(in_srgb,var(--surface-input)_84%,var(--surface-card))] text-[var(--fg-tertiary)] focus-within:border-[color-mix(in_srgb,var(--accent-cool)_44%,transparent)] focus-within:shadow-[var(--focus-ring)] focus-within:text-[var(--fg-secondary)]"
+        className="flex items-center gap-2 min-h-[32px] px-[9px] rounded-[var(--radius-control)] border border-[var(--border-soft)] bg-[color-mix(in_srgb,var(--surface-input)_84%,var(--vui-surface-row))] text-[var(--fg-tertiary)] focus-within:border-[color-mix(in_srgb,var(--accent-cool)_44%,transparent)] focus-within:shadow-[var(--focus-ring)] focus-within:text-[var(--fg-secondary)]"
       >
         <Search size={15} className="shrink-0" />
         <VNativeInput
@@ -141,7 +141,7 @@ export function AgentFilterRail({
         ))}
         {advancedSections && advancedSections.length ? (
           <details data-vui-product="agent-filter-advanced" className="group grid min-w-0">
-            <summary className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 min-h-[34px] px-[9px] py-[6px] rounded-lg border border-[var(--border-soft)] bg-[color-mix(in_srgb,var(--surface-card)_86%,var(--bg-canvas))] text-[var(--fg-secondary)] text-[0.8rem] font-[760] cursor-pointer list-none [&::-webkit-details-marker]:hidden hover:border-[var(--border-strong)] hover:text-[var(--fg-primary)] hover:bg-[var(--surface-panel-hover)]">
+            <summary className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 min-h-[34px] px-[9px] py-[6px] rounded-[var(--radius-control)] border border-[var(--border-soft)] bg-[color-mix(in_srgb,var(--vui-surface-row)_86%,var(--bg-canvas))] text-[var(--fg-secondary)] text-[0.8rem] font-[760] cursor-pointer list-none [&::-webkit-details-marker]:hidden hover:border-[var(--border-strong)] hover:text-[var(--fg-primary)] hover:bg-[var(--vui-surface-row-hover)]">
               <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
                 {advancedLabel}
               </span>
@@ -167,7 +167,7 @@ export function AgentFilterRail({
 
       <section
         data-vui-product="agent-filter-storage"
-        className="grid gap-[5px] min-w-0 p-2 rounded-lg border border-[var(--border-soft)] bg-[color-mix(in_srgb,var(--surface-card)_86%,var(--bg-canvas))]"
+        className="grid gap-[5px] min-w-0 p-2 rounded-[var(--radius-control)] border border-[var(--border-soft)] bg-[color-mix(in_srgb,var(--vui-surface-row)_86%,var(--bg-canvas))]"
       >
         <p className="m-0 mb-px text-[var(--fg-tertiary)] text-[0.61rem] tracking-[0.07em] uppercase">
           {storageLabel}
