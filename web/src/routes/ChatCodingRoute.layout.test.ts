@@ -45,6 +45,23 @@ const conversationCssSource = [
   ...Object.values(conversationStyles),
 ].join("\n");
 
+function sliceRequiredSection(source: string, startMarker: string, endMarker: string) {
+  const startIndex = source.indexOf(startMarker);
+  expect(startIndex, `missing start marker: ${startMarker}`).toBeGreaterThanOrEqual(0);
+  const endIndex = source.indexOf(endMarker, startIndex + startMarker.length);
+  expect(endIndex, `missing end marker after ${startMarker}: ${endMarker}`).toBeGreaterThan(startIndex);
+  return source.slice(startIndex, endIndex);
+}
+
+function expectOrderedFragments(source: string, fragments: string[]) {
+  let cursor = 0;
+  for (const fragment of fragments) {
+    const index = source.indexOf(fragment, cursor);
+    expect(index, `missing fragment: ${fragment}`).toBeGreaterThanOrEqual(0);
+    cursor = index + fragment.length;
+  }
+}
+
 describe("ChatCodingRoute layout contract", () => {
   it("keeps the center conversation readable and the composer as a stable bottom layer", () => {
     expect(conversationStyles.timeline).toBeTypeOf("string");
@@ -1396,6 +1413,29 @@ describe("ChatCodingRoute layout contract", () => {
     const queueAssistantDeltaBody = routeSource.slice(queueAssistantDeltaStart, handleSessionInitialStart);
     expect(queueAssistantDeltaBody).not.toContain("mergeAssistantDeltaIntoActiveTurnLayer");
     expect(queueAssistantDeltaBody).not.toContain("activeTurnLayerTextLength");
+  });
+
+  it("wires completed session stream events into the desktop notification helper", () => {
+    const handleAssistantDeltaSection = sliceRequiredSection(
+      routeSource,
+      "function handleAssistantDelta(event: MessageEvent<string>) {",
+      "stream.addEventListener(\"session_initial\", handleSessionInitial as EventListener);",
+    );
+    expectOrderedFragments(handleAssistantDeltaSection, [
+      "if (!shouldAcceptSessionStreamEvent(payload, streamSessionId) || payload.type !== \"assistant_delta\") {",
+      "desktopConversationNotifierRef.current.handleAssistantDelta(payload, {",
+      "queueAssistantDelta(payload, event.data.length);",
+    ]);
+
+    const applyPendingDetailSection = sliceRequiredSection(
+      routeSource,
+      "function applyPendingDetail(reason: \"timer\" | \"close\" | \"final\") {",
+      "function queueSessionDetail(detail: SessionDetail, payloadLength: number) {",
+    );
+    expectOrderedFragments(applyPendingDetailSection, [
+      "syncSessionDetail(detail);",
+      "desktopConversationNotifierRef.current.handleSessionDetail(detail, {",
+    ]);
   });
 
   it("records stream render-frame telemetry after ConversationView commits live text", () => {
