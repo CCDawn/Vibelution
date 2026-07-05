@@ -16,7 +16,7 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { VButton, VIconButton, VNativeSelect, VNativeTextarea, VRouteHeader } from "../components/vui";
+import { VButton, VIconButton, VNativeButton, VNativeSelect, VNativeTextarea, VRouteHeader } from "../components/vui";
 import { GitDiffView } from "./GitDiffView";
 import {
   getGitAiDraftBlockReason,
@@ -417,12 +417,11 @@ export function GitRoute() {
   function renderCommitItem(commit: GitCommitSummary, sourceLabel = gitCommitSourceLabel) {
     const active = activeObject?.kind === "commit" && activeObject.ref === commit.sha;
     return (
-      <VButton
+      <VNativeButton
         key={commit.sha}
         type="button"
-        variant="ghost"
         className={active ? `${styles.commitItem} ${styles.objectItemActive}` : styles.commitItem}
-        onPress={() =>
+        onClick={() =>
           selectGitObject({
             kind: "commit",
             ref: commit.sha,
@@ -440,7 +439,7 @@ export function GitRoute() {
         </div>
         <strong>{commit.subject}</strong>
         <p>{t("gitCommitBy")}: {commit.author}</p>
-      </VButton>
+      </VNativeButton>
     );
   }
 
@@ -463,10 +462,10 @@ export function GitRoute() {
       />
 
       <div className={styles.summaryGrid}>
-        <VButton type="button" variant="ghost" className={styles.summaryCard} onPress={selectCurrentBranch} isDisabled={!status?.branch}>
+        <VNativeButton type="button" className={styles.summaryCard} onClick={selectCurrentBranch} disabled={!status?.branch}>
           <span>{t("gitBranch")}</span>
           <strong>{status?.branch || status?.headRevShort || "-"}</strong>
-        </VButton>
+        </VNativeButton>
         <section className={styles.summaryCard}>
           <span>{t("gitChangedFiles")}</span>
           <strong>{status?.counts.total ?? 0}</strong>
@@ -483,20 +482,19 @@ export function GitRoute() {
           <span>{t("gitLocalCommits")}</span>
           <strong>{localCommitCount}</strong>
         </section>
-        <VButton
+        <VNativeButton
           type="button"
-          variant="ghost"
           className={styles.summaryCard}
-          onPress={() => {
+          onClick={() => {
             if (worktreeDetailTarget) {
               selectWorktree(worktreeDetailTarget);
             }
           }}
-          isDisabled={!worktreeDetailTarget}
+          disabled={!worktreeDetailTarget}
         >
           <span>{t("gitWorktreeBranches")}</span>
           <strong>{worktreeBranchCount} / {worktreeTotalCount}</strong>
-        </VButton>
+        </VNativeButton>
       </div>
 
       {!statusQuery.isPending && status && !status.available ? (
@@ -507,13 +505,13 @@ export function GitRoute() {
         {noChangedFiles ? (
           <>
             <main className={styles.gitOverviewPanel}>
-              <VButton type="button" variant="ghost" className={styles.cleanStateStrip} onPress={selectCurrentBranch}>
+              <VNativeButton type="button" className={styles.cleanStateStrip} onClick={selectCurrentBranch}>
                 <div>
                   <p className={styles.panelEyebrow}>{lang === "zh" ? "状态" : "Status"}</p>
                   <h2>{lang === "zh" ? "工作区干净" : "Clean worktree"}</h2>
                 </div>
                 <span>{status?.summary || (lang === "zh" ? "没有文件变更。" : "No changed files.")}</span>
-              </VButton>
+              </VNativeButton>
               <div className={styles.gitSituationGrid}>
                 <section className={styles.gitSituationCard}>
                   <div className={styles.panelHeader}>
@@ -540,23 +538,22 @@ export function GitRoute() {
                   </div>
                   <div className={styles.worktreeList}>
                     {pendingWorktreePreview.map((item) => (
-                      <VButton
+                      <VNativeButton
                         key={`${item.path}-${item.branch}`}
                         type="button"
-                        variant="ghost"
                         className={
                           activeObject?.kind === "worktree" && activeObject.path === item.path
                             ? `${styles.worktreeItem} ${styles.objectItemActive}`
                             : styles.worktreeItem
                         }
-                        onPress={() => selectWorktree(item)}
+                        onClick={() => selectWorktree(item)}
                       >
                         <div>
                           <strong>{worktreeDisplayName(item)}</strong>
                           <span>{displayGitPath(item.path)}</span>
                         </div>
                         <code>+{item.aheadMain} / -{item.behindMain}</code>
-                      </VButton>
+                      </VNativeButton>
                     ))}
                     {!pendingWorktreePreview.length ? (
                       <p className={styles.emptyState}>{lang === "zh" ? "没有待合入 worktree 分支。" : "No worktree branches with pending commits."}</p>
