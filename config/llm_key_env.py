@@ -10,6 +10,20 @@ from .models import PROVIDER_API_KEY_ENV_ALIASES, get_provider_api_key_env
 from .public_config import load_public_config, read_persisted_user_env_var
 
 
+def _add_provider_key_env_names(env_names: set[str], provider: dict[str, Any]) -> None:
+    provider_env = str(provider.get("api_key_env") or "").strip()
+    if provider_env:
+        env_names.add(provider_env)
+    provider_kind = str(provider.get("kind") or "").strip().lower()
+    canonical_env = get_provider_api_key_env(provider_kind)
+    if canonical_env:
+        env_names.add(canonical_env)
+    for alias in PROVIDER_API_KEY_ENV_ALIASES.get(provider_kind, []):
+        alias_env = str(alias or "").strip()
+        if alias_env:
+            env_names.add(alias_env)
+
+
 def configured_llm_key_env_names(public_config: dict[str, Any]) -> set[str]:
     llm = public_config.get("llm") if isinstance(public_config.get("llm"), dict) else {}
     model_library = llm.get("model_library") if isinstance(llm.get("model_library"), dict) else {}
@@ -21,21 +35,14 @@ def configured_llm_key_env_names(public_config: dict[str, Any]) -> set[str]:
             env_name = str(item.get("api_key_env") or "").strip()
             if env_name:
                 env_names.add(env_name)
+            provider = item.get("provider")
+            if isinstance(provider, dict):
+                _add_provider_key_env_names(env_names, provider)
 
     for provider in providers.values():
         if not isinstance(provider, dict):
             continue
-        provider_env = str(provider.get("api_key_env") or "").strip()
-        if provider_env:
-            env_names.add(provider_env)
-        provider_kind = str(provider.get("kind") or "").strip().lower()
-        canonical_env = get_provider_api_key_env(provider_kind)
-        if canonical_env:
-            env_names.add(canonical_env)
-        for alias in PROVIDER_API_KEY_ENV_ALIASES.get(provider_kind, []):
-            alias_env = str(alias or "").strip()
-            if alias_env:
-                env_names.add(alias_env)
+        _add_provider_key_env_names(env_names, provider)
 
     return env_names
 
