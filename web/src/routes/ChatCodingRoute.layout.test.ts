@@ -16,9 +16,11 @@ import terminalPanelSource from "./chat/CliAgentRunTerminalPanel.tsx?raw";
 import conversationIndexModelSource from "./conversationIndexModel.ts?raw";
 import conversationIndexTreeSource from "./ConversationIndexTree.tsx?raw";
 import conversationIndexSectionSource from "./ConversationIndexSection.tsx?raw";
+import conversationIndexSectionStyles from "./ConversationIndexSection.styles";
 import directSessionIndexItemStyles from "./DirectSessionIndexItem.styles";
 import directSessionIndexItemSource from "./DirectSessionIndexItem.tsx?raw";
 import directSessionIndexListSource from "./DirectSessionIndexList.tsx?raw";
+import groupSessionIndexItemsStyles from "./GroupSessionIndexItems.styles";
 import groupSessionIndexItemsSource from "./GroupSessionIndexItems.tsx?raw";
 import sessionContextMenuStyles from "./SessionContextMenu.styles";
 import sessionContextMenuSource from "./SessionContextMenu.tsx?raw";
@@ -2434,12 +2436,59 @@ describe("ChatCodingRoute layout contract", () => {
 
     expect(actionRowSource).toContain("icon={<Plus size={15} />}");
     expect(actionRowSource).toContain("icon={<UsersRound size={15} />}");
+    expect(routeSource).toContain("<VInput");
+    expect(routeSource).toContain("<Search size={15} aria-hidden=\"true\" />");
     expect(routeStyles.newSessionButton).toContain("border-[color-mix(in_srgb,var(--accent-cool)_34%,var(--vui-border-subtle))]");
     expect(routeStyles.newGroupButton).toContain("bg-[var(--vui-control-muted)]");
-    expect(routeStyles.panelSearch).toContain("grid-cols-[16px_minmax(0,1fr)]");
+    expect(routeStyles.panelSearch).toContain("rounded-[var(--radius-control)]");
+    expect(routeStyles.panelSearch).toContain("bg-transparent");
+    expect(routeStyles.panelSearchInput).toContain("[&_[data-slot=input-wrapper]]:min-h-[34px]");
+    expect(routeStyles.panelSearchInput).toContain("[&_[data-slot=input-wrapper]]:shadow-none");
+    expect(routeStyles.panelSearchInput).toContain("[&_[data-slot=input]]:text-[var(--vui-font-sm)]");
+    expect(routeStyles.sessionActionRow).toContain("flex-wrap");
+    expect(routeStyles.sessionActionRow).toContain("gap-1.5");
+    expect(routeStyles.newSessionButton).toContain("!min-w-0");
+    expect(routeStyles.newSessionButton).toContain("[&_[data-slot=vui-button-content]]:min-w-0");
+    expect(routeStyles.newGroupButton).toContain("!min-w-0");
+    expect(routeStyles.newGroupButton).toContain("[&_[data-slot=vui-button-content]]:min-w-0");
     expect(routeStyles.panelSearchInput).not.toContain("rounded-[var(--radius-panel)]");
     expect(routeStyles.panelSearchInput).not.toContain("bg-[var(--vui-surface-glass)]");
     expect(routeStyles.panelSearchInput).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+    expect(routeStyles.systemEntryGroup).toContain("rounded-none");
+    expect(routeStyles.systemEntryGroup).toContain("border-0");
+    expect(routeStyles.systemEntryButton).toContain("grid-cols-[26px_minmax(0,1fr)]");
+    expect(routeStyles.systemEntryButton).toContain("border-transparent");
+    expect(routeStyles.systemEntryButtonActive).toContain("before:absolute");
+  });
+
+  it("uses one lightweight Tailwind grammar for conversation index sections and rows", () => {
+    expect(conversationIndexSectionStyles.conversationGroupHeader).toContain("[&_svg]:transition-transform");
+    expect(conversationIndexSectionStyles.conversationGroupHeader).toContain("aria-expanded=true");
+    expect(conversationIndexSectionStyles.conversationGroupHeader).toContain("[&_strong]:rounded-full");
+    expect(conversationIndexSectionStyles.conversationGroupList).toContain("gap-1");
+
+    expect(directSessionIndexItemStyles.sessionItem).toContain("overflow-hidden");
+    expect(directSessionIndexItemStyles.sessionItem).toContain("before:absolute");
+    expect(directSessionIndexItemStyles.sessionItemActive).toContain("before:opacity-100");
+    expect(directSessionIndexItemStyles.sessionItemMain).toContain("min-h-[50px]");
+    expect(directSessionIndexItemStyles.sessionItemMain).toContain("[border:0]");
+    expect(directSessionIndexItemStyles.sessionItemMain).toContain("appearance-none");
+    expect(directSessionIndexItemStyles.sessionItem).toContain("rounded-[var(--radius-control)]");
+    expect(directSessionIndexItemSource).toContain("VChip tone=\"accent\"");
+    expect(directSessionIndexItemSource).toContain("VChip tone=\"success\"");
+    expect(directSessionIndexItemSource).toContain("VChip tone=\"warning\"");
+    expect(directSessionIndexItemStyles.sessionCurrentBadge).toContain("!h-[22px]");
+    expect(directSessionIndexItemStyles.sessionRunningBadge).toContain("!h-[22px]");
+    expect(directSessionIndexItemStyles.sessionUnreadBadge).toContain("!h-[22px]");
+
+    expect(groupSessionIndexItemsStyles.sessionItem).toContain("overflow-hidden");
+    expect(groupSessionIndexItemsStyles.sessionItem).toContain("before:absolute");
+    expect(groupSessionIndexItemsStyles.sessionItemMain).toContain("min-h-[50px]");
+    expect(groupSessionIndexItemsStyles.sessionItemMain).toContain("[border:0]");
+    expect(groupSessionIndexItemsSource).toContain("VChip tone=\"success\"");
+    expect(groupSessionIndexItemsStyles.sessionState).toContain("!h-[22px]");
+    expect(groupSessionIndexItemsStyles.teamTreeItem).toContain("border-transparent");
+    expect(groupSessionIndexItemsStyles.groupSessionItem).toContain("border-transparent");
   });
 
   it("selects requested direct sessions without waiting for the session index", () => {
