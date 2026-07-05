@@ -82,7 +82,7 @@ import type { ConversationStreamingFramePaintMetrics } from "../components/conve
 import { shouldShowNextStateSignalInConversation } from "../components/conversation/conversationNextStateSignal";
 import type { TurnAvatarResolution } from "../components/conversation/conversationTurnAvatar";
 import { isAgentInboxMessage, isTurnErrorMessage } from "../components/conversation/conversationMessagePredicates";
-import { VButton, VNativeInput, VNativeSelect } from "../components/vui";
+import { VButton, VInput, VNativeInput, VNativeSelect } from "../components/vui";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../app/browserTelemetry";
 import { getPageInstanceId } from "../app/pageInstance";
 import { resolvePollingInterval, usePageVisibility, useStartupWarmup } from "../app/pollingPolicy";
@@ -7460,13 +7460,14 @@ export function ChatCodingRoute() {
           </div>
         ) : (
           <div className={styles.panelSearch}>
-            <Search size={15} />
-            <VNativeInput
+            <Search size={15} aria-hidden="true" />
+            <VInput
               className={styles.panelSearchInput}
               type="text"
               value={sessionFilter}
               onChange={(event) => setSessionFilter(event.target.value)}
               placeholder={t("searchSessionsPlaceholder")}
+              aria-label={t("searchSessionsPlaceholder")}
             />
           </div>
         )}
