@@ -23,6 +23,16 @@ def _messages(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [item for item in messages if isinstance(item, dict)] if isinstance(messages, list) else []
 
 
+def _input_items(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    input_items = payload.get("input")
+    return [item for item in input_items if isinstance(item, dict)] if isinstance(input_items, list) else []
+
+
+def _conversation_items(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    messages = _messages(payload)
+    return messages if messages else _input_items(payload)
+
+
 def _role(message: Dict[str, Any]) -> str:
     return str(message.get("role") or "").strip().lower()
 
@@ -63,6 +73,18 @@ def _tool_call_ids(message: Dict[str, Any]) -> list[str]:
         tool_call_id = str(item.get("id") or "").strip() or f"tool_{index}"
         ids.append(tool_call_id)
     return ids
+
+
+def _content_block_types(items: List[Dict[str, Any]]) -> list[str]:
+    block_types: list[str] = []
+    for item in list(items or []):
+        content = item.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if isinstance(block, dict):
+                block_types.append(str(block.get("type") or "").strip().lower())
+    return block_types
 
 
 def validate_tool_result_pairing(messages: List[Dict[str, Any]]) -> PayloadValidationResult:
@@ -136,7 +158,7 @@ def validate_tool_result_pairing(messages: List[Dict[str, Any]]) -> PayloadValid
 
 
 def payload_protocol_summary(payload: Dict[str, Any], route: ResolvedProtocolRoute) -> Dict[str, Any]:
-    messages = _messages(payload)
+    messages = _conversation_items(payload)
     roles = [_role(item) or "unknown" for item in messages]
     thinking = payload.get("thinking")
     thinking_type = str(thinking.get("type") or "").strip().lower() if isinstance(thinking, dict) else ""
@@ -152,6 +174,7 @@ def payload_protocol_summary(payload: Dict[str, Any], route: ResolvedProtocolRou
         "lastMessageRole": roles[-1] if roles else "",
         "assistantPrefillDetected": _assistant_prefill_detected(messages),
         "toolCount": len(payload.get("tools") or []) if isinstance(payload.get("tools"), list) else 0,
+        "payloadTransportShape": "responses_input" if "input" in payload else "chat_messages",
         "payloadValidationResult": "not_validated",
         "payloadValidationErrorType": "",
     }
@@ -161,10 +184,11 @@ def validate_payload_against_protocol(
     payload: Dict[str, Any],
     route: ResolvedProtocolRoute,
 ) -> PayloadValidationResult:
-    messages = _messages(payload)
+    messages = _conversation_items(payload)
     summary = payload_protocol_summary(payload, route)
     policy = route.policy
     compat = route.compat
+    transport = str(getattr(policy, "transport", "") or "").strip().lower()
 
     def fail(error_type: str, message: str, **details: Any) -> PayloadValidationResult:
         return PayloadValidationResult(
@@ -173,6 +197,29 @@ def validate_payload_against_protocol(
             message=message,
             details={**summary, **details, "payloadValidationResult": "blocked_before_provider", "payloadValidationErrorType": error_type},
         )
+
+    if transport == "responses":
+        if "messages" in payload:
+            return fail("responses_transport_messages_not_allowed", "Responses transport payload must use top-level `input`, not `messages`.")
+        if "input" not in payload:
+            return fail("responses_transport_input_required", "Responses transport payload is missing top-level `input`.")
+        invalid_blocks = [block for block in _content_block_types(messages) if block in {"text", "image_url"}]
+        if invalid_blocks:
+            return fail(
+                "responses_transport_content_block_type_not_allowed",
+                "Responses transport payload must use Responses content blocks such as input_text/input_image.",
+                invalidContentBlockTypes=invalid_blocks[:8],
+            )
+    else:
+        if "input" in payload:
+            return fail("chat_transport_input_not_allowed", "Chat Completions transport payload must use top-level `messages`, not `input`.")
+        invalid_blocks = [block for block in _content_block_types(messages) if block in {"input_text", "input_image"}]
+        if invalid_blocks:
+            return fail(
+                "chat_transport_content_block_type_not_allowed",
+                "Chat Completions transport payload must not contain Responses content blocks.",
+                invalidContentBlockTypes=invalid_blocks[:8],
+            )
 
     if not policy.allow_tools:
         if payload.get("tools") or payload.get("tool_choice"):
