@@ -2522,6 +2522,18 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("工具调用");
     expect(html).toContain("The generation failed with a 502 upstream error.");
     expect(html).not.toContain("回答");
+    expect(styles.turnErrorNotice).toContain("grid-cols-[auto_minmax(0,1fr)]");
+    expect(styles.turnErrorNotice).toContain("shadow-none");
+    expect(styles.turnErrorNoticeBody).not.toContain("rounded-[var(--radius-panel)]");
+    expect(styles.turnErrorNoticeBody).not.toContain("border ");
+    expect(styles.turnErrorNoticeIcon).not.toContain("bg-[var(--vui-surface-row)]");
+    expect(styles.turnErrorNoticeMeta).not.toContain("bg-[var(--vui-surface-row)]");
+    expect(styles.turnErrorNoticeText).toContain("[overflow-wrap:anywhere]");
+    expect(styles.turnErrorReasonList).toContain("border-t");
+    expect(styles.turnErrorReasonList).not.toContain("rounded-[var(--radius-control)]");
+    expect(styles.turnErrorReasonRow).toContain("grid-cols-[max-content_minmax(0,1fr)]");
+    expect(styles.turnErrorReasonRow).toContain("[&_dd]:[overflow-wrap:anywhere]");
+    expect(styles.turnErrorReasonRow).not.toContain("p-2");
   });
 
   it("does not duplicate a persisted turn-error message with the current turn error banner", () => {
@@ -2584,6 +2596,12 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("类型: api_error");
     expect(html).toContain("通道: anthropic · www.atpify.cn");
     expect(html).toContain("模型: claude-opus-4-7");
+    expect(styles.turnError).toContain("shadow-none");
+    expect(styles.turnErrorText).toContain("[overflow-wrap:anywhere]");
+    expect(styles.turnErrorText).not.toContain("border ");
+    expect(styles.turnErrorDetail).toContain("[overflow-wrap:anywhere]");
+    expect(styles.turnErrorDetail).not.toContain("rounded-[var(--radius-panel)]");
+    expect(styles.turnErrorLabel).not.toContain("p-2");
   });
 
   it("renders legacy provider-failure summaries as a single timeline notice", () => {
