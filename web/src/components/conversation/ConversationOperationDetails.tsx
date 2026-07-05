@@ -3,6 +3,9 @@ import React, { useDeferredValue } from "react";
 import type { AgentMessageOperation } from "./agentMessageOperations";
 import styles from "./ConversationOperationDetails.styles";
 
+const MAX_DETAIL_VALUE_LENGTH = 1200;
+const MAX_DETAIL_VALUE_LINES = 18;
+
 export type OperationDetailKind = "thought" | "status" | "tool";
 export type OperationDetailRow = { label: string; value: string };
 export type OperationDetailLabels = {
@@ -77,20 +80,20 @@ export function buildOperationDetailRows(
     rows.push({ label: labels.rawName, value: rawLabel });
   }
   if (operation.kind === "status" && operation.resultPreview) {
-    rows.push({ label: labels.fullStatus, value: operation.resultPreview });
+    rows.push({ label: labels.fullStatus, value: boundedDetailText(operation.resultPreview) });
   }
   if (Object.keys(args).length > 0) {
-    rows.push({ label: labels.toolCallArguments, value: naturalRecordText(args) });
+    rows.push({ label: labels.toolCallArguments, value: boundedDetailText(naturalRecordText(args)) });
   }
   if (operation.resultPreview && operation.kind !== "status") {
     const readableResult = readableOperationResult(operation, labels.structuredResultFallback);
     rows.push({
       label: operation.kind === "thought" ? labels.thoughtProcess : labels.toolCallResult,
-      value: readableResult || operation.resultPreview,
+      value: boundedDetailText(readableResult || operation.resultPreview),
     });
   }
   if (operation.error) {
-    rows.push({ label: labels.toolCallError, value: operation.error });
+    rows.push({ label: labels.toolCallError, value: boundedDetailText(operation.error) });
   }
   return rows;
 }
@@ -181,6 +184,25 @@ function naturalRecordText(value: unknown): string {
     .join("\n");
 }
 
+function boundedDetailText(value: string): string {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) {
+    return "";
+  }
+  const lines = normalized.split(/\r?\n/);
+  const lineBounded = lines.slice(0, MAX_DETAIL_VALUE_LINES).join("\n").trimEnd();
+  const lengthBounded = lineBounded.length > MAX_DETAIL_VALUE_LENGTH
+    ? lineBounded.slice(0, MAX_DETAIL_VALUE_LENGTH).trimEnd()
+    : lineBounded;
+  const omittedLineCount = Math.max(0, lines.length - MAX_DETAIL_VALUE_LINES);
+  const omittedCharCount = normalized.length - lengthBounded.length;
+  const notices = [
+    omittedLineCount > 0 ? `已省略 ${omittedLineCount} 行` : "",
+    omittedCharCount > 0 ? `已省略 ${omittedCharCount} 个字符` : "",
+  ].filter(Boolean);
+  return notices.length > 0 ? `${lengthBounded}\n\n[${notices.join("，")}]` : lengthBounded;
+}
+
 export function DeferredOperationDetails({
   operation,
   expanded,
@@ -192,7 +214,7 @@ export function DeferredOperationDetails({
 }: DeferredOperationDetailsProps) {
   const deferredExpanded = useDeferredValue(expanded);
   const detailRows = deferredExpanded ? buildDetailRows(operation) : [];
-  if (!deferredExpanded) {
+  if (!deferredExpanded || detailRows.length === 0) {
     return null;
   }
   return (

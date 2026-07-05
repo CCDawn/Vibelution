@@ -40,20 +40,61 @@ function isSameConversationTurn(left: ConversationMessage, right: ConversationMe
   return Boolean(leftTurnId) && leftTurnId === conversationMessageTurnId(right);
 }
 
-function mergeUniqueJsonItems<T>(...itemGroups: Array<T[] | undefined>) {
+function mergeUniqueProjectionItems<T>(
+  semanticKey: (item: T) => string,
+  ...itemGroups: Array<T[] | undefined>
+) {
   const merged: T[] = [];
-  const seen = new Set<string>();
+  const indexes = new Map<string, number>();
   for (const group of itemGroups) {
     for (const item of group ?? []) {
-      const key = JSON.stringify(item);
-      if (seen.has(key)) {
+      const key = semanticKey(item);
+      const existingIndex = indexes.get(key);
+      if (existingIndex !== undefined) {
+        merged[existingIndex] = item;
         continue;
       }
-      seen.add(key);
+      indexes.set(key, merged.length);
       merged.push(item);
     }
   }
   return merged.length > 0 ? merged : undefined;
+}
+
+function projectionItemIdentity(item: unknown) {
+  if (!item || typeof item !== "object") {
+    return JSON.stringify(item);
+  }
+  const record = item as Record<string, unknown>;
+  const stableFields = [
+    "id",
+    "kind",
+    "name",
+    "sequence",
+    "tracePath",
+    "operationIds",
+    "sourceOperationIds",
+    "arguments",
+    "input",
+    "query",
+    "path",
+    "filename",
+    "url",
+    "title",
+  ];
+  const parts = stableFields
+    .map((field) => {
+      const value = record[field];
+      if (Array.isArray(value)) {
+        return value.length > 0 ? `${field}:${value.join("|")}` : "";
+      }
+      if (value && typeof value === "object") {
+        return `${field}:${JSON.stringify(value)}`;
+      }
+      return value === undefined || value === null || value === "" ? "" : `${field}:${String(value)}`;
+    })
+    .filter(Boolean);
+  return parts.length > 0 ? parts.join("::") : JSON.stringify(item);
 }
 
 function normalizeMergedText(value: string) {
@@ -101,10 +142,10 @@ function mergeLiveOverlayIntoActiveTurnMessage(
     streaming: activeTurnMessage.streaming ?? liveOverlayMessage.streaming,
     mentalSnapshot: activeTurnMessage.mentalSnapshot ?? liveOverlayMessage.mentalSnapshot,
     feedbackEvents: feedbackEvents.length > 0 ? feedbackEvents : undefined,
-    timelineItems: mergeUniqueJsonItems(liveOverlayMessage.timelineItems, activeTurnMessage.timelineItems),
-    toolCalls: mergeUniqueJsonItems(liveOverlayMessage.toolCalls, activeTurnMessage.toolCalls),
-    attachments: mergeUniqueJsonItems(liveOverlayMessage.attachments, activeTurnMessage.attachments),
-    references: mergeUniqueJsonItems(liveOverlayMessage.references, activeTurnMessage.references),
+    timelineItems: mergeUniqueProjectionItems(projectionItemIdentity, liveOverlayMessage.timelineItems, activeTurnMessage.timelineItems),
+    toolCalls: mergeUniqueProjectionItems(projectionItemIdentity, liveOverlayMessage.toolCalls, activeTurnMessage.toolCalls),
+    attachments: mergeUniqueProjectionItems(projectionItemIdentity, liveOverlayMessage.attachments, activeTurnMessage.attachments),
+    references: mergeUniqueProjectionItems(projectionItemIdentity, liveOverlayMessage.references, activeTurnMessage.references),
     metadata: {
       ...(liveOverlayMessage.metadata ?? {}),
       ...(activeTurnMessage.metadata ?? {}),
