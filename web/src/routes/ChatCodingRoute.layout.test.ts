@@ -407,10 +407,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(agentSessionTabStripSource).toContain("<VButton");
     expect(agentSessionTabStripSource).toContain("<VIconButton");
     expect(sessionContextMenuSource).toContain("<VButton");
-    expect(directSessionIndexItemSource).toContain("<VButton");
+    expect(directSessionIndexItemSource).toContain("<VNativeButton");
     expect(directSessionIndexItemSource).toContain("<VIconButton");
-    expect(groupSessionIndexItemsSource).toContain("<VButton");
-    expect(conversationIndexSectionSource).toContain("<VButton");
+    expect(groupSessionIndexItemsSource).toContain("<VNativeButton");
+    expect(conversationIndexSectionSource).toContain("<VNativeButton");
     expect(routeStyles.sessionContextMenuItem).toContain("[&_[data-slot=vui-button-content]]:contents");
     expect(routeStyles.sessionContextMenuItem).toContain("[&_[data-slot=vui-button-label]]:contents");
     expect(routeStyles.sessionContextMenuItem).toContain("[&_[data-slot=vui-button-label]]:col-span-full");
@@ -1514,7 +1514,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(directSessionIndexItemSource).toContain("styles.directSessionItem");
     expect(groupSessionIndexItemsSource).toContain("styles.groupSessionItem");
     expect(routeSource).toContain("navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: false })");
-    expect(directSessionIndexItemSource).toContain("styles.conversationKindBadgeDirect");
+    expect(directSessionIndexItemSource).not.toContain("styles.conversationKindBadgeDirect");
     expect(directSessionIndexItemSource).toContain("styles.conversationKindBadgeChild");
     expect(groupSessionIndexItemsSource).toContain("styles.conversationKindBadgeGroup");
 
@@ -1568,7 +1568,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.sessionItem).toContain("grid-cols-[minmax(0,1fr)]");
     expect(routeStyles.sessionItem).toContain("!px-1");
     expect(routeStyles.sessionItemMain).toContain("grid-cols-[27px_minmax(0,1fr)]");
-    expect(routeStyles.sessionItemMain).toContain("[&_[data-slot=vui-button-content]]:contents");
+    expect(routeStyles.sessionItemMain).not.toContain("data-slot=vui-button-content");
+    expect(routeStyles.sessionItemMain).not.toContain("data-slot=vui-button-label");
+    expect(routeStyles.conversationGroupHeader).not.toContain("data-slot=vui-button-content");
+    expect(routeStyles.conversationGroupHeader).not.toContain("data-slot=vui-button-label");
     expect(routeStyles.conversationCopy).toContain("overflow-hidden");
     expect(routeStyles.conversationTitleMain).toContain("overflow-hidden");
     expect(routeStyles.sessionItemTitle).toContain("truncate");
@@ -2022,6 +2025,22 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("styles.sessionLoadMoreStatus");
     expect(routeStyles.sessionLoadMoreButton).toBeTypeOf("string");
     expect(routeStyles.sessionLoadMoreStatus).toBeTypeOf("string");
+  });
+
+  it("keeps the conversation index toolbar buttons slot-aligned and the search field un-nested", () => {
+    const actionRowSource = routeSource.slice(
+      routeSource.indexOf("<div className={styles.sessionActionRow}>"),
+      routeSource.indexOf("{conversationIndexPanel}", routeSource.indexOf("<div className={styles.sessionActionRow}>")),
+    );
+
+    expect(actionRowSource).toContain("icon={<Plus size={15} />}");
+    expect(actionRowSource).toContain("icon={<UsersRound size={15} />}");
+    expect(routeStyles.newSessionButton).toContain("border-[color-mix(in_srgb,var(--accent-cool)_34%,var(--vui-border-subtle))]");
+    expect(routeStyles.newGroupButton).toContain("bg-[var(--vui-control-muted)]");
+    expect(routeStyles.panelSearch).toContain("grid-cols-[16px_minmax(0,1fr)]");
+    expect(routeStyles.panelSearchInput).not.toContain("rounded-[var(--radius-panel)]");
+    expect(routeStyles.panelSearchInput).not.toContain("bg-[var(--vui-surface-glass)]");
+    expect(routeStyles.panelSearchInput).not.toContain("shadow-[var(--vui-shadow-hairline)]");
   });
 
   it("selects requested direct sessions without waiting for the session index", () => {
