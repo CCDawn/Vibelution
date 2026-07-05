@@ -5687,6 +5687,18 @@ export type EvolutionOutcomeSemantics = {
   isRuntimeApplied: boolean;
 };
 
+export type EvolutionWorkbenchStorage = {
+  relativeWorkspaceRoot: string;
+  relativeEvidenceRoot: string;
+  formalWorkspaceRoot: string;
+  formalEvidenceRoot: string;
+  activeWorkspaceRoot: string;
+  activeEvidenceRoot: string;
+  formalEvidenceRootExists: boolean;
+  activeEvidenceRootExists: boolean;
+  usesExternalDataWorkspace: boolean;
+};
+
 export type SupervisedRunSemantics = {
   runStatus: string;
   runStatusLabel: string;
@@ -5755,6 +5767,7 @@ export type EvolutionOverview = {
     availableDatasets: number;
     runnableDatasets: number;
     blockedDatasets: number;
+    storage?: EvolutionWorkbenchStorage;
   };
 };
 
@@ -6232,6 +6245,7 @@ export type SupervisedWorktreeRunStreamEvent = {
 export type EvolutionWorkbench = {
   defaultBundleName: string;
   savedState: EvolutionOverview["workbench"];
+  storage?: EvolutionWorkbenchStorage;
   bundles: Array<{
     name: string;
     declaredName: string;

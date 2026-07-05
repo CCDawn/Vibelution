@@ -22,6 +22,7 @@ from core.evaluation.supervised_workbench import (
     list_available_workbench_bundles,
     list_recent_decision_records,
     prepare_dataset_run,
+    supervised_evidence_storage_metadata,
     run_workbench_session,
     select_dataset_by_input,
     select_decision_record,
@@ -402,6 +403,51 @@ def test_list_available_workbench_bundles_only_lists_launchable_case_bundles(tmp
             "benchmark": "dry",
         }
     ]
+
+
+def test_list_available_workbench_bundles_prefers_formal_workspace_when_root_has_stale_workspace(
+    tmp_path: Path,
+    monkeypatch,
+):
+    project_root = tmp_path / "project"
+    repo_bundle_dir = project_root / "workspace" / "evaluation" / "bundles"
+    formal_workspace = tmp_path / "external_data" / "workspace"
+    formal_bundle_dir = formal_workspace / "evaluation" / "bundles"
+    repo_bundle_dir.mkdir(parents=True, exist_ok=True)
+    formal_bundle_dir.mkdir(parents=True, exist_ok=True)
+    (repo_bundle_dir / "repo_stale_bundle.json").write_text(
+        json.dumps(
+            {
+                "bundle_name": "repo_stale_bundle",
+                "benchmark": "stale",
+                "cases": [{"case_id": "repo"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (formal_bundle_dir / "formal_live_bundle.json").write_text(
+        json.dumps(
+            {
+                "bundle_name": "formal_live_bundle",
+                "benchmark": "formal",
+                "cases": [{"case_id": "formal"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(developer_sandbox, "resolve_workspace_home", lambda *args, **kwargs: formal_workspace)
+
+    rows = list_available_workbench_bundles(project_root)
+    metadata = supervised_evidence_storage_metadata(project_root)
+
+    assert [item["name"] for item in rows] == ["formal_live_bundle"]
+    assert metadata["relativeEvidenceRoot"] == "workspace/supervised_evolution"
+    assert metadata["formalWorkspaceRoot"] == str(formal_workspace.resolve())
+    assert metadata["formalEvidenceRoot"] == str((formal_workspace / "supervised_evolution").resolve())
+    assert metadata["activeEvidenceRoot"] == str((formal_workspace / "supervised_evolution").resolve())
+    assert metadata["usesExternalDataWorkspace"] is True
 
 
 def test_format_file_excerpt_truncates_long_file(tmp_path: Path):

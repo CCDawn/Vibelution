@@ -16,6 +16,7 @@ from core.evaluation import (
     load_dashboard_records,
     load_gym_promotion_lifecycle,
     load_workbench_state,
+    supervised_evidence_storage_metadata,
 )
 from core.evaluation.supervised_artifacts import build_case_diagnostics, load_project_json_object
 from core.evaluation.supervised_intake import self_evolution_candidate_risk_level
@@ -895,6 +896,7 @@ def get_workbench_state_payload(*, project_root: Path | None = None) -> dict[str
         "availableDatasets": len(datasets),
         "runnableDatasets": runnable_datasets,
         "blockedDatasets": blocked_datasets,
+        "storage": supervised_evidence_storage_metadata(root),
     }
 
 

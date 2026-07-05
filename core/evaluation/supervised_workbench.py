@@ -656,13 +656,35 @@ def list_available_workbench_bundles(project_root: Path) -> list[dict[str, Any]]
     return rows
 
 
+def supervised_evidence_storage_metadata(project_root: Path | None = None) -> dict[str, Any]:
+    root = _resolve_project_root(project_root)
+    formal_workspace = developer_sandbox.formal_workspace_path(root).resolve()
+    active_workspace = _workspace_root(root).resolve()
+    formal_evidence_root = (formal_workspace / "supervised_evolution").resolve()
+    active_evidence_root = (active_workspace / "supervised_evolution").resolve()
+    repo_workspace = (root / "workspace").resolve()
+    return {
+        "relativeWorkspaceRoot": "workspace",
+        "relativeEvidenceRoot": "workspace/supervised_evolution",
+        "formalWorkspaceRoot": str(formal_workspace),
+        "formalEvidenceRoot": str(formal_evidence_root),
+        "activeWorkspaceRoot": str(active_workspace),
+        "activeEvidenceRoot": str(active_evidence_root),
+        "formalEvidenceRootExists": formal_evidence_root.exists(),
+        "activeEvidenceRootExists": active_evidence_root.exists(),
+        "usesExternalDataWorkspace": formal_workspace != repo_workspace,
+    }
+
+
 def _workspace_root(project_root: Path | None = None) -> Path:
     if project_root is None:
         from core.infrastructure.workspace_manager import get_workspace
 
         return get_workspace().root.resolve()
     root = Path(project_root).resolve()
-    return root if root.name.lower() == "workspace" else root / "workspace"
+    if root.name.lower() == "workspace":
+        return root
+    return developer_sandbox.seeded_sandbox_workspace_path(root).resolve()
 
 
 def format_materialization_summary(materialized: object, fallback_dataset_name: str) -> str:
