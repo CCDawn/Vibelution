@@ -40,6 +40,32 @@ def make_vllm_qwen_config(**kwargs):
     return make_config(**values)
 
 
+@pytest.mark.parametrize("transport", ["chat_completions", "responses"])
+def test_payload_preserves_total_and_connect_timeouts(transport):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://ai-pixel.online",
+            "llm.providers.default.api": "responses" if transport == "responses" else "openai-completions",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.5",
+            "llm.profiles.primary.transport": transport,
+            "llm.profiles.primary.timeout": 180,
+            "llm.profiles.primary.connect_timeout": 20,
+        }
+    )
+    client = LLMClient(config=config, backend=lambda payload: payload)
+
+    payload = client._build_payload([{"role": "user", "content": "ping"}])
+
+    timeout = payload["timeout"]
+    assert timeout.connect == 20
+    assert timeout.read == 180
+    assert timeout.write == 180
+    assert timeout.pool == 180
+
+
 def test_llamacpp_qwen_thinking_shapes_system_messages_and_thinking_flag():
     client = LLMClient(config=make_llamacpp_qwen_config(), backend=lambda payload: payload)
 
