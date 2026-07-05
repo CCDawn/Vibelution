@@ -1,23 +1,23 @@
 const reviewPanelSurface =
-  "rounded-lg border border-vui-border-subtle bg-vui-surface-panel/72 shadow-none";
+  "rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-panel/72 shadow-none";
 const reviewRowSurface =
-  "rounded-lg border border-vui-border-subtle bg-vui-surface-row";
+  "rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-row";
 const reviewRowSurfaceSoft =
-  "rounded-lg border border-vui-border-subtle bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,transparent)]";
+  "rounded-[var(--radius-control)] border border-vui-border-subtle bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,transparent)]";
 const reviewControlSurface =
-  "rounded-lg border border-vui-border-subtle bg-vui-control-muted transition hover:border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] hover:bg-vui-control-muted-hover";
+  "rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-control-muted transition hover:border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] hover:bg-vui-control-muted-hover";
 const reviewControlButton =
   `inline-flex min-h-8 min-w-0 w-fit max-w-full items-center justify-center gap-2 px-2.5 text-[13px] font-semibold leading-tight text-vui-fg-primary no-underline disabled:cursor-not-allowed disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0 ${reviewControlSurface}`;
 const reviewControlButtonActive =
   "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] text-[var(--accent-warm-2)]";
 const reviewPrimaryActionButton =
-  "inline-flex min-h-8 min-w-0 w-fit max-w-full items-center justify-center gap-2 rounded-lg border border-[color-mix(in_srgb,var(--accent-warm)_30%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_16%,var(--vui-control-muted))] px-2.5 text-[13px] font-semibold leading-tight text-[var(--accent-warm-2)] no-underline transition disabled:cursor-not-allowed disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0";
+  "inline-flex min-h-8 min-w-0 w-fit max-w-full items-center justify-center gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_30%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_16%,var(--vui-control-muted))] px-2.5 text-[13px] font-semibold leading-tight text-[var(--accent-warm-2)] no-underline transition disabled:cursor-not-allowed disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0";
 const reviewFormLabel =
   "block [&_span]:mb-1 [&_span]:block [&_span]:text-xs [&_span]:uppercase [&_span]:tracking-[0.08em] [&_span]:text-[var(--fg-tertiary)]";
 const reviewInputTargets =
-  "[&_input]:min-h-[34px] [&_input]:w-full [&_input]:rounded-lg [&_input]:border [&_input]:border-vui-border-subtle [&_input]:bg-vui-control-muted [&_input]:px-3 [&_input]:font-[inherit] [&_input]:text-vui-fg-primary [&_input]:outline-none [&_input::placeholder]:text-vui-fg-tertiary [&_select]:min-h-[34px] [&_select]:w-full [&_select]:rounded-lg [&_select]:border [&_select]:border-vui-border-subtle [&_select]:bg-vui-control-muted [&_select]:px-3 [&_select]:font-[inherit] [&_select]:text-vui-fg-primary [&_select]:outline-none";
+  "[&_input]:min-h-[34px] [&_input]:w-full [&_input]:rounded-[var(--radius-control)] [&_input]:border [&_input]:border-vui-border-subtle [&_input]:bg-vui-control-muted [&_input]:px-3 [&_input]:font-[inherit] [&_input]:text-vui-fg-primary [&_input]:outline-none [&_input::placeholder]:text-vui-fg-tertiary [&_select]:min-h-[34px] [&_select]:w-full [&_select]:rounded-[var(--radius-control)] [&_select]:border [&_select]:border-vui-border-subtle [&_select]:bg-vui-control-muted [&_select]:px-3 [&_select]:font-[inherit] [&_select]:text-vui-fg-primary [&_select]:outline-none";
 const reviewTextAreaTargets =
-  "[&_textarea]:min-h-[84px] [&_textarea]:w-full [&_textarea]:resize-y [&_textarea]:rounded-lg [&_textarea]:border [&_textarea]:border-vui-border-subtle [&_textarea]:bg-vui-control-muted [&_textarea]:p-2.5 [&_textarea]:font-[inherit] [&_textarea]:text-vui-fg-primary [&_textarea]:outline-none [&_textarea::placeholder]:text-vui-fg-tertiary";
+  "[&_textarea]:min-h-[84px] [&_textarea]:w-full [&_textarea]:resize-y [&_textarea]:rounded-[var(--radius-control)] [&_textarea]:border [&_textarea]:border-vui-border-subtle [&_textarea]:bg-vui-control-muted [&_textarea]:p-2.5 [&_textarea]:font-[inherit] [&_textarea]:text-vui-fg-primary [&_textarea]:outline-none [&_textarea::placeholder]:text-vui-fg-tertiary";
 const reviewFormField = [reviewFormLabel, reviewInputTargets].join(" ");
 const reviewTextAreaField = [reviewFormLabel, reviewTextAreaTargets].join(" ");
 
@@ -63,7 +63,7 @@ const styles = {
   statusNegative:
     "border-[color-mix(in_srgb,var(--fg-tertiary)_20%,transparent)] bg-[color-mix(in_srgb,var(--fg-tertiary)_12%,transparent)] text-[var(--accent-warm-2)]",
   statusDiscard:
-    "border-[color-mix(in_srgb,var(--surface-card)_18%,transparent)] bg-[color-mix(in_srgb,var(--surface-card)_12%,transparent)] text-[var(--fg-secondary)]",
+    "border-[color-mix(in_srgb,var(--vui-surface-row)_18%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_12%,transparent)] text-[var(--fg-secondary)]",
   queueControls: "flex flex-col gap-2.5",
   filterSegmented: "flex flex-wrap items-center gap-1.5",
   decisionSegmented: "flex flex-wrap items-center gap-1.5",
@@ -78,7 +78,7 @@ const styles = {
   dangerAction:
     "border-[color-mix(in_srgb,var(--state-error)_34%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   searchField:
-    "flex min-h-[34px] items-center gap-2 rounded-lg border border-vui-border-subtle bg-vui-control-muted px-2.5 text-vui-fg-secondary [&_input]:w-full [&_input]:border-0 [&_input]:bg-transparent [&_input]:font-[inherit] [&_input]:text-vui-fg-primary [&_input]:outline-none [&_input::placeholder]:text-vui-fg-tertiary",
+    "flex min-h-[34px] items-center gap-2 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-control-muted px-2.5 text-vui-fg-secondary [&_input]:w-full [&_input]:border-0 [&_input]:bg-transparent [&_input]:font-[inherit] [&_input]:text-vui-fg-primary [&_input]:outline-none [&_input::placeholder]:text-vui-fg-tertiary",
   queueMeta: "flex items-center justify-between gap-2.5 text-[13px] text-[var(--fg-tertiary)]",
   bulkToolbar:
     `grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 px-2 py-1.5 max-[520px]:grid-cols-1 ${reviewRowSurfaceSoft}`,
@@ -87,9 +87,9 @@ const styles = {
   bulkActions: "flex min-w-0 flex-wrap items-center justify-end gap-1.5 max-[520px]:justify-start",
   queueList: "flex min-h-0 flex-col gap-1.5 overflow-auto pr-1 max-[980px]:max-h-[420px]",
   queueItem:
-    `w-full cursor-pointer px-2.5 py-[9px] text-left text-inherit transition hover:border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] hover:bg-vui-surface-row-hover ${reviewRowSurface}`,
+    `w-full cursor-pointer px-2.5 py-[9px] text-left text-inherit transition hover:border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-surface-row-hover)_84%,transparent)] ${reviewRowSurface}`,
   queueItemActive:
-    "border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,var(--surface-card))]",
+    "border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,var(--vui-surface-row))]",
   queueItemTop: "flex items-center justify-between gap-2.5",
   queueTitleRow: "flex min-w-0 items-center justify-start gap-2.5 [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis",
   queueHeadline: "my-1.5 min-w-0 break-words leading-normal text-[var(--fg-secondary)]",
@@ -98,7 +98,7 @@ const styles = {
     "inline-flex min-h-6 max-w-full min-w-0 items-center justify-center truncate rounded-[var(--radius-control)] bg-vui-control-muted px-2 text-xs font-semibold text-vui-fg-secondary",
   queueFooter: "flex flex-wrap items-center justify-between gap-2.5 text-xs text-[var(--fg-tertiary)]",
   selectionButton:
-    "inline-flex h-7 w-7 flex-none items-center justify-center rounded-lg border border-vui-border-subtle bg-vui-control-muted p-0 text-vui-fg-tertiary disabled:cursor-not-allowed disabled:opacity-55",
+    "inline-flex h-7 w-7 flex-none items-center justify-center rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-control-muted p-0 text-vui-fg-tertiary disabled:cursor-not-allowed disabled:opacity-55",
   selectionButtonActive:
     "border-[color-mix(in_srgb,var(--accent-warm)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_14%,transparent)] text-[var(--accent-warm-2)]",
   factGrid: "grid grid-cols-4 gap-2 max-[980px]:grid-cols-2 max-[720px]:grid-cols-1",
@@ -134,7 +134,7 @@ const styles = {
   metaRow:
     "grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] items-start gap-2.5 text-[var(--fg-secondary)] [&_span]:min-w-0 [&_span]:break-all [&_span]:text-right max-[520px]:grid-cols-1 max-[520px]:[&_span]:text-left",
   emptyState:
-    "flex min-h-[82px] flex-col justify-center gap-1 rounded-lg border border-dashed border-[var(--border-strong)] px-[11px] py-[9px] text-[var(--fg-secondary)] [&_h3]:m-0 [&_h3]:text-[var(--fg-primary)]",
+    "flex min-h-[82px] flex-col justify-center gap-1 rounded-[var(--radius-panel)] border border-dashed border-[var(--border-strong)] px-[11px] py-[9px] text-[var(--fg-secondary)] [&_h3]:m-0 [&_h3]:text-[var(--fg-primary)]",
   spin: "animate-spin",
 } as const;
 
