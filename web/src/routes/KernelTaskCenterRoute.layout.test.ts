@@ -5,6 +5,20 @@ import styles from "./KernelTaskCenterRoute.styles";
 import stylesSource from "./KernelTaskCenterRoute.styles.ts?raw";
 import routerSource from "../app/router.tsx?raw";
 
+function hasRealBackgroundToken(className: string) {
+  return className
+    .split(/\s+/)
+    .some((token) => token.startsWith("bg-[") || token.startsWith("[background:"));
+}
+
+function expectBackgroundAware(className: string) {
+  expect(hasRealBackgroundToken(className)).toBe(true);
+  const backgroundTokens = className
+    .split(/\s+/)
+    .filter((token) => token.startsWith("bg-[") || token.startsWith("[background:"));
+  expect(backgroundTokens.some((token) => token.includes("color-mix(in_srgb") && token.includes("transparent"))).toBe(true);
+}
+
 describe("KernelTaskCenterRoute layout contract", () => {
   it("routes Kernel task center controls through VUI primitives", () => {
     expect(routeSource).toContain('from "../components/vui"');
@@ -42,6 +56,58 @@ describe("KernelTaskCenterRoute layout contract", () => {
   it("keeps the route root background-aware", () => {
     expect(styles.routeClass).not.toContain("bg-[var(--surface-page)]");
     expect(styles.routeClass).toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(styles.routeClass).toContain("min-w-0");
+    expect(styles.routeClass).toContain("max-w-full");
+    expect(styles.routeClass).toContain("overflow-x-hidden");
+    expectBackgroundAware(styles.headerClass);
+    expect(styles.headerClass).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+  });
+
+  it("keeps repeated Kernel panels as light background-aware surfaces", () => {
+    [
+      styles.paneClass,
+      styles.detailHeaderClass,
+      styles.metricClass,
+      styles.ledgerSectionClass,
+      styles.ledgerBucketClass,
+      styles.deliveryRowClass,
+      styles.lifecycleSectionClass,
+      styles.lifecycleRowClass,
+      styles.emptyStateClass,
+    ].forEach(expectBackgroundAware);
+
+    [
+      styles.paneClass,
+      styles.detailHeaderClass,
+      styles.metricClass,
+      styles.ledgerSectionClass,
+      styles.ledgerBucketClass,
+      styles.lifecycleSectionClass,
+    ].forEach((className) => {
+      expect(className).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+      expect(className).not.toContain("bg-[var(--surface-panel)]");
+      expect(className).not.toContain("bg-[var(--surface-card)]");
+    });
+  });
+
+  it("keeps Kernel mobile layout bounded without horizontal page overflow", () => {
+    expect(styles.workspaceClass).toContain("min-w-0");
+    expect(styles.workspaceClass).toContain("max-w-full");
+    expect(styles.workspaceClass).toContain("overflow-x-hidden");
+    expect(styles.taskPaneClass).toContain("min-w-0");
+    expect(styles.detailPaneClass).toContain("min-w-0");
+    expect(styles.detailPaneClass).toContain("max-w-full");
+    expect(styles.taskRowClass).toContain("min-w-0");
+    expect(styles.taskRowClass).toContain("max-w-full");
+  });
+
+  it("keeps Kernel header actions content-sized", () => {
+    expect(styles.headerActionsClass).toContain("flex-wrap");
+    expect(styles.statusFilterClass).toContain("w-fit");
+    expect(styles.statusFilterClass).toContain("max-w-full");
+    expect(styles.iconButtonClass).toContain("h-[34px]");
+    expect(styles.iconButtonClass).toContain("w-[34px]");
+    expect(styles.iconButtonClass).not.toContain("w-full");
   });
 
   it("presents Kernel as a ledger-first task chain instead of a logs surface", () => {
