@@ -22,6 +22,7 @@ from core.chat.conversation_ledger import (
     TURN_INTERRUPTED_MARKER,
     append_context_compression_checkpoint,
     append_conversation_event,
+    conversation_model_messages_from_events,
     load_conversation_events,
 )
 from core.chat.tool_result_replacement import replace_large_tool_results_for_compression
@@ -906,17 +907,15 @@ def test_append_history_checkpoint_persists_hidden_checkpoint(tmp_path, monkeypa
     assert checkpoint.payload["summary"] == "旧阶段已经归纳为检查点。"
     assert detail_messages[0]["role"] == "user"
     assert detail_messages[0]["content"] == "旧请求"
-    assert detail_messages[-1] == {
-        "id": "session-checkpoint-message-2",
-        "role": "assistant",
-        "content": "历史检查点：\n旧阶段已经归纳为检查点。",
-        "timestamp": checkpoint.timestamp,
-        "metadata": {
-            "kind": "compaction_checkpoint",
-            "turnId": "history-checkpoint",
-            "eventId": checkpoint.event_id,
-        },
-    }
+    assert detail_messages[-1]["role"] == "user"
+    assert detail_messages[-1]["content"] == "旧请求"
+
+    model_messages = conversation_model_messages_from_events(events)
+    serialized_model_messages = json.dumps(model_messages, ensure_ascii=False)
+    assert "旧阶段已经归纳为检查点" in serialized_model_messages
+    assert "context_compression_marker" not in serialized_model_messages
+    assert "上下文已压缩" not in serialized_model_messages
+    assert "历史检查点" not in serialized_model_messages
 
 
 def test_run_session_turn_seeds_bounded_assembled_history(tmp_path, monkeypatch):
