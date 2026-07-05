@@ -256,6 +256,14 @@ const styles: Record<string, string> = {
     "vui-components-conversationview composerAttachmentTray min-w-0 max-w-full overflow-hidden flex flex-wrap items-center gap-1.5",
   composerError:
     "vui-components-conversationview composerError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+  composerEditModeBar:
+    "vui-components-conversationview composerEditModeBar min-w-0 flex min-h-8 w-fit max-w-full items-center gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] px-2 py-1 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)]",
+  composerEditModeCancel:
+    "vui-components-conversationview composerEditModeCancel !min-h-6 !w-fit !rounded-[var(--radius-control)] !px-1.5 !py-0 text-[var(--vui-font-xs)] font-semibold leading-none",
+  composerEditModeIcon:
+    "vui-components-conversationview composerEditModeIcon min-w-0 shrink-0 text-[var(--accent-cool)]",
+  composerEditModeLabel:
+    "vui-components-conversationview composerEditModeLabel min-w-0 truncate font-semibold text-[var(--fg-primary)]",
   composerField: composerFieldShell,
   composerFieldDragActive: composerFieldDragActiveShell,
   composerGuidance:
