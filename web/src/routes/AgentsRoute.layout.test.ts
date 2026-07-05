@@ -21,6 +21,7 @@ import emptySelectionStyles from "./AgentEmptySelectionPanel.styles";
 import activityHistoryStyles from "./AgentActivityHistoryPanel.styles";
 import healthMaintenanceStyles from "./AgentHealthMaintenancePanel.styles";
 import listWorkspaceStyles from "./AgentListWorkspacePanel.styles";
+import managementNavStyles from "./AgentManagementNav.styles";
 import managementHeaderStyles from "./AgentManagementHeaderPanel.styles";
 import managementBriefStyles from "./AgentManagementBriefPanel.styles";
 import memoryPolicyStyles from "./AgentMemoryPolicyPanel.styles";
@@ -261,6 +262,16 @@ function expectLongTextWraps(className: string, label: string): void {
   expect(className, `${label} should allow long Chinese and English labels to wrap`).toContain("[overflow-wrap:anywhere]");
   expect(className, `${label} should not hide primary text behind ellipsis`).not.toContain("[text-overflow:ellipsis]");
   expect(className, `${label} should not force long labels onto one line`).not.toContain("[white-space:nowrap]");
+}
+
+function expectNoLegacySurfaceDebt(styleMap: Record<string, string>, label: string): void {
+  for (const [key, className] of Object.entries(styleMap)) {
+    expect(className, `${label}.${key} should not restack opaque card backgrounds`).not.toContain("var(--surface-card)");
+    expect(className, `${label}.${key} should not restack strong panel backgrounds`).not.toContain("var(--surface-panel-strong)");
+    expect(className, `${label}.${key} should not carry route-level shadow tokens`).not.toContain("var(--shadow");
+    expect(className, `${label}.${key} should not use decorative route gradients`).not.toContain("var(--vui-gradient");
+    expect(className, `${label}.${key} should not use decorative Tailwind shadow utilities`).not.toContain("shadow-[");
+  }
 }
 
 describe("AgentsRoute layout contract", () => {
@@ -1449,6 +1460,31 @@ describe("AgentsRoute layout contract", () => {
     expect(styles.agentRowBulkSelected).not.toContain("var(--surface-panel-strong)");
     expect(styles.groupButtonActive).not.toContain("var(--surface-panel-strong)");
     expect(styles.inboxMessageItemFocused).not.toContain("var(--surface-panel-strong)");
+  });
+
+  it("keeps the Agent Center convergence maps free of legacy card walls and decorative chrome", () => {
+    expectNoLegacySurfaceDebt(styles, "AgentsRoute");
+
+    for (const [styleMap, label] of [
+      [activityHistoryStyles, "AgentActivityHistory"],
+      [archiveZoneStyles, "AgentArchiveZone"],
+      [avatarEditorStyles, "AgentAvatarEditor"],
+      [managementBriefStyles, "AgentManagementBrief"],
+      [managementNavStyles, "AgentManagementNav"],
+      [memoryPolicyStyles, "AgentMemoryPolicy"],
+      [modeMembershipStyles, "AgentModeMembership"],
+      [personaProfileStyles, "AgentPersonaProfile"],
+      [returnBannerStyles, "AgentReturnBanner"],
+      [runtimeFocusStyles, "AgentRuntimeFocus"],
+      [runtimePolicyStyles, "AgentRuntimePolicy"],
+      [taskProfileStyles, "AgentTaskProfile"],
+    ] as const) {
+      expectNoLegacySurfaceDebt(styleMap, label);
+    }
+
+    expect(returnBannerStyles.returnBannerButton).toContain("max-[860px]:w-fit");
+    expect(returnBannerStyles.returnBannerButton).not.toContain("max-[860px]:w-full");
+    expect(returnBannerStyles.returnBannerButton).not.toContain("max-[860px]:[width:100%]");
   });
 
   it("keeps extracted Agent detail panel surfaces lightweight and background-aware", () => {

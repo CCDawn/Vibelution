@@ -1,6 +1,6 @@
 const navClass = [
   "mx-3 mt-1.5 inline-flex min-w-0 items-center gap-[3px] rounded-[8px] border border-vui-border-subtle",
-  "bg-[image:var(--vui-gradient-route-soft)] p-[3px] shadow-[var(--vui-shadow-inset-accent)]",
+  "bg-[color-mix(in_srgb,var(--surface-panel)_58%,transparent)] p-[3px]",
   "max-[720px]:w-[calc(100%-24px)] max-[720px]:justify-start max-[720px]:overflow-x-auto",
 ].join(" ");
 const linkClass = [
@@ -9,7 +9,7 @@ const linkClass = [
   "hover:bg-vui-surface-row-hover hover:text-vui-fg-primary max-[720px]:min-w-max",
 ].join(" ");
 const linkActiveClass = [
-  "bg-vui-status-info-bg text-vui-accent-cool shadow-[var(--vui-shadow-inset-accent)]",
+  "bg-[color-mix(in_srgb,var(--accent-cool)_12%,transparent)] text-vui-accent-cool",
 ].join(" ");
 
 const styles = {
