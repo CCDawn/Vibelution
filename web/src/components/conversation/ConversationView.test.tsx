@@ -63,9 +63,12 @@ function renderConversation(
     composerActionDisabled?: boolean;
     composerError?: string;
     composerGuidance?: string;
+    composerModeNotice?: string;
+    cancelComposerModeLabel?: string;
     turnError?: SessionTurnError | null;
     onSafeGuidance?: () => void;
     onInterruptGuidance?: () => void;
+    onCancelComposerMode?: () => void;
     showMentalSnapshots?: boolean;
     showComposer?: boolean;
     processDisplayMode?: ConversationProcessDisplayMode;
@@ -105,6 +108,8 @@ function renderConversation(
         composerPending={false}
         composerError={options.composerError}
         composerGuidance={options.composerGuidance}
+        composerModeNotice={options.composerModeNotice}
+        cancelComposerModeLabel={options.cancelComposerModeLabel}
         turnError={options.turnError}
         composerAttachments={options.composerAttachments}
         onRemoveComposerAttachment={options.onRemoveComposerAttachment}
@@ -125,6 +130,7 @@ function renderConversation(
         onSubmit={() => undefined}
         onSafeGuidance={options.onSafeGuidance}
         onInterruptGuidance={options.onInterruptGuidance}
+        onCancelComposerMode={options.onCancelComposerMode}
         onEditUserMessage={() => undefined}
       />
     </QueryClientProvider>,
@@ -415,6 +421,15 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.composerAttachmentThumb).toContain("object-cover");
     expect(styles.composerAttachmentName).toContain("truncate");
     expect(styles.composerAttachmentRemoveButton).toContain("!w-6");
+  });
+
+  it("keeps edit-mode composer chrome compact", () => {
+    expect(styles.composerEditModeBar).toContain("min-h-8");
+    expect(styles.composerEditModeBar).toContain("w-fit");
+    expect(styles.composerEditModeBar).toContain("px-2");
+    expect(styles.composerEditModeBar).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+    expect(styles.composerEditModeIcon).not.toContain("p-2");
+    expect(styles.composerEditModeCancel).toContain("!min-h-6");
   });
 
   it("uses shared readable scale tokens for dense conversation text", () => {
@@ -2455,6 +2470,32 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("disabled");
     expect(html).toContain("Original prompt");
     expect(html).toContain("编辑消息");
+  });
+
+  it("renders edit mode as a compact composer status row", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-user",
+          role: "user",
+          content: "Original prompt",
+          timestamp: "2026-05-22T00:00:00Z",
+        },
+      ],
+      {
+        editingMessageId: "message-user",
+        composerModeNotice: "正在编辑最新一条用户消息；发送后会替换这条消息并重跑后续对话。",
+        cancelComposerModeLabel: "取消编辑",
+        composerValue: "Original prompt",
+        onCancelComposerMode: () => undefined,
+      },
+    );
+
+    expect(html).toContain("composerEditModeBar");
+    expect(html).toContain("composerEditModeLabel");
+    expect(html).toContain("composerEditModeCancel");
+    expect(html).toContain('title="正在编辑最新一条用户消息；发送后会替换这条消息并重跑后续对话。"');
+    expect(html).not.toContain("composerModeNoticeIcon");
   });
 
   it("does not render the mental-model option in the composer", () => {

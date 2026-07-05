@@ -2626,13 +2626,22 @@ export function ConversationView({
         >
           {composerError ? <p className={styles.composerError}>{composerError}</p> : null}
           {composerModeNotice ? (
-            <div className={styles.composerModeNotice} role="status">
-              <span className={styles.composerModeNoticeIcon} aria-hidden="true">
+            <div
+              className={styles.composerEditModeBar}
+              role="status"
+              title={composerModeNotice}
+              aria-label={composerModeNotice}
+            >
+              <span className={styles.composerEditModeIcon} aria-hidden="true">
                 <Pencil size={14} />
               </span>
-              <span>{composerModeNotice}</span>
+              <span className={styles.composerEditModeLabel}>{t("editMessage")}</span>
               {onCancelComposerMode ? (
-                <VButton type="button" onClick={onCancelComposerMode}>
+                <VButton
+                  type="button"
+                  className={styles.composerEditModeCancel}
+                  onClick={onCancelComposerMode}
+                >
                   {cancelComposerModeLabel ?? t("cancelEditMessage")}
                 </VButton>
               ) : null}
