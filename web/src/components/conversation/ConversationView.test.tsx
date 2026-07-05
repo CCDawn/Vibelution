@@ -205,6 +205,13 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.responseToggle).toContain("[&_[data-slot=vui-button-label]]:contents");
   });
 
+  it("lays out static request status icon and text on one row", () => {
+    expect(styles.answerOnlyProcessStatic).toContain(" grid-cols-[14px_auto_auto]");
+    expect(styles.answerOnlyProcessStatic).toContain(" items-center");
+    expect(styles.answerOnlyProcessStatic).toContain(" gap-1.5");
+    expect(styles.answerOnlyProcessStatic).not.toContain("[&_[data-slot=vui-button-label]]");
+  });
+
   it("keeps the latest compact process prompt on one visual line", () => {
     expect(styles.answerOnlyProcessTitle).toContain("truncate");
     expect(styles.answerOnlyProcessTitle).toContain("whitespace-nowrap");
