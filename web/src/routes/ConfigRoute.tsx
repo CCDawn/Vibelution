@@ -2,8 +2,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Blocks,
   ChevronRight,
-  Database,
-  ExternalLink,
   Image as ImageIcon,
   Pencil,
   Play,
@@ -12,7 +10,6 @@ import {
   RotateCcw,
   Save,
   ShieldAlert,
-  SlidersHorizontal,
   Trash2,
   Upload,
   X,
@@ -66,14 +63,16 @@ import {
   uniqueModelLibraryId,
   type PublicConfigShape,
 } from "./configRouteLogic";
-import { LazyJsonCodeMirror } from "../components/editor/LazyJsonCodeMirror";
 import { VButton, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
+import { ConfigDraftPanel } from "./ConfigDraftPanel";
 import { ConfigLogHelperCenterPanel } from "./ConfigLogHelperCenterPanel";
+import { ConfigOverviewPanel } from "./ConfigOverviewPanel";
+import { ConfigRuntimePanel } from "./ConfigRuntimePanel";
 import { ConfigWorkspacePlaceholderPanel } from "./ConfigWorkspacePlaceholderPanel";
 import styles from "./ConfigRoute.styles";
 
-type ConfigLanguage = "zh" | "en";
+export type ConfigLanguage = "zh" | "en";
 type NoticeTone = "neutral" | "success" | "error";
 
 type ProviderDraft = {
@@ -683,7 +682,7 @@ export const CONFIG_COPY = {
   },
 } as const;
 
-type ConfigCopy = Record<keyof (typeof CONFIG_COPY)["zh"], string>;
+export type ConfigCopy = Record<keyof (typeof CONFIG_COPY)["zh"], string>;
 
 function emptyDraftMeta(): ConfigDraftMeta {
   return {
@@ -3143,98 +3142,38 @@ export function ConfigRoute() {
         ) : null}
 
         {isSectionVisible("overview") ? (
-        <section id="config-overview" className={styles.sectionSurface}>
-          <div className={styles.sectionHeader}>
-            <div>
-              <p className={styles.eyebrow}>{sectionTitle("overview", copy.sourceTitle)}</p>
-              <h2 className={styles.sectionTitle}>{copy.sourceTitle}</h2>
-            </div>
-            <Database size={16} className={styles.sectionIcon} />
-          </div>
-          <p className={styles.sectionText} title={copy.sourceBody}>{copy.sourceBodyShort}</p>
-          <div className={styles.hashGrid}>
-            <article className={styles.detailCard}>
-              <span>{copy.configPath}</span>
-              <code className={styles.hashValue}>{workspace.configPath}</code>
-            </article>
-            <article className={styles.detailCard}>
-              <span>{copy.configStatus}</span>
-              <strong>{hasPendingApply ? copy.unsavedDraft : copy.syncedDraft}</strong>
-            </article>
-          </div>
-          <div className={styles.actionsRow}>
-            <VButton type="button" className={styles.actionButton} isDisabled={Boolean(busyAction)} onClick={reloadWorkspace}>
-              <RefreshCw size={14} />
-              {copy.refresh}
-            </VButton>
-            <VButton
-              type="button"
-              className={styles.actionButton}
-              isDisabled={Boolean(busyAction)}
-              title={copy.openEnvironmentHint}
-              onClick={handleOpenEnvironment}
-            >
-              <ExternalLink size={14} />
-              {busyAction === copy.openEnvironmentPending ? copy.openEnvironmentPending : copy.openEnvironment}
-            </VButton>
-            <VButton
-              type="button"
-              className={styles.actionButton}
-              isDisabled={!canRestoreEditorText}
-              title={copy.editorRestoreHint}
-              onClick={restoreEditorText}
-            >
-              <RotateCcw size={14} />
-              {copy.resetDraft}
-            </VButton>
-          </div>
-          <details className={styles.rawConfigPanel}>
-            <summary>{copy.rawToml}</summary>
-            <p className={styles.helperText}>{copy.rawTomlHint}</p>
-            <pre className={styles.rawToml}>{workspace.rawToml}</pre>
-          </details>
-        </section>
+          <ConfigOverviewPanel
+            copy={copy}
+            eyebrow={sectionTitle("overview", copy.sourceTitle)}
+            workspace={workspace}
+            hasPendingApply={hasPendingApply}
+            busyAction={busyAction}
+            canRestoreEditorText={canRestoreEditorText}
+            onReloadWorkspace={() => {
+              void reloadWorkspace();
+            }}
+            onOpenEnvironment={() => {
+              void handleOpenEnvironment();
+            }}
+            onRestoreEditorText={restoreEditorText}
+          />
         ) : null}
 
         {isSectionVisible("shell") ? (
-        <section id="config-shell" className={styles.sectionSurface}>
-          <div className={styles.sectionHeader}>
-            <div>
-              <p className={styles.eyebrow}>{sectionTitle("shell", copy.runtimeTitle)}</p>
-              <h2 className={styles.sectionTitle}>{copy.runtimeTitle}</h2>
-            </div>
-            <SlidersHorizontal size={16} className={styles.sectionIcon} />
-          </div>
-          <p className={styles.sectionText}>{copy.runtimeBody}</p>
-          <div className={styles.matrixGrid}>
-            <article className={styles.matrixCard}>
-              <p className={styles.matrixTitle}>{copy.intakeMode}</p>
-              <div className={styles.segmented}>
-                {(["manual_review", "auto"] as const).map((mode) => (
-                  <VButton
-                    key={mode}
-                    type="button"
-                    className={
-                      getString(asRecord(draftConfig.evolution).intake_mode) === mode
-                        ? `${styles.segmentButton} ${styles.segmentButtonActive}`
-                        : styles.segmentButton
-                    }
-                    isDisabled={structuredActionsDisabled}
-                    onClick={() =>
-                      updateSimpleDraft((next) => {
-                        const evolution = asRecord(next.evolution);
-                        evolution.intake_mode = mode;
-                        next.evolution = evolution;
-                      })
-                    }
-                  >
-                    {intakeLabel(mode)}
-                  </VButton>
-                ))}
-              </div>
-            </article>
-          </div>
-        </section>
+          <ConfigRuntimePanel
+            copy={copy}
+            eyebrow={sectionTitle("shell", copy.runtimeTitle)}
+            currentIntakeMode={getString(asRecord(draftConfig.evolution).intake_mode)}
+            structuredActionsDisabled={structuredActionsDisabled}
+            intakeLabel={intakeLabel}
+            onIntakeModeChange={(mode) => {
+              void updateSimpleDraft((next) => {
+                const evolution = asRecord(next.evolution);
+                evolution.intake_mode = mode;
+                next.evolution = evolution;
+              });
+            }}
+          />
         ) : null}
 
         {isSectionVisible("models") ? (
@@ -3928,36 +3867,19 @@ export function ConfigRoute() {
         ))}
 
         {isSectionVisible("draft") ? (
-        <section id="config-draft" className={styles.sectionSurface}>
-          <div className={styles.sectionHeader}>
-            <div>
-              <p className={styles.eyebrow}>{sectionTitle("draft", copy.draftTitle)}</p>
-              <h2 className={styles.sectionTitle}>{copy.draftTitle}</h2>
-            </div>
-            <Database size={16} className={styles.sectionIcon} />
-          </div>
-          <p className={styles.sectionText}>{copy.draftBody}</p>
-          <div className={styles.actionsRow}>
-            <VButton type="button" className={styles.actionButton} isDisabled={!canCheckCurrentChanges} onClick={handleValidateEditorDraft}>
-              <RefreshCw size={14} />
-              {copy.validateDraft}
-            </VButton>
-            <VButton
-              type="button"
-              className={styles.actionButton}
-              isDisabled={!canRestoreEditorText}
-              title={copy.editorRestoreHint}
-              onClick={restoreEditorText}
-            >
-              <RotateCcw size={14} />
-              {copy.resetDraft}
-            </VButton>
-            <span className={styles.helperText}>{hasEditorChanges ? copy.editorDirtyHint : copy.editorCleanHint}</span>
-          </div>
-          <div className={styles.editorWrap}>
-            <LazyJsonCodeMirror value={jsonText} onChange={(value) => setJsonText(value)} />
-          </div>
-        </section>
+          <ConfigDraftPanel
+            copy={copy}
+            eyebrow={sectionTitle("draft", copy.draftTitle)}
+            jsonText={jsonText}
+            hasEditorChanges={hasEditorChanges}
+            canCheckCurrentChanges={canCheckCurrentChanges}
+            canRestoreEditorText={canRestoreEditorText}
+            onValidateEditorDraft={() => {
+              void handleValidateEditorDraft();
+            }}
+            onRestoreEditorText={restoreEditorText}
+            onJsonTextChange={setJsonText}
+          />
         ) : null}
 
         {isSectionVisible("health-diagnostics") ? (
