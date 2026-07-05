@@ -186,26 +186,208 @@ export function processSummaryPreview(
   if (tone !== "running" && tone !== "failed") {
     return "";
   }
-  const readable = tone === "failed"
-    ? operations.find((operation) => shouldShowTimelineOperation(operation) && operation.summary.trim())
-    : undefined;
-  const fallback = tone === "failed"
-    ? operations.find((operation) => operation.summary.trim() || operation.error?.trim())
-    : undefined;
   const preview = tone === "running"
     ? running?.summary.trim()
       || running?.resultPreview?.trim()
       || (running ? operationDisplayLabel(running, labels).trim() : "")
-    : failed?.summary.trim()
-      || failed?.error?.trim()
-      || readable?.summary.trim()
-      || fallback?.error?.trim()
-      || fallback?.summary.trim()
+    : bestFailedOperationSummary(operations, labels)
       || "";
   if (running && isLongLoopProgressOperation(running) && preview.trim()) {
     return compactPreview(`${operationDisplayLabel(running, labels)} · ${preview}`, 120);
   }
   return compactPreview(preview || "", 120);
+}
+
+type FailedOperationSummaryCandidate = {
+  text: string;
+  score: number;
+  index: number;
+};
+
+function bestFailedOperationSummary(
+  operations: AgentMessageOperation[],
+  labels: Pick<OperationStateLabels, "toolProcess">,
+) {
+  const candidates: FailedOperationSummaryCandidate[] = [];
+  operations.forEach((operation, index) => {
+    if (operationStatusTone(operation) === "failed") {
+      const summary = failedOperationSummary(operation, labels, index);
+      if (summary) {
+        candidates.push(summary);
+      }
+    }
+  });
+  if (candidates.length === 0) {
+    operations.forEach((operation, index) => {
+      if (operation.summary.trim() || operation.error?.trim()) {
+        const summary = failedOperationSummary(operation, labels, index);
+        if (summary) {
+          candidates.push(summary);
+        }
+      }
+    });
+  }
+  return candidates
+    .sort((left, right) => right.score - left.score || right.index - left.index)[0]?.text ?? "";
+}
+
+function failedOperationSummary(
+  operation: AgentMessageOperation | undefined,
+  labels: Pick<OperationStateLabels, "toolProcess">,
+  index: number,
+): FailedOperationSummaryCandidate | null {
+  if (!operation) {
+    return null;
+  }
+  const rawSummary = operation.summary.trim();
+  const rawError = operation.error?.trim() || "";
+  const rawResult = operation.resultPreview?.trim() || "";
+  const raw = rawSummary || rawError || rawResult;
+  const readable = readableStructuredSummary(raw);
+  const label = operationDisplayLabel(operation, labels).trim();
+  if (readable) {
+    const prefix = readableLabelPrefix(label, operation);
+    return { text: prefix ? `${prefix} · ${readable}` : readable, score: 80, index };
+  }
+  const readableSummary = readablePlainFailureText(rawSummary, operation);
+  if (readableSummary) {
+    return { text: readableSummary, score: 70, index };
+  }
+  const readableError = readableFallbackFailureText(rawError, operation);
+  if (readableError) {
+    return { text: readableError, score: 60, index };
+  }
+  const readableResult = readableFallbackFailureText(rawResult, operation);
+  if (readableResult) {
+    return { text: readableResult, score: 50, index };
+  }
+  if (looksLikeStructuredText(raw)) {
+    return label ? { text: label, score: 10, index } : null;
+  }
+  if (raw && label && raw !== label) {
+    return { text: raw, score: 20, index };
+  }
+  return label ? { text: label, score: 10, index } : null;
+}
+
+function readableStructuredSummary(value: string): string {
+  const trimmed = value.trim();
+  if (!looksLikeStructuredText(trimmed)) {
+    return "";
+  }
+  try {
+    return structuredSummaryText(JSON.parse(trimmed) as unknown);
+  } catch {
+    return "";
+  }
+}
+
+function looksLikeStructuredText(value: string) {
+  const trimmed = value.trim();
+  if (trimmed.startsWith("{")) {
+    return true;
+  }
+  if (!trimmed.startsWith("[")) {
+    return false;
+  }
+  const next = trimmed.slice(1).trimStart().charAt(0);
+  return next === ""
+    || next === "]"
+    || next === "{"
+    || next === "["
+    || next === '"'
+    || next === "-"
+    || /\d/.test(next)
+    || ["t", "f", "n"].includes(next.toLowerCase());
+}
+
+function isRawToolName(value: string, operation: AgentMessageOperation) {
+  const normalized = value.trim();
+  return normalized === String(operation.rawLabel ?? "").trim()
+    || normalized === String(operation.label ?? "").trim();
+}
+
+function readableLabelPrefix(label: string, operation: AgentMessageOperation) {
+  if (!label || isUnmappedRawToolLabel(label, operation)) {
+    return "";
+  }
+  return label;
+}
+
+function isUnmappedRawToolLabel(value: string, operation: AgentMessageOperation) {
+  const normalized = value.trim();
+  const rawLabel = String(operation.rawLabel ?? "").trim();
+  return Boolean(rawLabel && normalized === rawLabel && looksLikeToolIdentifier(normalized));
+}
+
+function looksLikeToolIdentifier(value: string) {
+  return /(?:^|[_-])tool$/i.test(value.trim()) || /^[a-z0-9]+(?:[_-][a-z0-9]+){2,}$/i.test(value.trim());
+}
+
+function readablePlainFailureText(value: string, operation: AgentMessageOperation) {
+  const trimmed = value.trim();
+  if (!trimmed || looksLikeStructuredText(trimmed) || isRawToolName(trimmed, operation)) {
+    return "";
+  }
+  return trimmed;
+}
+
+function readableFallbackFailureText(value: string, operation: AgentMessageOperation) {
+  const trimmed = readablePlainFailureText(value, operation);
+  if (!trimmed || isLowLevelFailureDiagnostic(trimmed)) {
+    return "";
+  }
+  return trimmed;
+}
+
+function isLowLevelFailureDiagnostic(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return [
+    "patch context",
+    "result_json",
+    "raw result",
+    "stderr",
+    "stdout",
+  ].some((marker) => normalized.includes(marker));
+}
+
+function structuredSummaryText(value: unknown): string {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => structuredSummaryText(item)).filter(Boolean).slice(0, 3).join("\n");
+  }
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+  const record = value as Record<string, unknown>;
+  const summaryKeys = [
+    "dirty_summary",
+    "summary",
+    "message",
+    "error",
+    "stderrPreview",
+    "stdoutPreview",
+    "resultPreview",
+    "output",
+    "text",
+    "content",
+    "status",
+  ];
+  for (const key of summaryKeys) {
+    const summary = structuredSummaryText(record[key]);
+    if (summary) {
+      return summary;
+    }
+  }
+  return "";
 }
 
 export function operationMatchesAny(operation: AgentMessageOperation, markers: string[]) {

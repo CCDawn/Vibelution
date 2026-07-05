@@ -958,7 +958,7 @@ const styles: Record<string, string> = {
   surface:
     "vui-components-conversationview surface relative flex h-full max-h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)]",
   surfaceCompact:
-    "vui-components-conversationview surfaceCompact rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--surface-panel)_72%,transparent)] backdrop-blur-[6px] [&_.timeline]:bg-[color-mix(in_srgb,var(--surface-page)_14%,transparent)] [&_.timeline]:px-3 [&_.timeline]:pt-[9px] [&_.timeline]:pb-[11px] [&_.composer]:gap-[7px] [&_.composer]:px-2.5 [&_.composer]:pt-1.5 [&_.composer]:pb-2",
+    "vui-components-conversationview surfaceCompact rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--surface-panel)_88%,transparent)] [&_.timeline]:bg-[color-mix(in_srgb,var(--surface-page)_10%,transparent)] [&_.timeline]:px-3 [&_.timeline]:pt-[9px] [&_.timeline]:pb-[11px] [&_.composer]:gap-[7px] [&_.composer]:px-2.5 [&_.composer]:pt-1.5 [&_.composer]:pb-2",
   thoughtMetaPill:
     "vui-components-conversationview thoughtMetaPill min-w-0 flex flex-wrap items-center gap-1.5 inline-flex min-h-6 w-fit max-w-full justify-center rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   thoughtMetaRow:
@@ -976,19 +976,19 @@ const styles: Record<string, string> = {
   timelineAssistantTextCell:
     "vui-components-conversationview timelineAssistantTextCell min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-w-[min(100%,920px)]",
   timelineCellDetailButton:
-    "vui-components-conversationview timelineCellDetailButton min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid min-h-0 content-start gap-1.5 overflow-auto inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+    "vui-components-conversationview timelineCellDetailButton min-w-0 inline-grid size-6 shrink-0 place-items-center rounded-[var(--radius-control)] border border-transparent bg-transparent p-0 text-[var(--fg-tertiary)] hover:border-[var(--vui-border-subtle)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
   timelineCellHeader:
-    "vui-components-conversationview timelineCellHeader min-w-0 flex flex-wrap items-center gap-1.5 grid min-h-0 content-start overflow-auto !grid !w-full grid-cols-[auto_auto_minmax(0,1fr)_auto_auto_auto] !items-start !justify-start gap-x-1.5 !border-0 !bg-transparent !p-0 !text-left !shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+    "vui-components-conversationview timelineCellHeader min-w-0 overflow-visible !grid !w-full grid-cols-[auto_auto_minmax(0,1fr)_auto_auto_auto] !items-start !justify-start gap-x-1.5 gap-y-1 !border-0 !bg-transparent !p-0 !text-left !shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   timelineCellMeta:
     "vui-components-conversationview timelineCellMeta min-w-0 flex flex-wrap items-center gap-1.5 grid min-h-0 content-start overflow-auto",
   timelineCellPreview:
-    "vui-components-conversationview timelineCellPreview min-w-0 border-0 bg-transparent p-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] shadow-none grid min-h-0 content-start gap-1.5 overflow-hidden whitespace-normal break-words [overflow-wrap:anywhere] line-clamp-1",
+    "vui-components-conversationview timelineCellPreview min-w-0 border-0 bg-transparent p-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] shadow-none grid min-h-0 content-start gap-1.5 overflow-hidden whitespace-normal break-words [overflow-wrap:anywhere] line-clamp-1",
   timelineCommandError:
     "vui-components-conversationview timelineCommandError min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   timelineCommandList:
     "vui-components-conversationview timelineCommandList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   timelineCommandRow:
-    "vui-components-conversationview timelineCommandRow min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+    "vui-components-conversationview timelineCommandRow min-w-0 grid min-h-0 content-start gap-1 border-b border-[color-mix(in_srgb,var(--accent-warm)_14%,var(--vui-border-subtle))] bg-transparent py-1.5 last:border-b-0",
   timelineHistoryButton:
     "vui-components-conversationview timelineHistoryButton min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
   timelineHistoryGate:
