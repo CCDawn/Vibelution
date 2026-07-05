@@ -29,6 +29,11 @@ describe("UsageRoute layout contract", () => {
     expect(styles.metricBand).toBeTypeOf("string");
     expect(stylesSource).toContain("grid-cols-[repeat(auto-fit,minmax(12rem,1fr))]");
     expect(stylesSource).toContain("min-h-0");
+    expect(styles.summaryCell).toContain("rounded-[var(--radius-panel)]");
+    expect(styles.usageRow).toContain("hover:bg-[var(--vui-surface-row-hover)]");
+    expect(styles.errorState).toContain("rounded-[var(--radius-control)]");
+    expect(stylesSource).not.toContain("rounded-lg");
+    expect(stylesSource).not.toContain("bg-vui-surface-row-hover");
     expect(stylesSource).not.toContain("rounded-[2rem]");
     expect(stylesSource).not.toContain("text-6xl");
     expect(stylesSource).not.toContain("from-purple");
