@@ -33,7 +33,7 @@ export function AgentBulkActionBar({
     >
       <VToolbar
         ariaLabel={ariaLabel}
-        className="w-full !flex-nowrap items-center overflow-x-auto gap-1.5 [&_button]:whitespace-nowrap"
+        className="w-full !flex-wrap items-center overflow-visible gap-1.5 min-[720px]:!flex-nowrap min-[720px]:overflow-x-auto [&_button]:whitespace-nowrap"
       >
         <div className="inline-flex min-h-[26px] shrink-0 items-center gap-1.5 text-[0.76rem] font-semibold text-vui-fg-secondary [&>strong]:text-vui-fg-primary">
           {summary}
@@ -44,7 +44,7 @@ export function AgentBulkActionBar({
           </VActionGroup>
         ) : null}
         {promptPicker ? (
-          <div className="min-w-[156px] flex-[1_1_190px]">{promptPicker}</div>
+          <div className="min-w-0 flex-[1_1_156px] min-[720px]:min-w-[156px] min-[720px]:flex-[1_1_190px]">{promptPicker}</div>
         ) : null}
         {mutationActions ? (
           <VActionGroup ariaLabel={`${ariaLabel} mutation`} className="shrink-0 !flex-nowrap justify-end">
