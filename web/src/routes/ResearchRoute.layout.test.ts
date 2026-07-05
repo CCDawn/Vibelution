@@ -3,6 +3,53 @@ import { describe, expect, it } from "vitest";
 import styles from "./ResearchRoute.styles";
 import routeSource from "./ResearchRoute.tsx?raw";
 
+const majorResearchSurfaceKeys = [
+  "agentModeCard",
+  "agentModeCard_live",
+  "agentPanel",
+  "summaryCard",
+  "intakePanel",
+  "historyPanel",
+  "pipelinePanel",
+  "processPanel",
+  "stageCard",
+  "stageCard_active",
+  "stageCard_compact",
+  "stageResultSummary",
+  "agentTracePanel",
+  "agentTracePanel_collapsed",
+  "agentTraceTurn",
+  "agentTraceDetailGroup",
+  "agentTraceDetailSummary",
+  "agentTraceDetailList",
+  "agentTraceDetailItem",
+  "sessionRow",
+  "evidenceCard",
+  "evidencePanel",
+  "evidenceRequestPanel",
+  "outputPanel",
+  "cardPreviewIntro",
+  "themeCard",
+  "themeCard_selected",
+  "themeCompareRow",
+  "themeCompareRow_selected",
+] as const;
+
+const narrowOverflowGuardKeys = [
+  "route",
+  "workspace",
+  "summaryGrid",
+  "sessionRail",
+  "sideColumn",
+  "pipelinePanel",
+  "processPanel",
+  "stageRail",
+  "agentTracePanel",
+  "agentTraceTimeline",
+  "themeGrid",
+  "themeCompareMetrics",
+] as const;
+
 describe("ResearchRoute layout contract", () => {
   it("routes Research controls through VUI primitives", () => {
     expect(routeSource).toContain('from "../components/vui"');
@@ -153,7 +200,9 @@ describe("ResearchRoute layout contract", () => {
 
     expect(routeSource).toContain("styles.stageRail");
     expect(styles.stageRail).toContain("grid-cols-[1fr]");
-    expect(styles.stageRail).toContain("overflow-visible");
+    expect(styles.stageRail).toContain("overflow-y-auto");
+    expect(styles.stageRail).toContain("overflow-x-hidden");
+    expect(styles.stageRail).not.toContain("overflow-visible");
 
     expect(routeSource).toContain("styles.stageOutputHeader");
     expect(styles.stageOutputHeader).toContain("grid-cols-[24px_minmax(0,1fr)]");
@@ -170,5 +219,55 @@ describe("ResearchRoute layout contract", () => {
     expect(routeSource).toContain("styles.themeHeader");
     expect(styles.themeHeader).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(styles.themeHeader).toContain("gap-2.5");
+  });
+
+  it("keeps route and workspace chrome background-aware with mobile overflow guards", () => {
+    expect(styles.route).toContain("max-w-full");
+    expect(styles.route).toContain("overflow-x-hidden");
+    expect(styles.route).not.toContain("bg-[var(--vui-surface-glass)]");
+    expect(styles.route).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+
+    expect(styles.workspace).toContain("max-w-full");
+    expect(styles.workspace).toContain("overflow-x-hidden");
+    expect(styles.workspace).toContain("grid-cols-[minmax(0,280px)_minmax(0,1fr)_minmax(0,280px)]");
+    expect(styles.workspace).toContain("max-[980px]:grid-cols-[minmax(0,1fr)]");
+    expect(styles.workspace).toContain("max-[980px]:overflow-y-auto");
+    expect(styles.workspace).toContain("max-[980px]:overflow-x-hidden");
+  });
+
+  it("keeps repeated research panels background-aware without strong glass or route shadows", () => {
+    for (const key of majorResearchSurfaceKeys) {
+      const className = styles[key];
+      const backgroundToken = className.split(/\s+/).find((token) => token.startsWith("bg-["));
+
+      expect(backgroundToken, `${key} should declare an explicit background token`).toBeTruthy();
+      expect(backgroundToken, `${key} background should be blended rather than opaque`).toContain("color-mix(in_srgb");
+      expect(backgroundToken, `${key} background should preserve the page backdrop`).toContain("transparent");
+      expect(backgroundToken, `${key} background should not restore an opaque VUI glass/card wall`).not.toContain("var(--vui-surface-glass)");
+      expect(backgroundToken, `${key} background should not restore an opaque VUI row wall`).not.toContain("var(--vui-surface-row)");
+      expect(backgroundToken, `${key} background should not restore the raw surface-card token`).not.toContain("var(--surface-card)");
+      expect(className).toContain("border-[color");
+      expect(className).toContain("color-mix(in_srgb");
+      expect(className).not.toContain("bg-[var(--vui-surface-glass)]");
+      expect(className).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+    }
+  });
+
+  it("prevents narrow research surfaces from forcing horizontal overflow", () => {
+    for (const key of narrowOverflowGuardKeys) {
+      const className = styles[key];
+      expect(className).toContain("min-w-0");
+      expect(className).toContain("max-w-full");
+    }
+
+    expect(styles.route).toContain("overflow-x-hidden");
+    expect(styles.workspace).toContain("overflow-x-hidden");
+    expect(styles.headerActions).toContain("flex-wrap");
+    expect(styles.panelHeader).toContain("flex-wrap");
+    expect(styles.stageHeader).toContain("min-w-0");
+    expect(styles.stageOutputHeader).toContain("min-w-0");
+    expect(styles.agentTraceMeta).toContain("min-w-0");
+    expect(styles.themeHeader).toContain("max-[640px]:grid-cols-[minmax(0,1fr)]");
+    expect(styles.themeCompareHeader).toContain("max-[640px]:grid-cols-[minmax(0,1fr)]");
   });
 });
