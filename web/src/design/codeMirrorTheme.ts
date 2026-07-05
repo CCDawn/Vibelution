@@ -15,20 +15,20 @@ export const workbenchCodeMirrorTheme = EditorView.theme({
     backgroundColor: "color-mix(in srgb, var(--accent-warm) 28%, transparent)",
   },
   ".cm-gutters": {
-    backgroundColor: "var(--surface-panel)",
+    backgroundColor: "var(--vui-surface-panel)",
     borderRightColor: "var(--border-soft)",
     color: "var(--fg-tertiary)",
   },
   ".cm-activeLine, .cm-activeLineGutter": {
-    backgroundColor: "var(--surface-card-muted)",
+    backgroundColor: "var(--vui-surface-row-hover)",
   },
   ".cm-foldPlaceholder": {
-    backgroundColor: "var(--surface-card)",
+    backgroundColor: "var(--vui-surface-row)",
     borderColor: "var(--border-soft)",
     color: "var(--fg-secondary)",
   },
   ".cm-tooltip": {
-    backgroundColor: "var(--surface-panel-strong)",
+    backgroundColor: "color-mix(in srgb, var(--vui-surface-panel) 92%, var(--vui-surface-row-hover))",
     borderColor: "var(--border-strong)",
     color: "var(--fg-primary)",
   },

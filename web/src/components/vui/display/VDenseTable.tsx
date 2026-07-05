@@ -61,7 +61,7 @@ export function VDenseTable<TRow>({
             rows.map((row) => (
               <tr
                 key={getRowKey(row)}
-                className="border-t border-vui-border-hairline text-vui-fg-secondary hover:bg-vui-surface-row-hover"
+                className="border-t border-vui-border-hairline text-vui-fg-secondary hover:bg-[var(--vui-surface-row-hover)]"
               >
                 {columns.map((column) => (
                   <td

@@ -62,7 +62,7 @@ const ACTIONS =
   "[&_[data-vui=native-button]]:gap-1 [&_[data-vui=native-button]]:min-h-[26px] [&_[data-vui=native-button]]:px-2 " +
   "[&_[data-vui=native-button]]:rounded-[7px] [&_[data-vui=native-button]]:border " +
   "[&_[data-vui=native-button]]:border-[color:color-mix(in_srgb,var(--accent-cool)_28%,var(--border-soft))] " +
-  "[&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--surface-card)_74%,transparent)] " +
+  "[&_[data-vui=native-button]]:bg-[color:color-mix(in_srgb,var(--vui-surface-row)_74%,transparent)] " +
   "[&_[data-vui=native-button]]:text-[var(--fg-primary)] [&_[data-vui=native-button]]:text-[var(--vui-font-xs)] " +
   "[&_[data-vui=native-button]:disabled]:cursor-not-allowed [&_[data-vui=native-button]:disabled]:opacity-55";
 
