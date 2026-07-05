@@ -12,7 +12,7 @@ const styles = {
   reviewQueueList:
     "reviewQueueList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto overflow-auto",
   reviewQueueSummary:
-    "reviewQueueSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid min-h-0 content-start gap-1.5 overflow-auto",
+    "reviewQueueSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 grid min-h-0 content-start gap-1.5 overflow-auto",
   reviewQueueTime:
     "reviewQueueTime min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   reviewQueueTitleLine:
