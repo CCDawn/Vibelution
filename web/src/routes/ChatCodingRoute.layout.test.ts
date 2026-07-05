@@ -87,7 +87,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(appShellCssSource).toContain("--theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 44%, transparent);");
     expect(appShellCssSource).toContain("--theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 60%, transparent);");
     expect(routeStyles.centerPane).toContain("bg-[color-mix(in_srgb,var(--surface-page)_10%,transparent)]");
-    expect(routeStyles.centerSurface).toContain("bg-[color-mix(in_srgb,var(--surface-panel-strong)_6%,transparent)]");
+    expect(routeStyles.centerSurface).toContain("bg-[color-mix(in_srgb,var(--vui-surface-panel)_6%,transparent)]");
     expect(conversationStyles.timeline).toContain("bg-[color-mix(in_srgb,var(--surface-page)_18%,transparent)]");
     expect(conversationStyles.surfaceCompact).toContain("[&_.timeline]:bg-[color-mix(in_srgb,var(--surface-page)_14%,transparent)]");
     expect(appShellCssSource).not.toContain("--theme-background-overlay-mid: rgba(");
@@ -182,10 +182,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatRuntimeNoticeStackSource).toContain("role=\"status\"");
     expect(chatRuntimeNoticeStackSource).toContain("runtimeNoticeToneClassName");
     expect(chatRuntimeNoticeStackStyles.stack).toBeTypeOf("string");
+    expect(chatRuntimeNoticeStackStyles.stack).toContain("bg-[color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)]");
     expect(chatRuntimeNoticeStackStyles.stack).toContain("shadow-none");
     expect(chatRuntimeNoticeStackStyles.stack).not.toContain("vui-surface-glass");
     expect(chatRuntimeNoticeStackStyles.stack).not.toContain("vui-shadow-hairline");
     expect(chatRuntimeNoticeStackStyles.notice).toContain("grid-cols-[16px_minmax(0,1fr)]");
+    expect(chatRuntimeNoticeStackStyles.notice).toContain("bg-[color-mix(in_srgb,var(--vui-surface-panel)_54%,transparent)]");
     expect(chatRuntimeNoticeStackStyles.notice).toContain("shadow-none");
     expect(chatRuntimeNoticeStackStyles.notice).not.toContain("vui-surface-glass");
     expect(chatRuntimeNoticeStackStyles.notice).not.toContain("vui-shadow-hairline");
@@ -1681,10 +1683,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(sessionContextMenuSource).toContain("styles.sessionContextMenu");
     expect(sessionContextMenuSource).toContain("styles.sessionContextMenuItem");
     expect(sessionContextMenuSource).toContain("styles.sessionContextMenuDanger");
+    expect(sessionContextMenuStyles.sessionContextMenu).toContain("bg-[color-mix(in_srgb,var(--vui-surface-panel)_86%,transparent)]");
     expect(sessionContextMenuStyles.sessionContextMenu).toContain("shadow-none");
     expect(sessionContextMenuStyles.sessionContextMenu).not.toContain("vui-surface-glass");
     expect(sessionContextMenuStyles.sessionContextMenu).not.toContain("vui-shadow-hairline");
     expect(directSessionIndexItemSource).toContain("styles.sessionItemNotice");
+    expect(directSessionIndexItemStyles.sessionItemNotice).toContain("bg-[color-mix(in_srgb,var(--vui-surface-panel)_62%,transparent)]");
     expect(directSessionIndexItemStyles.sessionItemNotice).toContain("shadow-none");
     expect(directSessionIndexItemStyles.sessionItemNotice).not.toContain("vui-surface-glass");
     expect(directSessionIndexItemStyles.sessionItemNotice).not.toContain("vui-shadow-hairline");
@@ -1860,6 +1864,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatFilePreviewPanelSource).toContain("return <div className={styles.emptySurface}>{loadingLabel}</div>;");
     expect(chatFilePreviewPanelSource).toContain("return <div className={styles.emptySurface}>{errorMessage}</div>;");
     expect(chatFilePreviewPanelStyles.emptySurface).toContain("min-h-[min(420px,calc(100dvh_-_190px))]");
+    expect(chatFilePreviewPanelStyles.emptySurface).toContain("bg-[color-mix(in_srgb,var(--vui-surface-panel)_70%,transparent)]");
     expect(chatFilePreviewPanelStyles.emptySurface).toContain("shadow-none");
     expect(chatFilePreviewPanelStyles.emptySurface).not.toContain("vui-surface-glass");
     expect(chatFilePreviewPanelStyles.emptySurface).not.toContain("vui-shadow-hairline");
