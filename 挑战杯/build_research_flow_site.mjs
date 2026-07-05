@@ -31,7 +31,7 @@ const nodes = [
     memory: "不进入正式记忆库；只作为后续 paper_note 的 sourceFiles。",
     graph: "可作为资料关系整理的 Paper source 节点，不进入正式知识图谱。",
     risks: ["资料来源不明", "PDF 抽取失败", "结构化提炼缺少证据锚点", "联网搜索结果混入第一版"],
-    openQuestions: ["章节识别和非 PDF 全文解析仍待补；Evidence Ledger 接入 paper_note 草稿输入仍待补。"],
+    openQuestions: ["章节识别和非 PDF 全文解析仍待补。"],
   },
   {
     id: "02",
@@ -42,16 +42,16 @@ const nodes = [
     role: "Paper Note Extraction Agent",
     summary: "把资料转成可审查、可追溯到证据账本的论文/资料笔记候选。",
     objective: "从资料中提取背景、方法、关键发现、局限和引用位置。",
-    inputs: ["资料清单", "sourceExtraction.pageAnchors", "contentExtraction.evidenceLedger（下一轮证据输入）", "PDF 页码", "论文片段", "补充备注"],
+    inputs: ["资料清单", "sourceExtraction.pageAnchors", "contentExtraction.evidenceLedger（evidence_ready 补充证据）", "PDF 页码", "论文片段", "补充备注"],
     actions: [
       "当前从 sourceExtraction.excerpt/pageAnchors 组装 sourceRefs、evidenceRefs 和 excerpt。",
-      "下一轮把 evidence_ready 条目作为 paper_note keyFindings 输入；missing_evidence_anchor 条目进入修订或补证据队列。",
+      "把 evidence_ready Evidence Ledger 合并进 paper_note 本地模型输入；missing_evidence_anchor 条目继续进入修订或补证据队列。",
       "对长 PDF / 长论文先生成 paperNoteChunkPlan，把 pageAnchors 切成可追踪 chunk seeds。",
       "调用 Local Research Worker Model 生成 summary、keyFindings、methods、limitations。",
       "通过 CandidateStore 校验 citation/page anchor，合格时进入 paper_note_draft。",
       "paper-note-draft 可带 chunkId 只处理目标 chunk，并回写 source candidate 的 paperNoteDrafts trace 与 chunk 进度。",
     ],
-    outputs: ["paperNoteChunkPlan", "paper_note_YYYYMMDD_NNN.json", "候选状态 draft", "Evidence Ledger -> PaperNote 关系（待接）", "Paper -> PaperNote 关系"],
+    outputs: ["paperNoteChunkPlan", "paper_note_YYYYMMDD_NNN.json", "候选状态 draft", "Evidence Ledger -> PaperNote 草稿输入关系", "Paper -> PaperNote 关系"],
     memory: "仍属于候选知识，不进入正式 RAG。",
     graph: "进入资料关系整理，可被 neuro_mechanism links 引用。",
     risks: ["摘要过度压缩", "缺页码", "evidenceLedger 缺锚点", "把作者假设当成实验结论"],
@@ -535,7 +535,7 @@ const implementationBlueprint = {
     ["M0.2", "Teams 科研三阶段入口", "科研索引不再与团队同级，也不再混放流程模块，进入 ai科学研究团队后默认展示知识搜集、实验、迭代三张阶段控制卡。", "用户先选团队，首页只做当前阶段判断和一键主操作；知识搜集页承载原资料搜集对话流和技术控制台，实验/迭代页先提供规划启动、轮次状态、模块边界和返回团队页；监督进化/自进化画布已拆到各自模式页，以只读系统团队画布展示。"],
     ["M0.5", "本地研究工作模型接线", "已新增 Local Research Worker Model 任务包、32k 上下文预算、JSON 输出校验、草稿记录和 invoke API；bossAGI-standard / qwen3.5-9b 通过临时 model_ref profile 调用，解析失败不写 CandidateStore。", "能为资料初筛、paper_note 草稿、neuro_mechanism 候选、algorithm_hypothesis 草稿和 review prefilter 构建任务包，调用本地模型，并把合格 JSON 草稿写入 CandidateStore。"],
     ["M1", "候选数据基座", "已新增 CandidateStore 列表查询、校验报告、source_manifest/PDF 最小字段校验和本地 PDF source-extraction API；PDF 缺路径、sha256、allowedForAnalysis=true 或抽取失败会进入 source_needs_confirmation。", "能登记 PDF source_manifest，按 candidateType/currentState/qualityStatus 查询候选，抽取 sha256/pageAnchors/excerpt，并查看 invalid/error/warning 统计；仍不写正式 Team Knowledge/RAG/知识图谱。"],
-    ["M2", "paper_note 与 PDF 锚点", "已新增 paper_note 输出契约与 Citation Anchor 校验，并接入 sourceExtraction -> paper_note_draft 自动草稿桥：本地 PDF pageAnchors/excerpt 会被转为 sourceRefs/evidenceRefs/excerpt 后调用本地模型；contentExtraction.evidenceLedger 会保留 candidateExtractions/recordExtractions 的 claims、keyFindings、citations、sourceRefs 和 evidenceRefs，供下一轮 paper_note 输入和资料关系整理使用；paperNoteChunkPlan 可把长文切成可追踪 chunk seeds。", "合格本地模型输出进入 paper_note_draft；Evidence Ledger 缺 sourceRef/page/citation/evidenceRef 锚点时进入 missing_evidence_anchor / needs_review，不能自然推进到 mechanism_candidate；Evidence Ledger 接入 paper_note 草稿输入和多 chunk 草稿合并仍待接。"],
+    ["M2", "paper_note 与 PDF 锚点", "已新增 paper_note 输出契约与 Citation Anchor 校验，并接入 sourceExtraction -> paper_note_draft 自动草稿桥：本地 PDF pageAnchors/excerpt 会被转为 sourceRefs/evidenceRefs/excerpt 后调用本地模型；contentExtraction.evidenceLedger 会保留 candidateExtractions/recordExtractions 的 claims、keyFindings、citations、sourceRefs 和 evidenceRefs，evidence_ready 条目已作为 paper_note 草稿补充输入，资料关系整理继续可读；paperNoteChunkPlan 可把长文切成可追踪 chunk seeds。", "合格本地模型输出进入 paper_note_draft；Evidence Ledger 缺 sourceRef/page/citation/evidenceRef 锚点时进入 missing_evidence_anchor / needs_review，不能自然推进到 mechanism_candidate；多个 chunk 草稿合并/去重仍待接。"],
     ["M3", "机制与算法假设", "已新增 neuro_mechanism、mechanism_mapping、algorithm_hypothesis 三段候选门禁；algorithm_hypothesis 必须含 mechanismMappingIds 或 neuroMechanismIds、hypothesis、baseline、expectedBenefit、expectedComputeCost 和含 dataset/metric/baseline/smokePlan 的 experimentPlan。", "合格机制进入 mechanism_candidate，合格映射进入 mechanism_mapping_candidate，合格算法假设进入 hypothesis_candidate；缺机制证据/术语风险、类比风险未标记或实验计划不完整时分别进入 mechanism_needs_revision / mapping_needs_revision / hypothesis_needs_revision。"],
     ["M4", "证据复核与资料关系整理", "candidate_graph builder 后端/API 已落地；Teams 科研流程面板已接入 latest candidate_graph SVG 预览；review_prefilter 已补 review_record 候选门禁，必须含 candidateIds、checklist、comments、requiredChanges、needsDecision，且禁止写最终 decision；returned/rejected 转移闭环已接入。", "candidate_graph_visible 和 review_prefiltered 都只进入 CandidateStore；断链进入 broken_links，带最终 decision 的 prefilter 进入 review_needs_revision；returned 可回到最小上游修订节点，rejected 进入 rejection_archive 并从资料关系整理推进视图隔离。"],
     ["M5", "知识治理与正式同步", "steward_pack_draft 门禁、待审入库桥、Ingestion Approval Gate、评分建议迁移、officialResearchGraph 正式边和 Memory Graph 展开已落地：有效草稿批准后创建正式 KnowledgeItem、承接待审评级并可视化正式科研 trace，拒绝后退回修订。", "正式 RAG 通过已审核 KnowledgeItem 检索；正式图谱边落在 KnowledgeItem metadata，并由 Memory Graph 只读展开。"],
@@ -664,7 +664,7 @@ const implementationBlueprint = {
     ["candidate_store", "已落地 Team 级 index、候选列表查询、按类型/状态过滤、validationSummary，并接入 source_manifest、paper_note、neuro_mechanism、mechanism_mapping、algorithm_hypothesis、candidate_graph 最小校验；rejected 候选保留在 CandidateStore metadata.rejectionArchive，但不进入资料关系整理推进节点。"],
     ["source_parser", "已接入后端/API：本地 PDF source_manifest 可计算 sha256、抽取 pageAnchors/excerpt 并回写 CandidateStore；阶段回写可额外沉淀 contentExtraction.evidenceLedger；缺文件、非 PDF、解析器不可用或无文本时记录 failed extraction。"],
     ["source_quality_assessment", "已接入后端/API/Teams 候选资料页：对 source_manifest 记录 relevance/reliability/accessibility/extractionReadiness/overall 分数和 approved/needs_revision/rejected 决策。"],
-    ["paper_note_chunk_planner", "已接入后端/API/Teams 候选资料页：对已完成 sourceExtraction 的 source_manifest 生成 paperNoteChunkPlan，并支持按 chunkId 调用 paper-note-draft；Evidence Ledger 可作为下一轮 paper_note keyFindings 的候选证据输入。"],
+    ["paper_note_chunk_planner", "已接入后端/API/Teams 候选资料页：对已完成 sourceExtraction 的 source_manifest 生成 paperNoteChunkPlan，并支持按 chunkId 调用 paper-note-draft；evidence_ready Evidence Ledger 可作为 paper_note 草稿的补充证据输入。"],
     ["candidate_validator", "已落地 source_manifest/PDF 字段校验、sourceExtraction 失败校验、Evidence Ledger 锚点状态、paper_note citation anchor 校验、neuro_mechanism 证据/术语风险校验、mechanism_mapping fact/inference/overAnalogyRisk 校验、algorithm_hypothesis experimentPlan 校验、candidate_graph 边界校验和 CandidateStore 校验报告。"],
     ["candidate_graph_builder", "已落地后端/API：生成 candidate_graph 候选快照、断链报告、未审节点清单、archivedCandidateCount 和 candidate_only officialBoundary；Teams 工作台已接入首版资料关系整理读取、刷新和 SVG 预览。"],
     ["research_agent_binding", "复用 research_service、research flow canvas、prompt-research-* 和研究组织治理工具。"],
@@ -892,7 +892,7 @@ const currentResearchRun = {
   ],
   nextActions: [
     "资料提炼 Agent 对 source_manifest 做可靠性、可访问性、相关性和抽取风险审查。",
-    "资料提炼 Agent 为 source_quality_approved 来源补 page/citation anchors 和 contentExtraction.evidenceLedger；Paper Note Extraction Agent 先生成 paperNoteChunkPlan，再按 chunkId 生成 paper_note 草稿，后续再把 Evidence Ledger 接入草稿输入。",
+    "资料提炼 Agent 为 source_quality_approved 来源补 page/citation anchors 和 contentExtraction.evidenceLedger；Paper Note Extraction Agent 先生成 paperNoteChunkPlan，再按 chunkId 生成 paper_note 草稿，并把 evidence_ready Evidence Ledger 作为补充证据输入。",
     "资料关系整理需要修复 missing links；当前 status actionItems 指向 repair_candidate_graph_links 与 run_review_prefilter。",
     "知识治理 Agent 只能在 review/steward pack 完成后生成待审入库包，不能直接正式入库。",
   ],
@@ -907,7 +907,7 @@ const knowledgeNodeRunbook = {
     tools: ["/api/teams/{teamId}/workflow-orchestration/stage-rounds/status", "/api/teams/{teamId}/workflow-orchestration/stage-rounds/start", "/api/teams/{teamId}/workflow-orchestration/stage-rounds/{stageRoundId}/coordination/retry", "/api/teams/{teamId}/workflow-orchestration/stage-rounds/{stageRoundId}/memory-record/retry", "/api/teams/{teamId}/workflow-orchestration/source-collection-runs", "/api/teams/{teamId}/workflow-orchestration/source-collection-runs/{runId}/stage-session-tasks", "source_collection_context_tool", "source_collection_stage_writeback_tool", "/api/teams/{teamId}/workflow-orchestration/stage-session-tasks/{taskId}/writeback", "/api/teams/{teamId}/workflow-orchestration/source-collection-runs/{runId}/search/execute", "/api/data-processing/runs", "/api/data-processing/runs/{runId}/collection-assignments", "/api/data-processing/runs/{runId}/collection-assignments/{assignmentId}/outputs", "/api/teams/{teamId}/workflow-orchestration/data-processing/runs/{runId}/records/{recordId}/source-candidate", "/api/teams/{teamId}/workflow-orchestration/official-model-evidence/status", "research_knowledge_query_tool", "/api/teams/{teamId}/workflow-orchestration/candidates/{candidateId}/source-extraction"],
     localModelUse: "本地 9B 模型适合做标题/摘要/片段初筛，输出 relevanceScore、topicTags、excludeReason；调用证据进入 official_model_evidence 状态面板，不直接决定正式纳入。",
     humanGate: "确认资料允许分析、来源可信度和是否纳入本轮。",
-    gap: "科研总览控制台、资料搜集阶段轮次、资料搜集批次启动、active 轮次复用反馈、DataSearchPlan/query seed 契约、KV/prompt cache 启动门禁、缓存分区对话轨迹、通用资料搜集 assignment/output、Teams 高价值摘要层、metadata-only 搜索执行器、DataRecord 到 source_manifest 导入桥、source-quality 筛选台和 Evidence Ledger 写回/前端展示已接入；全文网页/PDF 下载、长 PDF 自动分批、章节识别、非 PDF 资料解析和 Evidence Ledger 接入 paper_note 草稿输入仍待补。",
+    gap: "科研总览控制台、资料搜集阶段轮次、资料搜集批次启动、active 轮次复用反馈、DataSearchPlan/query seed 契约、KV/prompt cache 启动门禁、缓存分区对话轨迹、通用资料搜集 assignment/output、Teams 高价值摘要层、metadata-only 搜索执行器、DataRecord 到 source_manifest 导入桥、source-quality 筛选台、Evidence Ledger 写回/前端展示和 paper_note 草稿输入已接入；全文网页/PDF 下载、长 PDF 自动分批、章节识别和非 PDF 资料解析仍待补。",
     entry: "用户提供 PDF、论文、赛题或补充资料；文件可在挑战杯工作区定位。",
     operation: "用户在 ai科学研究团队科研控制台点击知识搜集主按钮后，stage-rounds/start 创建或续用 ResearchStageRound，并复用 source-collection run 建立 DataProcessingRun。知识搜集页只保留资料寻找、资料提炼、资料关系整理、资料入库四张步骤卡：source_finder 负责搜索、获取、下载和本地登记；source_extractor 负责内容提炼、价值判断和资料审查；source_relation_mapper 负责整理候选主题、来源和证据关系；source_ingestor 负责最终入库审核，并通过治理门禁写入正式 Team Knowledge。四张卡的主按钮都会创建对应 Agent 的 direct session task，跳转到 Chat 执行；Agent 必须先用 source_collection_context_tool 读取受控上下文，再用 source_collection_stage_writeback_tool 回写 status、summary、result、evidenceRefs 和 nextActions。旧本地执行按钮、手工 CollectionOutput 和历史会话入口只保留在详情/调试兜底区，不再作为主路径。",
     exit: "每个知识搜集轮次有 stageRoundId、roundNumber、teamMemoryRecord、coordinationContract.startResult(manual_only 或显式启动结果)、显式协调后的可选 coordinationRoomId/coordinationRoundId、sourceRunIds、dataSearchPlanRef、planned queries、assignedQueries、resultWritebackContract 和 sourceCollectionStageSessionTasks；每个阶段会话任务有 taskId、stageId、agentId、agentRole、sessionId、writebackContract、status、turn、result、evidenceRefs、nextActions 和作用域化 idempotencyKey，并持久化在 source_collection_runs/<runId>/stage_session_tasks.json；默认每次点击新建任务，只在显式相同 idempotencyKey 的同一次请求重试中复用；每个资料项先有 DataRecord/sourceRef/rawLocation/title/qualitySignals/collectionTrace，再有 source_manifest 的 id、path、type、allowedForAnalysis、sha256、pageScope、sourceExtraction.pageAnchors、sourceQualityAssessment 和 contentExtraction.evidenceLedger。",
@@ -918,13 +918,13 @@ const knowledgeNodeRunbook = {
     agent: "Paper Note Extraction Agent",
     agentStatus: "自动草稿桥已接入 / 长文 chunk plan 已接入 / Evidence Ledger 已接入",
     features: ["PDF/资料摘录", "paperNoteChunkPlan", "contentExtraction.evidenceLedger", "paper_note 候选 JSON 生成", "citation anchors", "uncertainty 字段", "chunkId 草稿追踪"],
-    tools: ["research_knowledge_query_tool", "sourceExtraction.excerpt", "contentExtraction.evidenceLedger（待接入草稿输入）", "本地研究模型 task/output API", "/api/teams/{teamId}/workflow-orchestration/official-model-evidence/status", "/api/teams/{teamId}/workflow-orchestration/paper-note-chunks/status", "/api/teams/{teamId}/workflow-orchestration/candidates/{candidateId}/paper-note-chunks/plan", "/api/teams/{teamId}/workflow-orchestration/candidates/{candidateId}/paper-note-draft"],
+    tools: ["research_knowledge_query_tool", "sourceExtraction.excerpt", "contentExtraction.evidenceLedger（evidence_ready 草稿输入）", "本地研究模型 task/output API", "/api/teams/{teamId}/workflow-orchestration/official-model-evidence/status", "/api/teams/{teamId}/workflow-orchestration/paper-note-chunks/status", "/api/teams/{teamId}/workflow-orchestration/candidates/{candidateId}/paper-note-chunks/plan", "/api/teams/{teamId}/workflow-orchestration/candidates/{candidateId}/paper-note-draft"],
     localModelUse: "本地 9B 模型适合按章节或 chunk 生成 paper_note 草稿；32k 内保留 18k-22k 原文证据和输出预留；invoke 会自动登记模型调用证据。",
     humanGate: "必要时确认摘要是否保守、是否遗漏关键章节。",
-    gap: "paper_note schema 与页码引用校验已接入 CandidateStore；本地 PDF 页码摘录已可由 source-extraction 提供，资料提炼 Evidence Ledger 已可由阶段回写沉淀并在 Teams 资料卡/详情/关系节点展示，sourceExtraction -> paper_note 自动草稿桥已接入；Evidence Ledger 接入 paper_note 草稿输入、多个 chunk draft 的合并/去重仍待接。",
+    gap: "paper_note schema 与页码引用校验已接入 CandidateStore；本地 PDF 页码摘录已可由 source-extraction 提供，资料提炼 Evidence Ledger 已可由阶段回写沉淀并在 Teams 资料卡/详情/关系节点展示，sourceExtraction -> paper_note 自动草稿桥和 evidence_ready Evidence Ledger 草稿输入已接入；多个 chunk draft 的合并/去重仍待接。",
     entry: "资料已登记且 allowedForAnalysis=true。",
-    operation: "先对已完成 sourceExtraction 的 source_manifest 生成 paperNoteChunkPlan；长文可按 chunkId 逐块调用 paper-note-draft，抽取 summary、keyFindings、methods、limitations 和 citation anchors；Evidence Ledger 已作为下一轮草稿输入来源登记。",
-    exit: "每个 chunk seed 能回指 sourceFiles、页码或章节；paper_note 关键发现能回指 sourceFiles/page anchors；下一轮再把 Evidence Ledger 作为补充证据输入；uncertainty 不为空时显式保留。",
+    operation: "先对已完成 sourceExtraction 的 source_manifest 生成 paperNoteChunkPlan；长文可按 chunkId 逐块调用 paper-note-draft，抽取 summary、keyFindings、methods、limitations 和 citation anchors；evidence_ready Evidence Ledger 会作为补充证据输入。",
+    exit: "每个 chunk seed 能回指 sourceFiles、页码或章节；paper_note 关键发现能回指 sourceFiles/page anchors；evidence_ready Evidence Ledger 已作为补充证据输入；uncertainty 不为空时显式保留。",
     fallback: "缺页码、缺来源、Evidence Ledger 缺锚点或摘要过度推断时退回 paper_note_needs_revision / missing_evidence_anchor。",
   },
   "03": {
@@ -2921,7 +2921,7 @@ function indexHtml() {
           <div class="focus-list">
             <div class="focus-item"><b>优先看</b><span>知识搜集页是否能一眼判断是否进行中、下一步按钮是什么、结果存在哪里，以及详情里能否追溯原始证据与 Evidence Ledger。</span></div>
             <div class="focus-item"><b>不能做</b><span>当前执行器只取元数据引用，不抓全文、不审批入库、不把资料关系整理当作正式事实。</span></div>
-            <div class="focus-item"><b>下一步</b><span>把 Evidence Ledger 接入 paper_note 草稿输入；继续扩展全文下载/网页抽取、质量评分和 cache hit/miss 运行证据。</span></div>
+            <div class="focus-item"><b>下一步</b><span>收口阶段状态投影和 paper_note 多 chunk 草稿合并；继续扩展全文下载/网页抽取、质量评分和 cache hit/miss 运行证据。</span></div>
           </div>
         </aside>
       </section>
