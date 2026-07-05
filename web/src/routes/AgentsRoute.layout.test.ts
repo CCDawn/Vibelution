@@ -1597,6 +1597,10 @@ describe("AgentsRoute layout contract", () => {
     expect(bulkOperationsStyles.bulkPromptLabel).toContain("max-w-full");
     expect(bulkOperationsStyles.bulkPromptLabel).toContain("break-words");
     expect(bulkOperationsStyles.bulkPromptLabel.split(/\s+/)).not.toContain("w-full");
+    expect(bulkOperationsStyles.bulkPromptPicker).toContain("min-w-0");
+    expect(bulkOperationsStyles.bulkPromptPicker).toContain("flex-wrap");
+    expect(bulkOperationsStyles.bulkPromptPicker).toContain("[&_select]:min-w-0");
+    expect(bulkOperationsPanelSource).toContain("className={styles.bulkPromptPicker}");
   });
 
   it("keeps Agent card subgrids away from invalid quoted Tailwind grid areas", () => {
@@ -1708,8 +1712,10 @@ describe("AgentsRoute layout contract", () => {
     expect(stylesSource).not.toContain(".bulkSummary");
     expect(stylesSource).not.toContain(".bulkPromptPicker");
     expect(styles.agentRowBulkSelected).toContain("[background:color-mix(in_srgb,_var(--accent-cool)_10%,_transparent)]");
-    expect(bulkActionBarSource).toContain("!flex-nowrap items-center overflow-x-auto");
-    expect(bulkActionBarSource).not.toContain("!flex-wrap items-center overflow-visible");
+    expect(bulkActionBarSource).toContain("!flex-wrap items-center overflow-visible");
+    expect(bulkActionBarSource).toContain("min-[720px]:!flex-nowrap");
+    expect(bulkActionBarSource).toContain("min-[720px]:overflow-x-auto");
+    expect(bulkActionBarSource).toContain("flex-[1_1_156px]");
   });
 
   it("renders bulk action controls through VUI buttons instead of page-owned button CSS", () => {

@@ -85,7 +85,7 @@ export function AgentBulkOperationsPanel({
     </>
   );
   const promptPicker = (
-    <VHStack>
+    <VHStack className={styles.bulkPromptPicker}>
       <label className={styles.bulkPromptLabel} htmlFor="agents-bulk-prompt">
         {copy.bulkPromptLabel}
       </label>
