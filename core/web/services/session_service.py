@@ -3296,21 +3296,7 @@ def get_session_stream_initial_state(session_id: str) -> dict | None:
     if target is None:
         return None
     summary = _build_session_summary(target, hydrate_agent=False)
-    messages = _normalize_latest_preview_messages(
-        normalized_session_id,
-        _session_ledger_visible_messages(normalized_session_id),
-    )
-    latest_message = messages[-1] if messages else {}
-    latest_message_payload = {
-        "id": str(latest_message.get("id") or "").strip(),
-        "role": str(latest_message.get("role") or "").strip(),
-        "timestamp": str(latest_message.get("timestamp") or "").strip(),
-        "contentLength": len(str(latest_message.get("content") or "")),
-        "thoughtLength": len(str(latest_message.get("thought") or "")),
-        "feedbackEventCount": len(list(latest_message.get("feedbackEvents") or [])),
-        "toolCallCount": len(list(latest_message.get("toolCalls") or [])),
-        "streaming": bool(latest_message.get("streaming")),
-    }
+    latest_message_payload = _session_stream_initial_latest_message_payload(normalized_session_id)
     return {
         "type": "session_initial",
         "sessionId": normalized_session_id,
@@ -3321,6 +3307,76 @@ def get_session_stream_initial_state(session_id: str) -> dict | None:
         "running": bool(session_running),
         "currentPhase": str(summary.get("currentPhase") or summary.get("status") or "").strip(),
         "updatedAt": str(summary.get("updatedAt") or summary.get("lastActive") or "").strip(),
+    }
+
+
+def _session_stream_initial_latest_message_payload(session_id: str) -> dict[str, Any]:
+    messages = _messages_with_live_output(session_id)
+    latest_message = _latest_session_stream_preview_message(messages)
+    preview = _session_stream_preview_message_components(latest_message)
+    if preview is None:
+        return {
+            "id": "",
+            "role": "",
+            "timestamp": "",
+            "contentLength": 0,
+            "thoughtLength": 0,
+            "feedbackEventCount": 0,
+            "toolCallCount": 0,
+            "streaming": False,
+        }
+    return {
+        "id": str(latest_message.get("id") or "").strip(),
+        "role": preview["role"],
+        "timestamp": str(latest_message.get("timestamp") or "").strip(),
+        "contentLength": len(preview["content"]),
+        "thoughtLength": len(preview["thought"]),
+        "feedbackEventCount": len(preview["feedbackEvents"]),
+        "toolCallCount": len(preview["toolCalls"]),
+        "streaming": preview["streaming"],
+    }
+
+
+def _latest_session_stream_preview_message(messages: Any, *, scan_limit: int = 12) -> dict[str, Any] | None:
+    for raw in reversed(list(messages or [])[-scan_limit:]):
+        preview = _session_stream_preview_message_components(raw)
+        if preview is None:
+            continue
+        if (
+            preview["role"] == "assistant"
+            and preview["content"]
+            and _looks_like_runtime_failure_notice(preview["content"])
+            and not preview["thought"]
+            and not preview["feedbackEvents"]
+            and not preview["toolCalls"]
+        ):
+            continue
+        return raw
+    return None
+
+
+def _session_stream_preview_message_components(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    role = str(raw.get("role") or "").strip().lower()
+    if role not in {"user", "assistant"}:
+        return None
+    content = _sanitize_message_content(role, raw.get("content") or "")
+    thought = _sanitize_thought_text(raw.get("thought") or "")
+    feedback_events = _normalize_message_feedback_events(
+        raw.get("feedbackEvents") or raw.get("feedback_events") or []
+    )
+    tool_calls = _normalize_message_tool_calls(raw.get("toolCalls") or raw.get("tool_calls") or [])
+    streaming = bool(raw.get("streaming"))
+    if not content and not thought and not feedback_events and not tool_calls and not streaming:
+        return None
+    return {
+        "role": role,
+        "content": content,
+        "thought": thought,
+        "feedbackEvents": feedback_events,
+        "toolCalls": tool_calls,
+        "streaming": streaming,
     }
 
 
