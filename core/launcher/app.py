@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from core.version import get_product_version
 from core.web.control import CONTROL_TOKEN_HEADER, control_token_payload, trusted_control_origins, validate_control_request
+from core.web.routes.runtime import BrowserTelemetryPayload
 from core.web.services import runtime_scene_service
 from . import service as launcher_service
 from .api_contract import (
@@ -296,6 +297,12 @@ def launcher_runtime_scene_event(request: Request, payload: LauncherRuntimeScene
             status_code=400,
             detail={"code": "invalid_electron_runtime_scene_event", "message": str(exc)},
         ) from exc
+
+
+@router.post("/api/runtime/browser-telemetry", status_code=202)
+def launcher_runtime_browser_telemetry(request: Request, payload: BrowserTelemetryPayload) -> dict:
+    _ensure_control_request(request)
+    return runtime_scene_service.record_browser_telemetry(payload.model_dump())
 
 
 def _ensure_control_request(request: Request) -> None:

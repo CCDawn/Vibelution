@@ -120,6 +120,19 @@ import {
   TeamWorkflowPaperNoteChunkStatusPanel,
   TeamWorkflowSourceQualityStatusPanel,
 } from "./TeamWorkflowStatusPanels";
+import {
+  AI_SEARCH_TEAM_ID,
+  KNOWLEDGE_EXPANSION_TEAM_ID,
+  RESEARCH_TEAM_ID,
+  TEAM_PICKER_TEAM_IDS,
+  TEAM_ORGANIZATION_CANVAS_KIND,
+  canvasFromKnownTeamId,
+  canvasFromTeam,
+  canvasFromTeamOrFallback,
+  memberCanvasFromTeam,
+  resolveKnownRouteTeamId,
+  resolveTeamsRouteEffectiveTeamId,
+} from "./TeamsRoute.canvasData";
 import styles from "./TeamsRoute.styles";
 
 const NODE_WIDTH = 172;
@@ -130,11 +143,6 @@ const RESEARCH_CANVAS_AUTO_LAYOUT_START_X = 64;
 const RESEARCH_CANVAS_AUTO_LAYOUT_CENTER_Y = 250;
 const RESEARCH_CANVAS_AUTO_LAYOUT_LAYER_GAP = 216;
 const RESEARCH_CANVAS_AUTO_LAYOUT_ROW_GAP = 122;
-const TEAM_ORGANIZATION_CANVAS_KIND = "team_organization_canvas";
-const RESEARCH_TEAM_ID = "research-team";
-const AI_SEARCH_TEAM_ID = "ai-search-team";
-const KNOWLEDGE_EXPANSION_TEAM_ID = "knowledge-expansion-team";
-const TEAM_PICKER_TEAM_IDS = [AI_SEARCH_TEAM_ID, KNOWLEDGE_EXPANSION_TEAM_ID, RESEARCH_TEAM_ID] as const;
 const EVOLUTION_SYSTEM_TEAM_IDS = new Set(["self-evolution-team", "supervised-evolution-team"]);
 const LINKED_ROOM_ACTIVE_REFETCH_MS = 5_000;
 const LINKED_ROOM_IDLE_REFETCH_MS = 30_000;
@@ -3275,13 +3283,6 @@ function researchStageStartFeedbackText(payload: ResearchStageRoundStartPayload,
   return `Entered ${label} round ${payload.stageRound.roundNumber}`;
 }
 
-function canvasFromTeam(team: Team | null): TeamOrganizationCanvas | null {
-  if (!team || !team.canvas || !("nodes" in team.canvas)) {
-    return null;
-  }
-  return team.canvas as TeamOrganizationCanvas;
-}
-
 function sourceCollectionAgentIdsFromCanvas(canvas: TeamOrganizationCanvas | null) {
   const agentIds: Record<string, string> = {};
   const roleSet = new Set(SOURCE_COLLECTION_TEAM_AGENT_ROLES);
@@ -4908,11 +4909,18 @@ export function TeamsRoute({
   const requestedTeamId = searchParams.get("team") ?? "";
   const requestedAgentId = searchParams.get("agent") ?? "";
   const requestedAgentTeamId = requestedAgentId ? agentTeamMembership.get(requestedAgentId)?.teamId ?? "" : "";
-  const requestedVisibleTeamId = requestedTeamId && visibleTeamIds.has(requestedTeamId) ? requestedTeamId : "";
+  const requestedVisibleTeamId = resolveKnownRouteTeamId(requestedTeamId, visibleTeamIds);
   const requestedVisibleAgentTeamId = requestedAgentTeamId && visibleTeamIds.has(requestedAgentTeamId) ? requestedAgentTeamId : "";
   const selectedVisibleTeamId = selectedTeamId && visibleTeamIds.has(selectedTeamId) ? selectedTeamId : "";
   const fallbackVisibleTeamId = visibleTeams[0]?.teamId ?? "";
-  const effectiveTeamId = forcedTeamId || selectedVisibleTeamId || requestedVisibleTeamId || requestedVisibleAgentTeamId || fallbackVisibleTeamId;
+  const effectiveTeamId = resolveTeamsRouteEffectiveTeamId({
+    forcedTeamId,
+    selectedTeamId: selectedVisibleTeamId,
+    requestedTeamId,
+    requestedAgentTeamId,
+    visibleTeamIds,
+    fallbackTeamId: fallbackVisibleTeamId,
+  });
   const teamDetailLoadMode = sourceCollectionStandalone ? "light" : "full";
   const teamDetailQuery = useQuery({
     queryKey: queryKeys.team(effectiveTeamId, teamDetailLoadMode),
@@ -4920,6 +4928,12 @@ export function TeamsRoute({
     enabled: Boolean(effectiveTeamId),
   });
   const selectedTeam = teamDetailQuery.data ?? visibleTeams.find((team) => team.teamId === effectiveTeamId) ?? null;
+  const teamCanvasQuery = useQuery({
+    queryKey: queryKeys.teamCanvas(effectiveTeamId || "none"),
+    queryFn: () => fetchJson<TeamOrganizationCanvas>(`/api/teams/${encodeURIComponent(effectiveTeamId)}/canvas`),
+    enabled: Boolean(effectiveTeamId),
+    staleTime: 10_000,
+  });
   const knowledgeExpansionWorkflowTeamSelected = isKnowledgeExpansionWorkflowTeam(selectedTeam);
   const researchWorkflowTeamSelected = isResearchWorkflowTeam(selectedTeam);
   const aiSearchScopeTeamSelected = isAiSearchScopeTeam(selectedTeam);
@@ -5131,7 +5145,11 @@ export function TeamsRoute({
       return linkedRoomRefetchInterval(pageVisible, detail?.status || linkedRoomStatusForPolling);
     },
   });
-  const canvas = canvasFromTeam(selectedTeam);
+  const durableCanvas = canvasFromTeamOrFallback(selectedTeam, teamCanvasQuery.data);
+  const memberCanvas = useMemo(() => memberCanvasFromTeam(selectedTeam), [selectedTeam]);
+  const knownTeamCanvas = useMemo(() => canvasFromKnownTeamId(effectiveTeamId), [effectiveTeamId]);
+  const canvas = durableCanvas ?? memberCanvas ?? knownTeamCanvas;
+  const hasWritableCanvas = Boolean(durableCanvas);
   const canvasNodes = useMemo(
     () =>
       (canvas?.nodes ?? []).map((node) => ({
@@ -10189,21 +10207,21 @@ export function TeamsRoute({
   }
 
   function addNode() {
-    if (!canvas || researchCanvasReadOnly) {
+    if (!durableCanvas || researchCanvasReadOnly) {
       return;
     }
-    const id = nextNodeId(canvas.nodes);
+    const id = nextNodeId(durableCanvas.nodes);
     saveCanvas({
-      ...canvas,
+      ...durableCanvas,
       nodes: [
-        ...canvas.nodes,
+        ...durableCanvas.nodes,
         {
           id,
           label: lang === "zh" ? "新角色" : "New role",
           type: "role",
           status: "unbound",
-          x: 140 + canvas.nodes.length * 54,
-          y: 150 + canvas.nodes.length * 36,
+          x: 140 + durableCanvas.nodes.length * 54,
+          y: 150 + durableCanvas.nodes.length * 36,
           agentId: "",
           agentCode: "",
           agentName: "",
@@ -10216,7 +10234,7 @@ export function TeamsRoute({
   }
 
   function applyNodeDraft() {
-    if (!canvas || !selectedNode || researchCanvasReadOnly) {
+    if (!durableCanvas || !selectedNode || researchCanvasReadOnly) {
       return;
     }
     const membership = nodeDraft.agentId ? agentTeamMembership.get(nodeDraft.agentId) : undefined;
@@ -10225,8 +10243,8 @@ export function TeamsRoute({
     }
     const agent = activeAgents.find((item) => item.agentId === nodeDraft.agentId);
     saveCanvas({
-      ...canvas,
-      nodes: canvas.nodes.map((node) =>
+      ...durableCanvas,
+      nodes: durableCanvas.nodes.map((node) =>
         node.id === selectedNode.id
           ? {
               ...node,
@@ -10245,12 +10263,12 @@ export function TeamsRoute({
   }
 
   function unbindSelectedNode() {
-    if (!canvas || !selectedNode || researchCanvasReadOnly) {
+    if (!durableCanvas || !selectedNode || researchCanvasReadOnly) {
       return;
     }
     saveCanvas({
-      ...canvas,
-      nodes: canvas.nodes.map((node) =>
+      ...durableCanvas,
+      nodes: durableCanvas.nodes.map((node) =>
         node.id === selectedNode.id
           ? {
               ...node,
@@ -10266,31 +10284,31 @@ export function TeamsRoute({
   }
 
   function deleteSelectedNode() {
-    if (!canvas || !selectedNode || canvas.nodes.length <= 1 || researchCanvasReadOnly) {
+    if (!durableCanvas || !selectedNode || durableCanvas.nodes.length <= 1 || researchCanvasReadOnly) {
       return;
     }
     const deletedNodeId = selectedNode.id;
-    const nextNodes = canvas.nodes.filter((node) => node.id !== deletedNodeId);
+    const nextNodes = durableCanvas.nodes.filter((node) => node.id !== deletedNodeId);
     saveCanvas({
-      ...canvas,
+      ...durableCanvas,
       nodes: nextNodes,
-      edges: canvas.edges.filter((edge) => edge.source !== deletedNodeId && edge.target !== deletedNodeId),
+      edges: durableCanvas.edges.filter((edge) => edge.source !== deletedNodeId && edge.target !== deletedNodeId),
     });
     setSelectedNodeId(nextNodes[0]?.id ?? "");
   }
 
   function connectFromLead() {
-    if (!canvas || !selectedNode || canvas.nodes.length < 2 || researchCanvasReadOnly) {
+    if (!durableCanvas || !selectedNode || durableCanvas.nodes.length < 2 || researchCanvasReadOnly) {
       return;
     }
-    const source = canvas.nodes[0];
-    if (source.id === selectedNode.id || canvas.edges.some((edge) => edge.source === source.id && edge.target === selectedNode.id)) {
+    const source = durableCanvas.nodes[0];
+    if (source.id === selectedNode.id || durableCanvas.edges.some((edge) => edge.source === source.id && edge.target === selectedNode.id)) {
       return;
     }
     saveCanvas({
-      ...canvas,
+      ...durableCanvas,
       edges: [
-        ...canvas.edges,
+        ...durableCanvas.edges,
         {
           id: `${source.id}-${selectedNode.id}`,
           source: source.id,
@@ -10303,7 +10321,7 @@ export function TeamsRoute({
   }
 
   function startNodeDrag(event: ReactPointerEvent<HTMLButtonElement>, node: TeamCanvasNode) {
-    if (!canvas || canvasSavePendingForTeam(canvas.teamId) || researchCanvasReadOnly) {
+    if (!durableCanvas || canvasSavePendingForTeam(durableCanvas.teamId) || researchCanvasReadOnly) {
       return;
     }
     event.preventDefault();
@@ -10364,7 +10382,7 @@ export function TeamsRoute({
 
   function finishNodeDrag(event: ReactPointerEvent<HTMLButtonElement>) {
     const dragState = dragStateRef.current;
-    if (!dragState || !canvas) {
+    if (!dragState || !durableCanvas) {
       return;
     }
     event.currentTarget.releasePointerCapture(event.pointerId);
@@ -10378,8 +10396,8 @@ export function TeamsRoute({
     }
     commitNodeDragPosition(dragState);
     saveCanvas({
-      ...canvas,
-      nodes: canvas.nodes.map((node) => (node.id === dragState.nodeId ? { ...node, x: dragState.currentX, y: dragState.currentY } : node)),
+      ...durableCanvas,
+      nodes: durableCanvas.nodes.map((node) => (node.id === dragState.nodeId ? { ...node, x: dragState.currentX, y: dragState.currentY } : node)),
     });
   }
 
@@ -12697,7 +12715,7 @@ export function TeamsRoute({
                         : (lang === "zh" ? "同步群聊" : "Sync room")}
                     </VNativeButton>
                   )}
-                  <VNativeButton type="button" onClick={addNode} disabled={!canvas}>
+                  <VNativeButton type="button" onClick={addNode} disabled={!hasWritableCanvas}>
                     <Plus size={14} />
                     {lang === "zh" ? "节点" : "Node"}
                   </VNativeButton>
@@ -12780,7 +12798,7 @@ export function TeamsRoute({
               <div className={styles.emptyCanvasContent}>
                 <span className={styles.emptyCanvasKicker}>{lang === "zh" ? "组织画布" : "Organization canvas"}</span>
                 <strong>
-                  {teamDetailQuery.isPending
+                  {teamDetailQuery.isPending || teamCanvasQuery.isPending
                     ? (lang === "zh" ? "正在读取画布" : "Loading canvas")
                     : (lang === "zh" ? "暂无画布数据" : "No canvas data")}
                 </strong>
@@ -12792,7 +12810,7 @@ export function TeamsRoute({
                 <div className={styles.emptyCanvasSteps}>
                   <span>{lang === "zh" ? "团队" : "Team"}</span>
                   <span>{selectedTeam?.name ?? (lang === "zh" ? "未选择" : "Not selected")}</span>
-                  <span>{teamDetailQuery.isError ? (lang === "zh" ? "读取失败" : "Failed") : (lang === "zh" ? "等待数据" : "Waiting")}</span>
+                  <span>{teamDetailQuery.isError || teamCanvasQuery.isError ? (lang === "zh" ? "读取失败" : "Failed") : (lang === "zh" ? "等待数据" : "Waiting")}</span>
                 </div>
               </div>
             </div>
@@ -12872,15 +12890,15 @@ export function TeamsRoute({
                 <VNativeTextarea value={nodeDraft.purpose} onChange={(event) => setNodeDraft((current) => ({ ...current, purpose: event.target.value }))} />
               </label>
               <div className={styles.actionRow}>
-                <VNativeButton type="button" onClick={applyNodeDraft} disabled={!canvas || selectedTeamSaveCanvasPending}>
+                <VNativeButton type="button" onClick={applyNodeDraft} disabled={!hasWritableCanvas || selectedTeamSaveCanvasPending}>
                   <Save size={14} />
                   {lang === "zh" ? "保存节点" : "Save node"}
                 </VNativeButton>
-                <VNativeButton type="button" onClick={connectFromLead} disabled={!canvas || !selectedNode || canvas.nodes[0]?.id === selectedNode.id}>
+                <VNativeButton type="button" onClick={connectFromLead} disabled={!hasWritableCanvas || !selectedNode || durableCanvas?.nodes[0]?.id === selectedNode.id}>
                   <Link2 size={14} />
                   {lang === "zh" ? "接入主干" : "Connect"}
                 </VNativeButton>
-                <VNativeButton type="button" onClick={unbindSelectedNode} disabled={!canvas || !selectedNode?.agentId || selectedTeamSaveCanvasPending}>
+                <VNativeButton type="button" onClick={unbindSelectedNode} disabled={!hasWritableCanvas || !selectedNode?.agentId || selectedTeamSaveCanvasPending}>
                   <Unlink size={14} />
                   {lang === "zh" ? "解绑节点" : "Unbind"}
                 </VNativeButton>
@@ -12888,7 +12906,7 @@ export function TeamsRoute({
                   type="button"
                   className={styles.dangerButton}
                   onClick={deleteSelectedNode}
-                  disabled={!canvas || !selectedNode || canvas.nodes.length <= 1 || selectedTeamSaveCanvasPending}
+                  disabled={!hasWritableCanvas || !selectedNode || (durableCanvas?.nodes.length ?? 0) <= 1 || selectedTeamSaveCanvasPending}
                 >
                   <Trash2 size={14} />
                   {lang === "zh" ? "删除节点" : "Delete"}

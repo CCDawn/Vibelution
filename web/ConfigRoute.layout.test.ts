@@ -2,8 +2,10 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import configRouteSource from "./src/routes/ConfigRoute.tsx?raw";
+import modelLibraryPanelSource from "./src/routes/ConfigModelLibraryPanel.tsx?raw";
 
 const configRouteStylesSource = readFileSync(new URL("./src/routes/ConfigRoute.styles.ts", import.meta.url), "utf-8");
+const modelLibrarySurfaceSource = [configRouteSource, modelLibraryPanelSource].join("\n");
 
 describe("ConfigRoute layout density contract", () => {
   it("uses separate compact view and edit field card classes", () => {
@@ -54,8 +56,8 @@ describe("ConfigRoute content experience contract", () => {
 
   it("shows model edit failures inside the model editor instead of relying only on the page notice", () => {
     expect(configRouteSource).toContain("modelEditorError");
-    expect(configRouteSource).toContain('role="alert"');
-    expect(configRouteSource).toContain("styles.inlineFormError");
+    expect(modelLibraryPanelSource).toContain('role="alert"');
+    expect(modelLibraryPanelSource).toContain("styles.inlineFormError");
     expect(configRouteSource).toContain("setModelEditorError(markError(error))");
   });
 
@@ -74,9 +76,9 @@ describe("ConfigRoute content experience contract", () => {
     expect(configRouteSource).not.toContain("handleAddProfile");
     expect(configRouteSource).not.toContain("handleTestProfile(");
 
-    const modelsStart = configRouteSource.indexOf("copy.modelsBody");
-    const modelEditorStart = configRouteSource.indexOf("modelEditor.mode", modelsStart);
-    const modelsIntroSource = configRouteSource.slice(modelsStart, modelEditorStart);
+    const modelsStart = modelLibraryPanelSource.indexOf("copy.modelsBodyShort");
+    const modelEditorStart = modelLibraryPanelSource.indexOf("modelEditor.mode", modelsStart);
+    const modelsIntroSource = modelLibraryPanelSource.slice(modelsStart, modelEditorStart);
     expect(modelsIntroSource).toContain("copy.modelCenterModels");
     expect(modelsIntroSource).toContain("copy.modelCenterAccounts");
     expect(modelsIntroSource).toContain("copy.modelCenterCapabilityIssues");
@@ -95,12 +97,12 @@ describe("ConfigRoute content experience contract", () => {
   });
 
   it("keeps model-library advanced transport fields behind a disclosure", () => {
-    expect(configRouteSource).toContain("styles.advancedEditorPanel");
-    expect(configRouteSource).toContain("copy.modelEditorAdvancedTitle");
+    expect(modelLibraryPanelSource).toContain("styles.advancedEditorPanel");
+    expect(modelLibraryPanelSource).toContain("copy.modelEditorAdvancedTitle");
 
-    const advancedPanelStart = configRouteSource.indexOf('className={styles.advancedEditorPanel}');
-    const saveButtonStart = configRouteSource.indexOf("copy.saveModel", advancedPanelStart);
-    const advancedPanelSource = configRouteSource.slice(advancedPanelStart, saveButtonStart);
+    const advancedPanelStart = modelLibraryPanelSource.indexOf('className={styles.advancedEditorPanel}');
+    const saveButtonStart = modelLibraryPanelSource.indexOf("copy.saveModel", advancedPanelStart);
+    const advancedPanelSource = modelLibraryPanelSource.slice(advancedPanelStart, saveButtonStart);
 
     expect(advancedPanelSource).toContain("copy.transport");
     expect(advancedPanelSource).toContain("copy.contract");
@@ -109,9 +111,9 @@ describe("ConfigRoute content experience contract", () => {
     expect(advancedPanelSource).toContain("MODEL_CONTRACT_OPTIONS.map");
     expect(advancedPanelSource).toContain("MODEL_TOOL_CALLING_MODE_OPTIONS.map");
     expect(advancedPanelSource).toContain("PROVIDER_COMPAT_MODE_OPTIONS.map");
-    expect(advancedPanelSource).toContain("<VNativeSelect\n                        value={modelEditor.details.transport}");
-    expect(advancedPanelSource).toContain("<VNativeSelect\n                        value={modelEditor.details.contract}");
-    expect(advancedPanelSource).toContain("<VNativeSelect\n                        value={modelEditor.details.tool_calling_mode}");
+    expect(advancedPanelSource).toContain("value={modelEditor.details.transport}");
+    expect(advancedPanelSource).toContain("value={modelEditor.details.contract}");
+    expect(advancedPanelSource).toContain("value={modelEditor.details.tool_calling_mode}");
   });
 
   it("treats model deletion as model-key cleanup in user-facing copy", () => {
@@ -124,14 +126,15 @@ describe("ConfigRoute content experience contract", () => {
   it("guards model library action buttons against invalid or locked edits", () => {
     expect(configRouteSource).toContain("const modelEditorRequiredFieldsReady = Boolean(modelEditor.model.trim() && modelEditor.provider.base_url.trim())");
     expect(configRouteSource).toContain("const canSubmitModelEditor = !structuredActionsDisabled && modelEditorRequiredFieldsReady");
-    expect(configRouteSource).toContain("isDisabled={!canSubmitModelEditor}");
+    expect(modelLibraryPanelSource).toContain("isDisabled={!canSubmitModelEditor}");
     expect(configRouteSource).toContain("setModelEditorError(copy.modelRequiredFieldsMissing)");
-    expect(configRouteSource).toContain("isDisabled={structuredActionsDisabled || !row.editable || !option}");
-    expect(configRouteSource).toContain("isDisabled={structuredActionsDisabled}");
+    expect(modelLibraryPanelSource).toContain("title={modelEditorRequiredFieldsReady ? undefined : copy.modelRequiredFieldsMissing}");
+    expect(modelLibraryPanelSource).toContain("isDisabled={structuredActionsDisabled || !row.editable || !option}");
+    expect(modelLibraryPanelSource).toContain("isDisabled={structuredActionsDisabled}");
   });
 
   it("labels the bulk image capability check as saved-model scoped", () => {
-    expect(configRouteSource).toContain("copy.checkSavedImageCapabilities");
+    expect(modelLibraryPanelSource).toContain("copy.checkSavedImageCapabilities");
     expect(configRouteSource).toContain('checkSavedImageCapabilities: "检测已保存模型图像输入"');
     expect(configRouteSource).toContain('checkSavedImageCapabilities: "Check saved models image input"');
   });
@@ -139,23 +142,23 @@ describe("ConfigRoute content experience contract", () => {
   it("uses one model-library test control for the selected model", () => {
     expect(configRouteSource).toContain("selectedModelTestId");
     expect(configRouteSource).toContain("handleTestSelectedLibraryModel");
-    expect(configRouteSource).toContain("copy.modelTestSelect");
-    expect(configRouteSource).toContain("copy.testSelectedLibraryModel");
+    expect(modelLibraryPanelSource).toContain("copy.modelTestSelect");
+    expect(modelLibraryPanelSource).toContain("copy.testSelectedLibraryModel");
     expect(configRouteSource).toContain("modelId: selectedModelTestId");
-    expect(configRouteSource).toContain("styles.modelLibraryTestBar");
+    expect(modelLibraryPanelSource).toContain("styles.modelLibraryTestBar");
 
-    const tableStart = configRouteSource.indexOf("styles.modelInventoryTable");
-    const tableEnd = configRouteSource.indexOf("activeEditorSections.map", tableStart);
-    const tableSource = configRouteSource.slice(tableStart, tableEnd);
+    const tableStart = modelLibraryPanelSource.indexOf("styles.modelInventoryTable");
+    const tableEnd = modelLibraryPanelSource.indexOf("styles.modelEditorPanel", tableStart);
+    const tableSource = modelLibraryPanelSource.slice(tableStart, tableEnd);
     expect(tableSource).toContain("copy.modelCenterActions");
     expect(tableSource).not.toContain("copy.testConnection");
     expect(tableSource).not.toContain("handleTestSelectedLibraryModel");
   });
 
   it("keeps model-library rows free of usage-location details", () => {
-    const tableStart = configRouteSource.indexOf("styles.modelInventoryTable");
-    const tableEnd = configRouteSource.indexOf("activeEditorSections.map", tableStart);
-    const tableSource = configRouteSource.slice(tableStart, tableEnd);
+    const tableStart = modelLibraryPanelSource.indexOf("styles.modelInventoryTable");
+    const tableEnd = modelLibraryPanelSource.indexOf("styles.modelEditorPanel", tableStart);
+    const tableSource = modelLibraryPanelSource.slice(tableStart, tableEnd);
 
     expect(tableSource).not.toContain("copy.modelCenterUsage");
     expect(tableSource).not.toContain("copy.modelCenterUsageCount");
@@ -164,17 +167,17 @@ describe("ConfigRoute content experience contract", () => {
   });
 
   it("shows the model key environment variable as a read-only model-id binding", () => {
-    expect(configRouteSource).toContain("copy.modelKeyEnv");
+    expect(modelLibraryPanelSource).toContain("copy.modelKeyEnv");
     expect(configRouteSource).toContain("模型密钥变量名由模型 ID 唯一生成");
-    expect(configRouteSource).toContain('aria-readonly="true"');
-    expect(configRouteSource).not.toContain("setModelEditor((current) => ({ ...current, api_key_env: event.target.value }))");
+    expect(modelLibraryPanelSource).toContain('aria-readonly="true"');
+    expect(modelLibrarySurfaceSource).not.toContain("setModelEditor((current) => ({ ...current, api_key_env: event.target.value }))");
   });
 
   it("shows provider default variables as compatibility-only display instead of editable key inputs", () => {
-    expect(configRouteSource).toContain("copy.providerKeyEnv");
+    expect(modelLibraryPanelSource).toContain("copy.providerKeyEnv");
     expect(configRouteSource).toContain("服务商默认变量仅作兼容来源展示");
     expect(configRouteSource).toContain("The provider default variable is compatibility-only display");
-    expect(configRouteSource).not.toContain("provider: { ...current.provider, api_key_env: event.target.value }");
+    expect(modelLibrarySurfaceSource).not.toContain("provider: { ...current.provider, api_key_env: event.target.value }");
   });
 
   it("passes the model unique key binding to model discovery requests", () => {

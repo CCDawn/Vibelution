@@ -1,3 +1,10 @@
+const panelSurface =
+  "rounded-lg border border-[color-mix(in_srgb,var(--vui-border-subtle)_82%,transparent)] bg-[color-mix(in_srgb,var(--surface-panel)_64%,transparent)]";
+const cardSurface =
+  "rounded-lg border border-[color-mix(in_srgb,var(--vui-border-subtle)_68%,transparent)] bg-[color-mix(in_srgb,var(--surface-card)_58%,transparent)] p-2";
+const rowSurface =
+  "rounded-lg border border-[color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color-mix(in_srgb,var(--surface-card-subtle)_74%,transparent)] p-2";
+
 const routeClass = "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-x-hidden";
 const headerClass = "mx-2.5 mt-2 min-w-0 border-[color-mix(in_srgb,var(--vui-border-subtle)_78%,transparent)] bg-[var(--vui-gradient-route-soft),color-mix(in_srgb,var(--surface-panel)_70%,transparent)]";
 const headerActionsClass = "flex flex-wrap items-center justify-end gap-2 max-[720px]:items-stretch max-[720px]:flex-col";
@@ -5,7 +12,7 @@ const statusFilterClass = "flex w-fit max-w-full min-w-[210px] items-center gap-
 const statusFilterLabelClass = "whitespace-nowrap text-[var(--vui-font-xs)] font-bold";
 const iconButtonClass = "h-[34px] w-[34px] min-h-[34px] rounded-lg border border-vui-border-soft bg-[var(--surface-card)] text-vui-fg-secondary hover:border-[var(--border-strong)] hover:bg-[var(--surface-panel-hover)] hover:text-vui-fg-primary";
 const workspaceClass = "grid min-h-0 min-w-0 max-w-full grid-cols-[minmax(320px,420px)_minmax(0,1fr)] gap-2 overflow-x-hidden px-2.5 pb-2.5 pt-2 max-[1120px]:grid-cols-1 max-[720px]:grid-cols-[minmax(0,1fr)] max-[720px]:p-2";
-const paneClass = "min-h-0 min-w-0 rounded-lg border border-[color-mix(in_srgb,var(--vui-border-subtle)_82%,transparent)] bg-[color-mix(in_srgb,var(--surface-panel)_64%,transparent)]";
+const paneClass = `min-h-0 min-w-0 ${panelSurface}`;
 const taskPaneClass = `${paneClass} grid grid-rows-[auto_minmax(0,1fr)]`;
 const detailPaneClass = `${paneClass} grid max-w-full content-start gap-2 overflow-auto p-2`;
 const panelHeaderClass = "flex items-center justify-between gap-2 border-b border-vui-border-soft p-2";
@@ -18,10 +25,10 @@ const taskRowTopClass = "grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] item
 const taskRowTitleClass = "block min-w-0 truncate";
 const taskRowMetaClass = "grid w-full min-w-0 gap-[3px] text-[var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
 const monoCodeClass = "block w-full min-w-0 break-all text-[var(--vui-font-xs)] text-vui-fg-tertiary";
-const detailHeaderClass = "flex min-w-0 items-center justify-between gap-2 rounded-lg border border-[color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)] bg-[color-mix(in_srgb,var(--surface-card)_64%,transparent)] p-2";
+const detailHeaderClass = `flex min-w-0 items-center justify-between gap-2 ${cardSurface}`;
 const detailTitleClass = "m-0 text-base text-vui-fg-primary";
 const summaryGridClass = "grid grid-cols-[repeat(5,minmax(0,1fr))] gap-2 max-[1280px]:grid-cols-3 max-[960px]:grid-cols-2 max-[720px]:grid-cols-1";
-const metricClass = "flex min-w-0 items-center gap-2 rounded-lg border border-[color-mix(in_srgb,var(--vui-border-subtle)_68%,transparent)] bg-[color-mix(in_srgb,var(--surface-card-subtle)_66%,transparent)] p-2";
+const metricClass = `flex min-w-0 items-center gap-2 ${cardSurface}`;
 const metricIconClass = "inline-flex text-[var(--accent-cool)]";
 const metricBodyClass = "grid min-w-0 gap-0.5";
 const metricLabelClass = "text-[var(--vui-font-xs)] uppercase tracking-[0.06em] text-vui-fg-tertiary";
@@ -29,7 +36,7 @@ const metricValueClass = "min-w-0 truncate text-[var(--vui-font-xs)] text-vui-fg
 const selectionNoticeClass = "rounded-lg border border-[color-mix(in_srgb,var(--state-warning)_28%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_8%,transparent)] px-2 py-[7px] text-[var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
 const ledgerSectionClass = "grid gap-[7px] rounded-lg border border-vui-border-soft bg-[color-mix(in_srgb,var(--surface-panel)_72%,transparent)] p-2";
 const ledgerFlowClass = "grid grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-2 max-[1280px]:grid-cols-1";
-const ledgerBucketClass = "grid min-w-0 content-start gap-[7px] rounded-lg border border-[color-mix(in_srgb,var(--vui-border-subtle)_68%,transparent)] bg-[color-mix(in_srgb,var(--surface-card)_58%,transparent)] p-2";
+const ledgerBucketClass = `grid min-w-0 content-start gap-[7px] ${cardSurface}`;
 const sectionHeaderClass = "flex items-center justify-between gap-2";
 const sectionTitleClass = "m-0 text-[0.9rem] text-vui-fg-primary";
 const sectionCountClass = "text-[var(--vui-font-xs)] text-vui-fg-tertiary";
@@ -40,7 +47,7 @@ const mutedLineClass = "text-[var(--vui-font-xs)] leading-[1.35] text-vui-fg-sec
 const warningLineClass = "text-[var(--vui-font-xs)] not-italic leading-[1.35] text-[var(--state-warning)]";
 const lifecycleSectionClass = "grid gap-[7px] rounded-lg border border-vui-border-soft bg-[color-mix(in_srgb,var(--surface-panel)_72%,transparent)] p-2";
 const lifecycleTimelineClass = "grid gap-1.5";
-const lifecycleRowClass = "grid grid-cols-[14px_minmax(0,1fr)] gap-[7px] rounded-lg border border-[color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color-mix(in_srgb,var(--surface-card-subtle)_74%,transparent)] p-2";
+const lifecycleRowClass = `grid grid-cols-[14px_minmax(0,1fr)] gap-[7px] ${rowSurface}`;
 const lifecycleDotClass = "mt-[5px] h-[9px] w-[9px] rounded-full bg-vui-fg-tertiary";
 const lifecycleTitleClass = "flex items-center justify-between gap-2";
 const lifecycleKindClass = "text-[var(--vui-font-xs)] text-vui-fg-primary";
