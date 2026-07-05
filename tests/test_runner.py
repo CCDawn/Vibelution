@@ -163,6 +163,7 @@ class TestRunner:
             "-v" if self.verbose else "-q",
             "--tb=short",
             "--no-header",
+            "--maxfail=0",
             "-p", "no:warnings",
         ]
 
@@ -533,6 +534,13 @@ def test_runner_builds_pytest_module_command():
 
     assert cmd[:3] == [sys.executable, "-m", "pytest"]
     assert "tests/test_environment_smoke.py" in cmd
+
+
+def test_runner_overrides_pytest_exitfirst_for_health_audit_commands():
+    runner = TestRunner(verbose=False, fast=False, environment_smoke=True)
+    cmd = runner.build_pytest_command("tests/test_environment_smoke.py")
+
+    assert "--maxfail=0" in cmd
 
 
 def test_runner_builds_parallel_pytest_command():
