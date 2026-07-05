@@ -239,6 +239,23 @@ function expectResponsiveActionRow(styleName: keyof typeof styles): void {
   expect(className, `${String(styleName)} should keep VUI buttons content-sized`).toContain("[&_[data-vui=\"button\"]]:w-fit");
 }
 
+function expectBackgroundAwareClass(className: string, label: string): void {
+  expect(className, `${label} should use a lightweight background-aware token`).toContain("color-mix(in_srgb");
+  expect(className, `${label} should avoid restacking surface-card walls inside Agent detail`).not.toContain("var(--surface-card)");
+  expect(className, `${label} should avoid strong opaque panel walls inside Agent detail`).not.toContain("var(--surface-panel-strong)");
+  expect(className, `${label} should not own route-level elevation`).not.toContain("box-shadow");
+  expect(className, `${label} should keep a hairline border`).toContain("[border:1px_solid");
+}
+
+function expectContentSizedVuiButtons(className: string, label: string): void {
+  const tokens = className.split(/\s+/);
+
+  expect(className, `${label} should keep VUI buttons within narrow Agent detail panels`).toContain("[&_[data-vui=\"button\"]]:[max-width:100%]");
+  expect(className, `${label} should keep VUI buttons content-sized by default`).toContain("[&_[data-vui=\"button\"]]:w-fit");
+  expect(tokens, `${label} should not stretch compact VUI actions across the row`).not.toContain("[&_[data-vui=\"button\"]]:w-full");
+  expect(tokens, `${label} should not stretch compact VUI actions across the row`).not.toContain("[&_[data-vui=\"button\"]]:[width:100%]");
+}
+
 describe("AgentsRoute layout contract", () => {
   it("loads the read-only Agent config workspace endpoint", () => {
     expect(routeSource).toContain("fetchJson<AgentConfigWorkspaceWithTeamIndexes>(\"/api/agents/config-workspace?includeRuntime=false\")");
@@ -1427,6 +1444,33 @@ describe("AgentsRoute layout contract", () => {
     expect(styles.inboxMessageItemFocused).not.toContain("var(--surface-panel-strong)");
   });
 
+  it("keeps extracted Agent detail panel surfaces lightweight and background-aware", () => {
+    const detailSurfaceStyles = [
+      [detailHeaderStyles.detailTabs, "AgentDetailHeader.detailTabs"],
+      [overviewStyles.factGrid, "AgentOverview.factGrid"],
+      [overviewStyles.detailSection, "AgentOverview.detailSection"],
+      [overviewStyles.boundarySummaryGrid, "AgentOverview.boundarySummaryGrid"],
+      [overviewStyles.policyGrid, "AgentOverview.policyGrid"],
+      [createPanelStyles.createAgentPanel, "AgentCreate.createAgentPanel"],
+      [createPanelStyles.createToolBundleOption, "AgentCreate.createToolBundleOption"],
+      [createPanelStyles.createToolBundleSelected, "AgentCreate.createToolBundleSelected"],
+      [createPanelStyles.createToolBundlePreview, "AgentCreate.createToolBundlePreview"],
+      [debugResetStyles.resetZone, "AgentDebugReset.resetZone"],
+      [debugResetStyles.resetOptionField, "AgentDebugReset.resetOptionField"],
+      [coreConfigStyles.configEditor, "AgentCoreConfig.configEditor"],
+      [coreConfigStyles.healthGuidePanel, "AgentCoreConfig.healthGuidePanel"],
+      [coreConfigStyles.llmSlotField, "AgentCoreConfig.llmSlotField"],
+      [referencesPanelStyles.configEditor, "AgentReferences.configEditor"],
+      [referencesPanelStyles.detailSection, "AgentReferences.detailSection"],
+      [referencesPanelStyles.referenceItem, "AgentReferences.referenceItem"],
+      [referencesPanelStyles.roomCheckField, "AgentReferences.roomCheckField"],
+    ] as const;
+
+    for (const [className, label] of detailSurfaceStyles) {
+      expectBackgroundAwareClass(className, label);
+    }
+  });
+
   it("keeps short route-level actions content-sized and mobile-safe", () => {
     for (const styleName of ["primaryButton", "secondaryButton", "dangerButton", "returnBannerButton"] as const) {
       expectContentSizedAction(styleName);
@@ -1439,6 +1483,63 @@ describe("AgentsRoute layout contract", () => {
     expect(styles.returnBannerButton).toContain("max-[860px]:w-fit");
     expect(styles.returnBannerButton).not.toContain("max-[860px]:w-full");
     expect(styles.returnBannerButton).not.toContain("max-[860px]:[width:100%]");
+  });
+
+  it("keeps Agent detail actions content-sized while preserving full-row tabs", () => {
+    expect(detailHeaderStyles.detailTabs).toContain("[grid-template-columns:repeat(3,_minmax(0,_1fr))]");
+    expect(detailHeaderStyles.detailTabs).toContain("max-[860px]:[grid-template-columns:1fr]");
+    expect(detailHeaderStyles.detailTab.split(/\s+/)).toContain("w-full");
+    expect(detailHeaderStyles.detailTabActive.split(/\s+/)).toContain("w-full");
+
+    for (const [className, label] of [
+      [createPanelStyles.editorActions, "AgentCreate.editorActions"],
+      [debugResetStyles.editorActions, "AgentDebugReset.editorActions"],
+      [coreConfigStyles.configDeepLinkRow, "AgentCoreConfig.configDeepLinkRow"],
+      [coreConfigStyles.promptConfigRow, "AgentCoreConfig.promptConfigRow"],
+      [coreConfigStyles.editorActions, "AgentCoreConfig.editorActions"],
+      [referencesPanelStyles.referenceMetaRow, "AgentReferences.referenceMetaRow"],
+      [referencesPanelStyles.roomCheckField, "AgentReferences.roomCheckField"],
+    ] as const) {
+      expectContentSizedVuiButtons(className, label);
+    }
+  });
+
+  it("keeps Agent detail form rows and long labels mobile-safe", () => {
+    for (const [className, label] of [
+      [createPanelStyles.createAgentPanel, "AgentCreate.createAgentPanel"],
+      [createPanelStyles.createAgentGrid, "AgentCreate.createAgentGrid"],
+      [createPanelStyles.fieldWide, "AgentCreate.fieldWide"],
+      [debugResetStyles.resetZone, "AgentDebugReset.resetZone"],
+      [debugResetStyles.resetOptionGrid, "AgentDebugReset.resetOptionGrid"],
+      [coreConfigStyles.configEditor, "AgentCoreConfig.configEditor"],
+      [coreConfigStyles.editorGrid, "AgentCoreConfig.editorGrid"],
+      [coreConfigStyles.llmSlotGrid, "AgentCoreConfig.llmSlotGrid"],
+      [referencesPanelStyles.configEditor, "AgentReferences.configEditor"],
+      [referencesPanelStyles.detailSection, "AgentReferences.detailSection"],
+      [referencesPanelStyles.roomMembershipList, "AgentReferences.roomMembershipList"],
+      [referencesPanelStyles.referenceList, "AgentReferences.referenceList"],
+    ] as const) {
+      expect(className, `${label} should be shrinkable inside mobile Agent detail panes`).toContain("min-w-0");
+    }
+
+    for (const [className, label] of [
+      [createPanelStyles.createToolBundleOption, "AgentCreate.createToolBundleOption"],
+      [createPanelStyles.createToolBundleSelected, "AgentCreate.createToolBundleSelected"],
+      [debugResetStyles.resetOptionField, "AgentDebugReset.resetOptionField"],
+      [referencesPanelStyles.roomCheckField, "AgentReferences.roomCheckField"],
+      [referencesPanelStyles.referenceItem, "AgentReferences.referenceItem"],
+      [overviewStyles.boundarySummaryGrid, "AgentOverview.boundarySummaryGrid"],
+      [overviewStyles.policyGrid, "AgentOverview.policyGrid"],
+      [overviewStyles.factGrid, "AgentOverview.factGrid"],
+    ] as const) {
+      expect(className, `${label} should allow long Agent labels to wrap instead of forcing horizontal overflow`).toContain("[overflow-wrap:anywhere]");
+    }
+
+    expect(coreConfigStyles.llmSlotGrid).toContain("max-[860px]:[grid-template-columns:1fr]");
+    expect(overviewStyles.boundarySummaryGrid).toContain("max-[860px]:[grid-template-columns:1fr]");
+    expect(referencesPanelStyles.referenceHeader).toContain("max-[860px]:[grid-template-columns:1fr]");
+    expect(referencesPanelStyles.referenceMetaRow).toContain("max-[860px]:[grid-template-columns:1fr]");
+    expect(referencesPanelStyles.roomCheckField).toContain("max-[860px]:[grid-template-columns:auto_minmax(0,_1fr)]");
   });
 
   it("keeps Agent card subgrids away from invalid quoted Tailwind grid areas", () => {
