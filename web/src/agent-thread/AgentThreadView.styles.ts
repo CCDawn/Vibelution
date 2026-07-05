@@ -16,7 +16,7 @@ const styles = {
   part: "min-w-0 text-[length:var(--vui-font-sm)] leading-[var(--vui-line-readable)] [overflow-wrap:anywhere]",
   text: "m-0 whitespace-pre-wrap text-[var(--fg-primary)]",
   processPart:
-    "grid gap-1 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--surface-card-muted)_72%,transparent)] px-2 py-1.5",
+    "grid gap-1 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-row-hover)_72%,transparent)] px-2 py-1.5",
   partHeader: "flex min-w-0 items-center gap-1.5 text-[length:var(--vui-font-xs)] leading-[var(--vui-line-tight)]",
   partName: "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-bold text-[var(--fg-secondary)]",
   partStatus:

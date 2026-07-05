@@ -16,7 +16,7 @@ export type TeamSourcePaginationProps = {
 };
 
 const BAR =
-  "flex min-w-0 items-center justify-between gap-2 px-2 py-1.5 rounded-lg select-none whitespace-nowrap " +
+  "flex min-w-0 items-center justify-between gap-2 px-2 py-1.5 rounded-[var(--radius-control)] select-none whitespace-nowrap " +
   "border border-[color:color-mix(in_srgb,var(--accent-cool)_18%,var(--border-soft))] " +
   "bg-[color:var(--source-workbench-card)] text-[0.64rem] font-[800] text-[var(--fg-muted)]";
 

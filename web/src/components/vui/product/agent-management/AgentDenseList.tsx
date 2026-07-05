@@ -61,7 +61,7 @@ const MODE_PILL =
   "inline-flex items-center min-h-[22px] px-[6px] border border-[color-mix(in_srgb,var(--accent-cool)_22%,transparent)] rounded-full bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] text-[0.7rem] not-italic whitespace-nowrap";
 
 const AVATAR =
-  "grid place-items-center shrink-0 w-[30px] h-[30px] rounded-full overflow-hidden text-[var(--fg-primary)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--surface-card))] [font-family:var(--font-display)] font-extrabold text-[0.66rem]";
+  "grid place-items-center shrink-0 w-[30px] h-[30px] rounded-full overflow-hidden text-[var(--fg-primary)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] [font-family:var(--font-display)] font-extrabold text-[0.66rem]";
 
 function runtimeToneClass(tone: string): string {
   if (tone === "running") {
@@ -117,14 +117,14 @@ function AgentRow({
   onToggleBulk: AgentDenseListProps["onToggleBulk"];
 }) {
   const rowClass = [
-    "w-full min-h-[44px] px-2 py-[var(--agent-row-pad-y)] border border-[var(--border-soft)] rounded-lg bg-[var(--surface-card)] text-[var(--fg-primary)] text-left items-center gap-2 min-w-0 grid",
+    "w-full min-h-[44px] px-2 py-[var(--agent-row-pad-y)] border border-[var(--border-soft)] rounded-[var(--radius-control)] bg-[var(--vui-surface-row)] text-[var(--fg-primary)] text-left items-center gap-2 min-w-0 grid",
     GRID_TEMPLATE,
     "max-[860px]:grid-cols-[1fr] max-[860px]:items-start",
-    "transition-[border-color,background,box-shadow] duration-150 hover:border-[var(--border-strong)] hover:bg-[var(--surface-panel-hover)]",
+    "transition-[border-color,background,box-shadow] duration-150 hover:border-[var(--border-strong)] hover:bg-[var(--vui-surface-row-hover)]",
     row.active
-      ? "border-[color-mix(in_srgb,var(--accent-warm)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_9%,var(--surface-panel-strong))]"
+      ? "border-[color-mix(in_srgb,var(--accent-warm)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_9%,var(--vui-surface-panel))]"
       : "",
-    row.bulkSelected ? "bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--surface-panel-strong))]" : "",
+    row.bulkSelected ? "bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-panel))]" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -132,7 +132,7 @@ function AgentRow({
   return (
     <div className="grid grid-cols-[28px_minmax(0,1fr)] items-center gap-[5px] min-w-0">
       <label
-        className="relative grid place-items-center w-[28px] h-[36px] border border-[var(--border-soft)] rounded-lg bg-[var(--surface-card)] text-[var(--fg-secondary)] cursor-pointer hover:border-[var(--border-strong)] hover:text-[var(--accent-warm-2)]"
+        className="relative grid place-items-center w-[28px] h-[36px] border border-[var(--border-soft)] rounded-[var(--radius-control)] bg-[var(--vui-surface-row)] text-[var(--fg-secondary)] cursor-pointer hover:border-[var(--border-strong)] hover:text-[var(--accent-warm-2)]"
         title={row.selectLabel}
       >
         <VNativeInput
@@ -215,7 +215,7 @@ export function AgentDenseList({ columns, columnLabels, onSelectRow, onToggleBul
           <div className="grid content-start gap-1 min-h-0">
             <div
               className={[
-                "grid items-center gap-2 min-w-0 sticky top-0 z-[1] px-2 pb-[5px] text-[var(--fg-tertiary)] text-[0.72rem] uppercase bg-[var(--surface-panel)]",
+                "grid items-center gap-2 min-w-0 sticky top-0 z-[1] px-2 pb-[5px] text-[var(--fg-tertiary)] text-[0.72rem] uppercase bg-[var(--vui-surface-panel)]",
                 GRID_TEMPLATE,
                 "max-[860px]:hidden",
               ].join(" ")}
