@@ -284,8 +284,17 @@ describe("LauncherRoute layout contract", () => {
   });
 
   it("uses a light dense Launcher surface with muted action buttons", () => {
-    expect(routeStylesSource).toContain("bg-[color-mix(in_srgb,var(--accent-primary)_10%,var(--surface-card))]");
-    expect(routeStylesSource).toContain("bg-[color-mix(in_srgb,var(--danger)_7%,var(--surface-card))]");
+    expect(routeStylesSource).toContain("const panelSurface");
+    expect(routeStylesSource).toContain("const rowSurface");
+    expect(routeStylesSource).toContain("const mutedControl");
+    expect(routeStylesSource).toContain("const primaryControl");
+    expect(routeStylesSource).toContain("const dangerControl");
+    expect(routeStylesSource).toContain("bg-vui-surface-panel/72");
+    expect(routeStylesSource).toContain("bg-vui-surface-row");
+    expect(routeStylesSource).toContain("bg-vui-control-muted");
+    expect(routeStylesSource).toContain("var(--vui-control-muted)");
+    expect(launcherPanelStylesSource).toContain("const panelSurface");
+    expect(launcherPanelStylesSource).toContain("const primaryControl");
     expect(routeStylesSource).toContain("min-h-7");
     expect(routeStylesSource).toContain("px-2");
     expect(routeStylesSource).toContain("w-fit");
@@ -303,6 +312,7 @@ describe("LauncherRoute layout contract", () => {
     expect(styles.header).toContain("!shadow-none");
     expect(styles.header).toContain("!backdrop-blur-none");
     expect(styles.panel).not.toContain("bg-[var(--surface-panel)]");
+    expect(styles.panel).toContain("bg-vui-surface-panel/72");
   });
 
   it("keeps the complete launcher surface reachable when the window is short", () => {
