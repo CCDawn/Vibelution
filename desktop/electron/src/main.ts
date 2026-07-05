@@ -1,4 +1,4 @@
-import { app, ipcMain, nativeTheme } from "electron";
+import { Notification, app, ipcMain, nativeImage, nativeTheme } from "electron";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { singleInstanceDecision } from "./appLock.js";
@@ -11,6 +11,12 @@ import {
   type DesktopLaunchSettings
 } from "./launch/desktopLaunchSettings.js";
 import { RuntimeSceneBridge, type RuntimeSceneElectronEvent } from "./lifecycle/runtimeSceneBridge.js";
+import {
+  createConversationNotificationService,
+  type ConversationNotificationService,
+  type DesktopConversationCompletionNotification,
+  type DesktopConversationNotificationResult
+} from "./notifications/conversationNotifications.js";
 import { createDesktopPaths, resolveDesktopEntryCatalogPath, type DesktopPaths } from "./paths.js";
 import { fetchLauncherControlToken, runDesktopActionOnce } from "./protocol/desktopActionClient.js";
 import { findVibelutionDeepLinkArg, parsePublicVibelutionDeepLink } from "./protocol/deepLink.js";
@@ -58,6 +64,7 @@ let desktopSessionRegistered = false;
 let desktopSessionRevision = 0;
 let shutdownApproved = false;
 let shutdownRequestRunning = false;
+let conversationNotificationService: ConversationNotificationService | null = null;
 const desktopCliArgs = parseDesktopCliArgs(process.argv.slice(1));
 let cachedDesktopLaunchSettings: DesktopLaunchSettings | null = null;
 
@@ -144,6 +151,7 @@ function desktopEnvironment(): NodeJS.ProcessEnv {
 
 function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapResult | null): ElectronWindowProvider {
   const desktopEnv = desktopEnvironment();
+  conversationNotificationService = null;
   return new ElectronWindowProvider(
     paths,
     resolveLauncherUrl(desktopEnv, bootstrap?.launcherUrl),
@@ -157,9 +165,75 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
         void requestDesktopShellExit().catch((error: unknown) => {
           console.warn(error instanceof Error ? error.message : String(error));
         });
-      }
+      },
+      onWorkbenchFocusAttentionClear: () => {
+        conversationNotificationService?.clearAttention();
+      },
     }
   );
+}
+
+function createConversationBadgeIcon(count: number) {
+  const safeCount = Math.max(1, Math.min(9, Math.round(count)));
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+    <circle cx="16" cy="16" r="15" fill="#1f2937"/>
+    <text x="16" y="21" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="18" font-weight="700" fill="#ffffff">${safeCount}</text>
+  </svg>`;
+  return nativeImage.createFromDataURL(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`);
+}
+
+function toRuntimeSceneFieldValue(value: unknown): string | number | boolean {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  if (value === null || value === undefined) {
+    return "";
+  }
+  return String(value);
+}
+
+function normalizeRuntimeSceneFields(fields: Record<string, unknown>): Record<string, string | number | boolean> {
+  return Object.fromEntries(
+    Object.entries(fields).map(([key, value]) => [key, toRuntimeSceneFieldValue(value)])
+  );
+}
+
+function failedConversationNotificationResult(
+  payload: DesktopConversationCompletionNotification | null | undefined
+): DesktopConversationNotificationResult {
+  return {
+    schemaVersion: 1,
+    status: "failed",
+    notificationKey: String(payload?.notificationKey || ""),
+    unreadCount: 0,
+    focused: false
+  };
+}
+
+function resolveConversationNotificationService(): ConversationNotificationService | null {
+  if (conversationNotificationService !== null) {
+    return conversationNotificationService;
+  }
+  if (windowProvider === null) {
+    return null;
+  }
+  conversationNotificationService = createConversationNotificationService({
+    windowProvider,
+    notificationSupported: () => Notification.isSupported(),
+    createNotification: ({ title, body, onClick }) => {
+      const notification = new Notification({ title, body, silent: false });
+      notification.on("click", onClick);
+      return notification;
+    },
+    createBadgeIcon: createConversationBadgeIcon,
+    recordEvent: async (event) => {
+      await recordElectronSupervisorEvent(launcherBootstrap, {
+        ...event,
+        fields: normalizeRuntimeSceneFields(event.fields)
+      });
+    }
+  });
+  return conversationNotificationService;
 }
 
 async function bootstrapLauncherIfEnabled(paths: DesktopPaths): Promise<LauncherBootstrapResult | null> {
@@ -603,6 +677,15 @@ ipcMain.handle(IPC_CHANNELS.focusWorkbenchWindow, async (event) => {
 ipcMain.handle(IPC_CHANNELS.requestDesktopShellExit, async (event) => {
   assertTrustedIpcSender(event, trustedIpcOrigins());
   return await requestDesktopShellExit();
+});
+
+ipcMain.handle(IPC_CHANNELS.notifyConversationCompleted, async (event, payload: DesktopConversationCompletionNotification) => {
+  assertTrustedIpcSender(event, trustedIpcOrigins());
+  const service = resolveConversationNotificationService();
+  if (service === null) {
+    return failedConversationNotificationResult(payload);
+  }
+  return await service.notify(payload);
 });
 
 app.whenReady()

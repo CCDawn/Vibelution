@@ -134,6 +134,10 @@ import {
   type TokenSpeedTrackerState,
 } from "./chatTokenSpeed";
 import {
+  browserDesktopNotificationBridge,
+  createDesktopConversationNotifier,
+} from "./chatDesktopNotifications";
+import {
   clearPendingSelfEvolutionHandoff,
   loadPendingSelfEvolutionHandoff,
 } from "./selfEvolutionHandoff";
@@ -1879,6 +1883,10 @@ export function ChatCodingRoute() {
   const sessionStreamApplyStatsRef = useRef<Record<string, { received: number; applied: number; dropped: number }>>({});
   const lastConversationStreamingFrameTelemetryAtRef = useRef<Record<string, number>>({});
   const activeTurnLayersBySessionRef = useRef<Record<string, ActiveTurnLayerState>>({});
+  const desktopConversationNotifierRef = useRef(createDesktopConversationNotifier({
+    bridge: browserDesktopNotificationBridge(),
+    postTelemetry: postBrowserTelemetry,
+  }));
   const sessionStreamDecisionSnapshotRef = useRef({
     sessionId: "",
     shouldConnect: false,
@@ -3291,6 +3299,9 @@ export function ChatCodingRoute() {
         });
       }
       syncSessionDetail(detail);
+      desktopConversationNotifierRef.current.handleSessionDetail(detail, {
+        sessionTitle: detail.title || detail.id,
+      });
       const phase = String(detail.currentPhase || detail.status || "").trim().toLowerCase();
       const activeLayer = activeTurnLayersBySessionRef.current[streamSessionId];
       if ((activeLayer && isActiveTurnSettledByDetail(activeLayer, detail)) || (phase && !isBusyPhase(phase))) {
@@ -3597,6 +3608,9 @@ export function ChatCodingRoute() {
         return;
       }
       setSessionStreamConnected(true);
+      desktopConversationNotifierRef.current.handleAssistantDelta(payload, {
+        sessionTitle: sessionDetailQuery.data?.title || directSessionActiveSummary?.title || streamSessionId,
+      });
       queueAssistantDelta(payload, event.data.length);
     }
 

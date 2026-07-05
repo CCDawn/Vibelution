@@ -5,5 +5,7 @@ contextBridge.exposeInMainWorld("vibelutionLauncher", {
   getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.getVersion),
   getDesktopShellSummary: () => ipcRenderer.invoke(IPC_CHANNELS.getDesktopShellSummary),
   focusWorkbenchWindow: () => ipcRenderer.invoke(IPC_CHANNELS.focusWorkbenchWindow),
-  requestDesktopShellExit: () => ipcRenderer.invoke(IPC_CHANNELS.requestDesktopShellExit)
+  requestDesktopShellExit: () => ipcRenderer.invoke(IPC_CHANNELS.requestDesktopShellExit),
+  notifyConversationCompleted: (payload: unknown) =>
+    ipcRenderer.invoke(IPC_CHANNELS.notifyConversationCompleted, payload)
 });
