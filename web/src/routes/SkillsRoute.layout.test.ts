@@ -21,7 +21,7 @@ describe("SkillsRoute layout contract", () => {
       routeSource.indexOf("</VRouteHeader>"),
     );
     expect(routeSource.indexOf('<AgentManagementNav active="skills" className={styles.managementNavClass} />')).toBeLessThan(
-      routeSource.indexOf("className={styles.summaryGridClass}"),
+      routeSource.indexOf("className={styles.summaryStripClass}"),
     );
     expect(appShellSource).not.toContain('to="/skills"');
   });
@@ -57,7 +57,7 @@ describe("SkillsRoute layout contract", () => {
     expect(routeSource).not.toMatch(/<select\b/);
     expect(routeSource).not.toMatch(/<textarea\b/);
     expect(routeSource).toContain("bulkReadOnlyNoteClass");
-    expect(routeSource).toContain("bulkActionBarClass");
+    expect(routeSource).toContain("<VDenseToolbar");
     expect(routeSource).toContain("selectableRowClass");
     expect(routeSource).not.toContain('method: "POST"');
     expect(routeSource).not.toContain('method: "PUT"');
@@ -101,11 +101,12 @@ describe("SkillsRoute layout contract", () => {
 
     expect(surfaceClasses).toHaveLength(5);
     surfaceClasses.forEach((className) => {
-      expect(className).toContain("border-vui-border-soft");
       expect(className).not.toContain("bg-[var(--surface-panel)]");
       expect(className).not.toContain("bg-[var(--surface-card)]");
       expect(className).not.toContain("shadow-[");
     });
+    expect(routeSource).toContain("<VSurface");
+    expect(routeSource).toContain("tone=\"panel\"");
   });
 
   it("keeps toolbar buttons sized to their content while full-row skill buttons remain explicit", () => {
@@ -130,5 +131,21 @@ describe("SkillsRoute layout contract", () => {
     expect(extractConstClass("contentHeaderClass")).toContain("max-[720px]:flex-wrap");
     expect(extractConstClass("commandPanelClass")).toContain("max-[720px]:grid-cols-[auto_minmax(0,1fr)]");
     expect(extractConstClass("rootRowClass")).toContain("max-[720px]:grid-cols-1");
+  });
+
+  it("uses VUI composition for summary, panels, and bulk/list surfaces", () => {
+    expect(routeSource).toContain("VStatusStrip");
+    expect(routeSource).toContain("VSurface");
+    expect(routeSource).toContain("VDenseToolbar");
+    expect(routeSource).toContain("VPanelHeader");
+    expect(routeSource).toContain("VStatusChip");
+    expect(routeSource).toContain("className={styles.summaryStripClass}");
+    expect(routeSource).toContain("<VSurface");
+    expect(routeSource).toContain("as=\"aside\"");
+    expect(routeSource).toContain("as=\"section\"");
+    expect(routeSource).toContain("<VDenseToolbar");
+    expect(routeSource).toContain("<VStatusChip");
+    expect(stylesSource).not.toContain("const summaryCardClass");
+    expect(stylesSource).not.toContain("const bulkActionBarClass");
   });
 });

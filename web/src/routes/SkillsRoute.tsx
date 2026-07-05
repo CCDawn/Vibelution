@@ -5,7 +5,17 @@ import { useEffect, useMemo, useState } from "react";
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import { SkillLibraryDetail, SkillLibraryItem, SkillLibraryPayload } from "../api/types";
-import { VButton, VIconButton, VNativeInput, VRouteHeader } from "../components/vui";
+import {
+  VButton,
+  VDenseToolbar,
+  VIconButton,
+  VNativeInput,
+  VPanelHeader,
+  VRouteHeader,
+  VStatusChip,
+  VStatusStrip,
+  VSurface,
+} from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
 import styles from "./SkillsRoute.styles";
@@ -246,35 +256,25 @@ export function SkillsRoute() {
       <div className={styles.controlStripClass}>
         <AgentManagementNav active="skills" className={styles.managementNavClass} />
 
-        <div className={styles.summaryGridClass}>
-          <section className={styles.summaryCardClass}>
-            <span className={styles.summaryLabelClass}>Total</span>
-            <strong className={styles.summaryValueClass}>{counts.total}</strong>
-          </section>
-          <section className={styles.summaryCardClass}>
-            <span className={styles.summaryLabelClass}>Codex</span>
-            <strong className={styles.summaryValueClass}>{counts.codex}</strong>
-          </section>
-          <section className={styles.summaryCardClass}>
-            <span className={styles.summaryLabelClass}>Agents</span>
-            <strong className={styles.summaryValueClass}>{counts.agents}</strong>
-          </section>
-          <section className={styles.summaryCardClass}>
-            <span className={styles.summaryLabelClass}>{copy.readOnly}</span>
-            <strong className={styles.summaryValueClass}>{libraryQuery.data?.mode ?? "read_only"}</strong>
-          </section>
-        </div>
+        <VStatusStrip
+          className={styles.summaryStripClass}
+          items={[
+            { label: "Total", value: <strong className={styles.summaryValueClass}>{counts.total}</strong> },
+            { label: "Codex", value: <strong className={styles.summaryValueClass}>{counts.codex}</strong> },
+            { label: "Agents", value: <strong className={styles.summaryValueClass}>{counts.agents}</strong> },
+            { label: copy.readOnly, value: <strong className={styles.summaryValueClass}>{libraryQuery.data?.mode ?? "read_only"}</strong> },
+          ]}
+        />
       </div>
 
       <main className={styles.workspaceClass}>
-        <aside className={styles.listPanelClass}>
-          <div className={styles.panelHeaderClass}>
-            <div>
-              <p className={styles.panelEyebrowClass}>{copy.listTitle}</p>
-              <h2 className={styles.panelTitleClass}>{filteredSkills.length} / {skills.length}</h2>
-            </div>
-            <Sparkles size={17} />
-          </div>
+        <VSurface as="aside" className={styles.listPanelClass} ariaLabel={copy.listTitle} tone="panel" padding="compact">
+          <VPanelHeader
+            className={styles.panelHeaderClass}
+            eyebrow={copy.listTitle}
+            title={`${filteredSkills.length} / ${skills.length}`}
+            actions={<Sparkles size={17} />}
+          />
 
           <label className={styles.searchBoxClass}>
             <Search size={14} />
@@ -294,7 +294,7 @@ export function SkillsRoute() {
             ))}
           </div>
 
-          <section className={styles.bulkActionBarClass} aria-label={copy.bulkSelected}>
+          <VDenseToolbar ariaLabel={copy.bulkSelected}>
             <div className={styles.bulkSummaryClass}>
               <CheckSquare size={15} />
               <strong className={styles.bulkSummaryTitleClass}>{copy.bulkSelected}</strong>
@@ -337,7 +337,7 @@ export function SkillsRoute() {
             >
               {copy.bulkDelete}
             </VButton>
-          </section>
+          </VDenseToolbar>
 
           <div className={styles.skillListClass}>
             {libraryQuery.isError ? (
@@ -378,15 +378,18 @@ export function SkillsRoute() {
               })
             )}
           </div>
-        </aside>
+        </VSurface>
 
-        <section className={styles.detailPanelClass}>
+        <VSurface as="section" className={styles.detailPanelClass} ariaLabel={copy.detailTitle} tone="panel" padding="compact">
           {activeSkill ? (
             <>
               <div className={styles.detailHeaderClass}>
                 <div>
-                  <p className={styles.panelEyebrowClass}>{copy.detailTitle}</p>
-                  <h2 className={styles.panelTitleClass}>{activeSkill.name}</h2>
+                  <VPanelHeader
+                    eyebrow={copy.detailTitle}
+                    title={activeSkill.name}
+                    actions={<VStatusChip tone="neutral">{sourceLabel(activeSkill.source, lang)}</VStatusChip>}
+                  />
                   <p className={styles.detailDescriptionClass}>{activeSkill.description || activeSkill.directoryName}</p>
                 </div>
                 <VButton
@@ -449,7 +452,7 @@ export function SkillsRoute() {
               <p className={styles.emptyDetailTextClass}>{copy.emptyDetail}</p>
             </div>
           )}
-        </section>
+        </VSurface>
       </main>
     </section>
   );
