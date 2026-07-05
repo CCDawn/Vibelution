@@ -1,6 +1,6 @@
 const styles = {
   root:
-    "root min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid min-h-0 content-start gap-2",
+    "root min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 grid min-h-0 content-start gap-2",
   toolbar:
     "toolbar min-w-0 grid gap-2 lg:grid-cols-[minmax(0,0.96fr)_minmax(0,1.04fr)]",
   formRow:
