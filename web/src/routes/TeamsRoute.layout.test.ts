@@ -93,6 +93,19 @@ function classTokenCount(className: string, token: string) {
   return className.split(/\s+/).filter((item) => item === token).length;
 }
 
+function topLevelBackgroundTokenCount(className: string) {
+  return className.split(/\s+/).filter((item) => item.startsWith("bg-[")).length;
+}
+
+function expectOperationalSurface(className: string, surface = "bg-[var(--vui-surface-panel)]") {
+  expect(className).toContain(surface);
+  expect(className).not.toContain("bg-[var(--vui-surface-glass)]");
+  expect(className).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+  expect(className).not.toContain("bg-[image:var(--vui-gradient-route-soft)]");
+  expect(className).not.toContain("shadow-[var(--vui-elevation-1-sheen)]");
+  expect(className).not.toContain("hover:shadow-[var(--vui-elevation-2-sheen)]");
+}
+
 describe("TeamsRoute layout contract", () => {
   it("uses shell language state without loading the full app dictionary", () => {
     expect(routeSource).toContain("useShellI18n");
@@ -1746,6 +1759,144 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.workflowPanel).toContain("bg-[var(--vui-surface-panel)]");
     expect(routeStyles.teamRoundPanel).toContain("bg-[var(--vui-surface-panel)]");
     expect(routeStyles.teamHistoryPanel).toContain("bg-[var(--vui-surface-panel)]");
+  });
+
+  it("keeps Teams route-level research and workflow surfaces operational instead of decorative", () => {
+    const routeOperationalPanelKeys = [
+      "aiSearchRunPanel",
+      "aiSearchRunSummary",
+      "aiSearchScopePanel",
+      "aiSearchWorkflowSummary",
+      "experimentKnowledgePanel",
+      "experimentLedgerPanel",
+      "experimentPlanSummary",
+      "knowledgeCompletionFlowPanel",
+      "researchDiscussionPanel",
+      "researchLoopPanel",
+      "researchLoopTemplateSummary",
+      "researchStageActionPanel",
+      "researchStageBoundaryPanel",
+      "researchStageCard",
+      "researchStageCardHead",
+      "researchStageCardMetrics",
+      "researchStageHeroPanel",
+      "researchStageModuleCard",
+      "teamRoundCard",
+      "teamUnavailableCard",
+      "teamUnavailableSurface",
+      "workflowPanel",
+    ] as const;
+
+    for (const key of routeOperationalPanelKeys) {
+      expectOperationalSurface(routeStyles[key]);
+    }
+
+    const routeRowKeys = [
+      "aiSearchRunCard",
+      "aiSearchRunCardDegraded",
+      "aiSearchRunCardDetails",
+      "aiSearchRunCardHeader",
+      "aiSearchRunCardReview",
+      "researchStageAgentCard",
+      "researchStageAgentPanel",
+      "researchStageAgentSummary",
+    ] as const;
+
+    for (const key of routeRowKeys) {
+      expectOperationalSurface(routeStyles[key], "bg-[var(--vui-surface-row)]");
+    }
+
+    expect(routeStyles.researchStageCard).toContain("rounded-[var(--radius-panel)]");
+    expect(routeStyles.researchStageCard).not.toContain("hover:-translate-y-px");
+    expect(routeStyles.researchStageHeroPanel).toContain("rounded-[var(--radius-panel)]");
+    expect(routeStyles.sourceCollectionUnavailable).toContain("rounded-[var(--radius-panel)]");
+    expect(routeStyles.sourceCollectionUnavailable).not.toContain("rounded-lg");
+    expect(routeStyles.sourceCollectionUnavailable).not.toContain("bg-[image:var(--vui-gradient-route-soft)]");
+
+    const researchAgentCardToneKeys = [
+      "researchStageAgentCard_ready",
+      "researchStageAgentCard_warning",
+      "researchStageAgentCard_blocked",
+      "researchStageAgentCard_missing",
+      "researchStageAgentCard_error",
+    ] as const;
+
+    for (const key of researchAgentCardToneKeys) {
+      const composedClassName = `${routeStyles.researchStageAgentCard} ${routeStyles[key]}`;
+      expectOperationalSurface(composedClassName, "bg-[var(--vui-surface-row)]");
+      expect(topLevelBackgroundTokenCount(composedClassName)).toBe(1);
+      expect(composedClassName).not.toContain("bg-[color-mix");
+    }
+
+    const researchAgentSummaryToneKeys = [
+      "researchStageAgentSummaryReady",
+      "researchStageAgentSummaryMissing",
+      "researchStageAgentSummaryBlocked",
+    ] as const;
+
+    for (const key of researchAgentSummaryToneKeys) {
+      const composedClassName = `${routeStyles.researchStageAgentSummary} ${routeStyles[key]}`;
+      expectOperationalSurface(composedClassName, "bg-[var(--vui-surface-row)]");
+      expect(topLevelBackgroundTokenCount(composedClassName)).toBe(1);
+      expect(composedClassName).not.toContain("bg-[color-mix");
+    }
+
+    const compactPanelClassName = `${routeStyles.researchStageAgentPanel} ${routeStyles.researchStageAgentPanelCompact}`;
+    expectOperationalSurface(compactPanelClassName, "bg-[var(--vui-surface-row)]");
+    expect(topLevelBackgroundTokenCount(compactPanelClassName)).toBe(1);
+    expect(compactPanelClassName).not.toContain("bg-[color-mix");
+
+    expectOperationalSurface(routeStyles.researchStageAgentPanelHeader, "bg-[var(--vui-surface-row)]");
+    expect(topLevelBackgroundTokenCount(routeStyles.researchStageAgentPanelHeader)).toBe(1);
+    expect(routeStyles.researchStageAgentPanelHeader).not.toContain("bg-[color-mix");
+
+    const researchAgentInlineKeys = [
+      "researchStageAgentActions",
+      "researchStageAgentGrid",
+      "researchStageAgentMeta",
+      "researchStageAgentRole",
+    ] as const;
+
+    for (const key of researchAgentInlineKeys) {
+      expect(topLevelBackgroundTokenCount(routeStyles[key])).toBe(0);
+      expect(routeStyles[key]).not.toContain("bg-[color-mix");
+    }
+  });
+
+  it("keeps Team source collection child panels flat and scan-first", () => {
+    const sourceCollectionPanelSurfaces = [
+      teamSourceCollectionPanelFrameStyles.sourceCollectionFocusedPanel,
+      teamSourceCollectionPanelFrameStyles.workflowSourceCollectionDetails,
+      teamSourceCollectionConversationPanelStyles.sourceCollectionConversationPanel,
+      teamSourceCollectionConversationPanelStyles.sourceCollectionResultsPanel,
+      teamSourceCollectionControlsPanelStyles.sourceCollectionControlPanel,
+      teamSourceCollectionOverviewPanelStyles.workflowSourceCollectionPanel,
+      teamSourceCollectionSourceDetailPanelStyles.sourceCollectionSourceDetailPanel,
+      teamSourceCollectionSourceDetailPanelStyles.sourceCollectionSourceDetailNotice,
+      teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentPanel,
+      teamWorkflowStatusPanelStyles.workflowCoordinationBriefSummary,
+      teamWorkflowStatusPanelStyles.workflowCoordinationPanel,
+      teamWorkflowStatusPanelStyles.workflowGraphPanel,
+      teamWorkflowStatusPanelStyles.workflowIngestionPanel,
+      teamWorkflowStatusPanelStyles.workflowModelEvidencePanel,
+      teamWorkflowStatusPanelStyles.workflowPaperNoteChunkPanel,
+      teamWorkflowStatusPanelStyles.workflowSourceQualityPanel,
+    ];
+
+    for (const className of sourceCollectionPanelSurfaces) {
+      expectOperationalSurface(className);
+    }
+
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspaceHeader).toContain("bg-[var(--vui-surface-panel)]");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspaceHeader).not.toContain(
+      "bg-[color:var(--source-workbench-card)]",
+    );
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageChatActions).not.toContain(
+      "bg-[image:var(--vui-gradient-route-soft)]",
+    );
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCard).toContain("bg-[var(--vui-surface-row)]");
+    expect(teamSourceCollectionSourceDetailPanelStyles.sourceCollectionSourceDetailHeader).toContain("bg-[var(--vui-surface-row)]");
+    expect(teamSourceCollectionSourceDetailPanelStyles.sourceCollectionSourceDetailFacts).toContain("bg-[var(--vui-surface-row)]");
   });
 
   it("prioritizes active stage task launch and interruption status over stale summaries", () => {
