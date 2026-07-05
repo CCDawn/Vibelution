@@ -685,9 +685,6 @@ def _tool_call_has_result_payload(tool_call: dict[str, Any]) -> bool:
 
 def _checkpoint_message_from_event(event: TurnJournalEvent) -> dict[str, Any]:
     payload = dict(event.payload or {})
-    legacy_message = _legacy_history_checkpoint_message_from_event(event, payload)
-    if legacy_message:
-        return legacy_message
     metadata = _context_compression_marker_metadata(event, payload)
     if not metadata:
         return {}
@@ -746,28 +743,6 @@ def _context_compression_marker_metadata(
     if "coveredEventSeqEnd" in payload:
         metadata["coveredEventSeqEnd"] = _safe_int(payload.get("coveredEventSeqEnd"))
     return metadata
-
-
-def _legacy_history_checkpoint_message_from_event(
-    event: TurnJournalEvent,
-    payload: dict[str, Any],
-) -> dict[str, Any]:
-    if str(payload.get("level") or "").strip() != "history":
-        return {}
-    summary = str(payload.get("summary") or payload.get("content") or "").strip()
-    if not summary:
-        return {}
-    return {
-        "role": "assistant",
-        "content": f"历史检查点：\n{summary}",
-        "timestamp": event.timestamp,
-        "metadata": {
-            "kind": EVENT_COMPACTION_CHECKPOINT,
-            "turnId": event.turn_id,
-            "eventId": event.event_id,
-        },
-    }
-
 
 def _checkpoint_model_message_from_event(event: TurnJournalEvent | None) -> dict[str, Any]:
     if event is None:

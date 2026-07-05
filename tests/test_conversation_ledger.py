@@ -302,6 +302,57 @@ def test_conversation_ledger_projects_compression_checkpoint_as_visible_marker(t
     )
 
 
+def test_history_level_compression_checkpoint_projects_as_visible_marker(tmp_path):
+    append_conversation_event(
+        tmp_path,
+        "session-history-marker",
+        "turn-old",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "历史明细不应作为普通聊天内容保留"},
+    )
+    event = append_context_compression_checkpoint(
+        tmp_path,
+        "session-history-marker",
+        turn_id="turn-history-checkpoint",
+        current_turn_id="turn-current",
+        summary="历史阶段 summary for model only。",
+        level="history",
+        reason="tool_request",
+        before_tokens=7000,
+        after_tokens=2500,
+        trigger_source="tool_request",
+    )
+
+    projection = project_conversation_ledger(
+        load_conversation_events(tmp_path, "session-history-marker"),
+        include_model_messages=True,
+        include_visible_messages=True,
+    )
+    marker = next(
+        message
+        for message in projection.visible_messages
+        if message.get("metadata", {}).get("eventId") == event.event_id
+    )
+    visible_content = "\n".join(
+        str(message.get("content") or "") for message in projection.visible_messages
+    )
+    serialized_model_messages = json.dumps(projection.model_messages, ensure_ascii=False)
+
+    assert marker["content"] == ""
+    assert marker["metadata"]["kind"] == "context_compression_marker"
+    assert marker["metadata"]["status"] == "applied"
+    assert marker["metadata"]["title"] == "上下文已压缩"
+    assert marker["metadata"]["level"] == "history"
+    assert "历史阶段 summary for model only" in marker["metadata"]["summaryPreview"]
+    assert "历史检查点" not in visible_content
+    assert "历史阶段 summary for model only" in serialized_model_messages
+    assert "context_compression_marker" not in serialized_model_messages
+    assert "上下文已压缩" not in serialized_model_messages
+    assert "工具请求" not in serialized_model_messages
+    assert "历史检查点" not in serialized_model_messages
+
+
 def test_context_compression_marker_metadata_does_not_enter_model_messages(tmp_path):
     append_conversation_event(
         tmp_path,
