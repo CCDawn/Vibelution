@@ -177,7 +177,8 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationStreamingResponseContentSource).not.toContain("requestAnimationFrame");
     expect(conversationStreamingResponseContentSource).not.toContain("setVisibleContent");
     expect(conversationViewSource).toContain("const isResponseStreaming = Boolean(message.streaming) && showResponseBlock");
-    expect(conversationViewSource).toContain("showResponseBlock && !isStreamingStatusPlaceholder && responseExpanded && !isResponseStreaming");
+    expect(conversationViewSource).toContain("showResponseBlock && !isStreamingStatusPlaceholder && !isResponseStreaming");
+    expect(conversationViewSource).not.toContain("showResponseBlock && !isStreamingStatusPlaceholder && responseExpanded && !isResponseStreaming");
     expect(conversationViewSource).toContain("? renderStreamingResponseText(responseText)");
     expect(conversationViewStylesSource).toContain(".streamingResponseText");
   });
@@ -232,7 +233,8 @@ describe("ConversationView edit resend affordance", () => {
   });
 
   it("keeps conversation timeline previews wrapped and button slots flat", () => {
-    expect(styles.timelineCellHeader).toContain("items-start");
+    expect(styles.timelineCellHeader).toContain("!items-center");
+    expect(styles.timelineCellHeader).not.toContain("!items-start");
     expect(styles.timelineCellHeader).toContain("!grid");
     expect(styles.timelineCellHeader).toContain("!w-full");
     expect(styles.timelineCellHeader).toContain("border-0");
@@ -258,6 +260,12 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.operationItem).toContain("!p-0");
     expect(styles.operationItem).toContain("pb-1");
     expect(styles.operationStatus).toContain("justify-self-start");
+  });
+
+  it("keeps process and answer disclosure icons vertically centered with their labels", () => {
+    expect(styles.timelineCellHeader).toContain("!items-center");
+    expect(styles.answerOnlyProcessToggle).toContain("[&_[data-slot=vui-button-label]]:items-center");
+    expect(styles.responseToggle).toContain("!items-center");
   });
 
   it("keeps expanded thought timeline text as a left-aligned reading block", () => {
@@ -471,7 +479,8 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("function getCachedMarkdownBlocks(content: string)");
     expect(conversationViewSource).toContain("trimOldestCacheEntries(responseSegmentCacheRef.current, RESPONSE_PARSE_CACHE_LIMIT)");
     expect(conversationViewSource).toContain("trimOldestCacheEntries(markdownBlockCacheRef.current, MARKDOWN_PARSE_CACHE_LIMIT)");
-    expect(conversationViewSource).toContain("const responseSegments = showResponseBlock && !isStreamingStatusPlaceholder && responseExpanded && !isResponseStreaming");
+    expect(conversationViewSource).toContain("const responseSegments = showResponseBlock && !isStreamingStatusPlaceholder && !isResponseStreaming");
+    expect(conversationViewSource).not.toContain("responseExpanded && !isResponseStreaming");
     expect(conversationViewSource).toContain("? getCachedResponseSegments(responseText)");
     expect(conversationViewSource).toContain("const blocks = getCachedMarkdownBlocks(content)");
     expect(conversationViewSource).toContain("const prewarmMessages = timelineMessages");

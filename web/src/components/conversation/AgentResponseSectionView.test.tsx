@@ -54,4 +54,28 @@ describe("AgentResponseSectionView", () => {
     expect(html).toContain('title="Show response"');
     expect(html).not.toContain("Hidden response body");
   });
+
+  it("can keep live answer content visible even when the disclosure state is collapsed", () => {
+    const html = renderToStaticMarkup(
+      <AgentResponseSectionView
+        answerKey="assistant-live-answer"
+        answerContentSectionIds="assistant-live-section-content-0"
+        expanded={false}
+        label="回答"
+        expandedTitle="收起回答"
+        collapsedTitle="展开回答"
+        showSpinner={true}
+        forceBodyVisible={true}
+        onToggle={() => undefined}
+      >
+        <p>正在实时输出的回答</p>
+      </AgentResponseSectionView>,
+    );
+
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('title="展开回答"');
+    expect(html).toContain("正在实时输出的回答");
+    expect(html).toContain("responseBody");
+    expect(html).toContain("statusSpinner");
+  });
 });
