@@ -7,12 +7,12 @@ This document defines the default collaboration protocol for multiple Agents wor
 - `C:\Users\17533\Desktop\Vibelution` is the durable local `main` development/integration workspace. Keep this path checked out on branch `main`; use it for local syncing, merging, final validation, project-memory serialization, and publishing only after the user explicitly authorizes a GitHub sync/release.
 - If `C:\Users\17533\Desktop\Vibelution` is found on a non-main branch, preserve or migrate that work into `C:\Users\17533\Desktop\Vibelution-worktrees\<task-slug>` or a named stash, then restore the root path to `main` before continuing normal development or integration.
 - Development Agents use task-specific worktrees under `C:\Users\17533\Desktop\Vibelution-worktrees\`.
-- If that external worktree root is unavailable, use `.claude/worktrees\<task-slug>` or another explicit task worktree path and record the actual path in preflight/claim evidence.
-- Each active task gets one worktree and one branch. Do not reuse an old task worktree for a new goal.
+- If that external worktree root is unavailable, use `.claude/worktrees\<task-slug>` or another explicit task worktree path and record the actual path in `check`/`claim` evidence.
+- Each active `STANDARD_TASK` or `HIGH_RISK` task gets one worktree and one branch. `FAST_PATCH` docs, rules, tiny UI polish, focused tests, or narrow reversible fixes may stay in the current workspace when there is no active-scope collision and no branch risk. Do not reuse an old task worktree for a new goal.
 
 ## Starting A Task
 
-Create a task branch from the current local `main`:
+For `STANDARD_TASK` and `HIGH_RISK`, create a task branch from the current local `main`:
 
 ```powershell
 cd C:\Users\17533\Desktop\Vibelution

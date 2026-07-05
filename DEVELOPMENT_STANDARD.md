@@ -29,11 +29,13 @@ If a task worktree does not contain `AGENTS.md`, read this file directly before 
 
 ## 2. Task Intake And BRT Gate
 
-Before any non-trivial code or behavior change, use the local BRT skill:
+Before choosing tools, worktree shape, validation, or reporting depth, classify the request as `FAST_PATCH`, `STANDARD_TASK`, or `HIGH_RISK`. The tier decides how much process is required; do not run the full ceremony before deciding whether it will add value.
+
+For non-trivial code or behavior changes, use the local BRT skill:
 
 `C:\Users\17533\.codex\skills\ccdawn-brt\SKILL.md`
 
-Use BRT when a request involves expected behavior, defaults, restore/memory behavior, permissions, state transitions, edge cases, completion criteria, safety gates, promotion/apply/rollback workflows, persistence, public API behavior, agent workflow, or runtime lifecycle.
+Use BRT when a request involves expected behavior, defaults, restore/memory behavior, permissions, state transitions, edge cases, completion criteria, safety gates, promotion/apply/rollback workflows, persistence, public API behavior, agent workflow, or runtime lifecycle. For `FAST_PATCH`, BRT may stay internal and use a silent or micro intent lock.
 
 The BRT checkpoint must lock:
 
@@ -46,9 +48,21 @@ The BRT checkpoint must lock:
 - allowed actions;
 - completion report shape.
 
-You may skip the full BRT flow only for obvious typos, mechanical refactors, dependency bumps, or tiny internal helpers with no behavior ambiguity. If skipped, say why the fast path is safe.
+You may skip the full BRT flow for `FAST_PATCH` work: obvious typos, copy changes, docs-only updates, rule wording updates, mechanical refactors, dependency bumps, tiny internal helpers, small layout/style polish, or focused tests with no behavior ambiguity. If skipped, say why the fast path is safe when the final report would otherwise look under-evidenced.
 
 Do not turn broad words such as `all`, `automatic`, `optimize`, `unified`, `smart`, `closed loop`, or `memory` into implementation without translating them into observable behavior first.
+
+### 2.1 Risk-Tiered Workflow
+
+Use the lightest tier that protects the user, the repository, and concurrent work:
+
+| Tier | Use when | Required workflow | Validation and closeout |
+| --- | --- | --- | --- |
+| `FAST_PATCH` | Single-surface, reversible, low-risk work such as copy, docs, rule wording, tiny UI style/layout polish, small tests, focused read-only review, or a mechanical helper change. No data migration, API contract, deletion, permissions, runtime lifecycle, release, or shared DTO impact. | Stay in the current workspace when that avoids needless friction; use worktree only if there is branch risk, active overlap, or the user asks. BRT can be silent/micro. No planning/task-splitting/memory sync by default. Hot files still need a narrow guard claim. | Run the smallest useful check, or state why no executable check is useful. Review `git status` and the current diff. Commit only when requested or when the local branch workflow requires it. Report refresh/memory/version as `not affected` when true. |
+| `STANDARD_TASK` | Normal feature or bug work, multi-file UI changes, user-visible behavior, component extraction, backend route/service changes, or changes that need focused tests to be trustworthy. | Use a task worktree by default. Run BRT in micro/align mode, claim relevant scopes in multi-session work, and reuse project-native patterns. | Run focused tests and any required build/typecheck for the affected surface. Make a Launcher refresh decision. Commit or explicitly hand off not-ready work. Update or propose project memory when the task changes durable project state. |
+| `HIGH_RISK` | Work touching data loss, archive/delete/reset, permissions, secrets, persistence, migrations, public API/DTO contracts, runtime/Launcher lifecycle, LLM/tool routing, memory/RAG, release/versioning, cross-lane coordination, or shared hot files. | Full flow: BRT, root-cause or source-of-truth reasoning, explicit guard claim, isolated worktree, plan when useful, no destructive or publication action without authorization. | Add or update tests/logging evidence, run broad enough validation, handle refresh and memory explicitly, judge version impact, self-review diff, and close the claim with evidence. |
+
+Upgrade the tier when evidence shows hidden risk. Downgrade when the remaining process would only create delay without improving correctness, safety, or handoff quality.
 
 ## 3. Root-Cause Planning
 
@@ -126,7 +140,7 @@ Do not log secrets, full prompts, large diffs, full file contents, or unbounded 
 
 ## 5. Logging And Test Coupling
 
-Every new feature or user-visible behavior change requires an explicit logging decision and a matching test decision in the same round.
+Every new feature or user-visible behavior change requires an explicit logging decision and a matching test decision in the same round. For `FAST_PATCH` copy, docs, visual polish, and tests-only work, a compact "logging not affected" and "no new automated test needed" decision is sufficient when true.
 
 Add or update runtime scene logging when a change affects:
 
@@ -155,7 +169,7 @@ The root workspace:
 
 `C:\Users\17533\Desktop\Vibelution`
 
-is the local `main` integration workspace. It is for syncing, merging, final validation, project-memory serialization, and user-authorized publication. Ordinary development belongs in task worktrees.
+is the local `main` integration workspace. It is for syncing, merging, final validation, project-memory serialization, and user-authorized publication. `STANDARD_TASK` and `HIGH_RISK` ordinary development belongs in task worktrees. `FAST_PATCH` may stay in the current workspace when it is narrow, reversible, and does not collide with active claims or branch state.
 
 This root path is the durable local development-main checkout and must stay checked out on branch `main`. Do not leave `C:\Users\17533\Desktop\Vibelution` on a task branch, unresolved merge, or long-lived dirty experiment. If root is found on a non-main branch, first preserve or migrate that branch's dirty work into `C:\Users\17533\Desktop\Vibelution-worktrees\<task-slug>` or a named stash, then restore root to `main` before continuing normal development or integration. A separate `main` worktree may be used only as a short-lived recovery exception while root is blocked, and it should be retired once root has been restored.
 
@@ -176,20 +190,22 @@ cd C:\Users\17533\Desktop\Vibelution
 git worktree add C:\Users\17533\Desktop\Vibelution-worktrees\<task-slug> -b codex/<task-slug> main
 ```
 
-Before editing in a multi-session project, use the project memory guard:
+Before editing hot files, shared scopes, or any `STANDARD_TASK` / `HIGH_RISK` work in a multi-session project, use the project memory guard:
 
 ```powershell
 python "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "C:\Users\17533\Desktop\Vibelution" status
-python "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "C:\Users\17533\Desktop\Vibelution" recommend --scope "<requested-scope>" --task-type "<task-type>" --summary "<task summary>"
-python "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "C:\Users\17533\Desktop\Vibelution" preflight --worktree "<task-worktree>"
-python "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "C:\Users\17533\Desktop\Vibelution" claim --agent-id "<agent-id>" --session-id "<session-id>" --lane "<lane-id>" --task "<task title>" --scope "<write-scope>" --forbidden-scope "<forbidden-scope>" --worktree "<task-worktree>" --branch "<task-branch>" --validation "<validation command>"
+python "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "C:\Users\17533\Desktop\Vibelution" check --lane "<lane-id>" --scope "<write-scope>" --scope "<second-write-scope>"
+python "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "C:\Users\17533\Desktop\Vibelution" claim --lane "<lane-id>" --scope "<write-scope>" --agent "<agent-id>" --task "<task title>" --ttl-minutes 120 --note "<scope and validation note>"
+python "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "C:\Users\17533\Desktop\Vibelution" release --claim-id "<claim-id>" --status completed --reason "<validation or blocker summary>"
 ```
 
 If a scope hits an active claim or hotspot, stop unless you have explicit authorization and record the claim with intentional `--force`.
 
 One Agent should bind to one active task worktree at a time. Do not reuse an old task worktree for a new goal.
 
-The Agent that implements a task owns the full local development loop by default: self-review the diff, run the scoped validation, commit the task branch, decide whether the merge gate is satisfied, and either merge the task into local `main` or explicitly leave it `ready_for_merge` / `blocked` with the reason. Do not treat implementation as complete merely because a worktree commit exists.
+The lightweight guard command vocabulary is `status`, `check`, `claim`, `activate`, `release`, and `prune`. Historical registry or merge-queue records may still use states such as `ready_for_merge`, `merged_to_main`, `local_applied`, `blocked`, or `cancelled`; treat those as queue semantics, not guard subcommands.
+
+For `STANDARD_TASK` and `HIGH_RISK`, the Agent that implements a task owns the full local development loop by default: self-review the diff, run the scoped validation, commit the task branch, decide whether the merge gate is satisfied, and either merge the task into local `main` or explicitly hand off a ready/blocked queue state with the reason. Do not treat implementation as complete merely because a worktree commit exists.
 
 ## 7. Shared Hot Files
 
@@ -209,6 +225,19 @@ Treat these as shared hot files and edit them only with a narrow scope and expli
 
 Do not perform broad formatting, opportunistic cleanup, renaming, or splitting in hot files unless the task is specifically scoped to that work.
 
+### 7.1 Shared DTO And Projection Serialization
+
+Changes touching `web/src/api/types.ts`, React Query key contracts, backend route DTOs, cross-route API projections, generated Challenge Cup flow output, or any other shared hot file must be serialized before implementation.
+
+Before claiming, forcing, or merging such work:
+
+- run the guard `check` for the exact hot files and related generated or projected surfaces;
+- list conflicting active claim IDs, owners, scopes, and whether each conflict is same-lane, scope overlap, or both;
+- use `--force` only after explicit user authorization or main integration owner decision, and record the reason in the claim note;
+- name the merge order, reconciliation owner, and final conflict-resolution validation.
+
+A DTO or projection change is not complete until backend route/service tests, frontend type/build/layout or logic tests, cache/query-key impact, and generated or project-memory surfaces are reconciled. If a user-visible surface is intentionally left stale, record it as projection debt with owner, trigger, and validation gap.
+
 ## 8. Implementation Boundaries
 
 - Prefer project-native tools and structured APIs over broad shell commands.
@@ -216,6 +245,7 @@ Do not perform broad formatting, opportunistic cleanup, renaming, or splitting i
 - Use focused tests and small validation loops before widening scope.
 - Do not repeat the same blocked tool pattern in the same round.
 - Keep Windows shell behavior in mind. Avoid Unix-only habits that add noise.
+- On Windows, if bare `python` resolves to the Microsoft Store `WindowsApps` shim or fails silently, use the project `.venv\Scripts\python.exe` or `py` explicitly. Command examples may be adapted to the reliable interpreter for the current machine.
 - On Windows PowerShell, do not pipe here-strings directly into `python -`; use `python -c "exec('''...''')"` or create a temporary UTF-8 no-BOM `.py` file.
 - When building keyword-triggered runtime guards or prompt relevance checks, avoid raw substring matching for English tokens on Windows paths; use token-aware matching.
 - Chat mode user input must enter the LLM payload as `role=user` or equivalent user-message shape. Do not wrap chat user input in `SystemMessage`.
@@ -304,17 +334,48 @@ Existing JavaScript files may remain temporarily. Migrate only when touched for 
 
 Python, CLI, harness, and evaluation execution code remain Python unless there is a separate architectural reason to change them.
 
-Frontend TypeScript changes that affect compiled application code or API/type contracts require the narrowest relevant tests plus:
+Frontend TypeScript changes that affect compiled application code or API/type contracts normally require the narrowest relevant tests plus:
 
 ```powershell
 npm --prefix web run build
 ```
 
-For frontend visual work, check the real UI after each meaningful visual change through the browser, screenshot, or user-provided screenshot. If browser tools are blocked, state that and use user screenshots as primary visual evidence.
+For `FAST_PATCH` visual-only changes with no API, routing, build-input, or shared component contract impact, a narrower check is acceptable: a focused Vitest/layout test, TypeScript check, browser/user screenshot, or reasoned diff self-review when no runnable UI is practical. Do not call it fully validated if the chosen check cannot cover the affected behavior.
+
+For frontend visual work, check the real UI after each meaningful visual change through the browser, screenshot, or user-provided screenshot when the layout or interaction risk is material. If browser tools are blocked, state that and use user screenshots as primary visual evidence.
 
 Vibelution workbench surfaces should feel like dense operational consoles: compact tables, spec grids, light boundaries, grouped headings, and metadata hierarchy before decorative cards.
 
 Detailed interaction geometry requirements, including button sizing, control choice, loading-state stability, and screenshot validation, live in section 23.10.
+
+### 9.1 Tailwind, HeroUI, And VUI Style Ownership
+
+Frontend styling is Tailwind-first. New UI, touched UI, extracted components, and visual polish under `web/` should express layout, spacing, density, color, borders, and state styling through Tailwind utility classes or Tailwind class maps. Do not introduce new CSS Modules, page-scale CSS files, ad hoc inline `style={{ ... }}`, or CSS-in-JS for ordinary product UI.
+
+Use this ownership order:
+
+- VUI project components own Vibelution-specific composition, density, tone mapping, and reusable visual language;
+- HeroUI owns accessible interaction primitives such as buttons, inputs, selects, tabs, dropdowns, popovers, tooltips, switches, checkboxes, modals, and drawers;
+- Tailwind owns the final visual styling applied through `className`, HeroUI `classNames`, or typed local `*.styles.ts` class maps.
+
+Before adding a new visible control or interaction primitive, check `web/src/components/vui/` and existing route/component patterns. Extend or compose an existing VUI wrapper when it can express the behavior. Use HeroUI directly only for a missing primitive, a small local composition, or a migration step toward a VUI wrapper.
+
+HeroUI is the preferred base for common interactive controls, but it must not become the business state owner. Map product states such as Agent health, runtime status, memory scope, claim state, tool policy, and validation status into project-owned tone or intent values before passing them into HeroUI props or slots.
+
+When customizing HeroUI, prefer its public APIs: `variant`, `size`, `radius`, `color`, `className`, `classNames`, slots, and documented composition patterns. Do not rely on unstable internal DOM structure, deep selectors, or one-off overrides that only work for a single route.
+
+Style maps should be local, typed, and narrow:
+
+- prefer dedicated component `*.styles.ts` maps or route-local style maps over importing a parent route's `styles`;
+- type style maps with `as const` or explicit unions instead of broad `Record<string, string>`;
+- avoid uncontrolled dynamic `styles[key]`; use typed tone maps or fallback helpers;
+- child components must not import parent `Route.styles` or receive parent-owned internal class names for their own visual structure.
+
+Allowed exceptions are limited to global base/reset CSS, Tailwind theme or token definitions, third-party library integration shims, complex markdown/prose rendering, canvas/SVG/chart rendering, and bounded keyframe animations. Each exception should be narrow, named, and justified in the plan, code comment, review note, or final report.
+
+Legacy CSS and non-Tailwind styling may remain until touched. When touching legacy UI, do not expand the old styling surface. Either migrate the touched slice to Tailwind/VUI/HeroUI or record why migration is deferred and what validation protects the mixed state.
+
+Frontend visual verification should cover the affected states and viewports in proportion to the tier. For `FAST_PATCH`, inspect only the states plausibly affected. For `STANDARD_TASK` and `HIGH_RISK` HeroUI or VUI changes, check normal, hover/focus, disabled, loading, error, empty, and longest realistic Chinese/English label states when relevant.
 
 ## 10. Bun Usage
 
@@ -373,9 +434,20 @@ Any Agent changing running UI code, backend code, launcher lifecycle code, runti
 
 Before any Launcher restart, check whether Vibelution has active work using Launcher status or lifecycle evidence when available.
 
-If any chat turn, group round, evolution run, supervised run, worktree task, or other project task is active, Launcher restart is forbidden by default. Do not ask for force-confirmation, do not pass `confirmedActiveWork`, and do not kill processes to bypass the guard. Report:
+If any chat turn, group round, evolution run, supervised run, worktree task, or other project task is active, Launcher restart is forbidden by default. Do not silently pass `confirmedActiveWork`, do not kill processes to bypass the guard, and first report:
 
 `有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。`
+
+After reporting the block, an Agent may request controlled force takeover when the user is asking for immediate runtime refresh or release/runtime verification and waiting would materially block the operator. The request must include:
+
+- the active work or active claim list that would be interrupted;
+- the likely interruption risk, such as lost in-flight output, cancelled work runs, dirty worktrees, or stale claim state;
+- safer alternatives, such as wait, stop a named task first, or defer refresh;
+- the exact confirmation phrase `确认强制接管并刷新 Vibelution`.
+
+Do not execute force takeover unless the user replies with that exact confirmation phrase in the current thread after seeing the risk list. A vague "force", "continue", or "yes" is not enough.
+
+When confirmed, use the existing Runtime Manager or Launcher force-stop / force-close / confirmed-active-work path before restart. Do not use ad hoc process killing, `taskkill.exe`, raw port cleanup, or direct `uvicorn`/`npm` restarts as the normal takeover path. Record the confirmation phrase, interrupted work identifiers, force-stop result, restart result, and follow-up cleanup or claim state in runtime evidence and the final report; sync project memory when the takeover changes governance state.
 
 Preferred refresh paths:
 
@@ -436,7 +508,7 @@ Commit messages should be concise, scoped, and behavior-oriented. Prefer prefixe
 - `docs: ...`;
 - `chore: ...`.
 
-After implementation and validation in a task worktree, the owning Agent should self-review and close the local loop. A task branch may merge itself into local `main` only when all merge gates pass:
+After implementation and validation in a task worktree, the owning Agent should self-review and close the local loop. `FAST_PATCH` work that intentionally stayed in the current workspace may stop after diff review and scoped validation when no commit or merge was requested. A task branch may merge itself into local `main` only when all merge gates pass:
 
 - the claim belongs to the current Agent/session and covers the changed files;
 - the task branch is committed and contains only current-task changes;
@@ -447,12 +519,12 @@ After implementation and validation in a task worktree, the owning Agent should 
 - the user did not ask to stop before merge, keep work isolated, or hand off only;
 - the merge remains local and does not push to GitHub.
 
-When the gates pass, merge one task at a time into local `main`, run the smallest useful post-merge validation or state why docs-only/rule-only validation is sufficient, close the claim, and remove the task worktree when it is clean.
+When the gates pass, merge one task at a time into local `main`, run the smallest useful post-merge validation or state why docs-only/rule-only/`FAST_PATCH` validation is sufficient, close the claim, and remove the task worktree when it is clean.
 
-When any gate fails, do not force the merge. Mark the claim ready or blocked with the exact reason:
+When any gate fails, do not force the merge. Close the lightweight guard claim as blocked, or create a separate ready/blocked queue handoff in the project memory lane if integration must happen later:
 
 ```powershell
-python "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "C:\Users\17533\Desktop\Vibelution" ready --claim-id "<claim-id>" --commit "<sha>" --changed-file "<file>" --validation "<result>"
+python "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "C:\Users\17533\Desktop\Vibelution" release --claim-id "<claim-id>" --status blocked --reason "<failed merge gate, validation, or conflict summary>"
 ```
 
 Self-merge does not change remote publication rules. Pushing, PR creation, remote branch deletion, or treating `origin/main` as authority still requires explicit user authorization.
@@ -530,7 +602,7 @@ Task-owning Agents should self-merge when the merge gates in section 13 pass. A 
 - merging one task at a time;
 - running targeted validation after each merge;
 - handling conflicts or returning them to the owning worktree;
-- closing claims with `finish`;
+- closing lightweight guard claims with `release`;
 - cleaning successfully merged worktrees;
 - serializing project-memory updates;
 - avoiding remote push unless the user authorizes it.
@@ -586,7 +658,7 @@ Handoff is gated on real user request and must not be triggered by system-inject
 
 Project memory is single-writer shared state.
 
-Before meaningful development, read:
+Before `STANDARD_TASK`, `HIGH_RISK`, continuation work, cross-session decisions, or any task where memory can change the answer, read:
 
 - `.docs/project-memory/INDEX.md`;
 - `.docs/project-memory/memory.json`;
@@ -594,9 +666,11 @@ Before meaningful development, read:
 - `.docs/project-memory/agent-registry.json`;
 - relevant lane files under `.docs/project-memory/lanes/`.
 
+For `FAST_PATCH`, read project memory only when the patch touches governance, active claims, remembered decisions, hot files, or an existing memory fact. Do not read the full memory bundle for trivial read-only questions, tiny cosmetic edits, or docs wording where memory cannot affect the conclusion.
+
 Session-level Agents must not hand-edit `.docs/project-memory/**` or `PROJECT_MEMORY.html` while working in parallel unless they are the current memory-sync owner with an explicit claim. Parallel Agents should write append-only memory proposals or report exact lane/update payloads.
 
-After meaningful development, update or propose updates for:
+After `STANDARD_TASK` or `HIGH_RISK` meaningful development, update or propose updates for:
 
 - current lane file under `.docs/project-memory/lanes/`;
 - `.docs/project-memory/memory.json` for shared metadata/global recent updates;
@@ -612,7 +686,24 @@ python "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\sync_
 python "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\render_overview.py" "C:\Users\17533\Desktop\Vibelution"
 ```
 
-Do not finish a task with stale project memory or a stale active claim unless the user explicitly says to skip it. If memory sync cannot be done safely in the task worktree, report the exact proposal for the main integration/memory-sync owner.
+Do not finish `STANDARD_TASK` or `HIGH_RISK` work with stale project memory or a stale active claim unless the user explicitly says to skip it. `FAST_PATCH` may report "project memory not affected" when it changes no durable project state, lane status, blocker, decision, or follow-up. If memory sync cannot be done safely in the task worktree, report the exact proposal for the main integration/memory-sync owner.
+
+### 19.1 Spec And Plan Lifecycle
+
+`docs/superpowers/specs/` and `docs/superpowers/plans/` are active governance artifacts, not loose notes. New or materially updated specs and plans should begin with compact status metadata:
+
+- `Status`;
+- `Owner`;
+- `Claim`, branch, or worktree when applicable;
+- `Scope`;
+- `Supersedes` or `Replaces` when this document retires another artifact;
+- `Implementation link`;
+- `Validation`;
+- `Close condition`.
+
+Use a small status vocabulary: `draft`, `user-approved`, `active-plan`, `in-progress`, `implemented`, `superseded`, `blocked`, or `historical`.
+
+When implementation starts or finishes, update the document status or the relevant project-memory lane. Do not leave superseded specs, abandoned plans, or already-implemented drafts with ambiguous current-state wording.
 
 ## 20. Challenge Cup Flow Site
 
@@ -641,6 +732,17 @@ node "C:\Users\17533\Desktop\Vibelution\挑战杯\build_research_flow_site.mjs"
 ```
 
 Before finishing a Challenge Cup round, verify HTML links still resolve and report whether the flow HTML was updated.
+
+### 20.1 Challenge Cup And Teams Projection Sync
+
+When Challenge Cup or Teams research workflow schema, data, evidence, or generated-site behavior changes, report a projection table before completion:
+
+| Source or fact | Backend source | API DTO | Teams UI | Generated flow site | Project memory/docs | Validation | Deferred debt |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+
+This applies especially to Evidence Ledger, `contentExtraction`, `candidateExtractions`, `recordExtractions`, stage tasks, source references, graph evidence, candidate knowledge, memory-platform sync, and deliverable state.
+
+Do not mark a research workflow change complete while a user-visible projection is stale unless the debt has an owner, claim or trigger, and a concrete validation gap.
 
 ## 21. Final Reports
 
@@ -671,7 +773,20 @@ Do not over-repeat root `config.toml` / `config.example.toml` cleanup state unle
 
 ## 22. Development Round Done Criteria
 
-A development round is not done until:
+A development round is not done until its tier-specific checklist is satisfied:
+
+`FAST_PATCH`:
+
+- behavior and scope are clear;
+- relevant logs/evidence were inspected when the request is a bug, runtime issue, or failed command;
+- implementation stayed within the narrow scope;
+- logging, testing, Launcher refresh, project memory, and version impact are either handled or explicitly `not affected`;
+- relevant lightweight checks ran, or the final report explains why no executable check is useful;
+- Git status and the current-task diff were reviewed;
+- any guard claim created for a hot file was released;
+- final report states remaining risk and next action.
+
+`STANDARD_TASK` and `HIGH_RISK`:
 
 - behavior and scope are clear;
 - relevant logs or evidence were inspected for bugs/runtime issues;
@@ -685,8 +800,8 @@ A development round is not done until:
 - current-task diff was self-reviewed;
 - changes are committed or explicitly marked not ready;
 - merge gates were evaluated;
-- claim is `ready_for_merge`, `merged_to_main`, `local_applied`, `blocked`, or `cancelled`;
-- project memory was updated or an exact update proposal was handed off;
+- lightweight guard claim was released as `completed`, `blocked`, or `released`, or the handoff queue state is explicitly recorded as `ready_for_merge`, `merged_to_main`, `local_applied`, `blocked`, or `cancelled`;
+- project memory was updated, explicitly not affected, or an exact update proposal was handed off;
 - version impact was judged;
 - final report states remaining risk and next action.
 
@@ -817,6 +932,16 @@ Avoid:
 - treating another Agent's final report as primary evidence without checking files, logs, commits, registry state, or tests.
 
 Validation anchor: memory work should show the source, target layer, promotion condition, and sync/render result or exact handoff proposal.
+
+#### User Content And Markdown Safety
+
+Trigger this sub-constraint when importing, rendering, indexing, retrieving, or exposing Markdown, HTML, local documents, user content spaces, knowledge docs, or generated prose from external or user-controlled sources.
+
+Treat the content as untrusted. Preserve attribution for actor, scope, origin path or ID, checksum or revision when practical, and ingest time. Imported text may be cited, searched, summarized, and rendered, but it must not become system/tool instructions or override developer, project, permission, or routing rules.
+
+Sanitize rendering through a safe Markdown or document path. Block or strip scripts, iframes, objects, embeds, executable data URIs, and external resources unless an explicit product decision allows them with visible source indication and no secret, prompt, local path, or context interpolation.
+
+Before exposing imported content to UI, search, memory, RAG, or tools, define delete, archive, reindex, and cache-invalidation semantics. Validation should cover parser/sanitizer behavior, actor or ACL boundaries, index/search behavior, prompt-injection isolation, and malicious links, images, data URIs, or embedded HTML.
 
 ### 23.6 Frontend State, Optimistic UX, And Cache Coherence
 
