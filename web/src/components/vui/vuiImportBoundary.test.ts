@@ -22,6 +22,7 @@ const productSharedParentStyleConsumers = [
   "app/AppShellStatusGuidePanel.tsx",
   "app/AppShellUtilityMenu.tsx",
   "routes/AgentSessionTabStrip.tsx",
+  "routes/ConfigHealthDiagnosticsPanel.tsx",
   "routes/ConversationIndexSection.tsx",
   "routes/ConversationIndexTree.tsx",
   "routes/DirectSessionIndexItem.tsx",

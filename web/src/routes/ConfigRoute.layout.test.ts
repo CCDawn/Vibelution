@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import routeSource from "./ConfigRoute.tsx?raw";
+import healthDiagnosticsPanelSource from "./ConfigHealthDiagnosticsPanel.tsx?raw";
 
 const stylesModuleSource = readFileSync(new URL("./ConfigRoute.module.css", import.meta.url), "utf-8");
 const stylesSource = stylesModuleSource;
@@ -110,12 +111,43 @@ describe("ConfigRoute layout contract", () => {
 
   it("routes cleanup diagnostics to Launcher maintenance instead of Web Reset", () => {
     expect(routeSource).toContain("healthOpenLauncher");
-    expect(routeSource).toContain('href="/launcher"');
+    expect(healthDiagnosticsPanelSource).toContain('href="/launcher"');
     expect(routeSource).toContain("queryKeys.launcherMaintenanceSummary()");
     expect(routeSource).not.toContain("healthOpenReset");
     expect(routeSource).not.toContain("queryKeys.resetSummary()");
+    expect(healthDiagnosticsPanelSource).not.toContain("`/reset?item=");
+    expect(healthDiagnosticsPanelSource).not.toContain('href={`/reset?item=');
+  });
+
+  it("moves health diagnostics display into a route-local panel while keeping ConfigRoute as query owner", () => {
+    expect(routeSource).toContain('import { ConfigHealthDiagnosticsPanel');
+    expect(routeSource).toContain('from "./ConfigHealthDiagnosticsPanel"');
+    expect(routeSource).toContain("<ConfigHealthDiagnosticsPanel");
+    expect(routeSource).toContain("diagnostics={healthDiagnosticsQuery.data}");
+    expect(routeSource).toContain("loading={healthDiagnosticsQuery.isLoading || healthDiagnosticsQuery.isFetching}");
+    expect(routeSource).toContain("void healthDiagnosticsQuery.refetch();");
+
+    expect(routeSource).not.toContain("function LogHelperCenter");
+    expect(routeSource).not.toContain("function HealthFindingCard");
+    expect(routeSource).not.toContain("function HealthQuickActionLink");
+    expect(routeSource).not.toContain("function SessionHelperCard");
+    expect(routeSource).not.toContain("function LogHelperCard");
+
+    expect(healthDiagnosticsPanelSource).toContain("export function ConfigHealthDiagnosticsPanel");
+    expect(healthDiagnosticsPanelSource).toContain("function HealthFindingCard");
+    expect(healthDiagnosticsPanelSource).toContain("function HealthQuickActionLink");
+    expect(healthDiagnosticsPanelSource).toContain("function SessionHelperCard");
+    expect(healthDiagnosticsPanelSource).toContain("function LogHelperCard");
+  });
+
+  it("keeps health diagnostics cleanup and reset hints routed to Launcher maintenance", () => {
+    expect(healthDiagnosticsPanelSource).toContain("healthOpenLauncher");
+    expect(healthDiagnosticsPanelSource).toContain('href="/launcher"');
+    expect(healthDiagnosticsPanelSource).toContain("action.resetItemId ? \"/launcher\"");
+    expect(healthDiagnosticsPanelSource).not.toContain("`/reset?item=");
+    expect(healthDiagnosticsPanelSource).not.toContain("href={`/reset?item=");
     expect(routeSource).not.toContain("`/reset?item=");
-    expect(routeSource).not.toContain('href={`/reset?item=');
+    expect(routeSource).not.toContain("href={`/reset?item=");
   });
 
   it("keeps workbench background image settings separate from avatar cropping", () => {
