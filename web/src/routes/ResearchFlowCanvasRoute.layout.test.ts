@@ -325,6 +325,63 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
     expect(styles.twoColumns).toContain("max-[430px]:grid-cols-1");
   });
 
+  it("keeps canvas inspector surfaces background-aware and horizontally contained", () => {
+    for (const key of [
+      "body",
+      "canvasShell",
+      "inspector",
+      "inspectorHeader",
+      "inspectorContent",
+      "issuePanel",
+      "issueCard",
+      "issueCardBody",
+      "issueCardHeader",
+      "issueSummary",
+      "organizationPanel",
+      "organizationActionRow",
+      "organizationAuditCard",
+      "organizationBadgeRow",
+      "organizationMetric",
+      "organizationProposalCard",
+      "organizationSummaryGrid",
+      "readonlyDetailHeader",
+      "selectionSummary",
+    ] as const) {
+      expect(styles[key], key).toContain("min-w-0");
+      expect(styles[key], key).toContain("max-w-full");
+    }
+
+    for (const key of [
+      "canvasShell",
+      "issuePanel",
+      "issueCard",
+      "issueCardBody",
+      "issueCardHeader",
+      "issueSummary",
+      "organizationPanel",
+      "organizationActionRow",
+      "organizationAuditCard",
+      "organizationBadgeRow",
+      "organizationMetric",
+      "organizationProposalCard",
+      "organizationSummaryGrid",
+      "readonlyDetailHeader",
+      "selectionSummary",
+    ] as const) {
+      expect(styles[key], key).toContain("color-mix(in_srgb");
+      expect(styles[key], key).toContain("transparent");
+      expect(styles[key], key).not.toContain("bg-[var(--vui-surface-row)]");
+      expect(styles[key], key).not.toContain("bg-[var(--surface-page)]");
+    }
+
+    expect(styles.body).toContain("overflow-x-hidden");
+    expect(styles.inspector).toContain("overflow-x-hidden");
+    expect(styles.inspectorContent).toContain("overflow-x-hidden");
+    expect(styles.selectionSummary).toContain("[overflow-wrap:anywhere]");
+    expect(styles.primaryButton).toContain("bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)]");
+    expect(styles.primaryButton).not.toContain("var(--vui-surface-row)");
+  });
+
   it("keeps restored canvas inspector grids from the CSS module migration", () => {
     expect(routeSource).toContain("styles.inspectorBody");
     expect(styles.inspectorBody).toContain("grid-cols-[76px_minmax(0,1fr)]");
