@@ -1,6 +1,9 @@
-const panelSurface = "rounded-lg border border-vui-border-subtle bg-vui-surface-panel/72";
-const rowSurface = "rounded-lg border border-vui-border-subtle bg-vui-surface-row";
-const rowSurfaceHover = "hover:border-vui-border-soft hover:bg-vui-surface-row-hover";
+const panelSurface =
+  "rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)]";
+const rowSurface =
+  "rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)]";
+const rowSurfaceHover =
+  "hover:border-[var(--vui-border-soft)] hover:bg-[var(--vui-surface-row-hover)]";
 
 const styles = {
   page:
@@ -52,7 +55,7 @@ const styles = {
   quietState:
     `m-0 ${rowSurface} px-2.5 py-2 text-[var(--vui-font-xs)] leading-tight text-vui-fg-tertiary`,
   errorState:
-    "mx-3 mt-2 rounded-lg border border-[color-mix(in_srgb,var(--state-error)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_10%,transparent)] px-2.5 py-2 text-[var(--vui-font-xs)] text-[var(--state-error)]",
+    "mx-3 mt-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_10%,transparent)] px-2.5 py-2 text-[var(--vui-font-xs)] text-[var(--state-error)]",
   detailGrid:
     "grid min-h-0 content-start gap-1.5 overflow-auto pr-1",
   detailRow:
