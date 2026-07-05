@@ -10,13 +10,13 @@ const styles = {
   teamMemoryMemberActions:
     "teamMemoryMemberActions min-w-0 flex flex-wrap items-center gap-1.5 !flex items-center justify-end gap-[5px] min-w-0 [&_a_span]:hidden [&_a]:inline-flex [&_a]:items-center [&_a]:justify-center [&_a]:w-[26px] [&_a]:min-w-[26px] [&_a]:min-h-[24px] [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_30%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--surface-panel)_88%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:no-underline",
   teamMemoryMemberCard:
-    "teamMemoryMemberCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "teamMemoryMemberCard min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
   teamMemoryMemberHeading:
     "teamMemoryMemberHeading min-w-0 hidden",
   teamMemoryMemberIdentity:
     "teamMemoryMemberIdentity min-w-0 grid gap-1",
   teamMemoryMemberTable:
-    "teamMemoryMemberTable min-w-0 min-h-0 !grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] content-start auto-rows-max gap-2 overflow-auto",
+    "teamMemoryMemberTable min-w-0 min-h-0 !grid grid-cols-[repeat(auto-fit,minmax(260px,max-content))] justify-start content-start auto-rows-max gap-2 overflow-auto",
   teamMemoryRole:
     "teamMemoryRole min-w-0",
   teamMemoryStatusBadge:
