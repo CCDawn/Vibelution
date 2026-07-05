@@ -4,6 +4,11 @@ import styles from "./ResearchFlowCanvasRoute.styles";
 import routeSource from "./ResearchFlowCanvasRoute.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
 
+function expectLightRepeatedSurface(style: string) {
+  expect(style).not.toContain("bg-[var(--vui-surface-glass)]");
+  expect(style).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+}
+
 describe("ResearchFlowCanvasRoute layout contract", () => {
   it("routes Research flow canvas controls through VUI primitives", () => {
     expect(routeSource).toContain('from "../components/vui"');
@@ -274,14 +279,62 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
     expect(styles.status_blocked).toBeTypeOf("string");
   });
 
+  it("keeps route shells background-aware instead of restacking page surfaces", () => {
+    expect(styles.route).not.toContain("bg-[var(--surface-page)]");
+    expect(styles.canvasShell).not.toContain("bg-[var(--surface-page)]");
+    expect(`${styles.route} ${styles.canvasShell}`).toMatch(/bg-transparent|bg-\[color-mix\(in_srgb,/);
+  });
+
+  it("keeps repeated issue and organization surfaces lighter than panel chrome", () => {
+    [
+      styles.issueCard,
+      styles.issueCardBody,
+      styles.issueCardHeader,
+      styles.issueCardError,
+      styles.issueCardWarning,
+      styles.issueSummary,
+      styles.issueSummaryError,
+      styles.issueSummaryOk,
+      styles.issueSummaryWarning,
+      styles.organizationAgentCard,
+      styles.organizationAuditCard,
+      styles.organizationProposalCard,
+      styles.organizationSummaryGrid,
+    ].forEach(expectLightRepeatedSurface);
+
+    expect(styles.issueCardError).toContain("var(--state-error)");
+    expect(styles.issueCardWarning).toContain("var(--state-warning)");
+    expect(styles.issueSummaryOk).toContain("var(--state-success)");
+    expect(styles.organizationAgentCard).toContain("var(--accent-cool)");
+  });
+
+  it("keeps narrow inspector layouts inside local scroll boundaries", () => {
+    expect(styles.body).toContain("max-[1080px]:grid-cols-1");
+    expect(styles.body).toContain("overflow-hidden");
+    expect(styles.canvasShell).toContain("min-w-0");
+    expect(styles.canvasShell).toContain("overflow-hidden");
+    expect(styles.canvasScroller).toContain("min-w-0");
+    expect(styles.canvasScroller).toContain("overflow-auto");
+    expect(styles.inspectorBody).toContain("min-w-0");
+    expect(styles.inspectorBody).toContain("overflow-hidden");
+    expect(styles.inspectorBody).toContain("max-[430px]:grid-cols-1");
+    expect(styles.inspectorTabs).toContain("overflow-auto");
+    expect(styles.inspectorContent).toContain("overflow-auto");
+    expect(styles.issueSummary).toContain("max-[430px]:grid-cols-1");
+    expect(styles.organizationSummaryGrid).toContain("max-[430px]:grid-cols-1");
+    expect(styles.twoColumns).toContain("max-[430px]:grid-cols-1");
+  });
+
   it("keeps restored canvas inspector grids from the CSS module migration", () => {
     expect(routeSource).toContain("styles.inspectorBody");
     expect(styles.inspectorBody).toContain("grid-cols-[76px_minmax(0,1fr)]");
+    expect(styles.inspectorBody).toContain("max-[430px]:grid-cols-1");
     expect(styles.inspectorBody).toContain("overflow-hidden");
 
     expect(routeSource).toContain("styles.organizationSummaryGrid");
     expect(styles.organizationSummaryGrid).toContain("grid-cols-[repeat(3,minmax(0,1fr))]");
     expect(styles.organizationSummaryGrid).toContain("gap-2");
+    expect(styles.organizationSummaryGrid).toContain("max-[430px]:grid-cols-1");
 
     expect(routeSource).toContain("styles.organizationMetric");
     expect(styles.organizationMetric).toContain("grid-cols-[auto_minmax(0,1fr)]");
@@ -289,6 +342,7 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
 
     expect(routeSource).toContain("styles.issueSummary");
     expect(styles.issueSummary).toContain("grid-cols-[repeat(2,minmax(0,1fr))]");
+    expect(styles.issueSummary).toContain("max-[430px]:grid-cols-1");
 
     expect(routeSource).toContain("styles.readonlySpecGrid");
     expect(styles.readonlySpecGrid).toContain("grid-cols-[auto_minmax(0,1fr)]");
@@ -296,6 +350,7 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
 
     expect(routeSource).toContain("styles.twoColumns");
     expect(styles.twoColumns).toContain("grid-cols-[repeat(2,minmax(0,1fr))]");
+    expect(styles.twoColumns).toContain("max-[430px]:grid-cols-1");
 
     expect(routeSource).toContain("styles.edgePair");
     expect(styles.edgePair).toContain("grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]");
