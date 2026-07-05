@@ -1,6 +1,13 @@
+const panelSurface =
+  "[border:1px_solid_var(--vui-border-subtle)] [border-radius:var(--radius-panel)] [background:color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)] [box-shadow:none]";
+const mutedControl =
+  "[display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] [min-height:var(--control-height)] [padding:0_9px] [border-radius:var(--control-radius)] [font:inherit] [font-size:var(--vui-font-xs)] [font-weight:600] [line-height:1] [white-space:nowrap] [transition:border-color_140ms_ease,background-color_140ms_ease,color_140ms_ease] [border:1px_solid_var(--vui-border-soft)] [background:var(--vui-control-muted)] [color:var(--vui-fg-primary)] hover:[cursor:pointer] hover:[border-color:var(--vui-border-soft)] hover:[background:var(--vui-control-muted-hover)] disabled:[cursor:not-allowed] disabled:[opacity:0.56]";
+const sectionHeaderSurface =
+  "[border-bottom:1px_solid_var(--vui-border-subtle)] [background:color-mix(in_srgb,var(--vui-surface-toolbar)_72%,transparent)]";
+
 const styles = {
   actionButton:
-    "vui-routes-configdraftpanel actionButton [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] [min-height:var(--control-height)] [padding:0_9px] [border-radius:var(--control-radius)] [font:inherit] [font-size:var(--vui-font-xs)] [font-weight:600] [line-height:1] [white-space:nowrap] [transition:border-color_140ms_ease,background-color_140ms_ease,color_140ms_ease] [border:1px_solid_var(--border-soft)] [background:var(--surface-card-subtle)] [color:var(--fg-primary)] hover:[cursor:pointer] hover:[border-color:color-mix(in_srgb,var(--surface-card)_14%,transparent)] disabled:[cursor:not-allowed] disabled:[opacity:0.56]",
+    `vui-routes-configdraftpanel actionButton ${mutedControl}`,
   actionsRow:
     "vui-routes-configdraftpanel actionsRow [display:flex] [align-items:center] [gap:6px] [flex-wrap:wrap]",
   editorWrap:
@@ -10,11 +17,11 @@ const styles = {
   helperText:
     "vui-routes-configdraftpanel helperText [margin:0] [color:var(--fg-secondary)] [line-height:1.38]",
   sectionHeader:
-    "vui-routes-configdraftpanel sectionHeader [display:flex] [align-items:start] [justify-content:space-between] [gap:8px] [min-height:40px] [padding:7px_var(--config-section-x)] [border-bottom:1px_solid_var(--border-hairline)] [background:var(--vui-gradient-route-soft),var(--surface-panel)]",
+    `vui-routes-configdraftpanel sectionHeader [display:flex] [align-items:start] [justify-content:space-between] [gap:8px] [min-height:40px] [padding:7px_var(--config-section-x)] ${sectionHeaderSurface}`,
   sectionIcon:
     "vui-routes-configdraftpanel sectionIcon [color:var(--accent-warm-2)] [margin-top:1px]",
   sectionSurface:
-    "vui-routes-configdraftpanel sectionSurface [border:1px_solid_var(--border-soft)] [border-radius:var(--radius-panel)] [background:var(--vui-gradient-route-soft),var(--surface-panel)] [box-shadow:none] [display:grid] [gap:0] [padding:0] [scroll-margin-top:84px] [overflow:visible] [&>_.sectionText]:[padding:6px_var(--config-section-x)_0] [&>_.sectionText]:[max-width:980px] [&>_.sectionText]:[font-size:var(--vui-font-xs)] [&>_:where(_.actionsRow,.editorWrap_)]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)] [&>_.sectionText_+_:where(_.actionsRow,.editorWrap_)]:[margin-top:6px]",
+    `vui-routes-configdraftpanel sectionSurface ${panelSurface} [display:grid] [gap:0] [padding:0] [scroll-margin-top:84px] [overflow:visible] [&>_.sectionText]:[padding:6px_var(--config-section-x)_0] [&>_.sectionText]:[max-width:980px] [&>_.sectionText]:[font-size:var(--vui-font-xs)] [&>_:where(_.actionsRow,.editorWrap_)]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)] [&>_.sectionText_+_:where(_.actionsRow,.editorWrap_)]:[margin-top:6px]`,
   sectionText:
     "vui-routes-configdraftpanel sectionText [margin:0] [color:var(--fg-secondary)] [line-height:1.38]",
   sectionTitle:

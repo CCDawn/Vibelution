@@ -1,16 +1,27 @@
 // Explicit Tailwind style map for ConfigModelLibraryPanel.
 // Kept route-local so the extracted model library panel does not depend on ConfigRoute.styles.
+const panelSurface =
+  "[border:1px_solid_var(--vui-border-subtle)] [border-radius:var(--radius-panel)] [background:color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)] [box-shadow:none]";
+const rowSurface =
+  "[border:1px_solid_var(--vui-border-subtle)] [border-radius:8px] [background:var(--vui-surface-row)]";
+const mutedControl =
+  "[display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] [min-height:var(--control-height)] [padding:0_9px] [border-radius:var(--control-radius)] [font:inherit] [font-size:var(--vui-font-xs)] [font-weight:600] [line-height:1] [white-space:nowrap] [transition:border-color_140ms_ease,background-color_140ms_ease,color_140ms_ease] [border:1px_solid_var(--vui-border-soft)] [background:var(--vui-control-muted)] [color:var(--vui-fg-primary)] hover:[cursor:pointer] hover:[border-color:var(--vui-border-soft)] hover:[background:var(--vui-control-muted-hover)] disabled:[cursor:not-allowed] disabled:[opacity:0.56]";
+const activeControl =
+  "[border:1px_solid_color-mix(in_srgb,var(--accent-warm)_28%,transparent)] [background:color-mix(in_srgb,var(--accent-warm)_14%,var(--vui-control-muted))] [color:var(--accent-warm-2)] [box-shadow:none] hover:[border-color:color-mix(in_srgb,var(--accent-warm)_40%,transparent)] hover:[background:color-mix(in_srgb,var(--accent-warm)_20%,var(--vui-control-muted))]";
+const sectionHeaderSurface =
+  "[border-bottom:1px_solid_var(--vui-border-subtle)] [background:color-mix(in_srgb,var(--vui-surface-toolbar)_72%,transparent)]";
+
 const styles = {
   actionButton:
-    "vui-routes-configroute actionButton [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] [min-height:var(--control-height)] [padding:0_9px] [border-radius:var(--control-radius)] [font:inherit] [font-size:var(--vui-font-xs)] [font-weight:600] [line-height:1] [white-space:nowrap] [transition:border-color_140ms_ease,background-color_140ms_ease,color_140ms_ease] [border:1px_solid_var(--border-soft)] [background:var(--surface-card-subtle)] [color:var(--fg-primary)] hover:[cursor:pointer] hover:[border-color:color-mix(in_srgb,var(--surface-card)_14%,transparent)] disabled:[cursor:not-allowed] disabled:[opacity:0.56]",
+    `vui-routes-configroute actionButton ${mutedControl}`,
   actionsRow:
     "vui-routes-configroute actionsRow [display:flex] [align-items:center] [gap:6px] [flex-wrap:wrap]",
   advancedEditorPanel:
-    "vui-routes-configroute advancedEditorPanel [display:grid] [gap:6px] [padding:7px] [border:1px_solid_var(--border-hairline)] [border-radius:7px] [background:var(--surface-card-subtle)] [&_summary]:[display:grid] [&_summary]:[gap:3px] [&_summary]:[cursor:pointer] [&_summary]:[color:var(--fg-primary)] [&_summary]:[font-weight:700] [&_summary_small]:[color:var(--fg-tertiary)] [&_summary_small]:[font-size:var(--vui-font-xs)] [&_summary_small]:[font-weight:500] [&_summary_small]:[line-height:1.35] [&[open]_summary]:[padding-bottom:6px]",
+    `vui-routes-configroute advancedEditorPanel [display:grid] [gap:6px] [padding:7px] ${rowSurface} [&_summary]:[display:grid] [&_summary]:[gap:3px] [&_summary]:[cursor:pointer] [&_summary]:[color:var(--vui-fg-primary)] [&_summary]:[font-weight:700] [&_summary_small]:[color:var(--vui-fg-tertiary)] [&_summary_small]:[font-size:var(--vui-font-xs)] [&_summary_small]:[font-weight:500] [&_summary_small]:[line-height:1.35] [&[open]_summary]:[padding-bottom:6px]`,
   compactButton:
     "vui-routes-configroute compactButton [min-height:27px] [padding:0_8px] [font-size:var(--vui-font-xs)]",
   dangerButton:
-    "vui-routes-configroute dangerButton [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] [min-height:var(--control-height)] [padding:0_9px] [border-radius:var(--control-radius)] [font:inherit] [font-size:var(--vui-font-xs)] [font-weight:600] [line-height:1] [white-space:nowrap] [transition:border-color_140ms_ease,background-color_140ms_ease,color_140ms_ease] [border:1px_solid_var(--border-soft)] [background:var(--surface-card-subtle)] [color:var(--fg-primary)] [color:var(--state-error)] [border-color:color-mix(in_srgb,var(--state-error)_24%,transparent)] [background:color-mix(in_srgb,var(--state-error)_12%,transparent)] hover:[cursor:pointer] hover:[border-color:color-mix(in_srgb,var(--surface-card)_14%,transparent)] disabled:[cursor:not-allowed] disabled:[opacity:0.56]",
+    `vui-routes-configroute dangerButton ${mutedControl} [color:var(--state-error)] [border-color:color-mix(in_srgb,var(--state-error)_24%,transparent)] [background:color-mix(in_srgb,var(--state-error)_12%,var(--vui-control-muted))]`,
   eyebrow:
     "vui-routes-configroute eyebrow [margin:0] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [text-transform:uppercase] [letter-spacing:0.08em]",
   field:
@@ -22,11 +33,11 @@ const styles = {
   formGridWideSpan:
     "vui-routes-configroute formGridWideSpan [grid-column:1/-1]",
   formHeader:
-    "vui-routes-configroute formHeader [display:flex] [align-items:start] [justify-content:space-between] [gap:8px] [min-height:36px] [padding:7px_9px] [border-bottom:1px_solid_var(--border-hairline)] max-[1120px]:[align-items:stretch] max-[1120px]:[flex-direction:column]",
+    `vui-routes-configroute formHeader [display:flex] [align-items:start] [justify-content:space-between] [gap:8px] [min-height:36px] [padding:7px_9px] ${sectionHeaderSurface} max-[1120px]:[align-items:stretch] max-[1120px]:[flex-direction:column]`,
   formHeaderIntro:
     "vui-routes-configroute formHeaderIntro [display:flex] [align-items:center] [gap:10px] [align-items:start]",
   formSurface:
-    "vui-routes-configroute formSurface [border:1px_solid_var(--border-soft)] [border-radius:var(--radius-panel)] [background:var(--vui-gradient-route-soft),var(--surface-panel)] [box-shadow:none] [display:grid] [gap:0] [padding:0] [scroll-margin-top:84px] [overflow:hidden] [&>_:where(_.formGrid,.formGridWide,.field,.actionsRow,.formActions,.toggleGrid,.advancedEditorPanel,.fieldHint,.inlineFormError,.helperText_)]:[margin:7px_9px_0] [&>_:where(.fieldHint,.inlineFormError,.helperText):last-child]:[margin-bottom:8px] [&>_:where(.actionsRow,.formActions,.toggleGrid):last-child]:[margin-bottom:8px] [&>_.formHeader_+_:where(.formGrid,.formGridWide,.field,.helperText)]:[margin-top:7px]",
+    `vui-routes-configroute formSurface ${panelSurface} [display:grid] [gap:0] [padding:0] [scroll-margin-top:84px] [overflow:hidden] [&>_:where(_.formGrid,.formGridWide,.field,.actionsRow,.formActions,.toggleGrid,.advancedEditorPanel,.fieldHint,.inlineFormError,.helperText_)]:[margin:7px_9px_0] [&>_:where(.fieldHint,.inlineFormError,.helperText):last-child]:[margin-bottom:8px] [&>_:where(.actionsRow,.formActions,.toggleGrid):last-child]:[margin-bottom:8px] [&>_.formHeader_+_:where(.formGrid,.formGridWide,.field,.helperText)]:[margin-top:7px]`,
   helperText:
     "vui-routes-configroute helperText [margin:0] [color:var(--fg-secondary)] [line-height:1.38]",
   inlineBadge:
@@ -44,7 +55,7 @@ const styles = {
   modelLibrarySection:
     "vui-routes-configroute modelLibrarySection [--config-section-y:6px] [grid-template-rows:auto_auto_auto_auto_auto_minmax(0,1fr)] [min-height:0] [overflow:auto] [&_.sectionHeader]:[min-height:34px] [&_.sectionHeader]:[padding-block:6px] [&>_.sectionText]:[max-width:none] [&>_.sectionText]:[padding-top:5px] [&>_.sectionText]:[overflow:hidden] [&>_.sectionText]:[text-overflow:ellipsis] [&>_.sectionText]:[white-space:nowrap] [&_.modelCenterSummaryBar]:[margin-top:5px] [&_.modelLibraryTestBar]:[gap:6px] [&_.modelLibraryTestBar]:[padding:6px_8px] [&_.modelLibraryTestBar]:[border-radius:7px] [&_.modelLibraryTestSelect]:[min-width:min(320px,100%)] [&_.modelLibraryTestSelect]:[flex-basis:260px] [&_.formHeader]:[min-height:32px] [&_.formHeader]:[padding:5px_8px] [&_.profileTableWrap]:[height:100%] [&_.profileTableWrap]:[max-height:none] [&_.profileTableWrap]:[min-height:0] [&_.profileTableWrap]:[overflow:auto] [&_.profileTable_th]:[padding:5px_7px] [&_.profileTable_td]:[padding:5px_7px] [&_.modelInventoryTable]:[min-width:1020px] [&_.modelInventoryTable]:[table-layout:fixed] [&_.modelInventoryTable_th:first-child]:[width:16%] [&_.modelInventoryTable_th:first-child]:[min-width:178px] [&_.modelInventoryTable_td:first-child]:[width:16%] [&_.modelInventoryTable_td:first-child]:[min-width:178px] [&_.modelInventoryTable_th:nth-child(2)]:[width:14%] [&_.modelInventoryTable_th:nth-child(2)]:[min-width:150px] [&_.modelInventoryTable_td:nth-child(2)]:[width:14%] [&_.modelInventoryTable_td:nth-child(2)]:[min-width:150px] [&_.modelInventoryTable_th:nth-child(3)]:[width:22%] [&_.modelInventoryTable_th:nth-child(3)]:[min-width:220px] [&_.modelInventoryTable_td:nth-child(3)]:[width:22%] [&_.modelInventoryTable_td:nth-child(3)]:[min-width:220px] [&_.modelInventoryTable_th:nth-child(4)]:[width:11%] [&_.modelInventoryTable_th:nth-child(4)]:[min-width:116px] [&_.modelInventoryTable_td:nth-child(4)]:[width:11%] [&_.modelInventoryTable_td:nth-child(4)]:[min-width:116px] [&_.modelInventoryTable_th:nth-child(5)]:[width:26%] [&_.modelInventoryTable_th:nth-child(5)]:[min-width:230px] [&_.modelInventoryTable_td:nth-child(5)]:[width:26%] [&_.modelInventoryTable_td:nth-child(5)]:[min-width:230px] [&_.modelInventoryTable_th:nth-child(6)]:[width:11%] [&_.modelInventoryTable_th:nth-child(6)]:[min-width:120px] [&_.modelInventoryTable_td:nth-child(6)]:[width:11%] [&_.modelInventoryTable_td:nth-child(6)]:[min-width:120px] max-[720px]:[&>_.sectionText]:[white-space:normal]",
   modelLibraryTestBar:
-    "vui-routes-configroute modelLibraryTestBar [display:flex] [align-items:end] [gap:8px] [flex-wrap:wrap] [padding:8px_10px] [border:1px_solid_var(--border-hairline)] [border-radius:8px] [background:var(--surface-card-muted)]",
+    `vui-routes-configroute modelLibraryTestBar [display:flex] [align-items:end] [gap:8px] [flex-wrap:wrap] [padding:8px_10px] ${rowSurface}`,
   modelLibraryTestSelect:
     "vui-routes-configroute modelLibraryTestSelect [min-width:min(360px,100%)] [flex:1_1_280px]",
   modelScenarioButtons:
@@ -52,7 +63,7 @@ const styles = {
   modelScenarioPicker:
     "vui-routes-configroute modelScenarioPicker [display:grid] [gap:6px] [margin:7px_9px_0] [&>_span]:[color:var(--fg-tertiary)] [&>_span]:[font-size:var(--vui-font-xs)] [&>_span]:[font-weight:700] [&>_span]:[text-transform:uppercase] [&>_span]:[letter-spacing:0.06em]",
   primaryButton:
-    "vui-routes-configroute primaryButton [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] [min-height:var(--control-height)] [padding:0_9px] [border-radius:var(--control-radius)] [font:inherit] [font-size:var(--vui-font-xs)] [font-weight:600] [line-height:1] [white-space:nowrap] [transition:border-color_140ms_ease,background-color_140ms_ease,color_140ms_ease] [border:1px_solid_color-mix(in_srgb,var(--accent-warm)_26%,transparent)] [background:color-mix(in_srgb,var(--accent-warm)_14%,transparent)] [color:var(--accent-warm-2)] [box-shadow:none] hover:[cursor:pointer] hover:[border-color:color-mix(in_srgb,var(--surface-card)_14%,transparent)] hover:[border-color:color-mix(in_srgb,var(--accent-warm)_40%,transparent)] hover:[background:color-mix(in_srgb,var(--accent-warm)_20%,transparent)] disabled:[cursor:not-allowed] disabled:[opacity:0.56]",
+    `vui-routes-configroute primaryButton ${mutedControl} ${activeControl}`,
   profileMetaCell:
     "vui-routes-configroute profileMetaCell [display:grid] [gap:5px] [min-width:0] [&_strong]:[min-width:0] [&_strong]:[color:var(--fg-primary)] [&_strong]:[overflow-wrap:anywhere] [&_strong]:[font-size:var(--vui-font-xs)] [&_span]:[min-width:0] [&_span]:[color:var(--fg-tertiary)] [&_span]:[overflow-wrap:anywhere] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[line-height:1.28]",
   profileTable:
@@ -62,17 +73,17 @@ const styles = {
   profileTableSelect:
     "vui-routes-configroute profileTableSelect [min-width:220px]",
   profileTableWrap:
-    "vui-routes-configroute profileTableWrap [width:100%] [overflow-x:auto] [border:1px_solid_var(--border-hairline)] [border-radius:7px] [background:var(--surface-card-muted)] [scrollbar-gutter:stable]",
+    `vui-routes-configroute profileTableWrap [width:100%] [overflow-x:auto] ${rowSurface} [scrollbar-gutter:stable]`,
   profileTaskCell:
     "vui-routes-configroute profileTaskCell [display:grid] [gap:5px] [min-width:0] [&_strong]:[min-width:0] [&_strong]:[color:var(--fg-primary)] [&_strong]:[overflow-wrap:anywhere] [&_strong]:[font-size:var(--vui-font-xs)] [&_span]:[min-width:0] [&_span]:[color:var(--fg-tertiary)] [&_span]:[overflow-wrap:anywhere] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[line-height:1.28]",
   readonlyCodeField:
     "vui-routes-configroute readonlyCodeField [display:flex] [align-items:center] [min-height:var(--control-height)] [width:100%] [min-width:0] [padding:6px_8px] [border:1px_solid_var(--border-hairline)] [border-radius:var(--control-radius)] [background:var(--surface-code)] [color:var(--fg-secondary)] [font-family:var(--font-mono)] [font-size:var(--vui-font-xs)] [line-height:1.25] [overflow-wrap:anywhere]",
   sectionHeader:
-    "vui-routes-configroute sectionHeader [display:flex] [align-items:start] [justify-content:space-between] [gap:8px] [min-height:40px] [padding:7px_var(--config-section-x)] [border-bottom:1px_solid_var(--border-hairline)] [background:var(--vui-gradient-route-soft),var(--surface-panel)]",
+    `vui-routes-configroute sectionHeader [display:flex] [align-items:start] [justify-content:space-between] [gap:8px] [min-height:40px] [padding:7px_var(--config-section-x)] ${sectionHeaderSurface}`,
   sectionIcon:
     "vui-routes-configroute sectionIcon [color:var(--fg-tertiary)] [flex:0_0_auto]",
   sectionSurface:
-    "vui-routes-configroute sectionSurface [border:1px_solid_var(--border-soft)] [border-radius:var(--radius-panel)] [background:var(--vui-gradient-route-soft),var(--surface-panel)] [box-shadow:none] [display:grid] [gap:0] [padding:0] [scroll-margin-top:84px] [overflow:visible] [&>_.sectionText]:[padding:6px_var(--config-section-x)_0] [&>_.sectionText]:[max-width:980px] [&>_.sectionText]:[font-size:var(--vui-font-xs)] [&>_:where(_.hashGrid,.matrixGrid,.healthSummaryGrid,.diagnosticsGrid,.logHelperGrid,.toggleGrid,.healthWorkbenchGrid,.profileTableWrap,.formSurface,.actionsRow,.rawConfigPanel,.editorWrap,.agentRunPanel_)]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)] [&>_.sectionText_+_:where(_.hashGrid,.matrixGrid,.healthSummaryGrid,.diagnosticsGrid,.logHelperGrid,.toggleGrid,.healthWorkbenchGrid,.profileTableWrap,.formSurface,.actionsRow,.rawConfigPanel,.editorWrap_)]:[margin-top:6px]",
+    `vui-routes-configroute sectionSurface ${panelSurface} [display:grid] [gap:0] [padding:0] [scroll-margin-top:84px] [overflow:visible] [&>_.sectionText]:[padding:6px_var(--config-section-x)_0] [&>_.sectionText]:[max-width:980px] [&>_.sectionText]:[font-size:var(--vui-font-xs)] [&>_:where(_.hashGrid,.matrixGrid,.healthSummaryGrid,.diagnosticsGrid,.logHelperGrid,.toggleGrid,.healthWorkbenchGrid,.profileTableWrap,.formSurface,.actionsRow,.rawConfigPanel,.editorWrap,.agentRunPanel_)]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)] [&>_.sectionText_+_:where(_.hashGrid,.matrixGrid,.healthSummaryGrid,.diagnosticsGrid,.logHelperGrid,.toggleGrid,.healthWorkbenchGrid,.profileTableWrap,.formSurface,.actionsRow,.rawConfigPanel,.editorWrap_)]:[margin-top:6px]`,
   sectionText:
     "vui-routes-configroute sectionText [margin:0] [color:var(--fg-secondary)] [line-height:1.38]",
   sectionTitle:
