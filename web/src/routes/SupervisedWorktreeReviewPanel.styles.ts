@@ -1,4 +1,4 @@
-const worktreeReviewSurfaceClass = "grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-2 overflow-hidden rounded-lg border border-vui-border-subtle bg-vui-surface-panel/72 px-3 pb-3 pt-2.5 text-[0.9rem] shadow-none";
+const worktreeReviewSurfaceClass = "grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-2 overflow-hidden rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-panel/72 px-3 pb-3 pt-2.5 text-[0.9rem] shadow-none";
 const surfaceHeaderCompactClass = "flex min-w-0 items-center justify-between gap-2.5";
 const headerCopyClass = "min-w-0";
 const eyebrowClass = "m-0 mb-0.5 text-[var(--vui-font-xs)] uppercase tracking-[0.08em] text-[var(--accent-warm-2)]";
@@ -25,7 +25,7 @@ const worktreeReviewGateClass = "grid min-w-0 gap-1.5 rounded-[7px] border borde
 const worktreeActionGateClass = "py-[7px]";
 const gateActionGridClass = "grid grid-cols-2 gap-[7px]";
 const controlActionsClass = "flex flex-wrap gap-2";
-const inlineActionClass = "inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-vui-border-soft bg-vui-control-muted px-3.5 text-[var(--vui-font-xs)] font-semibold text-vui-fg-primary disabled:cursor-not-allowed disabled:opacity-55";
+const inlineActionClass = "inline-flex min-h-10 items-center justify-center gap-2 rounded-[var(--radius-control)] border border-vui-border-soft bg-vui-control-muted px-3.5 text-[var(--vui-font-xs)] font-semibold text-vui-fg-primary disabled:cursor-not-allowed disabled:opacity-55";
 const gateInlineActionClass = "min-h-[34px] min-w-0 px-[9px]";
 const dangerInlineActionClass = "border-[color-mix(in_srgb,var(--state-error)_38%,var(--vui-border-subtle))] text-[var(--state-error)] hover:bg-[color-mix(in_srgb,var(--state-error)_10%,var(--vui-control-muted))]";
 const worktreeReviewHeaderClass = "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2";

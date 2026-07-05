@@ -7,7 +7,7 @@ const flowTabsClass = [
 const flowTabClass = [
   "!inline-grid h-[34px] min-h-[34px] max-h-[34px] min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1 overflow-hidden rounded-[6px] border border-transparent",
   "bg-transparent p-[4px_6px] text-left font-[inherit] text-vui-fg-secondary no-underline transition-[background,border-color,color] duration-150",
-  "hover:bg-vui-surface-row-hover hover:text-vui-fg-primary max-[760px]:p-[3px_4px]",
+  "hover:bg-[color-mix(in_srgb,var(--vui-surface-row-hover)_84%,transparent)] hover:text-vui-fg-primary max-[760px]:p-[3px_4px]",
   "[&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
 ].join(" ");
 const flowTabActiveClass = "border-[color-mix(in_srgb,var(--accent-warm)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_13%,var(--vui-surface-row))] text-[var(--accent-warm-2)]";
