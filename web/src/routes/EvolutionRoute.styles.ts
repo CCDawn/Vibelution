@@ -547,7 +547,7 @@ const styles = {
   toolbarControls:
     "flex [align-items:center] [justify-content:flex-end] [gap:6px] [flex-wrap:nowrap] [overflow:hidden] min-w-0 max-[1200px]:[min-width:min(500px,_100%)] max-[900px]:[justify-content:stretch] max-[900px]:min-w-0 max-[900px]:[width:100%] max-[900px]:[overflow-x:auto] max-[900px]:[scrollbar-width:thin] max-[640px]:[justify-content:flex-start]",
   toolbarControlsSupervisedFocus:
-    "[align-items:stretch] [flex:1_1_100%] min-w-0 [width:100%] [justify-content:flex-end]",
+    "[align-items:center] [flex:0_1_auto] min-w-0 [max-width:100%] [justify-content:flex-end]",
   toolbarIntro:
     "grid [gap:2px] [min-width:260px] [max-width:min(760px,_100%)] max-[1200px]:[min-width:220px] max-[1200px]:[max-width:min(390px,_100%)] max-[900px]:min-w-0 max-[900px]:[max-width:100%]",
   toolbarSupervisedFocus:
@@ -571,7 +571,7 @@ const styles = {
   viewStack:
     "grid [gap:16px] [align-content:start] min-h-0 [overflow:auto] [padding-right:4px]",
   workflowStepButton:
-    "grid w-full [gap:3px] min-w-0 [padding:7px_8px] [border:1px_solid_var(--border-hairline)] [border-radius:7px] [background:color-mix(in_srgb,_var(--surface-panel)_76%,_transparent)] [color:inherit] [font:inherit] [text-align:left] [cursor:pointer] [transition:border-color_120ms_ease,_background_120ms_ease] hover:[border-color:color-mix(in_srgb,_var(--accent-cool)_42%,_var(--border-soft))] hover:[background:color-mix(in_srgb,_var(--accent-cool)_7%,_var(--surface-panel))] hover:[outline:none] focus-visible:[border-color:color-mix(in_srgb,_var(--accent-cool)_42%,_var(--border-soft))] focus-visible:[background:color-mix(in_srgb,_var(--accent-cool)_7%,_var(--surface-panel))] focus-visible:[outline:none] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[font-weight:750] [&_strong]:[white-space:nowrap]",
+    "grid [gap:3px] min-w-0 [padding:7px_8px] [border:1px_solid_var(--border-hairline)] [border-radius:7px] [background:var(--surface-panel)] [color:inherit] [font:inherit] [text-align:left] [cursor:pointer] [transition:border-color_120ms_ease,_background_120ms_ease] hover:[border-color:color-mix(in_srgb,_var(--accent-cool)_42%,_var(--border-soft))] hover:[background:color-mix(in_srgb,_var(--accent-cool)_7%,_var(--surface-panel))] hover:[outline:none] focus-visible:[border-color:color-mix(in_srgb,_var(--accent-cool)_42%,_var(--border-soft))] focus-visible:[background:color-mix(in_srgb,_var(--accent-cool)_7%,_var(--surface-panel))] focus-visible:[outline:none] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[font-weight:750] [&_strong]:[white-space:nowrap]",
   workflowStepButtonActive:
     "[border-color:color-mix(in_srgb,_var(--accent-cool)_54%,_var(--border-soft))] [background:color-mix(in_srgb,_var(--accent-cool)_10%,_var(--surface-panel))]",
   workflowStepItem:

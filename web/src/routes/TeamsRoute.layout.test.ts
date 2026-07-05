@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
 import routeSource from "./TeamsRoute.tsx?raw";
 import teamMemoryIndexPanelSource from "./TeamMemoryIndexPanel.tsx?raw";
+import teamMemoryIndexPanelStyles from "./TeamMemoryIndexPanel.styles";
 import teamSourceCollectionActiveStagePanelSource from "./TeamSourceCollectionActiveStagePanel.tsx?raw";
 import teamSourceCollectionActiveStagePanelStyles from "./TeamSourceCollectionActiveStagePanel.styles";
 import teamSourceCollectionCandidatePanelSource from "./TeamSourceCollectionCandidatePanel.tsx?raw";
@@ -338,7 +339,18 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain('view: "graph"');
     expect(routeSource).toContain("teamId: selectedTeam.teamId");
     expect(routeSource).toContain("teamId: selectedTeam?.teamId");
-    expect(routeStyles.teamMemoryMemberTable).toContain("grid-cols-[repeat(auto-fill,minmax(240px,1fr))]");
+    expect(routeStyles.teamMemoryMemberTable).toContain("grid-cols-[repeat(auto-fit,minmax(260px,max-content))]");
+    expect(routeStyles.teamMemoryMemberTable).not.toContain("repeat(auto-fill");
+    expect(routeStyles.teamMemoryMemberTable).toContain("justify-start");
+    expect(routeStyles.teamMemoryMemberCard).toContain("bg-[var(--vui-surface-row)]");
+    expect(routeStyles.teamMemoryMemberCard).not.toContain("bg-[var(--vui-surface-glass)]");
+    expect(routeStyles.teamMemoryMemberCard).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+    expect(teamMemoryIndexPanelStyles.teamMemoryMemberTable).toContain("grid-cols-[repeat(auto-fit,minmax(260px,max-content))]");
+    expect(teamMemoryIndexPanelStyles.teamMemoryMemberTable).not.toContain("repeat(auto-fill");
+    expect(teamMemoryIndexPanelStyles.teamMemoryMemberTable).toContain("justify-start");
+    expect(teamMemoryIndexPanelStyles.teamMemoryMemberCard).toContain("bg-[var(--vui-surface-row)]");
+    expect(teamMemoryIndexPanelStyles.teamMemoryMemberCard).not.toContain("bg-[var(--vui-surface-glass)]");
+    expect(teamMemoryIndexPanelStyles.teamMemoryMemberCard).not.toContain("shadow-[var(--vui-shadow-hairline)]");
     expect(routeStylesSource).toContain(".teamMemoryMemberTable");
     expect(routeStylesSource).toContain(".teamMemoryMemberHeading");
     expect(routeStylesSource).toContain(".teamMemoryActionRail");
@@ -1682,15 +1694,50 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.teamUnavailableSurface).toContain("grid-cols-[minmax(0,720px)]");
     expect(routeStyles.teamUnavailableCard).toContain("max-w-[720px]");
     expect(routeStyles.teamUnavailableActions).toContain("justify-end");
+    expect(routeStyles.workspace).toContain("grid-cols-[minmax(520px,1fr)_minmax(300px,380px)]");
+    expect(routeStyles.workspace).toContain("overflow-hidden");
+    expect(routeStyles.workspace).toContain("max-[760px]:h-auto");
+    expect(routeStyles.workspace).toContain("max-[760px]:grid-cols-[minmax(0,1fr)]");
+    expect(routeStyles.workspace).toContain("max-[760px]:content-start");
+    expect(routeStyles.workspace).toContain("max-[760px]:overflow-auto");
     expect(routeStyles.workspaceResearchCanvas).toContain("h-full");
     expect(routeStyles.workspaceResearchCanvas).toContain("grid-cols-[minmax(520px,1fr)_minmax(300px,380px)]");
     expect(routeStyles.workspaceResearchCanvas).toContain("overflow-hidden");
+    expect(routeStyles.workspaceResearchCanvas).toContain("max-[760px]:h-auto");
+    expect(routeStyles.workspaceResearchCanvas).toContain("max-[760px]:grid-cols-[minmax(0,1fr)]");
+    expect(routeStyles.workspaceResearchCanvas).toContain("max-[760px]:overflow-auto");
+    expect(routeStyles.workspaceResearchCanvas).toContain("max-[760px]:content-start");
     expect(workflowGraphViewStyles.workflowGraphFrame).toContain("h-[var(--workflow-graph-height,360px)]");
     expect(workflowGraphViewStyles.workflowGraphFrame).not.toContain("h-full");
     expect(workflowGraphViewStyles.workflowGraphFrame).toContain("overflow-hidden");
     expect(routeStyles.canvasPanel).toContain("!flex");
+    expect(routeStyles.canvasPanel).toContain("bg-[var(--vui-surface-panel)]");
+    expect(routeStyles.canvasPanel).not.toContain("bg-[var(--vui-surface-glass)]");
+    expect(routeStyles.canvasPanel).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+    expect(routeStyles.canvas).toContain("bg-[var(--vui-surface-base)]");
+    expect(routeStyles.canvas).toContain("[background-size:40px_40px]");
+    expect(routeStyles.canvas).not.toContain("var(--vui-surface-glass)_94%");
     expect(routeStyles.inspector).toContain("!flex");
     expect(routeStylesSource).toContain(".canvasLayoutModeSwitch");
+  });
+
+  it("uses quiet workbench panels instead of nested glass card walls in the Team canvas", () => {
+    const quietSurfaceKeys = [
+      "canvasPanel",
+      "teamHistoryPanel",
+      "teamRoundPanel",
+      "workflowPanel",
+      "teamMemoryMemberCard",
+    ] as const;
+
+    for (const key of quietSurfaceKeys) {
+      expect(routeStyles[key]).not.toContain("bg-[var(--vui-surface-glass)]");
+      expect(routeStyles[key]).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+    }
+
+    expect(routeStyles.workflowPanel).toContain("bg-[var(--vui-surface-panel)]");
+    expect(routeStyles.teamRoundPanel).toContain("bg-[var(--vui-surface-panel)]");
+    expect(routeStyles.teamHistoryPanel).toContain("bg-[var(--vui-surface-panel)]");
   });
 
   it("prioritizes active stage task launch and interruption status over stale summaries", () => {
@@ -1740,7 +1787,8 @@ describe("TeamsRoute layout contract", () => {
     for (const className of [routeStyles.canvas, routeStyles.emptyCanvasPanel]) {
       expect(className).toContain("[background-image:linear-gradient(to_right");
       expect(className).toContain("linear-gradient(to_bottom");
-      expect(className).toContain("[background-size:32px_32px]");
+      expect(className).toContain("[background-size:40px_40px]");
+      expect(className).toContain("var(--vui-border-subtle)_24%");
       expect(className).not.toContain("vui-gradient-route-soft");
     }
   });
