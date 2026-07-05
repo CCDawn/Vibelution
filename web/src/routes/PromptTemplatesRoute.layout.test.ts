@@ -15,7 +15,7 @@ describe("PromptTemplatesRoute layout contract", () => {
       routeSource.indexOf("</VRouteHeader>"),
     );
     expect(routeSource.indexOf('<AgentManagementNav active="prompts" className={styles.managementNavClass} />')).toBeLessThan(
-      routeSource.indexOf("className={styles.summaryGridClass}"),
+      routeSource.indexOf("className={styles.summaryStripClass}"),
     );
   });
 
@@ -152,5 +152,22 @@ describe("PromptTemplatesRoute layout contract", () => {
     expect(styles.detailRowClass).not.toContain("bg-[var(--surface-card)]");
     expect(styles.detailCardClass).not.toContain("bg-[var(--surface-panel)]");
     expect(styles.agentListClass).not.toContain("bg-[var(--surface-panel)]");
+  });
+
+  it("uses VUI composition for summary, panels, bulk controls, and default status", () => {
+    expect(routeSource).toContain("VStatusStrip");
+    expect(routeSource).toContain("VSurface");
+    expect(routeSource).toContain("VDenseToolbar");
+    expect(routeSource).toContain("VPanelHeader");
+    expect(routeSource).toContain("VStatusChip");
+    expect(routeSource).toContain("className={styles.summaryStripClass}");
+    expect(routeSource).toContain("<VSurface");
+    expect(routeSource).toContain("as=\"aside\"");
+    expect(routeSource).toContain("as=\"section\"");
+    expect(routeSource).toContain("<VDenseToolbar");
+    expect(routeSource).toContain("tone={hasDefault ? \"success\" : \"neutral\"}");
+    expect(routeSource).not.toContain("hasDefault ? styles.statePillClass : styles.templateMetaClass");
+    expect(stylesSource).not.toContain("const summaryCardClass");
+    expect(stylesSource).not.toContain("const statePillClass");
   });
 });
