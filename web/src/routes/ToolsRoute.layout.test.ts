@@ -393,6 +393,17 @@ describe("ToolsRoute layout contract", () => {
     expect(styles.agentPolicySelect).toBeTypeOf("string");
   });
 
+  it("keeps Tools surface and action tokens centralized in route-local constants", () => {
+    expect(stylesModuleSource).toContain("const panelSurface");
+    expect(stylesModuleSource).toContain("const rowSurface");
+    expect(stylesModuleSource).toContain("const buttonBase");
+    expect(stylesModuleSource).toContain("const activeTone");
+    expect(stylesModuleSource).toContain("const compactField");
+    expect(agentScopeStylesModuleSource).toContain("const panelSurface");
+    expect(agentScopeStylesModuleSource).toContain("const rowSurface");
+    expect(agentScopeStylesModuleSource).toContain("const coolSurface");
+  });
+
   it("keeps bulk controls in compact document flow instead of covering tool rows", () => {
     expect(routeSource).toContain("styles.listPanel");
     expect(routeSource).toContain("styles.bulkActionBar");

@@ -6,6 +6,30 @@
 // componentizes ToolsRoute.
 // Includes phantom keys accessed by consumers but never declared in the old
 // styleKeys; the Proxy synthesized them on demand.
+const panelSurface =
+  "rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_58%,transparent)] p-2";
+const quietPanelSurface =
+  "rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_62%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_46%,transparent)] p-2";
+const rowSurface =
+  "rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_62%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_42%,transparent)]";
+const warmRowSurface =
+  "rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-warm)_18%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_5%,transparent)]";
+const buttonBase =
+  "inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55";
+const pillBase =
+  "inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]";
+const activeTone =
+  "border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]";
+const successTone =
+  "border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]";
+const warningTone =
+  "border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]";
+const errorTone =
+  "border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]";
+const compactField =
+  "grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full";
+const scrollStack = "grid min-h-0 content-start gap-1.5 overflow-auto";
+
 const styles = {
   agentBulkPolicyPanel:
     "agentBulkPolicyPanel min-w-0 rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,transparent)] p-2 text-[var(--accent-cool)]",
@@ -30,9 +54,9 @@ const styles = {
   controlStrip:
     "controlStrip min-w-0 flex flex-wrap items-center gap-1.5",
   countPill:
-    "countPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `countPill min-w-0 ${pillBase}`,
   dangerButton:
-    "dangerButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `dangerButton min-w-0 ${buttonBase} ${errorTone}`,
   deepLinkFocus:
     "deepLinkFocus min-w-0",
   deepLinkNotice:
@@ -44,15 +68,15 @@ const styles = {
   detailHeader:
     "detailHeader min-w-0 flex flex-wrap items-start justify-between gap-2",
   detailPanel:
-    "detailPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_58%,transparent)] p-2 overflow-auto",
+    `detailPanel min-w-0 max-w-full ${panelSurface} overflow-auto`,
   emptyDetail:
-    "emptyDetail min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_52%,transparent)] p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    `emptyDetail min-w-0 max-w-full ${panelSurface} text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]`,
   emptyState:
     "emptyState min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   filterButton:
-    "filterButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+    `filterButton min-w-0 ${buttonBase}`,
   filterButtonActive:
-    "filterButtonActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `filterButtonActive min-w-0 ${activeTone}`,
   filterRow:
     "filterRow min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
   header:
@@ -62,13 +86,13 @@ const styles = {
   image2ModelControls:
     "image2ModelControls min-w-0 flex flex-wrap items-center gap-1.5",
   image2ModelPanel:
-    "image2ModelPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_58%,transparent)] p-2",
+    `image2ModelPanel min-w-0 max-w-full ${panelSurface}`,
   image2ModelSelect:
-    "image2ModelSelect min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+    `image2ModelSelect min-w-0 ${compactField}`,
   image2ModelSummary:
-    "image2ModelSummary min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-card)_58%,transparent)] p-2",
+    `image2ModelSummary min-w-0 max-w-full ${panelSurface}`,
   listPanel:
-    "listPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_58%,transparent)] p-2 grid min-h-0 content-start gap-1.5 overflow-auto max-[760px]:max-h-[34vh]",
+    `listPanel min-w-0 max-w-full ${panelSurface} ${scrollStack} max-[760px]:max-h-[34vh]`,
   managementNav:
     "managementNav min-w-0",
   metaGrid:
@@ -76,11 +100,11 @@ const styles = {
   metaGridWide:
     "metaGridWide min-w-0 flex flex-wrap items-center gap-1.5 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   notice:
-    "notice min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_52%,transparent)] p-2",
+    `notice min-w-0 max-w-full ${panelSurface}`,
   noticeError:
-    "noticeError min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color:color-mix(in_srgb,var(--state-error)_9%,transparent)] p-2 text-[var(--state-error)]",
+    `noticeError min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color:color-mix(in_srgb,var(--state-error)_9%,transparent)] p-2 text-[var(--state-error)]`,
   noticeSuccess:
-    "noticeSuccess min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color:color-mix(in_srgb,var(--state-success)_9%,transparent)] p-2 text-[var(--state-success)]",
+    `noticeSuccess min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color:color-mix(in_srgb,var(--state-success)_9%,transparent)] p-2 text-[var(--state-success)]`,
   paneCollapsed:
     "paneCollapsed min-w-0 hidden",
   panelEyebrow:
@@ -92,39 +116,39 @@ const styles = {
   permissionSummaryGrid:
     "permissionSummaryGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   policyDraftPanel:
-    "policyDraftPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_58%,transparent)] p-2",
+    `policyDraftPanel min-w-0 max-w-full ${panelSurface}`,
   policyDraftSummary:
-    "policyDraftSummary min-w-0 max-w-full rounded-[7px] border border-[color:color-mix(in_srgb,var(--border-soft)_62%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_42%,transparent)] p-2 !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[7px] max-[900px]:grid-cols-[repeat(2,minmax(0,1fr))]",
+    `policyDraftSummary min-w-0 max-w-full ${rowSurface} p-2 !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[7px] max-[900px]:grid-cols-[repeat(2,minmax(0,1fr))]`,
   policyHint:
     "policyHint min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   policyMeta:
     "policyMeta min-w-0 flex flex-wrap items-center gap-1.5",
   policyPanel:
-    "policyPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_58%,transparent)] p-2",
+    `policyPanel min-w-0 max-w-full ${panelSurface}`,
   policyStatePill:
-    "policyStatePill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `policyStatePill min-w-0 ${pillBase}`,
   policy_active:
-    "policy_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `policy_active min-w-0 ${activeTone}`,
   policy_allowed:
     "policy_allowed min-w-0",
   policy_attention:
     "policy_attention min-w-0",
   policy_blocked:
-    "policy_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `policy_blocked min-w-0 ${warningTone}`,
   policy_danger:
-    "policy_danger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `policy_danger min-w-0 ${errorTone}`,
   policy_done:
     "policy_done min-w-0",
   policy_enabled:
     "policy_enabled min-w-0",
   policy_error:
-    "policy_error min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `policy_error min-w-0 ${errorTone}`,
   policy_excluded:
     "policy_excluded min-w-0",
   policy_explicit_required:
     "policy_explicit_required min-w-0",
   policy_failed:
-    "policy_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `policy_failed min-w-0 ${errorTone}`,
   policy_idle:
     "policy_idle min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)]",
   policy_info:
@@ -140,29 +164,29 @@ const styles = {
   policy_neutral:
     "policy_neutral min-w-0",
   policy_ok:
-    "policy_ok min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `policy_ok min-w-0 ${successTone}`,
   policy_pending:
     "policy_pending min-w-0",
   policy_ready:
-    "policy_ready min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `policy_ready min-w-0 ${successTone}`,
   policy_running:
-    "policy_running min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `policy_running min-w-0 ${successTone}`,
   policy_status:
     "policy_status min-w-0",
   policy_success:
-    "policy_success min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `policy_success min-w-0 ${successTone}`,
   policy_thought:
     "policy_thought min-w-0",
   policy_warn:
     "policy_warn min-w-0",
   policy_warning:
-    "policy_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `policy_warning min-w-0 ${warningTone}`,
   primaryButton:
-    "primaryButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]",
+    `primaryButton min-w-0 ${buttonBase} ${activeTone}`,
   readinessCard:
-    "readinessCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-card)_58%,transparent)] p-2",
+    `readinessCard min-w-0 max-w-full ${panelSurface}`,
   readinessPanel:
-    "readinessPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_58%,transparent)] p-2",
+    `readinessPanel min-w-0 max-w-full ${panelSurface}`,
   readiness_active:
     "readiness_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   readiness_allowed:
@@ -218,19 +242,19 @@ const styles = {
   readiness_warning:
     "readiness_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   refreshButton:
-    "refreshButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+    `refreshButton min-w-0 ${buttonBase}`,
   resizeHandle:
     "resizeHandle min-w-0 max-[760px]:hidden",
   resultCard:
-    "resultCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_62%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-card)_44%,transparent)] p-2",
+    `resultCard min-w-0 max-w-full ${quietPanelSurface}`,
   resultSummaryGrid:
-    "resultSummaryGrid min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_62%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_46%,transparent)] p-2 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+    `resultSummaryGrid min-w-0 max-w-full ${quietPanelSurface} grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]`,
   result_attention:
     "result_attention min-w-0",
   result_ok:
     "result_ok min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
   returnButton:
-    "returnButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+    `returnButton min-w-0 ${buttonBase}`,
   route:
     "route min-w-0 max-w-full grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] content-start overflow-hidden overflow-x-hidden text-[var(--fg-primary)]",
   rowSelect:
@@ -244,25 +268,25 @@ const styles = {
   scopeStats:
     "scopeStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   searchBox:
-    "searchBox min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_52%,transparent)] p-2",
+    `searchBox min-w-0 max-w-full ${panelSurface}`,
   secondaryButton:
-    "secondaryButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+    `secondaryButton min-w-0 ${buttonBase}`,
   segmentActive:
-    "segmentActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `segmentActive min-w-0 ${activeTone}`,
   segmentActiveDanger:
-    "segmentActiveDanger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `segmentActiveDanger min-w-0 ${errorTone}`,
   segmentButton:
-    "segmentButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+    `segmentButton min-w-0 ${buttonBase}`,
   segmentedControl:
     "segmentedControl min-w-0 flex flex-wrap items-center gap-1.5",
   selectableToolRow:
-    "selectableToolRow min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-warm)_18%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_5%,transparent)] p-[5px] !grid grid-cols-[28px_minmax(0,1fr)] items-center gap-[5px]",
+    `selectableToolRow min-w-0 max-w-full ${warmRowSurface} p-[5px] !grid grid-cols-[28px_minmax(0,1fr)] items-center gap-[5px]`,
   sourcePill:
-    "sourcePill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `sourcePill min-w-0 ${pillBase}`,
   stateBadge:
-    "stateBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `stateBadge min-w-0 ${pillBase}`,
   state_active:
-    "state_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `state_active min-w-0 ${activeTone}`,
   state_allowed:
     "state_allowed min-w-0",
   state_attention:
