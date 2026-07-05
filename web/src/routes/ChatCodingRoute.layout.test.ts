@@ -1398,6 +1398,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(queueAssistantDeltaBody).not.toContain("activeTurnLayerTextLength");
   });
 
+  it("wires completed session stream events into the desktop notification helper", () => {
+    expect(routeSource).toContain("createDesktopConversationNotifier");
+    expect(routeSource).toContain("handleAssistantDelta(payload");
+    expect(routeSource).toContain("handleSessionDetail(detail");
+  });
+
   it("records stream render-frame telemetry after ConversationView commits live text", () => {
     expect(routeSource).toContain("lastConversationStreamingFrameTelemetryAtRef");
     expect(routeSource).toContain("const handleConversationStreamingFramePaint = useCallback");

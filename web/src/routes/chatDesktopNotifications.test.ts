@@ -124,6 +124,20 @@ describe("desktop conversation notifier", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
+  it("supports the route pattern of assistant delta final followed by final detail without duplicate notification", () => {
+    const notify = vi.fn();
+    const notifier = createDesktopConversationNotifier({
+      bridge: { notifyConversationCompleted: notify },
+      postTelemetry: vi.fn(),
+    });
+
+    notifier.handleAssistantDelta(assistantDelta({ done: true }), { sessionTitle: "测试会话" });
+    notifier.handleSessionDetail(detail({ currentPhase: "running", status: "running" }), { sessionTitle: "测试会话" });
+    notifier.handleSessionDetail(detail({ currentPhase: "ready", status: "ready" }), { sessionTitle: "测试会话" });
+
+    expect(notify).toHaveBeenCalledTimes(1);
+  });
+
   it("degrades to telemetry-only when the Electron bridge is missing", () => {
     const telemetry = vi.fn();
     const notifier = createDesktopConversationNotifier({
