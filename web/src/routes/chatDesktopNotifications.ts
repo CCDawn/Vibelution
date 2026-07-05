@@ -56,6 +56,10 @@ function isBusyPhase(value: unknown): boolean {
   return BUSY_PHASES.has(normalizeText(value).toLowerCase());
 }
 
+function isReadyPhase(detail: SessionDetail): boolean {
+  return normalizeText(detail.currentPhase || detail.status).toLowerCase() === "ready";
+}
+
 function latestAssistantTurnMessage(detail: SessionDetail): ConversationMessage | undefined {
   return [...(detail.messages ?? [])].reverse().find((message) => {
     if (message.role !== "assistant") {
@@ -181,9 +185,10 @@ export function createDesktopConversationNotifier(
 
       const phase = normalizeText(detail.currentPhase || detail.status);
       const busy = isBusyPhase(phase);
+      const ready = isReadyPhase(detail);
       const wasBusy = lastBusyBySession.get(sessionId) ?? false;
       lastBusyBySession.set(sessionId, busy);
-      if (busy || !wasBusy) {
+      if (busy || !wasBusy || !ready) {
         return;
       }
 

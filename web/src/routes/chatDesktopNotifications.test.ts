@@ -111,6 +111,19 @@ describe("desktop conversation notifier", () => {
     expect(notify).toHaveBeenCalledTimes(1);
   });
 
+  it("does not emit for a busy to failed detail transition", () => {
+    const notify = vi.fn();
+    const notifier = createDesktopConversationNotifier({
+      bridge: { notifyConversationCompleted: notify },
+      postTelemetry: vi.fn(),
+    });
+
+    notifier.handleSessionDetail(detail({ currentPhase: "running", status: "running" }), { sessionTitle: "测试会话" });
+    notifier.handleSessionDetail(detail({ currentPhase: "failed", status: "failed" }), { sessionTitle: "测试会话" });
+
+    expect(notify).not.toHaveBeenCalled();
+  });
+
   it("degrades to telemetry-only when the Electron bridge is missing", () => {
     const telemetry = vi.fn();
     const notifier = createDesktopConversationNotifier({
