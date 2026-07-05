@@ -42,6 +42,7 @@ import teamSourceCollectionStandaloneStagePanelSource from "./TeamSourceCollecti
 import teamSourceCollectionStorageActionsPanelSource from "./TeamSourceCollectionStorageActionsPanel.tsx?raw";
 import teamSourceCollectionStorageActionsPanelStyles from "./TeamSourceCollectionStorageActionsPanel.styles";
 import teamWorkflowCandidatePreviewPanelSource from "./TeamWorkflowCandidatePreviewPanel.tsx?raw";
+import teamWorkflowCandidatePreviewPanelStyles from "./TeamWorkflowCandidatePreviewPanel.styles";
 import teamWorkflowCandidatePreviewPanelStylesSource from "./TeamWorkflowCandidatePreviewPanel.styles.ts?raw";
 import teamWorkflowStatusPanelsSource from "./TeamWorkflowStatusPanels.tsx?raw";
 import teamWorkflowStatusPanelStyles from "./TeamWorkflowStatusPanels.styles";
@@ -86,6 +87,10 @@ const routeStylesSource = [
   ...Object.keys(routeStylesBase).map((key) => `.${key}`),
   ...Object.values(routeStylesBase),
 ].join("\n");
+
+function classTokenCount(className: string, token: string) {
+  return className.split(/\s+/).filter((item) => item === token).length;
+}
 
 describe("TeamsRoute layout contract", () => {
   it("uses shell language state without loading the full app dictionary", () => {
@@ -1709,7 +1714,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.workspaceResearchCanvas).toContain("max-[760px]:content-start");
     expect(workflowGraphViewStyles.workflowGraphFrame).toContain("h-[var(--workflow-graph-height,360px)]");
     expect(workflowGraphViewStyles.workflowGraphFrame).not.toContain("h-full");
-    expect(workflowGraphViewStyles.workflowGraphFrame).toContain("overflow-hidden");
+    expect(workflowGraphViewStyles.workflowGraphFrame).toContain("overflow-auto");
     expect(routeStyles.canvasPanel).toContain("!flex");
     expect(routeStyles.canvasPanel).toContain("bg-[var(--vui-surface-panel)]");
     expect(routeStyles.canvasPanel).not.toContain("bg-[var(--vui-surface-glass)]");
@@ -1823,6 +1828,51 @@ describe("TeamsRoute layout contract", () => {
     expect(teamWorkflowStatusPanelStyles.workflowPaperNoteChunkPlans).toContain("[&_small]:break-words");
     expect(teamWorkflowStatusPanelStyles.workflowIngestionHeader).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(teamWorkflowStatusPanelStyles.workflowIngestionActions).toContain("[&_span]:break-words");
+  });
+
+  it("keeps Teams graph and candidate child panels light, text-safe, and mobile-fit", () => {
+    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListPanel).toContain("bg-[var(--vui-surface-panel)]");
+    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListPanel).toContain("overflow-hidden");
+    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListPanel).not.toContain("bg-[var(--vui-surface-glass)]");
+    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListPanel).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListHeader).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListHeader).toContain("max-[760px]:grid-cols-[minmax(0,1fr)]");
+    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListHeader).toContain("[&>div:first-child>strong]:truncate");
+    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListHeader).toContain("[&>div:first-child>span]:break-words");
+    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListHeader).toContain("[&_[data-vui=native-button]]:w-fit");
+    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListHeader).toContain("[&_[data-vui=native-button]]:whitespace-nowrap");
+    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateListScroll).toContain("[scrollbar-gutter:stable]");
+    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateList).toContain("[&_[data-vui-product=team-candidate-card]]:max-w-full");
+
+    expect(classTokenCount(teamMemoryIndexPanelStyles.teamMemoryActionRail, "flex")).toBe(1);
+    expect(classTokenCount(teamMemoryIndexPanelStyles.teamMemoryActionRail, "grid")).toBe(0);
+    expect(classTokenCount(teamMemoryIndexPanelStyles.teamMemoryActionRail, "min-w-0")).toBe(1);
+    expect(teamMemoryIndexPanelStyles.teamMemoryActionRail).toContain("[&_a]:w-fit");
+    expect(classTokenCount(teamMemoryIndexPanelStyles.teamMemoryMemberActions, "flex")).toBe(1);
+    expect(teamMemoryIndexPanelStyles.teamMemoryMemberActions).toContain("[&_a]:flex-none");
+
+    expect(workflowGraphViewStyles.workflowGraphFrame).toContain("max-w-full");
+    expect(workflowGraphViewStyles.workflowGraphFrame).toContain("overflow-auto");
+    expect(workflowGraphViewStyles.workflowGraphFrame).toContain("[scrollbar-gutter:stable]");
+    expect(workflowGraphViewStyles.workflowGraphCanvas).toContain("min-w-[var(--workflow-graph-width,720px)]");
+    expect(workflowGraphViewStyles.workflowGraphNode).toContain("bg-[var(--vui-surface-row)]");
+    expect(workflowGraphViewStyles.workflowGraphNode).toContain("shadow-none");
+    expect(workflowGraphViewStyles.workflowGraphNode).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+
+    expect(teamSourceCollectionGraphPanelStyles.sourceCollectionGraphNodeListShell).toContain("max-w-full");
+    expect(teamSourceCollectionGraphPanelStyles.sourceCollectionGraphNodeListShell).toContain("bg-[var(--vui-surface-panel)]");
+    expect(teamSourceCollectionGraphPanelStyles.workflowCandidateList).toContain("[&_[data-vui-product=team-candidate-card]]:max-w-full");
+    expect(teamSourceCollectionGraphPanelStyles.workflowCandidateList).toContain("[&_[data-vui=native-button]]:w-fit");
+
+    expect(teamSourceCollectionFindingDetailsPanelStyles.workflowSourceCollectionAssignments).toContain(
+      "grid-cols-[repeat(auto-fit,minmax(9rem,max-content))]",
+    );
+    expect(teamSourceCollectionFindingDetailsPanelStyles.workflowSourceCollectionAssignments).toContain("max-[640px]:grid-cols-[minmax(0,1fr)]");
+    expect(teamSourceCollectionFindingDetailsPanelStyles.workflowSourceCollectionAssignments).toContain("[&_[data-vui=native-button]]:w-fit");
+    expect(teamSourceCollectionFindingDetailsPanelStyles.workflowSourceCollectionAssignments).toContain("[&_[data-vui=native-button]_strong]:truncate");
+    expect(teamSourceCollectionFindingDetailsPanelStyles.workflowSourceCollectionAssignments).toContain("[&_[data-vui=native-button]_span]:break-words");
+    expect(teamSourceCollectionFindingDetailsPanelStyles.workflowSourceCollectionQueries).toContain("[&_strong]:truncate");
+    expect(teamSourceCollectionFindingDetailsPanelStyles.workflowSourceCollectionQueries).toContain("[&_small]:break-words");
   });
 
   it("uses a subtle mesh canvas background instead of repeated horizontal route stripes", () => {
