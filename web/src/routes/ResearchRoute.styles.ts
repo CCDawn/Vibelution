@@ -25,9 +25,9 @@ const styles: Record<string, string> = {
   agentTraceBubble:
     "agentTraceBubble min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentTraceContent:
-    "agentTraceContent min-w-0 max-w-full text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    "agentTraceContent min-w-0 max-w-full text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
   agentTraceControls:
-    "agentTraceControls min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    "agentTraceControls min-w-0 max-w-full flex flex-wrap items-center justify-end gap-1.5",
   agentTraceDetailGroup:
     "agentTraceDetailGroup min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_52%,transparent)] p-2 text-[var(--fg-secondary)]",
   agentTraceDetailIcon:
@@ -39,17 +39,17 @@ const styles: Record<string, string> = {
   agentTraceDetailSummary:
     "agentTraceDetailSummary min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,transparent)] p-2 text-[var(--accent-cool)]",
   agentTraceHeader:
-    "agentTraceHeader min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    "agentTraceHeader min-w-0 max-w-full flex flex-wrap items-center justify-between gap-1.5",
   agentTraceLivePill:
     "agentTraceLivePill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentTraceMeta:
-    "agentTraceMeta min-w-0 max-w-full flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    "agentTraceMeta min-w-0 max-w-full flex flex-wrap items-center gap-1.5 text-[var(--fg-tertiary)] [&_strong]:text-[var(--fg-primary)]",
   agentTracePanel:
     "agentTracePanel min-w-0 max-w-full overflow-hidden rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_6%,transparent)] p-2 text-[var(--accent-cool)]",
   agentTracePanel_collapsed:
     "agentTracePanel_collapsed min-w-0 max-w-full hidden overflow-hidden rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_6%,transparent)] p-2 text-[var(--accent-cool)]",
   agentTraceTimeline:
-    "agentTraceTimeline min-w-0 max-w-full grid min-h-0 content-start gap-1.5 overflow-auto overflow-x-hidden border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    "agentTraceTimeline min-w-0 max-w-full grid min-h-0 content-start gap-1.5 overflow-auto overflow-x-hidden",
   agentTraceTurn:
     "agentTraceTurn min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,transparent)] p-2 text-[var(--accent-cool)] !grid grid-cols-[30px_minmax(0,1fr)] gap-2.5",
   agentTrace_active:
@@ -175,7 +175,7 @@ const styles: Record<string, string> = {
   pipelinePanel:
     "pipelinePanel min-w-0 max-w-full overflow-hidden rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_58%,transparent)] p-2",
   primaryButton:
-    "primaryButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]",
+    "primaryButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] text-[var(--accent-cool)]",
   processPanel:
     "processPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--surface-panel)_54%,transparent)] p-2",
   questionText:
