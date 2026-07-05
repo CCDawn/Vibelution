@@ -108,6 +108,7 @@ describe("route aesthetic contract", () => {
     const offenders = Array.from(new Set([
       resolve(routeRoot, "ChatCodingRoute.styles.ts"),
       resolve(routeRoot, "MemoryRoute.styles.ts"),
+      resolve(routeRoot, "TeamsRoute.styles.ts"),
       ...MEMORY_STYLE_FILES,
     ]))
       .flatMap((file) => {
