@@ -31,6 +31,7 @@ import chatRuntimeNoticeStackStyles from "./chat/ChatRuntimeNoticeStack.styles";
 import chatRuntimeNoticeStackSource from "./chat/ChatRuntimeNoticeStack.tsx?raw";
 import chatToolApprovalDialogStyles from "./chat/ChatToolApprovalDialog.styles";
 import chatToolApprovalDialogSource from "./chat/ChatToolApprovalDialog.tsx?raw";
+import cliAgentRunTerminalPanelStyles from "./chat/CliAgentRunTerminalPanel.styles";
 import tokenCoreStatusPanelSource from "./chat/TokenCoreStatusPanel.tsx?raw";
 
 const appShellCssSource = readFileSync(new URL("../design/workbench-shell.css", import.meta.url), "utf-8");
@@ -174,7 +175,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatRuntimeNoticeStackSource).toContain("role=\"status\"");
     expect(chatRuntimeNoticeStackSource).toContain("runtimeNoticeToneClassName");
     expect(chatRuntimeNoticeStackStyles.stack).toBeTypeOf("string");
+    expect(chatRuntimeNoticeStackStyles.stack).toContain("shadow-none");
+    expect(chatRuntimeNoticeStackStyles.stack).not.toContain("vui-surface-glass");
+    expect(chatRuntimeNoticeStackStyles.stack).not.toContain("vui-shadow-hairline");
     expect(chatRuntimeNoticeStackStyles.notice).toContain("grid-cols-[16px_minmax(0,1fr)]");
+    expect(chatRuntimeNoticeStackStyles.notice).toContain("shadow-none");
+    expect(chatRuntimeNoticeStackStyles.notice).not.toContain("vui-surface-glass");
+    expect(chatRuntimeNoticeStackStyles.notice).not.toContain("vui-shadow-hairline");
     expect(chatRuntimeNoticeStackStyles.message).toBeTypeOf("string");
     expect(chatRuntimeNoticeStackStyles.toneWarning).toContain("var(--state-warning)");
   });
@@ -194,6 +201,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatToolApprovalDialogSource).toContain("role=\"dialog\"");
     expect(chatToolApprovalDialogSource).toContain("Tool permission approval");
     expect(chatToolApprovalDialogStyles.dialog).toContain("grid-cols-[34px_minmax(0,1fr)_auto]");
+    expect(chatToolApprovalDialogStyles.dialog).toContain("shadow-none");
+    expect(chatToolApprovalDialogStyles.dialog).not.toContain("vui-shadow-hairline");
     expect(chatToolApprovalDialogStyles.actions).toContain("flex");
   });
 
@@ -1824,6 +1833,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatFilePreviewPanelSource).toContain("return <div className={styles.emptySurface}>{loadingLabel}</div>;");
     expect(chatFilePreviewPanelSource).toContain("return <div className={styles.emptySurface}>{errorMessage}</div>;");
     expect(chatFilePreviewPanelStyles.emptySurface).toContain("min-h-[min(420px,calc(100dvh_-_190px))]");
+    expect(chatFilePreviewPanelStyles.emptySurface).toContain("shadow-none");
+    expect(chatFilePreviewPanelStyles.emptySurface).not.toContain("vui-surface-glass");
+    expect(chatFilePreviewPanelStyles.emptySurface).not.toContain("vui-shadow-hairline");
   });
 
   it("renders cli agent tool calls as persistent terminal tabs beside child sessions", () => {
@@ -1882,6 +1894,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("data-cli-agent-run-id={run.id}");
     expect(terminalPanelSource).toContain("data-cli-agent-run-id={run.id}");
     expect(routeSource).toContain("onTerminalSessionChange={handleCliAgentTerminalSessionChange}");
+    expect(cliAgentRunTerminalPanelStyles.cliAgentRunPanel).toContain("shadow-none");
+    expect(cliAgentRunTerminalPanelStyles.cliAgentRunPanel).not.toContain("vui-surface-glass");
+    expect(cliAgentRunTerminalPanelStyles.cliAgentRunPanel).not.toContain("vui-shadow-hairline");
+    expect(cliAgentRunTerminalPanelStyles.cliAgentRunPanelHidden).toContain("hidden");
+    expect(cliAgentRunTerminalPanelStyles.cliAgentRunPanelHidden).not.toContain("vui-surface-glass");
     expect(routeSource).not.toContain(") : activeCliAgentRun ? (");
     expect(routeSource).not.toContain('import { Terminal } from "@xterm/xterm"');
     expect(routeSource).not.toContain('import "@xterm/xterm/css/xterm.css"');

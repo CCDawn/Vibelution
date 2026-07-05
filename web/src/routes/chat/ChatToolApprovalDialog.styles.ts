@@ -6,7 +6,7 @@ const styles = {
   body:
     "min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   dialog:
-    "min-w-0 !grid grid-cols-[34px_minmax(0,1fr)_auto] gap-2.5 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] p-2 text-[var(--accent-warm)] shadow-[var(--vui-shadow-hairline)]",
+    "min-w-0 !grid grid-cols-[34px_minmax(0,1fr)_auto] gap-2.5 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] p-2 text-[var(--accent-warm)] shadow-none",
   header:
     "min-w-0 flex flex-wrap items-center gap-1.5",
   icon:
