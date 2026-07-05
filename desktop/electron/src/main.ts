@@ -165,7 +165,10 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
         void requestDesktopShellExit().catch((error: unknown) => {
           console.warn(error instanceof Error ? error.message : String(error));
         });
-      }
+      },
+      onWorkbenchFocusAttentionClear: () => {
+        conversationNotificationService?.clearAttention();
+      },
     }
   );
 }

@@ -226,6 +226,21 @@ describe("Electron window provider state", () => {
     expect(workbenchWindow.overlayCalls.at(-1)).toEqual({ icon: null, description: "" });
     expect(workbenchWindow.flashCalls.at(-1)).toBe(false);
   });
+
+  it("invokes the focus attention-clear callback when the workbench regains focus", async () => {
+    const workbenchWindow = new FakeWindow(42, "http://127.0.0.1:8000/", 4242);
+    const onWorkbenchFocusAttentionClear = vi.fn();
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => workbenchWindow,
+      onWorkbenchFocusAttentionClear,
+    });
+
+    await provider.openOrFocusWorkbench();
+    workbenchWindow.emit("focus");
+
+    expect(onWorkbenchFocusAttentionClear).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("Electron URL policy", () => {
