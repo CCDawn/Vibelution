@@ -50,6 +50,7 @@ function renderConversation(
       sizeBytes: number;
       contentType: string;
     }>;
+    onRemoveComposerAttachment?: (id: string) => void;
     composerReferences?: Array<{
       referenceId: string;
       kind: string;
@@ -106,6 +107,7 @@ function renderConversation(
         composerGuidance={options.composerGuidance}
         turnError={options.turnError}
         composerAttachments={options.composerAttachments}
+        onRemoveComposerAttachment={options.onRemoveComposerAttachment}
         composerReferences={options.composerReferences}
         nextStateSignals={options.nextStateSignals}
         userAvatarPreset={options.userAvatarPreset}
@@ -406,6 +408,13 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewStylesModuleSource).toContain("composerRoundButton: composerRoundActionButton");
     expect(conversationViewStylesModuleSource).toContain("composerRoundButtonPrimary: composerPrimaryActionButton");
     expect(conversationViewStylesModuleSource).toContain("sendButton: composerSendActionButton");
+    expect(styles.composerAttachmentTray).toContain("flex flex-wrap");
+    expect(styles.composerAttachmentChip).toContain("overflow-hidden");
+    expect(styles.composerAttachmentThumb).toContain("h-5");
+    expect(styles.composerAttachmentThumb).toContain("w-5");
+    expect(styles.composerAttachmentThumb).toContain("object-cover");
+    expect(styles.composerAttachmentName).toContain("truncate");
+    expect(styles.composerAttachmentRemoveButton).toContain("!w-6");
   });
 
   it("uses shared readable scale tokens for dense conversation text", () => {
@@ -2089,6 +2098,7 @@ describe("ConversationView edit resend affordance", () => {
             contentType: "image/png",
           },
         ],
+        onRemoveComposerAttachment: () => undefined,
       },
     );
 
@@ -2096,6 +2106,9 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("sketch.png");
     expect(html).toContain("pending.png");
     expect(html).toContain("blob:pending-image");
+    expect(html).toContain("composerAttachmentThumb");
+    expect(html).toContain("composerAttachmentName");
+    expect(html).toContain("composerAttachmentRemoveButton");
   });
 
   it("renders assistant responses as semantic labeled blocks", () => {
