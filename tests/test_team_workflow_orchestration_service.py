@@ -7611,6 +7611,56 @@ def test_local_research_model_task_and_output_records_candidate(tmp_path, monkey
     assert output_response["workflow"]["candidateStore"]["candidateCount"] == 1
 
 
+def test_local_research_model_task_accepts_ready_evidence_ledger_input(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+
+    task_response = team_workflow_orchestration_service.build_local_research_model_task(
+        team["teamId"],
+        {
+            "taskType": "paper_note_draft",
+            "evidenceLedger": {
+                "status": "evidence_ready",
+                "claims": [{"claim": "Predictive coding uses hierarchical prediction errors.", "sourceRef": "ledger-source"}],
+                "keyFindings": [
+                    {
+                        "finding": "层级预测误差支持跨层控制结构设计。",
+                        "sourceRef": "ledger-source",
+                        "page": "3",
+                        "citation": "Ledger Source, p.3",
+                    }
+                ],
+                "sourceRefs": [{"type": "paper", "id": "ledger-source", "label": "Ledger Source"}],
+                "evidenceRefs": [{"type": "page_anchor", "id": "ledger-source-p3", "label": "Ledger Source p.3"}],
+            },
+        },
+    )
+
+    task = task_response["task"]
+    assert task["evidenceLedger"]["status"] == "evidence_ready"
+    assert task["evidenceLedger"]["claims"][0]["claim"] == "Predictive coding uses hierarchical prediction errors."
+    assert task["sourceRefs"] == []
+    assert task["evidenceRefs"] == []
+
+
+def test_local_research_model_task_rejects_missing_anchor_evidence_ledger_input(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError, match="evidenceLedger"):
+        team_workflow_orchestration_service.build_local_research_model_task(
+            team["teamId"],
+            {
+                "taskType": "paper_note_draft",
+                "evidenceLedger": {
+                    "status": "missing_evidence_anchor",
+                    "claims": [{"claim": "Unanchored claim must not enter paper_note input."}],
+                    "keyFindings": [{"finding": "缺少来源锚点的发现。"}],
+                },
+            },
+        )
+
+
 def test_candidate_store_validates_pdf_source_manifest(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
@@ -7904,6 +7954,116 @@ def test_paper_note_autodraft_uses_source_extraction_excerpt_and_anchors(tmp_pat
     assert "neuro-p1" in captured_payload
     assert "source_manifest" in captured_payload
     assert response["workflow"]["candidateStore"]["candidateCount"] == 2
+
+
+def test_paper_note_autodraft_feeds_ready_evidence_ledger_to_model_input(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    source_path = tmp_path / "sources" / "ledger.pdf"
+    source_path.parent.mkdir(parents=True)
+    source_path.write_bytes(b"%PDF-1.4\nfake local pdf bytes\n")
+
+    def fake_extract(path, *, page_scope, max_pages, max_chars_per_page):
+        return [
+            {
+                "type": "pdf_page",
+                "id": "ledger-p3",
+                "label": "p. 3",
+                "page": 3,
+                "text": "Predictive coding excerpt from source extraction.",
+            }
+        ]
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "_extract_pdf_page_anchors", fake_extract)
+    _FakeLocalResearchClient.response = _FakeLocalResearchMessage(
+        """
+        {
+          "candidateType": "paper_note",
+          "sourceRefs": [{"type": "paper", "id": "ledger-source", "label": "Ledger Source"}],
+          "evidenceRefs": [{"type": "page_anchor", "id": "ledger-source-p3", "label": "Ledger Source p.3"}],
+          "claims": [{"claim": "Ledger claim is preserved.", "sourceRef": "ledger-source"}],
+          "keyFindings": [{"finding": "Ledger finding enters the paper note.", "sourceRef": "ledger-source", "page": "3", "citation": "Ledger Source, p.3"}],
+          "methods": ["evidence ledger synthesis"],
+          "limitations": ["autodraft requires review"],
+          "citations": [{"sourceRef": "ledger-source", "page": "3", "citation": "Ledger Source, p.3"}],
+          "uncertainty": [],
+          "riskFlags": [],
+          "confidence": 0.75,
+          "nextAction": "send_to_mechanism_extraction",
+          "requiresReview": true
+        }
+        """
+    )
+    _FakeLocalResearchClient.captured_messages = []
+    candidate = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Ledger PDF",
+            "sourcePath": str(source_path),
+            "sourceKind": "pdf",
+            "allowedForAnalysis": False,
+            "createdByAgent": "Source Intake Agent",
+        },
+    )["candidate"]
+    team_workflow_orchestration_service.extract_candidate_source_pages(
+        team["teamId"],
+        candidate["candidateId"],
+        {"allowedForAnalysis": True, "pageScope": "3"},
+    )
+    store_path = team_workflow_orchestration_service._candidate_store_path(team["teamId"])
+    store = json.loads(store_path.read_text(encoding="utf-8"))
+    source_candidate = next(item for item in store["candidates"] if item["candidateId"] == candidate["candidateId"])
+    source_candidate["metadata"]["contentExtraction"] = {
+        "status": "kept_with_notes",
+        "summary": "Ledger summary should be visible to paper_note drafting.",
+        "evidenceStatus": "evidence_ready",
+        "evidenceLedger": {
+            "status": "evidence_ready",
+            "claims": [
+                {
+                    "claim": "Predictive coding uses hierarchical prediction errors.",
+                    "sourceRef": "ledger-source",
+                    "supportLevel": "strong",
+                }
+            ],
+            "keyFindings": [
+                {
+                    "finding": "层级预测误差支持跨层控制结构设计。",
+                    "sourceRef": "ledger-source",
+                    "page": "3",
+                    "citation": "Ledger Source, p.3",
+                }
+            ],
+            "citations": [
+                {"sourceRef": "ledger-source", "page": "3", "citation": "Ledger Source, p.3"}
+            ],
+            "sourceRefs": [{"type": "paper", "id": "ledger-source", "label": "Ledger Source"}],
+            "evidenceRefs": [{"type": "page_anchor", "id": "ledger-source-p3", "label": "Ledger Source p.3"}],
+            "limitations": ["样本来源需要后续复核"],
+            "uncertainty": ["机制迁移到算法仍需实验验证"],
+            "riskFlags": ["analogy_risk"],
+            "supportLevel": "strong",
+            "nextAction": "draft_paper_note",
+        },
+    }
+    store_path.write_text(json.dumps(store, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    response = team_workflow_orchestration_service.draft_paper_note_from_source_candidate(
+        team["teamId"],
+        candidate["candidateId"],
+        {"createdByAgent": "Paper Note Extraction Agent"},
+        llm_client_factory=_FakeLocalResearchClient,
+    )
+
+    captured_payload = _FakeLocalResearchClient.captured_messages[-1]["messages"][1]["content"]
+    assert response["validation"]["valid"] is True
+    assert "Predictive coding excerpt from source extraction" in captured_payload
+    assert "Predictive coding uses hierarchical prediction errors" in captured_payload
+    assert "层级预测误差支持跨层控制结构设计" in captured_payload
+    assert "Ledger Source, p.3" in captured_payload
+    assert "ledger-source-p3" in captured_payload
+    assert "missing_evidence_anchor" not in captured_payload
 
 
 def test_paper_note_autodraft_requires_completed_source_extraction(tmp_path, monkeypatch):

@@ -49,12 +49,12 @@
             <article class="plan-card"><h2>目标</h2><p class="hint">从资料中提取背景、方法、关键发现、局限和引用位置。</p></article>
             <article class="plan-card"><h2>输入</h2><ul><li>资料清单</li>
 <li>sourceExtraction.pageAnchors</li>
-<li>contentExtraction.evidenceLedger（下一轮证据输入）</li>
+<li>contentExtraction.evidenceLedger（evidence_ready 补充证据）</li>
 <li>PDF 页码</li>
 <li>论文片段</li>
 <li>补充备注</li></ul></article>
             <article class="plan-card"><h2>处理动作</h2><ul><li>当前从 sourceExtraction.excerpt/pageAnchors 组装 sourceRefs、evidenceRefs 和 excerpt。</li>
-<li>下一轮把 evidence_ready 条目作为 paper_note keyFindings 输入；missing_evidence_anchor 条目进入修订或补证据队列。</li>
+<li>把 evidence_ready Evidence Ledger 合并进 paper_note 本地模型输入；missing_evidence_anchor 条目继续进入修订或补证据队列。</li>
 <li>对长 PDF / 长论文先生成 paperNoteChunkPlan，把 pageAnchors 切成可追踪 chunk seeds。</li>
 <li>调用 Local Research Worker Model 生成 summary、keyFindings、methods、limitations。</li>
 <li>通过 CandidateStore 校验 citation/page anchor，合格时进入 paper_note_draft。</li>
@@ -62,7 +62,7 @@
             <article class="plan-card"><h2>输出物</h2><ul><li>paperNoteChunkPlan</li>
 <li>paper_note_YYYYMMDD_NNN.json</li>
 <li>候选状态 draft</li>
-<li>Evidence Ledger -&gt; PaperNote 关系（待接）</li>
+<li>Evidence Ledger -&gt; PaperNote 草稿输入关系</li>
 <li>Paper -&gt; PaperNote 关系</li></ul></article>
             <article class="plan-card"><h2>风险</h2><ul><li>摘要过度压缩</li>
 <li>缺页码</li>
@@ -95,11 +95,11 @@
         <div class="status-item"><b>功能岗位</b><span>Paper Note Extraction Agent</span></div>
         <div class="status-item"><b>Agent 状态</b><span>自动草稿桥已接入 / 长文 chunk plan 已接入 / Evidence Ledger 已接入</span></div>
         <div class="status-item"><b>进入条件</b><span>资料已登记且 allowedForAnalysis=true。</span></div>
-        <div class="status-item"><b>退出条件</b><span>每个 chunk seed 能回指 sourceFiles、页码或章节；paper_note 关键发现能回指 sourceFiles/page anchors；下一轮再把 Evidence Ledger 作为补充证据输入；uncertainty 不为空时显式保留。</span></div>
+        <div class="status-item"><b>退出条件</b><span>每个 chunk seed 能回指 sourceFiles、页码或章节；paper_note 关键发现能回指 sourceFiles/page anchors；evidence_ready Evidence Ledger 已作为补充证据输入；uncertainty 不为空时显式保留。</span></div>
         <div class="status-item"><b>审核门禁</b><span>必要时确认摘要是否保守、是否遗漏关键章节。</span></div>
       </div>
       <div class="plan-grid">
-        <article class="plan-card"><h2>本步操作</h2><p class="hint">先对已完成 sourceExtraction 的 source_manifest 生成 paperNoteChunkPlan；长文可按 chunkId 逐块调用 paper-note-draft，抽取 summary、keyFindings、methods、limitations 和 citation anchors；Evidence Ledger 已作为下一轮草稿输入来源登记。</p></article>
+        <article class="plan-card"><h2>本步操作</h2><p class="hint">先对已完成 sourceExtraction 的 source_manifest 生成 paperNoteChunkPlan；长文可按 chunkId 逐块调用 paper-note-draft，抽取 summary、keyFindings、methods、limitations 和 citation anchors；evidence_ready Evidence Ledger 会作为补充证据输入。</p></article>
         <article class="plan-card"><h2>本地研究模型用法</h2><p class="hint">本地 9B 模型适合按章节或 chunk 生成 paper_note 草稿；32k 内保留 18k-22k 原文证据和输出预留；invoke 会自动登记模型调用证据。</p></article>
         <article class="plan-card"><h2>所需功能</h2><ul><li>PDF/资料摘录</li>
 <li>paperNoteChunkPlan</li>
@@ -110,13 +110,13 @@
 <li>chunkId 草稿追踪</li></ul></article>
         <article class="plan-card"><h2>工具/平台能力</h2><ul><li>research_knowledge_query_tool</li>
 <li>sourceExtraction.excerpt</li>
-<li>contentExtraction.evidenceLedger（待接入草稿输入）</li>
+<li>contentExtraction.evidenceLedger（evidence_ready 草稿输入）</li>
 <li>本地研究模型 task/output API</li>
 <li>/api/teams/{teamId}/workflow-orchestration/official-model-evidence/status</li>
 <li>/api/teams/{teamId}/workflow-orchestration/paper-note-chunks/status</li>
 <li>/api/teams/{teamId}/workflow-orchestration/candidates/{candidateId}/paper-note-chunks/plan</li>
 <li>/api/teams/{teamId}/workflow-orchestration/candidates/{candidateId}/paper-note-draft</li></ul></article>
-        <article class="plan-card"><h2>功能缺口</h2><p class="hint">paper_note schema 与页码引用校验已接入 CandidateStore；本地 PDF 页码摘录已可由 source-extraction 提供，资料提炼 Evidence Ledger 已可由阶段回写沉淀并在 Teams 资料卡/详情/关系节点展示，sourceExtraction -&gt; paper_note 自动草稿桥已接入；Evidence Ledger 接入 paper_note 草稿输入、多个 chunk draft 的合并/去重仍待接。</p></article>
+        <article class="plan-card"><h2>功能缺口</h2><p class="hint">paper_note schema 与页码引用校验已接入 CandidateStore；本地 PDF 页码摘录已可由 source-extraction 提供，资料提炼 Evidence Ledger 已可由阶段回写沉淀并在 Teams 资料卡/详情/关系节点展示，sourceExtraction -&gt; paper_note 自动草稿桥和 evidence_ready Evidence Ledger 草稿输入已接入；多个 chunk draft 的合并/去重仍待接。</p></article>
         <article class="plan-card"><h2>失败回退</h2><p class="hint">缺页码、缺来源、Evidence Ledger 缺锚点或摘要过度推断时退回 paper_note_needs_revision / missing_evidence_anchor。</p></article>
       </div>
     </section>
