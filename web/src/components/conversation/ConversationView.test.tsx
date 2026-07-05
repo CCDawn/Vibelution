@@ -1080,12 +1080,16 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).not.toContain(".find((message) => !isTurnErrorMessage(message) && (message.toolCalls?.length ?? 0) > 0)?.toolCalls");
   });
 
-  it("captures a scroll anchor before revealing earlier messages", () => {
-    expect(conversationViewSource).toContain("function showEarlierMessages()");
+  it("auto-loads earlier messages from an upward top-edge scroll instead of a manual gate", () => {
+    expect(conversationViewSource).toContain("function revealEarlierTimelineMessages()");
+    expect(conversationViewSource).toContain("timeline.scrollTop <= TIMELINE_HISTORY_LOAD_THRESHOLD_PX");
+    expect(conversationViewSource).toContain("handleScroll");
+    expect(conversationViewSource).toContain("revealEarlierTimelineMessages()");
     expect(conversationViewSource).toContain("captureTimelineRowKeyAnchor(timelineRef.current)");
     expect(conversationViewSource).toContain("restoreTimelineRowKeyAnchor(timelineRef.current, anchor)");
-    expect(conversationViewSource).toContain("onClick={showEarlierMessages}");
-    expect(conversationViewSource).not.toContain("onClick={() => setAllMessagesVisible(true)}");
+    expect(conversationViewSource).not.toContain("function showEarlierMessages()");
+    expect(conversationViewSource).not.toContain("onClick={showEarlierMessages}");
+    expect(conversationViewSource).not.toContain("setAllMessagesVisible(true)");
   });
 
   it("can render the opt-in compact workbench density", () => {
@@ -2264,7 +2268,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("| --- | --- |");
   });
 
-  it("renders only the latest message window by default for long conversations", () => {
+  it("renders only the latest message window by default for long conversations without a manual history button", () => {
     const messages = Array.from({ length: 18 }, (_, index) => ({
       id: `message-${index + 1}`,
       role: index % 2 === 0 ? "user" : "assistant",
@@ -2274,7 +2278,8 @@ describe("ConversationView edit resend affordance", () => {
 
     const html = renderConversation(messages);
 
-    expect(html).toContain("显示更早 4 条消息");
+    expect(html).not.toContain("显示更早");
+    expect(html).not.toContain("Show 4 earlier messages");
     expect(html).not.toContain("MESSAGE_1_CONTENT");
     expect(html).not.toContain("MESSAGE_4_CONTENT");
     expect(html).toContain("MESSAGE_5_CONTENT");
