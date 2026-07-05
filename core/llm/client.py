@@ -961,7 +961,11 @@ def _default_responses_backend(payload: Dict[str, Any]) -> Any:
             retryable=False,
         ) from exc
     _ensure_no_proxy_for_local_base_url(payload.get("base_url"))
-    return responses(**payload)
+    request_payload = dict(payload)
+    if request_payload.get("base_url") and not request_payload.get("api_base"):
+        request_payload["api_base"] = request_payload["base_url"]
+    request_payload.pop("base_url", None)
+    return responses(**request_payload)
 
 
 def _payload_uses_responses(payload: Dict[str, Any]) -> bool:
