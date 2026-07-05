@@ -6050,6 +6050,93 @@ def test_capture_session_ui_stream_merges_incremental_thought_updates(tmp_path, 
     assert capture.thought == "先看日志和代码"
 
 
+def test_capture_session_ui_stream_batches_tiny_response_deltas(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    live_updates: list[dict[str, object]] = []
+
+    def fake_set_live_output(session_id: str, **kwargs):
+        live_updates.append({"session_id": session_id, **kwargs})
+
+    monkeypatch.setattr(session_service, "_set_session_live_output", fake_set_live_output)
+    stub_ui = SimpleNamespace(
+        stream_thought=lambda *args, **kwargs: None,
+        clear_thought_stream=lambda *args, **kwargs: None,
+        stream_response=lambda *args, **kwargs: None,
+        clear_response_stream=lambda *args, **kwargs: None,
+        set_pet_mental_state=lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr("core.ui.get_ui", lambda: stub_ui)
+
+    capture = session_service.SessionTurnCapture(session_id="session-live-response", turn_id="turn-response")
+    with session_service._capture_session_ui_stream("session-live-response", capture):
+        for token in ["这", "是", "一", "段", "非", "常", "细", "碎", "的", "回", "答"]:
+            stub_ui.stream_response(token, done=False)
+
+    content_updates = [item for item in live_updates if "content" in item]
+    assert capture.content == "这是一段非常细碎的回答"
+    assert len(content_updates) == 1
+    assert content_updates[0]["content"] == "这是一段非常细碎的回答"
+    assert content_updates[0]["stage"] == "assistant_response"
+
+
+def test_capture_session_ui_stream_batches_tiny_thought_deltas(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    live_updates: list[dict[str, object]] = []
+
+    def fake_set_live_output(session_id: str, **kwargs):
+        live_updates.append({"session_id": session_id, **kwargs})
+
+    monkeypatch.setattr(session_service, "_set_session_live_output", fake_set_live_output)
+    stub_ui = SimpleNamespace(
+        stream_thought=lambda *args, **kwargs: None,
+        clear_thought_stream=lambda *args, **kwargs: None,
+        stream_response=lambda *args, **kwargs: None,
+        clear_response_stream=lambda *args, **kwargs: None,
+        set_pet_mental_state=lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr("core.ui.get_ui", lambda: stub_ui)
+
+    capture = session_service.SessionTurnCapture(session_id="session-live-thought", turn_id="turn-thinking")
+    with session_service._capture_session_ui_stream("session-live-thought", capture):
+        for token in ["先", "看", "日", "志", "，", "再", "看", "代", "码", "。"]:
+            stub_ui.stream_thought(token, done=False)
+
+    thought_updates = [item for item in live_updates if "thought" in item]
+    assert capture.thought == "先看日志，再看代码。"
+    assert len(thought_updates) == 1
+    assert thought_updates[0]["thought"] == "先看日志，再看代码。"
+
+
+def test_capture_session_ui_stream_flushes_response_batches_by_size(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    live_updates: list[dict[str, object]] = []
+
+    def fake_set_live_output(session_id: str, **kwargs):
+        live_updates.append({"session_id": session_id, **kwargs})
+
+    monkeypatch.setattr(session_service, "_set_session_live_output", fake_set_live_output)
+    stub_ui = SimpleNamespace(
+        stream_thought=lambda *args, **kwargs: None,
+        clear_thought_stream=lambda *args, **kwargs: None,
+        stream_response=lambda *args, **kwargs: None,
+        clear_response_stream=lambda *args, **kwargs: None,
+        set_pet_mental_state=lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr("core.ui.get_ui", lambda: stub_ui)
+
+    response = "这是一段足够长的回答内容，用来证明后端会按批次刷新，而不是每个字符都刷新。"
+    capture = session_service.SessionTurnCapture(session_id="session-live-response", turn_id="turn-response")
+    with session_service._capture_session_ui_stream("session-live-response", capture):
+        for token in response:
+            stub_ui.stream_response(token, done=False)
+
+    content_updates = [item for item in live_updates if "content" in item]
+    assert capture.content == response
+    assert len(content_updates) >= 2
+    assert len(content_updates) < len(response)
+    assert content_updates[-1]["content"] == response
+
+
 def test_capture_session_ui_stream_preserves_reasoning_delta_spaces(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)

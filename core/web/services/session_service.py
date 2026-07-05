@@ -2944,6 +2944,131 @@ class SessionTurnCapture:
         self._append_tool_feedback_event(tool_call, related_thought_sequence=related_thought_sequence)
 
 
+_SESSION_UI_CAPTURE_RESPONSE_BATCH_MIN_CHARS = 24
+_SESSION_UI_CAPTURE_RESPONSE_BATCH_MAX_LATENCY_SECONDS = 0.12
+_SESSION_UI_CAPTURE_RESPONSE_BATCH_LATENCY_MIN_CHARS = 8
+_SESSION_UI_CAPTURE_THOUGHT_BATCH_MIN_CHARS = 24
+_SESSION_UI_CAPTURE_THOUGHT_BATCH_MAX_LATENCY_SECONDS = 0.12
+_SESSION_UI_CAPTURE_THOUGHT_BATCH_LATENCY_MIN_CHARS = 8
+
+
+@dataclass
+class _SessionUiCaptureTextBatcher:
+    session_id: str
+    capture: SessionTurnCapture
+    response_batch_min_chars: int = _SESSION_UI_CAPTURE_RESPONSE_BATCH_MIN_CHARS
+    response_batch_max_latency_seconds: float = _SESSION_UI_CAPTURE_RESPONSE_BATCH_MAX_LATENCY_SECONDS
+    response_batch_latency_min_chars: int = _SESSION_UI_CAPTURE_RESPONSE_BATCH_LATENCY_MIN_CHARS
+    thought_batch_min_chars: int = _SESSION_UI_CAPTURE_THOUGHT_BATCH_MIN_CHARS
+    thought_batch_max_latency_seconds: float = _SESSION_UI_CAPTURE_THOUGHT_BATCH_MAX_LATENCY_SECONDS
+    thought_batch_latency_min_chars: int = _SESSION_UI_CAPTURE_THOUGHT_BATCH_LATENCY_MIN_CHARS
+    _pending_thought_text: str = ""
+    _pending_thought_started_at: float = 0.0
+    _published_thought_text: str = ""
+    _pending_response_content: str = ""
+    _pending_response_started_at: float = 0.0
+    _published_response_content: str = ""
+
+    def note_thought(self, thought: str, *, feedback_events: list[dict[str, Any]] | None = None) -> None:
+        cleaned = _sanitize_thought_text(thought)
+        if not cleaned:
+            return
+        self._pending_thought_text = cleaned
+        if self._pending_thought_started_at <= 0:
+            self._pending_thought_started_at = _perf_counter()
+        if self._should_flush_thought(cleaned):
+            self.flush_thought(feedback_events=feedback_events)
+
+    def note_response(self, content: str, *, done: bool = False) -> None:
+        cleaned = _sanitize_message_content("assistant", content)
+        if not cleaned:
+            if done:
+                self.flush_all()
+            return
+        self.flush_thought()
+        self._pending_response_content = cleaned
+        if self._pending_response_started_at <= 0:
+            self._pending_response_started_at = _perf_counter()
+        if done or self._should_flush_response(cleaned):
+            self.flush_response()
+
+    def flush_thought(self, *, feedback_events: list[dict[str, Any]] | None = None) -> None:
+        thought = _sanitize_thought_text(self._pending_thought_text)
+        if not thought:
+            self._pending_thought_text = ""
+            self._pending_thought_started_at = 0.0
+            return
+        if thought != self._published_thought_text or feedback_events is not None:
+            _set_session_live_output(
+                self.session_id,
+                turn_id=self.capture.turn_id,
+                thought=thought,
+                feedback_events=feedback_events if feedback_events is not None else self.capture.feedback_events,
+            )
+            self._published_thought_text = thought
+        self._pending_thought_text = ""
+        self._pending_thought_started_at = 0.0
+
+    def flush_response(self) -> None:
+        content = _sanitize_message_content("assistant", self._pending_response_content)
+        if not content:
+            self._pending_response_content = ""
+            self._pending_response_started_at = 0.0
+            return
+        if content != self._published_response_content:
+            _set_session_live_output(
+                self.session_id,
+                turn_id=self.capture.turn_id,
+                stage="assistant_response",
+                content=content,
+            )
+            self._published_response_content = content
+        self._pending_response_content = ""
+        self._pending_response_started_at = 0.0
+
+    def clear_thought(self) -> None:
+        self._pending_thought_text = ""
+        self._pending_thought_started_at = 0.0
+        self._published_thought_text = ""
+        _set_session_live_output(self.session_id, turn_id=self.capture.turn_id, thought="")
+
+    def clear_response(self) -> None:
+        self._pending_response_content = ""
+        self._pending_response_started_at = 0.0
+        self._published_response_content = ""
+        _set_session_live_output(self.session_id, turn_id=self.capture.turn_id, content="")
+
+    def flush_all(self) -> None:
+        self.flush_thought()
+        self.flush_response()
+
+    def _should_flush_thought(self, thought: str) -> bool:
+        pending_delta, replace = _live_output_delta(self._published_thought_text, thought)
+        pending_chars = len(thought if replace else pending_delta)
+        if pending_chars >= max(1, int(self.thought_batch_min_chars or 1)):
+            return True
+        if self._pending_thought_started_at <= 0:
+            return False
+        elapsed = _perf_counter() - self._pending_thought_started_at
+        return (
+            elapsed >= max(0.0, float(self.thought_batch_max_latency_seconds or 0.0))
+            and pending_chars >= max(1, int(self.thought_batch_latency_min_chars or 1))
+        )
+
+    def _should_flush_response(self, content: str) -> bool:
+        pending_delta, replace = _live_output_delta(self._published_response_content, content)
+        pending_chars = len(content if replace else pending_delta)
+        if pending_chars >= max(1, int(self.response_batch_min_chars or 1)):
+            return True
+        if self._pending_response_started_at <= 0:
+            return False
+        elapsed = _perf_counter() - self._pending_response_started_at
+        return (
+            elapsed >= max(0.0, float(self.response_batch_max_latency_seconds or 0.0))
+            and pending_chars >= max(1, int(self.response_batch_latency_min_chars or 1))
+        )
+
+
 def list_sessions(*, include_hidden_internal: bool = False) -> list[dict]:
     """Return summarized sessions sourced from persisted chat state."""
 
@@ -18784,6 +18909,9 @@ def _capture_session_ui_stream(
         context = _SESSION_UI_CAPTURE_CONTEXT.get({})
         if not isinstance(context, dict) or context.get("capture") is not capture:
             return
+        batcher = context.get("textBatcher")
+        if isinstance(batcher, _SessionUiCaptureTextBatcher):
+            batcher.flush_all()
         data = event.data or {}
         name = str(data.get("name") or "").strip()
         if not name:
@@ -18906,6 +19034,9 @@ def _capture_session_ui_stream(
         status = str(data.get("status") or "").strip()
         if not status:
             return
+        batcher = context.get("textBatcher") if isinstance(context, dict) else None
+        if isinstance(batcher, _SessionUiCaptureTextBatcher):
+            batcher.flush_all()
         _set_session_llm_status_live_output(
             target_session_id,
             status,
@@ -18935,11 +19066,16 @@ def _capture_session_ui_stream(
                 "sessionId": session_id,
                 "capture": capture,
                 "mentalModelEnabled": mental_model_enabled,
+                "textBatcher": _SessionUiCaptureTextBatcher(session_id=session_id, capture=capture),
             }
         )
         try:
             yield
         finally:
+            context = _SESSION_UI_CAPTURE_CONTEXT.get({})
+            batcher = context.get("textBatcher") if isinstance(context, dict) else None
+            if isinstance(batcher, _SessionUiCaptureTextBatcher):
+                batcher.flush_all()
             _SESSION_UI_CAPTURE_CONTEXT.reset(token)
             for callback_id in callback_ids:
                 event_bus.unsubscribe_by_id(callback_id)
@@ -18976,18 +19112,22 @@ def _ensure_session_ui_capture_hooks(ui: Any) -> None:
                 return
             cleaned = _sanitize_thought_delta_text(text)
             if cleaned and not done:
+                batcher = context.get("textBatcher")
                 capture.note_thought(cleaned)
                 _set_session_model_thinking_live_output(
                     session_id,
                     turn_id=capture.turn_id,
                     thought_chars=len(cleaned),
                 )
-                _set_session_live_output(
-                    session_id,
-                    turn_id=capture.turn_id,
-                    thought=capture.thought,
-                    feedback_events=capture.feedback_events,
-                )
+                if isinstance(batcher, _SessionUiCaptureTextBatcher):
+                    batcher.note_thought(capture.thought, feedback_events=capture.feedback_events)
+                else:
+                    _set_session_live_output(
+                        session_id,
+                        turn_id=capture.turn_id,
+                        thought=capture.thought,
+                        feedback_events=capture.feedback_events,
+                    )
 
         def clear_thought_stream_proxy():
             original = originals.get("clear_thought_stream")
@@ -18998,8 +19138,12 @@ def _ensure_session_ui_capture_hooks(ui: Any) -> None:
             session_id = str(context.get("sessionId") or "").strip()
             if not isinstance(capture, SessionTurnCapture) or not session_id:
                 return
+            batcher = context.get("textBatcher")
+            if isinstance(batcher, _SessionUiCaptureTextBatcher):
+                batcher.clear_thought()
+            else:
+                _set_session_live_output(session_id, turn_id=capture.turn_id, thought="")
             capture.clear_thought()
-            _set_session_live_output(session_id, turn_id=capture.turn_id, thought="")
 
         def stream_response_proxy(text: str, done: bool = False):
             original = originals.get("stream_response")
@@ -19020,12 +19164,20 @@ def _ensure_session_ui_capture_hooks(ui: Any) -> None:
                 else:
                     next_content = f"{previous}{cleaned}" if previous else cleaned
                 capture.note_content(next_content)
-                _set_session_live_output(
-                    session_id,
-                    turn_id=capture.turn_id,
-                    stage="assistant_response",
-                    content=next_content,
-                )
+                batcher = context.get("textBatcher")
+                if isinstance(batcher, _SessionUiCaptureTextBatcher):
+                    batcher.note_response(next_content, done=done)
+                else:
+                    _set_session_live_output(
+                        session_id,
+                        turn_id=capture.turn_id,
+                        stage="assistant_response",
+                        content=next_content,
+                    )
+            elif done:
+                batcher = context.get("textBatcher")
+                if isinstance(batcher, _SessionUiCaptureTextBatcher):
+                    batcher.flush_all()
 
         def clear_response_stream_proxy():
             original = originals.get("clear_response_stream")
@@ -19037,7 +19189,11 @@ def _ensure_session_ui_capture_hooks(ui: Any) -> None:
             if not isinstance(capture, SessionTurnCapture) or not session_id:
                 return
             capture.clear_content()
-            _set_session_live_output(session_id, turn_id=capture.turn_id, content="")
+            batcher = context.get("textBatcher")
+            if isinstance(batcher, _SessionUiCaptureTextBatcher):
+                batcher.clear_response()
+            else:
+                _set_session_live_output(session_id, turn_id=capture.turn_id, content="")
 
         def set_pet_mental_state_proxy(mood: str = "", feeling: str = "", whisper: str = ""):
             original = originals.get("set_pet_mental_state")
@@ -19050,6 +19206,9 @@ def _ensure_session_ui_capture_hooks(ui: Any) -> None:
                 return
             if not _is_mental_model_enabled_for_turn(context.get("mentalModelEnabled")):
                 return
+            batcher = context.get("textBatcher")
+            if isinstance(batcher, _SessionUiCaptureTextBatcher):
+                batcher.flush_all()
             capture.note_mental_state(mood=mood, feeling=feeling, whisper=whisper)
             snapshot = _live_mental_snapshot(capture.mental_state, get_web_language())
             if snapshot is not None:
