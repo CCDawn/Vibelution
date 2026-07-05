@@ -21,6 +21,7 @@ Vibelution 应复刻这种统计语义，而不是读取或合并 Codex 私有�
 - 保留缓存统计：缓存命中输入、非缓存输入、cache creation/write token、cache hit rate。
 - 区分 `provider_usage`、`estimated`、`missing`、`not_called`，避免把估算值伪装成真实值。
 - 支持按今日、最近 7 天、全部时间、模型、provider、session、agent/runtime scope 聚合。
+- 在顶部“工作台工具”菜单里新增一个与“启动器 / 日志 / Git / 文件”平行的独立入口，并路由到全局 Token 统计页面。
 - 兼容现有对话页 session usage/cache usage 展示，不把当前 UI runtime state 当作全局事实源。
 
 ## 非目标
@@ -28,7 +29,7 @@ Vibelution 应复刻这种统计语义，而不是读取或合并 Codex 私有�
 - 不把 Codex App、Codex CLI 或外部 `.codex` 的 Token 使用量合并进 Vibelution。
 - 第一版不做费用或账单估算。
 - 第一版不要求接入 provider rate limit 统计。
-- 第一版不重做整个对话页 token/compression UI，只补全全局统计入口和必要展示。
+- 第一版不重做整个对话页 token/compression UI；对话页只能作为当前会话摘要，不作为全局统计主入口。
 - 不把 `ui_runtime_state.json` 作为全局统计的 canonical source。
 
 ## 事实源
@@ -172,11 +173,37 @@ rollup object 应保留：
 
 API 不得暴露 raw prompt、response、provider secret 或完整 provider usage payload。
 
+## 路由入口设计
+
+用户明确要求全局 Token 统计入口放在截图所示的“工作台工具”菜单中，与“启动器 / 日志 / Git / 文件”平行，而不是藏在对话页状态条或诊断抽屉里。
+
+实现计划应以当前前端结构为准：
+
+- `web/src/app/AppShellUtilityMenu.tsx` 是顶部“工作台工具”菜单的 owning surface。
+- 现有同级入口包括 `/launcher`、`/logs`、`/git`，以及文件浏览按钮。
+- `web/src/app/router.tsx` 负责注册 `/logs`、`/git` 等工作台路由。
+- `web/src/i18n/shellDictionary.ts` 和相关 shell/layout tests 需要同步更新入口文案与布局契约。
+
+推荐路由：
+
+- 新增 `/usage` 或 `/tokens` 工作台路由，页面名中文为“用量”或“Token”。
+- 推荐入口标签为“Token”，原因是与 `Git` 同样短，能在当前按钮网格里保持宽度稳定。
+- tooltip 或辅助标题说明为“全局 Token 用量”，避免把它误解成当前会话 token 状态。
+- 图标优先使用 `lucide-react` 中语义接近统计/计量的图标，例如 `Gauge`、`Activity`、`BarChart3`。最终选择应以现有工具菜单视觉平衡为准。
+
+交互要求：
+
+- 点击入口后进入独立路由页面，而不是展开内联 panel。
+- 路由页面显示全局统计详情；工具菜单内只显示入口，不在悬浮菜单里塞大型统计卡片。
+- 当前页面为 `/usage` 或 `/tokens` 时，入口应具备与 `/logs`、`/git` 一致的 active 样式。
+- 入口必须和“启动器 / 日志 / Git / 文件”同一排/同一按钮网格，不新增第二组工具区。
+
 ## UI 设计
 
 UI 应保持紧凑、可扫读、偏运维工具感：
 
-- 全局 Token summary 放在现有 chat/coding token status 附近，或放入 diagnostics drawer 的稳定入口。
+- 主入口放在“工作台工具”菜单，作为与“启动器 / 日志 / Git / 文件”平行的路由链接。
+- 独立路由页展示全局 Token summary；对话页只保留当前会话/本轮摘要和跳转入口。
 - 一级数字显示 `In`、`Cached`、`Out`、`Total`。
 - 明确显示 source：provider-observed、estimated、missing。
 - 默认优先展示今日和全部时间；model/provider breakdown 放进 details panel。
@@ -204,6 +231,8 @@ UI 应保持紧凑、可扫读、偏运维工具感：
 
 前端 focused tests：
 
+- `AppShellUtilityMenu` 或 shell layout contract 能证明新增入口与 `/logs`、`/git` 平行，并具备 active route 样式。
+- router tests 能证明新增全局 Token 统计 route 可懒加载并走 workbench error boundary。
 - 全局 Token summary 能渲染 observed totals。
 - estimated/missing source 状态可见。
 - 现有 session cache usage 展示不回归。
@@ -223,6 +252,7 @@ UI 应保持紧凑、可扫读、偏运维工具感：
 - 最终 storage path 和格式必须跟随 Vibelution 已有 runtime persistence 约定。
 - `reasoningOutputTokens` 需要扩展 normalizer，因为当前 `UsageStats` 没有直接字段。
 - API 文件和 TypeScript DTO 落点需要 serialized claim，因为 `web/src/api/types.ts`、`core/web/services/session_service.py`、`core/web/services/runtime_service.py` 都是共享 hot surface。
+- UI 实现需要额外 serialized claim 覆盖 `web/src/app/AppShellUtilityMenu.tsx`、`web/src/app/router.tsx`、`web/src/i18n/shellDictionary.ts` 和新增 route 文件。
 
 ## 已批准口径
 
@@ -231,3 +261,4 @@ UI 应保持紧凑、可扫读、偏运维工具感：
 - “全局”指 Vibelution 全局 usage。
 - Codex 作为统计方法参考，不作为 Vibelution 的数据源。
 - 第一版以 provider-observed normalized usage 作为事实源；估算和缺失必须显式标记。
+- 全局 Token 统计入口必须放在“工作台工具”菜单里，与“启动器 / 日志 / Git / 文件”平行，并通过独立路由打开。
