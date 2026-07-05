@@ -51,6 +51,25 @@ const BUSY_PHASES = new Set([
   "paused",
 ]);
 
+const TERMINAL_PHASES = new Set([
+  "ready",
+  "completed",
+  "done",
+  "success",
+  "failed",
+  "failed_provider",
+  "failed_runtime",
+  "error",
+  "timeout",
+  "timed_out",
+  "blocked",
+  "cancelled",
+  "canceled",
+  "stopped",
+  "stopped_by_user",
+  "needs_continue",
+]);
+
 function normalizeText(value: unknown): string {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
@@ -59,8 +78,13 @@ function isBusyPhase(value: unknown): boolean {
   return BUSY_PHASES.has(normalizeText(value).toLowerCase());
 }
 
-function isReadyPhase(detail: SessionDetail): boolean {
-  return normalizeText(detail.currentPhase || detail.status).toLowerCase() === "ready";
+function terminalPhaseForDetail(detail: SessionDetail): string {
+  const phase = normalizeText(detail.currentPhase || detail.status).toLowerCase();
+  return TERMINAL_PHASES.has(phase) ? phase : "";
+}
+
+function notificationStatusForTerminalPhase(phase: string): string {
+  return ["ready", "completed", "done", "success"].includes(phase) ? "completed" : phase;
 }
 
 function latestAssistantTurnMessage(detail: SessionDetail): ConversationMessage | undefined {
@@ -79,6 +103,10 @@ function latestAssistantTurnMessage(detail: SessionDetail): ConversationMessage 
 function messageTurnId(message: ConversationMessage | undefined): string {
   const raw = normalizeText(message?.metadata?.turnId);
   return raw.startsWith("live:") ? raw.slice("live:".length) : raw;
+}
+
+function detailTurnId(detail: SessionDetail, latest: ConversationMessage | undefined): string {
+  return messageTurnId(latest) || normalizeText(latest?.id) || normalizeText(detail.lastTurnError?.turnId);
 }
 
 export function browserDesktopNotificationBridge(globalLike: unknown = globalThis): DesktopBridge | undefined {
@@ -183,28 +211,29 @@ export function createDesktopConversationNotifier(
 
       const phase = normalizeText(detail.currentPhase || detail.status);
       const busy = isBusyPhase(phase);
-      const ready = isReadyPhase(detail);
+      const terminalPhase = terminalPhaseForDetail(detail);
       const wasBusy = lastBusyBySession.get(sessionId) ?? false;
       lastBusyBySession.set(sessionId, busy);
-      if (busy || !wasBusy || !ready) {
+      if (busy || !wasBusy || !terminalPhase) {
         return;
       }
+      const terminalStatus = notificationStatusForTerminalPhase(terminalPhase);
 
       const latest = latestAssistantTurnMessage(detail);
-      const turnId = messageTurnId(latest) || normalizeText(latest?.id);
+      const turnId = detailTurnId(detail, latest);
       if (!turnId) {
         return;
       }
 
       emit({
         schemaVersion: 1,
-        notificationKey: `${sessionId}:${turnId}:completed`,
+        notificationKey: `${sessionId}:${turnId}:${terminalStatus}`,
         sessionId,
         turnId,
         title: SAFE_NOTIFICATION_TITLE,
         body: SAFE_NOTIFICATION_BODY,
         completedAt: normalizeText(latest?.timestamp) || undefined,
-        terminalStatus: "completed",
+        terminalStatus,
       });
     },
   };
