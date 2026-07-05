@@ -10,7 +10,7 @@ const styles = {
   sourceCollectionStageAgentList:
     "sourceCollectionStageAgentList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-[var(--accent-cool)]",
   sourceCollectionStageAgentPanel:
-    "sourceCollectionStageAgentPanel min-w-0 rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_22%,var(--vui-border-subtle))] bg-[color:color-mix(in_srgb,var(--accent-cool)_5%,var(--source-workbench-card))] p-2 text-[var(--accent-cool)]",
+    "sourceCollectionStageAgentPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 text-[var(--fg-primary)]",
 } as const;
 
 export default styles;
