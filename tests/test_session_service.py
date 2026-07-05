@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 import queue
 
+from core.chat.conversation_ledger import EVENT_ASSISTANT_MESSAGE, EVENT_USER_MESSAGE, append_conversation_event
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.services import session_service
 from core.web.services import agent_directory_service
@@ -402,6 +403,68 @@ def test_session_assistant_delta_publish_recovers_full_snapshot_with_lightweight
     assert recovered["thoughtDelta"] == "思考"
     assert recovered["replaceContent"] is True
     assert recovered["replaceThought"] is True
+
+
+def test_session_stream_initial_state_prefers_live_overlay_summary(tmp_path, monkeypatch):
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "session-live",
+            "updated_at": "2026-05-18T12:00:00",
+            "conversations": [
+                {
+                    "conversation_id": "session-live",
+                    "title": "真实会话",
+                    "updated_at": "2026-05-18T12:00:00",
+                    "last_turn_status": "ready",
+                }
+            ],
+        },
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-seeded-user",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "继续前端开发"},
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-seeded-assistant",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "已经接到真实状态了。"},
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    session_service._set_session_running("session-live", True, turn_id="turn-live")
+    try:
+        session_service._set_session_live_output(
+            "session-live",
+            turn_id="turn-live",
+            content="实时内容",
+            thought="实时思考",
+            feedback_events=[{"kind": "status", "name": "model_response"}],
+        )
+
+        payload = session_service.get_session_stream_initial_state("session-live")
+    finally:
+        session_service._set_session_running("session-live", False, turn_id="turn-live")
+        session_service._clear_session_live_output("session-live", turn_id="turn-live")
+
+    assert payload is not None
+    assert payload["running"] is True
+    assert payload["activeTurnId"] == "turn-live"
+    latest = payload["latestMessage"]
+    assert latest["id"] == session_service._live_assistant_message_id("session-live", "turn-live")
+    assert latest["role"] == "assistant"
+    assert latest["streaming"] is True
+    assert latest["contentLength"] == len("实时内容")
+    assert latest["thoughtLength"] == len("实时思考")
+    assert latest["feedbackEventCount"] == 1
 
 
 def test_get_session_detail_materializes_agent_directory_stub_without_switching_active(tmp_path, monkeypatch):
