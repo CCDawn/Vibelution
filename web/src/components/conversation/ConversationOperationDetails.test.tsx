@@ -96,6 +96,22 @@ describe("ConversationOperationDetails", () => {
     expect(html).toContain("Detailed reasoning");
   });
 
+  it("does not render an empty expanded details container", async () => {
+    const { DeferredOperationDetails } = await import("./ConversationOperationDetails");
+    const html = renderToStaticMarkup(
+      <DeferredOperationDetails
+        operation={thoughtOperation}
+        expanded
+        detailsId="operation-details-empty"
+        kind="tool"
+        classNames={classNames}
+        buildDetailRows={() => []}
+      />,
+    );
+
+    expect(html).toBe("");
+  });
+
   it("keeps expanded detail rows as inline metadata instead of nested cards", () => {
     expect(detailStyles.operationDetailRow).not.toMatch(/radius-panel|surface-glass|shadow-/);
     expect(detailStyles.operationDetailLabel).not.toMatch(/rounded-|border|bg-\[|shadow-|p-2/);
@@ -192,5 +208,30 @@ describe("ConversationOperationDetails", () => {
       durationSeconds: null,
       resultPreview: ["line 1", "line 2", "line 3", "line 4"].join("\n"),
     }, detailLabels.structuredResultFallback)).toBe("");
+  });
+
+  it("bounds expanded command-like tool results so raw output does not dominate the conversation", () => {
+    const longResult = Array.from({ length: 30 }, (_, index) =>
+      `${index + 1}- output line ${index + 1} with verbose raw payload`,
+    ).join("\n");
+    const rows = buildOperationDetailRows({
+      id: "tool-long-result",
+      kind: "tool",
+      label: "命令",
+      rawLabel: "cli_tool",
+      status: "done",
+      summary: "命令执行完成",
+      durationSeconds: null,
+      resultPreview: longResult,
+    }, detailLabels);
+
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toMatchObject({
+      label: "Result",
+    });
+    expect(rows[1].value).toContain("1- output line 1");
+    expect(rows[1].value).toContain("18- output line 18");
+    expect(rows[1].value).not.toContain("19- output line 19");
+    expect(rows[1].value).toContain("[已省略 12 行");
   });
 });

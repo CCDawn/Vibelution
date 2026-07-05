@@ -128,4 +128,117 @@ describe("projectAgentMessageTimelineMessages", () => {
     expect(projection.streamingMessages).toEqual([]);
     expect(projection.rowIdentities[0].rowKey).toBe("assistant-turn:turn-1");
   });
+
+  it("coalesces same-turn live overlay tool updates by semantic identity", () => {
+    const liveOverlay = assistantMessage("live-overlay", {
+      content: "正在读取文件",
+      streaming: true,
+      toolCalls: [
+        {
+          name: "read_file_tool",
+          status: "running",
+          summary: "正在读取 ConversationView.tsx",
+          resultPreview: "opening...",
+        },
+      ],
+      timelineItems: [
+        {
+          id: "tool-read-1",
+          kind: "operation",
+          status: "running",
+          title: "读取",
+          summary: "正在读取 ConversationView.tsx",
+          operationIds: ["tool-read-operation"],
+        },
+      ],
+      metadata: { kind: "session_live_overlay", turnId: "live:turn-1" },
+    });
+    const activeTurn = assistantMessage("active-turn", {
+      content: "回答正文",
+      streaming: true,
+      toolCalls: [
+        {
+          name: "read_file_tool",
+          status: "done",
+          summary: "已读取 ConversationView.tsx",
+          resultPreview: "loaded",
+        },
+      ],
+      timelineItems: [
+        {
+          id: "tool-read-1",
+          kind: "operation",
+          status: "completed",
+          title: "读取",
+          summary: "已读取 ConversationView.tsx",
+          operationIds: ["tool-read-operation"],
+        },
+      ],
+      metadata: { kind: "session_active_turn_layer", turnId: "turn-1" },
+    });
+
+    const projection = projectAgentMessageTimelineMessages({
+      timelineMessages: [liveOverlay],
+      activeTurnMessage: activeTurn,
+    });
+
+    expect(projection.messages).toHaveLength(1);
+    expect(projection.messages[0].toolCalls).toEqual([
+      {
+        name: "read_file_tool",
+        status: "done",
+        summary: "已读取 ConversationView.tsx",
+        resultPreview: "loaded",
+      },
+    ]);
+    expect(projection.messages[0].timelineItems).toEqual([
+      {
+        id: "tool-read-1",
+        kind: "operation",
+        status: "completed",
+        title: "读取",
+        summary: "已读取 ConversationView.tsx",
+        operationIds: ["tool-read-operation"],
+      },
+    ]);
+  });
+
+  it("keeps same-name live overlay tools separate when their stable inputs differ", () => {
+    const liveOverlay = assistantMessage("live-overlay", {
+      content: "正在读取文件",
+      streaming: true,
+      toolCalls: [
+        {
+          name: "read_file_tool",
+          status: "done",
+          summary: "读取 A",
+          arguments: { path: "A.ts" },
+        },
+      ],
+      metadata: { kind: "session_live_overlay", turnId: "live:turn-1" },
+    });
+    const activeTurn = assistantMessage("active-turn", {
+      content: "回答正文",
+      streaming: true,
+      toolCalls: [
+        {
+          name: "read_file_tool",
+          status: "done",
+          summary: "读取 B",
+          arguments: { path: "B.ts" },
+        },
+      ],
+      metadata: { kind: "session_active_turn_layer", turnId: "turn-1" },
+    });
+
+    const projection = projectAgentMessageTimelineMessages({
+      timelineMessages: [liveOverlay],
+      activeTurnMessage: activeTurn,
+    });
+
+    expect(projection.messages[0].toolCalls?.map((toolCall) => toolCall.summary)).toEqual([
+      "读取 A",
+      "读取 B",
+    ]);
+  });
 });
