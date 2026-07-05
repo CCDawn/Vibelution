@@ -33,7 +33,7 @@ const styles = {
   caseConversationFallback:
     "grid [min-height:180px] [place-items:center] [color:var(--fg-secondary)]",
   caseConversationShell:
-    "flex [flex:1_1_0] min-h-0 [height:100%]",
+    "flex [flex:1_1_0] min-h-0 [height:100%] bg-[var(--vui-surface-base)] [background-image:linear-gradient(to_right,color-mix(in_srgb,var(--vui-border-subtle)_24%,transparent)_1px,transparent_1px),linear-gradient(to_bottom,color-mix(in_srgb,var(--vui-border-subtle)_18%,transparent)_1px,transparent_1px)] [background-size:40px_40px]",
   caseConversationTranscript:
     "[flex:1_1_0] [height:100%] min-h-0 [padding:0_!important] [border:0_!important] [background:transparent_!important] [box-shadow:none_!important]",
   caseOverviewEvidence:
@@ -49,7 +49,7 @@ const styles = {
   caseOverviewItem:
     "grid [gap:4px] min-w-0 [padding:8px_10px] [border:1px_solid_var(--border-hairline)] [border-radius:7px] [background:color-mix(in_srgb,_var(--surface-panel)_68%,_transparent)] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[font-weight:650] [&_strong]:min-w-0 [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[line-height:1.35] [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis]",
   caseOverviewWorkspace:
-    "grid [grid-template-rows:auto_minmax(120px,_1fr)] [align-content:stretch] [gap:10px] [flex:1_1_0] min-w-0 min-h-0 [height:100%] [padding:10px] [overflow:auto]",
+    "grid [grid-template-rows:auto_minmax(120px,_1fr)] [align-content:stretch] [gap:10px] [flex:1_1_0] min-w-0 min-h-0 [height:100%] [padding:10px] [overflow:auto] bg-[var(--vui-surface-base)] [background-image:linear-gradient(to_right,color-mix(in_srgb,var(--vui-border-subtle)_24%,transparent)_1px,transparent_1px),linear-gradient(to_bottom,color-mix(in_srgb,var(--vui-border-subtle)_18%,transparent)_1px,transparent_1px)] [background-size:40px_40px]",
   casePreflightIssue:
     "grid [gap:5px] [padding:10px_11px] [border:1px_solid_color-mix(in_srgb,_var(--state-warning)_36%,_var(--border-hairline))] [border-radius:8px] [background:color-mix(in_srgb,_var(--state-warning)_9%,_var(--surface-card-subtle))] [color:var(--fg-secondary)] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_span]:[color:var(--fg-secondary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[line-height:1.4] [&_span]:[overflow-wrap:anywhere] [&_small]:[font-size:var(--vui-font-xs)] [&_small]:[line-height:1.4] [&_small]:[overflow-wrap:anywhere] [&_small]:[color:var(--fg-tertiary)]",
   caseRawEvidence:
