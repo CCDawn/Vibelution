@@ -257,6 +257,8 @@ def _tool_pairing_snapshot(messages: List[Dict[str, Any]]) -> Dict[str, int]:
 def _payload_message_snapshot(payload: Dict[str, Any]) -> Dict[str, Any]:
     messages = payload.get("messages")
     message_list = [item for item in messages if isinstance(item, dict)] if isinstance(messages, list) else []
+    if not message_list and isinstance(payload.get("input"), list):
+        message_list = [item for item in payload.get("input", []) if isinstance(item, dict)]
     roles = [str(item.get("role") or "").strip().lower() or "unknown" for item in message_list]
     shape_items: list[dict[str, Any]] = []
     has_image = False
@@ -283,6 +285,36 @@ def _payload_message_snapshot(payload: Dict[str, Any]) -> Dict[str, Any]:
         "payloadMessageHasImage": has_image,
         **_tool_pairing_snapshot(message_list),
     }
+
+
+def _responses_content_blocks(content: Any, convert_content_blocks_for_transport) -> list[dict[str, Any]]:
+    if isinstance(content, list):
+        converted = convert_content_blocks_for_transport(content, transport="responses")
+        return [dict(item) for item in converted if isinstance(item, dict)] if isinstance(converted, list) else []
+    text = str(content or "").strip()
+    if text:
+        return [{"type": "input_text", "text": text}]
+    return []
+
+
+def _responses_input_from_messages(
+    messages: List[Dict[str, Any]],
+    *,
+    convert_content_blocks_for_transport,
+) -> List[Dict[str, Any]]:
+    input_items: List[Dict[str, Any]] = []
+    for message in list(messages or []):
+        if not isinstance(message, dict):
+            continue
+        item: Dict[str, Any] = {
+            "role": str(message.get("role") or "user").strip().lower() or "user",
+            "content": _responses_content_blocks(
+                message.get("content"),
+                convert_content_blocks_for_transport,
+            ),
+        }
+        input_items.append(item)
+    return input_items
 
 
 def _apply_system_message_policy(
@@ -672,8 +704,8 @@ def build_llm_payload(
         policy_actions.provider_tool_chain_repaired += 1
     if has_prompt_cache_control and not preserve_cache_control:
         normalized_messages = strip_cache_control_from_messages(normalized_messages)
-    if has_image_content:
-        transport = str(getattr(profile, "transport", "") or "").strip().lower()
+    transport = str(getattr(profile, "transport", "") or "").strip().lower()
+    if has_image_content and transport != "responses":
         for item in normalized_messages:
             item["content"] = convert_content_blocks_for_transport(item.get("content"), transport=transport)
     normalized_messages = _apply_message_protocol_policy(
@@ -689,15 +721,29 @@ def build_llm_payload(
             policy_actions,
         )
 
-    payload = {
-        "model": adapter.litellm_model_name(),
-        "messages": adapter.messages(normalized_messages),
-        "max_tokens": profile.max_output_tokens,
-        "timeout": profile.timeout,
-        "stream": build_input.stream,
-        "api_key": build_input.api_key,
-        "base_url": build_input.provider.base_url,
-    }
+    if transport == "responses":
+        payload = {
+            "model": adapter.litellm_model_name(),
+            "input": _responses_input_from_messages(
+                adapter.messages(normalized_messages),
+                convert_content_blocks_for_transport=convert_content_blocks_for_transport,
+            ),
+            "max_output_tokens": profile.max_output_tokens,
+            "timeout": profile.timeout,
+            "stream": build_input.stream,
+            "api_key": build_input.api_key,
+            "base_url": build_input.provider.base_url,
+        }
+    else:
+        payload = {
+            "model": adapter.litellm_model_name(),
+            "messages": adapter.messages(normalized_messages),
+            "max_tokens": profile.max_output_tokens,
+            "timeout": profile.timeout,
+            "stream": build_input.stream,
+            "api_key": build_input.api_key,
+            "base_url": build_input.provider.base_url,
+        }
     payload.update(adapter.payload_sampling_parameters())
     payload.update(adapter.payload_thinking_parameters())
     thinking_payload = _payload_thinking_parameters(profile, build_input.provider, route, policy_actions)
