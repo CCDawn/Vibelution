@@ -268,6 +268,12 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.responseToggle).toContain("!items-center");
   });
 
+  it("keeps timeline status meta aligned to the top of multi-line operation rows", () => {
+    expect(styles.timelineCellHeader).toContain("!items-center");
+    expect(styles.timelineCellMeta).toContain("self-start");
+    expect(styles.timelineCellDetailButton).toContain("self-start");
+  });
+
   it("keeps expanded thought timeline text as a left-aligned reading block", () => {
     expect(styles.timelineThoughtText).toContain("!block");
     expect(styles.timelineThoughtText).toContain("text-left");
