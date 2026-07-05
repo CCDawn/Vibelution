@@ -4,9 +4,9 @@ const styles = {
   messageError:
     "messageError min-w-0 break-words border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
   workflowCoordinationBriefSummary:
-    "workflowCoordinationBriefSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 [&_span]:min-w-0 [&_span]:break-words",
+    "workflowCoordinationBriefSummary min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 [&_span]:min-w-0 [&_span]:break-words",
   workflowCoordinationPanel:
-    "workflowCoordinationPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "workflowCoordinationPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
   workflowCoordinationQueue:
     "workflowCoordinationQueue min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto [&_span]:min-w-0 [&_strong]:min-w-0 [&_strong]:truncate [&_small]:min-w-0 [&_small]:break-words",
   workflowCoordinationQueues:
@@ -20,7 +20,7 @@ const styles = {
   workflowGraphIssues:
     "workflowGraphIssues min-w-0",
   workflowGraphPanel:
-    "workflowGraphPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "workflowGraphPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
   workflowGraphStats:
     "workflowGraphStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   workflowIngestionActions:
@@ -30,7 +30,7 @@ const styles = {
   workflowIngestionHeader:
     "workflowIngestionHeader min-w-0 !grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 max-[640px]:grid-cols-[minmax(0,1fr)] [&>div]:min-w-0 [&_strong]:block [&_strong]:truncate [&_span]:min-w-0 [&_span]:break-words",
   workflowIngestionPanel:
-    "workflowIngestionPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "workflowIngestionPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
   workflowIngestionStage:
     "workflowIngestionStage min-w-0 [&_small]:min-w-0 [&_small]:break-words [&_strong]:min-w-0 [&_strong]:truncate",
   workflowIngestionStages:
@@ -40,17 +40,17 @@ const styles = {
   workflowModelEvidenceCoverage:
     "workflowModelEvidenceCoverage min-w-0 !grid grid-cols-[repeat(auto-fit,minmax(118px,1fr))] gap-1.5",
   workflowModelEvidencePanel:
-    "workflowModelEvidencePanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "workflowModelEvidencePanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
   workflowModelEvidenceStats:
     "workflowModelEvidenceStats min-w-0 grid gap-2 !grid grid-cols-[repeat(auto-fit,minmax(118px,1fr))] gap-1.5",
   workflowPaperNoteChunkPanel:
-    "workflowPaperNoteChunkPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "workflowPaperNoteChunkPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
   workflowPaperNoteChunkPlans:
     "workflowPaperNoteChunkPlans min-w-0 !grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[5px] max-[760px]:grid-cols-[minmax(0,1fr)] [&_span]:min-w-0 [&_span]:grid [&_span]:gap-0.5 [&_small]:min-w-0 [&_small]:break-words [&_small]:[overflow-wrap:anywhere] [&_strong]:min-w-0 [&_strong]:truncate",
   workflowPaperNoteChunkStats:
     "workflowPaperNoteChunkStats min-w-0 grid gap-2 !grid grid-cols-[repeat(4,minmax(86px,1fr))] gap-[5px] max-[760px]:grid-cols-[minmax(0,1fr)] [&_span]:min-w-0 [&_span]:break-words",
   workflowSourceQualityPanel:
-    "workflowSourceQualityPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "workflowSourceQualityPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
   workflowSourceQualityQueue:
     "workflowSourceQualityQueue min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[5px] max-[760px]:grid-cols-[minmax(0,1fr)] [&_span]:min-w-0 [&_span]:grid [&_span]:gap-0.5 [&_small]:min-w-0 [&_small]:break-words [&_strong]:min-w-0 [&_strong]:truncate",
   workflowSourceQualityStats:

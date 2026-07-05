@@ -10,7 +10,7 @@ const styles = {
   workflowIngestionHeader:
     "workflowIngestionHeader min-w-0 flex flex-wrap items-center gap-1.5",
   workflowSourceCollectionPanel:
-    "workflowSourceCollectionPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "workflowSourceCollectionPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
   workflowSourceCollectionPlan:
     "workflowSourceCollectionPlan min-w-0",
   workflowSourceCollectionStats:
