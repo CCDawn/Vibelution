@@ -16,6 +16,15 @@ export { VNativeTextarea, type VNativeTextareaProps } from "./forms/VNativeTexta
 export { VSelect, type VSelectOption, type VSelectProps } from "./forms/VSelect";
 export { VTextarea, type VTextareaProps } from "./forms/VTextarea";
 export { VActionGroup, type VActionGroupProps } from "./layout/VActionGroup";
+export {
+  VDenseRow,
+  VDenseToolbar,
+  VEmbeddedPanel,
+  VMetricChip,
+  VStateRow,
+  VStatusChip,
+  type VStatusTone,
+} from "./aesthetic";
 export { VEmptyState, type VEmptyStateProps } from "./layout/VEmptyState";
 export { VEntityList, type VEntityListItem, type VEntityListProps } from "./layout/VEntityList";
 export { VHStack, type VHStackProps } from "./layout/VHStack";

@@ -1,6 +1,6 @@
 const styles = {
   panelEyebrow:
-    "panelEyebrow min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "panelEyebrow min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   pipelineBoundary: "pipelineBoundary min-w-0",
   pipelineHeader: "pipelineHeader min-w-0 flex flex-wrap items-center gap-1.5",
   pipelineIndex: "pipelineIndex min-w-0",
