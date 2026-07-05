@@ -11,11 +11,20 @@ export type ElectronWindowLike = {
   isDestroyed(): boolean;
   isFocused(): boolean;
   on(event: string, listener: ElectronWindowEventListener): unknown;
+  setOverlayIcon?(icon: unknown, description: string): void;
+  flashFrame?(flag: boolean): void;
   webContents: {
     getOSProcessId(): number;
     getURL(): string;
     on(event: string, listener: ElectronWindowEventListener): unknown;
   };
+};
+
+export type WorkbenchAttentionOptions = {
+  unreadCount: number;
+  overlayIcon?: unknown;
+  description?: string;
+  flash?: boolean;
 };
 
 export type ElectronWindowFactory = (url: string, paths: DesktopPaths) => ElectronWindowLike;
@@ -80,6 +89,30 @@ export class ElectronWindowProvider {
     return this.reportAndReturn(this.stateFor("workbench"));
   }
 
+  isWorkbenchFocused(): boolean {
+    return Boolean(this.workbenchWindow && !this.workbenchWindow.isDestroyed() && this.workbenchWindow.isFocused());
+  }
+
+  setWorkbenchAttention(options: WorkbenchAttentionOptions): void {
+    if (!this.workbenchWindow || this.workbenchWindow.isDestroyed()) {
+      return;
+    }
+
+    const unreadCount = Number.isFinite(options.unreadCount) ? Math.max(0, Math.round(options.unreadCount)) : 0;
+    const hasUnread = unreadCount > 0;
+    const description = hasUnread
+      ? options.description || `${unreadCount} completed conversation${unreadCount === 1 ? "" : "s"}`
+      : "";
+
+    if (typeof this.workbenchWindow.setOverlayIcon === "function") {
+      this.workbenchWindow.setOverlayIcon(hasUnread ? options.overlayIcon ?? null : null, description);
+    }
+
+    if (typeof this.workbenchWindow.flashFrame === "function") {
+      this.workbenchWindow.flashFrame(Boolean(options.flash && hasUnread));
+    }
+  }
+
   async closeWorkbench(): Promise<ManagedWindowState> {
     if (this.workbenchWindow && !this.workbenchWindow.isDestroyed()) {
       this.workbenchWindow.close();
@@ -113,7 +146,12 @@ export class ElectronWindowProvider {
       }
       void this.reportState(closedWindowState(role));
     });
-    window.on("focus", () => void this.reportState(this.stateFor(role)));
+    window.on("focus", () => {
+      if (role === "workbench") {
+        this.setWorkbenchAttention({ unreadCount: 0 });
+      }
+      void this.reportState(this.stateFor(role));
+    });
     window.on("blur", () => void this.reportState(this.stateFor(role)));
     window.on("unresponsive", () => void this.reportState(this.stateFor(role)));
     window.webContents.on("render-process-gone", () => void this.reportState(this.stateFor(role)));
