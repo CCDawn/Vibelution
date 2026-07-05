@@ -1,9 +1,9 @@
 const reviewControlButton =
-  "inline-flex min-h-8 items-center justify-center gap-2 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-card-muted)] px-2.5 text-[13px] font-semibold text-[var(--fg-primary)] no-underline transition hover:border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] disabled:cursor-not-allowed disabled:opacity-55";
+  "inline-flex min-h-8 min-w-0 w-fit max-w-full items-center justify-center gap-2 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-card-muted)] px-2.5 text-[13px] font-semibold leading-tight text-[var(--fg-primary)] no-underline transition hover:border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] disabled:cursor-not-allowed disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0";
 const reviewControlButtonActive =
   "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] text-[var(--accent-warm-2)]";
 const reviewPrimaryActionButton =
-  "inline-flex min-h-8 items-center justify-center gap-2 rounded-lg border border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] px-2.5 text-[13px] font-semibold text-[var(--accent-warm-2)] no-underline transition disabled:cursor-not-allowed disabled:opacity-55";
+  "inline-flex min-h-8 min-w-0 w-fit max-w-full items-center justify-center gap-2 rounded-lg border border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] px-2.5 text-[13px] font-semibold leading-tight text-[var(--accent-warm-2)] no-underline transition disabled:cursor-not-allowed disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0";
 const reviewFormLabel =
   "block [&_span]:mb-1 [&_span]:block [&_span]:text-xs [&_span]:uppercase [&_span]:tracking-[0.08em] [&_span]:text-[var(--fg-tertiary)]";
 const reviewInputTargets =
@@ -15,7 +15,7 @@ const reviewTextAreaField = [reviewFormLabel, reviewTextAreaTargets].join(" ");
 
 const styles = {
   page:
-    "flex h-full min-h-0 flex-col gap-1.5 overflow-hidden px-3 py-2 pb-3 text-[var(--fg-primary)] max-[980px]:overflow-auto max-[980px]:pb-[18px]",
+    "flex h-full min-h-0 min-w-0 flex-col gap-1.5 overflow-hidden px-3 py-2 pb-3 text-[var(--fg-primary)] max-[980px]:overflow-auto max-[980px]:pb-[18px]",
   toolbar: "flex min-w-0 flex-wrap items-center justify-between gap-[var(--route-topbar-gap)]",
   toolbarIntro: "grid min-w-[260px] max-w-[760px] gap-0.5",
   toolbarControls: "flex flex-wrap items-center justify-end gap-3",
@@ -25,22 +25,22 @@ const styles = {
     "m-0 max-w-none overflow-hidden text-ellipsis whitespace-nowrap text-[length:var(--route-topbar-subtitle-size)] leading-tight text-[var(--fg-secondary)]",
   summaryStrip: "grid grid-cols-5 gap-[var(--route-summary-gap)] max-[980px]:grid-cols-2 max-[720px]:grid-cols-1",
   summaryCard:
-    "grid min-h-7 grid-cols-[auto_minmax(0,1fr)] items-baseline gap-1.5 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-panel-strong)] px-2 py-1 [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_span]:text-[var(--fg-tertiary)] [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[var(--vui-font-xs)]",
+    "grid min-h-7 min-w-0 grid-cols-[auto_minmax(0,1fr)] items-baseline gap-1.5 rounded-lg border border-[var(--border-hairline)] bg-[color-mix(in_srgb,var(--surface-card-subtle)_48%,transparent)] px-2 py-1 [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_span]:text-[var(--fg-tertiary)] [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[var(--vui-font-xs)]",
   lifecyclePanel:
-    "flex min-h-[34px] items-center justify-between gap-2 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-panel-strong)] px-2 py-1.5 max-[980px]:flex-col max-[980px]:items-start",
+    "flex min-h-[34px] min-w-0 items-center justify-between gap-2 rounded-lg border border-[var(--border-hairline)] bg-[color-mix(in_srgb,var(--surface-card-subtle)_42%,transparent)] px-2 py-1.5 max-[980px]:flex-col max-[980px]:items-start",
   lifecyclePills: "flex flex-wrap justify-end gap-2 max-[980px]:justify-start",
   workspace:
-    "grid min-h-0 flex-1 grid-cols-[var(--review-queue-width,380px)_12px_minmax(0,1fr)] overflow-hidden max-[980px]:grid-cols-1 max-[980px]:gap-y-3 max-[980px]:overflow-visible",
+    "grid min-h-0 min-w-0 flex-1 grid-cols-[var(--review-queue-width,380px)_12px_minmax(0,1fr)] overflow-hidden max-[980px]:grid-cols-1 max-[980px]:gap-y-3 max-[980px]:overflow-visible",
   resizeHandle:
     "relative min-w-3 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none before:absolute before:inset-y-0 before:left-1/2 before:w-[3px] before:-translate-x-1/2 before:rounded-[var(--radius-control)] before:bg-[var(--surface-resize-track)] before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] hover:before:shadow-[var(--vui-shadow-soft)] focus-visible:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] focus-visible:before:shadow-[var(--vui-shadow-soft)] max-[980px]:hidden",
   queuePanel:
-    "flex min-h-0 flex-col gap-2 overflow-hidden rounded-lg border border-[var(--border-soft)] bg-[var(--surface-panel-strong)] p-[9px] max-[980px]:max-h-none max-[980px]:overflow-visible",
+    "flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden rounded-lg border border-[var(--border-hairline)] bg-[color-mix(in_srgb,var(--surface-card-subtle)_38%,transparent)] p-[9px] max-[980px]:max-h-none max-[980px]:overflow-visible",
   paneCollapsed: "overflow-hidden p-0 invisible",
   detailPanel:
-    "flex min-h-0 flex-col gap-2.5 overflow-auto rounded-lg border border-[var(--border-soft)] bg-[var(--surface-panel-strong)] p-[9px] max-[980px]:overflow-visible",
-  panelHeader: "flex items-start justify-between gap-3.5",
-  detailHeader: "flex items-start justify-between gap-3.5",
-  sectionHeader: "flex items-start justify-between gap-3.5",
+    "flex min-h-0 min-w-0 flex-col gap-2.5 overflow-auto rounded-lg border border-[var(--border-hairline)] bg-[color-mix(in_srgb,var(--surface-card-subtle)_38%,transparent)] p-[9px] max-[980px]:overflow-visible",
+  panelHeader: "flex min-w-0 items-start justify-between gap-3.5",
+  detailHeader: "flex min-w-0 items-start justify-between gap-3.5 max-[520px]:flex-col",
+  sectionHeader: "flex min-w-0 items-start justify-between gap-3.5 max-[520px]:flex-col",
   sectionTitle: "m-0 text-base font-bold leading-snug",
   detailTitle: "m-0 text-base font-bold leading-snug",
   detailLead: "m-0 mt-1.5 leading-snug text-[var(--fg-secondary)]",
@@ -66,29 +66,29 @@ const styles = {
   primaryAction: reviewPrimaryActionButton,
   secondaryAction: reviewControlButton,
   compactAction:
-    "inline-flex min-h-7 min-w-0 items-center justify-center gap-1.5 overflow-hidden whitespace-nowrap rounded-lg border border-[var(--border-soft)] bg-[var(--surface-card-muted)] px-2 text-[11px] font-semibold text-[var(--fg-primary)] no-underline transition disabled:cursor-not-allowed disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-label]]:truncate",
+    "inline-flex min-h-7 min-w-0 w-fit max-w-full items-center justify-center gap-1.5 overflow-hidden whitespace-nowrap rounded-lg border border-[var(--border-soft)] bg-[var(--surface-card-muted)] px-2 text-[11px] font-semibold text-[var(--fg-primary)] no-underline transition disabled:cursor-not-allowed disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-label]]:truncate",
   dangerAction:
-    "border-[color-mix(in_srgb,var(--fg-tertiary)_22%,transparent)] bg-[color-mix(in_srgb,var(--fg-tertiary)_8%,transparent)] text-[var(--accent-warm-2)]",
+    "border-[color-mix(in_srgb,var(--state-error)_34%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   searchField:
     "flex min-h-[34px] items-center gap-2 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-card-muted)] px-2.5 text-[var(--fg-secondary)] [&_input]:w-full [&_input]:border-0 [&_input]:bg-transparent [&_input]:font-[inherit] [&_input]:text-[var(--fg-primary)] [&_input]:outline-none [&_input::placeholder]:text-[var(--fg-tertiary)]",
   queueMeta: "flex items-center justify-between gap-2.5 text-[13px] text-[var(--fg-tertiary)]",
   bulkToolbar:
-    "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-lg border border-[var(--border-hairline)] bg-[var(--surface-card-subtle)] px-2 py-1.5",
+    "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-lg border border-[var(--border-hairline)] bg-[color-mix(in_srgb,var(--surface-card-subtle)_54%,transparent)] px-2 py-1.5 max-[520px]:grid-cols-1",
   bulkCounter:
     "flex min-w-[70px] items-baseline justify-start gap-2 text-xs text-[var(--fg-secondary)] [&_strong]:text-base [&_strong]:text-[var(--fg-primary)]",
-  bulkActions: "grid min-w-0 grid-cols-3 gap-1.5",
+  bulkActions: "flex min-w-0 flex-wrap items-center justify-end gap-1.5 max-[520px]:justify-start",
   queueList: "flex min-h-0 flex-col gap-1.5 overflow-auto pr-1 max-[980px]:max-h-[420px]",
   queueItem:
-    "w-full cursor-pointer rounded-lg border border-[var(--border-hairline)] bg-[var(--surface-card)] px-2.5 py-[9px] text-left text-inherit transition hover:border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] hover:bg-[var(--surface-panel-strong)]",
+    "w-full cursor-pointer rounded-lg border border-[var(--border-hairline)] bg-[var(--surface-card)] px-2.5 py-[9px] text-left text-inherit transition hover:border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] hover:bg-[color-mix(in_srgb,var(--accent-warm)_6%,var(--surface-card))]",
   queueItemActive:
-    "border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] bg-[var(--surface-panel-strong)]",
+    "border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,var(--surface-card))]",
   queueItemTop: "flex items-center justify-between gap-2.5",
   queueTitleRow: "flex min-w-0 items-center justify-start gap-2.5 [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis",
-  queueHeadline: "my-1.5 leading-normal text-[var(--fg-secondary)]",
-  signalRow: "flex flex-wrap items-center justify-start gap-2.5",
+  queueHeadline: "my-1.5 min-w-0 break-words leading-normal text-[var(--fg-secondary)]",
+  signalRow: "flex min-w-0 flex-wrap items-center justify-start gap-2.5",
   signalPill:
-    "inline-flex min-h-6 items-center justify-center rounded-[var(--radius-control)] bg-[var(--surface-card-hover)] px-2 text-xs font-semibold text-[var(--fg-secondary)]",
-  queueFooter: "flex items-center justify-between gap-2.5 text-xs text-[var(--fg-tertiary)]",
+    "inline-flex min-h-6 max-w-full min-w-0 items-center justify-center truncate rounded-[var(--radius-control)] bg-[var(--surface-card-hover)] px-2 text-xs font-semibold text-[var(--fg-secondary)]",
+  queueFooter: "flex flex-wrap items-center justify-between gap-2.5 text-xs text-[var(--fg-tertiary)]",
   selectionButton:
     "inline-flex h-7 w-7 flex-none items-center justify-center rounded-lg border border-[var(--border-soft)] bg-[var(--surface-card-muted)] p-0 text-[var(--fg-tertiary)] disabled:cursor-not-allowed disabled:opacity-55",
   selectionButtonActive:
@@ -98,32 +98,33 @@ const styles = {
   signalColumns: "grid grid-cols-2 gap-2 max-[980px]:grid-cols-1",
   formGrid: "grid grid-cols-2 gap-2 max-[980px]:grid-cols-1",
   factCard:
-    "rounded-lg border border-[var(--border-soft)] bg-[var(--surface-panel-strong)] px-2.5 py-2 [&_span]:mb-1 [&_span]:block [&_span]:text-xs [&_span]:uppercase [&_span]:tracking-[0.08em] [&_span]:text-[var(--fg-tertiary)] [&_strong]:block [&_strong]:leading-normal",
+    "min-w-0 rounded-lg border border-[var(--border-hairline)] bg-[color-mix(in_srgb,var(--surface-card)_58%,transparent)] px-2.5 py-2 [&_span]:mb-1 [&_span]:block [&_span]:text-xs [&_span]:uppercase [&_span]:tracking-[0.08em] [&_span]:text-[var(--fg-tertiary)] [&_strong]:block [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:leading-normal",
   metricCard:
-    "rounded-lg border border-[var(--border-soft)] bg-[var(--surface-panel-strong)] px-2.5 py-2 [&_span]:mb-1 [&_span]:block [&_span]:text-xs [&_span]:uppercase [&_span]:tracking-[0.08em] [&_span]:text-[var(--fg-tertiary)] [&_strong]:block [&_strong]:leading-normal [&_p]:m-0 [&_p]:mt-1 [&_p]:leading-snug [&_p]:text-[var(--fg-secondary)]",
+    "min-w-0 rounded-lg border border-[var(--border-hairline)] bg-[color-mix(in_srgb,var(--surface-card)_58%,transparent)] px-2.5 py-2 [&_span]:mb-1 [&_span]:block [&_span]:text-xs [&_span]:uppercase [&_span]:tracking-[0.08em] [&_span]:text-[var(--fg-tertiary)] [&_strong]:block [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:leading-normal [&_p]:m-0 [&_p]:mt-1 [&_p]:leading-snug [&_p]:text-[var(--fg-secondary)]",
   signalSection:
-    "rounded-lg border border-[var(--border-hairline)] bg-[var(--surface-card-subtle)] px-2.5 py-[9px] [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-[0.95rem] [&_h3]:font-bold [&_ul]:m-0 [&_ul]:pl-[18px] [&_ul]:leading-relaxed [&_ul]:text-[var(--fg-secondary)]",
+    "min-w-0 rounded-lg border border-[var(--border-hairline)] bg-[color-mix(in_srgb,var(--surface-card-subtle)_52%,transparent)] px-2.5 py-[9px] [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-[0.95rem] [&_h3]:font-bold [&_ul]:m-0 [&_ul]:pl-[18px] [&_ul]:leading-relaxed [&_ul]:text-[var(--fg-secondary)]",
   detailSection:
-    "rounded-lg border border-[var(--border-hairline)] bg-[var(--surface-card-subtle)] px-2.5 py-[9px] [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-[0.95rem] [&_h3]:font-bold",
+    "min-w-0 rounded-lg border border-[var(--border-hairline)] bg-[color-mix(in_srgb,var(--surface-card-subtle)_52%,transparent)] px-2.5 py-[9px] [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-[0.95rem] [&_h3]:font-bold",
   transcriptSection:
-    "rounded-lg border border-[var(--border-hairline)] bg-[var(--surface-card-subtle)] px-2.5 py-[9px] [&_summary]:cursor-pointer [&_summary]:font-semibold",
+    "min-w-0 rounded-lg border border-[var(--border-hairline)] bg-[color-mix(in_srgb,var(--surface-card-subtle)_52%,transparent)] px-2.5 py-[9px] [&_summary]:cursor-pointer [&_summary]:font-semibold",
   evidenceList: "flex flex-col gap-1.5",
   transcriptList: "flex flex-col gap-1.5",
   evidenceCard:
-    "rounded-lg border border-[var(--border-soft)] bg-[var(--surface-panel)] px-2.5 py-[9px] [&_p]:m-0 [&_p]:mt-2 [&_p]:whitespace-pre-wrap [&_p]:leading-normal",
+    "min-w-0 rounded-lg border border-[var(--border-hairline)] bg-[color-mix(in_srgb,var(--surface-card)_62%,transparent)] px-2.5 py-[9px] [&_p]:m-0 [&_p]:mt-2 [&_p]:whitespace-pre-wrap [&_p]:break-words [&_p]:leading-normal",
   transcriptCard:
-    "rounded-lg border border-[var(--border-soft)] bg-[var(--surface-panel)] px-2.5 py-[9px] [&_p]:m-0 [&_p]:mt-2 [&_p]:whitespace-pre-wrap [&_p]:leading-normal",
-  evidenceTop: "flex items-center justify-between gap-2.5",
+    "min-w-0 rounded-lg border border-[var(--border-hairline)] bg-[color-mix(in_srgb,var(--surface-card)_62%,transparent)] px-2.5 py-[9px] [&_p]:m-0 [&_p]:mt-2 [&_p]:whitespace-pre-wrap [&_p]:break-words [&_p]:leading-normal",
+  evidenceTop:
+    "grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] items-center gap-2.5 [&_span]:min-w-0 [&_span]:truncate [&_span]:text-right max-[520px]:grid-cols-1 max-[520px]:items-start max-[520px]:[&_span]:text-left",
   formField: reviewFormField,
   textAreaField: reviewTextAreaField,
-  actionRow: "flex items-center justify-between gap-2.5",
-  detailHeaderActions: "flex items-center justify-between gap-2.5",
+  actionRow: "flex flex-wrap items-center justify-start gap-2.5",
+  detailHeaderActions: "flex min-w-0 flex-wrap items-center justify-end gap-2.5 max-[520px]:justify-start",
   feedbackText: "m-0 text-[var(--accent-warm-2)]",
   errorText: "m-0 text-[var(--accent-warm-2)]",
   hintText: "m-0 leading-normal text-[var(--fg-secondary)]",
-  transcriptMeta: "mt-3.5 grid gap-2.5",
+  transcriptMeta: "mt-3.5 grid min-w-0 gap-2.5",
   metaRow:
-    "flex items-start justify-between gap-4 text-[var(--fg-secondary)] [&_span]:flex-1 [&_span]:break-all [&_span]:text-right",
+    "grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] items-start gap-2.5 text-[var(--fg-secondary)] [&_span]:min-w-0 [&_span]:break-all [&_span]:text-right max-[520px]:grid-cols-1 max-[520px]:[&_span]:text-left",
   emptyState:
     "flex min-h-[82px] flex-col justify-center gap-1 rounded-lg border border-dashed border-[var(--border-strong)] px-[11px] py-[9px] text-[var(--fg-secondary)] [&_h3]:m-0 [&_h3]:text-[var(--fg-primary)]",
   spin: "animate-spin",

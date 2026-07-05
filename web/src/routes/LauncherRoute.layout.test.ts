@@ -284,8 +284,6 @@ describe("LauncherRoute layout contract", () => {
   });
 
   it("uses a light dense Launcher surface with muted action buttons", () => {
-    expect(routeStylesSource).toContain("bg-[var(--surface-page)]");
-    expect(routeStylesSource).toContain("bg-[color-mix(in_srgb,var(--surface-panel)_86%,transparent)]");
     expect(routeStylesSource).toContain("bg-[color-mix(in_srgb,var(--accent-primary)_10%,var(--surface-card))]");
     expect(routeStylesSource).toContain("bg-[color-mix(in_srgb,var(--danger)_7%,var(--surface-card))]");
     expect(routeStylesSource).toContain("min-h-7");
@@ -294,6 +292,17 @@ describe("LauncherRoute layout contract", () => {
     expect(routeStylesSource).toContain("whitespace-nowrap");
     expect(launcherShellStylesSource).toContain("var(--vui-gradient-route-soft)");
     expect(launcherShellStylesSource).toContain("var(--fg-primary)");
+  });
+
+  it("keeps the Launcher route root and header background-aware", () => {
+    expect(styles.route).not.toContain("bg-[var(--surface-page)]");
+    expect(styles.route).not.toContain("bg-[color-mix(in_srgb,var(--surface-page)");
+    expect(styles.header).not.toContain("bg-[color-mix(in_srgb,var(--surface-panel)_86%,transparent)]");
+    expect(styles.header).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+    expect(styles.header).toContain("!bg-transparent");
+    expect(styles.header).toContain("!shadow-none");
+    expect(styles.header).toContain("!backdrop-blur-none");
+    expect(styles.panel).not.toContain("bg-[var(--surface-panel)]");
   });
 
   it("keeps the complete launcher surface reachable when the window is short", () => {
@@ -306,6 +315,16 @@ describe("LauncherRoute layout contract", () => {
     expect(routeStylesSource).toContain("pb-[max(14px,env(safe-area-inset-bottom))]");
     expect(routeStylesSource).toContain("overflow-visible");
     expect(routeStylesSource).not.toContain("grid-rows-[auto_auto_auto_auto_auto_minmax(0,1fr)]");
+  });
+
+  it("keeps Launcher strips and actions from overflowing narrow windows", () => {
+    expect(styles.dangerZone).toContain("max-[860px]:grid-cols-[minmax(0,1fr)]");
+    expect(styles.workspace).toContain("grid-cols-[minmax(0,1fr)]");
+    expect(styles.statusBarReason).toContain("max-[860px]:grid-cols-[minmax(0,1fr)]");
+    expect(styles.dangerActions).toContain("min-w-0");
+    expect(styles.primaryButton).toContain("max-w-full");
+    expect(styles.statusBarButton).toContain("max-w-full");
+    expect(styles.iconButton).toContain("max-w-full");
   });
 
   it("keeps internal lifecycle fields out of the first-read labels", () => {

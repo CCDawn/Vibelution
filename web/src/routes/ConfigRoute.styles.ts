@@ -29,13 +29,13 @@ const styles = {
   avatarCropMask:
     "vui-routes-configroute avatarCropMask [position:absolute] [inset:0] [border:1px_solid_color-mix(in_srgb,var(--fg-primary)_54%,transparent)] [box-shadow:var(--vui-shadow-inset-accent)] [pointer-events:none]",
   avatarCropPanel:
-    "vui-routes-configroute avatarCropPanel [display:grid] [gap:10px] [padding:10px] [border:1px_solid_var(--border-hairline)] [border-radius:8px] [background:color-mix(in_srgb,var(--surface-card)_86%,transparent)]",
+    "vui-routes-configroute avatarCropPanel [display:grid] [gap:10px] [min-width:0] [padding:10px] [border:1px_solid_var(--border-hairline)] [border-radius:8px] [background:color-mix(in_srgb,var(--surface-card)_86%,transparent)]",
   avatarCropPreview:
     "vui-routes-configroute avatarCropPreview [position:relative] [overflow:hidden] [border:1px_solid_color-mix(in_srgb,var(--accent-cool)_34%,transparent)] [background:var(--vui-gradient-route-soft),var(--vui-gradient-route-soft),var(--vui-gradient-route-soft),var(--vui-gradient-route-soft),var(--surface-card)] [background-size:18px_18px] [background-position:0_0,0_9px,9px_-9px,-9px_0] [width:112px] [height:112px] [border-radius:999px]",
   avatarCropPreviewWrap:
     "vui-routes-configroute avatarCropPreviewWrap [display:grid] [justify-items:center] [gap:6px]",
   avatarCropWorkspace:
-    "vui-routes-configroute avatarCropWorkspace [display:grid] [grid-template-columns:minmax(220px,320px)_minmax(92px,120px)] [align-items:center] [gap:14px]",
+    "vui-routes-configroute avatarCropWorkspace [display:grid] [grid-template-columns:minmax(0,320px)_minmax(92px,120px)] [align-items:center] [gap:14px] [min-width:0] max-[720px]:[grid-template-columns:1fr] max-[720px]:[justify-items:start]",
   avatarCropZoomField:
     "vui-routes-configroute avatarCropZoomField [display:grid] [grid-template-columns:56px_minmax(0,1fr)] [align-items:center] [gap:10px] [color:var(--fg-secondary)] [font-size:var(--vui-font-xs)] [&_input]:[width:100%]",
   avatarImageActions:
@@ -45,7 +45,7 @@ const styles = {
   avatarImageDropButton:
     "vui-routes-configroute avatarImageDropButton [position:relative] [display:grid] [flex:0_0_auto] [place-items:center] [width:56px] [height:56px] [border-radius:999px] [cursor:pointer] [&:hover_.avatarImagePreview]:[border-color:color-mix(in_srgb,var(--accent-warm)_44%,var(--border-hairline))] [&:hover_.avatarImagePreview]:[box-shadow:var(--vui-shadow-accent)] [&:hover_.avatarImagePlaceholder]:[border-color:color-mix(in_srgb,var(--accent-warm)_44%,var(--border-hairline))] [&:hover_.avatarImagePlaceholder]:[box-shadow:var(--vui-shadow-accent)] [&_input]:[position:absolute] [&_input]:[inset:0] [&_input]:[opacity:0] [&_input]:[pointer-events:none]",
   avatarImageEditor:
-    "vui-routes-configroute avatarImageEditor [display:grid] [gap:10px]",
+    "vui-routes-configroute avatarImageEditor [display:grid] [gap:10px] [min-width:0]",
   avatarImageMeta:
     "vui-routes-configroute avatarImageMeta [display:grid] [gap:3px] [min-width:0] [&_strong]:[overflow:hidden] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[line-height:1.2] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_span]:[overflow:hidden] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-family:var(--font-mono)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[line-height:1.25] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap]",
   avatarImagePlaceholder:
@@ -55,9 +55,9 @@ const styles = {
   avatarImageUploadCue:
     "vui-routes-configroute avatarImageUploadCue [position:absolute] [right:-1px] [bottom:-1px] [display:grid] [place-items:center] [width:20px] [height:20px] [border:1px_solid_var(--border-hairline)] [border-radius:999px] [background:color-mix(in_srgb,var(--surface-panel-strong)_86%,transparent)] [color:var(--fg-primary)] [box-shadow:var(--vui-shadow-soft)]",
   avatarImageValue:
-    "vui-routes-configroute avatarImageValue [display:flex] [align-items:center] [gap:8px] [min-width:0] [color:var(--fg-secondary)] [font-size:var(--vui-font-xs)] [overflow-wrap:anywhere]",
+    "vui-routes-configroute avatarImageValue [display:flex] [align-items:center] [gap:8px] [min-width:0] [max-width:100%] [color:var(--fg-secondary)] [font-size:var(--vui-font-xs)] [overflow-wrap:anywhere]",
   buttonBlock:
-    "vui-routes-configroute buttonBlock [width:100%]",
+    "vui-routes-configroute buttonBlock [width:auto] [max-width:100%]",
   cardBadges:
     "vui-routes-configroute cardBadges [display:flex] [align-items:center] [gap:8px] [flex-wrap:wrap]",
   cardHeader:
@@ -85,7 +85,7 @@ const styles = {
   content:
     "vui-routes-configroute content [display:grid] [align-content:start] [gap:6px] [min-width:0] [min-height:0] [overflow:auto] [padding-right:2px] [scrollbar-gutter:stable]",
   contentModels:
-    "vui-routes-configroute contentModels [align-content:stretch] [grid-template-rows:minmax(0,1fr)_auto] [height:100%] [max-height:calc(100dvh_-_76px)] [&:has(>_.notice)]:[grid-template-rows:auto_minmax(0,1fr)_auto] [&>_.configDiscoverySection:last-child]:[display:grid] [&>_.configDiscoverySection:last-child]:[grid-template-rows:auto_auto]",
+    "vui-routes-configroute contentModels [align-content:stretch] [grid-template-rows:minmax(0,1fr)_auto] [height:100%] [max-height:calc(100dvh_-_76px)] [min-width:0] [&:has(>_.notice)]:[grid-template-rows:auto_minmax(0,1fr)_auto] [&>_.configDiscoverySection:last-child]:[display:grid] [&>_.configDiscoverySection:last-child]:[grid-template-rows:auto_auto] max-[720px]:[max-height:none] max-[720px]:[height:auto] max-[720px]:[overflow:visible]",
   countPill:
     "vui-routes-configroute countPill [display:inline-flex] [align-items:center] [justify-content:center] [min-width:30px] [min-height:28px] [padding:0_9px] [border:1px_solid_var(--border-hairline)] [border-radius:999px] [color:var(--fg-secondary)] [background:var(--surface-card-muted)] [font-size:var(--vui-font-xs)] [font-weight:700]",
   dangerButton:
@@ -341,7 +341,7 @@ const styles = {
   themeBackgroundImageCard:
     "vui-routes-configroute themeBackgroundImageCard [grid-column:1/-1] [grid-template-columns:1fr] [align-content:start] [min-height:0] [padding:9px]",
   themeBackgroundImageEditor:
-    "vui-routes-configroute themeBackgroundImageEditor [display:grid] [grid-template-columns:minmax(260px,0.34fr)_minmax(420px,1fr)] [gap:12px] [align-items:start] max-[720px]:[grid-template-columns:1fr]",
+    "vui-routes-configroute themeBackgroundImageEditor [display:grid] [grid-template-columns:minmax(0,0.34fr)_minmax(0,1fr)] [gap:12px] [align-items:start] [min-width:0] max-[900px]:[grid-template-columns:1fr]",
   themeBackgroundImageMeta:
     "vui-routes-configroute themeBackgroundImageMeta [display:grid] [align-content:space-between] [gap:6px] [min-width:0] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&>_span]:[min-width:0] [&>_span]:[overflow:hidden] [&>_span]:[color:var(--fg-tertiary)] [&>_span]:[font-family:var(--font-mono)] [&>_span]:[font-size:var(--vui-font-xs)] [&>_span]:[text-overflow:ellipsis] [&>_span]:[white-space:nowrap]",
   themeBackgroundImagePlaceholder:
@@ -349,7 +349,7 @@ const styles = {
   themeBackgroundImagePreview:
     "vui-routes-configroute themeBackgroundImagePreview [width:100%] [aspect-ratio:16/9] [min-height:104px] [border:1px_solid_var(--border-hairline)] [border-radius:6px] [background:var(--surface-card)] [object-fit:cover]",
   themeBackgroundImageValue:
-    "vui-routes-configroute themeBackgroundImageValue [display:grid] [grid-template-columns:1fr] [align-items:start] [gap:7px] [min-width:0] [color:var(--fg-secondary)] [font-size:var(--vui-font-xs)] [overflow-wrap:anywhere] max-[720px]:[grid-template-columns:1fr]",
+    "vui-routes-configroute themeBackgroundImageValue [display:grid] [grid-template-columns:1fr] [align-items:start] [gap:7px] [min-width:0] [max-width:100%] [color:var(--fg-secondary)] [font-size:var(--vui-font-xs)] [overflow-wrap:anywhere] max-[720px]:[grid-template-columns:1fr]",
   themeBackgroundPresetButton:
     "vui-routes-configroute themeBackgroundPresetButton [position:relative] [display:grid] [grid-template-rows:minmax(68px,auto)_auto] [gap:6px] [min-width:0] [min-height:0] [padding:6px] [border:1px_solid_var(--border-hairline)] [border-radius:6px] [background:color-mix(in_srgb,var(--surface-card)_82%,transparent)] [color:var(--fg-secondary)] [cursor:pointer] [text-align:left] hover:[border-color:color-mix(in_srgb,var(--accent-warm)_36%,var(--border-hairline))] hover:[background:color-mix(in_srgb,var(--accent-warm)_9%,var(--surface-card))] disabled:[cursor:not-allowed] disabled:[opacity:0.6] [&[data-active='true']]:[border-color:color-mix(in_srgb,var(--accent-warm)_62%,var(--border-strong))] [&[data-active='true']]:[background:color-mix(in_srgb,var(--accent-warm)_12%,var(--surface-card))] [&[data-active='true']]:[box-shadow:var(--vui-shadow-inset-accent)] [&_img]:[width:100%] [&_img]:[aspect-ratio:16/9] [&_img]:[height:auto] [&_img]:[border-radius:4px] [&_img]:[object-fit:cover] [&>_span]:[min-width:0] [&>_span]:[overflow:hidden] [&>_span]:[color:var(--fg-secondary)] [&>_span]:[font-size:var(--vui-font-xs)] [&>_span]:[font-weight:700] [&>_span]:[line-height:1.2] [&>_span]:[text-overflow:ellipsis] [&>_span]:[white-space:nowrap] [&>_em]:[position:absolute] [&>_em]:[top:9px] [&>_em]:[right:9px] [&>_em]:[padding:2px_6px] [&>_em]:[border:1px_solid_color-mix(in_srgb,var(--accent-warm)_40%,transparent)] [&>_em]:[border-radius:999px] [&>_em]:[background:color-mix(in_srgb,var(--surface-panel-strong)_74%,transparent)] [&>_em]:[color:var(--fg-primary)] [&>_em]:[font-size:var(--vui-font-xs)] [&>_em]:[font-style:normal] [&>_em]:[font-weight:800] [&>_em]:[line-height:1.2]",
   themeBackgroundPresetGrid:
@@ -407,7 +407,7 @@ const styles = {
   treeWide:
     "vui-routes-configroute treeWide [grid-column:1/-1]",
   userProfileAvatarFields:
-    "vui-routes-configroute userProfileAvatarFields [display:grid] [gap:6px] [min-width:0] [grid-template-columns:minmax(210px,0.4fr)_minmax(320px,0.6fr)] [&_.treeFieldCardView_.treeHint]:[display:none] max-[720px]:[grid-template-columns:1fr]",
+    "vui-routes-configroute userProfileAvatarFields [display:grid] [gap:6px] [min-width:0] [grid-template-columns:minmax(0,0.4fr)_minmax(0,0.6fr)] [&_.treeFieldCardView_.treeHint]:[display:none] max-[900px]:[grid-template-columns:1fr]",
   userProfileAvatarGroup:
     "vui-routes-configroute userProfileAvatarGroup [min-width:0] [display:grid] [gap:6px]",
   userProfileAvatarHeader:
