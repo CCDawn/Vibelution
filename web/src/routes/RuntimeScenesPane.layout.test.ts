@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import styles from "./RuntimeScenesPane.styles";
+import stylesSource from "./RuntimeScenesPane.styles.ts?raw";
 import paneSource from "./RuntimeScenesPane.tsx?raw";
 
 const backgroundTokens = (className: string) =>
@@ -162,6 +163,14 @@ describe("RuntimeScenesPane layout contract", () => {
       styles.sceneDetailSurface,
       styles.startupTracePanel,
     ].forEach(expectBackgroundAware);
+  });
+
+  it("keeps runtime scene surface and action tokens centralized in route-local constants", () => {
+    expect(stylesSource).toContain("const panelSurface");
+    expect(stylesSource).toContain("const rowSurface");
+    expect(stylesSource).toContain("const buttonBase");
+    expect(stylesSource).toContain("const activeTone");
+    expect(stylesSource).toContain("const scrollStack");
   });
 
   it("keeps nested runtime rows quieter than their parent panels", () => {
