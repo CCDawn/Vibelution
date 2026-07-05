@@ -286,7 +286,8 @@ def test_responses_payload_converts_images_after_canonical_projection():
         ]
     )
 
-    assert payload["messages"][0]["content"] == [
+    assert "messages" not in payload
+    assert payload["input"][0]["content"] == [
         {"type": "input_text", "text": "看图"},
         {"type": "input_image", "image_url": "data:image/png;base64,abc"},
     ]
