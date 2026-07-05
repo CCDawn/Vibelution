@@ -792,8 +792,21 @@ def _safe_payload_route_summary(payload: Dict[str, Any], profile: Any, provider:
         "baseUrlHost": host,
         "stream": bool(payload.get("stream")),
         "maxTokens": payload.get("max_tokens") if "max_tokens" in payload else payload.get("max_output_tokens"),
-        "timeout": payload.get("timeout"),
+        "timeout": _safe_timeout_summary(payload.get("timeout")),
     }
+
+
+def _safe_timeout_summary(timeout: Any) -> Any:
+    if timeout is None or isinstance(timeout, (bool, int, float, str)):
+        return timeout
+    fields = {
+        key: getattr(timeout, key, None)
+        for key in ("connect", "read", "write", "pool")
+        if getattr(timeout, key, None) is not None
+    }
+    if fields:
+        return fields
+    return str(timeout)
 
 
 def _safe_payload_thinking_summary(payload: Dict[str, Any]) -> Dict[str, Any]:

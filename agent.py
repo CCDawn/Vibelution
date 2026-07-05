@@ -2997,7 +2997,11 @@ class SelfEvolvingAgent:
                         max_attempts=reported_max_attempts,
                         config=getattr(self, "config", None),
                         role="primary",
-                        current_profile_id=getattr(getattr(self, "_base_llm", None), "profile_id", None),
+                        current_profile_id=getattr(
+                            llm_for_turn if "llm_for_turn" in locals() else None,
+                            "profile_id",
+                            getattr(getattr(self, "_base_llm", None), "profile_id", None),
+                        ),
                     )
                     category = recovery.category
                     is_retryable = recovery.retryable
@@ -3012,6 +3016,16 @@ class SelfEvolvingAgent:
                     disable_tools_for_retry = disable_tools_for_retry or recovery.disable_tools
                     fallback_profile_id_for_retry = (
                         recovery.fallback_profile_id or fallback_profile_id_for_retry
+                    )
+                    current_profile_id = str(
+                        getattr(llm_for_turn if "llm_for_turn" in locals() else None, "profile_id", "")
+                        or getattr(getattr(self, "_base_llm", None), "profile_id", "")
+                        or ""
+                    ).strip()
+                    can_retry_with_fallback = bool(
+                        recovery.fallback_profile_id
+                        and recovery.fallback_profile_id != current_profile_id
+                        and fallback_profile_id_for_retry == recovery.fallback_profile_id
                     )
                     exception_type = type(e).__name__
                     exception_message = str(e)
@@ -3065,8 +3079,13 @@ class SelfEvolvingAgent:
                         isinstance(e, LLMError)
                         and not (
                             attempt < MAX_CONSECUTIVE_FAILURES
-                            and (recovery.disable_tools or recovery.disable_streaming)
-                            and not recovery.stop_current_turn
+                            and (
+                                can_retry_with_fallback
+                                or (
+                                    (recovery.disable_tools or recovery.disable_streaming)
+                                    and not recovery.stop_current_turn
+                                )
+                            )
                         )
                     ):
                         return None
@@ -3077,7 +3096,7 @@ class SelfEvolvingAgent:
                         )
                         return None
 
-                    if recovery.stop_current_turn:
+                    if recovery.stop_current_turn and not can_retry_with_fallback:
                         return None
 
                     if attempt < MAX_CONSECUTIVE_FAILURES:

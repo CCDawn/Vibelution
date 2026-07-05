@@ -419,6 +419,88 @@ class TestToolMessageFlow:
         assert updated["content"][0]["text"] == "static prefix\n\n## Agent Static Context\nstable"
         assert updated["content"][1] == {"type": "text", "text": "dynamic suffix"}
 
+    def test_invoke_llm_uses_fallback_profile_after_exhausted_provider_error(self, monkeypatch):
+        calls = []
+        recovery_inputs = []
+
+        class DummyContext:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class DummyUI:
+            def thinking(self, _label):
+                return DummyContext()
+
+            def add_log(self, *_args, **_kwargs):
+                return None
+
+        class PrimaryLLM:
+            profile_id = "primary"
+
+            def invoke(self, _msgs, **_kwargs):
+                calls.append("primary")
+                raise LLMError(
+                    "server_error",
+                    "provider 服务异常",
+                    retryable=True,
+                    details={
+                        "attempt": 5,
+                        "max_attempts": 5,
+                        "retry_budget_exhausted": True,
+                    },
+                )
+
+        class FallbackLLM:
+            profile_id = "fallback_backup"
+
+            def invoke(self, _msgs, **_kwargs):
+                calls.append("fallback_backup")
+                return AIMessage(content="fallback ok")
+
+        def fake_recovery(*_args, current_profile_id=None, **_kwargs):
+            recovery_inputs.append(current_profile_id)
+            return SimpleNamespace(
+                category="server_error",
+                retryable=True,
+                action="retry_with_backoff",
+                user_message="provider 服务异常",
+                wait_seconds=0,
+                stop_current_turn=True,
+                disable_streaming=False,
+                disable_tools=False,
+                request_context_compression=False,
+                fallback_profile_id="fallback_backup" if current_profile_id == "primary" else None,
+            )
+
+        monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
+        monkeypatch.setattr(agent_module, "plan_llm_recovery", fake_recovery)
+        monkeypatch.setattr(agent_module.logger, "log_error", lambda *_args, **_kwargs: None)
+
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.llm_with_tools = PrimaryLLM()
+        agent._base_llm = PrimaryLLM()
+        agent.config = SimpleNamespace(
+            llm=SimpleNamespace(
+                model_name="gpt-5.5",
+                provider="relay",
+                api_base="https://example.invalid",
+                api_timeout=30,
+            ),
+        )
+        agent._should_stream_llm_for_turn = lambda *_args, **_kwargs: False
+        agent._get_llm_for_current_mode = lambda **kwargs: (
+            FallbackLLM() if kwargs.get("profile_id") == "fallback_backup" else PrimaryLLM()
+        )
+
+        result = agent._invoke_llm([AIMessage(content="hello")])
+
+        assert result.content == "fallback ok"
+        assert calls == ["primary", "fallback_backup"]
+        assert recovery_inputs == ["primary"]
+
     def test_invoke_llm_returns_none_for_exhausted_llmerror(self, monkeypatch):
         calls = {"count": 0}
 

@@ -78,6 +78,25 @@ _PROMPT_CACHE_KEY_SAFE_RE = re.compile(r"[^a-zA-Z0-9_.:-]+")
 _prompt_cache_partition: ContextVar[str] = ContextVar("vibelution_prompt_cache_partition", default="")
 
 
+def _provider_timeout(profile: LLMProfile) -> Any:
+    timeout = getattr(profile, "timeout", None)
+    connect_timeout = getattr(profile, "connect_timeout", None)
+    if timeout in (None, "") or connect_timeout in (None, ""):
+        return timeout
+    try:
+        timeout_seconds = float(timeout)
+        connect_timeout_seconds = float(connect_timeout)
+    except (TypeError, ValueError):
+        return timeout
+    if timeout_seconds <= 0 or connect_timeout_seconds <= 0:
+        return timeout
+    try:
+        import httpx
+    except Exception:
+        return timeout
+    return httpx.Timeout(timeout=timeout_seconds, connect=connect_timeout_seconds)
+
+
 def set_prompt_cache_partition(value: str):
     """直接设置当前上下文的 prompt cache 分片标识，返回 Token 供 reset。"""
     return _prompt_cache_partition.set(str(value or "").strip())
@@ -729,7 +748,7 @@ def build_llm_payload(
                 convert_content_blocks_for_transport=convert_content_blocks_for_transport,
             ),
             "max_output_tokens": profile.max_output_tokens,
-            "timeout": profile.timeout,
+            "timeout": _provider_timeout(profile),
             "stream": build_input.stream,
             "api_key": build_input.api_key,
             "base_url": build_input.provider.base_url,
@@ -739,7 +758,7 @@ def build_llm_payload(
             "model": adapter.litellm_model_name(),
             "messages": adapter.messages(normalized_messages),
             "max_tokens": profile.max_output_tokens,
-            "timeout": profile.timeout,
+            "timeout": _provider_timeout(profile),
             "stream": build_input.stream,
             "api_key": build_input.api_key,
             "base_url": build_input.provider.base_url,
