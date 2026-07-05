@@ -4,6 +4,7 @@ CLI UI 渲染行为测试
 """
 
 import json
+import time
 from pathlib import Path
 
 from rich.console import Console
@@ -13,6 +14,72 @@ from core.ui.ascii_art import get_avatar_manager
 from core.ui.cli_ui import UIManager
 from core.ui.token_display import format_token_count, format_token_report
 from core.infrastructure.agent_session import get_session_state, reset_session_state
+
+
+def test_stream_response_throttles_terminal_live_refresh_between_token_chunks(monkeypatch):
+    ui = UIManager()
+    calls = []
+
+    class FakeLive:
+        def update(self, renderable, refresh=False):
+            calls.append((renderable, refresh))
+
+    ticks = iter([100.0, 100.01, 100.02])
+    monkeypatch.setattr(UIManager, "_test_mode", False)
+    monkeypatch.setattr(ui, "_live", FakeLive())
+    monkeypatch.setattr(ui, "_status_renderable", lambda: "status")
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks))
+    ui._last_live_refresh_at = 0.0
+    ui._live_refresh_min_interval_seconds = 0.1
+
+    ui.stream_response("你", done=False)
+    ui.stream_response("好", done=False)
+    ui.stream_response("你好", done=True)
+
+    assert calls == [("status", True), ("status", True)]
+
+
+def test_status_updates_keep_immediate_terminal_live_refresh(monkeypatch):
+    ui = UIManager()
+    calls = []
+
+    class FakeLive:
+        def update(self, renderable, refresh=False):
+            calls.append((renderable, refresh))
+
+    monkeypatch.setattr(UIManager, "_test_mode", False)
+    monkeypatch.setattr(ui, "_live", FakeLive())
+    monkeypatch.setattr(ui, "_status_renderable", lambda: "status")
+    ui._last_live_refresh_at = 100.0
+    ui._live_refresh_min_interval_seconds = 10.0
+
+    ui.update_status("running")
+    ui.update_status("working")
+
+    assert calls == [("status", True), ("status", True)]
+
+
+def test_stream_thought_throttles_terminal_live_refresh_between_token_chunks(monkeypatch):
+    ui = UIManager()
+    calls = []
+
+    class FakeLive:
+        def update(self, renderable, refresh=False):
+            calls.append((renderable, refresh))
+
+    ticks = iter([200.0, 200.01, 200.02])
+    monkeypatch.setattr(UIManager, "_test_mode", False)
+    monkeypatch.setattr(ui, "_live", FakeLive())
+    monkeypatch.setattr(ui, "_status_renderable", lambda: "status")
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks))
+    ui._last_live_refresh_at = 0.0
+    ui._live_refresh_min_interval_seconds = 0.1
+
+    ui.stream_thought("先", done=False)
+    ui.stream_thought("先看", done=False)
+    ui.stream_thought("先看看", done=True)
+
+    assert calls == [("status", True), ("status", True)]
 
 
 def test_stream_thought_hides_think_tags():
