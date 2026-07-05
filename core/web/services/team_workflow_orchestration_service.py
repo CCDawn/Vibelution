@@ -8362,6 +8362,7 @@ def get_source_collection_summary(team_id: str, *, run_id: str = "") -> dict[str
             except data_processing_service.DataProcessingError as exc:
                 raise TeamWorkflowOrchestrationError(str(exc)) from exc
         run_summary = run_status.get("summary") if isinstance(run_status.get("summary"), dict) else {}
+        _reconcile_source_collection_stage_session_tasks_for_run(normalized_team_id, normalized_run_id)
     if normalized_run_id:
         projection = _source_collection_stage_cards_projection(
             normalized_team_id,
@@ -16707,28 +16708,38 @@ def _reconcile_source_collection_stage_session_tasks(team_id: str) -> bool:
     changed = False
     for task_store_path in runs_root.glob("*/stage_session_tasks.json"):
         run_id = task_store_path.parent.name
-        store = _read_json(task_store_path)
-        tasks = [item for item in list(store.get("tasks") or []) if isinstance(item, dict)]
-        if not tasks:
-            continue
-        repaired_round = _repair_missing_source_collection_stage_round(team_id, run_id, tasks)
-        changed = repaired_round or changed
-        next_tasks: list[dict[str, Any]] = []
-        store_changed = False
-        for task in tasks:
-            reconciled = _reconcile_source_collection_stage_session_task_turn_status(task)
-            reconciled = _reconcile_source_collection_stage_session_task_from_turn_result(reconciled)
-            reconciled = _reconcile_source_collection_stage_session_task_sources(team_id, run_id, reconciled)
-            reconciled = _reconcile_source_collection_stage_session_task_completion_gate(team_id, run_id, reconciled)
-            next_tasks.append(reconciled)
-            store_changed = store_changed or reconciled is not task
-        if store_changed:
-            store["tasks"] = next_tasks
-            _write_source_collection_stage_session_task_store(team_id, run_id, store)
-            for task in next_tasks:
-                if _trim_text(task.get("status"), max_length=80) not in {"running", "queued"}:
-                    _sync_stage_round_with_source_collection_stage_task(team_id, run_id, task)
-            changed = True
+        changed = _reconcile_source_collection_stage_session_tasks_for_run(team_id, run_id) or changed
+    return changed
+
+
+def _reconcile_source_collection_stage_session_tasks_for_run(team_id: str, run_id: str) -> bool:
+    normalized_run_id = _trim_text(run_id, max_length=160)
+    if not normalized_run_id:
+        return False
+    task_store_path = _source_collection_stage_session_task_store_path(team_id, normalized_run_id)
+    if not task_store_path.exists():
+        return False
+    store = _read_json(task_store_path)
+    tasks = [item for item in list(store.get("tasks") or []) if isinstance(item, dict)]
+    if not tasks:
+        return False
+    changed = _repair_missing_source_collection_stage_round(team_id, normalized_run_id, tasks)
+    next_tasks: list[dict[str, Any]] = []
+    store_changed = False
+    for task in tasks:
+        reconciled = _reconcile_source_collection_stage_session_task_turn_status(task)
+        reconciled = _reconcile_source_collection_stage_session_task_from_turn_result(reconciled)
+        reconciled = _reconcile_source_collection_stage_session_task_sources(team_id, normalized_run_id, reconciled)
+        reconciled = _reconcile_source_collection_stage_session_task_completion_gate(team_id, normalized_run_id, reconciled)
+        next_tasks.append(reconciled)
+        store_changed = store_changed or reconciled is not task
+    if store_changed:
+        store["tasks"] = next_tasks
+        _write_source_collection_stage_session_task_store(team_id, normalized_run_id, store)
+        for task in next_tasks:
+            if _trim_text(task.get("status"), max_length=80) not in {"running", "queued"}:
+                _sync_stage_round_with_source_collection_stage_task(team_id, normalized_run_id, task)
+        changed = True
     return changed
 
 
