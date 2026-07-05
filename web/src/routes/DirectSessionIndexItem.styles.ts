@@ -66,7 +66,7 @@ const styles = {
   sessionItemMain:
     "vui-routes-chatcodingroute sessionItemMain !grid !w-full min-w-0 grid-cols-[27px_minmax(0,1fr)] items-center justify-stretch gap-1.5 rounded-none border-0 bg-transparent !p-0 text-left text-[var(--fg-primary)] shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none",
   sessionItemNotice:
-    "vui-routes-chatcodingroute sessionItemNotice min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 rounded-[var(--radius-control)] bg-[var(--vui-surface-row)]",
+    "vui-routes-chatcodingroute sessionItemNotice min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)] bg-[color-mix(in_srgb,var(--surface-panel)_62%,transparent)] p-2 shadow-none",
   sessionItemSummary:
     "vui-routes-chatcodingroute sessionItemSummary block min-w-0 truncate text-[var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)]",
   sessionItemTitle:

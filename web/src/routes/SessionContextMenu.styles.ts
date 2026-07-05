@@ -1,6 +1,6 @@
 const styles = {
   sessionContextMenu:
-    "vui-routes-chatcodingroute sessionContextMenu fixed z-[80] grid w-[188px] max-w-[calc(100vw-24px)] content-start gap-1 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] p-1 text-[var(--fg-primary)] shadow-[var(--vui-shadow-hairline)] backdrop-blur",
+    "vui-routes-chatcodingroute sessionContextMenu fixed z-[80] grid w-[188px] max-w-[calc(100vw-24px)] content-start gap-1 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_76%,transparent)] bg-[color-mix(in_srgb,var(--surface-panel)_86%,transparent)] p-1 text-[var(--fg-primary)] shadow-none backdrop-blur-[4px]",
   sessionContextMenuDanger:
     "vui-routes-chatcodingroute sessionContextMenuDanger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   sessionContextMenuItem:
