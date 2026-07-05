@@ -41,12 +41,13 @@ Do not edit `DEVELOPMENT_STANDARD.md`, `AGENTS.md`, `.docs/project-memory/**`, o
 
 ## 3. Current Baseline
 
-As of 2026-07-04 after the source collection overview extraction:
+As of 2026-07-05 after the source collection residual ownership wave:
 
 - CSS module migration is no longer the primary remaining task. `web/src` has no normal `.module.css` route migration surface in the active scan.
 - Route-level direct `@heroui/react` imports are not the active blocker; HeroUI is expected to stay behind `web/src/components/vui/**`.
 - Static inline `style={{ ... }}` in production TSX is not the active blocker in the scanned frontend source.
 - Parent route style ownership has mostly been split for prior child panels in Agents, Memory, Teams, Launcher, Config, ChatCoding conversation children, and related route-local panels.
+- Teams source collection residual ownership has been narrowed: `TeamsRoute.styles.ts` keeps the page/grid/run-badge/step-state shell, while child panels and VUI product components own panel frames, focused panel layout, active-stage result layout, graph node list shell, result filter/pagination controls, result rows, and candidate list shells.
 - The remaining work is concentrated in large route files, large route style maps, repeated visual grammar, and product-level behavior backlogs that must be scheduled separately.
 
 Largest route/componentization hotspots observed:
@@ -637,13 +638,18 @@ Recently completed clusters:
 - `TeamWorkflowCandidatePreviewPanel`
 - `TeamWorkflowStatusPanels`
 - `TeamSourceCollectionOverviewPanel`
+- `TeamSourceCollectionPanelFrame.styles`
+- `TeamSourceCollectionResultControls`
+- `TeamSourceCollectionActiveStagePanel` result-layout ownership
+- `TeamSourceCollectionGraphPanel` node-list ownership
 
 Preferred remaining order:
 
-1. Candidate paper-note chunk actions and card toolbar cluster.
-2. Research loop evidence/status cluster.
-3. Experiment smoke/full-run result cluster.
-4. Canvas organization controls if still route-owned after verifying `ResearchFlowCanvasRoute` boundaries.
+1. Source collection view-model split: move record/candidate/filter/pagination/provenance projection helpers from `TeamsRoute.tsx` into a route-local adapter/helper without changing query, mutation, cache, URL, or writeback semantics.
+2. Candidate paper-note chunk actions and card toolbar cluster.
+3. Research loop evidence/status cluster.
+4. Experiment smoke/full-run result cluster.
+5. Canvas organization controls if still route-owned after verifying `ResearchFlowCanvasRoute` boundaries.
 
 Guardrails:
 
@@ -936,8 +942,28 @@ This componentization program is complete when:
 The next safest batch after this playbook is:
 
 ```text
+Batch: Teams source collection view-model split wave
+Reason: Source collection display ownership is now mostly local, but TeamsRoute still owns dense projection/filter/pagination/provenance helper code. Splitting that layer removes more route mass without touching backend behavior.
+Scope:
+- web/src/routes/TeamsRoute.tsx
+- web/src/routes/TeamsRoute.layout.test.ts
+- web/src/routes/TeamsRoute.logic.test.ts
+- new route-local helper/adapter files such as web/src/routes/TeamSourceCollectionViewModel.ts
+- focused TeamSourceCollection* tests if helpers become testable outside the route
+Validation:
+- npm --prefix web run test -- src/routes/TeamsRoute.layout.test.ts src/routes/TeamsRoute.logic.test.ts --run
+- npm --prefix web run test -- src/components/vui/vuiImportBoundary.test.ts src/components/vui/vuiBatchMigration.test.ts --run
+- npm --prefix web run build
+- git diff --check
+Stop:
+- if a helper extraction would change source collection query keys, mutation sequencing, writeback semantics, or backend DTO shape.
+```
+
+Parallel alternative if Teams source collection becomes blocked:
+
+```text
 Batch: AppShell + ChatCoding visual grammar convergence
-Reason: routeAestheticContract failures are concrete, mostly style-only, and avoid current Memory/user-content active claim.
+Reason: routeAestheticContract failures are concrete, mostly style-only, and avoid Memory/user-content API ownership.
 Scope:
 - web/src/app/AppShell.styles.ts
 - web/src/app/AppShellStatusGuidePanel.styles.ts
@@ -955,4 +981,4 @@ Stop:
 - if Memory offenders become required before the active user Markdown Space claim closes.
 ```
 
-This next batch should not edit `MemoryRoute.tsx`, `web/src/api/types.ts`, or `web/src/routes/memory/**` while the active user Markdown Space claim owns those paths.
+Do not edit `MemoryRoute.tsx`, `web/src/api/types.ts`, or `web/src/routes/memory/**` during either recommended next batch while a user Markdown Space claim owns those paths.

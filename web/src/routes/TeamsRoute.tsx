@@ -65,8 +65,6 @@ import {
 import {
   TeamCandidateCard,
   TeamSourceEmptyState,
-  TeamSourceFilterBar,
-  TeamSourcePagination,
   TeamSourceResultItem,
   TeamSourceResultList,
   type TeamSourceEmptyStateFact,
@@ -102,11 +100,15 @@ import {
   type TeamSourceCollectionSourceDetailLink,
 } from "./TeamSourceCollectionSourceDetailPanel";
 import {
-  TeamSourceCollectionStageActionIcon,
   TeamSourceCollectionStandaloneStagePanel,
   type TeamSourceCollectionStandaloneStageModule,
 } from "./TeamSourceCollectionStandaloneStagePanel";
 import { TeamSourceCollectionRunSettingsPanel } from "./TeamSourceCollectionRunSettingsPanel";
+import {
+  TeamSourceCollectionFilterBar,
+  TeamSourceCollectionPagination,
+  type TeamSourceCollectionFilterOption,
+} from "./TeamSourceCollectionResultControls";
 import { TeamSourceCollectionStorageActionsPanel, type TeamSourceCollectionStorageAction } from "./TeamSourceCollectionStorageActionsPanel";
 import { TeamWorkflowCandidatePreviewPanel, type TeamWorkflowCandidatePreviewItem } from "./TeamWorkflowCandidatePreviewPanel";
 import { TeamWorkflowGraphView, workflowGraphLayout } from "./TeamWorkflowGraphView";
@@ -6992,16 +6994,18 @@ export function TeamsRoute({
   ) {
     const sourceCollectionFilterLoadingCount = (filter: SourceCollectionSourceFilter) =>
       filter === "all" ? sourceCollectionLoadingText : "...";
+    const options: Array<TeamSourceCollectionFilterOption<SourceCollectionSourceFilter>> = SOURCE_COLLECTION_SOURCE_FILTERS.map((filter) => ({
+      key: filter,
+      label: sourceCollectionSourceFilterLabel(filter, lang),
+      count: loading ? sourceCollectionFilterLoadingCount(filter) : counts[filter] ?? 0,
+      selected: sourceCollectionSourceFilter === filter,
+    }));
+
     return (
-      <TeamSourceFilterBar
+      <TeamSourceCollectionFilterBar
         ariaLabel={label}
-        onSelect={(key) => setSourceCollectionSourceFilter(key as SourceCollectionSourceFilter)}
-        options={SOURCE_COLLECTION_SOURCE_FILTERS.map((filter) => ({
-          key: filter,
-          label: sourceCollectionSourceFilterLabel(filter, lang),
-          count: loading ? sourceCollectionFilterLoadingCount(filter) : counts[filter] ?? 0,
-          selected: sourceCollectionSourceFilter === filter,
-        }))}
+        options={options}
+        onSelect={setSourceCollectionSourceFilter}
       />
     );
   }
@@ -7026,7 +7030,7 @@ export function TeamsRoute({
     }));
   }
 
-  function stopSourceCollectionPaginationEvent(event: ReactMouseEvent<HTMLElement>) {
+  function stopSourceCollectionPaginationEvent(event: ReactMouseEvent<HTMLDivElement>) {
     event.stopPropagation();
   }
 
@@ -7036,18 +7040,13 @@ export function TeamsRoute({
       return null;
     }
     const page = Math.min(Math.max(1, sourceCollectionResultPageByStage[stageId] ?? 1), pageCount);
-    const start = (page - 1) * SOURCE_COLLECTION_RESULT_PAGE_SIZE + 1;
-    const end = Math.min(total, page * SOURCE_COLLECTION_RESULT_PAGE_SIZE);
     return (
-      <TeamSourcePagination
-        ariaLabel={lang === "zh" ? "结果分页" : "Result pagination"}
-        rangeLabel={lang === "zh" ? `第 ${start}-${end} 条 / 共 ${total} 条` : `${start}-${end} of ${total}`}
+      <TeamSourceCollectionPagination
+        lang={lang}
+        total={total}
         page={page}
-        pageCount={pageCount}
-        previousLabel={lang === "zh" ? "上一页" : "Previous"}
-        nextLabel={lang === "zh" ? "下一页" : "Next"}
-        onPrevious={() => setSourceCollectionResultPage(stageId, page - 1)}
-        onNext={() => setSourceCollectionResultPage(stageId, page + 1)}
+        pageSize={SOURCE_COLLECTION_RESULT_PAGE_SIZE}
+        onPageChange={(nextPage) => setSourceCollectionResultPage(stageId, nextPage)}
         onContain={stopSourceCollectionPaginationEvent}
       />
     );
@@ -8157,7 +8156,7 @@ export function TeamsRoute({
     return (
       <TeamSourceCollectionScreeningPanel
         lang={lang}
-        className={sourceCollectionPanelClassName("source-collection-screening-panel")}
+        focused={sourceCollectionFocusedPanelId === "source-collection-screening-panel"}
         open={
           (
             selectedSourceCollectionStageId === "extraction"
@@ -8531,7 +8530,7 @@ export function TeamsRoute({
     return (
       <TeamSourceCollectionCandidatePanel
         lang={lang}
-        className={sourceCollectionPanelClassName("source-collection-candidates-panel")}
+        focused={sourceCollectionFocusedPanelId === "source-collection-candidates-panel"}
         open={
           (
             selectedSourceCollectionStageId === "extraction"
@@ -8668,7 +8667,7 @@ export function TeamsRoute({
     return (
       <TeamSourceCollectionGraphPanel
         lang={lang}
-        className={sourceCollectionPanelClassName("source-collection-graph-panel")}
+        focused={sourceCollectionFocusedPanelId === "source-collection-graph-panel"}
         open={
           selectedSourceCollectionStageId === "relations"
           || sourceCollectionExpandedPanelId === "source-collection-graph-panel"
@@ -8696,56 +8695,46 @@ export function TeamsRoute({
             stateLabel={(value) => workflowStateLabel(value, lang)}
           />
         ) : null}
-        nodeList={visibleGraph?.nodes.length ? (
-          <div
-            className={styles.sourceCollectionGraphNodeListShell}
-            role="region"
-            tabIndex={0}
-            aria-label={lang === "zh" ? "入库关系节点列表，可滚动查看" : "Ingestion map nodes, scroll to review"}
-          >
-            <div className={styles.workflowCandidateList}>
-              {pagedGraphNodes.items.map((node) => {
-                const candidate = teamWorkflowCandidatesById.get(node.candidateId) ?? null;
-                const provenance = candidate ? sourceCollectionCandidateProvenance(candidate, lang) : null;
-                const evidenceLedgerSummary = candidate ? sourceCollectionEvidenceLedgerSummary(candidate) : null;
-                const selected = candidate ? selectedSourceCollectionCandidateId === candidate.candidateId : false;
-                return (
-                  <TeamCandidateCard
-                    key={`graph-node-${node.candidateId}`}
-                    tone={evidenceLedgerSummary ? sourceCollectionEvidenceLedgerTone(evidenceLedgerSummary) : sourceCollectionResultTone(node.qualityStatus || node.currentState)}
-                    statusLabel={workflowStateLabel(node.currentState, lang)}
-                    title={node.title || node.candidateId}
-                    summary={node.candidateId}
-                    meta={[
-                      { key: "type", label: sourceCollectionSourceTypeLabel(node.candidateType, lang) },
-                      { key: "node", label: node.currentWorkflowNode },
-                      ...(candidate
-                        ? [{ key: "category", label: sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang) }]
+        nodeListAriaLabel={lang === "zh" ? "入库关系节点列表，可滚动查看" : "Ingestion map nodes, scroll to review"}
+        nodeListItems={visibleGraph?.nodes.length ? pagedGraphNodes.items.map((node) => {
+          const candidate = teamWorkflowCandidatesById.get(node.candidateId) ?? null;
+          const provenance = candidate ? sourceCollectionCandidateProvenance(candidate, lang) : null;
+          const evidenceLedgerSummary = candidate ? sourceCollectionEvidenceLedgerSummary(candidate) : null;
+          const selected = candidate ? selectedSourceCollectionCandidateId === candidate.candidateId : false;
+          return (
+            <TeamCandidateCard
+              key={`graph-node-${node.candidateId}`}
+              tone={evidenceLedgerSummary ? sourceCollectionEvidenceLedgerTone(evidenceLedgerSummary) : sourceCollectionResultTone(node.qualityStatus || node.currentState)}
+              statusLabel={workflowStateLabel(node.currentState, lang)}
+              title={node.title || node.candidateId}
+              summary={node.candidateId}
+              meta={[
+                { key: "type", label: sourceCollectionSourceTypeLabel(node.candidateType, lang) },
+                { key: "node", label: node.currentWorkflowNode },
+                ...(candidate
+                  ? [{ key: "category", label: sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang) }]
+                  : []),
+                ...(evidenceLedgerSummary
+                  ? [
+                      { key: "evidence-ledger", label: sourceCollectionEvidenceLedgerCardLabel(evidenceLedgerSummary, lang) },
+                      ...(evidenceLedgerSummary.missingAnchor
+                        ? [{ key: "evidence-action", label: sourceCollectionEvidenceLedgerActionLabel(evidenceLedgerSummary, lang) }]
                         : []),
-                      ...(evidenceLedgerSummary
-                        ? [
-                            { key: "evidence-ledger", label: sourceCollectionEvidenceLedgerCardLabel(evidenceLedgerSummary, lang) },
-                            ...(evidenceLedgerSummary.missingAnchor
-                              ? [{ key: "evidence-action", label: sourceCollectionEvidenceLedgerActionLabel(evidenceLedgerSummary, lang) }]
-                              : []),
-                          ]
-                        : []),
-                    ]}
-                    source={provenance ? {
-                      label: provenance.label,
-                      value: provenance.value,
-                      href: provenance.href,
-                      title: provenance.href || provenance.value,
-                      missing: provenance.kind === "missing",
-                    } : undefined}
-                    selected={selected}
-                    onActivate={candidate ? () => selectSourceCollectionCandidate(candidate) : undefined}
-                  />
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
+                    ]
+                  : []),
+              ]}
+              source={provenance ? {
+                label: provenance.label,
+                value: provenance.value,
+                href: provenance.href,
+                title: provenance.href || provenance.value,
+                missing: provenance.kind === "missing",
+              } : undefined}
+              selected={selected}
+              onActivate={candidate ? () => selectSourceCollectionCandidate(candidate) : undefined}
+            />
+          );
+        }) : null}
         pagination={visibleGraph ? renderSourceCollectionPagination("relations", visibleGraph.nodes.length) : null}
         emptyMessage={
           graphForSelectedSourceRun && !visibleGraph?.nodes.length
@@ -8788,7 +8777,7 @@ export function TeamsRoute({
     return (
       <TeamSourceCollectionMemoryPanel
         lang={lang}
-        className={sourceCollectionPanelClassName("source-collection-memory-panel")}
+        focused={sourceCollectionFocusedPanelId === "source-collection-memory-panel"}
         open={
           selectedSourceCollectionStageId === "ingestion"
           || sourceCollectionExpandedPanelId === "source-collection-memory-panel"
@@ -9120,43 +9109,23 @@ export function TeamsRoute({
     const primaryStageAgentConfigLabel = primaryStageAgentBinding?.agent
       ? (lang === "zh" ? "配置 Agent" : "Configure Agent")
       : (lang === "zh" ? "绑定 Agent" : "Bind Agent");
-    const resultPanel = selectedSourceCollectionStageId === "extraction"
-      ? (
-          <div className={styles.sourceCollectionExtractionPanels}>
-            {renderSourceCollectionCandidatePanel()}
-            {renderSourceCollectionScreeningPanel()}
-          </div>
-        )
-      : selectedSourceCollectionStageId === "relations"
-        ? renderSourceCollectionGraphPanel()
-        : selectedSourceCollectionStageId === "ingestion"
-          ? (
-              <div className={styles.sourceCollectionIngestionPanels}>
-                {renderSourceCollectionGraphPanel()}
-                {renderSourceCollectionMemoryPanel()}
-              </div>
-            )
-          : renderSourceCollectionConversation();
     return (
       <TeamSourceCollectionActiveStagePanel
         lang={lang}
+        stageId={selectedSourceCollectionStageId}
         title={activeModule.label}
         status={activeModule.status}
         inputLabel={activeModule.inputLabel}
         outputLabel={activeModule.outputLabel}
         nextLabel={activeModule.nextLabel}
-        primaryAction={(
-          <VNativeButton
-            type="button"
-            className={activeModule.actionTone === "primary" ? styles.sourceCollectionStagePrimaryAction : styles.sourceCollectionStageSecondaryAction}
-            disabled={activeModule.actionDisabled}
-            onClick={activeModule.onAction}
-            title={sourceCollectionActionDisabledTitle(sourceCollectionStageActionReadinessFor(activeModule.id), activeModule.actionLabel)}
-          >
-            <TeamSourceCollectionStageActionIcon icon={activeModule.actionIcon} />
-            {activeModule.actionLabel}
-          </VNativeButton>
-        )}
+        primaryAction={{
+          tone: activeModule.actionTone,
+          disabled: activeModule.actionDisabled,
+          onAction: activeModule.onAction,
+          title: sourceCollectionActionDisabledTitle(sourceCollectionStageActionReadinessFor(activeModule.id), activeModule.actionLabel),
+          icon: activeModule.actionIcon,
+          label: activeModule.actionLabel,
+        }}
         agentChatAction={primaryStageAgentChatRoute ? (
           <Link
             to={primaryStageAgentChatRoute}
@@ -9192,9 +9161,12 @@ export function TeamsRoute({
             ) : null}
           </>
         )}
-      >
-        {resultPanel}
-      </TeamSourceCollectionActiveStagePanel>
+        renderConversationPanel={renderSourceCollectionConversation}
+        renderCandidatePanel={renderSourceCollectionCandidatePanel}
+        renderScreeningPanel={renderSourceCollectionScreeningPanel}
+        renderGraphPanel={renderSourceCollectionGraphPanel}
+        renderMemoryPanel={renderSourceCollectionMemoryPanel}
+      />
     );
   }
 
@@ -11563,10 +11535,6 @@ export function TeamsRoute({
       : sourceCollectionDisplayedCandidateCount > 0
         ? (lang === "zh" ? "Agent 重新提炼" : "Agent re-extract")
         : (lang === "zh" ? "Agent 提炼资料" : "Agent extract");
-  const sourceCollectionPanelClassName = (panelId: string) => [
-    styles.workflowSourceCollectionDetails,
-    sourceCollectionFocusedPanelId === panelId ? styles.sourceCollectionFocusedPanel : "",
-  ].filter(Boolean).join(" ");
   const sourceCollectionStageForPanel = (panelId: string): SourceCollectionStageModuleId => {
     if (panelId === "source-collection-screening-panel") {
       return "extraction";

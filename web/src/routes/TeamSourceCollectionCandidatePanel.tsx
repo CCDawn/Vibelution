@@ -1,5 +1,6 @@
 import { type ReactNode, type SyntheticEvent } from "react";
 
+import panelFrameStyles from "./TeamSourceCollectionPanelFrame.styles";
 import styles from "./TeamSourceCollectionCandidatePanel.styles";
 
 export type TeamSourceCollectionCandidatePanelStat = {
@@ -10,7 +11,7 @@ export type TeamSourceCollectionCandidatePanelStat = {
 
 type TeamSourceCollectionCandidatePanelProps = {
   lang: "zh" | "en";
-  className: string;
+  focused: boolean;
   open: boolean;
   rangeText: ReactNode;
   filterBar: ReactNode;
@@ -27,7 +28,7 @@ type TeamSourceCollectionCandidatePanelProps = {
 
 export function TeamSourceCollectionCandidatePanel({
   lang,
-  className,
+  focused,
   open,
   rangeText,
   filterBar,
@@ -41,6 +42,11 @@ export function TeamSourceCollectionCandidatePanel({
   children,
   onToggle,
 }: TeamSourceCollectionCandidatePanelProps) {
+  const className = [
+    panelFrameStyles.workflowSourceCollectionDetails,
+    focused ? panelFrameStyles.sourceCollectionFocusedPanel : "",
+  ].filter(Boolean).join(" ");
+
   return (
     <details
       id="source-collection-candidates-panel"

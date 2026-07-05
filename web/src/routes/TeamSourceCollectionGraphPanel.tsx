@@ -1,5 +1,6 @@
 import { type ReactNode, type SyntheticEvent } from "react";
 
+import panelFrameStyles from "./TeamSourceCollectionPanelFrame.styles";
 import styles from "./TeamSourceCollectionGraphPanel.styles";
 
 export type TeamSourceCollectionGraphPanelStat = {
@@ -10,7 +11,7 @@ export type TeamSourceCollectionGraphPanelStat = {
 
 type TeamSourceCollectionGraphPanelProps = {
   lang: "zh" | "en";
-  className: string;
+  focused: boolean;
   open: boolean;
   rangeText: ReactNode;
   filterBar: ReactNode;
@@ -18,7 +19,8 @@ type TeamSourceCollectionGraphPanelProps = {
   hasGraph: boolean;
   emptyMessage: ReactNode;
   graphView: ReactNode;
-  nodeList: ReactNode;
+  nodeListAriaLabel: string;
+  nodeListItems: ReactNode;
   pagination: ReactNode;
   errors: ReactNode;
   onToggle: (event: SyntheticEvent<HTMLDetailsElement>) => void;
@@ -26,7 +28,7 @@ type TeamSourceCollectionGraphPanelProps = {
 
 export function TeamSourceCollectionGraphPanel({
   lang,
-  className,
+  focused,
   open,
   rangeText,
   filterBar,
@@ -34,11 +36,17 @@ export function TeamSourceCollectionGraphPanel({
   hasGraph,
   emptyMessage,
   graphView,
-  nodeList,
+  nodeListAriaLabel,
+  nodeListItems,
   pagination,
   errors,
   onToggle,
 }: TeamSourceCollectionGraphPanelProps) {
+  const className = [
+    panelFrameStyles.workflowSourceCollectionDetails,
+    focused ? panelFrameStyles.sourceCollectionFocusedPanel : "",
+  ].filter(Boolean).join(" ");
+
   return (
     <details
       id="source-collection-graph-panel"
@@ -62,7 +70,16 @@ export function TeamSourceCollectionGraphPanel({
             ))}
           </div>
           {graphView}
-          {nodeList}
+          {nodeListItems ? (
+            <div
+              className={styles.sourceCollectionGraphNodeListShell}
+              role="region"
+              tabIndex={0}
+              aria-label={nodeListAriaLabel}
+            >
+              <div className={styles.workflowCandidateList}>{nodeListItems}</div>
+            </div>
+          ) : null}
           {pagination}
         </>
       ) : (
