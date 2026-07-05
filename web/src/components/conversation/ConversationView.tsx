@@ -175,6 +175,8 @@ import styles from "./ConversationView.styles";
 
 const DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT = 3;
 const INITIAL_VISIBLE_MESSAGE_COUNT = 14;
+const TIMELINE_HISTORY_LOAD_BATCH_COUNT = 14;
+const TIMELINE_HISTORY_LOAD_THRESHOLD_PX = 56;
 const INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT = 36;
 const RESPONSE_PARSE_CACHE_LIMIT = 80;
 const MARKDOWN_PARSE_CACHE_LIMIT = 160;
@@ -360,7 +362,7 @@ export function ConversationView({
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [previewImage, setPreviewImage] = useState<ConversationImagePreviewRequest | null>(null);
   const [composerDragActive, setComposerDragActive] = useState(false);
-  const [allMessagesVisible, setAllMessagesVisible] = useState(false);
+  const [visibleMessageLimit, setVisibleMessageLimit] = useState(INITIAL_VISIBLE_MESSAGE_COUNT);
   const [computerUseSessionResults, setComputerUseSessionResults] = useState<Record<string, ComputerUseResult>>({});
   const [computerUseSessionPending, setComputerUseSessionPending] = useState<Record<string, "confirm" | "cancel" | undefined>>({});
   const resolvedActionMode = composerActionMode ?? "send";
@@ -505,10 +507,7 @@ export function ConversationView({
     () => displayMessages.some((message) => isTurnErrorMessage(message)),
     [displayMessages],
   );
-  const visibleMessageCount = allMessagesVisible
-    ? displayMessages.length
-    : Math.min(displayMessages.length, INITIAL_VISIBLE_MESSAGE_COUNT);
-  const hiddenMessageCount = Math.max(0, displayMessages.length - visibleMessageCount);
+  const visibleMessageCount = Math.min(displayMessages.length, visibleMessageLimit);
   const timelineMessages = useMemo(
     () => displayMessages.slice(displayMessages.length - visibleMessageCount),
     [displayMessages, visibleMessageCount],
@@ -680,7 +679,7 @@ export function ConversationView({
       lastTimelineScrollTopRef.current = timelineRef.current?.scrollTop ?? 0;
       setIsAtBottom(false);
     }
-  }, [activeTimelineMessages.length, allMessagesVisible]);
+  }, [activeTimelineMessages.length, visibleMessageLimit]);
 
   useLayoutEffect(() => {
     const timeline = timelineRef.current;
@@ -750,11 +749,19 @@ export function ConversationView({
       return;
     }
     const handleScroll = () => {
+      const previousScrollTop = lastTimelineScrollTopRef.current;
+      if (
+        visibleMessageCount < displayMessages.length
+        && timeline.scrollTop <= TIMELINE_HISTORY_LOAD_THRESHOLD_PX
+        && timeline.scrollTop < previousScrollTop
+      ) {
+        revealEarlierTimelineMessages();
+      }
       const nextState = resolveTimelineFollowState({
         scrollHeight: timeline.scrollHeight,
         clientHeight: timeline.clientHeight,
         scrollTop: timeline.scrollTop,
-        previousScrollTop: lastTimelineScrollTopRef.current,
+        previousScrollTop,
         wasFollowingLatest: followLatestRef.current,
       });
       lastTimelineScrollTopRef.current = timeline.scrollTop;
@@ -765,7 +772,7 @@ export function ConversationView({
     handleScroll();
     timeline.addEventListener("scroll", handleScroll);
     return () => timeline.removeEventListener("scroll", handleScroll);
-  }, [sessionId]);
+  }, [displayMessages.length, sessionId, visibleMessageCount]);
 
   useEffect(() => {
     if (!previewImage) {
@@ -796,7 +803,7 @@ export function ConversationView({
   }, [composerDisabled, editingMessageId]);
 
   useEffect(() => {
-    setAllMessagesVisible(false);
+    setVisibleMessageLimit(INITIAL_VISIBLE_MESSAGE_COUNT);
     historyScrollAnchorRef.current = null;
     defaultExpansionRef.current = {};
     responseSegmentCacheRef.current.clear();
@@ -926,12 +933,18 @@ export function ConversationView({
     scrollTimelineToBottom(timeline, { followLatest: true, behavior: "smooth" });
   }
 
-  function showEarlierMessages() {
+  function revealEarlierTimelineMessages() {
+    if (visibleMessageCount >= displayMessages.length) {
+      return;
+    }
     historyScrollAnchorRef.current = captureTimelineRowKeyAnchor(timelineRef.current);
     atBottomRef.current = false;
     followLatestRef.current = false;
     setIsAtBottom(false);
-    setAllMessagesVisible(true);
+    setVisibleMessageLimit((current) => Math.min(
+      displayMessages.length,
+      current + TIMELINE_HISTORY_LOAD_BATCH_COUNT,
+    ));
   }
 
   const formatDuration = formatConversationDuration;
@@ -2202,22 +2215,6 @@ export function ConversationView({
           <div className={styles.emptyState}>{t("sessionNoMessages")}</div>
         ) : (
           <>
-            {hiddenMessageCount > 0 ? (
-              <div className={styles.timelineHistoryGate}>
-                <VButton
-                  type="button"
-                  className={styles.timelineHistoryButton}
-                  onClick={showEarlierMessages}
-                >
-                  <ArrowUp size={15} />
-                  <span>
-                    {lang === "zh"
-                      ? `显示更早 ${hiddenMessageCount} 条消息`
-                      : `Show ${hiddenMessageCount} earlier messages`}
-                  </span>
-                </VButton>
-              </div>
-            ) : null}
             {activeTimelineMessages.map((message, index) => (
               <ConversationTurnRow
                 key={activeTimelineRowIdentities[index].rowKey}
