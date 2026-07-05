@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { dictionary } from "../i18n/dictionary";
 import routeSource from "./GitRoute.tsx?raw";
 import stylesSource from "./GitRoute.styles.ts?raw";
+import { gitRouteStyles } from "./GitRoute.styles";
 import diffViewSource from "./GitDiffView.tsx?raw";
 import logicSource from "./gitRouteLogic.ts?raw";
 import { gitRouteDictionary } from "./gitRouteI18n";
@@ -58,6 +59,57 @@ describe("GitRoute layout contract", () => {
     }
   });
 
+  it("keeps the Git route shell background-aware and header chrome-light", () => {
+    expect(gitRouteStyles.route).not.toContain("surface-page");
+    expect(gitRouteStyles.route).not.toContain("bg-[var(--surface-page)]");
+    expect(gitRouteStyles.route).not.toContain("bg-[color-mix(in_srgb,var(--surface-page)");
+    expect(gitRouteStyles.header).not.toContain("surface-panel");
+    expect(gitRouteStyles.header).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+    expect(gitRouteStyles.header).toContain("!bg-transparent");
+    expect(gitRouteStyles.header).toContain("!shadow-none");
+    expect(gitRouteStyles.header).toContain("!backdrop-blur-none");
+  });
+
+  it("keeps Git workspaces fluid on mobile and avoids hard desktop column floors", () => {
+    expect(gitRouteStyles.workspace).toContain("min-w-0");
+    expect(gitRouteStyles.workspace).toContain("minmax(0,1fr)");
+    expect(gitRouteStyles.workspace).not.toMatch(/minmax\((500|520)px/);
+    expect(gitRouteStyles.workspace).toContain("max-[860px]:grid-cols-[minmax(0,1fr)]");
+    expect(gitRouteStyles.workspaceOverview).toContain("minmax(0,1fr)");
+    expect(gitRouteStyles.workspaceOverview).not.toMatch(/minmax\((500|520)px/);
+    expect(gitRouteStyles.workspaceOverview).toContain("max-[860px]:grid-cols-[minmax(0,1fr)]");
+    expect(gitRouteStyles.diffPanel).toContain("min-w-0");
+    expect(gitRouteStyles.objectDetailPanel).toContain("min-w-0");
+  });
+
+  it("keeps Git large surfaces translucent and action controls content-sized", () => {
+    const largeSurfaceKeys = [
+      "summaryCard",
+      "changePanel",
+      "commitPanel",
+      "gitSituationCard",
+      "cleanStateStrip",
+      "emptyPreview",
+      "commitScopeBox",
+    ] as const;
+    const actionControlKeys = [
+      "filterButton",
+      "filterButtonActive",
+      "selectionButton",
+      "secondaryButton",
+      "primaryButton",
+    ] as const;
+
+    for (const key of largeSurfaceKeys) {
+      expect(gitRouteStyles[key]).not.toContain("bg-[var(--surface-panel)]");
+    }
+    for (const key of actionControlKeys) {
+      expect(gitRouteStyles[key]).toContain("w-fit");
+      expect(gitRouteStyles[key]).toContain("max-w-full");
+    }
+    expect(gitRouteStyles.commitActions).toContain("grid-cols-[repeat(2,max-content)]");
+  });
+
   it("keeps commit actions scoped to selected files", () => {
     expect(routeSource).toContain("selectedPaths");
     expect(routeSource).toContain("stagedOutsideSelection");
@@ -92,7 +144,7 @@ describe("GitRoute layout contract", () => {
     expect(routeSource).toContain('kind: "worktree"');
     expect(routeSource).toContain('kind: "commit"');
     expect(routeSource).toContain("objectDetailQuery");
-    expect(stylesSource).toContain("grid-cols-[minmax(340px,0.9fr)_minmax(500px,1.18fr)_minmax(270px,0.62fr)]");
+    expect(stylesSource).toContain("grid-cols-[minmax(260px,0.9fr)_minmax(0,1.18fr)_minmax(240px,0.62fr)]");
     expect(stylesSource).toContain("objectDetailPanel:");
     expect(stylesSource).toContain("objectItemActive:");
   });

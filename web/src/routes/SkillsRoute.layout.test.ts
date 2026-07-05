@@ -5,6 +5,10 @@ import routerSource from "../app/router.tsx?raw";
 import routeSource from "./SkillsRoute.tsx?raw";
 import stylesSource from "./SkillsRoute.styles.ts?raw";
 
+function extractConstClass(name: string) {
+  return stylesSource.match(new RegExp(`const ${name} = "([^"]+)"`))?.[1] ?? "";
+}
+
 describe("SkillsRoute layout contract", () => {
   it("is mounted as an Agent management section", () => {
     expect(routerSource).toContain('path: "agents/skills"');
@@ -71,5 +75,60 @@ describe("SkillsRoute layout contract", () => {
     expect(routeSource).toContain("emptyDetailClass");
     expect(stylesSource).toContain("min-h-24");
     expect(stylesSource).toContain("p-3");
+  });
+
+  it("keeps route and header chrome background-aware", () => {
+    const routeClass = extractConstClass("routeClass");
+    const headerClass = extractConstClass("headerClass");
+
+    expect(routeClass).not.toContain("surface-page");
+    expect(routeClass).not.toMatch(/\bbg-\[(?:var\(--surface-page\)|color-mix\(in_srgb,var\(--surface-page\))/);
+    expect(headerClass).not.toContain("vui-gradient-route-soft");
+    expect(headerClass).not.toMatch(/\bshadow-\[/);
+    expect(headerClass).toContain("!bg-transparent");
+    expect(headerClass).toContain("!shadow-none");
+    expect(headerClass).toContain("!backdrop-blur-none");
+  });
+
+  it("keeps Skills surfaces lightweight instead of building nested opaque card walls", () => {
+    const surfaceClasses = [
+      extractConstClass("panelClass"),
+      extractConstClass("commandPanelClass"),
+      extractConstClass("metaGridClass"),
+      extractConstClass("surfacePanelClass"),
+      extractConstClass("emptyDetailClass"),
+    ];
+
+    expect(surfaceClasses).toHaveLength(5);
+    surfaceClasses.forEach((className) => {
+      expect(className).toContain("border-vui-border-soft");
+      expect(className).not.toContain("bg-[var(--surface-panel)]");
+      expect(className).not.toContain("bg-[var(--surface-card)]");
+      expect(className).not.toContain("shadow-[");
+    });
+  });
+
+  it("keeps toolbar buttons sized to their content while full-row skill buttons remain explicit", () => {
+    const compactButtonClasses = [
+      extractConstClass("filterButtonClass"),
+      extractConstClass("primaryButtonClass"),
+    ];
+    const skillButtonBaseClass = stylesSource.match(/const skillButtonBaseClass = \[([\s\S]*?)\]\.join/)?.[1] ?? "";
+
+    compactButtonClasses.forEach((className) => {
+      expect(className).toContain("inline-flex");
+      expect(className).toContain("w-fit");
+      expect(className).toContain("max-w-full");
+      expect(className.split(/\s+/)).not.toContain("w-full");
+    });
+    expect(skillButtonBaseClass).toContain("w-full");
+    expect(skillButtonBaseClass).toContain("[&_[data-slot=vui-button-content]]:w-full");
+  });
+
+  it("keeps detail chrome and command rows responsive on narrow viewports", () => {
+    expect(extractConstClass("detailHeaderClass")).toContain("max-[720px]:flex-wrap");
+    expect(extractConstClass("contentHeaderClass")).toContain("max-[720px]:flex-wrap");
+    expect(extractConstClass("commandPanelClass")).toContain("max-[720px]:grid-cols-[auto_minmax(0,1fr)]");
+    expect(extractConstClass("rootRowClass")).toContain("max-[720px]:grid-cols-1");
   });
 });
