@@ -15,6 +15,18 @@ const expectBackgroundAware = (className: string) => {
   expect(className).not.toContain("shadow-[var(--vui-shadow-hairline)]");
 };
 
+const expectControlOnlyAction = (className: string) => {
+  expect(className).toContain("inline-flex");
+  expect(className).toContain("w-fit");
+  expect(className).toContain("max-w-full");
+  expect(className).toContain("min-w-0");
+  expect(className).toContain("rounded-[var(--radius-control)]");
+  expect(className).toContain("bg-[var(--vui-control-muted)]");
+  expect(className).not.toContain("rounded-[var(--radius-panel)]");
+  expect(className).not.toContain("var(--vui-surface-panel)");
+  expect(className).not.toContain("var(--vui-surface-row)");
+};
+
 describe("RuntimeScenesPane layout contract", () => {
   it("routes runtime scene controls through VUI primitives", () => {
     expect(paneSource).toContain("from \"../components/vui\"");
@@ -175,15 +187,9 @@ describe("RuntimeScenesPane layout contract", () => {
       styles.toolbarButton,
       styles.packageKeyEntryButton,
       styles.sceneCardButton,
-    ].forEach((className) => {
-      expect(className).toContain("inline-flex");
-      expect(className).toContain("w-fit");
-      expect(className).toContain("max-w-full");
-      expect(className).toContain("min-w-0");
-    });
+    ].forEach(expectControlOnlyAction);
 
     [
-      styles.resizableLayout,
       styles.previewPane,
       styles.packageList,
       styles.timelineList,
@@ -192,5 +198,11 @@ describe("RuntimeScenesPane layout contract", () => {
       expect(className).toContain("min-w-0");
       expect(className).toContain("overflow");
     });
+
+    expect(styles.resizableLayout).toContain("min-w-0");
+    expect(styles.resizableLayout).toContain("max-w-full");
+    expect(styles.resizableLayout).toContain("overflow-x-hidden");
+    expect(styles.resizableLayout).toContain("max-[900px]:grid-cols-[minmax(0,1fr)]");
+    expect(styles.resizableLayout).toContain("max-[900px]:grid-rows-[max-content_minmax(0,1fr)]");
   });
 });
