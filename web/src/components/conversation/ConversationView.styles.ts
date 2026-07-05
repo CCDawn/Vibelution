@@ -148,7 +148,7 @@ const styles: Record<string, string> = {
   answerOnlyProcessPreview:
     "vui-components-conversationview answerOnlyProcessPreview min-w-0 truncate whitespace-nowrap border-0 bg-transparent p-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] shadow-none",
   answerOnlyProcessStatic:
-    "vui-components-conversationview answerOnlyProcessStatic min-w-0 grid [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:grid-cols-[14px_auto_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5",
+    "vui-components-conversationview answerOnlyProcessStatic min-w-0 !inline-grid w-fit max-w-full grid-cols-[14px_auto_auto] items-center gap-1.5",
   answerOnlyProcessTitle:
     "vui-components-conversationview answerOnlyProcessTitle min-w-0 truncate whitespace-nowrap text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   answerOnlyProcessToggle:
