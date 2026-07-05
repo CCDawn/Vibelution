@@ -30,7 +30,7 @@ describe("PetRoute layout contract", () => {
       expect(styles[key]).not.toContain("shadow-[var(--vui-shadow-hairline)]");
       expect(styles[key]).not.toContain("shadow-[var(--vui-shadow-soft)]");
     }
-    expect(styles.surfaceClass).toMatch(/bg-\[color-mix\(in_srgb,var\(--surface-panel\)_\d+%,transparent\)\]/);
+    expect(styles.surfaceClass).toMatch(/bg-\[color-mix\(in_srgb,var\(--vui-surface-panel\)_\d+%,transparent\)\]/);
   });
 
   it("keeps progress width on a Tailwind contract variable", () => {
