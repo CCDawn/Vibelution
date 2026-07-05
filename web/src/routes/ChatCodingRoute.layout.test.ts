@@ -144,24 +144,24 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps the conversation page aligned to the V2.1 quiet light style system", () => {
-    expect(conversationStyles.surfaceCompact).toContain("bg-[color-mix(in_srgb,var(--surface-panel)_72%,transparent)]");
+    expect(conversationStyles.surfaceCompact).toContain("bg-[color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)]");
     expect(conversationStyles.surfaceCompact).not.toContain("bg-[var(--surface-panel-strong)]");
 
-    expect(conversationStyles.composer).toContain("bg-[color-mix(in_srgb,var(--surface-panel)_74%,transparent)]");
+    expect(conversationStyles.composer).toContain("bg-[color-mix(in_srgb,var(--vui-surface-panel)_74%,transparent)]");
     expect(conversationStyles.composer).toContain("backdrop-blur-[6px]");
     expect(conversationStyles.composer).not.toContain("var(--surface-panel-strong)_92%");
 
-    expect(conversationStyles.sendButton).toContain("bg-[color-mix(in_srgb,var(--accent-cool)_16%,var(--surface-card))]");
+    expect(conversationStyles.sendButton).toContain("bg-[color-mix(in_srgb,var(--accent-cool)_16%,var(--vui-surface-row))]");
     expect(conversationStyles.sendButton).toContain("focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)]");
     expect(conversationStyles.sendButton).toContain("shadow-none");
     expect(conversationStyles.sendButton).not.toContain("bg-[#");
     expect(conversationStyles.sendButton).not.toContain("-translate-y");
-    expect(conversationStyles.attachButton).toContain("bg-[color-mix(in_srgb,var(--surface-card)_62%,transparent)]");
+    expect(conversationStyles.attachButton).toContain("bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)]");
     expect(conversationStyles.attachButton).toContain("active:bg-[color-mix(in_srgb,var(--surface-page)_18%,var(--vui-control-muted-hover))]");
     expect(conversationStyles.stopButton).toContain("!border-[color-mix(in_srgb,var(--state-error)_34%,transparent)]");
     expect(conversationStyles.stopButton).toContain("!text-[var(--state-error)]");
 
-    expect(conversationStyles.userCard).toContain("bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--surface-panel))]");
+    expect(conversationStyles.userCard).toContain("bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))]");
     expect(conversationStyles.userCard).not.toContain("bg-[var(--surface-panel-strong)]");
 
     expect(routeStyles.sessionItemActive).toContain("shadow-[var(--vui-shadow-inset-accent)]");

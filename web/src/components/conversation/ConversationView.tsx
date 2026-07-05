@@ -2720,7 +2720,7 @@ export function ConversationView({
             <div
               role="listbox"
               aria-label={lang === "zh" ? "斜杠指令" : "Slash commands"}
-              className="vui-components-conversationview slashCommandSuggestions min-w-0 overflow-hidden rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--surface-panel)] shadow-[var(--vui-shadow-hairline)]"
+              className="vui-components-conversationview slashCommandSuggestions min-w-0 overflow-hidden rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] shadow-[var(--vui-shadow-hairline)]"
             >
               {slashSuggestions.map((skill) => {
                 const description = skill.description?.trim() || skill.name || skill.directoryName;
