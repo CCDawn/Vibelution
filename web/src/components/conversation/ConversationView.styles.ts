@@ -979,11 +979,11 @@ const styles: Record<string, string> = {
   timelineAssistantTextCell:
     "vui-components-conversationview timelineAssistantTextCell min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-w-[min(100%,920px)]",
   timelineCellDetailButton:
-    "vui-components-conversationview timelineCellDetailButton min-w-0 inline-grid size-6 shrink-0 place-items-center rounded-[var(--radius-control)] border border-transparent bg-transparent p-0 text-[var(--fg-tertiary)] hover:border-[var(--vui-border-subtle)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+    "vui-components-conversationview timelineCellDetailButton min-w-0 inline-grid size-6 shrink-0 self-start place-items-center rounded-[var(--radius-control)] border border-transparent bg-transparent p-0 text-[var(--fg-tertiary)] hover:border-[var(--vui-border-subtle)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
   timelineCellHeader:
     "vui-components-conversationview timelineCellHeader min-w-0 overflow-visible !grid !w-full grid-cols-[auto_auto_minmax(0,1fr)_auto_auto_auto] !items-center !justify-start gap-x-1.5 gap-y-1 !border-0 !bg-transparent !p-0 !text-left !shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   timelineCellMeta:
-    "vui-components-conversationview timelineCellMeta min-w-0 flex flex-wrap items-center gap-1.5 grid min-h-0 content-start overflow-auto",
+    "vui-components-conversationview timelineCellMeta min-w-0 flex flex-wrap items-center gap-1.5 self-start grid min-h-0 content-start overflow-auto",
   timelineCellPreview:
     "vui-components-conversationview timelineCellPreview min-w-0 border-0 bg-transparent p-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] shadow-none grid min-h-0 content-start gap-1.5 overflow-hidden whitespace-normal break-words [overflow-wrap:anywhere] line-clamp-1",
   timelineCommandError:
