@@ -104,7 +104,7 @@ describe("GitRoute layout contract", () => {
 
     for (const key of largeSurfaceKeys) {
       expect(gitRouteStyles[key]).not.toContain("bg-[var(--surface-panel)]");
-      expect(gitRouteStyles[key]).toMatch(/bg-vui-surface-(panel|row|glass)/);
+      expect(gitRouteStyles[key]).toMatch(/bg-\[color-mix\(in_srgb,var\(--vui-surface-(panel|row)/);
     }
     for (const key of actionControlKeys) {
       expect(gitRouteStyles[key]).toContain("h-[var(--vui-control-height-sm)]");
@@ -206,7 +206,7 @@ describe("GitRoute layout contract", () => {
     expect(commitItemStyles).not.toContain("!grid");
     expect(commitItemStyles).not.toContain("data-slot=vui-button-content");
     expect(commitItemStyles).not.toContain("data-slot=vui-button-label");
-    expect(gitRouteStyles.commitItem).toContain("bg-vui-surface-row");
+    expect(gitRouteStyles.commitItem).toContain("bg-[color-mix(in_srgb,var(--vui-surface-row)");
     expect(commitItemStyles).toContain("[&_strong]:block");
     expect(commitItemStyles).toContain("[&_strong]:max-w-full");
     expect(commitItemStyles).toContain("[&_strong]:text-ellipsis");
