@@ -13,6 +13,8 @@ class FakeWindow implements ElectronWindowLike {
   readonly webContents: ElectronWindowLike["webContents"];
   focusCount = 0;
   closeCount = 0;
+  overlayCalls: Array<{ icon: unknown; description: string }> = [];
+  flashCalls: boolean[] = [];
   private destroyed = false;
   private focused = false;
   private handlers = new Map<string, Array<(...args: unknown[]) => void>>();
@@ -34,10 +36,23 @@ class FakeWindow implements ElectronWindowLike {
     this.focused = true;
   }
 
+  blur(): void {
+    this.focused = false;
+    this.emit("blur");
+  }
+
   close(): void {
     this.closeCount += 1;
     this.destroyed = true;
     this.emit("closed");
+  }
+
+  setOverlayIcon(icon: unknown, description: string): void {
+    this.overlayCalls.push({ icon, description });
+  }
+
+  flashFrame(flag: boolean): void {
+    this.flashCalls.push(flag);
   }
 
   isDestroyed(): boolean {
@@ -156,6 +171,60 @@ describe("Electron window provider state", () => {
     expect(closeEvent.preventDefault).toHaveBeenCalledTimes(1);
     expect(closeRequests).toEqual(["launcher"]);
     expect(launcherWindow.isDestroyed()).toBe(false);
+  });
+
+  it("reports workbench focus without exposing the raw BrowserWindow", async () => {
+    const workbenchWindow = new FakeWindow(42, "http://127.0.0.1:8000/", 4242);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => workbenchWindow
+    });
+
+    expect(provider.isWorkbenchFocused()).toBe(false);
+
+    await provider.openOrFocusWorkbench();
+
+    expect(provider.isWorkbenchFocused()).toBe(true);
+
+    workbenchWindow.blur();
+
+    expect(provider.isWorkbenchFocused()).toBe(false);
+  });
+
+  it("applies and clears workbench taskbar attention", async () => {
+    const workbenchWindow = new FakeWindow(42, "http://127.0.0.1:8000/", 4242);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => workbenchWindow
+    });
+    await provider.openOrFocusWorkbench();
+
+    const overlayIcon = { marker: "badge-1" };
+    provider.setWorkbenchAttention({ unreadCount: 1, overlayIcon, description: "1 completed conversation", flash: true });
+
+    expect(workbenchWindow.overlayCalls).toEqual([{ icon: overlayIcon, description: "1 completed conversation" }]);
+    expect(workbenchWindow.flashCalls).toEqual([true]);
+
+    provider.setWorkbenchAttention({ unreadCount: 0 });
+
+    expect(workbenchWindow.overlayCalls.at(-1)).toEqual({ icon: null, description: "" });
+    expect(workbenchWindow.flashCalls.at(-1)).toBe(false);
+  });
+
+  it("clears workbench attention when the workbench regains focus", async () => {
+    const workbenchWindow = new FakeWindow(42, "http://127.0.0.1:8000/", 4242);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => workbenchWindow
+    });
+
+    await provider.openOrFocusWorkbench();
+    provider.setWorkbenchAttention({ unreadCount: 3, overlayIcon: { marker: "badge-3" }, description: "3 completed conversations", flash: true });
+
+    workbenchWindow.emit("focus");
+
+    expect(workbenchWindow.overlayCalls.at(-1)).toEqual({ icon: null, description: "" });
+    expect(workbenchWindow.flashCalls.at(-1)).toBe(false);
   });
 });
 
