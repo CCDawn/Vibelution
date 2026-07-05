@@ -256,18 +256,22 @@ def test_shared_llm_key_env_sync_uses_public_config_without_leaking_values(monke
 
     model_env = "VIBELUTION_LLM_MODEL_CHAT_UNIT_API_KEY"
     provider_env = "VIBELUTION_LLM_PROVIDER_OPENAI_UNIT_API_KEY"
+    nested_provider_env = "VIBELUTION_LLM_PROVIDER_NESTED_UNIT_API_KEY"
     canonical_env = "OPENAI_API_KEY"
     secret = "unit-chat-model-secret"
+    nested_provider_secret = "unit-chat-nested-provider-secret"
     canonical_secret = "unit-chat-provider-secret"
 
     monkeypatch.delenv(model_env, raising=False)
     monkeypatch.delenv(provider_env, raising=False)
+    monkeypatch.delenv(nested_provider_env, raising=False)
     monkeypatch.delenv(canonical_env, raising=False)
     monkeypatch.setattr(
         llm_key_env,
         "read_persisted_user_env_var",
         lambda name: {
             model_env: secret,
+            nested_provider_env: nested_provider_secret,
             canonical_env: canonical_secret,
         }.get(name, ""),
     )
@@ -278,6 +282,10 @@ def test_shared_llm_key_env_sync_uses_public_config_without_leaking_values(monke
                 "model_library": {
                     "chat_unit_model": {
                         "api_key_env": model_env,
+                        "provider": {
+                            "kind": "openai_compatible",
+                            "api_key_env": nested_provider_env,
+                        },
                     }
                 },
                 "providers": {
@@ -292,16 +300,19 @@ def test_shared_llm_key_env_sync_uses_public_config_without_leaking_values(monke
     )
 
     assert payload["ok"] is True
-    assert payload["envCount"] == 3
+    assert payload["envCount"] == 4
     assert payload["alreadyPresentCount"] == 0
-    assert payload["syncedCount"] == 2
+    assert payload["syncedCount"] == 3
     assert payload["missingCount"] == 1
     assert model_env in payload["syncedEnvNames"]
+    assert nested_provider_env in payload["syncedEnvNames"]
     assert canonical_env in payload["syncedEnvNames"]
     assert provider_env in payload["missingEnvNames"]
     assert llm_key_env.os.environ[model_env] == secret
+    assert llm_key_env.os.environ[nested_provider_env] == nested_provider_secret
     assert llm_key_env.os.environ[canonical_env] == canonical_secret
     assert secret not in json.dumps(payload)
+    assert nested_provider_secret not in json.dumps(payload)
     assert canonical_secret not in json.dumps(payload)
 
 
