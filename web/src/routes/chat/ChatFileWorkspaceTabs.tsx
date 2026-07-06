@@ -32,10 +32,15 @@ export function ChatFileWorkspaceTabs({
     <>
       {openTabs.map((tabPath) => {
         const tabName = fileTabName(tabPath);
+        const selected = activeTab === tabPath;
         return (
           <div
             key={tabPath}
-            className={activeTab === tabPath ? `${styles.fileTab} ${styles.fileTabActive}` : styles.fileTab}
+            role="tab"
+            aria-selected={selected}
+            aria-current={selected ? "page" : undefined}
+            title={tabPath}
+            className={selected ? `${styles.fileTab} ${styles.fileTabActive}` : styles.fileTab}
           >
             <VButton
               type="button"
@@ -51,7 +56,7 @@ export function ChatFileWorkspaceTabs({
               title={closePreviewTabLabel}
               aria-label={`${closePreviewTabLabel} ${tabName}`}
             >
-              <X size={14} />
+              <X size={14} aria-hidden="true" />
             </VButton>
           </div>
         );
