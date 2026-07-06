@@ -703,6 +703,75 @@ def test_responses_transport_streams_with_responses_normalizer(monkeypatch):
     assert "messages" not in calls[0]
 
 
+def test_responses_transport_streams_function_call_items(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.5",
+            "llm.profiles.primary.transport": "responses",
+            "llm.profiles.primary.streaming": True,
+        }
+    )
+    calls = []
+
+    def default_responses_backend(payload):
+        calls.append(payload)
+        return iter(
+            [
+                {"type": "response.output_text.delta", "delta": "先看"},
+                {
+                    "type": "response.output_item.added",
+                    "item": {
+                        "id": "fc_1",
+                        "type": "function_call",
+                        "call_id": "call_1",
+                        "name": "read_file",
+                    },
+                },
+                {
+                    "type": "response.function_call_arguments.delta",
+                    "item_id": "fc_1",
+                    "delta": "{\"path\"",
+                },
+                {
+                    "type": "response.function_call_arguments.delta",
+                    "item_id": "fc_1",
+                    "delta": ": \"agent.py\"}",
+                },
+                {
+                    "type": "response.output_item.done",
+                    "item": {
+                        "id": "fc_1",
+                        "type": "function_call",
+                        "call_id": "call_1",
+                        "name": "read_file",
+                        "arguments": "{\"path\": \"agent.py\"}",
+                    },
+                },
+                {"type": "response.completed", "response": {"usage": {"total_tokens": 7}}},
+            ]
+        )
+
+    monkeypatch.setattr("core.llm.client._default_responses_backend", default_responses_backend)
+    client = LLMClient(config=config)
+
+    events = list(client.stream_events([{"role": "user", "content": "read"}]))
+
+    assert [event.type for event in events] == ["text_delta", "tool_call_final", "done"]
+    assert events[0].text == "先看"
+    assert events[1].tool_calls[0].id == "call_1"
+    assert events[1].tool_calls[0].name == "read_file"
+    assert events[1].tool_calls[0].arguments == {"path": "agent.py"}
+    assert events[1].tool_calls[0].raw_arguments == "{\"path\": \"agent.py\"}"
+    assert events[-1].usage.total_tokens == 7
+    assert "input" in calls[0]
+    assert "messages" not in calls[0]
+
+
 def test_responses_transport_preserves_existing_provider_prefix():
     config = make_config(
         **{

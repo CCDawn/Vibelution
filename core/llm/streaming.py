@@ -219,6 +219,7 @@ class ResponsesStreamNormalizer:
     def __init__(self) -> None:
         self._usage: UsageStats | None = None
         self._text_emitted = False
+        self._tool_calls = ResponsesToolCallAccumulator()
 
     def events(self, raw_chunks: Iterable[Any]) -> Iterator[StreamChunk]:
         for raw_chunk in raw_chunks:
@@ -236,6 +237,9 @@ class ResponsesStreamNormalizer:
             if text_delta:
                 self._text_emitted = True
                 yield StreamChunk(type="text_delta", text=text_delta, provider_payload=event)
+            tool_call = self._extract_tool_call(event_type, event)
+            if tool_call is not None:
+                yield StreamChunk(type="tool_call_final", tool_calls=[tool_call], provider_payload=event)
             if event_type in {"response.completed", "response.done"} and not self._text_emitted:
                 completed_text = self._extract_completed_text(event)
                 if completed_text:
@@ -290,6 +294,155 @@ class ResponsesStreamNormalizer:
         if not stats.provider_raw_usage:
             return None
         return stats
+
+    def _extract_tool_call(self, event_type: str, event: Dict[str, Any]) -> ToolCall | None:
+        if event_type == "response.output_item.added":
+            self._tool_calls.add_item(event.get("item"))
+            return None
+        if event_type in {
+            "response.function_call_arguments.delta",
+            "response.tool_call_arguments.delta",
+            "response.custom_tool_call_input.delta",
+        }:
+            self._tool_calls.add_arguments_delta(event)
+            return None
+        if event_type in {
+            "response.function_call_arguments.done",
+            "response.tool_call_arguments.done",
+            "response.custom_tool_call_input.done",
+        }:
+            self._tool_calls.add_arguments_done(event)
+            return None
+        if event_type == "response.output_item.done":
+            return self._tool_calls.finalize_item(event.get("item"))
+        return None
+
+
+class ResponsesToolCallAccumulator:
+    """Accumulates OpenAI Responses function-call item events."""
+
+    _CALL_ITEM_TYPES = {"function_call", "tool_call", "custom_tool_call"}
+
+    def __init__(self) -> None:
+        self._by_item_id: Dict[str, Dict[str, Any]] = {}
+        self._item_id_by_call_id: Dict[str, str] = {}
+        self._active_item_id: str = ""
+
+    def add_item(self, raw_item: Any) -> None:
+        item = _as_dict(raw_item)
+        if not self._is_call_item(item):
+            return
+        state = self._state_for_item(item)
+        self._merge_item(state, item, replace_arguments=False)
+
+    def add_arguments_delta(self, event: Dict[str, Any]) -> None:
+        state = self._state_for_event(event)
+        if state is None:
+            return
+        self._append_arguments(state, event.get("delta"))
+
+    def add_arguments_done(self, event: Dict[str, Any]) -> None:
+        state = self._state_for_event(event)
+        if state is None:
+            return
+        if "arguments" in event:
+            state["arguments"] = event.get("arguments") or ""
+        elif "delta" in event:
+            state["arguments"] = event.get("delta") or ""
+
+    def finalize_item(self, raw_item: Any) -> ToolCall | None:
+        item = _as_dict(raw_item)
+        if not self._is_call_item(item):
+            return None
+        state = self._state_for_item(item)
+        self._merge_item(state, item, replace_arguments=True)
+        item_id = str(state.get("item_id") or "")
+        if item_id:
+            self._by_item_id.pop(item_id, None)
+        call_id = str(state.get("call_id") or "")
+        if call_id:
+            self._item_id_by_call_id.pop(call_id, None)
+        if self._active_item_id == item_id:
+            self._active_item_id = ""
+        name = str(state.get("name") or "")
+        if not name:
+            return None
+        raw_args = state.get("arguments") or ""
+        provider_payload = item if isinstance(item, dict) else {}
+        return ToolCall(
+            id=call_id or item_id or name,
+            name=name,
+            arguments=parse_tool_arguments(raw_args),
+            raw_arguments=raw_args,
+            provider_payload=provider_payload,
+        )
+
+    @classmethod
+    def _is_call_item(cls, item: Any) -> bool:
+        return isinstance(item, dict) and str(item.get("type") or "") in cls._CALL_ITEM_TYPES
+
+    def _state_for_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
+        item_id = str(item.get("id") or item.get("item_id") or item.get("call_id") or "")
+        call_id = str(item.get("call_id") or item.get("id") or item_id)
+        if not item_id:
+            item_id = call_id or f"responses_tool_{len(self._by_item_id)}"
+        state = self._by_item_id.setdefault(
+            item_id,
+            {
+                "item_id": item_id,
+                "call_id": call_id,
+                "name": "",
+                "arguments": "",
+            },
+        )
+        if call_id:
+            state["call_id"] = call_id
+            self._item_id_by_call_id[call_id] = item_id
+        self._active_item_id = item_id
+        return state
+
+    def _state_for_event(self, event: Dict[str, Any]) -> Dict[str, Any] | None:
+        item_id = str(event.get("item_id") or event.get("output_item_id") or "")
+        call_id = str(event.get("call_id") or "")
+        if not item_id and call_id:
+            item_id = self._item_id_by_call_id.get(call_id, "")
+        if not item_id:
+            item_id = self._active_item_id
+        if not item_id:
+            return None
+        state = self._by_item_id.setdefault(
+            item_id,
+            {
+                "item_id": item_id,
+                "call_id": call_id,
+                "name": "",
+                "arguments": "",
+            },
+        )
+        if call_id:
+            state["call_id"] = call_id
+            self._item_id_by_call_id[call_id] = item_id
+        return state
+
+    def _merge_item(self, state: Dict[str, Any], item: Dict[str, Any], *, replace_arguments: bool) -> None:
+        if item.get("call_id"):
+            state["call_id"] = str(item.get("call_id"))
+            self._item_id_by_call_id[str(item.get("call_id"))] = str(state.get("item_id") or "")
+        if item.get("name"):
+            state["name"] = str(item.get("name"))
+        if "arguments" in item and (replace_arguments or not state.get("arguments")):
+            state["arguments"] = item.get("arguments") or ""
+        elif "input" in item and (replace_arguments or not state.get("arguments")):
+            state["arguments"] = item.get("input") or ""
+
+    @staticmethod
+    def _append_arguments(state: Dict[str, Any], part: Any) -> None:
+        if isinstance(part, str):
+            state["arguments"] = str(state.get("arguments") or "") + part
+        elif isinstance(part, dict):
+            state["arguments"] = part
+        elif part is not None:
+            state["arguments"] = str(state.get("arguments") or "") + str(part)
 
 
 def _as_dict(value: Any) -> Any:
