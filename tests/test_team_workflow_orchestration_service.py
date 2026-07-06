@@ -5020,6 +5020,213 @@ def test_source_collection_stage_turn_completion_reconciles_post_writeback_check
     assert stored_task["taskToolProgress"]["completed"] == len(stored_task["taskChecklist"])
 
 
+def test_source_collection_stage_task_after_turn_accepts_continuation_turn_for_same_task(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
+    discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
+    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding",
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": discovery["agentId"]},
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": "turn-stage-task-original",
+            "status": "running",
+        },
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "finding", "agentId": discovery["agentId"], "agentRole": "source_finder"},
+    )
+    old_placeholder = "本轮还没有形成最终回答，已保留当前执行进度；发送“继续”可衔接上一轮继续。"
+    events_path = tmp_path / "workspace" / "agents" / discovery["agentId"] / "events" / "agent_turn_results.jsonl"
+    events_path.parent.mkdir(parents=True, exist_ok=True)
+    events_path.write_text(
+        json.dumps(
+            {
+                "eventId": "turn-result-needs-continue",
+                "runId": "turn-stage-task-original",
+                "agentId": discovery["agentId"],
+                "sessionId": task["sessionId"],
+                "status": "needs_continue",
+                "summary": old_placeholder,
+                "createdAt": "2026-07-06T16:27:47+08:00",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    first_reconcile = team_workflow_orchestration_service.reconcile_source_collection_stage_session_task_after_turn(
+        team["teamId"],
+        task["taskId"],
+        run_id=run_id,
+        session_id=task["sessionId"],
+        turn_id="turn-stage-task-original",
+    )
+    assert first_reconcile["taskStatus"] == "interrupted"
+
+    continuation_turn_id = "turn-stage-task-continuation"
+    append_conversation_event(
+        tmp_path,
+        task["sessionId"],
+        continuation_turn_id,
+        "turn_started",
+        status="running",
+        payload={
+            "metadata": {
+                "kind": "source_collection_stage_session_task",
+                "teamId": team["teamId"],
+                "runId": run_id,
+                "stageId": "finding",
+                "agentId": discovery["agentId"],
+                "agentRole": "source_finder",
+                "sourceCollectionStageTaskId": task["taskId"],
+            }
+        },
+    )
+    _append_stage_task_tool_trace(tmp_path, task["task"], turn_id=continuation_turn_id)
+    writeback = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "继续轮已完成资料寻找，新增 1 条候选线索。",
+            "result": {
+                "candidateLeads": [
+                    {
+                        "title": "Predictive coding in the visual cortex",
+                        "doi": "10.1038/4580",
+                        "summary": "预测编码奠基论文。",
+                    }
+                ]
+            },
+            "recordedByAgent": discovery["agentId"],
+        },
+    )
+    assert writeback["task"]["status"] == "completed"
+    events_path.write_text(
+        events_path.read_text(encoding="utf-8")
+        + json.dumps(
+            {
+                "eventId": "turn-result-completed",
+                "runId": continuation_turn_id,
+                "agentId": discovery["agentId"],
+                "sessionId": task["sessionId"],
+                "status": "completed",
+                "summary": "继续轮已完成资料寻找，新增 1 条候选线索。",
+                "createdAt": "2026-07-06T16:41:01+08:00",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    continuation_reconcile = team_workflow_orchestration_service.reconcile_source_collection_stage_session_task_after_turn(
+        team["teamId"],
+        task["taskId"],
+        run_id=run_id,
+        session_id=task["sessionId"],
+        turn_id=continuation_turn_id,
+        reason="session_turn_completed",
+    )
+
+    assert continuation_reconcile["status"] == "reconciled"
+    assert continuation_reconcile["changed"] is True
+    assert continuation_reconcile["turnId"] == continuation_turn_id
+    stored_task, _stored_run_id = team_workflow_orchestration_service._find_source_collection_stage_session_task_by_id(
+        team["teamId"],
+        task["taskId"],
+    )
+    assert stored_task["turn"]["turnId"] == continuation_turn_id
+    assert stored_task["turn"]["previousTurnId"] == "turn-stage-task-original"
+    assert stored_task["turn"]["status"] == "completed"
+    assert stored_task["reconciledFromTurn"]["turnId"] == continuation_turn_id
+    assert stored_task["summary"] == "继续轮已完成资料寻找，新增 1 条候选线索。"
+    assert old_placeholder not in stored_task["summary"]
+
+
+def test_source_collection_stage_task_after_turn_rejects_unrelated_new_turn(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    _stub_source_collection_search_background(monkeypatch)
+    discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
+    session_service.ensure_agent_direct_session(agent_id=discovery["agentId"], title="资料寻找")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": discovery["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding",
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": discovery["agentId"]},
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": "turn-stage-task-original",
+            "status": "running",
+        },
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "finding", "agentId": discovery["agentId"], "agentRole": "source_finder"},
+    )
+    append_conversation_event(
+        tmp_path,
+        task["sessionId"],
+        "turn-unrelated-followup",
+        "turn_started",
+        status="running",
+        payload={"metadata": {"kind": "ordinary_chat"}},
+    )
+
+    result = team_workflow_orchestration_service.reconcile_source_collection_stage_session_task_after_turn(
+        team["teamId"],
+        task["taskId"],
+        run_id=run_id,
+        session_id=task["sessionId"],
+        turn_id="turn-unrelated-followup",
+    )
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "turn_id_mismatch"
+    stored_task, _stored_run_id = team_workflow_orchestration_service._find_source_collection_stage_session_task_by_id(
+        team["teamId"],
+        task["taskId"],
+    )
+    assert stored_task["turn"]["turnId"] == "turn-stage-task-original"
+
+
 def test_source_collection_stage_task_progress_counts_later_turn_tool_updates(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
