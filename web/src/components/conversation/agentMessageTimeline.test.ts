@@ -386,7 +386,7 @@ describe("agentMessageTimeline", () => {
     });
   });
 
-  it("expands backend command groups into individual operation timeline rows", () => {
+  it("preserves backend command groups as collapsed timeline packages", () => {
     const message: ConversationMessage = {
       id: "message-server-command-group",
       role: "assistant",
@@ -431,26 +431,29 @@ describe("agentMessageTimeline", () => {
 
     const items = timelineItemsForConversationMessage(message, { lang: "zh" });
 
-    expect(items.map((item) => item.kind)).toEqual(["operation", "operation", "assistant_text"]);
+    expect(items.map((item) => item.kind)).toEqual(["command_group", "assistant_text"]);
     expect(items[0]).toMatchObject({
-      kind: "operation",
-      status: "completed",
-      title: "搜索",
-      summary: "搜索配置文件",
-    });
-    expect(items[1]).toMatchObject({
-      kind: "operation",
-      status: "failed",
-      title: "命令",
-      summary: "命令执行失败",
-    });
-    expect(items).not.toContainEqual(expect.objectContaining({
       kind: "command_group",
+      status: "failed",
       title: "已运行 2 条命令",
-    }));
+      summary: "搜索配置文件；命令执行失败",
+    });
+    expect(items[0].kind === "command_group" ? items[0].operations.map((operation) => operation.rawLabel) : []).toEqual([
+      "grep_search_tool",
+      "cli_tool",
+    ]);
+    expect(items[0].kind === "command_group" ? items[0].operations.map((operation) => operation.status) : []).toEqual([
+      "done",
+      "failed",
+    ]);
+    expect(items[1]).toMatchObject({
+      id: "server-answer",
+      kind: "assistant_text",
+      text: "最终回答",
+    });
   });
 
-  it("expands command groups whose server operation ids use the persisted message id prefix", () => {
+  it("preserves command groups whose server operation ids use the persisted message id prefix", () => {
     const message: ConversationMessage = {
       id: "session-live-message-253",
       role: "assistant",
@@ -489,15 +492,19 @@ describe("agentMessageTimeline", () => {
 
     const items = timelineItemsForConversationMessage(message, { lang: "zh" });
 
-    expect(items.map((item) => item.kind)).toEqual(["operation", "operation"]);
-    expect(items.map((item) => ("title" in item ? item.title : ""))).toEqual(["搜索", "搜索"]);
-    expect(items).not.toContainEqual(expect.objectContaining({
+    expect(items.map((item) => item.kind)).toEqual(["command_group"]);
+    expect(items[0]).toMatchObject({
       kind: "command_group",
+      status: "failed",
       title: "已运行 2 条命令",
-    }));
+    });
+    expect(items[0].kind === "command_group" ? items[0].operations.map((operation) => operation.rawLabel) : []).toEqual([
+      "grep_search_tool",
+      "grep_search_tool",
+    ]);
   });
 
-  it("expands command groups after process projection changes the rendered message id", () => {
+  it("preserves command groups after process projection changes the rendered message id", () => {
     const message: ConversationMessage = {
       id: "projected-message",
       role: "assistant",
@@ -541,15 +548,97 @@ describe("agentMessageTimeline", () => {
 
     const items = timelineItemsForConversationMessage(message, { lang: "zh" });
 
-    expect(items.map((item) => item.kind)).toEqual(["operation", "operation"]);
+    expect(items.map((item) => item.kind)).toEqual(["command_group"]);
     expect(items).not.toContainEqual(expect.objectContaining({
       kind: "operation",
       title: "工具调用投影缺失",
     }));
-    expect(items).not.toContainEqual(expect.objectContaining({
+    expect(items[0]).toMatchObject({
       kind: "command_group",
+      status: "failed",
       title: "已运行 2 条命令",
-    }));
+    });
+    expect(items[0].kind === "command_group" ? items[0].operations.map((operation) => operation.rawLabel) : []).toEqual([
+      "grep_search_tool",
+      "cli_tool",
+    ]);
+  });
+
+  it("does not let a completed server command group hide failed or fallback child operations", () => {
+    const failedMessage: ConversationMessage = {
+      id: "message-command-group-child-failed",
+      role: "assistant",
+      content: "",
+      timestamp: "2026-07-06T06:20:00Z",
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "tool",
+          status: "done",
+          name: "grep_search_tool",
+          summary: "搜索完成",
+        },
+        {
+          sequence: 2,
+          kind: "tool",
+          status: "failed",
+          name: "cli_tool",
+          summary: "命令失败",
+        },
+      ],
+      timelineItems: [
+        {
+          id: "completed-group-with-failed-child",
+          kind: "command_group",
+          status: "completed",
+          title: "已运行 2 条命令",
+          operationIds: [
+            "message-command-group-child-failed-feedback-1",
+            "message-command-group-child-failed-feedback-2",
+          ],
+        },
+      ],
+    };
+    const fallbackMessage: ConversationMessage = {
+      id: "message-command-group-child-fallback",
+      role: "assistant",
+      content: "",
+      timestamp: "2026-07-06T06:21:00Z",
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "tool",
+          status: "fallback",
+          name: "read_file_tool",
+          summary: "备用路径读取",
+        },
+      ],
+      timelineItems: [
+        {
+          id: "completed-group-with-fallback-child",
+          kind: "command_group",
+          status: "completed",
+          title: "已运行 1 条命令",
+          operationIds: [
+            "message-command-group-child-fallback-feedback-1",
+          ],
+        },
+      ],
+    };
+
+    const failedItems = timelineItemsForConversationMessage(failedMessage, { lang: "zh" });
+    const fallbackItems = timelineItemsForConversationMessage(fallbackMessage, { lang: "zh" });
+
+    expect(failedItems[0]).toMatchObject({
+      kind: "command_group",
+      status: "failed",
+      title: "已运行 2 条命令",
+    });
+    expect(fallbackItems[0]).toMatchObject({
+      kind: "command_group",
+      status: "degraded",
+      title: "已运行 1 条命令",
+    });
   });
 
   it("surfaces command group projection gaps instead of silently rendering aggregate command rows", () => {

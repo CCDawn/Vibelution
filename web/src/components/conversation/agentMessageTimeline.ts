@@ -235,7 +235,7 @@ function timelineItemsFromServer(
         .map((operationId) => operationsById.get(operationId))
         .filter((operation): operation is AgentMessageOperation => Boolean(operation));
       if (commandOperations.length > 0) {
-        items.push(...commandOperations.map(operationTimelineItem));
+        items.push(serverCommandGroupTimelineItem(item, commandOperations, status, options.lang));
         continue;
       }
       items.push(missingCommandGroupOperation(item, requestedOperationIds, options.lang));
@@ -340,6 +340,44 @@ function operationTimelineItem(operation: AgentMessageOperation): AgentMessageOp
     summary: operation.summary,
     operation,
   };
+}
+
+function serverCommandGroupTimelineItem(
+  item: AgentMessageTimelineServerItem,
+  operations: AgentMessageOperation[],
+  status: AgentMessageTimelineItemStatus,
+  lang: string,
+): AgentMessageCommandGroupTimelineItem {
+  const inferred = commandGroupTimelineItem(item.messageId || item.turnId || item.id || "server-command-group", operations, lang);
+  const title = String(item.title || inferred.title).trim();
+  const summary = String(item.summary || inferred.summary).trim();
+  return {
+    id: item.id || inferred.id,
+    kind: "command_group",
+    status: strongestCommandGroupStatus(status, operations),
+    title,
+    summary,
+    operations: [...operations],
+  };
+}
+
+function strongestCommandGroupStatus(
+  serverStatus: AgentMessageTimelineItemStatus,
+  operations: AgentMessageOperation[],
+): AgentMessageTimelineItemStatus {
+  if (serverStatus === "failed" || operations.some((operation) => isFailedStatus(operation.status))) {
+    return "failed";
+  }
+  if (serverStatus === "degraded" || operations.some((operation) => isDegradedStatus(operation.status))) {
+    return "degraded";
+  }
+  if (serverStatus === "running" || operations.some((operation) => isRunningStatus(operation.status))) {
+    return "running";
+  }
+  if (serverStatus === "pending") {
+    return "pending";
+  }
+  return "completed";
 }
 
 function commandGroupTimelineItem(

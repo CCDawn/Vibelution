@@ -1363,7 +1363,7 @@ export function ConversationView({
       return renderAssistantTextTimelineItem(message, item, rowIdentity);
     }
     if (item.kind === "command_group") {
-      return renderCommandGroupTimelineItem(item, rowIdentity, isActiveTimelineItem);
+      return renderCommandGroupTimelineItem(message, item, rowIdentity, isActiveTimelineItem);
     }
     return renderOperationTimelineItem(item, rowIdentity, isActiveTimelineItem);
   }
@@ -1448,11 +1448,12 @@ export function ConversationView({
   }
 
   function renderCommandGroupTimelineItem(
+    message: ConversationMessage,
     item: Extract<AgentMessageTimelineItem, { kind: "command_group" }>,
     rowIdentity: AgentMessageTimelineRowIdentity,
     isActiveTimelineItem: boolean,
   ) {
-    const expanded = getExpansionState(item.id, "details", false);
+    const expanded = getExpansionState(message.id, item.id, false);
     const duration = formatDuration(
       item.operations
         .map((operation) => operation.durationSeconds)
@@ -1460,9 +1461,14 @@ export function ConversationView({
         .reduce((total, value) => total + value, 0),
     );
     const visibleStatus = timelineStatusText(item);
+    const statusTone = item.status === "completed" ? "success" : item.status === "degraded" ? "warning" : item.status;
+    const timelineToneClassName = styles[`timelineOperationCell_${statusTone}` as keyof typeof styles] ?? "";
+    const toneTextClassName = styles[`operationText_${statusTone}` as keyof typeof styles] ?? "";
+    const toneStatusClassName = styles[`operationStatus_${statusTone}` as keyof typeof styles] ?? "";
+    const toneIconClassName = styles[`operationIcon_${statusTone}` as keyof typeof styles] ?? "";
     const className = [
       styles.timelineOperationCell,
-      item.status === "failed" ? styles.timelineOperationCell_failed : "",
+      timelineToneClassName,
     ].filter(Boolean).join(" ");
     return (
       <section
@@ -1472,27 +1478,43 @@ export function ConversationView({
       >
         <VButton
           type="button"
-          className={styles.timelineCellHeader}
+          className={`${styles.timelineCellHeader} ${toneTextClassName}`}
           aria-expanded={expanded}
-          onClick={() => toggleSection(item.id, "details", false)}
+          onClick={() => toggleSection(message.id, item.id, false)}
           title={expanded ? t("executionDetailsVisible") : t("executionDetailsHidden")}
         >
-          {isActiveTimelineItem && item.status === "running" ? <LoaderCircle className={styles.statusSpinner} size={14} /> : <TerminalSquare size={14} />}
-          <span>{item.title}</span>
-          {item.summary ? <span className={styles.timelineCellPreview}>{item.summary}</span> : null}
-          {visibleStatus ? <span className={styles.timelineCellMeta}>{visibleStatus}</span> : null}
-          {duration ? <span className={styles.timelineCellMeta}>{duration}</span> : null}
+          <span className={`${styles.operationIcon} ${toneIconClassName}`}>
+            {isActiveTimelineItem && item.status === "running" ? <LoaderCircle className={styles.statusSpinner} size={14} /> : <TerminalSquare size={14} />}
+          </span>
+          <span className={toneTextClassName}>{item.title}</span>
+          {item.summary ? <span className={`${styles.timelineCellPreview} ${toneTextClassName}`}>{item.summary}</span> : null}
+          {visibleStatus ? <span className={`${styles.timelineCellMeta} ${toneStatusClassName}`}>{visibleStatus}</span> : null}
+          {duration ? <span className={`${styles.timelineCellMeta} ${toneStatusClassName}`}>{duration}</span> : null}
           {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
         </VButton>
         {expanded ? (
           <div className={styles.timelineCommandList}>
-            {item.operations.map((operation) => (
-              <div key={operation.id} className={styles.timelineCommandRow}>
-                <span>{operationLabel(operation)}</span>
-                {operation.summary ? <span>{operation.summary}</span> : null}
-                {operation.error ? <span className={styles.timelineCommandError}>{operation.error}</span> : null}
-              </div>
-            ))}
+            {item.operations.map((operation) => {
+              const operationDuration = formatDuration(operation.durationSeconds);
+              const statusTone = operationStatusToneClassName(operation);
+              const operationTextClassName = styles[`operationText_${statusTone}` as keyof typeof styles] ?? "";
+              const operationStatusClassName = styles[`operationStatus_${statusTone}` as keyof typeof styles] ?? "";
+              const operationIconClassName = styles[`operationIcon_${statusTone}` as keyof typeof styles] ?? "";
+              return (
+                <div key={operation.id} className={styles.timelineCommandRow}>
+                  <span className={`${styles.operationIcon} ${operationIconClassName}`}>
+                    {operationStatusIcon(operation, isActiveTimelineItem)}
+                  </span>
+                  <span className={operationTextClassName}>{operationLabel(operation)}</span>
+                  {operation.summary ? <span className={operationTextClassName}>{operation.summary}</span> : null}
+                  <span className={operationStatusClassName}>
+                    {operationStatusText(operation.status)}
+                    {operationDuration ? ` · ${operationDuration}` : ""}
+                  </span>
+                  {operation.error ? <span className={styles.timelineCommandError}>{operation.error}</span> : null}
+                </div>
+              );
+            })}
           </div>
         ) : null}
       </section>
@@ -2408,9 +2430,10 @@ export function ConversationView({
               previousAgentRenderState?.sectionState,
               agentSections,
             );
+            const timelineHasAssistantText = (message.timelineItems ?? []).some((item) => item.kind === "assistant_text");
             const timelineOptions = {
               lang,
-              includeAssistantText: false,
+              includeAssistantText: timelineHasAssistantText,
             };
             const agentMessageTimelineItems = buildAgentMessageTimelineItems(
               agentMessage,
@@ -2425,6 +2448,9 @@ export function ConversationView({
               && !agentInboxMessage
               && !groupTranscriptMessage
               && agentMessageTimelineItems.length > 0;
+            const timelineRendersAssistantText =
+              hasAgentMessageTimeline
+              && agentMessageTimelineItems.some((item) => item.kind === "assistant_text");
             const showUserContent = agentSections.hasUserContent;
             const userAuthoredMessage = message.role === "user" && !agentInboxMessage;
             const isStreamingStatusPlaceholder = Boolean(message.streaming)
@@ -2505,7 +2531,7 @@ export function ConversationView({
               }
               return renderAgentProcessDetails(true);
             };
-            const responseSectionNode = showResponseBlock && !isStreamingStatusPlaceholder ? (
+            const responseSectionNode = showResponseBlock && !isStreamingStatusPlaceholder && !timelineRendersAssistantText ? (
               <AgentResponseSectionView
                 answerKey={rowIdentity.answerKey}
                 answerContentSectionIds={agentRenderState.answerContentSectionIds}
@@ -2524,7 +2550,7 @@ export function ConversationView({
                   )}
               </AgentResponseSectionView>
             ) : null;
-            const processNode = answerOnlyProcessMode ? (
+            const processNode = answerOnlyProcessMode && !timelineRendersAssistantText ? (
               renderAnswerOnlyProcessGroup(
                 message.id,
                 operationGroups.timeline,
