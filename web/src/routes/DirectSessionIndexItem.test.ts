@@ -88,6 +88,7 @@ describe("DirectSessionIndexItem helpers", () => {
 
     expect(markup).toContain("sessionStatusCluster");
     expect(markup).toContain("sessionCurrentBadge");
+    expect(markup).toContain('data-vui="chip"');
     expect(markup).toContain("aria-label=\"currentSession\"");
     expect(markup).toContain("模型：mimo-v2.5");
   });
@@ -159,6 +160,7 @@ describe("DirectSessionIndexItem helpers", () => {
     });
 
     expect(markup).toContain("sessionRunningBadge");
+    expect(markup).toContain('data-vui="chip"');
     expect(markup).toContain("运行中");
     expect(markup).toContain("正在运行：工具调用中");
   });
