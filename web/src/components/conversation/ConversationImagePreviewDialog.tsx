@@ -22,9 +22,14 @@ export function ConversationImagePreviewDialog({
   lang,
   onClose,
 }: ConversationImagePreviewDialogProps) {
-  const downloadLabel = lang === "zh" ? "下载图片" : "Download image";
+  const downloadBaseLabel = lang === "zh" ? "下载图片" : "Download image";
+  const downloadLabel = `${downloadBaseLabel}${lang === "zh" ? "：" : ": "}${image.alt}`;
   const closeLabel = lang === "zh" ? "关闭预览" : "Close preview";
   const titleId = "conversation-image-preview-title";
+  const descriptionId = "conversation-image-preview-description";
+  const description = lang === "zh"
+    ? `正在预览图片：${image.alt}`
+    : `Previewing image: ${image.alt}`;
   const handleOverlayKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape") {
       event.stopPropagation();
@@ -38,6 +43,7 @@ export function ConversationImagePreviewDialog({
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
+      aria-describedby={descriptionId}
       tabIndex={-1}
       onClick={onClose}
       onKeyDown={handleOverlayKeyDown}
@@ -46,6 +52,9 @@ export function ConversationImagePreviewDialog({
         <div className={styles.imagePreviewToolbar}>
           <span id={titleId} className={styles.imagePreviewTitle} title={image.alt}>
             {image.alt}
+          </span>
+          <span id={descriptionId} className="sr-only">
+            {description}
           </span>
           <div className={styles.imagePreviewActions}>
             <a
@@ -69,7 +78,7 @@ export function ConversationImagePreviewDialog({
             </VButton>
           </div>
         </div>
-        <img className={styles.imagePreviewLarge} src={image.src} alt={image.alt} />
+        <img className={styles.imagePreviewLarge} src={image.src} alt={image.alt} aria-describedby={descriptionId} />
       </div>
     </div>
   );
