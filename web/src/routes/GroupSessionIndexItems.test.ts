@@ -83,6 +83,26 @@ describe("GroupSessionIndexItems helpers", () => {
     expect(markup).not.toContain('data-vui="button"');
   });
 
+  it("describes disabled Team rows with the missing room reason on the row button", () => {
+    const markup = renderToStaticMarkup(createElement(TeamConversationIndexItem, {
+      active: false,
+      lang: "zh",
+      onOpen: () => undefined,
+      roomId: "",
+      statusLabel: () => "启用中",
+      team: team({
+        linkedChatRoomId: "",
+        memberCount: 2,
+        name: "科研团队",
+      }),
+      teamRoute: "/teams?team=team-1",
+    }));
+
+    expect(markup).toContain('disabled=""');
+    expect(markup).toContain('aria-describedby="team-row-disabled-reason-team-1"');
+    expect(markup).toContain('<span id="team-row-disabled-reason-team-1" class="sr-only">团队群聊待同步</span>');
+  });
+
   it("localizes known Team status labels and delegates unknown status to the route fallback", () => {
     const fallback = (status: string) => `status:${status}`;
 
