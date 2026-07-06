@@ -35,21 +35,24 @@ export function ChatRuntimeNoticeStack({ lang, notices }: ChatRuntimeNoticeStack
 
   return (
     <div className={styles.stack} role="status" aria-live="polite">
-      {notices.map((notice) => (
-        <div
-          key={notice.id || `${notice.kind}-${notice.timestamp}-${notice.message}`}
-          className={[styles.notice, runtimeNoticeToneClassName(notice.level)].join(" ")}
-        >
-          <CircleDot size={13} />
-          <div className={styles.body}>
-            <span className={styles.label}>
-              {lang === "zh" ? "运行状态" : "Runtime"}
-              {notice.source ? ` · ${notice.source}` : ""}
-            </span>
-            <span className={styles.message}>{notice.message}</span>
+      <div className={styles.list} role="list">
+        {notices.map((notice) => (
+          <div
+            key={notice.id || `${notice.kind}-${notice.timestamp}-${notice.message}`}
+            className={[styles.notice, runtimeNoticeToneClassName(notice.level)].join(" ")}
+            role="listitem"
+          >
+            <CircleDot size={13} aria-hidden="true" />
+            <div className={styles.body}>
+              <span className={styles.label}>
+                {lang === "zh" ? "运行状态" : "Runtime"}
+                {notice.source ? ` · ${notice.source}` : ""}
+              </span>
+              <span className={styles.message}>{notice.message}</span>
+            </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }
