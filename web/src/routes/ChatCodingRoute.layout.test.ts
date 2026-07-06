@@ -276,6 +276,28 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatToolApprovalDialogStyles.toolItem).toContain("[overflow-wrap:anywhere]");
   });
 
+  it("marks tool approval resolving state as busy without losing dialog semantics", () => {
+    const markup = renderToStaticMarkup(createElement(ChatToolApprovalDialog, {
+      lang: "en",
+      pending: true,
+      rawTitle: "very_long_tool_name_that_should_wrap_inside_the_dialog_surface",
+      riskLabel: "Approval required",
+      scopeLabel: "current session",
+      toolLabels: [
+        { id: "long", label: "very_long_tool_name_that_should_wrap_inside_the_dialog_surface" },
+      ],
+      onApprove: () => undefined,
+      onReject: () => undefined,
+    }));
+
+    expect(markup).toContain('role="dialog"');
+    expect(markup).toContain('aria-busy="true"');
+    expect(markup).toContain("Resolving");
+    expect(markup.match(/disabled=""/g)?.length).toBe(2);
+    expect(markup.match(/aria-hidden="true"/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(markup).toContain("very_long_tool_name_that_should_wrap_inside_the_dialog_surface");
+  });
+
   it("renders tool approval dialog labels, descriptions, and tools as accessible relationships", () => {
     const markup = renderToStaticMarkup(createElement(ChatToolApprovalDialog, {
       lang: "zh",
@@ -303,28 +325,6 @@ describe("ChatCodingRoute layout contract", () => {
     expect(markup.match(/role="listitem"/g)?.length).toBe(2);
     expect(markup).toContain("shell_command");
     expect(markup).toContain("read_file");
-  });
-
-  it("marks tool approval resolving state as busy without losing dialog semantics", () => {
-    const markup = renderToStaticMarkup(createElement(ChatToolApprovalDialog, {
-      lang: "en",
-      pending: true,
-      rawTitle: "very_long_tool_name_that_should_wrap_inside_the_dialog_surface",
-      riskLabel: "Approval required",
-      scopeLabel: "current session",
-      toolLabels: [
-        { id: "long", label: "very_long_tool_name_that_should_wrap_inside_the_dialog_surface" },
-      ],
-      onApprove: () => undefined,
-      onReject: () => undefined,
-    }));
-
-    expect(markup).toContain('role="dialog"');
-    expect(markup).toContain('aria-busy="true"');
-    expect(markup).toContain("Resolving");
-    expect(markup.match(/disabled=""/g)?.length).toBe(2);
-    expect(markup.match(/aria-hidden="true"/g)?.length).toBeGreaterThanOrEqual(3);
-    expect(markup).toContain("very_long_tool_name_that_should_wrap_inside_the_dialog_surface");
   });
 
   it("loads the heavy conversation renderer through a lazy bridge", () => {
@@ -859,6 +859,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(tokenCoreStatusPanelSource).toContain("aria-disabled={!cacheDetailAvailable}");
     expect(tokenCoreStatusPanelSource).toContain("aria-expanded={cacheDetailAvailable ? cacheDetailOpen : undefined}");
     expect(tokenCoreStatusPanelSource).toContain("aria-controls={cacheDetailAvailable ? \"cache-detail-dialog\" : undefined}");
+    expect(tokenCoreStatusPanelSource).toContain("role=\"listitem\"");
+    expect(tokenCoreStatusPanelSource).toContain("<VButton");
     expect(routeSource).toContain("const modelInputTokens = Math.max(");
     expect(routeSource).toContain("lastCacheComposition?.calibratedInputTokens");
     expect(routeSource).toContain("hasProviderLlmUsage ? sessionLlmUsage.inputTokens : undefined");

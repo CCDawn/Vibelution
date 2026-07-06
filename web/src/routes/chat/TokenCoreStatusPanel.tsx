@@ -62,22 +62,22 @@ export function TokenCoreStatusPanel({
 
           if (metric.key === "cache") {
             return (
-              <VButton
-                key={metric.key}
-                type="button"
-                className={`${metricClassName} ${styles.tokenStatusMetricButton}`}
-                style={metricStyle}
-                isDisabled={!cacheDetailAvailable}
-                onClick={cacheDetailAvailable ? onOpenCacheDetail : undefined}
-                aria-disabled={!cacheDetailAvailable}
-                aria-label={cacheDetailOpenLabel}
-                aria-expanded={cacheDetailAvailable ? cacheDetailOpen : undefined}
-                aria-controls={cacheDetailAvailable ? "cache-detail-dialog" : undefined}
-                role="listitem"
-                title={metric.title}
-              >
-                {metricContent}
-              </VButton>
+              <div key={metric.key} className="min-w-0" role="listitem">
+                <VButton
+                  type="button"
+                  className={`${metricClassName} ${styles.tokenStatusMetricButton}`}
+                  style={metricStyle}
+                  isDisabled={!cacheDetailAvailable}
+                  onClick={cacheDetailAvailable ? onOpenCacheDetail : undefined}
+                  aria-disabled={!cacheDetailAvailable}
+                  aria-label={cacheDetailOpenLabel}
+                  aria-expanded={cacheDetailAvailable ? cacheDetailOpen : undefined}
+                  aria-controls={cacheDetailAvailable ? "cache-detail-dialog" : undefined}
+                  title={metric.title}
+                >
+                  {metricContent}
+                </VButton>
+              </div>
             );
           }
 
