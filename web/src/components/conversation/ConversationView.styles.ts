@@ -647,6 +647,12 @@ const styles: Record<string, string> = {
     "vui-components-conversationview operationName min-w-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   operationStatus:
     "vui-components-conversationview operationStatus min-w-0 justify-self-start",
+  operationStatus_failed:
+    "vui-components-conversationview operationStatus_failed min-w-0 !text-[var(--state-error)]",
+  operationStatus_success:
+    "vui-components-conversationview operationStatus_success min-w-0 !text-[var(--state-success)]",
+  operationStatus_warning:
+    "vui-components-conversationview operationStatus_warning min-w-0 !text-[var(--state-warning)]",
   operationStatusLead:
     "vui-components-conversationview operationStatusLead min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   operationStatusLine:
@@ -663,6 +669,12 @@ const styles: Record<string, string> = {
     "vui-components-conversationview operationSummaryText min-w-0 border-0 bg-transparent p-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] shadow-none line-clamp-1 whitespace-normal [overflow-wrap:anywhere]",
   operationText:
     "vui-components-conversationview operationText min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-w-full",
+  operationText_failed:
+    "vui-components-conversationview operationText_failed min-w-0 !text-[var(--state-error)]",
+  operationText_success:
+    "vui-components-conversationview operationText_success min-w-0 !text-[var(--state-success)]",
+  operationText_warning:
+    "vui-components-conversationview operationText_warning min-w-0 !text-[var(--state-warning)]",
   operationTimeline:
     "vui-components-conversationview operationTimeline min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   operationTimelineTrimmed:

@@ -1144,11 +1144,25 @@ describe("ConversationView edit resend affordance", () => {
   it("colors operation rows from each operation status instead of the operation kind", () => {
     expect(conversationViewSource).toContain("function operationStatusToneClassName(operation: AgentMessageOperation)");
     expect(conversationViewSource).toContain("operationStatusTone(operation)");
-    expect(conversationViewSource).toContain("styles[`operationItem_${operationStatusToneClassName(operation)}`]");
-    expect(conversationViewSource).toContain("styles[`operationIcon_${operationStatusToneClassName(operation)}`]");
+    expect(conversationViewSource).toContain("const statusTone = operationStatusToneClassName(operation);");
+    expect(conversationViewSource).toContain("styles[`operationItem_${statusTone}`]");
+    expect(conversationViewSource).toContain("styles[`operationIcon_${statusTone}`]");
+    expect(conversationViewSource).toContain("styles[`operationText_${statusTone}`]");
     expect(styles.operationItem_success).toContain("!text-[var(--state-success)]");
     expect(styles.operationItem_failed).toContain("!text-[var(--state-error)]");
     expect(styles.operationItem_warning).toContain("!text-[var(--state-warning)]");
+    expect(styles.operationText_success).toContain("!text-[var(--state-success)]");
+    expect(styles.operationText_failed).toContain("!text-[var(--state-error)]");
+    expect(styles.operationText_warning).toContain("!text-[var(--state-warning)]");
+  });
+
+  it("keeps successful child tool rows green inside a failed process group", () => {
+    expect(conversationViewSource).toContain("const statusTone = operationStatusToneClassName(operation);");
+    expect(conversationViewSource).toContain("styles[`operationText_${statusTone}`]");
+    expect(conversationViewSource).toContain("styles[`operationStatus_${statusTone}`]");
+    expect(styles.reActToolName).toContain("text-[var(--fg-primary)]");
+    expect(styles.operationText_success).toContain("!text-[var(--state-success)]");
+    expect(styles.operationStatus_success).toContain("!text-[var(--state-success)]");
   });
 
   it("does not let top-edge history loading rewrite cached response expansion defaults", () => {
