@@ -25,8 +25,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatRoute).toContain("styles.currentSessionMetaList");
     expect(chatStyles.currentSessionBlock).toContain("min-w-0");
     expect(chatStyles.currentSessionMetaList).toContain("min-w-0");
-    expect(chatStyles.inlineMetaPill).toContain("[&_strong]:truncate");
-    expect(chatStyles.inlineMetaPill).toContain("[&_strong]:whitespace-nowrap");
+    expect(chatStyles.inlineMetaPill).toContain("[&_strong]:whitespace-normal");
+    expect(chatStyles.inlineMetaPill).toContain("[overflow-wrap:anywhere]");
     expect(chatRoute).not.toContain('label: t("currentTask"),\n        value: currentTaskSummary');
   });
 });
