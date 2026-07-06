@@ -245,17 +245,37 @@ function timelineItemsFromServer(
       const operation = (item.operationIds || item.sourceOperationIds || [])
         .map((operationId) => operationsById.get(operationId))
         .find(Boolean) ?? serverOperation(item, status);
+      const timelineOperation = operationWithServerTimelineStatus(operation, status);
       items.push({
-        id: item.id || `${operation.id}-timeline-operation`,
+        id: item.id || `${timelineOperation.id}-timeline-operation`,
         kind: "operation",
         status,
-        title: String(item.title || operation.label).trim(),
-        summary: String(item.summary || operation.summary || "").trim(),
-        operation,
+        title: String(item.title || timelineOperation.label).trim(),
+        summary: String(item.summary || timelineOperation.summary || "").trim(),
+        operation: timelineOperation,
       });
     }
   }
   return mergeAdjacentThoughtItems(items);
+}
+
+function operationWithServerTimelineStatus(
+  operation: AgentMessageOperation,
+  status: AgentMessageTimelineItemStatus,
+): AgentMessageOperation {
+  const operationStatus = serverTimelineOperationStatus(status);
+  if (operation.status === operationStatus) {
+    return operation;
+  }
+  return {
+    ...operation,
+    status: operationStatus,
+    rawStatus: operation.rawStatus ?? operation.status,
+  };
+}
+
+function serverTimelineOperationStatus(status: AgentMessageTimelineItemStatus) {
+  return status === "completed" ? "done" : status;
 }
 
 function operationsByTimelineId(

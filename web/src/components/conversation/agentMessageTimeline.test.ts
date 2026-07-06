@@ -386,6 +386,67 @@ describe("agentMessageTimeline", () => {
     });
   });
 
+  it("keeps server failed operation status authoritative after linked status operations are normalized", () => {
+    const message: ConversationMessage = {
+      id: "message-server-failed-status-authority",
+      role: "assistant",
+      content: "失败后继续收束。",
+      timestamp: "2026-07-06T07:45:00Z",
+      feedbackEvents: [
+        {
+          sequence: 19,
+          kind: "status",
+          status: "failed",
+          name: "failed",
+          summary: "模型请求失败。\n原因：timeout。",
+          resultPreview: "模型请求失败。\n原因：timeout。",
+        },
+        {
+          sequence: 20,
+          kind: "tool",
+          status: "done",
+          name: "cli_tool",
+          summary: "[命令执行完成，无输出]",
+        },
+      ],
+      timelineItems: [
+        {
+          id: "message-server-failed-status-authority-feedback-19-timeline-operation",
+          kind: "operation",
+          status: "failed",
+          title: "failed",
+          summary: "模型请求失败。 原因：timeout。",
+          operationIds: ["message-server-failed-status-authority-feedback-19"],
+        },
+        {
+          id: "message-server-failed-status-authority-feedback-20-timeline-operation",
+          kind: "operation",
+          status: "completed",
+          title: "命令",
+          summary: "[命令执行完成，无输出]",
+          operationIds: ["message-server-failed-status-authority-feedback-20"],
+        },
+      ],
+    };
+
+    const items = timelineItemsForConversationMessage(message, { lang: "zh" });
+    const failedItem = items[0];
+
+    expect(failedItem).toMatchObject({
+      kind: "operation",
+      status: "failed",
+      title: "failed",
+      summary: "模型请求失败。 原因：timeout。",
+    });
+    expect(failedItem.kind === "operation" ? failedItem.operation.status : "").toBe("failed");
+    expect(failedItem.kind === "operation" ? failedItem.operation.rawStatus : "").toBe("failed");
+    expect(items[1]).toMatchObject({
+      kind: "operation",
+      status: "completed",
+      title: "命令",
+    });
+  });
+
   it("preserves backend command groups as collapsed timeline packages", () => {
     const message: ConversationMessage = {
       id: "message-server-command-group",
