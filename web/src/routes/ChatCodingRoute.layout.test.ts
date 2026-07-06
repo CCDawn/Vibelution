@@ -829,6 +829,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(tokenCoreStatusPanelSource).toContain("styles.tokenStatusRingCore");
     expect(tokenCoreStatusPanelSource).toContain("styles.tokenStatusCopy");
     expect(tokenCoreStatusPanelSource).toContain("styles.tokenStatusBar");
+    expect(tokenCoreStatusPanelSource).toContain("aria-labelledby={titleId}");
+    expect(tokenCoreStatusPanelSource).toContain("id={titleId}");
+    expect(tokenCoreStatusPanelSource).toContain("role=\"list\"");
+    expect(tokenCoreStatusPanelSource).toContain("role=\"listitem\"");
     expect(routeSource).not.toContain("styles.tokenCompressionTable");
     expect(routeSource).not.toContain("styles.tokenCompressionDetails");
     expect(routeSource).not.toContain("const tokenCompressionRows");
@@ -854,7 +858,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(tokenCoreStatusPanelSource).toContain("onClick={cacheDetailAvailable ? onOpenCacheDetail : undefined}");
     expect(tokenCoreStatusPanelSource).toContain("aria-disabled={!cacheDetailAvailable}");
     expect(tokenCoreStatusPanelSource).toContain("aria-expanded={cacheDetailAvailable ? cacheDetailOpen : undefined}");
-    expect(tokenCoreStatusPanelSource).toContain("aria-controls={cacheDetailAvailable && cacheDetailOpen ? \"cache-detail-dialog\" : undefined}");
+    expect(tokenCoreStatusPanelSource).toContain("aria-controls={cacheDetailAvailable ? \"cache-detail-dialog\" : undefined}");
     expect(routeSource).toContain("const modelInputTokens = Math.max(");
     expect(routeSource).toContain("lastCacheComposition?.calibratedInputTokens");
     expect(routeSource).toContain("hasProviderLlmUsage ? sessionLlmUsage.inputTokens : undefined");
@@ -1070,6 +1074,16 @@ describe("ChatCodingRoute layout contract", () => {
         onOpenCacheDetail: () => undefined,
       }),
     );
+    const availableClosedHtml = renderToStaticMarkup(
+      createElement(TokenCoreStatusPanel, {
+        cacheDetailAvailable: true,
+        cacheDetailOpen: false,
+        cacheDetailOpenLabel: "查看上一轮缓存命中详情",
+        lang: "zh",
+        metrics: tokenCoreStatusMetrics,
+        onOpenCacheDetail: () => undefined,
+      }),
+    );
 
     expect(unavailableHtml).toContain("disabled");
     expect(unavailableHtml).toContain("aria-disabled=\"true\"");
@@ -1078,6 +1092,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(availableHtml).toContain("aria-disabled=\"false\"");
     expect(availableHtml).toContain("aria-expanded=\"true\"");
     expect(availableHtml).toContain("aria-controls=\"cache-detail-dialog\"");
+    expect(availableClosedHtml).toContain("aria-expanded=\"false\"");
+    expect(availableClosedHtml).toContain("aria-controls=\"cache-detail-dialog\"");
   });
 
   it("shows the active skill contract before the context status cards", () => {

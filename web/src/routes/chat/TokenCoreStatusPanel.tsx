@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { useId, type CSSProperties } from "react";
 
 import { VButton } from "../../components/vui";
 import styles from "../ChatCodingRoute.styles";
@@ -30,15 +30,18 @@ export function TokenCoreStatusPanel({
   metrics,
   onOpenCacheDetail,
 }: TokenCoreStatusPanelProps) {
+  const panelId = useId();
+  const titleId = `${panelId}-title`;
+
   return (
-    <section className={`${styles.leftBlock} ${styles.tokenCompressionCard}`}>
+    <section className={`${styles.leftBlock} ${styles.tokenCompressionCard}`} aria-labelledby={titleId}>
       <div className={styles.sectionHeader}>
         <div className={styles.sectionIdentity}>
           <p className={styles.blockEyebrow}>Token</p>
-          <h3 className={styles.sectionTitle}>{lang === "zh" ? "核心状态" : "Core status"}</h3>
+          <h3 id={titleId} className={styles.sectionTitle}>{lang === "zh" ? "核心状态" : "Core status"}</h3>
         </div>
       </div>
-      <div className={styles.tokenStatusVisualGrid} aria-label={lang === "zh" ? "Token 核心状态" : "Token core status"}>
+      <div className={styles.tokenStatusVisualGrid} role="list" aria-label={lang === "zh" ? "Token 核心状态" : "Token core status"}>
         {metrics.map((metric) => {
           const metricStyle = { "--token-status-value": metric.percent } as CSSProperties;
           const metricClassName = `${styles.tokenStatusMetric} ${styles[`tokenStatusMetric_${metric.tone}`]}`;
@@ -69,7 +72,8 @@ export function TokenCoreStatusPanel({
                 aria-disabled={!cacheDetailAvailable}
                 aria-label={cacheDetailOpenLabel}
                 aria-expanded={cacheDetailAvailable ? cacheDetailOpen : undefined}
-                aria-controls={cacheDetailAvailable && cacheDetailOpen ? "cache-detail-dialog" : undefined}
+                aria-controls={cacheDetailAvailable ? "cache-detail-dialog" : undefined}
+                role="listitem"
                 title={metric.title}
               >
                 {metricContent}
@@ -83,6 +87,7 @@ export function TokenCoreStatusPanel({
               className={metricClassName}
               style={metricStyle}
               title={metric.title}
+              role="listitem"
             >
               {metricContent}
             </div>
