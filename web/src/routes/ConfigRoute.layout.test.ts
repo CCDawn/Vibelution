@@ -340,8 +340,25 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("styles.treeObjectCell");
     expect(routeSource).toContain("styles.treeToggle");
     expect(stylesSource).toContain("configDenseSection:");
-    expect(stylesSource).toContain("[&>_.treeGrid]:[grid-template-columns:repeat(auto-fit,minmax(186px,1fr))]");
+    expect(stylesSource).toContain("[&>_.treeGrid]:[grid-template-columns:repeat(3,minmax(220px,1fr))]");
+    expect(stylesSource).toContain("max-[1500px]:[&>_.treeGrid]:[grid-template-columns:repeat(2,minmax(220px,1fr))]");
+    expect(styles.configDenseSection).not.toContain("repeat(auto-fit");
     expect(stylesSource).toContain("treeGrid:");
+  });
+
+  it("keeps operational settings readable over custom workbench backgrounds", () => {
+    expect(styles.page).toContain("[background:color-mix(in_srgb,var(--surface-page)_94%,var(--bg-canvas))]");
+    expect(styles.page).toContain("[isolation:isolate]");
+    expect(stylesSource).toContain("color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))");
+    expect(styles.sidebar).toContain("color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))");
+    expect(styles.sectionSurface).toContain("color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))");
+    expect(styles.treeGrid).toContain("[grid-template-columns:repeat(2,minmax(0,1fr))]");
+    expect(styles.configDenseSection).toContain("[&>_.treeGrid]:[grid-template-columns:repeat(3,minmax(220px,1fr))]");
+    expect(styles.configDenseSection).not.toContain("repeat(auto-fit");
+    expect(styles.configDiscoverySection).toContain("[&>_.treeGrid]:[grid-template-columns:repeat(3,minmax(220px,1fr))]");
+    expect(styles.treeFieldValue).toContain("color-mix(in_srgb,var(--surface-code)_92%,var(--surface-panel))");
+    expect(healthDiagnosticsPanelStylesSource).toContain("color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))");
+    expect(healthDiagnosticsPanelStylesSource).toContain("color-mix(in_srgb,var(--surface-card)_94%,var(--surface-panel))");
   });
 
   it("keeps extracted Config panels on local VUI/Tailwind surface contracts", () => {
@@ -354,7 +371,7 @@ describe("ConfigRoute layout contract", () => {
     expect(runtimePanelStyles.segmented).toContain("[background:var(--vui-surface-toolbar)]");
     expect(draftPanelStyles.actionButton).toContain("var(--vui-control-muted)");
     expect(modelLibraryPanelStyles.formSurface).toContain("var(--vui-surface-panel)");
-    expect(healthDiagnosticsPanelStyles.findingCard).toContain("var(--vui-surface-row)");
+    expect(healthDiagnosticsPanelStyles.findingCard).toContain("color-mix(in_srgb,var(--surface-card)_94%,var(--surface-panel))");
     expect(placeholderPanelStyles.loadingBoard).toContain("var(--vui-surface-panel)");
     expect(extractedPanelStylesSource).not.toContain("[background:var(--vui-gradient-route-soft),var(--surface-panel)]");
   });
