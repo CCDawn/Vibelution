@@ -17048,31 +17048,58 @@ def reconcile_source_collection_stage_session_task_after_turn(
         }
     normalized_turn_id = _trim_text(turn_id, max_length=200)
     task_turn_id = _trim_text(task_turn.get("turnId"), max_length=200)
+    original_found_task = dict(found_task)
     if normalized_turn_id and task_turn_id and normalized_turn_id != task_turn_id:
-        return {
-            "schemaVersion": SCHEMA_VERSION,
-            "teamId": normalized_team_id,
-            "runId": found_run_id,
-            "taskId": normalized_task_id,
-            "status": "skipped",
-            "reason": "turn_id_mismatch",
-            "changed": False,
-        }
-    before_status = _trim_text(found_task.get("status"), max_length=80)
-    before_gate = found_task.get("completionGate") if isinstance(found_task.get("completionGate"), dict) else {}
+        continuation_task = _source_collection_stage_session_task_with_continuation_turn(
+            found_task,
+            session_id=normalized_session_id or task_session_id,
+            turn_id=normalized_turn_id,
+        )
+        if continuation_task is None:
+            return {
+                "schemaVersion": SCHEMA_VERSION,
+                "teamId": normalized_team_id,
+                "runId": found_run_id,
+                "taskId": normalized_task_id,
+                "status": "skipped",
+                "reason": "turn_id_mismatch",
+                "changed": False,
+            }
+        found_task = continuation_task
+        task_turn = found_task.get("turn") if isinstance(found_task.get("turn"), dict) else {}
+        task_turn_id = _trim_text(task_turn.get("turnId"), max_length=200)
+        _upsert_source_collection_stage_session_task(normalized_team_id, found_run_id, found_task)
+        _record_workflow_event(
+            "source_collection.stage_session_task_continuation_turn_adopted",
+            normalized_team_id,
+            fields={
+                "runId": found_run_id,
+                "taskId": normalized_task_id,
+                "sessionId": task_session_id,
+                "previousTurnId": _trim_text(task_turn.get("previousTurnId"), max_length=200),
+                "turnId": task_turn_id,
+            },
+            level="info",
+            outcome="reconciled",
+            lifecycle=True,
+        )
+    before_task = dict(found_task)
+    before_status = _trim_text(before_task.get("status"), max_length=80)
+    before_gate = before_task.get("completionGate") if isinstance(before_task.get("completionGate"), dict) else {}
     reconciled = _reconcile_source_collection_stage_session_task(normalized_team_id, found_run_id, dict(found_task))
     after_gate = reconciled.get("completionGate") if isinstance(reconciled.get("completionGate"), dict) else {}
     task_tool_progress = reconciled.get("taskToolProgress") if isinstance(reconciled.get("taskToolProgress"), dict) else {}
+    reconciled_turn = reconciled.get("turn") if isinstance(reconciled.get("turn"), dict) else {}
     return {
         "schemaVersion": SCHEMA_VERSION,
         "teamId": normalized_team_id,
         "runId": found_run_id,
         "taskId": normalized_task_id,
         "sessionId": task_session_id,
-        "turnId": task_turn_id,
+        "turnId": _trim_text(reconciled_turn.get("turnId"), max_length=200) or task_turn_id,
         "status": "reconciled",
         "reason": _trim_text(reason, max_length=120) or "session_turn_completed",
-        "changed": reconciled != found_task,
+        "changed": reconciled != original_found_task,
         "previousTaskStatus": before_status,
         "taskStatus": _trim_text(reconciled.get("status"), max_length=80),
         "previousCompletionGatePassed": bool(before_gate.get("passed")),
@@ -17081,6 +17108,138 @@ def reconcile_source_collection_stage_session_task_after_turn(
         "artifactComplete": bool(after_gate.get("artifactComplete")),
         "taskToolProgress": task_tool_progress,
     }
+
+
+def _source_collection_stage_session_task_with_continuation_turn(
+    task: dict[str, Any],
+    *,
+    session_id: str,
+    turn_id: str,
+) -> dict[str, Any] | None:
+    normalized_session_id = _trim_text(session_id, max_length=160)
+    normalized_turn_id = _trim_text(turn_id, max_length=200)
+    if not isinstance(task, dict) or not normalized_session_id or not normalized_turn_id:
+        return None
+    turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
+    task_session_id = _trim_text(task.get("sessionId") or turn.get("sessionId"), max_length=160)
+    if task_session_id and normalized_session_id != task_session_id:
+        return None
+    task_id = _trim_text(task.get("taskId"), max_length=160)
+    if not task_id:
+        return None
+    if not _source_collection_stage_session_task_turn_references_task(task, normalized_session_id, normalized_turn_id):
+        return None
+
+    previous_turn_id = _trim_text(turn.get("turnId"), max_length=200)
+    next_task = dict(task)
+    next_turn = dict(turn)
+    if previous_turn_id and previous_turn_id != normalized_turn_id:
+        next_turn["previousTurnId"] = previous_turn_id
+    next_turn["turnId"] = normalized_turn_id
+    next_turn["sessionId"] = normalized_session_id
+    next_turn["status"] = _trim_text(task.get("status"), max_length=80) or _trim_text(turn.get("status"), max_length=80)
+    turn_ids = _source_collection_stage_task_turn_ids(task)
+    if previous_turn_id:
+        turn_ids.append(previous_turn_id)
+    turn_ids.append(normalized_turn_id)
+    deduped_turn_ids = _source_collection_stage_task_turn_id_sequence(turn_ids)
+    next_turn["turnIds"] = deduped_turn_ids
+    next_task["turnIds"] = deduped_turn_ids
+    next_task["turn"] = next_turn
+    next_task["sessionId"] = normalized_session_id
+    next_task["updatedAt"] = utc_now_iso()
+
+    agent_id = _trim_text(task.get("agentId"), max_length=160)
+    turn_result = _source_collection_stage_session_task_turn_result(agent_id, normalized_session_id, normalized_turn_id) if agent_id else {}
+    if turn_result:
+        result_status = _source_collection_stage_task_status_from_turn_result(turn_result)
+        if result_status not in {"running", "queued"}:
+            next_turn["status"] = result_status
+            next_task["reconciledFromTurn"] = {
+                "turnId": normalized_turn_id,
+                "previousTurnId": previous_turn_id,
+                "status": _trim_text(turn_result.get("status"), max_length=80),
+                "resultEventId": _trim_text(turn_result.get("eventId"), max_length=160),
+                "createdAt": _trim_text(turn_result.get("createdAt"), max_length=120),
+                "reconciledAt": next_task["updatedAt"],
+            }
+            writeback = next_task.get("writeback") if isinstance(next_task.get("writeback"), dict) else {}
+            next_summary = _trim_text(writeback.get("summary"), max_length=4000) or _trim_text(turn_result.get("summary"), max_length=4000)
+            if next_summary:
+                next_task["summary"] = next_summary
+    return next_task
+
+
+def _source_collection_stage_task_turn_ids(task: dict[str, Any]) -> list[str]:
+    turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
+    raw_values: list[Any] = []
+    if isinstance(task.get("turnIds"), list):
+        raw_values.extend(task.get("turnIds") or [])
+    if isinstance(turn.get("turnIds"), list):
+        raw_values.extend(turn.get("turnIds") or [])
+    for key in ("previousTurnId", "turnId"):
+        raw_values.append(turn.get(key))
+    return [
+        _trim_text(value, max_length=200)
+        for value in raw_values
+        if _trim_text(value, max_length=200)
+    ]
+
+
+def _source_collection_stage_task_turn_id_sequence(values: list[Any]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        text = _trim_text(value, max_length=200)
+        if text and text not in result:
+            result.append(text)
+    return result[-12:]
+
+
+def _source_collection_stage_session_task_turn_references_task(
+    task: dict[str, Any],
+    session_id: str,
+    turn_id: str,
+) -> bool:
+    task_id = _trim_text(task.get("taskId"), max_length=160)
+    if not task_id:
+        return False
+    try:
+        events = load_conversation_events(_project_root(), session_id)
+    except Exception:
+        return False
+    for event in events:
+        if _trim_text(getattr(event, "turn_id", ""), max_length=200) != turn_id:
+            continue
+        metadata = _source_collection_stage_event_metadata(event)
+        if _source_collection_stage_task_id_from_metadata(metadata) == task_id:
+            return True
+        for tool_call in _source_collection_stage_tool_calls_from_event(event):
+            if _source_collection_stage_task_id_from_tool_call(tool_call) == task_id:
+                return True
+    return False
+
+
+def _source_collection_stage_task_id_from_metadata(metadata: dict[str, Any]) -> str:
+    if not isinstance(metadata, dict):
+        return ""
+    writeback_contract = metadata.get("writebackContract") if isinstance(metadata.get("writebackContract"), dict) else {}
+    return (
+        _trim_text(metadata.get("sourceCollectionStageTaskId"), max_length=160)
+        or _trim_text(metadata.get("taskId"), max_length=160)
+        or _trim_text(writeback_contract.get("taskId"), max_length=160)
+    )
+
+
+def _source_collection_stage_task_id_from_tool_call(tool_call: dict[str, Any]) -> str:
+    if not isinstance(tool_call, dict):
+        return ""
+    args = _source_collection_stage_tool_call_args(tool_call)
+    result = tool_call.get("result") if isinstance(tool_call.get("result"), dict) else {}
+    return (
+        _trim_text(args.get("task_id"), max_length=160)
+        or _trim_text(args.get("taskId"), max_length=160)
+        or _trim_text(result.get("taskId"), max_length=160)
+    )
 
 
 def _repair_missing_source_collection_stage_round(team_id: str, run_id: str, tasks: list[dict[str, Any]]) -> bool:
