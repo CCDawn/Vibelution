@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { ShieldAlert, ShieldCheck, X } from "lucide-react";
 
 import { VButton } from "../../components/vui";
@@ -29,6 +30,13 @@ export function ChatToolApprovalDialog({
   onApprove,
   onReject,
 }: ChatToolApprovalDialogProps) {
+  const dialogId = useId();
+  const titleId = `${dialogId}-title`;
+  const descriptionId = `${dialogId}-description`;
+  const scopeId = `${dialogId}-scope`;
+  const riskId = `${dialogId}-risk`;
+  const toolListId = `${dialogId}-tools`;
+  const descriptionIds = `${descriptionId} ${riskId} ${scopeId} ${toolListId}`;
   const visibleLabels = toolLabels.slice(0, 4);
   const extraCount = Math.max(0, toolLabels.length - visibleLabels.length);
 
@@ -38,29 +46,31 @@ export function ChatToolApprovalDialog({
         className={styles.dialog}
         role="dialog"
         aria-modal="true"
-        aria-label={lang === "zh" ? "工具权限审批" : "Tool permission approval"}
+        aria-labelledby={titleId}
+        aria-describedby={descriptionIds}
       >
-        <div className={styles.icon}>
+        <div className={styles.icon} aria-hidden="true">
           <ShieldAlert size={18} />
         </div>
         <div className={styles.body}>
           <div className={styles.header}>
-            <strong>{lang === "zh" ? "工具权限审批" : "Tool permission approval"}</strong>
-            <span>{riskLabel}</span>
+            <strong id={titleId}>{lang === "zh" ? "工具权限审批" : "Tool permission approval"}</strong>
+            <span id={riskId}>{riskLabel}</span>
           </div>
-          <p>
+          <p id={descriptionId}>
             {lang === "zh"
               ? `当前助手请求启用${toolLabels.length > 1 ? "这些能力" : "此能力"}，批准后仅在${scopeLabel}生效。`
               : `The current agent requests tool access. Approval applies to ${scopeLabel}.`}
           </p>
-          <div className={styles.toolList} title={rawTitle}>
+          <span id={scopeId} className={styles.visuallyHidden}>{scopeLabel}</span>
+          <div id={toolListId} className={styles.toolList} title={rawTitle} role="list">
             {visibleLabels.length
               ? visibleLabels.map((item) => (
-                <span key={item.id}>{item.label}</span>
+                <span key={item.id} role="listitem">{item.label}</span>
               ))
-              : <span>{lang === "zh" ? "工具策略变更" : "Tool policy change"}</span>}
+              : <span role="listitem">{lang === "zh" ? "工具策略变更" : "Tool policy change"}</span>}
             {extraCount ? (
-              <span>{lang === "zh" ? `另 ${extraCount} 项` : `+${extraCount}`}</span>
+              <span role="listitem">{lang === "zh" ? `另 ${extraCount} 项` : `+${extraCount}`}</span>
             ) : null}
           </div>
         </div>

@@ -35,6 +35,7 @@ import chatRuntimeNoticeStackStyles from "./chat/ChatRuntimeNoticeStack.styles";
 import chatRuntimeNoticeStackSource from "./chat/ChatRuntimeNoticeStack.tsx?raw";
 import chatToolApprovalDialogStyles from "./chat/ChatToolApprovalDialog.styles";
 import chatToolApprovalDialogSource from "./chat/ChatToolApprovalDialog.tsx?raw";
+import { ChatToolApprovalDialog } from "./chat/ChatToolApprovalDialog";
 import cliAgentRunTerminalPanelStyles from "./chat/CliAgentRunTerminalPanel.styles";
 import { TokenCoreStatusPanel, type TokenCoreStatusMetric } from "./chat/TokenCoreStatusPanel";
 import tokenCoreStatusPanelSource from "./chat/TokenCoreStatusPanel.tsx?raw";
@@ -251,10 +252,48 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStylesModuleSource).not.toContain("toolApprovalDialog:");
     expect(chatToolApprovalDialogSource).toContain("role=\"dialog\"");
     expect(chatToolApprovalDialogSource).toContain("Tool permission approval");
+    expect(chatToolApprovalDialogSource).toContain("aria-labelledby={titleId}");
+    expect(chatToolApprovalDialogSource).toContain("aria-describedby={descriptionIds}");
+    expect(chatToolApprovalDialogSource).toContain("id={titleId}");
+    expect(chatToolApprovalDialogSource).toContain("id={descriptionId}");
+    expect(chatToolApprovalDialogSource).toContain("id={scopeId}");
+    expect(chatToolApprovalDialogSource).toContain("id={riskId}");
+    expect(chatToolApprovalDialogSource).toContain("id={toolListId}");
+    expect(chatToolApprovalDialogSource).toContain("role=\"list\"");
+    expect(chatToolApprovalDialogSource).toContain("role=\"listitem\"");
     expect(chatToolApprovalDialogStyles.dialog).toContain("grid-cols-[34px_minmax(0,1fr)_auto]");
     expect(chatToolApprovalDialogStyles.dialog).toContain("shadow-none");
     expect(chatToolApprovalDialogStyles.dialog).not.toContain("vui-shadow-hairline");
     expect(chatToolApprovalDialogStyles.actions).toContain("flex");
+  });
+
+  it("renders tool approval dialog labels, descriptions, and tools as accessible relationships", () => {
+    const markup = renderToStaticMarkup(createElement(ChatToolApprovalDialog, {
+      lang: "zh",
+      pending: false,
+      rawTitle: "shell_command, read_file",
+      riskLabel: "需要审批",
+      scopeLabel: "当前会话",
+      toolLabels: [
+        { id: "shell", label: "shell_command" },
+        { id: "read", label: "read_file" },
+      ],
+      onApprove: () => undefined,
+      onReject: () => undefined,
+    }));
+
+    expect(markup).toContain('role="dialog"');
+    expect(markup).toContain('aria-modal="true"');
+    expect(markup).toContain("aria-labelledby=");
+    expect(markup).toContain("aria-describedby=");
+    expect(markup).not.toContain("aria-label=");
+    expect(markup).toContain("工具权限审批");
+    expect(markup).toContain("需要审批");
+    expect(markup).toContain("当前会话");
+    expect(markup).toContain('role="list"');
+    expect(markup.match(/role="listitem"/g)?.length).toBe(2);
+    expect(markup).toContain("shell_command");
+    expect(markup).toContain("read_file");
   });
 
   it("loads the heavy conversation renderer through a lazy bridge", () => {
