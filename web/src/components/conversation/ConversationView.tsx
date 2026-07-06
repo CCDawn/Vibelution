@@ -1264,27 +1264,28 @@ export function ConversationView({
             : operation.kind === "status"
               ? detailsExpanded ? t("executionDetailsVisible") : t("executionDetailsHidden")
             : detailsExpanded ? t("toolCallDetailsVisible") : t("toolCallDetailsHidden");
+          const statusTone = operationStatusToneClassName(operation);
           const operationClassName = [
             styles.operationItem,
             styles[`operationItem_${operationTone(operation)}`],
-            styles[`operationItem_${operationStatusToneClassName(operation)}`],
+            styles[`operationItem_${statusTone}`],
             isRunningOperationStatus(operation.status) ? styles.operationItemActive : "",
           ].filter(Boolean).join(" ");
           return (
             <div key={operation.id} className={styles.operationItemWrap}>
               <div className={operationClassName}>
                 <span
-                  className={`${styles.operationIcon} ${styles[`operationIcon_${operation.kind}`]} ${styles[`operationIcon_${operationStatusToneClassName(operation)}`]}`}
+                  className={`${styles.operationIcon} ${styles[`operationIcon_${operation.kind}`]} ${styles[`operationIcon_${statusTone}`]}`}
                 >
                   {operationIcon(operation.kind, operation.label)}
                 </span>
-                <div className={styles.operationText}>
-                  <span className={styles.operationName}>{operationLabel(operation)}</span>
+                <div className={`${styles.operationText} ${styles[`operationText_${statusTone}`]}`}>
+                  <span className={`${styles.operationName} ${styles[`operationText_${statusTone}`]}`}>{operationLabel(operation)}</span>
                   {operation.summary ? (
-                    <span className={styles.operationSummaryText}>{operation.summary}</span>
+                    <span className={`${styles.operationSummaryText} ${styles[`operationText_${statusTone}`]}`}>{operation.summary}</span>
                   ) : null}
                 </div>
-                <span className={styles.operationStatus}>
+                <span className={`${styles.operationStatus} ${styles[`operationStatus_${statusTone}`]}`}>
                   {operationStatusIcon(operation)}
                   <span>{operationStatusText(operation.status)}</span>
                 </span>
@@ -1573,11 +1574,11 @@ export function ConversationView({
             return (
               <div key={operation.id} className={`${styles.reActToolItem} ${styles[`operationItem_${statusTone}`]}`}>
                 <div className={`${styles.reActToolLine} ${styles[`operationItem_${statusTone}`]}`}>
-                  <span className={styles.reActToolName}>{operationLabel(operation)}</span>
+                  <span className={`${styles.reActToolName} ${styles[`operationText_${statusTone}`]}`}>{operationLabel(operation)}</span>
                   {operation.summary ? (
-                    <span className={styles.reActToolSummary}>{operation.summary}</span>
+                    <span className={`${styles.reActToolSummary} ${styles[`operationText_${statusTone}`]}`}>{operation.summary}</span>
                   ) : null}
-                  <span className={styles.reActToolStatus}>
+                  <span className={`${styles.reActToolStatus} ${styles[`operationStatus_${statusTone}`]}`}>
                     {operationStatusIcon(operation)}
                     <span>{operationStatusText(operation.status)}</span>
                     {duration ? <span>{duration}</span> : null}
