@@ -1263,6 +1263,14 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).not.toContain("defaultExpansionRef.current = {};\n    responseSegmentCacheRef.current.clear();\n    markdownBlockCacheRef.current.clear();\n    setSectionExpansion({});\n  }, [sessionId, visibleMessageLimit]");
   });
 
+  it("freezes process and timeline expansion defaults before top-edge history loading", () => {
+    expect(conversationViewSource).toContain('from "./conversationExpansionDefaults"');
+    expect(conversationViewSource).toContain("preserveConversationExpansionDefaults({");
+    expect(conversationViewSource).toContain("timelineItemsByMessageId: agentTimelineItemsByMessageId");
+    expect(conversationViewSource).toContain("operationGroupsByMessageId: agentOperationGroupsByMessageId");
+    expect(conversationViewSource).not.toMatch(/function preserveCurrentExpansionDefaults\(\)[\s\S]*?setDefault\(\"response\"[\s\S]*?}\n  }/);
+  });
+
   it("keeps active streaming scroll signals on a small streaming-only tail", () => {
     expect(conversationViewSource).toContain("projectAgentMessageTimelineMessages({ timelineMessages, activeTurnMessage })");
     expect(conversationViewSource).toContain("const streamingTimelineMessages = activeAgentMessageTimelineProjection.streamingMessages");
