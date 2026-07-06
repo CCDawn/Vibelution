@@ -17,15 +17,15 @@ describe("ConfigRoute layout density contract", () => {
     expect(configRouteStylesSource).toContain("hashGrid:");
     expect(configRouteStylesSource).toContain("treeGrid:");
     expect(configRouteStylesSource).toContain("[display:grid]");
-    expect(configRouteStylesSource).toContain("[gap:6px]");
+    expect(configRouteStylesSource).toContain("[gap:7px]");
     expect(configRouteStylesSource).toContain("treeFieldCardView:");
     expect(configRouteSource).toContain("styles.treeFieldCardView");
   });
 
   it("does not collapse the config tree to one column until phone width", () => {
     expect(configRouteSource).toContain("styles.treeGrid");
-    expect(configRouteStylesSource).toContain("[grid-template-columns:repeat(auto-fit,minmax(260px,1fr))]");
-    expect(configRouteStylesSource).toContain("max-[1120px]:[grid-template-columns:repeat(auto-fit,minmax(210px,1fr))]");
+    expect(configRouteStylesSource).toContain("[grid-template-columns:repeat(2,minmax(0,1fr))]");
+    expect(configRouteStylesSource).toContain("max-[1120px]:[grid-template-columns:repeat(2,minmax(210px,1fr))]");
     expect(configRouteStylesSource).toContain("max-[720px]:[grid-template-columns:1fr]");
     expect(configRouteStylesSource).not.toContain("ConfigRoute.legacy.css");
   });
