@@ -68,6 +68,7 @@ import {
   buildAgentMessageOperationGroups,
   buildAgentMessageReActOperationGroups,
   type AgentMessageOperation,
+  type AgentMessageOperationGroups,
   type AgentMessageOperationKind,
   type AgentMessageReActOperationGroup,
 } from "./agentMessageOperations";
@@ -98,6 +99,7 @@ import {
   buildAgentMessageTimelineItems,
   type AgentMessageTimelineItem,
 } from "./agentMessageTimeline";
+import { preserveConversationExpansionDefaults } from "./conversationExpansionDefaults";
 import { activeAgentMessageTimelineItemId } from "./agentMessageTimelineActiveItem";
 import {
   agentMessageTimelineItemRowKey,
@@ -537,7 +539,22 @@ export function ConversationView({
   const activeAgentMessages = activeAgentMessageTimelineProjection.agentMessages;
   const streamingTimelineMessages = activeAgentMessageTimelineProjection.streamingMessages;
   const activeTimelineRowIdentities = activeAgentMessageTimelineProjection.rowIdentities;
+  const activeConversationMessagesById = useMemo(() => {
+    const messagesById = new Map<string, ConversationMessage>();
+    for (const message of activeTimelineMessages) {
+      messagesById.set(message.id, message);
+    }
+    return messagesById;
+  }, [activeTimelineMessages]);
   const agentThread = useAgentThread(sessionId, activeAgentMessages);
+  const operationLabels = useMemo(
+    () => ({
+      thought: t("thoughtProcess"),
+      mental: t("mentalProcess"),
+      status: lang === "zh" ? "运行状态" : "Runtime status",
+    }),
+    [lang, t],
+  );
   const agentMessagesByMessageId = useMemo(() => {
     const agentMessages = new Map<string, AgentMessage>();
     for (const agentMessage of agentThread.messages) {
@@ -553,6 +570,32 @@ export function ConversationView({
     }
     return renderStates;
   }, [agentThread]);
+  const agentOperationGroupsByMessageId = useMemo(() => {
+    const operationGroupsByMessageId = new Map<string, AgentMessageOperationGroups>();
+    for (const agentMessage of agentThread.messages) {
+      operationGroupsByMessageId.set(agentMessage.id, buildAgentMessageOperationGroups(agentMessage, operationLabels));
+    }
+    return operationGroupsByMessageId;
+  }, [agentThread, operationLabels]);
+  const agentTimelineItemsByMessageId = useMemo(() => {
+    const itemsByMessageId = new Map<string, AgentMessageTimelineItem[]>();
+    for (const agentMessage of agentThread.messages) {
+      const operations = agentOperationGroupsByMessageId.get(agentMessage.id)?.timeline ?? [];
+      const sourceMessage = activeConversationMessagesById.get(agentMessage.source.id);
+      const serverTimelineItems = sourceMessage?.timelineItems;
+      const timelineHasAssistantText = (serverTimelineItems ?? []).some((item) => item.kind === "assistant_text");
+      itemsByMessageId.set(
+        agentMessage.id,
+        buildAgentMessageTimelineItems(
+          agentMessage,
+          operations,
+          { lang, includeAssistantText: timelineHasAssistantText },
+          serverTimelineItems,
+        ),
+      );
+    }
+    return itemsByMessageId;
+  }, [activeConversationMessagesById, agentOperationGroupsByMessageId, agentThread, lang]);
   const imageArtifactUrlsBeforeMessage = useMemo(() => {
     const urlsByMessageId = new Map<string, Set<string>>();
     const seenImageUrls = new Set<string>();
@@ -616,14 +659,6 @@ export function ConversationView({
   );
   const hasSessionMeta = resolvedStats.length > 0 || latestToolCalls.length > 0;
   const hasMetaSection = showSessionOverview && (hasSessionMeta || Boolean(supplementalContent));
-  const operationLabels = useMemo(
-    () => ({
-      thought: t("thoughtProcess"),
-      mental: t("mentalProcess"),
-      status: lang === "zh" ? "运行状态" : "Runtime status",
-    }),
-    [lang, t],
-  );
   const operationStateLabels = useMemo<OperationStateLabels>(
     () => ({
       running: lang === "zh" ? "执行中" : "Running",
@@ -970,26 +1005,15 @@ export function ConversationView({
   }
 
   function preserveCurrentExpansionDefaults() {
-    let changed = false;
-    const nextDefaults = { ...defaultExpansionRef.current };
-    for (const message of activeTimelineMessages) {
-      const agentRenderState = agentRenderStatesByMessageId.get(message.id);
-      if (!agentRenderState?.sectionState.hasResponseBlock) {
-        continue;
-      }
-      const messageDefaults = nextDefaults[message.id] ?? {};
-      if (messageDefaults.response !== undefined || sectionExpansion[message.id]?.response !== undefined) {
-        continue;
-      }
-      nextDefaults[message.id] = {
-        ...messageDefaults,
-        response: Boolean(message.streaming) || defaultExpandedResponseIds.has(message.id),
-      };
-      changed = true;
-    }
-    if (changed) {
-      defaultExpansionRef.current = nextDefaults;
-    }
+    defaultExpansionRef.current = preserveConversationExpansionDefaults({
+      currentDefaults: defaultExpansionRef.current,
+      sectionExpansion,
+      messages: activeTimelineMessages,
+      renderStatesByMessageId: agentRenderStatesByMessageId,
+      timelineItemsByMessageId: agentTimelineItemsByMessageId,
+      operationGroupsByMessageId: agentOperationGroupsByMessageId,
+      defaultExpandedResponseIds,
+    });
   }
 
   const formatDuration = formatConversationDuration;
@@ -2399,7 +2423,8 @@ export function ConversationView({
             if (!agentMessage) {
               return null;
             }
-            const operationGroups = buildAgentMessageOperationGroups(agentMessage, operationLabels);
+            const operationGroups = agentOperationGroupsByMessageId.get(agentMessage.id)
+              ?? buildAgentMessageOperationGroups(agentMessage, operationLabels);
             const agentRenderState = agentRenderStatesByMessageId.get(message.id) ?? buildAgentMessageRenderState(agentMessage);
             const agentSections = agentRenderState.sectionState;
             const processSections = agentRenderState.processSections;
