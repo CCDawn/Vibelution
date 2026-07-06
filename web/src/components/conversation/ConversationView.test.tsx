@@ -2827,6 +2827,42 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("```bash");
   });
 
+  it("renders codex-style markdown summaries as one markdown document instead of log-like plain text", () => {
+    const html = renderConversation([
+      {
+        id: "message-assistant-codex-summary",
+        role: "assistant",
+        content: [
+          "**前端 Group 会话索引已经完成一轮审查。**",
+          "",
+          "## 建议下一步收束",
+          "",
+          "### 1. 只暂存这三个前端文件",
+          "",
+          "- `web/src/components/conversation/ConversationView.tsx`",
+          "- `web/src/components/conversation/messageResponseSegments.ts`",
+          "",
+          "验证命令建议如下：",
+          "",
+          "```bash",
+          "npm --prefix web run test -- ConversationView.test.tsx",
+          "```",
+        ].join("\n"),
+        timestamp: "2026-05-22T00:01:00Z",
+      },
+    ]);
+
+    expect(html).toContain("markdownHeading");
+    expect(html).toContain(">建议下一步收束</h3>");
+    expect(html).toContain(">1. 只暂存这三个前端文件</h4>");
+    expect(html).toContain("<ul");
+    expect(html).toContain("inlineCode");
+    expect(html).toContain("npm --prefix web run test -- ConversationView.test.tsx");
+    expect(html).not.toContain("```bash");
+    expect(html).not.toContain("responseSegment_logs");
+    expect(html).not.toContain("responseSegment_verification");
+  });
+
   it("formats compact json code blocks without forcing horizontal conversation overflow", () => {
     const compactWritebackContract = "{\"acceptedStatuses\":[\"blocked\",\"cancelled\",\"completed\",\"failed\",\"interrupted\",\"needs_review\",\"queued\",\"running\"],\"agentId\":\"agent-20260629-201556-388028\",\"endpoint\":\"/api/teams/research-team/workflow-orchestration/stage-session-tasks/stagetask-1/writeback\",\"resultAuthority\":\"source_collection_stage_writeback_tool\"}";
     const html = renderConversation([
