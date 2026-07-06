@@ -13,6 +13,7 @@ Status: Draft approved for written spec review
 - Agent 不读文件、不写文件、不运行命令、不搜索、不创建 worktree、不修改代码、不生成可合入候选。
 - 运行时长按有效运行时间计，关闭、崩溃、暂停和等待恢复期间不扣预算。
 - 页面关闭、后端进程重启、Launcher/Vibelution 重启后自动续跑；整机重启后在 Vibelution 下次启动时识别未完成 run 并继续。
+- 页面启动时展示完整观察 prompt，用户主要编辑 prompt 文本，而不是单独编辑观察目标字段。
 - 用户中途输入作为引导事件进入同一轮观察，不重置 run。
 - 超过上下文上限或接近压缩阈值时进行上下文压缩，压缩完成后继续同一个 run。
 
@@ -20,17 +21,17 @@ Status: Draft approved for written spec review
 
 仓库已经有自进化双模式设计：隔离开发模式用于真实改进项目，自主观察模式用于 0 工具纯观察。自主观察模式当前已有设定目标与时长、实时观察、自动结束和报告字段等兼容表面；本阶段不扩展分析报告，而是先把长时间对话链路和机器事件链路保留下来。
 
-新的需求比普通自主观察更强。它要验证 Agent 是否能在连续时间中保持目标、约束和状态一致性，并且能经受三类扰动：
+新的需求比普通自主观察更强。它要验证 Agent 是否能在连续时间中保持用户确认的 prompt、约束和状态一致性，并且能经受三类扰动：
 
 - 上下文扰动：长时间运行导致上下文接近上限，系统需要压缩并继续。
 - 运行时扰动：页面、后端、Launcher 或系统重启造成中断，系统需要恢复未完成 run。
-- 用户扰动：用户中途输入新引导，Agent 需要吸收而不是丢失原目标或重开任务。
+- 用户扰动：用户中途输入新引导，Agent 需要吸收而不是丢失原 prompt 或重开任务。
 
 因此本设计把能力定义为 `self_observation_time_machine`，即自进化观察模式 v2 的时间状态回归机。
 
 ## 目标
 
-1. 让用户启动一个有明确有效运行时长的 0 工具观察 run。
+1. 让用户通过页面编辑完整观察 prompt，并启动一个有明确有效运行时长的 0 工具观察 run。
 2. 让 run 以多个有限 tick 持续推进，而不是一次无限长模型输出。
 3. 让上下文压缩成为同一 run 的可见事件，并在压缩后继续观察。
 4. 让中断恢复成为持久状态机能力，而不是依赖页面内存。
@@ -51,17 +52,19 @@ Status: Draft approved for written spec review
 
 `observation run` 是一次用户启动的长时观察实验。
 
+`observation prompt` 是用户在页面中直接看到并编辑的完整观察指令文本。默认 prompt 来自项目内置的 0 工具观察模板；用户可以修改观察目标、输出结构、实验关注点和自检要求，但不能通过 prompt 获得工具权限。
+
 `tick` 是一次有限观察步。每个 tick 从当前 run 状态、压缩摘要、未消费 guidance 和剩余预算构造输入，产生一段观察输出和自检状态。
 
 `effectiveRunTime` 是 run 真正处于 `running`、`ticking` 或模型生成中的累计时间。它是完成条件的唯一时间口径。
 
 `wallClockTime` 是真实经过时间，只用于审计中断、恢复和等待时间。
 
-`guidance event` 是用户中途输入的引导。它进入下一次或当前可安全插入的 tick，不清空原目标。
+`guidance event` 是用户中途输入的引导。它进入下一次或当前可安全插入的 tick，不清空原 prompt。
 
 `compression event` 是上下文压缩尝试或结果。成功压缩后模型上下文使用 checkpoint summary，可见时间线显示系统 marker。
 
-`resume event` 是 runtime 发现未完成 run 后自动继续的证据。恢复必须保留原目标、剩余有效时间、最近 tick 摘要、压缩摘要和未消费 guidance。
+`resume event` 是 runtime 发现未完成 run 后自动继续的证据。恢复必须保留原 prompt、剩余有效时间、最近 tick 摘要、压缩摘要和未消费 guidance。
 
 ## 状态机
 
@@ -104,9 +107,10 @@ created
 | Fact | Canonical source | Writer | Readers / derived surfaces | Refresh or invalidation | Old source cleanup |
 | --- | --- | --- | --- | --- | --- |
 | run 是否存在 | observation run ledger | observation service | UI active run, runtime scanner, future analyzer | append event 后刷新 run projection | 不新增 UI-only run |
+| 用户确认的观察 prompt | persisted run snapshot `prompt` | start route | tick prompt builder, UI prompt preview, future analyzer | start 时持久化，后续 tick 只追加运行上下文 | `goal` 只作兼容标题或派生摘要 |
 | 当前状态 | ledger event projection | observation service / runtime scanner | UI status, scheduler | 每次状态事件后派生 | 内存状态只作缓存 |
 | 有效运行时长 | tick timing events | scheduler | completion gate, UI progress, future analyzer | tick end / interruption 时累计 | 不用 wall clock 直接判定完成 |
-| 用户引导 | guidance events | API route | next tick context, UI timeline, future analyzer | guidance consumed event | 不覆盖原目标 |
+| 用户引导 | guidance events | API route | next tick context, UI timeline, future analyzer | guidance consumed event | 不覆盖原 prompt |
 | 压缩结果 | conversation ledger checkpoint / attempt event | compression pipeline | model context, visible marker, future analyzer | checkpoint append 后刷新 | 不写成 assistant 普通消息 |
 | 恢复次数 | resume events | runtime scanner / scheduler | UI timeline, future analyzer | startup scan / recovery action | 不靠进程内计数 |
 
@@ -190,7 +194,7 @@ UI 应同时展示：
 
 每个 tick 的输入包含：
 
-- 原始观察目标。
+- 用户确认的完整 observation prompt。
 - 0 工具沙盒规则。
 - 剩余有效时长。
 - 最近状态摘要。
@@ -228,7 +232,7 @@ UI 应同时展示：
 
 完整链路必须保留足够材料，让下一阶段可以比较压缩前后状态：
 
-- 原目标是否保持。
+- 原 prompt 是否保持。
 - 0 工具边界是否保持。
 - 最近 guidance 是否仍被记住。
 - 自检结构是否保持。
@@ -263,7 +267,7 @@ UI 应同时展示：
 
 ```text
 恢复自检：
-原目标：
+原 prompt 摘要：
 剩余有效时间：
 最近压缩摘要：
 未消费用户引导：
@@ -273,7 +277,7 @@ UI 应同时展示：
 
 ## 用户引导
 
-用户在运行期间可以输入引导。引导是 `role=user` 的事件，但只影响观察目标的后续关注点，不改变系统级 0 工具约束。
+用户在运行期间可以输入引导。引导是 `role=user` 的事件，但只影响已确认 prompt 的后续关注点，不改变系统级 0 工具约束。
 
 行为规则：
 
@@ -321,16 +325,25 @@ payload：
 ```json
 {
   "mode": "time_machine",
-  "goal": "观察 Agent 如何在长时间状态下维持目标",
+  "prompt": "你是 Vibelution 的自进化观察 Agent，处在无工具观察沙盒中。\n观察目标：观察 Agent 如何在长时间状态下维持目标\n...",
   "durationSeconds": 1800,
   "tickTargetSeconds": 60,
   "stopOnBoundaryViolation": true
 }
 ```
 
+兼容规则：
+
+- `prompt` 是主输入，页面必须显示并编辑它。
+- 默认 prompt 应由后端复用现有 `build_self_observation_prompt` 模板提供给页面，前端不维护第二份长期模板。
+- `goal` 可以继续作为兼容字段接受旧客户端请求；当 `prompt` 为空时后端用 `goal` 生成默认 prompt。
+- 当 `prompt` 存在时，`goal` 只用于标题、列表摘要或由后端从 prompt 派生，不作为用户主要编辑入口。
+- 后端仍必须独立注入/校验 no-tool policy；用户删掉 prompt 中的“无工具”文字也不会获得工具权限。
+
 读取：
 
 ```http
+GET /api/evolution/self/observation-runs/default-prompt
 GET /api/evolution/self/observation-runs/active
 GET /api/evolution/self/observation-runs/{runId}
 GET /api/evolution/self/observation-runs/{runId}/events
@@ -369,7 +382,9 @@ POST /api/evolution/self/observation-runs/{runId}/actions
 
 启动区：
 
-- 观察目标。
+- 完整观察 prompt 编辑器。
+- 恢复默认 prompt 按钮。
+- prompt 摘要或标题预览。
 - 有效运行时长。
 - tick 粒度。
 - 0 工具边界说明。
@@ -475,7 +490,7 @@ API 测试：
 
 前端测试：
 
-- 自主观察模式显示长时观察启动控件。
+- 自主观察模式显示完整观察 prompt 编辑器，而不是把观察目标作为主要输入。
 - 运行中展示有效时间、剩余时间、tick、压缩、恢复和 guidance 指标。
 - 观察模式不显示工具、worktree、diff、合入或审查控件。
 - guidance 输入提交后显示 marker。
@@ -523,5 +538,5 @@ API 测试：
 - 上下文压缩后 run 继续，且压缩事件可见。
 - 关闭页面、重启后端或重启 Vibelution 后，未完成 run 会继续剩余时间。
 - 整机重启后，下次 Vibelution 启动能识别并继续未完成 run。
-- 用户中途引导进入同一 run，不重置观察目标。
+- 用户中途引导进入同一 run，不重置已确认的 observation prompt。
 - 完整对话链路和事件链路能被读取，并足以支持下一阶段评价连续状态、压缩漂移、恢复表现、用户引导吸收和边界遵守。
