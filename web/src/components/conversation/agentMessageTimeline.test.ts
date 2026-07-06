@@ -625,6 +625,95 @@ describe("agentMessageTimeline", () => {
     ]);
   });
 
+  it("infers tool group titles when backend command groups omit the title", () => {
+    const message: ConversationMessage = {
+      id: "message-server-tool-group-no-title",
+      role: "assistant",
+      content: "",
+      timestamp: "2026-07-06T09:30:00Z",
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "tool",
+          status: "done",
+          name: "grep_search_tool",
+          summary: "搜索 timeline 标题",
+        },
+        {
+          sequence: 2,
+          kind: "tool",
+          status: "done",
+          name: "read_file_tool",
+          summary: "读取 timeline 实现",
+        },
+      ],
+      timelineItems: [
+        {
+          id: "server-tool-group-no-title",
+          kind: "command_group",
+          status: "completed",
+          operationIds: [
+            "message-server-tool-group-no-title-feedback-1",
+            "message-server-tool-group-no-title-feedback-2",
+          ],
+        },
+      ],
+    };
+
+    const items = timelineItemsForConversationMessage(message, { lang: "zh" });
+
+    expect(items[0]).toMatchObject({
+      kind: "command_group",
+      status: "completed",
+      title: "已执行 2 项工具",
+    });
+    expect(items[0].kind === "command_group" ? items[0].title : "").not.toContain("命令");
+  });
+
+  it("keeps inferred command titles for backend command groups that only contain cli tools", () => {
+    const message: ConversationMessage = {
+      id: "message-server-cli-group-no-title",
+      role: "assistant",
+      content: "",
+      timestamp: "2026-07-06T09:32:00Z",
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "tool",
+          status: "done",
+          name: "cli_tool",
+          summary: "运行 pytest",
+        },
+        {
+          sequence: 2,
+          kind: "tool",
+          status: "done",
+          name: "cli_tool",
+          summary: "运行 npm build",
+        },
+      ],
+      timelineItems: [
+        {
+          id: "server-cli-group-no-title",
+          kind: "command_group",
+          status: "completed",
+          operationIds: [
+            "message-server-cli-group-no-title-feedback-1",
+            "message-server-cli-group-no-title-feedback-2",
+          ],
+        },
+      ],
+    };
+
+    const items = timelineItemsForConversationMessage(message, { lang: "zh" });
+
+    expect(items[0]).toMatchObject({
+      kind: "command_group",
+      status: "completed",
+      title: "已运行 2 条命令",
+    });
+  });
+
   it("does not let a completed server command group hide failed or fallback child operations", () => {
     const failedMessage: ConversationMessage = {
       id: "message-command-group-child-failed",

@@ -435,10 +435,17 @@ function commandGroupTitle(
   lang: string,
 ) {
   const commandCount = operations.length;
+  const allShellCommands = operations.length > 0 && operations.every(isShellCommandOperation);
   if (lang === "zh") {
-    return status === "running" ? `正在运行 ${commandCount} 条命令` : `已运行 ${commandCount} 条命令`;
+    if (allShellCommands) {
+      return status === "running" ? `正在运行 ${commandCount} 条命令` : `已运行 ${commandCount} 条命令`;
+    }
+    return status === "running" ? `正在执行 ${commandCount} 项工具` : `已执行 ${commandCount} 项工具`;
   }
-  return status === "running" ? `Running ${commandCount} commands` : `Ran ${commandCount} commands`;
+  if (allShellCommands) {
+    return status === "running" ? `Running ${commandCount} commands` : `Ran ${commandCount} commands`;
+  }
+  return status === "running" ? `Running ${commandCount} tools` : `Ran ${commandCount} tools`;
 }
 
 function mergeAdjacentThoughtItems(items: AgentMessageTimelineItem[]) {
@@ -523,6 +530,37 @@ function isCommandLikeOperation(operation: AgentMessageOperation) {
     "读取",
     "列出",
   ].some((marker) => haystack.includes(marker));
+}
+
+function isShellCommandOperation(operation: AgentMessageOperation) {
+  if (operation.kind !== "tool") {
+    return false;
+  }
+  const rawName = String(operation.rawLabel ?? operation.label ?? "").trim().toLowerCase();
+  if (["cli_tool", "shell_tool", "command_tool", "execute_shell_command"].includes(rawName)) {
+    return true;
+  }
+  const haystack = [
+    operation.rawLabel,
+    operation.label,
+    operation.summary,
+  ].map((item) => String(item ?? "").toLowerCase()).join(" ");
+  if ([
+    "grep_search_tool",
+    "read_file_tool",
+    "glob_tool",
+    "code_symbol_tool",
+    "search",
+    "read",
+    "glob",
+    "搜索",
+    "读取",
+    "列出",
+    "代码图谱",
+  ].some((marker) => haystack.includes(marker))) {
+    return false;
+  }
+  return ["shell", "command", "命令"].some((marker) => haystack.includes(marker));
 }
 
 function normalizeTimelineStatus(status: string | undefined): AgentMessageTimelineItemStatus {
