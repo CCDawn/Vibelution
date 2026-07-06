@@ -25,7 +25,7 @@ export function ConversationImageArtifactView({
     <figure className={styles.imageArtifact}>
       <VButton
         type="button"
-        className={`${styles.imageArtifactFrame} ${styles.imagePreviewButton}`}
+        className={styles.imagePreviewButton}
         onClick={() =>
           onPreviewImage({
             src: artifact.imageUrl,
@@ -37,7 +37,9 @@ export function ConversationImageArtifactView({
         aria-label={previewLabel}
         title={previewLabel}
       >
-        <img className={styles.imagePreview} src={artifact.imageUrl} alt={imageAlt} loading="lazy" />
+        <span className={styles.imageArtifactFrame} aria-hidden="true">
+          <img className={styles.imagePreview} src={artifact.imageUrl} alt="" loading="lazy" />
+        </span>
       </VButton>
       <figcaption className={styles.imageArtifactFooter}>
         <span className={styles.imageArtifactMeta}>
@@ -51,7 +53,7 @@ export function ConversationImageArtifactView({
           title={downloadLabel}
           aria-label={downloadLabel}
         >
-          <Download size={15} />
+          <Download size={15} aria-hidden="true" />
         </a>
       </figcaption>
     </figure>

@@ -1,20 +1,20 @@
 const styles = {
   imageArtifact:
-    "vui-components-conversationview imageArtifact min-w-0",
+    "vui-components-conversationview imageArtifact grid min-w-0 gap-2",
   imageArtifactFooter:
-    "vui-components-conversationview imageArtifactFooter min-w-0 flex flex-wrap items-center gap-1.5",
+    "vui-components-conversationview imageArtifactFooter grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2",
   imageArtifactFrame:
-    "vui-components-conversationview imageArtifactFrame min-w-0",
+    "vui-components-conversationview imageArtifactFrame block aspect-square w-[min(100%,18rem)] min-w-0 overflow-hidden rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)]",
   imageArtifactMeta:
-    "vui-components-conversationview imageArtifactMeta min-w-0 flex flex-wrap items-center gap-1.5",
+    "vui-components-conversationview imageArtifactMeta grid min-w-0 gap-0.5 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   imageArtifactPrompt:
-    "vui-components-conversationview imageArtifactPrompt min-w-0",
+    "vui-components-conversationview imageArtifactPrompt min-w-0 truncate text-[var(--vui-font-sm)] font-medium leading-[var(--vui-line-compact)] text-[var(--fg-secondary)]",
   imageDownloadButton:
-    "vui-components-conversationview imageDownloadButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+    "vui-components-conversationview imageDownloadButton inline-flex size-[var(--vui-control-height-sm)] shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-panel)]",
   imagePreview:
-    "vui-components-conversationview imagePreview min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "vui-components-conversationview imagePreview size-full min-w-0 object-cover",
   imagePreviewButton:
-    "vui-components-conversationview imagePreviewButton min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+    "vui-components-conversationview imagePreviewButton inline-flex w-fit min-w-0 rounded-[var(--radius-panel)] p-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-panel)]",
 } as const;
 
 export default styles;
