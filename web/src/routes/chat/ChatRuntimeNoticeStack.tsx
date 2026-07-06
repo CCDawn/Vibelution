@@ -28,6 +28,10 @@ export function runtimeNoticeToneClassName(level: string | undefined) {
   return styles.toneInfo;
 }
 
+export function runtimeNoticeIsAlert(level: string | undefined) {
+  return ["blocked", "danger", "error", "failed"].includes(String(level || "").toLowerCase());
+}
+
 export function ChatRuntimeNoticeStack({ lang, notices }: ChatRuntimeNoticeStackProps) {
   if (!notices.length) {
     return null;
@@ -40,7 +44,7 @@ export function ChatRuntimeNoticeStack({ lang, notices }: ChatRuntimeNoticeStack
           <div
             key={notice.id || `${notice.kind}-${notice.timestamp}-${notice.message}`}
             className={[styles.notice, runtimeNoticeToneClassName(notice.level)].join(" ")}
-            role="listitem"
+            role={runtimeNoticeIsAlert(notice.level) ? "alert" : "listitem"}
           >
             <CircleDot size={13} aria-hidden="true" />
             <div className={styles.body}>

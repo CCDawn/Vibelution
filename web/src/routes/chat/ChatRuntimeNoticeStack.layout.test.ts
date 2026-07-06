@@ -8,7 +8,8 @@ describe("ChatRuntimeNoticeStack layout contract", () => {
     expect(source).toContain('role="status"');
     expect(source).toContain('aria-live="polite"');
     expect(source).toContain('role="list"');
-    expect(source).toContain('role="listitem"');
+    expect(source).toContain('role={runtimeNoticeIsAlert(notice.level) ? "alert" : "listitem"}');
+    expect(source).toContain('"alert" : "listitem"');
     expect(source).toContain('<CircleDot size={13} aria-hidden="true" />');
   });
 
