@@ -285,6 +285,9 @@ function looksLikeRawToolPayload(value: string) {
   if ((normalized.startsWith("{") && normalized.endsWith("}")) || (normalized.startsWith("[") && normalized.endsWith("]"))) {
     return true;
   }
+  if (/^\|?\s*#\s*\|\s*[^|]+\|\s*[^|]+\|/.test(normalized) && /\|[-:\s|]+\|/.test(normalized)) {
+    return true;
+  }
   if (/(^|\n)\s*\d+[-:]\s+/.test(normalized)) {
     return true;
   }
@@ -568,7 +571,8 @@ function isBatchedProgressTool(operation: AgentMessageOperation) {
     return false;
   }
   const rawName = String(operation.rawLabel ?? operation.label ?? "").trim().toLowerCase();
-  return rawName === "source_collection_stage_writeback_tool";
+  return rawName === "source_collection_stage_writeback_tool"
+    || rawName === "source_collection_context_tool";
 }
 
 function batchedProgressToolKey(operation: AgentMessageOperation) {
@@ -732,6 +736,11 @@ function displayToolLabel(name: string) {
     web_search_tool: "网页搜索",
     web_fetch_tool: "网页读取",
     computer_use_task_tool: "沙盒浏览器",
+    task_list_tool: "任务列表",
+    task_create_tool: "创建任务",
+    task_update_tool: "更新任务",
+    source_collection_context_tool: "读取资料上下文",
+    source_collection_stage_writeback_tool: "资料提炼回写",
   };
   if (exact[lower]) {
     return exact[lower];
