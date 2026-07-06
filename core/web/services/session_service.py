@@ -40,9 +40,11 @@ from core.chat.chat_result_contract import build_chat_coding_result_contract
 from core.chat.chat_result_formatter import format_chat_reply
 from core.chat.chat_task_types import trim_lines
 from core.chat.conversation_ledger import (
+    EVENT_ASSISTANT_DELTA_COMMITTED,
     EVENT_ASSISTANT_MESSAGE,
     EVENT_CLI_SESSION_LIFECYCLE,
     EVENT_CLI_TASK_RESULT,
+    EVENT_CLI_TASK_SENT,
     EVENT_TOOL_CALL_STARTED,
     EVENT_TOOL_RESULT,
     EVENT_TURN_COMPLETED,
@@ -2575,6 +2577,8 @@ class SessionTurnCapture:
     _tool_loop_call_count: int = 0
     _tool_loop_failure_count: int = 0
     _tool_loop_last_failure: str = ""
+    _committed_content_length: int = 0
+    _latest_tool_feedback_sequence: int = 0
 
     def note_thought(self, text: str) -> None:
         cleaned = _sanitize_thought_delta_text(text)
@@ -2679,8 +2683,24 @@ class SessionTurnCapture:
         if cleaned:
             self.content = cleaned
 
+    def uncommitted_content_segment(self) -> str:
+        content = _sanitize_message_content("assistant", self.content)
+        if not content:
+            return ""
+        committed_length = max(0, min(int(self._committed_content_length or 0), len(content)))
+        return content[committed_length:].strip()
+
+    def mark_content_committed(self) -> None:
+        self._committed_content_length = len(_sanitize_message_content("assistant", self.content))
+
+    def reserve_feedback_sequence(self) -> int:
+        sequence = self._next_feedback_sequence
+        self._next_feedback_sequence += 1
+        return sequence
+
     def clear_content(self) -> None:
         self.content = ""
+        self._committed_content_length = 0
 
     def note_mental_state(self, *, mood: str = "", feeling: str = "", whisper: str = "") -> None:
         self.mental_state = {
@@ -2790,6 +2810,7 @@ class SessionTurnCapture:
             if existing.get("name") == tool_name and existing.get("status") == "running":
                 self.tool_calls[index] = entry
                 self._update_running_tool_feedback_event(entry, related_thought_sequence=related_thought_sequence)
+                self._latest_tool_feedback_sequence = self._feedback_sequence_for_tool(tool_name)
                 self._remember_tool_loop_outcome(entry)
                 self._update_long_loop_progress_event(tool_name)
                 self._latest_thought_sequence = 0
@@ -2801,11 +2822,21 @@ class SessionTurnCapture:
         if len(self.tool_calls) > 30:
             self.tool_calls = self.tool_calls[-30:]
         self._append_tool_feedback_event(entry, related_thought_sequence=related_thought_sequence)
+        self._latest_tool_feedback_sequence = self._feedback_sequence_for_tool(tool_name)
         self._remember_tool_loop_outcome(entry)
         self._update_long_loop_progress_event(tool_name)
         self._latest_thought_sequence = 0
         self._latest_thought_text = ""
         self._pending_related_thought_sequence = 0
+
+    def _feedback_sequence_for_tool(self, tool_name: str) -> int:
+        normalized = str(tool_name or "").strip()
+        if not normalized:
+            return 0
+        for existing in reversed(self.feedback_events):
+            if existing.get("kind") == "tool" and existing.get("name") == normalized:
+                return _coerce_nonnegative_int(existing.get("sequence"))
+        return 0
 
     def _remember_tool_loop_outcome(self, tool_call: dict[str, Any]) -> None:
         status = _normalize_tool_call_status(tool_call.get("status"), default="running")
@@ -7807,6 +7838,7 @@ def _public_agent_prompt_snapshot(snapshot: Any) -> dict[str, Any]:
 
 
 def _normalize_messages(conversation_id: str, items: Any) -> list[dict[str, Any]]:
+    ledger_events_by_turn: dict[str, list[dict[str, Any]]] | None = None
     messages: list[dict[str, Any]] = []
     for index, raw in enumerate(list(items or []), start=1):
         if not isinstance(raw, dict):
@@ -7844,11 +7876,22 @@ def _normalize_messages(conversation_id: str, items: Any) -> list[dict[str, Any]
             entry["toolCalls"] = tool_calls
         if feedback_events:
             entry["feedbackEvents"] = feedback_events
+        turn_id = _message_turn_id(raw)
+        timeline_feedback_events = feedback_events
+        include_assistant_text = True
+        if role == "assistant" and turn_id:
+            if ledger_events_by_turn is None:
+                ledger_events_by_turn = _assistant_timeline_events_by_turn(conversation_id)
+            ordered_timeline_events = ledger_events_by_turn.get(turn_id) or []
+            if ordered_timeline_events:
+                timeline_feedback_events = ordered_timeline_events
+                include_assistant_text = False
         timeline_items = _build_message_timeline_items(
             message_id=entry["id"],
             content=content,
-            feedback_events=feedback_events,
+            feedback_events=timeline_feedback_events,
             streaming=bool(raw.get("streaming")),
+            include_assistant_text=include_assistant_text,
         )
         if timeline_items:
             entry["timelineItems"] = timeline_items
@@ -16724,7 +16767,7 @@ def _normalize_message_tool_calls(value: Any) -> list[dict[str, Any]]:
 
 def _normalize_feedback_event_kind(value: Any) -> str:
     kind = str(value or "").strip().lower()
-    if kind in {"thought", "mental", "tool", "status"}:
+    if kind in {"thought", "mental", "tool", "status", "assistant_text"}:
         return kind
     return ""
 
@@ -16762,6 +16805,10 @@ def _normalize_persisted_feedback_events(value: Any) -> list[dict[str, Any]]:
         )
         if summary:
             entry["summary"] = summary
+        if kind == "assistant_text":
+            content = _sanitize_message_content("assistant", item.get("text") or item.get("content") or summary)
+            if content:
+                entry["content"] = content
         arguments = _safe_tool_argument_details(
             item.get("arguments") if isinstance(item.get("arguments"), dict) else item.get("args")
         )
@@ -16836,6 +16883,8 @@ def _normalize_message_feedback_events(value: Any) -> list[dict[str, Any]]:
             "originalLength",
             "tracePath",
             "relatedThoughtSequence",
+            "content",
+            "text",
         ):
             if key in item:
                 entry[key] = item[key]
@@ -16844,12 +16893,144 @@ def _normalize_message_feedback_events(value: Any) -> list[dict[str, Any]]:
     return events
 
 
+def _assistant_timeline_events_by_turn(conversation_id: str) -> dict[str, list[dict[str, Any]]]:
+    normalized_session_id = str(conversation_id or "").strip()
+    if not normalized_session_id:
+        return {}
+    events_by_turn: dict[str, list[dict[str, Any]]] = {}
+    tool_event_keys: dict[str, dict[str, int]] = {}
+    for event in _load_session_conversation_events_cached(normalized_session_id):
+        turn_id = str(getattr(event, "turn_id", "") or "").strip()
+        if not turn_id:
+            continue
+        event_type = str(getattr(event, "event_type", "") or "").strip()
+        payload = dict(getattr(event, "payload", {}) or {})
+        if event_type == EVENT_ASSISTANT_DELTA_COMMITTED:
+            sequence = _coerce_nonnegative_int(payload.get("feedbackSequence") or payload.get("feedback_sequence"))
+            if sequence <= 0 and _is_assistant_timeline_segment_event(event):
+                sequence = _coerce_nonnegative_int(getattr(event, "sequence", 0))
+            content = _sanitize_message_content("assistant", payload.get("content") or "")
+            if sequence <= 0 or not content:
+                continue
+            events_by_turn.setdefault(turn_id, []).append(
+                {
+                    "sequence": sequence,
+                    "kind": "assistant_text",
+                    "status": _normalize_tool_call_status(getattr(event, "status", ""), default="done"),
+                    "content": content,
+                }
+            )
+            continue
+        if event_type not in {EVENT_TOOL_CALL_STARTED, EVENT_TOOL_RESULT, EVENT_CLI_TASK_SENT, EVENT_CLI_TASK_RESULT}:
+            continue
+        tool_event = _feedback_event_from_conversation_tool_event(event)
+        if tool_event:
+            items = events_by_turn.setdefault(turn_id, [])
+            tool_key = _conversation_tool_timeline_key(event)
+            previous_index = tool_event_keys.setdefault(turn_id, {}).get(tool_key) if tool_key else None
+            if previous_index is not None and 0 <= previous_index < len(items):
+                items[previous_index] = tool_event
+            else:
+                if tool_key:
+                    tool_event_keys.setdefault(turn_id, {})[tool_key] = len(items)
+                items.append(tool_event)
+    return {
+        turn_id: sorted(items, key=lambda item: _coerce_nonnegative_int(item.get("sequence")))
+        for turn_id, items in events_by_turn.items()
+        if any(str(item.get("kind") or "") == "assistant_text" for item in items)
+    }
+
+
+def _is_assistant_timeline_segment_event(event: Any) -> bool:
+    projection_kind = str(getattr(event, "projection_kind", "") or "").strip()
+    source = str(getattr(event, "source", "") or "").strip()
+    return projection_kind == "assistant_timeline_segment" or source == "session_ui_capture"
+
+
+def _conversation_tool_timeline_key(event: Any) -> str:
+    payload = dict(getattr(event, "payload", {}) or {})
+    tool_call = dict(payload.get("toolCall") or payload.get("tool_call") or payload)
+    tool_id = str(
+        getattr(event, "tool_call_id", "")
+        or tool_call.get("id")
+        or tool_call.get("toolCallId")
+        or tool_call.get("tool_call_id")
+        or tool_call.get("taskId")
+        or ""
+    ).strip()
+    if tool_id:
+        return f"id:{tool_id}"
+    sequence = _coerce_nonnegative_int(tool_call.get("feedbackSequence") or tool_call.get("feedback_sequence"))
+    if sequence > 0:
+        return f"sequence:{sequence}"
+    return ""
+
+
+def _feedback_event_from_conversation_tool_event(event: Any) -> dict[str, Any]:
+    payload = dict(getattr(event, "payload", {}) or {})
+    tool_call = dict(payload.get("toolCall") or payload.get("tool_call") or payload)
+    name = str(tool_call.get("name") or tool_call.get("toolName") or tool_call.get("tool_name") or "").strip()
+    if not name:
+        return {}
+    sequence = _coerce_nonnegative_int(tool_call.get("feedbackSequence") or tool_call.get("feedback_sequence"))
+    if sequence <= 0:
+        sequence = _coerce_nonnegative_int(getattr(event, "sequence", 0))
+    entry: dict[str, Any] = {
+        "sequence": sequence,
+        "kind": "tool",
+        "status": _normalize_tool_call_status(tool_call.get("status") or getattr(event, "status", ""), default="running"),
+        "name": name,
+    }
+    summary = trim_lines(
+        tool_call.get("summary")
+        or tool_call.get("resultPreview")
+        or tool_call.get("result_preview")
+        or tool_call.get("error")
+        or "",
+        max_lines=2,
+    )
+    if summary:
+        entry["summary"] = summary
+    arguments = _safe_tool_argument_details(
+        tool_call.get("arguments") if isinstance(tool_call.get("arguments"), dict) else tool_call.get("args")
+    )
+    if arguments:
+        entry["arguments"] = arguments
+    result_preview = _trim_tool_detail_text(
+        tool_call.get("resultPreview") or tool_call.get("result_preview") or tool_call.get("result"),
+        max_chars=1200,
+        max_lines=10,
+    )
+    if result_preview:
+        entry["resultPreview"] = result_preview
+    error = _trim_tool_detail_text(tool_call.get("error"), max_chars=1200, max_lines=10)
+    if error:
+        entry["error"] = error
+    for source_key, target_key in (
+        ("durationMs", "durationMs"),
+        ("duration_ms", "durationMs"),
+        ("durationSeconds", "durationSeconds"),
+        ("duration_seconds", "durationSeconds"),
+        ("timeoutSeconds", "timeoutSeconds"),
+        ("timeout_seconds", "timeoutSeconds"),
+    ):
+        if source_key in tool_call and target_key not in entry:
+            value = _coerce_tool_number(tool_call.get(source_key))
+            if value is not None:
+                entry[target_key] = value
+    _copy_tool_result_fact_fields(tool_call, entry)
+    if entry.get("semanticStatus"):
+        entry["status"] = _normalize_tool_call_status(entry.get("semanticStatus"), default=entry["status"])
+    return entry
+
+
 def _build_message_timeline_items(
     *,
     message_id: str,
     content: Any = "",
     feedback_events: Any = None,
     streaming: bool = False,
+    include_assistant_text: bool = True,
 ) -> list[dict[str, Any]]:
     normalized_message_id = str(message_id or "").strip()
     if not normalized_message_id:
@@ -16863,7 +17044,7 @@ def _build_message_timeline_items(
         feedback_events=normalized_feedback_events,
         streaming=streaming,
         lang=get_web_language(),
-        include_assistant_text=True,
+        include_assistant_text=include_assistant_text,
     )
 
 
@@ -18915,6 +19096,36 @@ def _visible_reply_matches_derived_tool_activity(result: dict[str, Any], visible
     return bool(derived and derived == visible)
 
 
+def _commit_session_capture_assistant_segment(
+    session_id: str,
+    capture: SessionTurnCapture,
+    *,
+    boundary: str,
+    status: str = "completed",
+) -> None:
+    segment = capture.uncommitted_content_segment()
+    if not segment:
+        return
+    sequence = capture.reserve_feedback_sequence()
+    _append_session_conversation_event(
+        session_id,
+        capture.turn_id,
+        EVENT_ASSISTANT_DELTA_COMMITTED,
+        status=status,
+        payload={
+            "content": segment,
+            "feedbackSequence": sequence,
+            "metadata": {
+                "boundary": str(boundary or "").strip(),
+                "source": "session_ui_capture",
+            },
+        },
+        source="session_ui_capture",
+        projection_kind="assistant_timeline_segment",
+    )
+    capture.mark_content_committed()
+
+
 @contextmanager
 def _capture_session_ui_stream(
     session_id: str,
@@ -18937,6 +19148,11 @@ def _capture_session_ui_stream(
         batcher = context.get("textBatcher")
         if isinstance(batcher, _SessionUiCaptureTextBatcher):
             batcher.flush_all()
+        _commit_session_capture_assistant_segment(
+            session_id,
+            capture,
+            boundary="tool_event",
+        )
         data = event.data or {}
         name = str(data.get("name") or "").strip()
         if not name:
@@ -18982,6 +19198,7 @@ def _capture_session_ui_stream(
         tool_call_payload = {
             "name": name,
             "status": status,
+            "feedbackSequence": capture._latest_tool_feedback_sequence,
             "arguments": data.get("args") if isinstance(data.get("args"), dict) else {},
             "summary": summary,
             "result": result,
@@ -19101,6 +19318,11 @@ def _capture_session_ui_stream(
             batcher = context.get("textBatcher") if isinstance(context, dict) else None
             if isinstance(batcher, _SessionUiCaptureTextBatcher):
                 batcher.flush_all()
+            _commit_session_capture_assistant_segment(
+                session_id,
+                capture,
+                boundary="capture_close",
+            )
             _SESSION_UI_CAPTURE_CONTEXT.reset(token)
             for callback_id in callback_ids:
                 event_bus.unsubscribe_by_id(callback_id)
