@@ -24,6 +24,16 @@ const donutSegmentToneKeys = [
 ] as const;
 
 describe("CacheDetailDialog donut layout contract", () => {
+  it("labels the dialog from visible title and description text", () => {
+    expect(cacheDetailDialogSource).toContain("useId");
+    expect(cacheDetailDialogSource).toContain("aria-labelledby={titleId}");
+    expect(cacheDetailDialogSource).toContain("aria-describedby={descriptionId}");
+    expect(cacheDetailDialogSource).not.toContain("aria-label={cacheDetailDialogTitle}");
+    expect(cacheDetailDialogSource).toContain("<h3 id={titleId}>{cacheDetailDialogTitle}</h3>");
+    expect(cacheDetailDialogSource).toContain("<p id={descriptionId}>{previousCacheHitLabel}</p>");
+    expect(cacheDetailDialogSource).toContain("<X size={16} aria-hidden=\"true\" />");
+  });
+
   it("renders donut circles as stroke-only SVG rings", () => {
     const donutSvgStart = cacheDetailDialogSource.indexOf("<svg");
     const donutSvgEnd = cacheDetailDialogSource.indexOf("</svg>", donutSvgStart);
