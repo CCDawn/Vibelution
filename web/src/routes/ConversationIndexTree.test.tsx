@@ -7,6 +7,7 @@ import type { ConversationSummary, SessionReferenceAttachment, SessionSummary, T
 import { ConversationIndexTree } from "./ConversationIndexTree";
 import { DEFAULT_COLLAPSED_CONVERSATION_GROUPS } from "./conversationIndexModel";
 import type { ConversationIndexGroup, ConversationIndexGroupKey } from "./conversationIndexModel";
+import styles from "./ConversationIndexTree.styles";
 
 function directConversation(overrides: Partial<ConversationSummary> = {}): ConversationSummary {
   return {
@@ -154,6 +155,20 @@ function renderTree(overrides: Partial<{
 }
 
 describe("ConversationIndexTree", () => {
+  it("exposes the whole conversation index as a labelled navigation region", () => {
+    const markup = renderTree({
+      collapsedConversationGroups: {
+        ...DEFAULT_COLLAPSED_CONVERSATION_GROUPS,
+        teams: false,
+        setupTeams: false,
+        standaloneGroups: false,
+      },
+    });
+
+    expect(markup).toContain('role="navigation"');
+    expect(markup).toContain('aria-label="对话索引"');
+  });
+
   it("renders direct, grouped room, team, and standalone group sections together", () => {
     const markup = renderTree({
       collapsedConversationGroups: {
@@ -231,5 +246,10 @@ describe("ConversationIndexTree", () => {
 
     expect(markup).toContain("sessionItemContextTarget");
     expect(markup).not.toContain("sessionItemActive");
+  });
+
+  it("keeps Team sections from becoming nested scroll surfaces", () => {
+    expect(styles.teamTreeGroup).toContain("overflow-hidden");
+    expect(styles.teamTreeGroup).not.toContain("overflow-auto");
   });
 });
