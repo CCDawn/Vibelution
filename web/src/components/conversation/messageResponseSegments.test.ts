@@ -45,6 +45,31 @@ describe("parseResponseSegments", () => {
     ]);
   });
 
+  it("keeps markdown document sections as answer content even when they mention validation", () => {
+    const segments = parseResponseSegments([
+      "**前端 Group 会话索引已经完成一轮审查。**",
+      "",
+      "## 建议下一步收束",
+      "",
+      "### 1. 只暂存这三个前端文件",
+      "",
+      "- `web/src/components/conversation/ConversationView.tsx`",
+      "- `web/src/components/conversation/messageResponseSegments.ts`",
+      "",
+      "验证命令建议如下：",
+      "",
+      "```bash",
+      "npm --prefix web run test -- ConversationView.test.tsx",
+      "```",
+    ].join("\n"));
+
+    expect(segments.map((segment) => segment.kind)).toEqual(["answer"]);
+    expect(segments[0].content).toContain("## 建议下一步收束");
+    expect(segments[0].content).toContain("### 1. 只暂存这三个前端文件");
+    expect(segments[0].content).toContain("验证命令建议如下");
+    expect(segments[0].content).toContain("```bash");
+  });
+
   it("recognizes file and log focused blocks without changing their text", () => {
     const segments = parseResponseSegments([
       "改动文件：",

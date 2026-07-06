@@ -36,6 +36,18 @@ export function parseResponseSegments(content: string): ResponseSegment[] {
   const segments: ResponseSegment[] = [];
   let pendingKind: ResponseSegmentKind | null = null;
 
+  function pushSegment(segment: Omit<ResponseSegment, "id">) {
+    const previous = segments[segments.length - 1];
+    if (previous && previous.kind === segment.kind && !previous.language && !segment.language) {
+      previous.content = `${previous.content}\n\n${segment.content}`;
+      return;
+    }
+    segments.push({
+      id: `segment-${segments.length}`,
+      ...segment,
+    });
+  }
+
   for (const block of blocks) {
     if (block.type === "text") {
       const labelKind = classifyStandaloneLabel(block.content);
@@ -44,8 +56,7 @@ export function parseResponseSegments(content: string): ResponseSegment[] {
         continue;
       }
       const kind = pendingKind ?? classifyTextBlock(block.content);
-      segments.push({
-        id: `segment-${segments.length}`,
+      pushSegment({
         kind,
         content: block.content,
       });
@@ -56,8 +67,12 @@ export function parseResponseSegments(content: string): ResponseSegment[] {
     const kind = pendingKind === "commit" || pendingKind === "verification" || pendingKind === "files" || pendingKind === "logs"
       ? pendingKind
       : "code";
-    segments.push({
-      id: `segment-${segments.length}`,
+    const previous = segments[segments.length - 1];
+    if (!pendingKind && previous?.kind === "answer" && !previous.language) {
+      previous.content = `${previous.content}\n\n${formatFencedCodeBlock(block)}`;
+      continue;
+    }
+    pushSegment({
       kind,
       content: block.content,
       language: block.language,
@@ -66,6 +81,11 @@ export function parseResponseSegments(content: string): ResponseSegment[] {
   }
 
   return segments;
+}
+
+function formatFencedCodeBlock(block: CodeBlock) {
+  const language = block.language && block.language !== "text" ? block.language : "";
+  return ["```" + language, block.content, "```"].join("\n");
 }
 
 function parseBlocks(content: string): ParsedBlock[] {
@@ -206,7 +226,7 @@ function looksLikeFileList(content: string) {
 function looksLikeLogOrSignal(content: string) {
   const lower = content.toLowerCase();
   return (
-    EVENT_CODE_RE.test(content)
+    looksLikeBareEventCode(content)
     || lower.includes("log")
     || lower.includes("telemetry")
     || lower.includes("runtime scene")
@@ -215,6 +235,11 @@ function looksLikeLogOrSignal(content: string) {
     || lower.includes("日志")
     || lower.includes("信号")
   );
+}
+
+function looksLikeBareEventCode(content: string) {
+  const normalized = content.trim().replace(/[`"'，。:：;；]+$/g, "");
+  return /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/i.test(normalized);
 }
 
 function looksLikeStatus(content: string) {
