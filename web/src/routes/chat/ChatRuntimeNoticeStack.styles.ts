@@ -1,6 +1,8 @@
 const styles = {
   stack:
     "min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)] p-2 shadow-none",
+  list:
+    "min-w-0 space-y-2",
   notice:
     "min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_54%,transparent)] p-2 shadow-none !grid grid-cols-[16px_minmax(0,1fr)] items-start gap-[7px]",
   body:
@@ -8,7 +10,7 @@ const styles = {
   label:
     "block text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   message:
-    "block text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    "block min-w-0 break-words text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
   toneError:
     "border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   toneInfo:
