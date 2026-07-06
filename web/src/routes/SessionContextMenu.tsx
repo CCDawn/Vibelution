@@ -45,6 +45,10 @@ type SessionContextMenuProps = {
   onRename: (session: SessionSummary) => void;
 };
 
+function sessionContextMenuIdPart(value: string): string {
+  return value.trim().replace(/[^a-zA-Z0-9_-]+/g, "-") || "session";
+}
+
 export function SessionContextMenu({
   addToReviewDisabled,
   addToReviewPending,
@@ -62,6 +66,19 @@ export function SessionContextMenu({
     ? undefined
     : { width: window.innerWidth, height: window.innerHeight };
   const style = sessionContextMenuStyle(position, viewport);
+  const idPart = sessionContextMenuIdPart(session.id);
+  const addToReviewTitle = addToReviewPending
+    ? t("addingSessionToReview")
+    : addToReviewDisabled
+      ? t("addSessionToReviewBusy")
+      : t("addSessionToReview");
+  const addToReviewDescriptionId = addToReviewDisabled
+    ? `session-context-menu-${idPart}-add-to-review-reason`
+    : undefined;
+  const deleteTitle = deleteDisabled ? t("deleteSessionBusy") : t("deleteSession");
+  const deleteDescriptionId = deleteDisabled
+    ? `session-context-menu-${idPart}-delete-reason`
+    : undefined;
 
   function stopPointerPropagation(event: PointerEvent<HTMLDivElement>) {
     event.stopPropagation();
@@ -73,22 +90,30 @@ export function SessionContextMenu({
       style={style}
       role="menu"
       aria-label={lang === "zh" ? "会话操作" : "Session actions"}
+      aria-busy={addToReviewPending ? true : undefined}
+      aria-orientation="vertical"
       onPointerDown={stopPointerPropagation}
     >
+      {addToReviewDescriptionId ? (
+        <span id={addToReviewDescriptionId} className="sr-only">
+          {addToReviewTitle}
+        </span>
+      ) : null}
+      {deleteDescriptionId ? (
+        <span id={deleteDescriptionId} className="sr-only">
+          {deleteTitle}
+        </span>
+      ) : null}
       <VButton
         type="button"
         role="menuitem"
         className={styles.sessionContextMenuItem}
         onPress={() => onAddToReview(session)}
         isDisabled={addToReviewDisabled}
+        aria-describedby={addToReviewDescriptionId}
+        aria-disabled={addToReviewDisabled ? true : undefined}
         icon={<BookPlus size={14} />}
-        title={
-          addToReviewPending
-            ? t("addingSessionToReview")
-            : addToReviewDisabled
-              ? t("addSessionToReviewBusy")
-              : t("addSessionToReview")
-        }
+        title={addToReviewTitle}
       >
         {addToReviewPending ? t("addingSessionToReview") : t("addSessionToReview")}
       </VButton>
@@ -120,8 +145,10 @@ export function SessionContextMenu({
         variant="danger"
         onPress={() => onDelete(session)}
         isDisabled={deleteDisabled}
+        aria-describedby={deleteDescriptionId}
+        aria-disabled={deleteDisabled ? true : undefined}
         icon={<Trash2 size={14} />}
-        title={deleteDisabled ? t("deleteSessionBusy") : t("deleteSession")}
+        title={deleteTitle}
       >
         {t("deleteSession")}
       </VButton>

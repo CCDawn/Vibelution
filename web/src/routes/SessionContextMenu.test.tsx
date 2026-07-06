@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { SessionSummary } from "../api/types";
-import routeStyles from "./ChatCodingRoute.styles";
+import sessionContextMenuStyles from "./SessionContextMenu.styles";
 import { SessionContextMenu, sessionContextMenuStyle } from "./SessionContextMenu";
 
 function t(key: string) {
@@ -57,7 +57,9 @@ describe("SessionContextMenu", () => {
 
     expect(markup).toContain("role=\"menu\"");
     expect(markup).toContain("aria-label=\"会话操作\"");
+    expect(markup).toContain("aria-orientation=\"vertical\"");
     expect(markup.match(/data-vui="button"/g)?.length).toBe(3);
+    expect(markup.match(/aria-hidden="true"/g)?.length).toBe(3);
     expect(markup).toContain("加入评审");
     expect(markup).toContain("重命名");
     expect(markup).toContain("移除会话记录");
@@ -103,6 +105,13 @@ describe("SessionContextMenu", () => {
 
     expect(markup).toContain("aria-label=\"Session actions\"");
     expect(markup).toContain("添加中");
+    expect(markup).toContain("aria-busy=\"true\"");
+    expect(markup.match(/aria-disabled="true"/g)?.length).toBe(2);
+    expect(markup).toContain("id=\"session-context-menu-session-1-add-to-review-reason\"");
+    expect(markup).toContain("aria-describedby=\"session-context-menu-session-1-add-to-review-reason\"");
+    expect(markup).toContain("id=\"session-context-menu-session-1-delete-reason\"");
+    expect(markup).toContain("aria-describedby=\"session-context-menu-session-1-delete-reason\"");
+    expect(markup.match(/class=\"sr-only\"/g)?.length).toBe(2);
     expect(markup).toContain("title=\"会话运行中，先停止后再删除\"");
     expect(markup.match(/disabled=""/g)?.length).toBe(2);
   });
@@ -119,17 +128,19 @@ describe("SessionContextMenu", () => {
   });
 
   it("renders as a floating overlay instead of a document-flow action block", () => {
-    expect(routeStyles.sessionContextMenu.split(/\s+/)).toContain("fixed");
-    expect(routeStyles.sessionContextMenu).toContain("z-[80]");
-    expect(routeStyles.sessionContextMenu).toContain("w-[188px]");
-    expect(routeStyles.sessionContextMenu).toContain("grid");
-    expect(routeStyles.sessionContextMenu).toContain("gap-1");
-    expect(routeStyles.sessionContextMenu).toContain("p-1");
-    expect(routeStyles.sessionContextMenu).toContain("shadow-[var(--vui-shadow-hairline)]");
-    expect(routeStyles.sessionContextMenuItem).toContain("!w-full");
-    expect(routeStyles.sessionContextMenuItem).toContain("justify-start");
-    expect(routeStyles.sessionContextMenuItem).toContain("text-left");
-    expect(routeStyles.sessionContextMenuDanger).toContain("text-[var(--state-error)]");
-    expect(routeStyles.sessionContextMenuDanger).not.toContain("text-[var(--accent-warm)]");
+    expect(sessionContextMenuStyles.sessionContextMenu.split(/\s+/)).toContain("fixed");
+    expect(sessionContextMenuStyles.sessionContextMenu).toContain("z-[80]");
+    expect(sessionContextMenuStyles.sessionContextMenu).toContain("w-[188px]");
+    expect(sessionContextMenuStyles.sessionContextMenu).toContain("grid");
+    expect(sessionContextMenuStyles.sessionContextMenu).toContain("gap-1");
+    expect(sessionContextMenuStyles.sessionContextMenu).toContain("p-1");
+    expect(sessionContextMenuStyles.sessionContextMenu).toContain("shadow-none");
+    expect(sessionContextMenuStyles.sessionContextMenuItem).toContain("!w-full");
+    expect(sessionContextMenuStyles.sessionContextMenuItem).toContain("justify-start");
+    expect(sessionContextMenuStyles.sessionContextMenuItem).toContain("text-left");
+    expect(sessionContextMenuStyles.sessionContextMenuItem).toContain("[&_[data-slot=vui-button-content]]:grid");
+    expect(sessionContextMenuStyles.sessionContextMenuItem).toContain("[&_[data-slot=vui-button-content]]:grid-cols-[auto_minmax(0,1fr)]");
+    expect(sessionContextMenuStyles.sessionContextMenuDanger).toContain("text-[var(--state-error)]");
+    expect(sessionContextMenuStyles.sessionContextMenuDanger).not.toContain("text-[var(--accent-warm)]");
   });
 });
