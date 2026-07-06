@@ -326,8 +326,9 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.summaryGrid).not.toContain("shadow-[var(--vui-shadow-hairline)]");
     expect(summaryGridTokens).not.toContain("p-2");
     expect(styles.summaryCard).toContain("rounded-[var(--radius-panel)]");
-    expect(styles.summaryCard).toContain("border border-[color-mix(in_srgb,var(--vui-border-subtle)_74%,transparent)]");
-    expect(styles.summaryCard).toContain("bg-[color-mix(in_srgb,var(--vui-surface-panel)_90%,white)]");
+    expect(styles.summaryCard).toContain("border border-[color-mix(in_srgb,var(--vui-border-strong)_68%,transparent)]");
+    expect(styles.summaryCard).toContain("bg-[var(--vui-surface-raised)]");
+    expect(styles.summaryCard).not.toContain("white)");
     expect(styles.summaryCard).toContain("shadow-none");
     expect(summaryCardTokens).toEqual(expect.arrayContaining(["flex", "flex-col", "gap-1"]));
     expect(summaryLabelTokens).not.toContain("border");
@@ -434,8 +435,9 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.userMessageBody).toContain("text-left");
 
     expect(styles.responseSection).toContain("w-[min(100%,860px)]");
-    expect(styles.responseSection).toContain("border border-[color-mix(in_srgb,var(--vui-border-subtle)_78%,transparent)]");
-    expect(styles.responseSection).toContain("bg-[color-mix(in_srgb,var(--vui-surface-panel)_92%,white)]");
+    expect(styles.responseSection).toContain("border border-[color-mix(in_srgb,var(--vui-border-strong)_76%,transparent)]");
+    expect(styles.responseSection).toContain("bg-[var(--vui-surface-chat-panel)]");
+    expect(styles.responseSection).not.toContain("white)");
     expect(styles.responseSection).toContain("px-3");
     expect(styles.responseSection).toContain("py-2.5");
     expect(styles.responseSection).toContain("shadow-none");
