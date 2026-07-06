@@ -1010,8 +1010,16 @@ const styles: Record<string, string> = {
     "vui-components-conversationview timelineHistoryGate min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   timelineOperationCell:
     "vui-components-conversationview timelineOperationCell min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  timelineOperationCell_pending:
+    "vui-components-conversationview timelineOperationCell_pending min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  timelineOperationCell_running:
+    "vui-components-conversationview timelineOperationCell_running min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-[var(--fg-secondary)]",
   timelineOperationCell_failed:
     "vui-components-conversationview timelineOperationCell_failed min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+  timelineOperationCell_success:
+    "vui-components-conversationview timelineOperationCell_success min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-[var(--state-success)]",
+  timelineOperationCell_warning:
+    "vui-components-conversationview timelineOperationCell_warning min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-[var(--state-warning)]",
   timelineOperationResult:
     "vui-components-conversationview timelineOperationResult min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   timelineThoughtCell:
