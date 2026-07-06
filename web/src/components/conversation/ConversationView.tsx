@@ -2702,9 +2702,13 @@ export function ConversationView({
             </div>
           ) : null}
           {composerAttachments.length ? (
-            <div className={styles.composerAttachmentTray} aria-label={lang === "zh" ? "待发送图片" : "Images to send"}>
+            <div
+              className={styles.composerAttachmentTray}
+              role="list"
+              aria-label={lang === "zh" ? "待发送图片" : "Images to send"}
+            >
               {composerAttachments.map((attachment) => (
-                <div key={attachment.id} className={styles.composerAttachmentChip}>
+                <div key={attachment.id} className={styles.composerAttachmentChip} role="listitem">
                   <img className={styles.composerAttachmentThumb} src={attachment.previewUrl} alt={attachment.filename} />
                   <span className={styles.composerAttachmentName} title={attachment.filename}>{attachment.filename}</span>
                   {onRemoveComposerAttachment ? (
@@ -2716,7 +2720,7 @@ export function ConversationView({
                       title={lang === "zh" ? "移除图片" : "Remove image"}
                       aria-label={lang === "zh" ? "移除图片" : "Remove image"}
                     >
-                      <X size={13} />
+                      <X size={13} aria-hidden="true" />
                     </VButton>
                   ) : null}
                 </div>
@@ -2724,13 +2728,17 @@ export function ConversationView({
             </div>
           ) : null}
           {composerReferences.length ? (
-            <div className={styles.composerReferenceTray} aria-label={lang === "zh" ? "待发送会话引用" : "Session references to send"}>
+            <div
+              className={styles.composerReferenceTray}
+              role="list"
+              aria-label={lang === "zh" ? "待发送会话引用" : "Session references to send"}
+            >
               {composerReferences.map((reference) => {
                 const referenceId = reference.referenceId || reference.sessionId;
                 const title = reference.title || reference.sessionId;
                 const agentLabel = reference.agentDisplayName || reference.agentCode || reference.agentId || "";
                 return (
-                  <div key={referenceId} className={styles.composerReferenceChip}>
+                  <div key={referenceId} className={styles.composerReferenceChip} role="listitem">
                     <span className={styles.composerReferenceIcon} aria-hidden="true">
                       <Link2 size={13} />
                     </span>
@@ -2745,7 +2753,7 @@ export function ConversationView({
                         title={lang === "zh" ? "移除会话引用" : "Remove session reference"}
                         aria-label={lang === "zh" ? "移除会话引用" : "Remove session reference"}
                       >
-                        <X size={13} />
+                        <X size={13} aria-hidden="true" />
                       </VButton>
                     ) : null}
                   </div>
