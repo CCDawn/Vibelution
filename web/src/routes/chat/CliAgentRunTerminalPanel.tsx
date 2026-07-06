@@ -557,10 +557,20 @@ export function CliAgentRunTerminalPanel({
             </VButton>
           ) : null}
         </div>
-        <div className={styles.cliAgentTerminalOutputShell}>
+        <div
+          className={styles.cliAgentTerminalOutputShell}
+          role="region"
+          aria-label={`${run.title} ${lang === "zh" ? "终端输出" : "terminal output"}`}
+        >
           <div ref={terminalElementRef} className={styles.cliAgentTerminalOutput} />
           {terminalError || terminalReadonly || !terminalHasOutput ? (
-            <div className={styles.cliAgentTerminalOverlay} data-tone={terminalError ? "error" : "muted"}>
+            <div
+              className={styles.cliAgentTerminalOverlay}
+              data-tone={terminalError ? "error" : "muted"}
+              role={terminalError ? "alert" : "status"}
+              aria-live={terminalError ? "assertive" : "polite"}
+              aria-atomic="true"
+            >
               {emptyText}
             </div>
           ) : null}
