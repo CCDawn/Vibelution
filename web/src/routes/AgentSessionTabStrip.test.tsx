@@ -99,17 +99,22 @@ function renderStrip(overrides: Partial<ComponentProps<typeof AgentSessionTabStr
 }
 
 describe("AgentSessionTabStrip", () => {
-  it("renders root and child sessions with model and child task labels", () => {
+  it("renders root and child sessions with model tooltip and child task labels", () => {
     const markup = renderStrip();
 
     expect(markup).toContain("Agent 会话");
     expect(markup).toContain("知识管理员");
     expect(markup).toContain("GPT 5.5");
+    expect(markup).not.toContain("idle · GPT 5.5</span>");
     expect(markup).toContain("子对话");
     expect(markup).toContain("接续分析");
     expect(markup).toContain("结果摘要");
     expect(markup).toContain("running");
     expect(markup).toContain("aria-current=\"true\"");
+    expect(markup).toContain("role=\"tablist\"");
+    expect(markup.match(/role="tab"/g)?.length).toBe(2);
+    expect(markup).toContain("aria-selected=\"true\"");
+    expect(markup).toContain("aria-selected=\"false\"");
   });
 
   it("renders the rename input for the edited session", () => {
@@ -147,10 +152,14 @@ describe("AgentSessionTabStrip", () => {
     expect(markup).not.toContain("CLI Agent");
     expect(markup).not.toContain("readonly");
     expect(markup).toContain("aria-current=\"true\"");
+    expect(markup).toContain("role=\"tablist\"");
+    expect(markup).toContain("role=\"tab\"");
+    expect(markup).toContain("aria-selected=\"true\"");
     expect(markup).toContain("agentSessionTabCli");
     expect(markup).toContain("agentSessionTabMainAction");
     expect(markup).toContain("agentSessionTabCloseButton");
     expect(markup).toContain("关闭终端页 Codex Code");
+    expect(markup).toContain("aria-hidden=\"true\"");
   });
 
   it("marks the tab targeted by the right-click context menu", () => {

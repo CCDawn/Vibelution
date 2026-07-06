@@ -81,7 +81,11 @@ export function AgentSessionTabStrip({
   }
 
   return (
-    <div className={styles.agentSessionTabGroup} aria-label={lang === "zh" ? "Agent 会话" : "Agent sessions"}>
+    <div
+      className={styles.agentSessionTabGroup}
+      role="tablist"
+      aria-label={lang === "zh" ? "Agent 会话" : "Agent sessions"}
+    >
       {sessions.map((session) => {
         const sessionIsChild = isChildSession(session);
         const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
@@ -111,9 +115,11 @@ export function AgentSessionTabStrip({
             <div
               key={session.id}
               className={tabClassName}
+              role="tab"
+              aria-selected={tabActive}
               aria-current={tabActive ? "true" : undefined}
               onContextMenu={(event) => onContextMenu(event, session)}
-              title={[sessionTitle, sessionSummary].filter(Boolean).join(" · ")}
+              title={[sessionTitle, sessionSummary, sessionDisplay.modelLabel].filter(Boolean).join(" · ")}
             >
               <span className={styles.agentSessionTabIcon} aria-hidden="true">
                 {sessionIsChild ? <MessageCircleHeart size={14} /> : <Bot size={14} />}
@@ -166,46 +172,52 @@ export function AgentSessionTabStrip({
         }
         const dragReferenceProps = {
           draggable: true,
-          onDragStart: (event: DragEvent<HTMLButtonElement>) =>
+          onDragStart: (event: DragEvent<HTMLDivElement>) =>
             onDragReference(
               event,
               buildSessionReferencePayload(session, sessionDisplay.name, sessionSummary),
             ),
         };
         return (
-          <VButton
+          <div
             key={session.id}
-            type="button"
             className={tabClassName}
+            role="tab"
+            aria-selected={tabActive}
             aria-current={tabActive ? "true" : undefined}
             {...dragReferenceProps}
             onContextMenu={(event) => onContextMenu(event, session)}
-            onPress={() => {
-              if (activeSessionId === session.id) {
-                onSetActiveTab(session.id, "agent");
-                return;
-              }
-              onOpenDirectSession(session.id);
-            }}
-            title={[sessionTitle, sessionSummary].filter(Boolean).join(" · ")}
+            title={[sessionTitle, sessionSummary, sessionDisplay.modelLabel].filter(Boolean).join(" · ")}
           >
-            <span className={styles.agentSessionTabIcon} aria-hidden="true">
-              {sessionIsChild ? <MessageCircleHeart size={14} /> : <Bot size={14} />}
-            </span>
-            <span className={styles.agentSessionTabCopy}>
-              <span className={styles.agentSessionTabKicker}>
-                {sessionIsChild ? (lang === "zh" ? "子对话" : "Child") : t("agentSession")}
-              </span>
-              <span className={styles.agentSessionTabTitle}>{sessionTitle}</span>
-            </span>
-            <span
-              className={styles.agentSessionTabMeta}
-              title={[statusLabel(sessionStatus), sessionDisplay.modelLabel].filter(Boolean).join(" · ")}
+            <VButton
+              type="button"
+              className={styles.agentSessionTabMainAction}
+              onPress={() => {
+                if (activeSessionId === session.id) {
+                  onSetActiveTab(session.id, "agent");
+                  return;
+                }
+                onOpenDirectSession(session.id);
+              }}
+              title={[sessionTitle, sessionSummary, sessionDisplay.modelLabel].filter(Boolean).join(" · ")}
             >
-              {statusLabel(sessionStatus)}
-              {sessionDisplay.modelLabel ? ` · ${sessionDisplay.modelLabel}` : ""}
-            </span>
-          </VButton>
+              <span className={styles.agentSessionTabIcon} aria-hidden="true">
+                {sessionIsChild ? <MessageCircleHeart size={14} /> : <Bot size={14} />}
+              </span>
+              <span className={styles.agentSessionTabCopy}>
+                <span className={styles.agentSessionTabKicker}>
+                  {sessionIsChild ? (lang === "zh" ? "子对话" : "Child") : t("agentSession")}
+                </span>
+                <span className={styles.agentSessionTabTitle}>{sessionTitle}</span>
+              </span>
+              <span
+                className={styles.agentSessionTabMeta}
+                title={[statusLabel(sessionStatus), sessionDisplay.modelLabel].filter(Boolean).join(" · ")}
+              >
+                {statusLabel(sessionStatus)}
+              </span>
+            </VButton>
+          </div>
         );
       })}
       {cliAgentRuns.map((run) => {
@@ -220,6 +232,8 @@ export function AgentSessionTabStrip({
           <div
             key={run.id}
             className={`${tabClassName} ${styles.agentSessionTabClosable}`}
+            role="tab"
+            aria-selected={tabActive}
             aria-current={tabActive ? "true" : undefined}
             title={title}
           >

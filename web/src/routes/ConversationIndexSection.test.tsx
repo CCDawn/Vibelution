@@ -18,6 +18,9 @@ describe("ConversationIndexSection", () => {
     );
 
     expect(markup).toContain("aria-expanded=\"true\"");
+    expect(markup).toContain("aria-controls=");
+    expect(markup).toContain("aria-labelledby=");
+    expect(markup).toContain('role="group"');
     expect(markup).toContain('data-vui="native-button"');
     expect(markup).not.toContain('data-vui="button"');
     expect(markup).toContain("用户会话");
@@ -38,6 +41,8 @@ describe("ConversationIndexSection", () => {
     );
 
     expect(markup).toContain("aria-expanded=\"false\"");
+    expect(markup).toContain("aria-controls=");
+    expect(markup).not.toContain('role="group"');
     expect(markup).toContain("团队");
     expect(markup).not.toContain("隐藏内容");
   });
