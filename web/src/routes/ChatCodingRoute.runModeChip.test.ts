@@ -22,8 +22,9 @@ describe("ChatCodingRoute run mode chip visual contract", () => {
     expect(styles.featureChip).toContain("[&_[data-slot=vui-button-label]]:min-w-0");
     expect(styles.featureChip).toContain("[&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto]");
     expect(styles.featureChip).toContain("[&_em]:shrink-0");
-    expect(styles.featureChip).toContain("[&_strong]:truncate");
-    expect(styles.featureChip).toContain("[&_strong]:whitespace-nowrap");
-    expect(styles.featureChip).not.toContain("overflow-wrap:anywhere");
+    expect(styles.featureChip).toContain("[&_strong]:whitespace-normal");
+    expect(styles.featureChip).toContain("[&_strong]:[overflow-wrap:anywhere]");
+    expect(styles.featureChip).not.toContain("[&_strong]:truncate");
+    expect(styles.featureChip).not.toContain("[&_strong]:whitespace-nowrap");
   });
 });
