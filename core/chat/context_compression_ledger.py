@@ -14,6 +14,7 @@ from typing import Any, Iterable
 
 from .turn_journal import (
     EVENT_COMPACTION_CHECKPOINT,
+    EVENT_COMPRESSION_ATTEMPT,
     TurnJournalEvent,
     append_turn_event,
     load_turn_events,
@@ -134,6 +135,63 @@ def append_context_compression_checkpoint(
     )
 
 
+def append_context_compression_attempt(
+    project_root: Path,
+    session_id: str,
+    *,
+    turn_id: str = "",
+    status: str,
+    summary: str = "",
+    level: str = "",
+    reason: str = "",
+    before_tokens: int = 0,
+    after_tokens: int = 0,
+    trigger_source: str = "",
+    effectiveness_threshold: float = 0.0,
+    effectiveness_ratio: float = 0.0,
+    error_type: str = "",
+    source: str = "agent_context_compression",
+) -> TurnJournalEvent | None:
+    """Append a non-covering compression attempt marker."""
+
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return None
+    normalized_status = str(status or "").strip() or "skipped_low_savings"
+    summary_text = str(summary or "").strip()
+    before = max(0, int(before_tokens or 0))
+    after = max(0, int(after_tokens or 0))
+    payload = {
+        "summary": summary_text,
+        "summaryHash": _short_hash(summary_text),
+        "summaryWritten": bool(summary_text),
+        "level": str(level or "").strip(),
+        "reason": str(reason or "").strip(),
+        "triggerSource": str(trigger_source or "").strip(),
+        "beforeTokens": before,
+        "afterTokens": after,
+        "savedTokens": max(0, before - after),
+        "effectivenessThreshold": max(0.0, float(effectiveness_threshold or 0.0)),
+        "effectivenessRatio": max(0.0, float(effectiveness_ratio or 0.0)),
+        "effective": False,
+        "markerStatus": normalized_status,
+        "errorType": str(error_type or "").strip(),
+        "schema": "context_compression_attempt.v1",
+    }
+    return append_turn_event(
+        Path(project_root),
+        normalized_session_id,
+        str(turn_id or "context-compression-attempt").strip(),
+        EVENT_COMPRESSION_ATTEMPT,
+        status=normalized_status,
+        payload=payload,
+        source=source,
+        visible_in_model=False,
+        projection_kind="context_compression_marker",
+        source_kind="context_compression",
+    )
+
+
 def apply_context_compression_checkpoints(
     events: Iterable[TurnJournalEvent],
     *,
@@ -246,6 +304,7 @@ def _short_hash(value: str) -> str:
 
 __all__ = [
     "append_context_compression_checkpoint",
+    "append_context_compression_attempt",
     "apply_context_compression_checkpoints",
     "build_context_compression_checkpoint_payload",
     "context_compression_projection",

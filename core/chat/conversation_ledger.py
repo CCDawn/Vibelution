@@ -24,6 +24,7 @@ from .turn_journal import (
     EVENT_CLI_TASK_RESULT,
     EVENT_CLI_TASK_SENT,
     EVENT_COMPACTION_CHECKPOINT,
+    EVENT_COMPRESSION_ATTEMPT,
     EVENT_TOOL_CALL_STARTED,
     EVENT_TOOL_RESULT,
     EVENT_TURN_COMPLETED,
@@ -50,6 +51,7 @@ from .turn_journal import (
 )
 from .context_compression_ledger import (
     append_context_compression_checkpoint,
+    append_context_compression_attempt,
     apply_context_compression_checkpoints,
     context_compression_projection,
     latest_context_compression_checkpoint,
@@ -195,6 +197,7 @@ __all__ = [
     "EVENT_CLI_TASK_RESULT",
     "EVENT_CLI_TASK_SENT",
     "EVENT_COMPACTION_CHECKPOINT",
+    "EVENT_COMPRESSION_ATTEMPT",
     "EVENT_TOOL_CALL_STARTED",
     "EVENT_TOOL_RESULT",
     "EVENT_TURN_COMPLETED",
@@ -208,6 +211,7 @@ __all__ = [
     "VOLATILE_MODEL_EVENT_TYPES",
     "append_conversation_event",
     "append_context_compression_checkpoint",
+    "append_context_compression_attempt",
     "apply_context_compression_checkpoints",
     "conversation_ledger_path",
     "conversation_model_messages_from_events",

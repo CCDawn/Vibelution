@@ -1502,26 +1502,45 @@ class SelfEvolvingAgent:
                 pass
             if session_id and self._get_mode_policy().mode == AgentMode.CHAT:
                 try:
-                    from core.chat.conversation_ledger import append_context_compression_checkpoint
-
-                    event = append_context_compression_checkpoint(
-                        Path(self.project_root),
-                        session_id,
-                        turn_id=turn_id or "context-compression",
-                        current_turn_id=turn_id,
-                        summary=summary,
-                        level=level.value,
-                        reason=combined_reason,
-                        before_tokens=current_tokens,
-                        after_tokens=after_tokens,
-                        iteration=iteration,
-                        trigger_source=_context_compression_trigger_source(combined_reason),
-                        effectiveness_threshold=effectiveness_threshold,
-                        effectiveness_ratio=effectiveness_ratio,
-                        effective=compression_effective,
-                        source_message_count=len(messages),
-                        tool_result_replacement_state=tool_result_replacement_state,
+                    from core.chat.conversation_ledger import (
+                        append_context_compression_attempt,
+                        append_context_compression_checkpoint,
                     )
+
+                    if compression_effective:
+                        event = append_context_compression_checkpoint(
+                            Path(self.project_root),
+                            session_id,
+                            turn_id=turn_id or "context-compression",
+                            current_turn_id=turn_id,
+                            summary=summary,
+                            level=level.value,
+                            reason=combined_reason,
+                            before_tokens=current_tokens,
+                            after_tokens=after_tokens,
+                            iteration=iteration,
+                            trigger_source=_context_compression_trigger_source(combined_reason),
+                            effectiveness_threshold=effectiveness_threshold,
+                            effectiveness_ratio=effectiveness_ratio,
+                            effective=True,
+                            source_message_count=len(messages),
+                            tool_result_replacement_state=tool_result_replacement_state,
+                        )
+                    else:
+                        event = append_context_compression_attempt(
+                            Path(self.project_root),
+                            session_id,
+                            turn_id=turn_id or "context-compression-attempt",
+                            status="skipped_low_savings",
+                            summary=summary,
+                            level=level.value,
+                            reason=combined_reason,
+                            before_tokens=current_tokens,
+                            after_tokens=after_tokens,
+                            trigger_source=_context_compression_trigger_source(combined_reason),
+                            effectiveness_threshold=effectiveness_threshold,
+                            effectiveness_ratio=effectiveness_ratio,
+                        )
                     ledger_checkpoint_written = event is not None
                     summary_written = ledger_checkpoint_written
                 except Exception as exc:
@@ -1536,6 +1555,28 @@ class SelfEvolvingAgent:
                             "errorType": type(exc).__name__,
                         },
                     )
+                    try:
+                        from core.chat.conversation_ledger import append_context_compression_attempt
+
+                        event = append_context_compression_attempt(
+                            Path(self.project_root),
+                            session_id,
+                            turn_id=turn_id or "context-compression-attempt",
+                            status="failed_preserved",
+                            summary="",
+                            level=level.value,
+                            reason=combined_reason,
+                            before_tokens=current_tokens,
+                            after_tokens=current_tokens,
+                            trigger_source=_context_compression_trigger_source(combined_reason),
+                            effectiveness_threshold=effectiveness_threshold,
+                            effectiveness_ratio=effectiveness_ratio,
+                            error_type=type(exc).__name__,
+                        )
+                        ledger_checkpoint_written = event is not None
+                        summary_written = ledger_checkpoint_written
+                    except Exception:
+                        pass
             try:
                 if not ledger_checkpoint_written:
                     self.prompt_manager.update_state_memory(

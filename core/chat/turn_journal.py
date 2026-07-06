@@ -33,6 +33,7 @@ EVENT_TURN_COMPLETED = "turn_completed"
 EVENT_TURN_FAILED = "turn_failed"
 EVENT_TURN_INTERRUPTED = "turn_interrupted"
 EVENT_COMPACTION_CHECKPOINT = "compaction_checkpoint"
+EVENT_COMPRESSION_ATTEMPT = "context_compression_attempt"
 
 TERMINAL_EVENTS = {
     EVENT_TURN_COMPLETED,
@@ -377,9 +378,13 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
     }
 
     for event in event_list:
-        if not event.visible_in_model:
+        if not event.visible_in_model and event.event_type != EVENT_COMPRESSION_ATTEMPT:
             continue
-        if not event_has_model_projection(event) and event.event_type not in TERMINAL_EVENTS:
+        if (
+            not event_has_model_projection(event)
+            and event.event_type not in TERMINAL_EVENTS
+            and event.event_type != EVENT_COMPRESSION_ATTEMPT
+        ):
             continue
         turn_id = str(event.turn_id or "").strip()
         payload = dict(event.payload or {})
@@ -429,7 +434,7 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
             if _message_has_visible_payload(message):
                 messages.append(message)
                 final_turn_ids.add(turn_id)
-        elif event.event_type == EVENT_COMPACTION_CHECKPOINT:
+        elif event.event_type in {EVENT_COMPACTION_CHECKPOINT, EVENT_COMPRESSION_ATTEMPT}:
             checkpoint_message = _checkpoint_message_from_event(event)
             if _message_has_visible_payload(checkpoint_message):
                 messages.append(checkpoint_message)
@@ -703,8 +708,19 @@ def _context_compression_marker_metadata(
     summary = str(payload.get("summary") or payload.get("content") or "").strip()
     summary_written = bool(payload.get("summaryWritten", bool(summary)))
     effective = bool(payload.get("effective", True))
-    status = "applied" if effective and summary_written else "skipped_low_savings"
-    title = "上下文已压缩" if status == "applied" else "压缩未应用 · 收益不足"
+    raw_status = str(payload.get("markerStatus") or event.status or "").strip()
+    if raw_status in {"skipped_low_savings", "failed_preserved"}:
+        status = raw_status
+    elif effective and summary_written:
+        status = "applied"
+    else:
+        status = "skipped_low_savings"
+    title_by_status = {
+        "applied": "上下文已压缩",
+        "skipped_low_savings": "压缩未应用 · 收益不足",
+        "failed_preserved": "压缩失败 · 已保留原上下文",
+    }
+    title = title_by_status.get(status, "压缩未应用 · 收益不足")
     before_tokens = _safe_int(payload.get("beforeTokens"))
     after_tokens = _safe_int(payload.get("afterTokens"))
     saved_tokens = _safe_int(payload.get("savedTokens"))
@@ -742,6 +758,9 @@ def _context_compression_marker_metadata(
         metadata["coveredEventSeqStart"] = _safe_int(payload.get("coveredEventSeqStart"))
     if "coveredEventSeqEnd" in payload:
         metadata["coveredEventSeqEnd"] = _safe_int(payload.get("coveredEventSeqEnd"))
+    error_type = str(payload.get("errorType") or "").strip()
+    if error_type:
+        metadata["errorType"] = error_type
     return metadata
 
 def _checkpoint_model_message_from_event(event: TurnJournalEvent | None) -> dict[str, Any]:
@@ -1038,6 +1057,7 @@ __all__ = [
     "EVENT_CLI_TASK_SENT",
     "EVENT_CLI_TASK_RESULT",
     "EVENT_COMPACTION_CHECKPOINT",
+    "EVENT_COMPRESSION_ATTEMPT",
     "MODEL_VISIBLE_EVENT_TYPES",
     "EVENT_TOOL_CALL_STARTED",
     "EVENT_TOOL_RESULT",
