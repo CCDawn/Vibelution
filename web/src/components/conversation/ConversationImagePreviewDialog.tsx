@@ -24,18 +24,29 @@ export function ConversationImagePreviewDialog({
 }: ConversationImagePreviewDialogProps) {
   const downloadLabel = lang === "zh" ? "下载图片" : "Download image";
   const closeLabel = lang === "zh" ? "关闭预览" : "Close preview";
+  const titleId = "conversation-image-preview-title";
+  const handleOverlayKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      onClose();
+    }
+  };
 
   return (
     <div
       className={styles.imagePreviewOverlay}
       role="dialog"
       aria-modal="true"
-      aria-label={image.alt}
+      aria-labelledby={titleId}
+      tabIndex={-1}
       onClick={onClose}
+      onKeyDown={handleOverlayKeyDown}
     >
       <div className={styles.imagePreviewDialog} onClick={(event) => event.stopPropagation()}>
         <div className={styles.imagePreviewToolbar}>
-          <span title={image.alt}>{image.alt}</span>
+          <span id={titleId} className={styles.imagePreviewTitle} title={image.alt}>
+            {image.alt}
+          </span>
           <div className={styles.imagePreviewActions}>
             <a
               className={styles.imageDownloadButton}
@@ -44,7 +55,7 @@ export function ConversationImagePreviewDialog({
               title={downloadLabel}
               aria-label={downloadLabel}
             >
-              <Download size={15} />
+              <Download size={15} aria-hidden="true" />
             </a>
             <VButton
               type="button"
@@ -52,8 +63,9 @@ export function ConversationImagePreviewDialog({
               onClick={onClose}
               title={closeLabel}
               aria-label={closeLabel}
+              autoFocus
             >
-              <X size={16} />
+              <X size={16} aria-hidden="true" />
             </VButton>
           </div>
         </div>
