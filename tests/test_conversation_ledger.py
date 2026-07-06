@@ -384,3 +384,87 @@ def test_context_compression_marker_metadata_does_not_enter_model_messages(tmp_p
     assert "context_compression_marker" not in serialized
     assert "上下文已压缩" not in serialized
     assert "历史检查点" not in serialized
+
+
+def test_context_compression_low_savings_marker_does_not_cover_history(tmp_path):
+    append_conversation_event(
+        tmp_path,
+        "session-low-savings",
+        "turn-old",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "低收益时仍保留的旧上下文"},
+    )
+    from core.chat.conversation_ledger import append_context_compression_attempt
+
+    append_context_compression_attempt(
+        tmp_path,
+        "session-low-savings",
+        turn_id="turn-current",
+        status="skipped_low_savings",
+        summary="压缩摘要收益不足。",
+        level="standard",
+        reason="context_pressure",
+        before_tokens=10000,
+        after_tokens=9800,
+        trigger_source="automatic_threshold",
+        effectiveness_threshold=0.3,
+        effectiveness_ratio=0.02,
+    )
+
+    projection = project_conversation_ledger(
+        load_conversation_events(tmp_path, "session-low-savings"),
+        include_model_messages=True,
+        include_visible_messages=True,
+    )
+    marker = next(
+        message for message in projection.visible_messages
+        if message.get("metadata", {}).get("kind") == "context_compression_marker"
+    )
+    model_text = "\n".join(str(message.get("content") or "") for message in projection.model_messages)
+
+    assert marker["metadata"]["status"] == "skipped_low_savings"
+    assert marker["metadata"]["title"] == "压缩未应用 · 收益不足"
+    assert "低收益时仍保留的旧上下文" in model_text
+
+
+def test_context_compression_failure_marker_preserves_model_history(tmp_path):
+    append_conversation_event(
+        tmp_path,
+        "session-failed-compression",
+        "turn-old",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "失败时仍保留的旧上下文"},
+    )
+    from core.chat.conversation_ledger import append_context_compression_attempt
+
+    append_context_compression_attempt(
+        tmp_path,
+        "session-failed-compression",
+        turn_id="turn-current",
+        status="failed_preserved",
+        summary="",
+        level="standard",
+        reason="compressor_error",
+        before_tokens=10000,
+        after_tokens=10000,
+        trigger_source="provider_context_length",
+        error_type="RuntimeError",
+    )
+
+    projection = project_conversation_ledger(
+        load_conversation_events(tmp_path, "session-failed-compression"),
+        include_model_messages=True,
+        include_visible_messages=True,
+    )
+    marker = next(
+        message for message in projection.visible_messages
+        if message.get("metadata", {}).get("kind") == "context_compression_marker"
+    )
+    model_text = "\n".join(str(message.get("content") or "") for message in projection.model_messages)
+
+    assert marker["metadata"]["status"] == "failed_preserved"
+    assert marker["metadata"]["title"] == "压缩失败 · 已保留原上下文"
+    assert marker["metadata"]["errorType"] == "RuntimeError"
+    assert "失败时仍保留的旧上下文" in model_text
