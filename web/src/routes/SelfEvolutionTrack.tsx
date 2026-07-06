@@ -1528,79 +1528,81 @@ export function SelfEvolutionTrack({
 
   return (
     <div className={styles.pageStack}>
-      <div className={styles.pageTabsRow}>
-        <section className={styles.runActionBar} aria-label={lang === "zh" ? "自进化当前运行" : "Current self-evolution run"}>
-          <div className={styles.runActionMain}>
-            <span className={styles.statusIcon}><Activity size={17} /></span>
-            <div className={styles.runActionText}>
-              <div className={styles.runActionMeta}>
-                <span className={styles.secondaryPill}>{activeModeLabel}</span>
-                <span className={styles.statusPill}>{activeStatusLabel}</span>
-                <span className={styles.secondaryPill}>
-                  {lang === "zh" ? `事务 ${transactionItems.length}` : `Transactions ${transactionItems.length}`}
-                </span>
+      <div className={styles.trackShell}>
+        <div className={styles.pageTabsRow}>
+          <section className={styles.runActionBar} aria-label={lang === "zh" ? "自进化当前运行" : "Current self-evolution run"}>
+            <div className={styles.runActionMain}>
+              <span className={styles.statusIcon}><Activity size={17} /></span>
+              <div className={styles.runActionText}>
+                <div className={styles.runActionMeta}>
+                  <span className={styles.secondaryPill}>{activeModeLabel}</span>
+                  <span className={styles.statusPill}>{activeStatusLabel}</span>
+                  <span className={styles.secondaryPill}>
+                    {lang === "zh" ? `事务 ${transactionItems.length}` : `Transactions ${transactionItems.length}`}
+                  </span>
+                </div>
+                <strong>{activeSummary}</strong>
+                <span>{activeNextAction}</span>
               </div>
-              <strong>{activeSummary}</strong>
-              <span>{activeNextAction}</span>
             </div>
+            <div className={styles.runActionCluster}>
+              {showTopTerminateAction ? (
+                <VButton
+                  type="button"
+                  className={styles.dangerAction}
+                  isDisabled={topTerminateDisabled}
+                  title={topTerminateReason || undefined}
+                  onClick={() => {
+                    if (observationTerminateVisible && observationRun?.runId) {
+                      onTerminateObservation(observationRun.runId);
+                      return;
+                    }
+                    if (worktreeRun) {
+                      onWorktreeAction(worktreeRun.runId, "terminate");
+                    }
+                  }}
+                >
+                  {(observationActionPending || worktreeActionPending) ? <LoaderCircle size={15} className={styles.spinning} /> : <X size={15} />}
+                  {terminateRequested ? t("selfStopRequested") : t("stopSelfRun")}
+                </VButton>
+              ) : !observationRunModeActive ? (
+                <VButton
+                  type="button"
+                  className={styles.primaryAction}
+                  isDisabled={runLocked || worktreeRunLocked || startPending || !startSelfAction?.enabled}
+                  title={disabledReason(startSelfAction) || undefined}
+                  onClick={onStartRun}
+                >
+                  {startPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ArrowUpRight size={15} />}
+                  {t("startSelfWorktreeRun")}
+                </VButton>
+              ) : null}
+            </div>
+          </section>
+          <div className={styles.segmentedTabs}>
+            <VButton
+              type="button"
+              className={activePage === "workspace" ? `${styles.tabButton} ${styles.tabButtonActive}` : styles.tabButton}
+              onClick={() => setActivePage("workspace")}
+            >
+              {t("selfWorkspacePage")}
+            </VButton>
+            <VButton
+              type="button"
+              className={activePage === "status" ? `${styles.tabButton} ${styles.tabButtonActive}` : styles.tabButton}
+              onClick={() => setActivePage("status")}
+            >
+              {t("selfStatusPage")}
+            </VButton>
           </div>
-          <div className={styles.runActionCluster}>
-            {showTopTerminateAction ? (
-              <VButton
-                type="button"
-                className={styles.dangerAction}
-                isDisabled={topTerminateDisabled}
-                title={topTerminateReason || undefined}
-                onClick={() => {
-                  if (observationTerminateVisible && observationRun?.runId) {
-                    onTerminateObservation(observationRun.runId);
-                    return;
-                  }
-                  if (worktreeRun) {
-                    onWorktreeAction(worktreeRun.runId, "terminate");
-                  }
-                }}
-              >
-                {(observationActionPending || worktreeActionPending) ? <LoaderCircle size={15} className={styles.spinning} /> : <X size={15} />}
-                {terminateRequested ? t("selfStopRequested") : t("stopSelfRun")}
-              </VButton>
-            ) : !observationRunModeActive ? (
-              <VButton
-                type="button"
-                className={styles.primaryAction}
-                isDisabled={runLocked || worktreeRunLocked || startPending || !startSelfAction?.enabled}
-                title={disabledReason(startSelfAction) || undefined}
-                onClick={onStartRun}
-              >
-                {startPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ArrowUpRight size={15} />}
-                {t("startSelfWorktreeRun")}
-              </VButton>
-            ) : null}
-          </div>
-        </section>
-        <div className={styles.segmentedTabs}>
-          <VButton
-            type="button"
-            className={activePage === "workspace" ? `${styles.tabButton} ${styles.tabButtonActive}` : styles.tabButton}
-            onClick={() => setActivePage("workspace")}
-          >
-            {t("selfWorkspacePage")}
-          </VButton>
-          <VButton
-            type="button"
-            className={activePage === "status" ? `${styles.tabButton} ${styles.tabButtonActive}` : styles.tabButton}
-            onClick={() => setActivePage("status")}
-          >
-            {t("selfStatusPage")}
-          </VButton>
         </div>
-      </div>
 
-      {activePage === "workspace" ? (
-        <div
-          className={styles.workspaceLayout}
-          style={workspaceLayoutStyle(sidebarCollapsed, sidebarWidth)}
-        >
+        <div className={styles.trackBody}>
+          {activePage === "workspace" ? (
+            <div
+              className={styles.workspaceLayout}
+              style={workspaceLayoutStyle(sidebarCollapsed, sidebarWidth)}
+            >
           <aside
             className={
               sidebarCollapsed
@@ -1881,11 +1883,11 @@ export function SelfEvolutionTrack({
               </>
             )}
           </main>
-        </div>
-      ) : observationRunModeActive ? (
-        renderObservationStatusSurface()
-      ) : (
-        <div className={styles.statusPage}>
+            </div>
+          ) : observationRunModeActive ? (
+            renderObservationStatusSurface()
+          ) : (
+            <div className={styles.statusPage}>
           <div className={styles.panelStack}>
             <div className={styles.metricStrip}>
               <article className={styles.stripItem}>
@@ -2373,8 +2375,10 @@ export function SelfEvolutionTrack({
               </section>
             </div>
           </div>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

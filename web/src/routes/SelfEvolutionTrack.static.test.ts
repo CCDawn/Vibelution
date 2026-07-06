@@ -27,11 +27,18 @@ const expectBackgroundAware = (className: string) => {
 
   expect(tokens.length).toBeGreaterThan(0);
   expect(tokens.some((token) =>
-    (token.includes("color-mix") && token.includes("transparent")) || token.includes("bg-vui-surface"),
+    token.includes("color-mix") || token.includes("bg-vui-surface"),
   )).toBe(true);
   expect(className).not.toContain("bg-[var(--surface-card)]");
   expect(className).not.toContain("bg-[var(--surface-panel)]");
   expect(className).not.toContain("shadow-[0_12px");
+};
+
+const expectOpaqueWorkbenchSurface = (className: string) => {
+  expectBackgroundAware(className);
+  expect(className).not.toContain("_72%,transparent");
+  expect(className).not.toContain("_74%,transparent");
+  expect(className).not.toContain("/72");
 };
 
 function transaction(overrides: Partial<SelfEvolutionTransaction> & { txnId: string }): SelfEvolutionTransaction {
@@ -108,15 +115,21 @@ describe("SelfEvolutionTrack static assets", () => {
 
   it("propagates full-height constraints from the parent route into the conversation workspace", () => {
     expect(selfEvolutionStylesSource).toContain("pageStack:");
+    expect(selfEvolutionStylesSource).toContain("trackShell:");
+    expect(selfEvolutionStylesSource).toContain("trackBody:");
     expect(selfEvolutionStylesSource).toContain("workspaceLayout:");
     expect(selfEvolutionStylesSource).toContain("conversationShell:");
     expect(selfEvolutionStylesSource).toContain("centerColumnObservation:");
     expect(selfEvolutionStylesSource).toContain("max-h-full");
+    expect(styles.trackShell).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(selfEvolutionStylesSource).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(selfEvolutionStylesSource).toContain("grid-rows-[minmax(0,1fr)]");
   });
 
   it("surfaces the active run controls before the workspace columns", () => {
+    expect(selfEvolutionSource.indexOf("styles.trackShell")).toBeLessThan(selfEvolutionSource.indexOf("styles.pageTabsRow"));
+    expect(selfEvolutionSource.indexOf("styles.pageTabsRow")).toBeLessThan(selfEvolutionSource.indexOf("styles.trackBody"));
+    expect(selfEvolutionSource.indexOf("styles.trackBody")).toBeLessThan(selfEvolutionSource.indexOf("styles.workspaceLayout"));
     expect(selfEvolutionSource).toContain("styles.runActionBar");
     expect(selfEvolutionSource).toContain("styles.runActionCluster");
     expect(selfEvolutionSource).toContain("showTopTerminateAction");
@@ -357,16 +370,22 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).not.toContain("style={{");
   });
 
-  it("keeps self-evolution route chrome background-aware and shadowless", () => {
+  it("keeps self-evolution route chrome inside a single opaque workbench shell", () => {
+    expect(styles.trackShell).toContain("bg-[color-mix(in_srgb,var(--vui-surface-panel)_96%,var(--vui-surface-base))]");
+    expect(styles.trackShell).toContain("border border-vui-border-subtle");
+    expect(styles.pageTabsRow).toContain("border-b border-vui-border-subtle");
+    expect(styles.runActionBar).not.toContain("border border-vui-border-subtle");
+    expect(styles.runActionBar).not.toContain("bg-vui-surface-panel");
+
     [
-      styles.runActionBar,
+      styles.trackShell,
       styles.observationEvidenceRail,
       styles.surface,
       styles.observationPanel,
       styles.approvalPanel,
       styles.subsurface,
       styles.petCompanionSurface,
-    ].forEach(expectBackgroundAware);
+    ].forEach(expectOpaqueWorkbenchSurface);
   });
 
   it("keeps repeated self-evolution panels and rows lighter than card walls", () => {
