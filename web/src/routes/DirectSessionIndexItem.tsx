@@ -1,4 +1,4 @@
-import { Bot, Check, Clock3, Cpu, LoaderCircle, MessageCircle, X } from "lucide-react";
+import { Bot, Check, Clock3, LoaderCircle, MessageCircle, X } from "lucide-react";
 import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
 
 import type { AgentInstance, SessionSummary } from "../api/types";
@@ -273,7 +273,6 @@ export function DirectSessionIndexItem({
   const sessionStatus = sessionStatusValue(session);
   const sessionAgentMeta = sessionAgentMetaLabel(session);
   const sessionFunctionVisible = showSessionFunctionLabel(sessionDisplay, lang);
-  const sessionModelLabel = sessionModelBadgeLabel(sessionDisplay.modelLabel);
   const sessionModelTitle = sessionModelTooltip(sessionDisplay.modelLabel, lang);
   const sessionSummaryVisible = showSessionSummaryInline(sessionSummary, lang, sessionIsChild);
   const unreadCount = sessionUnreadCount(session);
@@ -295,6 +294,13 @@ export function DirectSessionIndexItem({
   const currentTitle = t("currentSession");
   const currentBadgeLabel = lang === "zh" ? "当前" : "Current";
   const runningBadgeLabel = sessionRunningBadgeLabel(lang);
+  const sessionItemTitle = [sessionTitle, sessionModelTitle].filter(Boolean).join(" · ");
+  const sessionUpdatedTime = (
+    <span className={styles.conversationMetaTime}>
+      <Clock3 size={10} aria-hidden="true" />
+      <time>{formatTime(session.updatedAt || session.lastActive)}</time>
+    </span>
+  );
 
   const statusCluster = (
     <span className={styles.sessionStatusCluster}>
@@ -357,14 +363,8 @@ export function DirectSessionIndexItem({
                   onKeyDown={handleTitleKeyDown}
                   aria-label={renameLabel}
                 />
-                {sessionModelTitle ? (
-                  <span className={`${styles.agentModelTag} ${styles.agentModelTitleTag}`} title={sessionModelTitle} aria-label={sessionModelTitle}>
-                    <Cpu size={10} aria-hidden="true" />
-                    <span>{sessionModelLabel}</span>
-                  </span>
-                ) : null}
               </span>
-              {statusCluster}
+              {sessionUpdatedTime}
             </span>
             {sessionSummaryVisible ? (
               <span className={styles.sessionItemSummary} title={sessionSummary}>
@@ -386,10 +386,7 @@ export function DirectSessionIndexItem({
                   </span>
                 ) : null}
               </span>
-              <span className={styles.conversationMetaTime}>
-                <Clock3 size={10} aria-hidden="true" />
-                <time>{formatTime(session.updatedAt || session.lastActive)}</time>
-              </span>
+              {statusCluster}
             </span>
             {missingAgentMessage ? <span className={styles.agentMissingLine}>{missingAgentMessage}</span> : null}
           </span>
@@ -401,20 +398,15 @@ export function DirectSessionIndexItem({
           {...dragSessionProps}
           onClick={() => onOpen(session.id)}
           aria-current={active ? "true" : undefined}
+          title={sessionItemTitle || undefined}
         >
           {renderSessionAvatar(avatarClassName, sessionAvatarImageUrl, sessionAvatarFallback)}
           <span className={styles.conversationCopy}>
             <span className={styles.conversationTitleRow}>
               <span className={styles.conversationTitleMain}>
                 <span className={styles.sessionItemTitle}>{sessionTitle}</span>
-                {sessionModelTitle ? (
-                  <span className={`${styles.agentModelTag} ${styles.agentModelTitleTag}`} title={sessionModelTitle} aria-label={sessionModelTitle}>
-                    <Cpu size={10} aria-hidden="true" />
-                    <span>{sessionModelLabel}</span>
-                  </span>
-                ) : null}
               </span>
-              {statusCluster}
+              {sessionUpdatedTime}
             </span>
             {sessionSummaryVisible ? (
               <span className={styles.sessionItemSummary} title={sessionSummary}>
@@ -436,10 +428,7 @@ export function DirectSessionIndexItem({
                   </span>
                 ) : null}
               </span>
-              <span className={styles.conversationMetaTime}>
-                <Clock3 size={10} aria-hidden="true" />
-                <time>{formatTime(session.updatedAt || session.lastActive)}</time>
-              </span>
+              {statusCluster}
             </span>
             {missingAgentMessage ? <span className={styles.agentMissingLine}>{missingAgentMessage}</span> : null}
           </span>
