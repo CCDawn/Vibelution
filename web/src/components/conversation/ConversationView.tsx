@@ -1055,12 +1055,7 @@ export function ConversationView({
       if (!animateRunning) {
         return <CircleDot size={14} />;
       }
-      return (
-        <>
-          <LoaderCircle className={styles.statusSpinner} size={14} />
-          <CircleDot className={styles.statusRunningDot} size={14} />
-        </>
-      );
+      return <LoaderCircle className={styles.statusSpinner} size={14} />;
     }
     return <CircleDot size={14} />;
   }
