@@ -954,6 +954,7 @@ export function ConversationView({
     if (visibleMessageCount >= displayMessages.length) {
       return;
     }
+    preserveCurrentExpansionDefaults();
     historyScrollAnchorRef.current = captureTimelineRowKeyAnchor(timelineRef.current);
     atBottomRef.current = false;
     followLatestRef.current = false;
@@ -962,6 +963,29 @@ export function ConversationView({
       displayMessages.length,
       current + TIMELINE_HISTORY_LOAD_BATCH_COUNT,
     ));
+  }
+
+  function preserveCurrentExpansionDefaults() {
+    let changed = false;
+    const nextDefaults = { ...defaultExpansionRef.current };
+    for (const message of activeTimelineMessages) {
+      const agentRenderState = agentRenderStatesByMessageId.get(message.id);
+      if (!agentRenderState?.sectionState.hasResponseBlock) {
+        continue;
+      }
+      const messageDefaults = nextDefaults[message.id] ?? {};
+      if (messageDefaults.response !== undefined || sectionExpansion[message.id]?.response !== undefined) {
+        continue;
+      }
+      nextDefaults[message.id] = {
+        ...messageDefaults,
+        response: Boolean(message.streaming) || defaultExpandedResponseIds.has(message.id),
+      };
+      changed = true;
+    }
+    if (changed) {
+      defaultExpansionRef.current = nextDefaults;
+    }
   }
 
   const formatDuration = formatConversationDuration;
@@ -1005,6 +1029,17 @@ export function ConversationView({
       return "status";
     }
     return "tool";
+  }
+
+  function operationStatusToneClassName(operation: AgentMessageOperation) {
+    const tone = operationStatusTone(operation);
+    if (tone === "done") {
+      return "success";
+    }
+    if (tone === "degraded") {
+      return "warning";
+    }
+    return tone;
   }
 
   function operationStatusIcon(operation: AgentMessageOperation, animateRunning = true) {
@@ -1232,12 +1267,15 @@ export function ConversationView({
           const operationClassName = [
             styles.operationItem,
             styles[`operationItem_${operationTone(operation)}`],
+            styles[`operationItem_${operationStatusToneClassName(operation)}`],
             isRunningOperationStatus(operation.status) ? styles.operationItemActive : "",
           ].filter(Boolean).join(" ");
           return (
             <div key={operation.id} className={styles.operationItemWrap}>
               <div className={operationClassName}>
-                <span className={`${styles.operationIcon} ${styles[`operationIcon_${operation.kind}`]}`}>
+                <span
+                  className={`${styles.operationIcon} ${styles[`operationIcon_${operation.kind}`]} ${styles[`operationIcon_${operationStatusToneClassName(operation)}`]}`}
+                >
                   {operationIcon(operation.kind, operation.label)}
                 </span>
                 <div className={styles.operationText}>
@@ -1531,9 +1569,10 @@ export function ConversationView({
             const detailsExpanded = getExpansionState(operation.id, "details", false);
             const canExpandDetails = hasOperationDetails(operation);
             const computerUseResult = renderComputerUseResult(operation);
+            const statusTone = operationStatusToneClassName(operation);
             return (
-              <div key={operation.id} className={styles.reActToolItem}>
-                <div className={styles.reActToolLine}>
+              <div key={operation.id} className={`${styles.reActToolItem} ${styles[`operationItem_${statusTone}`]}`}>
+                <div className={`${styles.reActToolLine} ${styles[`operationItem_${statusTone}`]}`}>
                   <span className={styles.reActToolName}>{operationLabel(operation)}</span>
                   {operation.summary ? (
                     <span className={styles.reActToolSummary}>{operation.summary}</span>
