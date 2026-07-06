@@ -15,6 +15,8 @@ const styles = {
     "min-w-0",
   toolList:
     "min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  visuallyHidden:
+    "sr-only",
 } as const;
 
 export default styles;
