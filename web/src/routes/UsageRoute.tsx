@@ -191,27 +191,29 @@ export function UsageRoute() {
         )}
       />
 
-      <div className={styles.summaryGrid}>
-        <section className={styles.summaryCell}>
+      <div className={styles.overviewBand}>
+        <section className={styles.heroMetric}>
           <span>{label(lang, "全局累计", "All time")}</span>
           <strong>{numberText(allTime.totalTokens)}</strong>
           <small>{allTime.callCount} {label(lang, "次调用", "calls")}</small>
         </section>
-        <section className={styles.summaryCell}>
-          <span>{label(lang, "今日", "Today")}</span>
-          <strong>{numberText(today.totalTokens)}</strong>
-          <small>{numberText(today.inputTokens)} / {numberText(today.outputTokens)}</small>
-        </section>
-        <section className={styles.summaryCell}>
-          <span>{label(lang, "最近七日", "Last 7 days")}</span>
-          <strong>{numberText(last7Days.totalTokens)}</strong>
-          <small>{numberText(last7Days.reasoningOutputTokens)} {label(lang, "推理输出", "reasoning")}</small>
-        </section>
-        <section className={styles.summaryCell}>
-          <span>{label(lang, "最近一次", "Latest")}</span>
-          <strong>{numberText(lastTokenUsage?.totalTokens)}</strong>
-          <small>{formatTimestamp(lastTokenUsage?.recordedAt, lang)}</small>
-        </section>
+        <div className={styles.overviewStats}>
+          <section className={styles.overviewStat}>
+            <span>{label(lang, "今日", "Today")}</span>
+            <strong>{numberText(today.totalTokens)}</strong>
+            <small>{numberText(today.inputTokens)} / {numberText(today.outputTokens)}</small>
+          </section>
+          <section className={styles.overviewStat}>
+            <span>{label(lang, "最近七日", "Last 7 days")}</span>
+            <strong>{numberText(last7Days.totalTokens)}</strong>
+            <small>{numberText(last7Days.reasoningOutputTokens)} {label(lang, "推理输出", "reasoning")}</small>
+          </section>
+          <section className={styles.overviewStat}>
+            <span>{label(lang, "最近一次", "Latest")}</span>
+            <strong>{numberText(lastTokenUsage?.totalTokens)}</strong>
+            <small>{formatTimestamp(lastTokenUsage?.recordedAt, lang)}</small>
+          </section>
+        </div>
       </div>
 
       {usageQuery.isError ? (
@@ -221,74 +223,76 @@ export function UsageRoute() {
       ) : null}
 
       <div className={styles.metricBand}>
-        <aside className={styles.leftPanel}>
-          <div className={styles.panelHeader}>
-            <div>
-              <p className={styles.panelEyebrow}>{label(lang, "可信度", "Reliability")}</p>
-              <h2>{label(lang, "来源构成", "Source mix")}</h2>
+        <div className={styles.primaryColumn}>
+          <section className={styles.compositionPanel}>
+            <div className={styles.panelHeader}>
+              <div>
+                <p className={styles.panelEyebrow}>{label(lang, "可信度", "Reliability")}</p>
+                <h2>{label(lang, "Token 构成", "Token composition")}</h2>
+              </div>
+              <span className={styles.countPill}>{percentText(observedRatio)}</span>
             </div>
-            <span className={styles.countPill}>{percentText(observedRatio)}</span>
-          </div>
-          <div className={styles.sourceGrid}>
-            {SOURCE_KEYS.map((source) => (
-              <section key={source} className={sourceClassName(source)}>
-                <span>{sourceLabel(source, lang)}</span>
-                <strong>{numberText(sourceCount(allTime, source))}</strong>
-              </section>
-            ))}
-          </div>
-          <div className={styles.usageList}>
-            {renderUsageRow(label(lang, "输入", "Input"), allTime.inputTokens, totalTokens, label(lang, "prompt", "prompt"))}
-            {renderUsageRow(label(lang, "缓存输入", "Cached input"), allTime.cachedInputTokens, allTime.inputTokens, percentText(allTime.cacheHitRate))}
-            {renderUsageRow(label(lang, "输出", "Output"), allTime.outputTokens, totalTokens, label(lang, "answer", "answer"))}
-            {renderUsageRow(label(lang, "推理输出", "Reasoning output"), allTime.reasoningOutputTokens, totalTokens, "reasoningOutputTokens")}
-          </div>
-        </aside>
+            <div className={styles.sourceGrid}>
+              {SOURCE_KEYS.map((source) => (
+                <section key={source} className={sourceClassName(source)}>
+                  <span>{sourceLabel(source, lang)}</span>
+                  <strong>{numberText(sourceCount(allTime, source))}</strong>
+                </section>
+              ))}
+            </div>
+            <div className={styles.usageList}>
+              {renderUsageRow(label(lang, "输入", "Input"), allTime.inputTokens, totalTokens, label(lang, "prompt", "prompt"))}
+              {renderUsageRow(label(lang, "缓存输入", "Cached input"), allTime.cachedInputTokens, allTime.inputTokens, percentText(allTime.cacheHitRate))}
+              {renderUsageRow(label(lang, "输出", "Output"), allTime.outputTokens, totalTokens, label(lang, "answer", "answer"))}
+              {renderUsageRow(label(lang, "推理输出", "Reasoning output"), allTime.reasoningOutputTokens, totalTokens, "reasoningOutputTokens")}
+            </div>
+          </section>
 
-        <main className={styles.mainPanel}>
-          <div className={styles.panelHeader}>
-            <div>
-              <p className={styles.panelEyebrow}>{label(lang, "汇总", "Rollups")}</p>
-              <h2>{label(lang, "Codex 风格 Token 账本", "Codex-style token ledger")}</h2>
+          <section className={styles.rollupPanel}>
+            <div className={styles.panelHeader}>
+              <div>
+                <p className={styles.panelEyebrow}>{label(lang, "汇总", "Rollups")}</p>
+                <h2>{label(lang, "计数概览", "Counting overview")}</h2>
+              </div>
+              <VIconButton
+                type="button"
+                className="h-[var(--vui-control-height-sm)] min-h-8 w-[var(--vui-control-height-sm)] flex-none p-0"
+                label={label(lang, "刷新 Token 用量", "Refresh token usage")}
+                icon={<RefreshCw size={16} />}
+                onPress={refresh}
+              />
             </div>
-            <VIconButton
-              type="button"
-              className="h-[var(--vui-control-height-sm)] min-h-8 w-[var(--vui-control-height-sm)] flex-none p-0"
-              label={label(lang, "刷新 Token 用量", "Refresh token usage")}
-              icon={<RefreshCw size={16} />}
-              onPress={refresh}
-            />
-          </div>
-          <div className={styles.usageList}>
-            <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
-              <span>{label(lang, "当前范围", "Current scope")}</span>
-              <strong>{numberText(scopeUsage.totalTokens)}</strong>
-              <code>{summary?.scope ?? "global"}</code>
+            <div className={styles.rollupGrid}>
+              <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
+                <span>{label(lang, "当前范围", "Current scope")}</span>
+                <strong>{numberText(scopeUsage.totalTokens)}</strong>
+                <code>{summary?.scope ?? "global"}</code>
+              </div>
+              <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
+                <span>{label(lang, "最近会话", "Latest session")}</span>
+                <strong>{numberText(sessionUsage.totalTokens)}</strong>
+                <code>{sessionRollupLabel}</code>
+              </div>
+              <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
+                <span>{label(lang, "最近 Agent", "Latest agent")}</span>
+                <strong>{numberText(agentUsage.totalTokens)}</strong>
+                <code>{agentRollupLabel}</code>
+              </div>
+              <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
+                <span>{label(lang, "上下文窗口", "Context window")}</span>
+                <strong>{numberText(summary?.modelContextWindow)}</strong>
+                <code><Gauge size={13} /> window</code>
+              </div>
+              <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
+                <span>{label(lang, "延迟累计", "Latency total")}</span>
+                <strong>{numberText(allTime.latencyMs)} ms</strong>
+                <code><Activity size={13} /> api</code>
+              </div>
             </div>
-            <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
-              <span>{label(lang, "最近会话", "Latest session")}</span>
-              <strong>{numberText(sessionUsage.totalTokens)}</strong>
-              <code>{sessionRollupLabel}</code>
-            </div>
-            <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
-              <span>{label(lang, "最近 Agent", "Latest agent")}</span>
-              <strong>{numberText(agentUsage.totalTokens)}</strong>
-              <code>{agentRollupLabel}</code>
-            </div>
-            <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
-              <span>{label(lang, "上下文窗口", "Context window")}</span>
-              <strong>{numberText(summary?.modelContextWindow)}</strong>
-              <code><Gauge size={13} /> window</code>
-            </div>
-            <div className={`${styles.usageRow} ${styles.usageRowWide}`}>
-              <span>{label(lang, "延迟累计", "Latency total")}</span>
-              <strong>{numberText(allTime.latencyMs)} ms</strong>
-              <code><Activity size={13} /> api</code>
-            </div>
-          </div>
-        </main>
+          </section>
+        </div>
 
-        <aside className={styles.rightPanel}>
+        <aside className={styles.recordPanel}>
           <div className={styles.panelHeader}>
             <div>
               <p className={styles.panelEyebrow}>{label(lang, "最近记录", "Latest record")}</p>
