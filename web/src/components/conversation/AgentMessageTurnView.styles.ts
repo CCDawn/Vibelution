@@ -4,11 +4,11 @@ const styles = {
   turnContent:
     "vui-components-conversationview turnContent grid min-w-0 gap-[5px]",
   turnMeta:
-    "vui-components-conversationview turnMeta inline-flex min-w-0 max-w-full flex-wrap items-center justify-start gap-x-2 gap-y-1 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "vui-components-conversationview turnMeta grid min-w-0 max-w-full grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] max-[520px]:grid-cols-1",
   turnMetaActions:
-    "vui-components-conversationview turnMetaActions inline-flex min-w-0 shrink-0 items-center justify-start gap-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "vui-components-conversationview turnMetaActions inline-flex min-w-0 max-w-full shrink-0 flex-wrap items-center justify-start gap-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   turnMetaIdentity:
-    "vui-components-conversationview turnMetaIdentity grid min-w-0 max-w-full grid-cols-[minmax(0,auto)_auto] items-center gap-2",
+    "vui-components-conversationview turnMetaIdentity inline-grid min-w-0 max-w-full grid-cols-[minmax(0,auto)_auto] items-center gap-2",
   turnSpeaker:
     "vui-components-conversationview turnSpeaker min-w-0 max-w-full truncate text-[var(--vui-font-md)] font-semibold leading-tight text-[var(--fg-primary)] [overflow-wrap:anywhere]",
 } as const;

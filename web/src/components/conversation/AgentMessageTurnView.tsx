@@ -14,6 +14,7 @@ type AgentMessageTurnViewProps = {
   speakerLabel: ReactNode;
   identityAccessory?: ReactNode;
   metaActions?: ReactNode;
+  turnLabel?: string;
   children: ReactNode;
 };
 
@@ -29,11 +30,14 @@ export function AgentMessageTurnView({
   speakerLabel,
   identityAccessory,
   metaActions,
+  turnLabel,
   children,
 }: AgentMessageTurnViewProps) {
+  const speakerId = `agent-turn-speaker-${messageKey}`;
   return (
     <article
       className={className}
+      aria-label={turnLabel}
       data-conversation-row-key={rowKey}
       data-conversation-message-key={messageKey}
       data-agent-message-id={agentMessageId}
@@ -47,7 +51,7 @@ export function AgentMessageTurnView({
         {compactHeader ? null : (
           <div className={styles.turnMeta}>
             <div className={styles.turnMetaIdentity}>
-              <span className={styles.turnSpeaker}>
+              <span id={speakerId} className={styles.turnSpeaker} title={typeof speakerLabel === "string" ? speakerLabel : undefined}>
                 {speakerLabel}
               </span>
               {identityAccessory}
