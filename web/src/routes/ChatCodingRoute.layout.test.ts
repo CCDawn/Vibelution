@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
 
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import conversationStyles from "../components/conversation/ConversationView.styles";
@@ -34,6 +36,7 @@ import chatRuntimeNoticeStackSource from "./chat/ChatRuntimeNoticeStack.tsx?raw"
 import chatToolApprovalDialogStyles from "./chat/ChatToolApprovalDialog.styles";
 import chatToolApprovalDialogSource from "./chat/ChatToolApprovalDialog.tsx?raw";
 import cliAgentRunTerminalPanelStyles from "./chat/CliAgentRunTerminalPanel.styles";
+import { TokenCoreStatusPanel, type TokenCoreStatusMetric } from "./chat/TokenCoreStatusPanel";
 import tokenCoreStatusPanelSource from "./chat/TokenCoreStatusPanel.tsx?raw";
 
 const appShellCssSource = readFileSync(new URL("../design/workbench-shell.css", import.meta.url), "utf-8");
@@ -64,6 +67,45 @@ function expectOrderedFragments(source: string, fragments: string[]) {
     cursor = index + fragment.length;
   }
 }
+
+const tokenCoreStatusMetrics: TokenCoreStatusMetric[] = [
+  {
+    key: "cache",
+    label: "缓存",
+    value: "--",
+    meta: "暂无详情",
+    title: "缓存详情不可用",
+    percent: 0,
+    tone: "cache",
+  },
+  {
+    key: "modelInput",
+    label: "模型输入",
+    value: "12k",
+    meta: "上一轮",
+    title: "模型输入 token",
+    percent: 40,
+    tone: "modelInput",
+  },
+  {
+    key: "compression",
+    label: "压缩状态",
+    value: "72%",
+    meta: "阈值",
+    title: "压缩状态",
+    percent: 72,
+    tone: "compression",
+  },
+  {
+    key: "speed",
+    label: "响应速度",
+    value: "快",
+    meta: "估算",
+    title: "响应速度",
+    percent: 80,
+    tone: "speed",
+  },
+];
 
 describe("ChatCodingRoute layout contract", () => {
   it("keeps the center conversation readable and the composer as a stable bottom layer", () => {
@@ -738,7 +780,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(tokenCoreStatusPanelSource).toContain("\"--token-status-value\": metric.percent");
     expect(routeSource).toContain("cacheDetailOpenLabel");
     expect(routeSource).toContain("onOpenCacheDetail={openCacheDetail}");
+    expect(tokenCoreStatusPanelSource).toContain("isDisabled={!cacheDetailAvailable}");
+    expect(tokenCoreStatusPanelSource).toContain("onClick={cacheDetailAvailable ? onOpenCacheDetail : undefined}");
     expect(tokenCoreStatusPanelSource).toContain("aria-disabled={!cacheDetailAvailable}");
+    expect(tokenCoreStatusPanelSource).toContain("aria-expanded={cacheDetailAvailable ? cacheDetailOpen : undefined}");
+    expect(tokenCoreStatusPanelSource).toContain("aria-controls={cacheDetailAvailable && cacheDetailOpen ? \"cache-detail-dialog\" : undefined}");
     expect(routeSource).toContain("const modelInputTokens = Math.max(");
     expect(routeSource).toContain("lastCacheComposition?.calibratedInputTokens");
     expect(routeSource).toContain("hasProviderLlmUsage ? sessionLlmUsage.inputTokens : undefined");
@@ -760,7 +806,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("averageCacheHitRate");
     expect(routeSource).toContain("averageObservedTurnCount");
     expect(routeSource).toContain("setCacheDetailOpen(true)");
-    expect(tokenCoreStatusPanelSource).toContain("aria-controls={cacheDetailOpen ? \"cache-detail-dialog\" : undefined}");
+    expect(tokenCoreStatusPanelSource).not.toContain("aria-controls={cacheDetailOpen ? \"cache-detail-dialog\" : undefined}");
     expect(routeSource).not.toContain("className={styles.contextCompositionItem} title={cacheCompositionTitle}");
     expect(tokenCoreStatusPanelSource).toContain("title={metric.title}");
     expect(routeSource).toContain("handleCacheDetailKeyDown");
@@ -931,6 +977,37 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.contextCompositionSegmentMissing).toBeTypeOf("string");
     expect(routeStyles.contextCompositionSegmentExact).toBeTypeOf("string");
     expect(routeStyles.contextCompositionSegmentUnused).toBeTypeOf("string");
+  });
+
+  it("disables the cache metric trigger when cache details are unavailable", () => {
+    const unavailableHtml = renderToStaticMarkup(
+      createElement(TokenCoreStatusPanel, {
+        cacheDetailAvailable: false,
+        cacheDetailOpen: true,
+        cacheDetailOpenLabel: "查看上一轮缓存命中详情",
+        lang: "zh",
+        metrics: tokenCoreStatusMetrics,
+        onOpenCacheDetail: () => undefined,
+      }),
+    );
+    const availableHtml = renderToStaticMarkup(
+      createElement(TokenCoreStatusPanel, {
+        cacheDetailAvailable: true,
+        cacheDetailOpen: true,
+        cacheDetailOpenLabel: "查看上一轮缓存命中详情",
+        lang: "zh",
+        metrics: tokenCoreStatusMetrics,
+        onOpenCacheDetail: () => undefined,
+      }),
+    );
+
+    expect(unavailableHtml).toContain("disabled");
+    expect(unavailableHtml).toContain("aria-disabled=\"true\"");
+    expect(unavailableHtml).not.toContain("aria-expanded");
+    expect(unavailableHtml).not.toContain("aria-controls=\"cache-detail-dialog\"");
+    expect(availableHtml).toContain("aria-disabled=\"false\"");
+    expect(availableHtml).toContain("aria-expanded=\"true\"");
+    expect(availableHtml).toContain("aria-controls=\"cache-detail-dialog\"");
   });
 
   it("shows the active skill contract before the context status cards", () => {

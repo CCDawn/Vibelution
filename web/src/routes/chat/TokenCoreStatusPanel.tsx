@@ -64,11 +64,12 @@ export function TokenCoreStatusPanel({
                 type="button"
                 className={`${metricClassName} ${styles.tokenStatusMetricButton}`}
                 style={metricStyle}
-                onClick={onOpenCacheDetail}
+                isDisabled={!cacheDetailAvailable}
+                onClick={cacheDetailAvailable ? onOpenCacheDetail : undefined}
                 aria-disabled={!cacheDetailAvailable}
                 aria-label={cacheDetailOpenLabel}
-                aria-expanded={cacheDetailOpen}
-                aria-controls={cacheDetailOpen ? "cache-detail-dialog" : undefined}
+                aria-expanded={cacheDetailAvailable ? cacheDetailOpen : undefined}
+                aria-controls={cacheDetailAvailable && cacheDetailOpen ? "cache-detail-dialog" : undefined}
                 title={metric.title}
               >
                 {metricContent}
