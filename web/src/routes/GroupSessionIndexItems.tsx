@@ -134,6 +134,7 @@ export function TeamConversationIndexItem({
   const duplicateTitle = lang === "zh"
     ? `已合并 ${duplicateCount} 个同名团队记录`
     : `${duplicateCount} same-name Team records merged`;
+  const disabledReasonId = roomId ? undefined : `team-row-disabled-reason-${team.teamId}`;
 
   return (
     <div
@@ -144,6 +145,7 @@ export function TeamConversationIndexItem({
         type="button"
         className={styles.sessionItemMain}
         disabled={!roomId}
+        aria-describedby={disabledReasonId}
         onClick={() => onOpen(roomId)}
       >
         <span className={`${styles.conversationAvatar} ${styles.conversationAvatarGroup}`} aria-hidden="true">
@@ -174,6 +176,9 @@ export function TeamConversationIndexItem({
             ) : null}
           </span>
         </span>
+        {disabledReasonId ? (
+          <span id={disabledReasonId} className="sr-only">{roomTitle}</span>
+        ) : null}
       </VNativeButton>
     </div>
   );
