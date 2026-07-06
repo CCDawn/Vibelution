@@ -1832,6 +1832,11 @@ def test_start_source_collection_ingestion_stage_routes_to_bound_source_ingestor
     assert "共享记忆前审" not in submitted[0]["content"]
     assert "approved 候选" in submitted[0]["content"]
     assert "不要推断截断或隐藏候选" in submitted[0]["content"]
+    assert "stewardActionPacket.approvedCandidateIds" in submitted[0]["content"]
+    assert "writebackResultSkeleton" in submitted[0]["content"]
+    assert "不要因为 `recordPage.hasMore=true` 或 `candidatePage.hasMore=true` 自动翻完整批次" in submitted[0]["content"]
+    assert "如果返回的 `recordPage.hasMore=true`，必须继续按 `record_offset=recordPage.nextOffset` 分页读取" not in submitted[0]["content"]
+    assert "如果返回的 `candidatePage.hasMore=true`，必须继续按 `candidate_offset=candidatePage.nextOffset` 分页读取" not in submitted[0]["content"]
     metadata = submitted[0]["kwargs"]["message_metadata"]
     assert metadata["agentId"] == ingestor["agentId"]
     assert metadata["agentRole"] == "source_ingestor"

@@ -19903,7 +19903,12 @@ def _source_collection_stage_session_task_message(
     ]
     previous_attempt_lines = _source_collection_stage_previous_attempt_lines(previous_task)
     previous_attempt_block = [*previous_attempt_lines, ""] if previous_attempt_lines else []
-    if writeback_resume:
+    if can_materialize_formal_knowledge:
+        pagination_lines = [
+            "- 本任务是资料入库：读取一次 `source_collection_context_tool` 后，如果返回 `stewardActionPacket.approvedCandidateIds` 和 `writebackResultSkeleton`，优先立刻调用 `source_collection_stage_writeback_tool` 写回，不要先重读全部资料。",
+            "- 不要因为 `recordPage.hasMore=true` 或 `candidatePage.hasMore=true` 自动翻完整批次；只有缺少真实 approvedCandidateIds、writebackResultSkeleton 或入库证据时，才按 nextOffset 补读必要页。",
+        ]
+    elif writeback_resume:
         pagination_lines = [
             "- 本轮是写回恢复：如果当前会话上下文中已有完整结论和真实 ID，优先直接调用 `source_collection_stage_writeback_tool` 回写，不要先重读全部资料。",
             "- 只有缺少真实 recordId/candidateId 或证据时，才调用上面的 `source_collection_context_tool` 做一次性 ID 核对；不要因为 `candidatePage.hasMore=true` 自动翻完整批次。",
