@@ -1165,6 +1165,64 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.operationStatus_success).toContain("!text-[var(--state-success)]");
   });
 
+  it("overrides failed process group color on successful timeline operation children", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "assistant-failed-process-with-successful-children",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-07-05T15:29:00Z",
+          feedbackEvents: [
+            {
+              sequence: 1,
+              kind: "tool",
+              status: "done",
+              name: "code_graph_tool",
+              label: "代码图谱",
+              summary: '{ "status": "ok" }',
+              resultPreview: '{ "status": "ok" }',
+            },
+            {
+              sequence: 2,
+              kind: "tool",
+              status: "failed",
+              name: "grep_search_tool",
+              label: "搜索",
+              summary: "[工具参数错误] grep_search_tool 参数不符合当前工具签名",
+              error: "got an unexpected keyword argument '.max_results'",
+            },
+          ],
+          timelineItems: [
+            {
+              id: "timeline-successful-code-graph",
+              kind: "operation",
+              status: "completed",
+              title: "代码图谱",
+              summary: '{ "status": "ok" }',
+              operationIds: ["assistant-failed-process-with-successful-children-feedback-1"],
+            },
+            {
+              id: "timeline-failed-search",
+              kind: "operation",
+              status: "failed",
+              title: "搜索",
+              summary: "[工具参数错误] grep_search_tool 参数不符合当前工具签名",
+              operationIds: ["assistant-failed-process-with-successful-children-feedback-2"],
+            },
+          ],
+        },
+      ],
+      { processDisplayMode: "trace" },
+    );
+
+    expect(html).toContain("timelineOperationCell_success");
+    expect(html).toMatch(/<span class="[^"]*operationText_success[^"]*">代码图谱<\/span>/);
+    expect(html).toMatch(/<span class="[^"]*operationText_success[^"]*">\{ &quot;status&quot;: &quot;ok&quot; \}<\/span>/);
+    expect(html).toContain("timelineOperationCell_failed");
+    expect(html).toMatch(/timelineOperationCell_failed[\s\S]*grep_search_tool 参数不符合当前工具签名/);
+  });
+
   it("does not let top-edge history loading rewrite cached response expansion defaults", () => {
     expect(conversationViewSource).toContain("function revealEarlierTimelineMessages()");
     expect(conversationViewSource).toContain("preserveCurrentExpansionDefaults();");
