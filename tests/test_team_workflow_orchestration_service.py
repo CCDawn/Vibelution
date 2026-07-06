@@ -6297,6 +6297,155 @@ def test_candidate_graph_stage_writeback_materializes_candidate_graph(tmp_path, 
     assert graph_projection["counts"]["artifact"] == 2
 
 
+def test_candidate_graph_stage_writeback_materializes_agent_relation_edges(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料关系整理")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料关系整理")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "source_relation_mapper", "agentName": "资料关系整理"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经预测编码候选图谱",
+            "agentRoles": ["source_relation_mapper"],
+            "agentIds": {"source_relation_mapper": agent["agentId"]},
+            "querySeeds": ["predictive coding neural graph"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    source_one = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding hierarchy source",
+            "sourceUrl": "https://doi.org/10.0000/graph-source-one",
+            "sourceKind": "paper",
+            "summary": "Predictive coding hierarchy supports neural algorithm design.",
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/graph-source-one"},
+            "createdByAgent": "content-extraction-agent",
+        },
+    )["candidate"]
+    source_two = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Attention precision source",
+            "sourceUrl": "https://doi.org/10.0000/graph-source-two",
+            "sourceKind": "paper",
+            "summary": "Attention modulates precision in predictive processing.",
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/graph-source-two"},
+            "createdByAgent": "content-extraction-agent",
+        },
+    )["candidate"]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-relation-edges", "status": "running"},
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "relations", "agentId": agent["agentId"], "agentRole": "source_relation_mapper"},
+    )
+
+    _append_stage_task_tool_trace(tmp_path, task["task"])
+    response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "needs_review",
+            "summary": "形成2条来源-主题候选边和1条主题间候选关系。",
+            "result": {
+                "relationCoverage": {
+                    "sourceCandidateCount": 2,
+                    "themeNodeCount": 2,
+                    "sourceThemeEdgeCount": 2,
+                    "topicRelationCount": 1,
+                    "graphBoundary": "candidate_only",
+                },
+                "themeNodes": [
+                    {"themeId": "T1", "label": "预测编码基础理论"},
+                    {"themeId": "T2", "label": "注意与精度调节"},
+                ],
+                "sourceThemeEdges": [
+                    {
+                        "candidateId": source_one["candidateId"],
+                        "themeId": "T1",
+                        "relation": "source_supports_theme",
+                        "confidence": "high",
+                    },
+                    {
+                        "candidateId": source_two["candidateId"],
+                        "themeId": "T2",
+                        "relation": "source_supports_theme",
+                        "confidence": "high",
+                    },
+                ],
+                "topicRelations": [
+                    {"from": "T1", "to": "T2", "relation": "theory_informs_precision_attention", "confidence": "medium"}
+                ],
+            },
+            "recordedByAgent": agent["agentId"],
+        },
+    )
+
+    materialized = response["writeback"]["materializedCandidateGraph"]
+    graph_candidate = team_workflow_orchestration_service.list_candidate_store(
+        team["teamId"],
+        candidate_type="candidate_graph",
+    )["candidates"][0]
+    graph = graph_candidate["metadata"]["graph"]
+    edge_triples = {
+        (edge["sourceCandidateId"], edge["targetCandidateId"], edge["relation"])
+        for edge in graph["edges"]
+    }
+    graph_projection = next(
+        card
+        for card in team_workflow_orchestration_service._source_collection_stage_cards_projection(team["teamId"], run_id)["cards"]
+        if card["stageId"] == "relations"
+    )
+
+    assert materialized["nodeCount"] == 4
+    assert materialized["edgeCount"] == 3
+    assert graph["summary"]["nodeCount"] == 4
+    assert graph["summary"]["edgeCount"] == 3
+    assert {node["candidateId"] for node in graph["nodes"]} >= {
+        source_one["candidateId"],
+        source_two["candidateId"],
+        "source-theme:T1",
+        "source-theme:T2",
+    }
+    assert edge_triples == {
+        (source_one["candidateId"], "source-theme:T1", "source_supports_theme"),
+        (source_two["candidateId"], "source-theme:T2", "source_supports_theme"),
+        ("source-theme:T1", "source-theme:T2", "theory_informs_precision_attention"),
+    }
+    assert graph_projection["counts"]["artifact"] == 4
+    assert graph_projection["counts"]["output"] == 3
+
+
+def test_stage_writeback_result_metadata_preserves_relation_edge_batches():
+    result = {
+        "sourceThemeEdges": [
+            {"candidateId": f"candidate-{index}", "themeId": "T1", "relation": "source_supports_theme"}
+            for index in range(34)
+        ],
+        "topicRelations": [
+            {"from": "T1", "to": f"T{index}", "relation": "related_topic"}
+            for index in range(30)
+        ],
+    }
+
+    normalized = team_workflow_orchestration_service._normalize_source_collection_stage_writeback_result_metadata(result)
+
+    assert len(normalized["sourceThemeEdges"]) == 34
+    assert len(normalized["topicRelations"]) == 30
+
+
 def test_unregistered_quality_stage_task_is_rejected(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
