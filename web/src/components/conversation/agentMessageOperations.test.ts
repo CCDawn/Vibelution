@@ -331,6 +331,64 @@ describe("agentMessageOperations", () => {
     });
   });
 
+  it("compacts repeated source context tools while keeping the current running tool visible", () => {
+    const message: ConversationMessage = {
+      id: "message-repeated-source-context-tools",
+      role: "assistant",
+      content: "",
+      timestamp: "2026-07-06T20:19:00Z",
+      streaming: true,
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "tool",
+          status: "done",
+          name: "task_list_tool",
+          summary: "| # | 描述 | 状态 | 结果摘要 | |---|---|---|---|",
+        },
+        {
+          sequence: 2,
+          kind: "tool",
+          status: "done",
+          name: "task_create_tool",
+          summary: "已创建 4 个任务，当前共 4 个子任务。",
+        },
+        ...Array.from({ length: 6 }, (_, index) => ({
+          sequence: 3 + index,
+          kind: "tool" as const,
+          status: "done",
+          name: "source_collection_context_tool",
+          summary: JSON.stringify({
+            candidateFieldsTruncated: true,
+            candidatePage: { returned: 10 + index },
+          }),
+          resultPreview: JSON.stringify({
+            candidateFieldsTruncated: true,
+            candidatePage: { returned: 10 + index },
+          }),
+        })),
+        {
+          sequence: 9,
+          kind: "tool",
+          status: "running",
+          name: "task_update_tool",
+          summary: "运行中",
+        },
+      ],
+    };
+
+    const operations = operationsForConversationMessage(message);
+
+    expect(operations.map((operation) => `${operation.label}:${operation.status}:${operation.summary}`)).toEqual([
+      "任务列表:done:执行完成",
+      "创建任务:done:已创建 4 个任务，当前共 4 个子任务。",
+      "读取资料上下文:done:执行完成",
+      "更新任务:running:运行中",
+    ]);
+    expect(operations.filter((operation) => operation.rawLabel === "source_collection_context_tool")).toHaveLength(1);
+    expect(operations.map((operation) => operation.summary).join("\n")).not.toContain("candidateFieldsTruncated");
+  });
+
   it("normalizes completed historical operations through AgentMessage projection", () => {
     const message: ConversationMessage = {
       id: "message-1",

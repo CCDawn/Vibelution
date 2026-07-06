@@ -1020,9 +1020,67 @@ describe("ConversationView edit resend affordance", () => {
     );
 
     expect(html.match(/assistantTurn/g)?.length ?? 0).toBe(1);
-    expect(html.match(/source_collection_context_tool/g)?.length ?? 0).toBe(1);
+    expect(html).toContain("读取资料上下文");
+    expect(html).not.toContain("source_collection_context_tool");
     expect(html).toContain("上下文已读取");
     expect(html).not.toContain("正在读取受控资料上下文");
+  });
+
+  it("summarizes repeated source context tools without exposing raw JSON in the default trace", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-repeated-source-context-tools",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-07-06T20:19:00Z",
+        streaming: true,
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "tool",
+            status: "done",
+            name: "task_list_tool",
+            summary: "| # | 描述 | 状态 | 结果摘要 | |---|---|---|---|",
+          },
+          {
+            sequence: 2,
+            kind: "tool",
+            status: "done",
+            name: "task_create_tool",
+            summary: "已创建 4 个任务，当前共 4 个子任务。",
+          },
+          ...Array.from({ length: 6 }, (_, index) => ({
+            sequence: 3 + index,
+            kind: "tool" as const,
+            status: "done",
+            name: "source_collection_context_tool",
+            summary: JSON.stringify({
+              candidateFieldsTruncated: true,
+              candidatePage: { returned: 10 + index },
+            }),
+            resultPreview: JSON.stringify({
+              candidateFieldsTruncated: true,
+              candidatePage: { returned: 10 + index },
+            }),
+          })),
+          {
+            sequence: 9,
+            kind: "tool",
+            status: "running",
+            name: "task_update_tool",
+            summary: "运行中",
+          },
+        ],
+      },
+    ]);
+
+    expect(html).toContain("读取资料上下文");
+    expect(html.match(/读取资料上下文/g)?.length ?? 0).toBe(1);
+    expect(html).toContain("更新任务");
+    expect(html).toContain("运行中");
+    expect(html).not.toContain("source_collection_context_tool");
+    expect(html).not.toContain("candidateFieldsTruncated");
+    expect(html).not.toContain("| # | 描述 | 状态 | 结果摘要 |");
   });
 
   it("projects consecutive same-turn process-only tool messages into one compact assistant turn", () => {
@@ -2233,7 +2291,8 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html).toContain("过程");
     expect(html).toContain("工具调用 1");
-    expect(html.match(/source_collection_stage_writeback_tool/g)?.length ?? 0).toBe(1);
+    expect(html).toContain("资料提炼回写");
+    expect(html).not.toContain("source_collection_stage_writeback_tool");
     expect(html).toContain("资料提炼进行中：已完成第7批4条候选提炼");
     expect(html).not.toContain("资料提炼进行中：已完成第1批5条候选提炼");
     expect(html).not.toContain("资料提炼进行中：已完成第6批5条候选提炼");
