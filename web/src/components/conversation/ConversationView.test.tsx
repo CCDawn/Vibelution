@@ -1272,6 +1272,9 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html).toContain("顾云舒上下文");
     expect(html).toContain("顾云舒");
+    expect(html).toContain('aria-label="待发送会话引用"');
+    expect(html).toContain('role="list"');
+    expect(html).toContain('role="listitem"');
   });
 
   it("uses the configured user avatar preset for user turns", () => {
@@ -2268,6 +2271,10 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("composerAttachmentThumb");
     expect(html).toContain("composerAttachmentName");
     expect(html).toContain("composerAttachmentRemoveButton");
+    expect(html).toContain('aria-label="待发送图片"');
+    expect(html).toContain('role="list"');
+    expect(html).toContain('role="listitem"');
+    expect(conversationViewSource).toContain("<X size={13} aria-hidden=\"true\" />");
   });
 
   it("renders assistant responses as semantic labeled blocks", () => {
