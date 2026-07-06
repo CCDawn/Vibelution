@@ -254,6 +254,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatToolApprovalDialogSource).toContain("Tool permission approval");
     expect(chatToolApprovalDialogSource).toContain("aria-labelledby={titleId}");
     expect(chatToolApprovalDialogSource).toContain("aria-describedby={descriptionIds}");
+    expect(chatToolApprovalDialogSource).toContain("aria-busy={pending}");
     expect(chatToolApprovalDialogSource).toContain("id={titleId}");
     expect(chatToolApprovalDialogSource).toContain("id={descriptionId}");
     expect(chatToolApprovalDialogSource).toContain("id={scopeId}");
@@ -261,10 +262,18 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatToolApprovalDialogSource).toContain("id={toolListId}");
     expect(chatToolApprovalDialogSource).toContain("role=\"list\"");
     expect(chatToolApprovalDialogSource).toContain("role=\"listitem\"");
+    expect(chatToolApprovalDialogSource).toContain("<X size={15} aria-hidden=\"true\" />");
+    expect(chatToolApprovalDialogSource).toContain("<ShieldCheck size={15} aria-hidden=\"true\" />");
+    expect(chatToolApprovalDialogSource).toContain("className={styles.toolItem}");
     expect(chatToolApprovalDialogStyles.dialog).toContain("grid-cols-[34px_minmax(0,1fr)_auto]");
     expect(chatToolApprovalDialogStyles.dialog).toContain("shadow-none");
     expect(chatToolApprovalDialogStyles.dialog).not.toContain("vui-shadow-hairline");
     expect(chatToolApprovalDialogStyles.actions).toContain("flex");
+    expect(chatToolApprovalDialogStyles.toolList).toContain("overflow-auto");
+    expect(chatToolApprovalDialogStyles.toolItem).toContain("min-w-0");
+    expect(chatToolApprovalDialogStyles.toolItem).toContain("max-w-full");
+    expect(chatToolApprovalDialogStyles.toolItem).toContain("break-words");
+    expect(chatToolApprovalDialogStyles.toolItem).toContain("[overflow-wrap:anywhere]");
   });
 
   it("renders tool approval dialog labels, descriptions, and tools as accessible relationships", () => {
@@ -294,6 +303,28 @@ describe("ChatCodingRoute layout contract", () => {
     expect(markup.match(/role="listitem"/g)?.length).toBe(2);
     expect(markup).toContain("shell_command");
     expect(markup).toContain("read_file");
+  });
+
+  it("marks tool approval resolving state as busy without losing dialog semantics", () => {
+    const markup = renderToStaticMarkup(createElement(ChatToolApprovalDialog, {
+      lang: "en",
+      pending: true,
+      rawTitle: "very_long_tool_name_that_should_wrap_inside_the_dialog_surface",
+      riskLabel: "Approval required",
+      scopeLabel: "current session",
+      toolLabels: [
+        { id: "long", label: "very_long_tool_name_that_should_wrap_inside_the_dialog_surface" },
+      ],
+      onApprove: () => undefined,
+      onReject: () => undefined,
+    }));
+
+    expect(markup).toContain('role="dialog"');
+    expect(markup).toContain('aria-busy="true"');
+    expect(markup).toContain("Resolving");
+    expect(markup.match(/disabled=""/g)?.length).toBe(2);
+    expect(markup.match(/aria-hidden="true"/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(markup).toContain("very_long_tool_name_that_should_wrap_inside_the_dialog_surface");
   });
 
   it("loads the heavy conversation renderer through a lazy bridge", () => {

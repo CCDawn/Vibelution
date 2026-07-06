@@ -48,6 +48,7 @@ export function ChatToolApprovalDialog({
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={descriptionIds}
+        aria-busy={pending}
       >
         <div className={styles.icon} aria-hidden="true">
           <ShieldAlert size={18} />
@@ -66,11 +67,11 @@ export function ChatToolApprovalDialog({
           <div id={toolListId} className={styles.toolList} title={rawTitle} role="list">
             {visibleLabels.length
               ? visibleLabels.map((item) => (
-                <span key={item.id} role="listitem">{item.label}</span>
+                <span key={item.id} className={styles.toolItem} role="listitem">{item.label}</span>
               ))
-              : <span role="listitem">{lang === "zh" ? "工具策略变更" : "Tool policy change"}</span>}
+              : <span className={styles.toolItem} role="listitem">{lang === "zh" ? "工具策略变更" : "Tool policy change"}</span>}
             {extraCount ? (
-              <span role="listitem">{lang === "zh" ? `另 ${extraCount} 项` : `+${extraCount}`}</span>
+              <span className={styles.toolItem} role="listitem">{lang === "zh" ? `另 ${extraCount} 项` : `+${extraCount}`}</span>
             ) : null}
           </div>
         </div>
@@ -80,7 +81,7 @@ export function ChatToolApprovalDialog({
             onClick={onReject}
             isDisabled={pending}
           >
-            <X size={15} />
+            <X size={15} aria-hidden="true" />
             <span>{lang === "zh" ? "拒绝" : "Reject"}</span>
           </VButton>
           <VButton
@@ -89,7 +90,7 @@ export function ChatToolApprovalDialog({
             onClick={onApprove}
             isDisabled={pending}
           >
-            <ShieldCheck size={15} />
+            <ShieldCheck size={15} aria-hidden="true" />
             <span>{pending ? (lang === "zh" ? "处理中" : "Resolving") : (lang === "zh" ? "允许" : "Allow")}</span>
           </VButton>
         </div>

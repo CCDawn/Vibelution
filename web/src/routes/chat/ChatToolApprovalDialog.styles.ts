@@ -15,6 +15,8 @@ const styles = {
     "min-w-0",
   toolList:
     "min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  toolItem:
+    "min-w-0 max-w-full break-words [overflow-wrap:anywhere]",
   visuallyHidden:
     "sr-only",
 } as const;
