@@ -355,6 +355,24 @@ def inspect_graph(graph: dict[str, Any], *, file_path: str = "", symbol: str = "
             "symbols": [_public_symbol(item) for item in matches],
             "snippets": [_snippet_for_symbol(item) for item in matches[:5]],
         }
+    if rel:
+        index_meta = graph.get("index") if isinstance(graph.get("index"), dict) else {}
+        summary = graph.get("summary") if isinstance(graph.get("summary"), dict) else {}
+        return {
+            "status": "error",
+            "mode": "inspect",
+            "error": "target_not_indexed",
+            "message": (
+                f"inspect 目标文件 `{rel}` 未在代码图谱索引中。"
+                "请用 refresh=true 重试，或先调用 mode=\"index\" 刷新索引。"
+            ),
+            "target": {"filePath": rel},
+            "index": {
+                "fresh": bool(index_meta.get("fresh")),
+                "updatedAt": str(index_meta.get("updatedAt") or ""),
+                "fileCount": int(summary.get("fileCount") or 0),
+            },
+        }
     return _query_error("inspect", "target_required", "inspect 模式需要 file_path 或 symbol/query。")
 
 

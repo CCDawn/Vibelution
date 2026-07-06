@@ -169,6 +169,9 @@ def extract_tool_result_semantics(result: Any) -> dict[str, Any]:
         semantics["semanticStatus"] = "timeout"
         semantics["timedOut"] = True
         semantics["failureClass"] = "timeout"
+    elif text.startswith("[工具参数错误]"):
+        semantics["semanticStatus"] = "failed"
+        semantics["failureClass"] = semantics["failureClass"] or "tool_argument_error"
     elif text.startswith("[跨平台警告]"):
         semantics["semanticStatus"] = "degraded"
         semantics["failureClass"] = semantics["failureClass"] or "cross_platform_command"
@@ -262,6 +265,7 @@ def infer_tool_business_success(result: Any) -> bool:
             "[错误]",
             "[超时]",
             "[短路]",
+            "[工具参数错误]",
             "[EXEC FAILURE",
             "[WARNING | Exit Code",
             "[执行失败",

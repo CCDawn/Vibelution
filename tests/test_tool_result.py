@@ -491,6 +491,18 @@ class TestInferToolBusinessSuccess:
     def test_error_prefix_is_failure(self):
         assert infer_tool_business_success("[错误] something failed") is False
 
+    def test_tool_argument_error_prefix_is_failure(self):
+        payload = "[工具参数错误] grep_search_tool 参数不符合当前工具签名。"
+
+        assert infer_tool_business_success(payload) is False
+        semantics = extract_tool_result_semantics(payload)
+        envelope = package_tool_result(payload)
+
+        assert semantics["semanticStatus"] == "failed"
+        assert semantics["failureClass"] == "tool_argument_error"
+        assert envelope.semantic_status == "failed"
+        assert envelope.failure_class == "tool_argument_error"
+
     def test_low_quality_search_prefix_is_degraded_semantics(self):
         payload = "[搜索质量不足] 公开搜索未返回可采信的结果。"
 

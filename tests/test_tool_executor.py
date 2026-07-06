@@ -305,6 +305,33 @@ class TestToolExecutorInit:
         assert events[-1][1]["outcome"] == "failed"
         assert events[-1][1]["fields"]["semanticStatus"] == "failed"
 
+    def test_tool_argument_error_text_is_recorded_as_failed_scene_event(self, monkeypatch):
+        """Tool argument error text should be treated as a failed tool result."""
+        from core.infrastructure import tool_executor as tool_executor_module
+
+        events = []
+        monkeypatch.setattr(
+            tool_executor_module,
+            "_record_tool_scene_event",
+            lambda *args, **kwargs: events.append((args, kwargs)),
+        )
+
+        executor = ToolExecutor()
+        executor.register_tool(
+            "fake_argument_error_tool",
+            lambda: "[工具参数错误] grep_search_tool 参数不符合当前工具签名：unexpected keyword。",
+            timeout=5,
+        )
+
+        result, action = executor.execute("fake_argument_error_tool", {})
+
+        assert action is None
+        assert str(result).startswith("[工具参数错误]")
+        assert events[-1][0][1] == "tool.execute.failed"
+        assert events[-1][1]["outcome"] == "failed"
+        assert events[-1][1]["fields"]["semanticStatus"] == "failed"
+        assert events[-1][1]["fields"]["failureClass"] == "tool_argument_error"
+
     def test_tool_json_blocked_result_is_recorded_as_blocked_scene_event(self, monkeypatch):
         """Tools returning structured blocked JSON should not be logged as succeeded."""
         from core.infrastructure import tool_executor as tool_executor_module

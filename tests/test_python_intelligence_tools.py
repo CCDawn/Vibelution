@@ -108,6 +108,26 @@ def test_code_symbol_tool_v2_indexes_searches_and_inspects_project(tmp_path, mon
     assert any(item["path"] == "tests/test_demo.py" for item in tests["tests"])
 
 
+def test_code_symbol_tool_inspect_reports_unindexed_file_after_stale_index(tmp_path, monkeypatch):
+    from core.code_context_graph import service as graph_service
+
+    (tmp_path / "core").mkdir()
+    (tmp_path / "core" / "indexed.py").write_text("def indexed():\n    return 1\n", encoding="utf-8")
+    monkeypatch.setattr(graph_service, "project_root", lambda: tmp_path)
+
+    indexed = json.loads(pit.code_symbol_tool(mode="index"))
+    (tmp_path / "core" / "missing_from_index.py").write_text("def later():\n    return 2\n", encoding="utf-8")
+
+    payload = json.loads(pit.code_symbol_tool(mode="inspect", file_path="core/missing_from_index.py"))
+
+    assert indexed["status"] == "ok"
+    assert payload["status"] == "error"
+    assert payload["error"] == "target_not_indexed"
+    assert payload["target"]["filePath"] == "core/missing_from_index.py"
+    assert "未在代码图谱索引中" in payload["message"]
+    assert "refresh=true" in payload["message"]
+
+
 def test_python_symbol_query_parses_jedi_results(monkeypatch, tmp_path):
     source = tmp_path / "demo.py"
     source.write_text("value = 1\nprint(value)\n", encoding="utf-8")
