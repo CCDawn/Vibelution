@@ -117,6 +117,7 @@ import {
 import {
   type AgentMessageSectionState,
 } from "./agentMessageSections";
+import { shouldLoadEarlierConversationMessages } from "./conversationHistoryWindow";
 import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
 import { parseConversationMarkdownBlocks, type MarkdownBlock } from "./conversationMarkdownBlocks";
 import { safeConversationMarkdownUrl } from "./conversationMarkdownUrl";
@@ -767,11 +768,14 @@ export function ConversationView({
     }
     const handleScroll = () => {
       const previousScrollTop = lastTimelineScrollTopRef.current;
-      if (
-        visibleMessageCount < displayMessages.length
-        && timeline.scrollTop <= TIMELINE_HISTORY_LOAD_THRESHOLD_PX
-        && timeline.scrollTop < previousScrollTop
-      ) {
+      if (shouldLoadEarlierConversationMessages({
+        clientHeight: timeline.clientHeight,
+        hiddenMessageCount: displayMessages.length - visibleMessageCount,
+        previousScrollTop,
+        scrollHeight: timeline.scrollHeight,
+        scrollTop: timeline.scrollTop,
+        thresholdPx: TIMELINE_HISTORY_LOAD_THRESHOLD_PX,
+      })) {
         revealEarlierTimelineMessages();
       }
       const nextState = resolveTimelineFollowState({
