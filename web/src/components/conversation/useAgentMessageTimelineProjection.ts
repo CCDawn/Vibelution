@@ -6,6 +6,7 @@ import { mergeAgentFeedbackEvents } from "../../agent-thread/agentFeedbackEvents
 import {
   conversationMessageMetadataText,
   conversationMessageTurnId,
+  projectedConversationMessageIdsOrSelf,
 } from "./conversationMessageIdentity";
 import { projectTimelineProcessMessages } from "./timelineMessageProcessProjection";
 import {
@@ -125,6 +126,21 @@ function mergeConversationText(...values: Array<string | undefined>) {
   return merged.join("\n\n");
 }
 
+function mergeProjectedMessageIds(...messages: ConversationMessage[]) {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const message of messages) {
+    for (const id of projectedConversationMessageIdsOrSelf(message)) {
+      if (seen.has(id)) {
+        continue;
+      }
+      seen.add(id);
+      ids.push(id);
+    }
+  }
+  return ids;
+}
+
 function mergeLiveOverlayIntoActiveTurnMessage(
   liveOverlayMessage: ConversationMessage,
   activeTurnMessage: ConversationMessage,
@@ -149,6 +165,7 @@ function mergeLiveOverlayIntoActiveTurnMessage(
     metadata: {
       ...(liveOverlayMessage.metadata ?? {}),
       ...(activeTurnMessage.metadata ?? {}),
+      projectedMessageIds: mergeProjectedMessageIds(liveOverlayMessage, activeTurnMessage),
     },
   };
 }
