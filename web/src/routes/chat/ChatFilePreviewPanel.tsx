@@ -18,7 +18,11 @@ export function ChatFilePreviewPanel({
   sourceLabel,
 }: ChatFilePreviewPanelProps) {
   if (errorMessage) {
-    return <div className={styles.emptySurface}>{errorMessage}</div>;
+    return (
+      <div className={styles.emptySurface} role="alert">
+        {errorMessage}
+      </div>
+    );
   }
 
   if (file) {
@@ -27,10 +31,18 @@ export function ChatFilePreviewPanel({
         file={file}
         changed={changed}
         sourceLabel={sourceLabel}
-        fallback={<div className={styles.emptySurface}>{loadingLabel}</div>}
+        fallback={
+          <div className={styles.emptySurface} role="status" aria-live="polite">
+            {loadingLabel}
+          </div>
+        }
       />
     );
   }
 
-  return <div className={styles.emptySurface}>{loadingLabel}</div>;
+  return (
+    <div className={styles.emptySurface} role="status" aria-live="polite">
+      {loadingLabel}
+    </div>
+  );
 }
