@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 
 import type { ConversationMessage } from "../../api/types";
+import { conversationMessageToAgentMessage } from "../../agent-thread/adapters";
+import { buildAgentMessageOperations } from "./agentMessageOperations";
+import { buildAgentMessageTimelineItems } from "./agentMessageTimeline";
 import { projectAgentMessageTimelineMessages } from "./useAgentMessageTimelineProjection";
 
 const projectionSource = readFileSync(new URL("./useAgentMessageTimelineProjection.ts", import.meta.url), "utf8");
@@ -201,6 +204,96 @@ describe("projectAgentMessageTimelineMessages", () => {
         operationIds: ["tool-read-operation"],
       },
     ]);
+  });
+
+  it("keeps live overlay ids as aliases so command groups can resolve active feedback operations", () => {
+    const liveOverlay = assistantMessage("session-1-message-live-turn-1", {
+      content: "正在运行命令",
+      streaming: true,
+      feedbackEvents: [
+        {
+          sequence: 6,
+          kind: "tool",
+          status: "running",
+          name: "cli_tool",
+          summary: "git branch --show-current",
+        },
+        {
+          sequence: 7,
+          kind: "tool",
+          status: "running",
+          name: "cli_tool",
+          summary: "git status --short --branch",
+        },
+      ],
+      timelineItems: [
+        {
+          id: "session-1-message-live-turn-1-timeline-command-group-6-7",
+          kind: "command_group",
+          status: "running",
+          title: "正在运行 2 条命令",
+          summary: "git branch --show-current；git status --short --branch",
+          operationIds: [
+            "session-1-message-live-turn-1-feedback-6",
+            "session-1-message-live-turn-1-feedback-7",
+          ],
+        },
+      ],
+      metadata: { kind: "session_live_overlay", turnId: "live:turn-1" },
+    });
+    const activeTurn = assistantMessage("session-1-message-active-turn-1", {
+      content: "回答正文",
+      streaming: true,
+      feedbackEvents: [
+        {
+          sequence: 6,
+          kind: "tool",
+          status: "done",
+          name: "cli_tool",
+          summary: "main",
+        },
+        {
+          sequence: 7,
+          kind: "tool",
+          status: "done",
+          name: "cli_tool",
+          summary: "## main...origin/main [ahead 858]",
+        },
+      ],
+      metadata: { kind: "session_active_turn_layer", turnId: "turn-1" },
+    });
+
+    const projection = projectAgentMessageTimelineMessages({
+      timelineMessages: [liveOverlay],
+      activeTurnMessage: activeTurn,
+    });
+    const projectedMessage = projection.messages[0];
+    const agentMessage = conversationMessageToAgentMessage(projectedMessage);
+    const operations = buildAgentMessageOperations(agentMessage, {
+      thought: "思考",
+      mental: "心智状态",
+      status: "运行状态",
+    });
+    const timelineItems = buildAgentMessageTimelineItems(
+      agentMessage,
+      operations,
+      { lang: "zh" },
+      projectedMessage.timelineItems,
+    );
+
+    expect(projectedMessage.metadata?.projectedMessageIds).toEqual([
+      "session-1-message-live-turn-1",
+      "session-1-message-active-turn-1",
+    ]);
+    expect(timelineItems.map((item) => item.kind)).toEqual(["command_group"]);
+    expect(timelineItems[0]).toMatchObject({
+      kind: "command_group",
+      title: "正在运行 2 条命令",
+    });
+    expect(timelineItems).not.toContainEqual(expect.objectContaining({
+      kind: "operation",
+      title: "工具调用投影缺失",
+    }));
   });
 
   it("keeps same-name live overlay tools separate when their stable inputs differ", () => {
