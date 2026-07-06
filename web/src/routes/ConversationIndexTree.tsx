@@ -114,7 +114,7 @@ export function ConversationIndexTree({
   const setupTeams = filteredTeams.filter((team) => !isConfiguredConversationIndexTeam(team));
 
   return (
-    <>
+    <nav role="navigation" aria-label={lang === "zh" ? "对话索引" : "Conversation index"}>
       {filteredConversationsCount ? groupedConversations.map((group) => {
         const collapsed = !searchHasTerm
           && (collapsedConversationGroups[group.groupKey] ?? defaultConversationGroupCollapsed(group.groupKey, group.groupKind));
@@ -254,6 +254,6 @@ export function ConversationIndexTree({
           })}
         </ConversationIndexSection>
       ) : null}
-    </>
+    </nav>
   );
 }
