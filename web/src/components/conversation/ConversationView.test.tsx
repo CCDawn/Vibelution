@@ -1255,9 +1255,12 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).not.toContain(".find((message) => !isTurnErrorMessage(message) && (message.toolCalls?.length ?? 0) > 0)?.toolCalls");
   });
 
-  it("auto-loads earlier messages from an upward top-edge scroll instead of a manual gate", () => {
+  it("auto-loads earlier messages from top-edge or pinned timeline state instead of a manual gate", () => {
     expect(conversationViewSource).toContain("function revealEarlierTimelineMessages()");
-    expect(conversationViewSource).toContain("timeline.scrollTop <= TIMELINE_HISTORY_LOAD_THRESHOLD_PX");
+    expect(conversationViewSource).toContain("shouldLoadEarlierConversationMessages({");
+    expect(conversationViewSource).toContain("hiddenMessageCount: displayMessages.length - visibleMessageCount");
+    expect(conversationViewSource).toContain("scrollHeight: timeline.scrollHeight");
+    expect(conversationViewSource).toContain("clientHeight: timeline.clientHeight");
     expect(conversationViewSource).toContain("handleScroll");
     expect(conversationViewSource).toContain("revealEarlierTimelineMessages()");
     expect(conversationViewSource).toContain("captureTimelineRowKeyAnchor(timelineRef.current)");
