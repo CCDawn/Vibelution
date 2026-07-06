@@ -232,6 +232,10 @@ function timelineItemsFromServer(
       const commandOperations = (item.operationIds || item.sourceOperationIds || [])
         .map((operationId) => operationsById.get(operationId))
         .filter((operation): operation is AgentMessageOperation => Boolean(operation));
+      if (commandOperations.length > 0) {
+        items.push(...commandOperations.map(operationTimelineItem));
+        continue;
+      }
       items.push({
         id: item.id || `timeline-command-group-${items.length + 1}`,
         kind: "command_group",

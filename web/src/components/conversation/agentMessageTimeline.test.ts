@@ -344,6 +344,70 @@ describe("agentMessageTimeline", () => {
     });
   });
 
+  it("expands backend command groups into individual operation timeline rows", () => {
+    const message: ConversationMessage = {
+      id: "message-server-command-group",
+      role: "assistant",
+      content: "最终回答",
+      timestamp: "2026-06-18T00:00:00Z",
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "tool",
+          status: "done",
+          name: "grep_search_tool",
+          summary: "搜索配置文件",
+        },
+        {
+          sequence: 2,
+          kind: "tool",
+          status: "error",
+          name: "cli_tool",
+          summary: "命令执行失败",
+        },
+      ],
+      timelineItems: [
+        {
+          id: "server-command-group",
+          kind: "command_group",
+          status: "failed",
+          title: "已运行 2 条命令",
+          summary: "搜索配置文件；命令执行失败",
+          operationIds: [
+            "message-server-command-group-feedback-1",
+            "message-server-command-group-feedback-2",
+          ],
+        },
+        {
+          id: "server-answer",
+          kind: "assistant_text",
+          status: "completed",
+          text: "最终回答",
+        },
+      ],
+    };
+
+    const items = timelineItemsForConversationMessage(message, { lang: "zh" });
+
+    expect(items.map((item) => item.kind)).toEqual(["operation", "operation", "assistant_text"]);
+    expect(items[0]).toMatchObject({
+      kind: "operation",
+      status: "completed",
+      title: "搜索",
+      summary: "搜索配置文件",
+    });
+    expect(items[1]).toMatchObject({
+      kind: "operation",
+      status: "failed",
+      title: "命令",
+      summary: "命令执行失败",
+    });
+    expect(items).not.toContainEqual(expect.objectContaining({
+      kind: "command_group",
+      title: "已运行 2 条命令",
+    }));
+  });
+
   it("can exclude assistant text from backend timeline items so answers render only in the answer block", () => {
     const message: ConversationMessage = {
       id: "message-server-timeline-answer",
