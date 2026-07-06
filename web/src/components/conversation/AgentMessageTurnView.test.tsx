@@ -76,10 +76,13 @@ describe("AgentMessageTurnView", () => {
 
   it("keeps turn header slots bounded on narrow conversation surfaces", () => {
     expect(styles.turnMeta).toContain("max-w-full");
-    expect(styles.turnMeta).toContain("grid-cols-[minmax(0,1fr)_auto]");
-    expect(styles.turnMeta).toContain("max-[520px]:grid-cols-1");
+    expect(styles.turnMeta).toContain("inline-flex");
+    expect(styles.turnMeta).toContain("w-fit");
+    expect(styles.turnMeta).toContain("flex-wrap");
+    expect(styles.turnMeta).not.toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(styles.turnMeta).toContain("gap-x-2");
-    expect(styles.turnMetaIdentity).toContain("minmax(0,auto)");
+    expect(styles.turnMetaIdentity).toContain("inline-flex");
+    expect(styles.turnMetaIdentity).toContain("w-fit");
     expect(styles.turnMetaIdentity).toContain("max-w-full");
     expect(styles.turnMetaActions).toContain("max-w-full");
     expect(styles.turnMetaActions).toContain("flex-wrap");

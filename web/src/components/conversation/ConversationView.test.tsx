@@ -239,6 +239,21 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.answerOnlyProcessPreview).not.toContain("[overflow-wrap:anywhere]");
   });
 
+  it("keeps the back-to-bottom control floating and content-sized", () => {
+    expect(styles.surface).toContain("relative");
+    expect(styles.backToBottomButton).toContain("absolute");
+    expect(styles.backToBottomButton).toContain("bottom-[calc(var(--vui-control-height-md)_+_18px)]");
+    expect(styles.backToBottomButton).toContain("left-1/2");
+    expect(styles.backToBottomButton).toContain("-translate-x-1/2");
+    expect(styles.backToBottomButton).toContain("z-20");
+    expect(styles.backToBottomButton).toContain("!inline-flex");
+    expect(styles.backToBottomButton).toContain("!w-fit");
+    expect(styles.backToBottomButton).toContain("max-w-[calc(100%_-_24px)]");
+    expect(styles.backToBottomButton).toContain("[&_[data-slot=vui-button-content]]:!inline-flex");
+    expect(styles.backToBottomButton).toContain("[&_[data-slot=vui-button-label]]:!inline-flex");
+    expect(styles.backToBottomButton).not.toContain("!w-full");
+  });
+
   it("keeps conversation timeline previews wrapped and button slots flat", () => {
     expect(styles.timelineCellHeader).toContain("!items-center");
     expect(styles.timelineCellHeader).not.toContain("!items-start");
@@ -292,7 +307,7 @@ describe("ConversationView edit resend affordance", () => {
   });
 
   it("keeps expanded process details out of nested card chrome", () => {
-    expect(styles.answerOnlyProcessGroup).toContain("w-[min(100%,920px)]");
+    expect(styles.answerOnlyProcessGroup).toContain("w-[min(100%,860px)]");
     expect(styles.answerOnlyProcessGroup).toContain("bg-transparent");
     expect(styles.answerOnlyProcessGroup).toContain("shadow-none");
     expect(styles.answerOnlyProcessGroup).not.toContain("rounded-[var(--radius-control)]");
@@ -311,8 +326,9 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.summaryGrid).not.toContain("shadow-[var(--vui-shadow-hairline)]");
     expect(summaryGridTokens).not.toContain("p-2");
     expect(styles.summaryCard).toContain("rounded-[var(--radius-panel)]");
-    expect(styles.summaryCard).toContain("border border-[var(--vui-border-subtle)]");
-    expect(styles.summaryCard).toContain("bg-[var(--vui-surface-glass)]");
+    expect(styles.summaryCard).toContain("border border-[color-mix(in_srgb,var(--vui-border-subtle)_74%,transparent)]");
+    expect(styles.summaryCard).toContain("bg-[color-mix(in_srgb,var(--vui-surface-panel)_90%,white)]");
+    expect(styles.summaryCard).toContain("shadow-none");
     expect(summaryCardTokens).toEqual(expect.arrayContaining(["flex", "flex-col", "gap-1"]));
     expect(summaryLabelTokens).not.toContain("border");
     expect(summaryLabelTokens).not.toContain("p-2");
@@ -396,8 +412,8 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.assistantTurn).toContain("grid-cols-[34px_minmax(0,1fr)]");
     expect(styles.userTurn).toContain("grid-cols-[minmax(0,1fr)_34px]");
     expect(styles.userTurn).toContain("[&_.turnContent]:w-fit");
-    expect(styles.userTurn).toContain("[&_.turnContent]:max-w-[min(82%,860px)]");
-    expect(styles.assistantTurnContinuation).toContain("[&_.turnContent]:w-[min(100%,920px)]");
+    expect(styles.userTurn).toContain("[&_.turnContent]:max-w-[min(74%,760px)]");
+    expect(styles.assistantTurnContinuation).toContain("[&_.turnContent]:w-[min(100%,860px)]");
     expect(styles.turnContent).toContain("gap-[5px]");
     expect(styles.turnMeta).toContain("inline-flex");
     expect(styles.turnSpeaker).toContain("truncate");
@@ -408,25 +424,28 @@ describe("ConversationView edit resend affordance", () => {
   it("restores chat message affordances inside semantic message bodies", () => {
     expect(styles.userMessageBody).toContain("justify-self-end");
     expect(styles.userMessageBody).toContain("w-fit");
-    expect(styles.userMessageBody).toContain("max-w-[min(100%,76ch)]");
+    expect(styles.userMessageBody).toContain("max-w-[min(100%,68ch)]");
     expect(styles.userMessageBody).toContain("rounded-[var(--radius-panel)]");
-    expect(styles.userMessageBody).toContain("bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-panel))]");
-    expect(styles.userMessageBody).toContain("px-3");
-    expect(styles.userMessageBody).toContain("py-2");
+    expect(styles.userMessageBody).toContain("border border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))]");
+    expect(styles.userMessageBody).toContain("bg-[color-mix(in_srgb,var(--accent-cool)_6%,var(--vui-surface-panel))]");
+    expect(styles.userMessageBody).toContain("px-2.5");
+    expect(styles.userMessageBody).toContain("py-1.5");
+    expect(styles.userMessageBody).toContain("shadow-none");
     expect(styles.userMessageBody).toContain("text-left");
 
-    expect(styles.responseSection).toContain("w-[min(100%,920px)]");
-    expect(styles.responseSection).toContain("border-l");
-    expect(styles.responseSection).toContain("pl-2.5");
-    expect(styles.responseBody).toContain("border-t");
+    expect(styles.responseSection).toContain("w-[min(100%,860px)]");
+    expect(styles.responseSection).toContain("border border-[color-mix(in_srgb,var(--vui-border-subtle)_78%,transparent)]");
+    expect(styles.responseSection).toContain("bg-[color-mix(in_srgb,var(--vui-surface-panel)_92%,white)]");
+    expect(styles.responseSection).toContain("px-3");
+    expect(styles.responseSection).toContain("py-2.5");
+    expect(styles.responseSection).toContain("shadow-none");
+    expect(styles.responseBody).toContain("border-0");
     expect(styles.responseBody).toContain("bg-transparent");
-    expect(styles.responseBody).toContain("px-0");
-    expect(styles.responseBody).toContain("py-1.5");
+    expect(styles.responseBody).toContain("p-0");
     expect(styles.responseBody).toContain("shadow-none");
-    expect(styles.responseBody).not.toContain("rounded-[var(--radius-panel)]");
     expect(styles.responseBody).not.toContain("bg-[color-mix(in_srgb,var(--surface-panel)_66%,transparent)]");
 
-    expect(styles.answerOnlyProcessGroup).toContain("w-[min(100%,920px)]");
+    expect(styles.answerOnlyProcessGroup).toContain("w-[min(100%,860px)]");
     expect(styles.answerOnlyProcessGroup).toContain("max-w-full");
     expect(styles.answerOnlyProcessGroup).toContain("bg-transparent");
     expect(styles.answerOnlyProcessGroup).toContain("shadow-none");
@@ -456,6 +475,10 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewStylesModuleSource).toContain("composer: conversationComposerShell");
     expect(conversationViewStylesModuleSource).toContain("composerField: composerFieldShell");
     expect(conversationViewStylesModuleSource).toContain("composerFieldDragActive: composerFieldDragActiveShell");
+    expect(styles.composer).toContain("grid-cols-[minmax(0,1fr)_var(--vui-control-height-sm)]");
+    expect(styles.composerActionStack).toContain("grid-cols-1");
+    expect(styles.composerActionStack).toContain("content-end");
+    expect(styles.composerActionStack).toContain("gap-1");
     expect(conversationViewStylesModuleSource).toContain("composerRoundButton: composerRoundActionButton");
     expect(conversationViewStylesModuleSource).toContain("composerRoundButtonPrimary: composerPrimaryActionButton");
     expect(conversationViewStylesModuleSource).toContain("sendButton: composerSendActionButton");
@@ -479,6 +502,13 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.composerAttachmentThumb).toContain("object-cover");
     expect(styles.composerAttachmentName).toContain("truncate");
     expect(styles.composerAttachmentRemoveButton).toContain("!w-6");
+
+    const composerActionStackSource = conversationViewSource.slice(
+      conversationViewSource.indexOf("<div className={styles.composerActionStack}>"),
+      conversationViewSource.indexOf("</div>\n      </div>", conversationViewSource.indexOf("<div className={styles.composerActionStack}>")),
+    );
+    expect(composerActionStackSource).toContain("className={styles.attachButton}");
+    expect(composerActionStackSource).toContain("styles.composerRoundButtonPrimary");
   });
 
   it("keeps edit-mode composer chrome compact", () => {
@@ -1333,10 +1363,10 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.messageBody).toContain("max-w-[min(100%,76ch)]");
     expect(styles.markdownBody).toContain("max-w-[min(100%,76ch)]");
     expect(styles.responseSegment_answer).toContain("[&_.markdownBody]:max-w-[min(100%,76ch)]");
-    expect(styles.assistantTurn).toContain("[&_.turnContent]:w-[min(100%,920px)]");
+    expect(styles.assistantTurn).toContain("[&_.turnContent]:w-[min(100%,860px)]");
     expect(styles.agentInboxTurn).toContain("[&_.turnContent]:w-[min(100%,920px)]");
     expect(styles.groupTranscriptTurn).toContain("[&_.turnContent]:w-[min(100%,920px)]");
-    expect(styles.timelineAssistantTextCell).toContain("max-w-[min(100%,920px)]");
+    expect(styles.timelineAssistantTextCell).toContain("max-w-[min(100%,860px)]");
   });
 
   it("can render a read-only transcript without the composer", () => {
