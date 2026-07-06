@@ -37,6 +37,20 @@ def build_conversation_timeline_items(
 
     for event in events:
         kind = str(event.get("kind") or "").strip()
+        if kind == "assistant_text":
+            flush_command_buffer()
+            text = str(event.get("text") or event.get("content") or "").strip()
+            if text:
+                operation_id = _event_operation_id(message_id, event)
+                items.append(
+                    {
+                        "id": f"{operation_id}-timeline-response",
+                        "kind": "assistant_text",
+                        "status": _timeline_status(event.get("status")),
+                        "text": text,
+                    }
+                )
+            continue
         if kind == "thought":
             flush_command_buffer()
             text = _event_text(event)
@@ -155,7 +169,7 @@ def _normalize_feedback_events(value: Any) -> list[dict[str, Any]]:
         if not isinstance(raw, dict):
             continue
         kind = str(raw.get("kind") or "").strip()
-        if kind not in {"thought", "mental", "tool", "status"}:
+        if kind not in {"thought", "mental", "tool", "status", "assistant_text"}:
             continue
         sequence = _coerce_positive_int(raw.get("sequence")) or index
         event = dict(raw)

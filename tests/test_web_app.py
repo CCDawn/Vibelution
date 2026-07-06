@@ -12,6 +12,7 @@ import pytest
 from core.evaluation.chat_next_state_signals import append_chat_next_state_signal
 from core.chat.slash_commands import parse_skill_slash_command
 from core.chat.conversation_ledger import (
+    EVENT_ASSISTANT_DELTA_COMMITTED,
     EVENT_ASSISTANT_MESSAGE,
     EVENT_ASSISTANT_PARTIAL,
     EVENT_TOOL_RESULT,
@@ -6273,6 +6274,132 @@ def test_capture_session_ui_stream_preserves_ordered_feedback_events(tmp_path, m
     assert live_state.feedback_events[2]["status"] == "done"
     assert live_state.feedback_events[2]["relatedThoughtSequence"] == live_state.feedback_events[0]["sequence"]
     assert live_state.feedback_events[4]["relatedThoughtSequence"] == live_state.feedback_events[3]["sequence"]
+
+
+def test_capture_session_ui_stream_commits_response_segments_at_tool_boundaries(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+    stub_ui = SimpleNamespace(
+        stream_thought=lambda *args, **kwargs: None,
+        clear_thought_stream=lambda *args, **kwargs: None,
+        stream_response=lambda *args, **kwargs: None,
+        clear_response_stream=lambda *args, **kwargs: None,
+        set_pet_mental_state=lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr("core.ui.get_ui", lambda: stub_ui)
+
+    capture = session_service.SessionTurnCapture(session_id="session-live", turn_id="turn-segments")
+    with session_service._capture_session_ui_stream("session-live", capture):
+        stub_ui.stream_response("先给出初步判断。", done=False)
+        session_service.get_event_bus().publish(
+            session_service.EventNames.TOOL_SUCCESS,
+            {"name": "read_log", "result": "opened latest package", "durationMs": 12},
+        )
+        stub_ui.stream_response("再根据日志给出结论。", done=False)
+
+    events = load_conversation_events(tmp_path, "session-live")
+    segments = [event for event in events if event.event_type == EVENT_ASSISTANT_DELTA_COMMITTED]
+
+    assert [event.payload.get("content") for event in segments] == [
+        "先给出初步判断。",
+        "再根据日志给出结论。",
+    ]
+
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-segments",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={
+            "content": "先给出初步判断。再根据日志给出结论。",
+            "feedbackEvents": capture.feedback_events,
+        },
+        source="persist_session_turn_result",
+    )
+    detail = session_service.get_session_detail("session-live")
+    timeline_items = detail["messages"][-1]["timelineItems"]
+    assert [item["kind"] for item in timeline_items] == ["assistant_text", "operation", "assistant_text"]
+    assert [item.get("text") for item in timeline_items if item["kind"] == "assistant_text"] == [
+        "先给出初步判断。",
+        "再根据日志给出结论。",
+    ]
+
+
+def test_session_detail_interleaves_committed_assistant_segments_with_tool_events(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-interleaved",
+        EVENT_ASSISTANT_DELTA_COMMITTED,
+        status="completed",
+        payload={"content": "先给出初步判断。"},
+        source="session_ui_capture",
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-interleaved",
+        EVENT_TOOL_RESULT,
+        status="done",
+        payload={
+            "toolCall": {
+                "id": "tool-read-log",
+                "name": "read_log",
+                "status": "done",
+                "summary": "读取最新日志",
+                "resultPreview": "found rendering bottleneck",
+            }
+        },
+        source="session_ui_capture",
+        tool_call_id="tool-read-log",
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-interleaved",
+        EVENT_ASSISTANT_DELTA_COMMITTED,
+        status="completed",
+        payload={"content": "再根据日志给出结论。"},
+        source="session_ui_capture",
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        "turn-interleaved",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={
+            "content": "先给出初步判断。\n\n再根据日志给出结论。",
+            "feedbackEvents": [
+                {
+                    "sequence": 2,
+                    "kind": "tool",
+                    "status": "done",
+                    "name": "read_log",
+                    "summary": "读取最新日志",
+                    "resultPreview": "found rendering bottleneck",
+                }
+            ],
+        },
+        source="persist_session_turn_result",
+    )
+
+    detail = session_service.get_session_detail("session-live")
+    message = detail["messages"][-1]
+    timeline_items = message["timelineItems"]
+
+    assert message["content"] == "先给出初步判断。\n\n再根据日志给出结论。"
+    assert [item["kind"] for item in timeline_items] == ["assistant_text", "operation", "assistant_text"]
+    assert [item.get("text") for item in timeline_items if item["kind"] == "assistant_text"] == [
+        "先给出初步判断。",
+        "再根据日志给出结论。",
+    ]
+    assert timeline_items[1]["title"] == "读取"
 
 
 def test_capture_session_ui_stream_does_not_mark_returned_degraded_tool_running(tmp_path, monkeypatch):
