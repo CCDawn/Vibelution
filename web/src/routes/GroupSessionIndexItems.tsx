@@ -60,7 +60,7 @@ export function GroupConversationIndexItem({
   formatTime,
   onOpen,
 }: GroupConversationIndexItemProps) {
-  void fallbackSummary;
+  const title = conversation.title.trim() || fallbackSummary;
   const itemClassName = active
     ? `${styles.sessionItem} ${styles.groupSessionItem} ${styles.sessionItemActive}`
     : `${styles.sessionItem} ${styles.groupSessionItem}`;
@@ -68,13 +68,11 @@ export function GroupConversationIndexItem({
   const memberLabel = lang === "zh" ? `成员：${conversation.participantCount ?? 0}` : `Members: ${conversation.participantCount ?? 0}`;
 
   return (
-    <div
-      aria-current={active ? "true" : undefined}
-      className={itemClassName}
-    >
+    <div className={itemClassName}>
       <VNativeButton
         type="button"
         className={styles.sessionItemMain}
+        aria-current={active ? "true" : undefined}
         onClick={() => onOpen(roomId)}
       >
         <span className={`${styles.conversationAvatar} ${styles.conversationAvatarGroup}`} aria-hidden="true">
@@ -82,7 +80,7 @@ export function GroupConversationIndexItem({
         </span>
         <span className={styles.conversationCopy}>
           <span className={styles.conversationTitleRow}>
-            <span className={styles.sessionItemTitle}>{conversation.title}</span>
+            <span className={styles.sessionItemTitle}>{title}</span>
             <span className={styles.sessionState} title={groupStatus} aria-label={groupStatus}>
               <CircleDot size={10} aria-hidden="true" />
             </span>
@@ -137,14 +135,12 @@ export function TeamConversationIndexItem({
   const disabledReasonId = roomId ? undefined : `team-row-disabled-reason-${team.teamId}`;
 
   return (
-    <div
-      aria-current={active ? "true" : undefined}
-      className={itemClassName}
-    >
+    <div className={itemClassName}>
       <VNativeButton
         type="button"
         className={styles.sessionItemMain}
         disabled={!roomId}
+        aria-current={active ? "true" : undefined}
         aria-describedby={disabledReasonId}
         onClick={() => onOpen(roomId)}
       >

@@ -26,7 +26,7 @@ const styles = {
   sessionState:
     "vui-routes-chatcodingroute sessionState min-w-0",
   teamTreeItem:
-    "vui-routes-chatcodingroute teamTreeItem min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+    "vui-routes-chatcodingroute teamTreeItem min-w-0 grid min-h-0 content-start gap-1.5 overflow-hidden rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
 } as const;
 
 export default styles;

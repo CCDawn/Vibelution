@@ -11,6 +11,7 @@ import {
   teamMemberStatusTitle,
   teamStatusLabel,
 } from "./GroupSessionIndexItems";
+import styles from "./GroupSessionIndexItems.styles";
 
 function team(overrides: Partial<Team>): Team {
   return {
@@ -64,6 +65,35 @@ describe("GroupSessionIndexItems helpers", () => {
     expect(markup).not.toContain('data-vui="button"');
   });
 
+  it("keeps active group semantics on the native row button and falls back when the title is empty", () => {
+    const conversation: ConversationSummary = {
+      conversationId: "room-1",
+      roomId: "room-1",
+      title: "   ",
+      type: "group_room",
+      status: "active",
+      updatedAt: "2026-06-09T00:00:00.000Z",
+      participantCount: 3,
+      summary: "",
+    };
+    const markup = renderToStaticMarkup(createElement(GroupConversationIndexItem, {
+      active: true,
+      conversation,
+      fallbackSummary: "群聊会话",
+      formatTime: () => "06/09 00:00",
+      kindLabel: "群聊",
+      lang: "zh",
+      onOpen: () => undefined,
+      roomId: "room-1",
+      statusLabel: () => "启用中",
+    }));
+
+    expect(markup).toContain('aria-current="true"');
+    expect(markup).toMatch(/<button[^>]*aria-current="true"/);
+    expect(markup).not.toMatch(/<div[^>]*aria-current="true"/);
+    expect(markup).toContain(">群聊会话</span>");
+  });
+
   it("renders Team rows through native VUI row buttons", () => {
     const markup = renderToStaticMarkup(createElement(TeamConversationIndexItem, {
       active: false,
@@ -81,6 +111,26 @@ describe("GroupSessionIndexItems helpers", () => {
 
     expect(markup).toContain('data-vui="native-button"');
     expect(markup).not.toContain('data-vui="button"');
+  });
+
+  it("keeps active Team semantics on the native row button", () => {
+    const markup = renderToStaticMarkup(createElement(TeamConversationIndexItem, {
+      active: true,
+      lang: "zh",
+      onOpen: () => undefined,
+      roomId: "room-1",
+      statusLabel: () => "启用中",
+      team: team({
+        linkedChatRoomId: "room-1",
+        memberCount: 2,
+        name: "科研团队",
+      }),
+      teamRoute: "/teams?team=team-1",
+    }));
+
+    expect(markup).toContain('aria-current="true"');
+    expect(markup).toMatch(/<button[^>]*aria-current="true"/);
+    expect(markup).not.toMatch(/<div[^>]*aria-current="true"/);
   });
 
   it("describes disabled Team rows with the missing room reason on the row button", () => {
@@ -130,5 +180,10 @@ describe("GroupSessionIndexItems helpers", () => {
     expect(teamCategoryLabel(team({ teamCategory: "科研", teamKind: "research" }), "zh")).toBe("科研");
     expect(teamCategoryLabel(team({ teamCategory: "", teamKind: "research" }), "en")).toBe("research");
     expect(teamCategoryLabel(team({ teamCategory: "", teamKind: "" }), "zh")).toBe("自定义团队");
+  });
+
+  it("prevents Team rows from becoming their own horizontal scroll surface", () => {
+    expect(styles.teamTreeItem).toContain("overflow-hidden");
+    expect(styles.teamTreeItem).not.toContain("overflow-auto");
   });
 });
