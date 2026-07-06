@@ -1141,6 +1141,24 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain(">partial<");
   });
 
+  it("colors operation rows from each operation status instead of the operation kind", () => {
+    expect(conversationViewSource).toContain("function operationStatusToneClassName(operation: AgentMessageOperation)");
+    expect(conversationViewSource).toContain("operationStatusTone(operation)");
+    expect(conversationViewSource).toContain("styles[`operationItem_${operationStatusToneClassName(operation)}`]");
+    expect(conversationViewSource).toContain("styles[`operationIcon_${operationStatusToneClassName(operation)}`]");
+    expect(styles.operationItem_success).toContain("!text-[var(--state-success)]");
+    expect(styles.operationItem_failed).toContain("!text-[var(--state-error)]");
+    expect(styles.operationItem_warning).toContain("!text-[var(--state-warning)]");
+  });
+
+  it("does not let top-edge history loading rewrite cached response expansion defaults", () => {
+    expect(conversationViewSource).toContain("function revealEarlierTimelineMessages()");
+    expect(conversationViewSource).toContain("preserveCurrentExpansionDefaults();");
+    expect(conversationViewSource).toContain("function preserveCurrentExpansionDefaults()");
+    expect(conversationViewSource).toContain("const responseExpanded = getExpansionState(message.id, \"response\", defaultResponseExpanded)");
+    expect(conversationViewSource).not.toContain("defaultExpansionRef.current = {};\n    responseSegmentCacheRef.current.clear();\n    markdownBlockCacheRef.current.clear();\n    setSectionExpansion({});\n  }, [sessionId, visibleMessageLimit]");
+  });
+
   it("keeps active streaming scroll signals on a small streaming-only tail", () => {
     expect(conversationViewSource).toContain("projectAgentMessageTimelineMessages({ timelineMessages, activeTurnMessage })");
     expect(conversationViewSource).toContain("const streamingTimelineMessages = activeAgentMessageTimelineProjection.streamingMessages");

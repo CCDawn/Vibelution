@@ -528,7 +528,7 @@ const styles: Record<string, string> = {
   operationIcon_error:
     "vui-components-conversationview operationIcon_error min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] shrink-0 text-[var(--fg-tertiary)]",
   operationIcon_failed:
-    "vui-components-conversationview operationIcon_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] shrink-0 text-[var(--fg-tertiary)]",
+    "vui-components-conversationview operationIcon_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] !text-[var(--state-error)] shrink-0 text-[var(--fg-tertiary)]",
   operationIcon_files:
     "vui-components-conversationview operationIcon_files min-w-0 shrink-0 text-[var(--fg-tertiary)]",
   operationIcon_idle:
@@ -560,7 +560,7 @@ const styles: Record<string, string> = {
   operationIcon_status:
     "vui-components-conversationview operationIcon_status min-w-0 shrink-0 text-[var(--fg-tertiary)]",
   operationIcon_success:
-    "vui-components-conversationview operationIcon_success min-w-0 shrink-0 text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    "vui-components-conversationview operationIcon_success min-w-0 shrink-0 text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] !text-[var(--state-success)]",
   operationIcon_thought:
     "vui-components-conversationview operationIcon_thought min-w-0 shrink-0 text-[var(--fg-tertiary)]",
   operationIcon_tool:
@@ -572,7 +572,7 @@ const styles: Record<string, string> = {
   operationIcon_warn:
     "vui-components-conversationview operationIcon_warn min-w-0 shrink-0 text-[var(--fg-tertiary)]",
   operationIcon_warning:
-    "vui-components-conversationview operationIcon_warning min-w-0 shrink-0 text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    "vui-components-conversationview operationIcon_warning min-w-0 shrink-0 text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] !text-[var(--state-warning)]",
   operationItem:
     "vui-components-conversationview operationItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 w-[min(100%,72ch)] grid grid-cols-[22px_minmax(0,1fr)_auto_auto_16px] items-start gap-1.5 !rounded-none !border-x-0 !border-t-0 border-b border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] !bg-transparent !p-0 !pb-1 !text-[var(--fg-secondary)] !shadow-none",
   operationItemActive:
@@ -598,7 +598,7 @@ const styles: Record<string, string> = {
   operationItem_error:
     "vui-components-conversationview operationItem_error min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   operationItem_failed:
-    "vui-components-conversationview operationItem_failed min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    "vui-components-conversationview operationItem_failed min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 !border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] !bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] !text-[var(--state-error)]",
   operationItem_files:
     "vui-components-conversationview operationItem_files min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
   operationItem_idle:
@@ -630,7 +630,7 @@ const styles: Record<string, string> = {
   operationItem_status:
     "vui-components-conversationview operationItem_status min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
   operationItem_success:
-    "vui-components-conversationview operationItem_success min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    "vui-components-conversationview operationItem_success min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 !border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] !bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] !text-[var(--state-success)]",
   operationItem_thought:
     "vui-components-conversationview operationItem_thought min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
   operationItem_tool:
@@ -642,7 +642,7 @@ const styles: Record<string, string> = {
   operationItem_warn:
     "vui-components-conversationview operationItem_warn min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
   operationItem_warning:
-    "vui-components-conversationview operationItem_warning min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    "vui-components-conversationview operationItem_warning min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 !border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] !bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] !text-[var(--state-warning)]",
   operationName:
     "vui-components-conversationview operationName min-w-0 text-[var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   operationStatus:
