@@ -1316,7 +1316,7 @@ describe("ConversationView edit resend affordance", () => {
     );
 
     expect(html.match(/src="\/api\/agents\/avatar-image\/agent-zhounanzhi\.png"/g)?.length ?? 0).toBe(1);
-    expect(html.match(/周南栀/g)?.length ?? 0).toBe(1);
+    expect(html.match(/class="[^"]*turnSpeaker[^"]*" title="周南栀">周南栀<\/span>/g)?.length ?? 0).toBe(1);
     expect(semanticArticleClassCount(html, "assistantTurn")).toBe(1);
     expect(html.match(/assistantTurnContinuation/g)?.length ?? 0).toBe(0);
     expect(html.indexOf("answerOnlyProcessGroup")).toBeLessThan(html.indexOf("responseSection"));

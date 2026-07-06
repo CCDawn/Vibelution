@@ -23,6 +23,7 @@ export type ConversationOperationDetailsClassNames = {
   operationDetailsThought: string;
   operationDetailRow: string;
   operationDetailLabel: string;
+  operationDetailDescription?: string;
   operationDetailValue: string;
 };
 
@@ -218,7 +219,7 @@ export function DeferredOperationDetails({
     return null;
   }
   return (
-    <div
+    <dl
       id={detailsId}
       className={[
         classNames.operationDetails,
@@ -226,12 +227,28 @@ export function DeferredOperationDetails({
         className || "",
       ].filter(Boolean).join(" ")}
     >
-      {detailRows.map((row) => (
+      {detailRows.map((row, index) => {
+        const labelId = `${detailsId}-detail-label-${index}`;
+        return (
         <div key={`${operation.id}-${row.label}`} className={classNames.operationDetailRow}>
-          <span className={classNames.operationDetailLabel}>{row.label}</span>
-          <pre className={classNames.operationDetailValue}>{row.value}</pre>
+          <dt id={labelId} className={classNames.operationDetailLabel}>
+            {row.label}
+          </dt>
+          <dd
+            aria-labelledby={labelId}
+            className={classNames.operationDetailDescription ?? styles.operationDetailDescription}
+          >
+            <pre
+              aria-labelledby={labelId}
+              className={classNames.operationDetailValue}
+              tabIndex={0}
+            >
+              {row.value}
+            </pre>
+          </dd>
         </div>
-      ))}
-    </div>
+        );
+      })}
+    </dl>
   );
 }
