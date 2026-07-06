@@ -8,7 +8,7 @@
 
 **Claim / Branch / Worktree:** `codex/self-observation-time-machine-design` in `C:\Users\17533\Desktop\Vibelution-worktrees\self-observation-time-machine-design`
 
-**Scope:** Upgrade existing self-observation mode into a durable time-machine run loop with effective runtime accounting, restart recovery, user guidance, compression markers, and UI metrics.
+**Scope:** Upgrade existing self-observation mode into a durable time-machine run loop with effective runtime accounting, restart recovery, user guidance, compression markers, conversation-chain preservation, and UI metrics.
 
 **Supersedes:** none
 
@@ -32,23 +32,27 @@
 - Page close, backend process restart, Launcher/Vibelution restart, and later Vibelution startup after machine restart must identify unfinished runs and continue them.
 - User input during the run is a guidance event in the same run and does not reset the task.
 - Context compression writes visible compression events and continues the same run.
+- This stage does not generate a new observation analysis report, write project-memory records, or summarize the experiment into durable memory; it preserves the full conversation/event chain for the next stage to analyze.
 - Do not edit `VERSION`, `CHANGELOG.md`, root `config.toml`, `config.example.toml`, operator config, `.docs/project-memory/**`, or `PROJECT_MEMORY.html` in this implementation branch.
 - `web/src/api/types.ts` is a shared hot file; the implementation round must take a narrow project-memory guard claim before editing it unless the user explicitly skips guard use in that later round.
 - Launcher refresh is not needed for this plan document. The implementation changes backend API, runtime scheduling, and frontend build inputs, so refresh is required before real runtime UI verification.
+- Reuse-first rule: every implementation task must inspect and reuse project-native services, stores, UI components, and test helpers before adding new abstractions.
+- Hard-part search rule: if durable scheduling, state-machine enforcement, recovery, compression, or timeline rendering cannot be implemented cleanly with local parts, pause that task and do read-only component research before coding further.
+- Dependency rule: no external dependency may be installed or added to lockfiles unless a new plan update records the candidate, license, integration cost, validation strategy, and explicit user approval.
 
 ---
 
 ## File Structure
 
 - Modify `core/runtime_manager/evolution_store.py`: include `self_observation` in evolution summary and cleanup helpers so tests and runtime scans handle the new durable run kind.
-- Modify `core/web/services/self_evolution_control_service.py`: add durable observation ledger helpers, event schema, effective runtime accounting, tick loop, recovery scanner, guidance handling, compression marker handling, final report assembly, and runtime-scene event records.
+- Modify `core/web/services/self_evolution_control_service.py`: add durable observation ledger helpers, event schema, effective runtime accounting, tick loop, recovery scanner, guidance handling, compression marker handling, conversation/turn link preservation, and runtime-scene event records.
 - Modify `core/web/routes/evolution.py`: extend observation start payload, add active-run read route, add guidance route, and allow pause/resume/force_resume actions.
 - Modify `web/src/api/types.ts`: extend observation DTOs with time-machine metrics, event fields, guidance/compression/resume counters, and request payloads.
 - Modify `web/src/routes/EvolutionRoute.tsx`: wire guidance mutation and pass new observation metrics/action props into `SelfEvolutionTrack`.
 - Modify `web/src/routes/SelfEvolutionTrack.tsx`: add effective time metrics, tick/compression/resume/guidance counters, guidance input, marker rendering, and action states.
 - Modify `web/src/routes/SelfEvolutionTrack.styles.ts`: add compact operational styles for time-machine metrics and guidance controls.
 - Modify `web/src/routes/SelfEvolutionTrack.static.test.ts`: protect the no-tool UI boundary, time-machine metrics, and marker rendering source contracts.
-- Modify `tests/test_self_evolution_control_service.py`: service-level tests for durable ledger, effective runtime, tick loop, recovery, guidance, compression marker, boundary violation, and final report.
+- Modify `tests/test_self_evolution_control_service.py`: service-level tests for durable ledger, effective runtime, tick loop, recovery, guidance, compression marker, boundary violation, and conversation-chain preservation without a generated analysis report.
 - Modify `tests/test_web_evolution_routes.py`: API tests for start/read/active/events/guidance/action behavior.
 
 ## Source Of Truth
@@ -57,10 +61,55 @@
 | --- | --- | --- | --- | --- | --- |
 | Observation run existence | `evolution_store` kind `self_observation` snapshot | `self_evolution_control_service` | active run API, workspace snapshot, UI, recovery scanner | persist after every ledger event | in-memory `_OBSERVATION_RUNS` becomes cache only |
 | Current status | event projection in persisted snapshot | scheduler/action/recovery helpers | UI status, actions, scheduler | append state event then persist | frontend local state never owns status |
-| Effective runtime | `effectiveRunSeconds` and `tick_started`/`tick_completed` events | tick scheduler | completion gate, UI progress, report | tick completion or safe interruption | wall clock is audit only |
-| User guidance | bounded `guidanceQueue` and `user_guidance_*` events | guidance route | next tick prompt, UI markers, report | consumed event clears pending item | guidance never overwrites original goal |
-| Compression result | `compression_*` events plus bounded checkpoint summary fields | observation service compression adapter | tick prompt, UI marker, report | compression event persists before next tick | no assistant bubble is used as compression marker |
-| Recovery count | `runtime_interrupted`, `resume_needed`, `force_resume_*` events | startup/API scanner | UI, report, scheduler | recovery scan persists transition | process memory counter is not authoritative |
+| Effective runtime | `effectiveRunSeconds` and `tick_started`/`tick_completed` events | tick scheduler | completion gate, UI progress, future analyzer | tick completion or safe interruption | wall clock is audit only |
+| User guidance | bounded `guidanceQueue` and `user_guidance_*` events | guidance route | next tick prompt, UI markers, future analyzer | consumed event clears pending item | guidance never overwrites original goal |
+| Compression result | `compression_*` events plus bounded checkpoint summary fields | observation service compression adapter | tick prompt, UI marker, future analyzer | compression event persists before next tick | no assistant bubble is used as compression marker |
+| Recovery count | `runtime_interrupted`, `resume_needed`, `force_resume_*` events | startup/API scanner | UI, future analyzer, scheduler | recovery scan persists transition | process memory counter is not authoritative |
+| Full conversation chain | conversation session detail plus persisted `conversationSessionId`, `turnId`, `messages`, and event refs | session service and observation service | `ConversationView`, `LazyConversationView`, future analyzer | each tick preserves session/turn refs before terminal transition | compatibility `report` field is not the source of truth |
+
+---
+
+## Reuse Research And Component Decisions
+
+Current project reuse is the default path. External packages are candidates only when a local component cannot satisfy the behavior without becoming brittle.
+
+| Capability | Decision | Reusable component or candidate | Evidence | Implementation boundary |
+| --- | --- | --- | --- | --- |
+| Durable observation run ledger | REUSE | `core.runtime_manager.evolution_store` and `core.runtime_manager.work_run_store.WorkRunStore` | Existing store persists per-kind snapshots, active/latest indexes, corrupt JSON quarantine, and runtime-scene lifecycle events. Tests already cover active/latest tracking and snapshot rejection in `tests/test_work_run_store.py`. | Add a `self_observation` kind; do not create a parallel JSON ledger. |
+| Runtime-scene evidence | REUSE | `core.web.services.runtime_scene_service.record_runtime_scene_event` and WorkRunStore lifecycle events | Existing self-evolution and work-run paths already record bounded lifecycle evidence. | Add bounded `self_observation.*` event codes; do not log prompts, full outputs, or provider payloads. |
+| Conversation execution | REUSE | `create_supervised_agent_session`, `submit_session_message`, `get_session_detail`, `get_session_turn_completion_snapshot`, `request_stop_session_turn` | Current observation mode already routes through supervised session creation and `message_source="self_observation"`. | Keep `_run_observation_session` as the adapter; do not add a direct provider client. |
+| Context compression | ADAPT | `core.chat.context_compression_ledger.append_context_compression_checkpoint`, `append_context_compression_attempt`, `context_compression_projection`, `latest_context_compression_checkpoint`; `core.chat.turn_journal` marker metadata | Existing compression ledger emits checkpoint/attempt events and projection fields such as `compressionCount`. | Observation run records marker summaries that point at conversation compression facts; it does not invent a second compression source. |
+| Session interruption recovery | ADAPT | `session_service._repair_stale_running_conversation`, `_release_stale_chat_turn_work_run`, existing self-evolution restart/requeue patterns | Local code already repairs stale running conversations and requeues self-evolution restart intents. | Reuse the detection shape; keep observation-specific effective runtime accounting in observation ledger. |
+| Tick scheduling | REUSE for v1; REFERENCE_ONLY for external packages | Local `_RUN_EXECUTOR`, persisted run snapshot, session turn polling. External references: [APScheduler docs](https://apscheduler.readthedocs.io/) and [APScheduler user guide](https://apscheduler.readthedocs.io/en/3.x/userguide.html). | APScheduler supports triggers/job stores/executors/schedulers and database-backed jobs, but this feature needs sequential, single-run ticks tied to the existing session/runtime manager. | Do not add APScheduler in v1. Revisit only if multiple concurrent observation jobs or persistent scheduled jobs become required. |
+| Durable workflow engine | REFERENCE_ONLY | [Temporal Python SDK docs](https://docs.temporal.io/develop/python), [Temporal Python timers](https://docs.temporal.io/develop/python/workflows/timers), [Prefect docs](https://docs.prefect.io/v3/get-started) | Temporal durable timers can resume after downtime; Prefect provides workflow orchestration and state tracking. Both introduce a separate orchestration runtime and deployment model. | Do not add Temporal or Prefect in v1. Revisit only if Vibelution adopts a dedicated durable workflow service. |
+| State-machine library | REFERENCE_ONLY | [pytransitions/transitions](https://github.com/pytransitions/transitions), [python-statemachine docs](https://python-statemachine.readthedocs.io/en/latest/transitions.html) | Libraries provide explicit transition models, but the current state machine is small and must persist through project-owned ledger events. | Keep explicit status helper functions in-house for v1. If transition guards become hard to audit, add a separate dependency proposal. |
+| Frontend observation timeline | REUSE | `SelfEvolutionTrack` observation event rail, `LazyConversationView`, `ConversationView`, VUI/HeroUI primitives, existing `eventTail` rendering | Current UI already has observation mode, conversation pane, runtime notices, and event tail. | Extend existing controls and styles; do not add a timeline package. |
+| Guidance input and cache sync | REUSE | Existing `fetchJson`, React Query `useMutation`, `evolutionWorkspaceCache.afterSelfEvolutionChanged`, HeroUI/VUI form primitives | Current route code already wires worktree and observation actions this way. | Add one guidance mutation and reuse cache invalidation; do not introduce a new client store. |
+
+## Implementation Reuse Gate
+
+Every task begins with this local scan before writing implementation code:
+
+```powershell
+rg -n "WorkRunStore|persist_run_snapshot|append_context_compression_checkpoint|append_context_compression_attempt|context_compression_projection|latest_context_compression_checkpoint|_schedule_session_turn|submit_session_message|get_session_turn_completion_snapshot|record_runtime_scene_event|LazyConversationView|observationEventTail" "core" "web/src" "tests" -g "*.py" -g "*.ts" -g "*.tsx"
+```
+
+Expected: the scan finds the local components listed in the reuse table. Use those components unless the task has fresh evidence that they cannot satisfy the requirement.
+
+If a task is blocked for more than one focused implementation attempt because a local component is missing or unsafe, stop that task and perform a bounded read-only reuse search:
+
+```text
+Candidate:
+Source:
+License:
+Fit:
+Integration cost:
+Why local reuse failed:
+Decision: REUSE / ADAPT / REFERENCE_ONLY / BUILD_IN_HOUSE / BLOCKED
+Plan change required:
+```
+
+No external package install, lockfile update, service dependency, or copied external code is allowed without a committed plan update and explicit user approval.
 
 ---
 
@@ -80,6 +129,12 @@
 - Produces: `_load_active_self_observation_snapshot() -> dict[str, Any] | None`
 - Produces: `_append_self_observation_event(..., event_type: str, message: str, payload: dict[str, Any] | None = None, ...) -> dict[str, Any] | None`
 - Consumes: existing `start_self_observation_run`, `get_active_self_observation_run`, `get_self_observation_run_snapshot`
+
+- [ ] **Step 0: Apply the reuse gate for durable storage**
+
+Run the global reuse scan and confirm `WorkRunStore`, `persist_run_snapshot`, `load_active_run_snapshot`, and `tests/test_work_run_store.py` exist.
+
+Expected: use `evolution_store` kind `self_observation`; do not create a second JSON store or a UI-only ledger.
 
 - [ ] **Step 1: Write failing persistence tests**
 
@@ -127,7 +182,9 @@ def test_self_observation_terminal_snapshot_clears_active_index(monkeypatch):
         started["runId"],
         status="completed",
         latest_message="观察完成。",
-        report="观察目标：观察终态\n边界遵守：通过",
+        report="",
+        conversation_session_id="session-observe-terminal",
+        messages=["观察完成。"],
     )
 
     with service._OBSERVATION_RUN_STATE_LOCK:
@@ -138,6 +195,9 @@ def test_self_observation_terminal_snapshot_clears_active_index(monkeypatch):
     persisted = service.get_self_observation_run_snapshot(started["runId"])
     assert persisted is not None
     assert persisted["status"] == "completed"
+    assert persisted["report"] == ""
+    assert persisted["conversationSessionId"] == "session-observe-terminal"
+    assert persisted["messages"] == ["观察完成。"]
     assert persisted["eventTail"][-1]["type"] == "run_completed"
 ```
 
@@ -512,6 +572,12 @@ Expected: commit succeeds with only Task 1 files staged.
 - Produces: `_run_self_observation_loop(context: dict[str, Any]) -> None`
 - Keeps: `_run_self_observation_turn(context)` as compatibility wrapper that calls `_run_self_observation_loop(context)`.
 
+- [ ] **Step 0: Apply the reuse gate for scheduling**
+
+Run the global reuse scan and confirm existing session turn submission/polling helpers are available.
+
+Expected: implement sequential ticks on top of the existing executor and session polling path. Do not add APScheduler, Temporal, Prefect, Celery, or another scheduler/orchestrator in v1 unless a committed plan update approves it.
+
 - [ ] **Step 1: Write failing effective runtime tests**
 
 Add:
@@ -885,7 +951,9 @@ def _run_self_observation_loop(context: dict[str, Any]) -> None:
                 normalized,
                 status="completed",
                 latest_message="观察有效运行时长已达标。",
-                report=_build_self_observation_final_report(snapshot),
+                report="",
+                conversation_session_id=str(snapshot.get("conversationSessionId") or ""),
+                messages=list(snapshot.get("messages") or []),
             )
             return None
         tick_start_snapshot = _begin_self_observation_tick(normalized)
@@ -908,15 +976,16 @@ def _run_self_observation_loop(context: dict[str, Any]) -> None:
                 normalized,
                 status="failed",
                 latest_message="自主观察 tick 运行失败。",
-                report=f"观察目标：{snapshot.get('goal') or ''}\n异常与失败信号：{type(exc).__name__}: {exc}",
+                report="",
+                boundary_violation=f"tick_failed:{type(exc).__name__}: {exc}",
             )
             return None
         ended_at = _now_timestamp()
         messages = [str(item) for item in list(result.get("messages") or []) if str(item or "").strip()]
-        report = str(result.get("report") or "").strip()
-        latest_message = messages[-1] if messages else report
+        assistant_fallback = str(result.get("report") or "").strip()
+        latest_message = messages[-1] if messages else assistant_fallback
         violation = ""
-        for item in [*messages, report]:
+        for item in [*messages, assistant_fallback]:
             violation = detect_self_observation_boundary_violation(item)
             if violation:
                 break
@@ -925,7 +994,7 @@ def _run_self_observation_loop(context: dict[str, Any]) -> None:
                 normalized,
                 status="boundary_violation",
                 latest_message="自主观察检测到边界违规并已终止。",
-                report=report,
+                report="",
                 boundary_violation=violation,
                 conversation_session_id=str(result.get("conversationSessionId") or ""),
                 messages=messages,
@@ -936,7 +1005,7 @@ def _run_self_observation_loop(context: dict[str, Any]) -> None:
             started_at=started_at,
             ended_at=ended_at,
             message=latest_message,
-            summary=_self_observation_tick_summary(latest_message or report),
+            summary=_self_observation_tick_summary(latest_message or assistant_fallback),
             conversation_session_id=str(result.get("conversationSessionId") or ""),
         )
         _consume_self_observation_guidance_for_tick(normalized)
@@ -947,7 +1016,7 @@ def _run_self_observation_loop(context: dict[str, Any]) -> None:
                 normalized,
                 status="completed",
                 latest_message="观察有效运行时长已达标。",
-                report=_build_self_observation_final_report(final_snapshot),
+                report="",
                 conversation_session_id=str(final_snapshot.get("conversationSessionId") or ""),
                 messages=list(final_snapshot.get("messages") or []),
             )
@@ -959,7 +1028,7 @@ def _run_self_observation_turn(context: dict[str, Any]) -> None:
     return _run_self_observation_loop(context)
 ```
 
-This references `_self_observation_tick_summary`, `_consume_self_observation_guidance_for_tick`, `_maybe_record_self_observation_compression_marker`, and `_build_self_observation_final_report`; Tasks 4 and 5 replace their initial no-op bodies with full behavior. Add temporary bounded helpers now so Task 2 tests can pass:
+This references `_self_observation_tick_summary`, `_consume_self_observation_guidance_for_tick`, and `_maybe_record_self_observation_compression_marker`; Tasks 4 and 5 replace their initial no-op bodies with full behavior. Add temporary bounded helpers now so Task 2 tests can pass:
 
 ```python
 def _self_observation_tick_summary(text: str) -> str:
@@ -972,19 +1041,6 @@ def _consume_self_observation_guidance_for_tick(run_id: str) -> dict[str, Any] |
 
 def _maybe_record_self_observation_compression_marker(run_id: str, result: dict[str, Any]) -> dict[str, Any] | None:
     return get_self_observation_run_snapshot(run_id)
-
-
-def _build_self_observation_final_report(snapshot: dict[str, Any]) -> str:
-    return (
-        f"观察目标：{snapshot.get('goal') or ''}\n"
-        f"请求有效时长：{snapshot.get('durationSeconds') or 0} 秒\n"
-        f"实际有效运行时长：{snapshot.get('effectiveRunSeconds') or 0} 秒\n"
-        f"tick 次数：{snapshot.get('tickCount') or 0}\n"
-        f"压缩次数：{snapshot.get('compressionCount') or 0}\n"
-        f"恢复次数：{snapshot.get('resumeCount') or 0}\n"
-        f"用户引导次数：{snapshot.get('guidanceCount') or 0}\n"
-        "边界遵守：未检测到工具边界违规。"
-    )
 ```
 
 - [ ] **Step 8: Run tick tests**
@@ -1026,6 +1082,12 @@ Expected: commit succeeds with only Task 2 files staged.
 - Produces: `get_active_or_resume_self_observation_run() -> dict[str, Any] | None`
 - Produces route: `GET /api/evolution/self/observation-runs/active`
 - Extends action route with `pause`, `resume`, and `force_resume`.
+
+- [ ] **Step 0: Apply the reuse gate for recovery**
+
+Run the global reuse scan and inspect the existing stale-session repair and self-evolution restart/requeue patterns.
+
+Expected: reuse the same detection shape and runtime-scene vocabulary where possible; keep observation-specific owner, effective time, and resume counters in the observation ledger.
 
 - [ ] **Step 1: Write failing resume tests**
 
@@ -1291,6 +1353,12 @@ Expected: commit succeeds with only Task 3 files staged.
 - Replaces: `_consume_self_observation_guidance_for_tick(run_id: str) -> dict[str, Any] | None`
 - Produces route: `POST /api/evolution/self/observation-runs/{run_id}/guidance`
 
+- [ ] **Step 0: Apply the reuse gate for API/cache flow**
+
+Run the global reuse scan and confirm existing observation route/action and React Query mutation patterns.
+
+Expected: guidance is one route plus one mutation using existing `fetchJson` and cache invalidation. Do not introduce a new frontend store or message bus.
+
 - [ ] **Step 1: Write failing guidance service tests**
 
 Add:
@@ -1542,7 +1610,7 @@ Expected: commit succeeds with only Task 4 files staged.
 
 ---
 
-### Task 5: Compression Markers And Final Report
+### Task 5: Compression Markers And Conversation-Chain Preservation
 
 **Files:**
 - Modify: `core/web/services/self_evolution_control_service.py`
@@ -1551,9 +1619,14 @@ Expected: commit succeeds with only Task 4 files staged.
 **Interfaces:**
 - Consumes: `_maybe_record_self_observation_compression_marker(run_id, result)` no-op from Task 2.
 - Produces: `_record_self_observation_compression_event(run_id: str, *, event_type: str, summary: str = "", overhead_seconds: int = 0, reason: str = "") -> dict[str, Any] | None`
-- Produces: `_build_self_observation_final_report(snapshot: dict[str, Any]) -> str`
 
-- [ ] **Step 1: Write failing compression and report tests**
+- [ ] **Step 0: Apply the reuse gate for compression**
+
+Run the global reuse scan and confirm `context_compression_ledger` and `turn_journal` compression marker helpers exist.
+
+Expected: adapt conversation-ledger compression markers into observation events and preserve session/turn references. Do not build a separate summarizer, token counter, compression storage layer, or final-report builder for observation mode.
+
+- [ ] **Step 1: Write failing compression and chain-preservation tests**
 
 Add:
 
@@ -1580,11 +1653,11 @@ def test_self_observation_compression_applied_updates_marker_and_checkpoint(monk
     assert updated["eventTail"][-1]["payload"]["reason"] == "context_threshold"
 
 
-def test_self_observation_final_report_distinguishes_events_and_inference(monkeypatch):
+def test_self_observation_completion_preserves_conversation_chain_without_generated_report(monkeypatch):
     monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
     monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: None)
     service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
-    started = service.start_self_observation_run({"mode": "time_machine", "goal": "观察报告", "durationSeconds": 60})
+    started = service.start_self_observation_run({"mode": "time_machine", "goal": "观察链路", "durationSeconds": 60})
     service._record_self_observation_compression_event(
         started["runId"],
         event_type="compression_applied",
@@ -1593,28 +1666,35 @@ def test_self_observation_final_report_distinguishes_events_and_inference(monkey
         reason="test",
     )
     service._mark_self_observation_force_resuming(started["runId"], now="2026-07-06T00:01:00+00:00")
-    snapshot = service.get_self_observation_run_snapshot(started["runId"])
-    report = service._build_self_observation_final_report(snapshot or {})
+    final = service._set_self_observation_terminal_state(
+        started["runId"],
+        status="completed",
+        latest_message="观察有效运行时长已达标。",
+        report="",
+        conversation_session_id="session-observe-chain",
+        messages=["第一段观察。", "第二段观察。"],
+    )
 
-    assert "观察目标：观察报告" in report
-    assert "请求有效时长：60 秒" in report
-    assert "压缩次数：1" in report
-    assert "恢复次数：1" in report
-    assert "系统观察到的事件：" in report
-    assert "Agent 自己的推理：" in report
-    assert "无法验证清单：" in report
-    assert "边界遵守：" in report
+    assert final is not None
+    assert final["report"] == ""
+    assert final["conversationSessionId"] == "session-observe-chain"
+    assert final["messages"] == ["第一段观察。", "第二段观察。"]
+    assert [item["type"] for item in final["eventTail"] if item.get("type") in {"compression_applied", "force_resume_started", "run_completed"}] == [
+        "compression_applied",
+        "force_resume_started",
+        "run_completed",
+    ]
 ```
 
-- [ ] **Step 2: Run compression/report tests and verify failure**
+- [ ] **Step 2: Run compression/chain tests and verify failure**
 
 Run:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests\test_self_evolution_control_service.py -k "compression_applied_updates_marker or final_report_distinguishes_events" -q
+.\.venv\Scripts\python.exe -m pytest tests\test_self_evolution_control_service.py -k "compression_applied_updates_marker or completion_preserves_conversation_chain" -q
 ```
 
-Expected: FAIL until compression/report helpers are implemented.
+Expected: FAIL until compression helpers and terminal chain preservation are implemented.
 
 - [ ] **Step 3: Implement compression event helper**
 
@@ -1705,81 +1785,26 @@ def _maybe_record_self_observation_compression_marker(run_id: str, result: dict[
 
 Keep this adapter narrow. It observes compression metadata if the session layer provides it, but it does not introduce a second compression source or render compression as an assistant message.
 
-- [ ] **Step 5: Implement final report builder**
+- [ ] **Step 5: Preserve terminal chain fields without generating a report**
 
-Replace `_build_self_observation_final_report(snapshot)` with:
+Ensure `_set_self_observation_terminal_state(...)` keeps the compatibility `report` parameter but does not synthesize a new analysis report for time-machine completion. The call sites from Task 2 pass `report=""` for normal completion. The function must still persist:
 
 ```python
-def _event_type_counts(events: list[dict[str, Any]]) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for item in events:
-        event_type = str(item.get("type") or item.get("event") or "").strip()
-        if event_type:
-            counts[event_type] = counts.get(event_type, 0) + 1
-    return counts
-
-
-def _build_self_observation_final_report(snapshot: dict[str, Any]) -> str:
-    safe_snapshot = snapshot if isinstance(snapshot, dict) else {}
-    events = [item for item in list(safe_snapshot.get("eventTail") or []) if isinstance(item, dict)]
-    counts = _event_type_counts(events)
-    guidance_queue = [item for item in list(safe_snapshot.get("guidanceQueue") or []) if isinstance(item, dict)]
-    rejected_guidance = [item for item in guidance_queue if item.get("status") == "rejected_boundary"]
-    compressed_summary = str(safe_snapshot.get("lastCheckpointSummary") or "").strip()
-    last_tick = str(safe_snapshot.get("lastTickSummary") or safe_snapshot.get("latestMessage") or "").strip()
-    boundary = str(safe_snapshot.get("boundaryViolation") or "").strip()
-    return "\n".join(
-        [
-            f"观察目标：{safe_snapshot.get('goal') or ''}",
-            f"请求有效时长：{safe_snapshot.get('durationSeconds') or 0} 秒",
-            f"实际有效运行时长：{safe_snapshot.get('effectiveRunSeconds') or 0} 秒",
-            f"wall clock 总跨度：{safe_snapshot.get('wallClockSpanSeconds') or 0} 秒",
-            f"tick 次数：{safe_snapshot.get('tickCount') or 0}",
-            f"压缩次数：{safe_snapshot.get('compressionCount') or 0}",
-            f"恢复次数：{safe_snapshot.get('resumeCount') or 0}",
-            f"用户引导次数：{safe_snapshot.get('guidanceCount') or 0}",
-            "",
-            "连续状态摘要：",
-            f"- 最近 tick：{last_tick or '没有可见 tick 摘要'}",
-            "",
-            "压缩前后漂移：",
-            f"- 最近 checkpoint：{compressed_summary or '没有发生成功压缩'}",
-            "",
-            "恢复后自检：",
-            f"- force_resume_started：{counts.get('force_resume_started', 0)}",
-            f"- resume_needed：{counts.get('resume_needed', 0)}",
-            "",
-            "用户引导吸收：",
-            f"- 待消费：{safe_snapshot.get('pendingGuidanceCount') or 0}",
-            f"- 边界拒绝：{len(rejected_guidance)}",
-            "",
-            "系统观察到的事件：",
-            f"- {json.dumps(counts, ensure_ascii=False, sort_keys=True)}",
-            "",
-            "Agent 自己的推理：",
-            f"- {last_tick or '没有可见推理输出'}",
-            "",
-            "无法验证清单：",
-            "- 观察模式没有工具，不能把未执行的文件读取、命令运行、搜索或代码修改当作事实。",
-            "",
-            "边界遵守：",
-            f"- {'失败：' + boundary if boundary else '通过：未检测到工具边界违规'}",
-            "",
-            "异常与失败信号：",
-            f"- status={safe_snapshot.get('status') or ''}",
-            "",
-            "未来实验建议：",
-            "- 用更长有效运行时间重复实验，并比较压缩前后目标、引导和约束保持情况。",
-        ]
-    )
+        snapshot["report"] = str(report or "").strip()
+        if conversation_session_id:
+            snapshot["conversationSessionId"] = str(conversation_session_id or "").strip()
+        if messages is not None:
+            snapshot["messages"] = [str(item) for item in list(messages or []) if str(item or "").strip()]
 ```
 
-- [ ] **Step 6: Run compression/report tests**
+Expected: completed runs retain `conversationSessionId`, `messages`, and event references. The empty compatibility `report` field is allowed; it is not the source of truth and no generated report text is created in this stage.
+
+- [ ] **Step 6: Run compression/chain tests**
 
 Run:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests\test_self_evolution_control_service.py -k "self_observation and (compression or final_report or boundary_violation)" -q
+.\.venv\Scripts\python.exe -m pytest tests\test_self_evolution_control_service.py -k "self_observation and (compression or conversation_chain or boundary_violation)" -q
 ```
 
 Expected: PASS.
@@ -1812,6 +1837,12 @@ Expected: commit succeeds with only Task 5 files staged.
 - Produces: `SelfObservationGuidanceRequest`
 - Extends: `SelfObservationRunEvent`, `SelfObservationRun`, `SelfObservationRunStartRequest`, `SelfObservationRunActionRequest`
 - Produces props: `onAddObservationGuidance`, `observationGuidancePending`, `observationGuidanceError`
+
+- [ ] **Step 0: Apply the reuse gate for UI**
+
+Run the global reuse scan and confirm `SelfEvolutionTrack` already owns observation mode, `LazyConversationView`, `observationEventTail`, and VUI/HeroUI primitives.
+
+Expected: extend the existing observation workspace and event rail. Do not add a timeline/rendering package, new design system, or separate observation route.
 
 - [ ] **Step 1: Write failing frontend static tests**
 
@@ -2281,9 +2312,9 @@ After the branch is merged locally into `main` and Launcher refresh passes the a
 
 Expected: the observation surface stays operational, compact, and no-tool; isolated development mode still shows worktree/review controls only in its own mode.
 
-- [ ] **Step 9: Completion report fields**
+- [ ] **Step 9: Implementation closeout fields**
 
-When implementation completes, final report must include:
+When implementation completes, the closeout message to the operator must include:
 
 ```text
 Branch:
@@ -2303,12 +2334,13 @@ Version impact: minor recommended because this adds a compatible runtime capabil
 Spec coverage:
 
 - 0-tool boundary: Task 1 preserves `allowedTools=[]`, forbidden request fields, no worktree fields, and Task 6 prevents tool UI affordances.
+- Reuse-first behavior: the reuse table and per-task Step 0 gates require local component reuse before new abstractions, and require read-only component research before difficult parts proceed.
 - Effective runtime: Task 2 adds tick accounting, remaining time, and wall-clock gap exclusion.
 - Context compression: Task 5 records compression markers and checkpoint summaries without turning them into assistant bubbles.
 - Runtime recovery: Task 3 scans persisted active observation runs and force-resumes only non-terminal interrupted runs.
 - User guidance: Task 4 adds queued guidance, boundary classification, consumed events, and API route.
 - Same run continuity: Tasks 1-5 use a single persisted run snapshot and event tail across ticks, compression, guidance, and recovery.
-- Final report: Task 5 builds a report separating system events, agent inference, user guidance, unverifiable facts, and boundary status.
+- Conversation-chain preservation: Task 5 keeps `conversationSessionId`, messages, compression markers, resume markers, guidance markers, and terminal markers available without generating a new analysis report.
 - UI: Task 6 exposes metrics, guidance, and markers while keeping observation mode separate from development controls.
 
 Placeholder scan:
