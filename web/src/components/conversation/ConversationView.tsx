@@ -399,6 +399,7 @@ export function ConversationView({
     [slashCommandSuggestions, composerValue],
   );
   const showSlashSuggestions = !composerDisabled && slashSuggestions.length > 0;
+  const slashSuggestionListId = `conversation-${sessionId}-slash-suggestions`;
   const answerOnlyProcessMode = processDisplayMode === "answer";
   const timestampFormatter = useMemo(
     () =>
@@ -2763,14 +2764,16 @@ export function ConversationView({
           ) : null}
           {showSlashSuggestions ? (
             <div
+              id={slashSuggestionListId}
               role="listbox"
               aria-label={lang === "zh" ? "斜杠指令" : "Slash commands"}
               className="vui-components-conversationview slashCommandSuggestions min-w-0 overflow-hidden rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] shadow-[var(--vui-shadow-hairline)]"
             >
-              {slashSuggestions.map((skill) => {
+              {slashSuggestions.map((skill, index) => {
                 const description = skill.description?.trim() || skill.name || skill.directoryName;
                 return (
                   <div
+                    id={`${slashSuggestionListId}-option-${index}`}
                     key={skill.command}
                     role="option"
                     aria-selected={false}
@@ -2798,6 +2801,9 @@ export function ConversationView({
             value={composerValue}
             disabled={composerDisabled && resolvedActionMode !== "stop"}
             placeholder={composerPlaceholder}
+            aria-controls={showSlashSuggestions ? slashSuggestionListId : undefined}
+            aria-expanded={showSlashSuggestions ? true : undefined}
+            aria-autocomplete={showSlashSuggestions ? "list" : undefined}
             onChange={(event) => onComposerChange(event.target.value)}
             onPaste={(event) => {
               if (!onAddComposerAttachments || attachmentInputDisabled) {

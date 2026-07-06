@@ -74,6 +74,12 @@ function renderConversation(
     processDisplayMode?: ConversationProcessDisplayMode;
     useDefaultProcessDisplayMode?: boolean;
     activeTurnMessage?: ConversationMessage;
+    slashCommandSuggestions?: Array<{
+      directoryName: string;
+      name?: string;
+      command: string;
+      description?: string;
+    }>;
   } = {},
 ) {
   const queryClient = new QueryClient({
@@ -114,6 +120,7 @@ function renderConversation(
         composerAttachments={options.composerAttachments}
         onRemoveComposerAttachment={options.onRemoveComposerAttachment}
         composerReferences={options.composerReferences}
+        slashCommandSuggestions={options.slashCommandSuggestions}
         nextStateSignals={options.nextStateSignals}
         userAvatarPreset={options.userAvatarPreset}
         userAvatarImageUrl={options.userAvatarImageUrl}
@@ -1275,6 +1282,28 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain('aria-label="待发送会话引用"');
     expect(html).toContain('role="list"');
     expect(html).toContain('role="listitem"');
+  });
+
+  it("connects slash command suggestions to the composer textarea", () => {
+    const html = renderConversation([], {
+      composerValue: "/",
+      slashCommandSuggestions: [
+        {
+          directoryName: "ccdawn-brt",
+          name: "BRT",
+          command: "/brt",
+          description: "Intent routing",
+        },
+      ],
+    });
+
+    expect(html).toContain('role="listbox"');
+    expect(html).toContain('id="conversation-session-1-slash-suggestions"');
+    expect(html).toContain('aria-controls="conversation-session-1-slash-suggestions"');
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain('aria-autocomplete="list"');
+    expect(html).toContain('id="conversation-session-1-slash-suggestions-option-0"');
+    expect(html).toContain('role="option"');
   });
 
   it("uses the configured user avatar preset for user turns", () => {
