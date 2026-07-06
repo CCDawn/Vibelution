@@ -51,12 +51,29 @@ describe("AgentContextSectionsView", () => {
     expect(html).toContain('data-agent-context-part-count="2"');
     expect(html).toContain('data-agent-context-part-type="attachment"');
     expect(html).toContain('data-agent-context-part-type="reference"');
+    expect(html).toContain('data-agent-context-attachment-name="context.png"');
+    expect(html).toContain('data-agent-context-reference-kind="session"');
     expect(html).toContain('src="/api/sessions/session-agent-thread/artifacts/context-image.png"');
     expect(html).toContain('href="/api/sessions/session-agent-thread/artifacts/context-image.png?download=1"');
     expect(html).toContain("context.png");
     expect(html).toContain("下载图片");
+    expect(html).toContain('aria-label="用户上下文附件 context.png"');
+    expect(html).toContain('title="下载图片 context.png"');
     expect(html).toContain("旧会话摘录");
     expect(html).toContain("前端代理");
+    expect(html).toContain('aria-label="用户上下文引用 旧会话摘录 前端代理"');
+    expect(html).toContain('data-agent-context-reference-title="旧会话摘录"');
+    expect(html).toContain('data-agent-context-reference-agent="前端代理"');
+    expect(html).toContain('data-agent-context-group="attachments"');
+    expect(html).toContain('data-agent-context-group="references"');
+    expect(html).toContain('data-agent-context-group-count="1"');
+    expect(html).toContain('aria-label="用户上下文附件"');
+    expect(html).toContain('aria-label="用户上下文引用"');
+    expect(html).toContain('role="list"');
+    expect(html).toContain('role="listitem"');
+    expect(html).toContain("composerReferenceTitle");
+    expect(html).toContain("composerReferenceMeta");
+    expect(html).not.toContain("旧会话摘录 · 前端代理");
   });
 
   it("keeps attachments and reference chips bounded for dense conversation rows", () => {
@@ -68,7 +85,12 @@ describe("AgentContextSectionsView", () => {
     expect(styles.userAttachmentMeta).toContain("minmax(0,1fr)");
     expect(styles.userAttachmentMeta).toContain("[&>span]:truncate");
     expect(styles.composerReferenceChip).toContain("max-w-[min(100%,32rem)]");
-    expect(styles.composerReferenceCopy).toContain("truncate");
-    expect(styles.composerReferenceCopy).toContain("[overflow-wrap:anywhere]");
+    expect(styles.composerReferenceCopy).toContain("grid");
+    expect(styles.composerReferenceCopy).toContain("gap-0.5");
+    expect(styles.composerReferenceTitle).toContain("truncate");
+    expect(styles.composerReferenceTitle).toContain("[overflow-wrap:anywhere]");
+    expect(styles.composerReferenceMeta).toContain("truncate");
+    expect(styles.composerReferenceMeta).toContain("text-[var(--fg-tertiary)]");
+    expect(styles.userContextReferences).toContain("justify-end");
   });
 });
