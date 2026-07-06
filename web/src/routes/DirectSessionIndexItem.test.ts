@@ -92,6 +92,22 @@ describe("DirectSessionIndexItem helpers", () => {
     expect(markup).toContain("模型：mimo-v2.5");
   });
 
+  it("places the timestamp in the title row instead of vertically centering it beside the whole copy block", () => {
+    const markup = renderDirectItem({
+      session: makeSession({ currentPhase: "running", status: "running" }),
+      statusLabel: () => "正在请求",
+    });
+    const titleRowStart = markup.indexOf("conversationTitleRow");
+    const titleRowEnd = markup.indexOf("conversationMetaRow");
+    const titleRowMarkup = markup.slice(titleRowStart, titleRowEnd);
+    const metaRowMarkup = markup.slice(titleRowEnd);
+
+    expect(titleRowMarkup).toContain("conversationMetaTime");
+    expect(titleRowMarkup).toContain("06/22 18:54");
+    expect(metaRowMarkup).toContain("sessionStatusCluster");
+    expect(metaRowMarkup).not.toContain("conversationMetaTime");
+  });
+
   it("renders the compact row action through a native VUI button instead of generic HeroUI button chrome", () => {
     const markup = renderDirectItem();
 
@@ -117,12 +133,13 @@ describe("DirectSessionIndexItem helpers", () => {
     expect(markup).toContain("重命名");
   });
 
-  it("places the model badge beside the session title without repeating it in metadata", () => {
+  it("keeps the model name in the row tooltip instead of rendering a narrow inline badge", () => {
     const markup = renderDirectItem();
 
-    expect(markup).toContain("agentModelTitleTag");
     expect(markup).toContain("模型：mimo-v2.5");
-    expect(markup.match(/agentModelTag/g)).toHaveLength(1);
+    expect(markup).not.toContain("agentModelTitleTag");
+    expect(markup).not.toContain("agentModelTag");
+    expect(markup).not.toContain(">mimo-v2.5</span>");
   });
 
   it("keeps unread counts as compact badges separate from the current-session badge", () => {
