@@ -229,6 +229,7 @@ function timelineItemsFromServer(
       continue;
     }
     if (kind === "command_group") {
+      const requestedOperationIds = item.operationIds || item.sourceOperationIds || [];
       const commandOperations = (item.operationIds || item.sourceOperationIds || [])
         .map((operationId) => operationsById.get(operationId))
         .filter((operation): operation is AgentMessageOperation => Boolean(operation));
@@ -236,14 +237,7 @@ function timelineItemsFromServer(
         items.push(...commandOperations.map(operationTimelineItem));
         continue;
       }
-      items.push({
-        id: item.id || `timeline-command-group-${items.length + 1}`,
-        kind: "command_group",
-        status,
-        title: String(item.title || commandGroupTitle(commandOperations, status, options.lang)).trim(),
-        summary: String(item.summary || commandOperations.slice(0, 2).map((operation) => operation.summary || operation.label).filter(Boolean).join("；")).trim(),
-        operations: commandOperations,
-      });
+      items.push(missingCommandGroupOperation(item, requestedOperationIds, options.lang));
       continue;
     }
     if (kind === "operation") {
@@ -261,6 +255,37 @@ function timelineItemsFromServer(
     }
   }
   return mergeAdjacentThoughtItems(items);
+}
+
+function missingCommandGroupOperation(
+  item: AgentMessageTimelineServerItem,
+  requestedOperationIds: string[],
+  lang: string,
+): AgentMessageOperationTimelineItem {
+  const groupId = item.id || "timeline-command-group";
+  const count = requestedOperationIds.length;
+  const title = lang === "zh" ? "工具调用投影缺失" : "Tool call projection missing";
+  const summary = lang === "zh"
+    ? `${groupId} 引用了 ${count} 条工具结果，但当前消息没有匹配的 operation 投影。`
+    : `${groupId} references ${count} tool results, but the current message has no matching operation projection.`;
+  const detail = String(item.summary || item.title || "").trim();
+  const operation: AgentMessageOperation = {
+    id: `${groupId}-missing-operation-projection`,
+    kind: "status",
+    label: title,
+    status: "failed",
+    summary,
+    durationSeconds: null,
+    resultPreview: detail || summary,
+  };
+  return {
+    id: `${operation.id}-timeline-operation`,
+    kind: "operation",
+    status: "failed",
+    title,
+    summary,
+    operation,
+  };
 }
 
 function serverOperation(

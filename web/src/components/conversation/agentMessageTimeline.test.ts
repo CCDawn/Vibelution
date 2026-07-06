@@ -408,6 +408,91 @@ describe("agentMessageTimeline", () => {
     }));
   });
 
+  it("expands command groups whose server operation ids use the persisted message id prefix", () => {
+    const message: ConversationMessage = {
+      id: "session-live-message-253",
+      role: "assistant",
+      content: "本轮已按请求停止。",
+      timestamp: "2026-07-05T23:32:43",
+      feedbackEvents: [
+        {
+          sequence: 9,
+          kind: "tool",
+          status: "failed",
+          name: "grep_search_tool",
+          summary: "参数不符合当前工具签名",
+        },
+        {
+          sequence: 10,
+          kind: "tool",
+          status: "done",
+          name: "grep_search_tool",
+          summary: "搜索完成",
+        },
+      ],
+      timelineItems: [
+        {
+          id: "session-live-message-253-timeline-command-group-9-10",
+          kind: "command_group",
+          status: "failed",
+          title: "已运行 2 条命令",
+          summary: "参数错误；搜索完成",
+          operationIds: [
+            "session-live-message-253-feedback-9",
+            "session-live-message-253-feedback-10",
+          ],
+        },
+      ],
+    };
+
+    const items = timelineItemsForConversationMessage(message, { lang: "zh" });
+
+    expect(items.map((item) => item.kind)).toEqual(["operation", "operation"]);
+    expect(items.map((item) => ("title" in item ? item.title : ""))).toEqual(["搜索", "搜索"]);
+    expect(items).not.toContainEqual(expect.objectContaining({
+      kind: "command_group",
+      title: "已运行 2 条命令",
+    }));
+  });
+
+  it("surfaces command group projection gaps instead of silently rendering aggregate command rows", () => {
+    const message: ConversationMessage = {
+      id: "message-missing-command-ops",
+      role: "assistant",
+      content: "最终回答",
+      timestamp: "2026-06-18T00:00:00Z",
+      feedbackEvents: [],
+      timelineItems: [
+        {
+          id: "server-command-group-missing",
+          kind: "command_group",
+          status: "failed",
+          title: "已运行 2 条命令",
+          summary: "搜索配置文件；命令执行失败",
+          operationIds: [
+            "missing-feedback-1",
+            "missing-feedback-2",
+          ],
+        },
+      ],
+    };
+
+    const items = timelineItemsForConversationMessage(message, { lang: "zh" });
+
+    expect(items).toEqual([
+      expect.objectContaining({
+        kind: "operation",
+        status: "failed",
+        title: "工具调用投影缺失",
+        summary: "server-command-group-missing 引用了 2 条工具结果，但当前消息没有匹配的 operation 投影。",
+      }),
+    ]);
+    expect(items).not.toContainEqual(expect.objectContaining({
+      kind: "command_group",
+      title: "已运行 2 条命令",
+    }));
+  });
+
   it("can exclude assistant text from backend timeline items so answers render only in the answer block", () => {
     const message: ConversationMessage = {
       id: "message-server-timeline-answer",
