@@ -1329,7 +1329,7 @@ def writeback_source_collection_stage_session_task(
         "status": status,
         "agentRequestedStatus": status,
         "summary": _trim_text(request_payload.get("summary"), max_length=4000),
-        "result": _normalize_metadata(result_payload),
+        "result": _normalize_source_collection_stage_writeback_result_metadata(result_payload),
         "evidenceRefs": _normalize_ref_list(request_payload.get("evidenceRefs"), max_items=24),
         "nextActions": _normalize_text_list(request_payload.get("nextActions"), max_items=12, max_length=500),
         "recordedByAgent": _trim_text(request_payload.get("recordedByAgent"), max_length=160),
@@ -4496,7 +4496,7 @@ def _materialize_source_collection_stage_writeback_candidate_graph(
     if status not in SOURCE_COLLECTION_STAGE_WRITEBACK_MATERIALIZED_STATUSES:
         return _source_collection_stage_writeback_candidate_graph_summary(status="skipped_status")
     result = writeback.get("result") if isinstance(writeback.get("result"), dict) else {}
-    agent_graph = result.get("candidateGraph") if isinstance(result.get("candidateGraph"), dict) else {}
+    agent_graph = _source_collection_stage_writeback_agent_graph_payload(result)
     created_by_agent = (
         _trim_text(writeback.get("recordedByAgent"), max_length=160)
         or _trim_text(task.get("agentId"), max_length=160)
@@ -4534,6 +4534,10 @@ def _materialize_source_collection_stage_writeback_candidate_graph(
 
     candidate_graph = graph_response.get("candidateGraph") if isinstance(graph_response.get("candidateGraph"), dict) else {}
     graph = graph_response.get("graph") if isinstance(graph_response.get("graph"), dict) else {}
+    if agent_graph:
+        graph_response = dict(graph_response)
+        graph = _merge_source_collection_stage_writeback_agent_graph(graph, agent_graph)
+        graph_response["graph"] = graph
     graph_summary = graph.get("summary") if isinstance(graph.get("summary"), dict) else {}
     candidate_graph_id = _trim_text(candidate_graph.get("candidateId"), max_length=160)
     if candidate_graph_id:
@@ -4985,6 +4989,202 @@ def _source_collection_stage_writeback_candidate_graph_summary(
         "failedCandidateGraphCount": len(failed_items),
         "failedCandidateGraphs": failed_items[:24],
     }
+
+
+def _source_collection_stage_writeback_agent_graph_payload(result: dict[str, Any]) -> dict[str, Any]:
+    explicit_graph = result.get("candidateGraph") if isinstance(result.get("candidateGraph"), dict) else {}
+    if not explicit_graph and isinstance(result.get("candidate_graph"), dict):
+        explicit_graph = result["candidate_graph"]
+    relation_payload = {
+        "relationCoverage": result.get("relationCoverage") or result.get("relation_coverage"),
+        "themeNodes": result.get("themeNodes") or result.get("theme_nodes") or result.get("topicNodes") or result.get("topic_nodes"),
+        "sourceThemeEdges": result.get("sourceThemeEdges") or result.get("source_theme_edges") or result.get("sourceTopicEdges") or result.get("source_topic_edges"),
+        "topicRelations": result.get("topicRelations") or result.get("topic_relations") or result.get("themeRelations") or result.get("theme_relations"),
+    }
+    relation_payload = {
+        key: value
+        for key, value in relation_payload.items()
+        if value
+    }
+    if not explicit_graph:
+        return relation_payload
+    merged = dict(explicit_graph)
+    for key, value in relation_payload.items():
+        merged.setdefault(key, value)
+    return merged
+
+
+def _merge_source_collection_stage_writeback_agent_graph(
+    graph: dict[str, Any],
+    agent_graph: dict[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(graph, dict):
+        graph = {}
+    merged_graph = dict(graph)
+    nodes = [dict(item) for item in list(merged_graph.get("nodes") or []) if isinstance(item, dict)]
+    edges = [dict(item) for item in list(merged_graph.get("edges") or []) if isinstance(item, dict)]
+    missing_links = [dict(item) for item in list(merged_graph.get("missingLinks") or []) if isinstance(item, dict)]
+    unreviewed_nodes = [dict(item) for item in list(merged_graph.get("unreviewedNodes") or []) if isinstance(item, dict)]
+    node_ids = {_trim_text(node.get("candidateId"), max_length=160) for node in nodes if _trim_text(node.get("candidateId"), max_length=160)}
+    for node in _source_collection_agent_graph_nodes(agent_graph):
+        node_id = _trim_text(node.get("candidateId"), max_length=160)
+        if not node_id or node_id in node_ids:
+            continue
+        nodes.append(node)
+        node_ids.add(node_id)
+    seen_edges = {
+        (
+            _trim_text(edge.get("sourceCandidateId"), max_length=160),
+            _trim_text(edge.get("targetCandidateId"), max_length=160),
+            _trim_text(edge.get("relation"), max_length=160),
+        )
+        for edge in edges
+        if _trim_text(edge.get("sourceCandidateId"), max_length=160)
+        and _trim_text(edge.get("targetCandidateId"), max_length=160)
+        and _trim_text(edge.get("relation"), max_length=160)
+    }
+    for edge in _source_collection_agent_graph_edges(agent_graph):
+        source_id = _trim_text(edge.get("sourceCandidateId"), max_length=160)
+        target_id = _trim_text(edge.get("targetCandidateId"), max_length=160)
+        relation = _trim_text(edge.get("relation"), max_length=160)
+        if not source_id or not target_id or not relation:
+            continue
+        edge_key = (source_id, target_id, relation)
+        if edge_key in seen_edges:
+            continue
+        if source_id in node_ids and target_id in node_ids:
+            edges.append(edge)
+        else:
+            missing_links.append(edge)
+        seen_edges.add(edge_key)
+    summary = merged_graph.get("summary") if isinstance(merged_graph.get("summary"), dict) else {}
+    summary = dict(summary)
+    summary.update(
+        {
+            "nodeCount": len(nodes),
+            "edgeCount": len(edges),
+            "missingLinkCount": len(missing_links),
+            "unreviewedNodeCount": len(unreviewed_nodes),
+            "agentRelationNodeCount": len(_source_collection_agent_graph_nodes(agent_graph)),
+            "agentRelationEdgeCount": len(_source_collection_agent_graph_edges(agent_graph)),
+        }
+    )
+    coverage = agent_graph.get("relationCoverage") if isinstance(agent_graph.get("relationCoverage"), dict) else {}
+    if coverage:
+        summary["relationCoverage"] = _normalize_metadata(coverage)
+    merged_graph["nodes"] = nodes
+    merged_graph["edges"] = edges
+    merged_graph["missingLinks"] = missing_links
+    merged_graph["unreviewedNodes"] = unreviewed_nodes
+    merged_graph["summary"] = summary
+    return merged_graph
+
+
+def _source_collection_agent_graph_nodes(agent_graph: dict[str, Any]) -> list[dict[str, Any]]:
+    nodes: list[dict[str, Any]] = []
+    for item in list(agent_graph.get("nodes") or []):
+        if not isinstance(item, dict):
+            continue
+        node_id = _trim_text(item.get("candidateId") or item.get("id"), max_length=160)
+        if not node_id:
+            continue
+        nodes.append(
+            {
+                "candidateId": node_id,
+                "candidateType": _trim_text(item.get("candidateType") or item.get("type"), max_length=80) or "agent_relation_node",
+                "title": _trim_text(item.get("title") or item.get("label") or node_id, max_length=240),
+                "currentWorkflowNode": _trim_text(item.get("currentWorkflowNode"), max_length=120) or "candidate_graph",
+                "currentState": _trim_text(item.get("currentState"), max_length=120) or "candidate_graph_visible",
+                "qualityStatus": _trim_text(item.get("qualityStatus"), max_length=120) or "preview_ready",
+                "valid": bool(item.get("valid", True)),
+                "requiresReview": bool(item.get("requiresReview", False)),
+                "officialState": _trim_text(item.get("officialState"), max_length=80) or "candidate_only",
+            }
+        )
+    for item in list(agent_graph.get("themeNodes") or []):
+        if not isinstance(item, dict):
+            continue
+        theme_id = _source_collection_agent_graph_theme_id(item)
+        if not theme_id:
+            continue
+        nodes.append(
+            {
+                "candidateId": _source_collection_agent_graph_theme_node_id(theme_id),
+                "candidateType": "source_topic",
+                "title": _trim_text(item.get("label") or item.get("title") or theme_id, max_length=240),
+                "currentWorkflowNode": "candidate_graph",
+                "currentState": "candidate_graph_visible",
+                "qualityStatus": "preview_ready",
+                "valid": True,
+                "requiresReview": False,
+                "officialState": "candidate_only",
+            }
+        )
+    return nodes
+
+
+def _source_collection_agent_graph_edges(agent_graph: dict[str, Any]) -> list[dict[str, str]]:
+    edges: list[dict[str, str]] = []
+    for item in list(agent_graph.get("edges") or []):
+        if not isinstance(item, dict):
+            continue
+        source_id = _trim_text(item.get("sourceCandidateId") or item.get("source") or item.get("from"), max_length=160)
+        target_id = _trim_text(item.get("targetCandidateId") or item.get("target") or item.get("to"), max_length=160)
+        relation = _trim_text(item.get("relation") or item.get("relationType") or item.get("type"), max_length=160)
+        if source_id and target_id and relation:
+            edges.append(_candidate_graph_edge(source_id, target_id, relation))
+    for item in list(agent_graph.get("sourceThemeEdges") or []):
+        if not isinstance(item, dict):
+            continue
+        source_id = _trim_text(
+            item.get("candidateId") or item.get("candidate_id") or item.get("sourceCandidateId") or item.get("source_candidate_id"),
+            max_length=160,
+        )
+        theme_id = _source_collection_agent_graph_theme_id(item)
+        relation = _trim_text(item.get("relation") or item.get("relationType") or item.get("relation_type"), max_length=160) or "source_supports_theme"
+        if source_id and theme_id:
+            edges.append(_candidate_graph_edge(source_id, _source_collection_agent_graph_theme_node_id(theme_id), relation))
+    for item in list(agent_graph.get("topicRelations") or []):
+        if not isinstance(item, dict):
+            continue
+        source_theme_id = _trim_text(
+            item.get("from")
+            or item.get("fromThemeId")
+            or item.get("from_theme_id")
+            or item.get("sourceThemeId")
+            or item.get("source_theme_id"),
+            max_length=160,
+        )
+        target_theme_id = _trim_text(
+            item.get("to")
+            or item.get("toThemeId")
+            or item.get("to_theme_id")
+            or item.get("targetThemeId")
+            or item.get("target_theme_id"),
+            max_length=160,
+        )
+        relation = _trim_text(item.get("relation") or item.get("relationType") or item.get("relation_type"), max_length=160)
+        if source_theme_id and target_theme_id and relation:
+            edges.append(
+                _candidate_graph_edge(
+                    _source_collection_agent_graph_theme_node_id(source_theme_id),
+                    _source_collection_agent_graph_theme_node_id(target_theme_id),
+                    relation,
+                )
+            )
+    return edges
+
+
+def _source_collection_agent_graph_theme_id(item: dict[str, Any]) -> str:
+    return _trim_text(
+        item.get("themeId") or item.get("theme_id") or item.get("topicId") or item.get("topic_id") or item.get("id"),
+        max_length=160,
+    )
+
+
+def _source_collection_agent_graph_theme_node_id(theme_id: str) -> str:
+    normalized = _trim_text(theme_id, max_length=160)
+    return f"source-theme:{normalized}" if normalized and not normalized.startswith("source-theme:") else normalized
 
 
 def _source_collection_stage_writeback_steward_pack_output(result: dict[str, Any]) -> dict[str, Any]:
@@ -5519,7 +5719,8 @@ def _attach_candidate_graph_stage_writeback_metadata(
                 if isinstance(item, dict) and _trim_text(item.get("taskId"), max_length=160) != writeback_ref["taskId"]
             ]
             refs.append(writeback_ref)
-            graph = metadata.get("graph") if isinstance(metadata.get("graph"), dict) else {}
+            response_graph = graph_response.get("graph") if isinstance(graph_response.get("graph"), dict) else {}
+            graph = response_graph or (metadata.get("graph") if isinstance(metadata.get("graph"), dict) else {})
             if graph:
                 graph = dict(graph)
                 graph_summary = graph.get("summary") if isinstance(graph.get("summary"), dict) else {}
@@ -16739,6 +16940,47 @@ def _merge_source_collection_stage_writeback_result_payload(
         valid_existing_ids=valid_record_ids,
         max_items=300,
     )
+    _merge_source_collection_stage_writeback_array_group(
+        merged,
+        previous_result,
+        incoming,
+        canonical_key="themeNodes",
+        aliases=("themeNodes", "theme_nodes", "topicNodes", "topic_nodes"),
+        containers=("candidateGraph", "candidate_graph", "relationGraph", "relation_graph", "outputs", "summary"),
+        item_id=lambda item: item.get("themeId") or item.get("theme_id") or item.get("topicId") or item.get("topic_id") or item.get("id"),
+        valid_existing_ids=set(),
+        max_items=200,
+    )
+    _merge_source_collection_stage_writeback_array_group(
+        merged,
+        previous_result,
+        incoming,
+        canonical_key="sourceThemeEdges",
+        aliases=("sourceThemeEdges", "source_theme_edges", "sourceTopicEdges", "source_topic_edges"),
+        containers=("candidateGraph", "candidate_graph", "relationGraph", "relation_graph", "outputs", "summary"),
+        item_id=lambda item: (
+            f"{item.get('candidateId') or item.get('candidate_id') or item.get('sourceCandidateId') or item.get('source_candidate_id')}:"
+            f"{item.get('themeId') or item.get('theme_id') or item.get('topicId') or item.get('topic_id')}:"
+            f"{item.get('relation') or item.get('relationType') or item.get('relation_type')}"
+        ),
+        valid_existing_ids=set(),
+        max_items=500,
+    )
+    _merge_source_collection_stage_writeback_array_group(
+        merged,
+        previous_result,
+        incoming,
+        canonical_key="topicRelations",
+        aliases=("topicRelations", "topic_relations", "themeRelations", "theme_relations"),
+        containers=("candidateGraph", "candidate_graph", "relationGraph", "relation_graph", "outputs", "summary"),
+        item_id=lambda item: (
+            f"{item.get('from') or item.get('fromThemeId') or item.get('from_theme_id') or item.get('sourceThemeId') or item.get('source_theme_id')}:"
+            f"{item.get('to') or item.get('toThemeId') or item.get('to_theme_id') or item.get('targetThemeId') or item.get('target_theme_id')}:"
+            f"{item.get('relation') or item.get('relationType') or item.get('relation_type')}"
+        ),
+        valid_existing_ids=set(),
+        max_items=300,
+    )
     return merged
 
 
@@ -16859,6 +17101,65 @@ def _normalize_source_collection_stage_writeback_result_payload(value: Any) -> d
             parsed.setdefault("_structuredResultRecoveredFrom", key)
             return parsed
     return value
+
+
+def _normalize_source_collection_stage_writeback_result_metadata(value: Any) -> dict[str, Any]:
+    return _normalize_source_collection_stage_writeback_result_metadata_dict(value, max_items=500)
+
+
+def _normalize_source_collection_stage_writeback_result_metadata_dict(value: Any, *, max_items: int) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[str, Any] = {}
+    for key, item in value.items():
+        normalized_key = _trim_text(key, max_length=80)
+        if not normalized_key:
+            continue
+        normalized[normalized_key] = _normalize_source_collection_stage_writeback_result_metadata_value(
+            item,
+            max_items=_source_collection_stage_writeback_result_metadata_max_items(normalized_key, max_items),
+        )
+    return normalized
+
+
+def _normalize_source_collection_stage_writeback_result_metadata_value(value: Any, *, max_items: int) -> Any:
+    if isinstance(value, str):
+        return _trim_text(value, max_length=1000)
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    if isinstance(value, list):
+        return [
+            _normalize_source_collection_stage_writeback_result_metadata_value(item, max_items=max_items)
+            for item in value[:max_items]
+        ]
+    if isinstance(value, dict):
+        return _normalize_source_collection_stage_writeback_result_metadata_dict(value, max_items=max_items)
+    return _trim_text(value, max_length=1000)
+
+
+def _source_collection_stage_writeback_result_metadata_max_items(key: str, default: int) -> int:
+    if key in {
+        "candidateExtractions",
+        "recordExtractions",
+        "sourceThemeEdges",
+        "sourceTopicEdges",
+        "source_theme_edges",
+        "source_topic_edges",
+    }:
+        return 500
+    if key in {
+        "candidateDecisions",
+        "themeNodes",
+        "topicNodes",
+        "topicRelations",
+        "themeRelations",
+        "theme_nodes",
+        "topic_nodes",
+        "topic_relations",
+        "theme_relations",
+    }:
+        return 300
+    return default
 
 
 def _parse_source_collection_stage_writeback_result_text(text: str) -> dict[str, Any]:
