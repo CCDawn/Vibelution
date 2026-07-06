@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import type { CSSProperties } from "react";
+import { useId, type CSSProperties } from "react";
 
 import type { SessionCacheCompositionSegment } from "../../api/types";
 import { VButton } from "../../components/vui";
@@ -339,6 +339,10 @@ export function CacheDetailDialog({
   upperBoundCacheCompositionPercent,
   upperBoundCacheInputTokens,
 }: CacheDetailDialogProps) {
+  const dialogId = useId();
+  const titleId = `${dialogId}-title`;
+  const descriptionId = `${dialogId}-description`;
+
   return (
     <div className={styles.cacheDetailOverlay} role="presentation" onClick={onClose}>
       <section
@@ -346,13 +350,14 @@ export function CacheDetailDialog({
         className={styles.cacheDetailDialog}
         role="dialog"
         aria-modal="true"
-        aria-label={cacheDetailDialogTitle}
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
         onClick={(event) => event.stopPropagation()}
       >
         <header className={styles.cacheDetailHeader}>
           <div>
-            <p>{previousCacheHitLabel}</p>
-            <h3>{cacheDetailDialogTitle}</h3>
+            <p id={descriptionId}>{previousCacheHitLabel}</p>
+            <h3 id={titleId}>{cacheDetailDialogTitle}</h3>
           </div>
           <VButton
             type="button"
@@ -360,7 +365,7 @@ export function CacheDetailDialog({
             onClick={onClose}
             aria-label={closeLabel}
           >
-            <X size={16} />
+            <X size={16} aria-hidden="true" />
           </VButton>
         </header>
 
