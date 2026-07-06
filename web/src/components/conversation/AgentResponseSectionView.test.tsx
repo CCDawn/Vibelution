@@ -27,11 +27,14 @@ describe("AgentResponseSectionView", () => {
     expect(html).toContain('data-agent-content-channel="answer"');
     expect(html).toContain('aria-expanded="true"');
     expect(html).toContain('aria-controls="agent-response-assistant-1-answer"');
+    expect(html).toContain('aria-label="收起回答"');
     expect(html).toContain('id="agent-response-assistant-1-answer"');
     expect(html).toContain('title="收起回答"');
+    expect(html).toContain('aria-hidden="true"');
     expect(html).toContain("回答");
     expect(html).toContain("最终回答内容");
     expect(html).toContain("responseBody");
+    expect(html).toContain("responseToggleStatus");
     expect(html).toContain("statusSpinner");
   });
 
@@ -55,8 +58,11 @@ describe("AgentResponseSectionView", () => {
     expect(html).not.toContain("data-agent-content-channel");
     expect(html).toContain('aria-expanded="false"');
     expect(html).toContain('aria-controls="agent-response-assistant-2-answer"');
+    expect(html).toContain('aria-label="Show response"');
     expect(html).not.toContain('id="agent-response-assistant-2-answer"');
     expect(html).toContain('title="Show response"');
+    expect(html).toContain("responseToggleStatus");
+    expect(html).not.toContain("statusSpinner");
     expect(html).not.toContain("Hidden response body");
   });
 
@@ -86,11 +92,15 @@ describe("AgentResponseSectionView", () => {
   });
 
   it("keeps the response control styled as a bounded slot button", () => {
-    expect(styles.responseToggle).toContain("grid-cols-[auto_auto_minmax(0,1fr)]");
+    expect(styles.responseToggle).toContain("grid-cols-[auto_minmax(0,auto)_1rem]");
     expect(styles.responseToggle).toContain("max-w-full");
     expect(styles.responseToggle).toContain("overflow-hidden");
+    expect(styles.responseToggle).toContain("focus-visible:!ring-2");
+    expect(styles.responseToggleStatus).toContain("size-4");
+    expect(styles.responseToggleStatus).toContain("place-items-center");
     expect(styles.responseToggle).toContain("[&_[data-slot=vui-button-content]]:contents");
     expect(styles.responseToggle).toContain("[&_[data-slot=vui-button-label]]:contents");
+    expect(styles.statusSpinner).toContain("size-3.5");
     expect(styles.responseBody).toContain("[overflow-wrap:anywhere]");
   });
 });

@@ -31,6 +31,7 @@ export function AgentResponseSectionView({
 }: AgentResponseSectionViewProps) {
   const bodyVisible = expanded || forceBodyVisible;
   const responseBodyId = `agent-response-${answerKey}`;
+  const toggleLabel = expanded ? expandedTitle : collapsedTitle;
   return (
     <section
       className={styles.responseSection}
@@ -43,12 +44,15 @@ export function AgentResponseSectionView({
         className={styles.responseToggle}
         aria-expanded={expanded}
         aria-controls={responseBodyId}
+        aria-label={toggleLabel}
         onClick={onToggle}
-        title={expanded ? expandedTitle : collapsedTitle}
+        title={toggleLabel}
       >
-        {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        {expanded ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronRight size={16} aria-hidden="true" />}
         <span>{label}</span>
-        {showSpinner ? <LoaderCircle className={styles.statusSpinner} size={14} /> : null}
+        <span className={styles.responseToggleStatus}>
+          {showSpinner ? <LoaderCircle className={styles.statusSpinner} size={14} aria-hidden="true" /> : null}
+        </span>
       </VButton>
       {bodyVisible ? <div id={responseBodyId} className={styles.responseBody}>{children}</div> : null}
     </section>

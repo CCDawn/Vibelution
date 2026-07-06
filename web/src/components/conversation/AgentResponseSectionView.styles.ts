@@ -4,9 +4,11 @@ const styles = {
   responseSection:
     "vui-components-conversationview responseSection min-w-0 grid w-[min(100%,920px)] max-w-full gap-1 border-l border-[color-mix(in_srgb,var(--accent-cool)_22%,var(--vui-border-subtle))] pl-2.5",
   responseToggle:
-    "vui-components-conversationview responseToggle min-w-0 max-w-full overflow-hidden !grid !w-full grid-cols-[auto_auto_minmax(0,1fr)] !items-center !justify-start gap-x-1.5 !border-0 !bg-transparent !p-0 !text-left text-[var(--fg-secondary)] !shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+    "vui-components-conversationview responseToggle min-w-0 max-w-full overflow-hidden !grid !w-full grid-cols-[auto_minmax(0,auto)_1rem] !items-center !justify-start gap-x-1.5 !border-0 !bg-transparent !p-0 !text-left text-[var(--fg-secondary)] !shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none focus-visible:!outline-none focus-visible:!ring-2 focus-visible:!ring-[var(--accent-cool)] focus-visible:!ring-offset-2 focus-visible:!ring-offset-[var(--surface-panel)] [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+  responseToggleStatus:
+    "vui-components-conversationview responseToggleStatus grid size-4 shrink-0 place-items-center",
   statusSpinner:
-    "vui-components-conversationview statusSpinner min-w-0 animate-spin",
+    "vui-components-conversationview statusSpinner size-3.5 min-w-0 animate-spin",
 } as const;
 
 export default styles;
