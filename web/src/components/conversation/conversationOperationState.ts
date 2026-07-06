@@ -3,11 +3,12 @@ import type {
   AgentMessageReActOperationGroup,
 } from "./agentMessageOperations";
 
-export type OperationStateTone = "running" | "failed" | "done" | "pending";
+export type OperationStateTone = "running" | "failed" | "degraded" | "done" | "pending";
 
 export type OperationStateLabels = {
   running: string;
   failed: string;
+  degraded: string;
   done: string;
   pending: string;
   requesting: string;
@@ -25,11 +26,15 @@ export type OperationStateLabels = {
 };
 
 const RUNNING_OPERATION_STATUSES = new Set(["queued", "pending", "running", "thinking", "tooling", "answering"]);
+const DEGRADED_OPERATION_STATUSES = new Set(["degraded", "fallback", "partial", "recovered", "unavailable"]);
 
 export function operationStatusTone(operation: AgentMessageOperation): OperationStateTone {
   const status = operation.status.trim().toLowerCase();
   if (["failed", "error", "timeout"].includes(status)) {
     return "failed";
+  }
+  if (DEGRADED_OPERATION_STATUSES.has(status)) {
+    return "degraded";
   }
   if (isRunningOperationStatus(status)) {
     return "running";
@@ -59,6 +64,9 @@ export function operationCollectionTone(operations: AgentMessageOperation[]): Op
   if (operations.some((operation) => operationStatusTone(operation) === "failed")) {
     return "failed";
   }
+  if (operations.some((operation) => operationStatusTone(operation) === "degraded")) {
+    return "degraded";
+  }
   if (operations.some((operation) => operationStatusTone(operation) === "running")) {
     return "running";
   }
@@ -72,12 +80,15 @@ export function reActGroupTone(group: AgentMessageReActOperationGroup): Operatio
   return operationCollectionTone(group.operations);
 }
 
-export function operationStateLabel(tone: string, labels: Pick<OperationStateLabels, "running" | "failed" | "done" | "pending">) {
+export function operationStateLabel(tone: string, labels: Pick<OperationStateLabels, "running" | "failed" | "degraded" | "done" | "pending">) {
   if (tone === "running") {
     return labels.running;
   }
   if (tone === "failed") {
     return labels.failed;
+  }
+  if (tone === "degraded") {
+    return labels.degraded;
   }
   if (tone === "done") {
     return labels.done;
@@ -94,6 +105,9 @@ export function compactRequestStateLabel(
   }
   if (tone === "failed") {
     return labels.requestFailed;
+  }
+  if (tone === "degraded") {
+    return "degraded" in labels && typeof labels.degraded === "string" ? labels.degraded : labels.pendingRequest;
   }
   if (tone === "done") {
     return labels.done;
@@ -130,7 +144,7 @@ export function processSummaryTitle(
   operations: AgentMessageOperation[],
   labels: Pick<
     OperationStateLabels,
-    "thinking" | "requesting" | "requestFailed" | "done" | "pendingRequest" | "generating" | "processFailed" | "process" | "processPending"
+    "thinking" | "requesting" | "requestFailed" | "degraded" | "done" | "pendingRequest" | "generating" | "processFailed" | "process" | "processPending"
   >,
 ) {
   if (isCompactAnswerOnlyRequestProcess(operations)) {
@@ -141,6 +155,9 @@ export function processSummaryTitle(
   }
   if (tone === "failed") {
     return labels.processFailed;
+  }
+  if (tone === "degraded") {
+    return labels.degraded;
   }
   if (tone === "done") {
     return labels.process;
@@ -183,19 +200,38 @@ export function processSummaryPreview(
     .reverse()
     .find((operation) => isRunningOperationStatus(operation.status) && shouldShowTimelineOperation(operation));
   const failed = operations.find((operation) => operationStatusTone(operation) === "failed");
-  if (tone !== "running" && tone !== "failed") {
+  const degraded = operations.find((operation) => operationStatusTone(operation) === "degraded");
+  if (tone !== "running" && tone !== "failed" && tone !== "degraded") {
     return "";
   }
   const preview = tone === "running"
     ? running?.summary.trim()
       || running?.resultPreview?.trim()
       || (running ? operationDisplayLabel(running, labels).trim() : "")
-    : bestFailedOperationSummary(operations, labels)
+    : tone === "failed"
+      ? bestFailedOperationSummary(operations, labels)
+      : degradedOperationSummary(degraded, labels)
       || "";
   if (running && isLongLoopProgressOperation(running) && preview.trim()) {
     return compactPreview(`${operationDisplayLabel(running, labels)} · ${preview}`, 120);
   }
   return compactPreview(preview || "", 120);
+}
+
+function degradedOperationSummary(
+  operation: AgentMessageOperation | undefined,
+  labels: Pick<OperationStateLabels, "toolProcess">,
+) {
+  if (!operation) {
+    return "";
+  }
+  const raw = operation.summary.trim() || operation.error?.trim() || operation.resultPreview?.trim() || "";
+  const readable = readableStructuredSummary(raw) || readablePlainFailureText(raw, operation) || raw.trim();
+  const label = operationDisplayLabel(operation, labels).trim();
+  if (readable && label && readable !== label && !isUnmappedRawToolLabel(label, operation)) {
+    return `${label} · ${readable}`;
+  }
+  return readable || label;
 }
 
 type FailedOperationSummaryCandidate = {

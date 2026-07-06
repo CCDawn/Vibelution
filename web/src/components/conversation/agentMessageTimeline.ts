@@ -1,7 +1,7 @@
 import type { AgentMessage, AgentMessagePart, AgentTextPart } from "../../agent-thread/types";
 import { AgentMessageOperation } from "./agentMessageOperations";
 
-export type AgentMessageTimelineItemStatus = "pending" | "running" | "completed" | "failed";
+export type AgentMessageTimelineItemStatus = "pending" | "running" | "completed" | "failed" | "degraded";
 
 export type AgentMessageThoughtTimelineItem = {
   id: string;
@@ -471,6 +471,9 @@ function normalizeTimelineStatus(status: string | undefined): AgentMessageTimeli
   if (isFailedStatus(status)) {
     return "failed";
   }
+  if (isDegradedStatus(status)) {
+    return "degraded";
+  }
   if (isRunningStatus(status)) {
     return "running";
   }
@@ -488,4 +491,10 @@ function isRunningStatus(status: string | undefined) {
 
 function isFailedStatus(status: string | undefined) {
   return ["failed", "error", "timeout", "cancelled"].includes(String(status ?? "").trim().toLowerCase());
+}
+
+function isDegradedStatus(status: string | undefined) {
+  return ["degraded", "fallback", "partial", "recovered", "unavailable"].includes(
+    String(status ?? "").trim().toLowerCase(),
+  );
 }

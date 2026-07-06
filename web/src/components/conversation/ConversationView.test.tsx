@@ -1071,6 +1071,45 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("patch context not found");
   });
 
+  it("renders fallback and partial operation states as explicit non-success status", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-explicit-fallback-state",
+          role: "assistant",
+          content: "已返回可用但不完整的执行信息。",
+          timestamp: "2026-07-06T04:20:00Z",
+          feedbackEvents: [
+            {
+              sequence: 1,
+              kind: "tool",
+              status: "fallback",
+              name: "cli_tool",
+              summary: "使用备用路径：缺少 upstream operation id",
+              resultPreview: "projection gap",
+            },
+            {
+              sequence: 2,
+              kind: "tool",
+              status: "partial",
+              name: "read_file_tool",
+              summary: "只返回部分输出",
+              resultPreview: "truncated output",
+            },
+          ],
+        },
+      ],
+      { processDisplayMode: "trace" },
+    );
+
+    expect(html).toContain("备用路径");
+    expect(html).toContain("部分结果");
+    expect(html).toContain("使用备用路径：缺少 upstream operation id");
+    expect(html).toContain("只返回部分输出");
+    expect(html).not.toContain(">fallback<");
+    expect(html).not.toContain(">partial<");
+  });
+
   it("keeps active streaming scroll signals on a small streaming-only tail", () => {
     expect(conversationViewSource).toContain("projectAgentMessageTimelineMessages({ timelineMessages, activeTurnMessage })");
     expect(conversationViewSource).toContain("const streamingTimelineMessages = activeAgentMessageTimelineProjection.streamingMessages");

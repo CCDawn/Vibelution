@@ -24,6 +24,7 @@ const labels: OperationStateLabels = {
   running: "Running",
   failed: "Failed",
   done: "Done",
+  degraded: "Degraded",
   pending: "Pending",
   requesting: "Requesting",
   requestFailed: "Request failed",
@@ -67,6 +68,9 @@ describe("conversation operation state helpers", () => {
     expect(operationStatusTone(operation({ status: "timeout" }))).toBe("failed");
     expect(operationStatusTone(operation({ status: "running" }))).toBe("running");
     expect(operationStatusTone(operation({ status: "completed" }))).toBe("done");
+    expect(operationStatusTone(operation({ status: "degraded" }))).toBe("degraded");
+    expect(operationStatusTone(operation({ status: "fallback" }))).toBe("degraded");
+    expect(operationStatusTone(operation({ status: "partial" }))).toBe("degraded");
     expect(operationCollectionTone([
       operation({ id: "done", status: "done" }),
       operation({ id: "running", status: "running" }),
@@ -75,6 +79,10 @@ describe("conversation operation state helpers", () => {
       operation({ id: "done", status: "done" }),
       operation({ id: "failed", status: "failed" }),
     ])).toBe("failed");
+    expect(operationCollectionTone([
+      operation({ id: "done", status: "done" }),
+      operation({ id: "degraded", status: "degraded" }),
+    ])).toBe("degraded");
   });
 
   it("shows long-loop status operations while hiding internal pipeline noise", () => {
@@ -138,10 +146,36 @@ describe("conversation operation state helpers", () => {
 
     expect(operationDisplayLabel(operation({ label: "" }), labels)).toBe("Tool");
     expect(operationStateLabel("failed", labels)).toBe("Failed");
+    expect(operationStateLabel("degraded", labels)).toBe("Degraded");
     expect(hasModelThinkingProcess([internalThinking])).toBe(true);
     expect(isCompactAnswerOnlyRequestProcess([internalThinking])).toBe(true);
     expect(processSummaryTitle("running", [internalThinking], labels)).toBe("Thinking");
     expect(processSummaryMeta([internalThinking], labels)).toBe("");
+  });
+
+  it("keeps degraded and fallback processes visible in summaries instead of completed", () => {
+    const operations = [
+      operation({
+        id: "fallback-tool",
+        kind: "tool",
+        label: "命令",
+        status: "fallback",
+        rawStatus: "fallback",
+        summary: "使用备用路径：缺少 upstream operation id",
+      }),
+      operation({
+        id: "partial-tool",
+        kind: "tool",
+        label: "读取",
+        status: "partial",
+        rawStatus: "partial",
+        summary: "只返回部分输出",
+      }),
+    ];
+
+    expect(operationCollectionTone(operations)).toBe("degraded");
+    expect(processSummaryTitle("degraded", operations, labels)).toBe("Degraded");
+    expect(processSummaryPreview(operations, labels, (value) => value)).toBe("命令 · 使用备用路径：缺少 upstream operation id");
   });
 
   it("builds process summary meta and preview from visible operations", () => {

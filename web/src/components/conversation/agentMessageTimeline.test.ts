@@ -269,6 +269,48 @@ describe("agentMessageTimeline", () => {
     });
   });
 
+  it("preserves degraded fallback and partial states in operation timeline rows", () => {
+    const message: ConversationMessage = {
+      id: "message-degraded-timeline",
+      role: "assistant",
+      content: "部分结果已返回。",
+      timestamp: "2026-07-06T04:22:00Z",
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "tool",
+          status: "fallback",
+          name: "cli_tool",
+          summary: "使用备用路径：缺少 upstream operation id",
+        },
+        {
+          sequence: 2,
+          kind: "tool",
+          status: "partial",
+          name: "read_file_tool",
+          summary: "只返回部分输出",
+        },
+      ],
+    };
+
+    const items = timelineItemsForConversationMessage(message, { lang: "zh" });
+
+    expect(items[0]).toMatchObject({
+      kind: "operation",
+      status: "degraded",
+      title: "命令",
+      summary: "使用备用路径：缺少 upstream operation id",
+    });
+    expect(items[0].kind === "operation" ? items[0].operation.status : "").toBe("fallback");
+    expect(items[1]).toMatchObject({
+      kind: "operation",
+      status: "degraded",
+      title: "读取文件",
+      summary: "只返回部分输出",
+    });
+    expect(items[1].kind === "operation" ? items[1].operation.status : "").toBe("partial");
+  });
+
   it("does not expose mental snapshots as timeline body text", () => {
     const message: ConversationMessage = {
       id: "message-mental",

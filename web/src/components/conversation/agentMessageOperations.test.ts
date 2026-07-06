@@ -711,7 +711,7 @@ describe("agentMessageOperations", () => {
     expect(operations[0].rawStatus).toBe("running");
   });
 
-  it("treats degraded returned tool feedback as terminal instead of running", () => {
+  it("keeps degraded returned tool feedback terminal without reporting it as normal success", () => {
     const message: ConversationMessage = {
       id: "message-degraded-tool",
       role: "assistant",
@@ -735,10 +735,44 @@ describe("agentMessageOperations", () => {
     expect(operations[0]).toMatchObject({
       kind: "tool",
       label: "命令",
-      status: "done",
+      status: "degraded",
       rawStatus: "degraded",
       summary: "[跨平台警告] 在 Windows 上检测到 Unix shell 片段",
     });
+  });
+
+  it("preserves fallback and partial tool states instead of normalizing them to done", () => {
+    const message: ConversationMessage = {
+      id: "message-fallback-partial-tool",
+      role: "assistant",
+      content: "部分工具结果已返回。",
+      timestamp: "2026-07-06T04:18:00Z",
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "tool",
+          status: "fallback",
+          name: "cli_tool",
+          summary: "使用备用结果：上游缺失 operation id",
+          resultPreview: "projection gap",
+        },
+        {
+          sequence: 2,
+          kind: "tool",
+          status: "partial",
+          name: "read_file_tool",
+          summary: "只读取到部分输出",
+          resultPreview: "truncated output",
+        },
+      ],
+    };
+
+    const operations = operationsForConversationMessage(message);
+
+    expect(operations.map((operation) => `${operation.status}:${operation.rawStatus}:${operation.summary}`)).toEqual([
+      "fallback:fallback:使用备用结果：上游缺失 operation id",
+      "partial:partial:只读取到部分输出",
+    ]);
   });
 
   it("keeps terminal synthetic thought failures neutral after a completed tool", () => {

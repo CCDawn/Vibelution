@@ -496,7 +496,7 @@ function normalizeTimelineOperations(
 function findLatestConcreteProgressIndex(operations: AgentMessageOperation[]) {
   for (let index = operations.length - 1; index >= 0; index -= 1) {
     const operation = operations[index];
-    if (operation && ["done", "failed"].includes(operation.status)) {
+    if (operation && ["done", "failed", "degraded", "fallback", "partial", "recovered", "unavailable"].includes(operation.status)) {
       return index;
     }
   }
@@ -618,8 +618,11 @@ function normalizeOperationDisplay(operation: AgentMessageOperation): AgentMessa
 
 function normalizeDisplayStatus(status: string) {
   const normalized = String(status || "").trim().toLowerCase();
-  if (["done", "success", "completed", "succeeded", "finished", "ready", "degraded", "observed"].includes(normalized)) {
+  if (["done", "success", "completed", "succeeded", "finished", "ready", "observed"].includes(normalized)) {
     return "done";
+  }
+  if (["degraded", "fallback", "partial", "recovered", "unavailable"].includes(normalized)) {
+    return normalized;
   }
   if (["error", "failed", "failure", "timeout", "timed_out"].includes(normalized)) {
     return "failed";
