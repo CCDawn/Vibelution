@@ -541,7 +541,7 @@ export function CliAgentRunTerminalPanel({
             <SquareTerminal size={13} aria-hidden="true" />
             <span>{statusText}</span>
           </span>
-          <code>{visibleCommand}</code>
+          <code className={styles.cliAgentTerminalCommandText}>{visibleCommand}</code>
           {terminalCanResume || terminalCanStart ? (
             <VButton
               type="button"
