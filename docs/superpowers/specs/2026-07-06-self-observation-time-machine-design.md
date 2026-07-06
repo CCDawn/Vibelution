@@ -5,7 +5,7 @@ Status: Draft approved for written spec review
 
 ## 已确认意图
 
-用户希望把现有自进化观察模式升级成一个长时间运行的观察回归机，用来测试 Agent 在连续时间状态下的表现。该模式不是开发模式，不测试工具执行能力，而是测试 Agent 在无工具环境中持续理解目标、维持状态、经历上下文压缩、恢复续跑、吸收用户中途引导并最终收口报告的能力。
+用户希望把现有自进化观察模式升级成一个长时间运行的观察回归机，用来测试 Agent 在连续时间状态下的表现。该模式不是开发模式，不测试工具执行能力，而是测试 Agent 在无工具环境中持续理解目标、维持状态、经历上下文压缩、恢复续跑、吸收用户中途引导并完整保留对话链路的能力。
 
 已确认边界：
 
@@ -18,7 +18,7 @@ Status: Draft approved for written spec review
 
 ## 背景
 
-仓库已经有自进化双模式设计：隔离开发模式用于真实改进项目，自主观察模式用于 0 工具纯观察。自主观察模式当前重点是设定目标与时长、实时观察、自动结束和生成报告。
+仓库已经有自进化双模式设计：隔离开发模式用于真实改进项目，自主观察模式用于 0 工具纯观察。自主观察模式当前已有设定目标与时长、实时观察、自动结束和报告字段等兼容表面；本阶段不扩展分析报告，而是先把长时间对话链路和机器事件链路保留下来。
 
 新的需求比普通自主观察更强。它要验证 Agent 是否能在连续时间中保持目标、约束和状态一致性，并且能经受三类扰动：
 
@@ -35,7 +35,7 @@ Status: Draft approved for written spec review
 3. 让上下文压缩成为同一 run 的可见事件，并在压缩后继续观察。
 4. 让中断恢复成为持久状态机能力，而不是依赖页面内存。
 5. 让用户中途输入成为可审计 guidance event，并影响后续 tick。
-6. 让最终报告能评估连续状态稳定性、恢复能力、压缩后漂移、用户引导吸收和无工具边界遵守情况。
+6. 完整保留同一 run 的原始对话链路、压缩 marker、恢复 marker、guidance marker 和终态 marker，供下一阶段再生成记录或分析。
 
 ## 非目标
 
@@ -45,6 +45,7 @@ Status: Draft approved for written spec review
 - 不把关机期间伪装成 Agent 仍在运行；关机期间只记录 wall clock gap，不计入有效运行时间。
 - 不绕过用户显式终止。`force_resuming` 只表示从非用户主动中断中自动恢复，不表示强制复活已终止 run。
 - 不把压缩 marker、恢复 marker 或 guidance marker 伪装成普通 assistant 回复。
+- 第一阶段不生成新的观察分析报告、不写项目记忆记录、不做实验总结沉淀；这些都留到下一阶段基于完整链路再实现。
 
 ## 核心概念
 
@@ -79,7 +80,7 @@ created
 
 终态：
 
-- `completed`: 达到有效运行时长并生成最终报告。
+- `completed`: 达到有效运行时长并写入终态 marker；原始对话链路和事件链路保持可读取。
 - `terminated`: 用户显式终止。
 - `boundary_violation`: Agent 声称已经执行、读取、搜索、修改、验证或请求工具授权。
 - `failed`: 运行链路异常且无法恢复。
@@ -98,16 +99,16 @@ created
 
 ## 持久事实源
 
-唯一事实源是 observation run ledger。UI、状态卡、报告和恢复扫描都从 ledger 派生，不允许用前端状态、内存线程状态或临时缓存作为事实源。
+唯一事实源是 observation run ledger 加 conversation session/turn journal 链路。UI、状态卡、恢复扫描和下一阶段分析都从这些链路派生，不允许用前端状态、内存线程状态、临时缓存或兼容 `report` 字段作为事实源。
 
 | Fact | Canonical source | Writer | Readers / derived surfaces | Refresh or invalidation | Old source cleanup |
 | --- | --- | --- | --- | --- | --- |
-| run 是否存在 | observation run ledger | observation service | UI active run, runtime scanner, report generator | append event 后刷新 run projection | 不新增 UI-only run |
+| run 是否存在 | observation run ledger | observation service | UI active run, runtime scanner, future analyzer | append event 后刷新 run projection | 不新增 UI-only run |
 | 当前状态 | ledger event projection | observation service / runtime scanner | UI status, scheduler | 每次状态事件后派生 | 内存状态只作缓存 |
-| 有效运行时长 | tick timing events | scheduler | completion gate, UI progress, report | tick end / interruption 时累计 | 不用 wall clock 直接判定完成 |
-| 用户引导 | guidance events | API route | next tick context, UI timeline, report | guidance consumed event | 不覆盖原目标 |
-| 压缩结果 | conversation ledger checkpoint / attempt event | compression pipeline | model context, visible marker, report | checkpoint append 后刷新 | 不写成 assistant 普通消息 |
-| 恢复次数 | resume events | runtime scanner / scheduler | UI timeline, final report | startup scan / recovery action | 不靠进程内计数 |
+| 有效运行时长 | tick timing events | scheduler | completion gate, UI progress, future analyzer | tick end / interruption 时累计 | 不用 wall clock 直接判定完成 |
+| 用户引导 | guidance events | API route | next tick context, UI timeline, future analyzer | guidance consumed event | 不覆盖原目标 |
+| 压缩结果 | conversation ledger checkpoint / attempt event | compression pipeline | model context, visible marker, future analyzer | checkpoint append 后刷新 | 不写成 assistant 普通消息 |
+| 恢复次数 | resume events | runtime scanner / scheduler | UI timeline, future analyzer | startup scan / recovery action | 不靠进程内计数 |
 
 ## Ledger Event Schema
 
@@ -165,7 +166,7 @@ effectiveRunTime >= requestedDurationSeconds
 - `tick_started` 到 `tick_completed` 的时长计入有效运行时间。
 - `ticking` 中断时，只计入已确认的部分；无法精确确认时按最近安全 checkpoint 截断。
 - `queued`、`interrupted`、`needs_resume`、`force_resuming`、用户暂停、页面关闭、后端停机、Launcher 重启和整机关闭期间不计入有效运行时间。
-- `compressing` 默认计入系统处理时间，不计入 Agent 思考有效时间；报告中单独列出 compression overhead。
+- `compressing` 默认计入系统处理时间，不计入 Agent 思考有效时间；ledger 中单独记录 compression overhead，供后续分析阶段使用。
 - 恢复后继续使用剩余有效时间，而不是重新开始。
 
 UI 应同时展示：
@@ -225,7 +226,7 @@ UI 应同时展示：
 - 压缩失败但原上下文保留写 `compression_failed_preserved`。
 - 压缩后继续同一个 run，不创建新 run。
 
-最终报告必须比较压缩前后状态：
+完整链路必须保留足够材料，让下一阶段可以比较压缩前后状态：
 
 - 原目标是否保持。
 - 0 工具边界是否保持。
@@ -302,7 +303,7 @@ UI 行为：
 
 1. 写 `boundary_violation_detected`。
 2. run 进入 `boundary_violation` 终态。
-3. 生成失败报告，保留违规片段的短摘录和类型。
+3. 写入失败事件，保留违规片段的短摘录和类型。
 4. UI 显示这是观察实验失败信号，而不是普通 runtime error。
 
 ## API 设计
@@ -395,7 +396,7 @@ POST /api/evolution/self/observation-runs/{runId}/actions
 - resume marker。
 - guidance marker。
 - boundary violation marker。
-- final report marker。
+- run completed marker。
 
 观察模式不显示：
 
@@ -406,37 +407,25 @@ POST /api/evolution/self/observation-runs/{runId}/actions
 - 合入、丢弃、approve review。
 - 审查 Agent 卡片。
 
-## 最终报告
+## 完整对话链路保留
 
-报告结构：
+本阶段不生成新的观察分析报告。完成条件是 run 达到有效运行时长并写入 `run_completed` marker；后续分析、报告、记录或项目记忆沉淀，都基于本阶段保留下来的链路再实现。
 
-```text
-观察目标：
-请求有效时长：
-实际有效运行时长：
-wall clock 总跨度：
-tick 次数：
-压缩次数：
-恢复次数：
-用户引导次数：
+必须保留：
 
-连续状态摘要：
-压缩前后漂移：
-恢复后自检：
-用户引导吸收：
-无法验证清单：
-边界遵守：
-异常与失败信号：
-未来实验建议：
-```
+- 同一 `runId` 下的 conversation session id 和每个 tick 的 turn id。
+- 原始 assistant 输出链路，压缩不得删除或覆盖原始对话记录。
+- `tick_started`、`tick_completed`、`compression_*`、`runtime_interrupted`、`force_resume_*`、`user_guidance_*`、`boundary_violation_detected` 和 `run_completed` 事件。
+- 压缩 checkpoint summary 与原始 turn journal 的引用关系。
+- 用户中途 guidance 的添加、消费、拒绝状态和 seq。
+- 终态状态、有效运行时间、wall clock gap、压缩次数、恢复次数和边界违规短摘录。
 
-报告必须明确区分：
+不得在本阶段做：
 
-- Agent 自己的推理。
-- 系统观察到的事件。
-- 用户引导。
-- 无法验证内容。
-- 违规或异常。
+- 生成新的最终分析报告。
+- 写 `.docs/project-memory/**`、`PROJECT_MEMORY.html` 或其他长期项目记忆。
+- 把兼容 `report` 字段当作事实源。
+- 用摘要替代原始对话链路。
 
 ## 日志与证据
 
@@ -475,7 +464,7 @@ tick 次数：
 - guidance 要求工具时不会突破 0 工具边界。
 - compression_applied 后 run 继续。
 - compression_skipped_low_savings 不覆盖模型历史。
-- boundary violation 进入终态并生成失败报告。
+- boundary violation 进入终态并写失败事件。
 
 API 测试：
 
@@ -509,7 +498,7 @@ API 测试：
 
 第四阶段：guidance event 和 UI guidance 输入。
 
-第五阶段：压缩集成、时间线 marker 和最终报告。
+第五阶段：压缩集成、时间线 marker 和完整链路保留验证。
 
 每阶段都必须保持 0 工具边界和 no-worktree 保证。
 
@@ -535,4 +524,4 @@ API 测试：
 - 关闭页面、重启后端或重启 Vibelution 后，未完成 run 会继续剩余时间。
 - 整机重启后，下次 Vibelution 启动能识别并继续未完成 run。
 - 用户中途引导进入同一 run，不重置观察目标。
-- 最终报告能评价连续状态、压缩漂移、恢复表现、用户引导吸收和边界遵守。
+- 完整对话链路和事件链路能被读取，并足以支持下一阶段评价连续状态、压缩漂移、恢复表现、用户引导吸收和边界遵守。
