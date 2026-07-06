@@ -1,5 +1,5 @@
 import { ChevronRight } from "lucide-react";
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 
 import { VNativeButton } from "../components/vui";
 import styles from "./ConversationIndexSection.styles";
@@ -21,6 +21,9 @@ export function ConversationIndexSection({
   label,
   onToggle,
 }: ConversationIndexSectionProps) {
+  const sectionId = useId();
+  const headerId = `${sectionId}-header`;
+  const listId = `${sectionId}-list`;
   const sectionClassName = className
     ? `${styles.conversationGroup} ${className}`
     : styles.conversationGroup;
@@ -32,13 +35,19 @@ export function ConversationIndexSection({
         className={styles.conversationGroupHeader}
         onClick={onToggle}
         aria-expanded={expanded}
+        aria-controls={listId}
       >
         <ChevronRight size={14} aria-hidden="true" />
-        <span>{label}</span>
+        <span id={headerId}>{label}</span>
         <strong>{count}</strong>
       </VNativeButton>
       {expanded ? (
-        <div className={styles.conversationGroupList}>
+        <div
+          id={listId}
+          className={styles.conversationGroupList}
+          role="group"
+          aria-labelledby={headerId}
+        >
           {children}
         </div>
       ) : null}
