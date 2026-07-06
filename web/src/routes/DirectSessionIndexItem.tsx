@@ -2,7 +2,7 @@ import { Bot, Check, Clock3, LoaderCircle, MessageCircle, X } from "lucide-react
 import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
 
 import type { AgentInstance, SessionSummary } from "../api/types";
-import { VIconButton, VNativeButton, VNativeInput } from "../components/vui";
+import { VChip, VIconButton, VNativeButton, VNativeInput } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import {
   sessionAgentDisplayInfo,
@@ -305,23 +305,25 @@ export function DirectSessionIndexItem({
   const statusCluster = (
     <span className={styles.sessionStatusCluster}>
       {active ? (
-        <span
-          className={styles.sessionCurrentBadge}
-          title={currentTitle}
-          aria-label={currentTitle}
-        >
-          {currentBadgeLabel}
+        <span title={currentTitle} aria-label={currentTitle}>
+          <VChip tone="accent" className={styles.sessionCurrentBadge}>
+            {currentBadgeLabel}
+          </VChip>
         </span>
       ) : null}
       {sessionRunning ? (
-        <span className={styles.sessionRunningBadge} title={statusTitle} aria-label={statusTitle}>
-          <LoaderCircle size={10} aria-hidden="true" />
-          <span>{runningBadgeLabel}</span>
+        <span title={statusTitle} aria-label={statusTitle}>
+          <VChip tone="success" className={styles.sessionRunningBadge}>
+            <LoaderCircle size={10} aria-hidden="true" />
+            <span>{runningBadgeLabel}</span>
+          </VChip>
         </span>
       ) : null}
       {unreadCount > 0 ? (
-        <span className={styles.sessionUnreadBadge} title={unreadTitle} aria-label={unreadTitle}>
-          {unreadCount}
+        <span title={unreadTitle} aria-label={unreadTitle}>
+          <VChip tone="warning" className={styles.sessionUnreadBadge}>
+            {unreadCount}
+          </VChip>
         </span>
       ) : null}
     </span>

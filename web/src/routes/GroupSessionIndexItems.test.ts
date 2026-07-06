@@ -62,6 +62,7 @@ describe("GroupSessionIndexItems helpers", () => {
     }));
 
     expect(markup).toContain('data-vui="native-button"');
+    expect(markup).toContain('data-vui="chip"');
     expect(markup).not.toContain('data-vui="button"');
   });
 
@@ -110,6 +111,7 @@ describe("GroupSessionIndexItems helpers", () => {
     }));
 
     expect(markup).toContain('data-vui="native-button"');
+    expect(markup).toContain('data-vui="chip"');
     expect(markup).not.toContain('data-vui="button"');
   });
 

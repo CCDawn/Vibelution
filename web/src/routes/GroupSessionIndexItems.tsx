@@ -1,7 +1,7 @@
 import { CircleDot, Clock3, MessageCircleHeart, UsersRound } from "lucide-react";
 
 import type { ConversationSummary, Team } from "../api/types";
-import { VNativeButton } from "../components/vui";
+import { VChip, VNativeButton } from "../components/vui";
 import type { ConversationIndexTeam } from "./conversationIndexModel";
 import { conversationIndexTeamMemberCount } from "./conversationIndexModel";
 import styles from "./GroupSessionIndexItems.styles";
@@ -81,8 +81,10 @@ export function GroupConversationIndexItem({
         <span className={styles.conversationCopy}>
           <span className={styles.conversationTitleRow}>
             <span className={styles.sessionItemTitle}>{title}</span>
-            <span className={styles.sessionState} title={groupStatus} aria-label={groupStatus}>
-              <CircleDot size={10} aria-hidden="true" />
+            <span title={groupStatus} aria-label={groupStatus}>
+              <VChip tone="success" className={styles.sessionState}>
+                <CircleDot size={10} aria-hidden="true" />
+              </VChip>
             </span>
           </span>
           <span className={styles.conversationMetaRow}>
@@ -150,8 +152,10 @@ export function TeamConversationIndexItem({
         <span className={styles.conversationCopy}>
           <span className={styles.conversationTitleRow}>
             <span className={styles.sessionItemTitle}>{team.name}</span>
-            <span className={styles.sessionState} title={teamStatus} aria-label={teamStatus}>
-              <CircleDot size={10} aria-hidden="true" />
+            <span title={teamStatus} aria-label={teamStatus}>
+              <VChip tone="success" className={styles.sessionState}>
+                <CircleDot size={10} aria-hidden="true" />
+              </VChip>
             </span>
           </span>
           <span className={styles.conversationMetaRow}>
