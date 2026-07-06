@@ -626,6 +626,7 @@ export function ConversationView({
     () => ({
       running: lang === "zh" ? "执行中" : "Running",
       failed: lang === "zh" ? "执行失败" : "Failed",
+      degraded: lang === "zh" ? "降级运行" : "Process degraded",
       done: lang === "zh" ? "已完成" : "Done",
       pending: lang === "zh" ? "待处理" : "Pending",
       requesting: lang === "zh" ? "正在请求" : "Requesting",
@@ -1024,6 +1025,18 @@ export function ConversationView({
     return <CircleDot size={14} />;
   }
 
+  function operationStatusText(status: string) {
+    const normalized = status.trim().toLowerCase();
+    const explicitFallbackLabels: Record<string, string> = {
+      degraded: lang === "zh" ? "降级" : "Degraded",
+      fallback: lang === "zh" ? "备用路径" : "Fallback",
+      partial: lang === "zh" ? "部分结果" : "Partial",
+      recovered: lang === "zh" ? "已恢复" : "Recovered",
+      unavailable: lang === "zh" ? "不可用" : "Unavailable",
+    };
+    return explicitFallbackLabels[normalized] ?? statusLabel(status);
+  }
+
   function operationLabel(operation: AgentMessageOperation) {
     return operationDisplayLabel(operation, operationStateLabels);
   }
@@ -1059,6 +1072,9 @@ export function ConversationView({
     }
     if (tone === "failed") {
       return <TerminalSquare size={14} />;
+    }
+    if (tone === "degraded") {
+      return <CircleDot size={14} />;
     }
     if (tone === "done") {
       return <CheckCircle2 size={14} />;
@@ -1231,7 +1247,7 @@ export function ConversationView({
                 </div>
                 <span className={styles.operationStatus}>
                   {operationStatusIcon(operation)}
-                  <span>{statusLabel(operation.status)}</span>
+                  <span>{operationStatusText(operation.status)}</span>
                 </span>
                 {duration ? <span className={styles.operationDuration}>{duration}</span> : null}
                 {canExpandDetails ? (
@@ -1355,9 +1371,28 @@ export function ConversationView({
     );
   }
 
-  function timelineStatusText(status: AgentMessageTimelineItem["status"]) {
+  function timelineStatusText(item: AgentMessageTimelineItem) {
+    const status = item.status;
     if (status === "failed") {
       return lang === "zh" ? "执行失败" : "Failed";
+    }
+    if (status === "degraded") {
+      const rawStatus = item.kind === "operation"
+        ? String(item.operation.status || item.operation.rawStatus || "").trim().toLowerCase()
+        : "";
+      if (rawStatus === "fallback") {
+        return lang === "zh" ? "备用路径" : "Fallback";
+      }
+      if (rawStatus === "partial") {
+        return lang === "zh" ? "部分结果" : "Partial";
+      }
+      if (rawStatus === "unavailable") {
+        return lang === "zh" ? "不可用" : "Unavailable";
+      }
+      if (rawStatus === "recovered") {
+        return lang === "zh" ? "已恢复" : "Recovered";
+      }
+      return lang === "zh" ? "降级" : "Degraded";
     }
     if (status === "running") {
       return lang === "zh" ? "运行中" : "Running";
@@ -1380,7 +1415,7 @@ export function ConversationView({
         .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0)
         .reduce((total, value) => total + value, 0),
     );
-    const visibleStatus = timelineStatusText(item.status);
+    const visibleStatus = timelineStatusText(item);
     const className = [
       styles.timelineOperationCell,
       item.status === "failed" ? styles.timelineOperationCell_failed : "",
@@ -1435,7 +1470,7 @@ export function ConversationView({
       ? ""
       : readableOperationResult(operation, operationDetailLabels.structuredResultFallback);
     const showReadableResult = Boolean(operation.kind !== "tool" && readableResult && readableResult !== item.summary.trim());
-    const visibleStatus = timelineStatusText(item.status);
+    const visibleStatus = timelineStatusText(item);
     const className = [
       styles.timelineOperationCell,
       item.status === "failed" ? styles.timelineOperationCell_failed : "",
@@ -1504,7 +1539,7 @@ export function ConversationView({
                   ) : null}
                   <span className={styles.reActToolStatus}>
                     {operationStatusIcon(operation)}
-                    <span>{statusLabel(operation.status)}</span>
+                    <span>{operationStatusText(operation.status)}</span>
                     {duration ? <span>{duration}</span> : null}
                   </span>
                   {canExpandDetails ? (
