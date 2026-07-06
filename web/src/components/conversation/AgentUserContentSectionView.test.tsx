@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { AgentUserContentSectionView } from "./AgentUserContentSectionView";
+import styles from "./AgentUserContentSectionView.styles";
 
 describe("AgentUserContentSectionView", () => {
   it("renders the user content shell with stable AgentMessage content metadata", () => {
@@ -28,5 +29,16 @@ describe("AgentUserContentSectionView", () => {
     expect(html).toContain("userMessageBody");
     expect(html).not.toContain("data-agent-content-channel");
     expect(html).toContain("legacy user content");
+  });
+
+  it("keeps user message bubbles readable for long prose and nested markdown links", () => {
+    expect(styles.userMessageBody).toContain("whitespace-pre-wrap");
+    expect(styles.userMessageBody).toContain("[overflow-wrap:anywhere]");
+    expect(styles.userMessageBody).toContain("[&_.markdownBody]:max-w-[min(100%,76ch)]");
+    expect(styles.userMessageBody).toContain("[&_.markdownBody]:whitespace-normal");
+    expect(styles.userMessageBody).toContain("[&_.markdownBody]:break-words");
+    expect(styles.userMessageBody).toContain("[&_.markdownBody]:[overflow-wrap:anywhere]");
+    expect(styles.userMessageBody).toContain("[&_.inlineLink]:break-words");
+    expect(styles.userMessageBody).toContain("[&_.inlineLink]:[overflow-wrap:anywhere]");
   });
 });
