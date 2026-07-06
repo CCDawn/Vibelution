@@ -42,7 +42,7 @@ export function AgentResponseSectionView({
       <VButton
         type="button"
         className={styles.responseToggle}
-        aria-expanded={expanded}
+        aria-expanded={bodyVisible}
         aria-controls={responseBodyId}
         aria-label={toggleLabel}
         onClick={onToggle}
