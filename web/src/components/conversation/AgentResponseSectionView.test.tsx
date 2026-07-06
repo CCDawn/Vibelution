@@ -83,8 +83,9 @@ describe("AgentResponseSectionView", () => {
       </AgentResponseSectionView>,
     );
 
-    expect(html).toContain('aria-expanded="false"');
-    expect(html).toContain('title="展开回答"');
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain('aria-label="收起回答"');
+    expect(html).toContain('title="收起回答"');
     expect(html).toContain("正在实时输出的回答");
     expect(html).toContain("responseBody");
     expect(html).toContain('id="agent-response-assistant-live-answer"');

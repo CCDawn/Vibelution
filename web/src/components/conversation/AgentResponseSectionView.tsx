@@ -31,7 +31,7 @@ export function AgentResponseSectionView({
 }: AgentResponseSectionViewProps) {
   const bodyVisible = expanded || forceBodyVisible;
   const responseBodyId = `agent-response-${answerKey}`;
-  const toggleLabel = expanded ? expandedTitle : collapsedTitle;
+  const toggleLabel = bodyVisible ? expandedTitle : collapsedTitle;
   return (
     <section
       className={styles.responseSection}
@@ -48,7 +48,7 @@ export function AgentResponseSectionView({
         onClick={onToggle}
         title={toggleLabel}
       >
-        {expanded ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronRight size={16} aria-hidden="true" />}
+        {bodyVisible ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronRight size={16} aria-hidden="true" />}
         <span>{label}</span>
         <span className={styles.responseToggleStatus}>
           {showSpinner ? <LoaderCircle className={styles.statusSpinner} size={14} aria-hidden="true" /> : null}
