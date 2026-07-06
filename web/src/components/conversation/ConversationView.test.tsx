@@ -1570,6 +1570,50 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("step 5");
   });
 
+  it("renders backend command group timeline items as individual tool rows", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-server-command-group",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-05-22T00:00:00Z",
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "tool",
+            status: "done",
+            name: "grep_search_tool",
+            summary: "搜索配置文件",
+          },
+          {
+            sequence: 2,
+            kind: "tool",
+            status: "failed",
+            name: "cli_tool",
+            summary: "命令执行失败",
+          },
+        ],
+        timelineItems: [
+          {
+            id: "server-command-group",
+            kind: "command_group",
+            status: "failed",
+            title: "已运行 2 条命令",
+            summary: "搜索配置文件；命令执行失败",
+            operationIds: [
+              "assistant-server-command-group-feedback-1",
+              "assistant-server-command-group-feedback-2",
+            ],
+          },
+        ],
+      },
+    ]);
+
+    expect(html).not.toContain("已运行 2 条命令");
+    expect(html).toContain("搜索配置文件");
+    expect(html).toContain("命令执行失败");
+  });
+
   it("hides completed execution rail details until the trace is expanded", () => {
     const repeatedCommandEvents = Array.from({ length: 8 }, (_, index) => ({
       sequence: index + 1,
