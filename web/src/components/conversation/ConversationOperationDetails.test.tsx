@@ -16,6 +16,7 @@ const classNames = {
   operationDetailsThought: "operation-details-thought",
   operationDetailRow: "operation-detail-row",
   operationDetailLabel: "operation-detail-label",
+  operationDetailDescription: "operation-detail-description",
   operationDetailValue: "operation-detail-value",
 };
 
@@ -91,7 +92,13 @@ describe("ConversationOperationDetails", () => {
     expect(buildDetailRows).toHaveBeenCalledWith(thoughtOperation);
     expect(html).toContain('id="operation-details-1"');
     expect(html).toContain('class="operation-details operation-details-thought custom-details"');
+    expect(html).toContain("<dl");
+    expect(html).toContain("<dt");
+    expect(html).toContain("<dd");
     expect(html).toContain('class="operation-detail-row"');
+    expect(html).toContain('id="operation-details-1-detail-label-0"');
+    expect(html).toContain('aria-labelledby="operation-details-1-detail-label-0"');
+    expect(html).toContain('tabindex="0"');
     expect(html).toContain("Result");
     expect(html).toContain("Detailed reasoning");
   });
@@ -117,7 +124,11 @@ describe("ConversationOperationDetails", () => {
     expect(detailStyles.operationDetailLabel).not.toMatch(/rounded-|border|bg-\[|shadow-|p-2/);
     expect(detailStyles.operationDetailValue).not.toMatch(/radius-panel|surface-glass|shadow-/);
     expect(detailStyles.operationDetailRow).toContain("grid");
+    expect(detailStyles.operationDetailRow).toContain("grid-cols-[minmax(5.5rem,8rem)_minmax(0,1fr)]");
+    expect(detailStyles.operationDetailRow).toContain("max-[560px]:grid-cols-[minmax(0,1fr)]");
     expect(detailStyles.operationDetailValue).toContain("whitespace-pre-wrap");
+    expect(detailStyles.operationDetailValue).toContain("max-h-44");
+    expect(detailStyles.operationDetailValue).toContain("focus-visible:ring-2");
   });
 
   it("classifies thought and status operations distinctly while treating other kinds as tool details", async () => {
