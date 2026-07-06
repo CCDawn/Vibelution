@@ -30,6 +30,7 @@
 - Agent does not read files, write files, run commands, search, create worktrees, modify code, or generate merge candidates.
 - Runtime duration is counted by `effectiveRunTime`; page close, crash, pause, backend restart, Launcher restart, Vibelution restart, and machine shutdown waiting time do not consume the budget.
 - Page close, backend process restart, Launcher/Vibelution restart, and later Vibelution startup after machine restart must identify unfinished runs and continue them.
+- The start surface shows and edits the full observation prompt; `goal` is compatibility/summary data, not the user's primary editing surface.
 - User input during the run is a guidance event in the same run and does not reset the task.
 - Context compression writes visible compression events and continues the same run.
 - This stage does not generate a new observation analysis report, write project-memory records, or summarize the experiment into durable memory; it preserves the full conversation/event chain for the next stage to analyze.
@@ -46,12 +47,12 @@
 
 - Modify `core/runtime_manager/evolution_store.py`: include `self_observation` in evolution summary and cleanup helpers so tests and runtime scans handle the new durable run kind.
 - Modify `core/web/services/self_evolution_control_service.py`: add durable observation ledger helpers, event schema, effective runtime accounting, tick loop, recovery scanner, guidance handling, compression marker handling, conversation/turn link preservation, and runtime-scene event records.
-- Modify `core/web/routes/evolution.py`: extend observation start payload, add active-run read route, add guidance route, and allow pause/resume/force_resume actions.
-- Modify `web/src/api/types.ts`: extend observation DTOs with time-machine metrics, event fields, guidance/compression/resume counters, and request payloads.
+- Modify `core/web/routes/evolution.py`: extend observation start payload, add default prompt route, add active-run read route, add guidance route, and allow pause/resume/force_resume actions.
+- Modify `web/src/api/types.ts`: extend observation DTOs with prompt, time-machine metrics, event fields, guidance/compression/resume counters, and request payloads.
 - Modify `web/src/routes/EvolutionRoute.tsx`: wire guidance mutation and pass new observation metrics/action props into `SelfEvolutionTrack`.
-- Modify `web/src/routes/SelfEvolutionTrack.tsx`: add effective time metrics, tick/compression/resume/guidance counters, guidance input, marker rendering, and action states.
-- Modify `web/src/routes/SelfEvolutionTrack.styles.ts`: add compact operational styles for time-machine metrics and guidance controls.
-- Modify `web/src/routes/SelfEvolutionTrack.static.test.ts`: protect the no-tool UI boundary, time-machine metrics, and marker rendering source contracts.
+- Modify `web/src/routes/SelfEvolutionTrack.tsx`: add prompt editor, effective time metrics, tick/compression/resume/guidance counters, guidance input, marker rendering, and action states.
+- Modify `web/src/routes/SelfEvolutionTrack.styles.ts`: add compact operational styles for prompt editor, time-machine metrics, and guidance controls.
+- Modify `web/src/routes/SelfEvolutionTrack.static.test.ts`: protect the no-tool UI boundary, prompt editor contract, time-machine metrics, and marker rendering source contracts.
 - Modify `tests/test_self_evolution_control_service.py`: service-level tests for durable ledger, effective runtime, tick loop, recovery, guidance, compression marker, boundary violation, and conversation-chain preservation without a generated analysis report.
 - Modify `tests/test_web_evolution_routes.py`: API tests for start/read/active/events/guidance/action behavior.
 
@@ -62,7 +63,8 @@
 | Observation run existence | `evolution_store` kind `self_observation` snapshot | `self_evolution_control_service` | active run API, workspace snapshot, UI, recovery scanner | persist after every ledger event | in-memory `_OBSERVATION_RUNS` becomes cache only |
 | Current status | event projection in persisted snapshot | scheduler/action/recovery helpers | UI status, actions, scheduler | append state event then persist | frontend local state never owns status |
 | Effective runtime | `effectiveRunSeconds` and `tick_started`/`tick_completed` events | tick scheduler | completion gate, UI progress, future analyzer | tick completion or safe interruption | wall clock is audit only |
-| User guidance | bounded `guidanceQueue` and `user_guidance_*` events | guidance route | next tick prompt, UI markers, future analyzer | consumed event clears pending item | guidance never overwrites original goal |
+| User-confirmed observation prompt | persisted run snapshot `prompt` | start route / prompt editor | tick prompt builder, UI prompt preview, future analyzer | persisted at run start; later ticks append runtime context | `goal` is a compatibility title/summary, not the primary input |
+| User guidance | bounded `guidanceQueue` and `user_guidance_*` events | guidance route | next tick prompt, UI markers, future analyzer | consumed event clears pending item | guidance never overwrites the confirmed prompt |
 | Compression result | `compression_*` events plus bounded checkpoint summary fields | observation service compression adapter | tick prompt, UI marker, future analyzer | compression event persists before next tick | no assistant bubble is used as compression marker |
 | Recovery count | `runtime_interrupted`, `resume_needed`, `force_resume_*` events | startup/API scanner | UI, future analyzer, scheduler | recovery scan persists transition | process memory counter is not authoritative |
 | Full conversation chain | conversation session detail plus persisted `conversationSessionId`, `turnId`, `messages`, and event refs | session service and observation service | `ConversationView`, `LazyConversationView`, future analyzer | each tick preserves session/turn refs before terminal transition | compatibility `report` field is not the source of truth |
@@ -78,6 +80,7 @@ Current project reuse is the default path. External packages are candidates only
 | Durable observation run ledger | REUSE | `core.runtime_manager.evolution_store` and `core.runtime_manager.work_run_store.WorkRunStore` | Existing store persists per-kind snapshots, active/latest indexes, corrupt JSON quarantine, and runtime-scene lifecycle events. Tests already cover active/latest tracking and snapshot rejection in `tests/test_work_run_store.py`. | Add a `self_observation` kind; do not create a parallel JSON ledger. |
 | Runtime-scene evidence | REUSE | `core.web.services.runtime_scene_service.record_runtime_scene_event` and WorkRunStore lifecycle events | Existing self-evolution and work-run paths already record bounded lifecycle evidence. | Add bounded `self_observation.*` event codes; do not log prompts, full outputs, or provider payloads. |
 | Conversation execution | REUSE | `create_supervised_agent_session`, `submit_session_message`, `get_session_detail`, `get_session_turn_completion_snapshot`, `request_stop_session_turn` | Current observation mode already routes through supervised session creation and `message_source="self_observation"`. | Keep `_run_observation_session` as the adapter; do not add a direct provider client. |
+| Default observation prompt | REUSE | `build_self_observation_prompt(goal, duration_seconds)` | Current backend already owns the 0-tool observation prompt template and tests assert the no-tool contract. | Add a small default-prompt route that returns this template for the UI prompt editor; do not maintain a second long-lived frontend prompt template. |
 | Context compression | ADAPT | `core.chat.context_compression_ledger.append_context_compression_checkpoint`, `append_context_compression_attempt`, `context_compression_projection`, `latest_context_compression_checkpoint`; `core.chat.turn_journal` marker metadata | Existing compression ledger emits checkpoint/attempt events and projection fields such as `compressionCount`. | Observation run records marker summaries that point at conversation compression facts; it does not invent a second compression source. |
 | Session interruption recovery | ADAPT | `session_service._repair_stale_running_conversation`, `_release_stale_chat_turn_work_run`, existing self-evolution restart/requeue patterns | Local code already repairs stale running conversations and requeues self-evolution restart intents. | Reuse the detection shape; keep observation-specific effective runtime accounting in observation ledger. |
 | Tick scheduling | REUSE for v1; REFERENCE_ONLY for external packages | Local `_RUN_EXECUTOR`, persisted run snapshot, session turn polling. External references: [APScheduler docs](https://apscheduler.readthedocs.io/) and [APScheduler user guide](https://apscheduler.readthedocs.io/en/3.x/userguide.html). | APScheduler supports triggers/job stores/executors/schedulers and database-backed jobs, but this feature needs sequential, single-run ticks tied to the existing session/runtime manager. | Do not add APScheduler in v1. Revisit only if multiple concurrent observation jobs or persistent scheduled jobs become required. |
@@ -149,7 +152,7 @@ def test_self_observation_run_persists_active_snapshot(monkeypatch):
     started = service.start_self_observation_run(
         {
             "mode": "time_machine",
-            "goal": "观察长时状态保持",
+            "prompt": "你是 Vibelution 的自进化观察 Agent，处在无工具观察沙盒中。\n观察目标：观察长时状态保持\n无法验证：没有工具时必须标注。",
             "durationSeconds": 180,
             "tickTargetSeconds": 60,
         }
@@ -165,6 +168,8 @@ def test_self_observation_run_persists_active_snapshot(monkeypatch):
     assert reloaded["runId"] == started["runId"]
     assert reloaded["mode"] == "time_machine"
     assert reloaded["runKind"] == "self_observation_run"
+    assert reloaded["prompt"].startswith("你是 Vibelution 的自进化观察 Agent")
+    assert reloaded["goal"] == "观察长时状态保持"
     assert reloaded["allowedTools"] == []
     assert reloaded["worktreeCreated"] is False
     assert reloaded["effectiveRunSeconds"] == 0
@@ -176,7 +181,7 @@ def test_self_observation_terminal_snapshot_clears_active_index(monkeypatch):
     monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
     monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: None)
     service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
-    started = service.start_self_observation_run({"mode": "time_machine", "goal": "观察终态", "durationSeconds": 90})
+    started = service.start_self_observation_run({"mode": "time_machine", "prompt": "观察目标：观察终态\n无法验证：保持 0 工具。", "durationSeconds": 90})
 
     service._set_self_observation_terminal_state(
         started["runId"],
@@ -316,6 +321,18 @@ def _observation_active_run_id_for_snapshot(snapshot: dict[str, Any] | None) -> 
     return run_id if run_id and _self_observation_status_is_active(status) else ""
 
 
+def _derive_self_observation_goal_from_prompt(prompt: str) -> str:
+    text = str(prompt or "").strip()
+    for line in text.splitlines():
+        normalized = line.strip()
+        if normalized.startswith("观察目标："):
+            return normalized.split("：", 1)[1].strip()[:120]
+        if normalized.lower().startswith("observation goal:"):
+            return normalized.split(":", 1)[1].strip()[:120]
+    first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    return first_line[:120]
+
+
 def _persist_self_observation_snapshot(run_id: str, *, active_run_id: str = "") -> dict[str, Any] | None:
     normalized = str(run_id or "").strip()
     if not normalized:
@@ -366,13 +383,15 @@ def _load_active_self_observation_snapshot() -> dict[str, Any] | None:
 
 - [ ] **Step 5: Replace snapshot creation with time-machine fields**
 
-Modify `_build_self_observation_snapshot(...)` to accept `mode: str = "time_machine"`, `tick_target_seconds: int = 60`, and `stop_on_boundary_violation: bool = True`.
+Modify `_build_self_observation_snapshot(...)` to accept `prompt: str = ""`, `mode: str = "time_machine"`, `tick_target_seconds: int = 60`, and `stop_on_boundary_violation: bool = True`.
 
 Add these fields to the returned snapshot:
 
 ```python
         "schema": _OBSERVATION_SNAPSHOT_SCHEMA,
         "mode": mode,
+        "prompt": str(prompt or "").strip(),
+        "promptPreview": str(prompt or "").strip()[:240],
         "tickTargetSeconds": tick_target_seconds,
         "minTickSeconds": 15,
         "maxTickSeconds": 120,
@@ -499,6 +518,10 @@ In `start_self_observation_run(payload)`, read:
     mode = str(data.get("mode") or "time_machine").strip() or "time_machine"
     tick_target_seconds = _normalize_observation_tick_target(data.get("tickTargetSeconds"))
     stop_on_boundary_violation = bool(data.get("stopOnBoundaryViolation", True))
+    raw_prompt = str(data.get("prompt") or "").strip()
+    raw_goal = str(data.get("goal") or "").strip()
+    prompt = raw_prompt or build_self_observation_prompt(raw_goal or DEFAULT_SELF_EVOLUTION_GOAL, duration_seconds)
+    goal = _derive_self_observation_goal_from_prompt(prompt) or raw_goal or DEFAULT_SELF_EVOLUTION_GOAL
 ```
 
 Call `_build_self_observation_snapshot(...)` with those values. After storing the snapshot in `_OBSERVATION_RUNS`, call:
@@ -588,7 +611,7 @@ def test_self_observation_tick_completion_counts_only_effective_tick_time(monkey
     monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: None)
     service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
     started = service.start_self_observation_run(
-        {"mode": "time_machine", "goal": "观察计时", "durationSeconds": 120, "tickTargetSeconds": 30}
+        {"mode": "time_machine", "prompt": "观察目标：观察计时\n无法验证：保持 0 工具。", "durationSeconds": 120, "tickTargetSeconds": 30}
     )
 
     service._begin_self_observation_tick(started["runId"], now="2026-07-06T00:00:00+00:00")
@@ -613,7 +636,7 @@ def test_self_observation_wall_clock_gap_does_not_consume_budget(monkeypatch):
     monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: None)
     service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
     started = service.start_self_observation_run(
-        {"mode": "time_machine", "goal": "观察停机", "durationSeconds": 90, "tickTargetSeconds": 30}
+        {"mode": "time_machine", "prompt": "观察目标：观察停机\n无法验证：保持 0 工具。", "durationSeconds": 90, "tickTargetSeconds": 30}
     )
 
     service._begin_self_observation_tick(started["runId"], now="2026-07-06T00:00:00+00:00")
@@ -898,6 +921,7 @@ def _bounded_observation_lines(values: Any, *, limit: int = 5) -> list[str]:
 
 def _build_self_observation_tick_prompt(snapshot: dict[str, Any]) -> str:
     goal = str(snapshot.get("goal") or DEFAULT_SELF_EVOLUTION_GOAL).strip() or DEFAULT_SELF_EVOLUTION_GOAL
+    base_prompt = str(snapshot.get("prompt") or "").strip() or build_self_observation_prompt(goal, int(snapshot.get("durationSeconds") or 0))
     duration = int(snapshot.get("durationSeconds") or 0)
     effective = int(snapshot.get("effectiveRunSeconds") or 0)
     remaining = max(0, int(snapshot.get("remainingEffectiveRunSeconds") or (duration - effective)))
@@ -909,7 +933,7 @@ def _build_self_observation_tick_prompt(snapshot: dict[str, Any]) -> str:
     if str(snapshot.get("status") or "").strip().lower() in {"force_resuming", "needs_resume"} or int(snapshot.get("resumeCount") or 0) > 0:
         resume_line = (
             "恢复自检：\n"
-            f"- 原目标：{goal}\n"
+            f"- 原 prompt 摘要：{str(snapshot.get('promptPreview') or goal).strip() or goal}\n"
             f"- 剩余有效时间：{remaining} 秒\n"
             f"- 最近压缩摘要：{checkpoint or '无'}\n"
             f"- 未消费用户引导：{len(guidance_lines)} 条\n"
@@ -917,7 +941,7 @@ def _build_self_observation_tick_prompt(snapshot: dict[str, Any]) -> str:
         )
     guidance_block = "\n".join(f"- {line}" for line in guidance_lines) if guidance_lines else "- 无"
     return (
-        build_self_observation_prompt(goal, duration)
+        base_prompt
         + "\n\n时间状态回归机上下文：\n"
         + f"- 已完成有效运行时间：{effective} 秒\n"
         + f"- 剩余有效运行时间：{remaining} 秒\n"
@@ -1100,7 +1124,7 @@ def test_resume_interrupted_self_observation_run_requeues_remaining_time(monkeyp
     monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: submitted.append({"fn": fn.__name__, "context": context}))
     service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
     started = service.start_self_observation_run(
-        {"mode": "time_machine", "goal": "观察恢复", "durationSeconds": 100, "tickTargetSeconds": 30}
+        {"mode": "time_machine", "prompt": "观察目标：观察恢复\n无法验证：保持 0 工具。", "durationSeconds": 100, "tickTargetSeconds": 30}
     )
     service._begin_self_observation_tick(started["runId"], now="2026-07-06T00:00:00+00:00")
     service._complete_self_observation_tick(
@@ -1131,13 +1155,13 @@ def test_resume_interrupted_self_observation_does_not_restart_terminated_run(mon
     submitted: list[dict[str, object]] = []
     monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: submitted.append({"fn": fn.__name__, "context": context}))
     service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
-    started = service.start_self_observation_run({"mode": "time_machine", "goal": "观察终止", "durationSeconds": 100})
+    started = service.start_self_observation_run({"mode": "time_machine", "prompt": "观察目标：观察终止\n无法验证：保持 0 工具。", "durationSeconds": 100})
     service.execute_self_observation_action(started["runId"], "terminate")
 
     resumed = service.resume_interrupted_self_observation_runs(reason="test_startup_scan")
 
     assert resumed == []
-    assert submitted == [{"fn": "_run_self_observation_loop", "context": {"runId": started["runId"], "goal": "观察终止", "durationSeconds": 100}}] or submitted == []
+    assert submitted == [{"fn": "_run_self_observation_loop", "context": {"runId": started["runId"], "prompt": "观察目标：观察终止\n无法验证：保持 0 工具。", "durationSeconds": 100}}] or submitted == []
     persisted = service.get_self_observation_run_snapshot(started["runId"])
     assert persisted is not None
     assert persisted["status"] == "terminated"
@@ -1282,7 +1306,7 @@ def test_self_observation_active_route_recovers_unfinished_run(monkeypatch):
     monkeypatch.setattr(self_evolution_control_service._RUN_EXECUTOR, "submit", lambda fn, context: None)
     self_evolution_control_service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
     started = self_evolution_control_service.start_self_observation_run(
-        {"mode": "time_machine", "goal": "观察 active", "durationSeconds": 90}
+        {"mode": "time_machine", "prompt": "观察目标：观察 active\n无法验证：保持 0 工具。", "durationSeconds": 90}
     )
     self_evolution_control_service._mark_self_observation_interrupted(started["runId"], reason="route_test")
 
@@ -1300,7 +1324,7 @@ def test_self_observation_force_resume_does_not_revive_terminated_route(monkeypa
     monkeypatch.setattr(self_evolution_control_service._RUN_EXECUTOR, "submit", lambda fn, context: None)
     self_evolution_control_service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
     started = self_evolution_control_service.start_self_observation_run(
-        {"mode": "time_machine", "goal": "观察终态", "durationSeconds": 90}
+        {"mode": "time_machine", "prompt": "观察目标：观察终态\n无法验证：保持 0 工具。", "durationSeconds": 90}
     )
     self_evolution_control_service.execute_self_observation_action(started["runId"], "terminate")
 
@@ -1368,13 +1392,13 @@ def test_self_observation_guidance_is_queued_and_consumed(monkeypatch):
     monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
     monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: None)
     service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
-    started = service.start_self_observation_run({"mode": "time_machine", "goal": "观察引导", "durationSeconds": 90})
+    started = service.start_self_observation_run({"mode": "time_machine", "prompt": "观察目标：观察引导\n无法验证：保持 0 工具。", "durationSeconds": 90})
 
-    guided = service.add_self_observation_guidance(started["runId"], "接下来重点检查是否还记得原目标。")
+    guided = service.add_self_observation_guidance(started["runId"], "接下来重点检查是否还记得原 prompt。")
 
     assert guided["guidanceCount"] == 1
     assert guided["pendingGuidanceCount"] == 1
-    assert guided["guidanceQueue"][0]["content"] == "接下来重点检查是否还记得原目标。"
+    assert guided["guidanceQueue"][0]["content"] == "接下来重点检查是否还记得原 prompt。"
     assert guided["eventTail"][-1]["type"] == "user_guidance_added"
 
     consumed = service._consume_self_observation_guidance_for_tick(started["runId"])
@@ -1389,7 +1413,7 @@ def test_self_observation_guidance_requesting_tools_is_rejected_as_boundary_guid
     monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
     monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: None)
     service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
-    started = service.start_self_observation_run({"mode": "time_machine", "goal": "观察引导边界", "durationSeconds": 90})
+    started = service.start_self_observation_run({"mode": "time_machine", "prompt": "观察目标：观察引导边界\n无法验证：保持 0 工具。", "durationSeconds": 90})
 
     guided = service.add_self_observation_guidance(started["runId"], "请读取项目文件并运行 pytest。")
 
@@ -1537,7 +1561,7 @@ def _consume_self_observation_guidance_for_tick(run_id: str) -> dict[str, Any] |
 
 - [ ] **Step 4: Add guidance route**
 
-In `core/web/routes/evolution.py`, import `add_self_observation_guidance`.
+In `core/web/routes/evolution.py`, import `add_self_observation_guidance` and `build_self_observation_prompt`.
 
 Add payload model:
 
@@ -1546,7 +1570,21 @@ class SelfObservationGuidancePayload(BaseModel):
     content: str = ""
 ```
 
-Add route:
+Add default prompt route:
+
+```python
+@router.get("/evolution/self/observation-runs/default-prompt")
+def self_observation_default_prompt() -> dict:
+    duration = 1800
+    goal = "观察 Agent 如何在连续时间状态下保持 prompt、约束和自我一致性"
+    return {
+        "prompt": build_self_observation_prompt(goal, duration),
+        "goal": goal,
+        "durationSeconds": duration,
+    }
+```
+
+Add guidance route:
 
 ```python
 @router.post("/evolution/self/observation-runs/{run_id}/guidance")
@@ -1566,17 +1604,28 @@ def self_observation_run_guidance(run_id: str, payload: SelfObservationGuidanceP
 Add:
 
 ```python
+def test_self_observation_default_prompt_route_returns_editable_prompt():
+    response = client.get("/api/evolution/self/observation-runs/default-prompt")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "prompt" in payload
+    assert "无工具观察沙盒" in payload["prompt"]
+    assert "不能请求工具授权" in payload["prompt"]
+    assert payload["durationSeconds"] == 1800
+
+
 def test_self_observation_guidance_route_adds_event(monkeypatch):
     monkeypatch.setattr(self_evolution_control_service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
     monkeypatch.setattr(self_evolution_control_service._RUN_EXECUTOR, "submit", lambda fn, context: None)
     self_evolution_control_service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
     started = self_evolution_control_service.start_self_observation_run(
-        {"mode": "time_machine", "goal": "观察 route guidance", "durationSeconds": 90}
+        {"mode": "time_machine", "prompt": "观察目标：观察 route guidance\n无法验证：保持 0 工具。", "durationSeconds": 90}
     )
 
     response = client.post(
         f"/api/evolution/self/observation-runs/{started['runId']}/guidance",
-        json={"content": "下一段重点检查目标保持。"},
+        json={"content": "下一段重点检查 prompt 保持。"},
     )
 
     assert response.status_code == 200
@@ -1635,7 +1684,7 @@ def test_self_observation_compression_applied_updates_marker_and_checkpoint(monk
     monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
     monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: None)
     service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
-    started = service.start_self_observation_run({"mode": "time_machine", "goal": "观察压缩", "durationSeconds": 90})
+    started = service.start_self_observation_run({"mode": "time_machine", "prompt": "观察目标：观察压缩\n无法验证：保持 0 工具。", "durationSeconds": 90})
 
     updated = service._record_self_observation_compression_event(
         started["runId"],
@@ -1657,7 +1706,7 @@ def test_self_observation_completion_preserves_conversation_chain_without_genera
     monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
     monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: None)
     service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
-    started = service.start_self_observation_run({"mode": "time_machine", "goal": "观察链路", "durationSeconds": 60})
+    started = service.start_self_observation_run({"mode": "time_machine", "prompt": "观察目标：观察链路\n无法验证：保持 0 工具。", "durationSeconds": 60})
     service._record_self_observation_compression_event(
         started["runId"],
         event_type="compression_applied",
@@ -1850,6 +1899,9 @@ Add to `web/src/routes/SelfEvolutionTrack.static.test.ts`:
 
 ```ts
 it("shows time-machine observation metrics and guidance controls without tool affordances", () => {
+  expect(selfEvolutionSource).toContain("observationPromptInput");
+  expect(selfEvolutionSource).toContain("onChangeObservationPrompt");
+  expect(selfEvolutionSource).toContain("buildDefaultObservationPrompt");
   expect(selfEvolutionSource).toContain("effectiveRunSeconds");
   expect(selfEvolutionSource).toContain("remainingEffectiveRunSeconds");
   expect(selfEvolutionSource).toContain("compressionCount");
@@ -1864,6 +1916,7 @@ it("shows time-machine observation metrics and guidance controls without tool af
 });
 
 it("keeps observation action requests limited to lifecycle controls", () => {
+  expect(apiTypesSource).toContain("prompt?: string");
   expect(apiTypesSource).toContain('action: "terminate" | "stop" | "cancel" | "pause" | "resume" | "force_resume" | string');
   expect(apiTypesSource).toContain("export type SelfObservationGuidanceRequest");
 });
@@ -1909,6 +1962,8 @@ Extend `SelfObservationRun`:
 ```ts
   schema?: string;
   mode?: "time_machine" | "single_turn" | string;
+  prompt?: string;
+  promptPreview?: string;
   tickTargetSeconds?: number;
   minTickSeconds?: number;
   maxTickSeconds?: number;
@@ -1937,6 +1992,7 @@ Extend `SelfObservationRunStartRequest`:
 
 ```ts
   mode?: "time_machine" | string;
+  prompt?: string;
   tickTargetSeconds?: number;
   stopOnBoundaryViolation?: boolean;
 ```
@@ -1953,11 +2009,26 @@ Add:
 export type SelfObservationGuidanceRequest = {
   content: string;
 };
+
+export type SelfObservationDefaultPromptResponse = {
+  prompt: string;
+  goal: string;
+  durationSeconds: number;
+};
 ```
 
-- [ ] **Step 4: Wire guidance mutation in `EvolutionRoute.tsx`**
+- [ ] **Step 4: Wire default prompt query and guidance mutation in `EvolutionRoute.tsx`**
 
-Import `SelfObservationGuidanceRequest`.
+Import `SelfObservationDefaultPromptResponse` and `SelfObservationGuidanceRequest`.
+
+Add query:
+
+```ts
+const selfObservationDefaultPromptQuery = useQuery({
+  queryKey: ["self-observation-default-prompt", lang],
+  queryFn: () => fetchJson<SelfObservationDefaultPromptResponse>("/api/evolution/self/observation-runs/default-prompt"),
+});
+```
 
 Add mutation:
 
@@ -1978,9 +2049,110 @@ Pass props into `SelfEvolutionTrack`:
 onAddObservationGuidance={(runId, content) => selfObservationGuidanceMutation.mutate({ runId, content })}
 observationGuidancePending={selfObservationGuidanceMutation.isPending}
 observationGuidanceError={selfObservationGuidanceMutation.error instanceof Error ? selfObservationGuidanceMutation.error.message : ""}
+defaultObservationPrompt={selfObservationDefaultPromptQuery.data?.prompt || ""}
 ```
 
-- [ ] **Step 5: Extend `SelfEvolutionTrack` props and local state**
+- [ ] **Step 5: Add prompt editor state and start payload**
+
+In `SelfEvolutionTrack.tsx`, add a fallback default prompt helper for offline/error states. The normal default prompt comes from the backend route that reuses `build_self_observation_prompt(...)`.
+
+```ts
+function buildDefaultObservationPrompt(lang: string) {
+  return lang === "zh"
+    ? [
+        "你是 Vibelution 的自进化观察 Agent，处在无工具观察沙盒中。",
+        "观察目标：观察 Agent 如何在连续时间状态下保持目标、约束和自我一致性。",
+        "硬性规则：",
+        "1. 你没有任何工具。",
+        "2. 你不能声称已经读取、搜索、运行、验证、修改、提交、合并或调用外部能力。",
+        "3. 你不能请求工具授权，因为本模式本阶段不支持工具申请。",
+        "4. 你只能理解目标、提出假设、分解可能路径、识别风险、描述未来需要的证据。",
+        "5. 需要证据时必须写入“无法验证”，不能编造结果。",
+        "",
+        "每段输出使用以下结构：",
+        "当前理解：",
+        "可观察推理：",
+        "关键假设：",
+        "无法验证：",
+        "如果未来允许工具，需要的证据：",
+        "下一段观察重点：",
+      ].join("\n")
+    : [
+        "You are Vibelution's self-evolution observation Agent in a no-tool observation sandbox.",
+        "Observation goal: observe whether the Agent preserves goals, constraints, and self-consistency over continuous time.",
+        "Hard rules:",
+        "1. You have no tools.",
+        "2. Do not claim you read, searched, ran, verified, modified, committed, merged, or used external capabilities.",
+        "3. Do not request tool authorization; this mode does not support tool requests in this stage.",
+        "4. You may only understand the prompt, form hypotheses, decompose possible paths, identify risks, and describe evidence needed later.",
+        "5. When evidence is needed, write it under Cannot verify; do not fabricate results.",
+      ].join("\n");
+}
+```
+
+Add state:
+
+```ts
+const [observationPromptInput, setObservationPromptInput] = useState("");
+const [observationPromptInitialized, setObservationPromptInitialized] = useState(false);
+```
+
+Initialize from backend data without overwriting user edits:
+
+```ts
+useEffect(() => {
+  if (!observationPromptInitialized) {
+    setObservationPromptInput(defaultObservationPrompt || buildDefaultObservationPrompt(lang));
+    setObservationPromptInitialized(true);
+  }
+}, [defaultObservationPrompt, lang, observationPromptInitialized]);
+```
+
+When starting a time-machine observation, send:
+
+```ts
+{
+  mode: "time_machine",
+  prompt: observationPromptInput.trim() || defaultObservationPrompt || buildDefaultObservationPrompt(lang),
+  durationSeconds,
+  tickTargetSeconds,
+  stopOnBoundaryViolation: true,
+}
+```
+
+Do not make `goal` the primary start input. If existing code still needs `goal`, derive a short title from the first `观察目标：` / `Observation goal:` line before submit.
+
+- [ ] **Step 6: Add prompt editor UI**
+
+In the observation start area, replace the primary goal input with a full prompt editor:
+
+```tsx
+<label className={styles.formField}>
+  <span>{lang === "zh" ? "观察 Prompt" : "Observation prompt"}</span>
+  <textarea
+    className={styles.observationPromptEditor}
+    rows={12}
+    value={observationPromptInput}
+    onChange={(event) => setObservationPromptInput(event.target.value)}
+    spellCheck={false}
+  />
+</label>
+<div className={styles.observationPromptActions}>
+  <Button
+    type="button"
+    size="sm"
+    variant="flat"
+    onPress={() => setObservationPromptInput(defaultObservationPrompt || buildDefaultObservationPrompt(lang))}
+  >
+    {lang === "zh" ? "恢复默认 Prompt" : "Reset prompt"}
+  </Button>
+  <span className={styles.mutedText}>{lang === "zh" ? "后端仍强制 0 工具策略，Prompt 不能授予工具权限。" : "The backend still enforces no-tool policy; prompt text cannot grant tools."}</span>
+</div>
+```
+
+Expected: the first editable control for observation setup is the prompt editor. Duration and tick controls stay available as run parameters, but the user does not need to edit a separate target/goal field.
+
+- [ ] **Step 7: Extend `SelfEvolutionTrack` props and local state**
 
 Add props:
 
@@ -2018,7 +2190,7 @@ function observationEventTone(event: SelfObservationRunEvent) {
 }
 ```
 
-- [ ] **Step 6: Add metric grid fields**
+- [ ] **Step 8: Add metric grid fields**
 
 In the observation runtime panel, render these metrics from `observationRun`:
 
@@ -2053,7 +2225,7 @@ In the observation runtime panel, render these metrics from `observationRun`:
 
 Keep the existing `工具 0` and `worktree no` indicators visible in observation mode.
 
-- [ ] **Step 7: Add guidance input**
+- [ ] **Step 9: Add guidance input**
 
 In observation mode, below metrics and above timeline:
 
@@ -2093,7 +2265,7 @@ In observation mode, below metrics and above timeline:
 {observationGuidanceError ? <p className={styles.errorText}>{observationGuidanceError}</p> : null}
 ```
 
-- [ ] **Step 8: Render event markers by type**
+- [ ] **Step 10: Render event markers by type**
 
 In the observation event timeline map, add:
 
@@ -2116,6 +2288,8 @@ Add styles in `SelfEvolutionTrack.styles.ts`:
 
 ```ts
 observationGuidanceForm: "grid min-w-0 gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+observationPromptEditor: "min-h-[260px] w-full resize-y rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-raised)] px-3 py-2 font-mono text-sm leading-6 outline-none focus:border-[var(--accent-cool)]",
+observationPromptActions: "flex flex-wrap items-center gap-2",
 observationEventItem_tick: "border-l-[3px] border-l-[color-mix(in_srgb,var(--accent-cool)_50%,var(--vui-border-subtle))]",
 observationEventItem_compression: "border-l-[3px] border-l-[color-mix(in_srgb,var(--accent-warm)_55%,var(--vui-border-subtle))]",
 observationEventItem_guidance: "border-l-[3px] border-l-[color-mix(in_srgb,var(--accent-success)_45%,var(--vui-border-subtle))]",
@@ -2124,7 +2298,7 @@ observationEventItem_danger: "border-l-[3px] border-l-[color-mix(in_srgb,var(--a
 observationEventItem_neutral: "border-l-[3px] border-l-[var(--vui-border-subtle)]",
 ```
 
-- [ ] **Step 9: Run frontend static tests**
+- [ ] **Step 11: Run frontend static tests**
 
 Run:
 
@@ -2134,7 +2308,7 @@ npm --prefix web run test -- SelfEvolutionTrack.static.test.ts EvolutionRoute.la
 
 Expected: PASS.
 
-- [ ] **Step 10: Commit Task 6**
+- [ ] **Step 12: Commit Task 6**
 
 Run:
 
@@ -2174,7 +2348,7 @@ def test_self_observation_records_runtime_scene_events(monkeypatch):
     )
     service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
 
-    started = service.start_self_observation_run({"mode": "time_machine", "goal": "观察日志", "durationSeconds": 60})
+    started = service.start_self_observation_run({"mode": "time_machine", "prompt": "观察目标：观察日志\n无法验证：保持 0 工具。", "durationSeconds": 60})
     service._begin_self_observation_tick(started["runId"], now="2026-07-06T00:00:00+00:00")
     service._complete_self_observation_tick(
         started["runId"],
@@ -2303,9 +2477,9 @@ After the branch is merged locally into `main` and Launcher refresh passes the a
 
 1. Open `/evolution?track=self`.
 2. Select `自主观察`.
-3. Start a time-machine observation with goal `观察 Agent 如何在连续状态下保持目标` and duration `60`.
+3. Start a time-machine observation by editing the prompt to include `观察目标：观察 Agent 如何在连续状态下保持 prompt` and duration `60`.
 4. Confirm UI shows `工具 0`, `worktree no`, effective time, remaining time, tick count, compression count, resume count, and pending guidance.
-5. Submit guidance `下一段重点检查是否仍记得原目标`.
+5. Submit guidance `下一段重点检查是否仍记得原 prompt`.
 6. Confirm timeline shows `user_guidance_added`, then after a tick `user_guidance_consumed`.
 7. Confirm compression and resume events render as markers in the event rail and not as ordinary assistant bubbles when test fixtures or real runtime produce those events.
 8. Confirm terminate ends the run and a later active route read does not force-resume it.
