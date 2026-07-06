@@ -4120,6 +4120,46 @@ describe("ConversationView edit resend affordance", () => {
     expect(html.match(/statusSpinner/g)?.length).toBe(1);
   });
 
+  it("keeps the active running operation icon on a single centered anchor", () => {
+    const html = renderConversation([
+      {
+        id: "message-running-code-graph",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-07-06T06:50:00Z",
+        streaming: true,
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "tool",
+            status: "running",
+            name: "code_graph_tool",
+            label: "代码图谱",
+            summary: "扫描符号关系",
+          },
+        ],
+        timelineItems: [
+          {
+            id: "timeline-running-code-graph",
+            kind: "operation",
+            status: "running",
+            title: "代码图谱",
+            summary: "扫描符号关系",
+            operationIds: ["message-running-code-graph-feedback-1"],
+          },
+        ],
+      },
+    ]);
+
+    expect(html).toContain("代码图谱");
+    expect(html).toContain("运行中");
+    expect(html.match(/statusSpinner/g)?.length).toBe(1);
+    expect(html).not.toContain("statusRunningDot");
+    expect(styles.operationIcon).toContain("inline-grid");
+    expect(styles.operationIcon).toContain("size-4");
+    expect(styles.operationIcon).toContain("place-items-center");
+  });
+
   it("does not keep completed auxiliary sections spinning while a later tool is active", () => {
     const html = renderConversation([
       {

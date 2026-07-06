@@ -510,7 +510,7 @@ const styles: Record<string, string> = {
   operationGroup:
     "vui-components-conversationview operationGroup min-w-0",
   operationIcon:
-    "vui-components-conversationview operationIcon min-w-0 shrink-0 text-[var(--fg-tertiary)]",
+    "vui-components-conversationview operationIcon inline-grid size-4 min-w-0 shrink-0 place-items-center text-[var(--fg-tertiary)]",
   operationIcon_active:
     "vui-components-conversationview operationIcon_active min-w-0 shrink-0 text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   operationIcon_answer:
