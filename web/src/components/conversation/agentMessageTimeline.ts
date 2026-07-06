@@ -114,7 +114,7 @@ function buildAgentMessageTimelineItemsUncached(
   serverItems?: AgentMessageTimelineServerItem[],
 ): AgentMessageTimelineItem[] {
   if ((serverItems?.length ?? 0) > 0) {
-    return timelineItemsFromServer(serverItems ?? [], operations, options);
+    return timelineItemsFromServer(serverItems ?? [], operations, options, message);
   }
   return timelineItemsFromOperations(
     message.id,
@@ -191,8 +191,9 @@ function timelineItemsFromServer(
   serverItems: AgentMessageTimelineServerItem[],
   operations: AgentMessageOperation[],
   options: AgentMessageTimelineOptions,
+  message?: AgentMessage,
 ): AgentMessageTimelineItem[] {
-  const operationsById = new Map(operations.map((operation) => [operation.id, operation]));
+  const operationsById = operationsByTimelineId(operations, message);
   const items: AgentMessageTimelineItem[] = [];
   for (const item of serverItems) {
     const kind = String(item.kind || "").trim();
@@ -255,6 +256,34 @@ function timelineItemsFromServer(
     }
   }
   return mergeAdjacentThoughtItems(items);
+}
+
+function operationsByTimelineId(
+  operations: AgentMessageOperation[],
+  message?: AgentMessage,
+) {
+  const operationsById = new Map(operations.map((operation) => [operation.id, operation]));
+  const projectedMessageIds = projectedMessageIdsForOperationAliases(message);
+  if (projectedMessageIds.length === 0) {
+    return operationsById;
+  }
+  for (const operation of operations) {
+    if (typeof operation.sequence !== "number" || operation.sequence <= 0) {
+      continue;
+    }
+    for (const messageId of projectedMessageIds) {
+      operationsById.set(`${messageId}-feedback-${operation.sequence}`, operation);
+    }
+  }
+  return operationsById;
+}
+
+function projectedMessageIdsForOperationAliases(message?: AgentMessage) {
+  const projected = message?.metadata?.projectedMessageIds ?? message?.source.metadata?.projectedMessageIds;
+  if (!Array.isArray(projected)) {
+    return [];
+  }
+  return projected.map((item) => String(item).trim()).filter(Boolean);
 }
 
 function missingCommandGroupOperation(

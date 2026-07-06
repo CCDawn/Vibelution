@@ -455,6 +455,61 @@ describe("agentMessageTimeline", () => {
     }));
   });
 
+  it("expands command groups after process projection changes the rendered message id", () => {
+    const message: ConversationMessage = {
+      id: "projected-message",
+      role: "assistant",
+      content: "本轮已按请求停止。",
+      timestamp: "2026-07-05T23:32:43",
+      feedbackEvents: [
+        {
+          sequence: 49,
+          kind: "tool",
+          status: "done",
+          name: "grep_search_tool",
+          summary: "搜索路由",
+        },
+        {
+          sequence: 50,
+          kind: "tool",
+          status: "failed",
+          name: "cli_tool",
+          summary: "目录不存在",
+        },
+      ],
+      timelineItems: [
+        {
+          id: "session-live-message-253-timeline-command-group-49-50",
+          kind: "command_group",
+          status: "failed",
+          title: "已运行 2 条命令",
+          summary: "搜索路由；目录不存在",
+          operationIds: [
+            "session-live-message-253-feedback-49",
+            "session-live-message-253-feedback-50",
+          ],
+        },
+      ],
+      metadata: {
+        projectedMessageIds: [
+          "session-live-message-253",
+        ],
+      },
+    };
+
+    const items = timelineItemsForConversationMessage(message, { lang: "zh" });
+
+    expect(items.map((item) => item.kind)).toEqual(["operation", "operation"]);
+    expect(items).not.toContainEqual(expect.objectContaining({
+      kind: "operation",
+      title: "工具调用投影缺失",
+    }));
+    expect(items).not.toContainEqual(expect.objectContaining({
+      kind: "command_group",
+      title: "已运行 2 条命令",
+    }));
+  });
+
   it("surfaces command group projection gaps instead of silently rendering aggregate command rows", () => {
     const message: ConversationMessage = {
       id: "message-missing-command-ops",
