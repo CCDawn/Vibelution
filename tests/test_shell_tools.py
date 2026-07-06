@@ -513,6 +513,20 @@ class TestExecuteShellCommand:
         assert "PowerShell" in result
         assert "bash -c" in result
 
+    def test_windows_python_heredoc_returns_cross_platform_warning(self):
+        """Windows cmd 不支持 Unix heredoc；应在执行前给出可恢复提示。"""
+        command = "python - <<'PY'\nprint('x')\nPY"
+
+        with patch.object(shell_tools_module, "IS_WINDOWS", True), patch.object(shell_tools_module, "IS_UNIX", False):
+            route = shell_tools_module.classify_shell_command(command)
+
+        assert route.blocked is True
+        assert route.reason == "unix_shell_marker_on_windows"
+        assert "[跨平台警告]" in route.error
+        assert "heredoc" in route.error.lower() or "<<" in route.error
+        assert "PowerShell" in route.error
+        assert "bash -c" in route.error
+
     def test_default_python_command_uses_project_venv(self, tmp_path, monkeypatch):
         """裸 python 调用应默认改写到项目 .venv 解释器。"""
         fake_root = tmp_path / "project"

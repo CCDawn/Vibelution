@@ -355,6 +355,18 @@ def _classify_tool_semantic_result(tool_name: str, result: Any) -> dict[str, Any
                 "failureClass": failure_class,
             },
         }
+    if text.startswith("[工具参数错误]"):
+        return {
+            "eventCode": "tool.execute.failed",
+            "level": "error",
+            "outcome": "failed",
+            "lifecycle": True,
+            "fields": {
+                **fields,
+                "semanticStatus": "failed",
+                "failureClass": "tool_argument_error",
+            },
+        }
     if text.startswith(("[错误]", "[超时]", "[短路]")):
         return {
             "eventCode": "tool.execute.failed",
