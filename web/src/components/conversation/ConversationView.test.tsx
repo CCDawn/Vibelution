@@ -292,6 +292,30 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.answerOnlyProcessGroup).not.toContain("bg-[color-mix(in_srgb,var(--surface-panel)_58%,transparent)]");
   });
 
+  it("keeps the session summary as a single-layer metrics grid", () => {
+    const summaryGridTokens = styles.summaryGrid.split(/\s+/);
+    const summaryCardTokens = styles.summaryCard.split(/\s+/);
+    const summaryLabelTokens = styles.summaryLabel.split(/\s+/);
+    const summaryValueTokens = styles.summaryValue.split(/\s+/);
+
+    expect(styles.summaryGrid).toContain("grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))]");
+    expect(summaryGridTokens).not.toContain("border");
+    expect(styles.summaryGrid).not.toContain("bg-[var(--vui-surface-glass)]");
+    expect(styles.summaryGrid).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+    expect(summaryGridTokens).not.toContain("p-2");
+    expect(styles.summaryCard).toContain("rounded-[var(--radius-panel)]");
+    expect(styles.summaryCard).toContain("border border-[var(--vui-border-subtle)]");
+    expect(styles.summaryCard).toContain("bg-[var(--vui-surface-glass)]");
+    expect(summaryCardTokens).toEqual(expect.arrayContaining(["flex", "flex-col", "gap-1"]));
+    expect(summaryLabelTokens).not.toContain("border");
+    expect(summaryLabelTokens).not.toContain("p-2");
+    expect(styles.summaryValue).toContain("whitespace-normal");
+    expect(styles.summaryValue).toContain("break-words");
+    expect(styles.summaryValue).toContain("[overflow-wrap:anywhere]");
+    expect(summaryValueTokens).not.toContain("border");
+    expect(summaryValueTokens).not.toContain("p-2");
+  });
+
   it("renders live process previews as inline log text instead of white nested cards", () => {
     const inlinePreviewRules = [
       styles.answerOnlyProcessPreview,

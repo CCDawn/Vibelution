@@ -949,13 +949,13 @@ const styles: Record<string, string> = {
   streamingResponseText:
     "vui-components-conversationview streamingResponseText min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] text-[var(--vui-font-chat)] leading-[var(--vui-line-readable)]",
   summaryCard:
-    "vui-components-conversationview summaryCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "vui-components-conversationview summaryCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 flex flex-col gap-1",
   summaryGrid:
-    "vui-components-conversationview summaryGrid min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+    "vui-components-conversationview summaryGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))]",
   summaryLabel:
-    "vui-components-conversationview summaryLabel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+    "vui-components-conversationview summaryLabel min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   summaryValue:
-    "vui-components-conversationview summaryValue min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+    "vui-components-conversationview summaryValue min-w-0 whitespace-normal break-words [overflow-wrap:anywhere] text-[var(--vui-font-sm)] font-semibold leading-snug text-[var(--fg-primary)]",
   supplemental:
     "vui-components-conversationview supplemental min-w-0",
   surface:
