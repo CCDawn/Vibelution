@@ -1,13 +1,18 @@
-const panelSurface = "rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-panel/72 shadow-none";
+const panelSurface = "rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-panel/94 shadow-none";
 const rowSurface = "rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-row";
-const rowSurfaceSoft = "rounded-[var(--radius-control)] border border-vui-border-subtle bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,transparent)]";
+const rowSurfaceSoft = "rounded-[var(--radius-control)] border border-vui-border-subtle bg-[color-mix(in_srgb,var(--vui-surface-row)_84%,var(--vui-surface-panel))]";
 const controlSurface = "border border-vui-border-subtle bg-vui-control-muted hover:bg-vui-control-muted-hover";
 
 export const selfEvolutionTrackStyles = {
-  pageStack: "grid h-full max-h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] gap-2.5 overflow-hidden overflow-x-hidden max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
-  pageTabsRow: "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2.5 max-[1180px]:grid-cols-1",
+  pageStack: "grid h-full max-h-full min-h-0 min-w-0 max-w-full overflow-hidden overflow-x-hidden max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
+  trackShell:
+    "grid h-full max-h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden overflow-x-hidden rounded-[var(--radius-panel)] border border-vui-border-subtle bg-[color-mix(in_srgb,var(--vui-surface-panel)_96%,var(--vui-surface-base))] p-2.5 max-[1180px]:h-auto max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
+  trackBody:
+    "min-h-0 min-w-0 max-w-full overflow-hidden overflow-x-hidden pt-2.5 max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
+  pageTabsRow:
+    "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 border-b border-vui-border-subtle pb-2.5 max-[1180px]:grid-cols-1 max-[1180px]:items-stretch",
   runActionBar:
-    `grid min-h-[64px] min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3.5 py-2.5 max-[900px]:grid-cols-1 ${panelSurface}`,
+    "grid min-h-[56px] min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-1 py-1 max-[900px]:grid-cols-1",
   runActionMain: "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2.5",
   runActionText: "grid min-w-0 gap-1 [&_strong]:truncate [&_strong]:text-[0.98rem] [&_strong]:text-[var(--fg-primary)] [&_span]:line-clamp-1 [&_span]:text-[var(--vui-font-xs)] [&_span]:leading-normal [&_span]:text-[var(--fg-secondary)]",
   runActionMeta: "flex min-w-0 flex-wrap items-center gap-1.5",
@@ -57,7 +62,7 @@ export const selfEvolutionTrackStyles = {
   panelStack: "grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-4 overflow-hidden",
   sidebarResizer:
     "relative h-full w-2.5 cursor-col-resize rounded-[var(--radius-control)] border-0 bg-transparent p-0 before:absolute before:bottom-[18px] before:left-1 before:top-[18px] before:w-0.5 before:rounded-full before:bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] before:content-[''] max-[1180px]:hidden",
-  segmentedTabs: "inline-flex self-start items-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-1",
+  segmentedTabs: "inline-flex self-center items-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-1 max-[1180px]:self-start",
   tabButton: "min-h-9 cursor-pointer rounded-md border-0 bg-transparent px-4 text-[var(--fg-secondary)]",
   tabButtonActive: "bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] text-[var(--accent-warm-2)]",
   modeSwitch: "inline-flex w-fit flex-wrap items-center gap-1 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-1",
@@ -80,7 +85,7 @@ export const selfEvolutionTrackStyles = {
   skeletonLine: "block h-2 w-[min(72%,460px)] animate-pulse rounded-full bg-[var(--vui-gradient-route-soft)]",
   skeletonLineShort: "block h-2 w-[min(42%,260px)] animate-pulse rounded-full bg-[var(--vui-gradient-route-soft)]",
   petCompanionSurface:
-    "grid gap-2.5 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--accent-cool)_16%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--vui-surface-panel)_74%,transparent)] p-3.5",
+    "grid gap-2.5 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--accent-cool)_16%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--vui-surface-panel)_94%,var(--vui-surface-base))] p-3.5",
   petCompanionTone_idle: "",
   petCompanionTone_active: "border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--border-soft))]",
   petCompanionTone_paused: "border-[color-mix(in_srgb,var(--accent-warm)_24%,var(--border-soft))]",
