@@ -18,6 +18,7 @@ describe("AgentMessageTurnView", () => {
         compactHeader={false}
         avatar={<span>avatar-slot</span>}
         speakerLabel="Assistant"
+        turnLabel="Assistant message"
         identityAccessory={<span>editing</span>}
         metaActions={<span>19:50</span>}
       >
@@ -31,6 +32,9 @@ describe("AgentMessageTurnView", () => {
     expect(html).toContain('data-agent-message-id="agent-message-1"');
     expect(html).toContain('data-agent-section-count="4"');
     expect(html).toContain('data-agent-section-kinds="user,context,process,answer"');
+    expect(html).toContain('aria-label="Assistant message"');
+    expect(html).toContain('id="agent-turn-speaker-message-assistant-1"');
+    expect(html).toContain('title="Assistant"');
     expect(html).toContain("turnAvatar");
     expect(html).toContain("turnMeta");
     expect(html).toContain("turnSpeaker");
@@ -72,10 +76,13 @@ describe("AgentMessageTurnView", () => {
 
   it("keeps turn header slots bounded on narrow conversation surfaces", () => {
     expect(styles.turnMeta).toContain("max-w-full");
-    expect(styles.turnMeta).toContain("flex-wrap");
+    expect(styles.turnMeta).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(styles.turnMeta).toContain("max-[520px]:grid-cols-1");
     expect(styles.turnMeta).toContain("gap-x-2");
     expect(styles.turnMetaIdentity).toContain("minmax(0,auto)");
     expect(styles.turnMetaIdentity).toContain("max-w-full");
+    expect(styles.turnMetaActions).toContain("max-w-full");
+    expect(styles.turnMetaActions).toContain("flex-wrap");
     expect(styles.turnMetaActions).toContain("shrink-0");
     expect(styles.turnSpeaker).toContain("max-w-full");
     expect(styles.turnSpeaker).toContain("[overflow-wrap:anywhere]");
