@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { MarkdownBlock } from "./conversationMarkdownBlocks";
+import styles from "./ConversationStreamingResponseContent.styles";
 import conversationViewSource from "./ConversationView.tsx?raw";
 
 const classNames = {
@@ -52,5 +53,17 @@ describe("ConversationStreamingResponseContent", () => {
     );
 
     expect(html).toContain('class="markdown-body streaming-response markdown-table"');
+  });
+
+  it("keeps streaming text bounded for long tokens while preserving the table width override", () => {
+    expect(styles.markdownBody).toContain("max-w-[min(100%,76ch)]");
+    expect(styles.markdownBody).toContain("whitespace-normal");
+    expect(styles.markdownBody).toContain("break-words");
+    expect(styles.markdownBody).toContain("[overflow-wrap:anywhere]");
+    expect(styles.streamingResponseText).toContain("whitespace-normal");
+    expect(styles.streamingResponseText).toContain("break-words");
+    expect(styles.streamingResponseText).toContain("[overflow-wrap:anywhere]");
+    expect(styles.markdownBodyWithTable).toContain("max-w-full");
+    expect(styles.markdownBodyWithTable).not.toContain("max-w-[min(100%,76ch)]");
   });
 });
