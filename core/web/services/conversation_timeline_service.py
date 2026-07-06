@@ -117,11 +117,7 @@ def _command_group_item(message_id: str, events: list[dict[str, Any]], *, lang: 
         if any(_is_running_status(event.get("status")) for event in events)
         else "completed"
     )
-    command_count = len(events)
-    if lang == "zh":
-        title = f"正在运行 {command_count} 条命令" if status == "running" else f"已运行 {command_count} 条命令"
-    else:
-        title = f"Running {command_count} commands" if status == "running" else f"Ran {command_count} commands"
+    title = _command_group_title(events, status=status, lang=lang)
     first = events[0]
     last = events[-1]
     operation_ids = [_event_operation_id(message_id, event) for event in events]
@@ -138,6 +134,18 @@ def _command_group_item(message_id: str, events: list[dict[str, Any]], *, lang: 
         "sourceOperationIds": operation_ids,
         "operationIds": operation_ids,
     }
+
+
+def _command_group_title(events: list[dict[str, Any]], *, status: str, lang: str) -> str:
+    count = len(events)
+    all_shell_commands = bool(events) and all(_is_shell_command_event(event) for event in events)
+    if lang == "zh":
+        if all_shell_commands:
+            return f"正在运行 {count} 条命令" if status == "running" else f"已运行 {count} 条命令"
+        return f"正在执行 {count} 项工具" if status == "running" else f"已执行 {count} 项工具"
+    if all_shell_commands:
+        return f"Running {count} commands" if status == "running" else f"Ran {count} commands"
+    return f"Running {count} tools" if status == "running" else f"Ran {count} tools"
 
 
 def _merge_adjacent_thought_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -265,6 +273,21 @@ def _is_command_like_event(event: dict[str, Any]) -> bool:
         marker in haystack
         for marker in ("tool_", "cli_tool", "shell", "command", "命令", "grep_search_tool", "read_file_tool", "glob_tool", "rg", "搜索", "读取", "列出")
     )
+
+
+def _is_shell_command_event(event: dict[str, Any]) -> bool:
+    if str(event.get("kind") or "").strip() != "tool":
+        return False
+    raw_name = str(event.get("name") or event.get("label") or "").strip().lower()
+    if raw_name in {"cli_tool", "shell_tool", "command_tool", "execute_shell_command"}:
+        return True
+    haystack = " ".join(
+        str(event.get(key) or "").lower()
+        for key in ("name", "label", "summary")
+    )
+    if any(marker in haystack for marker in ("grep_search_tool", "read_file_tool", "glob_tool", "code_symbol_tool", "search", "read", "glob", "搜索", "读取", "列出", "代码图谱")):
+        return False
+    return any(marker in haystack for marker in ("shell", "command", "命令"))
 
 
 def _timeline_status(status: Any) -> TimelineStatus:
