@@ -1758,7 +1758,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("step 5");
   });
 
-  it("renders backend command group timeline items as individual tool rows", () => {
+  it("renders backend command group timeline items as collapsed command packages", () => {
     const html = renderConversation([
       {
         id: "assistant-server-command-group",
@@ -1797,9 +1797,161 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).not.toContain("已运行 2 条命令");
+    expect(html).toContain("已运行 2 条命令");
     expect(html).toContain("搜索配置文件");
-    expect(html).toContain("命令执行失败");
+    expect(html).toContain("执行失败");
+    expect(html).toContain(":item:command_group:server-command-group");
+    expect(html).not.toContain(":item:operation:");
+    expect(html).not.toContain("timelineCommandRow");
+  });
+
+  it("renders assistant text and command packages in backend timeline order without duplicating the answer block", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-server-interleaved-timeline",
+        role: "assistant",
+        content: "第一段回答\n\n第二段回答",
+        timestamp: "2026-07-06T05:50:00Z",
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "tool",
+            status: "done",
+            name: "grep_search_tool",
+            summary: "搜索完成",
+          },
+          {
+            sequence: 2,
+            kind: "tool",
+            status: "done",
+            name: "cli_tool",
+            summary: "命令完成",
+          },
+        ],
+        timelineItems: [
+          {
+            id: "server-answer-part-1",
+            kind: "assistant_text",
+            status: "completed",
+            text: "第一段回答",
+          },
+          {
+            id: "server-command-package",
+            kind: "command_group",
+            status: "completed",
+            title: "已运行 2 条命令",
+            summary: "搜索完成；命令完成",
+            operationIds: [
+              "assistant-server-interleaved-timeline-feedback-1",
+              "assistant-server-interleaved-timeline-feedback-2",
+            ],
+          },
+          {
+            id: "server-answer-part-2",
+            kind: "assistant_text",
+            status: "completed",
+            text: "第二段回答",
+          },
+        ],
+      },
+    ]);
+
+    const firstAnswerIndex = html.indexOf("第一段回答");
+    const commandPackageIndex = html.indexOf("已运行 2 条命令");
+    const secondAnswerIndex = html.indexOf("第二段回答");
+
+    expect(firstAnswerIndex).toBeGreaterThanOrEqual(0);
+    expect(commandPackageIndex).toBeGreaterThan(firstAnswerIndex);
+    expect(secondAnswerIndex).toBeGreaterThan(commandPackageIndex);
+    expect(html.match(/第一段回答/g)?.length ?? 0).toBe(1);
+    expect(html.match(/第二段回答/g)?.length ?? 0).toBe(1);
+    expect(html).not.toContain("responseLabel");
+  });
+
+  it("keeps backend timeline assistant text visible in the default answer display mode", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "assistant-default-interleaved-timeline",
+          role: "assistant",
+          content: "第一段实时回答\n\n第二段实时回答",
+          timestamp: "2026-07-06T06:05:00Z",
+          feedbackEvents: [
+            {
+              sequence: 1,
+              kind: "tool",
+              status: "done",
+              name: "grep_search_tool",
+              summary: "搜索完成",
+            },
+            {
+              sequence: 2,
+              kind: "tool",
+              status: "done",
+              name: "cli_tool",
+              summary: "命令完成",
+            },
+          ],
+          timelineItems: [
+            {
+              id: "default-answer-part-1",
+              kind: "assistant_text",
+              status: "completed",
+              text: "第一段实时回答",
+            },
+            {
+              id: "default-command-package",
+              kind: "command_group",
+              status: "completed",
+              title: "已运行 2 条命令",
+              summary: "搜索完成；命令完成",
+              operationIds: [
+                "assistant-default-interleaved-timeline-feedback-1",
+                "assistant-default-interleaved-timeline-feedback-2",
+              ],
+            },
+            {
+              id: "default-answer-part-2",
+              kind: "assistant_text",
+              status: "completed",
+              text: "第二段实时回答",
+            },
+          ],
+        },
+      ],
+      { useDefaultProcessDisplayMode: true },
+    );
+
+    const firstAnswerIndex = html.indexOf("第一段实时回答");
+    const commandPackageIndex = html.indexOf("已运行 2 条命令");
+    const secondAnswerIndex = html.indexOf("第二段实时回答");
+
+    expect(firstAnswerIndex).toBeGreaterThanOrEqual(0);
+    expect(commandPackageIndex).toBeGreaterThan(firstAnswerIndex);
+    expect(secondAnswerIndex).toBeGreaterThan(commandPackageIndex);
+    expect(html.match(/第一段实时回答/g)?.length ?? 0).toBe(1);
+    expect(html.match(/第二段实时回答/g)?.length ?? 0).toBe(1);
+    expect(html).toContain("conversationCellTimeline");
+    expect(html).not.toContain("answerOnlyProcessGroup");
+    expect(html).not.toContain("responseSection");
+  });
+
+  it("keeps command group expansion state scoped to the parent message during history reveal", () => {
+    expect(conversationViewSource).toContain("renderCommandGroupTimelineItem(message, item, rowIdentity, isActiveTimelineItem)");
+    expect(conversationViewSource).toContain("const expanded = getExpansionState(message.id, item.id, false)");
+    expect(conversationViewSource).toContain("onClick={() => toggleSection(message.id, item.id, false)}");
+    expect(conversationViewSource).not.toContain("const expanded = getExpansionState(item.id, \"details\", false)");
+    expect(conversationViewSource).not.toContain("onClick={() => toggleSection(item.id, \"details\", false)}");
+  });
+
+  it("applies per-operation status tones inside expanded command packages", () => {
+    expect(conversationViewSource).toContain("item.operations.map((operation) => {");
+    expect(conversationViewSource).toContain("const statusTone = operationStatusToneClassName(operation);");
+    expect(conversationViewSource).toContain("styles[`operationText_${statusTone}`]");
+    expect(conversationViewSource).toContain("styles[`operationStatus_${statusTone}`]");
+    expect(styles.operationText_success).toContain("!text-[var(--state-success)]");
+    expect(styles.operationText_failed).toContain("!text-[var(--state-error)]");
+    expect(styles.operationText_warning).toContain("!text-[var(--state-warning)]");
   });
 
   it("hides completed execution rail details until the trace is expanded", () => {
