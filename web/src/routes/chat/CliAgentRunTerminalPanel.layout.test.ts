@@ -14,4 +14,12 @@ describe("CliAgentRunTerminalPanel layout contract", () => {
     expect(styles.cliAgentTerminalCommandText).toContain("[overflow-wrap:anywhere]");
     expect(styles.cliAgentTerminalCommandText).not.toContain("whitespace-nowrap");
   });
+
+  it("announces terminal output and overlay states with semantic regions", () => {
+    expect(terminalPanelSource).toContain('role="region"');
+    expect(terminalPanelSource).toContain('aria-label={`${run.title} ${lang === "zh" ? "终端输出" : "terminal output"}`}');
+    expect(terminalPanelSource).toContain('role={terminalError ? "alert" : "status"}');
+    expect(terminalPanelSource).toContain('aria-live={terminalError ? "assertive" : "polite"}');
+    expect(terminalPanelSource).toContain('aria-atomic="true"');
+  });
 });
