@@ -41,10 +41,10 @@
 }
 
 :where(.vui-app-appshell).shell[data-theme="dark"] {
-  --shell-surface: color-mix(in srgb, var(--bg-canvas) 88%, transparent);
-  --shell-surface-muted: color-mix(in srgb, var(--bg-canvas) 82%, transparent);
-  --shell-panel: color-mix(in srgb, var(--bg-canvas) 92%, transparent);
-  --shell-card: color-mix(in srgb, var(--surface-card) 72%, transparent);
+  --shell-surface: color-mix(in srgb, var(--vui-surface-rail) 92%, transparent);
+  --shell-surface-muted: color-mix(in srgb, var(--vui-surface-base) 88%, transparent);
+  --shell-panel: color-mix(in srgb, var(--vui-surface-panel) 94%, transparent);
+  --shell-card: color-mix(in srgb, var(--vui-surface-row) 88%, transparent);
 }
 
 :where(.vui-app-appshell).shell[data-theme-background="custom"] {

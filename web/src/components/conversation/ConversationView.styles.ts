@@ -13,7 +13,7 @@ const assistantResponseSection = cv(
   "responseSection",
   "min-w-0 grid",
   assistantMessageMeasure,
-  "gap-1.5 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_78%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_92%,white)] px-3 py-2.5 shadow-none",
+  "gap-1.5 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-strong)_76%,transparent)] bg-[var(--vui-surface-chat-panel)] px-3 py-2.5 shadow-none",
 );
 const assistantResponseBody = cv(
   "responseBody",
@@ -157,7 +157,7 @@ const styles: Record<string, string> = {
   answerOnlyProcessToggle:
     "vui-components-conversationview answerOnlyProcessToggle min-w-0 grid border-0 bg-transparent p-0 text-[var(--fg-secondary)] hover:border-transparent hover:bg-transparent [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:inline-grid [&_[data-slot=vui-button-label]]:max-w-full [&_[data-slot=vui-button-label]]:grid-cols-[14px_auto_auto_minmax(0,1fr)_14px] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5",
   assistantCard:
-    "vui-components-conversationview assistantCard min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_78%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_92%,white)] p-2 shadow-none",
+    "vui-components-conversationview assistantCard min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-strong)_72%,transparent)] bg-[var(--vui-surface-chat-panel)] p-2 shadow-none",
   assistantTurn:
     "vui-components-conversationview assistantTurn grid w-full min-w-0 grid-cols-[34px_minmax(0,1fr)] gap-x-2.5 justify-self-stretch [&_.turnContent]:w-[min(100%,860px)] [&_.turnContent]:p-0 [&_.turnContent]:border-l-0",
   assistantTurnContinuation:
@@ -942,7 +942,7 @@ const styles: Record<string, string> = {
   sectionBlock:
     "vui-components-conversationview sectionBlock min-w-0",
   sectionPanel:
-    "vui-components-conversationview sectionPanel min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_74%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_90%,white)] p-2 shadow-none",
+    "vui-components-conversationview sectionPanel min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-strong)_68%,transparent)] bg-[var(--vui-surface-raised)] p-2 shadow-none",
   sectionToggle:
     "vui-components-conversationview sectionToggle min-w-0",
   sendButton: composerSendActionButton,
@@ -963,7 +963,7 @@ const styles: Record<string, string> = {
   streamingResponseText:
     "vui-components-conversationview streamingResponseText min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] text-[var(--vui-font-chat)] leading-[var(--vui-line-readable)]",
   summaryCard:
-    "vui-components-conversationview summaryCard min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_74%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_90%,white)] p-2 flex flex-col gap-1 shadow-none",
+    "vui-components-conversationview summaryCard min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-strong)_68%,transparent)] bg-[var(--vui-surface-raised)] p-2 flex flex-col gap-1 shadow-none",
   summaryGrid:
     "vui-components-conversationview summaryGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))]",
   summaryLabel:
@@ -973,9 +973,9 @@ const styles: Record<string, string> = {
   supplemental:
     "vui-components-conversationview supplemental min-w-0",
   surface:
-    "vui-components-conversationview surface relative flex h-full max-h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_76%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_88%,white)] shadow-none",
+    "vui-components-conversationview surface relative flex h-full max-h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-strong)_74%,transparent)] bg-[var(--vui-surface-chat)] shadow-none",
   surfaceCompact:
-    "vui-components-conversationview surfaceCompact rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_74%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_88%,white)] [&_.timeline]:bg-[color-mix(in_srgb,var(--surface-page)_6%,transparent)] [&_.timeline]:px-3 [&_.timeline]:pt-[9px] [&_.timeline]:pb-[11px] [&_.composer]:gap-[7px] [&_.composer]:px-2.5 [&_.composer]:pt-1.5 [&_.composer]:pb-2",
+    "vui-components-conversationview surfaceCompact rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-strong)_70%,transparent)] bg-[var(--vui-surface-chat)] [&_.timeline]:bg-[var(--vui-surface-chat)] [&_.timeline]:px-3 [&_.timeline]:pt-[9px] [&_.timeline]:pb-[11px] [&_.composer]:gap-[7px] [&_.composer]:px-2.5 [&_.composer]:pt-1.5 [&_.composer]:pb-2",
   thoughtMetaPill:
     "vui-components-conversationview thoughtMetaPill min-w-0 flex flex-wrap items-center gap-1.5 inline-flex min-h-6 w-fit max-w-full justify-center rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 text-[var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   thoughtMetaRow:
@@ -989,7 +989,7 @@ const styles: Record<string, string> = {
   thoughtTextBlock:
     "vui-components-conversationview thoughtTextBlock min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   timeline:
-    "vui-components-conversationview timeline grid min-h-0 min-w-0 flex-1 content-start gap-[10px] overflow-auto bg-[color-mix(in_srgb,var(--surface-page)_18%,transparent)] px-5 py-4 [scrollbar-gutter:stable]",
+    "vui-components-conversationview timeline grid min-h-0 min-w-0 flex-1 content-start gap-[10px] overflow-auto bg-[var(--vui-surface-chat)] px-5 py-4 [scrollbar-gutter:stable]",
   timelineAssistantTextCell:
     "vui-components-conversationview timelineAssistantTextCell min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-w-[min(100%,860px)]",
   timelineCellDetailButton:

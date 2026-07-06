@@ -4,10 +4,11 @@ import styles from "./ChatCodingRoute.styles";
 
 describe("ChatCodingRoute left status panel layout contract", () => {
   it("uses a readable solid panel surface instead of letting the scene image dominate text", () => {
-    expect(styles.leftBlock).toContain("!bg-[color-mix(in_srgb,var(--vui-surface-row)_96%,white)]");
-    expect(styles.leftBlock).toContain("border-[color-mix(in_srgb,var(--vui-border-subtle)_84%,transparent)]");
+    expect(styles.leftBlock).toContain("!bg-[var(--vui-surface-rail)]");
+    expect(styles.leftBlock).toContain("border-[color-mix(in_srgb,var(--vui-border-strong)_66%,transparent)]");
     expect(styles.leftBlock).not.toContain("var(--vui-surface-glass)_58%,transparent");
     expect(styles.leftBlock).not.toContain("var(--vui-surface-panel)");
+    expect(styles.leftBlock).not.toContain("white)");
     expect(styles.leftBlock).not.toContain("backdrop-blur");
   });
 
