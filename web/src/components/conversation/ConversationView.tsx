@@ -1511,9 +1511,14 @@ export function ConversationView({
       : readableOperationResult(operation, operationDetailLabels.structuredResultFallback);
     const showReadableResult = Boolean(operation.kind !== "tool" && readableResult && readableResult !== item.summary.trim());
     const visibleStatus = timelineStatusText(item);
+    const statusTone = operationStatusToneClassName(operation);
+    const timelineToneClassName = styles[`timelineOperationCell_${statusTone}` as keyof typeof styles] ?? "";
+    const toneTextClassName = styles[`operationText_${statusTone}` as keyof typeof styles] ?? "";
+    const toneStatusClassName = styles[`operationStatus_${statusTone}` as keyof typeof styles] ?? "";
+    const toneIconClassName = styles[`operationIcon_${statusTone}` as keyof typeof styles] ?? "";
     const className = [
       styles.timelineOperationCell,
-      item.status === "failed" ? styles.timelineOperationCell_failed : "",
+      timelineToneClassName,
     ].filter(Boolean).join(" ");
     return (
       <section
@@ -1521,12 +1526,14 @@ export function ConversationView({
         className={className}
         data-conversation-part-key={agentMessageTimelineItemRowKey(rowIdentity, item)}
       >
-        <div className={styles.timelineCellHeader}>
-          {operationStatusIcon(operation, isActiveTimelineItem)}
-          <span>{item.title}</span>
-          {item.summary ? <span className={styles.timelineCellPreview}>{item.summary}</span> : null}
-          {visibleStatus ? <span className={styles.timelineCellMeta}>{visibleStatus}</span> : null}
-          {duration ? <span className={styles.timelineCellMeta}>{duration}</span> : null}
+        <div className={`${styles.timelineCellHeader} ${toneTextClassName}`}>
+          <span className={`${styles.operationIcon} ${toneIconClassName}`}>
+            {operationStatusIcon(operation, isActiveTimelineItem)}
+          </span>
+          <span className={toneTextClassName}>{item.title}</span>
+          {item.summary ? <span className={`${styles.timelineCellPreview} ${toneTextClassName}`}>{item.summary}</span> : null}
+          {visibleStatus ? <span className={`${styles.timelineCellMeta} ${toneStatusClassName}`}>{visibleStatus}</span> : null}
+          {duration ? <span className={`${styles.timelineCellMeta} ${toneStatusClassName}`}>{duration}</span> : null}
           {canExpandDetails ? (
             <VButton
               type="button"
