@@ -132,7 +132,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.centerPane).toContain("bg-[color-mix(in_srgb,var(--surface-page)_10%,transparent)]");
     expect(routeStyles.centerSurface).toContain("bg-[color-mix(in_srgb,var(--vui-surface-panel)_6%,transparent)]");
     expect(conversationStyles.timeline).toContain("bg-[color-mix(in_srgb,var(--surface-page)_18%,transparent)]");
-    expect(conversationStyles.surfaceCompact).toContain("[&_.timeline]:bg-[color-mix(in_srgb,var(--surface-page)_14%,transparent)]");
+    expect(conversationStyles.surfaceCompact).toContain("[&_.timeline]:bg-[color-mix(in_srgb,var(--surface-page)_6%,transparent)]");
     expect(appShellCssSource).not.toContain("--theme-background-overlay-mid: rgba(");
     expect(routeCssSource).not.toContain("background: color-mix(in srgb, var(--surface-page) 92%, var(--bg-canvas));");
     expect(routeCssSource).not.toContain(".centerSurface {\n  display: grid;\n  height: 100%;\n  min-height: 0;\n  background: var(--surface-panel-strong);");
@@ -187,7 +187,7 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps the conversation page aligned to the V2.1 quiet light style system", () => {
-    expect(conversationStyles.surfaceCompact).toContain("bg-[color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)]");
+    expect(conversationStyles.surfaceCompact).toContain("bg-[color-mix(in_srgb,var(--vui-surface-panel)_88%,white)]");
     expect(conversationStyles.surfaceCompact).not.toContain("bg-[var(--surface-panel-strong)]");
 
     expect(conversationStyles.composer).toContain("bg-[color-mix(in_srgb,var(--vui-surface-panel)_74%,transparent)]");
@@ -204,7 +204,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationStyles.stopButton).toContain("!border-[color-mix(in_srgb,var(--state-error)_34%,transparent)]");
     expect(conversationStyles.stopButton).toContain("!text-[var(--state-error)]");
 
-    expect(conversationStyles.userCard).toContain("bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))]");
+    expect(conversationStyles.userCard).toContain("bg-[color-mix(in_srgb,var(--accent-cool)_5%,var(--vui-surface-panel))]");
     expect(conversationStyles.userCard).not.toContain("bg-[var(--surface-panel-strong)]");
 
     expect(routeStyles.sessionItemActive).toContain("shadow-[var(--vui-shadow-inset-accent)]");
@@ -495,11 +495,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.leftRail).toContain("gap-[var(--chat-workbench-gap)]");
     expect(routeStyles.leftRail).toContain("p-[var(--chat-workbench-gap)]");
     expect(routeStyles.leftBlock).toContain("shrink-0");
-    expect(routeStyles.companionBlock).toContain("!flex-1");
+    expect(routeStyles.leftBlock).toContain("gap-1.5");
+    expect(routeStyles.leftBlock).toContain("p-1.5");
+    expect(routeStyles.leftBlock).not.toContain("gap-[2px]");
+    expect(routeStyles.leftBlock).not.toContain("p-[2px]");
+    expect(routeStyles.companionBlock).not.toContain("!flex-1");
     expect(routeStyles.companionBlock).toContain("content-start");
     expect(routeStyles.companionBlock).not.toContain("max-h-[min(420px,70dvh)]");
-    expect(routeStyles.companionBlock).toContain("min-h-0");
-    expect(routeStyles.companionBlock).toContain("overflow-hidden");
+    expect(routeStyles.companionBlock).toContain("overflow-visible");
     expect(routeStyles.rightPane).toContain("grid");
     expect(routeStyles.rightPane).toContain("gap-[var(--chat-workbench-gap)]");
     expect(routeStyles.rightPane).toContain("p-[var(--chat-workbench-gap)]");
@@ -674,9 +677,12 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps the left rail status stack soft and non-nested", () => {
-    expect(routeStyles.leftBlock).toContain("bg-[color-mix(in_srgb,var(--vui-surface-glass)_58%,transparent)]");
-    expect(routeStyles.leftBlock).toContain("border-[color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)]");
+    expect(routeStyles.leftBlock).toContain("!bg-[color-mix(in_srgb,var(--vui-surface-panel)_96%,white)]");
+    expect(routeStyles.leftBlock).toContain("border-[color-mix(in_srgb,var(--vui-border-subtle)_68%,transparent)]");
+    expect(routeStyles.leftBlock).toContain("shadow-none");
     expect(routeStyles.leftBlock).not.toContain("bg-[color-mix(in_srgb,var(--vui-surface-glass)_82%,transparent)]");
+    expect(routeStyles.blockEyebrow).toContain("text-[var(--vui-font-sm)]");
+    expect(routeStyles.blockEyebrow).toContain("font-semibold");
 
     expect(routeStyles.tokenCompressionCard).toBe("vui-routes-chatcodingroute tokenCompressionCard min-w-0");
     expect(routeStyles.tokenCompressionCard).not.toContain("rounded-[var(--radius-panel)]");
@@ -685,25 +691,35 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.tokenCompressionCard).not.toContain("shadow-[var(--vui-shadow-hairline)]");
     expect(routeStyles.tokenCompressionCard).not.toContain("p-2");
 
-    expect(routeStyles.contextLineCompact).toContain("bg-[color-mix(in_srgb,var(--vui-surface-row)_42%,transparent)]");
+    expect(routeStyles.contextLineCompact).toContain("bg-[color-mix(in_srgb,var(--vui-surface-panel)_90%,white)]");
     expect(routeStyles.contextLineCompact).toContain("px-1.5");
+    expect(routeStyles.contextLineCompact).toContain("shadow-none");
     expect(routeStyles.contextLineCompact).not.toContain("p-2");
     expect(routeStyles.oneLineValue).toContain("bg-[color-mix(in_srgb,var(--vui-surface-row)_42%,transparent)]");
     expect(routeStyles.oneLineValue).not.toContain("p-2");
 
-    expect(routeStyles.companionBlock).toContain("!flex-1");
+    expect(routeStyles.companionBlock).not.toContain("!flex-1");
     expect(routeStyles.companionBlock).toContain("content-start");
     expect(routeStyles.companionBlock).not.toContain("max-h-[min(420px,70dvh)]");
     expect(routeStyles.companionCompact).toContain("grid-cols-[32px_minmax(0,1fr)]");
+    expect(routeStyles.companionCompact).toContain("bg-[color-mix(in_srgb,var(--vui-surface-panel)_96%,white)]");
+    expect(routeStyles.companionCompact).toContain("shadow-none");
+    expect(routeStyles.companionCopy).toContain("text-[var(--vui-font-sm)]");
+    expect(routeStyles.petShowcaseFeedback).toContain("text-[var(--vui-font-sm)]");
     expect(routeStyles.companionTopLine).not.toContain("bg-[var(--vui-surface-row)]");
     expect(routeStyles.compactDetails).toContain("max-h-[220px]");
     expect(routeStyles.compactDetails).toContain("overflow-auto");
-    expect(routeStyles.inlineMetaPill).toContain("min-h-[22px]");
-    expect(routeStyles.petShowcaseAction).toContain("min-h-[28px]");
+    expect(routeStyles.inlineMetaPill).toContain("min-h-[24px]");
+    expect(routeStyles.petShowcaseAction).toContain("min-h-[30px]");
+    expect(routeStyles.petShowcaseAction).toContain("text-[var(--vui-font-sm)]");
   });
 
   it("keeps left rail VButton cards from collapsing their internal grid layout", () => {
-    expect(routeStyles.tokenStatusMetric).toContain("grid-cols-[38px_minmax(0,1fr)]");
+    expect(routeStyles.tokenStatusMetric).toContain("grid-cols-[36px_minmax(0,1fr)]");
+    expect(routeStyles.tokenStatusMetric).toContain("min-h-[52px]");
+    expect(routeStyles.tokenStatusMetric).not.toContain("min-h-[44px]");
+    expect(routeStyles.tokenStatusMetric).toContain("bg-[color-mix(in_srgb,var(--vui-surface-panel)_97%,white)]");
+    expect(routeStyles.tokenStatusMetric).toContain("shadow-none");
     expect(routeStyles.tokenStatusMetric).toContain("!grid");
     expect(routeStyles.tokenStatusMetric).toContain("!w-full");
     expect(routeStyles.tokenStatusMetric).toContain("overflow-visible");
@@ -713,9 +729,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.tokenStatusCopy).toContain("min-w-0");
     expect(routeStyles.tokenStatusCopy).toContain("overflow-visible");
     expect(routeStyles.tokenStatusLabel).toContain("whitespace-normal");
-    expect(routeStyles.tokenStatusMeta).toContain("line-clamp-2");
-    expect(routeStyles.tokenStatusRing).toContain("size-[38px]");
+    expect(routeStyles.tokenStatusLabel).toContain("text-[12px]");
+    expect(routeStyles.tokenStatusMeta).toContain("[overflow-wrap:anywhere]");
+    expect(routeStyles.tokenStatusMeta).toContain("text-[11px]");
+    expect(routeStyles.tokenStatusRing).toContain("size-[36px]");
     expect(routeStyles.tokenStatusRingCore).toContain("text-[10px]");
+    expect(routeStyles.tokenStatusBar).toContain("h-1");
     expect(routeStyles.tokenStatusMetricButton).toContain("[&_[data-slot=vui-button-content]]:contents");
     expect(routeStyles.tokenStatusMetricButton).toContain("!grid");
     expect(routeStyles.tokenStatusMetricButton).toContain("!w-full");
@@ -1212,8 +1231,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("value: latestControlSignalLine");
     expect(routeSource).toContain("title: latestControlSignalTitle");
     expect(routeSource).not.toContain("nextStateSignals={detail.nextStateSignals ?? []}");
-    expect(routeStyles.inlineMetaPill).toContain("[&_strong]:truncate");
-    expect(routeStyles.inlineMetaPill).toContain("[&_strong]:whitespace-nowrap");
+    expect(routeStyles.inlineMetaPill).toContain("[&_strong]:whitespace-normal");
+    expect(routeStyles.inlineMetaPill).toContain("[overflow-wrap:anywhere]");
   });
 
   it("binds live token speed to the core token status metrics", () => {
@@ -1424,7 +1443,7 @@ describe("ChatCodingRoute layout contract", () => {
       [routeStyles.inlineMetaPill, "grid-cols-[minmax(58px,0.42fr)_minmax(0,1fr)]"],
       [routeStyles.inlineMetaList, "grid-cols-[minmax(0,1fr)]"],
       [routeStyles.sessionBindingNotice, "grid-cols-[minmax(0,1fr)_auto]"],
-      [routeStyles.activeSkillStatus, "grid-cols-[minmax(0,1fr)_auto]"],
+      [routeStyles.activeSkillStatus, "grid-cols-[minmax(0,1fr)]"],
       [routeStyles.agentIndexHeader, "grid-cols-[18px_minmax(0,1fr)_fit-content(72px)]"],
       [routeStyles.agentIndexOpenButton, "grid-cols-[30px_minmax(0,1fr)]"],
       [routeStyles.resourceSplit, "grid-cols-[repeat(auto-fit,minmax(118px,1fr))]"],
