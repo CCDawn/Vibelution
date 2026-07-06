@@ -2925,64 +2925,66 @@ export function ConversationView({
             event.currentTarget.value = "";
           }}
         />
-        <VButton
-          className={styles.attachButton}
-          isDisabled={attachmentInputDisabled || !onAddComposerAttachments}
-          type="button"
-          onClick={() => attachmentInputRef.current?.click()}
-          title={lang === "zh" ? "添加图片" : "Attach image"}
-          aria-label={lang === "zh" ? "添加图片" : "Attach image"}
-        >
-          <ImagePlus size={16} />
-        </VButton>
-        {!runningGuidanceActionsEnabled || showSafeGuidanceAction ? (
+        <div className={styles.composerActionStack}>
           <VButton
-            className={`${styles.sendButton} ${styles.composerRoundButton} ${styles.composerRoundButtonPrimary}`}
-            isDisabled={runningGuidanceActionsEnabled ? guidanceActionDisabled || !onSafeGuidance : resolvedActionDisabled}
+            className={styles.attachButton}
+            isDisabled={attachmentInputDisabled || !onAddComposerAttachments}
             type="button"
-            onClick={runningGuidanceActionsEnabled ? onSafeGuidance : handlePrimaryAction}
-            title={
-              runningGuidanceActionsEnabled
-                ? composerSafeGuidancePending
-                  ? (safeGuidancePendingLabel ?? t("safeGuidancePending"))
-                  : (safeGuidanceLabel ?? t("safeGuidance"))
-                : composerPending
-                  ? resolvedPendingLabel
-                  : resolvedActionLabel
-            }
-            aria-label={
-              runningGuidanceActionsEnabled
-                ? composerSafeGuidancePending
-                  ? (safeGuidancePendingLabel ?? t("safeGuidancePending"))
-                  : (safeGuidanceLabel ?? t("safeGuidance"))
-                : composerPending
-                  ? resolvedPendingLabel
-                  : resolvedActionLabel
-            }
+            onClick={() => attachmentInputRef.current?.click()}
+            title={lang === "zh" ? "添加图片" : "Attach image"}
+            aria-label={lang === "zh" ? "添加图片" : "Attach image"}
           >
-            {composerPending || composerSafeGuidancePending ? (
-              <LoaderCircle className={styles.statusSpinner} size={17} aria-hidden="true" />
-            ) : (
-              <ArrowUp size={18} aria-hidden="true" />
-            )}
+            <ImagePlus size={16} />
           </VButton>
-        ) : null}
-        {runningGuidanceActionsEnabled ? (
-          <VButton
-            className={`${styles.sendButton} ${styles.composerRoundButton} ${styles.stopButton}`}
-            isDisabled={resolvedActionDisabled}
-            type="button"
-            onClick={handlePrimaryAction}
-            title={composerPending ? resolvedPendingLabel : resolvedActionLabel}
-            aria-label={composerPending ? resolvedPendingLabel : resolvedActionLabel}
-          >
-            {composerPending ? (
-              <LoaderCircle className={styles.statusSpinner} size={17} aria-hidden="true" />
-            ) : (
-              <Square size={14} aria-hidden="true" />
-            )}
-          </VButton>
-        ) : null}
+          {!runningGuidanceActionsEnabled || showSafeGuidanceAction ? (
+            <VButton
+              className={`${styles.sendButton} ${styles.composerRoundButton} ${styles.composerRoundButtonPrimary}`}
+              isDisabled={runningGuidanceActionsEnabled ? guidanceActionDisabled || !onSafeGuidance : resolvedActionDisabled}
+              type="button"
+              onClick={runningGuidanceActionsEnabled ? onSafeGuidance : handlePrimaryAction}
+              title={
+                runningGuidanceActionsEnabled
+                  ? composerSafeGuidancePending
+                    ? (safeGuidancePendingLabel ?? t("safeGuidancePending"))
+                    : (safeGuidanceLabel ?? t("safeGuidance"))
+                  : composerPending
+                    ? resolvedPendingLabel
+                    : resolvedActionLabel
+              }
+              aria-label={
+                runningGuidanceActionsEnabled
+                  ? composerSafeGuidancePending
+                    ? (safeGuidancePendingLabel ?? t("safeGuidancePending"))
+                    : (safeGuidanceLabel ?? t("safeGuidance"))
+                  : composerPending
+                    ? resolvedPendingLabel
+                    : resolvedActionLabel
+              }
+            >
+              {composerPending || composerSafeGuidancePending ? (
+                <LoaderCircle className={styles.statusSpinner} size={17} aria-hidden="true" />
+              ) : (
+                <ArrowUp size={18} aria-hidden="true" />
+              )}
+            </VButton>
+          ) : null}
+          {runningGuidanceActionsEnabled ? (
+            <VButton
+              className={`${styles.sendButton} ${styles.composerRoundButton} ${styles.stopButton}`}
+              isDisabled={resolvedActionDisabled}
+              type="button"
+              onClick={handlePrimaryAction}
+              title={composerPending ? resolvedPendingLabel : resolvedActionLabel}
+              aria-label={composerPending ? resolvedPendingLabel : resolvedActionLabel}
+            >
+              {composerPending ? (
+                <LoaderCircle className={styles.statusSpinner} size={17} aria-hidden="true" />
+              ) : (
+                <Square size={14} aria-hidden="true" />
+              )}
+            </VButton>
+          ) : null}
+        </div>
       </div>
       ) : null}
       {previewImage ? (
