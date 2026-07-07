@@ -941,6 +941,28 @@ const styles: Record<string, string> = {
     "vui-components-conversationview responseSegment_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   responseToggle:
     "vui-components-conversationview responseToggle min-w-0 !grid !w-full grid-cols-[auto_auto_minmax(0,1fr)] !items-center !justify-start gap-x-1.5 !border-0 !bg-transparent !p-0 !text-left text-[var(--fg-secondary)] !shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+  rolloutTraceDot:
+    "vui-components-conversationview rolloutTraceDot mt-[0.45rem] size-1.5 shrink-0 rounded-full bg-current opacity-70",
+  rolloutTraceItem:
+    "vui-components-conversationview rolloutTraceItem min-w-0 flex items-start gap-1.5 text-[var(--vui-font-xs)] leading-[1.35] text-[var(--fg-tertiary)]",
+  rolloutTraceItem_completed:
+    "vui-components-conversationview rolloutTraceItem_completed min-w-0 text-[var(--fg-tertiary)]",
+  rolloutTraceItem_degraded:
+    "vui-components-conversationview rolloutTraceItem_degraded min-w-0 text-[var(--state-warning)]",
+  rolloutTraceItem_failed:
+    "vui-components-conversationview rolloutTraceItem_failed min-w-0 text-[var(--state-error)]",
+  rolloutTraceItem_pending:
+    "vui-components-conversationview rolloutTraceItem_pending min-w-0 text-[var(--fg-tertiary)]",
+  rolloutTraceItem_running:
+    "vui-components-conversationview rolloutTraceItem_running min-w-0 text-[var(--fg-secondary)]",
+  rolloutTraceList:
+    "vui-components-conversationview rolloutTraceList col-start-2 mt-1 grid min-w-0 gap-1 border-l border-[color-mix(in_srgb,var(--fg-tertiary)_22%,transparent)] bg-transparent pl-2 shadow-none",
+  rolloutTraceMeta:
+    "vui-components-conversationview rolloutTraceMeta min-w-0 text-[var(--fg-tertiary)] [overflow-wrap:anywhere]",
+  rolloutTraceText:
+    "vui-components-conversationview rolloutTraceText min-w-0 inline-flex max-w-full flex-wrap items-baseline gap-x-1.5 gap-y-0.5",
+  rolloutTraceTitle:
+    "vui-components-conversationview rolloutTraceTitle min-w-0 font-medium text-current",
   sectionBlock:
     "vui-components-conversationview sectionBlock min-w-0",
   sectionPanel:
