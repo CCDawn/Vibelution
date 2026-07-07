@@ -154,6 +154,40 @@ describe("agent thread adapters", () => {
     });
   });
 
+  it("drops internal thought placeholders while keeping real tools and answers", () => {
+    const message: ConversationMessage = {
+      id: "assistant-internal-placeholder",
+      role: "assistant",
+      content: "真实回答",
+      timestamp: "2026-07-07T14:21:00Z",
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "thought",
+          status: "done",
+          summary: "思考过程",
+          resultPreview: "internal",
+        },
+        {
+          sequence: 2,
+          kind: "tool",
+          status: "done",
+          name: "read_file_tool",
+          summary: "opened latest package",
+        },
+      ],
+    };
+
+    const agentMessage = conversationMessageToAgentMessage(message);
+
+    expect(agentMessage.parts.map((part) => part.type)).toEqual(["tool-call", "text"]);
+    expect(agentMessage.parts[0]).toMatchObject({
+      id: "assistant-internal-placeholder-feedback-2",
+      type: "tool-call",
+      name: "read_file_tool",
+    });
+  });
+
   it("uses legacy thought and tool calls only when feedback events are absent", () => {
     const message: ConversationMessage = {
       id: "assistant-legacy",

@@ -101,7 +101,10 @@ import {
 } from "./agentMessageTimeline";
 import { buildCodexTranscriptCells, type CodexTranscriptCell } from "./codexTranscriptCells";
 import { buildCodexRolloutTraceEvents, type CodexRolloutTraceEvent } from "./codexRolloutTrace";
-import { preserveConversationExpansionDefaults } from "./conversationExpansionDefaults";
+import {
+  preserveConversationExpansionDefaults,
+  shouldRefreshConversationExpansionDefault,
+} from "./conversationExpansionDefaults";
 import { activeAgentMessageTimelineItemId } from "./agentMessageTimelineActiveItem";
 import {
   agentMessageTimelineItemRowKey,
@@ -971,6 +974,16 @@ export function ConversationView({
     }
     const messageDefaults = defaultExpansionRef.current[messageId] ?? {};
     if (messageDefaults[section] === undefined) {
+      defaultExpansionRef.current = {
+        ...defaultExpansionRef.current,
+        [messageId]: {
+          ...messageDefaults,
+          [section]: defaultExpanded,
+        },
+      };
+      return defaultExpanded;
+    }
+    if (shouldRefreshConversationExpansionDefault(section, messageDefaults[section], defaultExpanded)) {
       defaultExpansionRef.current = {
         ...defaultExpansionRef.current,
         [messageId]: {

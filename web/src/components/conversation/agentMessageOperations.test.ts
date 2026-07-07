@@ -164,6 +164,55 @@ describe("agentMessageOperations", () => {
     ]);
   });
 
+  it("maps code search and raw tool identifiers to readable labels", () => {
+    const message: AgentMessage = {
+      id: "agent-tool-readable-labels",
+      role: "assistant",
+      createdAt: "2026-07-07T06:50:00Z",
+      streaming: false,
+      source: { kind: "conversation-message", id: "agent-tool-readable-labels" },
+      parts: [
+        {
+          id: "agent-tool-readable-labels-read",
+          type: "tool-call",
+          source: "feedback-event",
+          name: "read_file_tool",
+          status: "done",
+          summary: "opened latest package",
+        },
+        {
+          id: "agent-tool-readable-labels-search",
+          type: "tool-call",
+          source: "feedback-event",
+          name: "search_code_tool",
+          status: "done",
+          summary: "searched session detail",
+        },
+        {
+          id: "agent-tool-readable-labels-rg",
+          type: "tool-call",
+          source: "feedback-event",
+          name: "rg",
+          status: "done",
+          summary: "searched session detail",
+        },
+      ],
+    };
+
+    const operations = buildAgentMessageOperations(message, labels);
+
+    expect(operations.map((operation) => operation.label)).toEqual([
+      "读取文件",
+      "搜索代码",
+      "搜索",
+    ]);
+    expect(operations.map((operation) => operation.rawLabel)).toEqual([
+      "read_file_tool",
+      "search_code_tool",
+      "rg",
+    ]);
+  });
+
   it("keeps raw tool payloads out of main timeline summaries while preserving details", () => {
     const message: AgentMessage = {
       id: "agent-tool-summary-noise",
@@ -263,9 +312,10 @@ describe("agentMessageOperations", () => {
       "thought:Deep thinking:先看日志",
       "tool:读取:opened latest log",
       "thought:Deep thinking:再查 React 链路",
-      "tool:rg:searching feedbackEvents",
+      "tool:搜索:searching feedbackEvents",
     ]);
     expect(operations[1].relatedThoughtSequence).toBe(1);
+    expect(operations[3].rawLabel).toBe("rg");
     expect(operations[3].relatedThoughtSequence).toBe(3);
   });
 
