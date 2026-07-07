@@ -1041,12 +1041,13 @@ def ai_search_system_team_missing() -> bool:
         return not expected_roles.issubset(member_roles)
 
 
-def request_system_team_bootstrap(*, reason: str = "team_list") -> dict[str, Any]:
+def request_system_team_bootstrap(*, reason: str = "team_list", allow_sync_check: bool = True) -> dict[str, Any]:
     """Start a bounded background repair for missing system Teams.
 
     Team list reads must stay fast. This helper only performs lightweight
     missing checks inline, then lets the expensive Team/Agent/ChatRoom writes
-    happen outside the request path.
+    happen outside the request path. Callers on a latency-sensitive read path
+    can request the last ready snapshot without refreshing those checks inline.
     """
 
     global _TEAM_SYSTEM_BOOTSTRAP_THREAD
@@ -1055,16 +1056,48 @@ def request_system_team_bootstrap(*, reason: str = "team_list") -> dict[str, Any
     with _TEAM_SYSTEM_BOOTSTRAP_LOCK:
         if _TEAM_SYSTEM_BOOTSTRAP_THREAD and _TEAM_SYSTEM_BOOTSTRAP_THREAD.is_alive():
             return _system_team_bootstrap_state_snapshot_locked()
-        if (
+        ready_snapshot = (
             str(_TEAM_SYSTEM_BOOTSTRAP_STATE.get("status") or "") == "ready"
             and not list(_TEAM_SYSTEM_BOOTSTRAP_STATE.get("requiredSteps") or [])
-        ):
+        )
+        checked_at = 0.0
+        if ready_snapshot:
             try:
                 checked_at = float(_TEAM_SYSTEM_BOOTSTRAP_STATE.get("checkedAtMonotonic") or 0.0)
             except (TypeError, ValueError):
                 checked_at = 0.0
             if checked_at > 0 and now - checked_at <= TEAM_SYSTEM_BOOTSTRAP_READY_CACHE_TTL_SECONDS:
                 return _system_team_bootstrap_state_snapshot_locked()
+        if not allow_sync_check:
+            attempt = int(_TEAM_SYSTEM_BOOTSTRAP_STATE.get("attempt") or 0) + 1
+            request_id = f"system-team-bootstrap-{attempt}"
+            if ready_snapshot:
+                _TEAM_SYSTEM_BOOTSTRAP_STATE["attempt"] = attempt
+                snapshot = _system_team_bootstrap_state_snapshot_locked()
+            else:
+                _TEAM_SYSTEM_BOOTSTRAP_STATE.update(
+                    {
+                        "status": "running",
+                        "requiredSteps": [],
+                        "reason": normalized_reason,
+                        "startedAt": utc_now_iso(),
+                        "finishedAt": "",
+                        "lastError": "",
+                        "elapsedMs": 0,
+                        "attempt": attempt,
+                        "requestId": request_id,
+                    }
+                )
+                snapshot = _system_team_bootstrap_state_snapshot_locked()
+            _TEAM_SYSTEM_BOOTSTRAP_THREAD = threading.Thread(
+                target=_run_system_team_bootstrap_discovery,
+                args=(request_id, normalized_reason),
+                name="vibelution-team-system-bootstrap",
+                daemon=True,
+            )
+            thread = _TEAM_SYSTEM_BOOTSTRAP_THREAD
+            thread.start()
+            return snapshot
     team_lock_acquired = _try_acquire_team_lock()
     if not team_lock_acquired:
         with _TEAM_SYSTEM_BOOTSTRAP_LOCK:
@@ -1152,6 +1185,46 @@ def request_system_team_bootstrap(*, reason: str = "team_list") -> dict[str, Any
         snapshot = _system_team_bootstrap_state_snapshot_locked()
     thread.start()
     return snapshot
+
+
+def _run_system_team_bootstrap_discovery(request_id: str, reason: str) -> None:
+    try:
+        required_steps = _system_team_bootstrap_required_steps()
+    except Exception as exc:
+        with _TEAM_SYSTEM_BOOTSTRAP_LOCK:
+            _TEAM_SYSTEM_BOOTSTRAP_STATE.update(
+                {
+                    "status": "failed",
+                    "requiredSteps": [],
+                    "reason": reason,
+                    "finishedAt": utc_now_iso(),
+                    "lastError": f"{type(exc).__name__}: {exc}",
+                    "elapsedMs": 0,
+                    "requestId": request_id,
+                }
+            )
+        _record_system_team_bootstrap_event(
+            "team.system_bootstrap.check_failed",
+            outcome="failed",
+            fields={"reason": reason, "requestId": request_id, "errorType": type(exc).__name__},
+        )
+        return
+    if not required_steps:
+        with _TEAM_SYSTEM_BOOTSTRAP_LOCK:
+            _TEAM_SYSTEM_BOOTSTRAP_STATE.update(
+                {
+                    "status": "ready",
+                    "requiredSteps": [],
+                    "reason": reason,
+                    "finishedAt": utc_now_iso(),
+                    "lastError": "",
+                    "elapsedMs": 0,
+                    "requestId": request_id,
+                    "checkedAtMonotonic": _perf_counter(),
+                }
+            )
+        return
+    _run_system_team_bootstrap(request_id, list(required_steps), reason)
 
 
 def _system_team_bootstrap_required_steps() -> list[str]:

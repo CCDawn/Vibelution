@@ -100,9 +100,11 @@ def test_team_routes_reject_agent_that_already_belongs_to_active_team(tmp_path, 
 def test_team_list_route_schedules_system_bootstrap_without_inline_materialization(tmp_path, monkeypatch):
     _isolate_team_route_state(tmp_path, monkeypatch)
     requested_reasons = []
+    observed_allow_sync_check = []
 
-    def fake_request_system_team_bootstrap(*, reason):
+    def fake_request_system_team_bootstrap(*, reason, allow_sync_check=True):
         requested_reasons.append(reason)
+        observed_allow_sync_check.append(allow_sync_check)
         return {
             "schemaVersion": 1,
             "status": "running",
@@ -128,6 +130,36 @@ def test_team_list_route_schedules_system_bootstrap_without_inline_materializati
     assert payload["systemTeamBootstrap"]["status"] == "running"
     assert payload["systemTeamBootstrap"]["requiredSteps"] == ["evolution_system_teams", "ai_search_system_team"]
     assert requested_reasons == ["team_list"]
+    assert observed_allow_sync_check == [False]
+
+
+def test_team_list_route_reads_system_bootstrap_status_without_blocking_checks(tmp_path, monkeypatch):
+    _isolate_team_route_state(tmp_path, monkeypatch)
+    observed_allow_sync_check = []
+
+    def fake_request_system_team_bootstrap(*, reason, allow_sync_check=True):
+        observed_allow_sync_check.append(allow_sync_check)
+        return {
+            "schemaVersion": 1,
+            "status": "ready",
+            "requiredSteps": [],
+            "reason": reason,
+            "startedAt": "",
+            "finishedAt": "2026-06-21T00:00:00Z",
+            "lastError": "",
+            "elapsedMs": 0,
+            "attempt": 1,
+            "requestId": "test-bootstrap",
+        }
+
+    monkeypatch.setattr(teams_route, "request_system_team_bootstrap", fake_request_system_team_bootstrap)
+    client = _client()
+
+    response = client.get("/api/teams")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["systemTeamBootstrap"]["status"] == "ready"
+    assert observed_allow_sync_check == [False]
 
 
 def test_team_list_route_reads_utf8_bom_team_index(tmp_path, monkeypatch):
@@ -141,7 +173,7 @@ def test_team_list_route_reads_utf8_bom_team_index(tmp_path, monkeypatch):
     monkeypatch.setattr(
         teams_route,
         "request_system_team_bootstrap",
-        lambda *, reason: {
+        lambda *, reason, allow_sync_check=True: {
             "schemaVersion": 1,
             "status": "ready",
             "requiredSteps": [],
@@ -219,8 +251,17 @@ def test_team_list_route_reports_ready_when_system_teams_exist(tmp_path, monkeyp
     payload = response.json()
     teams = {team["teamId"]: team for team in payload["teams"]}
     assert {"self-evolution-team", "supervised-evolution-team", "ai-search-team", "knowledge-expansion-team"}.issubset(teams)
-    assert payload["systemTeamBootstrap"]["status"] == "ready"
+    assert payload["systemTeamBootstrap"]["status"] == "running"
     assert payload["systemTeamBootstrap"]["requiredSteps"] == []
+    thread = team_service._TEAM_SYSTEM_BOOTSTRAP_THREAD
+    assert thread is not None
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    ready = team_service.request_system_team_bootstrap(reason="team_list")
+    with team_service._TEAM_SYSTEM_BOOTSTRAP_LOCK:
+        team_service._TEAM_SYSTEM_BOOTSTRAP_THREAD = None
+    assert ready["status"] == "ready"
+    assert ready["requiredSteps"] == []
 
 
 def test_team_routes_save_canvas(tmp_path, monkeypatch):
