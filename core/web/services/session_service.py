@@ -7923,6 +7923,7 @@ def _normalize_messages(conversation_id: str, items: Any) -> list[dict[str, Any]
             entry["timelineItems"] = timeline_items
         codex_transcript = _build_codex_transcript_projection(
             message_id=entry["id"],
+            role=role,
             content=content,
             feedback_events=timeline_feedback_events,
             tool_calls=tool_calls,
@@ -17182,6 +17183,7 @@ def _build_message_timeline_items(
 def _build_codex_transcript_projection(
     *,
     message_id: str,
+    role: str = "assistant",
     content: Any = "",
     feedback_events: Any = None,
     tool_calls: Any = None,
@@ -17189,6 +17191,9 @@ def _build_codex_transcript_projection(
 ) -> dict[str, Any] | None:
     normalized_message_id = str(message_id or "").strip()
     if not normalized_message_id:
+        return None
+    normalized_role = str(role or "assistant").strip().lower()
+    if normalized_role != "assistant":
         return None
     normalized_feedback_events = _normalize_message_feedback_events(feedback_events or [])
     normalized_tool_calls = _normalize_message_tool_calls(tool_calls or [])
