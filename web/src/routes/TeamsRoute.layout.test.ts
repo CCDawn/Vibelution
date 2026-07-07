@@ -923,22 +923,24 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("knowledge-ingestion/precheck");
     expect(routeSource).toContain("runSourceCollectionGraphAction");
     expect(routeSource).not.toContain("runSourceCollectionMemoryPrecheckAction");
-    expect(routeSource).toContain("runKnowledgeCollectionCompletionAction");
+    expect(routeSource).toContain("runKnowledgeCollectionLoopAction");
     expect(routeSource).toContain("runKnowledgeCollectionCompletionMutation");
     expect(routeSource).toContain("/workflow-orchestration/knowledge-collection/complete");
     expect(routeSource).toContain("sourceCollectionActionRunId");
     expect(routeSource).toContain("sourceCollectionSummary?.runId");
-    expect(routeSource).toContain("runId: sourceCollectionActionRunId");
+    expect(routeSource).toContain("startKnowledgeCollectionCompletionForRun(sourceCollectionActionRunId");
     const sourceCollectionCompletionDisabledSource = routeSource.slice(
-      routeSource.indexOf("const sourceCollectionCompletionActionDisabled ="),
-      routeSource.indexOf("const sourceCollectionCompletionActionLabel ="),
+      routeSource.indexOf("const sourceCollectionLoopActionDisabled ="),
+      routeSource.indexOf("const sourceCollectionLoopActionLabel ="),
     );
     expect(sourceCollectionCompletionDisabledSource).not.toContain("!selectedSourceCollectionRun");
     expect(routeSource).toContain("extractionAgentId: sourceCollectionExtractorAgentId");
     expect(routeSource).toContain("agent_approved_only");
     expect(routeSource).toContain("Agent 生成关系图");
     expect(routeSource).toContain("通知资料入库 Agent");
-    expect(routeSource).toContain("一键完成知识搜集");
+    expect(routeSource).toContain("开始第一轮闭环");
+    expect(routeSource).toContain("继续本轮闭环");
+    expect(routeSource).toContain("开始下一轮闭环");
     expect(routeSource).toContain("renderKnowledgeCollectionCompletionFlowPanel");
     expect(routeSource).toContain("knowledgeCompletionFlowPanel");
     expect(routeSource).toContain("sourceCollectionCompletionFlowNodes");
@@ -962,7 +964,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionMemoryActionDisabled");
     expect(routeSource).toContain("sourceCollectionMemoryActionLabel");
     expect(routeSource).toContain("maxCandidates: Math.max(1, Math.min(80, sourceCollectionIngestCandidateCount))");
-    expect(routeSource).toContain("forceReview: sourceCollectionPrecheckCandidateCount <= 0 && sourceCollectionDisplayedCandidateCount > 0");
+    expect(routeSource).toContain("forceReview: precheckCandidateCount <= 0 && displayedCandidateCount > 0");
     expect(routeSource).toContain("forceReview: sourceCollectionRunApprovedCount <= 0 && sourceCollectionDisplayedCandidateCount > 0");
     expect(routeSource).toContain("可通知资料入库 Agent");
     expect(routeSource).toContain("条候选资料");
@@ -2101,13 +2103,20 @@ describe("TeamsRoute layout contract", () => {
     }
   });
 
-  it("keeps the whole knowledge collection completion action on the phase card, not the steward stage card", () => {
+  it("keeps one knowledge collection loop CTA on the phase card and leaves manual work in stage details", () => {
     const launcherSource = routeSource.slice(
       routeSource.indexOf("function renderResearchStageLauncher"),
       routeSource.indexOf("function renderResearchStageStandalonePage"),
     );
-    expect(launcherSource).toContain("runKnowledgeCollectionCompletionAction");
-    expect(launcherSource).toContain("一键完成知识搜集");
+    expect(launcherSource).toContain("runKnowledgeCollectionLoopAction");
+    expect(launcherSource).toContain("sourceCollectionLoopActionLabel");
+    expect(launcherSource).toContain("sourceCollectionLoopActionDisabled");
+    expect(launcherSource).toContain("手动控制");
+    expect(routeSource).toContain("开始第一轮闭环");
+    expect(routeSource).toContain("继续本轮闭环");
+    expect(routeSource).toContain("开始下一轮闭环");
+    expect(launcherSource).not.toContain("一键完成知识搜集");
+    expect(launcherSource).not.toContain("新一轮搜集");
 
     const stageModuleSource = routeSource.slice(
       routeSource.indexOf("const sourceCollectionStageModules"),
@@ -2121,6 +2130,52 @@ describe("TeamsRoute layout contract", () => {
     expect(ingestionModuleSource).not.toContain("runKnowledgeCollectionCompletionAction");
     expect(ingestionModuleSource).not.toContain("runKnowledgeCollectionCompletionMutation");
     expect(ingestionModuleSource).not.toContain("runKnowledgeCollectionIngestMutation.mutate");
+  });
+
+  it("starts a new source collection run before completion when the loop CTA represents the next loop", () => {
+    const loopActionSource = routeSource.slice(
+      routeSource.indexOf("const runKnowledgeCollectionLoopAction ="),
+      routeSource.indexOf("const runSourceCollectionSearchFromHeader ="),
+    );
+    expect(loopActionSource).toContain("sourceCollectionLoopStartsNewRun");
+    expect(loopActionSource).toContain("startSourceCollectionRunMutation.mutateAsync");
+    expect(loopActionSource).toContain("const startedRunId =");
+    expect(loopActionSource).toContain("startKnowledgeCollectionCompletionForRun(startedRunId");
+    expect(loopActionSource).toContain("startKnowledgeCollectionCompletionForRun(sourceCollectionActionRunId");
+  });
+
+  it("lets a completed knowledge collection work run clear stale one-click mutation errors", () => {
+    const completionStateSource = routeSource.slice(
+      routeSource.indexOf("const selectedTeamKnowledgeCollectionWorkRun ="),
+      routeSource.indexOf("const selectedTeamKnowledgeCollectionIngestResult ="),
+    );
+    expect(completionStateSource).toContain("selectedTeamKnowledgeCollectionCompleted");
+    expect(completionStateSource).toContain('selectedTeamKnowledgeCollectionWorkRunStatus === "completed"');
+    expect(completionStateSource).toContain('selectedTeamKnowledgeCollectionFlowStatus === "completed"');
+
+    const ingestErrorSource = routeSource.slice(
+      routeSource.indexOf("const selectedTeamKnowledgeCollectionIngestError ="),
+      routeSource.indexOf("const selectedTeamKnowledgeCollectionIngestResult ="),
+    );
+    expect(ingestErrorSource).toContain("!selectedTeamKnowledgeCollectionCompleted");
+  });
+
+  it("does not treat a completed knowledge work run from another source run as the selected loop completion", () => {
+    const completionStateSource = routeSource.slice(
+      routeSource.indexOf("const selectedTeamKnowledgeCollectionWorkRun ="),
+      routeSource.indexOf("const selectedTeamKnowledgeCollectionIngestResult ="),
+    );
+    expect(completionStateSource).toContain("selectedTeamKnowledgeCollectionSourceRunId");
+    expect(completionStateSource).toContain("selectedTeamKnowledgeCollectionMatchesSelectedRun");
+    expect(completionStateSource).toContain(
+      "selectedTeamKnowledgeCollectionSourceRunId === selectedSourceCollectionRunEffectiveId",
+    );
+
+    const loopStateSource = routeSource.slice(
+      routeSource.indexOf("const sourceCollectionLoopStartsNewRun ="),
+      routeSource.indexOf("const sourceCollectionLoopStartReadiness ="),
+    );
+    expect(loopStateSource).toContain("selectedTeamKnowledgeCollectionCompletedForSelectedRun");
   });
 
   it("keeps side-effect source collection actions behind initial-data readiness gates", () => {
@@ -2138,7 +2193,7 @@ describe("TeamsRoute layout contract", () => {
 
     const readinessSource = routeSource.slice(
       routeSource.indexOf("const sourceCollectionActionInitialDataPending = Boolean("),
-      routeSource.indexOf("const sourceCollectionCompletionActionLabel ="),
+      routeSource.indexOf("const sourceCollectionLoopActionLabel ="),
     );
     expect(readinessSource).toContain("sourceCollectionRecordsDataLoading");
     expect(readinessSource).toContain("sourceCollectionAssignmentsDataLoading");
@@ -2155,9 +2210,10 @@ describe("TeamsRoute layout contract", () => {
       routeSource.indexOf("function renderResearchStageStandalonePage"),
     );
     expect(launcherSource).toContain("sourceCollectionSearchActionReadiness.disabled");
-    expect(launcherSource).toContain("disabled={sourceCollectionCompletionActionDisabled}");
+    expect(launcherSource).toContain("disabled={sourceCollectionLoopActionDisabled}");
+    expect(routeSource).toContain("const sourceCollectionLoopActionDisabled = sourceCollectionLoopActionReadiness.disabled");
     expect(routeSource).toContain("const sourceCollectionCompletionActionDisabled = sourceCollectionCompletionActionReadiness.disabled");
-    expect(launcherSource).toContain("title={sourceCollectionActionDisabledTitle(sourceCollectionCompletionActionReadiness,");
+    expect(launcherSource).toContain("title={sourceCollectionActionDisabledTitle(sourceCollectionLoopActionReadiness, sourceCollectionLoopActionLabel)}");
 
     const stageModuleSource = routeSource.slice(
       routeSource.indexOf("const sourceCollectionStageModules"),
