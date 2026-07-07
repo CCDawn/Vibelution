@@ -8,7 +8,7 @@ import styles from "./LauncherShell.styles";
 import { applyWorkbenchDocumentTheme, readStoredWorkbenchTheme } from "./themePreference";
 
 export function LauncherShell() {
-  const { lang } = useShellI18n();
+  const { lang } = useShellI18n({ configEnabled: false });
   const [theme] = useState(() => readStoredWorkbenchTheme());
 
   useEffect(() => {

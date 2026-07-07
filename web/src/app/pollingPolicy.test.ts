@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { STARTUP_BACKGROUND_WARMUP_MS, isDocumentVisible, isStartupWarmupActive, resolvePollingInterval } from "./pollingPolicy";
+import {
+  STARTUP_BACKGROUND_WARMUP_MS,
+  isDocumentVisible,
+  isStartupWarmupActive,
+  resolveLauncherStatusPollingInterval,
+  resolvePollingInterval,
+} from "./pollingPolicy";
 
 describe("pollingPolicy", () => {
   it("treats visible and server-side unknown state as foreground", () => {
@@ -32,5 +38,15 @@ describe("pollingPolicy", () => {
     expect(isStartupWarmupActive(false, STARTUP_BACKGROUND_WARMUP_MS)).toBe(false);
     expect(isStartupWarmupActive(true, 0)).toBe(false);
     expect(isStartupWarmupActive(false, 60_000, 0)).toBe(true);
+  });
+
+  it("backs off Launcher status polling after the control plane settles", () => {
+    expect(resolveLauncherStatusPollingInterval(true, { lifecycleChanging: false, commandActive: false })).toBe(15_000);
+    expect(resolveLauncherStatusPollingInterval(false, { lifecycleChanging: false, commandActive: false })).toBe(60_000);
+  });
+
+  it("keeps Launcher status polling responsive while lifecycle commands are active", () => {
+    expect(resolveLauncherStatusPollingInterval(true, { lifecycleChanging: true, commandActive: false })).toBe(4_000);
+    expect(resolveLauncherStatusPollingInterval(false, { lifecycleChanging: false, commandActive: true })).toBe(15_000);
   });
 });
