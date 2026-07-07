@@ -731,6 +731,7 @@ function displayToolLabel(name: string) {
     read_file_tool: "读取文件",
     glob_tool: "列出文件",
     code_symbol_tool: "代码图谱",
+    search_code_tool: "搜索代码",
     get_git_status_summary_tool: "Git 状态",
     image2_generate_tool: "生成图片",
     web_search_tool: "网页搜索",
@@ -741,6 +742,7 @@ function displayToolLabel(name: string) {
     task_update_tool: "更新任务",
     source_collection_context_tool: "读取资料上下文",
     source_collection_stage_writeback_tool: "资料提炼回写",
+    rg: "搜索",
   };
   if (exact[lower]) {
     return exact[lower];

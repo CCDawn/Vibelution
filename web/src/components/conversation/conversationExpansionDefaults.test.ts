@@ -152,4 +152,77 @@ describe("conversation expansion defaults", () => {
     expect(defaults["message-failed"].process).toBe(false);
     expect(defaults["message-failed"].feedback).toBe(true);
   });
+
+  it("auto-collapses stale running process defaults after the turn completes", () => {
+    const completedMessage: ConversationMessage = {
+      id: "message-settled-after-streaming",
+      role: "assistant",
+      content: "已经进入真实状态。",
+      timestamp: "2026-07-07T12:00:00Z",
+    };
+
+    const defaults = preserveConversationExpansionDefaults({
+      currentDefaults: {
+        "message-settled-after-streaming": {
+          process: true,
+          feedback: true,
+        },
+      },
+      sectionExpansion: {},
+      messages: [completedMessage],
+      renderStatesByMessageId: new Map([
+        [completedMessage.id, renderState(true)],
+      ]),
+      timelineItemsByMessageId: new Map(),
+      operationGroupsByMessageId: new Map([
+        [completedMessage.id, operationGroups([
+          operation({ id: "thought-1", kind: "thought", status: "done", sequence: 1, resultPreview: "internal" }),
+          operation({ id: "tool-1", kind: "tool", status: "done", label: "read_file_tool", rawLabel: "read_file_tool", sequence: 2 }),
+          operation({ id: "tool-2", kind: "tool", status: "done", label: "search_code_tool", rawLabel: "search_code_tool", sequence: 3 }),
+        ])],
+      ]),
+      defaultExpandedResponseIds: new Set(),
+    });
+
+    expect(defaults["message-settled-after-streaming"].process).toBe(false);
+    expect(defaults["message-settled-after-streaming"].feedback).toBe(false);
+  });
+
+  it("preserves explicit user-expanded process sections after completion", () => {
+    const completedMessage: ConversationMessage = {
+      id: "message-user-expanded-process",
+      role: "assistant",
+      content: "已经进入真实状态。",
+      timestamp: "2026-07-07T12:01:00Z",
+    };
+
+    const defaults = preserveConversationExpansionDefaults({
+      currentDefaults: {
+        "message-user-expanded-process": {
+          process: true,
+          feedback: true,
+        },
+      },
+      sectionExpansion: {
+        "message-user-expanded-process": {
+          process: true,
+          feedback: true,
+        },
+      },
+      messages: [completedMessage],
+      renderStatesByMessageId: new Map([
+        [completedMessage.id, renderState(true)],
+      ]),
+      timelineItemsByMessageId: new Map(),
+      operationGroupsByMessageId: new Map([
+        [completedMessage.id, operationGroups([
+          operation({ id: "tool-1", kind: "tool", status: "done", label: "读取", rawLabel: "read_file_tool", sequence: 1 }),
+        ])],
+      ]),
+      defaultExpandedResponseIds: new Set(),
+    });
+
+    expect(defaults["message-user-expanded-process"].process).toBe(true);
+    expect(defaults["message-user-expanded-process"].feedback).toBe(true);
+  });
 });

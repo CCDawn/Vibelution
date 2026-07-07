@@ -103,4 +103,53 @@ describe("ConversationView process expansion defaults", () => {
     expect(html).not.toContain("完成态思考详情仍需手动展开。");
     expect(html).not.toContain("完成态工具详情仍需手动展开。");
   });
+
+  it("keeps settled process summaries compact without leaking raw internal labels", () => {
+    const html = renderConversation([
+      {
+        id: "message-settled-raw-process",
+        role: "assistant",
+        content: "状态\n已经接到真实状态了。",
+        timestamp: "2026-07-07T14:21:00Z",
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "thought",
+            status: "done",
+            summary: "思考过程",
+            resultPreview: "internal",
+          },
+          {
+            sequence: 2,
+            kind: "tool",
+            status: "done",
+            name: "read_file_tool",
+            summary: "opened latest package",
+            resultPreview: "raw read result",
+          },
+          {
+            sequence: 3,
+            kind: "tool",
+            status: "done",
+            name: "search_code_tool",
+            summary: "searched session detail",
+            resultPreview: "raw search result",
+          },
+        ],
+      },
+    ]);
+
+    expect(html).toContain("过程");
+    expect(html).toContain("工具调用 2");
+    expect(html).not.toContain("思考过程 1");
+    expect(html).toContain("状态");
+    expect(html).toContain("已经接到真实状态了。");
+    expect(html).not.toContain(">internal<");
+    expect(html).not.toContain("read_file_tool");
+    expect(html).not.toContain("search_code_tool");
+    expect(html).not.toContain("opened latest package");
+    expect(html).not.toContain("searched session detail");
+    expect(html).not.toContain("调用开始");
+    expect(html).not.toContain("运行开始");
+  });
 });

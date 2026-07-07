@@ -22,6 +22,16 @@ export type PreserveConversationExpansionDefaultsInput = {
   defaultExpandedResponseIds: Set<string>;
 };
 
+export function shouldRefreshConversationExpansionDefault(
+  section: string,
+  currentDefault: boolean | undefined,
+  nextDefault: boolean,
+) {
+  return (section === "process" || section === "feedback")
+    && currentDefault === true
+    && nextDefault === false;
+}
+
 export function preserveConversationExpansionDefaults({
   currentDefaults,
   sectionExpansion,
@@ -39,7 +49,14 @@ export function preserveConversationExpansionDefaults({
     const explicit = sectionExpansion[message.id] ?? {};
     let nextMessageDefaults = messageDefaults;
     const setDefault = (section: string, value: boolean) => {
-      if (messageDefaults[section] !== undefined || explicit[section] !== undefined) {
+      const currentDefault = nextMessageDefaults[section] ?? messageDefaults[section];
+      if (
+        explicit[section] !== undefined
+        || (
+          currentDefault !== undefined
+          && !shouldRefreshConversationExpansionDefault(section, currentDefault, value)
+        )
+      ) {
         return;
       }
       if (nextMessageDefaults === messageDefaults) {

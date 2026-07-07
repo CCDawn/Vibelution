@@ -83,12 +83,17 @@ function feedbackEventToAgentPart(
 ): AgentMessagePart | null {
   const id = `${message.id}-feedback-${event.sequence || index + 1}`;
   if (event.kind === "thought") {
-    return compactText(event.resultPreview ?? event.summary)
+    const text = compactText(event.resultPreview ?? event.summary);
+    const summary = compactText(event.summary);
+    if (!text || isInternalThoughtPlaceholder(text, summary)) {
+      return null;
+    }
+    return text
       ? {
           id,
           type: "thought",
-          text: compactText(event.resultPreview ?? event.summary),
-          summary: compactText(event.summary),
+          text,
+          summary,
           status: event.status || assistantStatus(message),
           sequence: event.sequence || undefined,
           timestamp: event.timestamp,
@@ -282,6 +287,18 @@ function normalizedSequence(value: unknown) {
 
 function compactText(value: unknown) {
   return String(value ?? "").trim();
+}
+
+function isInternalThoughtPlaceholder(text: string, summary: string) {
+  const normalizedText = text.trim().toLowerCase();
+  const normalizedSummary = summary.trim().toLowerCase();
+  if (!normalizedText) {
+    return true;
+  }
+  if (["internal", "internal_thought", "internal reasoning", "internal process"].includes(normalizedText)) {
+    return true;
+  }
+  return normalizedText === normalizedSummary && normalizedText.startsWith("internal");
 }
 
 function mentalSnapshotSummary(snapshot: MentalStateSnapshot | undefined) {
