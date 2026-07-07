@@ -55,6 +55,17 @@ describe("ConversationStreamingResponseContent", () => {
     expect(html).toContain('class="markdown-body streaming-response markdown-table"');
   });
 
+  it("keeps stable streaming markdown blocks behind a memo boundary", async () => {
+    const source = await import("./ConversationStreamingResponseContent.tsx?raw").then((module) => module.default);
+
+    expect(source).toContain("const StableStreamingMarkdownBlocks = React.memo");
+    expect(source).toContain("stableText={markdownProjection.stableText}");
+    expect(source).toContain("blocks={markdownProjection.stableBlocks}");
+    expect(source).toContain("blocks={markdownProjection.liveBlocks}");
+    expect(source).not.toContain("const blocks = markdownProjection.blocks");
+    expect(source).not.toContain("blocks.map((block, index) => renderBlock(block, index))");
+  });
+
   it("keeps streaming text bounded for long tokens while preserving the table width override", () => {
     expect(styles.markdownBody).toContain("max-w-[min(100%,76ch)]");
     expect(styles.markdownBody).toContain("whitespace-normal");
