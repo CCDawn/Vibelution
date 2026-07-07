@@ -4548,6 +4548,157 @@ def test_source_quality_stage_writeback_materializes_candidate_decisions(tmp_pat
     assert screening_projection["counts"]["pending"] == 0
 
 
+def test_source_collection_ingestion_stage_writeback_uses_scoped_team_base_when_ids_overlap(tmp_path, monkeypatch):
+    """Stage writeback must scope a raw team KB id before granting/reviewing ingestion."""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    extractor = agent_directory_service.create_agent_instance(display_name="资料提炼")
+    ingestor = agent_directory_service.create_agent_instance(display_name="资料入库")
+    duplicate_ingestor = agent_directory_service.create_agent_instance(display_name="另一队资料入库")
+    session_service.ensure_agent_direct_session(agent_id=extractor["agentId"], title="资料提炼")
+    session_service.ensure_agent_direct_session(agent_id=ingestor["agentId"], title="资料入库")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[
+            {"agentId": extractor["agentId"], "role": "source_extractor", "agentName": "资料提炼"},
+            {"agentId": ingestor["agentId"], "role": "source_ingestor", "agentName": "资料入库"},
+        ],
+    )
+    other_team = team_service.create_team(
+        name="另一支科研团队",
+        members=[{"agentId": duplicate_ingestor["agentId"], "role": "source_ingestor", "agentName": "另一队资料入库"}],
+    )
+    target_base = team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="挑战杯科研知识库",
+        description="Target team base",
+        actor_agent_id=ingestor["agentId"],
+    )
+    duplicate_base = team_knowledge_service.create_knowledge_base(
+        other_team["teamId"],
+        name="挑战杯科研知识库",
+        description="Duplicate raw id under another owner",
+        actor_agent_id=duplicate_ingestor["agentId"],
+    )
+    assert target_base["knowledgeBaseId"] == duplicate_base["knowledgeBaseId"]
+    assert target_base["scopedKnowledgeBaseId"] != duplicate_base["scopedKnowledgeBaseId"]
+
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经算法资料入库",
+            "agentRoles": ["source_extractor", "source_ingestor"],
+            "agentIds": {"source_extractor": extractor["agentId"], "source_ingestor": ingestor["agentId"]},
+            "querySeeds": ["predictive coding neural algorithm"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    source = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding cortical hierarchy neural network paper",
+            "sourceUrl": "https://doi.org/10.0000/source-ingestion-scoped",
+            "sourceKind": "paper",
+            "summary": "Neural predictive coding evidence for network learning and attention mechanisms.",
+            "tags": ["neuro", "algorithm"],
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/source-ingestion-scoped"},
+            "createdByAgent": "content-extraction-agent",
+        },
+    )["candidate"]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-scoped-ingestion", "status": "running"},
+    )
+    quality_task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "extraction", "agentId": extractor["agentId"], "agentRole": "source_extractor"},
+    )
+    _append_stage_task_tool_trace(tmp_path, quality_task["task"])
+    team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        quality_task["taskId"],
+        {
+            "status": "needs_review",
+            "summary": "审查 1/1 条候选：通过 1。",
+            "result": {
+                "reviewSummary": {"total": 1, "assessed": 1, "pass": 1},
+                "candidateDecisions": [
+                    {
+                        "candidateId": source["candidateId"],
+                        "decision": "keep",
+                        "reason": "主题相关且 DOI 可追踪。",
+                        "evidenceRefs": [{"type": "doi", "id": "10.0000/source-ingestion-scoped"}],
+                    }
+                ],
+            },
+            "recordedByAgent": extractor["agentId"],
+        },
+    )
+    ingestion_task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "ingestion", "agentId": ingestor["agentId"], "agentRole": "source_ingestor"},
+    )
+    _append_stage_task_tool_trace(tmp_path, ingestion_task["task"])
+
+    response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        ingestion_task["taskId"],
+        {
+            "status": "completed",
+            "summary": "生成 steward pack 并写入团队知识库。",
+            "result": {
+                "knowledgeBaseId": target_base["knowledgeBaseId"],
+                "targetDomain": "神经学启发神经网络算法",
+                "stewardPackDraft": {
+                    "candidateType": "review_record",
+                    "sourceRefs": [{"type": "source_manifest", "id": source["candidateId"], "label": source["title"]}],
+                    "evidenceRefs": [{"type": "doi", "id": "10.0000/source-ingestion-scoped"}],
+                    "claims": [{"claim": "预测编码层级可作为算法设计启发。", "sourceRef": source["candidateId"]}],
+                    "uncertainty": [],
+                    "riskFlags": [],
+                    "candidateIds": [source["candidateId"]],
+                    "targetDomain": "神经学启发神经网络算法",
+                    "sourceTrace": {
+                        "sourceCollectionRunId": run_id,
+                        "stageTaskId": ingestion_task["taskId"],
+                        "sourceCandidateIds": [source["candidateId"]],
+                    },
+                    "riskSummary": "候选资料来源可追踪，适合入库。",
+                    "proposalPayload": {
+                        "title": "Predictive coding cortical hierarchy neural network paper",
+                        "summary": "神经预测编码层级证据可支持神经网络学习机制分析。",
+                        "claims": [{"claim": "预测编码层级可作为算法设计启发。", "sourceRef": source["candidateId"]}],
+                    },
+                    "ratingSuggestion": {"rating": "high", "confidence": 0.92},
+                    "approvalRequired": True,
+                    "confidence": 0.92,
+                    "nextAction": "submit_to_knowledge_ingestion",
+                    "requiresReview": True,
+                },
+                "autoIngestDecision": {
+                    "decision": "approved",
+                    "confidence": 0.92,
+                    "knowledgeBaseId": target_base["knowledgeBaseId"],
+                    "reason": "候选资料已通过质量审查。",
+                },
+            },
+            "recordedByAgent": ingestor["agentId"],
+        },
+    )
+
+    materialized = response["writeback"]["materializedKnowledgeIngestion"]
+    assert materialized["failed"] == [], materialized["failed"]
+    assert materialized["status"] == "completed", materialized
+    assert materialized["knowledgeBaseId"] == target_base["knowledgeBaseId"]
+    assert materialized["scopedKnowledgeBaseId"] == target_base["scopedKnowledgeBaseId"]
+    assert materialized["formalKnowledgeItemCount"] >= 1
+
+
 def test_source_quality_reconcile_retries_legacy_no_assessable_keep_decisions(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)

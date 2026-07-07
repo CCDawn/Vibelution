@@ -4960,7 +4960,15 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
         or _trim_text(task.get("agentId"), max_length=160)
         or agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
     )
-    knowledge_base_id = _trim_text(result.get("knowledgeBaseId") or decision.get("knowledgeBaseId"), max_length=160)
+    requested_knowledge_base_id = _trim_text(
+        result.get("scopedKnowledgeBaseId")
+        or decision.get("scopedKnowledgeBaseId")
+        or result.get("knowledgeBaseId")
+        or decision.get("knowledgeBaseId"),
+        max_length=256,
+    )
+    knowledge_base_id = _knowledge_base_raw_id(requested_knowledge_base_id)
+    scoped_knowledge_base_id = _knowledge_base_scoped_id_for_team(team_id, requested_knowledge_base_id)
     knowledge_base = None
     try:
         if not knowledge_base_id:
@@ -4969,8 +4977,9 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
                 name="Knowledge Expansion Library",
                 actor_agent_id=steward_agent_id,
             )
-            knowledge_base_id = _trim_text(knowledge_base.get("knowledgeBaseId"), max_length=160)
-        team_knowledge_service.ensure_knowledge_base_review_grant(knowledge_base_id, steward_agent_id)
+            knowledge_base_id = _knowledge_base_raw_id(knowledge_base.get("knowledgeBaseId"))
+            scoped_knowledge_base_id = _knowledge_base_scoped_id_for_team(team_id, knowledge_base_id, knowledge_base)
+        team_knowledge_service.ensure_knowledge_base_review_grant(scoped_knowledge_base_id, steward_agent_id)
         pack_record = record_local_research_model_output(
             team_id,
             {
@@ -4983,7 +4992,7 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
         source_pending = submit_steward_pack_to_knowledge_ingestion(
             team_id,
             pack_record["candidateId"],
-            {"knowledgeBaseId": knowledge_base_id, "proposedByAgentId": steward_agent_id},
+            {"knowledgeBaseId": scoped_knowledge_base_id, "proposedByAgentId": steward_agent_id},
         )
         ingestion = source_pending["candidate"].get("metadata", {}).get("knowledgeIngestion", {}) if isinstance(source_pending.get("candidate"), dict) else {}
         inbox_source_id = _trim_text(ingestion.get("inboxSourceId"), max_length=160)
@@ -4999,7 +5008,7 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
             team_id,
             pack_record["candidateId"],
             {
-                "knowledgeBaseId": knowledge_base_id,
+                "knowledgeBaseId": scoped_knowledge_base_id,
                 "proposedByAgentId": steward_agent_id,
                 "centralSourceId": central_source_id,
             },
@@ -5008,7 +5017,7 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
             team_id,
             pack_record["candidateId"],
             {
-                "knowledgeBaseId": knowledge_base_id,
+                "knowledgeBaseId": scoped_knowledge_base_id,
                 "reviewedByAgentId": steward_agent_id,
                 "decision": "approved",
                 "resolutionNote": _trim_text(decision.get("reason") or writeback.get("summary"), max_length=2000),
@@ -5017,6 +5026,8 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
     except (TeamWorkflowOrchestrationError, team_knowledge_service.TeamKnowledgeError, team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
         summary = _source_collection_stage_writeback_knowledge_ingestion_summary(
             status="failed",
+            knowledge_base_id=knowledge_base_id,
+            scoped_knowledge_base_id=scoped_knowledge_base_id,
             approved_candidate_ids=approved_candidate_ids,
             failed=[{"reason": "knowledge_ingestion_failed", "error": str(exc)}],
         )
@@ -5059,6 +5070,7 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
         status="completed",
         steward_pack_candidate_id=_trim_text(pack_record.get("candidateId"), max_length=160),
         knowledge_base_id=knowledge_base_id,
+        scoped_knowledge_base_id=scoped_knowledge_base_id,
         approved_candidate_ids=approved_candidate_ids,
         formal_knowledge_item_ids=knowledge_item_ids,
         source_pending=source_pending,
@@ -5657,6 +5669,7 @@ def _source_collection_stage_writeback_knowledge_ingestion_summary(
     status: str,
     steward_pack_candidate_id: str = "",
     knowledge_base_id: str = "",
+    scoped_knowledge_base_id: str = "",
     approved_candidate_ids: list[str] | None = None,
     formal_knowledge_item_ids: list[str] | None = None,
     source_pending: dict[str, Any] | None = None,
@@ -5683,6 +5696,7 @@ def _source_collection_stage_writeback_knowledge_ingestion_summary(
         "status": status,
         "stewardPackCandidateId": _trim_text(steward_pack_candidate_id, max_length=160),
         "knowledgeBaseId": _trim_text(knowledge_base_id, max_length=160),
+        "scopedKnowledgeBaseId": _trim_text(scoped_knowledge_base_id, max_length=256),
         "approvedCandidateCount": len(normalized_approved_ids),
         "approvedCandidateIds": normalized_approved_ids[:80],
         "formalKnowledgeItemCount": len(normalized_item_ids),
