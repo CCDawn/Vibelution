@@ -4143,6 +4143,9 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("data-rollout-trace-kind=\"RuntimeStarted\"");
     expect(html).toContain("data-rollout-trace-kind=\"RuntimeEnded\"");
     expect(html).toContain("data-rollout-trace-kind=\"ToolCallEnded\"");
+    expect(html).toContain("data-rollout-tool-call-id=\"tool_call:message-rollout-trace-feedback-1\"");
+    expect(html).toContain("data-rollout-terminal-operation-id=\"terminal_operation:0\"");
+    expect(html).toContain("data-rollout-terminal-id=\"terminal:message-rollout-trace-feedback-1\"");
     expect(html).toContain("调用开始");
     expect(html).toContain("运行开始");
     expect(html).toContain("运行结束");

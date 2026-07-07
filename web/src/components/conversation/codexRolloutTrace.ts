@@ -1,4 +1,11 @@
 import type { AgentMessageOperation } from "./agentMessageOperations";
+import {
+  buildCodexToolLifecycleModel,
+  type CodexTerminalModelObservation,
+  type CodexTerminalOperation,
+  type CodexToolCall,
+  type CodexToolLifecycleStatus,
+} from "./codexToolLifecycleModel";
 
 export type CodexRolloutTraceEventKind =
   | "ToolCallStarted"
@@ -14,6 +21,9 @@ export type CodexRolloutTraceEvent = {
   id: string;
   kind: CodexRolloutTraceEventKind;
   operationId: string;
+  toolCallId?: string;
+  terminalOperationId?: string;
+  terminalId?: string;
   sequence?: number;
   timestamp?: string;
   status: CodexRolloutTraceStatus;
@@ -26,31 +36,30 @@ export type CodexRolloutTraceEvent = {
   timedOut?: boolean;
   tracePath?: string;
   error?: string;
-};
-
-type RuntimeDiagnosticsOperation = AgentMessageOperation & {
-  exitCode?: number | null;
-  timedOut?: boolean;
+  modelObservationSource?: "DirectToolCall";
 };
 
 export function buildCodexRolloutTraceEvents(
   operations: AgentMessageOperation[] | AgentMessageOperation,
 ): CodexRolloutTraceEvent[] {
-  const normalizedOperations = Array.isArray(operations) ? operations : [operations];
-  return normalizedOperations.flatMap((operation) => eventsForOperation(operation));
+  const model = buildCodexToolLifecycleModel(operations);
+  return model.toolCalls.flatMap((toolCall) => eventsForToolCall(
+    toolCall,
+    model.terminalOperations.find((operation) => operation.operationId === toolCall.terminalOperationId),
+    model.modelObservations.find((observation) => observation.toolCallId === toolCall.toolCallId),
+  ));
 }
 
-function eventsForOperation(operation: AgentMessageOperation): CodexRolloutTraceEvent[] {
-  if (operation.kind !== "tool") {
-    return [];
-  }
-
-  const status = normalizeRolloutTraceStatus(operation.status);
-  const runtimeKind = rolloutRuntimeKind(operation);
+function eventsForToolCall(
+  toolCall: CodexToolCall,
+  terminalOperation?: CodexTerminalOperation,
+  modelObservation?: CodexTerminalModelObservation,
+): CodexRolloutTraceEvent[] {
+  const status = rolloutStatus(toolCall.status);
   const startStatus = status === "pending" ? "pending" : "running";
   const startedEvents: CodexRolloutTraceEvent[] = [
-    baseEvent(operation, "ToolCallStarted", startStatus, runtimeKind),
-    baseEvent(operation, "RuntimeStarted", startStatus, runtimeKind),
+    baseEvent(toolCall, "ToolCallStarted", startStatus, terminalOperation, modelObservation),
+    baseEvent(toolCall, "RuntimeStarted", startStatus, terminalOperation, modelObservation),
   ];
 
   if (status === "pending" || status === "running") {
@@ -59,45 +68,50 @@ function eventsForOperation(operation: AgentMessageOperation): CodexRolloutTrace
 
   return [
     ...startedEvents,
-    terminalEvent(operation, "RuntimeEnded", status, runtimeKind),
-    terminalEvent(operation, "ToolCallEnded", status, runtimeKind),
+    terminalEvent(toolCall, "RuntimeEnded", status, terminalOperation, modelObservation),
+    terminalEvent(toolCall, "ToolCallEnded", status, terminalOperation, modelObservation),
   ];
 }
 
 function baseEvent(
-  operation: AgentMessageOperation,
+  toolCall: CodexToolCall,
   kind: CodexRolloutTraceEventKind,
   status: CodexRolloutTraceStatus,
-  runtimeKind: CodexRolloutTraceRuntimeKind,
+  terminalOperation?: CodexTerminalOperation,
+  modelObservation?: CodexTerminalModelObservation,
 ): CodexRolloutTraceEvent {
   return compactEvent({
-    id: eventId(operation.id, kind),
+    id: eventId(toolCall.rawOperationId, kind),
     kind,
-    operationId: operation.id,
-    sequence: operation.sequence,
-    timestamp: operation.timestamp,
+    operationId: toolCall.rawOperationId,
+    toolCallId: toolCall.toolCallId,
+    terminalOperationId: terminalOperation?.operationId,
+    terminalId: terminalOperation?.terminalId,
+    sequence: toolCall.sequence,
+    timestamp: toolCall.timestamp,
     status,
-    title: operation.label,
-    summary: compactText(operation.summary),
-    runtimeKind,
-    rawToolName: rawToolName(operation),
+    title: toolCall.title,
+    summary: compactText(toolCall.summary),
+    runtimeKind: toolCall.runtimeKind,
+    rawToolName: toolCall.rawToolName,
+    modelObservationSource: modelObservation?.source,
   });
 }
 
 function terminalEvent(
-  operation: AgentMessageOperation,
+  toolCall: CodexToolCall,
   kind: CodexRolloutTraceEventKind,
   status: CodexRolloutTraceStatus,
-  runtimeKind: CodexRolloutTraceRuntimeKind,
+  terminalOperation?: CodexTerminalOperation,
+  modelObservation?: CodexTerminalModelObservation,
 ): CodexRolloutTraceEvent {
-  const diagnostics = operation as RuntimeDiagnosticsOperation;
   return compactEvent({
-    ...baseEvent(operation, kind, status, runtimeKind),
-    durationSeconds: numberOrNull(operation.durationSeconds),
-    exitCode: numberOrNull(diagnostics.exitCode),
-    timedOut: typeof diagnostics.timedOut === "boolean" ? diagnostics.timedOut : undefined,
-    tracePath: compactText(operation.tracePath),
-    error: compactText(operation.error || (status === "failed" ? operation.summary : "")),
+    ...baseEvent(toolCall, kind, status, terminalOperation, modelObservation),
+    durationSeconds: numberOrNull(terminalOperation?.durationSeconds),
+    exitCode: numberOrNull(terminalOperation?.result?.exitCode),
+    timedOut: typeof terminalOperation?.result?.timedOut === "boolean" ? terminalOperation.result.timedOut : undefined,
+    tracePath: compactText(terminalOperation?.tracePath || toolCall.tracePath),
+    error: compactText(toolCall.error || terminalOperation?.result?.stderr),
   });
 }
 
@@ -111,50 +125,8 @@ function eventId(operationId: string, kind: CodexRolloutTraceEventKind) {
   return `${operationId}-${suffix[kind]}`;
 }
 
-function rolloutRuntimeKind(operation: AgentMessageOperation): CodexRolloutTraceRuntimeKind {
-  const haystack = [
-    operation.rawLabel,
-    operation.label,
-    operation.summary,
-  ].map((item) => String(item ?? "").toLowerCase()).join(" ");
-  if ([
-    "cli_tool",
-    "exec",
-    "shell",
-    "command",
-    "powershell",
-    "cmd.exe",
-    "bash",
-    "npm ",
-    "pytest",
-    "vitest",
-    "rg ",
-    "命令",
-  ].some((marker) => haystack.includes(marker))) {
-    return "terminal";
-  }
-  return "tool";
-}
-
-function normalizeRolloutTraceStatus(status: string | undefined): CodexRolloutTraceStatus {
-  const normalized = String(status ?? "").trim().toLowerCase();
-  if (["failed", "error", "failure", "timeout", "timed_out", "cancelled"].includes(normalized)) {
-    return "failed";
-  }
-  if (["degraded", "fallback", "partial", "recovered", "unavailable"].includes(normalized)) {
-    return "degraded";
-  }
-  if (["queued", "pending"].includes(normalized)) {
-    return "pending";
-  }
-  if (["running", "thinking", "tooling", "answering", "streaming"].includes(normalized)) {
-    return "running";
-  }
-  return "completed";
-}
-
-function rawToolName(operation: AgentMessageOperation) {
-  return compactText(operation.rawLabel || operation.label);
+function rolloutStatus(status: CodexToolLifecycleStatus): CodexRolloutTraceStatus {
+  return status;
 }
 
 function compactEvent(event: CodexRolloutTraceEvent): CodexRolloutTraceEvent {
