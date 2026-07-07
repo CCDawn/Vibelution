@@ -1,6 +1,6 @@
 # Vibelution
 
-> 仓库状态快照：2026-06-19
+> 仓库入口说明：README 提供静态入门说明；当前工作状态以 `.docs/project-memory/INDEX.md`、`PROJECT_MEMORY.html` 和 guard claim 状态为准。
 
 Vibelution 是一个本地优先的 AI Agent 工作台。它把编码对话、仓库阅读、Git 局势、自进化、监督评测、运行现场日志和模型配置收进同一套 Python runtime + FastAPI + React Web surface 里，让 agent 能在一个可观察、可回滚、可验证的工程环境中持续改进。
 
@@ -298,11 +298,13 @@ CI 通常覆盖：
 | [DEVELOPMENT_STANDARD.md](DEVELOPMENT_STANDARD.md) | 仓库协作约束与工程规范 |
 | [INDEX.md](INDEX.md) | 项目索引 |
 | [docs/README.md](docs/README.md) | 文档索引与归档边界 |
+| [.docs/project-memory/INDEX.md](.docs/project-memory/INDEX.md) | 当前项目记忆、lane 状态与 claim 入口 |
+| [PROJECT_MEMORY.html](PROJECT_MEMORY.html) | 人类可读项目记忆看板 |
 | [CONTEXT.md](CONTEXT.md) | 运行上下文说明 |
 | [core/core_prompt/SOUL.md](core/core_prompt/SOUL.md) | 核心使命与行为边界 |
 | [core/core_prompt/SPEC.md](core/core_prompt/SPEC.md) | 核心开发规范 |
 
-本地协作入口 `AGENTS.md`、`PROJECT_MEMORY.html` 和 `.docs/project-memory/INDEX.md` 由当前工作区维护；它们可能不会出现在干净 clone 或独立 worktree 中。
+本地协作入口 `AGENTS.md` 由当前工作区维护；它可能不会出现在干净 clone 或独立 worktree 中。项目记忆入口 `.docs/project-memory/INDEX.md` 和 `PROJECT_MEMORY.html` 是当前工作状态的权威读物。
 
 ## License
 

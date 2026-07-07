@@ -63,15 +63,20 @@ Inside its own worktree, an Agent should:
 - check `git status --short --branch` before staging;
 - stage only files that belong to the current task;
 - run the narrowest useful validation;
-- commit locally; do not push to GitHub unless the user explicitly authorizes remote sync or publication;
-- report the worktree path, branch, local commit SHA, changed files, validation result, Launcher refresh need, and project-memory update proposal.
+- commit locally;
+- self-review the diff and merge readiness before handoff;
+- merge its own task branch into local `main` when the local merge gates pass, then run targeted post-merge validation and close its claim;
+- hand off to the main integration session only for large conflicts, cross-lane conflicts, hot-file/active-claim conflicts, release-sensitive work, unclear semantic conflicts, or explicit user-designated integration;
+- never push to GitHub unless the user explicitly authorizes remote sync or publication;
+- report the worktree path, branch, local commit SHA, changed files, validation result, Launcher refresh need, project-memory update proposal, and whether it self-merged or why it could not.
 
 ## Main Integration Responsibilities
 
 The session currently closing work into `main` should:
 
 - keep the main workspace clean before each merge;
-- refuse to merge any claim that is not in `ready_for_merge`;
+- expect task-owning Agents to self-review and self-merge routine clean branches before asking for integration help;
+- refuse to merge any claim that is not in `ready_for_merge` unless it is doing an explicit mainline repair or user-designated integration pass;
 - abort and restore `main` immediately if a blocked branch is accidentally merged and produces conflicts;
 - merge one task branch at a time;
 - run targeted validation after each merge;
@@ -81,6 +86,8 @@ The session currently closing work into `main` should:
 - clean merged task worktrees.
 
 When a branch cannot merge cleanly, leave the task in its own worktree and mark the claim `blocked` with the conflicting files and next action. Do not keep conflict markers, staged partial resolutions, or an in-progress merge in the main integration workspace. The owning Agent should rebase/merge against the current local `main` or create a new conflict-resolved commit, then re-enter the queue as a fresh `ready_for_merge` claim. Use `origin/main` only when the user explicitly asks to align with GitHub.
+
+Small conflicts contained entirely inside the owning Agent's claimed files should normally be fixed by that Agent in its task worktree, followed by a fresh commit, validation, and local self-merge attempt. Main integration waits for or takes over only when the conflict is large, cross-lane, active-claim blocked, semantically ambiguous, release-sensitive, or explicitly assigned by the user.
 
 ## Cleanup
 

@@ -1,5 +1,7 @@
 # 2026-05-19 Scoped Commit Recipes
 
+> Status: Historical governance snapshot from 2026-05-19. Use `DEVELOPMENT_STANDARD.md`, `AGENTS.md`, and current `.docs/project-memory/` files for active rules.
+
 ## Purpose
 
 This note turns the three active line reports into commit-boundary guidance so later

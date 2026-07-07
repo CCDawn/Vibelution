@@ -1,7 +1,7 @@
 # Vibelution 项目索引
 
-**版本：** v7.3
-**日期：** 2026-06-19
+**版本：** v7.4
+**日期：** 2026-07-04
 **用途：** AI Agent 执行任务的执行参数（结构说明已与仓库同步）
 
 ---
@@ -53,7 +53,7 @@ Vibelution/
 
 | 文件 | 版本 | 更新日期 |
 |------|------|----------|
-| INDEX.md | v7.3 | 2026-06-19 |
+| INDEX.md | v7.4 | 2026-07-04 |
 | SOUL.md | v4.1 | 2026-04-30 |
 | SPEC.md | v4.5 | 2026-04-30 |
 
@@ -65,7 +65,7 @@ Vibelution/
 |------|------|----------|
 | agent.py 体量 | 优先将新逻辑放入 `core/`，入口保持黏合与循环 | ⚠️ 约 2.5k 行；近期偏运维稳定性，结构收敛节奏放缓 |
 | Core First 规范 | 必须执行 | ✅ 已建立 |
-| 测试 | 变更后跑相关 `pytest`；全量见下 | ✅ `tests/` 下逾 140 个测试文件 |
+| 测试 | 变更后跑相关 `pytest`；全量见下 | ✅ `tests/test_*.py` 按功能面持续增长，数量以 `tests/README.md` 中的统计命令为准 |
 | 单文件红线 | core/web/services 与前端 route 控制在 ~2k 行内 | ⚠️ session_service.py 约 1.3w 行、ChatCodingRoute.tsx 约 6.4k 行需拆 |
 
 ---
@@ -121,7 +121,7 @@ Vibelution/
 | 2 | P0 | 拆分 `web/src/routes/ChatCodingRoute.tsx`（~6.4k 行） | 📋 待办 |
 | 3 | P1 | 给 `log_info/` / `.runtime/` / `backups/` 落地本地 retention 策略 | 📋 进行中 |
 | 4 | P1 | 生产环境锁定 Python 3.11–3.12 并文档化 CI 镜像 | 📋 待办 |
-| 5 | P2 | 把 `挑战杯/` 子项目归位（拆 submodule 或挪到 docs/） | 📋 待办 |
+| 5 | P2 | 明确 `挑战杯/` 子项目归属：保留当前根目录入口或迁移前同步 flow 站点与项目记忆 | 📋 待决策 |
 | 6 | P2 | 优化 `core/prompt_manager/builder.py` 可读性 | 📋 待办 |
 
 ---
@@ -145,7 +145,7 @@ Vibelution/
 
 - [x] Core First 规范已建立
 - [x] 索引与 README 已与当前目录树对齐（持续随提交更新）
-- [x] 测试套件：`tests/` 下逾 140 文件（以本地收集为准）
+- [x] 测试套件：`tests/test_*.py` 按功能面持续增长，数量以 `tests/README.md` 中的统计命令为准
 - [ ] agent.py 体量偏大，按任务表继续收敛
 - [ ] 超大单文件（session_service.py / ChatCodingRoute.tsx）尚未拆分
 
@@ -155,6 +155,7 @@ Vibelution/
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| v7.4 | 2026-07-04 | 对齐 guard 命令到 `status/check/claim/release`；补充 `docs/superpowers/` 入口；将 README 状态说明委托给项目记忆；修正测试文档编号 |
 | v7.3 | 2026-06-19 | 增加 docs 入口；将 2026-05 历史计划归档到 docs/archive/plans/2026-05；刷新 README/INDEX 文档边界 |
 | v7.2 | 2026-06-05 | 补齐缺失子目录（chatroom/code_context_graph/llm/research/workspace）；修正 agent.py 行数；重排 P0/P1 待办，新增单文件红线约束与日志 retention 项 |
 | v7.1 | 2026-05-21 | 删除重复的根目录 reset.py，Reset 入口统一到 Web 工作台白名单清理动作面 |
