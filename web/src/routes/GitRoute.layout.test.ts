@@ -73,10 +73,13 @@ describe("GitRoute layout contract", () => {
   });
 
   it("keeps Git workspaces fluid on mobile and avoids hard desktop column floors", () => {
+    expect(gitRouteStyles.route).toContain("overflow-hidden");
+    expect(gitRouteStyles.route).toContain("overflow-x-hidden");
     expect(gitRouteStyles.workspace).toContain("min-w-0");
     expect(gitRouteStyles.workspace).toContain("minmax(0,1fr)");
     expect(gitRouteStyles.workspace).not.toMatch(/minmax\((500|520)px/);
     expect(gitRouteStyles.workspace).toContain("max-[860px]:grid-cols-[minmax(0,1fr)]");
+    expect(gitRouteStyles.workspace).toContain("max-[860px]:content-start");
     expect(gitRouteStyles.workspaceOverview).toContain("minmax(0,1fr)");
     expect(gitRouteStyles.workspaceOverview).not.toMatch(/minmax\((500|520)px/);
     expect(gitRouteStyles.workspaceOverview).toContain("max-[860px]:grid-cols-[minmax(0,1fr)]");
@@ -111,18 +114,36 @@ describe("GitRoute layout contract", () => {
       expect(gitRouteStyles[key]).not.toContain("bg-[var(--surface-card)]");
     }
     expect(gitRouteStyles.commitActions).toContain("grid-cols-[repeat(2,max-content)]");
+    expect(gitRouteStyles.commitActions).toContain("max-[520px]:grid-cols-[1fr]");
+  });
+
+  it("keeps Git summary and list rows dense without stretching controls", () => {
+    expect(gitRouteStyles.summaryGrid).toContain("grid-cols-[repeat(6,minmax(0,1fr))]");
+    expect(gitRouteStyles.summaryGrid).toContain("max-[1180px]:grid-cols-[repeat(3,minmax(0,1fr))]");
+    expect(gitRouteStyles.summaryGrid).toContain("max-[640px]:grid-cols-1");
+    expect(gitRouteStyles.summaryCard).toContain("px-2");
+    expect(gitRouteStyles.summaryCard).toContain("py-[5px]");
+    expect(gitRouteStyles.changePanel).toContain("gap-1.5");
+    expect(gitRouteStyles.changePanel).toContain("p-2");
+    expect(gitRouteStyles.commitPanel).toContain("gap-1.5");
+    expect(gitRouteStyles.fileButton).toContain("grid-cols-[22px_34px_minmax(0,1fr)]");
+    expect(gitRouteStyles.fileButton).toContain("p-[6px]");
+    expect(gitRouteStyles.fileButtonActive).toContain("grid-cols-[22px_34px_minmax(0,1fr)]");
   });
 
   it("keeps Git diff surfaces on lightweight VUI panels without losing code scroll semantics", () => {
     expect(diffStyles.surfaceClass).toContain("bg-vui-surface-panel");
     expect(diffStyles.surfaceClass).not.toContain("bg-[var(--surface-panel)]");
     expect(diffStyles.headerClass).toContain("border-vui-border-hairline");
+    expect(diffStyles.headerClass).toContain("max-[640px]:flex-wrap");
+    expect(diffStyles.fileNameClass).toContain("truncate");
     expect(diffStyles.diffWrapClass).toContain("overflow-auto");
     expect(diffStyles.diffWrapClass).toContain("bg-[var(--surface-code)]");
     expect(diffStyles.diffTableClass).toContain("w-max");
+    expect(diffStyles.diffTableClass).toContain("leading-[1.42]");
     expect(diffStyles.lineContentClass).toContain("whitespace-pre");
     expect(diffStyles.columnHeaderClass).toContain("sticky");
-    expect(diffStylesSource).toContain("grid-cols-[54px_54px_24px_minmax(0,1fr)]");
+    expect(diffStylesSource).toContain("grid-cols-[46px_46px_20px_minmax(0,1fr)]");
   });
 
   it("keeps commit actions scoped to selected files", () => {
@@ -174,7 +195,7 @@ describe("GitRoute layout contract", () => {
     const manualCommitStyles = stylesSource.slice(stylesSource.indexOf("manualCommitPanel:"));
     const actionStyles = stylesSource.slice(stylesSource.indexOf("commitActions:"));
 
-    expect(manualCommitStyles).toContain("max-h-[min(100%,calc(100dvh-190px))]");
+    expect(manualCommitStyles).toContain("max-h-[min(100%,calc(100dvh-178px))]");
     expect(manualCommitStyles).toContain("overflow-auto");
     expect(actionStyles).toContain("grid-cols-[repeat(2,max-content)]");
     expect(actionStyles).toContain("justify-end");
@@ -202,7 +223,7 @@ describe("GitRoute layout contract", () => {
     expect(commitItemStyles).toContain("min-w-0");
     expect(routeSource).toContain("<VNativeButton");
     expect(commitItemStyles).toContain("grid");
-    expect(commitItemStyles).toContain("min-h-[72px]");
+    expect(commitItemStyles).toContain("min-h-[62px]");
     expect(commitItemStyles).not.toContain("!grid");
     expect(commitItemStyles).not.toContain("data-slot=vui-button-content");
     expect(commitItemStyles).not.toContain("data-slot=vui-button-label");

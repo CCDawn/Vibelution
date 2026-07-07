@@ -31,6 +31,7 @@ type TeamSourceCollectionActiveStagePanelProps = {
   agentConfigAction: ReactNode;
   errors: ReactNode;
   renderConversationPanel: () => ReactNode;
+  compact?: boolean;
   renderCandidatePanel: () => ReactNode;
   renderScreeningPanel: () => ReactNode;
   renderGraphPanel: () => ReactNode;
@@ -50,6 +51,7 @@ export function TeamSourceCollectionActiveStagePanel({
   agentConfigAction,
   errors,
   renderConversationPanel,
+  compact = false,
   renderCandidatePanel,
   renderScreeningPanel,
   renderGraphPanel,
@@ -74,7 +76,7 @@ export function TeamSourceCollectionActiveStagePanel({
         : renderConversationPanel();
 
   return (
-    <section className={styles.sourceCollectionStageWorkspace} aria-label={lang === "zh" ? "当前阶段子页" : "Current stage workspace"}>
+    <section className={compact ? styles.sourceCollectionStageWorkspaceCompact : styles.sourceCollectionStageWorkspace} aria-label={lang === "zh" ? "当前阶段子页" : "Current stage workspace"}>
       <div className={styles.sourceCollectionStageWorkspaceHeader}>
         <div>
           <strong>{title}</strong>

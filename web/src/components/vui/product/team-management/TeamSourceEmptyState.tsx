@@ -15,7 +15,7 @@ export type TeamSourceEmptyStateProps = {
 };
 
 const PANEL =
-  "grid min-w-0 self-start items-start gap-2 rounded-[var(--radius-control)] border border-dashed " +
+  "grid min-w-0 w-full items-start gap-2 rounded-[var(--radius-control)] border border-dashed " +
   "border-[color:color-mix(in_srgb,var(--accent-cool)_26%,var(--border-soft))] " +
   "bg-[color:color-mix(in_srgb,var(--accent-cool)_5%,var(--source-workbench-card))] px-3 py-2.5 text-left max-[560px]:gap-1.5 max-[560px]:px-2 max-[560px]:py-2";
 

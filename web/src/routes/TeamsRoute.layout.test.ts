@@ -11,6 +11,7 @@ import teamSourceCollectionCandidatePanelSource from "./TeamSourceCollectionCand
 import teamSourceCollectionCandidatePanelStyles from "./TeamSourceCollectionCandidatePanel.styles";
 import teamSourceCollectionConversationPanelSource from "./TeamSourceCollectionConversationPanel.tsx?raw";
 import teamSourceCollectionConversationPanelStyles from "./TeamSourceCollectionConversationPanel.styles";
+import teamSourceCollectionConversationPanelStylesSource from "./TeamSourceCollectionConversationPanel.styles.ts?raw";
 import teamSourceCollectionControlsPanelSource from "./TeamSourceCollectionControlsPanel.tsx?raw";
 import teamSourceCollectionControlsPanelStyles from "./TeamSourceCollectionControlsPanel.styles";
 import teamSourceCollectionExtractionRecoveryPanelSource from "./TeamSourceCollectionExtractionRecoveryPanel.tsx?raw";
@@ -40,6 +41,7 @@ import teamSourceCollectionRunSwitcherPanelStyles from "./TeamSourceCollectionRu
 import teamSourceCollectionSourceDetailPanelSource from "./TeamSourceCollectionSourceDetailPanel.tsx?raw";
 import teamSourceCollectionSourceDetailPanelStyles from "./TeamSourceCollectionSourceDetailPanel.styles";
 import teamSourceCollectionStandaloneStagePanelSource from "./TeamSourceCollectionStandaloneStagePanel.tsx?raw";
+import teamSourceCollectionStandaloneStagePanelStyles from "./TeamSourceCollectionStandaloneStagePanel.styles";
 import teamSourceCollectionStorageActionsPanelSource from "./TeamSourceCollectionStorageActionsPanel.tsx?raw";
 import teamSourceCollectionStorageActionsPanelStyles from "./TeamSourceCollectionStorageActionsPanel.styles";
 import teamWorkflowCandidatePreviewPanelSource from "./TeamWorkflowCandidatePreviewPanel.tsx?raw";
@@ -76,6 +78,7 @@ const sourceCollectionLocalStyles = {
   ...teamSourceCollectionScreeningPanelStyles,
   ...teamSourceCollectionSourceDetailPanelStyles,
   ...teamSourceCollectionStageAgentsPanelStyles,
+  ...teamSourceCollectionStandaloneStagePanelStyles,
 };
 
 const routeStyles = {
@@ -1420,13 +1423,15 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.workflowSuccess).toBeTypeOf("string");
     expect(routeStyles.workflowError).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionPage).toBeTypeOf("string");
-    expect(routeStyles.sourceCollectionPageGrid).toBeTypeOf("string");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageGrid).toBeTypeOf("string");
     expect(routeStyles.sourceCollectionRunBadge).toBeTypeOf("string");
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionExtractionPanels).toBeTypeOf("string");
     expect(teamSourceCollectionConversationPanelStyles.sourceCollectionConversationPanel).toBeTypeOf("string");
     expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultsPanel).toBeTypeOf("string");
     expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultsHeader).toBeTypeOf("string");
     expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultWarning).toBeTypeOf("string");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionConversationPanelCompact).toBeTypeOf("string");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultsPanelCompact).toBeTypeOf("string");
     expect(teamSourceCollectionRunSwitcherPanelStyles.sourceCollectionRunSwitcher).toBeTypeOf("string");
     expect(teamSourceCollectionRunSwitcherPanelStyles.sourceCollectionRunSwitcherMain).toBeTypeOf("string");
     expect(teamSourceCollectionRunSwitcherPanelStyles.sourceCollectionRunSwitcherStats).toBeTypeOf("string");
@@ -1446,7 +1451,8 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceEmptyStateSource).toContain('data-slot="source-empty-facts"');
     expect(teamSourceEmptyStateSource).toContain("actions");
     expect(teamSourceEmptyStateSource).toContain("border-dashed");
-    expect(teamSourceEmptyStateSource).toContain("self-start");
+    expect(teamSourceEmptyStateSource).toContain("w-full");
+    expect(teamSourceEmptyStateSource).not.toContain("self-start");
     expect(teamSourceEmptyStateSource).toContain("max-[560px]:grid-cols-[repeat(2,minmax(0,1fr))]");
     expect(teamSourceCollectionSourceDetailPanelStyles.sourceCollectionSourceDetailPanel).toBeTypeOf("string");
     expect(teamSourceCollectionSourceDetailPanelStyles.sourceCollectionSourceDetailActions).toBeTypeOf("string");
@@ -1524,36 +1530,91 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspace).toContain("h-full");
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspace).toContain("min-h-[360px]");
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspace).toContain("overflow-hidden");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspaceCompact).toBeTypeOf("string");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspaceCompact).toContain("h-auto");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspaceCompact).toContain("min-h-0");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspaceCompact).toContain("shrink-0");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspaceCompact).toContain("grid-rows-[auto_auto]");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspaceCompact).toContain("overflow-visible");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspaceCompact).not.toContain("h-full");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspaceCompact).not.toContain("min-h-[360px]");
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspace).toContain("gap-[var(--team-workbench-gap)]");
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspace).toContain("p-[var(--team-workbench-gap)]");
-    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspace).toContain("max-[760px]:h-auto");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspace).toContain("max-[760px]:!h-auto");
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspace).toContain("max-[760px]:grid-rows-[auto_auto]");
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspace).toContain("max-[760px]:overflow-visible");
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageWorkspaceHeader).toContain("grid-cols-[minmax(0,1fr)_minmax(260px,0.7fr)_max-content]");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageChatActions).toContain("max-[720px]:!flex");
     expect(routeStyles.sourceCollectionPageBody).toContain("!grid");
     expect(routeStyles.sourceCollectionPageBody).toContain("h-full");
     expect(routeStyles.sourceCollectionPageBody).toContain("grid-rows-[auto_auto_auto_minmax(0,1fr)]");
     expect(routeStyles.sourceCollectionPageBody).toContain("max-[760px]:grid-rows-[auto_auto_auto_auto]");
+    expect(routeStyles.sourceCollectionPageBody).toContain("max-[760px]:content-start");
     expect(routeStyles.sourceCollectionPageBody).toContain("w-full");
     expect(routeStyles.sourceCollectionPageBody).toContain("max-w-none");
     expect(routeStyles.sourceCollectionPageBody).not.toContain("mx-auto");
     expect(routeStyles.sourceCollectionPageBody).not.toContain("max-w-[1480px]");
     expect(routeStyles.sourceCollectionPageBody).toContain("gap-[var(--team-workbench-gap)]");
     expect(routeStyles.sourceCollectionPageBody).toContain("p-[var(--team-workbench-gap)]");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageBodyCompact).toBeTypeOf("string");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageBodyCompact).toContain("!flex");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageBodyCompact).toContain("flex-col");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageBodyCompact).toContain("overflow-auto");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageBodyCompact).toContain("[&>*]:shrink-0");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageBodyCompact).not.toContain("grid-rows-[auto_auto_auto_minmax(0,1fr)]");
+    expect(teamSourceCollectionStandaloneStagePanelSource).toContain("compactActivePanel ? styles.sourceCollectionPageBodyCompact : styles.sourceCollectionPageBody");
     expect(teamSourceCollectionConversationPanelStyles.sourceCollectionConversationPanel).toContain("h-full");
     expect(teamSourceCollectionConversationPanelStyles.sourceCollectionConversationPanel).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(teamSourceCollectionConversationPanelStyles.sourceCollectionConversationPanel).toContain("overflow-hidden");
-    expect(routeStyles.sourceCollectionPageGrid).toContain("min-h-0");
-    expect(routeStyles.sourceCollectionPageGrid).toContain("h-full");
-    expect(routeStyles.sourceCollectionPageGrid).toContain("gap-[var(--team-workbench-gap)]");
-    expect(routeStyles.sourceCollectionPageGrid).toContain("max-[760px]:content-start");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionConversationPanel).toContain("max-[760px]:!h-auto");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionConversationPanel).toContain("max-[760px]:grid-rows-[auto_auto]");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionConversationPanel).toContain("max-[760px]:overflow-visible");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageGrid).toContain("min-h-0");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageGrid).toContain("h-full");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageGrid).toContain("gap-[var(--team-workbench-gap)]");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageGrid).toContain("max-[760px]:!flex");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageGrid).toContain("max-[760px]:!h-auto");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageGrid).toContain("max-[760px]:flex-col");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageGrid).toContain("max-[760px]:content-start");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageGrid).toContain("max-[760px]:overflow-visible");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageGridCompact).toBeTypeOf("string");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageGridCompact).toContain("!flex");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageGridCompact).toContain("h-auto");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageGridCompact).toContain("flex-col");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageGridCompact).toContain("shrink-0");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageGridCompact).toContain("content-start");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageGridCompact).toContain("overflow-visible");
+    expect(teamSourceCollectionStandaloneStagePanelStyles.sourceCollectionPageGridCompact).not.toContain("h-full");
+    expect(teamSourceCollectionStandaloneStagePanelSource).toContain("compactActivePanel");
     expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultsPanel).toContain("min-h-0");
     expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultsPanel).toContain("!flex");
     expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultsPanel).toContain("flex-col");
     expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultsPanel).toContain("overflow-hidden");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultsPanel).toContain("max-[760px]:!h-auto");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultsPanel).toContain("max-[760px]:overflow-visible");
     expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultsPanel).toContain("max-[760px]:min-h-0");
     expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultsPanel).not.toContain("min-h-[260px]");
     expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultsPanel).not.toContain("min-h-[210px]");
+    expect(teamSourceCollectionConversationPanelSource).toContain("compact");
+    expect(teamSourceCollectionConversationPanelSource).toContain("sourceCollectionResultsPanelCompact");
+    expect(routeSource).toContain("const sourceCollectionConversationHasVisibleResults = visibleResults.length > 0");
+    expect(routeSource).toContain("const sourceCollectionConversationCompact = !sourceCollectionConversationHasVisibleResults");
+    expect(routeSource).toContain("compact={sourceCollectionConversationCompact}");
+    expect(routeSource).toContain("const sourceCollectionActiveStageCompact =");
+    expect(routeSource).toContain("compact={sourceCollectionActiveStageCompact}");
+    expect(routeSource).toContain("const sourceCollectionFindingHasVisibleRecords =");
+    expect(routeSource).toContain("&& !sourceCollectionFindingHasVisibleRecords");
+    expect(routeSource).toContain("compactActivePanel={sourceCollectionFindingStageCompact}");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionConversationPanelCompact).toContain("h-auto");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionConversationPanelCompact).toContain("shrink-0");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionConversationPanelCompact).toContain("grid-rows-[auto_auto]");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionConversationPanelCompact).not.toContain("h-full");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionConversationPanelCompact).not.toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultsPanelCompact).toContain("self-start");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultsPanelCompact).toContain("shrink-0");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultsPanelCompact).toContain("overflow-visible");
+    expect(teamSourceCollectionConversationPanelStyles.sourceCollectionResultsPanelCompact).not.toContain("overflow-hidden");
+    expect(teamSourceCollectionConversationPanelStylesSource).not.toContain("sourceCollectionConversationPanelCompact:\n    \"sourceCollectionConversationPanelCompact h-full");
     expect(teamSourceResultListSource).toContain("flex-1");
     expect(teamSourceResultListSource).toContain("overflow-auto");
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionExtractionPanels).toContain("grid-cols-[minmax(0,1fr)]");
@@ -2212,7 +2273,7 @@ describe("TeamsRoute layout contract", () => {
 
     const stageCardSource = teamSourceCollectionStandaloneStagePanelSource.slice(
       teamSourceCollectionStandaloneStagePanelSource.indexOf("<TeamStagePipeline"),
-      teamSourceCollectionStandaloneStagePanelSource.indexOf("<div className={styles.sourceCollectionPageGrid}>"),
+      teamSourceCollectionStandaloneStagePanelSource.indexOf("<div className={compactActivePanel"),
     );
     expect(stageCardSource).toContain("TeamStageCard");
     expect(stageCardSource).toContain("tone={module.tone}");

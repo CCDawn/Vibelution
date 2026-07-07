@@ -4,31 +4,31 @@ const rowSurfaceSoft = "rounded-[var(--radius-control)] border border-vui-border
 const controlSurface = "border border-vui-border-subtle bg-vui-control-muted hover:bg-vui-control-muted-hover";
 
 export const selfEvolutionTrackStyles = {
-  pageStack: "grid h-full max-h-full min-h-0 min-w-0 max-w-full overflow-hidden overflow-x-hidden max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
+  pageStack: "grid h-full max-h-full min-h-0 min-w-0 max-w-full overflow-hidden overflow-x-hidden rounded-[var(--radius-panel)] bg-vui-surface-panel max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
   trackShell:
-    "grid h-full max-h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden overflow-x-hidden rounded-[var(--radius-panel)] border border-vui-border-subtle bg-[color-mix(in_srgb,var(--vui-surface-panel)_96%,var(--vui-surface-base))] p-2.5 max-[1180px]:h-auto max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
+    "grid h-full max-h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden overflow-x-hidden rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-panel p-3 max-[1180px]:h-auto max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden max-[760px]:p-2",
   trackBody:
-    "min-h-0 min-w-0 max-w-full overflow-hidden overflow-x-hidden pt-2.5 max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
+    "min-h-0 min-w-0 max-w-full overflow-hidden overflow-x-hidden pt-2 max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
   pageTabsRow:
-    "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 border-b border-vui-border-subtle pb-2.5 max-[1180px]:grid-cols-1 max-[1180px]:items-stretch",
+    "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 border-b border-vui-border-subtle pb-2 max-[1180px]:grid-cols-1 max-[1180px]:items-stretch",
   runActionBar:
-    "grid min-h-[56px] min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-1 py-1 max-[900px]:grid-cols-1",
+    "grid min-h-[42px] min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 px-1 py-0 max-[900px]:grid-cols-1",
   runActionMain: "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2.5",
-  runActionText: "grid min-w-0 gap-1 [&_strong]:truncate [&_strong]:text-[0.98rem] [&_strong]:text-[var(--fg-primary)] [&_span]:line-clamp-1 [&_span]:text-[var(--vui-font-xs)] [&_span]:leading-normal [&_span]:text-[var(--fg-secondary)]",
+  runActionText: "grid min-w-0 gap-1 [&_strong]:overflow-wrap-anywhere [&_strong]:text-[1rem] [&_strong]:leading-tight [&_strong]:text-[var(--fg-primary)] [&>span]:line-clamp-2 [&>span]:text-[var(--vui-font-sm)] [&>span]:leading-normal [&>span]:text-[var(--fg-secondary)]",
   runActionMeta: "flex min-w-0 flex-wrap items-center gap-1.5",
   runActionCluster: "flex flex-wrap items-center justify-end gap-2 max-[900px]:justify-start",
   primaryAction:
-    "inline-flex min-h-[38px] w-fit max-w-full cursor-pointer items-center justify-center gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_12%,var(--vui-control-muted))] px-3.5 font-semibold text-vui-fg-primary disabled:cursor-default disabled:opacity-50",
+    "inline-flex min-h-8 w-fit max-w-full cursor-pointer items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_12%,var(--vui-control-muted))] px-3 text-[var(--vui-font-sm)] font-semibold text-vui-fg-primary disabled:cursor-default disabled:opacity-50",
   dangerAction:
-    "inline-flex min-h-[38px] w-fit max-w-full cursor-pointer items-center justify-center gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_30%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_9%,var(--vui-control-muted))] px-3.5 font-semibold text-[var(--state-error)] disabled:cursor-default disabled:opacity-50",
+    "inline-flex min-h-8 w-fit max-w-full cursor-pointer items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_30%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_9%,var(--vui-control-muted))] px-3 text-[var(--vui-font-sm)] font-semibold text-[var(--state-error)] disabled:cursor-default disabled:opacity-50",
   workspaceLayout:
-    "grid h-full max-h-full min-h-0 min-w-0 max-w-full grid-cols-[var(--self-sidebar-width,304px)_10px_minmax(0,1fr)] items-stretch overflow-hidden overflow-x-hidden max-[1180px]:h-auto max-[1180px]:grid-cols-1 max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
+    "grid h-full max-h-full min-h-0 min-w-0 max-w-full grid-cols-[var(--self-sidebar-width,360px)_10px_minmax(0,1fr)] items-stretch overflow-hidden overflow-x-hidden max-[1180px]:h-auto max-[1180px]:grid-cols-1 max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
   sideColumn: "grid min-w-0 gap-3",
   sideColumnScrollable: "h-full overflow-y-auto pr-1.5 max-[1180px]:h-auto max-[1180px]:overflow-visible",
   paneCollapsed: "overflow-hidden p-0 invisible",
-  centerColumn: "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] gap-2.5 overflow-hidden overflow-x-hidden max-[1180px]:h-auto max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
+  centerColumn: "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden overflow-x-hidden max-[1180px]:h-auto max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
   centerColumnObservation: "grid-rows-[minmax(0,1fr)]",
-  conversationShell: "grid h-full max-h-full min-h-0 min-w-0 max-w-full overflow-hidden overflow-x-hidden max-[1180px]:h-auto max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden max-[760px]:h-[min(72vh,720px)] max-[760px]:min-h-[540px]",
+  conversationShell: "grid h-full max-h-full min-h-[420px] min-w-0 max-w-full overflow-hidden overflow-x-hidden rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-panel max-[1180px]:h-[min(74vh,760px)] max-[1180px]:overflow-hidden max-[1180px]:overflow-x-hidden max-[760px]:h-[min(72vh,720px)] max-[760px]:min-h-[540px]",
   observationWorkspace:
     "grid h-full max-h-full min-h-0 min-w-0 max-w-full grid-cols-[minmax(0,1fr)_minmax(280px,360px)] gap-2.5 overflow-hidden overflow-x-hidden max-[1180px]:h-auto max-[1180px]:grid-cols-1 max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
   observationConversationPane:
@@ -52,18 +52,21 @@ export const selfEvolutionTrackStyles = {
   agentCardActions: "flex flex-wrap items-center justify-end gap-1.5",
   agentCardAction:
     `inline-flex min-h-7 w-fit items-center justify-center gap-1.5 rounded-md px-2 text-[var(--vui-font-xs)] font-semibold text-vui-fg-secondary no-underline hover:text-vui-fg-primary ${controlSurface}`,
-  workflowCardGrid: "grid grid-cols-2 gap-2 max-[760px]:grid-cols-1",
+  workflowHeader: "flex min-w-0 flex-wrap items-center gap-2.5",
+  workflowCardGrid: "inline-flex w-fit min-w-0 max-w-full flex-wrap items-center gap-1.5 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-control-muted p-1",
   workflowCard:
-    `grid min-h-[88px] cursor-pointer content-start gap-1.5 p-3 text-left text-vui-fg-secondary ${rowSurfaceSoft} [&_span]:text-[var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_strong]:text-[0.95rem] [&_strong]:text-vui-fg-primary [&_small]:line-clamp-2 [&_small]:text-[var(--vui-font-xs)] [&_small]:leading-normal`,
+    "inline-flex min-h-8 w-fit cursor-pointer items-center justify-center gap-2 rounded-md border border-transparent bg-transparent px-2.5 py-1 text-[var(--vui-font-sm)] font-semibold text-vui-fg-secondary [&_span]:text-inherit [&_strong]:text-[var(--vui-font-xs)] [&_strong]:font-semibold [&_strong]:text-vui-fg-tertiary",
   workflowCardActive:
-    "border-[color-mix(in_srgb,var(--accent-cool)_34%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_9%,var(--vui-surface-row))]",
+    "border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_12%,var(--vui-surface-row))] text-vui-fg-primary [&_strong]:text-[var(--accent-cool)]",
+  workflowStepSummary:
+    "m-0 min-w-0 max-w-[min(100%,760px)] overflow-wrap-anywhere text-[var(--vui-font-xs)] leading-normal text-vui-fg-secondary",
   approvalPanel: `grid min-h-0 content-start gap-3 overflow-auto p-3.5 ${panelSurface}`,
   statusPage: "grid h-full min-h-0 overflow-hidden max-[1180px]:h-auto max-[1180px]:overflow-visible",
   panelStack: "grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-4 overflow-hidden",
   sidebarResizer:
     "relative h-full w-2.5 cursor-col-resize rounded-[var(--radius-control)] border-0 bg-transparent p-0 before:absolute before:bottom-[18px] before:left-1 before:top-[18px] before:w-0.5 before:rounded-full before:bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] before:content-[''] max-[1180px]:hidden",
-  segmentedTabs: "inline-flex self-center items-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-1 max-[1180px]:self-start",
-  tabButton: "min-h-9 cursor-pointer rounded-md border-0 bg-transparent px-4 text-[var(--fg-secondary)]",
+  segmentedTabs: "inline-flex self-center items-center gap-1 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-1 max-[1180px]:self-start",
+  tabButton: "min-h-8 cursor-pointer rounded-md border-0 bg-transparent px-3 text-[var(--vui-font-sm)] text-[var(--fg-secondary)]",
   tabButtonActive: "bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] text-[var(--accent-warm-2)]",
   modeSwitch: "inline-flex w-fit flex-wrap items-center gap-1 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-1",
   modeTab:

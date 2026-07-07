@@ -446,22 +446,22 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.layout.split(/\s+/)).toContain("grid");
     expect(routeStyles.layout).toContain("!gap-0");
     expect(routeStyles.layout).toContain("!p-0");
+    expect(routeStyles.layout).toContain("[--chat-pane-gutter:1px]");
     expect(routeStyles.layout).toContain(
-      "grid-cols-[var(--chat-left-pane-width,220px)_var(--chat-workbench-gap)_minmax(0,1fr)_var(--chat-workbench-gap)_var(--chat-right-pane-width,284px)]",
+      "grid-cols-[var(--chat-left-pane-width,220px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,284px)]",
     );
     expect(routeStyles.layout).toContain(
-      "max-[1100px]:grid-cols-[var(--chat-left-pane-width,220px)_var(--chat-workbench-gap)_minmax(0,1fr)_var(--chat-workbench-gap)_var(--chat-right-pane-width,284px)]",
+      "max-[1100px]:grid-cols-[var(--chat-left-pane-width,220px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,284px)]",
     );
     expect(routeStyles.layoutCenterFirst).toContain(
-      "!grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_var(--chat-workbench-gap)_minmax(520px,1fr)_var(--chat-workbench-gap)_minmax(0,var(--chat-right-pane-width,0px))]",
+      "!grid-cols-[minmax(0,var(--chat-left-pane-width,0px))_var(--chat-pane-gutter)_minmax(520px,1fr)_var(--chat-pane-gutter)_minmax(0,var(--chat-right-pane-width,0px))]",
     );
     expect(routeStyles.layout).not.toContain("_0px_minmax(0,1fr)_0px_");
     expect(routeStyles.layoutCenterFirst).not.toContain("_0px_minmax(520px,1fr)_0px_");
     expect(routeStyles.layout).not.toContain("_8px_");
     expect(routeStyles.layoutCenterFirst).not.toContain("_8px_");
     expect(routeStyles.resizeHandle).toContain("h-full");
-    expect(routeStyles.resizeHandle).toContain("w-3");
-    expect(routeStyles.resizeHandle).toContain("-mx-1.5");
+    expect(routeStyles.resizeHandle).toContain("w-[1px]");
     expect(routeStyles.resizeHandle).toContain("cursor-col-resize");
     expect(routeStyles.resizeHandle).toContain("touch-none");
     expect(routeStyles.resizeHandle).toContain("before:absolute");
@@ -588,7 +588,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.layoutCenterFirst).toContain("minmax(420px,1fr)");
     expect(routeStyles.conversationTitleRow).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(routeStyles.conversationTitleRow).toContain("max-w-full");
-    expect(conversationStyles.surfaceCompact).toContain("[&_.timeline]:px-3");
+    expect(conversationStyles.surfaceCompact).not.toContain("[&_.timeline]:px-3");
     expect(conversationStyles.surfaceCompact).toContain("[&_.timeline]:pt-[9px]");
     expect(conversationStyles.surfaceCompact).toContain("[&_.timeline]:pb-[11px]");
     expect(conversationStyles.surfaceCompact).toContain("[&_.composer]:gap-[7px]");
@@ -719,8 +719,8 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps left rail VButton cards from collapsing their internal grid layout", () => {
-    expect(routeStyles.tokenStatusMetric).toContain("grid-cols-[36px_minmax(0,1fr)]");
-    expect(routeStyles.tokenStatusMetric).toContain("min-h-[52px]");
+    expect(routeStyles.tokenStatusMetric).toContain("grid-cols-[44px_minmax(0,1fr)]");
+    expect(routeStyles.tokenStatusMetric).toContain("min-h-[64px]");
     expect(routeStyles.tokenStatusMetric).not.toContain("min-h-[44px]");
     expect(routeStyles.tokenStatusMetric).toContain("bg-[var(--vui-surface-raised)]");
     expect(routeStyles.tokenStatusMetric).not.toContain("white)");
@@ -733,13 +733,17 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.tokenStatusVisualGrid).toContain("w-full");
     expect(routeStyles.tokenStatusCopy).toContain("min-w-0");
     expect(routeStyles.tokenStatusCopy).toContain("overflow-visible");
+    expect(routeStyles.tokenStatusCopy).toContain("self-center");
     expect(routeStyles.tokenStatusLabel).toContain("whitespace-normal");
-    expect(routeStyles.tokenStatusLabel).toContain("text-[12px]");
+    expect(routeStyles.tokenStatusLabel).toContain("text-[var(--vui-font-sm)]");
     expect(routeStyles.tokenStatusMeta).toContain("[overflow-wrap:anywhere]");
-    expect(routeStyles.tokenStatusMeta).toContain("text-[11px]");
-    expect(routeStyles.tokenStatusRing).toContain("size-[36px]");
-    expect(routeStyles.tokenStatusRingCore).toContain("text-[10px]");
-    expect(routeStyles.tokenStatusBar).toContain("h-1");
+    expect(routeStyles.tokenStatusMeta).toContain("text-[var(--vui-font-xs)]");
+    expect(routeStyles.tokenStatusRing).toContain("size-[44px]");
+    expect(routeStyles.tokenStatusRingCore).toContain("text-[11px]");
+    expect(routeStyles.tokenStatusRingCore).toContain("max-w-full");
+    expect(routeStyles.tokenStatusRingCore).toContain("overflow-hidden");
+    expect(routeStyles.tokenStatusRingCore).toContain("text-ellipsis");
+    expect(routeStyles.tokenStatusBar).toContain("h-1.5");
     expect(routeStyles.tokenStatusMetricButton).toContain("[&_[data-slot=vui-button-content]]:contents");
     expect(routeStyles.tokenStatusMetricButton).toContain("!grid");
     expect(routeStyles.tokenStatusMetricButton).toContain("!w-full");
@@ -1120,6 +1124,38 @@ describe("ChatCodingRoute layout contract", () => {
     expect(availableHtml).toContain("aria-controls=\"cache-detail-dialog\"");
     expect(availableClosedHtml).toContain("aria-expanded=\"false\"");
     expect(availableClosedHtml).toContain("aria-controls=\"cache-detail-dialog\"");
+  });
+
+  it("keeps compact token metric values inside the narrow status ring", () => {
+    const compactMetrics: Array<TokenCoreStatusMetric & { displayValue: string }> = [
+      {
+        key: "modelInput",
+        label: "模型输入",
+        value: "128,000",
+        displayValue: "128k",
+        meta: "128,000 / 200,000 · 64%",
+        title: "模型输入 128,000",
+        percent: 64,
+        tone: "modelInput",
+      },
+    ];
+    const html = renderToStaticMarkup(
+      createElement(TokenCoreStatusPanel, {
+        cacheDetailAvailable: false,
+        cacheDetailOpen: false,
+        cacheDetailOpenLabel: "查看上一轮缓存命中详情",
+        lang: "zh",
+        metrics: compactMetrics,
+        onOpenCacheDetail: () => undefined,
+      }),
+    );
+
+    expect(tokenCoreStatusPanelSource).toContain("metric.displayValue ?? metric.value");
+    expect(html).toContain(">128k</span>");
+    expect(html).toContain("128,000 / 200,000");
+    expect(html).toContain("title=\"模型输入 128,000\"");
+    expect(routeSource).toContain("const compactNumberFormatter = useMemo(");
+    expect(routeSource).toContain("displayValue: modelInputAvailable ? compactNumberFormatter.format(modelInputTokens) : \"--\"");
   });
 
   it("shows the active skill contract before the context status cards", () => {

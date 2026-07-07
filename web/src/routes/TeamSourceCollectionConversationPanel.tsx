@@ -15,6 +15,7 @@ type TeamSourceCollectionConversationPanelProps = {
   pendingCandidateImportCount: number;
   missingSourceCount: number;
   children: ReactNode;
+  compact?: boolean;
   pagination: ReactNode;
 };
 
@@ -27,17 +28,25 @@ export function TeamSourceCollectionConversationPanel({
   pendingCandidateImportCount,
   missingSourceCount,
   children,
+  compact = false,
   pagination,
 }: TeamSourceCollectionConversationPanelProps) {
+  const panelClassName = compact
+    ? styles.sourceCollectionConversationPanelCompact
+    : styles.sourceCollectionConversationPanel;
+  const resultsClassName = compact
+    ? styles.sourceCollectionResultsPanelCompact
+    : styles.sourceCollectionResultsPanel;
+
   return (
-    <section id="source-collection-process" className={styles.sourceCollectionConversationPanel} aria-label={lang === "zh" ? "搜集对话流" : "Collection conversation"}>
+    <section id="source-collection-process" className={panelClassName} aria-label={lang === "zh" ? "搜集对话流" : "Collection conversation"}>
       <div className={styles.sourceCollectionConversationHeader}>
         <div>
           <strong>{lang === "zh" ? "本轮资料" : "Sources in this run"}</strong>
         </div>
         <small>{rangeText}</small>
       </div>
-      <section id="source-collection-results" className={styles.sourceCollectionResultsPanel} aria-label={lang === "zh" ? "本轮原始资料记录" : "Raw collected records"}>
+      <section id="source-collection-results" className={resultsClassName} aria-label={lang === "zh" ? "本轮原始资料记录" : "Raw collected records"}>
         <div className={styles.sourceCollectionResultsHeader}>
           <strong>{lang === "zh" ? "资料列表" : "Source list"}</strong>
           <span>{headerText}</span>

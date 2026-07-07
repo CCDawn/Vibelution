@@ -7,6 +7,7 @@ export type TokenCoreStatusMetric = {
   key: "cache" | "modelInput" | "compression" | "speed";
   label: string;
   value: string;
+  displayValue?: string;
   meta: string;
   title: string;
   percent: number;
@@ -48,7 +49,7 @@ export function TokenCoreStatusPanel({
           const metricContent = (
             <>
               <span className={styles.tokenStatusRing} aria-hidden="true">
-                <span className={styles.tokenStatusRingCore}>{metric.value}</span>
+                <span className={styles.tokenStatusRingCore}>{metric.displayValue ?? metric.value}</span>
               </span>
               <span className={styles.tokenStatusCopy}>
                 <span className={styles.tokenStatusLabel}>{metric.label}</span>

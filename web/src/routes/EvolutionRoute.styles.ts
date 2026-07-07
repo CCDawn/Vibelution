@@ -450,7 +450,7 @@ const styles = {
   selectionSummary:
     "inline-flex [align-items:center] [gap:8px] [color:var(--fg-secondary)]",
   selfPage:
-    "[grid-template-rows:minmax(0,_1fr)] [gap:0] max-[900px]:[grid-template-rows:minmax(0,_1fr)] max-[900px]:[gap:0]",
+    "[grid-template-rows:minmax(0,_1fr)] [gap:0] [padding:8px_12px_12px] [background:color-mix(in_srgb,_var(--vui-surface-panel)_78%,_var(--surface-page))] max-[900px]:[grid-template-rows:minmax(0,_1fr)] max-[900px]:[gap:0]",
   sourceHero:
     `grid [gap:5px] min-w-0 [padding:12px_14px] ${rowSurface} [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_small]:[color:var(--fg-tertiary)] [&_small]:[font-size:var(--vui-font-xs)] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[color:var(--fg-primary)] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_small]:[overflow:hidden] [&_small]:[text-overflow:ellipsis] [&_small]:[white-space:nowrap]`,
   sourceInventoryBar:

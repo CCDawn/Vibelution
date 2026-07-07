@@ -41,6 +41,7 @@ type TeamSourceCollectionStandaloneStagePanelProps = {
   stagePipelineAriaLabel: string;
   modules: TeamSourceCollectionStandaloneStageModule[];
   activePanel: ReactNode;
+  compactActivePanel?: boolean;
 };
 
 export function TeamSourceCollectionStageActionIcon({ icon }: { icon: TeamSourceCollectionStandaloneStageIcon }) {
@@ -70,9 +71,10 @@ export function TeamSourceCollectionStandaloneStagePanel({
   stagePipelineAriaLabel,
   modules,
   activePanel,
+  compactActivePanel = false,
 }: TeamSourceCollectionStandaloneStagePanelProps) {
   return (
-    <main className={styles.sourceCollectionPageBody}>
+    <main className={compactActivePanel ? styles.sourceCollectionPageBodyCompact : styles.sourceCollectionPageBody}>
       <TeamStageCommandBar
         ariaLabel={commandAriaLabel}
         tone={commandTone}
@@ -108,7 +110,7 @@ export function TeamSourceCollectionStandaloneStagePanel({
           />
         ))}
       </TeamStagePipeline>
-      <div className={styles.sourceCollectionPageGrid}>
+      <div className={compactActivePanel ? styles.sourceCollectionPageGridCompact : styles.sourceCollectionPageGrid}>
         {activePanel}
       </div>
     </main>

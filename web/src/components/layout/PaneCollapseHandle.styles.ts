@@ -1,14 +1,12 @@
 const paneHandleClass = "relative";
 const paneToggleButtonClass = [
-  "absolute left-1/2 top-1/2 z-[2] h-10 w-6 min-w-0 -translate-x-1/2 -translate-y-1/2 px-0",
-  "rounded-[8px] border-vui-border-subtle bg-vui-surface-glass text-vui-fg-secondary shadow-[var(--vui-shadow-soft)]",
-  "transition-[border-color,background-color,color,box-shadow] duration-150",
-  "hover:border-vui-accent-warm hover:bg-vui-control-muted hover:text-[var(--accent-warm-2)] hover:shadow-[var(--vui-shadow-accent)]",
-  "focus-visible:border-vui-accent-warm focus-visible:bg-vui-control-muted focus-visible:text-[var(--accent-warm-2)] focus-visible:shadow-[var(--vui-shadow-accent)]",
-  "[&_svg]:shrink-0",
-].join(" ");
-
-const styles = {
+  "absolute left-1/2 top-1/2 z-[2] !h-6 !w-3.5 !min-w-0 !aspect-auto -translate-x-1/2 -translate-y-1/2 px-0",
+  "rounded-full border border-[color-mix(in_srgb,var(--vui-border-subtle)_36%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-glass)_58%,transparent)] text-vui-fg-secondary shadow-[var(--vui-shadow-hairline)] backdrop-blur-[2px]",
+  "transition-[border-color,background-color,color,box-shadow,opacity] duration-150 opacity-70",
+  "hover:opacity-100 hover:border-[color-mix(in_srgb,var(--accent-warm)_34%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-control-muted)_76%,transparent)] hover:text-[var(--accent-warm-2)] hover:shadow-[var(--vui-shadow-soft)]",
+  "focus-visible:opacity-100 focus-visible:border-[color-mix(in_srgb,var(--accent-warm)_34%,transparent)] focus-visible:bg-[color-mix(in_srgb,var(--vui-control-muted)_76%,transparent)] focus-visible:text-[var(--accent-warm-2)] focus-visible:shadow-[var(--vui-shadow-soft)]",
+  "[&_svg]:h-3 [&_svg]:w-3 [&_svg]:shrink-0",
+].join(" ");const styles = {
   paneHandleClass,
   paneToggleButtonClass,
 } as const;

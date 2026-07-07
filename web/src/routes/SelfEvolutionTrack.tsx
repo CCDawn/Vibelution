@@ -41,7 +41,6 @@ import { VButton, VNativeInput, VNativeTextarea } from "../components/vui";
 import { TranslationKey } from "../i18n/dictionary";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
 import { useAppI18n } from "../i18n/useAppI18n";
-import { getPetAvatarSymbol } from "./chatCompactPanel";
 import { agentCenterConfigRoute } from "./agentCenterRoutes";
 import { selfEvolutionTrackStyles as styles } from "./SelfEvolutionTrack.styles";
 
@@ -61,6 +60,14 @@ function petVitalFillStyle(value: number): SelfEvolutionDynamicStyle {
   return {
     "--self-vital-progress": `${value}%`,
   };
+}
+
+function selfEvolutionConversationAvatarFallback(petName: string | null | undefined, lang: "zh" | "en") {
+  const name = String(petName || "").trim();
+  if (name) {
+    return name.slice(0, lang === "zh" ? 1 : 2).toUpperCase();
+  }
+  return lang === "zh" ? "自" : "SE";
 }
 
 type SelfEvolutionTrackProps = {
@@ -160,6 +167,7 @@ export const SELF_TRANSACTION_COLLAPSED_LIMIT = 8;
 const SELF_EVOLUTION_RETURN_TO = "/self-evolution";
 const SELF_EVOLUTION_AGENT_ROLE_ORDER = ["executor", "reviewer", "observer"] as const;
 const SELF_EVOLUTION_AGENT_ROLE_SET = new Set<string>(SELF_EVOLUTION_AGENT_ROLE_ORDER);
+const SELF_EVOLUTION_CONVERSATION_CONTEXT = "self-evolution";
 const SELF_SIDEBAR_WIDTH_STORAGE_KEY = "vibelution.self.sidebar.width";
 const DEFAULT_OBSERVATION_DURATION_SECONDS = 300;
 const MIN_OBSERVATION_DURATION_SECONDS = 30;
@@ -690,10 +698,10 @@ export function SelfEvolutionTrack({
   const [transactionHistoryExpanded, setTransactionHistoryExpanded] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     if (typeof window === "undefined") {
-      return 304;
+      return 360;
     }
     const saved = Number(window.localStorage.getItem(SELF_SIDEBAR_WIDTH_STORAGE_KEY) || "");
-    return Number.isFinite(saved) ? Math.max(260, Math.min(400, saved)) : 304;
+    return Number.isFinite(saved) ? Math.max(360, Math.min(460, saved)) : 360;
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const pageVisible = usePageVisibility();
@@ -942,7 +950,7 @@ export function SelfEvolutionTrack({
             ? t("petCompanionLowEnergy")
             : t("petCompanionStable");
   const petPresetLabel = petAvatarPresetLabel(t, pet?.avatarPreset);
-  const petAvatarFallback = getPetAvatarSymbol(pet?.avatarPreset, pet?.name);
+  const petAvatarFallback = selfEvolutionConversationAvatarFallback(pet?.name, lang);
 
   function disabledReason(state: { enabled: boolean; reason: string } | undefined) {
     if (!state || state.enabled) {
@@ -1076,7 +1084,7 @@ export function SelfEvolutionTrack({
 
     const handleMove = (moveEvent: PointerEvent) => {
       const nextWidth = startWidth + (moveEvent.clientX - startX);
-      setSidebarWidth(Math.max(260, Math.min(400, nextWidth)));
+      setSidebarWidth(Math.max(340, Math.min(460, nextWidth)));
     };
 
     const handleUp = () => {
@@ -1776,24 +1784,30 @@ export function SelfEvolutionTrack({
               </div>
             ) : (
               <>
-                <div className={styles.workflowCardGrid} aria-label={lang === "zh" ? "自进化步骤导航" : "Self-evolution workflow"}>
-                  {workflowSteps.map((step) => {
-                    const definition = SELF_EVOLUTION_WORKFLOW_STEPS.find((item) => item.id === step.id);
-                    const selected = selectedWorkflowStep?.id === step.id;
-                    return (
-                      <VButton
-                        key={step.id}
-                        type="button"
-                        className={selected ? `${styles.workflowCard} ${styles.workflowCardActive}` : styles.workflowCard}
-                        aria-pressed={selected}
-                        onClick={() => setSelectedWorkflowStepId(step.id as SelfEvolutionWorkflowStepId)}
-                      >
-                        <span>{definition ? (lang === "zh" ? definition.zh : definition.en) : step.label}</span>
-                        <strong>{statusLabel(step.status)}</strong>
-                        <small>{step.livePreview || step.summary || "--"}</small>
-                      </VButton>
-                    );
-                  })}
+                <div className={styles.workflowHeader}>
+                  <div className={styles.workflowCardGrid} aria-label={lang === "zh" ? "自进化步骤导航" : "Self-evolution workflow"}>
+                    {workflowSteps.map((step) => {
+                      const definition = SELF_EVOLUTION_WORKFLOW_STEPS.find((item) => item.id === step.id);
+                      const selected = selectedWorkflowStep?.id === step.id;
+                      const stepName = definition ? (lang === "zh" ? definition.zh : definition.en) : step.label;
+                      return (
+                        <VButton
+                          key={step.id}
+                          type="button"
+                          className={selected ? `${styles.workflowCard} ${styles.workflowCardActive}` : styles.workflowCard}
+                          aria-pressed={selected}
+                          title={step.livePreview || step.summary || stepName}
+                          onClick={() => setSelectedWorkflowStepId(step.id as SelfEvolutionWorkflowStepId)}
+                        >
+                          <span>{stepName}</span>
+                          <strong>{statusLabel(step.status)}</strong>
+                        </VButton>
+                      );
+                    })}
+                  </div>
+                  <p className={styles.workflowStepSummary}>
+                    {selectedWorkflowStep?.livePreview || selectedWorkflowStep?.summary || activeNextAction}
+                  </p>
                 </div>
                 <div className={styles.conversationShell}>
                   {selectedWorkflowStep?.id === "approval" ? (
@@ -1858,13 +1872,13 @@ export function SelfEvolutionTrack({
                       assistantAvatarFallback={petAvatarFallback}
                       userDisplayName={runtime?.userName}
                       taskSummary={conversationTask.latestSummary}
-                      defaultFileContext={conversationTask.changedFiles.at(-1) || conversationTask.readFiles.at(-1) || "workspace"}
+                      defaultFileContext={SELF_EVOLUTION_CONVERSATION_CONTEXT}
                       summaryItems={[]}
                       stats={[
-                        { label: t("selfGoal"), value: conversationTask.goal },
-                        { label: t("selfTransactions"), value: transactionItems.length },
-                        { label: t("filesChanged"), value: changedFiles.length || overview.worktree.dirtyFileCount },
-                        { label: t("lastUpdated"), value: compactTimestamp(conversationTask.updatedAt) },
+                        { label: lang === "zh" ? "目标" : "Goal", value: conversationTask.goal },
+                        { label: lang === "zh" ? "事务" : "Txn", value: transactionItems.length },
+                        { label: lang === "zh" ? "文件" : "Files", value: changedFiles.length || overview.worktree.dirtyFileCount },
+                        { label: lang === "zh" ? "更新" : "Updated", value: compactTimestamp(conversationTask.updatedAt) },
                       ]}
                       autoScrollToLatest={runIsActive}
                       showComposer={!runIsActive && !worktreeRunLocked && !runLocked}

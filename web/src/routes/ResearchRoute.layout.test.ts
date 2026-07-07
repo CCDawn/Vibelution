@@ -50,6 +50,46 @@ const narrowOverflowGuardKeys = [
   "themeCompareMetrics",
 ] as const;
 
+const contentSizedButtonKeys = [
+  "primaryButton",
+  "secondaryButton",
+  "sessionButton",
+  "sessionDeleteButton",
+  "sourceToggleButton",
+  "stageSelectButton",
+  "traceBackToBottomButton",
+  "traceGhostButton",
+  "workflowModeButton",
+] as const;
+
+const denseResearchCardKeys = [
+  "intakePanel",
+  "historyPanel",
+  "pipelinePanel",
+  "processPanel",
+  "stageCard",
+  "stageCard_active",
+  "stageCard_compact",
+  "stageResultItem",
+  "agentTracePanel",
+  "agentTraceTurn",
+  "agentTraceDetailGroup",
+  "agentTraceDetailItem",
+  "sessionRow",
+  "evidenceCard",
+  "evidenceRequestPanel",
+  "themeCompareRow",
+  "themeCompareRow_selected",
+] as const;
+
+function expectClassToken(className: string, token: string, message?: string) {
+  expect(className.split(/\s+/), message).toContain(token);
+}
+
+function expectNoClassToken(className: string, token: string, message?: string) {
+  expect(className.split(/\s+/), message).not.toContain(token);
+}
+
 describe("ResearchRoute layout contract", () => {
   it("routes Research controls through VUI primitives", () => {
     expect(routeSource).toContain('from "../components/vui"');
@@ -196,7 +236,7 @@ describe("ResearchRoute layout contract", () => {
     expect(styles.summaryCard).toContain("items-baseline");
 
     expect(routeSource).toContain("styles.sessionRow");
-    expect(styles.sessionRow).toContain("grid-cols-[minmax(0,1fr)_42px]");
+    expect(styles.sessionRow).toContain("grid-cols-[minmax(0,1fr)_34px]");
 
     expect(routeSource).toContain("styles.stageRail");
     expect(styles.stageRail).toContain("grid-cols-[1fr]");
@@ -205,13 +245,13 @@ describe("ResearchRoute layout contract", () => {
     expect(styles.stageRail).not.toContain("overflow-visible");
 
     expect(routeSource).toContain("styles.stageOutputHeader");
-    expect(styles.stageOutputHeader).toContain("grid-cols-[24px_minmax(0,1fr)]");
+    expect(styles.stageOutputHeader).toContain("grid-cols-[22px_minmax(0,1fr)]");
 
     expect(routeSource).toContain("styles.agentTraceTurn");
-    expect(styles.agentTraceTurn).toContain("grid-cols-[30px_minmax(0,1fr)]");
+    expect(styles.agentTraceTurn).toContain("grid-cols-[28px_minmax(0,1fr)]");
 
     expect(routeSource).toContain("styles.agentTraceDetailItem");
-    expect(styles.agentTraceDetailItem).toContain("grid-cols-[26px_minmax(0,1fr)]");
+    expect(styles.agentTraceDetailItem).toContain("grid-cols-[24px_minmax(0,1fr)]");
 
     expect(routeSource).toContain("styles.themeCompareHeader");
     expect(styles.themeCompareHeader).toContain("grid-cols-[minmax(0,1fr)_auto]");
@@ -229,10 +269,72 @@ describe("ResearchRoute layout contract", () => {
 
     expect(styles.workspace).toContain("max-w-full");
     expect(styles.workspace).toContain("overflow-x-hidden");
-    expect(styles.workspace).toContain("grid-cols-[minmax(0,280px)_minmax(0,1fr)_minmax(0,280px)]");
+    expect(styles.workspace).toContain("grid-cols-[minmax(0,252px)_minmax(0,1fr)_minmax(0,252px)]");
+    expect(styles.workspace).toContain("max-[1180px]:grid-cols-[minmax(0,220px)_minmax(0,1fr)_minmax(0,220px)]");
+    expect(styles.workspace).toContain("gap-1.5");
+    expect(styles.workspace).toContain("p-1.5");
     expect(styles.workspace).toContain("max-[980px]:grid-cols-[minmax(0,1fr)]");
     expect(styles.workspace).toContain("max-[980px]:overflow-y-auto");
     expect(styles.workspace).toContain("max-[980px]:overflow-x-hidden");
+    expect(styles.workspace).toContain("max-[980px]:p-1");
+  });
+
+  it("keeps dense research controls sized to their content", () => {
+    for (const key of contentSizedButtonKeys) {
+      const className = styles[key];
+
+      expectClassToken(className, "w-fit", `${key} should not stretch across dense workbench rows`);
+      expect(className, `${key} should still shrink inside narrow containers`).toContain("max-w-full");
+      expectNoClassToken(className, "w-full", `${key} should avoid full-width button geometry`);
+      expectNoClassToken(className, "flex-1", `${key} should avoid flex stretching`);
+      expect(className, `${key} should keep a stable compact height`).toContain("min-h-[var(--vui-control-height-sm)]");
+    }
+
+    expect(styles.headerActions).toContain("flex-wrap");
+    expect(styles.themeCompareActions).toContain("w-fit");
+    expect(styles.themeCompareActions).toContain("flex-wrap");
+    expect(styles.workflowModeControl).toContain("w-fit");
+    expect(styles.agentTraceControls).toContain("justify-end");
+  });
+
+  it("tightens stage, session, theme, and trace cards for scan-first density", () => {
+    for (const key of denseResearchCardKeys) {
+      expect(styles[key], `${key} should use the compact Research padding`).toContain("p-1.5");
+    }
+
+    expect(styles.summaryGrid).toContain("gap-1.5");
+    expect(styles.summaryGrid).toContain("grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))]");
+    expect(styles.summaryCard).toContain("px-2");
+    expect(styles.summaryCard).toContain("py-1.5");
+
+    expect(styles.sessionRail).toContain("gap-1");
+    expect(styles.sessionRow).toContain("grid-cols-[minmax(0,1fr)_34px]");
+    expect(styles.stageRail).toContain("gap-1");
+    expect(styles.stageOutputHeader).toContain("grid-cols-[22px_minmax(0,1fr)]");
+    expect(styles.stageResultItems).toContain("gap-1");
+
+    expect(styles.agentTraceAvatar).toContain("h-7");
+    expect(styles.agentTraceAvatar).toContain("w-7");
+    expect(styles.agentTraceTimeline).toContain("gap-1");
+    expect(styles.agentTraceTurn).toContain("grid-cols-[28px_minmax(0,1fr)]");
+    expect(styles.agentTraceDetailItem).toContain("grid-cols-[24px_minmax(0,1fr)]");
+
+    expect(styles.themeGrid).toContain("grid-cols-[minmax(0,1fr)]");
+    expect(styles.themeCompareMetrics).toContain("grid-cols-[repeat(auto-fit,minmax(7rem,1fr))]");
+    expect(styles.themeCompareRow).toContain("p-1.5");
+  });
+
+  it("keeps the mobile research workbench single-column without horizontal spill", () => {
+    expect(styles.workspace).toContain("max-[980px]:grid-rows-[auto_auto_auto]");
+    expect(styles.workspace).toContain("max-[980px]:gap-1.5");
+    expect(styles.sessionRail).toContain("max-[980px]:grid-cols-[repeat(2,minmax(0,1fr))]");
+    expect(styles.sessionRail).toContain("max-[640px]:grid-cols-[minmax(0,1fr)]");
+    expect(styles.summaryGrid).toContain("max-[480px]:grid-cols-[minmax(0,1fr)]");
+    expect(styles.themeGrid).toContain("max-[640px]:grid-cols-[minmax(0,1fr)]");
+    expect(styles.themeCompareHeader).toContain("max-[640px]:grid-cols-[minmax(0,1fr)]");
+    expect(styles.themeHeader).toContain("max-[640px]:grid-cols-[minmax(0,1fr)]");
+    expect(styles.themeCompareActions).toContain("max-[640px]:justify-start");
+    expect(styles.agentTraceDetailList).toContain("overflow-x-hidden");
   });
 
   it("keeps repeated research panels background-aware without strong glass or route shadows", () => {
