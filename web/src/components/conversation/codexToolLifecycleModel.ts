@@ -149,12 +149,7 @@ function appendToolOperation(model: CodexToolLifecycleModel, operation: AgentMes
     const terminalOperation = terminalOperationFromTool(operation, toolCallId, model.terminalOperations.length, status);
     terminalOperationId = terminalOperation.operationId;
     model.terminalOperations.push(terminalOperation);
-    model.terminalSessions.push({
-      terminalId: terminalOperation.terminalId,
-      createdByOperationId: terminalOperation.operationId,
-      operationIds: [terminalOperation.operationId],
-      status,
-    });
+    ensureTerminalSession(model, terminalOperation, status);
     model.modelObservations.push({
       operationId: terminalOperation.operationId,
       toolCallId,
@@ -188,7 +183,7 @@ function terminalOperationFromTool(
 ): CodexTerminalOperation {
   const diagnostics = operation as RuntimeDiagnosticsOperation;
   const operationId = `terminal_operation:${terminalOrdinal}`;
-  const terminalId = `terminal:${operation.id}`;
+  const terminalId = `terminal:${terminalSessionKey(operation)}`;
   const displayCommand = terminalDisplayCommand(operation);
   return compactTerminalOperation({
     operationId,
@@ -214,6 +209,70 @@ function terminalOperationFromTool(
     rawOperationId: operation.id,
     tracePath: compactText(operation.tracePath),
   });
+}
+
+function ensureTerminalSession(
+  model: CodexToolLifecycleModel,
+  terminalOperation: CodexTerminalOperation,
+  status: CodexToolLifecycleStatus,
+) {
+  const existingSession = model.terminalSessions.find(
+    (session) => session.terminalId === terminalOperation.terminalId,
+  );
+  if (!existingSession) {
+    model.terminalSessions.push({
+      terminalId: terminalOperation.terminalId,
+      createdByOperationId: terminalOperation.operationId,
+      operationIds: [terminalOperation.operationId],
+      status,
+    });
+    return;
+  }
+  if (!existingSession.operationIds.includes(terminalOperation.operationId)) {
+    existingSession.operationIds.push(terminalOperation.operationId);
+  }
+  existingSession.status = mergeTerminalSessionStatus(existingSession.status, status);
+}
+
+function mergeTerminalSessionStatus(
+  current: CodexToolLifecycleStatus,
+  next: CodexToolLifecycleStatus,
+): CodexToolLifecycleStatus {
+  if (current === "running" || next === "running") {
+    return "running";
+  }
+  if (current === "pending" || next === "pending") {
+    return "pending";
+  }
+  if (current === "failed" || next === "failed") {
+    return "failed";
+  }
+  if (current === "degraded" || next === "degraded") {
+    return "degraded";
+  }
+  return "completed";
+}
+
+function terminalSessionKey(operation: AgentMessageOperation) {
+  const args = operation.arguments ?? {};
+  for (const key of ["session_id", "sessionId", "terminal_id", "terminalId", "process_id", "processId"]) {
+    const value = args[key];
+    const normalized = terminalSessionKeyValue(value);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return operation.id;
+}
+
+function terminalSessionKeyValue(value: unknown) {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return "";
 }
 
 function terminalOperationKind(operation: AgentMessageOperation): CodexTerminalOperationKind {
