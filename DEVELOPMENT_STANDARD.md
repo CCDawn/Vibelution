@@ -58,9 +58,9 @@ Use the lightest tier that protects the user, the repository, and concurrent wor
 
 | Tier | Use when | Required workflow | Validation and closeout |
 | --- | --- | --- | --- |
-| `FAST_PATCH` | Single-surface, reversible, low-risk work such as copy, docs, rule wording, tiny UI style/layout polish, small tests, focused read-only review, or a mechanical helper change. No data migration, API contract, deletion, permissions, runtime lifecycle, release, or shared DTO impact. | Stay in the current workspace when that avoids needless friction; use worktree only if there is branch risk, active overlap, or the user asks. BRT can be silent/micro. No planning/task-splitting/memory sync by default. Hot files still need a narrow guard claim. | Run the smallest useful check, or state why no executable check is useful. Review `git status` and the current diff. Commit only when requested or when the local branch workflow requires it. Report refresh/memory/version as `not affected` when true. |
+| `FAST_PATCH` | Single-surface, reversible, low-risk work such as copy, docs, rule wording, tiny UI style/layout polish, small tests, focused read-only review, or a mechanical helper change. No data migration, API contract, deletion, permissions, runtime lifecycle, release, or shared DTO impact. | Stay in the current workspace when that avoids needless friction; use worktree only if there is branch risk, active overlap, or the user asks. BRT can be silent/micro. No planning/task-splitting/memory sync by default. Hot-file edits need active-claim review, narrow scope, scoped staging, and stronger final evidence. | Run the smallest useful check, or state why no executable check is useful. Review `git status` and the current diff. Commit only when requested or when the local branch workflow requires it. Report refresh/memory/version as `not affected` when true. |
 | `STANDARD_TASK` | Normal feature or bug work, multi-file UI changes, user-visible behavior, component extraction, backend route/service changes, or changes that need focused tests to be trustworthy. | Use a task worktree by default. Run BRT in micro/align mode, claim relevant scopes in multi-session work, and reuse project-native patterns. | Run focused tests and any required build/typecheck for the affected surface. Make a Launcher refresh decision. Commit or explicitly hand off not-ready work. Update or propose project memory when the task changes durable project state. |
-| `HIGH_RISK` | Work touching data loss, archive/delete/reset, permissions, secrets, persistence, migrations, public API/DTO contracts, runtime/Launcher lifecycle, LLM/tool routing, memory/RAG, release/versioning, cross-lane coordination, or shared hot files. | Full flow: BRT, root-cause or source-of-truth reasoning, explicit guard claim, isolated worktree, plan when useful, no destructive or publication action without authorization. | Add or update tests/logging evidence, run broad enough validation, handle refresh and memory explicitly, judge version impact, self-review diff, and close the claim with evidence. |
+| `HIGH_RISK` | Work touching data loss, archive/delete/reset, permissions, secrets, persistence, migrations, public API/DTO contracts, runtime/Launcher lifecycle, LLM/tool routing, memory/RAG, release/versioning, cross-lane coordination, remote publication, or shared hot files. | Full flow: BRT, root-cause or source-of-truth reasoning, explicit guard/claim decision, isolated worktree, plan when useful, no destructive action without explicit confirmation. Remote push/PR/publication may proceed only after the remote sync gate passes. | Add or update tests/logging evidence, run broad enough validation, handle refresh and memory explicitly, judge version impact, self-review diff, and close the claim with evidence. |
 
 Upgrade the tier when evidence shows hidden risk. Downgrade when the remaining process would only create delay without improving correctness, safety, or handoff quality.
 
@@ -202,7 +202,7 @@ The root workspace:
 
 `C:\Users\17533\Desktop\Vibelution`
 
-is the local `main` integration workspace. It is for syncing, merging, final validation, project-memory serialization, and user-authorized publication. `STANDARD_TASK` and `HIGH_RISK` ordinary development belongs in task worktrees. `FAST_PATCH` may stay in the current workspace when it is narrow, reversible, and does not collide with active claims or branch state.
+is the local `main` integration workspace. It is for syncing, merging, final validation, project-memory serialization, reviewed publication, and remote sync. `STANDARD_TASK` and `HIGH_RISK` ordinary development belongs in task worktrees. `FAST_PATCH` may stay in the current workspace when it is narrow, reversible, and does not collide with active claims or branch state.
 
 This root path is the durable local development-main checkout and must stay checked out on branch `main`. Do not leave `C:\Users\17533\Desktop\Vibelution` on a task branch, unresolved merge, or long-lived dirty experiment. If root is found on a non-main branch, first preserve or migrate that branch's dirty work into `C:\Users\17533\Desktop\Vibelution-worktrees\<task-slug>` or a named stash, then restore root to `main` before continuing normal development or integration. A separate `main` worktree may be used only as a short-lived recovery exception while root is blocked, and it should be retired once root has been restored.
 
@@ -223,7 +223,7 @@ cd C:\Users\17533\Desktop\Vibelution
 git worktree add C:\Users\17533\Desktop\Vibelution-worktrees\<task-slug> -b codex/<task-slug> main
 ```
 
-Before editing hot files, shared scopes, or any `STANDARD_TASK` / `HIGH_RISK` work in a multi-session project, use the project memory guard:
+Before editing hot files, shared scopes, or any `STANDARD_TASK` / `HIGH_RISK` work in a multi-session project, use the project memory guard to inspect active work and, when needed, reserve a narrow write scope:
 
 ```powershell
 python "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "C:\Users\17533\Desktop\Vibelution" status
@@ -232,7 +232,7 @@ python "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent
 python "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "C:\Users\17533\Desktop\Vibelution" release --claim-id "<claim-id>" --status completed --reason "<validation or blocker summary>"
 ```
 
-If a scope hits an active claim or hotspot, stop unless you have explicit authorization and record the claim with intentional `--force`.
+If a scope hits an active claim, coordinate with the owner, choose a non-overlapping slice, or make an explicit main-integration decision and record the reason. Hotspot status alone is not a stop sign, but it raises the review, validation, scoped staging, and reconciliation burden.
 
 One Agent should bind to one active task worktree at a time. Do not reuse an old task worktree for a new goal.
 
@@ -242,7 +242,7 @@ For `STANDARD_TASK` and `HIGH_RISK`, the Agent that implements a task owns the f
 
 ## 7. Shared Hot Files
 
-Treat these as shared hot files and edit them only with a narrow scope and explicit claim:
+Treat these as shared hot files. They may be edited, but require active-claim review, narrow impact scope, scoped staging, stronger validation evidence, and a final reconciliation note:
 
 - `AGENTS.md`;
 - `DEVELOPMENT_STANDARD.md`;
@@ -256,7 +256,7 @@ Treat these as shared hot files and edit them only with a narrow scope and expli
 - `web/src/i18n/dictionary.ts`;
 - `tests/test_web_app.py`.
 
-Do not perform broad formatting, opportunistic cleanup, renaming, or splitting in hot files unless the task is specifically scoped to that work.
+Do not perform broad formatting, opportunistic cleanup, renaming, or splitting in hot files unless the task is specifically scoped to that work. When a hot-file edit changes behavior or governance semantics, record the validation and version-impact decision in the closeout.
 
 ### 7.1 Shared DTO And Projection Serialization
 
@@ -266,7 +266,7 @@ Before claiming, forcing, or merging such work:
 
 - run the guard `check` for the exact hot files and related generated or projected surfaces;
 - list conflicting active claim IDs, owners, scopes, and whether each conflict is same-lane, scope overlap, or both;
-- use `--force` only after explicit user authorization or main integration owner decision, and record the reason in the claim note;
+- use `--force` only after a reviewed main-integration decision or explicit user direction, and record the reason in the claim note;
 - name the merge order, reconciliation owner, and final conflict-resolution validation.
 
 A DTO or projection change is not complete until backend route/service tests, frontend type/build/layout or logic tests, cache/query-key impact, and generated or project-memory surfaces are reconciled. If a user-visible surface is intentionally left stale, record it as projection debt with owner, trigger, and validation gap.
@@ -568,7 +568,7 @@ After implementation and validation in a task worktree, the owning Agent should 
 - local `main` has no unrelated dirty changes in files affected by the merge;
 - no active claim or hotspot conflict blocks the scope;
 - the user did not ask to stop before merge, keep work isolated, or hand off only;
-- the merge remains local and does not push to GitHub.
+- any post-merge remote sync uses the remote sync gate in section 14.
 
 When the gates pass, merge one task at a time into local `main`, run the smallest useful post-merge validation or state why docs-only/rule-only/`FAST_PATCH` validation is sufficient, close the claim, and remove the task worktree when it is clean.
 
@@ -578,24 +578,29 @@ When any gate fails, do not force the merge. Routine small conflicts inside the 
 python "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "C:\Users\17533\Desktop\Vibelution" release --claim-id "<claim-id>" --status blocked --reason "<failed merge gate, validation, or conflict summary>"
 ```
 
-Self-merge does not change remote publication rules. Pushing, PR creation, remote branch deletion, or treating `origin/main` as authority still requires explicit user authorization.
+Self-merge may be followed by push, PR creation, or publication when the remote sync gate passes. Remote branch deletion, force/overwrite, and treating `origin/main` as authority to reset local `main` remain destructive choices and require explicit confirmation.
 
 ## 14. Remote GitHub Sync
 
-Local `main` is the default integration fact source. GitHub `origin/main` is a remote backup/publication target unless the user explicitly says to sync, push, publish, create a PR, or delete remote branches.
+Local `main` is the default integration fact source. GitHub `origin/main` is a remote backup/publication target, not authority for resetting local `main` unless the reset is intentionally reviewed.
 
-Allowed by default:
+Read-only inspection is always allowed when useful:
 
 ```powershell
 git fetch origin
 ```
 
-Not allowed by default:
+Remote push, PR creation, and publication are allowed when the remote sync gate passes:
 
-- `git push`;
-- remote branch deletion;
-- PR creation;
-- treating `origin/main` as authority to reset local `main`.
+- worktree status is clean or all dirty files are known current-task changes;
+- the commit range to publish has been reviewed;
+- relevant validation evidence is fresh, or the validation blocker is explicit;
+- target remote and branch are confirmed from local config or the user request;
+- version impact is judged;
+- no force/overwrite, branch deletion, or reset-to-remote risk is present;
+- the final report names the target and evidence.
+
+Remote branch deletion, force push, overwrite, or resetting local `main` from `origin/main` are destructive remote/history operations. Require explicit confirmation for that destructive action, even when normal publication is otherwise allowed.
 
 When GitHub HTTPS 443 is unreachable, prefer checking SSH 22:
 
@@ -607,7 +612,7 @@ git config --show-origin --get-regexp "^(core\.sshCommand|remote\.origin\.)"
 
 Known local history: `C:\Users\17533\.ssh\id_ed25519` can authenticate to `git@github.com:CCDawn/Vibelution.git` but is read-only as a deploy key. Do not repeatedly push with that identity.
 
-Only with explicit user authorization for GitHub sync/publication, use the write key:
+When the remote sync gate passes and GitHub write access is needed, use the write key:
 
 ```powershell
 $env:GIT_SSH_COMMAND='ssh -i C:\Users\17533\.ssh\vibelution_write_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new'
@@ -656,7 +661,7 @@ Task-owning Agents should self-review and self-merge by default when the merge g
 - closing lightweight guard claims with `release`;
 - cleaning successfully merged worktrees;
 - serializing project-memory updates;
-- avoiding remote push unless the user authorizes it.
+- pushing or creating PRs only after the remote sync gate passes, and keeping destructive remote/history operations behind explicit confirmation.
 
 If a branch cannot merge cleanly, leave it in its own worktree and mark it blocked with the conflicting files and next action.
 
