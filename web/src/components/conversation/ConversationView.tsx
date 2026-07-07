@@ -1157,6 +1157,9 @@ export function ConversationView({
               className={eventClassName}
               data-rollout-trace-kind={event.kind}
               data-rollout-trace-status={event.status}
+              data-rollout-tool-call-id={event.toolCallId}
+              data-rollout-terminal-operation-id={event.terminalOperationId}
+              data-rollout-terminal-id={event.terminalId}
             >
               <span className={styles.rolloutTraceDot} aria-hidden="true" />
               <span className={styles.rolloutTraceText}>

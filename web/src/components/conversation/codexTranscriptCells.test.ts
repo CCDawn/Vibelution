@@ -39,7 +39,9 @@ describe("codexTranscriptCells", () => {
     expect(codexTranscriptCellsSource).toContain("export type CodexTranscriptCell =");
     expect(codexTranscriptCellsSource).toContain("export function buildCodexTranscriptCells");
     expect(codexTranscriptCellsSource).toContain('from "./codexRolloutTrace"');
+    expect(codexTranscriptCellsSource).toContain('from "./codexToolLifecycleModel"');
     expect(codexTranscriptCellsSource).toContain("rolloutTraceEvents?:");
+    expect(codexTranscriptCellsSource).toContain("toolLifecycleModel?:");
   });
 
   it("maps user text into one user cell", () => {
@@ -196,6 +198,53 @@ describe("codexTranscriptCells", () => {
     ]));
   });
 
+  it("attaches the Codex-like lifecycle model to terminal tool cells", () => {
+    const cells = buildCodexTranscriptCells(message({ id: "terminal-message" }), {
+      operations: [
+        {
+          id: "op-command",
+          kind: "tool",
+          label: "命令",
+          rawLabel: "cli_tool",
+          status: "done",
+          summary: "npm --prefix web run test",
+          durationSeconds: 1.5,
+        },
+      ],
+    });
+
+    expect(lifecycleModel(cells[0])).toMatchObject({
+      toolCalls: [
+        expect.objectContaining({
+          toolCallId: "tool_call:op-command",
+          terminalOperationId: "terminal_operation:0",
+          runtimeKind: "terminal",
+        }),
+      ],
+      terminalOperations: [
+        expect.objectContaining({
+          operationId: "terminal_operation:0",
+          terminalId: "terminal:op-command",
+          request: expect.objectContaining({
+            displayCommand: "npm --prefix web run test",
+          }),
+        }),
+      ],
+      terminalSessions: [
+        expect.objectContaining({
+          terminalId: "terminal:op-command",
+          operationIds: ["terminal_operation:0"],
+        }),
+      ],
+      modelObservations: [
+        expect.objectContaining({
+          source: "DirectToolCall",
+          toolCallId: "tool_call:op-command",
+        }),
+      ],
+    });
+  });
+
   it("maps command groups to tool_call cells and preserves failed groups as error notices", () => {
     const timelineItems: AgentMessageTimelineItem[] = [
       {
@@ -323,4 +372,12 @@ function rolloutTraceEvents(cell: CodexTranscriptCell) {
       }>;
     }
   ).rolloutTraceEvents ?? [];
+}
+
+function lifecycleModel(cell: CodexTranscriptCell) {
+  return (
+    cell as CodexTranscriptCell & {
+      toolLifecycleModel?: unknown;
+    }
+  ).toolLifecycleModel;
 }
