@@ -41,7 +41,8 @@ type NativeToolLifecycleModelInput = Partial<
 export function hasUsableNativeCodexTranscript(message: ConversationMessage) {
   const transcript = message.codexTranscript;
   return Boolean(
-    transcript
+    message.role === "assistant"
+    && transcript
     && String(transcript.source ?? "").trim() === "native"
     && Array.isArray(transcript.cells)
     && transcript.cells.length > 0,

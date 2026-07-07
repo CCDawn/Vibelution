@@ -104,6 +104,36 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain("responseSection");
   });
 
+  it("does not render stale native assistant transcript cells on user messages", () => {
+    const html = renderConversation([
+      {
+        id: "user-native-stale",
+        role: "user",
+        content: "用户消息不应重复显示",
+        timestamp: "2026-07-07T11:00:00Z",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "user-native-stale",
+          cells: [
+            {
+              id: "user-native-stale-assistant-markdown",
+              kind: "assistant_markdown",
+              messageId: "user-native-stale",
+              status: "completed",
+              tone: "neutral",
+              text: "用户消息不应重复显示",
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(html.match(/用户消息不应重复显示/g)).toHaveLength(1);
+    expect(html).not.toContain('data-codex-transcript-surface="true"');
+    expect(html).not.toContain('data-codex-transcript-cell-kind="assistant_markdown"');
+  });
+
   it("keeps the final answer visible when same-turn process packets carry tool-only native transcript cells", () => {
     const html = renderConversation([
       {

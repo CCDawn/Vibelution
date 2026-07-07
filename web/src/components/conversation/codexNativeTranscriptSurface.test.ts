@@ -85,6 +85,50 @@ describe("codexNativeTranscriptSurface", () => {
     expect(surface.suppressLegacyTurnStatus).toBe(true);
   });
 
+  it("ignores native assistant transcript cells attached to user messages", () => {
+    const surface = resolveCodexTranscriptSurface(message({
+      role: "user",
+      content: "你好",
+      codexTranscript: {
+        version: 1,
+        source: "native",
+        messageId: "message-1",
+        cells: [
+          {
+            id: "message-1-assistant-markdown",
+            kind: "assistant_markdown",
+            messageId: "message-1",
+            status: "completed",
+            tone: "neutral",
+            text: "你好",
+          },
+        ],
+      },
+    }), fallbackCells);
+
+    expect(hasUsableNativeCodexTranscript(message({
+      role: "user",
+      codexTranscript: {
+        version: 1,
+        source: "native",
+        messageId: "message-1",
+        cells: [
+          {
+            id: "message-1-assistant-markdown",
+            kind: "assistant_markdown",
+            messageId: "message-1",
+            status: "completed",
+            tone: "neutral",
+            text: "你好",
+          },
+        ],
+      },
+    }))).toBe(false);
+    expect(surface.mode).toBe("legacy");
+    expect(surface.source).toBe("legacy_projection");
+    expect(surface.suppressLegacyResponse).toBe(false);
+  });
+
   it("falls back to legacy projected cells when native transcript is missing or empty", () => {
     expect(hasUsableNativeCodexTranscript(message({}))).toBe(false);
 

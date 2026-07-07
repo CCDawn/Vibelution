@@ -87,6 +87,26 @@ def test_normalized_assistant_message_exposes_native_codex_transcript():
     ]
 
 
+def test_normalized_user_message_does_not_expose_assistant_codex_transcript():
+    messages = session_service._normalize_messages(
+        "session-codex",
+        [
+            {
+                "role": "user",
+                "content": "你好",
+                "timestamp": "2026-07-07T10:31:00Z",
+                "metadata": {"kind": "journal_user_message", "turnId": "turn-user"},
+            }
+        ],
+    )
+
+    user = messages[0]
+
+    assert user["role"] == "user"
+    assert user["content"] == "你好"
+    assert "codexTranscript" not in user
+
+
 def test_live_output_checkpoint_includes_native_codex_transcript():
     payload = session_service._live_output_checkpoint_payload(
         session_service.SessionLiveOutputState(
