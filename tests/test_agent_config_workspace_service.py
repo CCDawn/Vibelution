@@ -63,6 +63,7 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     model_library_ids.update({"relay_openai_gpt_5_5", "xiaomi_mimo_v2_5_pro_token_plan"})
     monkeypatch.setattr(agent_directory_service, "_configured_model_library_ids", lambda *args, **kwargs: set(model_library_ids))
     monkeypatch.setattr(supervised_agent_service, "_configured_model_library_ids", lambda *args, **kwargs: set(model_library_ids))
+    monkeypatch.setattr(config_service, "get_agent_model_options_workspace", _fake_config_workspace)
 
 
 def _mark_session_active(tmp_path, session_id: str):
@@ -1139,6 +1140,58 @@ def test_agent_config_workspace_reports_missing_model_key_and_prompt(tmp_path, m
     assert research_choice["contextWindow"] == 64000
 
 
+def test_agent_config_workspace_uses_lightweight_model_options_without_full_config_workspace(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    def fail_full_config_workspace():
+        raise AssertionError("full config workspace should not be built for Agent config workspace")
+
+    monkeypatch.setattr(config_service, "get_config_workspace", fail_full_config_workspace)
+    monkeypatch.setattr(
+        agent_config_workspace_service.config_service,
+        "get_agent_model_options_workspace",
+        _fake_config_workspace,
+        raising=False,
+    )
+    agent_directory_service.create_agent_instance(
+        display_name="模型轻量 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+    )
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+
+    model_option_ids = [item["model_id"] for item in payload["modelOptions"]]
+    agent_model_choice_ids = [item["modelId"] for item in payload["agentModelChoices"]]
+    assert "model-primary" in model_option_ids
+    assert "model-primary" in agent_model_choice_ids
+
+
+def test_agent_config_workspace_keeps_embedded_prompt_templates_lightweight(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="提示词轻量 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        prompt_template_id="prompt-chat-operation-default",
+    )
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+
+    top_level_template = next(
+        item
+        for item in payload["promptTemplates"]
+        if item["promptTemplateId"] == "prompt-chat-operation-default"
+    )
+    embedded_template = next(
+        item for item in payload["agents"] if item["agentId"] == agent["agentId"]
+    )["promptTemplate"]
+    assert top_level_template["content"] == ""
+    assert top_level_template["defaultContent"] == ""
+    assert embedded_template["content"] == ""
+    assert embedded_template["defaultContent"] == ""
+    assert embedded_template["contentLength"] > 0
+    assert embedded_template["contentPreview"]
+
+
 def test_agent_config_workspace_allows_self_evolution_observer_without_prompt_template():
     agent = {
         "agentId": "agent-observer",
@@ -1697,6 +1750,65 @@ def test_agent_config_workspace_reuses_loaded_agents_for_policy_options(tmp_path
 
     assert any(item["policyId"] == agent["toolPolicyId"] for item in payload["toolPolicies"])
     assert any(item["policyId"] == agent["memoryPolicyId"] for item in payload["memoryPolicies"])
+
+
+def test_agent_config_workspace_reuses_prompt_detail_during_health_derivation(monkeypatch):
+    agents = [
+        {
+            "agentId": f"agent-{index}",
+            "agentCode": f"A{index:03d}",
+            "displayName": f"Prompt Agent {index}",
+            "status": "active",
+            "primaryMode": "supervised_evolution",
+            "roleKey": "baseline",
+            "promptTemplateId": "prompt-shared",
+            "directSessionId": f"session-{index}",
+            "workspacePath": f"workspace/agents/agent-{index}",
+            "toolPolicyId": f"tool-agent-{index}",
+            "memoryPolicyId": f"memory-agent-{index}",
+            "metadata": {"fixedRole": True},
+            "toolPolicy": {"allowedTools": []},
+            "llmBindings": {"dialogue": {"modelId": "model-primary"}},
+            "personaProfile": {"background": "baseline"},
+            "taskProfile": {"mission": "run"},
+        }
+        for index in range(6)
+    ]
+    calls: list[str] = []
+
+    def fake_get_prompt_template(template_id: str):
+        calls.append(template_id)
+        return {
+            "promptTemplateId": template_id,
+            "content": "必须调用 open_evolution_transaction_tool 记录证据。",
+            "contentLength": 40,
+            "contentPreview": "必须调用 open_evolution_transaction_tool 记录证据。",
+            "sourcePath": "",
+            "sourceExists": False,
+        }
+
+    monkeypatch.setattr(agent_config_workspace_service, "get_prompt_template", fake_get_prompt_template)
+
+    health = agent_config_workspace_service._derive_health(
+        agents=agents,
+        prompt_refs={
+            "prompt-shared": {
+                "promptTemplateId": "prompt-shared",
+                "contentLength": 200,
+                "contentPreview": "必须调用 open_",
+                "sourcePath": "",
+                "sourceExists": False,
+            }
+        },
+        model_refs={"model-primary": {"modelId": "model-primary", "requiresApiKey": False}},
+        mode_bindings={"modes": {}},
+        chat_rooms=[],
+        teams=[],
+        active_agent_ids={agent["agentId"] for agent in agents},
+    )
+
+    assert calls == ["prompt-shared"]
+    assert sum(1 for item in health["issues"] if item["code"] == "prompt_mentions_unallowed_tool") == len(agents)
 
 
 def test_agent_registry_rejects_suspicious_direct_session_agent_shrink(tmp_path, monkeypatch):

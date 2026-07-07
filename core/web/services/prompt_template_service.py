@@ -700,12 +700,12 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
 )
 
 
-def list_prompt_templates(*, include_inactive: bool = False) -> dict[str, Any]:
+def list_prompt_templates(*, include_inactive: bool = False, include_content: bool = False) -> dict[str, Any]:
     """Return the prompt template index with lightweight content metadata."""
 
     payload = repair_prompt_templates()
     templates = [
-        _template_to_api(item, include_content=False)
+        _template_to_api(item, include_content=include_content)
         for item in payload.get("templates") or []
         if include_inactive or str(item.get("status") or "active").strip() != "inactive"
     ]

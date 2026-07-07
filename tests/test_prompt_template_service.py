@@ -190,6 +190,19 @@ def test_prompt_template_api_exposes_default_and_source_authority_metadata(tmp_p
     assert drifted["sourceDriftStatus"] == "drifted"
 
 
+def test_prompt_template_index_can_include_content_for_internal_aggregation(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    workspace = prompt_template_service.list_prompt_templates(include_content=True)
+    template = next(
+        item for item in workspace["templates"]
+        if item["promptTemplateId"] == "prompt-chat-operation-default"
+    )
+
+    assert "默认操作型会话 Agent" in template["content"]
+    assert template["contentLength"] == len(template["content"])
+
+
 def test_prompt_template_repair_upgrades_versioned_research_defaults(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     legacy_cases = {
