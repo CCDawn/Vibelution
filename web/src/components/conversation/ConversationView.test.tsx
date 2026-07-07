@@ -4118,7 +4118,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain(">当前</span>");
   });
 
-  it("renders Codex-like rollout lifecycle events inside expanded command rows", () => {
+  it("keeps completed Codex-like rollout lifecycle events out of the default command row", () => {
     const html = renderConversation([
       {
         id: "message-rollout-trace",
@@ -4138,18 +4138,16 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("rolloutTraceList");
-    expect(html).toContain("data-rollout-trace-kind=\"ToolCallStarted\"");
-    expect(html).toContain("data-rollout-trace-kind=\"RuntimeStarted\"");
-    expect(html).toContain("data-rollout-trace-kind=\"RuntimeEnded\"");
-    expect(html).toContain("data-rollout-trace-kind=\"ToolCallEnded\"");
-    expect(html).toContain("data-rollout-tool-call-id=\"tool_call:message-rollout-trace-feedback-1\"");
-    expect(html).toContain("data-rollout-terminal-operation-id=\"terminal_operation:0\"");
-    expect(html).toContain("data-rollout-terminal-id=\"terminal:message-rollout-trace-feedback-1\"");
-    expect(html).toContain("调用开始");
-    expect(html).toContain("运行开始");
-    expect(html).toContain("运行结束");
-    expect(html).toContain("调用结束");
+    expect(html).not.toContain("rolloutTraceList");
+    expect(html).not.toContain("data-rollout-trace-kind=\"ToolCallStarted\"");
+    expect(html).not.toContain("data-rollout-trace-kind=\"RuntimeStarted\"");
+    expect(html).not.toContain("data-rollout-trace-kind=\"RuntimeEnded\"");
+    expect(html).not.toContain("data-rollout-trace-kind=\"ToolCallEnded\"");
+    expect(html).not.toContain("调用开始");
+    expect(html).not.toContain("运行开始");
+    expect(html).not.toContain("运行结束");
+    expect(html).not.toContain("调用结束");
+    expect(html).toContain("npm --prefix web run test");
     expect(html).not.toContain("工具调用已开始");
   });
 

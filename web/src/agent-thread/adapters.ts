@@ -165,7 +165,7 @@ function toolEventToAgentPart(id: string, event: AgentFeedbackEvent): AgentToolC
 
 function legacyThoughtPartForMessage(message: ConversationMessage): AgentThoughtPart[] {
   const thought = compactText(message.thought);
-  if (!thought) {
+  if (!thought || isInternalThoughtPlaceholder(thought, thought)) {
     return [];
   }
   return [{

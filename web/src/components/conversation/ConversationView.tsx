@@ -1135,6 +1135,9 @@ export function ConversationView({
     if (operation.kind !== "tool") {
       return null;
     }
+    if (operationStatusTone(operation) === "done") {
+      return null;
+    }
     const events = buildCodexRolloutTraceEvents(operation);
     if (events.length === 0) {
       return null;
