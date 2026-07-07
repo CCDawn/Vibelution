@@ -155,6 +155,9 @@ _SESSION_ACTIVE_TURN_IDS: dict[str, str] = {}
 _SESSION_ACTIVE_TURN_LEASES: dict[str, list[str]] = {}
 _SESSION_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="web-chat-turn")
 _SESSION_AGENT_MAX_ACTIVE_TURNS = 4
+SOURCE_COLLECTION_STAGE_SESSION_TASK_KIND = "source_collection_stage_session_task"
+INTERNAL_AUTO_CONTINUE_MAX_TURNS = 3
+SOURCE_COLLECTION_STAGE_TASK_AUTO_CONTINUE_MAX_TURNS = 4
 _SESSION_STREAM_SUBSCRIBERS_LOCK = threading.Lock()
 _SESSION_STREAM_SUBSCRIBERS: dict[str, set[queue.Queue[dict[str, Any]]]] = {}
 _SESSION_STREAM_HEARTBEAT_SECONDS = 15.0
@@ -11875,7 +11878,7 @@ def _source_collection_stage_task_turn_metadata(messages: list[dict[str, Any]], 
         if str(message.get("role") or "").strip().lower() != "user":
             continue
         metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
-        if str(metadata.get("kind") or "").strip() != "source_collection_stage_session_task":
+        if str(metadata.get("kind") or "").strip() != SOURCE_COLLECTION_STAGE_SESSION_TASK_KIND:
             continue
         message_turn_id = _message_turn_id(message)
         if normalized_turn_id and message_turn_id and message_turn_id != normalized_turn_id:
@@ -12315,6 +12318,44 @@ def _supervised_workspace_override_path(context: dict[str, Any]) -> Path | None:
     return candidate_path
 
 
+def _source_collection_stage_task_context_metadata(context: dict[str, Any]) -> dict[str, str]:
+    metadata = context.get("message_metadata") if isinstance(context.get("message_metadata"), dict) else {}
+    if str(metadata.get("kind") or "").strip() != SOURCE_COLLECTION_STAGE_SESSION_TASK_KIND:
+        return {}
+    team_id = str(metadata.get("teamId") or "").strip()
+    task_id = str(metadata.get("sourceCollectionStageTaskId") or "").strip()
+    if not team_id or not task_id:
+        return {}
+    return {
+        "teamId": team_id,
+        "runId": str(metadata.get("runId") or "").strip(),
+        "stageId": str(metadata.get("stageId") or "").strip(),
+        "taskId": task_id,
+        "agentId": str(metadata.get("agentId") or "").strip(),
+        "agentRole": str(metadata.get("agentRole") or "").strip(),
+    }
+
+
+def _session_context_allows_internal_auto_continue(context: dict[str, Any]) -> bool:
+    explicit = _normalize_optional_bool(context.get("allow_internal_auto_continue"))
+    if explicit is not None:
+        return bool(explicit)
+    if str(context.get("user_message_source") or "").strip() != "agent_inbox":
+        return False
+    return bool(_source_collection_stage_task_context_metadata(context))
+
+
+def _session_context_internal_auto_continue_max_turns(context: dict[str, Any]) -> int:
+    explicit = _coerce_nonnegative_int(
+        context.get("max_internal_auto_continue_turns") or context.get("internal_auto_continue_max_turns")
+    )
+    if explicit:
+        return max(1, explicit)
+    if _source_collection_stage_task_context_metadata(context):
+        return SOURCE_COLLECTION_STAGE_TASK_AUTO_CONTINUE_MAX_TURNS
+    return INTERNAL_AUTO_CONTINUE_MAX_TURNS
+
+
 def _run_session_turn(context: dict[str, Any]) -> None:
     prepare_started_at = _perf_counter()
     session_id = str(context.get("session_id") or "").strip()
@@ -12510,6 +12551,9 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         if resolved_agent_llm is not None
         else {"llmModelId": llm_model_id_for_turn}
     )
+    source_collection_stage_task_auto_continue = _source_collection_stage_task_context_metadata(context)
+    allow_internal_auto_continue = _session_context_allows_internal_auto_continue(context)
+    internal_auto_continue_max_turns = _session_context_internal_auto_continue_max_turns(context)
     prompt_cache_partition = _session_prompt_cache_partition(
         session_id=session_id,
         agent_id=agent_id,
@@ -12549,6 +12593,11 @@ def _run_session_turn(context: dict[str, Any]) -> None:
             "lightweightChatPayload": lightweight_chat_payload,
             "lightweightChatPayloadReason": lightweight_chat_payload_reason,
             "disableTools": lightweight_chat_payload,
+            "internalAutoContinueAllowed": allow_internal_auto_continue,
+            "internalAutoContinueMaxTurns": internal_auto_continue_max_turns,
+            "sourceCollectionStageTaskAutoContinue": bool(source_collection_stage_task_auto_continue),
+            "sourceCollectionStageTaskId": source_collection_stage_task_auto_continue.get("taskId", ""),
+            "sourceCollectionStageRunId": source_collection_stage_task_auto_continue.get("runId", ""),
             **prepare_timings,
         },
     )
@@ -13050,7 +13099,8 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         llm_slot=llm_slot,
                         llm_model_id=llm_model_id_for_turn,
                         disable_tools=lightweight_chat_payload,
-                        allow_internal_auto_continue=bool(context.get("allow_internal_auto_continue")),
+                        allow_internal_auto_continue=allow_internal_auto_continue,
+                        max_internal_auto_continue_turns=internal_auto_continue_max_turns,
                     )
                 if isinstance(result, dict):
                     result["context_composition"] = context_composition
@@ -13327,10 +13377,12 @@ def _run_session_continuation_loop(
     llm_model_id: str = "",
     disable_tools: bool = False,
     allow_internal_auto_continue: bool = False,
+    max_internal_auto_continue_turns: int = INTERNAL_AUTO_CONTINUE_MAX_TURNS,
 ) -> Any:
     prompt = str(initial_prompt or "").strip()
     has_initial_attachments = bool(list(attachments or []))
     normalized_user_message_source = str(user_message_source or "").strip()
+    auto_continue_turn_limit = max(1, _coerce_nonnegative_int(max_internal_auto_continue_turns) or INTERNAL_AUTO_CONTINUE_MAX_TURNS)
     if (
         normalized_user_message_source == "agent_inbox"
         and not has_initial_attachments
@@ -13409,6 +13461,8 @@ def _run_session_continuation_loop(
                 "llmSlot": str(llm_slot or "").strip(),
                 "llmModelId": str(llm_model_id or "").strip(),
                 "disableTools": bool(disable_tools),
+                "internalAutoContinueAllowed": bool(allow_internal_auto_continue),
+                "internalAutoContinueMaxTurns": auto_continue_turn_limit,
             },
         )
         _record_session_execution_registry_event(
@@ -13549,6 +13603,31 @@ def _run_session_continuation_loop(
                     "turnIndex": turn_index,
                     "reason": "internal_auto_continue_not_authorized",
                     "userMessageSource": normalized_user_message_source,
+                },
+            )
+            return paused_result
+
+        if turn_index >= auto_continue_turn_limit:
+            paused_result = _build_auto_continue_paused_result(
+                result,
+                last_visible_result,
+                turn_index,
+                pause_reason="internal_auto_continue_limit_reached",
+                status="paused_limit",
+                fallback_visible="本轮已达到内部自动续跑上限，已保留当前执行进度；发送“继续”可衔接上一轮继续。",
+                internal_auto_continue_blocked=False,
+                reached_limit=True,
+            )
+            _record_session_turn_lifecycle_event(
+                session_id,
+                "followup_prompt_blocked",
+                turn_id=getattr(turn_control, "turn_id", ""),
+                outcome="paused_limit",
+                fields={
+                    "turnIndex": turn_index,
+                    "reason": "internal_auto_continue_limit_reached",
+                    "userMessageSource": normalized_user_message_source,
+                    "internalAutoContinueMaxTurns": auto_continue_turn_limit,
                 },
             )
             return paused_result
@@ -20685,7 +20764,10 @@ def _annotate_continuation_result(
         return result
     metadata = dict(result.get("metadata") or {}) if isinstance(result.get("metadata"), dict) else {}
     metadata["continuation_turn_count"] = turn_count
-    metadata.pop("continuation_limit_reached", None)
+    if reached_limit:
+        metadata["continuation_limit_reached"] = True
+    else:
+        metadata.pop("continuation_limit_reached", None)
     result["metadata"] = metadata
     return result
 
@@ -20694,24 +20776,34 @@ def _build_auto_continue_paused_result(
     result: Any,
     visible_result: dict[str, Any] | None,
     turn_count: int,
+    *,
+    pause_reason: str = "internal_auto_continue_not_authorized",
+    status: str = "needs_continue",
+    fallback_visible: str = "",
+    internal_auto_continue_blocked: bool = True,
+    reached_limit: bool = False,
 ) -> Any:
     if not isinstance(result, dict):
         return result
     merged = _merge_continuation_visible_result(dict(result), visible_result)
     visible = _visible_reply_summary_candidate(merged) if isinstance(merged, dict) else ""
     if not visible:
-        visible = "本轮还没有形成最终回答，已保留当前执行进度；发送“继续”可衔接上一轮继续。"
+        visible = fallback_visible or "本轮还没有形成最终回答，已保留当前执行进度；发送“继续”可衔接上一轮继续。"
     paused = dict(merged)
     metadata = dict(paused.get("metadata") or {}) if isinstance(paused.get("metadata"), dict) else {}
     metadata.update(
         {
             "continuation_turn_count": turn_count,
-            "internal_auto_continue_blocked": True,
-            "continuation_pause_reason": "internal_auto_continue_not_authorized",
+            "internal_auto_continue_blocked": bool(internal_auto_continue_blocked),
+            "continuation_pause_reason": str(pause_reason or "").strip() or "internal_auto_continue_not_authorized",
         }
     )
+    if reached_limit:
+        metadata["continuation_limit_reached"] = True
+    else:
+        metadata.pop("continuation_limit_reached", None)
     paused["metadata"] = metadata
-    paused["status"] = "needs_continue"
+    paused["status"] = str(status or "").strip() or "needs_continue"
     paused["outcome"] = "progress"
     paused["task_outcome"] = "progress"
     paused["recommended_next_action"] = paused.get("recommended_next_action") or "继续当前会话目标并汇总已有工具结果。"
