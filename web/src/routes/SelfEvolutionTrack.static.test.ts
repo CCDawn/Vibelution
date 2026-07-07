@@ -132,11 +132,9 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionStylesSource).toContain("trackBody:");
     expect(selfEvolutionStylesSource).toContain("workspaceLayout:");
     expect(selfEvolutionStylesSource).toContain("conversationShell:");
-    expect(selfEvolutionStylesSource).toContain("centerColumnObservation:");
     expect(selfEvolutionStylesSource).toContain("max-h-full");
     expect(styles.trackShell).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(selfEvolutionStylesSource).toContain("grid-rows-[auto_minmax(0,1fr)]");
-    expect(selfEvolutionStylesSource).toContain("grid-rows-[minmax(0,1fr)]");
   });
 
   it("surfaces the active run controls before the workspace columns", () => {
@@ -277,8 +275,19 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("observationConversationSessionId");
     expect(selfEvolutionSource).toContain("observationConversationReady");
     expect(selfEvolutionSource).toContain("sessionId={observationConversationSessionId}");
-    expect(selfEvolutionSource).toContain("renderObservationSetupPanel()");
+    expect(selfEvolutionSource).toContain("renderObservationPendingConversationShell()");
     expect(selfEvolutionSource).not.toContain("{renderObservationPanel()}");
+  });
+
+  it("keeps no-session observation mode inside a conversation-like empty shell", () => {
+    expect(selfEvolutionSource).toContain("function renderObservationPendingConversationShell()");
+    expect(selfEvolutionSource).toContain("renderObservationPendingConversationShell()");
+    expect(selfEvolutionSource).toContain("renderObservationSetupPanel({ embedded: true })");
+    expect(selfEvolutionSource).toContain("styles.observationPendingConversationShell");
+    expect(selfEvolutionSource).toContain("styles.observationPendingMessage");
+    expect(selfEvolutionStylesSource).toContain("observationPendingConversationShell:");
+    expect(selfEvolutionStylesSource).toContain("min-h-[420px]");
+    expect(selfEvolutionSource).not.toContain(") : (\n                    renderObservationSetupPanel()\n                  )");
   });
 
   it("loads real observation session detail instead of rendering only snapshot text", () => {
@@ -291,15 +300,19 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).not.toContain("messages={observationConversationMessages}");
   });
 
-  it("uses the observation workspace to fill the main area with conversation and evidence", () => {
+  it("keeps observation mode inside the self-evolution workspace instead of switching pages", () => {
+    expect(selfEvolutionSource).toContain("function renderObservationModeConversationPane()");
+    expect(selfEvolutionSource).toContain("<main className={styles.centerColumn}>");
+    expect(selfEvolutionSource).toContain("renderObservationModeConversationPane()");
     expect(selfEvolutionSource).toContain("styles.observationWorkspace");
-    expect(selfEvolutionSource).toContain("styles.centerColumnObservation");
     expect(selfEvolutionSource).toContain("styles.observationConversationPane");
     expect(selfEvolutionSource).toContain("styles.observationEvidenceRail");
     expect(selfEvolutionSource).toContain("styles.observationEventTimeline");
     expect(selfEvolutionSource).toContain("observationEventTail.map");
     expect(selfEvolutionSource).toContain("selfObservationEventTitle(event.event, lang)");
     expect(selfEvolutionSource).not.toContain("event.message || event.event");
+    expect(selfEvolutionSource).not.toContain("className={observationRunModeActive ? `${styles.centerColumn} ${styles.centerColumnObservation}` : styles.centerColumn}");
+    expect(selfEvolutionSource).not.toContain("{observationRunModeActive ? (\n              <div className={styles.observationWorkspace}>");
     expect(selfEvolutionStylesSource).toContain("observationWorkspace:");
     expect(selfEvolutionStylesSource).toContain("grid-cols-[minmax(0,1fr)_minmax(280px,360px)]");
     expect(selfEvolutionStylesSource).toContain("observationEvidenceRail:");

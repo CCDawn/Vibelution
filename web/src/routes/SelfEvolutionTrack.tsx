@@ -1172,11 +1172,11 @@ export function SelfEvolutionTrack({
     );
   }
 
-  function renderObservationSetupPanel() {
+  function renderObservationSetupPanel({ embedded = false }: { embedded?: boolean } = {}) {
     const latestPreview = compactObservationPreview(observationRun?.latestMessage, 160);
     const reportPreview = compactObservationPreview(observationRun?.report, 180);
     return (
-      <section className={styles.observationPanel}>
+      <section className={embedded ? styles.observationPendingSetup : styles.observationPanel}>
         <div className={styles.sectionHeader}>
           <div>
             <p className={styles.eyebrow}>{lang === "zh" ? "纯观察沙盒" : "No-tool sandbox"}</p>
@@ -1258,6 +1258,56 @@ export function SelfEvolutionTrack({
         {latestPreview ? <p className={styles.compactPreviewText}>{latestPreview}</p> : null}
         {reportPreview ? <p className={styles.compactPreviewText}>{reportPreview}</p> : null}
         {observationRun?.boundaryViolation ? <p className={styles.errorText}>{observationRun.boundaryViolation}</p> : null}
+      </section>
+    );
+  }
+
+  function renderObservationPendingConversationShell() {
+    return (
+      <section
+        className={styles.observationPendingConversationShell}
+        aria-label={lang === "zh" ? "自主观察待启动会话" : "Pending observation conversation"}
+      >
+        <div className={styles.sectionHeader}>
+          <div className={styles.observationPendingTitle}>
+            <span className={styles.statusIcon}><Bot size={15} /></span>
+            <div>
+              <p className={styles.eyebrow}>{lang === "zh" ? "自主观察" : "Self observation"}</p>
+              <h3 className={styles.sectionTitle}>{lang === "zh" ? "自主观察会话" : "Observation session"}</h3>
+            </div>
+          </div>
+          <span className={styles.statusPill}>{statusLabel(observationRun?.status || "idle")}</span>
+        </div>
+
+        <div className={styles.observationPendingBody}>
+          <div className={styles.observationPendingMessage}>
+            <div className={styles.itemTop}>
+              <strong>{lang === "zh" ? "等待观察目标" : "Waiting for observation goal"}</strong>
+              <span className={styles.secondaryPill}>{lang === "zh" ? "0 工具" : "0 tools"}</span>
+            </div>
+            <p className={styles.sectionSummary}>
+              {lang === "zh"
+                ? "填写目标并启动后，这里会切换为实时观察会话；观察 Agent 仍保持 no worktree。"
+                : "After you enter a goal and start, this area switches to the live observation session while the observer keeps no worktree."}
+            </p>
+            <div className={styles.observationMetricGrid}>
+              <div className={styles.stripItem}>
+                <span>{lang === "zh" ? "工具" : "Tools"}</span>
+                <strong>{OBSERVATION_MODE_TOOL_COUNT}</strong>
+              </div>
+              <div className={styles.stripItem}>
+                <span>{lang === "zh" ? "默认时长" : "Default duration"}</span>
+                <strong>{normalizedObservationDuration}</strong>
+              </div>
+              <div className={styles.stripItem}>
+                <span>{lang === "zh" ? "worktree" : "Worktree"}</span>
+                <strong>{OBSERVATION_MODE_WORKTREE_STATE}</strong>
+              </div>
+            </div>
+          </div>
+
+          {renderObservationSetupPanel({ embedded: true })}
+        </div>
       </section>
     );
   }
@@ -1534,6 +1584,49 @@ export function SelfEvolutionTrack({
     );
   }
 
+  function renderObservationModeConversationPane() {
+    return (
+      <div className={styles.observationWorkspace}>
+        <div className={styles.observationConversationPane}>
+          {observationConversationReady ? (
+            <LazyConversationView
+              sessionId={observationConversationSessionId}
+              density="compact"
+              eyebrowLabel={lang === "zh" ? "自主观察" : "Self observation"}
+              title={lang === "zh" ? "自主观察会话" : "Observation session"}
+              phase={observationSessionDetail?.currentPhase || observationRun?.status || "idle"}
+              messages={observationSessionMessages}
+              assistantDisplayName={pet?.name}
+              assistantAvatarFallback={petAvatarFallback}
+              userDisplayName={runtime?.userName}
+              taskSummary={observationSessionDetail?.taskSummary || observationRun?.latestMessage || observationRun?.report || ""}
+              defaultFileContext={observationSessionDetail?.defaultFileContext || "self_observation"}
+              summaryItems={[]}
+              stats={[
+                { label: lang === "zh" ? "观察目标" : "Goal", value: observationRun?.goal || observationGoalValue || "--" },
+                { label: lang === "zh" ? "时长" : "Duration", value: observationRun?.durationSeconds ?? normalizedObservationDuration },
+                { label: lang === "zh" ? "工具" : "Tools", value: OBSERVATION_MODE_TOOL_COUNT },
+                { label: "worktree", value: OBSERVATION_MODE_WORKTREE_STATE },
+              ]}
+              autoScrollToLatest={observationRunActive}
+              showComposer={false}
+              composerValue=""
+              composerPlaceholder=""
+              composerDisabled
+              composerPending={false}
+              onComposerChange={() => undefined}
+              onSubmit={() => undefined}
+              fallback={<div className={styles.loadingShell}>{t("loadingSession")}</div>}
+            />
+          ) : (
+            renderObservationPendingConversationShell()
+          )}
+        </div>
+        {renderObservationEvidenceRail()}
+      </div>
+    );
+  }
+
   return (
     <div className={styles.pageStack}>
       <div className={styles.trackShell}>
@@ -1742,48 +1835,8 @@ export function SelfEvolutionTrack({
             onPointerDown={beginSidebarResize}
           />
 
-          <main className={observationRunModeActive ? `${styles.centerColumn} ${styles.centerColumnObservation}` : styles.centerColumn}>
-            {observationRunModeActive ? (
-              <div className={styles.observationWorkspace}>
-                <div className={styles.observationConversationPane}>
-                  {observationConversationReady ? (
-                    <LazyConversationView
-                      sessionId={observationConversationSessionId}
-                      density="compact"
-                      eyebrowLabel={lang === "zh" ? "自主观察" : "Self observation"}
-                      title={lang === "zh" ? "自主观察会话" : "Observation session"}
-                      phase={observationSessionDetail?.currentPhase || observationRun?.status || "idle"}
-                      messages={observationSessionMessages}
-                      assistantDisplayName={pet?.name}
-                      assistantAvatarFallback={petAvatarFallback}
-                      userDisplayName={runtime?.userName}
-                      taskSummary={observationSessionDetail?.taskSummary || observationRun?.latestMessage || observationRun?.report || ""}
-                      defaultFileContext={observationSessionDetail?.defaultFileContext || "self_observation"}
-                      summaryItems={[]}
-                      stats={[
-                        { label: lang === "zh" ? "观察目标" : "Goal", value: observationRun?.goal || observationGoalValue || "--" },
-                        { label: lang === "zh" ? "时长" : "Duration", value: observationRun?.durationSeconds ?? normalizedObservationDuration },
-                        { label: lang === "zh" ? "工具" : "Tools", value: OBSERVATION_MODE_TOOL_COUNT },
-                        { label: "worktree", value: OBSERVATION_MODE_WORKTREE_STATE },
-                      ]}
-                      autoScrollToLatest={observationRunActive}
-                      showComposer={false}
-                      composerValue=""
-                      composerPlaceholder=""
-                      composerDisabled
-                      composerPending={false}
-                      onComposerChange={() => undefined}
-                      onSubmit={() => undefined}
-                      fallback={<div className={styles.loadingShell}>{t("loadingSession")}</div>}
-                    />
-                  ) : (
-                    renderObservationSetupPanel()
-                  )}
-                </div>
-                {renderObservationEvidenceRail()}
-              </div>
-            ) : (
-              <>
+          <main className={styles.centerColumn}>
+            <>
                 <div className={styles.workflowHeader}>
                   <div className={styles.workflowCardGrid} aria-label={lang === "zh" ? "自进化步骤导航" : "Self-evolution workflow"}>
                     {workflowSteps.map((step) => {
@@ -1809,7 +1862,10 @@ export function SelfEvolutionTrack({
                     {selectedWorkflowStep?.livePreview || selectedWorkflowStep?.summary || activeNextAction}
                   </p>
                 </div>
-                <div className={styles.conversationShell}>
+                {selectedWorkflowStep?.id !== "approval" && observationRunModeActive ? (
+                  renderObservationModeConversationPane()
+                ) : (
+                  <div className={styles.conversationShell}>
                   {selectedWorkflowStep?.id === "approval" ? (
                     <section className={styles.approvalPanel}>
                       <div className={styles.subsurfaceHeader}>
@@ -1893,9 +1949,9 @@ export function SelfEvolutionTrack({
                       fallback={<div className={styles.loadingShell}>{t("loadingSession")}</div>}
                     />
                   )}
-                </div>
+                  </div>
+                )}
               </>
-            )}
           </main>
             </div>
           ) : observationRunModeActive ? (
