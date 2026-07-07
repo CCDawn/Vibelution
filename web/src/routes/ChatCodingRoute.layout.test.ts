@@ -1640,16 +1640,19 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("kind: \"session_live_overlay\"");
     expect(routeSource).toContain("committedAssistantDeltaLayer = pendingLayer");
     expect(routeSource).toContain("pendingTextLength: activeTurnLayerTextLength(pendingLayer)");
-    expect(routeSource).toContain("let pendingAssistantDeltaPayloads: Array<{");
-    expect(routeSource).toContain("receivedAtMs: number;");
-    expect(routeSource).toContain("frameScheduledAtMs: number;");
+    expect(routeSource).toContain("createSessionAssistantDeltaScheduler");
+    expect(routeSource).toContain("const assistantDeltaScheduler = createSessionAssistantDeltaScheduler({");
+    expect(routeSource).toContain("nowMs: chatStreamPerformanceNowMs");
+    expect(routeSource).toContain("let frameScheduledAtMs = 0");
     expect(routeSource).toContain("let assistantDeltaApplyFrame: number | null = null");
     expect(routeSource).toContain("function applyPendingAssistantDeltas(reason: \"frame\" | \"close\" | \"final\")");
+    expect(routeSource).toContain("assistantDeltaScheduler.drain(reason, { frameScheduledAtMs: scheduledAtMs })");
+    expect(routeSource).toContain("for (const entry of drain.entries)");
     expect(routeSource).toContain("function scheduleAssistantDeltaFrame()");
     expect(routeSource).toContain("window.requestAnimationFrame");
     expect(routeSource).toContain("window.cancelAnimationFrame");
     expect(routeSource).toContain("function queueAssistantDelta(");
-    expect(routeSource).toContain("pendingAssistantDeltaPayloads.push({ payload, payloadLength, receivedAtMs })");
+    expect(routeSource).toContain("assistantDeltaScheduler.enqueue(payload, payloadLength)");
     expect(routeSource).toContain("const applyStartedAtMs = chatStreamPerformanceNowMs()");
     expect(routeSource).toContain("applyPendingAssistantDeltas(\"final\")");
     expect(routeSource).toContain("browser.session_stream.assistant_delta_frame_scheduled");
@@ -1668,6 +1671,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("browser.session_stream.assistant_delta_applied");
     expect(routeSource).toContain("pendingTextLength");
     expect(routeSource).toContain("batchSize");
+    expect(routeSource).toContain("drainMode: drain.mode");
+    expect(routeSource).toContain("pendingBefore: drain.pendingBefore");
+    expect(routeSource).toContain("pendingAfter: drain.pendingAfter");
+    expect(routeSource).toContain("oldestQueuedAgeMs");
     expect(routeSource).toContain("oldestReceivedAtMs");
     expect(routeSource).toContain("newestReceivedAtMs");
     expect(routeSource).toContain("receivedToApplyMs");
@@ -1680,6 +1687,7 @@ describe("ChatCodingRoute layout contract", () => {
     const queueAssistantDeltaBody = routeSource.slice(queueAssistantDeltaStart, handleSessionInitialStart);
     expect(queueAssistantDeltaBody).not.toContain("mergeAssistantDeltaIntoActiveTurnLayer");
     expect(queueAssistantDeltaBody).not.toContain("activeTurnLayerTextLength");
+    expect(queueAssistantDeltaBody).not.toContain("pendingAssistantDeltaPayloads");
   });
 
   it("wires completed session stream events into the desktop notification helper", () => {
