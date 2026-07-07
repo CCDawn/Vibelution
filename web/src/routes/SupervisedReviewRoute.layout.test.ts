@@ -46,10 +46,42 @@ describe("SupervisedReviewRoute layout contract", () => {
     expect(workspaceClass).toContain("min-h-0");
     expect(workspaceClass).toContain("minmax(0,1fr)");
     expect(workspaceClass).toContain("max-[980px]:grid-cols-1");
-    expect(workspaceClass).toContain("max-[980px]:overflow-visible");
+    expect(workspaceClass).toContain("max-[980px]:overflow-y-visible");
+    expect(workspaceClass).toContain("max-[980px]:overflow-x-hidden");
     expect(workspaceClass).not.toContain("max-[1280px]:grid-cols-1");
     expect(queuePanelClass).toContain("min-h-0");
     expect(detailPanelClass).toContain("min-h-0");
+  });
+
+  it("uses independent scroll regions for queue, evidence, decision, and transcript review work", () => {
+    const decisionSectionIndex = routeSource.indexOf("className={styles.decisionSection}");
+    const decisionCopyIndex = routeSource.indexOf('"裁决"');
+    const evidenceCopyIndex = routeSource.indexOf('"关键证据"');
+
+    expect(decisionSectionIndex).toBeGreaterThan(-1);
+    expect(decisionCopyIndex).toBeGreaterThan(decisionSectionIndex);
+    expect(evidenceCopyIndex).toBeLessThan(decisionSectionIndex);
+
+    expect(styles.page).toContain("overflow-x-hidden");
+    expect(styles.page).toContain("max-w-full");
+    expect(styles.workspace).toContain("overflow-x-hidden");
+    expect(styles.workspace).toContain("max-w-full");
+    expect(styles.queuePanel).toContain("grid-rows-[auto_auto_auto_auto_minmax(0,1fr)]");
+    expect(styles.queuePanel).toContain("overflow-hidden");
+    expect(styles.queueList).toContain("min-h-0");
+    expect(styles.queueList).toContain("overflow-y-auto");
+    expect(styles.queueList).toContain("overflow-x-hidden");
+    expect(styles.detailPanel).toContain("overflow-y-auto");
+    expect(styles.detailPanel).toContain("overflow-x-hidden");
+    expect(styles.evidenceList).toContain("max-h-[clamp(");
+    expect(styles.evidenceList).toContain("overflow-y-auto");
+    expect(styles.evidenceList).toContain("overflow-x-hidden");
+    expect(styles.decisionSection).toContain("border-[color-mix(in_srgb,var(--accent-warm)");
+    expect(styles.decisionSection).toContain("grid");
+    expect(styles.decisionSection).toContain("gap-2");
+    expect(styles.transcriptList).toContain("max-h-[clamp(");
+    expect(styles.transcriptList).toContain("overflow-y-auto");
+    expect(styles.transcriptList).toContain("overflow-x-hidden");
   });
 
   it("keeps the route surface background-aware instead of stacking opaque route-owned panels", () => {

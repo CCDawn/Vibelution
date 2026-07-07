@@ -337,6 +337,42 @@ describe("LauncherRoute layout contract", () => {
     expect(styles.iconButton).toContain("max-w-full");
   });
 
+  it("keeps Launcher panels compact with content-sized controls and internal scroll", () => {
+    expect(styles.route).toContain("max-w-full");
+    expect(routeStylesSource).toContain("[&_[data-vui=button]]:w-fit");
+    expect(routeStylesSource).toContain("[&_[data-vui=button]]:[max-width:100%]");
+    expect(routeStylesSource).toContain("[&_[data-vui=button]]:[white-space:nowrap]");
+
+    expect(styles.workspace).toContain("grid-cols-[minmax(0,1fr)_minmax(320px,0.72fr)]");
+    expect(styles.workspace).toContain("max-[1200px]:grid-cols-[minmax(0,1fr)]");
+    expect(styles.panel).toContain("overflow-hidden");
+    expect(styles.panelHeader).toContain("min-h-0");
+
+    expect(startupSettingsPanelStyles.settingsStrip).toContain("mx-2");
+    expect(startupSettingsPanelStyles.settingsStrip).toContain("overflow-hidden");
+    expect(startupSettingsPanelStyles.settingsSaveButton).toContain("justify-self-start");
+    expect(startupSettingsPanelStyles.settingsStrip).not.toContain("mx-3");
+
+    for (const panelStyles of [developerModePanelStyles, projectMaintenancePanelStyles]) {
+      expect(panelStyles.developerPanel).toContain("mx-2");
+      expect(panelStyles.developerPanel).toContain("overflow-hidden");
+      expect(panelStyles.developerGrid).toContain("min-h-0");
+      expect(panelStyles.developerNoise).toContain("overflow-hidden");
+      expect(panelStyles.noiseItemGrid).toContain("overflow-auto");
+      expect(panelStyles.cleanupConsole).toContain("overflow-auto");
+      expect(panelStyles.developerPanel).not.toContain("mx-3");
+    }
+
+    expect(developerModePanelStyles.cleanupActions).toContain("justify-start");
+    expect(developerModePanelStyles.cleanupActions).not.toContain("max-[620px]:grid");
+
+    expect(diagnosticsPanelStyles.diagnosticsPanel).toContain("overflow-hidden");
+    expect(diagnosticsPanelStyles.diagnosticsBody).toContain("max-h-[min(42vh,420px)]");
+    expect(diagnosticsPanelStyles.diagnosticsBody).toContain("overflow-auto");
+    expect(diagnosticsPanelStyles.guardianTable).toContain("overflow-auto");
+    expect(diagnosticsPanelStyles.guardianTable).toContain("max-h-[220px]");
+  });
+
   it("keeps internal lifecycle fields out of the first-read labels", () => {
     expect(routeSource).toContain('matrix: "项目组成"');
     expect(routeSource).toContain('keyStatus: "关键状态"');

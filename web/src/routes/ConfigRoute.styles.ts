@@ -214,7 +214,7 @@ const styles = {
   logHelperSignal:
     "vui-routes-configroute logHelperSignal [min-width:0] [padding:10px] [border:1px_solid_var(--border-hairline)] [border-radius:8px] [background:var(--vui-surface-row)] [display:grid] [gap:6px] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_strong]:[color:var(--fg-primary)] [&_strong]:[overflow-wrap:anywhere]",
   matrixCard:
-    `vui-routes-configroute matrixCard ${rowSurface} [display:grid] [gap:6px] [padding:8px]`,
+    `vui-routes-configroute matrixCard ${rowSurface} [display:grid] [gap:6px] [min-width:0] [padding:8px] [&_*]:[min-width:0] [&_*]:[overflow-wrap:anywhere]`,
   matrixGrid:
     "vui-routes-configroute matrixGrid [display:grid] [gap:8px] [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))] max-[1400px]:[grid-template-columns:repeat(auto-fit,minmax(220px,1fr))] max-[720px]:[grid-template-columns:1fr]",
   matrixTitle:
@@ -238,7 +238,7 @@ const styles = {
   modelScenarioPicker:
     "vui-routes-configroute modelScenarioPicker [display:grid] [gap:6px] [margin:7px_9px_0] [&>_span]:[color:var(--fg-tertiary)] [&>_span]:[font-size:var(--vui-font-xs)] [&>_span]:[font-weight:700] [&>_span]:[text-transform:uppercase] [&>_span]:[letter-spacing:0.06em]",
   notice:
-    "vui-routes-configroute notice [margin:0] [color:var(--fg-secondary)] [line-height:1.38] [padding:7px_9px] [border-radius:8px] [border:1px_solid_var(--border-hairline)] [background:var(--vui-surface-row)]",
+    "vui-routes-configroute notice [margin:0] [min-width:0] [color:var(--fg-secondary)] [line-height:1.38] [overflow-wrap:anywhere] [padding:7px_9px] [border-radius:8px] [border:1px_solid_var(--border-hairline)] [background:var(--vui-surface-row)]",
   noticeError:
     "vui-routes-configroute noticeError [color:var(--state-error)] [background:color-mix(in_srgb,var(--state-error)_14%,transparent)] [border-color:color-mix(in_srgb,var(--state-error)_24%,transparent)]",
   noticeSuccess:
@@ -260,7 +260,7 @@ const styles = {
   profileTableSelect:
     "vui-routes-configroute profileTableSelect [min-width:220px]",
   profileTableWrap:
-    "vui-routes-configroute profileTableWrap [width:100%] [overflow-x:auto] [border:1px_solid_var(--border-hairline)] [border-radius:7px] [background:var(--vui-surface-row)] [scrollbar-gutter:stable]",
+    "vui-routes-configroute profileTableWrap [width:100%] [min-width:0] [overflow-x:auto] [border:1px_solid_var(--border-hairline)] [border-radius:7px] [background:var(--vui-surface-row)] [scrollbar-gutter:stable]",
   profileTaskCell:
     "vui-routes-configroute profileTaskCell [display:grid] [gap:5px] [min-width:0] [&_strong]:[min-width:0] [&_strong]:[color:var(--fg-primary)] [&_strong]:[overflow-wrap:anywhere] [&_strong]:[font-size:var(--vui-font-xs)] [&_span]:[min-width:0] [&_span]:[color:var(--fg-tertiary)] [&_span]:[overflow-wrap:anywhere] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[line-height:1.28]",
   quickActionItem:

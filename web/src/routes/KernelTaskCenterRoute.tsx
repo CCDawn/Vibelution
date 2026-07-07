@@ -243,49 +243,51 @@ export function KernelTaskCenterRoute() {
             <EmptyState label={copy.loading} detail={selectedTaskId} tone="loading" />
           ) : (
             <>
-              <div className={styles.detailHeaderClass}>
-                <div>
-                  <p className={styles.eyebrowClass}>{copy.detail}</p>
-                  <h2 className={styles.detailTitleClass}>{shortId(timeline.taskId)}</h2>
+              <div className={styles.detailContentClass}>
+                <div className={styles.detailHeaderClass}>
+                  <div className={styles.detailTitleWrapClass}>
+                    <p className={styles.eyebrowClass}>{copy.detail}</p>
+                    <h2 className={styles.detailTitleClass}>{shortId(timeline.taskId)}</h2>
+                  </div>
+                  <StatusPill status={timeline.task.status} />
                 </div>
-                <StatusPill status={timeline.task.status} />
+
+                <div className={styles.summaryGridClass}>
+                  <Metric label={copy.factAuthority} value={timeline.readModel.truthSource} icon={<ShieldCheck size={15} />} />
+                  <Metric
+                    label={copy.viewType}
+                    value={timeline.readModel.projection ? copy.projectionView : copy.directView}
+                    icon={<ShieldCheck size={15} />}
+                  />
+                  <Metric label={copy.event} value={shortId(timeline.event.eventId)} icon={<Router size={15} />} />
+                  <Metric label={copy.workRun} value={shortId(timeline.execution.workRunId)} icon={<Activity size={15} />} />
+                  <Metric label={copy.outcome} value={timeline.outcome.status || "-"} icon={<Boxes size={15} />} />
+                </div>
+
+                {selectedTaskHiddenFromList ? <div className={styles.selectionNoticeClass}>{copy.taskHidden}</div> : null}
+
+                <section className={styles.ledgerSectionClass} aria-label={copy.taskChain}>
+                  <div className={styles.sectionHeaderClass}>
+                    <h3 className={styles.sectionTitleClass}>{copy.taskChain}</h3>
+                    <span className={styles.sectionCountClass}>3</span>
+                  </div>
+                  <div className={styles.ledgerFlowClass}>
+                    <LedgerBucket title={copy.deliveryResult} count={timeline.deliveries.length}>
+                      <div className={styles.deliveryGridClass}>
+                        {timeline.deliveries.map((delivery) => (
+                          <DeliveryRow key={`${delivery.targetAgentId}-${delivery.inboxMessageId}`} delivery={delivery} copy={copy} />
+                        ))}
+                      </div>
+                    </LedgerBucket>
+                    <LedgerBucket title={copy.projectionRefs} count={timeline.projectionRefs.length}>
+                      <RefList refs={timeline.projectionRefs} />
+                    </LedgerBucket>
+                    <LedgerBucket title={copy.evidenceRefs} count={timeline.runtimeEvidenceRefs.length}>
+                      <RefList refs={timeline.runtimeEvidenceRefs} className={styles.evidenceRefListClass} />
+                    </LedgerBucket>
+                  </div>
+                </section>
               </div>
-
-              <div className={styles.summaryGridClass}>
-                <Metric label={copy.factAuthority} value={timeline.readModel.truthSource} icon={<ShieldCheck size={15} />} />
-                <Metric
-                  label={copy.viewType}
-                  value={timeline.readModel.projection ? copy.projectionView : copy.directView}
-                  icon={<ShieldCheck size={15} />}
-                />
-                <Metric label={copy.event} value={shortId(timeline.event.eventId)} icon={<Router size={15} />} />
-                <Metric label={copy.workRun} value={shortId(timeline.execution.workRunId)} icon={<Activity size={15} />} />
-                <Metric label={copy.outcome} value={timeline.outcome.status || "-"} icon={<Boxes size={15} />} />
-              </div>
-
-              {selectedTaskHiddenFromList ? <div className={styles.selectionNoticeClass}>{copy.taskHidden}</div> : null}
-
-              <section className={styles.ledgerSectionClass} aria-label={copy.taskChain}>
-                <div className={styles.sectionHeaderClass}>
-                  <h3 className={styles.sectionTitleClass}>{copy.taskChain}</h3>
-                  <span className={styles.sectionCountClass}>3</span>
-                </div>
-                <div className={styles.ledgerFlowClass}>
-                  <LedgerBucket title={copy.deliveryResult} count={timeline.deliveries.length}>
-                    <div className={styles.deliveryGridClass}>
-                      {timeline.deliveries.map((delivery) => (
-                        <DeliveryRow key={`${delivery.targetAgentId}-${delivery.inboxMessageId}`} delivery={delivery} copy={copy} />
-                      ))}
-                    </div>
-                  </LedgerBucket>
-                  <LedgerBucket title={copy.projectionRefs} count={timeline.projectionRefs.length}>
-                    <RefList refs={timeline.projectionRefs} />
-                  </LedgerBucket>
-                  <LedgerBucket title={copy.evidenceRefs} count={timeline.runtimeEvidenceRefs.length}>
-                    <RefList refs={timeline.runtimeEvidenceRefs} className={styles.evidenceRefListClass} />
-                  </LedgerBucket>
-                </div>
-              </section>
 
               <section className={styles.lifecycleSectionClass}>
                 <div className={styles.sectionHeaderClass}>

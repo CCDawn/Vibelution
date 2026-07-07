@@ -23,7 +23,7 @@ const reviewTextAreaField = [reviewFormLabel, reviewTextAreaTargets].join(" ");
 
 const styles = {
   page:
-    "flex h-full min-h-0 min-w-0 flex-col gap-1.5 overflow-hidden px-3 py-2 pb-3 text-[var(--fg-primary)] max-[980px]:overflow-auto max-[980px]:pb-[18px]",
+    "flex h-full min-h-0 min-w-0 max-w-full flex-col gap-1.5 overflow-hidden overflow-x-hidden px-3 py-2 pb-3 text-[var(--fg-primary)] max-[980px]:overflow-y-auto max-[980px]:overflow-x-hidden max-[980px]:pb-[18px]",
   toolbar: "flex min-w-0 flex-wrap items-center justify-between gap-[var(--route-topbar-gap)]",
   toolbarIntro: "grid min-w-[260px] max-w-[760px] gap-0.5",
   toolbarControls: "flex flex-wrap items-center justify-end gap-3",
@@ -38,14 +38,14 @@ const styles = {
     `flex min-h-[34px] min-w-0 items-center justify-between gap-2 px-2 py-1.5 max-[980px]:flex-col max-[980px]:items-start ${reviewRowSurfaceSoft}`,
   lifecyclePills: "flex flex-wrap justify-end gap-2 max-[980px]:justify-start",
   workspace:
-    "grid min-h-0 min-w-0 flex-1 grid-cols-[var(--review-queue-width,380px)_12px_minmax(0,1fr)] overflow-hidden max-[980px]:grid-cols-1 max-[980px]:gap-y-3 max-[980px]:overflow-visible",
+    "grid min-h-0 min-w-0 max-w-full flex-1 grid-cols-[var(--review-queue-width,380px)_12px_minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[980px]:grid-cols-1 max-[980px]:gap-y-3 max-[980px]:overflow-y-visible max-[980px]:overflow-x-hidden",
   resizeHandle:
     "relative min-w-3 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none before:absolute before:inset-y-0 before:left-1/2 before:w-[3px] before:-translate-x-1/2 before:rounded-[var(--radius-control)] before:bg-[var(--surface-resize-track)] before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] hover:before:shadow-none focus-visible:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] focus-visible:before:shadow-none max-[980px]:hidden",
   queuePanel:
-    `flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden p-[9px] max-[980px]:max-h-none max-[980px]:overflow-visible ${reviewPanelSurface}`,
+    `grid min-h-0 min-w-0 max-w-full grid-rows-[auto_auto_auto_auto_minmax(0,1fr)] gap-2 overflow-hidden p-[9px] max-[980px]:max-h-[min(620px,72vh)] max-[980px]:overflow-hidden ${reviewPanelSurface}`,
   paneCollapsed: "overflow-hidden p-0 invisible",
   detailPanel:
-    `flex min-h-0 min-w-0 flex-col gap-2.5 overflow-auto p-[9px] max-[980px]:overflow-visible ${reviewPanelSurface}`,
+    `flex min-h-0 min-w-0 max-w-full flex-col gap-2.5 overflow-y-auto overflow-x-hidden p-[9px] max-[980px]:overflow-y-visible max-[980px]:overflow-x-hidden ${reviewPanelSurface}`,
   panelHeader: "flex min-w-0 items-start justify-between gap-3.5",
   detailHeader: "flex min-w-0 items-start justify-between gap-3.5 max-[520px]:flex-col",
   sectionHeader: "flex min-w-0 items-start justify-between gap-3.5 max-[520px]:flex-col",
@@ -80,12 +80,13 @@ const styles = {
   searchField:
     "flex min-h-[34px] items-center gap-2 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-control-muted px-2.5 text-vui-fg-secondary [&_input]:w-full [&_input]:border-0 [&_input]:bg-transparent [&_input]:font-[inherit] [&_input]:text-vui-fg-primary [&_input]:outline-none [&_input::placeholder]:text-vui-fg-tertiary",
   queueMeta: "flex items-center justify-between gap-2.5 text-[13px] text-[var(--fg-tertiary)]",
+  queueBulkZone: "grid min-w-0 max-w-full gap-1.5 overflow-hidden",
   bulkToolbar:
     `grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 px-2 py-1.5 max-[520px]:grid-cols-1 ${reviewRowSurfaceSoft}`,
   bulkCounter:
     "flex min-w-[70px] items-baseline justify-start gap-2 text-xs text-[var(--fg-secondary)] [&_strong]:text-base [&_strong]:text-[var(--fg-primary)]",
   bulkActions: "flex min-w-0 flex-wrap items-center justify-end gap-1.5 max-[520px]:justify-start",
-  queueList: "flex min-h-0 flex-col gap-1.5 overflow-auto pr-1 max-[980px]:max-h-[420px]",
+  queueList: "flex min-h-0 max-w-full flex-col gap-1.5 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-gutter:stable] max-[980px]:max-h-none",
   queueItem:
     `w-full cursor-pointer px-2.5 py-[9px] text-left text-inherit transition hover:border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-surface-row-hover)_84%,transparent)] ${reviewRowSurface}`,
   queueItemActive:
@@ -113,10 +114,12 @@ const styles = {
     `min-w-0 px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-[0.95rem] [&_h3]:font-bold [&_ul]:m-0 [&_ul]:pl-[18px] [&_ul]:leading-relaxed [&_ul]:text-vui-fg-secondary`,
   detailSection:
     `min-w-0 px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-[0.95rem] [&_h3]:font-bold`,
+  decisionSection:
+    `grid min-w-0 gap-2 border-[color-mix(in_srgb,var(--accent-warm)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_6%,var(--vui-surface-row))] px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_h3]:m-0 [&_h3]:mb-2.5 [&_h3]:text-[0.95rem] [&_h3]:font-bold`,
   transcriptSection:
     `min-w-0 px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_summary]:cursor-pointer [&_summary]:font-semibold`,
-  evidenceList: "flex flex-col gap-1.5",
-  transcriptList: "flex flex-col gap-1.5",
+  evidenceList: "flex max-h-[clamp(168px,28vh,280px)] min-h-0 flex-col gap-1.5 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-gutter:stable]",
+  transcriptList: "flex max-h-[clamp(220px,36vh,420px)] min-h-0 flex-col gap-1.5 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-gutter:stable]",
   evidenceCard:
     `min-w-0 px-2.5 py-[9px] ${reviewRowSurfaceSoft} [&_p]:m-0 [&_p]:mt-2 [&_p]:whitespace-pre-wrap [&_p]:break-words [&_p]:leading-normal`,
   transcriptCard:

@@ -80,6 +80,10 @@ describe("ConfigRoute layout contract", () => {
     expect(placeholderPanelSource).toContain("styles.loadingSpecGrid");
     expect(placeholderPanelStyles.loadingNavPanel).toBeTypeOf("string");
     expect(placeholderPanelStyles.loadingMetricGrid).toBeTypeOf("string");
+    expect(placeholderPanelStyles.loadingBoardHeader).toContain("max-[720px]:[grid-template-columns:1fr]");
+    expect(placeholderPanelStyles.loadingMetricGrid).toContain("max-[1120px]:[grid-template-columns:repeat(2,minmax(0,1fr))]");
+    expect(placeholderPanelStyles.loadingMetricGrid).toContain("max-[520px]:[grid-template-columns:1fr]");
+    expect(placeholderPanelStyles.loadingSpecGrid).toContain("max-[720px]:[grid-template-columns:1fr]");
     expect(extractedPanelStylesSource).toContain("loadingMetricGrid");
   });
 
@@ -122,8 +126,21 @@ describe("ConfigRoute layout contract", () => {
     expect(modelLibraryPanelStyles.formGridWide).toContain("repeat(auto-fit,minmax(176px,1fr))");
     expect(modelLibraryPanelStyles.modelLibrarySection).toContain("[grid-template-rows:auto_auto_auto_auto_minmax(0,0.58fr)_minmax(0,1fr)]");
     expect(modelLibraryPanelStyles.modelLibraryTestBar).toContain("[padding:6px_8px]");
+    expect(modelLibraryPanelStyles.modelLibraryTestBar).toContain("max-[720px]:[&_.actionButton]:[width:fit-content]");
     expect(modelLibraryPanelStyles.profileTableWrap).toContain("[min-height:min(240px,_34vh)]");
+    expect(modelLibraryPanelStyles.profileTableWrap).toContain("[min-width:0]");
     expect(modelLibraryPanelStyles.profileTableActions).toContain("[flex-wrap:nowrap]");
+  });
+
+  it("bounds Config diagnostics and transient notices so long text cannot force page overflow", () => {
+    expect(styles.notice).toContain("[min-width:0]");
+    expect(styles.notice).toContain("[overflow-wrap:anywhere]");
+    expect(styles.matrixCard).toContain("[min-width:0]");
+    expect(styles.matrixCard).toContain("[&_*]:[overflow-wrap:anywhere]");
+    expect(styles.profileTableWrap).toContain("[min-width:0]");
+    expect(healthDiagnosticsPanelStyles.findingCard).toContain("[min-width:0]");
+    expect(healthDiagnosticsPanelStyles.healthPanelHeader).toContain("[min-width:0]");
+    expect(healthDiagnosticsPanelStyles.quickActionItem).toContain("max-[520px]:[grid-template-columns:1fr]");
   });
 
   it("keeps the tablet config sidebar compact instead of stretching every control full width", () => {
