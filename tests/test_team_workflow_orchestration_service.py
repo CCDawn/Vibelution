@@ -358,6 +358,43 @@ def _append_stage_task_tool_trace(project_root: Path, task: dict, *, complete: b
         )
 
 
+def _stage_task_feedback_events(task: dict, *, complete: bool = True) -> list[dict]:
+    checklist = list(task.get("taskChecklist") or [])
+    events: list[dict] = [
+        {
+            "sequence": 1,
+            "kind": "tool",
+            "status": "done",
+            "name": "task_create_tool",
+            "arguments": {
+                "goal": task.get("title") or "知识搜集阶段任务",
+                "task_list": [
+                    {"description": item["description"]}
+                    for item in checklist
+                ],
+            },
+            "resultPreview": "task list created",
+        }
+    ]
+    update_items = checklist if complete else checklist[: max(0, len(checklist) - 1)]
+    for sequence, item in enumerate(update_items, start=2):
+        events.append(
+            {
+                "sequence": sequence,
+                "kind": "tool",
+                "status": "done",
+                "name": "task_update_tool",
+                "arguments": {
+                    "task_id": item["order"],
+                    "is_completed": True,
+                    "result_summary": item["description"],
+                },
+                "resultPreview": "task updated",
+            }
+        )
+    return events
+
+
 def _workflow_scene_events_by_code(events, event_code):
     return [
         kwargs
@@ -5023,6 +5060,116 @@ def test_source_collection_stage_turn_completion_reconciles_post_writeback_check
     assert stored_task["status"] == "completed"
     assert stored_task["completionGate"]["passed"] is True
     assert stored_task["taskToolProgress"]["completed"] == len(stored_task["taskChecklist"])
+
+
+def test_source_collection_stage_turn_completion_reconciles_feedback_event_checklist(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+    agent = agent_directory_service.create_agent_instance(display_name="资料入库")
+    direct_session = session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料入库")
+    coordinator = agent_directory_service.create_agent_instance(display_name="科研协调")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[
+            {"agentId": coordinator["agentId"], "role": "research_coordination", "agentName": "科研协调"},
+            {"agentId": agent["agentId"], "role": "source_ingestor", "agentName": "资料入库"},
+        ],
+    )
+    knowledge_base = team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="挑战杯科研知识库",
+        actor_agent_id=coordinator["agentId"],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经预测编码资料入库",
+            "agentRoles": ["source_ingestor"],
+            "agentIds": {"source_ingestor": agent["agentId"]},
+            "querySeeds": ["predictive coding neural algorithm"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    candidate = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding ingestion closure candidate",
+            "sourceUrl": "https://doi.org/10.0000/feedback-closure-candidate",
+            "sourceKind": "paper",
+            "summary": "Predictive coding evidence for feedback event closure.",
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/feedback-closure-candidate"},
+            "createdByAgent": agent["agentId"],
+        },
+    )["candidate"]
+    team_workflow_orchestration_service.assess_source_candidate_quality(
+        team["teamId"],
+        candidate["candidateId"],
+        {
+            "assessedByAgent": agent["agentId"],
+            "decision": "approved",
+            "notes": "来源可追踪，允许知识库管理员入库。",
+            "evidenceRefs": [{"type": "doi", "id": "10.0000/feedback-closure-candidate"}],
+        },
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "ingestion", "agentId": agent["agentId"], "agentRole": "source_ingestor"},
+    )
+
+    first = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "已完成正式知识入库，但 checklist 在同轮 feedback events 末尾才补齐。",
+            "result": {
+                "knowledgeBaseId": knowledge_base["knowledgeBaseId"],
+                "stewardPackDraft": {
+                    "approvedCandidateIds": [candidate["candidateId"]],
+                    "targetDomain": "神经机制启发神经网络算法",
+                    "proposalPayload": {
+                        "title": candidate["title"],
+                        "summary": "将已通过质检的预测编码 DOI 资料写入团队知识库。",
+                    },
+                },
+                "autoIngestDecision": {
+                    "decision": "approved_for_ingestion",
+                    "reason": "候选已通过资料质检，知识库管理员批准直接入库。",
+                    "approvedCandidates": [{"candidateId": candidate["candidateId"], "title": candidate["title"]}],
+                },
+            },
+            "recordedByAgent": agent["agentId"],
+        },
+    )
+    assert first["task"]["status"] == "needs_review"
+    assert first["task"]["completionGate"]["artifactComplete"] is True
+    assert first["task"]["completionGate"]["taskChecklistComplete"] is False
+
+    session_service._persist_session_turn_result(
+        direct_session["id"],
+        {
+            "status": "needs_continue",
+            "summary": "本轮还没有形成最终回答，已保留当前执行进度；发送“继续”可衔接上一轮继续。",
+            "raw_output": "本轮还没有形成最终回答，已保留当前执行进度；发送“继续”可衔接上一轮继续。",
+            "tool_call_count": len(first["task"]["taskChecklist"]) + 1,
+            "tool_trace": [],
+            "feedback_events": _stage_task_feedback_events(first["task"]),
+        },
+        turn_id=task["turn"]["turnId"],
+    )
+
+    stored_task, _stored_run_id = team_workflow_orchestration_service._find_source_collection_stage_session_task_by_id(
+        team["teamId"],
+        task["taskId"],
+    )
+    assert stored_task["status"] == "completed"
+    assert stored_task["completionGate"]["passed"] is True
+    assert stored_task["taskToolProgress"]["completed"] == len(stored_task["taskChecklist"])
+    assert stored_task["taskToolProgress"]["source"] == "feedback_events"
 
 
 def test_source_collection_stage_task_after_turn_accepts_continuation_turn_for_same_task(tmp_path, monkeypatch):
