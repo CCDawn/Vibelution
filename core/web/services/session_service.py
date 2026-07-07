@@ -7350,7 +7350,8 @@ def _repair_stale_running_conversation(conversation: dict[str, Any]) -> bool:
         zh="上一轮运行已被中断，当前会话已恢复为可继续状态。",
         en="The previous turn was interrupted. This session is ready to continue.",
     )
-    conversation.pop("messages", None)
+    if conversation.get("messages") and not _ledger_visible_messages_for_session(conversation_id):
+        conversation["legacy_messages_preserved"] = True
     conversation["runtime_notices"] = _append_session_runtime_notice(
         conversation.get("runtime_notices") or conversation.get("runtimeNotices") or [],
         {
@@ -7715,11 +7716,17 @@ def _normalize_conversation(
         agent_status_code = agent_status_code or "missing_agent"
     if lightweight:
         ledger_messages = _ledger_visible_messages_for_session(conversation_id)
-        messages = _normalize_latest_preview_messages(conversation_id, ledger_messages)
+        if ledger_messages:
+            messages = _normalize_latest_preview_messages(conversation_id, ledger_messages)
+        else:
+            messages = _normalize_latest_preview_messages(conversation_id, raw.get("messages") or [])
         visible_runtime_notices: list[dict[str, Any]] = []
     else:
         ledger_messages = _session_ledger_visible_messages(conversation_id)
-        messages = ledger_messages
+        if ledger_messages:
+            messages = ledger_messages
+        else:
+            messages = _normalize_messages(conversation_id, raw.get("messages") or [])
         runtime_notices = _normalize_session_runtime_notices(
             raw.get("runtime_notices") or raw.get("runtimeNotices") or []
         )
@@ -8828,7 +8835,7 @@ def _build_session_detail_from_summary(
     ) or "agent"
     detail_messages = _messages_with_live_output(conversation["id"])
     if not detail_messages:
-        detail_messages = list(conversation.get("messages") or [])
+        detail_messages = _normalize_messages(conversation["id"], conversation.get("messages") or [])
     context_usage = _build_session_context_usage(conversation, detail_messages)
     llm_usage = _session_last_llm_usage(detail_messages)
     stored_last_cache_composition = _normalize_session_cache_composition(
