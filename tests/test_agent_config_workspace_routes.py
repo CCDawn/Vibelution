@@ -260,6 +260,7 @@ def test_agent_config_workspace_repairs_legacy_agent_model_ids(tmp_path, monkeyp
         },
     )
     monkeypatch.setattr(config_service, "get_config_workspace", fake_config_workspace)
+    monkeypatch.setattr(config_service, "get_agent_model_options_workspace", fake_config_workspace)
     monkeypatch.setattr("config.settings.get_config", lambda: SimpleNamespace(llm=fake_llm))
 
     gpt_agent = agent_directory_service.create_agent_instance(

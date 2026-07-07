@@ -1473,6 +1473,15 @@ def get_config_workspace() -> dict[str, Any]:
     return _build_workspace(public_config)
 
 
+def get_agent_model_options_workspace() -> dict[str, Any]:
+    """Return the model options needed by Agent configuration aggregation."""
+
+    public_config = _with_config_workspace_defaults(load_public_config())
+    return {
+        "modelOptions": _decorate_model_options(public_config, None),
+    }
+
+
 def preview_config_workspace(public_config: dict[str, Any] | None, draft_meta: dict | None = None, base_hash: str = "") -> dict[str, Any]:
     """Validate and normalize a draft config without persisting it."""
 
@@ -2605,6 +2614,7 @@ __all__ = [
     "draft_check_model_image_input_capabilities",
     "draft_delete_model",
     "draft_update_model",
+    "get_agent_model_options_workspace",
     "get_config_summary",
     "get_config_workspace",
     "open_system_environment_settings",

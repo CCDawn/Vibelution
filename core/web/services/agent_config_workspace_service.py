@@ -266,7 +266,9 @@ def _build_agent_config_workspace(
             **agent,
             "dialogueModel": model_refs.get(agent_dialogue_model_id(agent)),
             "llmBindingModels": _llm_binding_model_refs(agent.get("llmBindings"), model_refs),
-            "promptTemplate": prompt_refs.get(str(agent.get("promptTemplateId") or "")),
+            "promptTemplate": _workspace_prompt_template_summary(
+                prompt_refs.get(str(agent.get("promptTemplateId") or ""))
+            ),
             "references": references.get(str(agent.get("agentId") or ""), []),
             "agentBoundary": _derive_agent_boundary(
                 agent,
@@ -300,7 +302,7 @@ def _build_agent_config_workspace(
         "teamIndexes": team_indexes,
         "agents": enriched_agents,
         "modeBindings": mode_bindings.get("modes") or {},
-        "promptTemplates": prompt_workspace.get("templates") or [],
+        "promptTemplates": _workspace_prompt_template_summaries(prompt_workspace.get("templates") or []),
         "agentLlmSlots": _agent_llm_slots(),
         "agentModelChoices": agent_model_choices,
         "modelOptions": config_workspace.get("modelOptions") or [],
@@ -468,7 +470,12 @@ def _prompt_template_has_runtime_content(prompt: dict[str, Any]) -> bool:
         return bool(str(prompt.get("contentPreview") or "").strip())
 
 
-def _prompt_template_runtime_content(prompt_template_id: str, prompt: dict[str, Any]) -> str:
+def _prompt_template_runtime_content(
+    prompt_template_id: str,
+    prompt: dict[str, Any],
+    *,
+    detail_cache: dict[str, str] | None = None,
+) -> str:
     content = str(prompt.get("content") or "")
     if content:
         return content
@@ -479,13 +486,19 @@ def _prompt_template_runtime_content(prompt_template_id: str, prompt: dict[str, 
     except (TypeError, ValueError):
         if preview:
             return preview
+    normalized_template_id = str(prompt_template_id or "").strip()
+    if detail_cache is not None and normalized_template_id in detail_cache:
+        return detail_cache[normalized_template_id]
     try:
-        detail = get_prompt_template(prompt_template_id)
+        detail = get_prompt_template(normalized_template_id)
     except Exception:
         detail = None
+    resolved = preview
     if isinstance(detail, dict):
-        return str(detail.get("content") or detail.get("contentPreview") or "")
-    return preview
+        resolved = str(detail.get("content") or detail.get("contentPreview") or "")
+    if detail_cache is not None:
+        detail_cache[normalized_template_id] = resolved
+    return resolved
 
 
 def _prompt_mentioned_required_tools(content: str) -> list[str]:
@@ -583,6 +596,7 @@ def _derive_health(
     active_agent_ids: set[str],
 ) -> dict[str, Any]:
     issues: list[dict[str, Any]] = []
+    prompt_detail_cache: dict[str, str] = {}
     for agent in agents:
         agent_id = str(agent.get("agentId") or "").strip()
         status = str(agent.get("status") or "active").strip()
@@ -685,7 +699,11 @@ def _derive_health(
                         f"{prompt_template_id} 没有可注入的模板内容；运行时只会使用 Agent 身份档案，Prompt Template 段为空。",
                     )
                 )
-            prompt_content = _prompt_template_runtime_content(prompt_template_id, prompt)
+            prompt_content = _prompt_template_runtime_content(
+                prompt_template_id,
+                prompt,
+                detail_cache=prompt_detail_cache,
+            )
             mentioned_required_tools = _prompt_mentioned_required_tools(prompt_content)
             if mentioned_required_tools:
                 tool_policy = agent.get("toolPolicy") if isinstance(agent.get("toolPolicy"), dict) else {}
@@ -1687,15 +1705,33 @@ def _compact_teams(teams: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _safe_prompt_workspace() -> dict[str, Any]:
     try:
-        return list_prompt_templates(include_inactive=True)
+        return list_prompt_templates(include_inactive=True, include_content=True)
     except Exception as exc:
         _record_workspace_error("agent_config.prompt_templates.load_failed", exc)
         return {"templates": [], "repairWarnings": [{"source": "prompt_templates", "error": type(exc).__name__}]}
 
 
+def _workspace_prompt_template_summaries(templates: Iterable[Any]) -> list[dict[str, Any]]:
+    summaries: list[dict[str, Any]] = []
+    for template in templates:
+        summary = _workspace_prompt_template_summary(template)
+        if summary is not None:
+            summaries.append(summary)
+    return summaries
+
+
+def _workspace_prompt_template_summary(template: Any) -> dict[str, Any] | None:
+    if not isinstance(template, dict):
+        return None
+    summary = dict(template)
+    summary["content"] = ""
+    summary["defaultContent"] = ""
+    return summary
+
+
 def _safe_config_workspace() -> dict[str, Any]:
     try:
-        return config_service.get_config_workspace()
+        return config_service.get_agent_model_options_workspace()
     except Exception as exc:
         _record_workspace_error("agent_config.models.load_failed", exc)
         return {"modelOptions": []}
