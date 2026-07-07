@@ -5270,6 +5270,137 @@ export type ConversationTimelineItem = {
   metadata?: Record<string, unknown>;
 };
 
+export type CodexTranscriptCellKind =
+  | "user"
+  | "assistant_markdown"
+  | "reasoning_summary"
+  | "tool_call"
+  | "status"
+  | "error_notice"
+  | "stream_tail"
+  | string;
+
+export type CodexTranscriptCellStatus = "pending" | "running" | "completed" | "failed" | "degraded" | string;
+
+export type CodexTranscriptCellTone = "neutral" | "running" | "warning" | "error" | string;
+
+export type CodexRolloutTraceEventKind =
+  | "ToolCallStarted"
+  | "RuntimeStarted"
+  | "RuntimeEnded"
+  | "ToolCallEnded"
+  | string;
+
+export type CodexRolloutTraceEvent = {
+  id: string;
+  kind: CodexRolloutTraceEventKind;
+  operationId: string;
+  toolCallId?: string;
+  terminalOperationId?: string;
+  terminalId?: string;
+  sequence?: number;
+  timestamp?: string;
+  status: CodexTranscriptCellStatus;
+  title: string;
+  summary?: string;
+  runtimeKind: "terminal" | "tool" | "status" | string;
+  rawToolName?: string;
+  durationSeconds?: number | null;
+  exitCode?: number | null;
+  timedOut?: boolean;
+  tracePath?: string;
+  error?: string;
+  modelObservationSource?: "DirectToolCall" | string;
+};
+
+export type CodexToolCall = {
+  toolCallId: string;
+  rawOperationId: string;
+  status: CodexTranscriptCellStatus;
+  title: string;
+  summary?: string;
+  rawToolName?: string;
+  runtimeKind: "terminal" | "tool" | string;
+  sequence?: number;
+  timestamp?: string;
+  terminalOperationId?: string;
+  tracePath?: string;
+  error?: string;
+};
+
+export type CodexTerminalRequest = {
+  displayCommand: string;
+  command?: string[];
+  cwd: string;
+};
+
+export type CodexTerminalResult = {
+  exitCode?: number | null;
+  stdout?: string;
+  stderr?: string;
+  formattedOutput?: string;
+  timedOut?: boolean;
+};
+
+export type CodexTerminalOperation = {
+  operationId: string;
+  toolCallId: string;
+  terminalId: string;
+  kind: "ExecCommand" | "WriteStdin" | string;
+  status: CodexTranscriptCellStatus;
+  request: CodexTerminalRequest;
+  result?: CodexTerminalResult;
+  durationSeconds?: number | null;
+  rawOperationId: string;
+  tracePath?: string;
+};
+
+export type CodexTerminalSession = {
+  terminalId: string;
+  createdByOperationId: string;
+  operationIds: string[];
+  status: CodexTranscriptCellStatus;
+};
+
+export type CodexTerminalModelObservation = {
+  operationId: string;
+  toolCallId: string;
+  source: "DirectToolCall" | string;
+  callItemIds: string[];
+  outputItemIds: string[];
+};
+
+export type CodexToolLifecycleModel = {
+  toolCalls: CodexToolCall[];
+  terminalOperations: CodexTerminalOperation[];
+  terminalSessions: CodexTerminalSession[];
+  modelObservations: CodexTerminalModelObservation[];
+};
+
+export type CodexTranscriptCell = {
+  id: string;
+  kind: CodexTranscriptCellKind;
+  messageId: string;
+  status: CodexTranscriptCellStatus;
+  tone: CodexTranscriptCellTone;
+  title?: string;
+  text?: string;
+  summary?: string;
+  operationIds?: string[];
+  rolloutTraceEvents?: CodexRolloutTraceEvent[];
+  toolLifecycleModel?: CodexToolLifecycleModel;
+  sourceItemId?: string;
+};
+
+export type CodexTranscriptProjection = CodexToolLifecycleModel & {
+  version: 1 | number;
+  source: "native" | "legacy" | string;
+  messageId: string;
+  streaming?: boolean;
+  cells: CodexTranscriptCell[];
+  rolloutEvents?: CodexRolloutTraceEvent[];
+};
+
 export type MentalStateSnapshot = {
   mood: string;
   feeling: string;
@@ -5312,6 +5443,7 @@ export type ConversationMessage = {
   mentalSnapshot?: MentalStateSnapshot;
   feedbackEvents?: ConversationFeedbackEvent[];
   timelineItems?: ConversationTimelineItem[];
+  codexTranscript?: CodexTranscriptProjection;
   streaming?: boolean;
   toolCalls?: ToolCall[];
   attachments?: ConversationAttachment[];
@@ -5593,6 +5725,7 @@ export type SessionAssistantDeltaStreamEvent = {
   replaceThought?: boolean;
   feedbackEvents?: ConversationFeedbackEvent[];
   timelineItems?: ConversationTimelineItem[];
+  codexTranscript?: CodexTranscriptProjection;
   updatedAt: string;
   done: boolean;
 };
