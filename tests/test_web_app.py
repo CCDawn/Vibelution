@@ -6080,6 +6080,39 @@ def test_capture_session_ui_stream_batches_tiny_response_deltas(tmp_path, monkey
     assert content_updates[0]["stage"] == "assistant_response"
 
 
+def test_capture_session_ui_stream_flushes_slow_tiny_response_deltas(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    live_updates: list[dict[str, object]] = []
+    clock = {"now": 1.0}
+
+    def fake_set_live_output(session_id: str, **kwargs):
+        live_updates.append({"session_id": session_id, **kwargs})
+
+    monkeypatch.setattr(session_service, "_set_session_live_output", fake_set_live_output)
+    monkeypatch.setattr(session_service, "_perf_counter", lambda: clock["now"])
+    stub_ui = SimpleNamespace(
+        stream_thought=lambda *args, **kwargs: None,
+        clear_thought_stream=lambda *args, **kwargs: None,
+        stream_response=lambda *args, **kwargs: None,
+        clear_response_stream=lambda *args, **kwargs: None,
+        set_pet_mental_state=lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr("core.ui.get_ui", lambda: stub_ui)
+
+    capture = session_service.SessionTurnCapture(session_id="session-live-response", turn_id="turn-response")
+    with session_service._capture_session_ui_stream("session-live-response", capture):
+        for token in ["慢", "速", "回", "答"]:
+            stub_ui.stream_response(token, done=False)
+            clock["now"] += 0.2
+
+    content_updates = [item for item in live_updates if "content" in item]
+    assert capture.content == "慢速回答"
+    assert [item["content"] for item in content_updates] == [
+        "慢速",
+        "慢速回答",
+    ]
+
+
 def test_capture_session_ui_stream_batches_tiny_thought_deltas(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     live_updates: list[dict[str, object]] = []

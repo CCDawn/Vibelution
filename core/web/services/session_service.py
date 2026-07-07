@@ -3095,10 +3095,12 @@ class _SessionUiCaptureTextBatcher:
         if self._pending_response_started_at <= 0:
             return False
         elapsed = _perf_counter() - self._pending_response_started_at
-        return (
-            elapsed >= max(0.0, float(self.response_batch_max_latency_seconds or 0.0))
-            and pending_chars >= max(1, int(self.response_batch_latency_min_chars or 1))
-        )
+        if elapsed < max(0.0, float(self.response_batch_max_latency_seconds or 0.0)):
+            return False
+        latency_min_chars = max(1, int(self.response_batch_latency_min_chars or 1))
+        if pending_chars >= latency_min_chars:
+            return True
+        return pending_chars > 0
 
 
 def list_sessions(*, include_hidden_internal: bool = False) -> list[dict]:
