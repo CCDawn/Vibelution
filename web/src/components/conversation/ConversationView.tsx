@@ -205,6 +205,7 @@ type ConversationTurnRowProps = {
   agentMessage?: AgentMessage;
   agentRenderState?: AgentMessageRenderState;
   previousAgentRenderState?: AgentMessageRenderState;
+  codexTranscriptCells?: CodexTranscriptCell[];
   rowIdentity: AgentMessageTimelineRowIdentity;
   defaultResponseExpanded: boolean;
   latestUserMessageId: string;
@@ -254,6 +255,7 @@ function conversationTurnRowPropsAreEqual(
     && previous.agentMessage === next.agentMessage
     && previous.agentRenderState === next.agentRenderState
     && previous.previousAgentRenderState === next.previousAgentRenderState
+    && previous.codexTranscriptCells === next.codexTranscriptCells
     && agentMessageTimelineRowIdentityIsEqual(previous.rowIdentity, next.rowIdentity)
     && previous.defaultResponseExpanded === next.defaultResponseExpanded
     && previous.latestUserMessageId === next.latestUserMessageId
@@ -1449,6 +1451,197 @@ export function ConversationView({
     );
   }
 
+  function renderCodexTranscriptCells(
+    message: ConversationMessage,
+    cells: CodexTranscriptCell[],
+    rowIdentity: AgentMessageTimelineRowIdentity,
+  ) {
+    const visibleCells = cells.filter((cell) => cell.kind !== "user");
+    if (visibleCells.length === 0) {
+      return null;
+    }
+    return (
+      <div
+        className={styles.codexTranscriptSurface}
+        data-codex-transcript-surface="true"
+        data-conversation-part-key={`${rowIdentity.messageKey}:codex-transcript`}
+      >
+        {visibleCells.map((cell) => renderCodexTranscriptCell(message, cell))}
+      </div>
+    );
+  }
+
+  function shouldRenderCodexTranscriptSurface(message: ConversationMessage) {
+    if (answerOnlyProcessMode || message.streaming) {
+      return false;
+    }
+    return (message.timelineItems ?? []).some((item) => item.kind === "operation");
+  }
+
+  function renderCodexTranscriptCell(message: ConversationMessage, cell: CodexTranscriptCell) {
+    if (cell.kind === "assistant_markdown") {
+      const text = cell.text?.trim() ?? "";
+      if (!text || isNoFinalAnswerStatusContent(text) || isStreamingStatusPlaceholderContent(text)) {
+        return null;
+      }
+      return (
+        <section
+          key={cell.id}
+          className={`${styles.codexTranscriptCell} ${styles.codexTranscriptAssistantCell}`}
+          data-codex-transcript-cell-kind={cell.kind}
+          data-codex-transcript-cell-status={cell.status}
+          data-codex-transcript-cell-tone={cell.tone}
+          data-conversation-part-key={cell.id}
+        >
+          {message.streaming ? renderStreamingResponseText(text) : renderResponseText(text, imageArtifactUrlsBeforeMessage.get(message.id))}
+        </section>
+      );
+    }
+    if (cell.kind === "stream_tail") {
+      return (
+        <section
+          key={cell.id}
+          className={`${styles.codexTranscriptCell} ${styles.codexTranscriptProcessCell} ${styles.codexTranscriptCell_running}`}
+          data-codex-transcript-cell-kind={cell.kind}
+          data-codex-transcript-cell-status={cell.status}
+          data-codex-transcript-cell-tone={cell.tone}
+          data-conversation-part-key={cell.id}
+          role="status"
+          aria-live="polite"
+        >
+          <span className={styles.codexTranscriptCellIcon} aria-hidden="true">
+            <LoaderCircle className={styles.statusSpinner} size={14} />
+          </span>
+          <span className={styles.codexTranscriptCellBody}>
+            <span className={styles.codexTranscriptCellTitle}>{lang === "zh" ? "正在生成" : "Streaming"}</span>
+          </span>
+        </section>
+      );
+    }
+    const toneClassName = styles[`codexTranscriptCell_${cell.tone}` as keyof typeof styles] ?? "";
+    const icon = codexTranscriptCellIcon(cell);
+    const title = codexTranscriptCellTitle(cell);
+    const meta = codexTranscriptCellMeta(cell);
+    const summary = cell.kind === "reasoning_summary" ? cell.text || cell.summary : cell.summary || cell.text;
+    return (
+      <section
+        key={cell.id}
+        className={[styles.codexTranscriptCell, styles.codexTranscriptProcessCell, toneClassName].filter(Boolean).join(" ")}
+        data-codex-transcript-cell-kind={cell.kind}
+        data-codex-transcript-cell-status={cell.status}
+        data-codex-transcript-cell-tone={cell.tone}
+        data-conversation-part-key={cell.id}
+        role={cell.status === "running" || cell.status === "pending" ? "status" : undefined}
+        aria-live={cell.status === "running" || cell.status === "pending" ? "polite" : undefined}
+      >
+        <span className={styles.codexTranscriptCellIcon} aria-hidden="true">
+          {icon}
+        </span>
+        <span className={styles.codexTranscriptCellBody}>
+          <span className={styles.codexTranscriptCellTitleRow}>
+            <span className={styles.codexTranscriptCellTitle}>{title}</span>
+            {meta ? <span className={styles.codexTranscriptCellMeta}>{meta}</span> : null}
+          </span>
+          {summary ? <span className={styles.codexTranscriptCellSummary}>{summary}</span> : null}
+          {renderCodexTranscriptRolloutEvents(cell)}
+        </span>
+      </section>
+    );
+  }
+
+  function codexTranscriptCellIcon(cell: CodexTranscriptCell) {
+    if (cell.status === "running" || cell.status === "pending") {
+      return <LoaderCircle className={styles.statusSpinner} size={14} />;
+    }
+    if (cell.kind === "reasoning_summary") {
+      return <BrainCircuit size={14} />;
+    }
+    if (cell.kind === "status") {
+      return <CircleDot size={14} />;
+    }
+    if (cell.kind === "error_notice" || cell.status === "failed") {
+      return <TerminalSquare size={14} />;
+    }
+    return <CheckCircle2 size={14} />;
+  }
+
+  function codexTranscriptCellTitle(cell: CodexTranscriptCell) {
+    if (cell.title?.trim()) {
+      return cell.title.trim();
+    }
+    if (cell.kind === "reasoning_summary") {
+      return lang === "zh" ? "思考" : "Reasoning";
+    }
+    if (cell.kind === "status") {
+      return lang === "zh" ? "状态" : "Status";
+    }
+    if (cell.kind === "error_notice") {
+      return lang === "zh" ? "执行失败" : "Failed";
+    }
+    return lang === "zh" ? "工具调用" : "Tool call";
+  }
+
+  function codexTranscriptCellMeta(cell: CodexTranscriptCell) {
+    if (cell.status === "completed") {
+      return "";
+    }
+    if (cell.status === "failed") {
+      return lang === "zh" ? "失败" : "Failed";
+    }
+    if (cell.status === "degraded") {
+      return lang === "zh" ? "降级" : "Degraded";
+    }
+    if (cell.status === "pending") {
+      return lang === "zh" ? "等待中" : "Pending";
+    }
+    if (cell.status === "running") {
+      return lang === "zh" ? "运行中" : "Running";
+    }
+    return "";
+  }
+
+  function renderCodexTranscriptRolloutEvents(cell: CodexTranscriptCell) {
+    if (cell.tone !== "error" && cell.tone !== "warning" && cell.status !== "running") {
+      return null;
+    }
+    const events = cell.rolloutTraceEvents ?? [];
+    if (events.length === 0) {
+      return null;
+    }
+    return (
+      <ol className={styles.rolloutTraceList} aria-label={lang === "zh" ? "工具生命周期" : "Tool lifecycle"}>
+        {events.map((event) => {
+          const eventClassName = [
+            styles.rolloutTraceItem,
+            styles[`rolloutTraceItem_${event.status}`],
+          ].filter(Boolean).join(" ");
+          const detailText = [
+            event.error,
+            event.exitCode !== undefined && event.exitCode !== null ? `exit ${event.exitCode}` : "",
+            event.timedOut ? (lang === "zh" ? "已超时" : "timed out") : "",
+          ].filter(Boolean).join(" · ");
+          return (
+            <li
+              key={event.id}
+              className={eventClassName}
+              data-rollout-trace-kind={event.kind}
+              data-rollout-trace-status={event.status}
+              data-rollout-tool-call-id={event.toolCallId}
+              data-rollout-terminal-operation-id={event.terminalOperationId}
+              data-rollout-terminal-id={event.terminalId}
+            >
+              <span className={styles.rolloutTraceDot} aria-hidden="true" />
+              <span className={styles.rolloutTraceText}>
+                <span className={styles.rolloutTraceTitle}>{rolloutTraceEventLabel(event.kind)}</span>
+                {detailText ? <span className={styles.rolloutTraceMeta}>{detailText}</span> : null}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    );
+  }
+
   function renderAgentMessageTimelineItem(
     message: ConversationMessage,
     item: AgentMessageTimelineItem,
@@ -2467,6 +2660,7 @@ export function ConversationView({
                     ? agentRenderStatesByMessageId.get(activeTimelineMessages[index - 1].id)
                     : undefined
                 }
+                codexTranscriptCells={agentCodexCellsByMessageId.get(message.id)}
                 rowIdentity={activeTimelineRowIdentities[index]}
                 defaultResponseExpanded={defaultExpandedResponseIds.has(message.id)}
                 latestUserMessageId={latestUserMessageId}
@@ -2583,6 +2777,14 @@ export function ConversationView({
             const responseSegments = showResponseBlock && !isStreamingStatusPlaceholder && !isResponseStreaming
               ? getCachedResponseSegments(responseText)
               : [];
+            const codexTranscriptNode = (
+              shouldRenderCodexTranscriptSurface(message)
+              && !turnErrorMessage
+              && !agentInboxMessage
+              && !groupTranscriptMessage
+            )
+              ? renderCodexTranscriptCells(message, codexTranscriptCells, rowIdentity)
+              : null;
             const shouldForceResponseBodyVisible = showResponseBlock && !isStreamingStatusPlaceholder && defaultResponseExpanded;
             const isEditingMessage = userAuthoredMessage && message.id === editingMessageId;
             const agentInboxExpanded = getExpansionState(message.id, "agentInbox", false);
@@ -2791,6 +2993,7 @@ export function ConversationView({
                   ) : null}
                   {contextNode}
 
+                  {codexTranscriptNode}
                   {processNode}
                   {turnStatusNode}
                   {answerOnlyProcessMode ? responseSectionNode : null}

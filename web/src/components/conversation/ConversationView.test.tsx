@@ -164,6 +164,102 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
     expect(conversationViewSource).toContain("agentCodexCellsByMessageId");
     expect(conversationViewSource).toContain("data-codex-transcript-cell-count");
   });
+
+  it("renders visible Codex transcript cells instead of only auditing the cell count", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "assistant-codex-cell-render",
+          role: "assistant",
+          content: "最终回答：Codex-like transcript 已接管主回答。",
+          timestamp: "2026-07-07T10:00:00Z",
+          feedbackEvents: [
+            {
+              sequence: 1,
+              kind: "thought",
+              status: "done",
+              summary: "分析 transcript cell 映射",
+              resultPreview: "分析 transcript cell 映射",
+            },
+            {
+              sequence: 2,
+              kind: "tool",
+              status: "done",
+              name: "read_file",
+              summary: "读取 ConversationView.tsx",
+            },
+            {
+              sequence: 3,
+              kind: "status",
+              status: "done",
+              name: "render_status",
+              summary: "普通完成态保持灰色",
+            },
+            {
+              sequence: 4,
+              kind: "tool",
+              status: "failed",
+              name: "npm_test",
+              summary: "运行测试失败",
+              error: "Expected visible cells",
+            },
+          ],
+          timelineItems: [
+            {
+              id: "reasoning-cell",
+              kind: "thought",
+              status: "completed",
+              text: "分析 transcript cell 映射",
+              preview: "分析 transcript cell 映射",
+              operationIds: [],
+            },
+            {
+              id: "tool-cell",
+              kind: "operation",
+              status: "completed",
+              title: "read_file",
+              summary: "读取 ConversationView.tsx",
+              operationIds: ["assistant-codex-cell-render-feedback-2"],
+            },
+            {
+              id: "status-cell",
+              kind: "operation",
+              status: "completed",
+              title: "render_status",
+              summary: "普通完成态保持灰色",
+              operationIds: ["assistant-codex-cell-render-feedback-3"],
+            },
+            {
+              id: "error-cell",
+              kind: "operation",
+              status: "failed",
+              title: "npm_test",
+              summary: "运行测试失败",
+              operationIds: ["assistant-codex-cell-render-feedback-4"],
+            },
+            {
+              id: "answer-cell",
+              kind: "assistant_text",
+              status: "completed",
+              text: "最终回答：Codex-like transcript 已接管主回答。",
+            },
+          ],
+        },
+      ],
+      { processDisplayMode: "trace" },
+    );
+
+    expect(html).toContain('data-codex-transcript-surface="true"');
+    expect(html).toContain('data-codex-transcript-cell-kind="reasoning_summary"');
+    expect(html).toContain('data-codex-transcript-cell-kind="tool_call"');
+    expect(html).toContain('data-codex-transcript-cell-kind="status"');
+    expect(html).toContain('data-codex-transcript-cell-kind="error_notice"');
+    expect(html).toContain('data-codex-transcript-cell-kind="assistant_markdown"');
+    expect(html).toMatch(/data-codex-transcript-cell-kind="tool_call"[^>]*data-codex-transcript-cell-tone="neutral"/);
+    expect(html).toMatch(/data-codex-transcript-cell-kind="status"[^>]*data-codex-transcript-cell-tone="neutral"/);
+    expect(html).toMatch(/data-codex-transcript-cell-kind="error_notice"[^>]*data-codex-transcript-cell-tone="error"/);
+    expect(html).toContain("最终回答：Codex-like transcript 已接管主回答。");
+  });
 });
 
 describe("ConversationView edit resend affordance", () => {
