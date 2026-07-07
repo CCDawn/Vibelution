@@ -27,7 +27,6 @@ export const selfEvolutionTrackStyles = {
   sideColumnScrollable: "h-full overflow-y-auto pr-1.5 max-[1180px]:h-auto max-[1180px]:overflow-visible",
   paneCollapsed: "overflow-hidden p-0 invisible",
   centerColumn: "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden overflow-x-hidden max-[1180px]:h-auto max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
-  centerColumnObservation: "grid-rows-[minmax(0,1fr)]",
   conversationShell: "grid h-full max-h-full min-h-[420px] min-w-0 max-w-full overflow-hidden overflow-x-hidden rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-panel max-[1180px]:h-[min(74vh,760px)] max-[1180px]:overflow-hidden max-[1180px]:overflow-x-hidden max-[760px]:h-[min(72vh,720px)] max-[760px]:min-h-[540px]",
   observationWorkspace:
     "grid h-full max-h-full min-h-0 min-w-0 max-w-full grid-cols-[minmax(0,1fr)_minmax(280px,360px)] gap-2.5 overflow-hidden overflow-x-hidden max-[1180px]:h-auto max-[1180px]:grid-cols-1 max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
@@ -76,6 +75,16 @@ export const selfEvolutionTrackStyles = {
   surface: `${panelSurface} p-3.5 max-[760px]:p-4`,
   observationPanel:
     `grid min-h-0 content-start gap-3 overflow-auto p-3.5 ${panelSurface}`,
+  observationPendingConversationShell:
+    `grid h-full max-h-full min-h-[420px] min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-auto overflow-x-hidden p-3.5 max-[1180px]:h-[min(72vh,720px)] max-[760px]:min-h-[540px] ${panelSurface}`,
+  observationPendingTitle:
+    "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2.5",
+  observationPendingBody:
+    "grid min-h-0 content-start gap-3",
+  observationPendingMessage:
+    `grid min-w-0 gap-2 p-3 ${rowSurfaceSoft}`,
+  observationPendingSetup:
+    "grid min-h-0 content-start gap-3 overflow-visible p-0",
   loadingShell:
     "grid min-h-[148px] max-h-[180px] content-start self-start overflow-hidden grid-cols-[minmax(240px,300px)_minmax(0,1fr)] gap-2 max-[1180px]:min-h-[172px] max-[1180px]:max-h-[210px] max-[1180px]:grid-cols-1",
   loadingRail: `grid min-h-0 content-start gap-2.5 p-3 ${rowSurfaceSoft}`,
