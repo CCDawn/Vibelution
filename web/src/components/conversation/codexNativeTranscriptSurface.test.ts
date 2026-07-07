@@ -107,6 +107,37 @@ describe("codexNativeTranscriptSurface", () => {
     expect(empty.fallbackReason).toBe("native_empty");
   });
 
+  it("does not suppress legacy response text when native transcript has only process cells", () => {
+    const surface = resolveCodexTranscriptSurface(message({
+      content: "最终回答应该继续显示",
+      codexTranscript: {
+        version: 1,
+        source: "native",
+        messageId: "assistant-native-process-only",
+        cells: [
+          {
+            id: "native-tool-only",
+            kind: "tool_call",
+            messageId: "assistant-native-process-only",
+            status: "completed",
+            tone: "neutral",
+            title: "grep_search_tool",
+            summary: "未找到匹配项",
+          },
+        ],
+        toolCalls: [],
+        terminalOperations: [],
+        terminalSessions: [],
+        modelObservations: [],
+      },
+    }), fallbackCells);
+
+    expect(surface.mode).toBe("native");
+    expect(surface.hasAssistantMarkdown).toBe(false);
+    expect(surface.suppressLegacyProcess).toBe(true);
+    expect(surface.suppressLegacyResponse).toBe(false);
+  });
+
   it("preserves native terminal lifecycle arrays on the transcript cells", () => {
     const surface = resolveCodexTranscriptSurface(message({
       codexTranscript: {
