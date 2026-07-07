@@ -4,7 +4,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from core.chat.conversation_ledger import (
+    EVENT_ASSISTANT_DELTA_COMMITTED,
     EVENT_ASSISTANT_MESSAGE,
+    EVENT_TOOL_RESULT,
     EVENT_USER_MESSAGE,
     append_conversation_event,
     load_conversation_events,
@@ -503,6 +505,102 @@ def test_persist_turn_result_preserves_ordered_feedback_events(tmp_path, monkeyp
     assert timeline_items[0]["text"] == "先看日志。"
     assert timeline_items[1]["operationIds"] == [f"{detail['messages'][-1]['id']}-feedback-2"]
     assert timeline_items[-1]["text"] == "已完成。"
+
+
+def test_session_detail_attaches_turn_timeline_once_for_tool_result_packets(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    turn_id = "turn-interleaved-dedupe"
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        turn_id,
+        EVENT_TOOL_RESULT,
+        status="done",
+        payload={
+            "toolCall": {
+                "id": "tool-read-log",
+                "name": "read_log",
+                "feedbackSequence": 1,
+                "result": "opened latest package",
+            },
+        },
+        tool_call_id="tool-read-log",
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        turn_id,
+        EVENT_TOOL_RESULT,
+        status="done",
+        payload={
+            "toolCall": {
+                "id": "tool-rg",
+                "name": "rg",
+                "feedbackSequence": 2,
+                "result": "searched session detail",
+            },
+        },
+        tool_call_id="tool-rg",
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        turn_id,
+        EVENT_ASSISTANT_DELTA_COMMITTED,
+        status="completed",
+        payload={
+            "content": "先说明现象，再给出结论。",
+            "feedbackSequence": 3,
+            "metadata": {"source": "session_ui_capture"},
+        },
+        source="session_ui_capture",
+        projection_kind="assistant_timeline_segment",
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        turn_id,
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={
+            "content": "先说明现象，再给出结论。",
+            "toolCalls": [
+                {"id": "tool-read-log", "name": "read_log", "status": "done"},
+                {"id": "tool-rg", "name": "rg", "status": "done"},
+            ],
+            "feedbackEvents": [
+                {"sequence": 1, "kind": "tool", "status": "done", "name": "read_log", "summary": "opened latest package"},
+                {"sequence": 2, "kind": "tool", "status": "done", "name": "rg", "summary": "searched session detail"},
+            ],
+        },
+        source="persist_session_turn_result",
+    )
+
+    detail = session_service.get_session_detail("session-live")
+    turn_messages = [
+        message
+        for message in detail["messages"]
+        if (message.get("metadata") or {}).get("turnId") == turn_id
+    ]
+    assistant_text_messages = [
+        message
+        for message in turn_messages
+        if any(item.get("kind") == "assistant_text" for item in message.get("timelineItems") or [])
+    ]
+
+    assert [message["metadata"]["kind"] for message in turn_messages] == [
+        "tool_result",
+        "tool_result",
+        "journal_assistant_message",
+    ]
+    assert len(assistant_text_messages) == 1
+    assert assistant_text_messages[0] is turn_messages[-1]
+    assert [
+        item["kind"]
+        for item in assistant_text_messages[0]["timelineItems"]
+    ] == ["operation", "operation", "assistant_text"]
+    assert all("timelineItems" not in message for message in turn_messages[:-1])
 
 
 def test_persist_turn_result_normalizes_completed_feedback_statuses(tmp_path, monkeypatch):
