@@ -188,6 +188,32 @@ describe("agent thread adapters", () => {
     });
   });
 
+  it("drops legacy internal thought placeholders when feedback events are absent", () => {
+    const message: ConversationMessage = {
+      id: "assistant-legacy-internal-placeholder",
+      role: "assistant",
+      content: "真实回答",
+      timestamp: "2026-07-07T14:24:00Z",
+      thought: "internal",
+      toolCalls: [
+        {
+          name: "search_code_tool",
+          status: "done",
+          summary: "搜索会话详情",
+        },
+      ],
+    };
+
+    const agentMessage = conversationMessageToAgentMessage(message);
+
+    expect(agentMessage.parts.map((part) => part.type)).toEqual(["tool-call", "text"]);
+    expect(agentMessage.parts[0]).toMatchObject({
+      id: "assistant-legacy-internal-placeholder-tool-0",
+      type: "tool-call",
+      name: "search_code_tool",
+    });
+  });
+
   it("uses legacy thought and tool calls only when feedback events are absent", () => {
     const message: ConversationMessage = {
       id: "assistant-legacy",
