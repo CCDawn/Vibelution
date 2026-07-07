@@ -7848,8 +7848,10 @@ def _public_agent_prompt_snapshot(snapshot: Any) -> dict[str, Any]:
 
 def _normalize_messages(conversation_id: str, items: Any) -> list[dict[str, Any]]:
     ledger_events_by_turn: dict[str, list[dict[str, Any]]] | None = None
+    raw_items = list(items or [])
+    timeline_target_indices = _assistant_timeline_target_indices(raw_items)
     messages: list[dict[str, Any]] = []
-    for index, raw in enumerate(list(items or []), start=1):
+    for index, raw in enumerate(raw_items, start=1):
         if not isinstance(raw, dict):
             continue
         role = str(raw.get("role") or "").strip().lower()
@@ -7892,8 +7894,11 @@ def _normalize_messages(conversation_id: str, items: Any) -> list[dict[str, Any]
             if ledger_events_by_turn is None:
                 ledger_events_by_turn = _assistant_timeline_events_by_turn(conversation_id)
             ordered_timeline_events = ledger_events_by_turn.get(turn_id) or []
-            if ordered_timeline_events:
+            if ordered_timeline_events and timeline_target_indices.get(turn_id) == index:
                 timeline_feedback_events = ordered_timeline_events
+                include_assistant_text = False
+            elif ordered_timeline_events:
+                timeline_feedback_events = []
                 include_assistant_text = False
         timeline_items = _build_message_timeline_items(
             message_id=entry["id"],
@@ -7935,6 +7940,26 @@ def _dedupe_turn_error_messages(messages: list[dict[str, Any]]) -> list[dict[str
                 seen_turn_errors.add(dedupe_key)
         deduped.append(message)
     return deduped
+
+
+def _assistant_timeline_target_indices(items: list[Any]) -> dict[str, int]:
+    targets: dict[str, int] = {}
+    first_assistant_by_turn: dict[str, int] = {}
+    for index, raw in enumerate(list(items or []), start=1):
+        if not isinstance(raw, dict):
+            continue
+        if str(raw.get("role") or "").strip().lower() != "assistant":
+            continue
+        turn_id = _message_turn_id(raw)
+        if not turn_id:
+            continue
+        first_assistant_by_turn.setdefault(turn_id, index)
+        content = _sanitize_message_content("assistant", raw.get("content") or "")
+        if content:
+            targets[turn_id] = index
+    for turn_id, index in first_assistant_by_turn.items():
+        targets.setdefault(turn_id, index)
+    return targets
 
 
 def _message_turn_id(message: Any) -> str:
