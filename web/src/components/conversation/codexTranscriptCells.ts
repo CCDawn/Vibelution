@@ -2,6 +2,7 @@ import type { AgentMessage, AgentMessagePart, AgentTextPart } from "../../agent-
 import type { AgentMessageOperation } from "./agentMessageOperations";
 import type { AgentMessageTimelineItem, AgentMessageTimelineItemStatus } from "./agentMessageTimeline";
 import { buildCodexRolloutTraceEvents, type CodexRolloutTraceEvent } from "./codexRolloutTrace";
+import { buildCodexToolLifecycleModel, type CodexToolLifecycleModel } from "./codexToolLifecycleModel";
 
 export type CodexTranscriptCellKind =
   | "user"
@@ -27,6 +28,7 @@ export type CodexTranscriptCell = {
   summary?: string;
   operationIds?: string[];
   rolloutTraceEvents?: CodexRolloutTraceEvent[];
+  toolLifecycleModel?: CodexToolLifecycleModel;
   sourceItemId?: string;
 };
 
@@ -140,6 +142,7 @@ function cellsFromTimelineItems(
           title: item.title,
           summary: item.summary,
           operationIds,
+          toolLifecycleModel: buildCodexToolLifecycleModel(item.operations),
           rolloutTraceEvents: buildCodexRolloutTraceEvents(item.operations),
           sourceItemId: item.id,
         };
@@ -186,6 +189,7 @@ function cellFromOperation(
       ? compactText(operation.error || timelineSummary || operation.summary)
       : compactText(timelineSummary || operation.summary),
     operationIds: [operation.id],
+    toolLifecycleModel: operation.kind === "tool" ? buildCodexToolLifecycleModel(operation) : undefined,
     rolloutTraceEvents: buildCodexRolloutTraceEvents(operation),
     sourceItemId,
   };

@@ -103,6 +103,9 @@ describe("codexRolloutTrace", () => {
     expect(events[2]).toMatchObject({
       kind: "RuntimeEnded",
       operationId: "op-command",
+      toolCallId: "tool_call:op-command",
+      terminalOperationId: "terminal_operation:0",
+      terminalId: "terminal:op-command",
       status: "failed",
       runtimeKind: "terminal",
       error: "Exit code 1",
@@ -110,7 +113,45 @@ describe("codexRolloutTrace", () => {
       tracePath: "logs/runtime_scenes/run-1/timeline.jsonl",
       exitCode: 1,
       timedOut: true,
+      modelObservationSource: "DirectToolCall",
     });
+  });
+
+  it("builds lifecycle events from the Codex-like lifecycle model instead of ad hoc operation projection", () => {
+    const events = buildCodexRolloutTraceEvents([
+      toolOperation({
+        id: "op-shell",
+        label: "命令",
+        rawLabel: "cli_tool",
+        status: "done",
+        summary: "npm --prefix web run test",
+      }),
+      toolOperation({
+        id: "op-search",
+        label: "搜索",
+        rawLabel: "web_search_tool",
+        status: "done",
+        summary: "搜索代码",
+      }),
+    ]);
+
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "RuntimeStarted",
+        operationId: "op-shell",
+        toolCallId: "tool_call:op-shell",
+        terminalOperationId: "terminal_operation:0",
+        terminalId: "terminal:op-shell",
+        runtimeKind: "terminal",
+      }),
+      expect.objectContaining({
+        kind: "RuntimeEnded",
+        operationId: "op-search",
+        toolCallId: "tool_call:op-search",
+        runtimeKind: "tool",
+      }),
+    ]));
+    expect(events.find((event) => event.operationId === "op-search")).not.toHaveProperty("terminalOperationId");
   });
 
   it("does not invent end events while a tool operation is still running", () => {
