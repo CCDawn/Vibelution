@@ -1409,6 +1409,39 @@ def test_runtime_summary_marks_ready_session_as_needing_response(monkeypatch):
     assert "继续" in payload["sessionStateLine"] or "ready" in payload["sessionStateLine"].lower()
 
 
+def test_runtime_summary_treats_needs_continue_as_ready_despite_stale_working_runtime(monkeypatch):
+    monkeypatch.setattr(
+        runtime_service,
+        "get_active_session_summary",
+        lambda: {
+            "title": "GPT Pixel",
+            "taskSummary": "已完成修复并通过验证；还可以继续提交。",
+            "currentPhase": "needs_continue",
+            "updatedAt": "2026-07-07T00:39:58",
+        },
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_state",
+        lambda: {
+            "status": "WORKING",
+            "runtime_status": "WORKING",
+            "last_tool_name": "read_log",
+            "updated_at": "2026-07-07T09:20:21",
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["status"] == "success"
+    assert payload["currentPhase"] == "needs_continue"
+    assert payload["sessionState"] == "ready"
+    assert payload["sessionNeedsResponse"] is True
+    assert payload["sessionToolName"] == ""
+    assert payload["activeTools"] == []
+    assert "继续" in payload["sessionStateLine"] or "ready" in payload["sessionStateLine"].lower()
+
+
 def test_runtime_summary_marks_failed_session_as_needing_response(monkeypatch):
     monkeypatch.setattr(
         runtime_service,
