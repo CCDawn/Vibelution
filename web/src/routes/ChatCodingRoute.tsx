@@ -168,6 +168,7 @@ import {
   mergeAssistantDeltaIntoActiveTurnLayer,
   type ActiveTurnLayerState,
 } from "./chatActiveTurnLayer";
+import { createSessionAssistantDeltaScheduler } from "./sessionAssistantDeltaScheduler";
 import {
   isChildSession,
   isAgentRootSession,
@@ -3241,26 +3242,11 @@ export function ChatCodingRoute() {
     let applyTimer: number | null = null;
     let lastAppliedAt = 0;
     let committedAssistantDeltaLayer: ActiveTurnLayerState | undefined = activeTurnLayersBySessionRef.current[streamSessionId];
-    let pendingAssistantDeltaPayloads: Array<{
-      payload: Extract<SessionStreamEvent, { type: "assistant_delta" }>;
-      payloadLength: number;
-      receivedAtMs: number;
-    }> = [];
+    const assistantDeltaScheduler = createSessionAssistantDeltaScheduler({
+      nowMs: chatStreamPerformanceNowMs,
+    });
     let assistantDeltaApplyFrame: number | null = null;
     let frameScheduledAtMs = 0;
-    let pendingAssistantDeltaTelemetry: {
-      payloadLength: number;
-      turnId: string;
-      stage: string;
-      contentDeltaLength: number;
-      thoughtDeltaLength: number;
-      pendingTextLength: number;
-      batchSize: number;
-      done: boolean;
-      oldestReceivedAtMs: number;
-      newestReceivedAtMs: number;
-      frameScheduledAtMs: number;
-    } | null = null;
     const decisionSnapshot = sessionStreamDecisionSnapshotRef.current;
     postBrowserTelemetry({
       phase: "session_stream",
@@ -3372,47 +3358,32 @@ export function ChatCodingRoute() {
     }
 
     function applyPendingAssistantDeltas(reason: "frame" | "close" | "final") {
-      if (pendingAssistantDeltaPayloads.length === 0 || disposed) {
+      if (assistantDeltaScheduler.pendingCount === 0 || disposed) {
         return;
       }
       const applyStartedAtMs = chatStreamPerformanceNowMs();
-      const pendingPayloads = pendingAssistantDeltaPayloads;
-      pendingAssistantDeltaPayloads = [];
       if (assistantDeltaApplyFrame !== null) {
         window.cancelAnimationFrame(assistantDeltaApplyFrame);
         assistantDeltaApplyFrame = null;
       }
       const scheduledAtMs = frameScheduledAtMs;
       frameScheduledAtMs = 0;
+      const drain = assistantDeltaScheduler.drain(reason, { frameScheduledAtMs: scheduledAtMs });
       let pendingLayer = committedAssistantDeltaLayer;
-      let telemetry = pendingAssistantDeltaTelemetry;
       let appliedPayloadCount = 0;
       let finalDone = false;
-      let oldestReceivedAtMs = Number.POSITIVE_INFINITY;
-      let newestReceivedAtMs = 0;
-      for (const entry of pendingPayloads) {
-        oldestReceivedAtMs = Math.min(oldestReceivedAtMs, entry.receivedAtMs);
-        newestReceivedAtMs = Math.max(newestReceivedAtMs, entry.receivedAtMs);
+      for (const entry of drain.entries) {
         pendingLayer = mergeAssistantDeltaIntoActiveTurnLayer(pendingLayer, entry.payload);
         appliedPayloadCount += 1;
         finalDone = finalDone || entry.payload.done;
       }
       if (appliedPayloadCount === 0) {
-        pendingAssistantDeltaTelemetry = null;
         return;
       }
-      telemetry = telemetry
-        ? {
-          ...telemetry,
-          batchSize: appliedPayloadCount,
-          done: finalDone || telemetry.done,
-          pendingTextLength: activeTurnLayerTextLength(pendingLayer),
-          oldestReceivedAtMs: Number.isFinite(oldestReceivedAtMs) ? oldestReceivedAtMs : telemetry.oldestReceivedAtMs,
-          newestReceivedAtMs: newestReceivedAtMs || telemetry.newestReceivedAtMs,
-          frameScheduledAtMs: scheduledAtMs || telemetry.frameScheduledAtMs,
-        }
-        : null;
-      pendingAssistantDeltaTelemetry = null;
+      const telemetry = {
+        ...drain.telemetry,
+        pendingTextLength: activeTurnLayerTextLength(pendingLayer),
+      };
       committedAssistantDeltaLayer = pendingLayer;
       setActiveTurnLayersBySession((current) =>
         setActiveTurnLayerForSession(current, streamSessionId, pendingLayer)
@@ -3448,6 +3419,10 @@ export function ChatCodingRoute() {
             pendingTextLength: telemetry?.pendingTextLength ?? 0,
             batchSize: telemetry?.batchSize ?? appliedPayloadCount,
             done: telemetry?.done ?? false,
+            drainMode: drain.mode,
+            pendingBefore: drain.pendingBefore,
+            pendingAfter: drain.pendingAfter,
+            oldestQueuedAgeMs: Math.round(drain.oldestQueuedAgeMs),
             oldestReceivedAtMs: Math.round(telemetryOldestReceivedAtMs),
             newestReceivedAtMs: Math.round(telemetryNewestReceivedAtMs),
             frameScheduledAtMs: Math.round(telemetryFrameScheduledAtMs),
@@ -3461,6 +3436,9 @@ export function ChatCodingRoute() {
             applyElapsedMs: Math.max(0, Math.round(applyFinishedAtMs - applyStartedAtMs)),
           },
         });
+      }
+      if (drain.shouldContinue && !disposed) {
+        scheduleAssistantDeltaFrame();
       }
       if (reason === "final" && (telemetry?.done || finalDone)) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) });
@@ -3482,38 +3460,15 @@ export function ChatCodingRoute() {
       payload: Extract<SessionStreamEvent, { type: "assistant_delta" }>,
       payloadLength: number,
     ) {
-      const receivedAtMs = chatStreamPerformanceNowMs();
       const stats = sessionStreamApplyStatsRef.current[streamSessionId] ?? { received: 0, applied: 0, dropped: 0 };
       stats.received += 1;
       sessionStreamApplyStatsRef.current[streamSessionId] = stats;
-      pendingAssistantDeltaPayloads.push({ payload, payloadLength, receivedAtMs });
-      const contentDeltaLength = (payload.contentDelta ?? payload.content ?? "").length;
-      const thoughtDeltaLength = (payload.thoughtDelta ?? payload.thought ?? "").length;
-      const oldestPendingReceivedAtMs = pendingAssistantDeltaTelemetry?.oldestReceivedAtMs ?? receivedAtMs;
-      const newestPendingReceivedAtMs = receivedAtMs;
-      const telemetry = {
-        payloadLength,
-        turnId: payload.turnId,
-        stage: payload.stage,
-        contentDeltaLength,
-        thoughtDeltaLength,
-        pendingTextLength: 0,
-        batchSize: pendingAssistantDeltaPayloads.length,
-        done: payload.done,
-        oldestReceivedAtMs: oldestPendingReceivedAtMs,
-        newestReceivedAtMs: newestPendingReceivedAtMs,
-        frameScheduledAtMs,
-      };
-      pendingAssistantDeltaTelemetry = telemetry;
+      const queued = assistantDeltaScheduler.enqueue(payload, payloadLength);
       if (payload.done) {
         applyPendingAssistantDeltas("final");
         return;
       }
       scheduleAssistantDeltaFrame();
-      pendingAssistantDeltaTelemetry = {
-        ...telemetry,
-        frameScheduledAtMs,
-      };
       if (stats.received === 1 || stats.received % 50 === 0) {
         postBrowserTelemetry({
           phase: "session_stream",
@@ -3528,14 +3483,14 @@ export function ChatCodingRoute() {
             appliedCount: stats.applied,
             droppedCount: stats.dropped,
             payloadLength,
-            contentDeltaLength: telemetry.contentDeltaLength,
-            thoughtDeltaLength: telemetry.thoughtDeltaLength,
-            pendingTextLength: telemetry.pendingTextLength,
-            batchSize: telemetry.batchSize,
+            contentDeltaLength: queued.contentDeltaLength,
+            thoughtDeltaLength: queued.thoughtDeltaLength,
+            pendingTextLength: 0,
+            batchSize: queued.pendingCount,
             done: payload.done,
-            receivedAtMs: Math.round(receivedAtMs),
+            receivedAtMs: Math.round(queued.receivedAtMs),
             frameScheduledAtMs: Math.round(frameScheduledAtMs),
-            queuedForMs: Math.max(0, Math.round(frameScheduledAtMs - receivedAtMs)),
+            queuedForMs: Math.max(0, Math.round(frameScheduledAtMs - queued.receivedAtMs)),
           },
         });
       }

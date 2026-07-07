@@ -1,8 +1,9 @@
 import React, { ReactNode, useMemo, useRef } from "react";
 
 import type { MarkdownBlock } from "./conversationMarkdownBlocks";
+import { createCodexStreamController } from "./codexStreamController";
 import styles from "./ConversationStreamingResponseContent.styles";
-import { projectStreamingMarkdownBlocks } from "./streamingMarkdown";
+import { parseStreamingMarkdownBlocks, projectStreamingMarkdownBlocks } from "./streamingMarkdown";
 
 export type ConversationStreamingResponseContentClassNames = {
   markdownBody: string;
@@ -68,7 +69,35 @@ export function ConversationStreamingResponseContent({
   renderBlock,
 }: ConversationStreamingResponseContentProps) {
   const visibleText = String(content ?? "");
-  const markdownProjection = useMemo(() => projectStreamingMarkdownBlocks(visibleText), [visibleText]);
+  const streamProjection = useMemo(() => {
+    const controller = createCodexStreamController();
+    controller.push(visibleText);
+    const snapshot = controller.snapshot();
+    const stableText = snapshot.queuedStableText || snapshot.emittedStableText;
+    const liveText = snapshot.liveTailText;
+    if (!stableText && !liveText) {
+      return projectStreamingMarkdownBlocks(visibleText);
+    }
+    return {
+      stableText,
+      liveText,
+    };
+  }, [visibleText]);
+  const markdownProjection = useMemo(() => {
+    const stableBlocks = streamProjection.stableText
+      ? parseStreamingMarkdownBlocks(streamProjection.stableText)
+      : [];
+    const liveBlocks = streamProjection.liveText
+      ? parseStreamingMarkdownBlocks(streamProjection.liveText)
+      : [];
+    return {
+      stableText: streamProjection.stableText,
+      liveText: streamProjection.liveText,
+      stableBlocks,
+      liveBlocks,
+      blocks: [...stableBlocks, ...liveBlocks],
+    };
+  }, [streamProjection]);
   const renderBlockRef = useRef(renderBlock);
   renderBlockRef.current = renderBlock;
   const hasBlocks = markdownProjection.stableBlocks.length > 0 || markdownProjection.liveBlocks.length > 0;
