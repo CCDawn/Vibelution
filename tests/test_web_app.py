@@ -7513,6 +7513,43 @@ def test_session_detail_shows_current_runtime_notice_until_real_message_arrives(
     assert settled["runtimeNotices"] == []
 
 
+def test_session_detail_recovers_stale_running_legacy_messages(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="idle")
+    state = load_chat_state(tmp_path)
+    conversation = state["conversations"][0]
+    conversation["last_turn_status"] = "running"
+    conversation["messages"] = [
+        {
+            "role": "user",
+            "content": "旧会话里只有 legacy 消息",
+            "timestamp": "2026-05-29T18:16:30",
+        },
+        {
+            "role": "assistant",
+            "content": "legacy 历史回复应继续显示",
+            "timestamp": "2026-05-29T18:16:31",
+        },
+    ]
+    event_path = tmp_path / "workspace" / "sessions" / "session-live" / "turn_journal.jsonl"
+    if event_path.exists():
+        event_path.unlink()
+    save_chat_state(tmp_path, state)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    response = client.get("/api/sessions/session-live")
+
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    assert [message["content"] for message in payload["messages"]] == [
+        "旧会话里只有 legacy 消息",
+        "legacy 历史回复应继续显示",
+    ]
+    assert payload["runtimeNotices"][-1]["kind"] == "turn_recovered"
+    persisted = load_chat_state(tmp_path)["conversations"][0]
+    assert persisted["last_turn_status"] == "ready"
+    assert "messages" in persisted
+
+
 def test_submit_session_message_persists_lease_conflict_notice_without_llm_call(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="idle")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)

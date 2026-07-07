@@ -296,7 +296,7 @@ def load_chat_state(project_root: Path) -> dict[str, Any]:
             return {}
         if not isinstance(payload, dict):
             return {}
-        cleaned, changed = _drop_legacy_chat_state_messages(payload)
+        cleaned, changed = _drop_legacy_chat_state_messages(payload, project_root=project_root)
         if changed:
             try:
                 atomic_write_text(path, json.dumps(cleaned, ensure_ascii=False, indent=2))
@@ -311,11 +311,15 @@ def save_chat_state(project_root: Path, state: dict[str, Any]) -> None:
     with chat_state_transaction(project_root):
         path = chat_state_path(project_root)
         path.parent.mkdir(parents=True, exist_ok=True)
-        cleaned, _changed = _drop_legacy_chat_state_messages(state)
+        cleaned, _changed = _drop_legacy_chat_state_messages(state, project_root=project_root)
         atomic_write_text(path, json.dumps(cleaned, ensure_ascii=False, indent=2))
 
 
-def _drop_legacy_chat_state_messages(state: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+def _drop_legacy_chat_state_messages(
+    state: dict[str, Any],
+    *,
+    project_root: Path | None = None,
+) -> tuple[dict[str, Any], bool]:
     if not isinstance(state, dict):
         return {}, True
     changed = False
@@ -328,13 +332,36 @@ def _drop_legacy_chat_state_messages(state: dict[str, Any]) -> tuple[dict[str, A
                 cleaned_conversations.append(item)
                 continue
             conversation = dict(item)
-            if "messages" in conversation:
+            if "messages" in conversation and not _should_keep_legacy_chat_messages(project_root, conversation):
                 conversation.pop("messages", None)
                 changed = True
             cleaned_conversations.append(conversation)
         if changed:
             cleaned["conversations"] = cleaned_conversations
     return cleaned, changed
+
+
+def _should_keep_legacy_chat_messages(project_root: Path | None, conversation: dict[str, Any]) -> bool:
+    legacy_preserved = bool(conversation.get("legacy_messages_preserved") or conversation.get("legacyMessagesPreserved"))
+    persisted_status = str(conversation.get("last_turn_status") or conversation.get("lastTurnStatus") or "").strip().lower()
+    if not legacy_preserved and persisted_status not in {"queued", "running", "stopping"}:
+        return False
+    if project_root is None:
+        return False
+    conversation_id = str(
+        conversation.get("conversation_id")
+        or conversation.get("conversationId")
+        or conversation.get("id")
+        or ""
+    ).strip()
+    if not conversation_id:
+        return False
+    try:
+        from core.chat.conversation_ledger import latest_ledger_sequence
+
+        return latest_ledger_sequence(Path(project_root), conversation_id) <= 0
+    except Exception:
+        return False
 
 
 def _backup_corrupt_chat_state(path: Path, exc: Exception) -> None:
