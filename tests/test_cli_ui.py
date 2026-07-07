@@ -666,6 +666,21 @@ def test_token_totals_persist_across_workspace_reset(tmp_path):
     assert data["total_output_tokens"] == 45
 
 
+def test_note_turn_result_persists_terminal_runtime_state_and_clears_active_tool(tmp_path):
+    ui = UIManager()
+    ui.reset_workspace()
+    ui._runtime_state_path = tmp_path / "ui_runtime_state.json"
+    ui._runtime.last_status = "WORKING"
+    ui._runtime.last_tool_name = "read_log"
+
+    ui.note_turn_result(success=True)
+
+    data = json.loads(ui._runtime_state_path.read_text(encoding="utf-8"))
+    assert data["status"] == "SUCCESS"
+    assert data["runtime_status"] == "SUCCESS"
+    assert data["last_tool_name"] == ""
+
+
 def test_token_totals_load_from_runtime_state_file(tmp_path):
     state_path = tmp_path / "ui_runtime_state.json"
     state_path.write_text(
@@ -768,6 +783,21 @@ def test_context_window_persists_runtime_state(tmp_path):
     assert data["current_context_tokens"] == 2048
     assert data["context_token_limit"] == 8192
     assert data["status"] == "IDLE"
+
+
+def test_success_status_persists_terminal_runtime_state_and_clears_active_tool(tmp_path):
+    ui = UIManager()
+    ui.reset_workspace()
+    ui._runtime_state_path = tmp_path / "ui_runtime_state.json"
+    ui._runtime.last_status = "WORKING"
+    ui._runtime.last_tool_name = "read_log"
+
+    ui.update_status("SUCCESS")
+
+    data = json.loads(ui._runtime_state_path.read_text(encoding="utf-8"))
+    assert data["status"] == "SUCCESS"
+    assert data["runtime_status"] == "SUCCESS"
+    assert data["last_tool_name"] == ""
 
 
 def test_pet_panel_distinguishes_request_context_from_turn_usage():

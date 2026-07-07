@@ -831,6 +831,7 @@ class UIManager:
                 self._runtime.failed_rounds += 1
         if had_progress:
             self._status = "SUCCESS" if success else "ERROR"
+            self._settle_terminal_runtime_status()
         self._save_runtime_state()
         self._update_status_line()
 
@@ -2938,6 +2939,7 @@ class UIManager:
         if runtime_telemetry:
             self._last_status_telemetry = dict(runtime_telemetry)
         self._status = status.upper()
+        self._settle_terminal_runtime_status()
         if goal is not None:
             self._current_goal = goal
         if iterations is not None:
@@ -2957,6 +2959,13 @@ class UIManager:
             self._last_cached_input_tokens = self._turn_cached_input_tokens
         self._save_runtime_state()
         self._update_status_line()
+
+    def _settle_terminal_runtime_status(self):
+        if self._status not in {"SUCCESS", "DONE", "IDLE", "ERROR", "FAILED"}:
+            return
+        with self._runtime_lock:
+            self._runtime.last_status = self._status
+            self._runtime.last_tool_name = ""
 
     def refresh_pet_display(self):
         self._update_status_line()

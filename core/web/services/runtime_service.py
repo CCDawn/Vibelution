@@ -50,6 +50,7 @@ LAUNCHER_SCRIPT_PATH = PROJECT_ROOT / "scripts" / "vibelution_launcher.ps1"
 LAUNCHER_STATE_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "state.json"
 LAUNCHER_SHUTDOWN_LOG_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "shutdown-request.log"
 RUNNING_SESSION_PHASES = {"running", "stopping"}
+RESUMABLE_TERMINAL_SESSION_PHASES = {"needs_continue", "paused_limit", "stopped_by_user"}
 
 
 class RuntimeRestartActiveWorkBlocked(Exception):
@@ -1492,7 +1493,7 @@ def _derive_web_status(task_status: object, runtime_state: dict) -> str:
         return "failed"
     if task in {"needs_input", "waiting"}:
         return "waiting"
-    if task in {"done", "ready"}:
+    if task in {"done", "ready"} or task in RESUMABLE_TERMINAL_SESSION_PHASES:
         return "success"
     if task in {"running", "stopping"}:
         return "running"
@@ -1539,6 +1540,11 @@ def _derive_session_state(lang: str, active_session: dict, runtime_state: dict) 
     elif session_phase == "ready":
         state = "ready"
         needs_response = True
+        line = text_for(lang, zh="这一轮已经回答完成，可以继续推进", en="the latest reply is complete and ready to continue")
+    elif session_phase in RESUMABLE_TERMINAL_SESSION_PHASES:
+        state = "ready"
+        needs_response = True
+        last_tool_name = ""
         line = text_for(lang, zh="这一轮已经回答完成，可以继续推进", en="the latest reply is complete and ready to continue")
     elif current_status in {"ERROR", "FAILED"} or runtime_status == "ERROR":
         state = "failed"
@@ -1978,6 +1984,9 @@ def _compression_trigger_source_payload(source: object, reason: str) -> str:
 
 
 def _active_tools(active_session: dict, runtime_state: dict) -> list[str]:
+    session_phase = str(active_session.get("currentPhase") or "").strip().lower()
+    if session_phase in RESUMABLE_TERMINAL_SESSION_PHASES:
+        return []
     tools: list[str] = []
     for message in reversed(list(active_session.get("messages") or [])):
         tool_calls = list(message.get("toolCalls") or [])
