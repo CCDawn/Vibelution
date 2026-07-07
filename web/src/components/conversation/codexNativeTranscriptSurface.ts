@@ -54,13 +54,14 @@ export function resolveCodexTranscriptSurface(
 ): CodexTranscriptSurface {
   if (hasUsableNativeCodexTranscript(message)) {
     const cells = codexNativeTranscriptToCells(message.codexTranscript as CodexTranscriptProjection);
+    const hasAssistantMarkdown = cells.some((cell) => cell.kind === "assistant_markdown" && Boolean(cell.text?.trim()));
     return {
       mode: "native",
       source: "message.codexTranscript",
       cells,
-      hasAssistantMarkdown: cells.some((cell) => cell.kind === "assistant_markdown" && Boolean(cell.text?.trim())),
+      hasAssistantMarkdown,
       suppressLegacyProcess: true,
-      suppressLegacyResponse: true,
+      suppressLegacyResponse: hasAssistantMarkdown,
       suppressLegacyTurnStatus: true,
     };
   }

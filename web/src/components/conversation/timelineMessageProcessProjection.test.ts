@@ -120,6 +120,67 @@ describe("timeline message process projection", () => {
     ]);
   });
 
+  it("merges native transcript cells from same-turn process packets and the final answer", () => {
+    const projected = projectTimelineProcessMessages([
+      {
+        ...toolMessage("message-tool-1", "grep_search_tool"),
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "message-tool-1",
+          cells: [
+            {
+              id: "message-tool-1-tool",
+              kind: "tool_call",
+              messageId: "message-tool-1",
+              status: "completed",
+              tone: "neutral",
+              title: "grep_search_tool",
+              summary: "未找到匹配项",
+            },
+          ],
+          toolCalls: [],
+          terminalOperations: [],
+          terminalSessions: [],
+          modelObservations: [],
+        },
+      },
+      {
+        id: "message-answer",
+        role: "assistant",
+        content: "最终回答应该显示。",
+        timestamp: "2026-06-26T14:56:02Z",
+        metadata: { turnId: "turn-edit" },
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "message-answer",
+          cells: [
+            {
+              id: "message-answer-markdown",
+              kind: "assistant_markdown",
+              messageId: "message-answer",
+              status: "completed",
+              tone: "neutral",
+              text: "最终回答应该显示。",
+            },
+          ],
+          toolCalls: [],
+          terminalOperations: [],
+          terminalSessions: [],
+          modelObservations: [],
+        },
+      },
+    ]);
+
+    expect(projected).toHaveLength(1);
+    expect(projected[0].content).toBe("最终回答应该显示。");
+    expect(projected[0].codexTranscript?.cells.map((cell) => cell.kind)).toEqual([
+      "tool_call",
+      "assistant_markdown",
+    ]);
+  });
+
   it("keeps same-turn live overlay status text out of the committed assistant answer", () => {
     const projected = projectTimelineProcessMessages([
       {

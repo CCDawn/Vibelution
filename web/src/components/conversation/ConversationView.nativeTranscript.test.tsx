@@ -104,6 +104,69 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain("responseSection");
   });
 
+  it("keeps the final answer visible when same-turn process packets carry tool-only native transcript cells", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-native-tool",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-07-07T11:00:00Z",
+        metadata: { turnId: "turn-native-answer" },
+        toolCalls: [{ name: "grep_search_tool", status: "done", summary: "未找到匹配项" }],
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "assistant-native-tool",
+          cells: [
+            {
+              id: "native-tool-only",
+              kind: "tool_call",
+              messageId: "assistant-native-tool",
+              status: "completed",
+              tone: "neutral",
+              title: "grep_search_tool",
+              summary: "未找到匹配项",
+            },
+          ],
+          toolCalls: [],
+          terminalOperations: [],
+          terminalSessions: [],
+          modelObservations: [],
+        },
+      },
+      {
+        id: "assistant-native-answer",
+        role: "assistant",
+        content: "最终回答应该显示。",
+        timestamp: "2026-07-07T11:00:10Z",
+        metadata: { turnId: "turn-native-answer" },
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "assistant-native-answer",
+          cells: [
+            {
+              id: "native-answer-visible",
+              kind: "assistant_markdown",
+              messageId: "assistant-native-answer",
+              status: "completed",
+              tone: "neutral",
+              text: "最终回答应该显示。",
+            },
+          ],
+          toolCalls: [],
+          terminalOperations: [],
+          terminalSessions: [],
+          modelObservations: [],
+        },
+      },
+    ]);
+
+    expect(html).toContain("grep_search_tool");
+    expect(html).toContain("最终回答应该显示。");
+    expect(html).toContain('data-codex-transcript-cell-kind="assistant_markdown"');
+  });
+
   it("keeps the legacy projection path when native transcript is unavailable", () => {
     const html = renderConversation([
       {
