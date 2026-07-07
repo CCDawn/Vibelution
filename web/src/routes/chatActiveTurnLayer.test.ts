@@ -68,6 +68,48 @@ describe("chat active turn layer", () => {
     expect(recovered?.thoughtContent).toBe("完整思考");
   });
 
+  it("preserves native Codex transcript snapshots across assistant deltas", () => {
+    const first = mergeAssistantDeltaIntoActiveTurnLayer(
+      undefined,
+      assistantDelta({
+        contentDelta: "",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "session-1-message-live-turn-1",
+          cells: [
+            {
+              id: "native-tool",
+              kind: "tool_call",
+              messageId: "session-1-message-live-turn-1",
+              status: "running",
+              tone: "running",
+              title: "npm build",
+            },
+          ],
+        },
+      }),
+    );
+    const second = mergeAssistantDeltaIntoActiveTurnLayer(
+      first,
+      assistantDelta({
+        contentDelta: "最终回答",
+        feedbackEvents: undefined,
+      }),
+    );
+
+    expect(second?.codexTranscript?.cells[0]).toMatchObject({
+      id: "native-tool",
+      kind: "tool_call",
+    });
+
+    const message = activeTurnLayerToConversationMessage(second);
+
+    expect(message?.content).toBe("最终回答");
+    expect(message?.codexTranscript?.source).toBe("native");
+    expect(message?.codexTranscript?.cells[0]?.id).toBe("native-tool");
+  });
+
   it("updates the same unsequenced feedback event instead of appending a duplicate", () => {
     const first = mergeAssistantDeltaIntoActiveTurnLayer(
       undefined,
