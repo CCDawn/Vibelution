@@ -11260,6 +11260,14 @@ def _knowledge_collection_completion_flow_visualization(
         ]
         step_statuses = [_knowledge_collection_flow_step_status(step.get("status")) for step in stage_steps]
         node_status = _knowledge_collection_flow_node_status(step_statuses)
+        if stage["stageId"] == "ingestion" and node_status == "pending":
+            official_knowledge_completed = any(
+                _trim_text(step.get("stageId"), max_length=120) == "official_knowledge"
+                and _knowledge_collection_flow_step_status(step.get("status")) == "completed"
+                for step in stage_steps
+            )
+            if official_knowledge_completed:
+                node_status = "completed"
         node_error_type = next(
             (_trim_text(step.get("errorType"), max_length=160) for step in stage_steps if _trim_text(step.get("errorType"), max_length=160)),
             "",

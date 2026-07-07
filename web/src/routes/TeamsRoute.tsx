@@ -7303,55 +7303,32 @@ export function TeamsRoute({
                 )}
                 {renderResearchStageAgentSummary(stageType)}
                 <div className={styles.researchStageActions}>
-                  <VNativeButton
-                    type="button"
-                    onClick={() => runStagePrimaryAction(stageType)}
-                    disabled={disabled}
-                    title={stageType === "knowledge_collection" ? sourceCollectionActionDisabledTitle(knowledgeCollectionPrimaryReadiness, primaryLabel) : primaryLabel}
-                  >
-                    {stageType === "knowledge_collection" && selectedSourceCollectionRun && sourceCollectionSearchOpenAssignmentCount > 0 ? <Search size={13} /> : <Play size={13} />}
-                    {primaryLabel}
-                  </VNativeButton>
                   {stageType === "knowledge_collection" ? (
                     <VNativeButton
                       type="button"
-                      onClick={runKnowledgeCollectionCompletionAction}
-                      disabled={sourceCollectionCompletionActionDisabled}
-                      title={sourceCollectionActionDisabledTitle(sourceCollectionCompletionActionReadiness, lang === "zh" ? "一键完成知识搜集" : "Complete knowledge collection")}
+                      onClick={() => void runKnowledgeCollectionLoopAction()}
+                      disabled={sourceCollectionLoopActionDisabled}
+                      title={sourceCollectionActionDisabledTitle(sourceCollectionLoopActionReadiness, sourceCollectionLoopActionLabel)}
                     >
-                      <CheckCircle2 size={13} />
-                      {sourceCollectionCompletionActionLabel}
+                      {sourceCollectionLoopStartsNewRun ? <Play size={13} /> : <CheckCircle2 size={13} />}
+                      {sourceCollectionLoopActionLabel}
                     </VNativeButton>
-                  ) : null}
-                  {stageType === "knowledge_collection" ? (
+                  ) : (
                     <VNativeButton
                       type="button"
-                      onClick={() => {
-                        if (!selectedTeam?.teamId) {
-                          return;
-                        }
-                        if (knowledgeExpansionWorkflowTeamSelected) {
-                          startSourceCollectionRunMutation.mutate({
-                            teamId: selectedTeam.teamId,
-                            draft: sourceCollectionDraft,
-                          });
-                          return;
-                        }
-                        launchResearchStage(stageType, "new_round");
-                      }}
-                      disabled={
-                        knowledgeExpansionWorkflowTeamSelected
-                          ? selectedTeamStartSourceCollectionPending || !sourceCollectionCanStart
-                          : selectedTeamStartResearchStagePending || !researchStageCanLaunch
-                      }
+                      onClick={() => runStagePrimaryAction(stageType)}
+                      disabled={disabled}
+                      title={primaryLabel}
                     >
-                      <Plus size={13} />
-                      {lang === "zh" ? "新一轮搜集" : "New round"}
+                      <Play size={13} />
+                      {primaryLabel}
                     </VNativeButton>
-                  ) : null}
+                  )}
                   <Link to={researchWorkspaceStageRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID, stageType)}>
                     <Link2 size={13} />
-                    {lang === "zh" ? "阶段详情" : "Details"}
+                    {stageType === "knowledge_collection"
+                      ? (lang === "zh" ? "手动控制" : "Manual controls")
+                      : (lang === "zh" ? "阶段详情" : "Details")}
                   </Link>
                 </div>
               </article>
@@ -7458,7 +7435,7 @@ export function TeamsRoute({
             <span>
               {workRun
                 ? (workRun.summary || workRun.currentTask || workRun.runId)
-                : (lang === "zh" ? "点击一键完成知识搜集后，这里展示阶段 Agent 的运行状态。" : "After one-click completion starts, stage Agent progress appears here.")}
+                : (lang === "zh" ? "闭环执行后，这里展示阶段 Agent 的运行状态。" : "After loop execution starts, stage Agent progress appears here.")}
             </span>
           </div>
           <span className={`${styles.workflowTag} ${workflowIngestionTone(flowStatus)}`}>
@@ -11301,11 +11278,26 @@ export function TeamsRoute({
     teamWorkflowKnowledgeIngestionStatusQuery.data?.latestWorkRun ?? null;
   const selectedTeamKnowledgeCollectionWorkRun =
     selectedTeamKnowledgeIngestionActiveWorkRun ?? selectedTeamKnowledgeIngestionLatestWorkRun ?? null;
+  const selectedTeamKnowledgeCollectionSourceRunId = String(selectedTeamKnowledgeCollectionWorkRun?.sourceRunId || "");
+  const selectedTeamKnowledgeCollectionMatchesSelectedRun =
+    !selectedTeamKnowledgeCollectionSourceRunId
+    || !selectedSourceCollectionRunEffectiveId
+    || selectedTeamKnowledgeCollectionSourceRunId === selectedSourceCollectionRunEffectiveId;
+  const selectedTeamKnowledgeCollectionWorkRunStatus = String(selectedTeamKnowledgeCollectionWorkRun?.status || "").toLowerCase();
+  const selectedTeamKnowledgeCollectionFlowStatus = String(
+    selectedTeamKnowledgeCollectionWorkRun?.flowVisualization?.status || "",
+  ).toLowerCase();
+  const selectedTeamKnowledgeCollectionCompleted =
+    selectedTeamKnowledgeCollectionWorkRunStatus === "completed"
+    || selectedTeamKnowledgeCollectionFlowStatus === "completed";
+  const selectedTeamKnowledgeCollectionCompletedForSelectedRun =
+    selectedTeamKnowledgeCollectionCompleted && selectedTeamKnowledgeCollectionMatchesSelectedRun;
   const selectedTeamKnowledgeCollectionIngestPending =
     (runKnowledgeCollectionCompletionMutation.isPending && runKnowledgeCollectionCompletionMutation.variables?.teamId === selectedTeam?.teamId)
     || Boolean(selectedTeamKnowledgeIngestionActiveWorkRun);
   const selectedTeamKnowledgeCollectionIngestError =
     runKnowledgeCollectionCompletionMutation.variables?.teamId === selectedTeam?.teamId
+    && !selectedTeamKnowledgeCollectionCompleted
     && runKnowledgeCollectionCompletionMutation.error instanceof Error
       ? runKnowledgeCollectionCompletionMutation.error
       : null;
@@ -11518,6 +11510,21 @@ export function TeamsRoute({
             : sourceCollectionActionNoInputReason,
     sourceCollectionActionInitialDataPending,
   );
+  const sourceCollectionLoopStartsNewRun = !selectedSourceCollectionRun || selectedTeamKnowledgeCollectionCompletedForSelectedRun;
+  const sourceCollectionLoopStartReadiness = sourceCollectionActionReadiness(
+    !selectedTeam?.teamId
+      || selectedTeamStartSourceCollectionPending
+      || selectedTeamKnowledgeCollectionIngestPending
+      || !sourceCollectionCanStart,
+    !selectedTeam?.teamId
+      ? sourceCollectionActionNoRunReason
+      : selectedTeamStartSourceCollectionPending || selectedTeamKnowledgeCollectionIngestPending
+        ? sourceCollectionActionBusyReason
+        : sourceCollectionActionNoInputReason,
+  );
+  const sourceCollectionLoopActionReadiness = sourceCollectionLoopStartsNewRun
+    ? sourceCollectionLoopStartReadiness
+    : sourceCollectionCompletionActionReadiness;
   const sourceCollectionMemoryActionDisabled = sourceCollectionMemoryActionReadiness.disabled;
   const sourceCollectionMemoryActionLabel = sourceCollectionMemoryActionDisabled && sourceCollectionMemoryActionReadiness.loading
     ? (lang === "zh" ? "读取中" : "Loading")
@@ -11532,6 +11539,16 @@ export function TeamsRoute({
   const sourceCollectionCompletionActionLabel = selectedTeamKnowledgeCollectionIngestPending
     ? (lang === "zh" ? "一键完成中" : "Completing")
     : (lang === "zh" ? "一键完成知识搜集" : "Complete knowledge collection");
+  const sourceCollectionLoopActionDisabled = sourceCollectionLoopActionReadiness.disabled;
+  const sourceCollectionLoopActionLabel = selectedTeamStartSourceCollectionPending || selectedTeamKnowledgeCollectionIngestPending
+    ? (lang === "zh" ? "闭环执行中" : "Loop running")
+    : sourceCollectionLoopStartsNewRun
+      ? selectedTeamKnowledgeCollectionCompletedForSelectedRun && selectedSourceCollectionRun
+        ? (lang === "zh" ? "开始下一轮闭环" : "Start next loop")
+        : (lang === "zh" ? "开始第一轮闭环" : "Start first loop")
+      : sourceCollectionOperationFailed
+        ? (lang === "zh" ? "重试本轮闭环" : "Retry this loop")
+        : (lang === "zh" ? "继续本轮闭环" : "Continue this loop");
   const sourceCollectionGraphActionDisabled = sourceCollectionGraphActionReadiness.disabled;
   const sourceCollectionGraphActionLabel = selectedTeamBuildCandidateGraphPending
     ? (lang === "zh" ? "Agent 生成中" : "Agent building")
@@ -11691,10 +11708,24 @@ export function TeamsRoute({
     });
     openSourceCollectionStage("relations");
   };
-  const runKnowledgeCollectionCompletionAction = () => {
-    if (sourceCollectionCompletionActionReadiness.disabled || !selectedTeam?.teamId || !sourceCollectionActionRunId) {
+  const startKnowledgeCollectionCompletionForRun = (
+    runId: string,
+    options: {
+      displayedCandidateCount?: number;
+      ingestCandidateCount?: number;
+      precheckCandidateCount?: number;
+      rawRecordCount?: number;
+      searchOpenAssignmentCount?: number;
+    } = {},
+  ) => {
+    if (!selectedTeam?.teamId || !runId) {
       return;
     }
+    const searchOpenAssignmentCount = options.searchOpenAssignmentCount ?? sourceCollectionSearchOpenAssignmentCount;
+    const rawRecordCount = options.rawRecordCount ?? sourceCollectionRawRecordCount;
+    const displayedCandidateCount = options.displayedCandidateCount ?? sourceCollectionDisplayedCandidateCount;
+    const ingestCandidateCount = options.ingestCandidateCount ?? sourceCollectionIngestCandidateCount;
+    const precheckCandidateCount = options.precheckCandidateCount ?? sourceCollectionPrecheckCandidateCount;
     selectResearchWorkspaceView("canvas");
     const nextParams = new URLSearchParams(searchParams);
     nextParams.set("team", selectedTeam.teamId);
@@ -11702,20 +11733,55 @@ export function TeamsRoute({
     setSearchParams(nextParams, { replace: false });
     runKnowledgeCollectionCompletionMutation.mutate({
       teamId: selectedTeam.teamId,
-      runId: sourceCollectionActionRunId,
+      runId,
       extractionAgentId: sourceCollectionExtractorAgentId,
       sourceQualityAgentId: sourceCollectionExtractorAgentId,
       candidateGraphAgentId: sourceCollectionRelationMapperAgentId,
       stewardAgentId: sourceCollectionIngestorAgentId,
       knowledgeBaseId: sourceCollectionDefaultKnowledgeBaseId,
       targetDomain: sourceCollectionDraft.topic || "神经机制启发神经网络算法",
-      maxCandidates: Math.max(1, Math.min(80, sourceCollectionIngestCandidateCount)),
+      maxCandidates: Math.max(1, Math.min(80, ingestCandidateCount)),
       maxSearchBatches: 20,
-      maxQueriesPerBatch: Math.max(1, Math.min(50, sourceCollectionSearchOpenAssignmentCount || 4)),
+      maxQueriesPerBatch: Math.max(1, Math.min(50, searchOpenAssignmentCount || 4)),
       maxResultsPerQuery: Math.max(1, Math.min(5, sourceCollectionDraft.maxResultsPerQuery || 3)),
-      maxRecords: Math.max(1, Math.min(1000, Math.max(sourceCollectionRawRecordCount, sourceCollectionDisplayedCandidateCount, 100))),
-      forceReview: sourceCollectionPrecheckCandidateCount <= 0 && sourceCollectionDisplayedCandidateCount > 0,
+      maxRecords: Math.max(1, Math.min(1000, Math.max(rawRecordCount, displayedCandidateCount, 100))),
+      forceReview: precheckCandidateCount <= 0 && displayedCandidateCount > 0,
     });
+  };
+  const runKnowledgeCollectionCompletionAction = () => {
+    if (sourceCollectionCompletionActionReadiness.disabled || !sourceCollectionActionRunId) {
+      return;
+    }
+    startKnowledgeCollectionCompletionForRun(sourceCollectionActionRunId);
+  };
+  const runKnowledgeCollectionLoopAction = async () => {
+    if (sourceCollectionLoopActionReadiness.disabled || !selectedTeam?.teamId) {
+      return;
+    }
+    if (sourceCollectionLoopStartsNewRun) {
+      try {
+        const started = await startSourceCollectionRunMutation.mutateAsync({
+          teamId: selectedTeam.teamId,
+          draft: sourceCollectionDraft,
+        });
+        const startedRunId = started.run.runId;
+        const startedAssignmentCount = Math.max(started.assignmentCount, started.assignments.length);
+        startKnowledgeCollectionCompletionForRun(startedRunId, {
+          displayedCandidateCount: 0,
+          ingestCandidateCount: 0,
+          precheckCandidateCount: 0,
+          rawRecordCount: 0,
+          searchOpenAssignmentCount: startedAssignmentCount || 4,
+        });
+      } catch {
+        return;
+      }
+      return;
+    }
+    if (!sourceCollectionActionRunId) {
+      return;
+    }
+    startKnowledgeCollectionCompletionForRun(sourceCollectionActionRunId);
   };
   const runSourceCollectionSearchFromHeader = () => {
     if (sourceCollectionSearchActionReadiness.disabled || !selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId) {

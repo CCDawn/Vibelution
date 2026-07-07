@@ -10644,6 +10644,28 @@ def test_knowledge_collection_completion_background_normalizes_one_click_default
     assert latest_flow["nodes"][-1]["agentRole"] == "source_ingestor"
 
 
+def test_knowledge_collection_completion_flow_treats_official_knowledge_as_ingestion_done():
+    step = team_workflow_orchestration_service._knowledge_collection_completion_step
+    flow = team_workflow_orchestration_service._knowledge_collection_completion_flow_visualization(
+        "completed",
+        steps=[
+            step("remaining_search", "no_open_assignment", input_count=1, output_count=0),
+            step("candidate_extraction", "partial", input_count=10, output_count=0),
+            step("source_review", "completed", input_count=34, output_count=28),
+            step("candidate_graph", "completed", input_count=34, output_count=28),
+            step("steward_pack", "completed", input_count=28, output_count=1),
+            step("source_gate", "pending_review", input_count=1, output_count=1),
+            step("knowledge_proposal", "pending_review", input_count=1, output_count=1),
+            step("official_knowledge", "completed", input_count=1, output_count=1),
+        ],
+    )
+
+    nodes = {node["stageId"]: node for node in flow["nodes"]}
+    assert flow["status"] == "completed"
+    assert nodes["ingestion"]["status"] == "completed"
+    assert nodes["ingestion"]["outputCount"] == 4
+
+
 def test_knowledge_collection_completion_background_failure_logs_child_payload(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     scene_events = _capture_workflow_events(monkeypatch)
