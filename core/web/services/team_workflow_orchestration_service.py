@@ -11003,8 +11003,6 @@ def _decorate_knowledge_ingestion_work_run_snapshot(snapshot: dict[str, Any] | N
     if not isinstance(snapshot, dict):
         return None
     payload = dict(snapshot)
-    if isinstance(payload.get("flowVisualization"), dict):
-        return payload
     result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
     raw_steps = payload.get("completionSteps") if isinstance(payload.get("completionSteps"), list) else []
     steps = _knowledge_collection_completion_steps_for_snapshot(result, raw_steps)
@@ -11013,11 +11011,31 @@ def _decorate_knowledge_ingestion_work_run_snapshot(snapshot: dict[str, Any] | N
     error_type = _trim_text(payload.get("errorType"), max_length=160)
     run_id = _trim_text(payload.get("runId"), max_length=160)
     source_run_id = _trim_text(payload.get("sourceRunId"), max_length=160)
+    existing_flow = payload.get("flowVisualization") if isinstance(payload.get("flowVisualization"), dict) else None
+    existing_flow_nodes = existing_flow.get("nodes") if isinstance(existing_flow, dict) and isinstance(existing_flow.get("nodes"), list) else []
+    official_knowledge_completed = any(
+        _trim_text(step.get("stageId"), max_length=120) == "official_knowledge"
+        and _knowledge_collection_flow_step_status(step.get("status")) == "completed"
+        for step in steps
+    )
+    stale_completed_flow = (
+        isinstance(existing_flow, dict)
+        and _knowledge_collection_flow_step_status(status) == "completed"
+        and official_knowledge_completed
+        and any(
+            isinstance(node, dict)
+            and _trim_text(node.get("stageId"), max_length=120) == "ingestion"
+            and _knowledge_collection_flow_step_status(node.get("status")) != "completed"
+            for node in existing_flow_nodes
+        )
+    )
+    if isinstance(existing_flow, dict) and not stale_completed_flow:
+        return payload
     should_backfill_flow = bool(steps) or bool(source_run_id) or run_id.startswith("knowledge-completion")
     if not steps and _knowledge_collection_flow_step_status(status) == "failed":
         steps = [_knowledge_collection_failed_step_for_snapshot(payload)]
         should_backfill_flow = True
-    if should_backfill_flow:
+    if should_backfill_flow or stale_completed_flow:
         payload["flowVisualization"] = _knowledge_collection_completion_flow_visualization(
             status,
             steps=steps,
