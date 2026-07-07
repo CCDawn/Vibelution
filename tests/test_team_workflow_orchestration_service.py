@@ -3323,6 +3323,83 @@ def test_source_collection_stage_card_projection_closes_finding_with_downstream_
     assert "0 search assignments remain" in finding_card["artifactSummary"]
 
 
+def test_source_collection_stage_card_projection_suppresses_interrupted_task_after_one_click_completion(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    isolated_store = WorkRunStore(root=tmp_path / "completion-work-runs")
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_knowledge_ingestion_work_run_store",
+        lambda: isolated_store,
+    )
+    finder = agent_directory_service.create_agent_instance(display_name="资料寻找")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
+    )
+    run = data_processing_service.create_processing_run(
+        title="Knowledge collection current round",
+        scope={"teamId": team["teamId"], "workflowStage": "knowledge_collection"},
+        metadata={"startedFrom": "team_workflow_source_collection"},
+    )
+    data_processing_service.add_record(
+        run["runId"],
+        {
+            "sourceType": "paper",
+            "sourceRef": "https://doi.org/10.0000/one-click-supersedes-interrupt",
+            "title": "One-click completion source",
+        },
+    )
+    team_workflow_orchestration_service._upsert_source_collection_stage_session_task(
+        team["teamId"],
+        run["runId"],
+        {
+            "taskId": "stagetask-interrupted-before-completion",
+            "runId": run["runId"],
+            "stageId": "finding",
+            "agentId": finder["agentId"],
+            "agentRole": "source_finder",
+            "sessionId": "session-finder-interrupted",
+            "status": "interrupted",
+            "summary": "Agent 私聊在阶段回写前中断。",
+            "createdAt": "2026-07-07T22:47:27+08:00",
+            "updatedAt": "2026-07-07T22:50:55+08:00",
+        },
+    )
+    isolated_store.persist_snapshot(
+        team_workflow_orchestration_service.KNOWLEDGE_INGESTION_WORK_RUN_KIND,
+        {
+            "runId": "knowledge-completion-supersedes-interrupted-task",
+            "runKind": team_workflow_orchestration_service.KNOWLEDGE_INGESTION_WORK_RUN_KIND,
+            "kind": team_workflow_orchestration_service.KNOWLEDGE_INGESTION_WORK_RUN_KIND,
+            "teamId": team["teamId"],
+            "status": "completed",
+            "currentPhase": "completed",
+            "sourceRunId": run["runId"],
+            "flowVisualization": {
+                "kind": "knowledge_collection_completion",
+                "schemaVersion": team_workflow_orchestration_service.SCHEMA_VERSION,
+                "status": "completed",
+                "currentStageId": "",
+                "nodes": [
+                    {"stageId": "finding", "agentRole": "source_finder", "status": "executed"},
+                    {"stageId": "extraction", "agentRole": "source_extractor", "status": "completed"},
+                    {"stageId": "relations", "agentRole": "source_relation_mapper", "status": "completed"},
+                    {"stageId": "ingestion", "agentRole": "source_ingestor", "status": "completed"},
+                ],
+            },
+            "updatedAt": "2026-07-08T00:27:17+08:00",
+        },
+    )
+
+    projection = team_workflow_orchestration_service._source_collection_stage_cards_projection(team["teamId"], run["runId"])
+
+    finding_card = next(item for item in projection["cards"] if item["stageId"] == "finding")
+    assert finding_card["status"] == "artifact_ready_no_latest_agent_task"
+    assert finding_card["agentTaskStatus"] == "not_started"
+    assert finding_card["latestTask"] == {}
+    assert finding_card["counts"]["historicalTask"] == 1
+
+
 def test_source_collection_stage_card_projection_does_not_close_partial_needs_review_artifacts():
     card = team_workflow_orchestration_service._source_collection_stage_card_projection(
         "extraction",

@@ -17944,6 +17944,10 @@ def _source_collection_stage_cards_projection(
         )
         for stage_id, stage_tasks in tasks_by_stage.items()
     }
+    stage_task_groups = _source_collection_stage_task_groups_after_completion_supersession(
+        stage_task_groups,
+        _source_collection_completion_superseded_stage_cutoffs(normalized_team_id, normalized_run_id),
+    )
     cards = [
         _source_collection_stage_card_projection(
             "finding",
@@ -18181,6 +18185,90 @@ def _source_collection_stage_tasks_for_current_team(
         else:
             historical.append(task)
     return current, historical
+
+
+def _source_collection_completion_superseded_stage_cutoffs(team_id: str, run_id: str) -> dict[str, str]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_run_id = _trim_text(run_id, max_length=160)
+    if not normalized_run_id:
+        return {}
+    try:
+        snapshot = _decorate_knowledge_ingestion_work_run_snapshot(
+            _knowledge_ingestion_work_run_store().load_latest_snapshot(KNOWLEDGE_INGESTION_WORK_RUN_KIND)
+        )
+    except Exception:
+        return {}
+    if not isinstance(snapshot, dict):
+        return {}
+    if _trim_text(snapshot.get("teamId"), max_length=160) != normalized_team_id:
+        return {}
+    if _trim_text(snapshot.get("sourceRunId"), max_length=160) != normalized_run_id:
+        return {}
+    if _knowledge_collection_flow_step_status(snapshot.get("status")) == "failed":
+        return {}
+    flow = snapshot.get("flowVisualization") if isinstance(snapshot.get("flowVisualization"), dict) else {}
+    nodes = [item for item in list(flow.get("nodes") or []) if isinstance(item, dict)]
+    updated_at = _trim_text(snapshot.get("finishedAt") or snapshot.get("updatedAt"), max_length=120)
+    if not nodes or not updated_at:
+        return {}
+    cutoffs: dict[str, str] = {}
+    for node in nodes:
+        stage_id = _normalize_source_collection_stage_id(node.get("stageId"), default="")
+        if stage_id not in SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES:
+            continue
+        raw_status = _trim_text(node.get("status"), max_length=120).lower()
+        normalized_status = _knowledge_collection_flow_step_status(raw_status)
+        if raw_status == "executed" or normalized_status in {"completed", "skipped"}:
+            cutoffs[stage_id] = updated_at
+    return cutoffs
+
+
+def _source_collection_stage_task_groups_after_completion_supersession(
+    stage_task_groups: dict[str, tuple[list[dict[str, Any]], list[dict[str, Any]]]],
+    stage_cutoffs: dict[str, str],
+) -> dict[str, tuple[list[dict[str, Any]], list[dict[str, Any]]]]:
+    if not stage_cutoffs:
+        return stage_task_groups
+    result: dict[str, tuple[list[dict[str, Any]], list[dict[str, Any]]]] = {}
+    for stage_id, group in stage_task_groups.items():
+        current, historical = group
+        cutoff = _trim_text(stage_cutoffs.get(stage_id), max_length=120)
+        if not cutoff:
+            result[stage_id] = (current, historical)
+            continue
+        next_current: list[dict[str, Any]] = []
+        superseded: list[dict[str, Any]] = []
+        for task in current:
+            if _source_collection_stage_task_superseded_by_completion(task, cutoff):
+                superseded.append(task)
+            else:
+                next_current.append(task)
+        result[stage_id] = (next_current, [*historical, *superseded])
+    return result
+
+
+def _source_collection_stage_task_superseded_by_completion(task: dict[str, Any], completion_updated_at: str) -> bool:
+    status = _trim_text(task.get("status"), max_length=80).lower()
+    if status in {"completed", "needs_review"}:
+        return False
+    task_updated_at = _trim_text(task.get("updatedAt") or task.get("createdAt"), max_length=120)
+    if not task_updated_at:
+        return True
+    return _workflow_timestamp_sort_key(task_updated_at) < _workflow_timestamp_sort_key(completion_updated_at)
+
+
+def _workflow_timestamp_sort_key(value: Any) -> tuple[float, str]:
+    text = _trim_text(value, max_length=120)
+    if not text:
+        return (0.0, "")
+    normalized = text.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return (parsed.timestamp(), text)
+    except ValueError:
+        return (0.0, text)
 
 
 def _source_collection_team_member_snapshot(team_id: str) -> list[dict[str, Any]]:
