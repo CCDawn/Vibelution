@@ -6949,6 +6949,49 @@ def test_execute_source_collection_search_skips_existing_query_without_force(tmp
     assert data_processing_service.list_records(run_response["run"]["runId"])["summary"]["recordCount"] == 2
 
 
+def test_execute_source_collection_search_advances_after_no_record_output(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    calls = []
+
+    def fake_search(query, *, max_results, provider):
+        calls.append(query["queryId"])
+        if len(calls) == 1:
+            return _fake_low_quality_source_search_response(query, max_results=max_results, provider=provider)
+        return _fake_source_search_response(query, max_results=max_results, provider=provider)
+
+    monkeypatch.setattr(team_workflow_orchestration_service, "_execute_source_collection_query", fake_search)
+    team = team_service.create_team(name="ai科学研究团队")
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding cortical hierarchy",
+            "querySeeds": ["predictive coding cortical hierarchy", "predictive coding neural algorithm"],
+            "searchLanguages": ["en"],
+            "sourceTypes": ["paper"],
+            "agentRoles": ["source_finder"],
+        },
+    )
+    first_query_id = run_response["searchPlan"]["queries"][0]["queryId"]
+    second_query_id = run_response["searchPlan"]["queries"][1]["queryId"]
+
+    first = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {"maxQueries": 1, "maxResultsPerQuery": 1},
+    )
+    second = team_workflow_orchestration_service.execute_source_collection_search(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {"maxQueries": 1, "maxResultsPerQuery": 1},
+    )
+
+    assert first["recordCount"] == 0
+    assert first["outputCount"] == 1
+    assert second["executedQueryCount"] == 1
+    assert second["recordCount"] == 1
+    assert calls == [first_query_id, second_query_id]
+
+
 def test_execute_source_collection_search_records_output_per_query(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
 

@@ -2350,6 +2350,7 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
         run = data_processing_service.get_processing_run(normalized_run_id)
         assignments_payload = data_processing_service.list_collection_assignments(normalized_run_id)
         records_payload = data_processing_service.list_records(normalized_run_id)
+        outputs_payload = data_processing_service.list_collection_outputs(normalized_run_id)
     except data_processing_service.DataProcessingError as exc:
         raise TeamWorkflowOrchestrationError(str(exc)) from exc
     run_scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
@@ -2358,7 +2359,8 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
         raise TeamWorkflowOrchestrationError("Data processing run does not belong to this team.")
     assignments = [item for item in list(assignments_payload.get("assignments") or []) if isinstance(item, dict)]
     existing_records = [item for item in list(records_payload.get("records") or []) if isinstance(item, dict)]
-    existing_query_ids = _source_collection_existing_query_ids(existing_records)
+    existing_outputs = [item for item in list(outputs_payload.get("outputs") or []) if isinstance(item, dict)]
+    existing_query_ids = _source_collection_attempted_query_ids(existing_records, existing_outputs)
     existing_identity_records = _source_collection_existing_identity_records(existing_records)
     execution_events: list[dict[str, Any]] = []
     outputs: list[dict[str, Any]] = []
@@ -2705,8 +2707,12 @@ def _execute_source_collection_search_impl(team_id: str, run_id: str, payload: d
     final_run = data_processing_service.get_processing_run(normalized_run_id)
     final_assignments = data_processing_service.list_collection_assignments(normalized_run_id)["assignments"]
     final_records_payload = data_processing_service.list_records(normalized_run_id)
+    final_outputs_payload = data_processing_service.list_collection_outputs(normalized_run_id)
     final_status = data_processing_service.get_processing_status(normalized_run_id)
-    final_existing_query_ids = _source_collection_existing_query_ids(list(final_records_payload.get("records") or []))
+    final_existing_query_ids = _source_collection_attempted_query_ids(
+        [item for item in list(final_records_payload.get("records") or []) if isinstance(item, dict)],
+        [item for item in list(final_outputs_payload.get("outputs") or []) if isinstance(item, dict)],
+    )
     next_runnable_query_ids = _source_collection_next_runnable_query_ids(
         [item for item in list(final_assignments or []) if isinstance(item, dict)],
         final_existing_query_ids,
@@ -15913,6 +15919,22 @@ def _source_collection_existing_query_ids(records: list[dict[str, Any]]) -> set[
             if query_id:
                 query_ids.add(query_id)
     return query_ids
+
+
+def _source_collection_output_query_ids(outputs: list[dict[str, Any]]) -> set[str]:
+    query_ids: set[str] = set()
+    for output in outputs:
+        if not isinstance(output, dict):
+            continue
+        quality_signals = output.get("qualitySignals") if isinstance(output.get("qualitySignals"), dict) else {}
+        query_id = _trim_text(quality_signals.get("queryId"), max_length=160)
+        if query_id:
+            query_ids.add(query_id)
+    return query_ids
+
+
+def _source_collection_attempted_query_ids(records: list[dict[str, Any]], outputs: list[dict[str, Any]]) -> set[str]:
+    return _source_collection_existing_query_ids(records) | _source_collection_output_query_ids(outputs)
 
 
 def _source_collection_existing_identity_records(records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
