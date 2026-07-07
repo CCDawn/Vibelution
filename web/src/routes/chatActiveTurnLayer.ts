@@ -18,6 +18,7 @@ export type ActiveTurnLayerState = {
   thoughtContent: string;
   feedbackEvents: NonNullable<ConversationMessage["feedbackEvents"]>;
   timelineItems?: ConversationMessage["timelineItems"];
+  codexTranscript?: ConversationMessage["codexTranscript"];
   ledgerSeq: number;
 };
 
@@ -68,7 +69,7 @@ export function mergeAssistantDeltaIntoActiveTurnLayer(
   const feedbackEvents = payload.feedbackEvents
     ? mergeAgentFeedbackEvents(base?.feedbackEvents, payload.feedbackEvents)
     : base?.feedbackEvents ?? [];
-  if (!content && !thought && !payload.stage && !feedbackEvents.length) {
+  if (!content && !thought && !payload.stage && !feedbackEvents.length && !payload.codexTranscript && !base?.codexTranscript) {
     return undefined;
   }
   return {
@@ -82,6 +83,7 @@ export function mergeAssistantDeltaIntoActiveTurnLayer(
     thoughtContent: thought,
     feedbackEvents,
     timelineItems: payload.timelineItems ?? base?.timelineItems,
+    codexTranscript: payload.codexTranscript ?? base?.codexTranscript,
     ledgerSeq: Math.max(normalizedLedgerSeq(base?.ledgerSeq), normalizedLedgerSeq(payload.ledgerSeq)),
   };
 }
@@ -102,6 +104,7 @@ export function activeTurnLayerToConversationMessage(
     thought: layer.thoughtContent || undefined,
     feedbackEvents: layer.feedbackEvents.length > 0 ? layer.feedbackEvents : undefined,
     timelineItems: layer.timelineItems,
+    codexTranscript: layer.codexTranscript,
     metadata: {
       kind: "session_active_turn_layer",
       sessionId: layer.sessionId,
