@@ -5,6 +5,7 @@ import {
   mapChatComposerImageAttachments,
   type ChatConversationComposerBridgeLabels,
 } from "./ChatConversationComposerBridge";
+import { dictionary } from "../../i18n/dictionary";
 
 const labels: ChatConversationComposerBridgeLabels = {
   editMessageModeNotice: "editing",
@@ -102,6 +103,13 @@ describe("ChatConversationComposerBridge", () => {
       sizeBytes: 7,
       contentType: "image/webp",
     }]);
+  });
+
+  it("uses concise dictionary placeholders for direct chat turns", () => {
+    expect(dictionary.zh.messageInputPlaceholder).toBe("描述下一步要做什么...");
+    expect(dictionary.en.messageInputPlaceholder).toBe("Describe the next step...");
+    expect(dictionary.zh.messageInputPlaceholder).not.toContain("当前会话");
+    expect(dictionary.en.messageInputPlaceholder).not.toContain("current session");
   });
 });
 
