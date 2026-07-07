@@ -58,6 +58,8 @@ describe("ConversationStreamingResponseContent", () => {
   it("keeps stable streaming markdown blocks behind a memo boundary", async () => {
     const source = await import("./ConversationStreamingResponseContent.tsx?raw").then((module) => module.default);
 
+    expect(source).toContain('from "./codexStreamController"');
+    expect(source).toContain("createCodexStreamController");
     expect(source).toContain("const StableStreamingMarkdownBlocks = React.memo");
     expect(source).toContain("stableText={markdownProjection.stableText}");
     expect(source).toContain("blocks={markdownProjection.stableBlocks}");
