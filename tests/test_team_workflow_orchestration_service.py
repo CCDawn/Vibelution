@@ -10766,6 +10766,61 @@ def test_knowledge_ingestion_status_backfills_failed_completion_flow(tmp_path, m
     assert "Knowledge review grant failed" in flow["error"]
 
 
+def test_knowledge_ingestion_status_repairs_stale_completed_completion_flow(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    isolated_store = WorkRunStore(root=tmp_path / "completion-work-runs")
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_knowledge_ingestion_work_run_store",
+        lambda: isolated_store,
+    )
+    team = team_service.create_team(name="挑战杯科研团队", members=[])
+    run_id = "knowledge-completion-stale-flow"
+    source_run_id = "source-run-completed"
+
+    isolated_store.persist_snapshot(
+        team_workflow_orchestration_service.KNOWLEDGE_INGESTION_WORK_RUN_KIND,
+        {
+            "runId": run_id,
+            "runKind": team_workflow_orchestration_service.KNOWLEDGE_INGESTION_WORK_RUN_KIND,
+            "teamId": team["teamId"],
+            "status": "completed",
+            "currentPhase": "completed",
+            "sourceRunId": source_run_id,
+            "completionSteps": [
+                {"stageId": "source_gate", "status": "pending_review", "inputCount": 1, "outputCount": 1},
+                {"stageId": "knowledge_proposal", "status": "pending_review", "inputCount": 1, "outputCount": 1},
+                {"stageId": "official_knowledge", "status": "completed", "inputCount": 1, "outputCount": 1},
+            ],
+            "flowVisualization": {
+                "kind": "knowledge_collection_completion",
+                "schemaVersion": team_workflow_orchestration_service.SCHEMA_VERSION,
+                "status": "completed",
+                "currentStageId": "ingestion",
+                "nodes": [
+                    {"stageId": "finding", "label": "资料寻找", "agentRole": "source_finder", "status": "completed"},
+                    {"stageId": "extraction", "label": "资料提炼", "agentRole": "source_extractor", "status": "completed"},
+                    {"stageId": "relations", "label": "资料关系整理", "agentRole": "source_relation_mapper", "status": "completed"},
+                    {"stageId": "ingestion", "label": "资料入库", "agentRole": "source_ingestor", "status": "pending"},
+                ],
+            },
+            "summary": {"formalKnowledgeItemCount": 1},
+            "updatedAt": "2026-07-07T15:49:52Z",
+        },
+    )
+
+    status = team_workflow_orchestration_service.get_knowledge_ingestion_status(team["teamId"])
+    latest_run = status["latestWorkRun"]
+    flow = latest_run["flowVisualization"]
+    nodes = {node["stageId"]: node for node in flow["nodes"]}
+
+    assert latest_run["runId"] == run_id
+    assert latest_run["sourceRunId"] == source_run_id
+    assert flow["status"] == "completed"
+    assert nodes["ingestion"]["status"] == "completed"
+    assert nodes["ingestion"]["outputCount"] == 3
+
+
 def test_knowledge_collection_completion_runs_search_extract_before_ingestion(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     calls: list[tuple[str, dict]] = []
