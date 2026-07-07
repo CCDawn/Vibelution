@@ -32,7 +32,7 @@ import type {
   WorkbenchWindowMode,
 } from "../api/types";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../app/browserTelemetry";
-import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
+import { resolveLauncherStatusPollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import {
   applyBeforeUnloadProjectCloseGuard,
   buildProjectWindowCloseBlockedTelemetry,
@@ -836,8 +836,36 @@ function controlPlaneHasCommandType(
   });
 }
 
+function launcherStatusCommandActive(status: LauncherStatusWithGuardian | undefined): boolean {
+  const evidence = status?.controlPlaneEvidence;
+  if (!evidence) {
+    return false;
+  }
+  return Boolean(
+    evidence.state.activeCommand?.commandId
+    || evidence.queue.pendingCount > 0
+    || evidence.queue.processingCount > 0
+    || evidence.restartQueue?.active
+    || evidence.restartQueue?.pending
+    || evidence.recovery?.active,
+  );
+}
+
+function launcherStatusLifecycleChanging(status: LauncherStatusWithGuardian | undefined): boolean {
+  const bundle = status?.projectBundle;
+  const phase = String(bundle?.phase || status?.launcher.phase || "").toLowerCase();
+  const overall = String(status?.lifecycleProof?.overallState || bundle?.overallState || "").toLowerCase();
+  const desired = String(bundle?.desiredState || "").toLowerCase();
+  const observed = String(bundle?.observedState || "").toLowerCase();
+  return (
+    includesAny(phase, ["start", "open", "queue", "processing", "stop", "close", "restart"])
+    || includesAny(overall, ["starting", "closing", "stopping", "restarting"])
+    || (desired !== "" && observed !== "" && desired !== observed)
+  );
+}
+
 export function LauncherRoute() {
-  const { lang } = useShellI18n();
+  const { lang } = useShellI18n({ configEnabled: false });
   const queryClient = useQueryClient();
   const pageVisible = usePageVisibility();
   const locale = lang === "zh" ? "zh-CN" : "en-US";
@@ -1322,7 +1350,13 @@ export function LauncherRoute() {
   const statusQuery = useQuery({
     queryKey: queryKeys.launcherStatus(),
     queryFn: getLauncherStatus,
-    refetchInterval: resolvePollingInterval(pageVisible, 4_000, { backgroundMs: 4_000 }),
+    refetchInterval: (query) => {
+      const status = query.state.data as LauncherStatusWithGuardian | undefined;
+      return resolveLauncherStatusPollingInterval(pageVisible, {
+        commandActive: launcherStatusCommandActive(status),
+        lifecycleChanging: launcherStatusLifecycleChanging(status),
+      });
+    },
     refetchIntervalInBackground: true,
   });
   const developerNoiseQuery = useQuery({
