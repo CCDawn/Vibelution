@@ -100,6 +100,7 @@ import {
   type AgentMessageTimelineItem,
 } from "./agentMessageTimeline";
 import { buildCodexTranscriptCells, type CodexTranscriptCell } from "./codexTranscriptCells";
+import { buildCodexRolloutTraceEvents, type CodexRolloutTraceEvent } from "./codexRolloutTrace";
 import { preserveConversationExpansionDefaults } from "./conversationExpansionDefaults";
 import { activeAgentMessageTimelineItemId } from "./agentMessageTimelineActiveItem";
 import {
@@ -1107,6 +1108,55 @@ export function ConversationView({
     return explicitFallbackLabels[normalized] ?? statusLabel(status);
   }
 
+  function rolloutTraceEventLabel(kind: CodexRolloutTraceEvent["kind"]) {
+    const labels: Record<CodexRolloutTraceEvent["kind"], string> = {
+      ToolCallStarted: lang === "zh" ? "调用开始" : "Tool call started",
+      RuntimeStarted: lang === "zh" ? "运行开始" : "Runtime started",
+      RuntimeEnded: lang === "zh" ? "运行结束" : "Runtime ended",
+      ToolCallEnded: lang === "zh" ? "调用结束" : "Tool call ended",
+    };
+    return labels[kind];
+  }
+
+  function renderRolloutTraceEvents(operation: AgentMessageOperation) {
+    if (operation.kind !== "tool") {
+      return null;
+    }
+    const events = buildCodexRolloutTraceEvents(operation);
+    if (events.length === 0) {
+      return null;
+    }
+    return (
+      <ol className={styles.rolloutTraceList} aria-label={lang === "zh" ? "工具生命周期" : "Tool lifecycle"}>
+        {events.map((event) => {
+          const eventClassName = [
+            styles.rolloutTraceItem,
+            styles[`rolloutTraceItem_${event.status}`],
+          ].filter(Boolean).join(" ");
+          const detailText = [
+            event.error,
+            event.exitCode !== undefined && event.exitCode !== null ? `exit ${event.exitCode}` : "",
+            event.timedOut ? (lang === "zh" ? "已超时" : "timed out") : "",
+          ].filter(Boolean).join(" · ");
+          return (
+            <li
+              key={event.id}
+              className={eventClassName}
+              data-rollout-trace-kind={event.kind}
+              data-rollout-trace-status={event.status}
+            >
+              <span className={styles.rolloutTraceDot} aria-hidden="true" />
+              <span className={styles.rolloutTraceText}>
+                <span className={styles.rolloutTraceTitle}>{rolloutTraceEventLabel(event.kind)}</span>
+                {detailText ? <span className={styles.rolloutTraceMeta}>{detailText}</span> : null}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    );
+  }
+
   function operationLabel(operation: AgentMessageOperation) {
     return operationDisplayLabel(operation, operationStateLabels);
   }
@@ -1551,6 +1601,7 @@ export function ConversationView({
                       {operationMetaText ? <span className={`${styles.timelineCellMeta} ${operationStatusClassName}`}>{operationMetaText}</span> : null}
                     </span>
                     {operation.summary ? <span className={`${styles.timelineCellPreview} ${operationTextClassName}`}>{operation.summary}</span> : null}
+                    {renderRolloutTraceEvents(operation)}
                   </span>
                   {operation.error ? <span className={styles.timelineCommandError}>{operation.error}</span> : null}
                 </div>
@@ -1618,6 +1669,7 @@ export function ConversationView({
             </VButton>
           ) : null}
         </div>
+        {renderRolloutTraceEvents(operation)}
         {canExpandDetails ? (
           <DeferredOperationDetails
             operation={operation}

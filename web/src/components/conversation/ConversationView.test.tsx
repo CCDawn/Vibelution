@@ -4118,6 +4118,71 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain(">当前</span>");
   });
 
+  it("renders Codex-like rollout lifecycle events inside expanded command rows", () => {
+    const html = renderConversation([
+      {
+        id: "message-rollout-trace",
+        role: "assistant",
+        content: "已完成检查。",
+        timestamp: "2026-06-05T13:36:00Z",
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "tool",
+            status: "done",
+            name: "cli_tool",
+            summary: "npm --prefix web run test",
+            timestamp: "2026-06-05T13:36:01Z",
+          },
+        ],
+      },
+    ]);
+
+    expect(html).toContain("rolloutTraceList");
+    expect(html).toContain("data-rollout-trace-kind=\"ToolCallStarted\"");
+    expect(html).toContain("data-rollout-trace-kind=\"RuntimeStarted\"");
+    expect(html).toContain("data-rollout-trace-kind=\"RuntimeEnded\"");
+    expect(html).toContain("data-rollout-trace-kind=\"ToolCallEnded\"");
+    expect(html).toContain("调用开始");
+    expect(html).toContain("运行开始");
+    expect(html).toContain("运行结束");
+    expect(html).toContain("调用结束");
+    expect(html).not.toContain("工具调用已开始");
+  });
+
+  it("keeps failed rollout diagnostics visible without turning normal trace rows into cards", () => {
+    const html = renderConversation([
+      {
+        id: "message-rollout-failed",
+        role: "assistant",
+        content: "命令失败。",
+        timestamp: "2026-06-05T13:36:00Z",
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "tool",
+            status: "failed",
+            name: "cli_tool",
+            summary: "npm --prefix web run build",
+            error: "exit code 1",
+            timestamp: "2026-06-05T13:36:01Z",
+          },
+        ],
+      },
+    ]);
+
+    expect(html).toContain("rolloutTraceList");
+    expect(html).toContain("data-rollout-trace-status=\"failed\"");
+    expect(html).toContain("exit code 1");
+    expect(styles.rolloutTraceList).toContain("border-l");
+    expect(styles.rolloutTraceList).toContain("bg-transparent");
+    expect(styles.rolloutTraceList).not.toContain("rounded-[var(--radius-panel)]");
+    expect(styles.rolloutTraceList).toContain("shadow-none");
+    expect(styles.rolloutTraceList).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+    expect(styles.rolloutTraceItem_completed).toContain("text-[var(--fg-tertiary)]");
+    expect(styles.rolloutTraceItem_failed).toContain("text-[var(--state-error)]");
+  });
+
   it("shows display tool labels while preserving raw names in expandable details", () => {
     const html = renderConversation([
       {
