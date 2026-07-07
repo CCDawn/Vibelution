@@ -60,10 +60,16 @@ const statusKeyMap: Record<string, ShellTranslationKey> = {
   missing: "status_missing",
 };
 
-export function useShellI18n() {
+export type ShellI18nOptions = {
+  configEnabled?: boolean;
+};
+
+export function useShellI18n(options: ShellI18nOptions = {}) {
+  const configEnabled = options.configEnabled ?? true;
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
     queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
+    enabled: configEnabled,
   });
 
   const lang: Language = configQuery.data?.language === "en" ? "en" : "zh";

@@ -28,6 +28,19 @@ export function resolvePollingInterval(
   return options.backgroundMs ?? false;
 }
 
+export function resolveLauncherStatusPollingInterval(
+  pageVisible: boolean,
+  options: {
+    lifecycleChanging: boolean;
+    commandActive: boolean;
+  },
+): PollingInterval {
+  if (options.lifecycleChanging || options.commandActive) {
+    return resolvePollingInterval(pageVisible, 4_000, { backgroundMs: 15_000 });
+  }
+  return resolvePollingInterval(pageVisible, 15_000, { backgroundMs: 60_000 });
+}
+
 export function isStartupWarmupActive(ready: boolean, elapsedMs: number, warmupMs = STARTUP_BACKGROUND_WARMUP_MS): boolean {
   if (ready) {
     return false;

@@ -72,7 +72,7 @@ describe("LauncherRoute layout contract", () => {
 
   it("uses shell language state without loading the full app dictionary", () => {
     expect(routeSource).toContain("useShellI18n");
-    expect(routeSource).toContain("const { lang } = useShellI18n()");
+    expect(routeSource).toContain("const { lang } = useShellI18n({ configEnabled: false })");
     expect(routeSource).not.toContain("useAppI18n");
   });
 
@@ -114,9 +114,11 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("queryKeys.runtimeSummary()");
   });
 
-  it("keeps launcher controls fresh while the control surface is minimized", () => {
+  it("keeps launcher polling responsive during lifecycle work and slower once settled", () => {
     expect(routeSource).toContain("isControlPlaneIdle");
-    expect(routeSource).toContain("refetchInterval: resolvePollingInterval(pageVisible, 4_000, { backgroundMs: 4_000 })");
+    expect(routeSource).toContain("resolveLauncherStatusPollingInterval");
+    expect(routeSource).toContain("launcherStatusCommandActive(status)");
+    expect(routeSource).toContain("launcherStatusLifecycleChanging(status)");
     expect(routeSource).toContain("refetchIntervalInBackground: true");
     expect(routeSource).toContain("const controlPlaneIdle = isControlPlaneIdle(evidence)");
     expect(routeSource).toContain("const controlBusy = controlMutation.isPending && !(controlPlaneIdle && lifecycleSettled)");
