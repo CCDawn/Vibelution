@@ -99,6 +99,7 @@ import {
   buildAgentMessageTimelineItems,
   type AgentMessageTimelineItem,
 } from "./agentMessageTimeline";
+import { buildCodexTranscriptCells, type CodexTranscriptCell } from "./codexTranscriptCells";
 import { preserveConversationExpansionDefaults } from "./conversationExpansionDefaults";
 import { activeAgentMessageTimelineItemId } from "./agentMessageTimelineActiveItem";
 import {
@@ -596,6 +597,16 @@ export function ConversationView({
     }
     return itemsByMessageId;
   }, [activeConversationMessagesById, agentOperationGroupsByMessageId, agentThread, lang]);
+  const agentCodexCellsByMessageId = useMemo(() => {
+    const cellsByMessageId = new Map<string, CodexTranscriptCell[]>();
+    for (const agentMessage of agentThread.messages) {
+      cellsByMessageId.set(agentMessage.id, buildCodexTranscriptCells(agentMessage, {
+        operations: agentOperationGroupsByMessageId.get(agentMessage.id)?.timeline,
+        timelineItems: agentTimelineItemsByMessageId.get(agentMessage.id),
+      }));
+    }
+    return cellsByMessageId;
+  }, [agentOperationGroupsByMessageId, agentThread, agentTimelineItemsByMessageId]);
   const imageArtifactUrlsBeforeMessage = useMemo(() => {
     const urlsByMessageId = new Map<string, Set<string>>();
     const seenImageUrls = new Set<string>();
@@ -1402,14 +1413,16 @@ export function ConversationView({
       >
         <VButton
           type="button"
-          className={styles.timelineCellHeader}
+          className={styles.timelineThoughtHeader}
           aria-expanded={expanded}
           onClick={() => toggleSection(message.id, item.id, item.defaultExpanded)}
           title={expanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden")}
         >
           {isActiveTimelineItem && item.status === "running" ? <LoaderCircle className={styles.statusSpinner} size={14} /> : <BrainCircuit size={14} />}
-          <span>{lang === "zh" ? "思考" : "Thinking"}</span>
-          {!expanded && item.preview ? <span className={styles.timelineCellPreview}>{item.preview}</span> : null}
+          <span className={styles.timelineCellBody}>
+            <span className={styles.timelineCellTitle}>{lang === "zh" ? "思考" : "Thinking"}</span>
+            {!expanded && item.preview ? <span className={styles.timelineCellPreview}>{item.preview}</span> : null}
+          </span>
           {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
         </VButton>
         {expanded ? <pre className={styles.timelineThoughtText}>{item.text}</pre> : null}
@@ -1485,6 +1498,7 @@ export function ConversationView({
     const toneTextClassName = styles[`operationText_${statusTone}` as keyof typeof styles] ?? "";
     const toneStatusClassName = styles[`operationStatus_${statusTone}` as keyof typeof styles] ?? "";
     const toneIconClassName = styles[`operationIcon_${statusTone}` as keyof typeof styles] ?? "";
+    const metaText = [visibleStatus, duration].filter(Boolean).join(" · ");
     const className = [
       styles.timelineOperationCell,
       timelineToneClassName,
@@ -1505,10 +1519,13 @@ export function ConversationView({
           <span className={`${styles.operationIcon} ${toneIconClassName}`}>
             {isActiveTimelineItem && item.status === "running" ? <LoaderCircle className={styles.statusSpinner} size={14} /> : <TerminalSquare size={14} />}
           </span>
-          <span className={toneTextClassName}>{item.title}</span>
-          {item.summary ? <span className={`${styles.timelineCellPreview} ${toneTextClassName}`}>{item.summary}</span> : null}
-          {visibleStatus ? <span className={`${styles.timelineCellMeta} ${toneStatusClassName}`}>{visibleStatus}</span> : null}
-          {duration ? <span className={`${styles.timelineCellMeta} ${toneStatusClassName}`}>{duration}</span> : null}
+          <span className={styles.timelineCellBody}>
+            <span className={styles.timelineCellTitleRow}>
+              <span className={`${styles.timelineCellTitle} ${toneTextClassName}`}>{item.title}</span>
+              {metaText ? <span className={`${styles.timelineCellMeta} ${toneStatusClassName}`}>{metaText}</span> : null}
+            </span>
+            {item.summary ? <span className={`${styles.timelineCellPreview} ${toneTextClassName}`}>{item.summary}</span> : null}
+          </span>
           {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
         </VButton>
         {expanded ? (
@@ -1519,16 +1536,21 @@ export function ConversationView({
               const operationTextClassName = styles[`operationText_${statusTone}` as keyof typeof styles] ?? "";
               const operationStatusClassName = styles[`operationStatus_${statusTone}` as keyof typeof styles] ?? "";
               const operationIconClassName = styles[`operationIcon_${statusTone}` as keyof typeof styles] ?? "";
+              const operationMetaText = [
+                operationStatusText(operation.status),
+                operationDuration,
+              ].filter(Boolean).join(" · ");
               return (
                 <div key={operation.id} className={styles.timelineCommandRow}>
                   <span className={`${styles.operationIcon} ${operationIconClassName}`}>
                     {operationStatusIcon(operation, isActiveTimelineItem)}
                   </span>
-                  <span className={operationTextClassName}>{operationLabel(operation)}</span>
-                  {operation.summary ? <span className={operationTextClassName}>{operation.summary}</span> : null}
-                  <span className={operationStatusClassName}>
-                    {operationStatusText(operation.status)}
-                    {operationDuration ? ` · ${operationDuration}` : ""}
+                  <span className={styles.timelineCellBody}>
+                    <span className={styles.timelineCellTitleRow}>
+                      <span className={`${styles.timelineCellTitle} ${operationTextClassName}`}>{operationLabel(operation)}</span>
+                      {operationMetaText ? <span className={`${styles.timelineCellMeta} ${operationStatusClassName}`}>{operationMetaText}</span> : null}
+                    </span>
+                    {operation.summary ? <span className={`${styles.timelineCellPreview} ${operationTextClassName}`}>{operation.summary}</span> : null}
                   </span>
                   {operation.error ? <span className={styles.timelineCommandError}>{operation.error}</span> : null}
                 </div>
@@ -1561,6 +1583,7 @@ export function ConversationView({
     const toneTextClassName = styles[`operationText_${statusTone}` as keyof typeof styles] ?? "";
     const toneStatusClassName = styles[`operationStatus_${statusTone}` as keyof typeof styles] ?? "";
     const toneIconClassName = styles[`operationIcon_${statusTone}` as keyof typeof styles] ?? "";
+    const metaText = [visibleStatus, duration].filter(Boolean).join(" · ");
     const className = [
       styles.timelineOperationCell,
       timelineToneClassName,
@@ -1575,10 +1598,13 @@ export function ConversationView({
           <span className={`${styles.operationIcon} ${toneIconClassName}`}>
             {operationStatusIcon(operation, isActiveTimelineItem)}
           </span>
-          <span className={toneTextClassName}>{item.title}</span>
-          {item.summary ? <span className={`${styles.timelineCellPreview} ${toneTextClassName}`}>{item.summary}</span> : null}
-          {visibleStatus ? <span className={`${styles.timelineCellMeta} ${toneStatusClassName}`}>{visibleStatus}</span> : null}
-          {duration ? <span className={`${styles.timelineCellMeta} ${toneStatusClassName}`}>{duration}</span> : null}
+          <span className={styles.timelineCellBody}>
+            <span className={styles.timelineCellTitleRow}>
+              <span className={`${styles.timelineCellTitle} ${toneTextClassName}`}>{item.title}</span>
+              {metaText ? <span className={`${styles.timelineCellMeta} ${toneStatusClassName}`}>{metaText}</span> : null}
+            </span>
+            {item.summary ? <span className={`${styles.timelineCellPreview} ${toneTextClassName}`}>{item.summary}</span> : null}
+          </span>
           {canExpandDetails ? (
             <VButton
               type="button"
@@ -2461,6 +2487,7 @@ export function ConversationView({
               timelineOptions,
               message.timelineItems,
             );
+            const codexTranscriptCells = agentCodexCellsByMessageId.get(agentMessage.id) ?? [];
             const hasAgentMessageTimeline =
               message.role === "assistant"
               && hasFeedbackTimeline
@@ -2651,6 +2678,7 @@ export function ConversationView({
                 }
               >
 
+                  <span hidden data-codex-transcript-cell-count={codexTranscriptCells.length} />
                   {agentInboxMessage ? (
                     <section className={styles.agentInboxSection}>
                       {researchOrgChips.length > 0 ? (

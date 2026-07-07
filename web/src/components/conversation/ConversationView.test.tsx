@@ -157,6 +157,15 @@ describe("ConversationView VUI control contract", () => {
   });
 });
 
+describe("ConversationView Codex-like transcript adapter integration", () => {
+  it("builds codex transcript cells from the AgentMessage projection before rendering turns", () => {
+    expect(conversationViewSource).toContain('from "./codexTranscriptCells"');
+    expect(conversationViewSource).toContain("buildCodexTranscriptCells(");
+    expect(conversationViewSource).toContain("agentCodexCellsByMessageId");
+    expect(conversationViewSource).toContain("data-codex-transcript-cell-count");
+  });
+});
+
 describe("ConversationView edit resend affordance", () => {
   it("does not force-collapse thinking sections when streaming settles", () => {
     expect(conversationViewSource).not.toContain("previousStreamingRef");
@@ -255,10 +264,13 @@ describe("ConversationView edit resend affordance", () => {
   });
 
   it("keeps conversation timeline previews wrapped and button slots flat", () => {
-    expect(styles.timelineCellHeader).toContain("!items-center");
-    expect(styles.timelineCellHeader).not.toContain("!items-start");
+    expect(styles.timelineCellHeader).toContain("!items-start");
+    expect(styles.timelineCellHeader).not.toContain("!items-center");
     expect(styles.timelineCellHeader).toContain("!grid");
     expect(styles.timelineCellHeader).toContain("!w-full");
+    expect(styles.timelineCellHeader).toContain("grid-cols-[20px_fit-content(52rem)_24px_minmax(0,1fr)]");
+    expect(styles.timelineCellHeader).not.toContain("_max-content_");
+    expect(styles.timelineCellHeader).toContain("gap-x-2");
     expect(styles.timelineCellHeader).toContain("border-0");
     expect(styles.timelineCellHeader).toContain("bg-transparent");
     expect(styles.timelineCellHeader).toContain("p-0");
@@ -270,7 +282,11 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.timelineCellHeader).toContain("[&_[data-slot=vui-button-label]]:contents");
     expect(styles.timelineCellPreview).toContain("whitespace-normal");
     expect(styles.timelineCellPreview).toContain("[overflow-wrap:anywhere]");
-    expect(styles.timelineCellPreview).toContain("line-clamp-1");
+    expect(styles.timelineCellPreview).toContain("line-clamp-2");
+    expect(styles.timelineCellPreview).toContain("text-[var(--vui-font-sm)]");
+    expect(styles.timelineCellPreview).not.toContain("text-[var(--vui-font-xs)]");
+    expect(styles.timelineCellTitle).toContain("text-[var(--vui-font-sm)]");
+    expect(styles.timelineCellTitle).toContain("font-semibold");
     expect(styles.operationItem).not.toContain("860px");
     expect(styles.operationItem).toContain("w-[min(100%,72ch)]");
     expect(styles.operationItem).toContain("!rounded-none");
@@ -284,15 +300,24 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.operationStatus).toContain("justify-self-start");
   });
 
-  it("keeps process and answer disclosure icons vertically centered with their labels", () => {
-    expect(styles.timelineCellHeader).toContain("!items-center");
+  it("top-aligns process disclosure rows while answer toggles keep centered labels", () => {
+    expect(styles.timelineCellHeader).toContain("!items-start");
     expect(styles.answerOnlyProcessToggle).toContain("[&_[data-slot=vui-button-label]]:items-center");
     expect(styles.responseToggle).toContain("!items-center");
   });
 
   it("keeps timeline status meta aligned to the top of multi-line operation rows", () => {
-    expect(styles.timelineCellHeader).toContain("!items-center");
-    expect(styles.timelineCellMeta).toContain("self-start");
+    expect(styles.timelineCellHeader).toContain("!items-start");
+    expect(styles.timelineCellTitleRow).toContain("inline-flex");
+    expect(styles.timelineCellTitleRow).toContain("items-baseline");
+    expect(styles.timelineCellTitleRow).toContain("gap-2");
+    expect(styles.timelineCellMeta).toContain("inline-flex");
+    expect(styles.timelineCellMeta).toContain("align-baseline");
+    expect(styles.timelineCellMeta).toContain("whitespace-nowrap");
+    expect(styles.timelineCellMeta).not.toContain("justify-self-end");
+    expect(styles.timelineCellMeta).not.toContain("text-right");
+    expect(styles.timelineCellMeta).not.toContain("max-w-[min(30ch,34vw)]");
+    expect(styles.timelineCellMeta).toContain("text-[var(--fg-tertiary)]");
     expect(styles.timelineCellDetailButton).toContain("self-start");
   });
 
@@ -360,7 +385,7 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(styles.answerOnlyProcessGroup_running).toContain("text-[var(--fg-secondary)]");
     expect(styles.answerOnlyProcessGroup_running).not.toContain("text-[var(--state-success)]");
-    expect(styles.timelineCellPreview).toContain("line-clamp-1");
+    expect(styles.timelineCellPreview).toContain("line-clamp-2");
     expect(styles.operationSummaryText).toContain("line-clamp-1");
   });
 
@@ -410,11 +435,24 @@ describe("ConversationView edit resend affordance", () => {
       expect(skeletonClass).not.toMatch(/(?:^|\s)p-2(?:\s|$)/);
     }
 
+    expect(styles.timeline).toContain("px-[clamp(1.25rem,6vw,5.5rem)]");
+    expect(styles.timeline).not.toContain("px-3");
+    expect(styles.surfaceCompact).not.toContain("[&_.timeline]:px-3");
+    expect(styles.assistantTurn).toContain("w-[min(100%,980px)]");
+    expect(styles.assistantTurn).toContain("justify-self-center");
     expect(styles.assistantTurn).toContain("grid-cols-[34px_minmax(0,1fr)]");
+    expect(styles.agentInboxTurn).toContain("w-[min(100%,980px)]");
+    expect(styles.agentInboxTurn).toContain("justify-self-center");
+    expect(styles.groupTranscriptTurn).toContain("w-[min(100%,980px)]");
+    expect(styles.groupTranscriptTurn).toContain("justify-self-center");
+    expect(styles.userTurn).toContain("w-[min(100%,980px)]");
+    expect(styles.userTurn).toContain("justify-self-center");
     expect(styles.userTurn).toContain("grid-cols-[minmax(0,1fr)_34px]");
     expect(styles.userTurn).toContain("[&_.turnContent]:w-fit");
-    expect(styles.userTurn).toContain("[&_.turnContent]:max-w-[min(74%,760px)]");
+    expect(styles.userTurn).toContain("[&_.turnContent]:max-w-[min(70%,720px)]");
     expect(styles.assistantTurnContinuation).toContain("[&_.turnContent]:w-[min(100%,860px)]");
+    expect(styles.assistantTurnContinuation).toContain("w-[min(100%,980px)]");
+    expect(styles.assistantTurnContinuation).toContain("justify-self-center");
     expect(styles.turnContent).toContain("gap-[5px]");
     expect(styles.turnMeta).toContain("inline-flex");
     expect(styles.turnSpeaker).toContain("truncate");
@@ -435,15 +473,17 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.userMessageBody).toContain("text-left");
 
     expect(styles.responseSection).toContain("w-[min(100%,860px)]");
-    expect(styles.responseSection).toContain("border border-[color-mix(in_srgb,var(--vui-border-strong)_76%,transparent)]");
-    expect(styles.responseSection).toContain("bg-[var(--vui-surface-chat-panel)]");
+    expect(styles.responseSection).not.toContain("justify-self-stretch");
+    expect(styles.responseSection).toContain("border-l");
+    expect(styles.responseSection).toContain("bg-transparent");
+    expect(styles.responseSection).not.toContain("bg-[var(--vui-surface-chat-panel)]");
+    expect(styles.responseSection).not.toContain("rounded-[var(--radius-panel)]");
     expect(styles.responseSection).not.toContain("white)");
-    expect(styles.responseSection).toContain("px-3");
-    expect(styles.responseSection).toContain("py-2.5");
+    expect(styles.responseSection).toContain("pl-2.5");
     expect(styles.responseSection).toContain("shadow-none");
     expect(styles.responseBody).toContain("border-0");
     expect(styles.responseBody).toContain("bg-transparent");
-    expect(styles.responseBody).toContain("p-0");
+    expect(styles.responseBody).toContain("pl-5");
     expect(styles.responseBody).toContain("shadow-none");
     expect(styles.responseBody).not.toContain("bg-[color-mix(in_srgb,var(--surface-panel)_66%,transparent)]");
 
@@ -1238,21 +1278,26 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("styles[`operationItem_${statusTone}`]");
     expect(conversationViewSource).toContain("styles[`operationIcon_${statusTone}`]");
     expect(conversationViewSource).toContain("styles[`operationText_${statusTone}`]");
-    expect(styles.operationItem_success).toContain("!text-[var(--state-success)]");
+    expect(conversationViewSource).toContain("styles.timelineCellBody");
+    expect(conversationViewSource).toContain("styles.timelineCellTitle");
+    expect(styles.operationItem_success).toContain("!text-[var(--fg-secondary)]");
+    expect(styles.operationItem_success).not.toContain("state-success");
     expect(styles.operationItem_failed).toContain("!text-[var(--state-error)]");
     expect(styles.operationItem_warning).toContain("!text-[var(--state-warning)]");
-    expect(styles.operationText_success).toContain("!text-[var(--state-success)]");
+    expect(styles.operationText_success).toContain("!text-[var(--fg-secondary)]");
+    expect(styles.operationText_success).not.toContain("state-success");
     expect(styles.operationText_failed).toContain("!text-[var(--state-error)]");
     expect(styles.operationText_warning).toContain("!text-[var(--state-warning)]");
   });
 
-  it("keeps successful child tool rows green inside a failed process group", () => {
+  it("keeps successful child tool rows neutral inside a failed process group", () => {
     expect(conversationViewSource).toContain("const statusTone = operationStatusToneClassName(operation);");
     expect(conversationViewSource).toContain("styles[`operationText_${statusTone}`]");
     expect(conversationViewSource).toContain("styles[`operationStatus_${statusTone}`]");
     expect(styles.reActToolName).toContain("text-[var(--fg-primary)]");
-    expect(styles.operationText_success).toContain("!text-[var(--state-success)]");
-    expect(styles.operationStatus_success).toContain("!text-[var(--state-success)]");
+    expect(styles.operationText_success).toContain("!text-[var(--fg-secondary)]");
+    expect(styles.operationStatus_success).toContain("!text-[var(--fg-tertiary)]");
+    expect(styles.operationStatus_success).not.toContain("state-success");
   });
 
   it("overrides failed process group color on successful timeline operation children", () => {
@@ -2047,7 +2092,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("const statusTone = operationStatusToneClassName(operation);");
     expect(conversationViewSource).toContain("styles[`operationText_${statusTone}`]");
     expect(conversationViewSource).toContain("styles[`operationStatus_${statusTone}`]");
-    expect(styles.operationText_success).toContain("!text-[var(--state-success)]");
+    expect(styles.operationText_success).toContain("!text-[var(--fg-secondary)]");
     expect(styles.operationText_failed).toContain("!text-[var(--state-error)]");
     expect(styles.operationText_warning).toContain("!text-[var(--state-warning)]");
   });

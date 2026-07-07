@@ -92,11 +92,21 @@ describe("AgentResponseSectionView", () => {
     expect(html).toContain("statusSpinner");
   });
 
-  it("keeps the response control styled as a bounded slot button", () => {
+  it("keeps the response control styled as a Codex-like transcript row", () => {
+    expect(styles.responseSection).toContain("w-[min(100%,860px)]");
+    expect(styles.responseSection).toContain("bg-transparent");
+    expect(styles.responseSection).toContain("border-l");
+    expect(styles.responseSection).not.toContain("rounded-[var(--radius-panel)]");
+    expect(styles.responseSection).not.toContain("bg-[var(--vui-surface-chat-panel)]");
+    expect(styles.responseSection).not.toContain("border border-");
+    expect(styles.responseBody).toContain("pl-5");
+    expect(styles.responseBody).toContain("text-[var(--fg-primary)]");
+    expect(styles.responseBody).not.toContain("border-t");
     expect(styles.responseToggle).toContain("grid-cols-[auto_minmax(0,auto)_1rem]");
     expect(styles.responseToggle).toContain("max-w-full");
     expect(styles.responseToggle).toContain("overflow-hidden");
     expect(styles.responseToggle).toContain("focus-visible:!ring-2");
+    expect(styles.responseToggle).toContain("text-[var(--fg-tertiary)]");
     expect(styles.responseToggleStatus).toContain("size-4");
     expect(styles.responseToggleStatus).toContain("place-items-center");
     expect(styles.responseToggle).toContain("[&_[data-slot=vui-button-content]]:contents");
