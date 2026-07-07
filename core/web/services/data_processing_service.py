@@ -182,6 +182,17 @@ def list_records(run_id: str) -> dict[str, Any]:
     }
 
 
+def list_collection_outputs(run_id: str) -> dict[str, Any]:
+    run = _load_run(run_id)
+    outputs = _read_jsonl(_outputs_path(run["runId"]))
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "runId": run["runId"],
+        "outputs": outputs,
+        "summary": {"outputCount": len(outputs)},
+    }
+
+
 def add_record(run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     run = _load_run(run_id)
     record = _build_record(run["runId"], payload)
