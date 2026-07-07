@@ -157,6 +157,8 @@ Do not log secrets, full prompts, large diffs, full file contents, or unbounded 
 
 Every new feature or user-visible behavior change requires an explicit logging decision and a matching test decision in the same round. For `FAST_PATCH` copy, docs, visual polish, and tests-only work, a compact "logging not affected" and "no new automated test needed" decision is sufficient when true.
 
+Key modules require a stronger logging posture. When a change touches Agent orchestration, LLM routing, tool execution, memory/RAG, runtime/Launcher lifecycle, config/model governance, supervision/self-evolution, Git/worktree integration, delete/reset/archive flows, or shared API/DTO contracts, add or update bounded runtime-scene logging at the decision point unless the final report gives a concrete reason the existing logs already cover the new branch. The log must expose stable IDs, branch/status, reason, outcome, and enough timing or count evidence for a future Agent to diagnose the behavior without replaying the whole run.
+
 Add or update runtime scene logging when a change affects:
 
 - runtime behavior;
@@ -177,6 +179,22 @@ New logs should normally write into the current lifecycle package under `logs/ru
 Each new feature should add or update the smallest useful automated tests protecting the behavior and logging contract. Cover the primary success path and at least one important failure or boundary path.
 
 If no new logging or no new tests are warranted, state that explicitly in the final report with the reason.
+
+## 5.1 Local Agent Paper And Search Capture Discipline
+
+Vibelution development should learn from the local Agent research corpus before inventing a new path.
+
+Local reference roots:
+
+- `C:\Users\17533\Desktop\Agent论文\docs`
+- `C:\Users\17533\Desktop\Agent论文\projects`
+- `C:\Users\17533\Desktop\Agent论文\search-results`
+
+For `STANDARD_TASK` and `HIGH_RISK` work that changes Agent behavior, LLM calls, tool routing, context/memory, runtime orchestration, planning/review loops, supervision, self-evolution, or durable workflow design, inspect the relevant local papers or projects first. At minimum, search filenames and nearby READMEs/docs under `Agent论文\docs` and `Agent论文\projects`; when a known local project is relevant, prefer adapting its proven pattern over creating a parallel mechanism.
+
+When web search or external repository research is used for project development, persist a compact local research note under `C:\Users\17533\Desktop\Agent论文\search-results`. The note should include date, task, query/source URLs or repository names, what was learned, reuse decision, and any license/security caveat. Do not paste full copyrighted papers, full articles, credentials, full prompts, or large external code into the note. External code remains reference material unless explicitly reviewed for license and maintenance fit.
+
+`FAST_PATCH` work may skip local paper/project review and search capture when the change is clearly cosmetic, docs-only, tests-only, or mechanically scoped; state "local Agent corpus not affected" in the final report if that decision matters.
 
 ## 6. Worktree And Scope Discipline
 
@@ -823,6 +841,8 @@ A development round is not done until its tier-specific checklist is satisfied:
 
 - behavior and scope are clear;
 - relevant logs or evidence were inspected for bugs/runtime issues;
+- relevant local Agent papers/projects were consulted, or the final report explains why the local Agent corpus was not applicable;
+- any web search or external repository research used during development was captured under `C:\Users\17533\Desktop\Agent论文\search-results`;
 - implementation stayed within claimed scope;
 - logging decision is explicit;
 - test decision is explicit;
