@@ -1,4 +1,4 @@
-import type { ConversationMessage } from "../../api/types";
+import type { CodexTranscriptProjection, ConversationMessage } from "../../api/types";
 import {
   conversationMessageTurnId,
   projectedConversationMessageIdsOrSelf,
@@ -49,6 +49,31 @@ function mergeText(...values: Array<string | undefined>) {
     merged.push(text);
   }
   return merged.join("\n\n");
+}
+
+function mergeCodexTranscripts(
+  previous: CodexTranscriptProjection | undefined,
+  next: CodexTranscriptProjection | undefined,
+  messageId: string,
+): CodexTranscriptProjection | undefined {
+  if (!previous) {
+    return next;
+  }
+  if (!next) {
+    return previous;
+  }
+  return {
+    ...previous,
+    ...next,
+    messageId,
+    streaming: Boolean(previous.streaming || next.streaming) || undefined,
+    cells: mergeExactItems(previous.cells, next.cells) ?? [],
+    rolloutEvents: mergeExactItems(previous.rolloutEvents, next.rolloutEvents),
+    toolCalls: mergeExactItems(previous.toolCalls, next.toolCalls) ?? [],
+    terminalOperations: mergeExactItems(previous.terminalOperations, next.terminalOperations) ?? [],
+    terminalSessions: mergeExactItems(previous.terminalSessions, next.terminalSessions) ?? [],
+    modelObservations: mergeExactItems(previous.modelObservations, next.modelObservations) ?? [],
+  };
 }
 
 function isExcludedAssistantProjectionMessage(message: ConversationMessage) {
@@ -125,6 +150,7 @@ function mergeProcessProjectionMessages(previous: ConversationMessage, next: Con
     toolCalls: mergeExactItems(previous.toolCalls, next.toolCalls),
     attachments: mergeExactItems(previous.attachments, next.attachments),
     references: mergeExactItems(previous.references, next.references),
+    codexTranscript: mergeCodexTranscripts(previous.codexTranscript, next.codexTranscript, previous.id),
     metadata: {
       ...(previous.metadata ?? {}),
       ...(next.metadata ?? {}),
