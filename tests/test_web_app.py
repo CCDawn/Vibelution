@@ -6025,6 +6025,90 @@ def test_session_continuation_marks_server_side_model_wait_as_thinking(tmp_path,
     )
 
 
+def test_source_collection_stage_task_enables_bounded_internal_auto_continue(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_EXECUTOR",
+        SimpleNamespace(submit=lambda fn, context: fn(context)),
+    )
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **_kwargs: object())
+    captured: dict[str, object] = {}
+
+    def fake_run_session_continuation_loop(agent, **kwargs):
+        captured.update(kwargs)
+        return {
+            "status": "completed",
+            "summary": "阶段任务完成。",
+            "raw_output": "阶段任务完成。",
+            "outcome": "done",
+        }
+
+    monkeypatch.setattr(session_service, "_run_session_continuation_loop", fake_run_session_continuation_loop)
+
+    detail = session_service.submit_session_message(
+        "session-live",
+        "资料搜集阶段任务",
+        turn_mode="task",
+        write_intent=False,
+        message_source="agent_inbox",
+        message_metadata={
+            "kind": "source_collection_stage_session_task",
+            "teamId": "research-team",
+            "runId": "dprun-1",
+            "stageId": "finding",
+            "agentId": "agent-source-finder",
+            "agentRole": "source_finder",
+            "sourceCollectionStageTaskId": "stagetask-1",
+        },
+    )
+
+    assert detail["id"] == "session-live"
+    assert captured["allow_internal_auto_continue"] is True
+    assert captured["max_internal_auto_continue_turns"] == session_service.SOURCE_COLLECTION_STAGE_TASK_AUTO_CONTINUE_MAX_TURNS
+
+
+def test_session_continuation_auto_continue_pauses_at_bounded_limit(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
+    prompts: list[str] = []
+
+    def fake_run_existing_agent_single_turn(agent, **kwargs):
+        prompts.append(str(kwargs.get("initial_prompt") or ""))
+        return {
+            "status": "completed",
+            "summary": "",
+            "raw_output": "",
+            "outcome": "progress",
+            "tool_call_count": 1,
+            "tool_trace": [{"name": "task_update_tool", "status": "done", "summary": "progress"}],
+        }
+
+    monkeypatch.setattr(session_service, "run_existing_agent_single_turn", fake_run_existing_agent_single_turn)
+
+    turn_control = session_service._create_session_turn_control("session-auto-limit")
+    try:
+        result = session_service._run_session_continuation_loop(
+            object(),
+            session_id="session-auto-limit",
+            turn_control=turn_control,
+            initial_prompt="继续阶段任务",
+            history_messages=[],
+            allow_internal_auto_continue=True,
+            max_internal_auto_continue_turns=2,
+        )
+    finally:
+        session_service._clear_session_turn_control("session-auto-limit", turn_id=turn_control.turn_id)
+
+    assert len(prompts) == 2
+    assert isinstance(result, dict)
+    assert result["status"] == "paused_limit"
+    assert result["metadata"]["continuation_limit_reached"] is True
+    assert result["metadata"]["continuation_pause_reason"] == "internal_auto_continue_limit_reached"
+    assert "自动续跑上限" in result["raw_output"]
+
+
 def test_capture_session_ui_stream_merges_incremental_thought_updates(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda _session_id: None)
