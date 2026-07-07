@@ -155,6 +155,48 @@ describe("codexToolLifecycleModel", () => {
     });
   });
 
+  it("aggregates terminal operations that share a runtime session key", () => {
+    const model = buildCodexToolLifecycleModel([
+      toolOperation({
+        id: "op-exec",
+        rawLabel: "cli_tool",
+        summary: "npm run dev",
+        status: "done",
+        arguments: { session_id: "terminal-a" },
+      }),
+      toolOperation({
+        id: "op-stdin",
+        rawLabel: "write_stdin",
+        summary: "q",
+        status: "running",
+        arguments: { session_id: "terminal-a" },
+      }),
+    ]);
+
+    expect(model.terminalOperations).toEqual([
+      expect.objectContaining({
+        operationId: "terminal_operation:0",
+        terminalId: "terminal:terminal-a",
+        kind: "ExecCommand",
+        status: "completed",
+      }),
+      expect.objectContaining({
+        operationId: "terminal_operation:1",
+        terminalId: "terminal:terminal-a",
+        kind: "WriteStdin",
+        status: "running",
+      }),
+    ]);
+    expect(model.terminalSessions).toEqual([
+      expect.objectContaining({
+        terminalId: "terminal:terminal-a",
+        createdByOperationId: "terminal_operation:0",
+        operationIds: ["terminal_operation:0", "terminal_operation:1"],
+        status: "running",
+      }),
+    ]);
+  });
+
   it("does not reduce thoughts, mental notes, or status rows as Codex tool calls", () => {
     const model = buildCodexToolLifecycleModel([
       {
