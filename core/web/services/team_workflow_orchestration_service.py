@@ -19705,6 +19705,11 @@ def _source_collection_stage_task_tool_progress_from_trace(
             completed_ids.add(item_id)
 
     progress = _source_collection_stage_task_tool_progress(checklist, completed_ids=completed_ids)
+    call_sources = {
+        _trim_text(tool_call.get("__source"), max_length=80)
+        for tool_call in tool_calls
+        if _trim_text(tool_call.get("__source"), max_length=80)
+    }
     progress.update(
         {
             "traceAvailable": True,
@@ -19713,6 +19718,10 @@ def _source_collection_stage_task_tool_progress_from_trace(
             "completedByTrace": progress.get("completed", 0),
         }
     )
+    if call_sources:
+        progress["sources"] = sorted(call_sources)
+        if call_sources == {"feedback_events"}:
+            progress["source"] = "feedback_events"
     progress["complete"] = bool(progress.get("complete")) and task_create_observed
     if not task_create_observed:
         progress["pendingReason"] = "task_create_tool_not_observed"
@@ -19796,6 +19805,12 @@ def _source_collection_stage_tool_calls_from_event(event: Any) -> list[dict[str,
                 raw_calls.extend(message[key])
     if not raw_calls and _source_collection_stage_tool_call_name(payload):
         raw_calls.append(payload)
+    raw_feedback_events: list[Any] = []
+    for key in ("feedbackEvents", "feedback_events"):
+        if isinstance(payload.get(key), list):
+            raw_feedback_events.extend(payload[key])
+        if isinstance(message.get(key), list):
+            raw_feedback_events.extend(message[key])
 
     event_type = _trim_text(getattr(event, "event_type", ""), max_length=80)
     normalized_calls: list[dict[str, Any]] = []
@@ -19805,6 +19820,18 @@ def _source_collection_stage_tool_calls_from_event(event: Any) -> list[dict[str,
         item = dict(raw)
         if event_type:
             item.setdefault("__eventType", event_type)
+        normalized_calls.append(item)
+    for raw in raw_feedback_events:
+        if not isinstance(raw, dict):
+            continue
+        item = dict(raw)
+        if _trim_text(item.get("kind"), max_length=80).lower() != "tool":
+            continue
+        if not _source_collection_stage_tool_call_name(item):
+            continue
+        if event_type:
+            item.setdefault("__eventType", event_type)
+        item["__source"] = "feedback_events"
         normalized_calls.append(item)
     return normalized_calls
 
