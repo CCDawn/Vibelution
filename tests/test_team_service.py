@@ -1501,6 +1501,98 @@ def test_system_team_bootstrap_ready_snapshot_skips_repeated_missing_checks(tmp_
     assert second["status"] == "ready"
 
 
+def test_system_team_bootstrap_nonblocking_ready_snapshot_skips_expired_missing_checks(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_system_team_bootstrap_ready()
+    monkeypatch.setattr(team_service, "_perf_counter", lambda: 100.0)
+    first = team_service.request_system_team_bootstrap(reason="team_list")
+    created_threads = []
+    next_attempt = int(first["attempt"] or 0) + 1
+
+    class CapturedThread:
+        def __init__(self, *, target, args, name, daemon):
+            self.target = target
+            self.args = args
+            self.name = name
+            self.daemon = daemon
+            self.started = False
+            created_threads.append(self)
+
+        def is_alive(self):
+            return False
+
+        def start(self):
+            self.started = True
+
+    monkeypatch.setattr(team_service, "_perf_counter", lambda: 200.0)
+    monkeypatch.setattr(team_service.threading, "Thread", CapturedThread)
+    monkeypatch.setattr(
+        team_service,
+        "_system_team_bootstrap_required_steps",
+        lambda: (_ for _ in ()).throw(AssertionError("nonblocking ready snapshot should refresh in the background")),
+    )
+
+    second = team_service.request_system_team_bootstrap(reason="team_list", allow_sync_check=False)
+
+    assert first["status"] == "ready"
+    assert second["status"] == "ready"
+    assert second["requiredSteps"] == []
+    assert created_threads and created_threads[0].started is True
+    assert created_threads[0].args == (f"system-team-bootstrap-{next_attempt}", "team_list")
+
+
+def test_system_team_bootstrap_nonblocking_idle_schedules_background_check(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    created_threads = []
+
+    with team_service._TEAM_SYSTEM_BOOTSTRAP_LOCK:
+        team_service._TEAM_SYSTEM_BOOTSTRAP_THREAD = None
+        team_service._TEAM_SYSTEM_BOOTSTRAP_STATE.update(
+            {
+                "status": "idle",
+                "requiredSteps": [],
+                "reason": "",
+                "startedAt": "",
+                "finishedAt": "",
+                "lastError": "",
+                "elapsedMs": 0,
+                "attempt": 0,
+                "requestId": "",
+                "checkedAtMonotonic": 0.0,
+            }
+        )
+
+    class CapturedThread:
+        def __init__(self, *, target, args, name, daemon):
+            self.target = target
+            self.args = args
+            self.name = name
+            self.daemon = daemon
+            self.started = False
+            created_threads.append(self)
+
+        def is_alive(self):
+            return False
+
+        def start(self):
+            self.started = True
+
+    monkeypatch.setattr(team_service.threading, "Thread", CapturedThread)
+    monkeypatch.setattr(
+        team_service,
+        "_system_team_bootstrap_required_steps",
+        lambda: (_ for _ in ()).throw(AssertionError("nonblocking idle request should check in the background")),
+    )
+
+    payload = team_service.request_system_team_bootstrap(reason="team_list", allow_sync_check=False)
+
+    assert payload["status"] == "running"
+    assert payload["requiredSteps"] == []
+    assert payload["reason"] == "team_list"
+    assert created_threads and created_threads[0].started is True
+    assert created_threads[0].name == "vibelution-team-system-bootstrap"
+
+
 def test_compact_team_list_does_not_hydrate_agents_for_active_teams(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")

@@ -79,7 +79,7 @@ class AiSearchRunStartPayload(BaseModel):
 @router.get("/teams")
 def team_list(includeArchived: bool = False) -> dict:
     payload = list_teams_compact(include_archived=includeArchived)
-    payload["systemTeamBootstrap"] = request_system_team_bootstrap(reason="team_list")
+    payload["systemTeamBootstrap"] = request_system_team_bootstrap(reason="team_list", allow_sync_check=False)
     return payload
 
 
