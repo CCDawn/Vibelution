@@ -553,6 +553,39 @@ describe("ConversationView edit resend affordance", () => {
     expect(composerActionStackSource).toContain("styles.composerRoundButtonPrimary");
   });
 
+  it("keeps the composer row compact with stable square actions", () => {
+    expect(styles.composer).toContain("items-center");
+    expect(styles.composer).toContain("grid-cols-[minmax(0,1fr)_var(--vui-control-height-sm)]");
+
+    expect(styles.composerField).toContain("[&_textarea]:min-h-[48px]");
+    expect(styles.composerField).toContain("[&_textarea]:max-h-[112px]");
+    expect(styles.composerField).toContain("[&_textarea]:resize-none");
+    expect(styles.composerField).not.toContain("[&_textarea]:min-h-20");
+
+    for (const actionClass of [styles.attachButton, styles.composerRoundButton, styles.composerRoundButtonPrimary]) {
+      expect(actionClass).toContain("h-[var(--vui-control-height-sm)]");
+      expect(actionClass).toContain("w-[var(--vui-control-height-sm)]");
+      expect(actionClass).toContain("shrink-0");
+      expect(actionClass).toContain("p-0");
+    }
+
+    expect(styles.sendButton).toContain("h-[var(--vui-control-height-sm)]");
+    expect(styles.sendButton).toContain("w-[var(--vui-control-height-sm)]");
+    expect(styles.sendButton).toContain("shrink-0");
+    expect(styles.sendButton).toContain("p-0");
+    expect(styles.sendButton).toContain("disabled:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)]");
+    expect(styles.sendButton).toContain("disabled:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)]");
+    expect(styles.sendButton).toContain("disabled:!text-[var(--fg-tertiary)]");
+
+    const sendButtonClassName = `${styles.sendButton} ${styles.composerRoundButton} ${styles.composerRoundButtonPrimary}`;
+    expect(sendButtonClassName).toContain("disabled:hover:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)]");
+    expect(sendButtonClassName).toContain("disabled:hover:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)]");
+    expect(sendButtonClassName).toContain("disabled:hover:!text-[var(--fg-tertiary)]");
+    expect(sendButtonClassName).not.toContain("disabled:hover:!border-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]");
+    expect(sendButtonClassName).not.toContain("disabled:hover:!bg-[color-mix(in_srgb,var(--accent-cool)_14%,var(--vui-surface-row))]");
+    expect(sendButtonClassName).not.toContain("disabled:hover:!text-[var(--accent-cool)]");
+  });
+
   it("keeps edit-mode composer chrome compact", () => {
     expect(styles.composerEditModeBar).toContain("min-h-8");
     expect(styles.composerEditModeBar).toContain("w-fit");

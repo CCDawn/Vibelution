@@ -594,6 +594,21 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationStyles.surfaceCompact).toContain("[&_.composer]:gap-[7px]");
   });
 
+  it("keeps the embedded composer compact inside the workbench frame", () => {
+    expect(conversationStyles.composer).toContain("items-center");
+    expect(conversationStyles.composer).not.toContain("items-end");
+    expect(conversationStyles.composerField).toContain("[&_textarea]:min-h-[48px]");
+    expect(conversationStyles.composerField).toContain("[&_textarea]:max-h-[112px]");
+    expect(conversationStyles.composerField).not.toContain("[&_textarea]:min-h-20");
+    expect(conversationStyles.surfaceCompact).toContain("[&_.composer]:pt-1.5");
+    expect(conversationStyles.surfaceCompact).toContain("[&_.composer]:pb-2");
+    expect(conversationStyles.surfaceCompact).not.toContain("[&_.composer]:py-4");
+    expect(conversationStyles.sendButton).toContain("h-[var(--vui-control-height-sm)]");
+    expect(conversationStyles.sendButton).toContain("w-[var(--vui-control-height-sm)]");
+    expect(conversationStyles.attachButton).toContain("h-[var(--vui-control-height-sm)]");
+    expect(conversationStyles.attachButton).toContain("w-[var(--vui-control-height-sm)]");
+  });
+
   it("does not ship micro typography in the chat workbench surface", () => {
     expect(routeCssSource).not.toMatch(/font-size:\s*0\.(?:6\d|7[0-7])rem/);
     expect(routeStyles.agentModelTag).toBeTypeOf("string");
