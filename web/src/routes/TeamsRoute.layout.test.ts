@@ -442,12 +442,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("hasTeams");
     expect(routeSource).toContain("showTeamUnavailableSurface");
     expect(routeSource).toContain("teamListInitialLoading");
-    expect(routeSource).toContain("const showTeamUnavailableSurface = !teamListInitialLoading && !hasTeams");
+    expect(routeSource).toContain("const showTeamUnavailableSurface = teamListInitialLoading || !hasTeams");
     expect(routeSource).toContain("teamContextMeta");
     expect(routeSource).toContain("teamSummaryStatusItems");
     expect(routeSource).toContain("styles.teamUnavailableSurface");
     expect(routeSource).toContain("teamListUnavailable");
     expect(routeSource).toContain("团队数据不可用");
+    expect(routeSource).toContain("正在读取团队");
     expect(routeSource).toContain("团队尚未初始化");
     expect(routeSource).not.toContain("styles.workspaceEmpty");
     expect(routeSource).toContain("showTeamUnavailableSurface ? (");
@@ -2478,6 +2479,35 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("onPointerMove={researchCanvasReadOnly ? undefined : moveNodeDrag}");
     expect(routeSource).toContain("onPointerUp={researchCanvasReadOnly ? undefined : finishNodeDrag}");
     expect(routeSource).toContain("edgeLine(edge, displayCanvasNodes, visibleEdges)");
+  });
+
+  it("keeps Team workspaces behind detail readiness during cold loading", () => {
+    expect(routeSource).toContain("const selectedTeamReference = visibleTeams.find((team) => team.teamId === effectiveTeamId) ?? null");
+    expect(routeSource).toContain("const selectedTeamDetailLoading = Boolean(");
+    expect(routeSource).toContain("const showTeamLoadingSurface =");
+    expect(routeSource).toContain("const showTeamDetailUnavailableSurface =");
+
+    const mainRenderSource = routeSource.slice(
+      routeSource.indexOf("{showTeamUnavailableSurface ? ("),
+      routeSource.indexOf("<main className={canvasPanelClassName}"),
+    );
+    expect(mainRenderSource).toContain("showTeamLoadingSurface ? (");
+    expect(mainRenderSource).toContain("showTeamDetailUnavailableSurface ? (");
+    expect(mainRenderSource).toContain("teamWorkspaceLoadingTitle");
+    expect(mainRenderSource.indexOf("showTeamLoadingSurface ? (")).toBeLessThan(
+      mainRenderSource.indexOf("<div className={workspaceClassName}>"),
+    );
+    expect(mainRenderSource.indexOf("showTeamDetailUnavailableSurface ? (")).toBeLessThan(
+      mainRenderSource.indexOf("<div className={workspaceClassName}>"),
+    );
+
+    const standaloneSource = routeSource.slice(
+      routeSource.indexOf("if (sourceCollectionStandalone)"),
+      routeSource.indexOf("if (stageStandaloneView)"),
+    );
+    expect(standaloneSource).toContain("researchWorkflowTeamSelected && !showTeamLoadingSurface && !showTeamDetailUnavailableSurface ? (");
+    expect(standaloneSource).toContain("teamWorkspaceLoadingTitle");
+    expect(standaloneSource).not.toContain("researchWorkflowTeamSelected ? (");
   });
 
   it("routes the source collection ingestion step to the single source ingestion Agent", () => {
