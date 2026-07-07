@@ -211,7 +211,8 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("toolScopeOptions");
     expect(agentScopePanelSource).toContain("styles.agentScopeBar");
     expect(agentScopeStylesSource).toContain(".agentScopeBar");
-    expect(agentScopeStyles.agentScopeBar).toContain("grid-cols-[minmax(170px,1fr)_minmax(180px,230px)");
+    expect(agentScopeStyles.agentScopeBar).toContain("grid-cols-[minmax(150px,1fr)_minmax(170px,220px)");
+    expect(agentScopeStyles.agentScopeBar).toContain("max-[880px]:grid-cols-[minmax(0,1fr)_minmax(170px,220px)]");
     expect(routeSource).toContain("scopeStateForTool(tool, activeAgentScopeId)");
     expect(routeSource).toContain("JSON.stringify({ args: {}, agentScope: payload.agentScopeId, agentId: payload.agentId })");
     expect(routeSource).toContain("agentId: activePolicyAgent.agentId");
@@ -377,7 +378,8 @@ describe("ToolsRoute layout contract", () => {
 
   it("keeps long tool descriptions readable in the dense tool browser", () => {
     expect(routeSource).toContain("styles.toolCopy");
-    expect(styles.toolCopy).toContain("text-[var(--vui-font-sm)]");
+    expect(styles.toolCopy).toContain("text-[var(--vui-font-xs)]");
+    expect(styles.toolCopy).toContain("[&>span]:truncate");
     expect(styles.toolList).toContain("overflow-auto");
   });
 
@@ -472,10 +474,11 @@ describe("ToolsRoute layout contract", () => {
   it("keeps the Agent policy draft summary in a four-column grid", () => {
     expect(routeSource).toContain("styles.policyDraftSummary");
     expect(styles.policyDraftSummary).toContain("grid-cols-[repeat(4,minmax(0,1fr))]");
-    expect(styles.policyDraftSummary).toContain("gap-[7px]");
-    expect(styles.policyDraftSummary).toContain("p-2");
+    expect(styles.policyDraftSummary).toContain("gap-[5px]");
+    expect(styles.policyDraftSummary).toContain("py-[5px]");
     expectBackgroundAwareHairlineSurface(styles.policyDraftSummary);
     expect(styles.policyDraftSummary).toContain("max-[900px]:grid-cols-[repeat(2,minmax(0,1fr))]");
+    expect(styles.policyDraftSummary).toContain("max-[520px]:grid-cols-[1fr]");
   });
 
   it("allocates the remaining route height to the tools workspace", () => {
@@ -492,11 +495,34 @@ describe("ToolsRoute layout contract", () => {
 
   it("stacks the Tools workspace on narrow screens instead of clipping the detail panel", () => {
     expect(styles.workspace).toContain("max-[760px]:grid-cols-[minmax(0,1fr)]");
-    expect(styles.workspace).toContain("max-[760px]:grid-rows-[minmax(180px,34vh)_minmax(360px,1fr)]");
+    expect(styles.workspace).toContain("max-[760px]:grid-rows-[minmax(220px,42vh)_minmax(420px,1fr)]");
     expect(styles.workspace).toContain("max-[760px]:overflow-y-auto");
     expect(styles.workspace).toContain("max-[760px]:overflow-x-hidden");
-    expect(styles.listPanel).toContain("max-[760px]:max-h-[34vh]");
+    expect(styles.listPanel).toContain("max-[760px]:max-h-[42vh]");
     expect(styles.detailPanel).toContain("overflow-auto");
     expect(styles.resizeHandle).toContain("max-[760px]:hidden");
+  });
+
+  it("keeps dense workbench rows compact and mobile-safe", () => {
+    expect(styles.filterRow).toContain("flex");
+    expect(styles.filterRow).toContain("gap-1");
+    expect(styles.searchBox).toContain("grid-cols-[auto_minmax(0,1fr)]");
+    expect(styles.bulkActionBar).toContain("grid-cols-[minmax(0,1fr)_repeat(4,max-content)]");
+    expect(styles.bulkActionBar).toContain("max-[520px]:grid-cols-[minmax(0,1fr)]");
+    expect(styles.selectableToolRow).toContain("grid-cols-[28px_minmax(0,1fr)]");
+    expect(styles.toolCopy).toContain("[&>strong]:truncate");
+    expect(styles.toolPermissionRow).toContain("max-[640px]:grid-cols-[1fr]");
+    expect(styles.segmentedControl).toContain("max-[640px]:justify-start");
+  });
+
+  it("uses compact scan grids for detail and Agent scope panels", () => {
+    expect(styles.readinessPanel).toContain("grid-cols-[repeat(4,minmax(0,1fr))]");
+    expect(styles.readinessPanel).toContain("max-[520px]:grid-cols-[1fr]");
+    expect(styles.metaGrid).toContain("minmax(7.5rem,1fr)");
+    expect(styles.toolAgentFitPanel).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(styles.toolAgentFitPanel).toContain("max-[640px]:grid-cols-[1fr]");
+    expect(agentScopeStyles.agentScopeBar).toContain("fit-content(18rem)");
+    expect(agentScopeStyles.agentScopeBar).toContain("max-[640px]:grid-cols-[1fr]");
+    expect(agentScopeStyles.scopeStats).toContain("max-[1180px]:col-span-full");
   });
 });

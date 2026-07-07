@@ -11,26 +11,27 @@ const activeControl =
 
 export const gitRouteStyles = {
   route:
-    "grid h-full min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] max-[860px]:overflow-auto",
+    "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_auto_auto_minmax(0,1fr)] overflow-hidden overflow-x-hidden text-vui-fg-primary max-[860px]:overflow-auto",
   header:
     "mx-2.5 mt-2 min-w-0 border-[var(--vui-border-subtle)] !bg-transparent !shadow-none !backdrop-blur-none",
   panelEyebrow: "m-0 mb-0.5 text-[var(--vui-font-xs)] uppercase tracking-[0.08em] text-[var(--fg-tertiary)]",
   refreshButton:
     "h-[var(--vui-control-height-sm)] min-h-8 w-[var(--vui-control-height-sm)] flex-none p-0",
-  summaryGrid: "grid grid-cols-4 gap-[var(--route-summary-gap)] px-3 pt-2 max-[860px]:grid-cols-1",
-  summaryCard: `grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-baseline gap-2 ${panelSurface} p-[var(--route-summary-padding)] text-left text-inherit disabled:cursor-default disabled:opacity-75 data-[vui=native-button]:cursor-pointer data-[vui=native-button]:hover:border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] data-[vui=native-button]:hover:bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[var(--vui-font-xs)] [&_strong]:text-vui-fg-primary`,
+  summaryGrid:
+    "grid min-w-0 grid-cols-[repeat(6,minmax(0,1fr))] gap-1.5 px-3 pt-1.5 max-[1180px]:grid-cols-[repeat(3,minmax(0,1fr))] max-[640px]:grid-cols-1",
+  summaryCard: `grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-baseline gap-1.5 ${panelSurface} px-2 py-[5px] text-left text-inherit disabled:cursor-default disabled:opacity-75 data-[vui=native-button]:cursor-pointer data-[vui=native-button]:hover:border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] data-[vui=native-button]:hover:bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[var(--vui-font-xs)] [&_strong]:text-vui-fg-primary`,
   notice:
     "mx-3.5 mt-2 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--state-error)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_12%,transparent)] px-2.5 py-2 text-[var(--vui-font-xs)] text-[var(--state-error)]",
   workspace:
-    "grid min-h-0 min-w-0 grid-cols-[var(--git-change-panel-width,330px)_10px_minmax(0,1fr)_minmax(260px,320px)] p-[var(--route-workspace-padding)] max-[1200px]:grid-cols-[minmax(260px,var(--git-change-panel-width,320px))_8px_minmax(0,1fr)] max-[1200px]:grid-rows-[minmax(0,1fr)_minmax(210px,34vh)] max-[1200px]:gap-y-2 max-[860px]:grid-cols-[minmax(0,1fr)] max-[860px]:grid-rows-none max-[860px]:gap-3.5",
+    "grid min-h-0 min-w-0 grid-cols-[var(--git-change-panel-width,330px)_10px_minmax(0,1fr)_minmax(250px,310px)] p-2 max-[1200px]:grid-cols-[minmax(250px,var(--git-change-panel-width,310px))_8px_minmax(0,1fr)] max-[1200px]:grid-rows-[minmax(0,1fr)_minmax(220px,36vh)] max-[1200px]:gap-y-2 max-[860px]:grid-cols-[minmax(0,1fr)] max-[860px]:grid-rows-none max-[860px]:content-start max-[860px]:gap-2",
   workspaceOverview:
     "grid-cols-[minmax(260px,0.9fr)_minmax(0,1.18fr)_minmax(240px,0.62fr)] gap-2 max-[1200px]:grid-cols-[minmax(0,1fr)_minmax(260px,320px)] max-[1200px]:grid-rows-[minmax(260px,0.92fr)_minmax(240px,0.8fr)] max-[860px]:grid-cols-[minmax(0,1fr)] max-[860px]:grid-rows-none",
   resizeHandle:
     "relative min-w-2.5 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none before:absolute before:inset-y-0 before:left-1/2 before:w-[3px] before:-translate-x-1/2 before:rounded-full before:bg-[color-mix(in_srgb,var(--vui-surface-row)_18%,transparent)] before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] hover:before:shadow-[var(--vui-shadow-soft)] focus-visible:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] focus-visible:before:shadow-[var(--vui-shadow-soft)] max-[860px]:hidden",
   changePanel:
-    `grid min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-[9px] ${panelSurface} p-2.5`,
+    `grid min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-1.5 ${panelSurface} p-2`,
   commitPanel:
-    `grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-[9px] ${panelSurface} p-2.5 max-[1200px]:col-span-full max-[1200px]:row-start-2 max-[1200px]:grid-cols-[minmax(300px,0.9fr)_minmax(0,1.1fr)] max-[1200px]:grid-rows-[auto_minmax(0,1fr)] max-[1200px]:items-start max-[860px]:col-auto max-[860px]:row-auto max-[860px]:grid-cols-[minmax(0,1fr)] max-[860px]:grid-rows-[auto_auto_minmax(180px,1fr)]`,
+    `grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-1.5 ${panelSurface} p-2 max-[1200px]:col-span-full max-[1200px]:row-start-2 max-[1200px]:grid-cols-[minmax(280px,0.9fr)_minmax(0,1.1fr)] max-[1200px]:grid-rows-[auto_minmax(0,1fr)] max-[1200px]:items-start max-[860px]:col-auto max-[860px]:row-auto max-[860px]:grid-cols-[minmax(0,1fr)] max-[860px]:grid-rows-[auto_auto_minmax(180px,1fr)]`,
   gitOverviewPanel:
     "grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2 max-[1200px]:[.workspaceOverview_&]:col-start-1 max-[1200px]:[.workspaceOverview_&]:row-start-1 max-[860px]:[.workspaceOverview_&]:col-auto max-[860px]:[.workspaceOverview_&]:row-auto",
   cleanStateStrip:
@@ -60,9 +61,9 @@ export const gitRouteStyles = {
   fileList: "grid min-h-0 content-start gap-1.5 overflow-auto pr-1",
   commitList: "grid min-h-0 content-start gap-1.5 overflow-auto pr-1",
   fileButton:
-    `grid w-full grid-cols-[24px_38px_minmax(0,1fr)] items-start gap-2 ${rowSurface} p-2 text-left text-vui-fg-primary ${rowSurfaceHover}`,
+    `grid w-full grid-cols-[22px_34px_minmax(0,1fr)] items-start gap-1.5 ${rowSurface} p-[6px] text-left text-vui-fg-primary ${rowSurfaceHover}`,
   fileButtonActive:
-    "grid w-full grid-cols-[24px_38px_minmax(0,1fr)] items-start gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_10%,var(--vui-surface-row))] p-2 text-left text-vui-fg-primary shadow-[var(--vui-shadow-inset-accent)]",
+    "grid w-full grid-cols-[22px_34px_minmax(0,1fr)] items-start gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_10%,var(--vui-surface-row))] p-[6px] text-left text-vui-fg-primary shadow-[var(--vui-shadow-inset-accent)]",
   fileButtonSelected:
     "border-[color-mix(in_srgb,var(--state-success)_34%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_8%,var(--vui-surface-row))]",
   fileStatus: "font-mono text-[var(--vui-font-xs)] text-[var(--accent-warm-2)]",
@@ -83,11 +84,11 @@ export const gitRouteStyles = {
     `grid h-full content-start justify-items-start gap-[7px] ${panelSurface} p-3.5 text-vui-fg-secondary [&_p]:m-0 [&_p]:text-[var(--vui-font-xs)] [&_p]:leading-tight [&_p]:text-vui-fg-secondary [&_strong]:text-[0.98rem] [&_strong]:text-vui-fg-primary [&_svg]:h-[18px] [&_svg]:w-[18px] [&_svg]:text-[var(--accent-cool)]`,
   emptyState: "m-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)]",
   commitItem:
-    `grid h-auto min-h-[72px] w-full min-w-0 cursor-pointer items-start justify-start gap-1.5 ${rowSurface} p-[9px] text-left text-inherit ${rowSurfaceHover} [&_code]:leading-tight [&_strong]:block [&_strong]:min-w-0 [&_strong]:max-w-full [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:leading-snug [&_p]:m-0 [&_p]:text-[var(--vui-font-xs)] [&_p]:leading-tight [&_p]:text-vui-fg-secondary`,
+    `grid h-auto min-h-[62px] w-full min-w-0 cursor-pointer items-start justify-start gap-1 ${rowSurface} p-2 text-left text-inherit ${rowSurfaceHover} [&_code]:leading-tight [&_strong]:block [&_strong]:min-w-0 [&_strong]:max-w-full [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:leading-snug [&_p]:m-0 [&_p]:text-[var(--vui-font-xs)] [&_p]:leading-tight [&_p]:text-vui-fg-secondary`,
   objectItemActive:
     "border-[color-mix(in_srgb,var(--accent-cool)_40%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] shadow-[var(--vui-shadow-inset-accent)]",
   manualCommitPanel:
-    "grid min-h-0 max-h-[min(100%,calc(100dvh-190px))] content-start gap-[9px] overflow-auto border-b border-[var(--border-soft)] pb-2.5 max-[1200px]:row-span-2 max-[1200px]:border-b-0 max-[1200px]:border-r max-[1200px]:pb-0 max-[1200px]:pr-3.5 max-[860px]:row-auto max-[860px]:max-h-none max-[860px]:overflow-visible max-[860px]:border-b max-[860px]:border-r-0 max-[860px]:pb-3.5 max-[860px]:pr-0",
+    "grid min-h-0 max-h-[min(100%,calc(100dvh-178px))] content-start gap-2 overflow-auto border-b border-[var(--border-soft)] pb-2 max-[1200px]:row-span-2 max-[1200px]:border-b-0 max-[1200px]:border-r max-[1200px]:pb-0 max-[1200px]:pr-3 max-[860px]:row-auto max-[860px]:max-h-none max-[860px]:overflow-visible max-[860px]:border-b max-[860px]:border-r-0 max-[860px]:pb-3 max-[860px]:pr-0",
   commitScopeBox: `grid gap-2 ${rowSurface} p-[9px]`,
   scopeHeader:
     "flex items-start justify-between gap-2.5 [&_div]:grid [&_div]:min-w-0 [&_div]:gap-1 [&_div>span]:m-0 [&_div>span]:text-[var(--vui-font-xs)] [&_div>span]:leading-snug [&_div>span]:text-[var(--fg-tertiary)] [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:text-[0.9rem] [&_strong]:text-[var(--fg-primary)]",
@@ -107,7 +108,7 @@ export const gitRouteStyles = {
     "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)]",
   modelActionRow: "grid-cols-[auto] justify-end",
   commitActions:
-    "grid min-w-0 grid-cols-[repeat(2,max-content)] justify-end gap-2 [&_.secondaryButton]:w-fit [&_.primaryButton]:w-fit",
+    "grid min-w-0 grid-cols-[repeat(2,max-content)] justify-end gap-1.5 max-[520px]:grid-cols-[1fr] max-[520px]:justify-start [&_.secondaryButton]:w-fit [&_.primaryButton]:w-fit",
   secondaryButton:
     mutedControl,
   primaryButton:

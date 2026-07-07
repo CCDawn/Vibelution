@@ -7829,6 +7829,8 @@ export function TeamsRoute({
   function renderSourceCollectionConversation() {
     const pagedResults = sourceCollectionPageItems("finding", sourceCollectionFilteredRecords);
     const visibleResults = pagedResults.items;
+    const sourceCollectionConversationHasVisibleResults = visibleResults.length > 0;
+    const sourceCollectionConversationCompact = !sourceCollectionConversationHasVisibleResults;
     const selectedRunEmptyWithHistorical = Boolean(
       !sourceCollectionRecordsDataLoading
       && !sourceCollectionRecords.length
@@ -7936,9 +7938,10 @@ export function TeamsRoute({
         ]}
         pendingCandidateImportCount={sourceCollectionPendingCandidateImportCount}
         missingSourceCount={sourceCollectionRecordMissingSourceCount}
+        compact={sourceCollectionConversationCompact}
         pagination={sourceCollectionRecordsDataLoading ? null : renderSourceCollectionPagination("finding", sourceCollectionFilteredRecords.length)}
       >
-          {visibleResults.length ? (
+          {sourceCollectionConversationHasVisibleResults ? (
             <TeamSourceResultList ariaLabel={lang === "zh" ? "原始资料记录" : "Raw source records"}>
               {visibleResults.map((record) => {
                 const linkedCandidate = sourceCollectionCandidatesByRecordId.get(record.recordId) ?? null;
@@ -9128,10 +9131,13 @@ export function TeamsRoute({
     const primaryStageAgentConfigLabel = primaryStageAgentBinding?.agent
       ? (lang === "zh" ? "配置 Agent" : "Configure Agent")
       : (lang === "zh" ? "绑定 Agent" : "Bind Agent");
+    const sourceCollectionActiveStageCompact =
+      activeModule.id === "finding" && sourceCollectionFindingStageCompact;
     return (
       <TeamSourceCollectionActiveStagePanel
         lang={lang}
         stageId={selectedSourceCollectionStageId}
+        compact={sourceCollectionActiveStageCompact}
         title={activeModule.label}
         status={activeModule.status}
         inputLabel={activeModule.inputLabel}
@@ -12233,6 +12239,11 @@ export function TeamsRoute({
       onDetail: module.onDetail,
     };
   });
+  const sourceCollectionFindingHasVisibleRecords =
+    sourceCollectionPageItems("finding", sourceCollectionFilteredRecords).items.length > 0;
+  const sourceCollectionFindingStageCompact =
+    selectedSourceCollectionStageId === "finding"
+    && !sourceCollectionFindingHasVisibleRecords;
   const activeWorkflowItemCount = teamWorkflow?.activeWorkflowItems.length ?? 0;
   const researchCanvasVisible = researchCanvasReadOnly;
   const teamListInitialLoading = teamsQuery.isPending && !teamsQuery.data;
@@ -12531,6 +12542,7 @@ export function TeamsRoute({
             stagePipelineAriaLabel={lang === "zh" ? "知识搜集内部模块" : "Knowledge collection modules"}
             modules={sourceCollectionStandaloneStageModules}
             activePanel={renderSourceCollectionActiveStagePanel()}
+            compactActivePanel={sourceCollectionFindingStageCompact}
           />
         ) : (
           <main className={styles.sourceCollectionPageBody}>

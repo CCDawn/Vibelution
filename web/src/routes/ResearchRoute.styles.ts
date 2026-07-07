@@ -21,7 +21,7 @@ const styles: Record<string, string> = {
   agentReview:
     "agentReview min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentTraceAvatar:
-    "agentTraceAvatar min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    "agentTraceAvatar min-w-0 inline-grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentTraceBubble:
     "agentTraceBubble min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   agentTraceContent:
@@ -29,15 +29,15 @@ const styles: Record<string, string> = {
   agentTraceControls:
     "agentTraceControls min-w-0 max-w-full flex flex-wrap items-center justify-end gap-1.5",
   agentTraceDetailGroup:
-    "agentTraceDetailGroup min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_52%,transparent)] p-2 text-[var(--fg-secondary)]",
+    "agentTraceDetailGroup min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_52%,transparent)] p-1.5 text-[var(--fg-secondary)]",
   agentTraceDetailIcon:
     "agentTraceDetailIcon min-w-0 max-w-full shrink-0 rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-row)_56%,transparent)] p-2 text-[var(--fg-tertiary)]",
   agentTraceDetailItem:
-    "agentTraceDetailItem min-w-0 max-w-full !grid grid-cols-[26px_minmax(0,1fr)] items-start gap-2 rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_52%,transparent)] p-2",
+    "agentTraceDetailItem min-w-0 max-w-full !grid grid-cols-[24px_minmax(0,1fr)] items-start gap-1.5 rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_52%,transparent)] p-1.5",
   agentTraceDetailList:
-    "agentTraceDetailList min-w-0 max-w-full grid min-h-0 content-start gap-1.5 overflow-auto overflow-x-hidden rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_46%,transparent)] p-2 text-[var(--fg-secondary)]",
+    "agentTraceDetailList min-w-0 max-w-full grid min-h-0 content-start gap-1 overflow-auto overflow-x-hidden rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_46%,transparent)] p-1.5 text-[var(--fg-secondary)]",
   agentTraceDetailSummary:
-    "agentTraceDetailSummary min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,transparent)] p-2 text-[var(--accent-cool)]",
+    "agentTraceDetailSummary min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,transparent)] p-1.5 text-[var(--accent-cool)]",
   agentTraceHeader:
     "agentTraceHeader min-w-0 max-w-full flex flex-wrap items-center justify-between gap-1.5",
   agentTraceLivePill:
@@ -45,13 +45,13 @@ const styles: Record<string, string> = {
   agentTraceMeta:
     "agentTraceMeta min-w-0 max-w-full flex flex-wrap items-center gap-1.5 text-[var(--fg-tertiary)] [&_strong]:text-[var(--fg-primary)]",
   agentTracePanel:
-    "agentTracePanel min-w-0 max-w-full overflow-hidden rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_6%,transparent)] p-2 text-[var(--accent-cool)]",
+    "agentTracePanel min-w-0 max-w-full overflow-hidden rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_6%,transparent)] p-1.5 text-[var(--accent-cool)]",
   agentTracePanel_collapsed:
-    "agentTracePanel_collapsed min-w-0 max-w-full hidden overflow-hidden rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_6%,transparent)] p-2 text-[var(--accent-cool)]",
+    "agentTracePanel_collapsed min-w-0 max-w-full hidden overflow-hidden rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_6%,transparent)] p-1.5 text-[var(--accent-cool)]",
   agentTraceTimeline:
-    "agentTraceTimeline min-w-0 max-w-full grid min-h-0 content-start gap-1.5 overflow-auto overflow-x-hidden",
+    "agentTraceTimeline min-w-0 max-w-full grid min-h-0 content-start gap-1 overflow-auto overflow-x-hidden",
   agentTraceTurn:
-    "agentTraceTurn min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,transparent)] p-2 text-[var(--accent-cool)] !grid grid-cols-[30px_minmax(0,1fr)] gap-2.5",
+    "agentTraceTurn min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,transparent)] p-1.5 text-[var(--accent-cool)] !grid grid-cols-[28px_minmax(0,1fr)] gap-2",
   agentTrace_active:
     "agentTrace_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   agentTrace_agent:
@@ -119,9 +119,9 @@ const styles: Record<string, string> = {
   agentTrace_warning:
     "agentTrace_warning min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   cardActions:
-    "cardActions min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_54%,transparent)] p-2 flex flex-wrap items-center gap-1.5",
+    "cardActions min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_54%,transparent)] p-1.5 flex flex-wrap items-center gap-1",
   cardPreviewIntro:
-    "cardPreviewIntro min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_50%,transparent)] p-2",
+    "cardPreviewIntro min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_50%,transparent)] p-1.5",
   compactList:
     "compactList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   compactList_warning:
@@ -133,23 +133,23 @@ const styles: Record<string, string> = {
   errorText:
     "errorText min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   evidenceCard:
-    "evidenceCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_52%,transparent)] p-2",
+    "evidenceCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_52%,transparent)] p-1.5",
   evidenceHeader:
     "evidenceHeader min-w-0 flex flex-wrap items-center gap-1.5",
   evidenceList:
-    "evidenceList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+    "evidenceList min-w-0 grid min-h-0 content-start gap-1 overflow-auto",
   evidencePanel:
-    "evidencePanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_54%,transparent)] p-2",
+    "evidencePanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_54%,transparent)] p-1.5",
   evidenceRequestPanel:
-    "evidenceRequestPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_6%,transparent)] p-2",
+    "evidenceRequestPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_6%,transparent)] p-1.5",
   guardrailPanel:
-    "guardrailPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_54%,transparent)] p-2",
+    "guardrailPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_54%,transparent)] p-1.5",
   header:
     "header min-w-0 flex flex-wrap items-center gap-1.5",
   headerActions:
     "headerActions min-w-0 flex flex-wrap items-center gap-1.5",
   historyPanel:
-    "historyPanel min-w-0 max-w-full overflow-hidden rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_54%,transparent)] p-2",
+    "historyPanel min-w-0 max-w-full overflow-hidden rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_54%,transparent)] p-1.5",
   intakeField:
     "intakeField min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   intakeField_medium:
@@ -161,11 +161,11 @@ const styles: Record<string, string> = {
   intakeFields:
     "intakeFields min-w-0",
   intakePanel:
-    "intakePanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_54%,transparent)] p-2",
+    "intakePanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_54%,transparent)] p-1.5",
   okText:
     "okText min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
   outputPanel:
-    "outputPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_54%,transparent)] p-2",
+    "outputPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_54%,transparent)] p-1.5",
   panelEyebrow:
     "panelEyebrow min-w-0 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   panelHeader:
@@ -173,11 +173,11 @@ const styles: Record<string, string> = {
   panelLead:
     "panelLead min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   pipelinePanel:
-    "pipelinePanel min-w-0 max-w-full overflow-hidden rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_58%,transparent)] p-2",
+    "pipelinePanel min-w-0 max-w-full overflow-hidden rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_58%,transparent)] p-1.5",
   primaryButton:
     "primaryButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] text-[var(--accent-cool)]",
   processPanel:
-    "processPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_54%,transparent)] p-2",
+    "processPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_54%,transparent)] p-1.5",
   questionText:
     "questionText min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   riskText:
@@ -193,13 +193,13 @@ const styles: Record<string, string> = {
   sessionDeleteButton:
     "sessionDeleteButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   sessionList:
-    "sessionList min-w-0 max-w-full grid min-h-0 content-start gap-1.5 overflow-auto overflow-x-hidden",
+    "sessionList min-w-0 max-w-full grid min-h-0 content-start gap-1 overflow-auto overflow-x-hidden",
   sessionRail:
-    "sessionRail min-w-0 max-w-full grid min-h-0 content-start gap-1.5 overflow-auto overflow-x-hidden max-[980px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[640px]:grid-cols-[minmax(0,1fr)]",
+    "sessionRail min-w-0 max-w-full grid min-h-0 content-start gap-1 overflow-auto overflow-x-hidden max-[980px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[640px]:grid-cols-[minmax(0,1fr)]",
   sessionRow:
-    "sessionRow min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_48%,transparent)] p-2 !grid grid-cols-[minmax(0,1fr)_42px] items-stretch gap-0 rounded-[var(--radius-control)]",
+    "sessionRow min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_48%,transparent)] p-1.5 !grid grid-cols-[minmax(0,1fr)_34px] items-stretch gap-0 rounded-[var(--radius-control)]",
   sessionRow_active:
-    "sessionRow_active min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    "sessionRow_active min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-1.5 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   sideColumn:
     "sideColumn min-w-0 max-w-full",
   sourceBar:
@@ -211,11 +211,11 @@ const styles: Record<string, string> = {
   stageBody:
     "stageBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   stageCard:
-    "stageCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_50%,transparent)] p-2",
+    "stageCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_50%,transparent)] p-1.5",
   stageCard_active:
-    "stageCard_active min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_10%,transparent)] p-2 text-[var(--accent-cool)]",
+    "stageCard_active min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_10%,transparent)] p-1.5 text-[var(--accent-cool)]",
   stageCard_compact:
-    "stageCard_compact min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_48%,transparent)] p-2",
+    "stageCard_compact min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_48%,transparent)] p-1.5",
   stageDescription:
     "stageDescription min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   stageHeader:
@@ -227,17 +227,17 @@ const styles: Record<string, string> = {
   stageOutput:
     "stageOutput min-w-0",
   stageOutputHeader:
-    "stageOutputHeader min-w-0 max-w-full flex flex-wrap items-center gap-1.5 !grid grid-cols-[24px_minmax(0,1fr)] items-start gap-1.5 px-[7px] py-[5px] rounded-[7px] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_58%,transparent)]",
+    "stageOutputHeader min-w-0 max-w-full flex flex-wrap items-center gap-1 !grid grid-cols-[22px_minmax(0,1fr)] items-start gap-1 px-1.5 py-1 rounded-[7px] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_58%,transparent)]",
   stageRail:
-    "stageRail min-w-0 max-w-full grid min-h-0 content-start gap-1.5 overflow-y-auto overflow-x-hidden !grid grid-cols-[1fr] gap-1.5 pb-0",
+    "stageRail min-w-0 max-w-full grid min-h-0 content-start gap-1 overflow-y-auto overflow-x-hidden !grid grid-cols-[1fr] gap-1 pb-0",
   stageResult:
     "stageResult min-w-0",
   stageResultItem:
-    "stageResultItem min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_48%,transparent)] p-2",
+    "stageResultItem min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_48%,transparent)] p-1.5",
   stageResultItems:
-    "stageResultItems min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+    "stageResultItems min-w-0 grid min-h-0 content-start gap-1 overflow-auto",
   stageResultSummary:
-    "stageResultSummary min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_54%,transparent)] p-2",
+    "stageResultSummary min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_54%,transparent)] p-1.5",
   stageSelectButton:
     "stageSelectButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55 grid gap-1 [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   statePill:
@@ -317,25 +317,25 @@ const styles: Record<string, string> = {
   subnavLinkActive:
     "subnavLinkActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   summaryCard:
-    "summaryCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_50%,transparent)] p-2 !grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-2 p-[var(--route-summary-padding)]",
+    "summaryCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_50%,transparent)] px-2 py-1.5 !grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-1.5",
   summaryGrid:
-    "summaryGrid min-w-0 max-w-full grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] overflow-x-hidden",
+    "summaryGrid min-w-0 max-w-full grid gap-1.5 grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] overflow-x-hidden max-[480px]:grid-cols-[minmax(0,1fr)]",
   tagRow:
     "tagRow min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
   themeBody:
     "themeBody min-w-0 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   themeCard:
-    "themeCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_50%,transparent)] p-2",
+    "themeCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_50%,transparent)] p-1.5",
   themeCard_selected:
-    "themeCard_selected min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_11%,transparent)] p-2 text-[var(--accent-cool)]",
+    "themeCard_selected min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_11%,transparent)] p-1.5 text-[var(--accent-cool)]",
   themeCompareActions:
-    "themeCompareActions min-w-0 flex flex-wrap items-center gap-1.5",
+    "themeCompareActions min-w-0 w-fit max-w-full flex flex-wrap items-center gap-1.5 max-[640px]:justify-start",
   themeCompareHeader:
     "themeCompareHeader min-w-0 max-w-full flex flex-wrap items-center gap-1.5 !grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 max-[640px]:grid-cols-[minmax(0,1fr)]",
   themeCompareMain:
     "themeCompareMain min-w-0",
   themeCompareMetrics:
-    "themeCompareMetrics min-w-0 max-w-full grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] overflow-x-hidden",
+    "themeCompareMetrics min-w-0 max-w-full grid gap-1.5 grid-cols-[repeat(auto-fit,minmax(7rem,1fr))] overflow-x-hidden",
   themeCompareQuestion:
     "themeCompareQuestion min-w-0",
   themeCompareRank:
@@ -343,13 +343,13 @@ const styles: Record<string, string> = {
   themeCompareReview:
     "themeCompareReview min-w-0",
   themeCompareRow:
-    "themeCompareRow min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_48%,transparent)] p-2",
+    "themeCompareRow min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_48%,transparent)] p-1.5",
   themeCompareRow_selected:
-    "themeCompareRow_selected min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_11%,transparent)] p-2 text-[var(--accent-cool)]",
+    "themeCompareRow_selected min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_11%,transparent)] p-1.5 text-[var(--accent-cool)]",
   themeCompareTags:
     "themeCompareTags min-w-0",
   themeGrid:
-    "themeGrid min-w-0 max-w-full grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] overflow-x-hidden",
+    "themeGrid min-w-0 max-w-full grid gap-1.5 grid-cols-[minmax(0,1fr)] overflow-x-hidden max-[640px]:grid-cols-[minmax(0,1fr)]",
   themeHeader:
     "themeHeader min-w-0 max-w-full flex flex-wrap items-center gap-1.5 !grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2.5 max-[640px]:grid-cols-[minmax(0,1fr)]",
   themePlan:
@@ -365,9 +365,9 @@ const styles: Record<string, string> = {
   workflowModeButton_active:
     "workflowModeButton_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   workflowModeControl:
-    "workflowModeControl min-w-0 flex flex-wrap items-center gap-1.5",
+    "workflowModeControl min-w-0 w-fit max-w-full flex flex-wrap items-center gap-1.5",
   workspace:
-    "workspace min-w-0 max-w-full grid h-full min-h-0 grid-cols-[minmax(0,280px)_minmax(0,1fr)_minmax(0,280px)] grid-rows-[minmax(0,1fr)] gap-2 overflow-hidden overflow-x-hidden p-2 max-[1180px]:grid-cols-[minmax(0,240px)_minmax(0,1fr)_minmax(0,240px)] max-[980px]:grid-cols-[minmax(0,1fr)] max-[980px]:grid-rows-[auto_auto_auto] max-[980px]:overflow-y-auto max-[980px]:overflow-x-hidden",
+    "workspace min-w-0 max-w-full grid h-full min-h-0 grid-cols-[minmax(0,252px)_minmax(0,1fr)_minmax(0,252px)] grid-rows-[minmax(0,1fr)] gap-1.5 overflow-hidden overflow-x-hidden p-1.5 max-[1180px]:grid-cols-[minmax(0,220px)_minmax(0,1fr)_minmax(0,220px)] max-[980px]:grid-cols-[minmax(0,1fr)] max-[980px]:grid-rows-[auto_auto_auto] max-[980px]:gap-1.5 max-[980px]:overflow-y-auto max-[980px]:overflow-x-hidden max-[980px]:p-1",
 };
 
 export default styles;

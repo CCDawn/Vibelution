@@ -72,7 +72,7 @@ const styles = {
   contractStateGrid:
     "contractStateGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] hidden",
   controlStrip:
-    "controlStrip min-w-0 flex items-center gap-1.5 overflow-hidden px-2 pb-1",
+    "controlStrip min-w-0 flex items-center gap-1.5 overflow-x-auto overflow-y-hidden px-2 pb-1",
   copyNotice:
     "copyNotice min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   countPill:
@@ -86,7 +86,7 @@ const styles = {
   detailMeta:
     "detailMeta min-w-0 flex flex-wrap items-center gap-1.5 text-[var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   detailPanel:
-    "detailPanel min-w-0 min-h-0 overflow-auto rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
+    "detailPanel min-w-0 min-h-0 overflow-auto rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 [&_h2]:break-words [&_p]:break-words",
   editPreviewGrid:
     "editPreviewGrid min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   editPreviewPanel:
@@ -166,7 +166,7 @@ const styles = {
   header:
     "header min-w-0 flex flex-wrap items-center gap-1.5",
   headerActions:
-    "headerActions min-w-0 flex flex-wrap items-center gap-1.5 justify-end [&>a]:shrink-0 [&>button]:shrink-0",
+    "headerActions min-w-0 flex flex-wrap items-center gap-1.5 justify-end [&>a]:shrink-0 [&>button]:shrink-0 [&_[data-vui=\"button\"]]:w-fit [&_[data-vui=\"button\"]]:max-w-full",
   healthStrip:
     "healthStrip min-w-0 flex flex-wrap items-center gap-1.5",
   iconButton:
@@ -194,11 +194,11 @@ const styles = {
   itemHeader:
     "itemHeader min-w-0 flex flex-wrap items-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
   itemList:
-    "itemList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+    "itemList min-w-0 grid min-h-0 content-start gap-1 overflow-auto rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-1.5",
   itemOrigin:
     "itemOrigin min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
   itemPanel:
-    "itemPanel min-w-0 min-h-0 overflow-auto rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+    "itemPanel min-w-0 grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-1.5 overflow-hidden rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
   itemPath:
     "itemPath min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 font-mono text-[var(--vui-font-xs)]",
   itemSelectionRow:
@@ -356,9 +356,9 @@ const styles = {
   rawPanel:
     "rawPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
   refreshButton:
-    "refreshButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+    "refreshButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full shrink-0 items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
   returnButton:
-    "returnButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+    "returnButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full shrink-0 items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
   reviewQueueActions:
     "reviewQueueActions min-w-0 flex flex-wrap items-center gap-1.5 grid min-h-0 content-start overflow-auto",
   reviewQueueBody:
@@ -408,9 +408,9 @@ const styles = {
   sourceIcon:
     "sourceIcon min-w-0 shrink-0 text-[var(--fg-tertiary)]",
   sourceList:
-    "sourceList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+    "sourceList min-w-0 grid min-h-0 content-start gap-1 overflow-auto",
   sourcePanel:
-    "sourcePanel min-w-0 min-h-0 overflow-auto rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
+    "sourcePanel min-w-0 grid min-h-0 grid-rows-[auto_auto_auto_auto_minmax(0,1fr)] gap-1.5 overflow-hidden rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
   sourceRecord:
     "sourceRecord min-w-0",
   sourceRecordActions:
@@ -458,9 +458,9 @@ const styles = {
   stewardWorkbench:
     "stewardWorkbench min-w-0 hidden",
   subnav:
-    "subnav min-w-0 inline-flex max-w-full items-center justify-self-start gap-[3px] overflow-auto p-[3px] rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)]",
+    "subnav min-w-0 inline-flex w-fit max-w-full items-center justify-self-start gap-[3px] overflow-x-auto overflow-y-hidden p-[3px] rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)]",
   subnavLink:
-    "subnavLink min-w-0 inline-flex items-center justify-center min-h-[24px] w-fit min-w-[74px] max-w-[9.5rem] px-[9px] rounded-[var(--radius-control)] text-[var(--vui-font-xs)] text-[var(--fg-secondary)] font-[700] no-underline whitespace-nowrap hover:text-[var(--fg-primary)] hover:bg-[var(--vui-control-muted-hover)]",
+    "subnavLink min-w-0 inline-flex shrink-0 items-center justify-center min-h-[24px] w-fit min-w-[74px] max-w-[9.5rem] px-[9px] rounded-[var(--radius-control)] text-[var(--vui-font-xs)] text-[var(--fg-secondary)] font-[700] no-underline whitespace-nowrap hover:text-[var(--fg-primary)] hover:bg-[var(--vui-control-muted-hover)]",
   subnavLinkActive:
     "subnavLinkActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]",
   subtitle:
@@ -476,7 +476,7 @@ const styles = {
   usageList:
     "usageList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   viewStack:
-    "viewStack min-w-0 flex h-full min-h-0 flex-col overflow-hidden [&>.workspace]:flex-1 [&>.workspace]:min-h-0 [&>.cleanupWorkspace]:flex-1 [&>.cleanupWorkspace]:min-h-0 [&>.overviewGrid]:flex-1 [&>.overviewGrid]:min-h-0 [&>.effectiveGrid]:flex-1 [&>.effectiveGrid]:min-h-0",
+    "viewStack min-w-0 flex h-full min-h-0 flex-col overflow-hidden [&>.workspace]:flex-1 [&>.workspace]:min-h-0 [&>.cleanupWorkspace]:flex-1 [&>.cleanupWorkspace]:min-h-0 [&>.overviewGrid]:flex-1 [&>.overviewGrid]:min-h-0 [&>.effectiveGrid]:flex-1 [&>.effectiveGrid]:min-h-0 [&>.summaryGrid]:shrink-0",
   visibilityHeader:
     "visibilityHeader min-w-0 flex flex-wrap items-center gap-1.5 !grid grid-cols-[22px_minmax(0,1fr)] items-start gap-2",
   visibilityPanel:
@@ -486,7 +486,7 @@ const styles = {
   wideField:
     "wideField min-w-0 grid gap-1 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   workspace:
-    "workspace min-w-0 grid h-full min-h-0 flex-1 gap-2 p-2 grid-rows-[minmax(0,1fr)] overflow-auto",
+    "workspace min-w-0 grid h-full min-h-0 flex-1 gap-2 p-2 grid-cols-[minmax(190px,240px)_minmax(0,1fr)_minmax(240px,0.4fr)] grid-rows-[minmax(0,1fr)] overflow-hidden max-[1120px]:grid-cols-[minmax(190px,240px)_minmax(0,1fr)] max-[1120px]:[&_.detailPanel]:col-span-2 max-[780px]:grid-cols-1 max-[780px]:overflow-auto max-[780px]:[&_.detailPanel]:col-span-1",
 } as const;
 
 export default styles;

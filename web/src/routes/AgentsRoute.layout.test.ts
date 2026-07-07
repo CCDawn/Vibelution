@@ -1426,6 +1426,23 @@ describe("AgentsRoute layout contract", () => {
     expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:[overflow:auto]");
   });
 
+  it("uses route-level VUI density guards for Agent workspace panels and actions", () => {
+    expect(styles.route).toContain("[--agent-density-gap:4px]");
+    expect(styles.route).toContain("[--agent-panel-pad:8px]");
+    expect(styles.route).toContain("[--agent-row-pad-y:5px]");
+    expect(styles.route).toContain("[--agent-control-height:24px]");
+    expect(styles.route).toContain("[&_[data-vui-product=\"agent-workspace-panel\"]]:max-w-full");
+    expect(styles.route).toContain("[&_[data-vui-product=\"agent-workspace-panel\"]]:overflow-hidden");
+    expect(styles.route).toContain("[&_[data-vui-product=\"agent-workspace-panel\"]]:[scrollbar-gutter:stable]");
+    expect(styles.route).toContain("[&_[data-vui-product=\"agent-workspace-panel\"]]:[overflow-wrap:anywhere]");
+    expect(styles.route).toContain("max-[860px]:[&_[data-vui-product=\"agent-workspace-panel\"]]:overflow-visible");
+    expect(styles.route).toContain("[&_[data-vui=\"button\"]]:w-fit");
+    expect(styles.route).toContain("[&_[data-vui=\"button\"]]:[max-width:100%]");
+    expect(styles.route).toContain("[&_[data-vui=\"button\"]]:[white-space:nowrap]");
+    expect(styles.route).not.toContain("[&_[data-vui=\"button\"]]:w-full");
+    expect(styles.route).not.toContain("[&_[data-vui=\"button\"]]:[width:100%]");
+  });
+
   it("keeps route-level repeated Agent panels/cards transparent and hairline only", () => {
     const repeatedSurfaceStyles: Array<keyof typeof styles> = [
       "activityTimelineItem",

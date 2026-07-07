@@ -113,6 +113,19 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain('density="compact"');
   });
 
+  it("keeps self-evolution conversation context readable instead of falling back to workspace fragments", () => {
+    expect(selfEvolutionSource).toContain("SELF_EVOLUTION_CONVERSATION_CONTEXT");
+    expect(selfEvolutionSource).toContain("self-evolution");
+    expect(selfEvolutionSource).toContain("defaultFileContext={SELF_EVOLUTION_CONVERSATION_CONTEXT}");
+    expect(selfEvolutionSource).not.toContain('|| "workspace"');
+  });
+
+  it("uses a self-evolution conversation avatar instead of pet preset abbreviations", () => {
+    expect(selfEvolutionSource).toContain("selfEvolutionConversationAvatarFallback");
+    expect(selfEvolutionSource).toContain("const petAvatarFallback = selfEvolutionConversationAvatarFallback(pet?.name, lang)");
+    expect(selfEvolutionSource).not.toContain("getPetAvatarSymbol");
+  });
+
   it("propagates full-height constraints from the parent route into the conversation workspace", () => {
     expect(selfEvolutionStylesSource).toContain("pageStack:");
     expect(selfEvolutionStylesSource).toContain("trackShell:");
@@ -371,7 +384,7 @@ describe("SelfEvolutionTrack static assets", () => {
   });
 
   it("keeps self-evolution route chrome inside a single opaque workbench shell", () => {
-    expect(styles.trackShell).toContain("bg-[color-mix(in_srgb,var(--vui-surface-panel)_96%,var(--vui-surface-base))]");
+    expect(styles.trackShell).toContain("bg-vui-surface-panel");
     expect(styles.trackShell).toContain("border border-vui-border-subtle");
     expect(styles.pageTabsRow).toContain("border-b border-vui-border-subtle");
     expect(styles.runActionBar).not.toContain("border border-vui-border-subtle");
@@ -388,10 +401,38 @@ describe("SelfEvolutionTrack static assets", () => {
     ].forEach(expectOpaqueWorkbenchSurface);
   });
 
+  it("keeps the self-evolution workspace visually stable at desktop widths", () => {
+    expect(selfEvolutionSource).toContain("return 360;");
+    expect(selfEvolutionSource).toContain("Math.max(360, Math.min(460, saved))");
+    expect(selfEvolutionSource).toContain("Math.max(340, Math.min(460, nextWidth))");
+    expect(styles.workspaceLayout).toContain("var(--self-sidebar-width,360px)");
+    expect(styles.conversationShell).toContain("border border-vui-border-subtle");
+    expect(styles.conversationShell).toContain("bg-vui-surface-panel");
+    expect(styles.centerColumn).toContain("gap-3");
+  });
+
+  it("keeps the workflow step switch compact instead of rendering full-width card buttons", () => {
+    expect(styles.centerColumn).toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(selfEvolutionSource).toContain("styles.workflowHeader");
+    expect(styles.workflowCardGrid).toContain("inline-flex");
+    expect(styles.workflowCardGrid).toContain("w-fit");
+    expect(styles.workflowCardGrid).not.toContain("grid-cols-[minmax(0,1fr)_minmax(0,1fr)]");
+    expect(styles.workflowCardGrid).not.toContain("[&>*]:w-full");
+
+    expect(styles.workflowCard).toContain("inline-flex");
+    expect(styles.workflowCard).toContain("min-h-8");
+    expect(styles.workflowCard).toContain("w-fit");
+    expect(styles.workflowCard).not.toContain("min-h-[72px]");
+    expect(styles.workflowCard).not.toContain("content-start");
+    expect(selfEvolutionSource).toContain("styles.workflowStepSummary");
+    expect(selfEvolutionSource).not.toContain("<small>{step.livePreview || step.summary || \"--\"}</small>");
+    expect(selfEvolutionSource).toContain('<div className={styles.workflowHeader}>');
+    expect(selfEvolutionSource.indexOf('<div className={styles.workflowHeader}>')).toBeLessThan(selfEvolutionSource.indexOf('<div className={styles.conversationShell}>'));
+  });
+
   it("keeps repeated self-evolution panels and rows lighter than card walls", () => {
     [
       styles.agentCard,
-      styles.workflowCard,
       styles.observationEventItem,
       styles.loadingRail,
       styles.loadingPanel,

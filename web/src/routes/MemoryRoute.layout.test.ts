@@ -262,13 +262,28 @@ describe("MemoryRoute layout contract", () => {
     expect(styles.viewStack).toContain("h-full");
     expect(styles.viewStack).toContain("min-h-0");
     expect(styles.viewStack).toContain("overflow-hidden");
+    expect(styles.viewStack).toContain("[&>.summaryGrid]:shrink-0");
     expect(styles.workspace).toContain("h-full");
     expect(styles.workspace).toContain("min-h-0");
     expect(styles.workspace).toContain("grid-rows-[minmax(0,1fr)]");
-    expect(styles.workspace).toContain("overflow-auto");
+    expect(styles.workspace).toContain("grid-cols-[minmax(190px,240px)_minmax(0,1fr)_minmax(240px,0.4fr)]");
+    expect(styles.workspace).toContain("overflow-hidden");
+    expect(styles.workspace).toContain("max-[1120px]:grid-cols-[minmax(190px,240px)_minmax(0,1fr)]");
+    expect(styles.workspace).toContain("max-[1120px]:[&_.detailPanel]:col-span-2");
+    expect(styles.workspace).toContain("max-[780px]:grid-cols-1");
+    expect(styles.workspace).toContain("max-[780px]:overflow-auto");
     expect(styles.detailPanel).toContain("min-h-0");
     expect(styles.detailPanel).toContain("overflow-auto");
     expect(styles.emptyDetail).toContain("min-h-[96px]");
+    expect(styles.controlStrip).toContain("overflow-x-auto");
+    expect(styles.controlStrip).not.toContain("overflow-hidden");
+    expect(styles.subnav).toContain("w-fit");
+    expect(styles.subnav).toContain("overflow-x-auto");
+    expect(styles.subnavLink).toContain("shrink-0");
+    expect(styles.headerActions).toContain("[&_[data-vui=\"button\"]]:w-fit");
+    expect(styles.headerActions).toContain("[&_[data-vui=\"button\"]]:max-w-full");
+    expect(styles.refreshButton).toContain("shrink-0");
+    expect(styles.returnButton).toContain("shrink-0");
     expect(overviewPanelStyles.summaryGrid).toContain("grid-cols-[repeat(auto-fit,minmax(156px,max-content))]");
     expect(overviewPanelStyles.summaryGrid).toContain("justify-start");
     expect(overviewPanelStyles.summaryGrid).toContain("bg-[var(--vui-surface-panel)]");
@@ -447,7 +462,13 @@ describe("MemoryRoute layout contract", () => {
     expect(styles.graphCanvasPanel).toContain("h-full");
     expect(styles.graphCanvasPanel).toContain("overflow-hidden");
     expect(styles.sourcePanel).toContain("min-h-0");
+    expect(styles.sourcePanel).toContain("grid");
+    expect(styles.sourcePanel).toContain("grid-rows-[auto_auto_auto_auto_minmax(0,1fr)]");
     expect(styles.itemPanel).toContain("min-h-0");
+    expect(styles.itemPanel).toContain("grid");
+    expect(styles.itemPanel).toContain("grid-rows-[auto_auto_minmax(0,1fr)]");
+    expect(styles.itemList).toContain("min-h-0");
+    expect(styles.itemList).toContain("overflow-auto");
   });
 
   it("keeps restored MemoryRoute grids from the CSS module migration", () => {

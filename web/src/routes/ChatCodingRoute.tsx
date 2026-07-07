@@ -3952,6 +3952,10 @@ export function ChatCodingRoute() {
     [locale],
   );
   const numberFormatter = useMemo(() => new Intl.NumberFormat(locale), [locale]);
+  const compactNumberFormatter = useMemo(
+    () => new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }),
+    [locale],
+  );
 
   const runtime = runtimeQuery.data;
   const pet = petQuery.data;
@@ -5030,6 +5034,7 @@ export function ChatCodingRoute() {
       key: "modelInput",
       label: lang === "zh" ? "模型输入" : "Model input",
       value: modelInputAvailable ? numberFormatter.format(modelInputTokens) : "--",
+      displayValue: modelInputAvailable ? compactNumberFormatter.format(modelInputTokens) : "--",
       meta: modelInputMetaLine,
       title: modelInputTitle,
       percent: clampPercent(modelInputPercent),

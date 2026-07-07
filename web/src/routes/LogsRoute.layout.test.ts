@@ -6,7 +6,6 @@ import routeSource from "./LogsRoute.tsx?raw";
 const logSurfaceKeys = [
   "diagnosticsPanel",
   "diagnosticsSummaryRow",
-  "logPreviewStack",
   "packageDiagnosisPanel",
   "packageDiagnosisSummaryRow",
   "packageFilesPanel",
@@ -78,7 +77,7 @@ describe("LogsRoute layout contract", () => {
   });
 
   it("keeps the resizable logs workspace as a three-column grid", () => {
-    expect(styles.workspace).toContain("grid-cols-[minmax(0,1fr)_10px_var(--logs-right-rail-width,250px)]");
+    expect(styles.workspace).toContain("grid-cols-[minmax(0,1fr)_10px_minmax(220px,var(--logs-right-rail-width,250px))]");
     expect(styles.workspace).toContain("grid-rows-[minmax(0,1fr)]");
     expect(styles.workspace).toContain("overflow-hidden");
   });
@@ -112,6 +111,26 @@ describe("LogsRoute layout contract", () => {
       expect(styles[key]).not.toContain("bg-[var(--vui-surface-glass)]");
       expect(styles[key]).not.toContain("shadow-[var(--vui-shadow");
     }
+  });
+
+  it("avoids adding another card shell around the actual log preview stack", () => {
+    expect(styles.previewPane).toContain("grid-rows-[minmax(0,1fr)]");
+    expect(styles.logPreviewStack).toContain("grid-rows-[auto_minmax(0,1fr)_auto]");
+    expect(styles.logPreviewStack).not.toContain("rounded-[var(--radius-panel)]");
+    expect(styles.logPreviewStack).not.toContain("border border-[color-mix(in_srgb");
+    expect(styles.logPreviewStack).not.toContain("bg-[color-mix(in_srgb");
+  });
+
+  it("keeps Logs lists internally scrollable with bounded heights", () => {
+    for (const key of ["packageList", "packageFileList", "rootNav"] as const) {
+      expect(styles[key]).toContain("overflow-auto");
+    }
+
+    expect(styles.sidebar).toContain("grid-rows-[auto_auto_minmax(0,1fr)]");
+    expect(styles.rightRail).toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(styles.packageFilesPanel).toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(styles.packageFileList).toContain("max-h-[min(190px,24vh)]");
+    expect(styles.rootNav).toContain("max-[760px]:max-h-[34vh]");
   });
 
   it("keeps short toolbar and picker controls content-sized unless the whole row is the target", () => {
