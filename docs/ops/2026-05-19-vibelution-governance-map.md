@@ -1,5 +1,7 @@
 # 2026-05-19 Vibelution Governance Map
 
+> Status: Historical governance snapshot from 2026-05-19. Treat "current round" wording below as historical unless reaffirmed by `DEVELOPMENT_STANDARD.md`, `AGENTS.md`, or current `.docs/project-memory/` claims.
+
 ## Purpose
 
 This note records the current Vibelution-level repo governance boundary while three

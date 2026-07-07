@@ -13,29 +13,9 @@ tests/
 ├── test_runner.py                 # 统一测试运行器（pytest 封装）
 ├── prompt_debugger.py             # 提示词打靶测试（工具变更时必用）
 ├── simulate_lifecycle.py          # 沙盘生命周期独立验证脚本
-│
-├── [pytest 测试文件]              # 以 test_*.py 为准，按功能面持续增长
-│   ├── test_code_analysis_tools.py # 代码分析工具
-│   ├── test_event_bus.py          # 事件总线
-│   ├── test_key_info_extractor.py # 关键信息提取
-│   ├── test_memory.py             # 记忆系统
-│   ├── test_memory_tools.py       # 记忆工具
-│   ├── test_model_discovery.py    # 模型发现
-│   ├── test_prompt_manager.py     # Prompt 管理器
-│   ├── test_rebirth_tools.py      # 重启工具
-│   ├── test_restarter.py          # 重启守护进程
-│   ├── test_search_tools.py       # 搜索工具
-│   ├── test_security.py            # 安全验证
-│   ├── test_shell_tools.py        # Shell 工具
-│   ├── test_state.py               # 状态管理器
-│   ├── test_task_planner.py        # 任务规划器
-│   ├── test_token_manager.py       # Token 管理器
-│   ├── test_tool_executor.py      # 工具执行器
-│   ├── test_tool_registry.py      # 工具注册表
-│   ├── test_tool_result.py        # 工具结果处理
-│   ├── test_tool_tracker.py       # 工具追踪
-│   ├── test_workspace_manager.py  # 工作区管理器
-│   └── test_event_bus.py           # 事件总线
+├── select_tests.py                 # 影响面测试选择器
+├── test_matrix.yaml                # 变更范围到验证命令的映射
+└── test_*.py                       # pytest 测试文件集合，按功能面持续增长
 ```
 
 ---
@@ -46,28 +26,13 @@ tests/
 
 | 测试文件 | 被测模块 | 分类 |
 |---------|---------|------|
-| `test_memory_tools.py` | `tools/memory_tools.py` | tools/ |
-| `test_shell_tools.py` | `tools/shell_tools.py` | tools/ |
-| `test_search_tools.py` | `tools/search_tools.py` | tools/ |
-| `test_code_analysis_tools.py` | `tools/code_analysis_tools.py` | tools/ |
-| `test_rebirth_tools.py` | `tools/rebirth_tools.py` | tools/ |
-| `test_token_manager.py` | `tools/token_manager.py` | tools/ |
-| `test_key_info_extractor.py` | `tools/key_info_extractor.py` | tools/ |
-| `test_task_planner.py` | `core/task_planner.py` | core/ |
-| `test_prompt_manager.py` | `core/prompt_manager/prompt_manager.py` | core/prompt_manager/ |
-| `test_tool_executor.py` | `core/infrastructure/tool_executor.py` | core/infrastructure/ |
-| `test_tool_registry.py` | `core/infrastructure/tool_registry.py` | core/infrastructure/ |
-| `test_security.py` | `core/infrastructure/security.py` | core/infrastructure/ |
-| `test_model_discovery.py` | `core/infrastructure/model_discovery.py` | core/infrastructure/ |
-| `test_tool_tracker.py` | `core/logging/tool_tracker.py` | core/logging/ |
-| `test_restarter.py` | `core/restarter_manager/restarter.py` | core/restarter_manager/ |
-| `test_workspace_manager.py` | `core/infrastructure/workspace_manager.py` | core/infrastructure/ |
-| `test_state.py` | `core/infrastructure/state.py` | core/infrastructure/ |
-| `test_event_bus.py` | `core/infrastructure/event_bus.py` | core/infrastructure/ |
-| `test_tool_result.py` | `core/infrastructure/tool_result.py` | core/infrastructure/ |
-| `test_memory.py` | 跨模块（记忆系统集成） | 集成测试 |
-| `test_web_app.py` | Web API 与工作台聚合路由 | web/ |
-| `test_web_git_routes.py` | Git 页面相关 API 路由 | web/git |
+| `test_*tools*.py` / `test_tool_*.py` | tools 与 tool execution/registry/policy | tools / infrastructure |
+| `test_web_*.py` / route-specific tests | FastAPI routes、Web services、前端契约相关后端面 | web |
+| `test_runtime_*.py` / `test_launcher_*.py` | Launcher、runtime manager、进程生命周期 | runtime |
+| `test_memory*.py` / `test_*knowledge*.py` / `test_rag_*.py` | Memory、Knowledge、RAG、ACL 与检索 | memory |
+| `test_team_*.py` / `test_*workflow*.py` | Teams、Team workflow、source extraction、paper note | teams |
+| `test_config_*.py` / `test_model_*.py` | 配置、模型发现、provider 能力与兼容性 | config |
+| 其它 `test_*.py` | 按被测模块命名，优先靠 `tests/test_matrix.yaml` 和文件名定位 | module-specific |
 
 ---
 
@@ -223,7 +188,7 @@ python tests/prompt_debugger.py "你的测试 prompt"
 - 模型在适当场景下主动调用该工具
 - 无幻觉调用（不该调用时不调用）
 
-### 3.5 独立脚本 simulate_lifecycle.py
+### 3.8 独立脚本 simulate_lifecycle.py
 
 不调用大模型，验证生命周期防断裂加固：
 

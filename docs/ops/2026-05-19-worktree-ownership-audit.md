@@ -1,5 +1,7 @@
 # 2026-05-19 Worktree Ownership Audit
 
+> Status: Historical governance snapshot from 2026-05-19. Use `DEVELOPMENT_STANDARD.md`, `AGENTS.md`, and current `.docs/project-memory/` files for active ownership and claim rules.
+
 ## Summary
 
 This audit captures the minimum safe ownership boundaries reported by the three active

@@ -106,6 +106,21 @@ Dual writes, compatibility aliases, copied defaults, duplicated lifecycle status
 
 Validation anchor: changes must prove that writes go to the canonical source, derived views refresh from it, stale derived data cannot override it, and old sources cannot silently become active again.
 
+### 3.2 Explicit Fallback State
+
+Fallback, degradation, compatibility paths, projection gaps, partial data, and recovery paths must be visible as such when they affect user-visible behavior, debugging evidence, runtime status, or downstream decisions.
+
+Do not report fallback as `success`, `completed`, `done`, or normal output unless the primary behavior truly completed and the fallback is explicitly secondary. A fallback state must expose:
+
+- status: fallback, degraded, partial, recovered, compatibility, or unavailable;
+- reason: the missing upstream data, failed operation, unsupported capability, timeout, permission issue, or projection gap;
+- scope: which source, message, tool result, field, route, or runtime step was affected;
+- impact: what the user can trust, what is incomplete, and what repair or validation signal remains.
+
+Silent fallback is allowed only for cosmetic or optional enhancements that do not change facts, hide missing data, alter decisions, or mask upstream failures. Mitigation must be labeled as mitigation, not as a permanent fix.
+
+Validation anchor: user-visible or debugging-critical fallback behavior needs tests or fixture evidence proving the status label, reason, and partial/unavailable state are exposed instead of being rendered as ordinary success.
+
 ## 4. Log-First Diagnosis
 
 For bugs, regressions, stalls, runtime mismatches, failed commands, unexpected behavior, bad delegation, repeated tool loops, or broken convergence, start from the newest relevant lifecycle log package under:
@@ -364,6 +379,22 @@ HeroUI is the preferred base for common interactive controls, but it must not be
 
 When customizing HeroUI, prefer its public APIs: `variant`, `size`, `radius`, `color`, `className`, `classNames`, slots, and documented composition patterns. Do not rely on unstable internal DOM structure, deep selectors, or one-off overrides that only work for a single route.
 
+For substantial HeroUI React work, refresh the official agent-facing reference in a review-first way:
+
+```powershell
+npx --yes heroui-cli@latest agents-md --react --output AGENTS.md
+```
+
+Use `--output` to target a scratch or review file when the root `AGENTS.md` is not the intended edit target. Review any generated markdown, `.heroui-docs/`, and `.gitignore` changes before merging them into project rules. Keep downloaded HeroUI docs only when they are intentionally part of the current task evidence; otherwise remove temporary generated files before closing the round.
+
+Do not run the remote installer pipeline in the Vibelution main checkout or ordinary task worktrees:
+
+```powershell
+curl -fsSL https://heroui.com/install | bash -s heroui-react
+```
+
+Treat that command as a HeroUI new-project or isolated scratch-environment bootstrap reference only. Existing Vibelution frontend work must preserve the project package-manager contract, lockfiles, VUI ownership layer, and reviewable dependency changes.
+
 Style maps should be local, typed, and narrow:
 
 - prefer dedicated component `*.styles.ts` maps or route-local style maps over importing a parent route's `styles`;
@@ -508,7 +539,9 @@ Commit messages should be concise, scoped, and behavior-oriented. Prefer prefixe
 - `docs: ...`;
 - `chore: ...`.
 
-After implementation and validation in a task worktree, the owning Agent should self-review and close the local loop. `FAST_PATCH` work that intentionally stayed in the current workspace may stop after diff review and scoped validation when no commit or merge was requested. A task branch may merge itself into local `main` only when all merge gates pass:
+After implementation and validation in a task worktree, the owning Agent should self-review and close the local loop. This is the default expectation for every development session: do not hand off routine PR review, scoped validation, local commit, or local `main` merge merely because a separate main integration session exists. A task Agent should first try to finish its own local review-and-merge cycle when the merge gates below pass.
+
+`FAST_PATCH` work that intentionally stayed in the current workspace may stop after diff review and scoped validation when no commit or merge was requested. A task branch may merge itself into local `main` only when all merge gates pass:
 
 - the claim belongs to the current Agent/session and covers the changed files;
 - the task branch is committed and contains only current-task changes;
@@ -521,7 +554,7 @@ After implementation and validation in a task worktree, the owning Agent should 
 
 When the gates pass, merge one task at a time into local `main`, run the smallest useful post-merge validation or state why docs-only/rule-only/`FAST_PATCH` validation is sufficient, close the claim, and remove the task worktree when it is clean.
 
-When any gate fails, do not force the merge. Close the lightweight guard claim as blocked, or create a separate ready/blocked queue handoff in the project memory lane if integration must happen later:
+When any gate fails, do not force the merge. Routine small conflicts inside the owning Agent's claimed scope should be resolved in the task worktree and revalidated by that same Agent before retrying the local merge. Wait for a main integration session only for large conflicts, cross-lane conflicts, shared DTO/projection conflicts, hot-file conflicts with active claims, release/version conflicts, unclear semantic conflicts, or user-designated integration work. Close the lightweight guard claim as blocked, or create a separate ready/blocked queue handoff in the project memory lane if integration must happen later:
 
 ```powershell
 python "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "C:\Users\17533\Desktop\Vibelution" release --claim-id "<claim-id>" --status blocked --reason "<failed merge gate, validation, or conflict summary>"
@@ -594,7 +627,7 @@ Task handoff must include version bump recommendation, capability domain, user-v
 
 ## 16. Mainline Integration
 
-Task-owning Agents should self-merge when the merge gates in section 13 pass. A mainline integration session is still responsible for queued, cross-lane, conflicted, release-sensitive, or user-designated integration work:
+Task-owning Agents should self-review and self-merge by default when the merge gates in section 13 pass. A mainline integration session is a fallback and serialization owner, not the normal destination for routine clean task branches. It is still responsible for queued, cross-lane, large-conflict, release-sensitive, or user-designated integration work:
 
 - keeping local `main` clean before each merge;
 - reviewing claim status and write scopes;
