@@ -21,6 +21,10 @@ function classTokens(className: string) {
   return className.split(/\s+/).filter(Boolean);
 }
 
+function styleValue(key: string) {
+  return (styles as Record<string, string>)[key] ?? "";
+}
+
 describe("ResetRoute layout contract", () => {
   it("uses shell language state without loading the full app dictionary", () => {
     expect(routeSource).toContain("useShellI18n");
@@ -32,6 +36,9 @@ describe("ResetRoute layout contract", () => {
     expect(routeSource).toContain("Launcher 维护中心");
     expect(routeSource).toContain('href="/launcher"');
     expect(routeSource).toContain('data-reset-retired="launcher-owned"');
+    expect(routeSource).toContain('data-reset-status="retired"');
+    expect(routeSource).toContain('data-reset-action="launcher-maintenance"');
+    expect(routeSource).toContain('data-reset-risk="web-api-retired"');
     expect(routeSource).not.toContain("queryKeys.resetSummary()");
     expect(routeSource).not.toContain('"/api/reset/summary"');
     expect(routeSource).not.toContain('"/api/reset/preview"');
@@ -57,6 +64,36 @@ describe("ResetRoute layout contract", () => {
     expect(styles.workspaceClass).toContain("max-w-full");
     expect(styles.workspaceClass).toContain("overflow-x-hidden");
     expect(styles.cardClass).toContain("min-w-0");
+  });
+
+  it("lays out the retired state, action entry, and risk notes as a compact workbench", () => {
+    expect(styleValue("workspaceClass")).toContain("grid-cols-[minmax(320px,560px)_minmax(260px,420px)]");
+    expect(styleValue("workspaceClass")).toContain("items-start");
+    expect(styleValue("workspaceClass")).toContain("justify-start");
+    expect(styleValue("workspaceClass")).toContain("overflow-y-auto");
+    expect(styleValue("workspaceClass")).toContain("max-[760px]:grid-cols-[minmax(0,1fr)]");
+
+    expect(styleValue("statusStripClass")).toContain("grid-cols-[auto_minmax(0,1fr)]");
+    expect(styleValue("statusStripClass")).toContain("max-w-[560px]");
+    expect(styleValue("statusStripClass")).toContain("overflow-hidden");
+    expectBackgroundAware(styleValue("statusStripClass"));
+
+    expect(styleValue("launcherPanelClass")).toContain("max-w-[560px]");
+    expect(styleValue("launcherPanelClass")).toContain("content-start");
+    expectBackgroundAware(styleValue("launcherPanelClass"));
+
+    expect(styleValue("riskPanelClass")).toContain("max-w-[420px]");
+    expect(styleValue("riskPanelClass")).toContain("content-start");
+    expect(styleValue("riskListClass")).toContain("max-h-[220px]");
+    expect(styleValue("riskListClass")).toContain("overflow-auto");
+    expect(styleValue("riskItemClass")).toContain("grid-cols-[auto_minmax(0,1fr)]");
+  });
+
+  it("lets retired-page copy wrap instead of hiding important migration details", () => {
+    expect(styleValue("copyTextClass")).toContain("break-words");
+    expect(styleValue("copyTextClass")).toContain("[overflow-wrap:anywhere]");
+    expect(styleValue("copyTextClass")).not.toContain("truncate");
+    expect(styleValue("subtitleClass")).not.toContain("truncate");
   });
 
   it("keeps the Launcher action content-sized outside mobile full-width contexts", () => {

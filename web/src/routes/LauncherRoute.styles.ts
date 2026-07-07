@@ -13,9 +13,9 @@ const panelHeaderText =
 
 export const launcherRouteStyles = {
   route:
-    "grid h-full min-h-full content-start overflow-y-auto overflow-x-hidden overscroll-contain pb-[max(12px,env(safe-area-inset-bottom))] text-vui-fg-primary [scrollbar-gutter:stable] [--accent-primary:var(--accent-warm)] [--danger:var(--state-error)]",
+    "grid h-full min-h-full max-w-full content-start overflow-y-auto overflow-x-hidden overscroll-contain pb-[max(12px,env(safe-area-inset-bottom))] text-vui-fg-primary [scrollbar-gutter:stable] [--accent-primary:var(--accent-warm)] [--danger:var(--state-error)] [&_[data-vui=button]]:w-fit [&_[data-vui=button]]:[max-width:100%] [&_[data-vui=button]]:[white-space:nowrap]",
   header:
-    "mx-2.5 mt-2 min-w-0 border-[var(--vui-border-subtle)] !bg-transparent !shadow-none !backdrop-blur-none",
+    "mx-2 mt-2 min-w-0 border-[var(--vui-border-subtle)] !bg-transparent !shadow-none !backdrop-blur-none",
   panelEyebrow: "m-0 text-[var(--vui-font-xs)] uppercase tracking-[0.08em] text-vui-fg-tertiary",
   statusBar:
     "grid w-[min(760px,58vw)] min-w-0 grid-cols-[minmax(220px,1fr)_max-content] items-center gap-2 max-[1200px]:w-full max-[1200px]:max-w-none max-[1200px]:grid-cols-[minmax(0,1fr)] max-[1200px]:justify-items-stretch",
@@ -27,14 +27,14 @@ export const launcherRouteStyles = {
   iconButton: mutedControl,
   statusBarButton: mutedControl,
   dangerButton: dangerControl,
-  summaryStrip: "grid grid-cols-4 gap-1.5 px-3 pt-2 max-[1200px]:grid-cols-2 max-[620px]:grid-cols-1",
+  summaryStrip: "grid grid-cols-4 gap-1.5 px-2 pt-2 max-[1200px]:grid-cols-2 max-[620px]:grid-cols-1",
   userGuide:
-    `mx-3 mt-1.5 grid min-w-0 grid-cols-[max-content_minmax(132px,max-content)_max-content] items-center gap-2 ${panelSurface} px-[9px] py-1.5 data-[tone=success]:border-[color-mix(in_srgb,var(--state-success)_38%,transparent)] data-[tone=warning]:border-[color-mix(in_srgb,var(--state-warning)_42%,transparent)] data-[tone=error]:border-[color-mix(in_srgb,var(--state-error)_42%,transparent)] max-[1200px]:grid-cols-[max-content_minmax(132px,max-content)_minmax(0,1fr)] max-[860px]:grid-cols-[minmax(0,1fr)] ${panelHeaderText} [&_em]:min-w-0 [&_em]:truncate [&_em]:text-[var(--vui-font-xs)] [&_em]:not-italic [&_em]:text-vui-fg-secondary max-[1200px]:[&_em]:col-[2/-1] max-[860px]:[&_em]:col-auto max-[860px]:[&_em]:whitespace-normal max-[860px]:[&_em]:overflow-visible max-[860px]:[&_em]:overflow-wrap-anywhere`,
+    `mx-2 mt-1.5 grid min-w-0 grid-cols-[max-content_minmax(132px,max-content)_max-content] items-center gap-2 ${panelSurface} px-2 py-1.5 data-[tone=success]:border-[color-mix(in_srgb,var(--state-success)_38%,transparent)] data-[tone=warning]:border-[color-mix(in_srgb,var(--state-warning)_42%,transparent)] data-[tone=error]:border-[color-mix(in_srgb,var(--state-error)_42%,transparent)] max-[1200px]:grid-cols-[max-content_minmax(132px,max-content)_minmax(0,1fr)] max-[860px]:grid-cols-[minmax(0,1fr)] ${panelHeaderText} [&_em]:min-w-0 [&_em]:truncate [&_em]:text-[var(--vui-font-xs)] [&_em]:not-italic [&_em]:text-vui-fg-secondary max-[1200px]:[&_em]:col-[2/-1] max-[860px]:[&_em]:col-auto max-[860px]:[&_em]:whitespace-normal max-[860px]:[&_em]:overflow-visible max-[860px]:[&_em]:overflow-wrap-anywhere`,
   dangerZone:
-    `mx-3 mt-1.5 grid min-w-0 grid-cols-[max-content_minmax(0,1fr)_max-content] items-center gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--danger)_30%,transparent)] bg-[color-mix(in_srgb,var(--danger)_5%,var(--vui-surface-panel))] px-[9px] py-1.5 max-[860px]:grid-cols-[minmax(0,1fr)] [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:font-bold [&_span]:text-[color-mix(in_srgb,var(--danger)_72%,var(--vui-fg-primary))] [&_small]:min-w-0 [&_small]:truncate [&_small]:text-[var(--vui-font-xs)] [&_small]:text-vui-fg-secondary max-[860px]:[&_small]:whitespace-normal max-[860px]:[&_small]:overflow-visible max-[860px]:[&_small]:overflow-wrap-anywhere`,
+    `mx-2 mt-1.5 grid min-w-0 grid-cols-[max-content_minmax(0,1fr)_max-content] items-center gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--danger)_30%,transparent)] bg-[color-mix(in_srgb,var(--danger)_5%,var(--vui-surface-panel))] px-2 py-1.5 max-[860px]:grid-cols-[minmax(0,1fr)] [&_span]:whitespace-nowrap [&_span]:text-[var(--vui-font-xs)] [&_span]:font-bold [&_span]:text-[color-mix(in_srgb,var(--danger)_72%,var(--vui-fg-primary))] [&_small]:min-w-0 [&_small]:truncate [&_small]:text-[var(--vui-font-xs)] [&_small]:text-vui-fg-secondary max-[860px]:[&_small]:whitespace-normal max-[860px]:[&_small]:overflow-visible max-[860px]:[&_small]:overflow-wrap-anywhere`,
   dangerActions: "flex min-w-0 justify-end max-[860px]:justify-start",
   settingsStrip:
-    `mx-3 mt-1.5 grid min-w-0 grid-cols-[minmax(110px,0.78fr)_minmax(92px,0.6fr)_repeat(3,minmax(82px,0.52fr))_max-content_minmax(96px,0.62fr)_minmax(104px,0.68fr)_max-content_max-content_max-content] items-end gap-1.5 self-start ${panelSurface} px-2 py-[7px] max-[1200px]:grid-cols-[max-content_max-content_minmax(0,1fr)] max-[860px]:grid-cols-[minmax(0,1fr)] [&>small]:col-span-full`,
+    `mx-2 mt-1.5 grid min-h-0 min-w-0 max-w-full grid-cols-[minmax(104px,0.76fr)_minmax(92px,0.6fr)_repeat(3,minmax(74px,0.5fr))_max-content_minmax(96px,0.62fr)_minmax(100px,0.64fr)_max-content_max-content_max-content] items-end gap-1 self-start overflow-hidden ${panelSurface} px-2 py-1.5 max-[1320px]:grid-cols-[minmax(112px,max-content)_minmax(118px,max-content)_repeat(2,minmax(92px,1fr))_max-content] max-[1040px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[620px]:grid-cols-[minmax(0,1fr)] [&>small]:col-span-full`,
   settingsHeader:
     "grid self-center gap-0.5 [&>span]:text-[var(--vui-font-xs)] [&>span]:uppercase [&>span]:tracking-[0.06em] [&>span]:text-[var(--fg-tertiary)] [&>strong]:min-w-0 [&>strong]:truncate [&>strong]:text-[var(--vui-font-xs)] [&>strong]:text-[var(--fg-primary)] [&>small]:min-w-0 [&>small]:truncate [&>small]:text-[var(--vui-font-xs)] [&>small]:text-[var(--fg-secondary)]",
   settingField:
@@ -42,40 +42,40 @@ export const launcherRouteStyles = {
   settingToggle:
     "inline-flex min-h-7 min-w-0 items-center gap-1.5 whitespace-nowrap pb-px [&>span]:text-[var(--vui-font-xs)] [&>span]:uppercase [&>span]:tracking-[0.06em] [&>span]:text-[var(--fg-tertiary)] [&_input]:m-0 [&_input]:h-3.5 [&_input]:w-3.5",
   settingsSaveButton:
-    `${primaryControl} py-[3px]`,
+    `${primaryControl} justify-self-start py-[3px]`,
   settingError: "col-span-full text-[var(--vui-font-xs)] text-[var(--state-error)]",
   segmentedControl:
-    "inline-flex min-w-0 items-center gap-0.5 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-toolbar p-0.5 max-[860px]:justify-self-start [&_button]:min-h-[25px] [&_button]:rounded-[calc(var(--radius-control)-2px)] [&_button]:border-0 [&_button]:bg-transparent [&_button]:px-[7px] [&_button]:py-[3px] [&_button]:text-[var(--vui-font-xs)] [&_button]:leading-none [&_button]:text-vui-fg-secondary [&_button[data-active=true]]:bg-[color-mix(in_srgb,var(--accent-primary)_12%,var(--vui-control-muted))] [&_button[data-active=true]]:text-vui-fg-primary [&_button:disabled]:cursor-default [&_button:disabled]:opacity-60 [&_button[data-vui]]:min-w-0 [&_button[data-vui]_[data-slot=vui-button-content]]:inline-flex [&_button[data-vui]_[data-slot=vui-button-content]]:items-center [&_button[data-vui]_[data-slot=vui-button-content]]:gap-[5px] [&_button[data-vui]_[data-slot=vui-button-label]]:inline-flex [&_button[data-vui]_[data-slot=vui-button-label]]:items-center [&_button[data-vui]_[data-slot=vui-button-label]]:gap-[5px]",
+    "inline-flex min-w-0 max-w-full flex-wrap items-center gap-0.5 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-toolbar p-0.5 max-[860px]:justify-self-start [&_button]:min-h-[25px] [&_button]:rounded-[calc(var(--radius-control)-2px)] [&_button]:border-0 [&_button]:bg-transparent [&_button]:px-[7px] [&_button]:py-[3px] [&_button]:text-[var(--vui-font-xs)] [&_button]:leading-none [&_button]:text-vui-fg-secondary [&_button[data-active=true]]:bg-[color-mix(in_srgb,var(--accent-primary)_12%,var(--vui-control-muted))] [&_button[data-active=true]]:text-vui-fg-primary [&_button:disabled]:cursor-default [&_button:disabled]:opacity-60 [&_button[data-vui]]:min-w-0 [&_button[data-vui]_[data-slot=vui-button-content]]:inline-flex [&_button[data-vui]_[data-slot=vui-button-content]]:items-center [&_button[data-vui]_[data-slot=vui-button-content]]:gap-[5px] [&_button[data-vui]_[data-slot=vui-button-label]]:inline-flex [&_button[data-vui]_[data-slot=vui-button-label]]:items-center [&_button[data-vui]_[data-slot=vui-button-label]]:gap-[5px]",
   developerPanel:
-    `mx-3 mt-1.5 grid min-w-0 gap-1.5 ${panelSurface} px-2 py-[7px] data-[enabled=true]:border-[color-mix(in_srgb,var(--state-warning)_42%,transparent)]`,
+    `mx-2 mt-1.5 grid min-h-0 min-w-0 max-w-full gap-1.5 overflow-hidden ${panelSurface} px-2 py-1.5 data-[enabled=true]:border-[color-mix(in_srgb,var(--state-warning)_42%,transparent)]`,
   developerPanelHeader:
     "flex min-w-0 items-center justify-between gap-2 max-[860px]:flex-col max-[860px]:items-start [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&_strong]:text-[var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)]",
-  developerGrid: "grid min-w-0 grid-cols-[minmax(138px,0.42fr)_minmax(300px,1fr)_minmax(260px,0.82fr)] gap-1.5 max-[1200px]:grid-cols-[minmax(0,1fr)]",
+  developerGrid: "grid min-h-0 min-w-0 grid-cols-[minmax(132px,0.36fr)_minmax(0,1fr)_minmax(250px,0.72fr)] gap-1.5 max-[1200px]:grid-cols-[minmax(0,1fr)]",
   developerStatus:
     `grid min-w-0 content-start gap-1 ${rowSurface} p-[7px] data-[tone=warning]:border-[color-mix(in_srgb,var(--state-warning)_42%,transparent)] ${panelHeaderText} [&_small]:min-w-0 [&_small]:truncate [&_small]:text-[var(--vui-font-xs)] [&_small]:text-vui-fg-secondary`,
-  developerNoise: `grid min-w-0 gap-1.5 ${rowSurface} p-[7px]`,
+  developerNoise: `grid min-h-0 min-w-0 gap-1.5 overflow-hidden ${rowSurface} p-[7px]`,
   developerNoiseHeader: "flex min-w-0 items-center justify-between gap-2 [&_span]:text-[var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_span]:text-[var(--fg-tertiary)]",
   compactButton:
     "inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-[5px] rounded-[var(--radius-control)] border border-vui-border-soft bg-vui-control-muted px-1.5 py-[3px] text-[var(--vui-font-xs)] text-vui-fg-secondary hover:bg-vui-control-muted-hover disabled:cursor-default disabled:opacity-60 [&[data-vui]]:min-w-0",
-  noiseItemGrid: "grid min-w-0 grid-cols-4 gap-[5px] max-[860px]:grid-cols-[minmax(0,1fr)]",
+  noiseItemGrid: "grid max-h-[150px] min-w-0 grid-cols-4 gap-[5px] overflow-auto pr-0.5 [scrollbar-gutter:stable] max-[860px]:grid-cols-[minmax(0,1fr)]",
   noiseItem:
     "grid min-w-0 gap-0.5 rounded-md border border-[color-mix(in_srgb,var(--border-soft)_72%,transparent)] px-1.5 py-[5px] data-[protected=true]:opacity-80 [&_span]:min-w-0 [&_span]:truncate [&_span]:text-[var(--vui-font-xs)] [&_span]:text-[var(--fg-secondary)] [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:text-[var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)] [&_small]:min-w-0 [&_small]:truncate [&_small]:text-[var(--vui-font-xs)] [&_small]:text-[var(--fg-secondary)]",
-  cleanupConsole: `grid min-w-0 gap-1.5 ${rowSurface} p-[7px]`,
+  cleanupConsole: `grid max-h-[220px] min-w-0 gap-1.5 overflow-auto ${rowSurface} p-[7px] [scrollbar-gutter:stable]`,
   cleanupMetrics:
     "flex min-w-0 flex-wrap items-center gap-1.5 [&_span]:text-[var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_span]:text-[var(--fg-tertiary)] [&_strong]:text-[var(--fg-primary)] max-[620px]:grid max-[620px]:grid-cols-[minmax(0,1fr)]",
-  cleanupActions: "flex min-w-0 flex-wrap items-center gap-1.5 max-[620px]:grid max-[620px]:grid-cols-[minmax(0,1fr)]",
+  cleanupActions: "flex min-w-0 flex-wrap items-center justify-start gap-1.5",
   cleanupPlan:
     "grid min-w-0 gap-[3px] rounded-md border border-[color-mix(in_srgb,var(--state-warning)_34%,var(--border-soft))] bg-[color-mix(in_srgb,var(--state-warning)_6%,var(--vui-surface-row))] p-1.5 [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:text-[var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)] [&_small]:min-w-0 [&_small]:truncate [&_small]:text-[var(--vui-font-xs)] [&_small]:text-[var(--fg-secondary)] [&_li]:min-w-0 [&_li]:truncate [&_li]:text-[var(--vui-font-xs)] [&_li]:text-[var(--fg-secondary)] [&_ul]:m-0 [&_ul]:grid [&_ul]:min-w-0 [&_ul]:gap-0.5 [&_ul]:pl-4",
   metric:
     "grid min-w-0 grid-cols-[minmax(72px,max-content)_minmax(0,1fr)] items-baseline gap-x-[7px] gap-y-0.5 rounded-[7px] border border-[color-mix(in_srgb,var(--border-soft)_90%,var(--vui-surface-base))] bg-[var(--vui-surface-panel)] px-[9px] py-[7px] data-[tone=success]:border-[color-mix(in_srgb,var(--state-success)_38%,var(--border-soft))] data-[tone=warning]:border-[color-mix(in_srgb,var(--state-warning)_42%,var(--border-soft))] data-[tone=error]:border-[color-mix(in_srgb,var(--state-error)_42%,var(--border-soft))] max-[620px]:grid-cols-[82px_minmax(0,1fr)] [&_span]:text-[var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_span]:text-[var(--fg-tertiary)] [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:text-[var(--fg-primary)] [&_small]:col-span-full [&_small]:min-w-0 [&_small]:truncate [&_small]:text-[var(--vui-font-xs)] [&_small]:leading-tight [&_small]:text-[var(--fg-secondary)]",
   notice:
-    `mx-3 mt-1.5 grid gap-0.5 ${panelSurface} px-2 py-1.5 text-[var(--vui-font-xs)] text-vui-fg-secondary data-[tone=success]:border-[color-mix(in_srgb,var(--state-success)_34%,transparent)] data-[tone=success]:text-[var(--state-success)] data-[tone=warning]:border-[color-mix(in_srgb,var(--state-warning)_34%,transparent)] data-[tone=warning]:text-[var(--state-warning)] data-[tone=error]:border-[color-mix(in_srgb,var(--state-error)_34%,transparent)] data-[tone=error]:text-[var(--state-error)] [&_span]:min-w-0 [&_span]:truncate [&_span]:text-[var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary`,
+    `mx-2 mt-1.5 grid gap-0.5 ${panelSurface} px-2 py-1.5 text-[var(--vui-font-xs)] text-vui-fg-secondary data-[tone=success]:border-[color-mix(in_srgb,var(--state-success)_34%,transparent)] data-[tone=success]:text-[var(--state-success)] data-[tone=warning]:border-[color-mix(in_srgb,var(--state-warning)_34%,transparent)] data-[tone=warning]:text-[var(--state-warning)] data-[tone=error]:border-[color-mix(in_srgb,var(--state-error)_34%,transparent)] data-[tone=error]:text-[var(--state-error)] [&_span]:min-w-0 [&_span]:truncate [&_span]:text-[var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary`,
   workspace:
-    "grid min-h-0 grid-cols-[minmax(0,1fr)] auto-rows-auto gap-1.5 overflow-visible px-3 pb-[max(14px,env(safe-area-inset-bottom))] pt-1.5 max-[1200px]:flex max-[1200px]:flex-col",
-  panel: `block min-h-0 min-w-0 ${panelSurface} px-[9px] py-[7px] max-[1200px]:flex-none`,
-  matrixPanel: "col-auto",
+    "grid min-h-0 grid-cols-[minmax(0,1fr)_minmax(320px,0.72fr)] auto-rows-min gap-1.5 overflow-visible px-2 pb-[max(14px,env(safe-area-inset-bottom))] pt-1.5 max-[1200px]:grid-cols-[minmax(0,1fr)]",
+  panel: `block min-h-0 min-w-0 overflow-hidden ${panelSurface} px-2 py-[7px]`,
+  matrixPanel: "col-auto min-h-0",
   panelHeader:
-    "flex min-w-0 items-baseline justify-between gap-2.5 border-b border-[var(--border-soft)] pb-1.5 [&>*]:min-w-0 [&_strong]:flex-auto [&_strong]:truncate [&_strong]:text-right [&_strong]:text-[var(--fg-primary)]",
+    "flex min-h-0 min-w-0 items-baseline justify-between gap-2.5 border-b border-[var(--border-soft)] pb-1.5 [&>*]:min-w-0 [&_strong]:flex-auto [&_strong]:truncate [&_strong]:text-right [&_strong]:text-[var(--fg-primary)]",
   guardStrip:
     "my-1.5 grid min-w-0 grid-cols-[minmax(82px,max-content)_minmax(128px,max-content)_minmax(0,1fr)] items-center gap-[7px] rounded-[7px] border border-[var(--border-soft)] bg-[color-mix(in_srgb,var(--vui-surface-row)_88%,transparent)] px-2 py-1.5 data-[tone=success]:border-[color-mix(in_srgb,var(--state-success)_34%,var(--border-soft))] data-[tone=warning]:border-[color-mix(in_srgb,var(--state-warning)_40%,var(--border-soft))] max-[620px]:grid-cols-[minmax(0,1fr)] [&_span]:text-[var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_span]:text-[var(--fg-tertiary)] [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:text-[var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)] [&_small]:min-w-0 [&_small]:truncate [&_small]:text-[var(--vui-font-xs)] [&_small]:text-[var(--fg-secondary)]",
   specGrid:

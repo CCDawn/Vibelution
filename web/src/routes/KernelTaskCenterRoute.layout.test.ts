@@ -107,6 +107,42 @@ describe("KernelTaskCenterRoute layout contract", () => {
     expect(styles.taskRowClass).toContain("max-w-full");
   });
 
+  it("uses independent scroll regions for the task list, detail ledger, and event stream", () => {
+    expect(styles.routeClass).toContain("overflow-hidden");
+    expect(styles.workspaceClass).toContain("overflow-hidden");
+    expect(styles.taskPaneClass).toContain("overflow-hidden");
+    expect(styles.taskListClass).toContain("overflow-auto");
+    expect(styles.taskListClass).toContain("overflow-x-hidden");
+
+    expect(styles.detailPaneClass).toContain("grid-cols-[minmax(0,1fr)_minmax(300px,0.86fr)]");
+    expect(styles.detailPaneClass).toContain("grid-rows-[minmax(0,1fr)]");
+    expect(styles.detailPaneClass).toContain("overflow-hidden");
+    expect(styles.detailContentClass).toContain("overflow-auto");
+    expect(styles.detailContentClass).toContain("overflow-x-hidden");
+
+    expect(styles.lifecycleSectionClass).toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(styles.lifecycleSectionClass).toContain("overflow-hidden");
+    expect(styles.lifecycleTimelineClass).toContain("overflow-auto");
+    expect(styles.lifecycleTimelineClass).toContain("overflow-x-hidden");
+    expect(styles.deliveryGridClass).toContain("overflow-auto");
+    expect(styles.deliveryGridClass).toContain("overflow-x-hidden");
+    expect(routeSource).toContain("styles.detailContentClass");
+  });
+
+  it("wraps long Kernel ids, refs, paths, and errors inside their panels", () => {
+    expect(styles.detailHeaderClass).toContain("max-w-full");
+    expect(styles.detailTitleClass).toContain("truncate");
+    expect(styles.deliveryRowClass).toContain("max-w-full");
+    expect(styles.deliveryRowTopClass).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(styles.mutedLineClass).toContain("break-words");
+    expect(styles.warningLineClass).toContain("break-words");
+    expect(styles.lifecycleSummaryClass).toContain("break-words");
+    expect(styles.chipCodeClass).toContain("max-w-full");
+    expect(styles.chipCodeClass).toContain("break-all");
+    expect(styles.chipCodeClass).toContain("whitespace-normal");
+    expect(styles.emptyDetailClass).toContain("break-words");
+  });
+
   it("keeps Kernel header actions content-sized", () => {
     expect(styles.headerActionsClass).toContain("flex-wrap");
     expect(styles.statusFilterClass).toContain("w-fit");

@@ -542,43 +542,45 @@ export function SupervisedReviewRoute() {
             <strong>{pendingOnlyCount}</strong>
           </div>
 
-          <div className={styles.bulkToolbar}>
-            <div className={styles.bulkCounter}>
-              <strong>{selectedCount}</strong>
-              <span>{lang === "zh" ? `已选 / 当前待审 ${visiblePendingCount}` : `selected / ${visiblePendingCount} visible pending`}</span>
+          <div className={styles.queueBulkZone}>
+            <div className={styles.bulkToolbar}>
+              <div className={styles.bulkCounter}>
+                <strong>{selectedCount}</strong>
+                <span>{lang === "zh" ? `已选 / 当前待审 ${visiblePendingCount}` : `selected / ${visiblePendingCount} visible pending`}</span>
+              </div>
+              <div className={styles.bulkActions}>
+                <VButton
+                  type="button"
+                  className={styles.compactAction}
+                  isDisabled={visiblePendingCount === 0}
+                  onClick={selectVisiblePendingItems}
+                >
+                  <SquareCheckBig size={14} />
+                  {lang === "zh" ? "选择当前待审" : "Select pending"}
+                </VButton>
+                <VButton
+                  type="button"
+                  className={styles.compactAction}
+                  isDisabled={selectedCount === 0}
+                  onClick={() => setSelectedCandidateIds([])}
+                >
+                  {lang === "zh" ? "清空" : "Clear"}
+                </VButton>
+                <VButton
+                  type="button"
+                  className={`${styles.compactAction} ${styles.dangerAction}`}
+                  isDisabled={selectedCount === 0 || bulkDeleteMutation.isPending}
+                  onClick={() => bulkDeleteMutation.mutate()}
+                >
+                  {bulkDeleteMutation.isPending ? <LoaderCircle size={14} className={styles.spin} /> : <Trash2 size={14} />}
+                  {lang === "zh" ? "丢弃所选" : "Discard selected"}
+                </VButton>
+              </div>
             </div>
-            <div className={styles.bulkActions}>
-              <VButton
-                type="button"
-                className={styles.compactAction}
-                isDisabled={visiblePendingCount === 0}
-                onClick={selectVisiblePendingItems}
-              >
-                <SquareCheckBig size={14} />
-                {lang === "zh" ? "选择当前待审" : "Select pending"}
-              </VButton>
-              <VButton
-                type="button"
-                className={styles.compactAction}
-                isDisabled={selectedCount === 0}
-                onClick={() => setSelectedCandidateIds([])}
-              >
-                {lang === "zh" ? "清空" : "Clear"}
-              </VButton>
-              <VButton
-                type="button"
-                className={`${styles.compactAction} ${styles.dangerAction}`}
-                isDisabled={selectedCount === 0 || bulkDeleteMutation.isPending}
-                onClick={() => bulkDeleteMutation.mutate()}
-              >
-                {bulkDeleteMutation.isPending ? <LoaderCircle size={14} className={styles.spin} /> : <Trash2 size={14} />}
-                {lang === "zh" ? "丢弃所选" : "Discard selected"}
-              </VButton>
-            </div>
-          </div>
 
-          {bulkFeedback ? <p className={styles.feedbackText}>{bulkFeedback}</p> : null}
-          {bulkError ? <p className={styles.errorText}>{bulkError}</p> : null}
+            {bulkFeedback ? <p className={styles.feedbackText}>{bulkFeedback}</p> : null}
+            {bulkError ? <p className={styles.errorText}>{bulkError}</p> : null}
+          </div>
 
           {visibleItems.length === 0 ? (
             <div className={styles.emptyState}>
@@ -752,7 +754,7 @@ export function SupervisedReviewRoute() {
                 </div>
               </section>
 
-              <section className={styles.detailSection}>
+              <section className={styles.decisionSection}>
                 <div className={styles.sectionHeader}>
                   <div>
                     <p className={styles.eyebrow}>{lang === "zh" ? "裁决" : "Decision"}</p>
