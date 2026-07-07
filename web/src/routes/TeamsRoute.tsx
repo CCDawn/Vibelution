@@ -4927,7 +4927,11 @@ export function TeamsRoute({
     queryFn: () => fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`),
     enabled: Boolean(effectiveTeamId),
   });
-  const selectedTeam = teamDetailQuery.data ?? visibleTeams.find((team) => team.teamId === effectiveTeamId) ?? null;
+  const selectedTeamReference = visibleTeams.find((team) => team.teamId === effectiveTeamId) ?? null;
+  const selectedTeam = teamDetailQuery.data ?? selectedTeamReference ?? null;
+  const selectedTeamDetailLoading = Boolean(
+    effectiveTeamId && selectedTeamReference && !teamDetailQuery.data && teamDetailQuery.isPending
+  );
   const teamCanvasQuery = useQuery({
     queryKey: queryKeys.teamCanvas(effectiveTeamId || "none"),
     queryFn: () => fetchJson<TeamOrganizationCanvas>(`/api/teams/${encodeURIComponent(effectiveTeamId)}/canvas`),
@@ -12249,7 +12253,12 @@ export function TeamsRoute({
   const teamListInitialLoading = teamsQuery.isPending && !teamsQuery.data;
   const teamListUnavailable = teamsQuery.isError && !teamsQuery.data;
   const teamListLoading = teamListInitialLoading;
-  const showTeamUnavailableSurface = !teamListInitialLoading && !hasTeams;
+  const showTeamUnavailableSurface = teamListInitialLoading || !hasTeams;
+  const selectedTeamDetailUnavailable = Boolean(
+    effectiveTeamId && selectedTeamReference && !teamDetailQuery.data && teamDetailQuery.isError
+  );
+  const showTeamLoadingSurface = !showTeamUnavailableSurface && selectedTeamDetailLoading;
+  const showTeamDetailUnavailableSurface = !showTeamUnavailableSurface && selectedTeamDetailUnavailable;
   const teamUnavailableTitle = teamListUnavailable
     ? (lang === "zh" ? "团队数据不可用" : "Team data unavailable")
     : teamListLoading
@@ -12263,6 +12272,23 @@ export function TeamsRoute({
       ? (lang === "zh" ? "正在连接团队索引，页面会在数据返回后切换到工作区。" : "Connecting to the team index. The workspace opens once data is available.")
       : (lang === "zh" ? "暂时没有可展示团队。请确认 AI 搜索范围团队、知识库扩充团队和挑战杯ai科研团队已初始化。" : "No visible teams are available. Confirm the AI search, knowledge expansion, and research teams are initialized.");
   const teamUnavailableDetail = teamsQuery.error instanceof Error ? teamsQuery.error.message : "";
+  const teamWorkspaceLoadingTitle = lang === "zh" ? "正在读取团队详情" : "Loading team details";
+  const teamWorkspaceLoadingMessage = selectedTeamReference
+    ? (lang === "zh"
+      ? `正在打开 ${selectedTeamReference.name} 的完整工作区数据，详情、组织画布和科研工作流会一起就绪后显示。`
+      : `Opening the complete workspace for ${selectedTeamReference.name}. Details, organization canvas, and research workflow panels appear together.`)
+    : (lang === "zh"
+      ? "正在打开团队工作区，详情、组织画布和科研工作流会一起就绪后显示。"
+      : "Opening the team workspace. Details, organization canvas, and research workflow panels appear together.");
+  const teamWorkspaceUnavailableTitle = lang === "zh" ? "团队详情不可用" : "Team details unavailable";
+  const teamWorkspaceUnavailableMessage = selectedTeamReference
+    ? (lang === "zh"
+      ? `${selectedTeamReference.name} 已出现在团队列表里，但详情接口没有返回完整工作区数据。请刷新团队，或通过 Launcher 恢复后端 API。`
+      : `${selectedTeamReference.name} is present in the team list, but the detail API did not return the complete workspace data. Refresh teams or restore the backend API from Launcher.`)
+    : (lang === "zh"
+      ? "团队详情接口没有返回完整工作区数据。请刷新团队，或通过 Launcher 恢复后端 API。"
+      : "The team detail API did not return the complete workspace data. Refresh teams or restore the backend API from Launcher.");
+  const teamWorkspaceUnavailableDetail = teamDetailQuery.error instanceof Error ? teamDetailQuery.error.message : "";
   const teamContextMeta = selectedTeam?.name
     ?? (teamListInitialLoading
       ? (lang === "zh" ? "正在读取团队" : "Loading teams")
@@ -12526,7 +12552,7 @@ export function TeamsRoute({
             </VButton>
           </div>
         </header>
-        {researchWorkflowTeamSelected ? (
+        {researchWorkflowTeamSelected && !showTeamLoadingSurface && !showTeamDetailUnavailableSurface ? (
           <TeamSourceCollectionStandaloneStagePanel
             commandAriaLabel={lang === "zh" ? "知识搜集操作台" : "Knowledge collection command bar"}
             commandTone={sourceCollectionConsoleState}
@@ -12547,9 +12573,19 @@ export function TeamsRoute({
         ) : (
           <main className={styles.sourceCollectionPageBody}>
             <section className={styles.sourceCollectionUnavailable}>
-              <strong>{lang === "zh" ? "正在读取 挑战杯ai科研团队" : "Loading Challenge Cup AI research team"}</strong>
+              <strong>
+                {showTeamLoadingSurface
+                  ? teamWorkspaceLoadingTitle
+                  : showTeamDetailUnavailableSurface
+                    ? teamWorkspaceUnavailableTitle
+                    : (lang === "zh" ? "正在读取 挑战杯ai科研团队" : "Loading Challenge Cup AI research team")}
+              </strong>
               <span>
-                {teamDetailQuery.error instanceof Error
+                {showTeamLoadingSurface
+                  ? teamWorkspaceLoadingMessage
+                  : showTeamDetailUnavailableSurface
+                  ? (teamWorkspaceUnavailableDetail || teamWorkspaceUnavailableMessage)
+                  : teamDetailQuery.error instanceof Error
                   ? teamDetailQuery.error.message
                   : (lang === "zh" ? "这个一级页只绑定 research-team，不会展示给普通团队。" : "This workspace is bound to research-team and is hidden from ordinary teams.")}
               </span>
@@ -12626,6 +12662,42 @@ export function TeamsRoute({
               <VNativeButton type="button" onClick={() => void teamsQuery.refetch()} disabled={teamsQuery.isFetching}>
                 <RefreshCw size={14} />
                 {teamsQuery.isFetching ? (lang === "zh" ? "刷新中" : "Refreshing") : (lang === "zh" ? "刷新" : "Refresh")}
+              </VNativeButton>
+            </div>
+          </section>
+        </main>
+      ) : showTeamLoadingSurface ? (
+        <main className={styles.teamUnavailableSurface} aria-label={teamWorkspaceLoadingTitle}>
+          <section className={styles.teamUnavailableCard} title={teamWorkspaceLoadingMessage}>
+            <div className={styles.sectionTitle}>
+              <strong>{teamWorkspaceLoadingTitle}</strong>
+              <span>{lang === "zh" ? "详情读取中" : "details loading"}</span>
+            </div>
+            <p>{teamWorkspaceLoadingMessage}</p>
+            <div className={styles.teamUnavailableMeta} aria-label={lang === "zh" ? "团队详情读取状态" : "Team detail loading status"}>
+              <span>{lang === "zh" ? "团队" : "Team"} <strong>{selectedTeamReference?.name ?? effectiveTeamId}</strong></span>
+              <span>{lang === "zh" ? "详情" : "Details"} <strong>{teamDetailLoadMode}</strong></span>
+              <span>{lang === "zh" ? "来源" : "Source"} <strong>Team detail API</strong></span>
+            </div>
+          </section>
+        </main>
+      ) : showTeamDetailUnavailableSurface ? (
+        <main className={styles.teamUnavailableSurface} aria-label={teamWorkspaceUnavailableTitle}>
+          <section className={styles.teamUnavailableCard} title={teamWorkspaceUnavailableDetail || teamWorkspaceUnavailableMessage}>
+            <div className={styles.sectionTitle}>
+              <strong>{teamWorkspaceUnavailableTitle}</strong>
+              <span>{lang === "zh" ? "详情不可用" : "details unavailable"}</span>
+            </div>
+            <p>{teamWorkspaceUnavailableDetail || teamWorkspaceUnavailableMessage}</p>
+            <div className={styles.teamUnavailableMeta} aria-label={lang === "zh" ? "团队详情错误状态" : "Team detail error status"}>
+              <span>{lang === "zh" ? "团队" : "Team"} <strong>{selectedTeamReference?.name ?? effectiveTeamId}</strong></span>
+              <span>{lang === "zh" ? "详情" : "Details"} <strong>{teamDetailLoadMode}</strong></span>
+              <span>{lang === "zh" ? "状态" : "Status"} <strong>{lang === "zh" ? "失败" : "failed"}</strong></span>
+            </div>
+            <div className={styles.teamUnavailableActions}>
+              <VNativeButton type="button" onClick={() => void teamDetailQuery.refetch()} disabled={teamDetailQuery.isFetching}>
+                <RefreshCw size={14} />
+                {teamDetailQuery.isFetching ? (lang === "zh" ? "刷新中" : "Refreshing") : (lang === "zh" ? "刷新详情" : "Refresh details")}
               </VNativeButton>
             </div>
           </section>
