@@ -744,6 +744,15 @@ def _live_output_checkpoint_payload(state: "SessionLiveOutputState") -> dict[str
     )
     if timeline_items:
         payload["timelineItems"] = timeline_items
+    codex_transcript = _build_codex_transcript_projection(
+        message_id=_live_assistant_message_id(session_id, turn_id) if session_id else "",
+        content=content,
+        feedback_events=feedback_events,
+        tool_calls=payload.get("toolCalls") or [],
+        streaming=True,
+    )
+    if codex_transcript:
+        payload["codexTranscript"] = codex_transcript
     return payload
 
 
@@ -7909,6 +7918,15 @@ def _normalize_messages(conversation_id: str, items: Any) -> list[dict[str, Any]
         )
         if timeline_items:
             entry["timelineItems"] = timeline_items
+        codex_transcript = _build_codex_transcript_projection(
+            message_id=entry["id"],
+            content=content,
+            feedback_events=timeline_feedback_events,
+            tool_calls=tool_calls,
+            streaming=bool(raw.get("streaming")),
+        )
+        if codex_transcript:
+            entry["codexTranscript"] = codex_transcript
         if attachments:
             entry["attachments"] = attachments
         if references:
@@ -17082,6 +17100,501 @@ def _build_message_timeline_items(
     )
 
 
+def _build_codex_transcript_projection(
+    *,
+    message_id: str,
+    content: Any = "",
+    feedback_events: Any = None,
+    tool_calls: Any = None,
+    streaming: bool = False,
+) -> dict[str, Any] | None:
+    normalized_message_id = str(message_id or "").strip()
+    if not normalized_message_id:
+        return None
+    normalized_feedback_events = _normalize_message_feedback_events(feedback_events or [])
+    normalized_tool_calls = _normalize_message_tool_calls(tool_calls or [])
+    content_text = _sanitize_message_content("assistant", content)
+    operation_sources = _codex_transcript_operation_sources(
+        normalized_message_id,
+        normalized_feedback_events,
+        normalized_tool_calls,
+    )
+    cells: list[dict[str, Any]] = []
+    lifecycle = _empty_codex_tool_lifecycle_projection()
+    rollout_events: list[dict[str, Any]] = []
+
+    for ordinal, source in enumerate(operation_sources):
+        cell, source_lifecycle, source_events = _codex_transcript_cell_from_operation_source(
+            normalized_message_id,
+            source,
+            ordinal,
+        )
+        if cell:
+            cells.append(cell)
+        _extend_codex_tool_lifecycle_projection(lifecycle, source_lifecycle)
+        rollout_events.extend(source_events)
+
+    if content_text:
+        cells.append(
+            _compact_codex_record(
+                {
+                    "id": f"{normalized_message_id}-assistant-markdown",
+                    "kind": "assistant_markdown",
+                    "messageId": normalized_message_id,
+                    "status": "running" if streaming else "completed",
+                    "tone": "running" if streaming else "neutral",
+                    "text": content_text,
+                }
+            )
+        )
+    if streaming and not content_text and any(
+        cell.get("status") in {"pending", "running"} for cell in cells
+    ):
+        cells.append(
+            {
+                "id": f"{normalized_message_id}-stream-tail",
+                "kind": "stream_tail",
+                "messageId": normalized_message_id,
+                "status": "running",
+                "tone": "running",
+            }
+        )
+
+    if not cells and not rollout_events and not any(lifecycle.values()):
+        return None
+    return _compact_codex_record(
+        {
+            "version": 1,
+            "source": "native",
+            "messageId": normalized_message_id,
+            "streaming": bool(streaming),
+            "cells": cells,
+            "toolCalls": lifecycle["toolCalls"],
+            "terminalOperations": lifecycle["terminalOperations"],
+            "terminalSessions": lifecycle["terminalSessions"],
+            "modelObservations": lifecycle["modelObservations"],
+            "rolloutEvents": rollout_events,
+        }
+    )
+
+
+def _codex_transcript_operation_sources(
+    message_id: str,
+    feedback_events: list[dict[str, Any]],
+    tool_calls: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    sources: list[dict[str, Any]] = []
+    for event in feedback_events:
+        kind = str(event.get("kind") or "").strip().lower()
+        if kind == "assistant_text":
+            continue
+        source = dict(event)
+        source["_operationId"] = _codex_operation_id(message_id, source, len(sources) + 1)
+        source["_sourceKind"] = "feedback"
+        sources.append(source)
+    if sources:
+        return sources
+    for index, tool_call in enumerate(tool_calls, start=1):
+        source = dict(tool_call)
+        source.setdefault("kind", "tool")
+        source["_operationId"] = _codex_operation_id(message_id, source, index)
+        source["_sourceKind"] = "toolCall"
+        source["_sequence"] = index
+        sources.append(source)
+    return sources
+
+
+def _codex_operation_id(message_id: str, source: dict[str, Any], sequence: int) -> str:
+    raw_id = str(
+        source.get("id")
+        or source.get("toolCallId")
+        or source.get("tool_call_id")
+        or source.get("taskId")
+        or ""
+    ).strip()
+    if raw_id:
+        return raw_id
+    normalized_sequence = _coerce_nonnegative_int(source.get("sequence") or source.get("_sequence") or sequence)
+    if normalized_sequence > 0:
+        return f"{message_id}-feedback-{normalized_sequence}"
+    name = str(source.get("name") or "operation").strip() or "operation"
+    return f"{message_id}-{name}-{sequence}"
+
+
+def _codex_transcript_cell_from_operation_source(
+    message_id: str,
+    source: dict[str, Any],
+    ordinal: int,
+) -> tuple[dict[str, Any] | None, dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
+    operation_id = str(source.get("_operationId") or "").strip()
+    status = _codex_lifecycle_status(source.get("status") or source.get("semanticStatus"))
+    kind = str(source.get("kind") or "tool").strip().lower()
+    title = str(source.get("name") or source.get("label") or "").strip()
+    summary = _codex_operation_summary(source, failed=status == "failed")
+    cell_kind = _codex_cell_kind(kind, status)
+    cell = _compact_codex_record(
+        {
+            "id": f"{message_id}-{operation_id}",
+            "kind": cell_kind,
+            "messageId": message_id,
+            "status": status,
+            "tone": _codex_cell_tone(status),
+            "title": title or _codex_cell_default_title(cell_kind),
+            "summary": summary,
+            "operationIds": [operation_id] if operation_id else [],
+            "sourceItemId": operation_id,
+        }
+    )
+    if kind != "tool":
+        return cell, _empty_codex_tool_lifecycle_projection(), []
+    lifecycle = _codex_tool_lifecycle_projection_from_source(source, operation_id, ordinal, status, title, summary)
+    rollout_events = _codex_rollout_events_from_lifecycle(
+        lifecycle["toolCalls"][0],
+        lifecycle["terminalOperations"][0] if lifecycle["terminalOperations"] else None,
+    ) if lifecycle["toolCalls"] else []
+    if rollout_events:
+        cell["rolloutTraceEvents"] = rollout_events
+    if any(lifecycle.values()):
+        cell["toolLifecycleModel"] = lifecycle
+    return cell, lifecycle, rollout_events
+
+
+def _codex_lifecycle_status(value: Any) -> str:
+    normalized = _normalize_tool_call_status(value, default="done")
+    if normalized in {"failed", "error", "blocked", "cancelled", "timeout", "timed_out"}:
+        return "failed"
+    if normalized in {"degraded", "fallback", "partial", "recovered", "unavailable"}:
+        return "degraded"
+    if normalized in {"queued", "pending", "submitted"}:
+        return "pending"
+    if normalized in {"running", "thinking", "tooling", "answering", "in_progress"}:
+        return "running"
+    return "completed"
+
+
+def _codex_cell_tone(status: str) -> str:
+    if status == "failed":
+        return "error"
+    if status == "degraded":
+        return "warning"
+    if status in {"running", "pending"}:
+        return "running"
+    return "neutral"
+
+
+def _codex_cell_kind(kind: str, status: str) -> str:
+    if status == "failed":
+        return "error_notice"
+    if kind == "thought":
+        return "reasoning_summary"
+    if kind == "status":
+        return "status"
+    return "tool_call"
+
+
+def _codex_cell_default_title(kind: str) -> str:
+    if kind == "reasoning_summary":
+        return "Reasoning"
+    if kind == "status":
+        return "Status"
+    if kind == "error_notice":
+        return "Failed"
+    return "Tool call"
+
+
+def _codex_operation_summary(source: dict[str, Any], *, failed: bool) -> str:
+    if failed:
+        return _trim_tool_detail_text(
+            source.get("error") or source.get("summary") or source.get("resultPreview") or "",
+            max_chars=1200,
+            max_lines=10,
+        )
+    return _trim_tool_detail_text(
+        source.get("summary") or source.get("resultPreview") or source.get("content") or "",
+        max_chars=1200,
+        max_lines=10,
+    )
+
+
+def _empty_codex_tool_lifecycle_projection() -> dict[str, list[dict[str, Any]]]:
+    return {
+        "toolCalls": [],
+        "terminalOperations": [],
+        "terminalSessions": [],
+        "modelObservations": [],
+    }
+
+
+def _extend_codex_tool_lifecycle_projection(
+    target: dict[str, list[dict[str, Any]]],
+    source: dict[str, list[dict[str, Any]]],
+) -> None:
+    for key in ("toolCalls", "terminalOperations", "terminalSessions", "modelObservations"):
+        target[key].extend(source.get(key) or [])
+    _merge_codex_terminal_sessions(target)
+
+
+def _merge_codex_terminal_sessions(lifecycle: dict[str, list[dict[str, Any]]]) -> None:
+    sessions_by_id: dict[str, dict[str, Any]] = {}
+    for session in lifecycle.get("terminalSessions") or []:
+        terminal_id = str(session.get("terminalId") or "").strip()
+        if not terminal_id:
+            continue
+        existing = sessions_by_id.get(terminal_id)
+        if existing is None:
+            sessions_by_id[terminal_id] = {
+                **session,
+                "operationIds": list(session.get("operationIds") or []),
+            }
+            continue
+        for operation_id in session.get("operationIds") or []:
+            if operation_id not in existing["operationIds"]:
+                existing["operationIds"].append(operation_id)
+        existing["status"] = _merge_codex_lifecycle_status(existing.get("status"), session.get("status"))
+    lifecycle["terminalSessions"] = list(sessions_by_id.values())
+
+
+def _merge_codex_lifecycle_status(left: Any, right: Any) -> str:
+    statuses = {_codex_lifecycle_status(left), _codex_lifecycle_status(right)}
+    for status in ("running", "pending", "failed", "degraded"):
+        if status in statuses:
+            return status
+    return "completed"
+
+
+def _codex_tool_lifecycle_projection_from_source(
+    source: dict[str, Any],
+    operation_id: str,
+    ordinal: int,
+    status: str,
+    title: str,
+    summary: str,
+) -> dict[str, list[dict[str, Any]]]:
+    lifecycle = _empty_codex_tool_lifecycle_projection()
+    if not operation_id:
+        return lifecycle
+    tool_call_id = f"tool_call:{operation_id}"
+    runtime_kind = _codex_runtime_kind(source)
+    terminal_operation_id = f"terminal_operation:{ordinal}" if runtime_kind == "terminal" else ""
+    tool_call = _compact_codex_record(
+        {
+            "toolCallId": tool_call_id,
+            "rawOperationId": operation_id,
+            "status": status,
+            "title": title or str(source.get("name") or "Tool call").strip() or "Tool call",
+            "summary": summary,
+            "rawToolName": str(source.get("name") or "").strip(),
+            "runtimeKind": runtime_kind,
+            "sequence": _coerce_nonnegative_int(source.get("sequence") or source.get("_sequence")) or None,
+            "timestamp": str(source.get("timestamp") or "").strip(),
+            "terminalOperationId": terminal_operation_id,
+            "tracePath": str(source.get("tracePath") or "").strip(),
+            "error": _trim_tool_detail_text(source.get("error") or "", max_chars=1200, max_lines=10),
+        }
+    )
+    lifecycle["toolCalls"].append(tool_call)
+    if runtime_kind != "terminal":
+        return lifecycle
+    terminal_id = f"terminal:{_codex_terminal_session_key(source, operation_id)}"
+    terminal_operation = _compact_codex_record(
+        {
+            "operationId": terminal_operation_id,
+            "toolCallId": tool_call_id,
+            "terminalId": terminal_id,
+            "kind": _codex_terminal_operation_kind(source),
+            "status": status,
+            "request": _codex_terminal_request(source, summary, title),
+            "result": None if status in {"pending", "running"} else _codex_terminal_result(source, summary, status),
+            "durationSeconds": _coerce_tool_number(
+                _first_present_mapping_value(source, ("durationSeconds", "duration_seconds"))
+            ),
+            "rawOperationId": operation_id,
+            "tracePath": str(source.get("tracePath") or "").strip(),
+        }
+    )
+    lifecycle["terminalOperations"].append(terminal_operation)
+    lifecycle["terminalSessions"].append(
+        {
+            "terminalId": terminal_id,
+            "createdByOperationId": terminal_operation_id,
+            "operationIds": [terminal_operation_id],
+            "status": status,
+        }
+    )
+    lifecycle["modelObservations"].append(
+        {
+            "operationId": terminal_operation_id,
+            "toolCallId": tool_call_id,
+            "source": "DirectToolCall",
+            "callItemIds": [tool_call_id],
+            "outputItemIds": [] if status in {"pending", "running"} else [f"{tool_call_id}:output"],
+        }
+    )
+    return lifecycle
+
+
+def _codex_runtime_kind(source: dict[str, Any]) -> str:
+    haystack = " ".join(
+        str(source.get(key) or "")
+        for key in ("name", "label", "summary", "resultPreview", "error")
+    ).lower()
+    if any(
+        marker in haystack
+        for marker in (
+            "cli_tool",
+            "exec",
+            "shell",
+            "command",
+            "powershell",
+            "cmd.exe",
+            "bash",
+            "npm ",
+            "pytest",
+            "vitest",
+            "rg ",
+            "write_stdin",
+            "命令",
+        )
+    ):
+        return "terminal"
+    return "tool"
+
+
+def _codex_terminal_session_key(source: dict[str, Any], operation_id: str) -> str:
+    arguments = source.get("arguments") if isinstance(source.get("arguments"), dict) else {}
+    for key in ("session_id", "sessionId", "terminal_id", "terminalId", "process_id", "processId"):
+        value = arguments.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return str(value)
+    return operation_id
+
+
+def _codex_terminal_operation_kind(source: dict[str, Any]) -> str:
+    name = str(source.get("name") or source.get("label") or "").strip().lower()
+    return "WriteStdin" if "write_stdin" in name else "ExecCommand"
+
+
+def _codex_terminal_request(source: dict[str, Any], summary: str, title: str) -> dict[str, Any]:
+    arguments = source.get("arguments") if isinstance(source.get("arguments"), dict) else {}
+    display_command = _trim_tool_detail_text(
+        arguments.get("cmd")
+        or arguments.get("command")
+        or source.get("resultPreview")
+        or summary
+        or title,
+        max_chars=1200,
+        max_lines=4,
+    )
+    command = arguments.get("command")
+    if isinstance(command, list):
+        command_value = [
+            _trim_tool_detail_text(item, max_chars=240, max_lines=1)
+            for item in command[:12]
+        ]
+    elif display_command:
+        command_value = [display_command]
+    else:
+        command_value = []
+    return _compact_codex_record(
+        {
+            "displayCommand": display_command,
+            "command": command_value,
+            "cwd": _trim_tool_detail_text(arguments.get("cwd") or "", max_chars=420, max_lines=1),
+        }
+    )
+
+
+def _codex_terminal_result(source: dict[str, Any], summary: str, status: str) -> dict[str, Any]:
+    result_preview = _trim_tool_detail_text(source.get("resultPreview") or "", max_chars=1200, max_lines=10)
+    error = _trim_tool_detail_text(source.get("error") or "", max_chars=1200, max_lines=10)
+    return _compact_codex_record(
+        {
+            "exitCode": _codex_exit_code(source),
+            "stdout": "" if status == "failed" else (result_preview or summary),
+            "stderr": error if error else (summary if status == "failed" else ""),
+            "formattedOutput": error or result_preview or summary,
+            "timedOut": bool(source.get("timedOut")) if "timedOut" in source else None,
+        }
+    )
+
+
+def _codex_exit_code(source: dict[str, Any]) -> int | float | None:
+    value = _coerce_tool_number(_first_present_mapping_value(source, ("exitCode", "exit_code")))
+    return value
+
+
+def _codex_rollout_events_from_lifecycle(
+    tool_call: dict[str, Any],
+    terminal_operation: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    status = _codex_lifecycle_status(tool_call.get("status"))
+    start_status = "pending" if status == "pending" else "running"
+    events = [
+        _codex_rollout_event(tool_call, "ToolCallStarted", start_status, terminal_operation),
+        _codex_rollout_event(tool_call, "RuntimeStarted", start_status, terminal_operation),
+    ]
+    if status in {"pending", "running"}:
+        return events
+    events.extend(
+        [
+            _codex_rollout_event(tool_call, "RuntimeEnded", status, terminal_operation),
+            _codex_rollout_event(tool_call, "ToolCallEnded", status, terminal_operation),
+        ]
+    )
+    return events
+
+
+def _codex_rollout_event(
+    tool_call: dict[str, Any],
+    kind: str,
+    status: str,
+    terminal_operation: dict[str, Any] | None,
+) -> dict[str, Any]:
+    result = terminal_operation.get("result") if isinstance(terminal_operation, dict) else {}
+    return _compact_codex_record(
+        {
+            "id": f"{tool_call.get('rawOperationId')}-{_codex_rollout_event_suffix(kind)}",
+            "kind": kind,
+            "operationId": tool_call.get("rawOperationId"),
+            "toolCallId": tool_call.get("toolCallId"),
+            "terminalOperationId": (terminal_operation or {}).get("operationId"),
+            "terminalId": (terminal_operation or {}).get("terminalId"),
+            "sequence": tool_call.get("sequence"),
+            "timestamp": tool_call.get("timestamp"),
+            "status": status,
+            "title": tool_call.get("title"),
+            "summary": tool_call.get("summary"),
+            "runtimeKind": tool_call.get("runtimeKind") or "tool",
+            "rawToolName": tool_call.get("rawToolName"),
+            "durationSeconds": (terminal_operation or {}).get("durationSeconds"),
+            "exitCode": result.get("exitCode") if isinstance(result, dict) else None,
+            "timedOut": result.get("timedOut") if isinstance(result, dict) else None,
+            "tracePath": (terminal_operation or {}).get("tracePath") or tool_call.get("tracePath"),
+            "error": tool_call.get("error") or (result.get("stderr") if isinstance(result, dict) else ""),
+            "modelObservationSource": "DirectToolCall" if terminal_operation else None,
+        }
+    )
+
+
+def _codex_rollout_event_suffix(kind: str) -> str:
+    return {
+        "ToolCallStarted": "tool-call-started",
+        "RuntimeStarted": "runtime-started",
+        "RuntimeEnded": "runtime-ended",
+        "ToolCallEnded": "tool-call-ended",
+    }.get(kind, kind)
+
+
+def _compact_codex_record(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in record.items()
+        if value is not None and value != "" and value != [] and value != {}
+    }
+
+
 def _normalize_session_turn_error(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
@@ -18379,6 +18892,15 @@ def _build_live_output_message(session_id: str) -> dict[str, Any] | None:
     )
     if timeline_items:
         message["timelineItems"] = timeline_items
+    codex_transcript = _build_codex_transcript_projection(
+        message_id=message["id"],
+        content=content,
+        feedback_events=feedback_events,
+        tool_calls=tool_calls,
+        streaming=True,
+    )
+    if codex_transcript:
+        message["codexTranscript"] = codex_transcript
     return message
 
 
@@ -18470,7 +18992,7 @@ def _set_session_live_output(
                 )
             _SESSION_LIVE_OUTPUTS.pop(session_id, None)
             delete_checkpoint = True
-        elif content is not _UNSET or thought is not _UNSET or feedback_events is not _UNSET:
+        elif content is not _UNSET or thought is not _UNSET or feedback_events is not _UNSET or tool_calls is not _UNSET:
             assistant_delta_state = SessionLiveOutputState(
                 session_id=state.session_id,
                 turn_id=state.turn_id,
@@ -18481,6 +19003,7 @@ def _set_session_live_output(
                 content_delta=content_delta,
                 replace_thought=replace_thought,
                 replace_content=replace_content,
+                tool_calls=list(state.tool_calls or []),
                 feedback_events=list(state.feedback_events or []),
                 updated_at=state.updated_at,
             )
@@ -20625,6 +21148,15 @@ def _publish_session_assistant_delta(
     }
     if include_feedback_events:
         event["feedbackEvents"] = list(state.feedback_events or [])
+    codex_transcript = _build_codex_transcript_projection(
+        message_id=_live_assistant_message_id(session_id, state.turn_id),
+        content=state.content,
+        feedback_events=state.feedback_events,
+        tool_calls=state.tool_calls,
+        streaming=not done,
+    )
+    if codex_transcript:
+        event["codexTranscript"] = codex_transcript
     recovery_event = _assistant_delta_recovery_stream_event(
         {
             **event,
@@ -20722,6 +21254,11 @@ def _merge_session_assistant_delta_events(
         merged["feedbackEvents"] = feedback_events
     else:
         merged.pop("feedbackEvents", None)
+    codex_transcript = current.get("codexTranscript") or previous.get("codexTranscript")
+    if codex_transcript:
+        merged["codexTranscript"] = codex_transcript
+    else:
+        merged.pop("codexTranscript", None)
     return merged
 
 

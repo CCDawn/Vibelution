@@ -100,6 +100,7 @@ import {
   type AgentMessageTimelineItem,
 } from "./agentMessageTimeline";
 import { buildCodexTranscriptCells, type CodexTranscriptCell } from "./codexTranscriptCells";
+import { resolveCodexTranscriptSurface, type CodexTranscriptSurface } from "./codexNativeTranscriptSurface";
 import { buildCodexRolloutTraceEvents, type CodexRolloutTraceEvent } from "./codexRolloutTrace";
 import {
   preserveConversationExpansionDefaults,
@@ -603,16 +604,21 @@ export function ConversationView({
     }
     return itemsByMessageId;
   }, [activeConversationMessagesById, agentOperationGroupsByMessageId, agentThread, lang]);
-  const agentCodexCellsByMessageId = useMemo(() => {
-    const cellsByMessageId = new Map<string, CodexTranscriptCell[]>();
+  const agentCodexSurfacesByMessageId = useMemo(() => {
+    const surfacesByMessageId = new Map<string, CodexTranscriptSurface>();
     for (const agentMessage of agentThread.messages) {
-      cellsByMessageId.set(agentMessage.id, buildCodexTranscriptCells(agentMessage, {
+      const legacyCells = buildCodexTranscriptCells(agentMessage, {
         operations: agentOperationGroupsByMessageId.get(agentMessage.id)?.timeline,
         timelineItems: agentTimelineItemsByMessageId.get(agentMessage.id),
-      }));
+      });
+      const sourceMessage = activeConversationMessagesById.get(agentMessage.source.id);
+      if (!sourceMessage) {
+        continue;
+      }
+      surfacesByMessageId.set(agentMessage.id, resolveCodexTranscriptSurface(sourceMessage, legacyCells));
     }
-    return cellsByMessageId;
-  }, [agentOperationGroupsByMessageId, agentThread, agentTimelineItemsByMessageId]);
+    return surfacesByMessageId;
+  }, [activeConversationMessagesById, agentOperationGroupsByMessageId, agentThread, agentTimelineItemsByMessageId]);
   const imageArtifactUrlsBeforeMessage = useMemo(() => {
     const urlsByMessageId = new Map<string, Set<string>>();
     const seenImageUrls = new Set<string>();
@@ -1471,7 +1477,13 @@ export function ConversationView({
     );
   }
 
-  function shouldRenderCodexTranscriptSurface(message: ConversationMessage) {
+  function shouldRenderCodexTranscriptSurface(
+    message: ConversationMessage,
+    surface?: CodexTranscriptSurface,
+  ) {
+    if (surface?.mode === "native") {
+      return surface.cells.length > 0;
+    }
     if (answerOnlyProcessMode || message.streaming) {
       return false;
     }
@@ -2660,7 +2672,7 @@ export function ConversationView({
                     ? agentRenderStatesByMessageId.get(activeTimelineMessages[index - 1].id)
                     : undefined
                 }
-                codexTranscriptCells={agentCodexCellsByMessageId.get(message.id)}
+                codexTranscriptCells={agentCodexSurfacesByMessageId.get(message.id)?.cells}
                 rowIdentity={activeTimelineRowIdentities[index]}
                 defaultResponseExpanded={defaultExpandedResponseIds.has(message.id)}
                 latestUserMessageId={latestUserMessageId}
@@ -2752,7 +2764,9 @@ export function ConversationView({
               timelineOptions,
               message.timelineItems,
             );
-            const codexTranscriptCells = agentCodexCellsByMessageId.get(agentMessage.id) ?? [];
+            const codexTranscriptSurface = agentCodexSurfacesByMessageId.get(agentMessage.id);
+            const codexTranscriptCells = codexTranscriptSurface?.cells ?? [];
+            const nativeCodexTranscriptPrimary = codexTranscriptSurface?.mode === "native";
             const hasAgentMessageTimeline =
               message.role === "assistant"
               && hasFeedbackTimeline
@@ -2778,7 +2792,7 @@ export function ConversationView({
               ? getCachedResponseSegments(responseText)
               : [];
             const codexTranscriptNode = (
-              shouldRenderCodexTranscriptSurface(message)
+              shouldRenderCodexTranscriptSurface(message, codexTranscriptSurface)
               && !turnErrorMessage
               && !agentInboxMessage
               && !groupTranscriptMessage
@@ -2851,7 +2865,7 @@ export function ConversationView({
               }
               return renderAgentProcessDetails(true);
             };
-            const responseSectionNode = showResponseBlock && !isStreamingStatusPlaceholder && !timelineRendersAssistantText ? (
+            const responseSectionNode = !codexTranscriptSurface?.suppressLegacyResponse && showResponseBlock && !isStreamingStatusPlaceholder && !timelineRendersAssistantText ? (
               <AgentResponseSectionView
                 answerKey={rowIdentity.answerKey}
                 answerContentSectionIds={agentRenderState.answerContentSectionIds}
@@ -2870,7 +2884,7 @@ export function ConversationView({
                   )}
               </AgentResponseSectionView>
             ) : null;
-            const processNode = answerOnlyProcessMode && !timelineRendersAssistantText ? (
+            const processNode = codexTranscriptSurface?.suppressLegacyProcess ? null : answerOnlyProcessMode && !timelineRendersAssistantText ? (
               renderAnswerOnlyProcessGroup(
                 message.id,
                 operationGroups.timeline,
@@ -2889,7 +2903,7 @@ export function ConversationView({
                 agentRenderState.processSectionIds,
               )
             ) : renderAgentProcessDetails();
-            const turnStatusNode = noFinalAnswerStatusText ? (
+            const turnStatusNode = !codexTranscriptSurface?.suppressLegacyTurnStatus && noFinalAnswerStatusText ? (
               <div className={styles.turnStatusNote} role="status" aria-live="polite">
                 <span className={styles.turnStatusLabel}>{lang === "zh" ? "状态" : "Status"}</span>
                 <span className={styles.turnStatusText}>{noFinalAnswerStatusText}</span>
@@ -2951,7 +2965,12 @@ export function ConversationView({
                 }
               >
 
-                  <span hidden data-codex-transcript-cell-count={codexTranscriptCells.length} />
+                  <span
+                    hidden
+                    data-codex-transcript-cell-count={codexTranscriptCells.length}
+                    data-codex-transcript-surface-mode={codexTranscriptSurface?.mode ?? "empty"}
+                    data-codex-transcript-native-primary={nativeCodexTranscriptPrimary ? "true" : "false"}
+                  />
                   {agentInboxMessage ? (
                     <section className={styles.agentInboxSection}>
                       {researchOrgChips.length > 0 ? (

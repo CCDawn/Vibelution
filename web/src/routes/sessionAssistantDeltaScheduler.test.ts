@@ -103,4 +103,36 @@ describe("sessionAssistantDeltaScheduler", () => {
     expect(drain.telemetry.done).toBe(true);
     expect(drain.pendingAfter).toBe(0);
   });
+
+  it("preserves native Codex transcript snapshots without counting them as text delta", () => {
+    const scheduler = createSessionAssistantDeltaScheduler({ nowMs: () => 0 });
+    const payload = assistantDelta({
+      contentDelta: "",
+      thoughtDelta: "",
+      codexTranscript: {
+        version: 1,
+        source: "native",
+        messageId: "session-1-message-live-turn-1",
+        cells: [
+          {
+            id: "native-tool",
+            kind: "tool_call",
+            messageId: "session-1-message-live-turn-1",
+            status: "running",
+            tone: "running",
+            title: "npm build",
+          },
+        ],
+      },
+    });
+
+    scheduler.enqueue(payload, 4096);
+    const drain = scheduler.drain("frame");
+
+    expect(drain.entries[0].payload.codexTranscript?.source).toBe("native");
+    expect(drain.entries[0].payload.codexTranscript?.cells[0]?.id).toBe("native-tool");
+    expect(drain.telemetry.payloadLength).toBe(4096);
+    expect(drain.telemetry.contentDeltaLength).toBe(0);
+    expect(drain.telemetry.thoughtDeltaLength).toBe(0);
+  });
 });
