@@ -319,7 +319,7 @@ describe("agentMessageOperations", () => {
     expect(operations[3].relatedThoughtSequence).toBe(3);
   });
 
-  it("keeps ConversationMessage operation compatibility aligned with AgentMessage projection", () => {
+  it("keeps ConversationMessage operation compatibility aligned without restoring hidden internal status", () => {
     const message: ConversationMessage = {
       id: "message-feedback-compat",
       role: "assistant",
@@ -342,7 +342,7 @@ describe("agentMessageOperations", () => {
     const agentOperations = buildAgentMessageOperations(conversationMessageToAgentMessage(message), labels);
 
     expect(compatibilityOperations).toEqual(agentOperations);
-    expect(compatibilityOperations.map((operation) => operation.kind)).toEqual(["status", "thought", "tool"]);
+    expect(compatibilityOperations).toEqual([]);
   });
 
   it("keeps only the latest feedback update for the same unsequenced tool event", () => {
@@ -504,7 +504,7 @@ describe("agentMessageOperations", () => {
     });
   });
 
-  it("keeps runtime status feedback as a first-class timeline operation", () => {
+  it("drops internal runtime status feedback from ConversationMessage operations", () => {
     const message: ConversationMessage = {
       id: "message-status",
       role: "assistant",
@@ -531,13 +531,35 @@ describe("agentMessageOperations", () => {
 
     const grouped = operationGroupsForConversationMessage(message);
 
-    expect(grouped.timeline.map((item) => `${item.kind}:${item.label}:${item.status}:${item.summary}`)).toEqual([
-      "status:准备上下文:done:读取会话、Agent 与工具权限",
-      "status:请求模型:running:首个响应片段等待中",
-    ]);
-    expect(grouped.timeline[1].resultPreview).toBe("正在请求模型");
-    expect(grouped.status.map((item) => item.kind)).toEqual(["status", "status"]);
+    expect(grouped.timeline).toEqual([]);
+    expect(grouped.status).toEqual([]);
     expect(grouped.mental).toEqual([]);
+  });
+
+  it("keeps recoverable long-loop status feedback as a first-class timeline operation", () => {
+    const message: ConversationMessage = {
+      id: "message-long-loop-status",
+      role: "assistant",
+      content: "",
+      timestamp: "2026-06-05T00:00:00Z",
+      streaming: true,
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "status",
+          status: "running",
+          name: "long_loop_progress",
+          summary: "本轮尚未形成最终回答，工具循环已执行 4 次。",
+        },
+      ],
+    };
+
+    const grouped = operationGroupsForConversationMessage(message);
+
+    expect(grouped.timeline.map((item) => `${item.kind}:${item.label}:${item.status}:${item.summary}`)).toEqual([
+      "status:工具循环:running:本轮尚未形成最终回答，工具循环已执行 4 次。",
+    ]);
+    expect(grouped.status.map((item) => item.kind)).toEqual(["status"]);
   });
 
   it("splits feedback timelines into ReAct operation groups", () => {
@@ -560,7 +582,7 @@ describe("agentMessageOperations", () => {
     const groups = buildAgentMessageReActOperationGroups(operations);
 
     expect(groups.map((group) => group.operations.map((operation) => operation.sequence))).toEqual([
-      [1, 2, 3],
+      [2, 3],
       [4, 5],
     ]);
     expect(groups.map((group) => group.thoughtSequence)).toEqual([2, 4]);
@@ -780,7 +802,7 @@ describe("agentMessageOperations", () => {
     expect(buildAgentMessageReActOperationGroups(withPrepStatus)[0].id).toBe("react-thought-2");
   });
 
-  it("keeps only the latest running operation active for legacy timelines", () => {
+  it("keeps only the latest running operation active after hidden runtime statuses are removed", () => {
     const message: ConversationMessage = {
       id: "message-running-legacy",
       role: "assistant",
@@ -796,8 +818,8 @@ describe("agentMessageOperations", () => {
 
     const operations = operationsForConversationMessage(message);
 
-    expect(operations.map((item) => item.status)).toEqual(["done", "done", "running"]);
-    expect(operations.map((item) => item.rawStatus)).toEqual(["running", "running", "running"]);
+    expect(operations.map((item) => item.status)).toEqual(["running"]);
+    expect(operations.map((item) => item.rawStatus)).toEqual(["running"]);
   });
 
   it("downgrades stale running thoughts when a later completed tool exists", () => {

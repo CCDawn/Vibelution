@@ -30,6 +30,15 @@ describe("conversationDisplayProtocol", () => {
     })).toBe(true);
   });
 
+  it("keeps recoverable long-loop progress visible", () => {
+    expect(shouldDisplayRuntimeStatus({
+      kind: "status",
+      name: "long_loop_progress",
+      status: "running",
+      summary: "尚未形成最终回答 · web_fetch_tool 第 3 次工具调用",
+    })).toBe(true);
+  });
+
   it("applies the same visibility policy to transcript cells", () => {
     expect(shouldDisplayTranscriptCell({
       id: "status-context",
