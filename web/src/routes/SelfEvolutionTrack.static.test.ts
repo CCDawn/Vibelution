@@ -318,6 +318,23 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionStylesSource).toContain("observationEvidenceRail:");
   });
 
+  it("lets observation mode own the center conversation area even when the approval step is selected", () => {
+    const centerStart = selfEvolutionSource.indexOf("<main className={styles.centerColumn}>");
+    const centerEnd = selfEvolutionSource.indexOf("</main>", centerStart);
+    const centerSurface = centerStart >= 0 && centerEnd > centerStart
+      ? selfEvolutionSource.slice(centerStart, centerEnd)
+      : "";
+    const observationBranch = centerSurface.indexOf("observationRunModeActive ? (");
+    const approvalBranch = centerSurface.indexOf('selectedWorkflowStep?.id === "approval"');
+
+    expect(selfEvolutionSource).toContain("const centerWorkflowSummary = observationRunModeActive");
+    expect(centerSurface).toContain("{centerWorkflowSummary}");
+    expect(centerSurface).toContain("renderObservationModeConversationPane()");
+    expect(observationBranch).toBeGreaterThanOrEqual(0);
+    expect(approvalBranch).toBeGreaterThan(observationBranch);
+    expect(centerSurface).not.toContain('selectedWorkflowStep?.id !== "approval" && observationRunModeActive');
+  });
+
   it("renders self-evolution Agent cards that deep-link to config and activity logs", () => {
     expect(selfEvolutionSource).toContain("AgentConfigWorkspace");
     expect(selfEvolutionSource).toContain("AgentConfigWorkspaceAgent");
