@@ -272,6 +272,86 @@ def test_failed_parallel_tool_results_remain_paired_context():
     assert summary["payloadMessageMissingToolResultCount"] == 0
 
 
+def test_responses_transport_projects_tool_pairs_as_response_items():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.providers.default.api": "responses",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.5",
+            "llm.profiles.primary.transport": "responses",
+        }
+    )
+    client = LLMClient(config=config, backend=lambda payload: payload)
+
+    payload = client._build_payload(
+        [
+            {"role": "user", "content": "查一下资料"},
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"id": "call_search", "name": "web_search_tool", "args": {"query": "Responses API tool history"}},
+                ],
+            ),
+            ToolMessage(content="找到 1 条来源", tool_call_id="call_search"),
+            {"role": "user", "content": "继续"},
+        ]
+    )
+
+    input_items = payload["input"]
+    assert [item.get("type") or item.get("role") for item in input_items] == [
+        "user",
+        "function_call",
+        "function_call_output",
+        "user",
+    ]
+    assert input_items[1] == {
+        "type": "function_call",
+        "call_id": "call_search",
+        "name": "web_search_tool",
+        "arguments": '{"query": "Responses API tool history"}',
+    }
+    assert input_items[2] == {
+        "type": "function_call_output",
+        "call_id": "call_search",
+        "output": "找到 1 条来源",
+    }
+    summary = client._last_payload_protocol_summary
+    assert summary["payloadResponsesFunctionCallCount"] == 1
+    assert summary["payloadResponsesFunctionCallOutputCount"] == 1
+    assert summary["payloadResponsesMissingFunctionOutputCount"] == 0
+
+
+def test_responses_transport_projects_assistant_history_as_output_text():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.providers.default.api": "responses",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.5",
+            "llm.profiles.primary.transport": "responses",
+        }
+    )
+    client = LLMClient(config=config, backend=lambda payload: payload)
+
+    payload = client._build_payload(
+        [
+            {"role": "user", "content": "你好"},
+            {"role": "assistant", "content": "你好，我在。"},
+            {"role": "user", "content": "继续"},
+        ]
+    )
+
+    assert payload["input"][1] == {
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": "你好，我在。"}],
+    }
+
+
 def test_basic_chat_no_tools_blocks_tool_payload_before_provider():
     config = make_config(
         **{

@@ -157,9 +157,83 @@ def validate_tool_result_pairing(messages: List[Dict[str, Any]]) -> PayloadValid
     return PayloadValidationResult(ok=True)
 
 
+def validate_responses_function_pairing(items: List[Dict[str, Any]]) -> PayloadValidationResult:
+    """Validate Responses function_call/function_call_output items before provider send."""
+
+    pending: list[str] = []
+    seen_call_ids: set[str] = set()
+    seen_output_ids: set[str] = set()
+    for index, item in enumerate(items):
+        item_type = str(item.get("type") or "").strip().lower()
+        if item_type == "function_call":
+            call_id = str(item.get("call_id") or "").strip()
+            if not call_id:
+                return PayloadValidationResult(
+                    ok=False,
+                    error_type="function_call_missing_id",
+                    message="Responses function_call item is missing call_id.",
+                    details={"messageIndex": index},
+                )
+            if call_id in seen_call_ids:
+                return PayloadValidationResult(
+                    ok=False,
+                    error_type="duplicate_function_call_id",
+                    message="Duplicate Responses function_call call_id detected before provider send.",
+                    details={"messageIndex": index, "callId": call_id},
+                )
+            seen_call_ids.add(call_id)
+            pending.append(call_id)
+            continue
+        if item_type == "function_call_output":
+            call_id = str(item.get("call_id") or "").strip()
+            if not call_id:
+                return PayloadValidationResult(
+                    ok=False,
+                    error_type="function_call_output_missing_id",
+                    message="Responses function_call_output item is missing call_id.",
+                    details={"messageIndex": index},
+                )
+            if call_id in seen_output_ids:
+                return PayloadValidationResult(
+                    ok=False,
+                    error_type="duplicate_function_call_output",
+                    message="Duplicate Responses function_call_output detected before provider send.",
+                    details={"messageIndex": index, "callId": call_id},
+                )
+            if call_id not in pending:
+                return PayloadValidationResult(
+                    ok=False,
+                    error_type="orphan_function_call_output",
+                    message="Responses function_call_output has no pending function_call.",
+                    details={"messageIndex": index, "callId": call_id, "pendingCallIds": list(pending)},
+                )
+            seen_output_ids.add(call_id)
+            pending.remove(call_id)
+            continue
+        if pending:
+            return PayloadValidationResult(
+                ok=False,
+                error_type="missing_function_call_output",
+                message="Responses function_call is missing a matching function_call_output before the next non-tool item.",
+                details={"messageIndex": index, "pendingCallIds": list(pending)},
+            )
+    if pending:
+        return PayloadValidationResult(
+            ok=False,
+            error_type="missing_function_call_output",
+            message="Responses function_call is missing a matching function_call_output at the end of the payload.",
+            details={"pendingCallIds": list(pending)},
+        )
+    return PayloadValidationResult(ok=True)
+
+
 def payload_protocol_summary(payload: Dict[str, Any], route: ResolvedProtocolRoute) -> Dict[str, Any]:
     messages = _conversation_items(payload)
     roles = [_role(item) or "unknown" for item in messages]
+    response_item_types = [
+        str(item.get("type") or item.get("role") or "unknown").strip().lower() or "unknown"
+        for item in _input_items(payload)
+    ]
     thinking = payload.get("thinking")
     thinking_type = str(thinking.get("type") or "").strip().lower() if isinstance(thinking, dict) else ""
     thinking_requested = any(key in payload for key in ("thinking", "enable_thinking"))
@@ -172,6 +246,7 @@ def payload_protocol_summary(payload: Dict[str, Any], route: ResolvedProtocolRou
         "messageRoles": roles,
         "messageRoleTail": roles[-5:],
         "lastMessageRole": roles[-1] if roles else "",
+        "responsesItemTypeTail": response_item_types[-5:],
         "assistantPrefillDetected": _assistant_prefill_detected(messages),
         "toolCount": len(payload.get("tools") or []) if isinstance(payload.get("tools"), list) else 0,
         "payloadTransportShape": "responses_input" if "input" in payload else "chat_messages",
@@ -210,6 +285,9 @@ def validate_payload_against_protocol(
                 "Responses transport payload must use Responses content blocks such as input_text/input_image.",
                 invalidContentBlockTypes=invalid_blocks[:8],
             )
+        pairing_result = validate_responses_function_pairing(_input_items(payload))
+        if not pairing_result.ok:
+            return fail(pairing_result.error_type, pairing_result.message, **pairing_result.details)
     else:
         if "input" in payload:
             return fail("chat_transport_input_not_allowed", "Chat Completions transport payload must use top-level `messages`, not `input`.")
@@ -270,9 +348,10 @@ def validate_payload_against_protocol(
                     f"Protocol `{route.protocol.value}` does not allow the final payload message to be assistant prefill.",
                 )
 
-    pairing_result = validate_tool_result_pairing(messages)
-    if not pairing_result.ok:
-        return fail(pairing_result.error_type, pairing_result.message, **pairing_result.details)
+    if transport != "responses":
+        pairing_result = validate_tool_result_pairing(messages)
+        if not pairing_result.ok:
+            return fail(pairing_result.error_type, pairing_result.message, **pairing_result.details)
 
     return PayloadValidationResult(
         ok=True,
@@ -298,6 +377,7 @@ __all__ = [
     "PayloadValidationResult",
     "assert_payload_valid",
     "payload_protocol_summary",
+    "validate_responses_function_pairing",
     "validate_tool_result_pairing",
     "validate_payload_against_protocol",
 ]
