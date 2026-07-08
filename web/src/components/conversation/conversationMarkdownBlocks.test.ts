@@ -8,7 +8,7 @@ import { parseStreamingMarkdownBlocks } from "./streamingMarkdown";
 describe("conversation markdown block boundary", () => {
   it("keeps markdown block parsing out of the heavy ConversationView module", () => {
     expect(existsSync(new URL("./conversationMarkdownBlocks.ts", import.meta.url))).toBe(true);
-    expect(conversationViewSource).toContain('from "./conversationMarkdownBlocks"');
+    expect(conversationViewSource).not.toContain('from "./conversationMarkdownBlocks"');
     expect(conversationViewSource).not.toContain("function parseMarkdownBlocks");
     expect(conversationViewSource).not.toContain("function isMarkdownTableHeader");
     expect(conversationViewSource).not.toContain("function isMarkdownTableRow");

@@ -129,15 +129,13 @@ import {
 } from "./agentMessageSections";
 import { shouldLoadEarlierConversationMessages } from "./conversationHistoryWindow";
 import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
-import { parseConversationMarkdownBlocks, type MarkdownBlock } from "./conversationMarkdownBlocks";
-import { safeConversationMarkdownUrl } from "./conversationMarkdownUrl";
+import { ConversationMarkdownRenderer, type ConversationMarkdownClassNames } from "./ConversationMarkdownRenderer";
 import {
   addComparableConversationImageUrl,
   comparableConversationImageUrl,
   conversationImageDownloadName,
   conversationImagePreviewUrl,
 } from "./conversationImagePreview";
-import { renderConversationInlineMarkdown } from "./conversationInlineMarkdown";
 import { shouldShowNextStateSignalInConversation } from "./conversationNextStateSignal";
 import {
   formatConversationDuration,
@@ -194,9 +192,27 @@ const TIMELINE_HISTORY_LOAD_BATCH_COUNT = 14;
 const TIMELINE_HISTORY_LOAD_THRESHOLD_PX = 56;
 const INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT = 36;
 const RESPONSE_PARSE_CACHE_LIMIT = 80;
-const MARKDOWN_PARSE_CACHE_LIMIT = 160;
 const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
 const EMPTY_SECTION_EXPANSION: Record<string, boolean> = {};
+const CONVERSATION_MARKDOWN_CLASS_NAMES: ConversationMarkdownClassNames = {
+  inlineCode: styles.inlineCode,
+  inlineLink: styles.inlineLink,
+  inlineStrong: styles.inlineStrong,
+  markdownBlockquote: styles.markdownBlockquote,
+  markdownBody: styles.markdownBody,
+  markdownBodyWithTable: styles.markdownBodyWithTable,
+  markdownDivider: styles.markdownDivider,
+  markdownHeading: styles.markdownHeading,
+  markdownHeading1: styles.markdownHeading1,
+  markdownHeading2: styles.markdownHeading2,
+  markdownHeading3: styles.markdownHeading3,
+  markdownHeading4: styles.markdownHeading4,
+  markdownTable: styles.markdownTable,
+  markdownTableWrap: styles.markdownTableWrap,
+  messageBody: styles.messageBody,
+  responseSegmentList: styles.responseSegmentList,
+  responseSegmentPre: styles.responseSegmentPre,
+};
 
 function conversationPerformanceNowMs() {
   return typeof performance === "undefined" ? Date.now() : performance.now();
@@ -376,7 +392,6 @@ export function ConversationView({
   const lastComposerFocusSignalRef = useRef("");
   const defaultExpansionRef = useRef<Record<string, Record<string, boolean>>>({});
   const responseSegmentCacheRef = useRef<Map<string, ResponseSegment[]>>(new Map());
-  const markdownBlockCacheRef = useRef<Map<string, MarkdownBlock[]>>(new Map());
   const [sectionExpansion, setSectionExpansion] = useState<Record<string, Record<string, boolean>>>({});
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [previewImage, setPreviewImage] = useState<ConversationImagePreviewRequest | null>(null);
@@ -900,7 +915,6 @@ export function ConversationView({
     historyScrollAnchorRef.current = null;
     defaultExpansionRef.current = {};
     responseSegmentCacheRef.current.clear();
-    markdownBlockCacheRef.current.clear();
     setSectionExpansion({});
   }, [sessionId]);
 
@@ -927,15 +941,7 @@ export function ConversationView({
       }
       const message = prewarmMessages[index];
       if (message) {
-        getCachedResponseSegments(message.content).forEach((segment) => {
-          if (
-            segment.kind !== "code"
-            && !segment.language
-            && !(["commit", "verification"].includes(segment.kind) && segment.content.includes("\n"))
-          ) {
-            getCachedMarkdownBlocks(segment.content);
-          }
-        });
+        getCachedResponseSegments(message.content);
       }
       index += 1;
       if (index < prewarmMessages.length) {
@@ -962,20 +968,6 @@ export function ConversationView({
     const parsed = parseResponseSegments(key);
     responseSegmentCacheRef.current.set(key, parsed);
     trimOldestCacheEntries(responseSegmentCacheRef.current, RESPONSE_PARSE_CACHE_LIMIT);
-    return parsed;
-  }
-
-  function getCachedMarkdownBlocks(content: string) {
-    const key = String(content ?? "");
-    const cached = markdownBlockCacheRef.current.get(key);
-    if (cached) {
-      markdownBlockCacheRef.current.delete(key);
-      markdownBlockCacheRef.current.set(key, cached);
-      return cached;
-    }
-    const parsed = parseConversationMarkdownBlocks(key);
-    markdownBlockCacheRef.current.set(key, parsed);
-    trimOldestCacheEntries(markdownBlockCacheRef.current, MARKDOWN_PARSE_CACHE_LIMIT);
     return parsed;
   }
 
@@ -2605,15 +2597,13 @@ export function ConversationView({
   }
 
   function renderResponseText(content: string, duplicateImageUrls?: Set<string>) {
-    const blocks = getCachedMarkdownBlocks(content);
-    if (blocks.length === 0) {
-      return null;
-    }
-    const hasTable = blocks.some((block) => block.type === "table");
     return (
-      <div className={`${styles.markdownBody} ${hasTable ? styles.markdownBodyWithTable : ""}`}>
-        {blocks.map((block, index) => renderMarkdownBlock(block, index, duplicateImageUrls))}
-      </div>
+      <ConversationMarkdownRenderer
+        content={content}
+        classNames={CONVERSATION_MARKDOWN_CLASS_NAMES}
+        duplicateImageUrls={duplicateImageUrls}
+        renderImage={renderMarkdownImage}
+      />
     );
   }
 
@@ -2624,139 +2614,47 @@ export function ConversationView({
     return (
       <ConversationStreamingResponseContent
         content={content}
-        renderBlock={renderMarkdownBlock}
       />
     );
   }
 
-  function renderMarkdownBlock(block: MarkdownBlock, index: number, duplicateImageUrls?: Set<string>) {
-    if (block.type === "heading") {
-      const HeadingTag = block.level <= 2 ? "h3" : "h4";
-      return (
-        <HeadingTag
-          key={`heading-${index}-${block.content}`}
-          className={`${styles.markdownHeading} ${styles[`markdownHeading${block.level}`]}`}
-        >
-          {renderInlineContent(block.content)}
-        </HeadingTag>
-      );
+  function renderMarkdownImage(alt: string, url: string, duplicateImageUrls?: Set<string>) {
+    const previewUrl = conversationImagePreviewUrl(url);
+    if (duplicateImageUrls?.has(comparableConversationImageUrl(url))) {
+      return null;
     }
-    if (block.type === "divider") {
-      return <hr key={`divider-${index}`} className={styles.markdownDivider} />;
-    }
-    if (block.type === "image") {
-      const safeUrl = safeConversationMarkdownUrl(block.url);
-      if (!safeUrl) {
-        return null;
-      }
-      const previewUrl = conversationImagePreviewUrl(safeUrl);
-      if (duplicateImageUrls?.has(comparableConversationImageUrl(safeUrl))) {
-        return null;
-      }
-      const imageAlt = block.alt || (lang === "zh" ? "生成图片" : "Generated image");
-      const previewLabel = lang === "zh" ? "预览图片" : "Preview image";
-      return (
-        <figure key={`image-${index}-${safeUrl}`} className={styles.markdownImageFigure}>
-          <VButton
-            type="button"
-            className={styles.imagePreviewButton}
-            onClick={() =>
-              openImagePreview({
-                src: previewUrl,
-                alt: imageAlt,
-                downloadUrl: safeUrl,
-                downloadName: conversationImageDownloadName(safeUrl) || true,
-              })
-            }
-            aria-label={previewLabel}
-            title={previewLabel}
-          >
-            <img className={styles.markdownImage} src={previewUrl} alt={imageAlt} loading="lazy" />
-          </VButton>
-          <figcaption className={styles.markdownImageCaption}>
-            {block.alt ? <span>{block.alt}</span> : null}
-            <a
-              className={styles.markdownImageLink}
-              href={safeUrl}
-              download={conversationImageDownloadName(safeUrl) || true}
-            >
-              {lang === "zh" ? "下载图片" : "Download image"}
-            </a>
-          </figcaption>
-        </figure>
-      );
-    }
-    if (block.type === "table") {
-      return (
-        <div key={`table-${index}`} className={styles.markdownTableWrap}>
-          <table className={styles.markdownTable}>
-            <thead>
-              <tr>
-                {block.headers.map((header, headerIndex) => (
-                  <th key={`${header}-${headerIndex}`}>{renderInlineContent(header)}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {block.rows.map((row, rowIndex) => (
-                <tr key={`row-${rowIndex}`}>
-                  {block.headers.map((_, cellIndex) => (
-                    <td key={`cell-${rowIndex}-${cellIndex}`}>{renderInlineContent(row[cellIndex] ?? "")}</td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      );
-    }
-    if (block.type === "code") {
-      return (
-        <pre
-          key={`code-${index}-${block.language}-${block.content.length}`}
-          className={[
-            styles.responseSegmentPre,
-            block.open ? styles.streamingCodeBlock : "",
-          ].filter(Boolean).join(" ")}
-        >
-          <code>{formattedCodeBlockContent(block.content, block.language)}</code>
-        </pre>
-      );
-    }
-    if (block.type === "blockquote") {
-      return (
-        <blockquote key={`quote-${index}-${block.content}`} className={styles.markdownBlockquote}>
-          {renderInlineContent(block.content)}
-        </blockquote>
-      );
-    }
-    if (block.type === "unorderedList") {
-      return (
-        <ul key={`ul-${index}`} className={styles.responseSegmentList}>
-          {block.items.map((item, itemIndex) => (
-            <li key={`${item}-${itemIndex}`}>{renderInlineContent(item)}</li>
-          ))}
-        </ul>
-      );
-    }
-    if (block.type === "orderedList") {
-      return (
-        <ol key={`ol-${index}`} className={styles.responseSegmentList}>
-          {block.items.map((item, itemIndex) => (
-            <li key={`${item}-${itemIndex}`}>{renderInlineContent(item)}</li>
-          ))}
-        </ol>
-      );
-    }
+    const imageAlt = alt || (lang === "zh" ? "生成图片" : "Generated image");
+    const previewLabel = lang === "zh" ? "预览图片" : "Preview image";
     return (
-      <p key={`paragraph-${index}`} className={styles.messageBody}>
-        {renderInlineContent(block.content)}
-      </p>
+      <figure className={styles.markdownImageFigure}>
+        <VButton
+          type="button"
+          className={styles.imagePreviewButton}
+          onClick={() =>
+            openImagePreview({
+              src: previewUrl,
+              alt: imageAlt,
+              downloadUrl: url,
+              downloadName: conversationImageDownloadName(url) || true,
+            })
+          }
+          aria-label={previewLabel}
+          title={previewLabel}
+        >
+          <img className={styles.markdownImage} src={previewUrl} alt={imageAlt} loading="lazy" />
+        </VButton>
+        <figcaption className={styles.markdownImageCaption}>
+          {alt ? <span>{alt}</span> : null}
+          <a
+            className={styles.markdownImageLink}
+            href={url}
+            download={conversationImageDownloadName(url) || true}
+          >
+            {lang === "zh" ? "下载图片" : "Download image"}
+          </a>
+        </figcaption>
+      </figure>
     );
-  }
-
-  function renderInlineContent(content: string) {
-    return renderConversationInlineMarkdown(content);
   }
 
   function isNonNullNode<T>(node: T | null): node is T {
