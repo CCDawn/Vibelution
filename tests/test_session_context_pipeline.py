@@ -16,6 +16,7 @@ from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_MESSAGE,
     EVENT_ASSISTANT_PARTIAL,
     EVENT_TOOL_RESULT,
+    EVENT_TURN_FAILED,
     EVENT_TURN_INTERRUPTED,
     EVENT_TURN_STARTED,
     EVENT_USER_MESSAGE,
@@ -296,7 +297,8 @@ def test_context_assembler_replaces_large_tool_results_only_for_compression(tmp_
     normal_tool = next(
         item for item in normal.history_messages if "历史工具结果: cli_tool" in str(item.get("content") or "")
     )
-    assert normal_tool["role"] == "assistant"
+    assert normal_tool["role"] == "system"
+    assert normal_tool["metadata"]["promotedFromRole"] == "assistant"
     assert large_result.strip() in normal_tool["content"]
     assert normal.tool_result_replacement_state["replacements"] == []
 
@@ -539,6 +541,91 @@ def test_context_assembler_excludes_current_turn_ledger_from_history_seed(tmp_pa
     assert "上一轮用户输入" in contents
     assert "上一轮助手输出" in contents
     assert "当前轮用户输入" not in contents
+
+
+def test_context_assembler_drops_failed_status_loop_from_model_history(tmp_path):
+    append_conversation_event(
+        tmp_path,
+        "session-failed-loop",
+        "turn-orphan-assistant",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "当前判断：你好，我在。"},
+        source="test",
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-failed-loop",
+        "turn-original",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "你能做什么"},
+        source="test",
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-failed-loop",
+        "turn-original",
+        EVENT_ASSISTANT_MESSAGE,
+        status="failed_provider",
+        payload={"content": "模型连接正在重试...\n第 3/5 次；原因：server_error。"},
+        source="test",
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-failed-loop",
+        "turn-original",
+        EVENT_TURN_INTERRUPTED,
+        status="interrupted",
+        payload={"reason": "process_restarted", "marker": TURN_INTERRUPTED_MARKER},
+        source="test",
+    )
+    for turn_id in ("turn-continue-1", "turn-continue-2"):
+        append_conversation_event(
+            tmp_path,
+            "session-failed-loop",
+            turn_id,
+            EVENT_USER_MESSAGE,
+            status="recorded",
+            payload={"content": "继续"},
+            source="test",
+        )
+        append_conversation_event(
+            tmp_path,
+            "session-failed-loop",
+            turn_id,
+            EVENT_ASSISTANT_MESSAGE,
+            status="failed_provider",
+            payload={
+                "content": "模型服务上游暂时失败，本轮没有完成。具体报错：Upstream request failed。",
+                "metadata": {"kind": "turn_error", "providerFailure": True},
+            },
+            source="test",
+        )
+        append_conversation_event(
+            tmp_path,
+            "session-failed-loop",
+            turn_id,
+            EVENT_TURN_FAILED,
+            status="failed_provider",
+            payload={"errorType": "provider_upstream_error"},
+            source="test",
+        )
+
+    assembled = assemble_conversation_context(
+        [],
+        session_id="session-failed-loop",
+        current_turn_id="turn-current",
+        ledger_events=load_conversation_events(tmp_path, "session-failed-loop"),
+        recent_message_limit=8,
+    )
+
+    assert [(item["role"], item["content"]) for item in assembled.history_messages] == [
+        ("user", "你能做什么"),
+    ]
+    assert assembled.included_event_ids
+    assert all("模型服务上游暂时失败" not in item["content"] for item in assembled.history_messages)
+    assert all(TURN_INTERRUPTED_MARKER not in item["content"] for item in assembled.history_messages)
 
 
 def test_context_assembler_replays_ledger_compression_checkpoint_without_current_turn_loss(tmp_path):

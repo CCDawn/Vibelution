@@ -119,6 +119,10 @@ def assemble_conversation_context(
     bounded_recent_limit = max(1, min(int(recent_message_limit or DEFAULT_RECENT_MESSAGE_LIMIT), 40))
     recent_start_index = max(0, len(normalized_messages) - bounded_recent_limit)
     recent_raw_messages = normalized_messages[recent_start_index:]
+    recent_safe_start_offset = _provider_safe_history_tail_start_offset(recent_raw_messages)
+    if recent_safe_start_offset:
+        recent_start_index += recent_safe_start_offset
+        recent_raw_messages = recent_raw_messages[recent_safe_start_offset:]
     recent_messages = recent_raw_messages
     checkpoint = latest_checkpoint(events)
     ledger_checkpoint = latest_context_compression_checkpoint(ledger_replay_events)
@@ -144,6 +148,7 @@ def assemble_conversation_context(
             tool_result_char_limit=agent_inbox_tool_result_limit,
             assistant_message_char_limit=AGENT_INBOX_ASSISTANT_MESSAGE_CHAR_LIMIT,
         )
+    history_messages = _promote_leading_context_assistant_messages(history_messages)
     included_event_ids = _included_event_ids(
         events,
         recent_start_index=recent_start_index,
@@ -420,6 +425,51 @@ def _historical_ledger_events(
         for event in list(events or [])
         if str(getattr(event, "turn_id", "") or "").strip() != normalized_current_turn_id
     ]
+
+
+def _provider_safe_history_tail_start_offset(messages: list[dict[str, Any]]) -> int:
+    for index, message in enumerate(list(messages or [])):
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "").strip().lower()
+        if role in {"system", "user"}:
+            return index
+        if role == "assistant" and _is_context_seed_assistant_message(message):
+            return index
+    return len(messages)
+
+
+def _is_context_seed_assistant_message(message: dict[str, Any]) -> bool:
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    return str(metadata.get("kind") or "").strip() in {
+        "compaction_checkpoint",
+        "context_compression_attempt",
+        "historical_orphan_tool_result",
+        "historical_tool_context",
+        "history_checkpoint_seed",
+        "retrieved_history_seed",
+    }
+
+
+def _promote_leading_context_assistant_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    promoted: list[dict[str, Any]] = []
+    in_leading_context = True
+    for raw in list(messages or []):
+        if not isinstance(raw, dict):
+            continue
+        message = dict(raw)
+        role = str(message.get("role") or "").strip().lower()
+        if in_leading_context and role == "assistant" and _is_context_seed_assistant_message(message):
+            metadata = dict(message.get("metadata") or {})
+            metadata["promotedFromRole"] = "assistant"
+            metadata["promotionReason"] = "provider_safe_history_tail_start"
+            message["metadata"] = metadata
+            message["role"] = "system"
+            promoted.append(message)
+            continue
+        in_leading_context = False
+        promoted.append(message)
+    return promoted
 
 
 def _checkpoint_seed_message(event: HistoryEvent | None) -> dict[str, Any] | None:
