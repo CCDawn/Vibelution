@@ -529,12 +529,28 @@ export function isVisibleConversation(
   if (conversation.type !== "direct_agent") {
     return true;
   }
-  if (String(conversation.conversationIndexKind ?? "").trim() === CONVERSATION_INDEX_KIND_HIDDEN) {
+  const conversationKind = String(conversation.conversationIndexKind ?? "").trim();
+  const conversationVisibility = String(conversation.conversationIndexVisibility ?? "").trim();
+  if (
+    conversationVisibility === HIDDEN_CONVERSATION_INDEX_VISIBILITY
+    && conversationKind !== CONVERSATION_INDEX_KIND_INVALID
+  ) {
+    return false;
+  }
+  if (conversationKind === CONVERSATION_INDEX_KIND_HIDDEN) {
     return false;
   }
   const sessionId = conversation.directSessionId || conversation.conversationId;
   const session = sessionId && sessionsById ? sessionsById.get(sessionId) : undefined;
-  if (String(session?.conversationIndexKind ?? "").trim() === CONVERSATION_INDEX_KIND_HIDDEN) {
+  const sessionKind = String(session?.conversationIndexKind ?? "").trim();
+  const sessionVisibility = String(session?.conversationIndexVisibility ?? "").trim();
+  if (
+    sessionVisibility === HIDDEN_CONVERSATION_INDEX_VISIBILITY
+    && sessionKind !== CONVERSATION_INDEX_KIND_INVALID
+  ) {
+    return false;
+  }
+  if (sessionKind === CONVERSATION_INDEX_KIND_HIDDEN) {
     return false;
   }
   if (session) {
