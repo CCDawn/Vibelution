@@ -5326,6 +5326,12 @@ export type CodexToolCall = {
   terminalOperationId?: string;
   tracePath?: string;
   error?: string;
+  resultPreview?: string;
+  resultType?: string;
+  resultLength?: number | null;
+  resultKind?: string;
+  truncated?: boolean;
+  originalLength?: number | null;
 };
 
 export type CodexTerminalRequest = {
