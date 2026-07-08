@@ -18,6 +18,7 @@ import {
   isRuntimeNoticeText,
   isTransientReasoningStatusText,
 } from "./conversationMessagePredicates";
+import { isInternalStreamingStatusContent } from "./conversationInternalStatus";
 
 export function hasMentalSnapshot(snapshot: AgentMentalSnapshot | undefined) {
   if (!snapshot) {
@@ -185,6 +186,9 @@ function isAgentRuntimeStatusText(message: AgentMessage, text: string) {
     /^(状态|status)\s+.+/i.test(content)
     && /(正在|running|thinking|reasoning|tooling|模型|model|上下文|context)/i.test(content)
   ) {
+    return true;
+  }
+  if (isInternalStreamingStatusContent(content)) {
     return true;
   }
   return Boolean(message.streaming) && isTransientReasoningStatusText(content);

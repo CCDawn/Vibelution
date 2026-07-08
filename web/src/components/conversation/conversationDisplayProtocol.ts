@@ -31,7 +31,11 @@ export function shouldDisplayRuntimeStatus(input: RuntimeStatusDisplayInput) {
 }
 
 export function shouldDisplayTranscriptCell(cell: TranscriptCellDisplayInput) {
-  if (normalizedText(cell.kind) !== "status") {
+  const kind = normalizedText(cell.kind);
+  if (kind === "assistant_markdown" && hasInternalTranscriptText(cell)) {
+    return false;
+  }
+  if (kind !== "status") {
     return true;
   }
   return shouldDisplayRuntimeStatus({
@@ -76,6 +80,15 @@ function hasDisplayableDiagnosticStatus(input: RuntimeStatusDisplayInput) {
     || ["failed", "error", "failure", "timeout", "timed_out", "cancelled"].includes(status)
     || ["degraded", "fallback", "partial", "recovered", "unavailable"].includes(status)
   );
+}
+
+function hasInternalTranscriptText(cell: TranscriptCellDisplayInput) {
+  const content = [
+    cell.summary,
+    cell.resultPreview,
+    cell.text,
+  ].map(compactText).filter(Boolean).join("\n");
+  return Boolean(content && isInternalStreamingStatusContent(content));
 }
 
 function isDisplayableProgressStatus(input: RuntimeStatusDisplayInput) {

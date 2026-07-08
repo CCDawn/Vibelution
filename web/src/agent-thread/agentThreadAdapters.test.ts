@@ -243,6 +243,25 @@ describe("agent thread adapters", () => {
     expect(serializedParts).not.toContain("正在准备对话上下文");
   });
 
+  it("drops internal runtime pipeline status text when it arrives as assistant content", () => {
+    const statusText = "context_prepare\n正在准备对话上下文...\n\nagent_prepare\n正在唤起对话 agent...\n\nmodel_request\n正在请求模型，等待首个响应片段...\n\nretrying\n模型连接正在重试...\n第 2/5 次；原因：server_error。本轮仍在继续，请不要重复提交。";
+    const message: ConversationMessage = {
+      id: "assistant-content-status",
+      role: "assistant",
+      content: statusText,
+      timestamp: "2026-07-08T17:01:00Z",
+    };
+
+    const agentMessage = conversationMessageToAgentMessage(message);
+    const serializedParts = JSON.stringify(agentMessage.parts);
+
+    expect(agentMessage.parts).toEqual([]);
+    expect(serializedParts).not.toContain("context_prepare");
+    expect(serializedParts).not.toContain("model_request");
+    expect(serializedParts).not.toContain("retrying");
+    expect(serializedParts).not.toContain("正在准备对话上下文");
+  });
+
   it("keeps failed internal runtime status events as temporary error info", () => {
     const message: ConversationMessage = {
       id: "assistant-pipeline-error",

@@ -67,4 +67,15 @@ describe("conversationDisplayProtocol", () => {
       summary: "server_error",
     })).toBe(true);
   });
+
+  it("hides native assistant markdown cells that only contain internal pipeline statuses", () => {
+    expect(shouldDisplayTranscriptCell({
+      id: "assistant-status-markdown",
+      kind: "assistant_markdown",
+      messageId: "message-1",
+      status: "completed",
+      tone: "neutral",
+      text: "context_prepare\n正在准备对话上下文...\n\nmodel_request\n正在请求模型，等待首个响应片段...\n\nretrying\n模型连接正在重试...\n第 1/5 次；原因：server_error。本轮仍在继续，请不要重复提交。",
+    })).toBe(false);
+  });
 });
