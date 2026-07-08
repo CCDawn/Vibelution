@@ -151,7 +151,7 @@ describe("chat active turn layer", () => {
     });
   });
 
-  it("keeps status-only assistant deltas out of answer content", () => {
+  it("keeps internal status-only assistant deltas out of the visible active layer", () => {
     const active = mergeAssistantDeltaIntoActiveTurnLayer(
       undefined,
       assistantDelta({
@@ -170,22 +170,37 @@ describe("chat active turn layer", () => {
       }),
     );
 
-    expect(active?.answerContent).toBe("");
-    expect(active?.processStage).toBe("agent_prepare");
-    expect(active?.feedbackEvents?.[0]).toMatchObject({
-      kind: "status",
-      name: "agent_prepare",
-      status: "running",
-    });
+    expect(active).toBeUndefined();
+  });
+
+  it("keeps diagnostic status-only assistant deltas in the visible active layer", () => {
+    const active = mergeAssistantDeltaIntoActiveTurnLayer(
+      undefined,
+      assistantDelta({
+        stage: "model_failed",
+        content: "",
+        contentDelta: "",
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "status",
+            status: "failed",
+            name: "model_failed",
+            summary: "模型请求失败。",
+            error: "provider upstream unavailable",
+          },
+        ],
+      }),
+    );
 
     const message = activeTurnLayerToConversationMessage(active);
 
     expect(message?.content).toBe("");
-    expect(message?.streamStage).toBe("agent_prepare");
+    expect(message?.streamStage).toBe("model_failed");
     expect(message?.feedbackEvents?.[0]).toMatchObject({
       kind: "status",
-      name: "agent_prepare",
-      status: "running",
+      name: "model_failed",
+      status: "failed",
     });
   });
 
@@ -208,18 +223,10 @@ describe("chat active turn layer", () => {
       }),
     );
 
-    expect(active?.answerContent).toBe("");
-    expect(active?.feedbackEvents?.[0]).toMatchObject({
-      kind: "status",
-      name: "agent_prepare",
-    });
-
-    const message = activeTurnLayerToConversationMessage(active);
-
-    expect(message?.content).toBe("");
+    expect(active).toBeUndefined();
   });
 
-  it("keeps process state and answer text in separate active-layer fields", () => {
+  it("keeps answer text visible without retaining internal status feedback", () => {
     const preparing = mergeAssistantDeltaIntoActiveTurnLayer(
       undefined,
       assistantDelta({
@@ -235,6 +242,8 @@ describe("chat active turn layer", () => {
         ],
       }),
     );
+    expect(preparing).toBeUndefined();
+
     const responding = mergeAssistantDeltaIntoActiveTurnLayer(
       preparing,
       assistantDelta({
@@ -258,18 +267,12 @@ describe("chat active turn layer", () => {
       processStage: "responding",
       streaming: true,
     });
-    expect(responding?.feedbackEvents?.map((event) => event.name)).toEqual([
-      "agent_prepare",
-      "model_request",
-    ]);
+    expect(responding?.feedbackEvents?.map((event) => event.name)).toEqual([]);
     const message = activeTurnLayerToConversationMessage(responding);
 
     expect(message?.content).toBe("真正回答");
     expect(message?.metadata?.kind).toBe("session_active_turn_layer");
-    expect(message?.feedbackEvents?.map((event) => event.name)).toEqual([
-      "agent_prepare",
-      "model_request",
-    ]);
+    expect(message?.feedbackEvents).toBeUndefined();
   });
 
   it("treats the active layer as settled once committed detail has the same assistant turn", () => {

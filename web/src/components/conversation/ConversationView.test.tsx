@@ -1122,7 +1122,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(semanticArticleClassCount(html, "assistantTurn")).toBe(1);
   });
 
-  it("merges a same-turn live overlay into the active assistant turn instead of rendering duplicates", () => {
+  it("drops same-turn status-only live overlay and active assistant turn instead of rendering an empty row", () => {
     const html = renderConversation(
       [
         {
@@ -1177,7 +1177,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("正在思考中");
     expect(html).not.toContain("正在唤起对话 agent");
     expect(html).not.toContain("正在绑定 Agent 实例");
-    expect(html.match(/assistantTurn/g)?.length ?? 0).toBe(1);
+    expect(semanticArticleClassCount(html, "assistantTurn")).toBe(0);
   });
 
   it("renders stable row and part identities for the active assistant turn", () => {

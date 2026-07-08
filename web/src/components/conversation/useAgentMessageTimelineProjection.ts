@@ -1,8 +1,12 @@
-import type { ConversationMessage } from "../../api/types";
+import type { ConversationMessage, ConversationTimelineItem } from "../../api/types";
 import { conversationMessageToAgentMessage } from "../../agent-thread/adapters";
 import type { AgentMessage } from "../../agent-thread/types";
 import { answerProjectionContent } from "./conversationInternalStatus";
 import { mergeAgentFeedbackEvents } from "../../agent-thread/agentFeedbackEvents";
+import {
+  shouldDisplayRuntimeStatus,
+  shouldDisplayTranscriptCell,
+} from "./conversationDisplayProtocol";
 import {
   conversationMessageMetadataText,
   conversationMessageTurnId,
@@ -25,6 +29,8 @@ export type AgentMessageTimelineProjection = {
   streamingMessages: ConversationMessage[];
   rowIdentities: AgentMessageTimelineRowIdentity[];
 };
+
+type ConversationFeedbackEvent = NonNullable<ConversationMessage["feedbackEvents"]>[number];
 
 function isSessionLiveOverlayMessage(message: ConversationMessage) {
   return message.role === "assistant"
@@ -126,6 +132,103 @@ function mergeConversationText(...values: Array<string | undefined>) {
   return merged.join("\n\n");
 }
 
+function compactText(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function hasVisibleFeedbackEvent(event: ConversationFeedbackEvent) {
+  if (!shouldDisplayRuntimeStatus({
+    kind: event.kind,
+    name: event.name,
+    status: event.status,
+    summary: event.summary,
+    resultPreview: event.resultPreview,
+    error: event.error,
+    failureClass: event.failureClass,
+    timedOut: event.timedOut,
+  })) {
+    return false;
+  }
+  if (event.kind === "status") {
+    return true;
+  }
+  return Boolean(
+    compactText(event.name)
+    || compactText(event.summary)
+    || compactText(event.resultPreview)
+    || compactText(event.error)
+    || compactText(event.failureClass)
+  );
+}
+
+function visibleFeedbackEvents(events: ConversationFeedbackEvent[] | undefined) {
+  const visible = (events ?? []).filter(hasVisibleFeedbackEvent);
+  return visible.length > 0 ? visible : undefined;
+}
+
+function hasVisibleTimelineItem(item: ConversationTimelineItem) {
+  if (item.kind === "status") {
+    return shouldDisplayRuntimeStatus({
+      kind: "status",
+      name: item.title,
+      status: item.status,
+      summary: item.summary,
+      resultPreview: item.preview ?? item.text,
+      text: item.text,
+    });
+  }
+  if (item.kind === "assistant_text" || item.kind === "thought") {
+    return Boolean(compactText(item.text) || compactText(item.summary) || compactText(item.preview));
+  }
+  return Boolean(
+    compactText(item.title)
+    || compactText(item.summary)
+    || compactText(item.text)
+    || compactText(item.preview)
+    || (item.operationIds?.length ?? 0) > 0
+    || (item.sourceOperationIds?.length ?? 0) > 0
+  );
+}
+
+function hasVisibleCodexTranscript(message: ConversationMessage) {
+  const transcript = message.codexTranscript;
+  return Boolean(
+    transcript
+    && String(transcript.source ?? "").trim() === "native"
+    && Array.isArray(transcript.cells)
+    && transcript.cells.some(shouldDisplayTranscriptCell)
+  );
+}
+
+function hasVisibleMentalSnapshot(message: ConversationMessage) {
+  const snapshot = message.mentalSnapshot;
+  return Boolean(
+    snapshot
+    && [
+      snapshot.mood,
+      snapshot.feeling,
+      snapshot.whisper,
+      snapshot.summary,
+      snapshot.cognitiveState,
+      snapshot.intervention,
+    ].some(compactText)
+  );
+}
+
+function hasVisibleProjectionMessageContent(message: ConversationMessage) {
+  return Boolean(
+    compactText(answerProjectionContent(message))
+    || compactText(message.thought)
+    || hasVisibleMentalSnapshot(message)
+    || visibleFeedbackEvents(message.feedbackEvents)?.length
+    || (message.toolCalls?.length ?? 0) > 0
+    || (message.timelineItems ?? []).some(hasVisibleTimelineItem)
+    || hasVisibleCodexTranscript(message)
+    || (message.attachments?.length ?? 0) > 0
+    || (message.references?.length ?? 0) > 0
+  );
+}
+
 function mergeProjectedMessageIds(...messages: ConversationMessage[]) {
   const ids: string[] = [];
   const seen = new Set<string>();
@@ -145,10 +248,10 @@ function mergeLiveOverlayIntoActiveTurnMessage(
   liveOverlayMessage: ConversationMessage,
   activeTurnMessage: ConversationMessage,
 ): ConversationMessage {
-  const feedbackEvents = mergeAgentFeedbackEvents(
+  const feedbackEvents = visibleFeedbackEvents(mergeAgentFeedbackEvents(
     liveOverlayMessage.feedbackEvents,
     activeTurnMessage.feedbackEvents,
-  );
+  ));
   return {
     ...liveOverlayMessage,
     ...activeTurnMessage,
@@ -157,7 +260,7 @@ function mergeLiveOverlayIntoActiveTurnMessage(
     streamStage: activeTurnMessage.streamStage || liveOverlayMessage.streamStage,
     streaming: activeTurnMessage.streaming ?? liveOverlayMessage.streaming,
     mentalSnapshot: activeTurnMessage.mentalSnapshot ?? liveOverlayMessage.mentalSnapshot,
-    feedbackEvents: feedbackEvents.length > 0 ? feedbackEvents : undefined,
+    feedbackEvents,
     timelineItems: mergeUniqueProjectionItems(projectionItemIdentity, liveOverlayMessage.timelineItems, activeTurnMessage.timelineItems),
     toolCalls: mergeUniqueProjectionItems(projectionItemIdentity, liveOverlayMessage.toolCalls, activeTurnMessage.toolCalls),
     attachments: mergeUniqueProjectionItems(projectionItemIdentity, liveOverlayMessage.attachments, activeTurnMessage.attachments),
@@ -192,17 +295,21 @@ export function projectAgentMessageTimelineMessages({
   activeTurnMessage,
 }: AgentMessageTimelineProjectionInput): AgentMessageTimelineProjection {
   const projectedMessages = (() => {
-    if (!activeTurnMessage || hasCommittedAssistantAnswerForActiveTurn(timelineMessages, activeTurnMessage)) {
-      return projectTimelineProcessMessages(timelineMessages);
+    const visibleTimelineMessages = timelineMessages.filter(hasVisibleProjectionMessageContent);
+    if (!activeTurnMessage || hasCommittedAssistantAnswerForActiveTurn(visibleTimelineMessages, activeTurnMessage)) {
+      return projectTimelineProcessMessages(visibleTimelineMessages);
     }
     let mergedActiveTurnMessage = activeTurnMessage;
-    const dedupedTimelineMessages = timelineMessages.filter((message) => {
+    const dedupedTimelineMessages = visibleTimelineMessages.filter((message) => {
       if (isSessionLiveOverlayMessage(message) && isSameConversationTurn(message, activeTurnMessage)) {
         mergedActiveTurnMessage = mergeLiveOverlayIntoActiveTurnMessage(message, mergedActiveTurnMessage);
         return false;
       }
       return true;
     });
+    if (!hasVisibleProjectionMessageContent(mergedActiveTurnMessage)) {
+      return projectTimelineProcessMessages(dedupedTimelineMessages);
+    }
     return projectTimelineProcessMessages([...dedupedTimelineMessages, mergedActiveTurnMessage]);
   })();
   const projectedAgentMessages = projectedMessages.map(conversationMessageToAgentMessage);
