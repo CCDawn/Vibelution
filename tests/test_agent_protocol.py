@@ -501,6 +501,90 @@ class TestToolMessageFlow:
         assert calls == ["primary", "fallback_backup"]
         assert recovery_inputs == ["primary"]
 
+    def test_invoke_llm_retries_exhausted_stream_provider_error_without_streaming(self, monkeypatch):
+        calls = []
+        streamed = []
+
+        class DummyContext:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class DummyUI:
+            def thinking(self, _label):
+                return DummyContext()
+
+            def add_log(self, *_args, **_kwargs):
+                return None
+
+            def stream_response(self, text, done=False):
+                streamed.append((text, done))
+
+        class StreamFailingLLM:
+            profile_id = "primary"
+
+            def stream(self, _msgs, **_kwargs):
+                calls.append("stream")
+                raise LLMError(
+                    "server_error",
+                    "provider 流式上游异常",
+                    retryable=True,
+                    details={
+                        "attempt": 5,
+                        "max_attempts": 5,
+                        "retry_budget_exhausted": True,
+                    },
+                )
+                yield
+
+            def invoke(self, _msgs, **_kwargs):
+                calls.append("invoke")
+                return AIMessage(content="nonstream ok")
+
+        monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
+        monkeypatch.setattr(agent_module.logger, "log_error", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(agent_module.time, "sleep", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(
+            agent_module,
+            "plan_llm_recovery",
+            lambda *args, **kwargs: SimpleNamespace(
+                category="server_error",
+                retryable=True,
+                action="retry_with_backoff",
+                user_message="provider 流式上游异常",
+                wait_seconds=0,
+                stop_current_turn=True,
+                disable_streaming=False,
+                disable_tools=False,
+                request_context_compression=False,
+                fallback_profile_id=None,
+            ),
+        )
+
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.llm_with_tools = StreamFailingLLM()
+        agent._base_llm = SimpleNamespace(profile_id="primary")
+        agent.config = SimpleNamespace(
+            llm=SimpleNamespace(
+                model_name="gpt-5.5",
+                provider="relay",
+                api_base="https://example.invalid",
+                api_timeout=30,
+            ),
+        )
+        agent._should_stream_llm_for_turn = lambda *_args, **_kwargs: True
+        agent._get_llm_for_current_mode = lambda **_kwargs: StreamFailingLLM()
+
+        result = agent._invoke_llm([AIMessage(content="hello")])
+
+        assert result.content == "nonstream ok"
+        assert calls == ["stream", "invoke"]
+        assert streamed == [("nonstream ok", True)]
+        assert agent._last_llm_error_category == "server_error"
+        assert agent._last_llm_error_details["disable_streaming_next_attempt"] is True
+
     def test_invoke_llm_returns_none_for_exhausted_llmerror(self, monkeypatch):
         calls = {"count": 0}
 
