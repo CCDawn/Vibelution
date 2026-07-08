@@ -493,7 +493,7 @@ function normalizeTimelineOperations(
       rawStatus: operation.rawStatus ?? operation.status,
     };
   });
-  return compactRepeatedBatchedProgressTools(normalized);
+  return compactRepeatedVisibleStatusProgress(compactRepeatedBatchedProgressTools(normalized));
 }
 
 function findLatestConcreteProgressIndex(operations: AgentMessageOperation[]) {
@@ -564,6 +564,50 @@ function compactRepeatedBatchedProgressTools(operations: AgentMessageOperation[]
     }
     return true;
   });
+}
+
+function compactRepeatedVisibleStatusProgress(operations: AgentMessageOperation[]) {
+  const reversedCompacted: AgentMessageOperation[] = [];
+  const seenKeys = new Set<string>();
+  for (let index = operations.length - 1; index >= 0; index -= 1) {
+    const operation = operations[index];
+    if (!isVisibleStatusProgress(operation) || operation.error?.trim()) {
+      reversedCompacted.push(operation);
+      continue;
+    }
+    const key = visibleStatusProgressKey(operation);
+    if (seenKeys.has(key)) {
+      continue;
+    }
+    seenKeys.add(key);
+    reversedCompacted.push(operation);
+  }
+  return reversedCompacted.reverse();
+}
+
+function isVisibleStatusProgress(operation: AgentMessageOperation) {
+  if (operation.kind !== "status") {
+    return false;
+  }
+  const haystack = [
+    operation.rawLabel,
+    operation.label,
+    operation.summary,
+    operation.resultPreview,
+  ].map((value) => String(value ?? "").trim().toLowerCase()).filter(Boolean).join(" ");
+  return haystack.includes("long_loop_progress")
+    || haystack.includes("尚未形成最终回答")
+    || haystack.includes("本轮尚未形成最终回答")
+    || haystack.includes("工具循环")
+    || haystack.includes("tool loop");
+}
+
+function visibleStatusProgressKey(operation: AgentMessageOperation) {
+  return [
+    operation.kind,
+    String(operation.rawLabel || operation.label || "").trim().toLowerCase(),
+    normalizeDisplayStatus(operation.rawStatus || operation.status),
+  ].join(":");
 }
 
 function isBatchedProgressTool(operation: AgentMessageOperation) {

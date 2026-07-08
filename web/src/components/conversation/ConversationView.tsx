@@ -218,6 +218,144 @@ function conversationPerformanceNowMs() {
   return typeof performance === "undefined" ? Date.now() : performance.now();
 }
 
+type ConversationFeedbackEvent = NonNullable<ConversationMessage["feedbackEvents"]>[number];
+
+function operationGroupsWithFeedbackStatusPlaceholder(
+  groups: AgentMessageOperationGroups,
+  message: ConversationMessage,
+  lang: "zh" | "en" | string,
+): AgentMessageOperationGroups {
+  const operation = feedbackStatusPlaceholderOperation(message, groups.timeline, lang);
+  if (!operation) {
+    return groups;
+  }
+  return {
+    timeline: [...groups.timeline, operation],
+    thoughts: groups.thoughts,
+    mental: groups.mental,
+    tools: groups.tools,
+    status: [...groups.status, operation],
+  };
+}
+
+function feedbackStatusPlaceholderOperation(
+  message: ConversationMessage,
+  existingOperations: AgentMessageOperation[],
+  lang: "zh" | "en" | string,
+): AgentMessageOperation | null {
+  if (existingOperations.some(operationIsVisibleStatusProgress)) {
+    return null;
+  }
+  const existingSequences = new Set(
+    existingOperations
+      .map((operation) => operation.sequence)
+      .filter((sequence): sequence is number => typeof sequence === "number" && Number.isFinite(sequence)),
+  );
+  const statusEvents = (message.feedbackEvents ?? [])
+    .filter((event) => event.kind === "status")
+    .filter((event) => {
+      const sequence = Number(event.sequence ?? 0);
+      return !Number.isFinite(sequence) || sequence <= 0 || !existingSequences.has(sequence);
+    })
+    .filter(shouldUseFeedbackStatusPlaceholder);
+  const event = statusEvents[statusEvents.length - 1];
+  if (!event) {
+    return null;
+  }
+  const sequence = Number(event.sequence ?? 0);
+  const rawName = String(event.name || "status").trim();
+  const summary = statusEventSummary(event);
+  return {
+    id: `${message.id}-feedback-status-placeholder-${sequence > 0 ? sequence : statusEvents.length}`,
+    kind: "status",
+    label: feedbackStatusPlaceholderLabel(event, lang),
+    rawLabel: rawName,
+    status: String(event.status || (message.streaming ? "running" : "done")).trim() || "running",
+    rawStatus: String(event.status || "").trim() || undefined,
+    summary,
+    durationSeconds: null,
+    resultPreview: statusEventResultPreview(event) || summary,
+    error: typeof event.error === "string" ? event.error : undefined,
+    sequence: sequence > 0 ? sequence : undefined,
+    timestamp: event.timestamp,
+  };
+}
+
+function operationIsVisibleStatusProgress(operation: AgentMessageOperation) {
+  if (operation.kind !== "status") {
+    return false;
+  }
+  const combined = [
+    operation.rawLabel,
+    operation.label,
+    operation.summary,
+    operation.resultPreview,
+  ].map((value) => String(value ?? "").trim().toLowerCase()).filter(Boolean).join(" ");
+  return combined.includes("long_loop_progress")
+    || combined.includes("尚未形成最终回答")
+    || combined.includes("本轮尚未形成最终回答")
+    || combined.includes("工具循环")
+    || combined.includes("tool loop");
+}
+
+function shouldUseFeedbackStatusPlaceholder(event: ConversationFeedbackEvent) {
+  if (statusEventHasDiagnostic(event)) {
+    return true;
+  }
+  return feedbackStatusIsLongLoopProgress(event);
+}
+
+function feedbackStatusPlaceholderLabel(event: ConversationFeedbackEvent, lang: "zh" | "en" | string) {
+  const zh = lang !== "en";
+  const combined = statusEventCombinedText(event).toLowerCase();
+  if (feedbackStatusIsLongLoopProgress(event)) {
+    return zh ? "工具循环" : "Tool loop";
+  }
+  if (combined.includes("model_thinking") || combined.includes("正在思考") || combined.includes("reasoning")) {
+    return zh ? "模型思考" : "Model thinking";
+  }
+  if (combined.includes("model_request") || combined.includes("请求模型")) {
+    return zh ? "请求模型" : "Request model";
+  }
+  if (combined.includes("retrying") || combined.includes("model_retry") || combined.includes("模型连接正在重试")) {
+    return zh ? "请求重试" : "Request retry";
+  }
+  return zh ? "运行状态" : "Runtime status";
+}
+
+function feedbackStatusIsLongLoopProgress(event: ConversationFeedbackEvent) {
+  return statusEventCombinedText(event).toLowerCase().includes("long_loop_progress")
+    || statusEventCombinedText(event).includes("工具循环")
+    || statusEventCombinedText(event).includes("尚未形成最终回答");
+}
+
+function statusEventHasDiagnostic(event: ConversationFeedbackEvent) {
+  const status = String(event.status ?? "").trim().toLowerCase();
+  return Boolean(
+    event.error
+    || event.failureClass
+    || event.timedOut
+    || ["failed", "error", "failure", "timeout", "timed_out", "cancelled"].includes(status)
+    || ["degraded", "fallback", "partial", "recovered", "unavailable"].includes(status)
+  );
+}
+
+function statusEventCombinedText(event: ConversationFeedbackEvent) {
+  return [
+    event.name,
+    event.summary,
+    event.resultPreview,
+  ].map((value) => String(value ?? "").trim()).filter(Boolean).join("\n");
+}
+
+function statusEventSummary(event: ConversationFeedbackEvent) {
+  return String(event.summary || event.resultPreview || "").trim();
+}
+
+function statusEventResultPreview(event: ConversationFeedbackEvent) {
+  return String(event.resultPreview || "").trim();
+}
+
 type ConversationTurnRowProps = {
   message: ConversationMessage;
   previousMessage?: ConversationMessage;
@@ -1483,17 +1621,8 @@ export function ConversationView({
     );
   }
 
-  function shouldRenderCodexTranscriptSurface(
-    message: ConversationMessage,
-    surface?: CodexTranscriptSurface,
-  ) {
-    if (surface?.mode === "native") {
-      return surface.cells.length > 0;
-    }
-    if (answerOnlyProcessMode || message.streaming) {
-      return false;
-    }
-    return (message.timelineItems ?? []).some((item) => item.kind === "operation");
+  function shouldRenderCodexTranscriptSurface(surface?: CodexTranscriptSurface) {
+    return surface?.mode === "native" && surface.cells.length > 0;
   }
 
   function renderCodexTranscriptCell(message: ConversationMessage, cell: CodexTranscriptCell) {
@@ -2248,29 +2377,6 @@ export function ConversationView({
     );
   }
 
-  function renderCompactRequestSummary(operations: AgentMessageOperation[]) {
-    const tone = operationCollectionTone(operations);
-    const title = compactInternalProcessStateLabel(tone, operations, operationStateLabels);
-    return (
-      <section className={`${styles.operationGroup} ${styles.executionTraceGroup}`}>
-        <div
-          className={`${styles.operationSummary} ${styles.executionRequestSummary}`}
-          role="status"
-          aria-live={tone === "running" ? "polite" : undefined}
-        >
-          {tone === "running" ? (
-            <LoaderCircle className={styles.statusSpinner} size={14} />
-          ) : tone === "done" ? (
-            <CheckCircle2 size={14} />
-          ) : (
-            <CircleDot size={14} />
-          )}
-          <span>{title}</span>
-        </div>
-      </section>
-    );
-  }
-
   function renderOperationGroup(
     messageId: string,
     section: "thought" | "mental" | "tools",
@@ -2326,11 +2432,11 @@ export function ConversationView({
     }
     const visibleOperations = compactVisibleTimelineOperations(operations.filter(shouldShowTimelineOperation));
     if (visibleOperations.length === 0) {
-      return renderCompactRequestSummary(operations);
+      return null;
     }
     const reActGroups = buildAgentMessageReActOperationGroups(visibleOperations);
     if (reActGroups.length === 0) {
-      return renderCompactRequestSummary(operations);
+      return null;
     }
     const defaultTimelineExpanded = defaultExpanded || reActGroups.some((group) => shouldExpandReActGroupByDefault(group));
     const expanded = getExpansionState(messageId, "feedback", defaultTimelineExpanded);
@@ -2388,6 +2494,9 @@ export function ConversationView({
     const title = processSummaryTitle(tone, operations, operationStateLabels);
     const meta = processSummaryMeta(operations, operationStateLabels);
     const hasExpandableDetails = operations.some(shouldShowTimelineOperation);
+    if (!hasExpandableDetails) {
+      return null;
+    }
     const summaryContent = (
       <>
         <span className={styles.answerOnlyProcessIcon} aria-hidden="true">
@@ -2397,23 +2506,6 @@ export function ConversationView({
         {meta ? <span className={styles.answerOnlyProcessMeta}>{meta}</span> : null}
       </>
     );
-    if (!hasExpandableDetails) {
-      return (
-        <section
-          className={[styles.answerOnlyProcessGroup, toneStyle].filter(Boolean).join(" ")}
-          data-agent-process-section-ids={processSectionIds}
-          data-agent-process-kind={processSectionIds ? "answer-only" : undefined}
-        >
-          <div
-            className={[styles.answerOnlyProcessToggle, styles.answerOnlyProcessStatic].filter(Boolean).join(" ")}
-            role={tone === "running" ? "status" : undefined}
-            aria-live={tone === "running" ? "polite" : undefined}
-          >
-            {summaryContent}
-          </div>
-        </section>
-      );
-    }
     return (
       <section
         className={[styles.answerOnlyProcessGroup, toneStyle].filter(Boolean).join(" ")}
@@ -2807,8 +2899,9 @@ export function ConversationView({
             if (!agentMessage) {
               return null;
             }
-            const operationGroups = agentOperationGroupsByMessageId.get(agentMessage.id)
+            const baseOperationGroups = agentOperationGroupsByMessageId.get(agentMessage.id)
               ?? buildAgentMessageOperationGroups(agentMessage, operationLabels);
+            const operationGroups = operationGroupsWithFeedbackStatusPlaceholder(baseOperationGroups, message, lang);
             const agentRenderState = agentRenderStatesByMessageId.get(message.id) ?? buildAgentMessageRenderState(agentMessage);
             const agentSections = agentRenderState.sectionState;
             const processSections = agentRenderState.processSections;
@@ -2863,7 +2956,6 @@ export function ConversationView({
             const isStreamingStatusPlaceholder = Boolean(message.streaming)
               && showResponseBlock
               && answerOnlyProcessMode
-              && hasFeedbackTimeline
               && isStreamingStatusPlaceholderContent(responseText);
             const isResponseStreaming = Boolean(message.streaming) && showResponseBlock && !isStreamingStatusPlaceholder;
             const showResponseSpinner = isResponseStreaming && !hasActiveProcess;
@@ -2873,7 +2965,7 @@ export function ConversationView({
               ? getCachedResponseSegments(responseText)
               : [];
             const codexTranscriptNode = (
-              shouldRenderCodexTranscriptSurface(message, codexTranscriptSurface)
+              shouldRenderCodexTranscriptSurface(codexTranscriptSurface)
               && !turnErrorMessage
               && !agentInboxMessage
               && !groupTranscriptMessage
@@ -3051,6 +3143,8 @@ export function ConversationView({
                     data-codex-transcript-cell-count={codexTranscriptCells.length}
                     data-codex-transcript-surface-mode={codexTranscriptSurface?.mode ?? "empty"}
                     data-codex-transcript-native-primary={nativeCodexTranscriptPrimary ? "true" : "false"}
+                    data-codex-transcript-projection-gap-reason={codexTranscriptSurface?.projectionGap?.reason ?? ""}
+                    data-codex-transcript-projection-gap-legacy-cell-count={codexTranscriptSurface?.projectionGap?.legacyCellCount ?? 0}
                   />
                   {agentInboxMessage ? (
                     <section className={styles.agentInboxSection}>

@@ -1,6 +1,7 @@
 import type { AgentMessage, AgentMessagePart, AgentTextPart } from "../../agent-thread/types";
 import { AgentMessageOperation } from "./agentMessageOperations";
 import { shouldDisplayRuntimeStatus } from "./conversationDisplayProtocol";
+import { compactVisibleTimelineOperations } from "./conversationOperationState";
 
 export type AgentMessageTimelineItemStatus = "pending" | "running" | "completed" | "failed" | "degraded";
 
@@ -134,7 +135,9 @@ function timelineItemsFromOperations(
   options: AgentMessageTimelineOptions,
 ): AgentMessageTimelineItem[] {
   const items: AgentMessageTimelineItem[] = [];
-  const sortedOperations = [...operations].sort((left, right) => (left.sequence ?? 0) - (right.sequence ?? 0));
+  const sortedOperations = compactVisibleTimelineOperations(
+    [...operations].sort((left, right) => (left.sequence ?? 0) - (right.sequence ?? 0)),
+  );
 
   for (const operation of sortedOperations) {
     if (operation.kind === "thought") {
