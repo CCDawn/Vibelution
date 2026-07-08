@@ -507,7 +507,7 @@ def model_messages_from_events(events: Iterable[TurnJournalEvent]) -> list[dict[
     event_list = list(events or [])
     event_by_id = {event.event_id: event for event in event_list if event.event_id}
     messages: list[dict[str, Any]] = []
-    for message in model_visible_messages_from_events(event_list):
+    for message in _filter_recoverable_status_messages(model_visible_messages_from_events(event_list)):
         metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
         if metadata.get("kind") == "context_compression_marker":
             checkpoint_message = _checkpoint_model_message_from_event(
@@ -518,6 +518,116 @@ def model_messages_from_events(events: Iterable[TurnJournalEvent]) -> list[dict[
             continue
         messages.append(message)
     return normalize_model_messages(messages)
+
+
+def _filter_recoverable_status_messages(messages: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep retry/error status UI out of the semantic model history."""
+
+    first_pass: list[dict[str, Any]] = []
+    meaningful_non_user_turn_ids: set[str] = set()
+    skipped_recoverable_status = False
+    for raw in list(messages or []):
+        if not isinstance(raw, dict):
+            continue
+        message = dict(raw)
+        if _is_recoverable_status_message(message):
+            skipped_recoverable_status = True
+            continue
+        first_pass.append(message)
+        if _is_meaningful_non_user_message(message):
+            turn_id = _message_turn_id(message)
+            if turn_id:
+                meaningful_non_user_turn_ids.add(turn_id)
+
+    second_pass: list[dict[str, Any]] = []
+    for message in first_pass:
+        if _is_turn_interrupted_marker_message(message) and _message_turn_id(message) not in meaningful_non_user_turn_ids:
+            continue
+        second_pass.append(message)
+
+    retained_non_user_turn_ids = {
+        _message_turn_id(message)
+        for message in second_pass
+        if _is_meaningful_non_user_message(message)
+    }
+    filtered = [
+        message
+        for message in second_pass
+        if not (
+            _is_continuation_only_user_message(message)
+            and _message_turn_id(message) not in retained_non_user_turn_ids
+        )
+    ]
+    if skipped_recoverable_status:
+        return _minimal_provider_failure_recovery_history(filtered)
+    return filtered
+
+
+def _minimal_provider_failure_recovery_history(messages: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    for message in reversed(list(messages or [])):
+        if str(message.get("role") or "").strip().lower() != "user":
+            continue
+        if _is_continuation_only_user_message(message):
+            continue
+        if str(message.get("content") or "").strip():
+            return [message]
+    return []
+
+
+def _message_turn_id(message: dict[str, Any]) -> str:
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    return str(metadata.get("turnId") or message.get("turnId") or "").strip()
+
+
+def _message_metadata_kind(message: dict[str, Any]) -> str:
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    return str(metadata.get("kind") or "").strip()
+
+
+def _is_recoverable_status_message(message: dict[str, Any]) -> bool:
+    role = str(message.get("role") or "").strip().lower()
+    if role != "assistant":
+        return False
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    if metadata.get("providerFailure") is True:
+        return True
+    if str(metadata.get("kind") or "").strip() == "turn_error":
+        return True
+    if str(metadata.get("errorType") or "").strip().startswith("provider_"):
+        return True
+    content = str(message.get("content") or "")
+    return any(
+        marker in content
+        for marker in (
+            "模型连接正在重试",
+            "模型服务上游暂时失败",
+            "provider 上游服务不可用",
+            "Upstream request failed",
+            "server_error:",
+        )
+    )
+
+
+def _is_turn_interrupted_marker_message(message: dict[str, Any]) -> bool:
+    return _message_metadata_kind(message) == "turn_interrupted"
+
+
+def _is_meaningful_non_user_message(message: dict[str, Any]) -> bool:
+    role = str(message.get("role") or "").strip().lower()
+    if role == "user":
+        return False
+    if _is_turn_interrupted_marker_message(message):
+        return False
+    if _is_recoverable_status_message(message):
+        return False
+    return _message_has_visible_payload(message)
+
+
+def _is_continuation_only_user_message(message: dict[str, Any]) -> bool:
+    if str(message.get("role") or "").strip().lower() != "user":
+        return False
+    content = str(message.get("content") or "").strip().lower()
+    return content in {"继续", "继续。", "继续吧", "继续一下", "continue", "go on"}
 
 
 def _assistant_message_from_payload(
