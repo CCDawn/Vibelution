@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import conversationViewSource from "./ConversationView.tsx?raw";
 import {
+  answerProjectionContent,
   compactStreamingStatusPlaceholder,
   isNoFinalAnswerStatusContent,
+  messageHasInternalStreamingStatusContent,
   isStreamingStatusPlaceholderContent,
 } from "./conversationInternalStatus";
 
@@ -20,6 +22,36 @@ describe("conversation internal status helpers", () => {
   it("recognizes internal streaming status placeholder text", () => {
     expect(isStreamingStatusPlaceholderContent("正在请求模型，等待首个响应片段")).toBe(true);
     expect(isStreamingStatusPlaceholderContent("这是用户可见的正常回答")).toBe(false);
+  });
+
+  it("keeps retry live overlay text out of the assistant answer projection", () => {
+    const retryStatusText = "模型连接正在重试...\n第 2/5 次；原因：server_error。本轮仍在继续，请不要重复提交。";
+    const message = {
+      id: "message-model-retry-overlay",
+      role: "assistant" as const,
+      content: retryStatusText,
+      timestamp: "2026-07-08T00:25:00Z",
+      streaming: true,
+      streamStage: "model_retry",
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "status" as const,
+          status: "running" as const,
+          name: "retrying",
+          summary: retryStatusText,
+          resultPreview: retryStatusText,
+        },
+      ],
+      metadata: {
+        kind: "session_live_overlay",
+        turnId: "turn-retry",
+      },
+    };
+
+    expect(isStreamingStatusPlaceholderContent(retryStatusText)).toBe(true);
+    expect(messageHasInternalStreamingStatusContent(message)).toBe(true);
+    expect(answerProjectionContent(message)).toBe("");
   });
 
   it("recognizes no-final-answer interruption status text", () => {
