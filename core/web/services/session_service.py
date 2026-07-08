@@ -17307,6 +17307,8 @@ def _codex_transcript_operation_sources(
         if kind == "assistant_text":
             continue
         source = dict(event)
+        if _is_non_diagnostic_runtime_status_source(source):
+            continue
         source["_operationId"] = _codex_operation_id(message_id, source, len(sources) + 1)
         source["_sourceKind"] = "feedback"
         sources.append(source)
@@ -17320,6 +17322,23 @@ def _codex_transcript_operation_sources(
         source["_sequence"] = index
         sources.append(source)
     return sources
+
+
+def _is_non_diagnostic_runtime_status_source(source: dict[str, Any]) -> bool:
+    if str(source.get("kind") or "").strip().lower() != "status":
+        return False
+    status = _codex_lifecycle_status(source.get("status") or source.get("semanticStatus"))
+    if status in {"failed", "degraded"} or _status_source_has_error_detail(source):
+        return False
+    return True
+
+
+def _status_source_has_error_detail(source: dict[str, Any]) -> bool:
+    return bool(
+        str(source.get("error") or "").strip()
+        or str(source.get("failureClass") or source.get("failure_class") or "").strip()
+        or bool(source.get("timedOut") or source.get("timed_out"))
+    )
 
 
 def _codex_operation_id(message_id: str, source: dict[str, Any], sequence: int) -> str:

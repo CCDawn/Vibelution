@@ -3,6 +3,7 @@ import type { AgentMessageOperation } from "./agentMessageOperations";
 import type { AgentMessageTimelineItem, AgentMessageTimelineItemStatus } from "./agentMessageTimeline";
 import { buildCodexRolloutTraceEvents, type CodexRolloutTraceEvent } from "./codexRolloutTrace";
 import { buildCodexToolLifecycleModel, type CodexToolLifecycleModel } from "./codexToolLifecycleModel";
+import { shouldDisplayTranscriptCell } from "./conversationDisplayProtocol";
 
 export type CodexTranscriptCellKind =
   | "user"
@@ -49,9 +50,10 @@ export function buildCodexTranscriptCells(
     return [];
   }
 
-  const cells = options.timelineItems?.length
+  const cells = (options.timelineItems?.length
     ? cellsFromTimelineItems(message.id, options.timelineItems)
-    : cellsFromOperations(message.id, options.operations ?? []);
+    : cellsFromOperations(message.id, options.operations ?? []))
+    .filter(shouldDisplayTranscriptCell);
   if (!hasAssistantMarkdownCell(cells)) {
     const answerText = answerTextFromMessage(message);
     if (answerText) {

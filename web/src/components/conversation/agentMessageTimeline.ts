@@ -1,5 +1,6 @@
 import type { AgentMessage, AgentMessagePart, AgentTextPart } from "../../agent-thread/types";
 import { AgentMessageOperation } from "./agentMessageOperations";
+import { shouldDisplayRuntimeStatus } from "./conversationDisplayProtocol";
 
 export type AgentMessageTimelineItemStatus = "pending" | "running" | "completed" | "failed" | "degraded";
 
@@ -154,7 +155,7 @@ function timelineItemsFromOperations(
     if (operation.kind === "mental") {
       continue;
     }
-    if (operation.kind === "status" && !operation.error?.trim() && normalizeTimelineStatus(operation.status) !== "failed") {
+    if (!shouldDisplayTimelineOperation(operation)) {
       continue;
     }
     items.push(operationTimelineItem(operation));
@@ -246,6 +247,9 @@ function timelineItemsFromServer(
         .map((operationId) => operationsById.get(operationId))
         .find(Boolean) ?? serverOperation(item, status);
       const timelineOperation = operationWithServerTimelineStatus(operation, status);
+      if (!shouldDisplayTimelineOperation(timelineOperation, item)) {
+        continue;
+      }
       items.push({
         id: item.id || `${timelineOperation.id}-timeline-operation`,
         kind: "operation",
@@ -257,6 +261,20 @@ function timelineItemsFromServer(
     }
   }
   return mergeAdjacentThoughtItems(items);
+}
+
+function shouldDisplayTimelineOperation(
+  operation: AgentMessageOperation,
+  item?: AgentMessageTimelineServerItem,
+) {
+  return shouldDisplayRuntimeStatus({
+    kind: operation.kind,
+    name: item?.title ?? operation.label,
+    status: item?.status ?? operation.status,
+    summary: item?.summary ?? operation.summary,
+    resultPreview: operation.resultPreview,
+    error: operation.error,
+  });
 }
 
 function operationWithServerTimelineStatus(

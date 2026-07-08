@@ -109,7 +109,7 @@ describe("codexTranscriptCells", () => {
     });
   });
 
-  it("maps tool, status, degraded, and failed operation cells without changing backend DTOs", () => {
+  it("maps tool, degraded, and failed operation cells without changing backend DTOs", () => {
     const operations: AgentMessageOperation[] = [
       {
         id: "op-search",
@@ -148,7 +148,7 @@ describe("codexTranscriptCells", () => {
 
     const cells = buildCodexTranscriptCells(message({ id: "operation-message" }), { operations });
 
-    expect(cells.map((cell) => cell.kind)).toEqual(["tool_call", "status", "tool_call", "error_notice"]);
+    expect(cells.map((cell) => cell.kind)).toEqual(["tool_call", "tool_call", "error_notice"]);
     expect(cells[0]).toMatchObject({
       kind: "tool_call",
       status: "completed",
@@ -164,31 +164,24 @@ describe("codexTranscriptCells", () => {
       "ToolCallEnded",
     ]);
     expect(cells[1]).toMatchObject({
-      kind: "status",
-      status: "running",
-      tone: "running",
-      title: "准备上下文",
-    });
-    expect(rolloutTraceEvents(cells[1])).toEqual([]);
-    expect(cells[2]).toMatchObject({
       kind: "tool_call",
       status: "degraded",
       tone: "warning",
     });
-    expect(rolloutTraceEvents(cells[2])).toEqual(expect.arrayContaining([
+    expect(rolloutTraceEvents(cells[1])).toEqual(expect.arrayContaining([
       expect.objectContaining({
         kind: "RuntimeEnded",
         operationId: "op-partial",
         status: "degraded",
       }),
     ]));
-    expect(cells[3]).toMatchObject({
+    expect(cells[2]).toMatchObject({
       kind: "error_notice",
       status: "failed",
       tone: "error",
       summary: "Exit code 1",
     });
-    expect(rolloutTraceEvents(cells[3])).toEqual(expect.arrayContaining([
+    expect(rolloutTraceEvents(cells[2])).toEqual(expect.arrayContaining([
       expect.objectContaining({
         kind: "RuntimeEnded",
         operationId: "op-failed",
@@ -196,6 +189,31 @@ describe("codexTranscriptCells", () => {
         error: "Exit code 1",
       }),
     ]));
+  });
+
+  it("filters internal runtime status operation cells from legacy transcript projections", () => {
+    const cells = buildCodexTranscriptCells(message({ id: "legacy-internal-status" }), {
+      operations: [
+        {
+          id: "op-context-prepare",
+          kind: "status",
+          label: "context_prepare",
+          status: "done",
+          summary: "正在准备对话上下文... 正在读取当前会话、绑定 Agent、工具权限和可恢复的上轮现场。",
+          durationSeconds: null,
+        },
+        {
+          id: "op-retrying",
+          kind: "status",
+          label: "retrying",
+          status: "done",
+          summary: "第 1/5 次；原因：server_error。",
+          durationSeconds: null,
+        },
+      ],
+    });
+
+    expect(cells).toEqual([]);
   });
 
   it("attaches the Codex-like lifecycle model to terminal tool cells", () => {
@@ -342,10 +360,10 @@ describe("codexTranscriptCells", () => {
       operations: [
         {
           id: "op-running",
-          kind: "status",
-          label: "请求模型",
+          kind: "tool",
+          label: "读取文件",
           status: "running",
-          summary: "等待首个响应片段",
+          summary: "读取 agentMessageTimeline.ts",
           durationSeconds: null,
         },
       ],

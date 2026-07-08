@@ -182,6 +182,49 @@ describe("agentMessageTimeline", () => {
     expect(items[0].kind === "operation" ? items[0].operation.rawLabel : "").toBe("grep_search_tool");
   });
 
+  it("filters internal runtime status rows from backend timeline items", () => {
+    const message: ConversationMessage = {
+      id: "message-server-internal-status",
+      role: "assistant",
+      content: "最终回答",
+      timestamp: "2026-07-08T17:01:00Z",
+      feedbackEvents: [],
+      timelineItems: [
+        {
+          id: "server-context-prepare",
+          kind: "operation",
+          status: "completed",
+          title: "context_prepare",
+          summary: "正在准备对话上下文... 正在读取当前会话、绑定 Agent、工具权限和可恢复的上轮现场。",
+          operationIds: ["message-server-internal-status-feedback-1"],
+        },
+        {
+          id: "server-retrying",
+          kind: "operation",
+          status: "completed",
+          title: "retrying",
+          summary: "第 1/5 次；原因：server_error。",
+          operationIds: ["message-server-internal-status-feedback-2"],
+        },
+        {
+          id: "server-answer",
+          kind: "assistant_text",
+          status: "completed",
+          text: "最终回答",
+        },
+      ],
+    };
+
+    const items = timelineItemsForConversationMessage(message, { lang: "zh" });
+
+    expect(items.map((item) => item.kind)).toEqual(["assistant_text"]);
+    expect(items[0]).toMatchObject({
+      id: "server-answer",
+      kind: "assistant_text",
+      text: "最终回答",
+    });
+  });
+
   it("keeps the complete thought stream as natural text", () => {
     const message: ConversationMessage = {
       id: "message-thought",
