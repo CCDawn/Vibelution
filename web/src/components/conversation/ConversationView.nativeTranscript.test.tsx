@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import type { ConversationMessage } from "../../api/types";
 import { ConversationView } from "./ConversationView";
 
-function renderConversation(messages: ConversationMessage[]) {
+function renderConversation(messages: ConversationMessage[], processDisplayMode: "answer" | "trace" = "trace") {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -22,7 +22,7 @@ function renderConversation(messages: ConversationMessage[]) {
         showHeader={false}
         showSessionOverview={false}
         showComposer={false}
-        processDisplayMode="trace"
+        processDisplayMode={processDisplayMode}
         composerValue=""
         composerPlaceholder="Type"
         composerDisabled={false}
@@ -40,6 +40,65 @@ function renderConversation(messages: ConversationMessage[]) {
 }
 
 describe("ConversationView native Codex transcript surface", () => {
+  it("keeps compact runtime process visible without duplicating the native final answer", () => {
+    const answer = "你好，我在。";
+    const html = renderConversation([
+      {
+        id: "user-message",
+        role: "user",
+        content: "你好",
+        timestamp: "2026-07-08T15:52:32Z",
+      },
+      {
+        id: "assistant-native-chat-turn",
+        role: "assistant",
+        content: answer,
+        timestamp: "2026-07-08T15:53:00Z",
+        feedbackEvents: [
+          { sequence: 1, kind: "status", status: "done", name: "context_prepare", summary: "正在准备对话上下文..." },
+          { sequence: 2, kind: "status", status: "done", name: "agent_prepare", summary: "正在唤起对话 Agent..." },
+          { sequence: 3, kind: "status", status: "done", name: "model_request", summary: "正在请求模型，等待首个响应片段..." },
+          { sequence: 4, kind: "status", status: "done", name: "model_thinking", summary: "正在思考中，等待模型输出..." },
+        ],
+        timelineItems: [
+          {
+            id: "assistant-native-chat-turn-timeline-response",
+            kind: "assistant_text",
+            status: "completed",
+            text: answer,
+          },
+        ],
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "assistant-native-chat-turn",
+          cells: [
+            {
+              id: "assistant-native-chat-turn-answer",
+              kind: "assistant_markdown",
+              messageId: "assistant-native-chat-turn",
+              status: "completed",
+              tone: "neutral",
+              text: answer,
+            },
+          ],
+        },
+      },
+    ], "answer");
+
+    expect(html.match(/你好，我在。/g)).toHaveLength(1);
+    expect(html).toContain('data-codex-transcript-cell-kind="assistant_markdown"');
+    expect(html).toContain('data-agent-process-kind="timeline"');
+    expect(html).toContain("准备上下文");
+    expect(html).toContain("绑定 Agent");
+    expect(html).toContain("请求模型");
+    expect(html).toContain("模型思考");
+    expect(html).not.toContain("正在准备对话上下文...");
+    expect(html).not.toContain("正在唤起对话 Agent...");
+    expect(html).not.toContain("正在请求模型，等待首个响应片段...");
+    expect(html).not.toContain("正在思考中，等待模型输出...");
+  });
+
   it("renders native transcript as the primary assistant surface without duplicating legacy process or response", () => {
     const html = renderConversation([
       {

@@ -49,6 +49,7 @@ export type AgentMessageTimelineItem =
 export type AgentMessageTimelineOptions = {
   lang: "zh" | "en" | string;
   includeAssistantText?: boolean;
+  includeInternalStatus?: boolean;
 };
 
 export type AgentMessageTimelineServerItem = {
@@ -75,6 +76,7 @@ const agentTimelineItemsCache = new WeakMap<
     serverItems: AgentMessageTimelineServerItem[] | undefined;
     lang: string;
     includeAssistantText: boolean | undefined;
+    includeInternalStatus: boolean | undefined;
     items: AgentMessageTimelineItem[];
   }
 >();
@@ -95,6 +97,7 @@ export function buildAgentMessageTimelineItems(
     && cached.serverItems === serverItems
     && cached.lang === options.lang
     && cached.includeAssistantText === options.includeAssistantText
+    && cached.includeInternalStatus === options.includeInternalStatus
   ) {
     return cached.items;
   }
@@ -104,6 +107,7 @@ export function buildAgentMessageTimelineItems(
     serverItems,
     lang: options.lang,
     includeAssistantText: options.includeAssistantText,
+    includeInternalStatus: options.includeInternalStatus,
     items,
   });
   return items;
@@ -158,7 +162,7 @@ function timelineItemsFromOperations(
     if (operation.kind === "mental") {
       continue;
     }
-    if (!shouldDisplayTimelineOperation(operation)) {
+    if (!shouldDisplayTimelineOperation(operation, undefined, options)) {
       continue;
     }
     items.push(operationTimelineItem(operation));
@@ -250,7 +254,7 @@ function timelineItemsFromServer(
         .map((operationId) => operationsById.get(operationId))
         .find(Boolean) ?? serverOperation(item, status);
       const timelineOperation = operationWithServerTimelineStatus(operation, status);
-      if (!shouldDisplayTimelineOperation(timelineOperation, item)) {
+      if (!shouldDisplayTimelineOperation(timelineOperation, item, options)) {
         continue;
       }
       items.push({
@@ -269,14 +273,17 @@ function timelineItemsFromServer(
 function shouldDisplayTimelineOperation(
   operation: AgentMessageOperation,
   item?: AgentMessageTimelineServerItem,
+  options: AgentMessageTimelineOptions = { lang: "zh" },
 ) {
   return shouldDisplayRuntimeStatus({
     kind: operation.kind,
-    name: item?.title ?? operation.label,
+    name: item?.title ?? operation.rawLabel ?? operation.label,
     status: item?.status ?? operation.status,
     summary: item?.summary ?? operation.summary,
     resultPreview: operation.resultPreview,
     error: operation.error,
+  }, {
+    includeInternalPipeline: Boolean(options.includeInternalStatus),
   });
 }
 

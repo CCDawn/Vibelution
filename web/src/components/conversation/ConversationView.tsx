@@ -66,6 +66,7 @@ import {
   isNoFinalAnswerStatusContent,
   isStreamingStatusPlaceholderContent,
 } from "./conversationInternalStatus";
+import { isInternalRuntimeStatus } from "./conversationDisplayProtocol";
 import {
   buildAgentMessageOperationGroups,
   buildAgentMessageReActOperationGroups,
@@ -2174,7 +2175,7 @@ export function ConversationView({
     const canExpandDetails = hasOperationDetails(operation);
     const duration = formatDuration(operation.durationSeconds);
     const computerUseResult = renderComputerUseResult(operation);
-    const readableResult = operation.kind === "tool"
+    const readableResult = operation.kind === "tool" || isCompactInternalStatusOperation(operation)
       ? ""
       : readableOperationResult(operation, operationDetailLabels.structuredResultFallback);
     const showReadableResult = Boolean(operation.kind !== "tool" && readableResult && readableResult !== item.summary.trim());
@@ -2232,6 +2233,20 @@ export function ConversationView({
         {showReadableResult ? <pre className={styles.timelineOperationResult}>{readableResult}</pre> : null}
         {computerUseResult}
       </section>
+    );
+  }
+
+  function isCompactInternalStatusOperation(operation: AgentMessageOperation) {
+    return Boolean(
+      operation.kind === "status"
+      && !operation.error?.trim()
+      && isInternalRuntimeStatus({
+        kind: "status",
+        name: operation.rawLabel ?? operation.label,
+        status: operation.status,
+        summary: operation.summary,
+        resultPreview: operation.resultPreview,
+      }),
     );
   }
 
@@ -2948,20 +2963,28 @@ export function ConversationView({
               previousAgentRenderState?.sectionState,
               agentSections,
             );
+            const codexTranscriptSurface = agentCodexSurfacesByMessageId.get(agentMessage.id);
+            const codexTranscriptCells = codexTranscriptSurface?.cells ?? [];
+            const nativeCodexTranscriptPrimary = codexTranscriptSurface?.mode === "native";
+            const nativeAssistantTranscriptHasAnswer = Boolean(
+              nativeCodexTranscriptPrimary && codexTranscriptSurface?.hasAssistantMarkdown,
+            );
             const timelineHasAssistantText = (message.timelineItems ?? []).some((item) => item.kind === "assistant_text");
             const timelineOptions = {
               lang,
-              includeAssistantText: timelineHasAssistantText,
+              includeAssistantText: timelineHasAssistantText && !nativeAssistantTranscriptHasAnswer,
+              includeInternalStatus: nativeAssistantTranscriptHasAnswer,
             };
+            const timelineServerItems = nativeAssistantTranscriptHasAnswer
+              && !(message.timelineItems ?? []).some((item) => item.kind !== "assistant_text")
+              ? undefined
+              : message.timelineItems;
             const agentMessageTimelineItems = buildAgentMessageTimelineItems(
               agentMessage,
               operationGroups.timeline,
               timelineOptions,
-              message.timelineItems,
+              timelineServerItems,
             );
-            const codexTranscriptSurface = agentCodexSurfacesByMessageId.get(agentMessage.id);
-            const codexTranscriptCells = codexTranscriptSurface?.cells ?? [];
-            const nativeCodexTranscriptPrimary = codexTranscriptSurface?.mode === "native";
             const hasAgentMessageTimeline =
               message.role === "assistant"
               && hasFeedbackTimeline
@@ -2972,6 +2995,7 @@ export function ConversationView({
             const timelineRendersAssistantText =
               hasAgentMessageTimeline
               && agentMessageTimelineItems.some((item) => item.kind === "assistant_text");
+            const shouldRenderNativeProcessTimeline = nativeAssistantTranscriptHasAnswer && hasAgentMessageTimeline;
             const showUserContent = agentSections.hasUserContent;
             const userAuthoredMessage = message.role === "user" && !agentInboxMessage;
             const isStreamingStatusPlaceholder = Boolean(message.streaming)
@@ -3077,7 +3101,9 @@ export function ConversationView({
                   )}
               </AgentResponseSectionView>
             ) : null;
-            const processNode = codexTranscriptSurface?.suppressLegacyProcess ? null : answerOnlyProcessMode && !timelineRendersAssistantText ? (
+            const processNode = codexTranscriptSurface?.suppressLegacyProcess ? null : shouldRenderNativeProcessTimeline ? (
+              renderAgentMessageTimeline(message, agentMessageTimelineItems, rowIdentity, agentRenderState.processSectionIds)
+            ) : answerOnlyProcessMode && !timelineRendersAssistantText ? (
               renderAnswerOnlyProcessGroup(
                 message.id,
                 operationGroups.timeline,
