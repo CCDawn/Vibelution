@@ -181,6 +181,45 @@ describe("timeline message process projection", () => {
     ]);
   });
 
+  it("does not treat legacy DTO process fields as mergeable process packets", () => {
+    const projected = projectTimelineProcessMessages([
+      {
+        id: "message-legacy-process-only",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-06-26T14:56:00Z",
+        thought: "legacy thought should stay non-projectable",
+        toolCalls: [{ name: "legacy_tool", status: "done", summary: "legacy tool" }],
+        mentalSnapshot: {
+          mood: "",
+          feeling: "",
+          whisper: "",
+          summary: "legacy mental",
+          cognitiveState: "normal",
+          confidence: 0,
+          sampleSize: 0,
+          interventionCount: 0,
+          updatedAt: "2026-06-26T14:56:00Z",
+          source: "test",
+        },
+        metadata: { turnId: "turn-legacy" },
+      },
+      {
+        id: "message-answer",
+        role: "assistant",
+        content: "最终回答应该单独显示。",
+        timestamp: "2026-06-26T14:56:02Z",
+        metadata: { turnId: "turn-legacy" },
+      },
+    ]);
+
+    expect(projected.map((message) => message.id)).toEqual([
+      "message-legacy-process-only",
+      "message-answer",
+    ]);
+    expect(projected[1].metadata?.projectedMessageIds).toBeUndefined();
+  });
+
   it("keeps same-turn live overlay status text out of the committed assistant answer", () => {
     const projected = projectTimelineProcessMessages([
       {

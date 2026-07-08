@@ -31,7 +31,7 @@ export type CodexTranscriptProjectionGapReason =
 
 export type CodexTranscriptProjectionGap = {
   reason: CodexTranscriptProjectionGapReason;
-  legacyCellCount: number;
+  projectedCellCount: number;
 };
 
 export type CodexTranscriptSurface = {
@@ -39,9 +39,9 @@ export type CodexTranscriptSurface = {
   source: "message.codexTranscript" | "none";
   cells: CodexTranscriptCell[];
   hasAssistantMarkdown: boolean;
-  suppressLegacyProcess: boolean;
-  suppressLegacyResponse: boolean;
-  suppressLegacyTurnStatus: boolean;
+  suppressProjectedProcess: boolean;
+  suppressProjectedResponse: boolean;
+  suppressProjectedTurnStatus: boolean;
   projectionGap?: CodexTranscriptProjectionGap;
 };
 
@@ -62,7 +62,7 @@ export function hasUsableNativeCodexTranscript(message: ConversationMessage) {
 
 export function resolveCodexTranscriptSurface(
   message: ConversationMessage,
-  legacyCells: CodexTranscriptCell[] = [],
+  projectedCells: CodexTranscriptCell[] = [],
 ): CodexTranscriptSurface {
   if (hasUsableNativeCodexTranscript(message)) {
     const transcript = message.codexTranscript as CodexTranscriptProjection;
@@ -74,9 +74,9 @@ export function resolveCodexTranscriptSurface(
       source: "message.codexTranscript",
       cells,
       hasAssistantMarkdown,
-      suppressLegacyProcess: hasNativeProcessProjection,
-      suppressLegacyResponse: hasAssistantMarkdown,
-      suppressLegacyTurnStatus: true,
+      suppressProjectedProcess: hasNativeProcessProjection,
+      suppressProjectedResponse: hasAssistantMarkdown,
+      suppressProjectedTurnStatus: true,
     };
   }
   return {
@@ -84,12 +84,12 @@ export function resolveCodexTranscriptSurface(
     source: "none",
     cells: [],
     hasAssistantMarkdown: false,
-    suppressLegacyProcess: false,
-    suppressLegacyResponse: false,
-    suppressLegacyTurnStatus: false,
+    suppressProjectedProcess: false,
+    suppressProjectedResponse: false,
+    suppressProjectedTurnStatus: false,
     projectionGap: {
       reason: nativeTranscriptProjectionGapReason(message),
-      legacyCellCount: legacyCells.length,
+      projectedCellCount: projectedCells.length,
     },
   };
 }

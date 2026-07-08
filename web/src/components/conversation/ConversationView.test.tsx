@@ -3448,8 +3448,22 @@ describe("ConversationView edit resend affordance", () => {
         role: "assistant",
         content: "模型服务上游暂时失败，本轮没有完成。完整 provider 错误已写入运行日志。",
         timestamp: "2026-05-22T00:01:00Z",
-        thought: "The generation failed with a 502 upstream error.",
-        toolCalls: [{ name: "image2_generate_tool", status: "done", summary: "failed" }],
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "thought",
+            status: "done",
+            summary: "The generation failed with a 502 upstream error.",
+            resultPreview: "The generation failed with a 502 upstream error.",
+          },
+          {
+            sequence: 2,
+            kind: "tool",
+            status: "done",
+            name: "image2_generate_tool",
+            summary: "failed",
+          },
+        ],
         metadata: {
           kind: "turn_error",
           errorType: "RuntimeError",
@@ -3482,9 +3496,9 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("claude-opus-4-7");
     expect(html).toContain("rate_limited");
     expect(html).toContain("assistantTurn");
-    expect(html).toContain("思考过程");
-    expect(html).toContain("工具调用");
-    expect(html).toContain("The generation failed with a 502 upstream error.");
+    expect(html).not.toContain("思考过程");
+    expect(html).not.toContain("工具调用");
+    expect(html).not.toContain("The generation failed with a 502 upstream error.");
     expect(html).not.toContain("回答");
     expect(styles.turnErrorNotice).toContain("grid-cols-[auto_minmax(0,1fr)]");
     expect(styles.turnErrorNotice).toContain("shadow-none");
@@ -3577,7 +3591,6 @@ describe("ConversationView edit resend affordance", () => {
         role: "assistant",
         content: failureText,
         timestamp: "2026-05-22T00:01:00Z",
-        toolCalls: [{ name: "image2_generate_tool", status: "done", summary: "failed" }],
         metadata: {
           kind: "image2_generation",
           status: "failed",
@@ -3589,8 +3602,22 @@ describe("ConversationView edit resend affordance", () => {
         role: "assistant",
         content: failureText,
         timestamp: "2026-05-22T00:01:03Z",
-        thought: "The generation failed with a 502 upstream error.",
-        toolCalls: [{ name: "image2_generate_tool", status: "done", summary: "failed" }],
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "thought",
+            status: "done",
+            summary: "The generation failed with a 502 upstream error.",
+            resultPreview: "The generation failed with a 502 upstream error.",
+          },
+          {
+            sequence: 2,
+            kind: "tool",
+            status: "done",
+            name: "image2_generate_tool",
+            summary: "failed",
+          },
+        ],
       },
     ]);
 
@@ -3598,9 +3625,9 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("运行提示");
     expect(html).toContain("RuntimeError");
     expect(html).toContain("模型服务上游暂时失败");
-    expect(html).toContain("思考过程");
-    expect(html).toContain("工具调用");
-    expect(html).toContain("The generation failed with a 502 upstream error.");
+    expect(html).not.toContain("思考过程");
+    expect(html).not.toContain("工具调用");
+    expect(html).not.toContain("The generation failed with a 502 upstream error.");
     expect(html).not.toContain("回答");
   });
 
@@ -3653,7 +3680,7 @@ describe("ConversationView edit resend affordance", () => {
     ).toBe(true);
   });
 
-  it("separates mental model traces from tool call counts", () => {
+  it("does not turn legacy mental snapshots into visible process or tool rows", () => {
     const html = renderConversation([
       {
         id: "message-mental",
@@ -3676,15 +3703,10 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("心智模型");
-    expect(html).toContain("认知态");
-    expect(html).toContain("顺畅");
-    expect(html).toContain("来源");
-    expect(html).toContain("运行时");
-    expect(html).toContain("样本数");
-    expect(html).toContain("摘要");
-    expect(html).toContain("tracking state");
-    expect(html).toContain("No tool call happened.");
+    expect(html).toContain("已暂停，等待继续。");
+    expect(html).not.toContain("心智模型");
+    expect(html).not.toContain("tracking state");
+    expect(html).not.toContain("No tool call happened.");
     expect(html).not.toContain("执行了 1 个操作");
     expect(html).not.toContain("工具调用 1");
   });
@@ -3764,15 +3786,22 @@ describe("ConversationView edit resend affordance", () => {
         content: "已读取文件。",
         timestamp: "2026-05-26T00:01:00Z",
         streaming: true,
-        toolCalls: [{ name: "read_file", status: "done", summary: "opened session_service.py" }],
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "tool",
+            status: "done",
+            name: "read_file",
+            summary: "opened session_service.py",
+          },
+        ],
       },
     ]);
 
-    expect(html).toContain("工具调用 1");
-    expect(html).toContain("read_file");
+    expect(html).toContain("读取");
     expect(html).toContain("opened session_service.py");
     expect(html).not.toContain("operationItemTool");
-    expect(html).toContain("operationIcon_tool");
+    expect(html).not.toContain("operationIcon_tool");
     expect(html).not.toContain("执行了 1 个操作");
   });
 
@@ -3783,8 +3812,10 @@ describe("ConversationView edit resend affordance", () => {
         role: "assistant",
         content: "沙盒浏览器已暂停等待确认。",
         timestamp: "2026-06-03T00:01:00Z",
-        toolCalls: [
+        feedbackEvents: [
           {
+            sequence: 1,
+            kind: "tool",
             name: "computer_use_task_tool",
             status: "done",
             summary: "need_confirmation",
@@ -3817,7 +3848,15 @@ describe("ConversationView edit resend affordance", () => {
         role: "assistant",
         content: "我会先检查日志。",
         timestamp: "2026-05-29T09:35:18Z",
-        thought: "先确认后端是否捕获 thought，再看前端是否把它渲染出来。",
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "thought",
+            status: "done",
+            summary: "先确认后端是否捕获 thought，再看前端是否把它渲染出来。",
+            resultPreview: "先确认后端是否捕获 thought，再看前端是否把它渲染出来。",
+          },
+        ],
       },
     ]);
 
@@ -4564,8 +4603,10 @@ describe("ConversationView edit resend affordance", () => {
         content: "已调用图片工具。",
         timestamp: "2026-05-26T00:01:00Z",
         streaming: true,
-        toolCalls: [
+        feedbackEvents: [
           {
+            sequence: 1,
+            kind: "tool",
             name: "image2_generate_tool",
             status: "failed",
             summary: "Read timed out.",
@@ -4584,7 +4625,7 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("image2_generate_tool");
+    expect(html).toContain("生成图片");
     expect(html).toContain('title="展开工具详情"');
     expect(html).not.toContain("生成美女图片");
   });
@@ -4597,8 +4638,10 @@ describe("ConversationView edit resend affordance", () => {
         content: "已完成大批量搜索。",
         timestamp: "2026-05-26T00:01:00Z",
         streaming: true,
-        toolCalls: [
+        feedbackEvents: [
           {
+            sequence: 1,
+            kind: "tool",
             name: "batch_web_search_tool",
             status: "done",
             summary: "batch search done",
@@ -4620,7 +4663,7 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("batch_web_search_tool");
+    expect(html).toContain("搜索");
     expect(html).toContain('title="展开工具详情"');
     expect(html).not.toContain("predictive coding backpropagation equivalent implementation PyTorch");
     expect(html).not.toContain("very long line of result text");
@@ -4634,7 +4677,15 @@ describe("ConversationView edit resend affordance", () => {
         content: "正在读取文件。",
         timestamp: "2026-05-26T00:01:00Z",
         streaming: true,
-        toolCalls: [{ name: "read_file", status: "running", summary: "opening session_service.py" }],
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "tool",
+            status: "running",
+            name: "read_file",
+            summary: "opening session_service.py",
+          },
+        ],
       },
       {
         id: "message-done",
@@ -4642,13 +4693,21 @@ describe("ConversationView edit resend affordance", () => {
         content: "已读取文件。",
         timestamp: "2026-05-26T00:02:00Z",
         streaming: false,
-        toolCalls: [{ name: "read_file", status: "done", summary: "opened session_service.py" }],
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "tool",
+            status: "done",
+            name: "read_file",
+            summary: "opened session_service.py",
+          },
+        ],
       },
     ]);
 
     expect(html.match(/statusSpinner/g)?.length).toBe(1);
     expect(html).toContain("opening session_service.py");
-    expect(html).toContain("已读取文件。");
+    expect(html).toContain("opened session_service.py");
   });
 
   it("only animates the latest running timeline item", () => {
@@ -4749,33 +4808,39 @@ describe("ConversationView edit resend affordance", () => {
         content: "好的，我直接生成方案二！",
         timestamp: "2026-05-29T19:39:00Z",
         streaming: true,
-        thought: "The user wants me to try generating the image again.",
-        mentalSnapshot: {
-          mood: "focused",
-          feeling: "目标很明确，继续尝试方案二的生成。",
-          whisper: "稍等片刻，让速率限制冷却一下再重试。",
-          summary: "目标很明确，继续尝试方案二的生成。",
-          cognitiveState: "productive",
-          confidence: 0.7,
-          sampleSize: 1,
-          interventionCount: 0,
-          updatedAt: "2026-05-29T19:39:05Z",
-          source: "runtime",
-        },
-        toolCalls: [
-          { name: "spawn_agent_tool", status: "done", summary: "delegation policy blocked" },
-          { name: "image2_generate_tool", status: "running", summary: "生成方案二" },
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "thought",
+            status: "done",
+            summary: "The user wants me to try generating the image again.",
+            resultPreview: "The user wants me to try generating the image again.",
+          },
+          {
+            sequence: 2,
+            kind: "tool",
+            status: "done",
+            name: "spawn_agent_tool",
+            summary: "delegation policy blocked",
+          },
+          {
+            sequence: 3,
+            kind: "tool",
+            status: "running",
+            name: "image2_generate_tool",
+            summary: "生成方案二",
+          },
         ],
       },
     ]);
 
     expect(html).toContain("思考过程");
-    expect(html).toContain("心智模型");
-    expect(html).toContain("工具调用 2");
+    expect(html).toContain("生成图片");
+    expect(html).toContain("delegation policy blocked");
     expect(html.match(/statusSpinner/g)?.length).toBe(1);
   });
 
-  it("shows a spinner for an active mental model section", () => {
+  it("does not show legacy mental snapshots as active process sections", () => {
     const html = renderConversation([
       {
         id: "message-mental-running",
@@ -4798,14 +4863,13 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain("心智模型");
-    expect(html).toContain("Following the active turn");
-    expect(html).toContain("tracking state");
-    expect(html).toContain("运行时");
-    expect(html.match(/statusSpinner/g)?.length).toBe(1);
+    expect(html).not.toContain("心智模型");
+    expect(html).not.toContain("Following the active turn");
+    expect(html).not.toContain("tracking state");
+    expect(html.match(/statusSpinner/g)?.length).toBeUndefined();
   });
 
-  it("deduplicates matching mental feeling and summary rows", () => {
+  it("does not render legacy mental snapshot body rows", () => {
     const html = renderConversation([
       {
         id: "message-mental-deduped",
@@ -4827,10 +4891,11 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html.match(/规则感知: normal/g)?.length).toBe(1);
-    expect(html).toContain("感受");
+    expect(html).toContain("继续。");
+    expect(html).not.toContain("规则感知: normal");
+    expect(html).not.toContain("感受");
     expect(html).not.toContain("摘要");
-    expect(html).toContain("低语");
+    expect(html).not.toContain("低语");
   });
 });
 

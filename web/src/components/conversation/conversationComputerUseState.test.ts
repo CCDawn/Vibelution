@@ -33,16 +33,16 @@ describe("conversationComputerUseState", () => {
     expect(computerUseSessionIdFromPreview("{invalid")).toBe("");
   });
 
-  it("collects sorted unique computer-use session ids from tool calls and feedback events", () => {
+  it("collects sorted unique computer-use session ids from feedback events only", () => {
     const message = {
       role: "assistant",
       toolCalls: [
-        { name: COMPUTER_USE_TOOL_NAME, resultPreview: JSON.stringify({ sessionId: "cu-b" }) },
+        { name: COMPUTER_USE_TOOL_NAME, resultPreview: JSON.stringify({ sessionId: "legacy-cu" }) },
         { name: "other_tool", resultPreview: JSON.stringify({ sessionId: "ignored" }) },
       ],
       feedbackEvents: [
-        { kind: "tool", name: COMPUTER_USE_TOOL_NAME, resultPreview: JSON.stringify({ sessionId: "cu-a" }) },
-        { kind: "tool", name: COMPUTER_USE_TOOL_NAME, resultPreview: JSON.stringify({ sessionId: "cu-b" }) },
+        { sequence: 1, kind: "tool", status: "done", name: COMPUTER_USE_TOOL_NAME, resultPreview: JSON.stringify({ sessionId: "cu-a" }) },
+        { sequence: 2, kind: "tool", status: "done", name: COMPUTER_USE_TOOL_NAME, resultPreview: JSON.stringify({ sessionId: "cu-b" }) },
       ],
     } as ConversationMessage;
 
@@ -53,9 +53,9 @@ describe("conversationComputerUseState", () => {
   it("builds stable row-state text from result and pending maps", () => {
     const message = {
       role: "assistant",
-      toolCalls: [
-        { name: COMPUTER_USE_TOOL_NAME, resultPreview: JSON.stringify({ sessionId: "cu-a" }) },
-        { name: COMPUTER_USE_TOOL_NAME, resultPreview: JSON.stringify({ sessionId: "cu-b" }) },
+      feedbackEvents: [
+        { sequence: 1, kind: "tool", status: "done", name: COMPUTER_USE_TOOL_NAME, resultPreview: JSON.stringify({ sessionId: "cu-a" }) },
+        { sequence: 2, kind: "tool", status: "done", name: COMPUTER_USE_TOOL_NAME, resultPreview: JSON.stringify({ sessionId: "cu-b" }) },
       ],
     } as ConversationMessage;
     const results: Record<string, ComputerUseResult> = {
