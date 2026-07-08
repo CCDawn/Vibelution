@@ -1536,6 +1536,7 @@ export function ConversationView({
     const title = codexTranscriptCellTitle(cell);
     const meta = codexTranscriptCellMeta(cell);
     const summary = codexTranscriptVisibleSummary(cell);
+    const toolDetails = renderCodexTranscriptToolDetails(cell, title, meta);
     return (
       <section
         key={cell.id}
@@ -1551,12 +1552,13 @@ export function ConversationView({
           {icon}
         </span>
         <span className={styles.codexTranscriptCellBody}>
-          <span className={styles.codexTranscriptCellTitleRow}>
-            <span className={styles.codexTranscriptCellTitle}>{title}</span>
-            {meta ? <span className={styles.codexTranscriptCellMeta}>{meta}</span> : null}
-          </span>
+          {toolDetails ?? (
+            <span className={styles.codexTranscriptCellTitleRow}>
+              <span className={styles.codexTranscriptCellTitle}>{title}</span>
+              {meta ? <span className={styles.codexTranscriptCellMeta}>{meta}</span> : null}
+            </span>
+          )}
           {summary ? <span className={styles.codexTranscriptCellSummary}>{summary}</span> : null}
-          {renderCodexTranscriptToolDetails(cell)}
           {renderCodexTranscriptRolloutEvents(cell)}
         </span>
       </section>
@@ -1621,7 +1623,7 @@ export function ConversationView({
     return "";
   }
 
-  function renderCodexTranscriptToolDetails(cell: CodexTranscriptCell) {
+  function renderCodexTranscriptToolDetails(cell: CodexTranscriptCell, title: string, meta: string) {
     if (cell.kind !== "tool_call" && cell.kind !== "error_notice") {
       return null;
     }
@@ -1630,14 +1632,27 @@ export function ConversationView({
       return null;
     }
     const detailsId = `codex-tool-detail-${cell.id}`;
+    const toggleLabel = lang === "zh" ? `展开或收起工具结果：${title}` : `Expand or collapse tool results: ${title}`;
     return (
       <details
-        className={styles.operationDetails}
+        className={`${styles.operationDetails} group`}
         data-codex-tool-detail="true"
         open
       >
-        <summary className={styles.operationDetailToggle}>
-          {lang === "zh" ? "指令与结果" : "Instruction and result"}
+        <summary
+          className={`${styles.codexTranscriptCellTitleRow} cursor-pointer list-none select-none [&::-webkit-details-marker]:hidden`}
+          aria-label={toggleLabel}
+        >
+          <span className={styles.codexTranscriptCellTitle}>{title}</span>
+          {meta ? <span className={styles.codexTranscriptCellMeta}>{meta}</span> : null}
+          <span
+            className="inline-flex size-4 shrink-0 items-center justify-center border-0 bg-transparent p-0 text-[var(--fg-tertiary)] leading-none hover:text-[var(--fg-primary)]"
+            data-codex-tool-detail-toggle="inline-symbol"
+            aria-hidden="true"
+          >
+            <span className="inline-flex group-open:hidden">▸</span>
+            <span className="hidden group-open:inline-flex">▾</span>
+          </span>
         </summary>
         <dl id={detailsId} className={styles.operationDetails}>
           {rows.map((row, index) => {

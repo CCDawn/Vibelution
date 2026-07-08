@@ -340,8 +340,11 @@ describe("ConversationView native Codex transcript surface", () => {
 
     expect(html).toContain("cli_tool");
     expect(html).toContain('open=""');
+    expect(html).toContain('data-codex-tool-detail-toggle="inline-symbol"');
+    expect(html).toContain('aria-label="展开或收起工具结果：cli_tool"');
     expect(html).toContain("git status --short");
     expect(html).toContain("M web/src/components/conversation/ConversationView.tsx");
+    expect(html).not.toContain("指令与结果");
     expect(html).not.toContain(meaninglessSummary);
     expect(html).not.toContain("dirty_summary");
     expect(html).not.toContain("工作目录");
@@ -397,7 +400,8 @@ describe("ConversationView native Codex transcript surface", () => {
     ]);
 
     expect(html).toContain("glob_tool");
-    expect(html).toContain("指令与结果");
+    expect(html).toContain('data-codex-tool-detail-toggle="inline-symbol"');
+    expect(html).not.toContain("指令与结果");
     expect(html).toContain("web/src/components/conversation/ConversationView.tsx");
     expect(html).not.toContain(">指令</dt>");
   });
