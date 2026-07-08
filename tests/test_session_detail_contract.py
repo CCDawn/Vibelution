@@ -1,4 +1,5 @@
 import json
+import queue
 
 import pytest
 from fastapi.testclient import TestClient
@@ -601,6 +602,169 @@ def test_session_detail_attaches_turn_timeline_once_for_tool_result_packets(tmp_
         for item in assistant_text_messages[0]["timelineItems"]
     ] == ["operation", "operation", "assistant_text"]
     assert all("timelineItems" not in message for message in turn_messages[:-1])
+
+
+def _append_window_test_turn(project_root, session_id: str, turn_number: int) -> None:
+    turn_id = f"turn-window-{turn_number}"
+    append_conversation_event(
+        project_root,
+        session_id,
+        turn_id,
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": f"窗口问题 {turn_number}"},
+    )
+    append_conversation_event(
+        project_root,
+        session_id,
+        turn_id,
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={
+            "content": f"窗口回答 {turn_number}",
+            "toolCalls": [
+                {"id": f"tool-window-{turn_number}", "name": "rg", "status": "done", "summary": f"搜索 {turn_number}"},
+            ],
+            "feedbackEvents": [
+                {
+                    "sequence": 1,
+                    "kind": "tool",
+                    "status": "done",
+                    "name": "rg",
+                    "summary": f"搜索 {turn_number}",
+                },
+            ],
+        },
+    )
+
+
+def test_session_detail_window_returns_latest_messages_and_paging_metadata(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    for turn_number in range(1, 4):
+        _append_window_test_turn(tmp_path, "session-live", turn_number)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    response = client.get("/api/sessions/session-live?messageLimit=4&transcriptScope=window")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [message["content"] for message in payload["messages"]] == [
+        "窗口问题 2",
+        "窗口回答 2",
+        "窗口问题 3",
+        "窗口回答 3",
+    ]
+    assert payload["messageWindow"] == {
+        "mode": "window",
+        "totalMessages": 8,
+        "returnedMessages": 4,
+        "oldestMessageIndex": 5,
+        "newestMessageIndex": 8,
+        "hasEarlier": True,
+        "hasLater": False,
+        "nextBeforeMessageIndex": 5,
+        "transcriptScope": "window",
+    }
+
+
+def test_session_detail_window_can_page_earlier_without_reindexing_messages(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    for turn_number in range(1, 4):
+        _append_window_test_turn(tmp_path, "session-live", turn_number)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    response = client.get("/api/sessions/session-live?messageLimit=2&beforeMessageIndex=5&transcriptScope=window")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [message["content"] for message in payload["messages"]] == [
+        "窗口问题 1",
+        "窗口回答 1",
+    ]
+    assert [message["id"] for message in payload["messages"]] == [
+        "session-live-message-3",
+        "session-live-message-4",
+    ]
+    assert payload["messageWindow"]["oldestMessageIndex"] == 3
+    assert payload["messageWindow"]["newestMessageIndex"] == 4
+    assert payload["messageWindow"]["hasEarlier"] is True
+    assert payload["messageWindow"]["hasLater"] is True
+    assert payload["messageWindow"]["nextBeforeMessageIndex"] == 3
+
+
+def test_session_detail_window_can_omit_native_transcript_for_light_payloads(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    _append_window_test_turn(tmp_path, "session-live", 1)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    response = client.get("/api/sessions/session-live?messageLimit=2&transcriptScope=none")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assistant = payload["messages"][-1]
+    assert assistant["content"] == "窗口回答 1"
+    assert assistant["toolCalls"] == [
+        {"name": "rg", "status": "done", "summary": "搜索 1"},
+    ]
+    assert "codexTranscript" not in assistant
+    assert payload["messageWindow"]["transcriptScope"] == "none"
+
+
+def test_session_detail_snapshot_publish_uses_windowed_detail_by_default(monkeypatch):
+    subscriber: queue.Queue[dict[str, object]] = queue.Queue()
+    captured_calls: list[dict[str, object]] = []
+
+    def fake_get_session_detail(
+        session_id,
+        *,
+        message_limit=None,
+        before_message_index=None,
+        transcript_scope="all",
+    ):
+        captured_calls.append(
+            {
+                "sessionId": session_id,
+                "messageLimit": message_limit,
+                "beforeMessageIndex": before_message_index,
+                "transcriptScope": transcript_scope,
+            }
+        )
+        return {
+            "id": session_id,
+            "ledgerSeq": 7,
+            "currentPhase": "ready",
+            "messages": [{"id": "message-latest", "role": "assistant", "content": "latest"}],
+            "messageWindow": {
+                "mode": "window",
+                "totalMessages": 120,
+                "returnedMessages": 1,
+                "oldestMessageIndex": 120,
+                "newestMessageIndex": 120,
+                "hasEarlier": True,
+                "hasLater": False,
+                "nextBeforeMessageIndex": 120,
+                "transcriptScope": "window",
+            },
+        }
+
+    monkeypatch.setattr(session_service, "get_session_detail", fake_get_session_detail)
+    session_service._register_session_stream_subscriber("session-live", subscriber)
+    try:
+        session_service._publish_session_detail_snapshot("session-live")
+        event = subscriber.get_nowait()
+    finally:
+        session_service._unregister_session_stream_subscriber("session-live", subscriber)
+
+    assert captured_calls == [
+        {
+            "sessionId": "session-live",
+            "messageLimit": 40,
+            "beforeMessageIndex": None,
+            "transcriptScope": "window",
+        }
+    ]
+    assert event["type"] == "session_detail"
+    assert event["detail"]["messageWindow"]["transcriptScope"] == "window"
 
 
 def test_persist_turn_result_normalizes_completed_feedback_statuses(tmp_path, monkeypatch):

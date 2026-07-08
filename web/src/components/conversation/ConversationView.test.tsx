@@ -1598,7 +1598,9 @@ describe("ConversationView edit resend affordance", () => {
   it("auto-loads earlier messages from top-edge or pinned timeline state instead of a manual gate", () => {
     expect(conversationViewSource).toContain("function revealEarlierTimelineMessages()");
     expect(conversationViewSource).toContain("shouldLoadEarlierConversationMessages({");
-    expect(conversationViewSource).toContain("hiddenMessageCount: displayMessages.length - visibleMessageCount");
+    expect(conversationViewSource).toContain("const hiddenHistorySignalCount = hiddenRenderedMessageCount + (hasEarlierMessages ? 1 : 0)");
+    expect(conversationViewSource).toContain("hiddenMessageCount: hiddenHistorySignalCount");
+    expect(conversationViewSource).toContain("onLoadEarlierMessages()");
     expect(conversationViewSource).toContain("scrollHeight: timeline.scrollHeight");
     expect(conversationViewSource).toContain("clientHeight: timeline.clientHeight");
     expect(conversationViewSource).toContain("handleScroll");
