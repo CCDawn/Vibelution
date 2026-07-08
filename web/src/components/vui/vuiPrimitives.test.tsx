@@ -9,6 +9,20 @@ import { VButton, VChip, VIconButton, VNativeButton, VPanel, VToolbar, VTooltip 
 import { VibelutionHeroProvider } from "./renderers/heroui/HeroProvider";
 
 describe("VUI foundation primitives", () => {
+  it("keeps VUI button hover behavior owned by shared semantic slots", () => {
+    const heroSlotsSource = readFileSync(
+      resolve(import.meta.dirname, "renderers/heroui/heroSlots.ts"),
+      "utf8",
+    );
+
+    expect(heroSlotsSource).toContain("vuiButtonHoverClass");
+    expect(heroSlotsSource).toContain("hover:border-[var(--vui-control-hover-border)]");
+    expect(heroSlotsSource).toContain("hover:bg-[var(--vui-control-hover-bg)]");
+    expect(heroSlotsSource).toContain("hover:text-[var(--vui-control-hover-fg)]");
+    expect(heroSlotsSource).not.toContain("hover:border-[var(--border-strong)]");
+    expect(heroSlotsSource).not.toContain("hover:bg-[var(--vui-control-muted-hover)]");
+  });
+
   it("scans Tailwind classes from the TSX surfaces replacing CSS modules", () => {
     const tailwindEntry = readFileSync(
       resolve(import.meta.dirname, "../../design/tailwind.css"),

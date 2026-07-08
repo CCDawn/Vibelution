@@ -5,11 +5,12 @@
   --vui-native-control-radius: var(--radius-control);
   --vui-native-control-border-width: 1px;
   --vui-native-control-border: var(--vui-border-subtle);
-  --vui-native-control-border-hover: var(--border-strong);
+  --vui-native-control-border-hover: var(--vui-control-hover-border);
   --vui-native-control-bg: var(--vui-control-muted);
-  --vui-native-control-bg-hover: var(--vui-control-muted-hover);
+  --vui-native-control-bg-hover: var(--vui-control-hover-bg);
   --vui-native-control-fg: var(--fg-secondary);
-  --vui-native-control-fg-hover: var(--fg-primary);
+  --vui-native-control-fg-hover: var(--vui-control-hover-fg);
+  --vui-native-control-shadow-hover: var(--vui-control-hover-shadow);
   --vui-native-field-bg: var(--surface-input);
   --vui-native-field-bg-hover: var(--surface-card);
   --vui-native-field-fg: var(--fg-primary);
@@ -33,6 +34,7 @@
   transition:
     background-color 0.16s ease,
     border-color 0.16s ease,
+    box-shadow 0.16s ease,
     color 0.16s ease,
     opacity 0.16s ease;
 }
@@ -91,6 +93,7 @@
   border-color: var(--vui-native-control-border-hover);
   background-color: var(--vui-native-control-bg-hover);
   color: var(--vui-native-control-fg-hover);
+  box-shadow: var(--vui-native-control-shadow-hover);
 }
 
 [data-vui-app] :is(

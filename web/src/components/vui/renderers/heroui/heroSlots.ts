@@ -1,6 +1,9 @@
 export const vuiButtonBaseClass =
   "border border-vui-border-subtle bg-vui-control-muted text-vui-fg-secondary shadow-none";
 
+export const vuiButtonHoverClass =
+  "transition-colors duration-150 hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] hover:shadow-[var(--vui-control-hover-shadow)]";
+
 export const vuiButtonPrimaryClass =
   "border-vui-accent-cool bg-vui-surface-panel text-vui-fg-primary";
 
