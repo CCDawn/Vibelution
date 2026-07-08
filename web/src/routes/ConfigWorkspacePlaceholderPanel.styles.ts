@@ -1,7 +1,7 @@
 const panelSurface =
-  "[border:1px_solid_var(--vui-border-subtle)] [border-radius:var(--radius-panel)] [background:color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)]";
+  "[border:1px_solid_var(--vui-border-subtle)] [border-radius:var(--radius-panel)] [background:color-mix(in_srgb,var(--surface-panel)_96%,var(--surface-page))] [box-shadow:var(--vui-shadow-hairline)]";
 const rowSurface =
-  "[border:1px_solid_var(--vui-border-subtle)] [border-radius:8px] [background:var(--vui-surface-row)]";
+  "[border:1px_solid_var(--vui-border-subtle)] [border-radius:8px] [background:color-mix(in_srgb,var(--surface-card)_94%,var(--surface-page))]";
 
 const styles = {
   eyebrow: "vui-routes-configroute eyebrow [margin:0] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [text-transform:uppercase] [letter-spacing:0.08em]",

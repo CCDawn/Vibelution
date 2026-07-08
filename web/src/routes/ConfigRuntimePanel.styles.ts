@@ -1,5 +1,5 @@
 const panelSurface =
-  "[border:1px_solid_var(--vui-border-subtle)] [border-radius:var(--radius-panel)] [background:color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)] [box-shadow:none]";
+  "[border:1px_solid_var(--vui-border-subtle)] [border-radius:var(--radius-panel)] [background:color-mix(in_srgb,var(--surface-panel)_96%,var(--surface-page))] [box-shadow:var(--vui-shadow-hairline)]";
 const mutedControl =
   "[display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] [min-height:var(--control-height)] [padding:0_9px] [border-radius:var(--control-radius)] [font:inherit] [font-size:var(--vui-font-xs)] [font-weight:600] [line-height:1] [white-space:nowrap] [transition:border-color_140ms_ease,background-color_140ms_ease,color_140ms_ease] [border:1px_solid_transparent] [background:transparent] [color:var(--vui-fg-secondary)] hover:[cursor:pointer] hover:[color:var(--vui-fg-primary)] disabled:[cursor:not-allowed] disabled:[opacity:0.56]";
 const activeControl =
