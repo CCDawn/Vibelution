@@ -134,6 +134,31 @@ describe("conversation operation state helpers", () => {
     expect(compacted.map((item) => item.id)).toEqual(["read", "loop-2"]);
   });
 
+  it("deduplicates long-loop progress across normalized status changes", () => {
+    const compacted = compactVisibleTimelineOperations([
+      operation({
+        id: "loop-done",
+        kind: "status",
+        rawLabel: "long_loop_progress",
+        rawStatus: "running",
+        label: "Tool loop",
+        status: "done",
+        summary: "first",
+      }),
+      operation({
+        id: "loop-running",
+        kind: "status",
+        rawLabel: "long_loop_progress",
+        rawStatus: "running",
+        label: "Tool loop",
+        status: "running",
+        summary: "second",
+      }),
+    ]);
+
+    expect(compacted.map((item) => item.id)).toEqual(["loop-running"]);
+  });
+
   it("builds localized operation labels and process summaries", () => {
     const internalThinking = operation({
       id: "thinking",

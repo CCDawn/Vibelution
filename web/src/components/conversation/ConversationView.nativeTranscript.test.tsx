@@ -458,7 +458,7 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain(">指令</dt>");
   });
 
-  it("keeps the legacy projection path when native transcript is unavailable", () => {
+  it("keeps legacy process visible without rendering it as a Codex transcript when native transcript is unavailable", () => {
     const html = renderConversation([
       {
         id: "assistant-legacy",
@@ -489,5 +489,8 @@ describe("ConversationView native Codex transcript surface", () => {
 
     expect(html).toContain("legacy process renders");
     expect(html).toContain("data-agent-process-kind");
+    expect(html).not.toContain('data-codex-transcript-surface="true"');
+    expect(html).toContain('data-codex-transcript-surface-mode="empty"');
+    expect(html).toContain('data-codex-transcript-projection-gap-reason="native_missing"');
   });
 });
