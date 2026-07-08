@@ -9,6 +9,8 @@ const STREAMING_STATUS_CONTENT_MARKERS = [
   "工具工作区",
   "正在请求模型",
   "等待首个响应片段",
+  "模型连接正在重试",
+  "本轮仍在继续",
   "上下文已组装完成",
   "正在进入 llm 调用",
   "preparing the conversation context",
@@ -19,6 +21,9 @@ const STREAMING_STATUS_CONTENT_MARKERS = [
   "tool workspace",
   "requesting the model",
   "waiting for the first response chunk",
+  "model connection is retrying",
+  "retrying the model connection",
+  "model request is retrying",
   "context is assembled",
   "llm call is starting",
 ];
@@ -30,6 +35,7 @@ const INTERNAL_STREAMING_STATUS_STAGES = new Set([
   "history_restore",
   "model_request",
   "model_thinking",
+  "model_retry",
   "followup_prepare",
 ]);
 

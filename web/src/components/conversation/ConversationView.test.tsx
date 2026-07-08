@@ -161,7 +161,7 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
   it("builds codex transcript cells from the AgentMessage projection before rendering turns", () => {
     expect(conversationViewSource).toContain('from "./codexTranscriptCells"');
     expect(conversationViewSource).toContain("buildCodexTranscriptCells(");
-    expect(conversationViewSource).toContain("agentCodexCellsByMessageId");
+    expect(conversationViewSource).toContain("agentCodexSurfacesByMessageId");
     expect(conversationViewSource).toContain("data-codex-transcript-cell-count");
   });
 
@@ -3974,6 +3974,42 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("answerOnlyProcessPreview");
     expect(html).not.toContain("回答</span>");
     expect(html).not.toContain("responseSection");
+  });
+
+  it("shows model-retry live overlay as process state instead of a duplicate answer block", () => {
+    const retryStatusText = "模型连接正在重试...\n第 2/5 次；原因：server_error。本轮仍在继续，请不要重复提交。";
+    const html = renderConversation(
+      [
+        {
+          id: "message-model-retry-live-overlay",
+          role: "assistant",
+          content: retryStatusText,
+          timestamp: "2026-07-08T00:25:00Z",
+          streaming: true,
+          streamStage: "model_retry",
+          feedbackEvents: [
+            {
+              sequence: 1,
+              kind: "status",
+              status: "running",
+              name: "retrying",
+              summary: retryStatusText,
+              resultPreview: retryStatusText,
+            },
+          ],
+          metadata: {
+            kind: "session_live_overlay",
+            turnId: "turn-retry",
+          },
+        },
+      ],
+      { useDefaultProcessDisplayMode: true },
+    );
+
+    expect(html).not.toContain("回答</span>");
+    expect(html).not.toContain("responseSection");
+    expect((html.match(/模型连接正在重试/g) ?? [])).toHaveLength(0);
+    expect((html.match(/本轮仍在继续/g) ?? [])).toHaveLength(0);
   });
 
   it("renders request-only process state as static status without empty expandable details", () => {
